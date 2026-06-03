@@ -30,6 +30,14 @@ updated_by: codex
 - top pill の黒い base をノッチ裏まで描画し、handle 右端とノッチ左端が接するように配置。
 - pill window の shadow を無効化し、top pill の上端に `3pt` の黒 overfill を追加して、上部の細いスリット状の抜けを埋めた。
 - 左側 handle のラウンド形状変更を試したが、意図と違ったため撤回し、元の `TopDockedPillShape` ベースの形へ戻した。
+- 今後の追加機能を plugin 的に扱えるよう、単一 `main.swift` から App / Windowing / State / Models / Providers / Views / Support へ分割。
+- `NotchProvider` / `ProviderRegistry` / `ProviderStore` を追加し、追加機能は provider として登録する構成に変更。
+- 既存の `sessions` / `usage` はデモ表示だったため削除し、provider 未登録時の空状態だけを表示するように変更。
+- `README.md` に provider-hosted content 構成と、外部化する場合は XPC / helper / JSON-RPC を優先する方針を追記。
+- 表示先を `Auto / Main / Sub` から選べる `DisplayPlacementMode` と `AppSettings` を追加。
+- preview header の gear button から開ける `SettingsWindowController` / `SettingsView` を追加。
+- `Auto` はマウスがある画面、`Main` は primary macOS display、`Sub` は接続中の secondary display を使うようにした。
+- ノッチが検出できない外部/サブディスプレイでは fake notch を出さず、上部中央の小さい handle として表示するように変更。
 
 ## 検証
 
@@ -60,14 +68,39 @@ updated_by: codex
 - 上端 overfill 後も left handle hover で preview が `w=472 h=312 mid=756,189` で開き、hover out 後に閉じることを確認。
 - ラウンド形状変更の撤回後、`screencapture -l` で元の連続した黒ベース形状に戻ったことを確認。
 - 撤回後も `CGWindowListCopyWindowInfo` で pill が `x=609 y=0 w=239 h=33`、hover 後 preview が `w=472 h=312 mid=756,189`、hover out 後に閉じることを確認。
+- `swift build` 成功。
+- `./script/build_and_run.sh --verify` 成功。`HoverMenuPreview launched` を確認。
+- display placement 設定追加後に `swift build` 成功。
+- display placement 設定追加後に `./script/build_and_run.sh --verify` 成功。`HoverMenuPreview launched` を確認。
 
 ## 変更ファイル
 
 - `Sources/HoverMenuPreview/main.swift`
+- `Sources/HoverMenuPreview/App/AppDelegate.swift`
+- `Sources/HoverMenuPreview/Windowing/HoverWindowController.swift`
+- `Sources/HoverMenuPreview/Windowing/PanelAnimationTiming.swift`
+- `Sources/HoverMenuPreview/Windowing/PanelGeometry.swift`
+- `Sources/HoverMenuPreview/Windowing/SettingsWindowController.swift`
+- `Sources/HoverMenuPreview/State/AppSettings.swift`
+- `Sources/HoverMenuPreview/State/HoverMenuStore.swift`
+- `Sources/HoverMenuPreview/State/ProviderStore.swift`
+- `Sources/HoverMenuPreview/Models/DisplayPlacementMode.swift`
+- `Sources/HoverMenuPreview/Models/HoverState.swift`
+- `Sources/HoverMenuPreview/Models/ProviderModels.swift`
+- `Sources/HoverMenuPreview/Providers/NotchProvider.swift`
+- `Sources/HoverMenuPreview/Providers/ProviderRegistry.swift`
+- `Sources/HoverMenuPreview/Support/NSScreen+DisplayIdentity.swift`
+- `Sources/HoverMenuPreview/Support/TopDockedPillShape.swift`
+- `Sources/HoverMenuPreview/Views/HoverPanelShell.swift`
+- `Sources/HoverMenuPreview/Views/HoverPillView.swift`
+- `Sources/HoverMenuPreview/Views/IconButtonStyle.swift`
+- `Sources/HoverMenuPreview/Views/PluginHostView.swift`
+- `Sources/HoverMenuPreview/Views/SettingsView.swift`
 - `README.md`
 - `progress/progress.md`
 - `progress/2026-06/2026-06-03_hover-menu-preview.md`
 
 ## 次アクション
 
-- アニメーションの質感をさらに寄せる場合は、開き始めの width / duration / timing curve を実画面で微調整する。
+- 最初に実装する実データ provider を決める。
+- provider permission / settings UI / auto launch の設計を詰める。

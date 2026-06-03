@@ -27,15 +27,17 @@ status: active
 - 2026-06-03: `auxiliaryTopLeftArea` / `auxiliaryTopRightArea` から実ノッチ幅を取り、left handle 右端をノッチ左端へ揃えて、ノッチ裏まで黒い UI base を敷くように変更済み。
 - 2026-06-03: top pill の shadow を無効化し、上端 `3pt` を黒で overfill して、上部の細いスリット状の抜けを埋めたことをピクセル検査で確認済み。
 - 2026-06-03: 左上 handle のラウンド形状変更は意図と違ったため撤回し、元の連続した黒ベース形状へ戻したことを確認済み。
+- 2026-06-03: `main.swift` の単一ファイル構成を App / Windowing / State / Models / Providers / Views / Support に分割し、今後の追加機能を `NotchProvider` として差し込む土台へ変更。デモ用 sessions / usage 表示は削除済み。
+- 2026-06-03: Display placement 設定を追加。`Auto / Main / Sub` で表示先を選べるようにし、ノッチなし画面では fake notch ではなく top-center handle に切り替えるよう変更済み。
 
 ## 進行中
 
-- Codex: 開発用 project migration と初期進捗ログ整備。
+- Codex: ノッチ shell と provider-hosted content の分離、display placement 設定を実装済み。次は実データ provider の要件定義。
 
 ## 次アクション
 
 - `./script/build_and_run.sh --verify` で移行先の build / launch を確認する。
-- アプリ化の要件を決める: app name、表示する session data、設定画面、終了/自動起動、データ取得元。
+- アプリ化の要件を決める: app name、最初に実装する provider、終了/自動起動、データ取得元。
 
 ## Blocker / Risk
 
@@ -46,7 +48,9 @@ status: active
 
 - Project root: `/Users/shotaro/code/share/hover-menu-preview`
 - Run: `./script/build_and_run.sh --verify`
-- UI source: `Sources/HoverMenuPreview/main.swift`
+- UI source: `Sources/HoverMenuPreview/Views/`
+- Windowing source: `Sources/HoverMenuPreview/Windowing/`
+- Provider source: `Sources/HoverMenuPreview/Providers/`
 
 ## 重要パス
 
@@ -73,6 +77,8 @@ status: active
 - 2026-06-03: top pill の黒ベースを実ノッチ幅に合わせ、ノッチ裏の隙間を解消。
 - 2026-06-03: top pill 上端のスリット状の抜けを黒 overfill で解消。
 - 2026-06-03: 左上 handle のラウンド形状変更を撤回し、元の形へ復帰。
+- 2026-06-03: Provider/Registry/Store の基盤を追加し、デモ用 sessions / usage 表示を削除。
+- 2026-06-03: 設定ウィンドウを追加し、表示先を `Auto / Main / Sub` から選べるように変更。
 - 2026-06-03: preview morphing を上部ノッチ中央から出て、上部ノッチ中央へ戻る動きに調整。
 - 2026-06-03: notch sizing / point-pixel compensation の設計メモを README に追記。
 - 2026-06-03: pill の下端の隙間を抑えるため、pill height を 33pt に調整。
