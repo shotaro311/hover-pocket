@@ -44,6 +44,7 @@ status: active
 - 2026-06-07: Codex chat 欄への画像 drag/drop が効かない報告を受け、drag 開始直後に hover panel を一時非表示にし、画像 drag payload を file URL 起点の `NSItemProvider` に変更。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-07: Mirror provider に A案ベースの compact microphone check row を追加。設定で表示/非表示を切替可能。Mirror microphone row 表示中は `AVAudioEngine` で meter を自動起動し、panel 非表示/非active/設定OFFで停止。button は一時録音用に変更し、`録音 -> 停止 -> 再生 -> 再生完了後にメモリから削除` の流れにした。audio file は作成しない。`NSMicrophoneUsageDescription` を generated app bundle に追加。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-07: アプリ名を `ノッチポッケ` に決定。SwiftPM package / executable / generated app bundle を `NotchPokke` に変更し、bundle 表示名を `ノッチポッケ` に設定。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。`.env.local` は ignore 済みで、公開対象 tracked files に実OAuth値やtokenがないことを確認。GitHub public repository `shotaro311/notch-pokke` へ push 済み。
+- 2026-06-07: README を日本語中心へ全面更新。概要、機能、実行方法、Google Calendar 設定、表示先、実装メモ、ノッチサイズ、注意事項を日本語で読めるようにした。
 
 ## 進行中
 
@@ -113,6 +114,7 @@ status: active
 - 2026-06-07: Microphone button 操作後に panel が閉じない問題を修正。preview 表示中だけ window controller 側で mouse location を監視して hover exit 取りこぼしを補完し、open animation 中の mouse event 無効時間を短縮。録音ボタンの hit area も 30pt に拡大。
 - 2026-06-07: アプリ名を `ノッチポッケ` に決定し、SwiftPM package / executable / generated app bundle の公開名を `NotchPokke` へ変更。bundle 表示名は `ノッチポッケ`。
 - 2026-06-07: GitHub public repository `shotaro311/notch-pokke` を作成し、`main` を push。`gh repo view` で visibility `PUBLIC` を確認。
+- 2026-06-07: README を日本語中心へ更新し、公開 GitHub のトップで概要と使い方が伝わる状態にした。
 - 2026-06-04: Mirror close 時の点滅対策として、content 非表示化を window `orderOut` 後へ移動。
 - 2026-06-04: Mirror の軽快化として、camera prewarm / provider active 分離 / eventDriven refresh skip を追加。見た目の animation は変更なし。
 - 2026-06-04: Mirror のカクつき / ちらつき対策として、camera preview layer の暗黙 animation 無効化、animation 中 shadow off、閉じかけ再 hover の frame snap 防止、live camera への blur 削除を追加。

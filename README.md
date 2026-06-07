@@ -1,83 +1,65 @@
 # ノッチポッケ (NotchPokke)
 
-ノッチ部分をポケットのように使う macOS prototype app. It places a compact black notch handle at the top of the screen and opens a dark utility panel when the mouse hovers over it.
+ノッチポッケは、MacBook のノッチ付近にマウスを重ねるだけで、ミラー、Google Calendar、クリップボード履歴を素早く開ける macOS プロトタイプアプリです。
 
-## Run
+画面上部に小さな黒いハンドルを置き、そこへホバーすると暗いユーティリティパネルが表示されます。通常のメニューバーアプリよりも、ノッチ周辺からパッと取り出す体験を重視しています。
+
+## 現在できること
+
+現在は組み込みの `Mirror`、`Calendar`、`Clipboard` プロバイダーを搭載しています。
+
+### ミラー
+
+- ノッチハンドルへホバーすると、MacBook のカメラを使った鏡表示を開けます。
+- カメラ映像は左右反転し、実際の鏡のように表示します。
+- カメラはミラーパネルが有効な間だけ起動し、閉じると停止します。
+- 初回利用時は macOS のカメラ権限ダイアログが表示されます。
+- 設定から、ミラー下部にコンパクトなマイクチェック UI を表示できます。
+- マイクチェック UI 表示中は、音声レベルメーターが自動で動きます。
+- 一時録音、停止、再生ができます。録音データはメモリ上だけで扱い、音声ファイルとして保存しません。
+
+### Google Calendar
+
+- Google アカウントで接続し、カレンダー予定を表示できます。
+- 日付へホバーすると、その日の予定をプレビューできます。
+- 日付をクリックすると、その日の予定詳細を固定表示できます。
+- 書き込み可能なカレンダーでは、予定の追加、編集、削除ができます。
+- 編集では、タイトル、開始/終了時刻、終日、場所、メモを変更できます。
+
+### クリップボード
+
+- テキストのコピー履歴を左側に表示します。
+- 画像のコピー履歴を右側に表示します。
+- 履歴項目をクリックすると、再びクリップボードへコピーできます。
+- テキストや画像を他のアプリへドラッグできます。
+- 画像履歴はローカルの Application Support 配下に保存します。
+
+### パネル設定
+
+- 表示するプロバイダーを設定画面で切り替えられます。
+- 最後に開いたパネルを次回も優先表示するか選べます。
+- パネル上部のプロバイダーアイコンを Control クリックすると、表示順を移動できます。
+- ミラー下部のマイクチェック UI を表示するか選べます。
+
+## 動かし方
 
 ```bash
 ./script/build_and_run.sh
 ```
 
-Use `./script/build_and_run.sh --verify` to build, launch, and confirm the `NotchPokke` process exists.
+ビルド、起動、プロセス存在確認まで行う場合は次のコマンドを使います。
 
-## Current features
-
-The app currently ships with built-in `Mirror`, `Calendar`, and `Clipboard` providers.
-
-- Hover the notch handle to open the preview panel.
-- The app preconfigures the camera session when access is already granted, but starts the Mac camera only while the mirror preview is active.
-- The camera preview is horizontally mirrored so it behaves like a real mirror.
-- Closing the panel stops the camera session.
-- The first use may show the macOS camera permission prompt.
-- Optional microphone check UI can be shown under the mirror from Settings.
-- While the mirror microphone row is visible, the microphone meter starts automatically.
-- The microphone row can record a temporary in-memory sample, play it once, and clear it without writing an audio file.
-
-Calendar:
-
-- Hover a date to preview that day's events.
-- Click a date to pin that day's schedule in the detail pane.
-- Add events from writable calendars.
-- Edit event title, time, all-day state, location, and notes.
-- Delete events from writable calendars.
-
-Clipboard:
-
-- Text clipboard history appears in the left column.
-- Image clipboard history appears in the right column.
-- Click an item to copy it back to the clipboard.
-- Drag text or image items into another app.
-- Images are stored locally under Application Support.
-
-Panel settings:
-
-- Show or hide built-in providers from Settings.
-- Choose whether the last used panel should reopen by default.
-- Control-click a provider icon in the panel header to move it left or right.
-- Show or hide the compact microphone check row under Mirror.
-
-## Naming
-
-The public app/product name is `ノッチポッケ`, with the ASCII executable and repository name `NotchPokke` / `notch-pokke`.
-
-## Implementation note
-
-SwiftUI's `MenuBarExtra` is mainly click-driven and only appears in the standard right-side menu bar area. This prototype uses AppKit `NSPanel` windows plus SwiftUI hover handlers so the trigger can sit at the top center like the reference recording.
-
-## Architecture note
-
-The app is now structured as a notch shell with provider-hosted content. The current visible content is intentionally not a sessions/usage demo anymore; real features should be added as providers.
-
-```text
-Sources/HoverMenuPreview/
-  App/         app delegate and launch wiring
-  Windowing/   NSPanel creation, notch geometry, hover close, animation timing
-  State/       panel visibility and provider selection/loading state
-  Models/      plugin IDs, manifests, permissions, snapshots, preview content
-  Providers/   NotchProvider protocol and ProviderRegistry
-  Views/       pill, panel shell, plugin host, shared controls
-  Support/     reusable shapes and small helpers
+```bash
+./script/build_and_run.sh --verify
 ```
 
-Keep `Windowing` responsible for AppKit windows, screen/notch measurements, and open/close animation. Provider implementations should not touch `NSPanel`, `NSApp`, or screen coordinates.
+成功すると `NotchPokke launched` と表示されます。
 
-Add future features by implementing `NotchProvider`, registering them in `ProviderRegistry`, and rendering through `PluginHostView`. Start with compiled-in providers. If external plugins are needed later, prefer helper process / XPC / JSON-RPC returning `manifest + snapshot`, while the app keeps control of rendering and permissions.
+## Google Calendar の設定
 
-## Google Calendar provider
+Calendar プロバイダーは、Google のインストール型アプリ向け OAuth フロー、loopback redirect、PKCE を使っています。Google token や client secret はソース管理に保存しません。
 
-The Calendar provider uses Google's installed app OAuth flow with a loopback redirect and PKCE. No Google token or client secret is stored in source control.
-
-Create a local `.env.local` from `.env.example`:
+まず `.env.example` を参考に、ローカル用の `.env.local` を作成します。
 
 ```bash
 GOOGLE_CLIENT_ID="YOUR_DESKTOP_OAUTH_CLIENT_ID.apps.googleusercontent.com"
@@ -85,18 +67,15 @@ GOOGLE_CLIENT_SECRET="YOUR_DESKTOP_OAUTH_CLIENT_SECRET"
 GOOGLE_OAUTH_CHROME_PROFILE="Default"
 ```
 
-To create the OAuth client in the active `gcloud` project:
+有効な `gcloud` project で OAuth client を作る場合は、補助スクリプトを使えます。
 
 ```bash
 ./script/open_google_oauth_console.sh
 ```
 
-In Google Auth Platform, create a client with application type `Desktop app`.
-Use the generated client ID and client secret in `.env.local`. Set
-`GOOGLE_OAUTH_CHROME_PROFILE` when OAuth should open a specific Chrome profile
-instead of the default browser.
+Google Auth Platform で application type を `Desktop app` にして client を作成し、発行された client ID / client secret を `.env.local` に入れてください。
 
-Then run:
+設定後は次の順で確認します。
 
 ```bash
 ./script/check_google_calendar_setup.sh
@@ -104,22 +83,40 @@ Then run:
 ./script/verify_google_calendar.sh
 ```
 
-`script/build_and_run.sh` injects the configured OAuth values into the generated app `Info.plist`. If `GOOGLE_CLIENT_ID` is missing, the Calendar provider still loads and shows a configuration-required state.
-`script/verify_google_calendar.sh` uses the same OAuth, Calendar API, and day-detail filtering code as the app, and prints only counts/ranges rather than event details.
+`script/build_and_run.sh` は `.env.local` の OAuth 値を、生成される app bundle の `Info.plist` に注入します。`GOOGLE_CLIENT_ID` が未設定でもアプリ自体は起動し、Calendar パネルには設定不足の状態が表示されます。
 
-## Display placement
+## 表示先ディスプレイ
 
-Display placement is a user setting:
+表示先は設定画面から選べます。
 
-- `Auto`: use the display under the pointer, then keep the panel on that display while it is open.
-- `Main`: always use the primary macOS display.
-- `Sub`: use a secondary display when one is connected, and fall back to the primary display otherwise.
+- `Auto`: ポインターがあるディスプレイを使い、パネルが開いている間はそのディスプレイに固定します。
+- `Main`: macOS のメインディスプレイを常に使います。
+- `Sub`: サブディスプレイがあれば使い、なければメインディスプレイへ戻します。
 
-Only screens with a real `auxiliaryTopLeftArea` / `auxiliaryTopRightArea` gap use the notch-attached layout. Screens without a detected notch use a small top-center handle instead of a fake 185pt notch.
+実ノッチが検出できる画面では、ノッチに接続したレイアウトを使います。ノッチがない画面では、画面上部中央の小さなハンドルとして表示します。
 
-## Notch sizing note
+## 実装メモ
 
-macOS screen layout values are in points, not physical pixels. On the current built-in Retina display, the measured notch-related values were:
+SwiftUI の `MenuBarExtra` はクリック操作が中心で、標準の右上メニューバー領域に寄っています。このプロトタイプでは、AppKit の `NSPanel` と SwiftUI の hover handler を組み合わせ、画面上部中央のノッチ周辺にトリガーを置いています。
+
+現在の構成は、ノッチ shell と provider-hosted content に分かれています。新しい機能は `NotchProvider` として追加し、`ProviderRegistry` に登録して `PluginHostView` から表示する方針です。
+
+```text
+Sources/HoverMenuPreview/
+  App/         アプリ delegate と起動処理
+  Windowing/   NSPanel 作成、ノッチ位置計算、hover close、animation timing
+  State/       パネル表示状態、provider 選択、loading state
+  Models/      plugin ID、manifest、permission、snapshot、preview content
+  Providers/   NotchProvider protocol と ProviderRegistry
+  Views/       pill、panel shell、plugin host、共通 UI
+  Support/     再利用 shape と小さな helper
+```
+
+`Windowing` は AppKit window、画面/ノッチ計測、open/close animation を担当します。各 provider は `NSPanel`、`NSApp`、画面座標を直接触らない方針です。
+
+## ノッチサイズのメモ
+
+macOS の画面レイアウト値は物理ピクセルではなく point です。現在の内蔵 Retina ディスプレイでは、ノッチ周辺の計測値は次の通りでした。
 
 ```text
 safeAreaInsets.top = 32pt
@@ -127,11 +124,11 @@ backingScaleFactor = 2.0
 1px = 0.5pt
 ```
 
-So a true 1-pixel compensation would be `safeAreaInsets.top + 0.5pt`. In this prototype, `33pt` looked visually correct, which means the chosen adjustment is `safeAreaInsets.top + 1pt`, or +2 physical pixels on a 2x Retina screen.
+厳密な 1px 補正は `safeAreaInsets.top + 0.5pt` ですが、このプロトタイプでは `33pt` が見た目として自然でした。つまり、現在は `safeAreaInsets.top + 1pt`、2x Retina では物理 +2px の補正を使っています。
 
-Keep this as a visual fit correction, not a universal notch rule. If the app later needs to adapt across Mac models and external displays, compute from `NSScreen.safeAreaInsets.top`, `backingScaleFactor`, and `auxiliaryTopLeftArea` / `auxiliaryTopRightArea` instead of hard-coding the height.
+この値は見た目合わせの補正であり、すべての Mac で使える普遍的なノッチルールではありません。将来的に複数モデルへ対応する場合は、`NSScreen.safeAreaInsets.top`、`backingScaleFactor`、`auxiliaryTopLeftArea`、`auxiliaryTopRightArea` から計算する方針です。
 
-The current prototype uses `auxiliaryTopLeftArea` and `auxiliaryTopRightArea` to derive the horizontal notch span. On the current built-in display, the measured notch span is:
+現在の実機では、`auxiliaryTopLeftArea` と `auxiliaryTopRightArea` から次のノッチ幅を取得しています。
 
 ```text
 notch x = 663pt ... 848pt
@@ -140,4 +137,10 @@ left handle width = 54pt
 pill frame = x: 609pt, width: 239pt
 ```
 
-This makes the visible left handle end exactly at the notch left edge, while the black base continues behind the notch.
+これにより、左側のハンドル右端がノッチ左端に揃い、黒いベースがノッチ裏まで続く見た目になります。
+
+## 注意
+
+- 現時点ではローカルプロトタイプです。署名、notarization、自動起動、配布用 installer は未整備です。
+- `.env.local`、OAuth client secret、token 類は Git に含めないでください。
+- Clipboard 履歴は機密テキストも拾える可能性があります。今後、除外ルールや private mode を追加する余地があります。

@@ -34,6 +34,7 @@ status: active
 - アプリ名を `ノッチポッケ` に決定し、SwiftPM package / executable / generated app bundle の公開名を `NotchPokke` へ変更。bundle 表示名は `ノッチポッケ` にした。
 - README を公開リポジトリ向けに更新し、Google OAuth client ID / secret は `.env.local` でローカル管理して source control に含めない前提を明記した。
 - GitHub public repository `shotaro311/notch-pokke` を作成し、`main` を push した。
+- README を日本語中心へ全面更新し、概要、機能、実行方法、Google Calendar 設定、表示先、実装メモ、ノッチサイズ、注意事項を日本語で読めるようにした。
 
 ## 検証
 
@@ -58,6 +59,7 @@ status: active
 - Mirror microphone button / close 修正後: `swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。録音ボタン押下後に画面外へ移動し、`microphone temp recording started` の直後に `AVAudioEngine stop` と `camera session stopped` が出ること、panel が画面から消えることを確認。
 - `ノッチポッケ` rename / GitHub 公開準備後: `swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。generated app bundle は `NotchPokke.app`、process は `NotchPokke` で起動することを確認。`.env.local` は ignore 済みで、公開対象 tracked files に実OAuth値やtokenがないことを確認。
 - GitHub 公開後: `gh repo view shotaro311/notch-pokke` で visibility `PUBLIC`、default branch `main`、URL `https://github.com/shotaro311/notch-pokke` を確認。
+- README 日本語対応後: `git diff --check` 成功。
 
 ## 未完了 / 注意
 
