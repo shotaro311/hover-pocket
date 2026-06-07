@@ -40,10 +40,12 @@ status: active
 - 2026-06-04: `GoogleCalendarProvider` を追加。Google installed app OAuth の loopback redirect + PKCE、Keychain token保存、Calendar API `calendarList.list` / `events.list`、月グリッド + 日付hover詳細UI、Settings の connect / disconnect 導線を実装。`swift build`、`./script/build_and_run.sh --verify`、dummy OAuth値の `Info.plist` 注入、loopback socket port確保、callback早着対策、setup check、crash 例外なしを確認済み。gcloud / Calendar API は設定済み。`gcloud iam oauth-clients` と既存gcloud tokenではCalendar OAuth検証に使えないことも確認済み。実Googleアカウント取得には OAuth desktop client ID 設定が必要。
 - 2026-06-04: `shotaro.matsu0311@gmail.com` のChrome `Default` profileで Google Auth Platform の Desktop OAuth client を作成し、`.env.local` に client ID / secret を保存。実OAuth consent、Keychain保存、Calendar API取得まで検証済み。`./script/verify_google_calendar.sh --force-google-sign-in` は `calendar_sources=5`、`events_in_visible_grid=53`、`days_with_events=37`、`today_events=3`。保存済み認証での再取得も `used_login_flow=false` で成功。`./script/build_and_run.sh --verify`、`git diff --check`、起動後 `CPU 0.0%`、直近crash例外なしを確認済み。
 - 2026-06-07: Google Calendar の日付クリック詳細固定、予定追加、編集、削除 UI と Calendar API 書き込み処理を追加。OAuth scope を `calendar.events` に変更し、古い read-only credential は再接続が必要な状態として扱うようにした。`swift build`、`./script/check_google_calendar_setup.sh`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。実Googleアカウントの write scope 追加同意は OAuth callback 待ちで未完了。
+- 2026-06-07: Clipboard provider を追加。テキスト/画像 clipboard 履歴、画像の Application Support 保存、クリック再コピー、外部アプリへの drag/drop provider を実装。provider の表示/非表示、順番、最後に開いた panel / default panel 設定を追加。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。起動後 CPU 0.0% を確認。
+- 2026-06-07: Codex chat 欄への画像 drag/drop が効かない報告を受け、drag 開始直後に hover panel を一時非表示にし、画像 drag payload を file URL 起点の `NSItemProvider` に変更。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 
 ## 進行中
 
-- Codex: `Mirror` provider は crash / 重さ / close 残像 / ちらつき / UI 枠との同期 / 繰り返し開閉時の処理蓄積対策まで実装済み。`Calendar` provider は Google account login、calendarList、events.list、日付別イベント抽出まで実アカウントで検証済み。追加で予定追加、編集、削除の API / UI は実装済みで、write scope の再接続待ち。
+- Codex: `Mirror` provider は crash / 重さ / close 残像 / ちらつき / UI 枠との同期 / 繰り返し開閉時の処理蓄積対策まで実装済み。`Calendar` provider は Google account login、calendarList、events.list、日付別イベント抽出まで実アカウントで検証済み。追加で予定追加、編集、削除の API / UI は実装済みで、write scope の再接続待ち。`Clipboard` provider は text/image 履歴、local image 保存、再コピー、drag/drop まで実装済み。
 
 ## 次アクション
 
@@ -51,6 +53,8 @@ status: active
 - Mirror の初回 permission UX と表示品質を調整する。
 - Calendar provider の初回表示UXと日付hover詳細の見た目を実画面で微調整する。
 - Calendar provider の write scope 追加同意後、一時イベントの作成・編集・削除を実アカウントで確認する。
+- Clipboard provider の text/image drag/drop を、Finder / Slack / browser input など複数アプリで手動確認する。
+- Clipboard image drag/drop を Codex chat 欄で再確認する。
 - アプリ化の要件を決める: app name、終了/自動起動、Google OAuth consent screen、設定項目、今後追加する provider。
 
 ## Blocker / Risk
@@ -62,6 +66,7 @@ status: active
 - `.env.local` には Google OAuth client ID / secret が入っているため、値を出力せず、repo に含めない。
 - Google OAuth consent screen が Testing の場合、登録済み test user のみログイン可能。一般公開には Google OAuth app verification が必要になる可能性がある。
 - Calendar event 書き込みには `calendar.events` scope が必要。既存の read-only token では再接続が必要。
+- Clipboard history は機密テキストも拾えるため、今後は除外ルール、保存期間設定、private mode を追加する余地がある。
 
 ## 引き継ぎ
 
@@ -93,6 +98,8 @@ status: active
 ## 最近の更新
 
 - 2026-06-07: Calendar provider に日付クリック固定、予定追加、編集、削除 UI / API を追加。OAuth scope は `calendar.events` に変更し、既存 read-only credential は再接続扱いにした。
+- 2026-06-07: Clipboard provider と provider 表示/順番/default panel 設定を追加。
+- 2026-06-07: Clipboard image drag の drop 互換性改善として、panel 一時非表示と file URL provider を追加。
 - 2026-06-04: Mirror close 時の点滅対策として、content 非表示化を window `orderOut` 後へ移動。
 - 2026-06-04: Mirror の軽快化として、camera prewarm / provider active 分離 / eventDriven refresh skip を追加。見た目の animation は変更なし。
 - 2026-06-04: Mirror のカクつき / ちらつき対策として、camera preview layer の暗黙 animation 無効化、animation 中 shadow off、閉じかけ再 hover の frame snap 防止、live camera への blur 削除を追加。

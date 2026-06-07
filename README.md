@@ -12,7 +12,7 @@ Use `./script/build_and_run.sh --verify` to build, launch, and confirm the proce
 
 ## Current features
 
-The app currently ships with built-in `Mirror` and `Calendar` providers.
+The app currently ships with built-in `Mirror`, `Calendar`, and `Clipboard` providers.
 
 - Hover the notch handle to open the preview panel.
 - The app preconfigures the camera session when access is already granted, but starts the Mac camera only while the mirror preview is active.
@@ -27,6 +27,20 @@ Calendar:
 - Add events from writable calendars.
 - Edit event title, time, all-day state, location, and notes.
 - Delete events from writable calendars.
+
+Clipboard:
+
+- Text clipboard history appears in the left column.
+- Image clipboard history appears in the right column.
+- Click an item to copy it back to the clipboard.
+- Drag text or image items into another app.
+- Images are stored locally under Application Support.
+
+Panel settings:
+
+- Show or hide built-in providers from Settings.
+- Choose whether the last used panel should reopen by default.
+- Control-click a provider icon in the panel header to move it left or right.
 
 ## Project path
 

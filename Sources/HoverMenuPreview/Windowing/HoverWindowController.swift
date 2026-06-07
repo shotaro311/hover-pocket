@@ -29,9 +29,13 @@ final class HoverWindowController {
 
     init() {
         let settings = AppSettings()
+        let menuStore = HoverMenuStore(settings: settings)
         self.settings = settings
-        self.menuStore = HoverMenuStore(settings: settings)
-        self.settingsWindowController = SettingsWindowController(settings: settings)
+        self.menuStore = menuStore
+        self.settingsWindowController = SettingsWindowController(
+            settings: settings,
+            providerStore: menuStore.providerStore
+        )
 
         configurePillWindow()
         configurePreviewWindow()
@@ -83,7 +87,8 @@ final class HoverWindowController {
             rootView: HoverPanelShell(
                 hoverState: hoverState,
                 store: menuStore,
-                onOpenSettings: { [weak self] in self?.showSettings() }
+                onOpenSettings: { [weak self] in self?.showSettings() },
+                onExternalDragStarted: { [weak self] in self?.prepareForExternalDrag() }
             )
         )
         previewWindow = panel
@@ -121,6 +126,34 @@ final class HoverWindowController {
         closePreview()
     }
 
+    private func prepareForExternalDrag() {
+        cancelClose()
+        let token = previewAnimationToken + 1
+        previewAnimationToken = token
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            Task { @MainActor in
+                guard let self, self.previewAnimationToken == token else { return }
+                self.hidePreviewForExternalDrag()
+            }
+        }
+    }
+
+    private func hidePreviewForExternalDrag() {
+        guard let previewWindow, previewWindow.isVisible else { return }
+        resetTask?.cancel()
+        resetTask = nil
+        setProviderActive(false)
+        setPreviewContentVisible(false, animated: false)
+        previewWindow.alphaValue = 1
+        previewWindow.hasShadow = true
+        previewWindow.invalidateShadow()
+        previewWindow.ignoresMouseEvents = false
+        if let screen = previewWindow.screen ?? targetScreen() {
+            previewWindow.setFrame(PanelGeometry.frames(on: screen).preview, display: false)
+        }
+        previewWindow.orderOut(nil)
+    }
+
     private func showPreview() {
         cancelClose()
         resetTask?.cancel()
@@ -129,6 +162,7 @@ final class HoverWindowController {
         guard let screen = targetScreen(), let previewWindow else { return }
         let frames = PanelGeometry.frames(on: screen)
         pillWindow?.setFrame(frames.pill, display: true)
+        menuStore.providerStore.prepareForPanelOpen()
         setProviderActive(true)
         menuStore.providerStore.refreshSelected(reason: .panelOpened)
 

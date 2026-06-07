@@ -2,62 +2,148 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
+    @ObservedObject var providerStore: ProviderStore
     @ObservedObject private var calendarStore = GoogleCalendarStore.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Display")
-                    .font(.system(size: 13, weight: .bold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                displaySection
 
-                Picker("Display", selection: $settings.displayPlacementMode) {
-                    ForEach(DisplayPlacementMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                Divider()
+
+                panelsSection
+
+                Divider()
+
+                googleCalendarSection
+            }
+            .padding(20)
+        }
+        .frame(width: 460, height: 500)
+    }
+
+    private var displaySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Display")
+                .font(.system(size: 13, weight: .bold))
+
+            Picker("Display", selection: $settings.displayPlacementMode) {
+                ForEach(DisplayPlacementMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text(settings.displayPlacementMode.detail)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var panelsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Panels")
+                .font(.system(size: 13, weight: .bold))
+
+            Toggle("Open last used panel", isOn: $settings.rememberLastSelectedProvider)
+
+            if !settings.rememberLastSelectedProvider, !providerStore.visibleManifests.isEmpty {
+                Picker("Default panel", selection: preferredProviderSelection) {
+                    ForEach(providerStore.visibleManifests) { manifest in
+                        Label(manifest.title, systemImage: manifest.symbolName)
+                            .tag(manifest.id.rawValue)
                     }
                 }
-                .pickerStyle(.segmented)
+            }
 
-                Text(settings.displayPlacementMode.detail)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(settings.orderedManifests(providerStore.registry.manifests)) { manifest in
+                    HStack(spacing: 8) {
+                        Image(systemName: manifest.symbolName)
+                            .frame(width: 18)
+                            .foregroundStyle(.secondary)
+
+                        Text(manifest.title)
+                            .font(.system(size: 12))
+
+                        Spacer()
+
+                        Toggle(
+                            "",
+                            isOn: providerVisibilityBinding(for: manifest)
+                        )
+                        .labelsHidden()
+                        .disabled(isOnlyVisibleProvider(manifest))
+                    }
+                }
+            }
+        }
+    }
+
+    private var googleCalendarSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Google Calendar")
+                .font(.system(size: 13, weight: .bold))
+
+            HStack(spacing: 10) {
+                calendarStatus
+
+                Spacer()
+
+                if calendarStore.isSignedIn {
+                    Button("Disconnect") {
+                        calendarStore.signOut()
+                    }
+                } else {
+                    Button(calendarConnectTitle) {
+                        calendarStore.signIn()
+                    }
+                    .disabled(!calendarStore.isConfigured || calendarStore.connectionState == .signingIn)
+                }
+            }
+
+            if let message = calendarStore.lastErrorMessage {
+                Text(message)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Google Calendar")
-                    .font(.system(size: 13, weight: .bold))
-
-                HStack(spacing: 10) {
-                    calendarStatus
-
-                    Spacer()
-
-                    if calendarStore.isSignedIn {
-                        Button("Disconnect") {
-                            calendarStore.signOut()
-                        }
-                    } else {
-                        Button(calendarConnectTitle) {
-                            calendarStore.signIn()
-                        }
-                        .disabled(!calendarStore.isConfigured || calendarStore.connectionState == .signingIn)
-                    }
-                }
-
-                if let message = calendarStore.lastErrorMessage {
-                    Text(message)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            Spacer(minLength: 0)
         }
-        .padding(20)
-        .frame(width: 420, height: 230)
+    }
+
+    private var preferredProviderSelection: Binding<String> {
+        Binding(
+            get: {
+                let visible = providerStore.visibleManifests
+                if let preferred = settings.preferredProviderRawValue,
+                   visible.contains(where: { $0.id.rawValue == preferred }) {
+                    return preferred
+                }
+                return visible.first?.id.rawValue ?? ""
+            },
+            set: { settings.preferredProviderRawValue = $0 }
+        )
+    }
+
+    private func providerVisibilityBinding(for manifest: PluginManifest) -> Binding<Bool> {
+        Binding(
+            get: {
+                settings.isProviderVisible(manifest.id)
+            },
+            set: { isVisible in
+                settings.setProvider(
+                    manifest.id,
+                    isVisible: isVisible,
+                    manifests: providerStore.registry.manifests
+                )
+            }
+        )
+    }
+
+    private func isOnlyVisibleProvider(_ manifest: PluginManifest) -> Bool {
+        settings.isProviderVisible(manifest.id) && providerStore.visibleManifests.count <= 1
     }
 
     private var calendarStatus: some View {

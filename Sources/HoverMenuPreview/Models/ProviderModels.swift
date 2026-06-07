@@ -19,6 +19,8 @@ struct PluginManifest: Hashable, Codable, Sendable, Identifiable {
 
 enum PluginPermission: Hashable, Codable, Sendable {
     case camera
+    case clipboardRead
+    case clipboardWrite
     case codexSessionsRead
     case calendarRead
     case calendarWrite

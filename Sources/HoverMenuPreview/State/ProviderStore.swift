@@ -7,24 +7,62 @@ final class ProviderStore: ObservableObject {
     @Published var selectedPluginID: PluginID?
     @Published private(set) var states: [PluginID: ProviderState]
 
+    private let settings: AppSettings
+    private var settingsCancellable: AnyCancellable?
     private var refreshTask: Task<Void, Never>?
 
-    init(registry: ProviderRegistry = .empty) {
+    init(registry: ProviderRegistry = .empty, settings: AppSettings = AppSettings()) {
         self.registry = registry
-        self.selectedPluginID = registry.manifests.first?.id
+        self.settings = settings
+        self.selectedPluginID = settings.providerSelectionForPanelOpen(manifests: registry.manifests)
         self.states = Dictionary(
             uniqueKeysWithValues: registry.manifests.map { ($0.id, ProviderState.idle) }
         )
+        observeSettings()
+        syncProviderSideEffects()
+    }
+
+    var visibleManifests: [PluginManifest] {
+        settings.visibleManifests(registry.manifests)
     }
 
     var selectedProvider: (any NotchProvider)? {
-        registry.provider(for: selectedPluginID)
+        guard let selectedPluginID,
+              visibleManifests.contains(where: { $0.id == selectedPluginID })
+        else {
+            return registry.provider(for: visibleManifests.first?.id)
+        }
+        return registry.provider(for: selectedPluginID)
     }
 
     func select(_ id: PluginID) {
         guard selectedPluginID != id else { return }
+        guard visibleManifests.contains(where: { $0.id == id }) else { return }
         selectedPluginID = id
+        settings.recordProviderSelection(id)
         refreshSelected(reason: .userRequested)
+    }
+
+    func prepareForPanelOpen() {
+        guard let id = settings.providerSelectionForPanelOpen(manifests: registry.manifests) else {
+            selectedPluginID = nil
+            return
+        }
+        if selectedPluginID != id {
+            selectedPluginID = id
+        }
+    }
+
+    func moveProvider(_ id: PluginID, by offset: Int) {
+        settings.moveProvider(id, by: offset, manifests: registry.manifests)
+        objectWillChange.send()
+    }
+
+    func canMoveProvider(_ id: PluginID, by offset: Int) -> Bool {
+        let orderedIDs = visibleManifests.map(\.id)
+        guard let index = orderedIDs.firstIndex(of: id) else { return false }
+        let destination = index + offset
+        return destination >= 0 && destination < orderedIDs.count
     }
 
     func state(for id: PluginID) -> ProviderState {
@@ -63,6 +101,38 @@ final class ProviderStore: ObservableObject {
                     )
                 }
             }
+        }
+    }
+
+    private func observeSettings() {
+        settingsCancellable = settings.objectWillChange
+            .sink { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.settingsDidChange()
+                }
+            }
+    }
+
+    private func settingsDidChange() {
+        syncSelectionWithSettings()
+        syncProviderSideEffects()
+        objectWillChange.send()
+    }
+
+    private func syncSelectionWithSettings() {
+        let visibleIDs = Set(visibleManifests.map(\.id))
+        if let selectedPluginID, visibleIDs.contains(selectedPluginID) {
+            return
+        }
+        selectedPluginID = settings.providerSelectionForPanelOpen(manifests: registry.manifests)
+    }
+
+    private func syncProviderSideEffects() {
+        let clipboardVisible = visibleManifests.contains { $0.id == ClipboardProvider.pluginID }
+        if clipboardVisible {
+            ClipboardHistoryStore.shared.startMonitoring()
+        } else {
+            ClipboardHistoryStore.shared.stopMonitoring()
         }
     }
 

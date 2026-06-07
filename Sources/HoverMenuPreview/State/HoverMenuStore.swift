@@ -7,8 +7,8 @@ final class HoverMenuStore: ObservableObject {
     let settings: AppSettings
     let providerStore: ProviderStore
 
-    init(settings: AppSettings, providerStore: ProviderStore = ProviderStore(registry: .builtIn)) {
+    init(settings: AppSettings, providerStore: ProviderStore? = nil) {
         self.settings = settings
-        self.providerStore = providerStore
+        self.providerStore = providerStore ?? ProviderStore(registry: .builtIn, settings: settings)
     }
 }

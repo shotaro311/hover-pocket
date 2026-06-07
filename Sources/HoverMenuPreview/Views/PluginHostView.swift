@@ -3,6 +3,7 @@ import SwiftUI
 struct PluginHostView: View {
     @ObservedObject var providerStore: ProviderStore
     let isPreviewActive: Bool
+    let onExternalDragStarted: () -> Void
 
     var body: some View {
         Group {
@@ -15,6 +16,9 @@ struct PluginHostView: View {
                         isPreviewActive: isPreviewActive,
                         refresh: {
                             providerStore.refreshSelected(reason: .userRequested)
+                        },
+                        beginExternalDrag: {
+                            onExternalDragStarted()
                         }
                     )
                 )

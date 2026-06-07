@@ -5,6 +5,7 @@ struct HoverPanelShell: View {
     let hoverState: HoverState
     @ObservedObject var store: HoverMenuStore
     let onOpenSettings: () -> Void
+    let onExternalDragStarted: () -> Void
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -19,7 +20,8 @@ struct HoverPanelShell: View {
 
                 PluginHostView(
                     providerStore: store.providerStore,
-                    isPreviewActive: store.providerActive
+                    isPreviewActive: store.providerActive,
+                    onExternalDragStarted: onExternalDragStarted
                 )
             }
             .opacity(store.contentVisible ? 1 : 0)
@@ -45,15 +47,9 @@ struct HoverPanelShell: View {
 
             Spacer()
 
-            if store.providerStore.registry.manifests.count > 1 {
-                ForEach(store.providerStore.registry.manifests) { manifest in
-                    Button {
-                        store.providerStore.select(manifest.id)
-                    } label: {
-                        Image(systemName: manifest.symbolName)
-                    }
-                    .buttonStyle(IconButtonStyle(selected: store.providerStore.selectedPluginID == manifest.id))
-                    .help(manifest.title)
+            if store.providerStore.visibleManifests.count > 1 {
+                ForEach(store.providerStore.visibleManifests) { manifest in
+                    providerButton(manifest)
                 }
             }
 
@@ -75,5 +71,26 @@ struct HoverPanelShell: View {
         }
         .padding(.horizontal, 18)
         .frame(height: 54)
+    }
+
+    private func providerButton(_ manifest: PluginManifest) -> some View {
+        Button {
+            store.providerStore.select(manifest.id)
+        } label: {
+            Image(systemName: manifest.symbolName)
+        }
+        .buttonStyle(IconButtonStyle(selected: store.providerStore.selectedPluginID == manifest.id))
+        .help(manifest.title)
+        .contextMenu {
+            Button("Move Left") {
+                store.providerStore.moveProvider(manifest.id, by: -1)
+            }
+            .disabled(!store.providerStore.canMoveProvider(manifest.id, by: -1))
+
+            Button("Move Right") {
+                store.providerStore.moveProvider(manifest.id, by: 1)
+            }
+            .disabled(!store.providerStore.canMoveProvider(manifest.id, by: 1))
+        }
     }
 }
