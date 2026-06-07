@@ -6,7 +6,7 @@ struct MirrorProvider: NotchProvider {
         title: "Mirror",
         symbolName: "person.crop.rectangle",
         defaultEnabled: true,
-        requestedPermissions: [.camera],
+        requestedPermissions: [.camera, .microphone],
         refreshPolicy: .eventDriven
     )
 
@@ -16,6 +16,6 @@ struct MirrorProvider: NotchProvider {
         state: ProviderState,
         actions: ProviderActions
     ) -> AnyView {
-        AnyView(MirrorPreviewView(isActive: actions.isPreviewActive))
+        AnyView(MirrorPreviewView(isActive: actions.isPreviewActive, settings: actions.settings))
     }
 }

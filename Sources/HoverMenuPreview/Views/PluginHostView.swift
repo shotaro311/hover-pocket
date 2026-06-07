@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PluginHostView: View {
     @ObservedObject var providerStore: ProviderStore
+    @ObservedObject var settings: AppSettings
     let isPreviewActive: Bool
     let onExternalDragStarted: () -> Void
 
@@ -14,6 +15,7 @@ struct PluginHostView: View {
                     state: providerStore.state(for: id),
                     actions: ProviderActions(
                         isPreviewActive: isPreviewActive,
+                        settings: settings,
                         refresh: {
                             providerStore.refreshSelected(reason: .userRequested)
                         },

@@ -1,6 +1,6 @@
-# Hover Menu Preview
+# ノッチポッケ (NotchPokke)
 
-macOS hover prototype. It places a small black pill at the top of the screen and opens a dark preview panel when the mouse hovers over the text.
+ノッチ部分をポケットのように使う macOS prototype app. It places a compact black notch handle at the top of the screen and opens a dark utility panel when the mouse hovers over it.
 
 ## Run
 
@@ -8,7 +8,7 @@ macOS hover prototype. It places a small black pill at the top of the screen and
 ./script/build_and_run.sh
 ```
 
-Use `./script/build_and_run.sh --verify` to build, launch, and confirm the process exists.
+Use `./script/build_and_run.sh --verify` to build, launch, and confirm the `NotchPokke` process exists.
 
 ## Current features
 
@@ -19,6 +19,9 @@ The app currently ships with built-in `Mirror`, `Calendar`, and `Clipboard` prov
 - The camera preview is horizontally mirrored so it behaves like a real mirror.
 - Closing the panel stops the camera session.
 - The first use may show the macOS camera permission prompt.
+- Optional microphone check UI can be shown under the mirror from Settings.
+- While the mirror microphone row is visible, the microphone meter starts automatically.
+- The microphone row can record a temporary in-memory sample, play it once, and clear it without writing an audio file.
 
 Calendar:
 
@@ -41,12 +44,11 @@ Panel settings:
 - Show or hide built-in providers from Settings.
 - Choose whether the last used panel should reopen by default.
 - Control-click a provider icon in the panel header to move it left or right.
+- Show or hide the compact microphone check row under Mirror.
 
-## Project path
+## Naming
 
-```text
-/Users/shotaro/code/share/hover-menu-preview
-```
+The public app/product name is `ノッチポッケ`, with the ASCII executable and repository name `NotchPokke` / `notch-pokke`.
 
 ## Implementation note
 

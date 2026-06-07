@@ -3,16 +3,17 @@
 import PackageDescription
 
 let package = Package(
-    name: "HoverMenuPreview",
+    name: "NotchPokke",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "HoverMenuPreview", targets: ["HoverMenuPreview"])
+        .executable(name: "NotchPokke", targets: ["NotchPokke"])
     ],
     targets: [
         .executableTarget(
-            name: "HoverMenuPreview"
+            name: "NotchPokke",
+            path: "Sources/HoverMenuPreview"
         )
     ]
 )

@@ -20,6 +20,7 @@ struct HoverPanelShell: View {
 
                 PluginHostView(
                     providerStore: store.providerStore,
+                    settings: store.settings,
                     isPreviewActive: store.providerActive,
                     onExternalDragStarted: onExternalDragStarted
                 )

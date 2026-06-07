@@ -21,6 +21,8 @@ final class HoverWindowController {
     private var previewWindow: NSPanel?
     private var closeTask: DispatchWorkItem?
     private var resetTask: DispatchWorkItem?
+    private var hoverMonitorTimer: Timer?
+    private var mouseEventsEnableTask: DispatchWorkItem?
     private var previewAnimationToken = 0
     private let settings: AppSettings
     private let menuStore: HoverMenuStore
@@ -128,6 +130,7 @@ final class HoverWindowController {
 
     private func prepareForExternalDrag() {
         cancelClose()
+        stopHoverMonitor()
         let token = previewAnimationToken + 1
         previewAnimationToken = token
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
@@ -158,6 +161,8 @@ final class HoverWindowController {
         cancelClose()
         resetTask?.cancel()
         resetTask = nil
+        mouseEventsEnableTask?.cancel()
+        mouseEventsEnableTask = nil
 
         guard let screen = targetScreen(), let previewWindow else { return }
         let frames = PanelGeometry.frames(on: screen)
@@ -179,12 +184,16 @@ final class HoverWindowController {
         previewWindow.hasShadow = false
         previewWindow.ignoresMouseEvents = true
         previewWindow.orderFrontRegardless()
+        enablePreviewMouseEventsSoon(for: previewWindow, token: token)
 
         if shouldReduceMotion {
+            mouseEventsEnableTask?.cancel()
+            mouseEventsEnableTask = nil
             previewWindow.hasShadow = true
             previewWindow.invalidateShadow()
             previewWindow.ignoresMouseEvents = false
             setPreviewContentVisible(true, animated: false)
+            startHoverMonitor()
             return
         }
 
@@ -203,8 +212,27 @@ final class HoverWindowController {
                 previewWindow.hasShadow = true
                 previewWindow.invalidateShadow()
                 previewWindow.ignoresMouseEvents = false
+                self.startHoverMonitor()
             }
         }
+    }
+
+    private func enablePreviewMouseEventsSoon(for previewWindow: NSPanel, token: Int) {
+        let task = DispatchWorkItem { [weak self, weak previewWindow] in
+            Task { @MainActor in
+                guard let self,
+                      let previewWindow,
+                      self.previewAnimationToken == token,
+                      previewWindow.isVisible
+                else {
+                    return
+                }
+
+                previewWindow.ignoresMouseEvents = false
+            }
+        }
+        mouseEventsEnableTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06, execute: task)
     }
 
     private func scheduleClose() {
@@ -230,6 +258,9 @@ final class HoverWindowController {
     private func closePreview() {
         guard let previewWindow, previewWindow.isVisible else { return }
 
+        stopHoverMonitor()
+        mouseEventsEnableTask?.cancel()
+        mouseEventsEnableTask = nil
         previewAnimationToken += 1
         let token = previewAnimationToken
         resetTask?.cancel()
@@ -276,6 +307,9 @@ final class HoverWindowController {
     private func resetClosedPreviewWindow(_ previewWindow: NSPanel, frame: NSRect) {
         resetTask?.cancel()
         resetTask = nil
+        stopHoverMonitor()
+        mouseEventsEnableTask?.cancel()
+        mouseEventsEnableTask = nil
         previewWindow.orderOut(nil)
         setProviderActive(false)
         setPreviewContentVisible(false, animated: false)
@@ -291,6 +325,35 @@ final class HoverWindowController {
         let pillContainsMouse = pillWindow?.frame.insetBy(dx: -4, dy: -4).contains(location) ?? false
         let previewContainsMouse = previewWindow?.frame.insetBy(dx: -4, dy: -4).contains(location) ?? false
         return pillContainsMouse || previewContainsMouse
+    }
+
+    private func startHoverMonitor() {
+        guard hoverMonitorTimer == nil else { return }
+
+        let timer = Timer(timeInterval: 0.08, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.closeIfMouseLeftHoverRegion()
+            }
+        }
+        hoverMonitorTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopHoverMonitor() {
+        hoverMonitorTimer?.invalidate()
+        hoverMonitorTimer = nil
+    }
+
+    private func closeIfMouseLeftHoverRegion() {
+        guard previewWindow?.isVisible == true,
+              closeTask == nil,
+              !isMouseInsideHoverRegion()
+        else {
+            return
+        }
+
+        scheduleClose()
     }
 
     private func targetScreen() -> NSScreen? {

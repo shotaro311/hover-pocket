@@ -7,15 +7,18 @@ struct ProviderContext: Sendable {
 
 struct ProviderActions {
     let isPreviewActive: Bool
+    let settings: AppSettings
     let refresh: @MainActor () -> Void
     let beginExternalDrag: @MainActor () -> Void
 
     init(
         isPreviewActive: Bool = false,
+        settings: AppSettings,
         refresh: @escaping @MainActor () -> Void = {},
         beginExternalDrag: @escaping @MainActor () -> Void = {}
     ) {
         self.isPreviewActive = isPreviewActive
+        self.settings = settings
         self.refresh = refresh
         self.beginExternalDrag = beginExternalDrag
     }

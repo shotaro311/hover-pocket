@@ -4,9 +4,39 @@ import SwiftUI
 
 struct MirrorPreviewView: View {
     let isActive: Bool
+    @ObservedObject var settings: AppSettings
     @StateObject private var camera = MirrorCameraModel.shared
+    @StateObject private var microphone = MirrorMicrophoneModel.shared
 
     var body: some View {
+        VStack(spacing: settings.showMirrorMicrophoneCheck ? 8 : 0) {
+            mirrorSurface
+
+            if settings.showMirrorMicrophoneCheck {
+                microphoneCheckRow
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
+        .onAppear {
+            camera.setActive(isActive)
+            syncMicrophoneMonitoring()
+        }
+        .onDisappear {
+            camera.setActive(false)
+            microphone.setMonitoringActive(false)
+        }
+        .onChange(of: isActive) { _, newValue in
+            camera.setActive(newValue)
+            syncMicrophoneMonitoring()
+        }
+        .onChange(of: settings.showMirrorMicrophoneCheck) { _, isVisible in
+            syncMicrophoneMonitoring()
+        }
+    }
+
+    private var mirrorSurface: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.black)
@@ -39,18 +69,149 @@ struct MirrorPreviewView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.white.opacity(0.10), lineWidth: 1)
         )
-        .padding(.horizontal, 14)
-        .padding(.top, 12)
-        .padding(.bottom, 14)
-        .onAppear {
-            camera.setActive(isActive)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var microphoneCheckRow: some View {
+        HStack(spacing: 9) {
+            Image(systemName: microphoneIconName)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(microphoneAccentColor)
+                .frame(width: 18)
+
+            Text("Mic Check")
+                .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.82))
+                .lineLimit(1)
+
+            audioBars
+                .frame(width: 92)
+
+            Text(microphone.inputName)
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.42))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                microphone.toggleRecordingPlayback()
+            } label: {
+                Image(systemName: microphoneControlIconName)
+                    .font(.system(size: 10.5, weight: .bold))
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white.opacity(0.84))
+            .background(
+                Circle()
+                    .fill(microphoneControlFillColor)
+            )
+            .overlay(
+                Circle()
+                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+            )
+            .contentShape(Circle())
+            .disabled(!microphone.canUseRecordingControl)
+            .opacity(microphone.canUseRecordingControl ? 1 : 0.42)
+            .help(microphoneControlHelp)
         }
-        .onDisappear {
-            camera.setActive(false)
+        .frame(height: 34)
+        .padding(.horizontal, 11)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(Color.white.opacity(0.045))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private var audioBars: some View {
+        HStack(alignment: .center, spacing: 3) {
+            ForEach(0..<12, id: \.self) { index in
+                let threshold = Double(index + 1) / 12.0
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(microphone.level >= threshold ? microphoneAccentColor : Color.white.opacity(0.13))
+                    .frame(width: 4, height: barHeight(at: index))
+            }
         }
-        .onChange(of: isActive) { _, newValue in
-            camera.setActive(newValue)
+        .animation(.easeOut(duration: 0.08), value: microphone.level)
+    }
+
+    private func syncMicrophoneMonitoring() {
+        microphone.setMonitoringActive(isActive && settings.showMirrorMicrophoneCheck)
+    }
+
+    private var microphoneIconName: String {
+        switch microphone.status {
+        case .running:
+            return "mic.fill"
+        case .requestingPermission:
+            return "mic.badge.plus"
+        case .denied, .restricted:
+            return "mic.slash.fill"
+        case .unavailable, .failed:
+            return "exclamationmark.triangle.fill"
+        case .idle:
+            return "mic"
         }
+    }
+
+    private var microphoneAccentColor: Color {
+        switch microphone.status {
+        case .running:
+            return .green.opacity(0.86)
+        case .denied, .restricted, .unavailable, .failed:
+            return .yellow.opacity(0.90)
+        default:
+            return .cyan.opacity(0.74)
+        }
+    }
+
+    private var microphoneControlIconName: String {
+        switch microphone.recordingState {
+        case .idle:
+            return "record.circle"
+        case .recording:
+            return "stop.fill"
+        case .readyToPlay:
+            return "play.fill"
+        case .playing:
+            return "stop.fill"
+        }
+    }
+
+    private var microphoneControlFillColor: Color {
+        switch microphone.recordingState {
+        case .recording:
+            return .red.opacity(0.46)
+        case .readyToPlay:
+            return .green.opacity(0.24)
+        case .playing:
+            return .green.opacity(0.38)
+        case .idle:
+            return .white.opacity(0.10)
+        }
+    }
+
+    private var microphoneControlHelp: String {
+        switch microphone.recordingState {
+        case .idle:
+            return "Record a temporary mic sample"
+        case .recording:
+            return "Stop recording"
+        case .readyToPlay:
+            return "Play temporary mic sample"
+        case .playing:
+            return "Stop playback and clear"
+        }
+    }
+
+    private func barHeight(at index: Int) -> CGFloat {
+        let pattern: [CGFloat] = [7, 10, 14, 18, 22, 17, 12, 20, 15, 11, 16, 9]
+        return pattern[index % pattern.count]
     }
 
     @ViewBuilder

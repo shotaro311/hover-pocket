@@ -184,7 +184,7 @@ final class LoopbackOAuthReceiver: @unchecked Sendable {
         let body = """
         <html><head><meta charset="utf-8"><title>\(title)</title></head>
         <body style="font-family:-apple-system;padding:24px">
-        <h3>\(title)</h3><p>You can return to HoverMenuPreview.</p>
+        <h3>\(title)</h3><p>You can return to ノッチポッケ.</p>
         </body></html>
         """
         let response = """

@@ -2,8 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="HoverMenuPreview"
-PRODUCT_NAME="HoverMenuPreview"
+APP_NAME="NotchPokke"
+DISPLAY_NAME="ノッチポッケ"
+PRODUCT_NAME="NotchPokke"
+LEGACY_PROCESS_NAME="HoverMenuPreview"
 BUNDLE_DIR="$ROOT_DIR/dist/$APP_NAME.app"
 EXECUTABLE_PATH="$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
 
@@ -74,10 +76,12 @@ if [[ -n "$GOOGLE_OAUTH_CHROME_REMOTE_DEBUGGING_PORT" ]]; then
 "
 fi
 
-if pgrep -x "$APP_NAME" >/dev/null 2>&1; then
-  pkill -x "$APP_NAME" || true
-  sleep 0.2
-fi
+for process_name in "$APP_NAME" "$LEGACY_PROCESS_NAME"; do
+  if pgrep -x "$process_name" >/dev/null 2>&1; then
+    pkill -x "$process_name" || true
+    sleep 0.2
+  fi
+done
 
 swift build
 
@@ -94,9 +98,11 @@ cat > "$BUNDLE_DIR/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key>
   <string>$APP_NAME</string>
   <key>CFBundleIdentifier</key>
-  <string>local.codex.hover-menu-preview</string>
+  <string>local.codex.notch-pokke</string>
+  <key>CFBundleDisplayName</key>
+  <string>$DISPLAY_NAME</string>
   <key>CFBundleName</key>
-  <string>$APP_NAME</string>
+  <string>$DISPLAY_NAME</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>
@@ -109,7 +115,9 @@ ${GOOGLE_OAUTH_PLIST}  <key>NSAppTransportSecurity</key>
     <true/>
   </dict>
   <key>NSCameraUsageDescription</key>
-  <string>HoverMenuPreview uses the Mac camera to show a mirror preview while the notch panel is open.</string>
+  <string>ノッチポッケ uses the Mac camera to show a mirror preview while the notch panel is open.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>ノッチポッケ uses the microphone only for the mirror microphone check.</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
 </dict>

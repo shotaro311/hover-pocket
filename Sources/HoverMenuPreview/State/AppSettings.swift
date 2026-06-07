@@ -39,6 +39,12 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var showMirrorMicrophoneCheck: Bool {
+        didSet {
+            defaults.set(showMirrorMicrophoneCheck, forKey: Self.showMirrorMicrophoneCheckKey)
+        }
+    }
+
     private let defaults: UserDefaults
     private static let displayPlacementModeKey = "displayPlacementMode"
     private static let providerOrderKey = "providerOrder"
@@ -46,6 +52,7 @@ final class AppSettings: ObservableObject {
     private static let rememberLastSelectedProviderKey = "rememberLastSelectedProvider"
     private static let preferredProviderKey = "preferredProvider"
     private static let lastSelectedProviderKey = "lastSelectedProvider"
+    private static let showMirrorMicrophoneCheckKey = "showMirrorMicrophoneCheck"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -61,6 +68,11 @@ final class AppSettings: ObservableObject {
         }
         self.preferredProviderRawValue = defaults.string(forKey: Self.preferredProviderKey)
         self.lastSelectedProviderRawValue = defaults.string(forKey: Self.lastSelectedProviderKey)
+        if defaults.object(forKey: Self.showMirrorMicrophoneCheckKey) == nil {
+            self.showMirrorMicrophoneCheck = false
+        } else {
+            self.showMirrorMicrophoneCheck = defaults.bool(forKey: Self.showMirrorMicrophoneCheckKey)
+        }
     }
 
     func orderedManifests(_ manifests: [PluginManifest]) -> [PluginManifest] {

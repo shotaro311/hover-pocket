@@ -16,6 +16,10 @@ struct SettingsView: View {
 
                 Divider()
 
+                mirrorSection
+
+                Divider()
+
                 googleCalendarSection
             }
             .padding(20)
@@ -79,6 +83,20 @@ struct SettingsView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var mirrorSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Mirror")
+                .font(.system(size: 13, weight: .bold))
+
+            Toggle("Show microphone test under mirror", isOn: $settings.showMirrorMicrophoneCheck)
+
+            Text("Microphone starts only when you press the test button.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
