@@ -13,7 +13,10 @@ struct HoverPanelShell: View {
                 .fill(Color(red: 0.02, green: 0.02, blue: 0.025))
 
             VStack(spacing: 0) {
-                header
+                ProviderHeaderView(
+                    providerStore: store.providerStore,
+                    onOpenSettings: onOpenSettings
+                )
 
                 Divider()
                     .overlay(Color.white.opacity(0.08))
@@ -40,16 +43,22 @@ struct HoverPanelShell: View {
         }
     }
 
-    private var header: some View {
+}
+
+private struct ProviderHeaderView: View {
+    @ObservedObject var providerStore: ProviderStore
+    let onOpenSettings: () -> Void
+
+    var body: some View {
         HStack(spacing: 12) {
-            Text(store.providerStore.selectedProvider?.manifest.title ?? "Plugins")
+            Text(providerStore.selectedProvider?.manifest.title ?? "Plugins")
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white)
 
             Spacer()
 
-            if store.providerStore.visibleManifests.count > 1 {
-                ForEach(store.providerStore.visibleManifests) { manifest in
+            if providerStore.visibleManifests.count > 1 {
+                ForEach(providerStore.visibleManifests) { manifest in
                     providerButton(manifest)
                 }
             }
@@ -76,22 +85,22 @@ struct HoverPanelShell: View {
 
     private func providerButton(_ manifest: PluginManifest) -> some View {
         Button {
-            store.providerStore.select(manifest.id)
+            providerStore.select(manifest.id)
         } label: {
             Image(systemName: manifest.symbolName)
         }
-        .buttonStyle(IconButtonStyle(selected: store.providerStore.selectedPluginID == manifest.id))
+        .buttonStyle(IconButtonStyle(selected: providerStore.selectedPluginID == manifest.id))
         .help(manifest.title)
         .contextMenu {
             Button("Move Left") {
-                store.providerStore.moveProvider(manifest.id, by: -1)
+                providerStore.moveProvider(manifest.id, by: -1)
             }
-            .disabled(!store.providerStore.canMoveProvider(manifest.id, by: -1))
+            .disabled(!providerStore.canMoveProvider(manifest.id, by: -1))
 
             Button("Move Right") {
-                store.providerStore.moveProvider(manifest.id, by: 1)
+                providerStore.moveProvider(manifest.id, by: 1)
             }
-            .disabled(!store.providerStore.canMoveProvider(manifest.id, by: 1))
+            .disabled(!providerStore.canMoveProvider(manifest.id, by: 1))
         }
     }
 }
