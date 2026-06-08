@@ -120,19 +120,13 @@ private struct PanelSizeCycleButton: View {
 
     var body: some View {
         Button {
-            withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.82)) {
-                settings.panelSize = settings.panelSize.next
-            }
+            settings.panelSize = settings.panelSize.next
         } label: {
-            HStack(spacing: 3) {
-                ForEach(PanelSizeOption.allCases) { option in
-                    Text(option.shortTitle)
-                        .font(.system(size: 10, weight: settings.panelSize == option ? .bold : .medium))
-                        .foregroundStyle(settings.panelSize == option ? Color.white : Color.white.opacity(0.34))
-                        .frame(width: 12, height: 18)
-                        .contentTransition(.opacity)
-                }
-            }
+            Text(settings.panelSize.shortTitle)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.white)
+                .frame(width: 22, height: 20)
+                .contentTransition(.opacity)
             .padding(.horizontal, 5)
             .padding(.vertical, 3)
             .background(
@@ -145,6 +139,8 @@ private struct PanelSizeCycleButton: View {
             )
         }
         .buttonStyle(.plain)
+        .animation(.easeOut(duration: 0.16), value: settings.panelSize)
+        .accessibilityLabel("Panel size \(settings.panelSize.shortTitle)")
         .help("Panel size: \(settings.panelSize.title)")
     }
 }

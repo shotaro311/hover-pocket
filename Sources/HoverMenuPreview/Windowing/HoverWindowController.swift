@@ -471,22 +471,36 @@ final class HoverWindowController {
         previewWindow.hasShadow = false
         previewWindow.invalidateShadow()
 
+        animatePreviewResize(
+            previewWindow,
+            from: previewWindow.frame,
+            to: frames.preview,
+            token: token
+        )
+    }
+
+    private func animatePreviewResize(
+        _ previewWindow: NSPanel,
+        from _: NSRect,
+        to targetFrame: NSRect,
+        token: Int
+    ) {
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.34
             context.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 0.92, 0.28, 1.0)
-            previewWindow.animator().setFrame(frames.preview, display: true)
+            previewWindow.animator().setFrame(targetFrame, display: true)
         } completionHandler: { [weak self, weak previewWindow] in
             Task { @MainActor in
-                guard let self, let previewWindow, self.previewAnimationToken == token else { return }
-                previewWindow.setFrame(frames.preview, display: true)
+                guard let self,
+                      let previewWindow,
+                      self.previewAnimationToken == token
+                else {
+                    return
+                }
+
+                previewWindow.setFrame(targetFrame, display: true)
                 previewWindow.hasShadow = true
                 previewWindow.invalidateShadow()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self, weak previewWindow] in
-                    Task { @MainActor in
-                        guard let self, let previewWindow, self.previewAnimationToken == token else { return }
-                        previewWindow.setFrame(frames.preview, display: true)
-                    }
-                }
             }
         }
     }

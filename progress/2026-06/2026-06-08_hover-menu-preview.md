@@ -26,6 +26,9 @@ status: active
 - パネル見出し右側に `小 中 大` の切替ボタンを追加し、クリックごとに `小 -> 中 -> 大 -> 小` へ循環するようにした。
 - 表示中のパネルサイズ変更は、ノッチ下の上端位置を固定したまま AppKit window frame をイージング付きでリサイズするようにした。
 - 実動作確認中に、SwiftUI root が `AppSettings` を直接監視しておらず、サイズは変わるがX座標だけ先に動く不整合を検出。`HoverPanelShell` が `AppSettings` を直接監視するよう修正し、リサイズ後の最終 frame を再固定する処理を追加した。
+- PR `#2` 追加修正として、ヘッダーのサイズボタン表示を `小 中 大` の3文字常時表示から、現在サイズの1文字だけを表示する形へ変更。
+- サイズ切替時の SwiftUI `withAnimation` を外し、パネル本体のリサイズは AppKit window frame のアニメーションだけで行うようにした。これにより中央基準に見える動きを抑え、上端 `Y = 33` を保ったままサイズ変更する。
+- 今後のPR作成運用を Draft PR ではなく Ready PR に変更。Mac 側の `git-feature-pr-workflow` skill を更新し、Windows 側も peer 経由で同じ変更を反映した。
 
 ## 検証
 
@@ -42,6 +45,7 @@ status: active
 - Windows helper: 修正版 plugin version `0.1.0+codex.20260608013156` で、PR `#1` の `classify` が `docs_only: false`、`worker: mac` になること、Windows worker の `list-targets` が `targets: []` になることを peer 経由で確認。
 - 後片付け: PR `#1` は `CLOSED`、`mergedAt: null`。remote / local のテストブランチ削除済み。open PR は 0 件、Mac `list-targets` も `targets: []`。
 - PR `#2` size control: `swift build` 成功。`./script/build_and_run.sh --verify` 成功。AXPress でサイズボタンを3回押し、`520 x 372pt -> 600 x 430pt -> 456 x 326pt -> 520 x 372pt` に変わることを `CGWindowListCopyWindowInfo` で確認。小サイズを defaults に保存した状態で起動すると `456 x 326pt` で開くことも確認。検証後は defaults を `medium` に戻した。起動後 CPU は `0.1%`。
+- 追加修正後: ヘッダー切り出しでサイズボタンが `中` の1文字だけを表示することを確認。AXPress で `520 x 372pt -> 600 x 430pt -> 456 x 326pt -> 520 x 372pt` に切り替わり、各サイズで上端 `Y = 33` が維持されることを確認。アニメーション途中のサンプリングでも `Y = 33` を維持。`swift build`、`./script/build_and_run.sh --verify` 成功。
 
 ## 未完了 / 注意
 
