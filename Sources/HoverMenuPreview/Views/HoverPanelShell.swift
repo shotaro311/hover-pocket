@@ -4,6 +4,7 @@ import SwiftUI
 struct HoverPanelShell: View {
     let hoverState: HoverState
     @ObservedObject var store: HoverMenuStore
+    @ObservedObject var settings: AppSettings
     let onOpenSettings: () -> Void
     let onExternalDragStarted: () -> Void
 
@@ -15,6 +16,7 @@ struct HoverPanelShell: View {
             VStack(spacing: 0) {
                 ProviderHeaderView(
                     providerStore: store.providerStore,
+                    settings: settings,
                     onOpenSettings: onOpenSettings
                 )
 
@@ -23,7 +25,7 @@ struct HoverPanelShell: View {
 
                 PluginHostView(
                     providerStore: store.providerStore,
-                    settings: store.settings,
+                    settings: settings,
                     isPreviewActive: store.providerActive,
                     onExternalDragStarted: onExternalDragStarted
                 )
@@ -32,7 +34,10 @@ struct HoverPanelShell: View {
             .scaleEffect(store.contentVisible ? 1 : 0.92, anchor: .top)
             .offset(y: store.contentVisible ? 0 : -14)
         }
-        .frame(width: PanelLayout.previewSize.width, height: PanelLayout.previewSize.height)
+        .frame(
+            width: PanelLayout.previewSize(for: settings.panelSize).width,
+            height: PanelLayout.previewSize(for: settings.panelSize).height
+        )
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -47,13 +52,18 @@ struct HoverPanelShell: View {
 
 private struct ProviderHeaderView: View {
     @ObservedObject var providerStore: ProviderStore
+    @ObservedObject var settings: AppSettings
     let onOpenSettings: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text(providerStore.selectedProvider?.manifest.title ?? "Plugins")
-                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                .foregroundStyle(.white)
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Text(providerStore.selectedProvider?.manifest.title ?? "Plugins")
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+
+                PanelSizeCycleButton(settings: settings)
+            }
 
             Spacer()
 
@@ -102,5 +112,39 @@ private struct ProviderHeaderView: View {
             }
             .disabled(!providerStore.canMoveProvider(manifest.id, by: 1))
         }
+    }
+}
+
+private struct PanelSizeCycleButton: View {
+    @ObservedObject var settings: AppSettings
+
+    var body: some View {
+        Button {
+            withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.82)) {
+                settings.panelSize = settings.panelSize.next
+            }
+        } label: {
+            HStack(spacing: 3) {
+                ForEach(PanelSizeOption.allCases) { option in
+                    Text(option.shortTitle)
+                        .font(.system(size: 10, weight: settings.panelSize == option ? .bold : .medium))
+                        .foregroundStyle(settings.panelSize == option ? Color.white : Color.white.opacity(0.34))
+                        .frame(width: 12, height: 18)
+                        .contentTransition(.opacity)
+                }
+            }
+            .padding(.horizontal, 5)
+            .padding(.vertical, 3)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(0.08))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .help("Panel size: \(settings.panelSize.title)")
     }
 }

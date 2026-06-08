@@ -53,6 +53,20 @@ struct SettingsView: View {
 
             Toggle("Open last used panel", isOn: $settings.rememberLastSelectedProvider)
 
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("Panel size", selection: $settings.panelSize) {
+                    ForEach(PanelSizeOption.allCases) { option in
+                        Text(option.title).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(settings.panelSize.detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if !settings.rememberLastSelectedProvider, !providerStore.visibleManifests.isEmpty {
                 Picker("Default panel", selection: preferredProviderSelection) {
                     ForEach(providerStore.visibleManifests) { manifest in

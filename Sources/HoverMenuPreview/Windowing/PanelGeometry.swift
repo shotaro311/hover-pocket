@@ -5,11 +5,21 @@ enum PanelLayout {
     static let topEdgeOverfill: CGFloat = 3
     static let notchHandleWidth: CGFloat = 54
     static let previewGap: CGFloat = 0
-    static let previewSize = NSSize(width: 520, height: 372)
     static let collapsedPreviewSize = NSSize(width: 72, height: 12)
 
     static var defaultPillWidth: CGFloat {
         notchHandleWidth
+    }
+
+    static func previewSize(for panelSize: PanelSizeOption) -> NSSize {
+        switch panelSize {
+        case .small:
+            return NSSize(width: 456, height: 326)
+        case .medium:
+            return NSSize(width: 520, height: 372)
+        case .large:
+            return NSSize(width: 600, height: 430)
+        }
     }
 }
 
@@ -37,9 +47,10 @@ struct PanelFrames {
 }
 
 enum PanelGeometry {
-    static func frames(on screen: NSScreen) -> PanelFrames {
+    static func frames(on screen: NSScreen, panelSize: PanelSizeOption) -> PanelFrames {
         let notchProfile = notchProfile(on: screen)
         let pill = pillMetrics(on: screen, notchProfile: notchProfile)
+        let previewSize = PanelLayout.previewSize(for: panelSize)
         let pillY = screen.frame.maxY - PanelLayout.pillHeight
         let pillFrame = NSRect(
             x: pill.minX,
@@ -48,13 +59,13 @@ enum PanelGeometry {
             height: PanelLayout.pillHeight
         )
 
-        let previewX = screen.frame.midX - PanelLayout.previewSize.width / 2
-        let previewY = pillFrame.minY - PanelLayout.previewSize.height - PanelLayout.previewGap
+        let previewX = screen.frame.midX - previewSize.width / 2
+        let previewY = pillFrame.minY - previewSize.height - PanelLayout.previewGap
         let previewFrame = NSRect(
             x: previewX,
             y: previewY,
-            width: PanelLayout.previewSize.width,
-            height: PanelLayout.previewSize.height
+            width: previewSize.width,
+            height: previewSize.height
         )
 
         let collapsedFrame = NSRect(

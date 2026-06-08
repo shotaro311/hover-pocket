@@ -27,7 +27,7 @@ final class HoverWindowController {
     private let settings: AppSettings
     private let menuStore: HoverMenuStore
     private let settingsWindowController: SettingsWindowController
-    private var settingsCancellable: AnyCancellable?
+    private var settingsCancellables = Set<AnyCancellable>()
 
     init() {
         let settings = AppSettings()
@@ -51,7 +51,7 @@ final class HoverWindowController {
     func positionWindows() {
         guard let screen = targetScreen() else { return }
 
-        let frames = PanelGeometry.frames(on: screen)
+        let frames = PanelGeometry.frames(on: screen, panelSize: settings.panelSize)
         pillWindow?.setFrame(frames.pill, display: true)
 
         if previewWindow?.isVisible == true {
@@ -83,12 +83,13 @@ final class HoverWindowController {
             onExit: { [weak self] in self?.scheduleClose() }
         )
 
-        let panel = makePanel(size: PanelLayout.previewSize, acceptsKeyboardFocus: true)
+        let panel = makePanel(size: PanelLayout.previewSize(for: settings.panelSize), acceptsKeyboardFocus: true)
         panel.hasShadow = true
         panel.contentViewController = NSHostingController(
             rootView: HoverPanelShell(
                 hoverState: hoverState,
                 store: menuStore,
+                settings: settings,
                 onOpenSettings: { [weak self] in self?.showSettings() },
                 onExternalDragStarted: { [weak self] in self?.prepareForExternalDrag() }
             )
@@ -152,7 +153,7 @@ final class HoverWindowController {
         previewWindow.invalidateShadow()
         previewWindow.ignoresMouseEvents = false
         if let screen = previewWindow.screen ?? targetScreen() {
-            previewWindow.setFrame(PanelGeometry.frames(on: screen).preview, display: false)
+            previewWindow.setFrame(PanelGeometry.frames(on: screen, panelSize: settings.panelSize).preview, display: false)
         }
         previewWindow.orderOut(nil)
     }
@@ -165,7 +166,7 @@ final class HoverWindowController {
         mouseEventsEnableTask = nil
 
         guard let screen = targetScreen(), let previewWindow else { return }
-        let frames = PanelGeometry.frames(on: screen)
+        let frames = PanelGeometry.frames(on: screen, panelSize: settings.panelSize)
         pillWindow?.setFrame(frames.pill, display: true)
         menuStore.providerStore.prepareForPanelOpen()
         setProviderActive(true)
@@ -275,7 +276,7 @@ final class HoverWindowController {
             return
         }
 
-        let frames = PanelGeometry.frames(on: screen)
+        let frames = PanelGeometry.frames(on: screen, panelSize: settings.panelSize)
         previewWindow.hasShadow = false
         previewWindow.ignoresMouseEvents = true
 
@@ -426,12 +427,67 @@ final class HoverWindowController {
     }
 
     private func observeSettings() {
-        settingsCancellable = settings.$displayPlacementMode
+        settings.$displayPlacementMode
             .dropFirst()
             .sink { [weak self] _ in
                 guard let self else { return }
                 closePreview()
                 positionWindows()
             }
+            .store(in: &settingsCancellables)
+
+        settings.$panelSize
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                DispatchQueue.main.async { [weak self] in
+                    self?.resizePreviewForPanelSizeChange()
+                }
+            }
+            .store(in: &settingsCancellables)
+    }
+
+    private func resizePreviewForPanelSizeChange() {
+        guard let screen = previewWindow?.screen ?? targetScreen() else { return }
+        let frames = PanelGeometry.frames(on: screen, panelSize: settings.panelSize)
+        pillWindow?.setFrame(frames.pill, display: true)
+
+        guard let previewWindow else { return }
+        guard previewWindow.isVisible else {
+            previewWindow.setFrame(frames.preview, display: false)
+            return
+        }
+
+        resetTask?.cancel()
+        resetTask = nil
+        previewAnimationToken += 1
+        let token = previewAnimationToken
+
+        guard !shouldReduceMotion else {
+            previewWindow.setFrame(frames.preview, display: true)
+            return
+        }
+
+        previewWindow.hasShadow = false
+        previewWindow.invalidateShadow()
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.34
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 0.92, 0.28, 1.0)
+            previewWindow.animator().setFrame(frames.preview, display: true)
+        } completionHandler: { [weak self, weak previewWindow] in
+            Task { @MainActor in
+                guard let self, let previewWindow, self.previewAnimationToken == token else { return }
+                previewWindow.setFrame(frames.preview, display: true)
+                previewWindow.hasShadow = true
+                previewWindow.invalidateShadow()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { [weak self, weak previewWindow] in
+                    Task { @MainActor in
+                        guard let self, let previewWindow, self.previewAnimationToken == token else { return }
+                        previewWindow.setFrame(frames.preview, display: true)
+                    }
+                }
+            }
+        }
     }
 }

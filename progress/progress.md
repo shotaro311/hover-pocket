@@ -49,10 +49,11 @@ status: active
 - 2026-06-08: GitHub Actions `Codex PR Router` を追加。PR作成/更新/レビュー時に変更ファイルを分類し、Mac worker 向け origin / autofix / human merge / docs-only auto-merge safe ラベルを付ける。trusted author の docs-only PR だけ auto-merge 有効化を試みる。
 - 2026-06-08: `github-codex-autofix` plugin を Mac / Windows 両方へ配置。Mac / Windows Codex Automation を毎日 10:00 / 12:00 / 15:00 / 18:00 / 21:00 に設定し、対象PRがない場合は軽量チェックだけで終了する運用にした。
 - 2026-06-08: 実PR `#1` で `Codex PR Router` のラベル付与、Mac helper の対象PR検出、claim / release、Windows helper の Mac向けPR除外を確認。`.github/*.md` の docs-only 誤判定も修正し、Mac / Windows plugin へ反映済み。
+- 2026-06-08: PR `#2` で表示領域サイズを `小 / 中 / 大` の3段階に切り替える機能を追加。Settings とパネル見出し右側の `小 中 大` ボタンから変更でき、表示中のパネルはイージング付きで `456 x 326pt / 520 x 372pt / 600 x 430pt` にリサイズされることを実ウィンドウフレームで確認済み。
 
 ## 進行中
 
-- Codex: `ノッチポッケ` として GitHub public repository へ公開済み。`Mirror` provider は crash / 重さ / close 残像 / ちらつき / UI 枠との同期 / 繰り返し開閉時の処理蓄積対策まで実装済み。provider アイコン切替時のヘッダー選択状態更新バグも修正済み。`Calendar` provider は Google account login、calendarList、events.list、日付別イベント抽出まで実アカウントで検証済み。追加で予定追加、編集、削除の API / UI は実装済みで、write scope の再接続待ち。`Clipboard` provider は text/image 履歴、local image 保存、再コピー、drag/drop まで実装済み。GitHub PR の自動分類と Mac / Windows Codex Automation による自動修正運用の入口動作も実PRで確認済み。
+- Codex: `ノッチポッケ` として GitHub public repository へ公開済み。`Mirror` provider は crash / 重さ / close 残像 / ちらつき / UI 枠との同期 / 繰り返し開閉時の処理蓄積対策まで実装済み。provider アイコン切替時のヘッダー選択状態更新バグも修正済み。`Calendar` provider は Google account login、calendarList、events.list、日付別イベント抽出まで実アカウントで検証済み。追加で予定追加、編集、削除の API / UI は実装済みで、write scope の再接続待ち。`Clipboard` provider は text/image 履歴、local image 保存、再コピー、drag/drop まで実装済み。パネル表示領域は `小 / 中 / 大` で切替可能。GitHub PR の自動分類と Mac / Windows Codex Automation による自動修正運用の入口動作も実PRで確認済み。
 
 ## 次アクション
 
@@ -125,6 +126,7 @@ status: active
 - 2026-06-08: `Codex PR Router` workflow を追加し、ハイブリッド自動修正運用の GitHub 側分類を導入。
 - 2026-06-08: `github-codex-autofix` plugin を Mac / Windows に配置し、両環境で Codex Automation を設定。Windows 側は peer 経由で zip SHA 一致、script 存在、`list-targets` 対象なしを確認。
 - 2026-06-08: 実PR `#1` で `Codex PR Router` のラベル付与、Mac helper の対象PR検出、claim / release、Windows helper の Mac向けPR除外を確認。検証PRはマージせず閉じ、テストブランチは削除済み。
+- 2026-06-08: PR `#2` でパネル表示領域の `小 / 中 / 大` サイズ切替を追加。ヘッダーの `小 中 大` ボタンと Settings の `Panel size` picker から変更できる。
 - 2026-06-04: Mirror close 時の点滅対策として、content 非表示化を window `orderOut` 後へ移動。
 - 2026-06-04: Mirror の軽快化として、camera prewarm / provider active 分離 / eventDriven refresh skip を追加。見た目の animation は変更なし。
 - 2026-06-04: Mirror のカクつき / ちらつき対策として、camera preview layer の暗黙 animation 無効化、animation 中 shadow off、閉じかけ再 hover の frame snap 防止、live camera への blur 削除を追加。
