@@ -41,4 +41,4 @@ status: active
 - 実画面でのホバー切り替えの体感速度は、ユーザー側の操作感確認が必要。
 - 自動テストターゲットは未整備。現状の検証は `swift build` と app bundle 起動確認が中心。
 - Keychain 許可は既存の古い ad-hoc 署名由来の許可情報が残っているため、次に Calendar を開いた時だけ1回出る可能性がある。その場合は `常に許可` を押せば、以後は安定署名に対して保存される見込み。
-- GitHub repository slug は現時点では `shotaro311/notch-pokke` のまま。公開URL変更を避けるため、repo rename は別判断にした。
+- GitHub repository slug も `shotaro311/notch-pocket` へ変更済み。local `origin` も `https://github.com/shotaro311/notch-pocket.git` へ更新済み。

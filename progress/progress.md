@@ -43,7 +43,7 @@ status: active
 - 2026-06-07: Clipboard provider を追加。テキスト/画像 clipboard 履歴、画像の Application Support 保存、クリック再コピー、外部アプリへの drag/drop provider を実装。provider の表示/非表示、順番、最後に開いた panel / default panel 設定を追加。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。起動後 CPU 0.0% を確認。
 - 2026-06-07: Codex chat 欄への画像 drag/drop が効かない報告を受け、drag 開始直後に hover panel を一時非表示にし、画像 drag payload を file URL 起点の `NSItemProvider` に変更。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-07: Mirror provider に A案ベースの compact microphone check row を追加。設定で表示/非表示を切替可能。Mirror microphone row 表示中は `AVAudioEngine` で meter を自動起動し、panel 非表示/非active/設定OFFで停止。button は一時録音用に変更し、`録音 -> 停止 -> 再生 -> 再生完了後にメモリから削除` の流れにした。audio file は作成しない。`NSMicrophoneUsageDescription` を generated app bundle に追加。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
-- 2026-06-07: アプリ名を `ノッチポケット` に決定。SwiftPM package / executable / generated app bundle を `NotchPocket` に変更し、bundle 表示名を `ノッチポケット` に設定。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。`.env.local` は ignore 済みで、公開対象 tracked files に実OAuth値やtokenがないことを確認。GitHub public repository `shotaro311/notch-pokke` へ push 済み。
+- 2026-06-07: アプリ名を `ノッチポケット` に決定。SwiftPM package / executable / generated app bundle を `NotchPocket` に変更し、bundle 表示名を `ノッチポケット` に設定。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。`.env.local` は ignore 済みで、公開対象 tracked files に実OAuth値やtokenがないことを確認。GitHub public repository `shotaro311/notch-pocket` へ push 済み。
 - 2026-06-07: README を日本語中心へ全面更新。概要、機能、実行方法、Google Calendar 設定、表示先、実装メモ、ノッチサイズ、注意事項を日本語で読めるようにした。
 - 2026-06-08: パネルを開いたまま provider アイコンを切り替えると機能だけ切り替わりアイコン選択状態が更新されない問題を修正。ヘッダーを `ProviderStore` 監視の `ProviderHeaderView` に分離。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-08: GitHub Actions `Codex PR Router` を追加。PR作成/更新/レビュー時に変更ファイルを分類し、Mac worker 向け origin / autofix / human merge / docs-only auto-merge safe ラベルを付ける。trusted author の docs-only PR だけ auto-merge 有効化を試みる。
@@ -53,7 +53,7 @@ status: active
 - 2026-06-08: PR `#2` の追加修正として、ヘッダーのサイズ表示を現在サイズ1文字だけに変更。サイズ変更時は上端 `Y = 33` を維持することを実ウィンドウフレームで確認。今後のPR作成運用も Mac / Windows ともに Draft ではなく Ready PR 前提へ変更済み。
 - 2026-06-09: 上部ヘッダー右端の電源アイコンを廃止し、provider アイコン群と設定ボタンの間に薄い縦線の仕切りを追加。Settings で `Icon switching` を `Click / Hover` から選べるようにし、`Hover` ではアイコンにポインタを重ねた時点で provider が切り替わる。追加でヘッダーUIを `ProviderHeaderView.swift` へ分離し、`ProviderStore` の設定監視を provider 構成関連に限定。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-09: Google OAuth の Keychain 許可ダイアログが毎回出る問題を調査し、Calendar Store 初期化時の Keychain 読み込みを廃止。Calendar を開く / Connect を押すタイミングまで認証確認を遅延。`script/build_and_run.sh` で利用可能な `Apple Development` 署名IDを自動検出して app bundle を安定署名するよう変更。`codesign` で ad-hoc ではなく Apple Development 署名を確認済み。
-- 2026-06-09: アプリ名を `ノッチポケット` / `NotchPocket` へ変更。SwiftPM package / executable / generated app bundle / README / progress / OAuth callback page / permission descriptions を更新。Keychain service と Clipboard 保存先も新名へ変更し、旧保存先からの移行処理を追加。GitHub repository slug は公開URL維持のため `shotaro311/notch-pokke` のまま。
+- 2026-06-09: アプリ名を `ノッチポケット` / `NotchPocket` へ変更。SwiftPM package / executable / generated app bundle / README / progress / OAuth callback page / permission descriptions を更新。Keychain service と Clipboard 保存先も新名へ変更し、旧保存先からの移行処理を追加。GitHub repository slug と local `origin` も `shotaro311/notch-pocket` へ変更済み。
 
 ## 進行中
 
@@ -86,7 +86,7 @@ status: active
 ## 引き継ぎ
 
 - Project root: `/Users/shotaro/code/share/hover-menu-preview`
-- GitHub: `https://github.com/shotaro311/notch-pokke`
+- GitHub: `https://github.com/shotaro311/notch-pocket`
 - Run: `./script/build_and_run.sh --verify`
 - Product name: `ノッチポケット` / `NotchPocket`
 - UI source: `Sources/HoverMenuPreview/Views/`
@@ -125,7 +125,7 @@ status: active
 - 2026-06-07: Microphone meter を Mirror 表示中に自動起動する仕様へ変更。右端 button は一時録音/停止/再生にし、再生完了後にメモリ上の録音を削除する。
 - 2026-06-07: Microphone button 操作後に panel が閉じない問題を修正。preview 表示中だけ window controller 側で mouse location を監視して hover exit 取りこぼしを補完し、open animation 中の mouse event 無効時間を短縮。録音ボタンの hit area も 30pt に拡大。
 - 2026-06-07: アプリ名を `ノッチポケット` に決定し、SwiftPM package / executable / generated app bundle の公開名を `NotchPocket` へ変更。bundle 表示名は `ノッチポケット`。
-- 2026-06-07: GitHub public repository `shotaro311/notch-pokke` を作成し、`main` を push。`gh repo view` で visibility `PUBLIC` を確認。
+- 2026-06-07: GitHub public repository `shotaro311/notch-pocket` を作成し、`main` を push。`gh repo view` で visibility `PUBLIC` を確認。
 - 2026-06-07: README を日本語中心へ更新し、公開 GitHub のトップで概要と使い方が伝わる状態にした。
 - 2026-06-08: provider アイコン切替時のヘッダー未更新バグを修正。`ProviderHeaderView` が `ProviderStore` を直接監視する構成に変更。
 - 2026-06-08: `Codex PR Router` workflow を追加し、ハイブリッド自動修正運用の GitHub 側分類を導入。
