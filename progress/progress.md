@@ -51,7 +51,7 @@ status: active
 - 2026-06-08: 実PR `#1` で `Codex PR Router` のラベル付与、Mac helper の対象PR検出、claim / release、Windows helper の Mac向けPR除外を確認。`.github/*.md` の docs-only 誤判定も修正し、Mac / Windows plugin へ反映済み。
 - 2026-06-08: PR `#2` で表示領域サイズを `小 / 中 / 大` の3段階に切り替える機能を追加。Settings とパネル見出し右側の `小 中 大` ボタンから変更でき、表示中のパネルはイージング付きで `456 x 326pt / 520 x 372pt / 600 x 430pt` にリサイズされることを実ウィンドウフレームで確認済み。
 - 2026-06-08: PR `#2` の追加修正として、ヘッダーのサイズ表示を現在サイズ1文字だけに変更。サイズ変更時は上端 `Y = 33` を維持することを実ウィンドウフレームで確認。今後のPR作成運用も Mac / Windows ともに Draft ではなく Ready PR 前提へ変更済み。
-- 2026-06-09: 上部ヘッダー右端の電源アイコンを廃止し、provider アイコン群と設定ボタンの間に薄い縦線の仕切りを追加。Settings で `Icon switching` を `Click / Hover` から選べるようにし、`Hover` ではアイコンにポインタを重ねた時点で provider が切り替わる。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
+- 2026-06-09: 上部ヘッダー右端の電源アイコンを廃止し、provider アイコン群と設定ボタンの間に薄い縦線の仕切りを追加。Settings で `Icon switching` を `Click / Hover` から選べるようにし、`Hover` ではアイコンにポインタを重ねた時点で provider が切り替わる。追加でヘッダーUIを `ProviderHeaderView.swift` へ分離し、`ProviderStore` の設定監視を provider 構成関連に限定。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 
 ## 進行中
 
@@ -131,7 +131,7 @@ status: active
 - 2026-06-08: 実PR `#1` で `Codex PR Router` のラベル付与、Mac helper の対象PR検出、claim / release、Windows helper の Mac向けPR除外を確認。検証PRはマージせず閉じ、テストブランチは削除済み。
 - 2026-06-08: PR `#2` でパネル表示領域の `小 / 中 / 大` サイズ切替を追加。ヘッダーの `小 中 大` ボタンと Settings の `Panel size` picker から変更できる。
 - 2026-06-08: PR `#2` のサイズボタンを現在サイズ1文字表示へ変更し、サイズ変更時の上端固定を確認。Mac / Windows のPR作成手順も Ready PR 前提へ更新。
-- 2026-06-09: 上部ヘッダーの電源アイコンを廃止し、provider アイコン群と設定ボタンの間に薄い縦線の仕切りを追加。Settings の `Icon switching` で `Click / Hover` を選べるようにした。
+- 2026-06-09: 上部ヘッダーの電源アイコンを廃止し、provider アイコン群と設定ボタンの間に薄い縦線の仕切りを追加。Settings の `Icon switching` で `Click / Hover` を選べるようにした。リファクタリングとして `ProviderHeaderView.swift` を分離し、`ProviderStore` の不要な設定変更再通知を減らした。
 - 2026-06-04: Mirror close 時の点滅対策として、content 非表示化を window `orderOut` 後へ移動。
 - 2026-06-04: Mirror の軽快化として、camera prewarm / provider active 分離 / eventDriven refresh skip を追加。見た目の animation は変更なし。
 - 2026-06-04: Mirror のカクつき / ちらつき対策として、camera preview layer の暗黙 animation 無効化、animation 中 shadow off、閉じかけ再 hover の frame snap 防止、live camera への blur 削除を追加。

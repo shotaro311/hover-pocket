@@ -8,7 +8,7 @@ final class ProviderStore: ObservableObject {
     @Published private(set) var states: [PluginID: ProviderState]
 
     private let settings: AppSettings
-    private var settingsCancellable: AnyCancellable?
+    private var settingsCancellables = Set<AnyCancellable>()
     private var refreshTask: Task<Void, Never>?
 
     init(registry: ProviderRegistry = .empty, settings: AppSettings = AppSettings()) {
@@ -55,7 +55,6 @@ final class ProviderStore: ObservableObject {
 
     func moveProvider(_ id: PluginID, by offset: Int) {
         settings.moveProvider(id, by: offset, manifests: registry.manifests)
-        objectWillChange.send()
     }
 
     func canMoveProvider(_ id: PluginID, by offset: Int) -> Bool {
@@ -105,12 +104,25 @@ final class ProviderStore: ObservableObject {
     }
 
     private func observeSettings() {
-        settingsCancellable = settings.objectWillChange
+        settings.$providerOrderRawValues
+            .dropFirst()
             .sink { [weak self] _ in
-                DispatchQueue.main.async {
-                    self?.settingsDidChange()
-                }
+                self?.scheduleSettingsDidChange()
             }
+            .store(in: &settingsCancellables)
+
+        settings.$hiddenProviderRawValues
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.scheduleSettingsDidChange()
+            }
+            .store(in: &settingsCancellables)
+    }
+
+    private func scheduleSettingsDidChange() {
+        DispatchQueue.main.async { [weak self] in
+            self?.settingsDidChange()
+        }
     }
 
     private func settingsDidChange() {
