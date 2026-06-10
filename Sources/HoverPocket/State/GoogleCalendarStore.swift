@@ -1,5 +1,16 @@
 import Foundation
 
+enum GoogleCalendarToolError: LocalizedError {
+    case notConnected
+
+    var errorDescription: String? {
+        switch self {
+        case .notConnected:
+            return "Google Calendar is not connected."
+        }
+    }
+}
+
 @MainActor
 final class GoogleCalendarStore: ObservableObject {
     static let shared = GoogleCalendarStore()
@@ -130,6 +141,43 @@ final class GoogleCalendarStore: ObservableObject {
             return []
         }
         return snapshot.events(for: day)
+    }
+
+    func loadMonthForTool(containing month: Date, force: Bool = false) async throws -> GoogleCalendarSnapshot {
+        restoreConnectionIfNeeded()
+        guard connectionState == .signedIn else {
+            throw GoogleCalendarToolError.notConnected
+        }
+
+        let calendar = Calendar.current
+        let monthStart = calendar.startOfMonth(for: month)
+        if !force,
+           let lastLoadedMonth,
+           calendar.isDate(lastLoadedMonth, equalTo: monthStart, toGranularity: .month),
+           let snapshot = loadState.snapshot {
+            return snapshot
+        }
+
+        let previous = loadState.snapshot
+        refreshTask?.cancel()
+        refreshTask = nil
+        loadState = .loading(previous: previous)
+        lastErrorMessage = nil
+
+        do {
+            let snapshot = try await apiClient.fetchMonth(containing: monthStart, calendar: calendar)
+            lastLoadedMonth = monthStart
+            loadState = .loaded(snapshot)
+            return snapshot
+        } catch {
+            let message = Self.safeErrorMessage(error)
+            if case GoogleOAuthError.insufficientScopes = error {
+                connectionState = .needsReconnect
+            }
+            lastErrorMessage = message
+            loadState = .failed(message: message, previous: previous)
+            throw error
+        }
     }
 
     func writableSources() -> [GoogleCalendarSource] {

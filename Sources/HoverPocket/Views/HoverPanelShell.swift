@@ -28,6 +28,12 @@ struct HoverPanelShell: View {
                     isPreviewActive: store.providerActive,
                     onExternalDragStarted: onExternalDragStarted
                 )
+                .frame(maxHeight: .infinity)
+
+                Divider()
+                    .overlay(Color.white.opacity(0.08))
+
+                AICommandPaletteView(store: store.aiCommandStore)
             }
             .opacity(store.contentVisible ? 1 : 0)
             .scaleEffect(store.contentVisible ? 1 : 0.92, anchor: .top)
