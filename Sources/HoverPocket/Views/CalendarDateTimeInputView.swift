@@ -9,6 +9,15 @@ struct CalendarDateTimeInputView: View {
     let onDateChanged: () -> Void
 
     private let calendar = Calendar.current
+    private let accentColor = Color(red: 1.0, green: 0.73, blue: 0.08)
+
+    @State private var activeUnit: DateTimeUnit?
+    @State private var dragBaseDate: Date?
+    @State private var appliedDragSteps = 0
+    @State private var dragOffset: CGFloat = 0
+    @State private var scrollRemainder: CGFloat = 0
+    @State private var scrollPulseOffset: CGFloat = 0
+    @State private var isDraggingRail = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 7) {
@@ -19,21 +28,155 @@ struct CalendarDateTimeInputView: View {
                 .frame(width: 32, alignment: .leading)
                 .padding(.top, 6)
 
+            inputLane
+        }
+    }
+
+    private var inputLane: some View {
+        ZStack(alignment: .topLeading) {
             HStack(alignment: .top, spacing: 3) {
-                DateTimeSegmentField(date: $date, unit: .year, calendar: calendar, onDateChanged: onDateChanged)
+                DateTimeSegmentField(
+                    date: $date,
+                    activeUnit: $activeUnit,
+                    unit: .year,
+                    calendar: calendar,
+                    accentColor: accentColor,
+                    onDateChanged: onDateChanged,
+                    onDragChanged: updateDrag(unit:translationWidth:),
+                    onDragEnded: endDrag
+                )
                 DateTimeSeparator("/")
-                DateTimeSegmentField(date: $date, unit: .month, calendar: calendar, onDateChanged: onDateChanged)
+                DateTimeSegmentField(
+                    date: $date,
+                    activeUnit: $activeUnit,
+                    unit: .month,
+                    calendar: calendar,
+                    accentColor: accentColor,
+                    onDateChanged: onDateChanged,
+                    onDragChanged: updateDrag(unit:translationWidth:),
+                    onDragEnded: endDrag
+                )
                 DateTimeSeparator("/")
-                DateTimeSegmentField(date: $date, unit: .day, calendar: calendar, onDateChanged: onDateChanged)
+                DateTimeSegmentField(
+                    date: $date,
+                    activeUnit: $activeUnit,
+                    unit: .day,
+                    calendar: calendar,
+                    accentColor: accentColor,
+                    onDateChanged: onDateChanged,
+                    onDragChanged: updateDrag(unit:translationWidth:),
+                    onDragEnded: endDrag
+                )
 
                 if includesTime {
                     Spacer(minLength: 4)
-                    DateTimeSegmentField(date: $date, unit: .hour, calendar: calendar, onDateChanged: onDateChanged)
+                    DateTimeSegmentField(
+                        date: $date,
+                        activeUnit: $activeUnit,
+                        unit: .hour,
+                        calendar: calendar,
+                        accentColor: accentColor,
+                        onDateChanged: onDateChanged,
+                        onDragChanged: updateDrag(unit:translationWidth:),
+                        onDragEnded: endDrag
+                    )
                     DateTimeSeparator(":")
-                    DateTimeSegmentField(date: $date, unit: .minute, calendar: calendar, onDateChanged: onDateChanged)
+                    DateTimeSegmentField(
+                        date: $date,
+                        activeUnit: $activeUnit,
+                        unit: .minute,
+                        calendar: calendar,
+                        accentColor: accentColor,
+                        onDateChanged: onDateChanged,
+                        onDragChanged: updateDrag(unit:translationWidth:),
+                        onDragEnded: endDrag
+                    )
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let activeUnit {
+                fixedAdjustmentRail(for: activeUnit)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
+    }
+
+    private func fixedAdjustmentRail(for unit: DateTimeUnit) -> some View {
+        AdjustmentRail(isActive: true, offset: railOffset, accentColor: accentColor)
+            .frame(width: DateTimeUnit.fixedRailWidth, height: 24)
+            .contentShape(Rectangle())
+            .overlay {
+                RailInputCaptureView(
+                    onScroll: handleScroll(delta:),
+                    onDragChanged: { updateDrag(unit: unit, translationWidth: $0) },
+                    onDragEnded: endDrag
+                )
+                .frame(width: DateTimeUnit.fixedRailWidth, height: 24)
+            }
+            .offset(x: DateTimeUnit.fixedRailXOffset, y: 30)
+            .zIndex(1)
+    }
+
+    private var railOffset: CGFloat {
+        isDraggingRail ? dragOffset : scrollPulseOffset
+    }
+
+    private func clampedOffset(_ value: CGFloat) -> CGFloat {
+        min(DateTimeUnit.fixedRailOffsetLimit, max(-DateTimeUnit.fixedRailOffsetLimit, value))
+    }
+
+    private func updateDrag(unit: DateTimeUnit, translationWidth: CGFloat) {
+        activeUnit = unit
+
+        if dragBaseDate == nil {
+            dragBaseDate = date
+            appliedDragSteps = 0
+            scrollPulseOffset = 0
+        }
+
+        isDraggingRail = true
+        dragOffset = clampedOffset(translationWidth)
+        let steps = Int((translationWidth / unit.pointsPerStep).rounded(.towardZero))
+        guard steps != appliedDragSteps, let dragBaseDate else { return }
+
+        date = unit.adding(steps: steps, to: dragBaseDate, calendar: calendar)
+        appliedDragSteps = steps
+        onDateChanged()
+    }
+
+    private func endDrag() {
+        dragBaseDate = nil
+        appliedDragSteps = 0
+        isDraggingRail = false
+        withAnimation(.easeOut(duration: 0.14)) {
+            dragOffset = 0
+        }
+    }
+
+    private func handleScroll(delta: CGFloat) {
+        guard let activeUnit else { return }
+
+        scrollRemainder += -delta
+        let steps = Int((scrollRemainder / activeUnit.scrollPointsPerStep).rounded(.towardZero))
+        guard steps != 0 else { return }
+
+        scrollRemainder -= CGFloat(steps) * activeUnit.scrollPointsPerStep
+        let visualStep = steps > 0 ? 1 : -1
+
+        withAnimation(.interactiveSpring(response: 0.18, dampingFraction: 0.82)) {
+            scrollPulseOffset = clampedOffset(CGFloat(visualStep) * activeUnit.scrollPulseDistance)
+        }
+
+        date = activeUnit.adding(steps: steps, to: date, calendar: calendar)
+        onDateChanged()
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !isDraggingRail else { return }
+            withAnimation(.easeOut(duration: 0.16)) {
+                scrollPulseOffset = 0
+            }
         }
     }
 }
@@ -55,155 +198,62 @@ private struct DateTimeSeparator: View {
 
 private struct DateTimeSegmentField: View {
     @Binding var date: Date
+    @Binding var activeUnit: DateTimeUnit?
 
     let unit: DateTimeUnit
     let calendar: Calendar
+    let accentColor: Color
     let onDateChanged: () -> Void
-
-    private let accentColor = Color(red: 1.0, green: 0.73, blue: 0.08)
+    let onDragChanged: (DateTimeUnit, CGFloat) -> Void
+    let onDragEnded: () -> Void
 
     @State private var text = ""
-    @State private var dragBaseDate: Date?
-    @State private var appliedDragSteps = 0
-    @State private var dragOffset: CGFloat = 0
-    @State private var scrollRemainder: CGFloat = 0
-    @State private var scrollPulseOffset: CGFloat = 0
-    @State private var isDragging = false
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        VStack(spacing: 4) {
-            TextField(unit.placeholder, text: $text)
-                .textFieldStyle(.plain)
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundStyle(Color.white.opacity(0.86))
-                .multilineTextAlignment(.center)
-                .focused($isFocused)
-                .frame(width: unit.width, height: 26)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill((isFocused || isDragging) ? Color.white.opacity(0.13) : Color.white.opacity(0.055))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke((isFocused || isDragging) ? accentColor.opacity(0.9) : Color.white.opacity(0.06), lineWidth: 1)
-                )
-                .onSubmit {
-                    applyTypedValue()
-                }
-                .onChange(of: isFocused) { _, focused in
-                    focused ? syncText() : applyTypedValue()
-                }
-                .onChange(of: text) { _, newValue in
-                    let filtered = String(newValue.filter(\.isNumber).prefix(unit.maxDigits))
-                    if filtered != newValue {
-                        text = filtered
-                    }
-                }
-                .simultaneousGesture(dragGesture)
-
-            Color.clear
-                .frame(width: unit.width, height: 24)
-                .overlay {
-                    AdjustmentRail(isActive: isRailVisible, offset: railOffset, accentColor: accentColor)
-                        .frame(width: unit.railWidth, height: 24)
-                        .contentShape(Rectangle())
-                        .overlay {
-                            if isRailVisible {
-                                RailInputCaptureView(
-                                    onScroll: handleScroll(delta:),
-                                    onDragChanged: updateDrag(translationWidth:),
-                                    onDragEnded: endDrag
-                                )
-                                .frame(width: unit.railWidth, height: 24)
-                            }
-                        }
-                        .allowsHitTesting(isRailVisible)
-                }
-                .zIndex(isRailVisible ? 1 : 0)
-        }
+        TextField(unit.placeholder, text: $text)
+            .focused($isFocused)
+            .modifier(DateTimeSegmentFieldStyle(width: unit.width, isActive: isActive, accentColor: accentColor))
+            .onSubmit(applyTypedValue)
+            .onChange(of: isFocused) { _, focused in
+                handleFocusChange(focused)
+            }
+            .onChange(of: text) { _, newValue in
+                sanitizeText(newValue)
+            }
+            .onChange(of: date) { _, _ in
+                syncText()
+            }
+            .simultaneousGesture(dragGesture)
         .onAppear {
             syncText()
         }
         .help(unit.helpText)
     }
 
-    private var isRailVisible: Bool {
-        isFocused || isDragging
+    private var isActive: Bool {
+        activeUnit == unit
+    }
+
+    private func handleFocusChange(_ focused: Bool) {
+        if focused {
+            activeUnit = unit
+            syncText()
+        } else {
+            applyTypedValue()
+        }
     }
 
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 4)
             .onChanged { value in
-                updateDrag(translationWidth: value.translation.width)
+                activeUnit = unit
+                applyTypedValue()
+                onDragChanged(unit, value.translation.width)
             }
             .onEnded { _ in
-                endDrag()
+                onDragEnded()
             }
-    }
-
-    private var railOffset: CGFloat {
-        isDragging ? dragOffset : scrollPulseOffset
-    }
-
-    private func clampedOffset(_ value: CGFloat) -> CGFloat {
-        min(unit.railOffsetLimit, max(-unit.railOffsetLimit, value))
-    }
-
-    private func updateDrag(translationWidth: CGFloat) {
-        if dragBaseDate == nil {
-            applyTypedValue()
-            dragBaseDate = date
-            appliedDragSteps = 0
-            scrollPulseOffset = 0
-        }
-
-        isDragging = true
-        dragOffset = clampedOffset(translationWidth)
-        let steps = Int((translationWidth / unit.pointsPerStep).rounded(.towardZero))
-        guard steps != appliedDragSteps, let dragBaseDate else { return }
-
-        date = unit.adding(steps: steps, to: dragBaseDate, calendar: calendar)
-        appliedDragSteps = steps
-        onDateChanged()
-        syncText()
-    }
-
-    private func endDrag() {
-        dragBaseDate = nil
-        appliedDragSteps = 0
-        isDragging = false
-        withAnimation(.easeOut(duration: 0.14)) {
-            dragOffset = 0
-        }
-        syncText()
-    }
-
-    private func handleScroll(delta: CGFloat) {
-        guard isRailVisible else { return }
-
-        scrollRemainder += -delta
-        let steps = Int((scrollRemainder / unit.scrollPointsPerStep).rounded(.towardZero))
-        guard steps != 0 else { return }
-
-        scrollRemainder -= CGFloat(steps) * unit.scrollPointsPerStep
-        let visualStep = steps > 0 ? 1 : -1
-
-        withAnimation(.interactiveSpring(response: 0.18, dampingFraction: 0.82)) {
-            scrollPulseOffset = clampedOffset(CGFloat(visualStep) * unit.scrollPulseDistance)
-        }
-
-        date = unit.adding(steps: steps, to: date, calendar: calendar)
-        onDateChanged()
-        syncText()
-
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(120))
-            guard !isDragging else { return }
-            withAnimation(.easeOut(duration: 0.16)) {
-                scrollPulseOffset = 0
-            }
-        }
     }
 
     private func applyTypedValue() {
@@ -219,6 +269,43 @@ private struct DateTimeSegmentField: View {
 
     private func syncText() {
         text = unit.formattedValue(from: date, calendar: calendar)
+    }
+
+    private func sanitizeText(_ value: String) {
+        let digits = value.filter { character in
+            character.isNumber
+        }
+        let filtered = String(digits.prefix(unit.maxDigits))
+        if filtered != value {
+            text = filtered
+        }
+    }
+}
+
+private struct DateTimeSegmentFieldStyle: ViewModifier {
+    let width: CGFloat
+    let isActive: Bool
+    let accentColor: Color
+
+    func body(content: Content) -> some View {
+        content
+            .textFieldStyle(.plain)
+            .font(.system(size: 10, weight: .bold, design: .monospaced))
+            .foregroundStyle(Color.white.opacity(0.86))
+            .multilineTextAlignment(.center)
+            .frame(width: width, height: 26)
+            .background(backgroundShape)
+            .overlay(borderShape)
+    }
+
+    private var backgroundShape: some View {
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .fill(isActive ? Color.white.opacity(0.13) : Color.white.opacity(0.055))
+    }
+
+    private var borderShape: some View {
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .stroke(isActive ? accentColor.opacity(0.9) : Color.white.opacity(0.06), lineWidth: 1)
     }
 }
 
@@ -329,12 +416,16 @@ private final class RailInputCaptureNSView: NSView {
     }
 }
 
-private enum DateTimeUnit {
+private enum DateTimeUnit: Equatable {
     case year
     case month
     case day
     case hour
     case minute
+
+    static let fixedRailWidth: CGFloat = 150
+    static let fixedRailXOffset: CGFloat = 44
+    static let fixedRailOffsetLimit: CGFloat = 64
 
     var placeholder: String {
         switch self {
@@ -357,14 +448,6 @@ private enum DateTimeUnit {
 
     var width: CGFloat {
         self == .year ? 44 : 28
-    }
-
-    var railWidth: CGFloat {
-        self == .year ? 132 : 116
-    }
-
-    var railOffsetLimit: CGFloat {
-        self == .year ? 54 : 46
     }
 
     var pointsPerStep: CGFloat {
