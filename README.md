@@ -59,13 +59,12 @@
 
 ## Google Calendar の設定
 
-Calendar プロバイダーは、Google のインストール型アプリ向け OAuth フロー、loopback redirect、PKCE を使っています。Google token や client secret はソース管理に保存しません。
+Calendar プロバイダーは、Google のインストール型アプリ向け OAuth フロー、loopback redirect、PKCE を使っています。Google token は Keychain に保存し、OAuth secret や token 類はソース管理にも配布用 app bundle にも入れません。
 
 まず `.env.example` を参考に、ローカル用の `.env.local` を作成します。
 
 ```bash
 GOOGLE_CLIENT_ID="YOUR_DESKTOP_OAUTH_CLIENT_ID.apps.googleusercontent.com"
-GOOGLE_CLIENT_SECRET="YOUR_DESKTOP_OAUTH_CLIENT_SECRET"
 GOOGLE_OAUTH_CHROME_PROFILE="Default"
 ```
 
@@ -75,7 +74,7 @@ GOOGLE_OAUTH_CHROME_PROFILE="Default"
 ./script/open_google_oauth_console.sh
 ```
 
-Google Auth Platform で application type を `Desktop app` にして client を作成し、発行された client ID / client secret を `.env.local` に入れてください。
+Google Auth Platform で application type を `Desktop app` にして client を作成し、発行された client ID を `.env.local` に入れてください。
 
 設定後は次の順で確認します。
 
@@ -85,7 +84,17 @@ Google Auth Platform で application type を `Desktop app` にして client を
 ./script/verify_google_calendar.sh
 ```
 
-`script/build_and_run.sh` は `.env.local` の OAuth 値を、生成される app bundle の `Info.plist` に注入します。`GOOGLE_CLIENT_ID` が未設定でもアプリ自体は起動し、Calendar パネルには設定不足の状態が表示されます。
+`script/build_and_run.sh` は `.env.local` の OAuth client ID を、生成される app bundle の `Info.plist` に注入します。`GOOGLE_CLIENT_ID` が未設定でもアプリ自体は起動し、Calendar パネルには設定不足の状態が表示されます。
+
+## ZIP アプリの作成
+
+ローカル配布用の ZIP は次のコマンドで作成できます。
+
+```bash
+./script/package_zip.sh
+```
+
+成果物は `dist/releases/` に出力されます。Developer ID Application 証明書が見つかる場合は hardened runtime 付きで署名します。一般配布では、この ZIP をさらに Apple notarization に通してください。
 
 ## 表示先ディスプレイ
 
@@ -150,5 +159,5 @@ MIT License です。詳細は [LICENSE](LICENSE) を確認してください。
 ## 注意
 
 - 現時点ではローカルプロトタイプです。開発用のコード署名は起動スクリプトで行いますが、notarization、自動起動、配布用 installer は未整備です。
-- `.env.local`、OAuth client secret、token 類は Git に含めないでください。
+- `.env.local`、OAuth 設定値、token 類は Git に含めないでください。
 - Clipboard 履歴は機密テキストも拾える可能性があります。今後、除外ルールや private mode を追加する余地があります。

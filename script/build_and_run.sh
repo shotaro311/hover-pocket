@@ -8,6 +8,8 @@ PRODUCT_NAME="HoverPocket"
 LEGACY_PROCESS_NAMES=("NotchPocket" "NotchPokke" "HoverMenuPreview")
 BUNDLE_DIR="$ROOT_DIR/dist/$APP_NAME.app"
 EXECUTABLE_PATH="$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
+APP_VERSION="${APP_VERSION:-0.1.0}"
+APP_BUILD="${APP_BUILD:-$(git -C "$ROOT_DIR" rev-list --count HEAD 2>/dev/null || date +%Y%m%d%H%M)}"
 
 cd "$ROOT_DIR"
 
@@ -45,20 +47,15 @@ xml_escape() {
 }
 
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-$(read_env_key GOOGLE_CLIENT_ID)}"
-GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-$(read_env_key GOOGLE_CLIENT_SECRET)}"
 GOOGLE_OAUTH_CHROME_PROFILE="${GOOGLE_OAUTH_CHROME_PROFILE:-$(read_env_key GOOGLE_OAUTH_CHROME_PROFILE)}"
 GOOGLE_OAUTH_CHROME_USER_DATA_DIR="${GOOGLE_OAUTH_CHROME_USER_DATA_DIR:-$(read_env_key GOOGLE_OAUTH_CHROME_USER_DATA_DIR)}"
 GOOGLE_OAUTH_CHROME_REMOTE_DEBUGGING_PORT="${GOOGLE_OAUTH_CHROME_REMOTE_DEBUGGING_PORT:-$(read_env_key GOOGLE_OAUTH_CHROME_REMOTE_DEBUGGING_PORT)}"
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-$(read_env_key CODESIGN_IDENTITY)}"
+CODESIGN_HARDENED_RUNTIME="${CODESIGN_HARDENED_RUNTIME:-$(read_env_key CODESIGN_HARDENED_RUNTIME)}"
 GOOGLE_OAUTH_PLIST=""
 if [[ -n "$GOOGLE_CLIENT_ID" ]]; then
   GOOGLE_OAUTH_PLIST+="  <key>GoogleOAuthClientID</key>
   <string>$(xml_escape "$GOOGLE_CLIENT_ID")</string>
-"
-fi
-if [[ -n "$GOOGLE_CLIENT_SECRET" ]]; then
-  GOOGLE_OAUTH_PLIST+="  <key>GoogleOAuthClientSecret</key>
-  <string>$(xml_escape "$GOOGLE_CLIENT_SECRET")</string>
 "
 fi
 if [[ -n "$GOOGLE_OAUTH_CHROME_PROFILE" ]]; then
@@ -109,6 +106,10 @@ cat > "$BUNDLE_DIR/Contents/Info.plist" <<PLIST
   <string>$DISPLAY_NAME</string>
   <key>CFBundleName</key>
   <string>$DISPLAY_NAME</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$(xml_escape "$APP_VERSION")</string>
+  <key>CFBundleVersion</key>
+  <string>$(xml_escape "$APP_BUILD")</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>
@@ -135,7 +136,11 @@ if [[ -z "$CODESIGN_IDENTITY" ]]; then
 fi
 
 if [[ -n "$CODESIGN_IDENTITY" ]]; then
-  codesign --force --deep --sign "$CODESIGN_IDENTITY" "$BUNDLE_DIR" >/dev/null
+  codesign_args=(--force --deep --sign "$CODESIGN_IDENTITY")
+  if [[ "$CODESIGN_HARDENED_RUNTIME" == "1" || "$CODESIGN_HARDENED_RUNTIME" == "true" ]]; then
+    codesign_args+=(--options runtime --timestamp)
+  fi
+  codesign "${codesign_args[@]}" "$BUNDLE_DIR" >/dev/null
   echo "Signed $APP_NAME.app with $CODESIGN_IDENTITY"
 else
   echo "No codesigning identity found; using SwiftPM ad-hoc signature"
