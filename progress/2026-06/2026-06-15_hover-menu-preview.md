@@ -30,6 +30,7 @@ status: active
 - Sparkle updater は起動時に自動開始せず、手動更新確認で appcast 取得確認が通った後だけ開始するようにした。
 - Calendar 日時セグメントの数値調整UIは、A案のインライン目盛りバーを採用。フォーカス中の数値に黄色枠を出し、直下に目盛り付きルーラーと黄色ノブを表示して、バー自体も左右ドラッグで調整できるようにした。
 - Calendar 日時セグメントの調整バーが小さく操作しづらかったため、目盛り幅、バー高さ、ノブサイズ、ドラッグ判定領域を拡大した。
+- Calendar 調整バー表示時に日時フィールドの横位置が崩れないよう、バーの横幅を通常レイアウト計算から外してオーバーレイ表示へ変更。ドラッグ中のノブは連続移動にし、バー上のマウススクロールでも日時を調整できるようにした。
 - Google Calendar OAuth を配布前提で安全側へ調整。配布バンドルでは OS 既定ブラウザで Google ログインを開く。Chrome profile / remote debugging 指定は明示的な開発オプションに限定。
 - Google sign out 時にローカルKeychain削除だけでなく Google revoke endpoint へ refresh token の取り消しを送るようにした。Keychain の refresh token 保存属性はこのMac限定へ変更。
 - Google Cloud に HoverPocket 専用 project / OAuth consent app を作成し、Google Calendar API を有効化。OAuth 同意画面のアプリ名は `HoverPocket`、support/contact email は `shotaro.matsu0311@gmail.com` に設定。
@@ -54,6 +55,7 @@ status: active
 - Sparkle 修正後に `./script/package_zip.sh` 成功。配布ZIP生成では `SUFeedURL` を明示的に入れた app bundle と `appcast.xml` を生成できることを確認。
 - Calendar 日時セグメントのA案UI修正後に `swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - Calendar 調整バー拡大後に `swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
+- Calendar 調整バーのオーバーレイ化、スムーズ化、スクロール対応後に `swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - Google OAuth client secret はGit管理ファイルに含めず、生成 app bundle の `Info.plist` にだけ入ることを確認済み。Chrome profile 指定は標準では `Info.plist` に入らないことを確認済み。
 - `./script/verify_google_calendar.sh` 成功。実Googleログインフローが開き、Calendar API取得まで `google_calendar_verify=ok`、`used_login_flow=true` で確認。
 - 生成 app bundle の `Info.plist` に `GIDClientID` / `CFBundleURLTypes` が入り、`GoogleOAuthClientID` / `GoogleOAuthClientSecret` は入らないことを確認。

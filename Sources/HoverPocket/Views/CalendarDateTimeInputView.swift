@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct CalendarDateTimeInputView: View {
@@ -64,6 +65,9 @@ private struct DateTimeSegmentField: View {
     @State private var text = ""
     @State private var dragBaseDate: Date?
     @State private var appliedDragSteps = 0
+    @State private var dragOffset: CGFloat = 0
+    @State private var scrollRemainder: CGFloat = 0
+    @State private var scrollPulseOffset: CGFloat = 0
     @State private var isDragging = false
     @FocusState private var isFocused: Bool
 
@@ -98,11 +102,24 @@ private struct DateTimeSegmentField: View {
                 }
                 .simultaneousGesture(dragGesture)
 
-            AdjustmentRail(isActive: isRailVisible, offset: railOffset, accentColor: accentColor)
-                .frame(width: isRailVisible ? unit.railWidth : unit.width, height: 24, alignment: .center)
-                .contentShape(Rectangle())
-                .gesture(dragGesture)
-                .offset(x: isRailVisible ? -((unit.railWidth - unit.width) / 2) : 0)
+            Color.clear
+                .frame(width: unit.width, height: 24)
+                .overlay {
+                    AdjustmentRail(isActive: isRailVisible, offset: railOffset, accentColor: accentColor)
+                        .frame(width: unit.railWidth, height: 24)
+                        .contentShape(Rectangle())
+                        .overlay {
+                            if isRailVisible {
+                                RailInputCaptureView(
+                                    onScroll: handleScroll(delta:),
+                                    onDragChanged: updateDrag(translationWidth:),
+                                    onDragEnded: endDrag
+                                )
+                                .frame(width: unit.railWidth, height: 24)
+                            }
+                        }
+                        .allowsHitTesting(isRailVisible)
+                }
                 .zIndex(isRailVisible ? 1 : 0)
         }
         .onAppear {
@@ -118,32 +135,75 @@ private struct DateTimeSegmentField: View {
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 4)
             .onChanged { value in
-                if dragBaseDate == nil {
-                    applyTypedValue()
-                    dragBaseDate = date
-                    appliedDragSteps = 0
-                }
-
-                isDragging = true
-                let steps = Int((value.translation.width / unit.pointsPerStep).rounded(.towardZero))
-                guard steps != appliedDragSteps, let dragBaseDate else { return }
-
-                date = unit.adding(steps: steps, to: dragBaseDate, calendar: calendar)
-                appliedDragSteps = steps
-                onDateChanged()
-                syncText()
+                updateDrag(translationWidth: value.translation.width)
             }
             .onEnded { _ in
-                dragBaseDate = nil
-                appliedDragSteps = 0
-                isDragging = false
-                syncText()
+                endDrag()
             }
     }
 
     private var railOffset: CGFloat {
-        let raw = CGFloat(appliedDragSteps) * 6
-        return min(unit.railOffsetLimit, max(-unit.railOffsetLimit, raw))
+        isDragging ? dragOffset : scrollPulseOffset
+    }
+
+    private func clampedOffset(_ value: CGFloat) -> CGFloat {
+        min(unit.railOffsetLimit, max(-unit.railOffsetLimit, value))
+    }
+
+    private func updateDrag(translationWidth: CGFloat) {
+        if dragBaseDate == nil {
+            applyTypedValue()
+            dragBaseDate = date
+            appliedDragSteps = 0
+            scrollPulseOffset = 0
+        }
+
+        isDragging = true
+        dragOffset = clampedOffset(translationWidth)
+        let steps = Int((translationWidth / unit.pointsPerStep).rounded(.towardZero))
+        guard steps != appliedDragSteps, let dragBaseDate else { return }
+
+        date = unit.adding(steps: steps, to: dragBaseDate, calendar: calendar)
+        appliedDragSteps = steps
+        onDateChanged()
+        syncText()
+    }
+
+    private func endDrag() {
+        dragBaseDate = nil
+        appliedDragSteps = 0
+        isDragging = false
+        withAnimation(.easeOut(duration: 0.14)) {
+            dragOffset = 0
+        }
+        syncText()
+    }
+
+    private func handleScroll(delta: CGFloat) {
+        guard isRailVisible else { return }
+
+        scrollRemainder += -delta
+        let steps = Int((scrollRemainder / unit.scrollPointsPerStep).rounded(.towardZero))
+        guard steps != 0 else { return }
+
+        scrollRemainder -= CGFloat(steps) * unit.scrollPointsPerStep
+        let visualStep = steps > 0 ? 1 : -1
+
+        withAnimation(.interactiveSpring(response: 0.18, dampingFraction: 0.82)) {
+            scrollPulseOffset = clampedOffset(CGFloat(visualStep) * unit.scrollPulseDistance)
+        }
+
+        date = unit.adding(steps: steps, to: date, calendar: calendar)
+        onDateChanged()
+        syncText()
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !isDragging else { return }
+            withAnimation(.easeOut(duration: 0.16)) {
+                scrollPulseOffset = 0
+            }
+        }
     }
 
     private func applyTypedValue() {
@@ -204,6 +264,71 @@ private struct AdjustmentRail: View {
     }
 }
 
+private struct RailInputCaptureView: NSViewRepresentable {
+    let onScroll: (CGFloat) -> Void
+    let onDragChanged: (CGFloat) -> Void
+    let onDragEnded: () -> Void
+
+    func makeNSView(context: Context) -> RailInputCaptureNSView {
+        let view = RailInputCaptureNSView()
+        view.onScroll = onScroll
+        view.onDragChanged = onDragChanged
+        view.onDragEnded = onDragEnded
+        return view
+    }
+
+    func updateNSView(_ nsView: RailInputCaptureNSView, context: Context) {
+        nsView.onScroll = onScroll
+        nsView.onDragChanged = onDragChanged
+        nsView.onDragEnded = onDragEnded
+    }
+}
+
+private final class RailInputCaptureNSView: NSView {
+    var onScroll: (CGFloat) -> Void = { _ in }
+    var onDragChanged: (CGFloat) -> Void = { _ in }
+    var onDragEnded: () -> Void = {}
+
+    private var dragStartX: CGFloat?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        self
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        dragStartX = convert(event.locationInWindow, from: nil).x
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let currentX = convert(event.locationInWindow, from: nil).x
+        let startX = dragStartX ?? currentX
+        dragStartX = startX
+        onDragChanged(currentX - startX)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        dragStartX = nil
+        onDragEnded()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        dragStartX = nil
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        let dominantDelta = abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX)
+            ? event.scrollingDeltaY
+            : event.scrollingDeltaX
+
+        guard dominantDelta != 0 else {
+            super.scrollWheel(with: event)
+            return
+        }
+
+        onScroll(dominantDelta)
+    }
+}
+
 private enum DateTimeUnit {
     case year
     case month
@@ -244,6 +369,14 @@ private enum DateTimeUnit {
 
     var pointsPerStep: CGFloat {
         self == .minute ? 8 : 12
+    }
+
+    var scrollPointsPerStep: CGFloat {
+        self == .minute ? 8 : 10
+    }
+
+    var scrollPulseDistance: CGFloat {
+        self == .year ? 22 : 18
     }
 
     var helpText: String {
