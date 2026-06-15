@@ -61,7 +61,7 @@ status: active
 - 2026-06-15: AI command palette の自動フォーカス、Apple Foundation Models `@Generable` structured output 経路、Calendar write 承認 summary、Calendar editor の手入力/ドラッグ調整対応日時入力、日付セルのダブルクリック新規予定起動を追加。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。Computer Use では hover panel を開くイベント再現ができず、実画面確認は未完了。
 - 2026-06-15: Product Compass レポートを生成し、6/22 の伊勢田さん向け検証を「Calendar を開かず予定を見る・追加する」に絞った。AI command deterministic fallback は `今日の予定`、`明日14時 打ち合わせ`、`金曜 デザイン納期`、`来週月曜10時 撮影 場所: 天神` を安定して扱う方向へ強化。承認 summary は場所/メモも先に見える形へ調整し、6/22 観察チェックリストを追加。
 - 2026-06-15: ZIP配布検証用に `script/package_zip.sh` を追加。Developer ID Application 署名、hardened runtime、versioned Info.plist、OAuth secret 非埋め込みで `dist/releases/HoverPocket-0.1.0-30.zip` を作成し、ZIP展開後の起動確認まで成功。notarization は未実施のため一般配布前に必要。
-- 2026-06-15: Sparkle 2.9.3 を導入し、Settings に `Check for Updates` を追加。GitHub Releases latest appcast URL と Sparkle EdDSA 公開鍵を app bundle に注入し、`script/generate_appcast.sh` / `script/publish_github_release.sh` で ZIP / SHA256 / appcast を配信できる土台を追加。
+- 2026-06-15: Sparkle 2.9.3 を導入し、Settings に `Check for Updates` を追加。GitHub Releases latest appcast URL と Sparkle EdDSA 公開鍵を app bundle に注入し、`script/generate_appcast.sh` / `script/publish_github_release.sh` で ZIP / SHA256 / appcast を配信できる土台を追加。初期配布では delta update を無効化し、フルZIP更新だけを appcast に載せる。
 
 ## 進行中
 

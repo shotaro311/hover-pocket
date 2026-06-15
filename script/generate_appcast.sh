@@ -22,6 +22,7 @@ mkdir -p "$RELEASE_DIR"
   --download-url-prefix "$SPARKLE_DOWNLOAD_URL_PREFIX" \
   --versions "$APP_BUILD" \
   --maximum-versions 1 \
+  --maximum-deltas 0 \
   "$RELEASE_DIR"
 
 echo "appcast=$RELEASE_DIR/appcast.xml"

@@ -25,6 +25,7 @@ status: active
 - `script/build_and_run.sh` で `Sparkle.framework` を `Contents/Frameworks` へ同梱し、実行ファイルへ `@executable_path/../Frameworks` rpath を追加。
 - Sparkle EdDSA 公開鍵を `SUPublicEDKey`、GitHub Releases の latest appcast URL を `SUFeedURL` として app bundle へ注入するようにした。秘密鍵は macOS Keychain の `hover-pocket` アカウントに保存。
 - `script/generate_appcast.sh` と `script/publish_github_release.sh` を追加し、GitHub Releases へ ZIP / SHA256 / appcast を公開できる土台を追加。
+- 初期配布では差分更新ファイルの公開漏れを避けるため、Sparkle appcast は delta update を生成せずフルZIP更新だけにした。
 
 ## 検証
 
@@ -37,6 +38,7 @@ status: active
 - `./script/package_zip.sh` 成功。`dist/releases/HoverPocket-0.1.0-30.zip` を作成し、ZIPから `dist/releases/extract-test/HoverPocket.app` へ展開して `codesign --verify --deep --strict` と起動確認に成功。
 - 作成した app は Developer ID Application 署名と hardened runtime 付きだが、notarization 未実施のため `spctl` は `Unnotarized Developer ID` と判定する。
 - Sparkle.framework 同梱後に `./script/build_and_run.sh --verify` 成功。`dist/releases/appcast.xml` は最新ビルド1件だけを含み、Sparkle EdDSA signature 付き enclosure を生成できることを確認。
+- `dist/releases/appcast.xml` が未アップロードの delta file を参照しないことを確認。
 
 ## 残課題
 
