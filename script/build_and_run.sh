@@ -48,8 +48,13 @@ xml_escape() {
   printf '%s' "$value"
 }
 
+BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-$(read_env_key BUNDLE_IDENTIFIER)}"
+BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-local.codex.hover-pocket}"
+GOOGLE_SIGN_IN_CLIENT_ID="${GOOGLE_SIGN_IN_CLIENT_ID:-$(read_env_key GOOGLE_SIGN_IN_CLIENT_ID)}"
+GOOGLE_SIGN_IN_REVERSED_CLIENT_ID="${GOOGLE_SIGN_IN_REVERSED_CLIENT_ID:-$(read_env_key GOOGLE_SIGN_IN_REVERSED_CLIENT_ID)}"
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-$(read_env_key GOOGLE_CLIENT_ID)}"
 GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-$(read_env_key GOOGLE_CLIENT_SECRET)}"
+GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK="${GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK:-$(read_env_key GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK)}"
 GOOGLE_OAUTH_ENABLE_CHROME_OVERRIDE="${GOOGLE_OAUTH_ENABLE_CHROME_OVERRIDE:-$(read_env_key GOOGLE_OAUTH_ENABLE_CHROME_OVERRIDE)}"
 GOOGLE_OAUTH_CHROME_PROFILE="${GOOGLE_OAUTH_CHROME_PROFILE:-$(read_env_key GOOGLE_OAUTH_CHROME_PROFILE)}"
 GOOGLE_OAUTH_CHROME_USER_DATA_DIR="${GOOGLE_OAUTH_CHROME_USER_DATA_DIR:-$(read_env_key GOOGLE_OAUTH_CHROME_USER_DATA_DIR)}"
@@ -61,16 +66,37 @@ SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-$(read_env_key SPARKLE_PUBLIC_ED
 SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-$DEFAULT_SPARKLE_FEED_URL}"
 SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-$DEFAULT_SPARKLE_PUBLIC_ED_KEY}"
 GOOGLE_OAUTH_PLIST=""
+GOOGLE_SIGN_IN_PLIST=""
 SPARKLE_PLIST=""
-if [[ -n "$GOOGLE_CLIENT_ID" ]]; then
+if [[ -n "$GOOGLE_SIGN_IN_CLIENT_ID" && -z "$GOOGLE_SIGN_IN_REVERSED_CLIENT_ID" ]]; then
+  GOOGLE_SIGN_IN_REVERSED_CLIENT_ID="$(awk -F. '{ for (i=NF; i>=1; i--) printf "%s%s", $i, (i == 1 ? "" : ".") }' <<< "$GOOGLE_SIGN_IN_CLIENT_ID")"
+fi
+if [[ -n "$GOOGLE_SIGN_IN_CLIENT_ID" ]]; then
+  GOOGLE_SIGN_IN_PLIST+="  <key>GIDClientID</key>
+  <string>$(xml_escape "$GOOGLE_SIGN_IN_CLIENT_ID")</string>
+"
+fi
+if [[ -n "$GOOGLE_SIGN_IN_REVERSED_CLIENT_ID" ]]; then
+  GOOGLE_SIGN_IN_PLIST+="  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>$(xml_escape "$GOOGLE_SIGN_IN_REVERSED_CLIENT_ID")</string>
+      </array>
+    </dict>
+  </array>
+"
+fi
+if [[ -n "$GOOGLE_CLIENT_ID" && ( -z "$GOOGLE_SIGN_IN_CLIENT_ID" || "$GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK" == "1" || "$GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK" == "true" ) ]]; then
   GOOGLE_OAUTH_PLIST+="  <key>GoogleOAuthClientID</key>
   <string>$(xml_escape "$GOOGLE_CLIENT_ID")</string>
 "
-fi
-if [[ -n "$GOOGLE_CLIENT_SECRET" ]]; then
-  GOOGLE_OAUTH_PLIST+="  <key>GoogleOAuthClientSecret</key>
+  if [[ -n "$GOOGLE_CLIENT_SECRET" ]]; then
+    GOOGLE_OAUTH_PLIST+="  <key>GoogleOAuthClientSecret</key>
   <string>$(xml_escape "$GOOGLE_CLIENT_SECRET")</string>
 "
+  fi
 fi
 if [[ "$GOOGLE_OAUTH_ENABLE_CHROME_OVERRIDE" == "1" || "$GOOGLE_OAUTH_ENABLE_CHROME_OVERRIDE" == "true" ]]; then
   if [[ -n "$GOOGLE_OAUTH_CHROME_PROFILE" ]]; then
@@ -135,7 +161,7 @@ cat > "$BUNDLE_DIR/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key>
   <string>$APP_NAME</string>
   <key>CFBundleIdentifier</key>
-  <string>local.codex.hover-pocket</string>
+  <string>$(xml_escape "$BUNDLE_IDENTIFIER")</string>
   <key>CFBundleDisplayName</key>
   <string>$DISPLAY_NAME</string>
   <key>CFBundleName</key>
@@ -150,7 +176,7 @@ cat > "$BUNDLE_DIR/Contents/Info.plist" <<PLIST
   <string>14.0</string>
   <key>LSUIElement</key>
   <true/>
-${GOOGLE_OAUTH_PLIST}  <key>NSAppTransportSecurity</key>
+${GOOGLE_SIGN_IN_PLIST}${GOOGLE_OAUTH_PLIST}  <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsLocalNetworking</key>
     <true/>

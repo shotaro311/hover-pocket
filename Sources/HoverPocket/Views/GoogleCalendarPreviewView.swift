@@ -351,7 +351,7 @@ struct GoogleCalendarPreviewView: View {
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white)
 
-            Text("Set GOOGLE_CLIENT_ID before running the app.")
+            Text("Set GOOGLE_SIGN_IN_CLIENT_ID before running the app.")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.white.opacity(0.5))
                 .multilineTextAlignment(.center)

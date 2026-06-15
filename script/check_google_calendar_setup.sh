@@ -30,12 +30,15 @@ read_env_key() {
 
 status=0
 
-client_id="${GOOGLE_CLIENT_ID:-$(read_env_key GOOGLE_CLIENT_ID)}"
-if [[ -n "$client_id" ]]; then
-  echo "google_client_id=set"
+native_client_id="${GOOGLE_SIGN_IN_CLIENT_ID:-$(read_env_key GOOGLE_SIGN_IN_CLIENT_ID)}"
+legacy_client_id="${GOOGLE_CLIENT_ID:-$(read_env_key GOOGLE_CLIENT_ID)}"
+if [[ -n "$native_client_id" ]]; then
+  echo "google_ios_oauth_client_id=set"
+elif [[ -n "$legacy_client_id" ]]; then
+  echo "google_desktop_oauth_client_id=set"
 else
-  echo "google_client_id=missing"
-  echo "next=run ./script/open_google_oauth_console.sh and create a Desktop app OAuth client"
+  echo "google_oauth_client_id=missing"
+  echo "next=run ./script/open_google_oauth_console.sh and create an iOS OAuth client"
   status=1
 fi
 

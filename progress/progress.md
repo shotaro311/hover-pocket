@@ -62,17 +62,18 @@ status: active
 - 2026-06-15: Product Compass レポートを生成し、6/22 の伊勢田さん向け検証を「Calendar を開かず予定を見る・追加する」に絞った。AI command deterministic fallback は `今日の予定`、`明日14時 打ち合わせ`、`金曜 デザイン納期`、`来週月曜10時 撮影 場所: 天神` を安定して扱う方向へ強化。承認 summary は場所/メモも先に見える形へ調整し、6/22 観察チェックリストを追加。
 - 2026-06-15: ZIP配布検証用に `script/package_zip.sh` を追加。Developer ID Application 署名、hardened runtime、versioned Info.plist、OAuth secret 非埋め込みで `dist/releases/HoverPocket-0.1.0-30.zip` を作成し、ZIP展開後の起動確認まで成功。notarization は未実施のため一般配布前に必要。
 - 2026-06-15: Sparkle 2.9.3 を導入し、Settings に `Check for Updates` を追加。GitHub Releases latest appcast URL と Sparkle EdDSA 公開鍵を app bundle に注入し、`script/generate_appcast.sh` / `script/publish_github_release.sh` で ZIP / SHA256 / appcast を配信できる土台を追加。初期配布では delta update を無効化し、フルZIP更新だけを appcast に載せる。
+- 2026-06-15: Google Cloud に HoverPocket 専用 project / OAuth consent app を作成し、Google Calendar API を有効化。`shotaro.matsu0311@gmail.com` を test user に追加し、iOS OAuth client + custom URL scheme + PKCE + `ASWebAuthenticationSession` のネイティブ認証フローへ変更。生成 app bundle には iOS OAuth client ID / URL scheme のみ入り、Desktop OAuth client secret は通常入らない。`./script/verify_google_calendar.sh --force-google-sign-in` と保存済み credential 再取得が成功。
 
 ## 進行中
 
-- Codex: `ホバーポケット` として GitHub public repository へ公開済み。`Mirror` provider は crash / 重さ / close 残像 / ちらつき / UI 枠との同期 / 繰り返し開閉時の処理蓄積対策まで実装済み。provider アイコン切替時のヘッダー選択状態更新バグも修正済み。`Calendar` provider は Google account login、calendarList、events.list、日付別イベント抽出まで実アカウントで検証済み。追加で予定追加、編集、削除の API / UI は実装済みで、write scope の再接続待ち。Calendar editor は手入力/ドラッグ調整対応の日時入力と日付セルのダブルクリック新規予定起動を追加済み。`Clipboard` provider は text/image 履歴、local image 保存、再コピー、drag/drop まで実装済み。パネル表示領域は `小 / 中 / 大` で切替可能で、ヘッダーには現在サイズ1文字だけを表示する。AI native Phase 1 として、Apple Foundation Models provider、構造化 action、Calendar read/write tool、ApprovalGate、AuditLog、下段 command palette lane、解釈候補 fallback UI、自動フォーカスを追加済み。上部ヘッダーの電源アイコンは廃止済みで、provider アイコン切替は Settings から `Click / Hover` を選択できる。GitHub PR の自動分類と Mac / Windows Codex Automation による自動修正運用の入口動作も実PRで確認済み。
+- Codex: `ホバーポケット` として GitHub public repository へ公開済み。`Mirror` provider は crash / 重さ / close 残像 / ちらつき / UI 枠との同期 / 繰り返し開閉時の処理蓄積対策まで実装済み。provider アイコン切替時のヘッダー選択状態更新バグも修正済み。`Calendar` provider は Google iOS OAuth client + custom URL scheme + PKCE + `ASWebAuthenticationSession` で Google account login、calendarList、events.list、日付別イベント抽出まで実アカウントで検証済み。追加で予定追加、編集、削除の API / UI は実装済み。Calendar editor は手入力/ドラッグ調整対応の日時入力と日付セルのダブルクリック新規予定起動を追加済み。`Clipboard` provider は text/image 履歴、local image 保存、再コピー、drag/drop まで実装済み。パネル表示領域は `小 / 中 / 大` で切替可能で、ヘッダーには現在サイズ1文字だけを表示する。AI native Phase 1 として、Apple Foundation Models provider、構造化 action、Calendar read/write tool、ApprovalGate、AuditLog、下段 command palette lane、解釈候補 fallback UI、自動フォーカスを追加済み。上部ヘッダーの電源アイコンは廃止済みで、provider アイコン切替は Settings から `Click / Hover` を選択できる。GitHub PR の自動分類と Mac / Windows Codex Automation による自動修正運用の入口動作も実PRで確認済み。
 
 ## 次アクション
 
 - `./script/build_and_run.sh --verify` で移行先の build / launch を確認する。
 - Mirror の初回 permission UX と表示品質を調整する。
 - Calendar provider の初回表示UXと日付hover詳細の見た目を実画面で微調整する。
-- Calendar provider の write scope 追加同意後、一時イベントの作成・編集・削除を実アカウントで確認する。
+- Calendar provider の一時イベント作成・編集・削除を実アカウントで確認する。
 - Clipboard provider の text/image drag/drop を、Finder / Slack / browser input など複数アプリで手動確認する。
 - Clipboard image drag/drop を Codex chat 欄で再確認する。
 - Apple Foundation Models の実機可用性を macOS 26 / Apple Intelligence 環境で確認する。
@@ -89,7 +90,7 @@ status: active
 - 初回 camera permission はユーザー操作が必要。
 - 自動検証では顔が写る映像確認は避けている。ユーザー側で mirror 映像の見え方確認が必要。
 - 機密情報や token は含めていない。
-- `.env.local` には Google OAuth 設定値が入るため、値を出力せず、repo に含めない。配布用 app bundle へは client ID のみ注入し、secret は入れない。
+- `.env.local` には Google OAuth 設定値が入るため、値を出力せず、repo に含めない。配布用 app bundle へは iOS OAuth client ID / URL scheme のみ注入し、Desktop OAuth client secret は通常入れない。
 - Google OAuth consent screen が Testing の場合、登録済み test user のみログイン可能。一般公開には Google OAuth app verification が必要になる可能性がある。
 - 現在のZIP成果物は Developer ID Application 署名済みだが未notarized。手元検証には使えるが、友人や一般ユーザーへ配るには Apple notarization が必要。
 - Sparkle秘密鍵は macOS Keychain の `hover-pocket` アカウントにある。秘密鍵ファイルをGitに書き出さない。

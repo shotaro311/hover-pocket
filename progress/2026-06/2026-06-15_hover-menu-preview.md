@@ -28,7 +28,10 @@ status: active
 - 初期配布では差分更新ファイルの公開漏れを避けるため、Sparkle appcast は delta update を生成せずフルZIP更新だけにした。
 - Google Calendar OAuth を配布前提で安全側へ調整。配布バンドルでは OS 既定ブラウザで Google ログインを開く。Chrome profile / remote debugging 指定は明示的な開発オプションに限定。
 - Google sign out 時にローカルKeychain削除だけでなく Google revoke endpoint へ refresh token の取り消しを送るようにした。Keychain の refresh token 保存属性はこのMac限定へ変更。
-- 実Googleログインで `client_secret is missing.` が表示されたため、Desktop OAuth client の token exchange では `.env.local` 由来の client secret を生成 app bundle へ注入する仕様に戻した。値はGitには含めない。
+- Google Cloud に HoverPocket 専用 project / OAuth consent app を作成し、Google Calendar API を有効化。OAuth 同意画面のアプリ名は `HoverPocket`、support/contact email は `shotaro.matsu0311@gmail.com` に設定。
+- OAuth consent app は Testing のため、`shotaro.matsu0311@gmail.com` を test user に追加。未追加時に出ていた `403: access_denied` はこの設定不足が原因。
+- Google Calendar OAuth を、iOS OAuth client + custom URL scheme + PKCE + `ASWebAuthenticationSession` のネイティブ認証フローへ変更。refresh token は既存の自前 Keychain store に保存する。
+- Desktop OAuth fallback は `GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK=1` のときだけ `Info.plist` に注入するようにし、通常の配布 app bundle には client secret を入れない構成にした。
 
 ## 検証
 
@@ -44,6 +47,10 @@ status: active
 - `dist/releases/appcast.xml` が未アップロードの delta file を参照しないことを確認。
 - Google OAuth client secret はGit管理ファイルに含めず、生成 app bundle の `Info.plist` にだけ入ることを確認済み。Chrome profile 指定は標準では `Info.plist` に入らないことを確認済み。
 - `./script/verify_google_calendar.sh` 成功。実Googleログインフローが開き、Calendar API取得まで `google_calendar_verify=ok`、`used_login_flow=true` で確認。
+- 生成 app bundle の `Info.plist` に `GIDClientID` / `CFBundleURLTypes` が入り、`GoogleOAuthClientID` / `GoogleOAuthClientSecret` は入らないことを確認。
+- `./script/verify_google_calendar.sh --force-google-sign-in` 成功。`google_calendar_verify=ok`、`used_login_flow=true`、`calendar_sources=5`、`events_in_visible_grid=68`。
+- 保存済み credential で `./script/verify_google_calendar.sh` 成功。`used_login_flow=false`、`calendar_sources=5`、`events_in_visible_grid=68`。
+- `./script/check_google_calendar_setup.sh` 成功。`google_ios_oauth_client_id=set`、`.env.local` gitignore OK。
 
 ## 残課題
 

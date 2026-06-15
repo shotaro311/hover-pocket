@@ -59,13 +59,14 @@
 
 ## Google Calendar の設定
 
-Calendar プロバイダーは、Google のインストール型アプリ向け OAuth フロー、loopback redirect、PKCE を使っています。Google token は Keychain に保存し、OAuth client secret や token 類はソース管理に含めません。配布版のユーザーは、Calendar パネルまたは Settings から Google のログイン画面を開き、Google アカウントで許可すれば使えます。
+Calendar プロバイダーは、Google の iOS OAuth client、custom URL scheme、PKCE、ASWebAuthenticationSession を使うネイティブ認証フローを優先します。iOS OAuth client が未設定の場合だけ、既存の Desktop OAuth + loopback redirect + PKCE にフォールバックします。Google token は Keychain に保存し、OAuth client secret や token 類はソース管理に含めません。配布版のユーザーは、Calendar パネルまたは Settings から Google のログイン画面を開き、Google アカウントで許可すれば使えます。
 
 まず `.env.example` を参考に、ローカル用の `.env.local` を作成します。
 
 ```bash
-GOOGLE_CLIENT_ID="YOUR_DESKTOP_OAUTH_CLIENT_ID.apps.googleusercontent.com"
-GOOGLE_CLIENT_SECRET="YOUR_DESKTOP_OAUTH_CLIENT_SECRET"
+BUNDLE_IDENTIFIER="local.codex.hover-pocket"
+GOOGLE_SIGN_IN_CLIENT_ID="YOUR_IOS_OAUTH_CLIENT_ID.apps.googleusercontent.com"
+GOOGLE_SIGN_IN_REVERSED_CLIENT_ID="com.googleusercontent.apps.YOUR_IOS_OAUTH_CLIENT_ID_PREFIX"
 ```
 
 有効な `gcloud` project で OAuth client を作る場合は、補助スクリプトを使えます。
@@ -74,7 +75,15 @@ GOOGLE_CLIENT_SECRET="YOUR_DESKTOP_OAUTH_CLIENT_SECRET"
 ./script/open_google_oauth_console.sh
 ```
 
-Google Auth Platform で application type を `Desktop app` にして client を作成し、発行された client ID を `.env.local` に入れてください。
+Google Auth Platform で application type を `iOS` にして client を作成し、bundle ID には `BUNDLE_IDENTIFIER` と同じ値を入れてください。発行された client ID と iOS URL scheme を `.env.local` に入れます。アプリの redirect URI は `GOOGLE_SIGN_IN_REVERSED_CLIENT_ID:/oauth2redirect/google` の形式で使います。
+
+既存の Desktop OAuth を開発用フォールバックとして使う場合だけ、次の値も設定します。iOS OAuth client が設定されている場合、このフォールバックは明示的に有効化しない限り app bundle へ埋め込みません。
+
+```bash
+GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK="1"
+GOOGLE_CLIENT_ID="YOUR_DESKTOP_OAUTH_CLIENT_ID.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET="YOUR_DESKTOP_OAUTH_CLIENT_SECRET"
+```
 
 設定後は次の順で確認します。
 
@@ -84,7 +93,7 @@ Google Auth Platform で application type を `Desktop app` にして client を
 ./script/verify_google_calendar.sh
 ```
 
-`script/build_and_run.sh` は `.env.local` の OAuth client ID / client secret を、生成される app bundle の `Info.plist` に注入します。`GOOGLE_CLIENT_ID` が未設定でもアプリ自体は起動し、Calendar パネルには設定不足の状態が表示されます。Desktop OAuth の client secret はユーザーのGoogleパスワードやrefresh tokenではありませんが、Gitや公開ドキュメントには含めないでください。
+`script/build_and_run.sh` は `.env.local` の iOS OAuth client ID / URL scheme を、生成される app bundle の `Info.plist` に注入します。Desktop OAuth フォールバックは `GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK=1` のときだけ注入します。iOS OAuth client ID と Desktop OAuth client ID のどちらも未設定でもアプリ自体は起動し、Calendar パネルには設定不足の状態が表示されます。Desktop OAuth の client secret はユーザーのGoogleパスワードやrefresh tokenではありませんが、Gitや公開ドキュメントには含めないでください。
 
 通常は OS 既定ブラウザで Google ログインを開きます。開発検証で特定の Chrome profile を使う場合だけ、次の値を `.env.local` に追加します。配布版には入れないでください。
 
