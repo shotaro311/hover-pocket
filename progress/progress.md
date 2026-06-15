@@ -64,6 +64,7 @@ status: active
 - 2026-06-15: Sparkle 2.9.3 を導入し、Settings に `Check for Updates` を追加。GitHub Releases latest appcast URL と Sparkle EdDSA 公開鍵を app bundle に注入し、`script/generate_appcast.sh` / `script/publish_github_release.sh` で ZIP / SHA256 / appcast を配信できる土台を追加。初期配布では delta update を無効化し、フルZIP更新だけを appcast に載せる。
 - 2026-06-15: Sparkle 更新確認の公開前エラーを修正。ローカル開発ビルドでは未公開の GitHub appcast URL を自動注入せず、配布ビルドでも手動更新確認前に appcast 取得可否を確認して、404 では Sparkle 汎用エラーではなく Settings の状態表示に留める。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify`、`./script/package_zip.sh` 成功。
 - 2026-06-15: Calendar 日時セグメントの数値調整UIは A案のインライン目盛りバーを採用。フォーカス中の数値に黄色枠を出し、直下に目盛り付きルーラーと黄色ノブを表示して、バー自体も左右ドラッグで調整できるようにした。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
+- 2026-06-15: Calendar 日時セグメントの調整バーが小さく操作しづらかったため、目盛り幅、バー高さ、ノブサイズ、ドラッグ判定領域を拡大。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-15: Google Cloud に HoverPocket 専用 project / OAuth consent app を作成し、Google Calendar API を有効化。`shotaro.matsu0311@gmail.com` を test user に追加し、iOS OAuth client + custom URL scheme + PKCE + `ASWebAuthenticationSession` のネイティブ認証フローへ変更。生成 app bundle には iOS OAuth client ID / URL scheme のみ入り、Desktop OAuth client secret は通常入らない。`./script/verify_google_calendar.sh --force-google-sign-in` と保存済み credential 再取得が成功。
 
 ## 進行中

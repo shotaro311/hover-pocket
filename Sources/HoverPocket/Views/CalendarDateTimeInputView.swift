@@ -68,7 +68,7 @@ private struct DateTimeSegmentField: View {
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 4) {
             TextField(unit.placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
@@ -98,16 +98,21 @@ private struct DateTimeSegmentField: View {
                 }
                 .simultaneousGesture(dragGesture)
 
-            AdjustmentRail(isActive: isFocused || isDragging, offset: railOffset, accentColor: accentColor)
-                .frame(width: unit.railWidth)
-                .frame(width: unit.width, height: 12, alignment: .center)
+            AdjustmentRail(isActive: isRailVisible, offset: railOffset, accentColor: accentColor)
+                .frame(width: isRailVisible ? unit.railWidth : unit.width, height: 24, alignment: .center)
                 .contentShape(Rectangle())
                 .gesture(dragGesture)
+                .offset(x: isRailVisible ? -((unit.railWidth - unit.width) / 2) : 0)
+                .zIndex(isRailVisible ? 1 : 0)
         }
         .onAppear {
             syncText()
         }
         .help(unit.helpText)
+    }
+
+    private var isRailVisible: Bool {
+        isFocused || isDragging
     }
 
     private var dragGesture: some Gesture {
@@ -137,8 +142,8 @@ private struct DateTimeSegmentField: View {
     }
 
     private var railOffset: CGFloat {
-        let raw = CGFloat(appliedDragSteps) * 3
-        return min(18, max(-18, raw))
+        let raw = CGFloat(appliedDragSteps) * 6
+        return min(unit.railOffsetLimit, max(-unit.railOffsetLimit, raw))
     }
 
     private func applyTypedValue() {
@@ -164,25 +169,29 @@ private struct AdjustmentRail: View {
 
     var body: some View {
         ZStack(alignment: .center) {
-            HStack(spacing: 3) {
-                ForEach(0..<17, id: \.self) { index in
+            Capsule()
+                .fill(Color.white.opacity(isActive ? 0.06 : 0))
+                .frame(height: 14)
+
+            HStack(spacing: 4) {
+                ForEach(0..<23, id: \.self) { index in
                     Capsule()
                         .fill(tickColor(for: index))
-                        .frame(width: 1, height: index % 4 == 0 ? 7 : 4)
+                        .frame(width: 1.4, height: index % 4 == 0 ? 12 : 7)
                 }
             }
 
             Capsule()
                 .fill(accentColor.opacity(isActive ? 0.72 : 0))
-                .frame(width: 2, height: 10)
+                .frame(width: 3, height: 18)
 
             Circle()
                 .fill(accentColor.opacity(isActive ? 1 : 0))
-                .frame(width: 9, height: 9)
-                .shadow(color: accentColor.opacity(isActive ? 0.42 : 0), radius: 5, x: 0, y: 0)
+                .frame(width: 15, height: 15)
+                .shadow(color: accentColor.opacity(isActive ? 0.48 : 0), radius: 8, x: 0, y: 0)
                 .offset(x: offset)
         }
-        .frame(height: 12)
+        .frame(height: 24)
         .opacity(isActive ? 1 : 0)
         .animation(.easeOut(duration: 0.12), value: isActive)
     }
@@ -191,7 +200,7 @@ private struct AdjustmentRail: View {
         guard isActive else {
             return .clear
         }
-        return index == 8 ? accentColor.opacity(0.9) : Color.white.opacity(index % 4 == 0 ? 0.36 : 0.22)
+        return index == 11 ? accentColor.opacity(0.9) : Color.white.opacity(index % 4 == 0 ? 0.42 : 0.26)
     }
 }
 
@@ -226,11 +235,15 @@ private enum DateTimeUnit {
     }
 
     var railWidth: CGFloat {
-        self == .year ? 82 : 68
+        self == .year ? 132 : 116
+    }
+
+    var railOffsetLimit: CGFloat {
+        self == .year ? 54 : 46
     }
 
     var pointsPerStep: CGFloat {
-        self == .minute ? 7 : 10
+        self == .minute ? 8 : 12
     }
 
     var helpText: String {
