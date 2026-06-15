@@ -59,6 +59,8 @@ private struct DateTimeSegmentField: View {
     let calendar: Calendar
     let onDateChanged: () -> Void
 
+    private let accentColor = Color(red: 1.0, green: 0.73, blue: 0.08)
+
     @State private var text = ""
     @State private var dragBaseDate: Date?
     @State private var appliedDragSteps = 0
@@ -76,11 +78,11 @@ private struct DateTimeSegmentField: View {
                 .frame(width: unit.width, height: 26)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill((isFocused || isDragging) ? Color.white.opacity(0.12) : Color.white.opacity(0.055))
+                        .fill((isFocused || isDragging) ? Color.white.opacity(0.13) : Color.white.opacity(0.055))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke((isFocused || isDragging) ? Color.white.opacity(0.2) : Color.white.opacity(0.06), lineWidth: 1)
+                        .stroke((isFocused || isDragging) ? accentColor.opacity(0.9) : Color.white.opacity(0.06), lineWidth: 1)
                 )
                 .onSubmit {
                     applyTypedValue()
@@ -96,8 +98,11 @@ private struct DateTimeSegmentField: View {
                 }
                 .simultaneousGesture(dragGesture)
 
-            AdjustmentRail(isActive: isFocused || isDragging, offset: railOffset)
-                .frame(width: unit.width)
+            AdjustmentRail(isActive: isFocused || isDragging, offset: railOffset, accentColor: accentColor)
+                .frame(width: unit.railWidth)
+                .frame(width: unit.width, height: 12, alignment: .center)
+                .contentShape(Rectangle())
+                .gesture(dragGesture)
         }
         .onAppear {
             syncText()
@@ -155,19 +160,38 @@ private struct DateTimeSegmentField: View {
 private struct AdjustmentRail: View {
     let isActive: Bool
     let offset: CGFloat
+    let accentColor: Color
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .center) {
+            HStack(spacing: 3) {
+                ForEach(0..<17, id: \.self) { index in
+                    Capsule()
+                        .fill(tickColor(for: index))
+                        .frame(width: 1, height: index % 4 == 0 ? 7 : 4)
+                }
+            }
+
             Capsule()
-                .fill(isActive ? Color.white.opacity(0.16) : Color.clear)
-                .frame(height: 3)
+                .fill(accentColor.opacity(isActive ? 0.72 : 0))
+                .frame(width: 2, height: 10)
 
             Circle()
-                .fill(isActive ? Color.white.opacity(0.62) : Color.clear)
-                .frame(width: 5, height: 5)
+                .fill(accentColor.opacity(isActive ? 1 : 0))
+                .frame(width: 9, height: 9)
+                .shadow(color: accentColor.opacity(isActive ? 0.42 : 0), radius: 5, x: 0, y: 0)
                 .offset(x: offset)
         }
-        .frame(height: 6)
+        .frame(height: 12)
+        .opacity(isActive ? 1 : 0)
+        .animation(.easeOut(duration: 0.12), value: isActive)
+    }
+
+    private func tickColor(for index: Int) -> Color {
+        guard isActive else {
+            return .clear
+        }
+        return index == 8 ? accentColor.opacity(0.9) : Color.white.opacity(index % 4 == 0 ? 0.36 : 0.22)
     }
 }
 
@@ -199,6 +223,10 @@ private enum DateTimeUnit {
 
     var width: CGFloat {
         self == .year ? 44 : 28
+    }
+
+    var railWidth: CGFloat {
+        self == .year ? 82 : 68
     }
 
     var pointsPerStep: CGFloat {
