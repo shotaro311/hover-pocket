@@ -5,7 +5,6 @@ import Security
 
 struct GoogleOAuthConfiguration: Equatable, Sendable {
     let clientID: String
-    let clientSecret: String?
     let chromeProfileDirectory: String?
     let chromeUserDataDirectory: String?
     let chromeRemoteDebuggingPort: String?
@@ -22,8 +21,6 @@ struct GoogleOAuthConfiguration: Equatable, Sendable {
             return nil
         }
 
-        let rawSecret = Bundle.main.object(forInfoDictionaryKey: "GoogleOAuthClientSecret") as? String
-        let secret = rawSecret?.trimmingCharacters(in: .whitespacesAndNewlines)
         let rawChromeProfile = Bundle.main.object(forInfoDictionaryKey: "GoogleOAuthChromeProfileDirectory") as? String
         let chromeProfile = rawChromeProfile?.trimmingCharacters(in: .whitespacesAndNewlines)
         let rawChromeUserData = Bundle.main.object(forInfoDictionaryKey: "GoogleOAuthChromeUserDataDirectory") as? String
@@ -32,7 +29,6 @@ struct GoogleOAuthConfiguration: Equatable, Sendable {
         let remoteDebuggingPort = rawRemoteDebuggingPort?.trimmingCharacters(in: .whitespacesAndNewlines)
         return GoogleOAuthConfiguration(
             clientID: clientID,
-            clientSecret: secret?.isEmpty == false ? secret : nil,
             chromeProfileDirectory: chromeProfile?.isEmpty == false ? chromeProfile : nil,
             chromeUserDataDirectory: chromeUserData?.isEmpty == false ? chromeUserData : nil,
             chromeRemoteDebuggingPort: remoteDebuggingPort?.isEmpty == false ? remoteDebuggingPort : nil
@@ -179,8 +175,14 @@ final class GoogleOAuthService: @unchecked Sendable {
     }
 
     func signOut() {
+        let refreshToken = try? keychain.load()?.refreshToken
         setCurrentToken(nil)
         keychain.delete()
+        if let refreshToken {
+            Task.detached(priority: .utility) {
+                try? await Self.revokeToken(refreshToken)
+            }
+        }
     }
 
     func accessToken() async throws -> String {
@@ -314,16 +316,13 @@ final class GoogleOAuthService: @unchecked Sendable {
         redirectURI: String,
         configuration: GoogleOAuthConfiguration
     ) async throws -> GoogleOAuthTokenResponse {
-        var form = [
+        let form = [
             "client_id": configuration.clientID,
             "code": code,
             "code_verifier": verifier,
             "grant_type": "authorization_code",
             "redirect_uri": redirectURI
         ]
-        if let clientSecret = configuration.clientSecret {
-            form["client_secret"] = clientSecret
-        }
         return try await postTokenRequest(form: form)
     }
 
@@ -331,15 +330,24 @@ final class GoogleOAuthService: @unchecked Sendable {
         guard let configuration = GoogleOAuthConfiguration.current else {
             throw GoogleOAuthError.missingConfiguration
         }
-        var form = [
+        let form = [
             "client_id": configuration.clientID,
             "grant_type": "refresh_token",
             "refresh_token": refreshToken
         ]
-        if let clientSecret = configuration.clientSecret {
-            form["client_secret"] = clientSecret
-        }
         return try await postTokenRequest(form: form)
+    }
+
+    private static func revokeToken(_ token: String) async throws {
+        var request = URLRequest(url: URL(string: "https://oauth2.googleapis.com/revoke")!)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = "token=\(formEscape(token))".data(using: .utf8)
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            return
+        }
     }
 
     private func postTokenRequest(form: [String: String]) async throws -> GoogleOAuthTokenResponse {
@@ -383,6 +391,12 @@ final class GoogleOAuthService: @unchecked Sendable {
     }
 
     private func formEscape(_ value: String) -> String {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: ":#[]@!$&'()*+,;=")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    private static func formEscape(_ value: String) -> String {
         var allowed = CharacterSet.urlQueryAllowed
         allowed.remove(charactersIn: ":#[]@!$&'()*+,;=")
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value

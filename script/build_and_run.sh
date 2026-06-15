@@ -49,6 +49,7 @@ xml_escape() {
 }
 
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-$(read_env_key GOOGLE_CLIENT_ID)}"
+GOOGLE_OAUTH_ENABLE_CHROME_OVERRIDE="${GOOGLE_OAUTH_ENABLE_CHROME_OVERRIDE:-$(read_env_key GOOGLE_OAUTH_ENABLE_CHROME_OVERRIDE)}"
 GOOGLE_OAUTH_CHROME_PROFILE="${GOOGLE_OAUTH_CHROME_PROFILE:-$(read_env_key GOOGLE_OAUTH_CHROME_PROFILE)}"
 GOOGLE_OAUTH_CHROME_USER_DATA_DIR="${GOOGLE_OAUTH_CHROME_USER_DATA_DIR:-$(read_env_key GOOGLE_OAUTH_CHROME_USER_DATA_DIR)}"
 GOOGLE_OAUTH_CHROME_REMOTE_DEBUGGING_PORT="${GOOGLE_OAUTH_CHROME_REMOTE_DEBUGGING_PORT:-$(read_env_key GOOGLE_OAUTH_CHROME_REMOTE_DEBUGGING_PORT)}"
@@ -65,20 +66,22 @@ if [[ -n "$GOOGLE_CLIENT_ID" ]]; then
   <string>$(xml_escape "$GOOGLE_CLIENT_ID")</string>
 "
 fi
-if [[ -n "$GOOGLE_OAUTH_CHROME_PROFILE" ]]; then
-  GOOGLE_OAUTH_PLIST+="  <key>GoogleOAuthChromeProfileDirectory</key>
+if [[ "$GOOGLE_OAUTH_ENABLE_CHROME_OVERRIDE" == "1" || "$GOOGLE_OAUTH_ENABLE_CHROME_OVERRIDE" == "true" ]]; then
+  if [[ -n "$GOOGLE_OAUTH_CHROME_PROFILE" ]]; then
+    GOOGLE_OAUTH_PLIST+="  <key>GoogleOAuthChromeProfileDirectory</key>
   <string>$(xml_escape "$GOOGLE_OAUTH_CHROME_PROFILE")</string>
 "
-fi
-if [[ -n "$GOOGLE_OAUTH_CHROME_USER_DATA_DIR" ]]; then
-  GOOGLE_OAUTH_PLIST+="  <key>GoogleOAuthChromeUserDataDirectory</key>
+  fi
+  if [[ -n "$GOOGLE_OAUTH_CHROME_USER_DATA_DIR" ]]; then
+    GOOGLE_OAUTH_PLIST+="  <key>GoogleOAuthChromeUserDataDirectory</key>
   <string>$(xml_escape "$GOOGLE_OAUTH_CHROME_USER_DATA_DIR")</string>
 "
-fi
-if [[ -n "$GOOGLE_OAUTH_CHROME_REMOTE_DEBUGGING_PORT" ]]; then
-  GOOGLE_OAUTH_PLIST+="  <key>GoogleOAuthChromeRemoteDebuggingPort</key>
+  fi
+  if [[ -n "$GOOGLE_OAUTH_CHROME_REMOTE_DEBUGGING_PORT" ]]; then
+    GOOGLE_OAUTH_PLIST+="  <key>GoogleOAuthChromeRemoteDebuggingPort</key>
   <string>$(xml_escape "$GOOGLE_OAUTH_CHROME_REMOTE_DEBUGGING_PORT")</string>
 "
+  fi
 fi
 if [[ -n "$SPARKLE_FEED_URL" ]]; then
   SPARKLE_PLIST+="  <key>SUFeedURL</key>

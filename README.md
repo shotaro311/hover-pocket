@@ -59,13 +59,12 @@
 
 ## Google Calendar の設定
 
-Calendar プロバイダーは、Google のインストール型アプリ向け OAuth フロー、loopback redirect、PKCE を使っています。Google token は Keychain に保存し、OAuth secret や token 類はソース管理にも配布用 app bundle にも入れません。
+Calendar プロバイダーは、Google のインストール型アプリ向け OAuth フロー、loopback redirect、PKCE を使っています。Google token は Keychain に保存し、OAuth secret や token 類はソース管理にも配布用 app bundle にも入れません。配布版のユーザーは、Calendar パネルまたは Settings から Google のログイン画面を開き、Google アカウントで許可すれば使えます。
 
 まず `.env.example` を参考に、ローカル用の `.env.local` を作成します。
 
 ```bash
 GOOGLE_CLIENT_ID="YOUR_DESKTOP_OAUTH_CLIENT_ID.apps.googleusercontent.com"
-GOOGLE_OAUTH_CHROME_PROFILE="Default"
 ```
 
 有効な `gcloud` project で OAuth client を作る場合は、補助スクリプトを使えます。
@@ -85,6 +84,13 @@ Google Auth Platform で application type を `Desktop app` にして client を
 ```
 
 `script/build_and_run.sh` は `.env.local` の OAuth client ID を、生成される app bundle の `Info.plist` に注入します。`GOOGLE_CLIENT_ID` が未設定でもアプリ自体は起動し、Calendar パネルには設定不足の状態が表示されます。
+
+通常は OS 既定ブラウザで Google ログインを開きます。開発検証で特定の Chrome profile を使う場合だけ、次の値を `.env.local` に追加します。配布版には入れないでください。
+
+```bash
+GOOGLE_OAUTH_ENABLE_CHROME_OVERRIDE=1
+GOOGLE_OAUTH_CHROME_PROFILE="Default"
+```
 
 ## ZIP アプリの作成
 
