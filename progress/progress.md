@@ -62,6 +62,7 @@ status: active
 - 2026-06-15: Product Compass レポートを生成し、6/22 の伊勢田さん向け検証を「Calendar を開かず予定を見る・追加する」に絞った。AI command deterministic fallback は `今日の予定`、`明日14時 打ち合わせ`、`金曜 デザイン納期`、`来週月曜10時 撮影 場所: 天神` を安定して扱う方向へ強化。承認 summary は場所/メモも先に見える形へ調整し、6/22 観察チェックリストを追加。
 - 2026-06-15: ZIP配布検証用に `script/package_zip.sh` を追加。Developer ID Application 署名、hardened runtime、versioned Info.plist、OAuth secret 非埋め込みで `dist/releases/HoverPocket-0.1.0-30.zip` を作成し、ZIP展開後の起動確認まで成功。notarization は未実施のため一般配布前に必要。
 - 2026-06-15: Sparkle 2.9.3 を導入し、Settings に `Check for Updates` を追加。GitHub Releases latest appcast URL と Sparkle EdDSA 公開鍵を app bundle に注入し、`script/generate_appcast.sh` / `script/publish_github_release.sh` で ZIP / SHA256 / appcast を配信できる土台を追加。初期配布では delta update を無効化し、フルZIP更新だけを appcast に載せる。
+- 2026-06-15: Sparkle 更新確認の公開前エラーを修正。ローカル開発ビルドでは未公開の GitHub appcast URL を自動注入せず、配布ビルドでも手動更新確認前に appcast 取得可否を確認して、404 では Sparkle 汎用エラーではなく Settings の状態表示に留める。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify`、`./script/package_zip.sh` 成功。
 - 2026-06-15: Google Cloud に HoverPocket 専用 project / OAuth consent app を作成し、Google Calendar API を有効化。`shotaro.matsu0311@gmail.com` を test user に追加し、iOS OAuth client + custom URL scheme + PKCE + `ASWebAuthenticationSession` のネイティブ認証フローへ変更。生成 app bundle には iOS OAuth client ID / URL scheme のみ入り、Desktop OAuth client secret は通常入らない。`./script/verify_google_calendar.sh --force-google-sign-in` と保存済み credential 再取得が成功。
 
 ## 進行中
@@ -81,6 +82,7 @@ status: active
 - Calendar editor の手入力/ドラッグ調整日時入力と日付ダブルクリック起動を実機操作で確認する。
 - 2026-06-22: 伊勢田さんに Calendar Pocket 検証を行い、`progress/2026-06/2026-06-22_calendar-pocket-validation.md` の観察項目に沿って記録する。
 - 自動アップデートの実公開前に Apple notarization を通し、GitHub Releases に `HoverPocket-<version>-<build>.zip`、`.sha256`、`appcast.xml` をアップロードする。
+- GitHub Releases へ appcast を公開した後、実際の Sparkle 更新成功フローを手動確認する。
 - アプリ化の要件を決める: 終了/自動起動、Google OAuth consent screen、設定項目、今後追加する provider。
 - 次の本物のレビューコメント付きPRで、Codex Automation がレビュー内容を読んで修正commitを積むところまで確認する。
 
@@ -93,6 +95,7 @@ status: active
 - `.env.local` には Google OAuth 設定値が入るため、値を出力せず、repo に含めない。配布用 app bundle へは iOS OAuth client ID / URL scheme のみ注入し、Desktop OAuth client secret は通常入れない。
 - Google OAuth consent screen が Testing の場合、登録済み test user のみログイン可能。一般公開には Google OAuth app verification が必要になる可能性がある。
 - 現在のZIP成果物は Developer ID Application 署名済みだが未notarized。手元検証には使えるが、友人や一般ユーザーへ配るには Apple notarization が必要。
+- GitHub Releases latest の `appcast.xml` は現時点で 404。公開前に更新確認を押しても Sparkle 汎用エラーを出さないよう修正済みだが、実更新成功確認は公開後に必要。
 - Sparkle秘密鍵は macOS Keychain の `hover-pocket` アカウントにある。秘密鍵ファイルをGitに書き出さない。
 - Calendar event 書き込みには `calendar.events` scope が必要。既存の read-only token では再接続が必要。
 - AI native Phase 1 の Apple Foundation Models provider は SDK / OS が未対応の場合、deterministic fallback で候補生成する。モデル本体の実行確認は対応OSで別途必要。

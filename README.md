@@ -114,11 +114,15 @@ GOOGLE_OAUTH_CHROME_PROFILE="Default"
 
 ## 自動アップデート
 
-自動アップデートは Sparkle 2 を使います。アプリ内の Settings から `Check for Updates` を押すと、次の appcast を見に行きます。
+自動アップデートは Sparkle 2 を使います。ローカル開発ビルドでは、未公開の更新フィードを見に行かないよう `SPARKLE_FEED_URL` を明示した場合だけ Settings の `Check for Updates` が有効になります。
+
+配布ZIPを作る `./script/package_zip.sh` では、既定で次の appcast を見に行く設定をアプリに入れます。
 
 ```text
 https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml
 ```
+
+この URL に `appcast.xml` がまだ公開されていない場合、アプリは Sparkle の汎用エラーダイアログを出さず、Settings に `Update feed is not published yet` と表示します。
 
 Sparkle の公開鍵は `SUPublicEDKey` として `Info.plist` に入ります。秘密鍵は macOS Keychain の `hover-pocket` アカウントに保存され、Git には含めません。
 

@@ -26,6 +26,8 @@ status: active
 - Sparkle EdDSA 公開鍵を `SUPublicEDKey`、GitHub Releases の latest appcast URL を `SUFeedURL` として app bundle へ注入するようにした。秘密鍵は macOS Keychain の `hover-pocket` アカウントに保存。
 - `script/generate_appcast.sh` と `script/publish_github_release.sh` を追加し、GitHub Releases へ ZIP / SHA256 / appcast を公開できる土台を追加。
 - 初期配布では差分更新ファイルの公開漏れを避けるため、Sparkle appcast は delta update を生成せずフルZIP更新だけにした。
+- Sparkle 更新確認の公開前エラー対策として、ローカル開発ビルドでは `SPARKLE_FEED_URL` を明示した場合だけ `SUFeedURL` を入れるよう変更。配布ビルドでは appcast 取得を事前確認し、404 などの場合は Sparkle の汎用エラーダイアログではなく Settings の状態表示に留めるようにした。
+- Sparkle updater は起動時に自動開始せず、手動更新確認で appcast 取得確認が通った後だけ開始するようにした。
 - Google Calendar OAuth を配布前提で安全側へ調整。配布バンドルでは OS 既定ブラウザで Google ログインを開く。Chrome profile / remote debugging 指定は明示的な開発オプションに限定。
 - Google sign out 時にローカルKeychain削除だけでなく Google revoke endpoint へ refresh token の取り消しを送るようにした。Keychain の refresh token 保存属性はこのMac限定へ変更。
 - Google Cloud に HoverPocket 専用 project / OAuth consent app を作成し、Google Calendar API を有効化。OAuth 同意画面のアプリ名は `HoverPocket`、support/contact email は `shotaro.matsu0311@gmail.com` に設定。
@@ -45,6 +47,9 @@ status: active
 - 作成した app は Developer ID Application 署名と hardened runtime 付きだが、notarization 未実施のため `spctl` は `Unnotarized Developer ID` と判定する。
 - Sparkle.framework 同梱後に `./script/build_and_run.sh --verify` 成功。`dist/releases/appcast.xml` は最新ビルド1件だけを含み、Sparkle EdDSA signature 付き enclosure を生成できることを確認。
 - `dist/releases/appcast.xml` が未アップロードの delta file を参照しないことを確認。
+- GitHub Releases latest の `appcast.xml` は現時点で HTTP 404。これが更新確認時の Sparkle 汎用エラーの直接原因であることを確認。
+- Sparkle 修正後に `swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。ローカル開発ビルドの `Info.plist` に `SUFeedURL` が入らないことを確認。
+- Sparkle 修正後に `./script/package_zip.sh` 成功。配布ZIP生成では `SUFeedURL` を明示的に入れた app bundle と `appcast.xml` を生成できることを確認。
 - Google OAuth client secret はGit管理ファイルに含めず、生成 app bundle の `Info.plist` にだけ入ることを確認済み。Chrome profile 指定は標準では `Info.plist` に入らないことを確認済み。
 - `./script/verify_google_calendar.sh` 成功。実Googleログインフローが開き、Calendar API取得まで `google_calendar_verify=ok`、`used_login_flow=true` で確認。
 - 生成 app bundle の `Info.plist` に `GIDClientID` / `CFBundleURLTypes` が入り、`GoogleOAuthClientID` / `GoogleOAuthClientSecret` は入らないことを確認。
@@ -58,3 +63,4 @@ status: active
 - Apple Foundation Models の `@Generable` 経路は macOS 26 / Apple Intelligence 対応SDKと実機で追加確認が必要。
 - 一般配布前に Apple notarization と Sparkle 更新フィードのホスティング先を決める。
 - GitHub Releases への実公開は未実行。notarization 完了後に `script/publish_github_release.sh` で公開する。
+- GitHub Releases へ appcast を公開した後、実際の Sparkle 更新成功フローを手動確認する。

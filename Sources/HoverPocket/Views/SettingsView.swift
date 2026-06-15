@@ -170,7 +170,7 @@ struct SettingsView: View {
                 .font(.system(size: 13, weight: .bold))
 
             HStack(spacing: 10) {
-                Label(updateStatusText, systemImage: appUpdater.canCheckForUpdates ? "arrow.down.circle" : "exclamationmark.triangle")
+                Label(appUpdater.statusText, systemImage: appUpdater.statusSystemImage)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
 
@@ -269,7 +269,4 @@ struct SettingsView: View {
         }
     }
 
-    private var updateStatusText: String {
-        appUpdater.canCheckForUpdates ? "Automatic updates are enabled" : "Update feed is not configured"
-    }
 }
