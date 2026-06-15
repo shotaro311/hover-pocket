@@ -185,6 +185,7 @@ final class HoverWindowController {
         previewWindow.hasShadow = false
         previewWindow.ignoresMouseEvents = true
         previewWindow.orderFrontRegardless()
+        previewWindow.makeKey()
         enablePreviewMouseEventsSoon(for: previewWindow, token: token)
 
         if shouldReduceMotion {

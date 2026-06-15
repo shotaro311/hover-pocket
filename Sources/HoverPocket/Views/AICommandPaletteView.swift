@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AICommandPaletteView: View {
     @ObservedObject var store: AICommandStore
+    let isVisible: Bool
     @FocusState private var isFocused: Bool
 
     var body: some View {
@@ -55,6 +56,21 @@ struct AICommandPaletteView: View {
         // 高さは親（HoverPanelShell）が aiPaletteHeight で固定する。
         // ここで伸ばすと Provider 領域を押し潰すので、レーン内で上詰めにする。
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onAppear {
+            focusInputIfNeeded()
+        }
+        .onChange(of: isVisible) { _, visible in
+            if visible {
+                focusInputIfNeeded()
+            }
+        }
+    }
+
+    private func focusInputIfNeeded() {
+        guard isVisible, store.pendingAction == nil else { return }
+        DispatchQueue.main.async {
+            isFocused = true
+        }
     }
 }
 
@@ -69,6 +85,10 @@ private struct ApprovalCard: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.white.opacity(0.9))
                     .lineLimit(1)
+
+                if let parameters = action.createEventParameters {
+                    CalendarWriteApprovalSummary(parameters: parameters)
+                }
 
                 // フィールドは省略しない（承認原則）。固定レーンに収まらない場合はスクロールで全件確認できるようにする
                 ScrollView(.vertical, showsIndicators: false) {
@@ -115,6 +135,72 @@ private struct ApprovalCard: View {
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(Color.white.opacity(0.06))
         )
+    }
+}
+
+private struct CalendarWriteApprovalSummary: View {
+    let parameters: CalendarCreateEventParameters
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(parameters.title.isEmpty ? "Untitled event" : parameters.title)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.white.opacity(0.92))
+                .lineLimit(1)
+
+            HStack(spacing: 6) {
+                Label(timeText, systemImage: parameters.isAllDay ? "calendar" : "clock")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.76))
+                    .lineLimit(1)
+
+                if let calendarTitle = parameters.calendarTitle, !calendarTitle.isEmpty {
+                    Text(calendarTitle)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.44))
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.green.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(Color.green.opacity(0.18), lineWidth: 1)
+        )
+    }
+
+    private var timeText: String {
+        if parameters.isAllDay {
+            return Self.dayFormatter.string(from: parameters.start)
+        }
+        return "\(Self.dateTimeFormatter.string(from: parameters.start)) - \(Self.timeFormatter.string(from: parameters.end))"
+    }
+
+    private static var dayFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }
+
+    private static var dateTimeFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }
+
+    private static var timeFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter
     }
 }
 

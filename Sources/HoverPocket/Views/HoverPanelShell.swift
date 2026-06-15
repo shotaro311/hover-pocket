@@ -33,7 +33,7 @@ struct HoverPanelShell: View {
                 Divider()
                     .overlay(Color.white.opacity(0.08))
 
-                AICommandPaletteView(store: store.aiCommandStore)
+                AICommandPaletteView(store: store.aiCommandStore, isVisible: store.contentVisible)
                     .frame(height: PanelLayout.aiPaletteHeight)
             }
             .opacity(store.contentVisible ? 1 : 0)

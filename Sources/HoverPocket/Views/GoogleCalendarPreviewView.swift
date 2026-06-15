@@ -119,37 +119,42 @@ struct GoogleCalendarPreviewView: View {
 
     private func dayCell(_ day: CalendarDayCell) -> some View {
         let isSelected = Calendar.current.isDate(day.date, inSameDayAs: detailDate)
-        return Button {
-            selectedDate = day.date
-            lockedDate = day.date
-            hoveredDate = nil
-            draft = nil
-        } label: {
-            VStack(spacing: 3) {
-                Text("\(day.dayNumber)")
-                    .font(.system(size: 11, weight: day.isToday ? .bold : .semibold, design: .monospaced))
-                    .foregroundStyle(day.isInDisplayedMonth ? Color.white : Color.white.opacity(0.28))
-                    .lineLimit(1)
+        return VStack(spacing: 3) {
+            Text("\(day.dayNumber)")
+                .font(.system(size: 11, weight: day.isToday ? .bold : .semibold, design: .monospaced))
+                .foregroundStyle(day.isInDisplayedMonth ? Color.white : Color.white.opacity(0.28))
+                .lineLimit(1)
 
-                HStack(spacing: 2) {
-                    ForEach(day.events.prefix(3)) { event in
-                        Circle()
-                            .fill(color(for: event.calendarColorHex))
-                            .frame(width: 4, height: 4)
-                    }
+            HStack(spacing: 2) {
+                ForEach(day.events.prefix(3)) { event in
+                    Circle()
+                        .fill(color(for: event.calendarColorHex))
+                        .frame(width: 4, height: 4)
                 }
-                .frame(height: 5)
             }
-            .frame(width: 36, height: 32)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(dayBackground(isSelected: isSelected, isToday: day.isToday))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke(day.isToday ? Color.white.opacity(0.42) : Color.white.opacity(isSelected ? 0.18 : 0), lineWidth: 1)
-            )
+            .frame(height: 5)
         }
+        .frame(width: 36, height: 32)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(dayBackground(isSelected: isSelected, isToday: day.isToday))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(day.isToday ? Color.white.opacity(0.42) : Color.white.opacity(isSelected ? 0.18 : 0), lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .gesture(
+            TapGesture(count: 2)
+                .onEnded {
+                    beginNewEvent(on: day.date)
+                }
+                .exclusively(before: TapGesture()
+                    .onEnded {
+                        selectDay(day.date)
+                    }
+                )
+        )
         .buttonStyle(.plain)
         .onHover { inside in
             guard lockedDate == nil, draft == nil else { return }
@@ -451,8 +456,16 @@ struct GoogleCalendarPreviewView: View {
         store.refreshMonth(containing: displayedMonth, force: true)
     }
 
+    private func selectDay(_ day: Date) {
+        selectedDate = day
+        lockedDate = day
+        hoveredDate = nil
+        draft = nil
+    }
+
     private func beginNewEvent(on day: Date) {
         guard let newDraft = GoogleCalendarEventDraft.new(on: day, sources: store.writableSources()) else {
+            selectDay(day)
             return
         }
         selectedDate = day
@@ -523,6 +536,8 @@ private struct CalendarEventEditorView: View {
     let onCancel: () -> Void
     let onDelete: (() -> Void)?
 
+    @FocusState private var focusedField: CalendarEditorFocusField?
+
     private var calendar: Calendar {
         .current
     }
@@ -553,6 +568,7 @@ private struct CalendarEventEditorView: View {
             TextField("Title", text: $draft.title)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 11, weight: .medium))
+                .focused($focusedField, equals: .title)
 
             Picker("Calendar", selection: $draft.calendarID) {
                 ForEach(sources) { source in
@@ -573,20 +589,27 @@ private struct CalendarEventEditorView: View {
                 }
 
             if draft.isAllDay {
-                DatePicker("Date", selection: allDayDateBinding, displayedComponents: .date)
-                    .datePickerStyle(.compact)
-                    .controlSize(.small)
-                    .font(.system(size: 10, weight: .medium))
+                CalendarDateTimeInputView(
+                    date: allDayDateBinding,
+                    label: "Date",
+                    includesTime: false,
+                    onDateChanged: normalizeDraftDates
+                )
             } else {
                 VStack(alignment: .leading, spacing: 6) {
-                    DatePicker("Start", selection: $draft.start, displayedComponents: [.date, .hourAndMinute])
-                        .datePickerStyle(.compact)
-                        .controlSize(.small)
-                    DatePicker("End", selection: $draft.end, displayedComponents: [.date, .hourAndMinute])
-                        .datePickerStyle(.compact)
-                        .controlSize(.small)
+                    CalendarDateTimeInputView(
+                        date: $draft.start,
+                        label: "Start",
+                        includesTime: true,
+                        onDateChanged: normalizeDraftDates
+                    )
+                    CalendarDateTimeInputView(
+                        date: $draft.end,
+                        label: "End",
+                        includesTime: true,
+                        onDateChanged: normalizeDraftDates
+                    )
                 }
-                .font(.system(size: 10, weight: .medium))
                 .onChange(of: draft.start) { _, _ in
                     normalizeDraftDates()
                 }
@@ -646,6 +669,11 @@ private struct CalendarEventEditorView: View {
         }
         .onAppear {
             normalizeDraftDates()
+            if draft.isNew {
+                DispatchQueue.main.async {
+                    focusedField = .title
+                }
+            }
         }
     }
 
@@ -666,6 +694,10 @@ private struct CalendarEventEditorView: View {
             draft = normalized
         }
     }
+}
+
+private enum CalendarEditorFocusField: Hashable {
+    case title
 }
 
 private extension Color {

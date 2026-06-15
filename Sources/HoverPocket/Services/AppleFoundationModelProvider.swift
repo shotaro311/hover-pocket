@@ -2,6 +2,36 @@ import Foundation
 
 #if canImport(FoundationModels)
 import FoundationModels
+
+@available(macOS 26.0, *)
+@Generable
+private enum GeneratedCalendarIntentAction {
+    case calendarReadDay
+    case calendarCreateEvent
+    case unclear
+}
+
+@available(macOS 26.0, *)
+@Generable
+private struct GeneratedCalendarIntentPlan {
+    @Guide(description: "Choose calendarReadDay for reading events, calendarCreateEvent for creating one event, or unclear when the request is ambiguous.")
+    var action: GeneratedCalendarIntentAction
+
+    @Guide(description: "Target day for reading or all-day event creation. Format yyyy-MM-dd. Leave empty if unknown.")
+    var date: String?
+
+    @Guide(description: "Calendar event title. Required only for calendarCreateEvent.")
+    var title: String?
+
+    @Guide(description: "Event start time. Format yyyy-MM-dd'T'HH:mm:ss. Required only for timed calendarCreateEvent.")
+    var start: String?
+
+    @Guide(description: "Event end time. Format yyyy-MM-dd'T'HH:mm:ss. Required only for timed calendarCreateEvent.")
+    var end: String?
+
+    @Guide(description: "True only when the user explicitly asks for an all-day event.")
+    var allDay: Bool
+}
 #endif
 
 struct AppleFoundationModelProvider: AIModelProvider {
@@ -55,19 +85,90 @@ struct AppleFoundationModelProvider: AIModelProvider {
         let session = LanguageModelSession(instructions: """
         You are a strict planner for a macOS menu-bar app.
         Choose exactly one of: calendar_read_day, calendar_create_event, unclear.
-        Output only key=value lines.
-        For calendar_read_day include date=yyyy-MM-dd.
-        For calendar_create_event include title=, start=yyyy-MM-dd'T'HH:mm:ss, end=yyyy-MM-dd'T'HH:mm:ss, allDay=true|false.
+        Return only the requested structured value.
+        For calendarReadDay include date=yyyy-MM-dd.
+        For calendarCreateEvent include title, start=yyyy-MM-dd'T'HH:mm:ss, end=yyyy-MM-dd'T'HH:mm:ss, and allDay.
         Do not invent unavailable tools. Do not plan multiple steps.
         Current time zone: \(context.timeZoneIdentifier).
         """)
-        let response = try await session.respond(to: input)
+        let response = try await session.respond(
+            to: input,
+            generating: GeneratedCalendarIntentPlan.self
+        )
+        if let plan = Self.makePlan(
+            from: response.content,
+            sourceText: input,
+            context: context,
+            modelIdentifier: descriptor.id
+        ) {
+            return plan
+        }
+
+        let textResponse = try await session.respond(to: input)
         return Self.parseModelResponse(
-            response.content,
+            textResponse.content,
             sourceText: input,
             context: context,
             modelIdentifier: descriptor.id
         )
+    }
+
+    @available(macOS 26.0, *)
+    private static func makePlan(
+        from generated: GeneratedCalendarIntentPlan,
+        sourceText: String,
+        context: AICommandContext,
+        modelIdentifier: String
+    ) -> IntentPlan? {
+        switch generated.action {
+        case .calendarReadDay:
+            guard let date = parseDay(generated.date, now: context.now) else { return nil }
+            let action = PocketAction(
+                kind: .calendarReadDay,
+                sourceText: sourceText,
+                readParameters: CalendarReadParameters(date: date)
+            )
+            return IntentPlan(
+                sourceText: sourceText,
+                primaryAction: action,
+                candidates: [],
+                confidence: 0.9,
+                modelIdentifier: modelIdentifier
+            )
+        case .calendarCreateEvent:
+            guard let title = generated.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !title.isEmpty else {
+                return nil
+            }
+            let start = parseDateTime(generated.start)
+                ?? parseDay(generated.date, now: context.now)
+                ?? defaultEventStart(now: context.now)
+            let end = parseDateTime(generated.end) ?? defaultEventEnd(start: start)
+            let calendar = context.writableCalendars.first
+            let action = PocketAction(
+                kind: .calendarCreateEvent,
+                sourceText: sourceText,
+                createEventParameters: CalendarCreateEventParameters(
+                    calendarID: calendar?.id,
+                    calendarTitle: calendar?.title,
+                    title: title,
+                    start: start,
+                    end: end,
+                    isAllDay: generated.allDay,
+                    location: nil,
+                    notes: nil
+                )
+            )
+            return IntentPlan(
+                sourceText: sourceText,
+                primaryAction: action,
+                candidates: [],
+                confidence: 0.88,
+                modelIdentifier: modelIdentifier
+            )
+        case .unclear:
+            return nil
+        }
     }
     #endif
 
