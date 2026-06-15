@@ -94,7 +94,29 @@ Google Auth Platform で application type を `Desktop app` にして client を
 ./script/package_zip.sh
 ```
 
-成果物は `dist/releases/` に出力されます。Developer ID Application 証明書が見つかる場合は hardened runtime 付きで署名します。一般配布では、この ZIP をさらに Apple notarization に通してください。
+成果物は `dist/releases/` に出力されます。Developer ID Application 証明書が見つかる場合は hardened runtime 付きで署名し、Sparkle 用の `appcast.xml` も生成します。一般配布では、この ZIP をさらに Apple notarization に通してください。
+
+## 自動アップデート
+
+自動アップデートは Sparkle 2 を使います。アプリ内の Settings から `Check for Updates` を押すと、次の appcast を見に行きます。
+
+```text
+https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml
+```
+
+Sparkle の公開鍵は `SUPublicEDKey` として `Info.plist` に入ります。秘密鍵は macOS Keychain の `hover-pocket` アカウントに保存され、Git には含めません。
+
+GitHub Releases へ ZIP、SHA256、appcast をアップロードする場合は次のコマンドを使います。
+
+```bash
+./script/publish_github_release.sh
+```
+
+実際に公開せず、作成されるタグと成果物だけ確認する場合は次のように実行します。
+
+```bash
+PUBLISH_DRY_RUN=1 ./script/publish_github_release.sh
+```
 
 ## 表示先ディスプレイ
 

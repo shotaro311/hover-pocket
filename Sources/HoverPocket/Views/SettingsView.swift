@@ -4,6 +4,7 @@ struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var providerStore: ProviderStore
     @ObservedObject private var calendarStore = GoogleCalendarStore.shared
+    @ObservedObject private var appUpdater = AppUpdater.shared
 
     var body: some View {
         ScrollView {
@@ -21,6 +22,10 @@ struct SettingsView: View {
                 Divider()
 
                 googleCalendarSection
+
+                Divider()
+
+                updatesSection
             }
             .padding(20)
         }
@@ -159,6 +164,26 @@ struct SettingsView: View {
         }
     }
 
+    private var updatesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Updates")
+                .font(.system(size: 13, weight: .bold))
+
+            HStack(spacing: 10) {
+                Label(updateStatusText, systemImage: appUpdater.canCheckForUpdates ? "arrow.down.circle" : "exclamationmark.triangle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button("Check for Updates") {
+                    appUpdater.checkForUpdates()
+                }
+                .disabled(!appUpdater.canCheckForUpdates)
+            }
+        }
+    }
+
     private var preferredProviderSelection: Binding<String> {
         Binding(
             get: {
@@ -242,5 +267,9 @@ struct SettingsView: View {
         default:
             return "Connect"
         }
+    }
+
+    private var updateStatusText: String {
+        appUpdater.canCheckForUpdates ? "Automatic updates are enabled" : "Update feed is not configured"
     }
 }

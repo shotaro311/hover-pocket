@@ -10,6 +10,8 @@ BUNDLE_DIR="$ROOT_DIR/dist/$APP_NAME.app"
 EXECUTABLE_PATH="$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
 APP_VERSION="${APP_VERSION:-0.1.0}"
 APP_BUILD="${APP_BUILD:-$(git -C "$ROOT_DIR" rev-list --count HEAD 2>/dev/null || date +%Y%m%d%H%M)}"
+DEFAULT_SPARKLE_FEED_URL="https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml"
+DEFAULT_SPARKLE_PUBLIC_ED_KEY="J2afuh/KnvOiS3eoNrMJoCyldAXL+Oku9scoSS5OUJE="
 
 cd "$ROOT_DIR"
 
@@ -52,7 +54,12 @@ GOOGLE_OAUTH_CHROME_USER_DATA_DIR="${GOOGLE_OAUTH_CHROME_USER_DATA_DIR:-$(read_e
 GOOGLE_OAUTH_CHROME_REMOTE_DEBUGGING_PORT="${GOOGLE_OAUTH_CHROME_REMOTE_DEBUGGING_PORT:-$(read_env_key GOOGLE_OAUTH_CHROME_REMOTE_DEBUGGING_PORT)}"
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-$(read_env_key CODESIGN_IDENTITY)}"
 CODESIGN_HARDENED_RUNTIME="${CODESIGN_HARDENED_RUNTIME:-$(read_env_key CODESIGN_HARDENED_RUNTIME)}"
+SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-$(read_env_key SPARKLE_FEED_URL)}"
+SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-$(read_env_key SPARKLE_PUBLIC_ED_KEY)}"
+SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-$DEFAULT_SPARKLE_FEED_URL}"
+SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-$DEFAULT_SPARKLE_PUBLIC_ED_KEY}"
 GOOGLE_OAUTH_PLIST=""
+SPARKLE_PLIST=""
 if [[ -n "$GOOGLE_CLIENT_ID" ]]; then
   GOOGLE_OAUTH_PLIST+="  <key>GoogleOAuthClientID</key>
   <string>$(xml_escape "$GOOGLE_CLIENT_ID")</string>
@@ -73,6 +80,16 @@ if [[ -n "$GOOGLE_OAUTH_CHROME_REMOTE_DEBUGGING_PORT" ]]; then
   <string>$(xml_escape "$GOOGLE_OAUTH_CHROME_REMOTE_DEBUGGING_PORT")</string>
 "
 fi
+if [[ -n "$SPARKLE_FEED_URL" ]]; then
+  SPARKLE_PLIST+="  <key>SUFeedURL</key>
+  <string>$(xml_escape "$SPARKLE_FEED_URL")</string>
+"
+fi
+if [[ -n "$SPARKLE_PUBLIC_ED_KEY" ]]; then
+  SPARKLE_PLIST+="  <key>SUPublicEDKey</key>
+  <string>$(xml_escape "$SPARKLE_PUBLIC_ED_KEY")</string>
+"
+fi
 
 default_codesign_identity() {
   security find-identity -p codesigning -v 2>/dev/null \
@@ -89,9 +106,17 @@ done
 swift build
 
 rm -rf "$BUNDLE_DIR"
-mkdir -p "$BUNDLE_DIR/Contents/MacOS"
+mkdir -p "$BUNDLE_DIR/Contents/MacOS" "$BUNDLE_DIR/Contents/Frameworks"
 cp ".build/debug/$PRODUCT_NAME" "$EXECUTABLE_PATH"
 chmod +x "$EXECUTABLE_PATH"
+
+SPARKLE_FRAMEWORK_PATH="$(find "$ROOT_DIR/.build" -maxdepth 5 -path '*/debug/Sparkle.framework' -type d 2>/dev/null | head -1)"
+if [[ -n "$SPARKLE_FRAMEWORK_PATH" ]]; then
+  ditto "$SPARKLE_FRAMEWORK_PATH" "$BUNDLE_DIR/Contents/Frameworks/Sparkle.framework"
+  if ! otool -l "$EXECUTABLE_PATH" | grep -q '@executable_path/../Frameworks'; then
+    install_name_tool -add_rpath "@executable_path/../Frameworks" "$EXECUTABLE_PATH"
+  fi
+fi
 
 cat > "$BUNDLE_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -121,6 +146,8 @@ ${GOOGLE_OAUTH_PLIST}  <key>NSAppTransportSecurity</key>
     <key>NSAllowsLocalNetworking</key>
     <true/>
   </dict>
+${SPARKLE_PLIST}  <key>SUEnableInstallerLauncherService</key>
+  <true/>
   <key>NSCameraUsageDescription</key>
   <string>ホバーポケット uses the Mac camera to show a mirror preview while the hover panel is open.</string>
   <key>NSMicrophoneUsageDescription</key>

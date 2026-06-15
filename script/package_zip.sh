@@ -39,7 +39,10 @@ rm -f "$ZIP_PATH" "$ZIP_PATH.sha256"
 ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
 shasum -a 256 "$ZIP_PATH" > "$ZIP_PATH.sha256"
 
+APP_VERSION="$APP_VERSION" APP_BUILD="$APP_BUILD" "$ROOT_DIR/script/generate_appcast.sh" >/dev/null
+
 echo "app=$APP_PATH"
 echo "zip=$ZIP_PATH"
 echo "sha256=$ZIP_PATH.sha256"
+echo "appcast=$RELEASE_DIR/appcast.xml"
 spctl -a -vv "$APP_PATH" || true
