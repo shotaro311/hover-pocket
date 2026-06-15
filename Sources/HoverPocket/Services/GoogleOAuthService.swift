@@ -5,6 +5,7 @@ import Security
 
 struct GoogleOAuthConfiguration: Equatable, Sendable {
     let clientID: String
+    let clientSecret: String?
     let chromeProfileDirectory: String?
     let chromeUserDataDirectory: String?
     let chromeRemoteDebuggingPort: String?
@@ -21,6 +22,8 @@ struct GoogleOAuthConfiguration: Equatable, Sendable {
             return nil
         }
 
+        let rawSecret = Bundle.main.object(forInfoDictionaryKey: "GoogleOAuthClientSecret") as? String
+        let secret = rawSecret?.trimmingCharacters(in: .whitespacesAndNewlines)
         let rawChromeProfile = Bundle.main.object(forInfoDictionaryKey: "GoogleOAuthChromeProfileDirectory") as? String
         let chromeProfile = rawChromeProfile?.trimmingCharacters(in: .whitespacesAndNewlines)
         let rawChromeUserData = Bundle.main.object(forInfoDictionaryKey: "GoogleOAuthChromeUserDataDirectory") as? String
@@ -29,6 +32,7 @@ struct GoogleOAuthConfiguration: Equatable, Sendable {
         let remoteDebuggingPort = rawRemoteDebuggingPort?.trimmingCharacters(in: .whitespacesAndNewlines)
         return GoogleOAuthConfiguration(
             clientID: clientID,
+            clientSecret: secret?.isEmpty == false ? secret : nil,
             chromeProfileDirectory: chromeProfile?.isEmpty == false ? chromeProfile : nil,
             chromeUserDataDirectory: chromeUserData?.isEmpty == false ? chromeUserData : nil,
             chromeRemoteDebuggingPort: remoteDebuggingPort?.isEmpty == false ? remoteDebuggingPort : nil
@@ -316,13 +320,16 @@ final class GoogleOAuthService: @unchecked Sendable {
         redirectURI: String,
         configuration: GoogleOAuthConfiguration
     ) async throws -> GoogleOAuthTokenResponse {
-        let form = [
+        var form = [
             "client_id": configuration.clientID,
             "code": code,
             "code_verifier": verifier,
             "grant_type": "authorization_code",
             "redirect_uri": redirectURI
         ]
+        if let clientSecret = configuration.clientSecret {
+            form["client_secret"] = clientSecret
+        }
         return try await postTokenRequest(form: form)
     }
 
@@ -330,11 +337,14 @@ final class GoogleOAuthService: @unchecked Sendable {
         guard let configuration = GoogleOAuthConfiguration.current else {
             throw GoogleOAuthError.missingConfiguration
         }
-        let form = [
+        var form = [
             "client_id": configuration.clientID,
             "grant_type": "refresh_token",
             "refresh_token": refreshToken
         ]
+        if let clientSecret = configuration.clientSecret {
+            form["client_secret"] = clientSecret
+        }
         return try await postTokenRequest(form: form)
     }
 
