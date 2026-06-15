@@ -111,14 +111,14 @@ struct PocketAction: Identifiable, Codable, Equatable, Sendable {
                 )
                 fields.remove(at: 2)
             }
-            if let calendarTitle = parameters.calendarTitle, !calendarTitle.isEmpty {
-                fields.append(PocketActionApprovalField(id: "calendar", label: "Calendar", value: calendarTitle))
-            }
             if let location = parameters.location, !location.isEmpty {
                 fields.append(PocketActionApprovalField(id: "location", label: "Location", value: location))
             }
             if let notes = parameters.notes, !notes.isEmpty {
                 fields.append(PocketActionApprovalField(id: "notes", label: "Notes", value: notes))
+            }
+            if let calendarTitle = parameters.calendarTitle, !calendarTitle.isEmpty {
+                fields.append(PocketActionApprovalField(id: "calendar", label: "Calendar", value: calendarTitle))
             }
             return fields
         }

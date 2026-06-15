@@ -59,6 +59,7 @@ status: active
 - 2026-06-10: AI native Phase 1 MVP を `feature/ai-native-phase1` で実装。Apple Foundation Models provider、`PocketAction` / `ToolResult` / `IntentPlan` / `ApprovalGate` / `AuditLog`、Calendar read/write tool、下段 command palette lane、構造化 action 由来の承認 UI、解釈候補 fallback UI を追加。`swift build` 成功。Ollama、Codex harness、Clipboard Tool、マルチステップ自律実行、チャット履歴は未実装。
 - 2026-06-10: AI native Phase 1 の review fix として、ApprovalCard が全 `approvalFields` を表示するよう修正。`PocketAction.requiresApproval` を `kind` 由来の computed property に変更し、Calendar write は常に承認必須にした。`swift build` 成功。
 - 2026-06-15: AI command palette の自動フォーカス、Apple Foundation Models `@Generable` structured output 経路、Calendar write 承認 summary、Calendar editor の手入力/ドラッグ調整対応日時入力、日付セルのダブルクリック新規予定起動を追加。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。Computer Use では hover panel を開くイベント再現ができず、実画面確認は未完了。
+- 2026-06-15: Product Compass レポートを生成し、6/22 の伊勢田さん向け検証を「Calendar を開かず予定を見る・追加する」に絞った。AI command deterministic fallback は `今日の予定`、`明日14時 打ち合わせ`、`金曜 デザイン納期`、`来週月曜10時 撮影 場所: 天神` を安定して扱う方向へ強化。承認 summary は場所/メモも先に見える形へ調整し、6/22 観察チェックリストを追加。
 
 ## 進行中
 
@@ -75,6 +76,7 @@ status: active
 - Apple Foundation Models の実機可用性を macOS 26 / Apple Intelligence 環境で確認する。
 - AI command palette の手動 UX 確認を行い、曖昧入力時の候補表示と Calendar write 承認導線を確認する。
 - Calendar editor の手入力/ドラッグ調整日時入力と日付ダブルクリック起動を実機操作で確認する。
+- 2026-06-22: 伊勢田さんに Calendar Pocket 検証を行い、`progress/2026-06/2026-06-22_calendar-pocket-validation.md` の観察項目に沿って記録する。
 - アプリ化の要件を決める: 終了/自動起動、Google OAuth consent screen、設定項目、今後追加する provider。
 - 次の本物のレビューコメント付きPRで、Codex Automation がレビュー内容を読んで修正commitを積むところまで確認する。
 

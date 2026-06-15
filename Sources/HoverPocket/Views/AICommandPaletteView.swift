@@ -12,7 +12,7 @@ struct AICommandPaletteView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.white.opacity(0.42))
 
-                TextField("Ask Calendar...", text: $store.input)
+                TextField("今日の予定 / 明日14時 打ち合わせ", text: $store.input)
                     .textFieldStyle(.plain)
                     .focused($isFocused)
                     .font(.system(size: 12, weight: .medium))
@@ -143,23 +143,29 @@ private struct CalendarWriteApprovalSummary: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(parameters.title.isEmpty ? "Untitled event" : parameters.title)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Color.white.opacity(0.92))
-                .lineLimit(1)
-
             HStack(spacing: 6) {
-                Label(timeText, systemImage: parameters.isAllDay ? "calendar" : "clock")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.76))
-                    .lineLimit(1)
+                Image(systemName: "calendar.badge.plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.green.opacity(0.9))
 
-                if let calendarTitle = parameters.calendarTitle, !calendarTitle.isEmpty {
-                    Text(calendarTitle)
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.44))
-                        .lineLimit(1)
-                }
+                Text(parameters.title.isEmpty ? "Untitled event" : parameters.title)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Color.white.opacity(0.92))
+                    .lineLimit(1)
+            }
+
+            approvalLine(systemImage: parameters.isAllDay ? "calendar" : "clock", text: timeText, isPrimary: true)
+
+            if let location = normalized(parameters.location) {
+                approvalLine(systemImage: "mappin.and.ellipse", text: location)
+            }
+
+            if let notes = normalized(parameters.notes) {
+                approvalLine(systemImage: "note.text", text: notes)
+            }
+
+            if let calendarTitle = normalized(parameters.calendarTitle) {
+                approvalLine(systemImage: "calendar", text: calendarTitle)
             }
         }
         .padding(.horizontal, 8)
@@ -173,6 +179,20 @@ private struct CalendarWriteApprovalSummary: View {
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .stroke(Color.green.opacity(0.18), lineWidth: 1)
         )
+    }
+
+    private func approvalLine(systemImage: String, text: String, isPrimary: Bool = false) -> some View {
+        Label(text, systemImage: systemImage)
+            .font(.system(size: 10, weight: isPrimary ? .semibold : .medium, design: isPrimary ? .monospaced : .default))
+            .foregroundStyle(Color.white.opacity(isPrimary ? 0.76 : 0.58))
+            .lineLimit(1)
+    }
+
+    private func normalized(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return value
     }
 
     private var timeText: String {

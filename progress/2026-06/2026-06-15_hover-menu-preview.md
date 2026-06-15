@@ -15,6 +15,10 @@ status: active
 - Calendar event editor の日付/時刻入力を `DatePicker` から手入力可能な数値セグメント UI へ変更。
 - 日付/時刻セグメントはフォーカス時に調整バーを表示し、左右ドラッグで値を変更できるようにした。
 - Calendar の日付セルをダブルクリックすると、その日の新規予定 editor を直接開くようにした。
+- Product Compass レポートを `product-compass-reports/2026-06-15-hoverpocket-ai-pocket.html` に生成し、6/22 の伊勢田さん向け検証方針を整理。
+- AI command の deterministic shortcut をモデル実行より優先し、`今日の予定`、`明日14時 打ち合わせ`、`金曜 デザイン納期`、`来週月曜10時 撮影 場所: 天神` の検証入力に寄せて強化。
+- Calendar write 承認 summary に場所とメモも表示し、構造化フィールドの順序をタイトル、日時、場所、メモ、カレンダーへ調整。
+- 6/22 の観察チェックリストを `progress/2026-06/2026-06-22_calendar-pocket-validation.md` に追加。
 
 ## 検証
 
@@ -22,6 +26,8 @@ status: active
 - `git diff --check` 成功。
 - `./script/build_and_run.sh --verify` 成功。
 - Computer Use / System Events で handle クリックを試したが、この環境では hover panel を開くイベントを再現できず、実画面での崩れ確認は未完了。
+- Product Compass レポート追加後、`docs: Product Compassレポートを追加` をコミット済み。
+- 一時 Swift 検証で、上記4入力がそれぞれ `2026-06-15 read`、`2026-06-16 14:00 打ち合わせ`、`2026-06-19 all-day デザイン納期`、`2026-06-22 10:00 撮影 / 場所: 天神` に解釈されることを確認。
 
 ## 残課題
 
