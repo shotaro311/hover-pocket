@@ -67,6 +67,7 @@ status: active
 - 2026-06-15: Calendar 日時セグメントの調整バーが小さく操作しづらかったため、目盛り幅、バー高さ、ノブサイズ、ドラッグ判定領域を拡大。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-15: Calendar 調整バー表示時に日時フィールドの横位置が崩れないよう、バーの横幅を通常レイアウト計算から外してオーバーレイ表示へ変更。ドラッグ中のノブは連続移動にし、バー上のマウススクロールでも日時を調整できるようにした。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-15: Calendar 調整バーは選択数字の直下へ移動させず、日時入力レーン内の固定位置に1つだけ表示する仕様へ変更。対象数字は黄色枠で示す。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
+- 2026-06-15: Calendar 表示初期のラグ対策として、保存済みGoogle認証の確認中でもCalendar本体を先に表示する `restoring` 状態を追加。予定データ取得前でも空の日付グリッドを即描画し、Google Calendar取得は背後で更新するようにした。空グリッドの月単位キャッシュと DateFormatter 生成削減も実施。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-15: Google Cloud に HoverPocket 専用 project / OAuth consent app を作成し、Google Calendar API を有効化。`shotaro.matsu0311@gmail.com` を test user に追加し、iOS OAuth client + custom URL scheme + PKCE + `ASWebAuthenticationSession` のネイティブ認証フローへ変更。生成 app bundle には iOS OAuth client ID / URL scheme のみ入り、Desktop OAuth client secret は通常入らない。`./script/verify_google_calendar.sh --force-google-sign-in` と保存済み credential 再取得が成功。
 
 ## 進行中

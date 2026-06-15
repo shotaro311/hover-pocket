@@ -25,11 +25,12 @@ final class GoogleCalendarStore: ObservableObject {
     private var refreshTask: Task<Void, Never>?
     private var lastLoadedMonth: Date?
     private var didCheckStoredCredential = false
+    private var emptyMonthDaysCache: [String: [CalendarDayCell]] = [:]
 
     init(oauth: GoogleOAuthService = GoogleOAuthService()) {
         self.oauth = oauth
         self.apiClient = GoogleCalendarAPIClient(oauth: oauth)
-        connectionState = oauth.isConfigured ? .signedOut : .missingConfiguration
+        connectionState = oauth.isConfigured ? .restoring : .missingConfiguration
     }
 
     var isConfigured: Bool {
@@ -43,6 +44,7 @@ final class GoogleCalendarStore: ObservableObject {
     func connect() {
         restoreConnectionIfNeeded()
         guard connectionState != .signedIn else { return }
+        guard connectionState != .restoring else { return }
         signIn()
     }
 
@@ -129,8 +131,13 @@ final class GoogleCalendarStore: ObservableObject {
     }
 
     func days(for month: Date, hoveredDate: Date?) -> [CalendarDayCell] {
-        guard let snapshot = loadState.snapshot else {
-            return Self.emptyMonthDays(for: month)
+        let calendar = Calendar.current
+        let monthStart = calendar.startOfMonth(for: month)
+
+        guard let snapshot = loadState.snapshot,
+              calendar.isDate(snapshot.monthAnchor, equalTo: monthStart, toGranularity: .month)
+        else {
+            return emptyMonthDays(for: monthStart, calendar: calendar)
         }
 
         return snapshot.dayCells(for: month)
@@ -230,19 +237,22 @@ final class GoogleCalendarStore: ObservableObject {
         }
     }
 
-    private static func emptyMonthDays(for month: Date) -> [CalendarDayCell] {
-        let calendar = Calendar.current
-        let monthStart = calendar.startOfMonth(for: month)
+    private func emptyMonthDays(for monthStart: Date, calendar: Calendar) -> [CalendarDayCell] {
+        let cacheKey = Self.monthCacheKey(for: monthStart, calendar: calendar)
+        if let cached = emptyMonthDaysCache[cacheKey] {
+            return cached
+        }
+
         let weekday = calendar.component(.weekday, from: monthStart)
         let leadingDays = (weekday - calendar.firstWeekday + 7) % 7
         let gridStart = calendar.date(byAdding: .day, value: -leadingDays, to: monthStart) ?? monthStart
 
-        return (0..<42).compactMap { offset in
+        let days: [CalendarDayCell] = (0..<42).compactMap { offset in
             guard let date = calendar.date(byAdding: .day, value: offset, to: gridStart) else {
                 return nil
             }
             return CalendarDayCell(
-                id: dayIdentifier(for: date),
+                id: Self.dayIdentifier(for: date, calendar: calendar),
                 date: date,
                 dayNumber: calendar.component(.day, from: date),
                 isInDisplayedMonth: calendar.isDate(date, equalTo: monthStart, toGranularity: .month),
@@ -250,15 +260,27 @@ final class GoogleCalendarStore: ObservableObject {
                 events: []
             )
         }
+        emptyMonthDaysCache[cacheKey] = days
+        return days
     }
 
     private static func dayIdentifier(for date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
+        dayIdentifier(for: date, calendar: .current)
+    }
+
+    private static func dayIdentifier(for date: Date, calendar: Calendar) -> String {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d",
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0
+        )
+    }
+
+    private static func monthCacheKey(for monthStart: Date, calendar: Calendar) -> String {
+        let components = calendar.dateComponents([.year, .month], from: monthStart)
+        return String(format: "%04d-%02d", components.year ?? 0, components.month ?? 0)
     }
 
     private static func safeErrorMessage(_ error: Error) -> String {

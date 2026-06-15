@@ -18,6 +18,8 @@ struct GoogleCalendarPreviewView: View {
             switch store.connectionState {
             case .missingConfiguration:
                 configurationView
+            case .restoring:
+                calendarView
             case .signedOut, .needsReconnect, .signingIn:
                 signedOutView
             case .signedIn:
@@ -420,6 +422,8 @@ struct GoogleCalendarPreviewView: View {
 
     private var calendarConnectionPrompt: String {
         switch store.connectionState {
+        case .restoring:
+            return "Checking saved Google account."
         case .needsReconnect:
             return "Reconnect to edit events."
         default:
@@ -431,6 +435,8 @@ struct GoogleCalendarPreviewView: View {
         switch store.connectionState {
         case .signingIn:
             return "Connecting"
+        case .restoring:
+            return "Checking"
         case .needsReconnect:
             return "Reconnect"
         default:

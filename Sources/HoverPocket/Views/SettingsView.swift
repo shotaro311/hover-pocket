@@ -151,7 +151,7 @@ struct SettingsView: View {
                     Button(calendarConnectTitle) {
                         calendarStore.connect()
                     }
-                    .disabled(!calendarStore.isConfigured || calendarStore.connectionState == .signingIn)
+                    .disabled(!calendarStore.isConfigured || calendarStore.connectionState == .signingIn || calendarStore.connectionState == .restoring)
                 }
             }
 
@@ -232,6 +232,8 @@ struct SettingsView: View {
         switch calendarStore.connectionState {
         case .missingConfiguration:
             return "key.slash"
+        case .restoring:
+            return "arrow.triangle.2.circlepath"
         case .signedOut:
             return "person.crop.circle.badge.plus"
         case .needsReconnect:
@@ -247,6 +249,8 @@ struct SettingsView: View {
         switch calendarStore.connectionState {
         case .missingConfiguration:
             return "Set GOOGLE_CLIENT_ID and relaunch."
+        case .restoring:
+            return "Checking saved Google account"
         case .signedOut:
             return "Not connected"
         case .needsReconnect:
@@ -262,6 +266,8 @@ struct SettingsView: View {
         switch calendarStore.connectionState {
         case .signingIn:
             return "Connecting"
+        case .restoring:
+            return "Checking"
         case .needsReconnect:
             return "Reconnect"
         default:
