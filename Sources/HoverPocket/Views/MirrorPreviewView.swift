@@ -308,6 +308,7 @@ final class MirrorCameraModel: ObservableObject {
     private var isSessionRunning = false
     private var isPreviewReady = false
     private var wantsCamera = false
+    private var runIntentVersion = 0
     private var pendingStopTask: DispatchWorkItem?
 
     init() {
@@ -327,13 +328,16 @@ final class MirrorCameraModel: ObservableObject {
     func setActive(_ active: Bool) {
         guard wantsCamera != active else {
             if active {
+                runIntentVersion += 1
                 pendingStopTask?.cancel()
                 pendingStopTask = nil
+                prepareIfAuthorized()
                 activate()
             }
             return
         }
 
+        runIntentVersion += 1
         wantsCamera = active
 
         if active {
@@ -396,11 +400,6 @@ final class MirrorCameraModel: ObservableObject {
             return
         }
 
-        if isSessionRunning {
-            updateStatus(.running)
-            return
-        }
-
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             startSession()
@@ -442,7 +441,9 @@ final class MirrorCameraModel: ObservableObject {
         guard !isStarting else { return }
 
         isStarting = true
-        updateStatus(.starting)
+        if !isSessionRunning {
+            updateStatus(.starting)
+        }
         Self.logger.notice("camera session start requested")
 
         sessionQueue.async { [weak self, sessionBox] in
@@ -482,16 +483,17 @@ final class MirrorCameraModel: ObservableObject {
 
     private func scheduleStopSession() {
         pendingStopTask?.cancel()
+        let stopIntentVersion = runIntentVersion
         let task = DispatchWorkItem { [weak self] in
-            self?.stopSessionNow()
+            self?.stopSessionNow(for: stopIntentVersion)
         }
 
         pendingStopTask = task
         DispatchQueue.main.asyncAfter(deadline: .now() + stopGrace, execute: task)
     }
 
-    private func stopSessionNow() {
-        guard !wantsCamera else { return }
+    private func stopSessionNow(for intentVersion: Int) {
+        guard intentVersion == runIntentVersion, !wantsCamera else { return }
         isStarting = false
         pendingStopTask = nil
 
@@ -506,6 +508,11 @@ final class MirrorCameraModel: ObservableObject {
                 self.isSessionRunning = false
                 if wasRunning {
                     Self.logger.notice("camera session stopped")
+                }
+                guard intentVersion == self.runIntentVersion, !self.wantsCamera else {
+                    Self.logger.notice("stale camera stop completed after reactivation; restarting")
+                    self.startSession()
+                    return
                 }
                 if !self.wantsCamera, self.status != .denied, self.status != .restricted {
                     self.updateStatus(.idle)

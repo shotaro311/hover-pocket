@@ -1,6 +1,6 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-06-15
+updated: 2026-06-20
 updated_by: codex
 status: active
 ---
@@ -69,6 +69,9 @@ status: active
 - 2026-06-15: Calendar 調整バーは選択数字の直下へ移動させず、日時入力レーン内の固定位置に1つだけ表示する仕様へ変更。対象数字は黄色枠で示す。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-15: Calendar 表示初期のラグ対策として、保存済みGoogle認証の確認中でもCalendar本体を先に表示する `restoring` 状態を追加。予定データ取得前でも空の日付グリッドを即描画し、Google Calendar取得は背後で更新するようにした。空グリッドの月単位キャッシュと DateFormatter 生成削減も実施。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-15: Google Cloud に HoverPocket 専用 project / OAuth consent app を作成し、Google Calendar API を有効化。`shotaro.matsu0311@gmail.com` を test user に追加し、iOS OAuth client + custom URL scheme + PKCE + `ASWebAuthenticationSession` のネイティブ認証フローへ変更。生成 app bundle には iOS OAuth client ID / URL scheme のみ入り、Desktop OAuth client secret は通常入らない。`./script/verify_google_calendar.sh --force-google-sign-in` と保存済み credential 再取得が成功。
+- 2026-06-19: 決定アプリアイコンを `Resources/AppIcon.png` として追加し、`script/build_and_run.sh` で `AppIcon.icns` を生成して `CFBundleIconFile=AppIcon` を app bundle に入れるようにした。Mirror は4秒遅延停止と再ホバー起動が競合しても、古い停止完了後に active intent が残っていれば自動再起動するよう修正。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。実マウス移動の hover open / close 5サイクルで毎回 preview が開き、最後の再openも成功。
+- 2026-06-19: 一般配布向けに `script/notarize_release.sh` を追加。ZIP作成、notarytool submit/wait、staple、spctl検証、staple後の再ZIP、SHA256 / appcast 再生成を1コマンド化した。`publish_github_release.sh` も既定で notarization を通し、既存ZIP利用時は展開後に `stapler validate` / `spctl` で未notarized ZIPを拒否する。`bash -n` と認証情報未設定時の安全な停止は確認済み。
+- 2026-06-20: `hover-pocket` notarytool Keychain profile を作成し、`NOTARYTOOL_PROFILE=hover-pocket ./script/notarize_release.sh` で Apple notarization を実行。submission `dd941d6b-7078-4d6a-94a7-c5a0f8697637` は `Accepted`。`dist/HoverPocket.app` と `dist/releases/HoverPocket-0.1.0-41.zip` 展開後 app の両方で `codesign --verify --deep --strict`、`stapler validate`、`spctl --assess --type execute` 成功。ZIP SHA256 は `362a6fcea234f3faf8b19eb5df625b48594eb573fc3fb5f79a765ff8ffd0986e`。
 
 ## 進行中
 
@@ -86,20 +89,20 @@ status: active
 - AI command palette の手動 UX 確認を行い、曖昧入力時の候補表示と Calendar write 承認導線を確認する。
 - Calendar editor の手入力/ドラッグ調整日時入力と日付ダブルクリック起動を実機操作で確認する。
 - 2026-06-22: 伊勢田さんに Calendar Pocket 検証を行い、`progress/2026-06/2026-06-22_calendar-pocket-validation.md` の観察項目に沿って記録する。
-- 自動アップデートの実公開前に Apple notarization を通し、GitHub Releases に `HoverPocket-<version>-<build>.zip`、`.sha256`、`appcast.xml` をアップロードする。
+- notarized ZIP を GitHub Releases にアップロードし、`HoverPocket-<version>-<build>.zip`、`.sha256`、`appcast.xml` を公開する。
 - GitHub Releases へ appcast を公開した後、実際の Sparkle 更新成功フローを手動確認する。
 - アプリ化の要件を決める: 終了/自動起動、Google OAuth consent screen、設定項目、今後追加する provider。
 - 次の本物のレビューコメント付きPRで、Codex Automation がレビュー内容を読んで修正commitを積むところまで確認する。
 
 ## Blocker / Risk
 
-- 現時点はローカル prototype。署名、notarization、LaunchAgent、自動起動は未実装。
+- 現時点はローカル prototype。Developer ID 署名と notarization 済みZIPは作成済みだが、LaunchAgent、自動起動、正式インストーラは未実装。
 - 初回 camera permission はユーザー操作が必要。
 - 自動検証では顔が写る映像確認は避けている。ユーザー側で mirror 映像の見え方確認が必要。
 - 機密情報や token は含めていない。
 - `.env.local` には Google OAuth 設定値が入るため、値を出力せず、repo に含めない。配布用 app bundle へは iOS OAuth client ID / URL scheme のみ注入し、Desktop OAuth client secret は通常入れない。
 - Google OAuth consent screen が Testing の場合、登録済み test user のみログイン可能。一般公開には Google OAuth app verification が必要になる可能性がある。
-- 現在のZIP成果物は Developer ID Application 署名済みだが未notarized。手元検証には使えるが、友人や一般ユーザーへ配るには Apple notarization が必要。
+- 現在のZIP成果物 `dist/releases/HoverPocket-0.1.0-41.zip` は Developer ID Application 署名と notarization/staple 済み。一般配布には GitHub Releases など公開先へのアップロードと、配布URL経由での最終 Gatekeeper 確認が必要。
 - GitHub Releases latest の `appcast.xml` は現時点で 404。公開前に更新確認を押しても Sparkle 汎用エラーを出さないよう修正済みだが、実更新成功確認は公開後に必要。
 - Sparkle秘密鍵は macOS Keychain の `hover-pocket` アカウントにある。秘密鍵ファイルをGitに書き出さない。
 - Calendar event 書き込みには `calendar.events` scope が必要。既存の read-only token では再接続が必要。
@@ -124,6 +127,8 @@ status: active
 
 ## 詳細ログ
 
+- [2026-06-20](2026-06/2026-06-20_hover-menu-preview.md)
+- [2026-06-19](2026-06/2026-06-19_hover-menu-preview.md)
 - [2026-06-15](2026-06/2026-06-15_hover-menu-preview.md)
 - [2026-06-10](2026-06/2026-06-10_hover-menu-preview.md)
 - [2026-06-09](2026-06/2026-06-09_hover-menu-preview.md)
@@ -143,6 +148,8 @@ status: active
 
 ## 最近の更新
 
+- 2026-06-20: Apple notarization を実行し、`HoverPocket-0.1.0-41.zip` を notarized/stapled ZIP として再生成。app 本体と ZIP 展開後 app の両方で Gatekeeper accepted を確認。
+- 2026-06-19: 決定アプリアイコンを app bundle に反映し、Mirror camera の遅延停止/再起動競合を修正。実マウス移動の hover open / close 5サイクルで preview 再open を確認。
 - 2026-06-07: Calendar provider に日付クリック固定、予定追加、編集、削除 UI / API を追加。OAuth scope は `calendar.events` に変更し、既存 read-only credential は再接続扱いにした。
 - 2026-06-07: Clipboard provider と provider 表示/順番/default panel 設定を追加。
 - 2026-06-07: Clipboard image drag の drop 互換性改善として、panel 一時非表示と file URL provider を追加。

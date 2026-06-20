@@ -8,26 +8,74 @@ APP_BUILD="${APP_BUILD:-$(git -C "$ROOT_DIR" rev-list --count HEAD 2>/dev/null |
 SPARKLE_TAG="${SPARKLE_TAG:-v${APP_VERSION}-${APP_BUILD}}"
 RELEASE_TITLE="${RELEASE_TITLE:-HoverPocket ${APP_VERSION} (${APP_BUILD})}"
 RELEASE_NOTES="${RELEASE_NOTES:-Initial Sparkle-enabled build.}"
+PUBLISH_DRY_RUN="${PUBLISH_DRY_RUN:-0}"
+PUBLISH_REQUIRE_NOTARIZED="${PUBLISH_REQUIRE_NOTARIZED:-1}"
+if [[ -z "${PUBLISH_PREPARE_RELEASE:-}" ]]; then
+  if [[ "$PUBLISH_DRY_RUN" == "1" || "$PUBLISH_DRY_RUN" == "true" ]]; then
+    PUBLISH_PREPARE_RELEASE=0
+  else
+    PUBLISH_PREPARE_RELEASE=1
+  fi
+fi
 ZIP_PATH="$ROOT_DIR/dist/releases/${APP_NAME}-${APP_VERSION}-${APP_BUILD}.zip"
 SHA_PATH="$ZIP_PATH.sha256"
 APPCAST_PATH="$ROOT_DIR/dist/releases/appcast.xml"
 
 cd "$ROOT_DIR"
 
+verify_notarized_zip_payload() {
+  local extract_dir
+  extract_dir="$(mktemp -d "${TMPDIR:-/tmp}/hoverpocket-publish-zip.XXXXXX")"
+  ditto -x -k "$ZIP_PATH" "$extract_dir"
+
+  local extracted_app="$extract_dir/$APP_NAME.app"
+  if [[ ! -d "$extracted_app" ]]; then
+    echo "error=extracted app not found in release zip" >&2
+    rm -rf "$extract_dir"
+    exit 1
+  fi
+
+  if ! codesign --verify --deep --strict --verbose=2 "$extracted_app"; then
+    rm -rf "$extract_dir"
+    exit 1
+  fi
+  if ! xcrun stapler validate "$extracted_app"; then
+    rm -rf "$extract_dir"
+    exit 1
+  fi
+  if ! spctl --assess --type execute --verbose=2 "$extracted_app"; then
+    rm -rf "$extract_dir"
+    exit 1
+  fi
+  rm -rf "$extract_dir"
+}
+
 if ! command -v gh >/dev/null 2>&1; then
   echo "error=gh CLI is required to publish a GitHub release" >&2
   exit 1
 fi
 
-"$ROOT_DIR/script/package_zip.sh"
+if [[ "$PUBLISH_PREPARE_RELEASE" == "1" || "$PUBLISH_PREPARE_RELEASE" == "true" ]]; then
+  if [[ "$PUBLISH_REQUIRE_NOTARIZED" == "1" || "$PUBLISH_REQUIRE_NOTARIZED" == "true" ]]; then
+    "$ROOT_DIR/script/notarize_release.sh"
+  else
+    "$ROOT_DIR/script/package_zip.sh"
+  fi
+fi
 
 if [[ ! -f "$ZIP_PATH" || ! -f "$SHA_PATH" || ! -f "$APPCAST_PATH" ]]; then
   echo "error=release artifacts are missing" >&2
   exit 1
 fi
 
-if [[ "${PUBLISH_DRY_RUN:-}" == "1" || "${PUBLISH_DRY_RUN:-}" == "true" ]]; then
+if [[ "$PUBLISH_REQUIRE_NOTARIZED" == "1" || "$PUBLISH_REQUIRE_NOTARIZED" == "true" ]]; then
+  verify_notarized_zip_payload
+fi
+
+if [[ "$PUBLISH_DRY_RUN" == "1" || "$PUBLISH_DRY_RUN" == "true" ]]; then
   echo "dry_run=true"
+  echo "prepare_release=$PUBLISH_PREPARE_RELEASE"
+  echo "require_notarized=$PUBLISH_REQUIRE_NOTARIZED"
   echo "tag=$SPARKLE_TAG"
   echo "zip=$ZIP_PATH"
   echo "sha256=$SHA_PATH"

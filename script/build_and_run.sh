@@ -8,6 +8,8 @@ PRODUCT_NAME="HoverPocket"
 LEGACY_PROCESS_NAMES=("NotchPocket" "NotchPokke" "HoverMenuPreview")
 BUNDLE_DIR="$ROOT_DIR/dist/$APP_NAME.app"
 EXECUTABLE_PATH="$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
+APP_ICON_NAME="AppIcon"
+APP_ICON_SOURCE="$ROOT_DIR/Resources/$APP_ICON_NAME.png"
 APP_VERSION="${APP_VERSION:-0.1.0}"
 APP_BUILD="${APP_BUILD:-$(git -C "$ROOT_DIR" rev-list --count HEAD 2>/dev/null || date +%Y%m%d%H%M)}"
 DEFAULT_SPARKLE_FEED_URL="${DEFAULT_SPARKLE_FEED_URL:-}"
@@ -131,6 +133,29 @@ default_codesign_identity() {
     | awk -F'"' '/Apple Development:/ { print $2; exit }'
 }
 
+install_app_icon() {
+  [[ -f "$APP_ICON_SOURCE" ]] || return 0
+
+  local resources_dir="$BUNDLE_DIR/Contents/Resources"
+  local iconset_dir
+  iconset_dir="$(mktemp -d "${TMPDIR:-/tmp}/hoverpocket-iconset.XXXXXX")/$APP_ICON_NAME.iconset"
+  mkdir -p "$iconset_dir"
+
+  sips -z 16 16 "$APP_ICON_SOURCE" --out "$iconset_dir/icon_16x16.png" >/dev/null
+  sips -z 32 32 "$APP_ICON_SOURCE" --out "$iconset_dir/icon_16x16@2x.png" >/dev/null
+  sips -z 32 32 "$APP_ICON_SOURCE" --out "$iconset_dir/icon_32x32.png" >/dev/null
+  sips -z 64 64 "$APP_ICON_SOURCE" --out "$iconset_dir/icon_32x32@2x.png" >/dev/null
+  sips -z 128 128 "$APP_ICON_SOURCE" --out "$iconset_dir/icon_128x128.png" >/dev/null
+  sips -z 256 256 "$APP_ICON_SOURCE" --out "$iconset_dir/icon_128x128@2x.png" >/dev/null
+  sips -z 256 256 "$APP_ICON_SOURCE" --out "$iconset_dir/icon_256x256.png" >/dev/null
+  sips -z 512 512 "$APP_ICON_SOURCE" --out "$iconset_dir/icon_256x256@2x.png" >/dev/null
+  sips -z 512 512 "$APP_ICON_SOURCE" --out "$iconset_dir/icon_512x512.png" >/dev/null
+  sips -z 1024 1024 "$APP_ICON_SOURCE" --out "$iconset_dir/icon_512x512@2x.png" >/dev/null
+
+  iconutil -c icns "$iconset_dir" -o "$resources_dir/$APP_ICON_NAME.icns"
+  rm -rf "$(dirname "$iconset_dir")"
+}
+
 for process_name in "$APP_NAME" "${LEGACY_PROCESS_NAMES[@]}"; do
   if pgrep -x "$process_name" >/dev/null 2>&1; then
     pkill -x "$process_name" || true
@@ -141,9 +166,10 @@ done
 swift build
 
 rm -rf "$BUNDLE_DIR"
-mkdir -p "$BUNDLE_DIR/Contents/MacOS" "$BUNDLE_DIR/Contents/Frameworks"
+mkdir -p "$BUNDLE_DIR/Contents/MacOS" "$BUNDLE_DIR/Contents/Frameworks" "$BUNDLE_DIR/Contents/Resources"
 cp ".build/debug/$PRODUCT_NAME" "$EXECUTABLE_PATH"
 chmod +x "$EXECUTABLE_PATH"
+install_app_icon
 
 SPARKLE_FRAMEWORK_PATH="$(find "$ROOT_DIR/.build" -maxdepth 5 -path '*/debug/Sparkle.framework' -type d 2>/dev/null | head -1)"
 if [[ -n "$SPARKLE_FRAMEWORK_PATH" ]]; then
@@ -166,6 +192,8 @@ cat > "$BUNDLE_DIR/Contents/Info.plist" <<PLIST
   <string>$DISPLAY_NAME</string>
   <key>CFBundleName</key>
   <string>$DISPLAY_NAME</string>
+  <key>CFBundleIconFile</key>
+  <string>$APP_ICON_NAME</string>
   <key>CFBundleShortVersionString</key>
   <string>$(xml_escape "$APP_VERSION")</string>
   <key>CFBundleVersion</key>
