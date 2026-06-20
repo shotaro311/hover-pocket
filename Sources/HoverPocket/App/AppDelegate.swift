@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func screenParametersChanged() {
         hoverWindowController.positionWindows()
+        hoverWindowController.showPill()
     }
 
     @objc private func applicationBecameActive() {

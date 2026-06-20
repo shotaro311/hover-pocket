@@ -1,6 +1,6 @@
 import Foundation
 
-enum AppLanguage: String, CaseIterable, Identifiable {
+enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
     case japanese
     case english
 
@@ -35,7 +35,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     }
 }
 
-enum AppTextKey: String {
+enum AppTextKey: String, Sendable {
     case addEvent
     case allDay
     case calendar
@@ -84,6 +84,8 @@ enum AppTextKey: String {
     case disconnect
     case displayAutomatic
     case displayAutomaticDetail
+    case displayAll
+    case displayAllDetail
     case displayMain
     case displayMainDetail
     case displaySecondary
@@ -152,6 +154,8 @@ enum AppTextKey: String {
     case settings
     case settingsWindowTitle
     case showMicrophoneTest
+    case showMirrorOnSecondaryDisplays
+    case showMirrorOnSecondaryDisplaysDetail
     case showSideHandle
     case showStickyNoteUndo
     case start
@@ -184,6 +188,11 @@ enum AppTextKey: String {
     case title
     case untitledEvent
     case updates
+    case updateAvailable
+    case updateChecking
+    case updateFeedMissing
+    case updateReady
+    case updateUnavailable
     case updated
     case dateTimeInputHelp
     case quitHoverPocket
@@ -266,6 +275,8 @@ enum AppText {
         case .disconnect: return "接続解除"
         case .displayAutomatic: return "自動"
         case .displayAutomaticDetail: return "ポインタがある画面に表示し、開いている間はその画面に固定します。"
+        case .displayAll: return "すべて"
+        case .displayAllDetail: return "各ディスプレイ上部に起点を表示します。ノッチがない画面では控えめなミニバーで表示します。"
         case .displayMain: return "メイン"
         case .displayMainDetail: return "常に macOS のメインディスプレイに表示します。"
         case .displaySecondary: return "サブ"
@@ -334,6 +345,8 @@ enum AppText {
         case .settings: return "設定"
         case .settingsWindowTitle: return "設定"
         case .showMicrophoneTest: return "ミラー下にマイクテストを表示"
+        case .showMirrorOnSecondaryDisplays: return "サブディスプレイでもミラーを表示"
+        case .showMirrorOnSecondaryDisplaysDetail: return "オフの場合、サブディスプレイから開いたホバーポケットではミラーを表示しません。"
         case .showSideHandle: return "ノッチ横のハンドルエリアを表示"
         case .showStickyNoteUndo: return "付箋操作後に Undo を表示"
         case .start: return "開始"
@@ -366,6 +379,11 @@ enum AppText {
         case .title: return "タイトル"
         case .untitledEvent: return "無題の予定"
         case .updates: return "アップデート"
+        case .updateAvailable: return "アップデートがあります"
+        case .updateChecking: return "アップデートを確認中"
+        case .updateFeedMissing: return "アップデート配信が未設定です"
+        case .updateReady: return "アップデート確認を使用できます"
+        case .updateUnavailable: return "アップデートはありません"
         case .updated: return "更新"
         case .dateTimeInputHelp: return "数値を入力、または左右にドラッグして調整できます。"
         case .quitHoverPocket: return "ホバーポケットを終了"
@@ -424,6 +442,8 @@ enum AppText {
         case .disconnect: return "Disconnect"
         case .displayAutomatic: return "Auto"
         case .displayAutomaticDetail: return "Uses the display under the pointer, then stays there while open."
+        case .displayAll: return "All"
+        case .displayAllDetail: return "Shows an entry point on every display. Notchless displays use the subtle mini bar."
         case .displayMain: return "Main"
         case .displayMainDetail: return "Always uses the primary macOS display."
         case .displaySecondary: return "Sub"
@@ -492,6 +512,8 @@ enum AppText {
         case .settings: return "Settings"
         case .settingsWindowTitle: return "Settings"
         case .showMicrophoneTest: return "Show microphone test under mirror"
+        case .showMirrorOnSecondaryDisplays: return "Show Mirror on secondary displays"
+        case .showMirrorOnSecondaryDisplaysDetail: return "When off, Mirror is hidden when HoverPocket is opened from a secondary display."
         case .showSideHandle: return "Show side handle beside notch"
         case .showStickyNoteUndo: return "Show undo after note actions"
         case .start: return "Start"
@@ -524,6 +546,11 @@ enum AppText {
         case .title: return "Title"
         case .untitledEvent: return "Untitled event"
         case .updates: return "Updates"
+        case .updateAvailable: return "Update available"
+        case .updateChecking: return "Checking for updates"
+        case .updateFeedMissing: return "Update feed is not configured"
+        case .updateReady: return "Update checks are available"
+        case .updateUnavailable: return "No update available"
         case .updated: return "Updated"
         case .dateTimeInputHelp: return "Type a value, or drag left/right to adjust."
         case .quitHoverPocket: return "Quit HoverPocket"

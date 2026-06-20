@@ -2,6 +2,7 @@ enum DisplayPlacementMode: String, CaseIterable, Identifiable {
     case automatic
     case mainDisplay
     case secondaryDisplay
+    case allDisplays
 
     var id: String {
         rawValue
@@ -19,6 +20,8 @@ enum DisplayPlacementMode: String, CaseIterable, Identifiable {
             AppText.text(.displayMain, language: language)
         case .secondaryDisplay:
             AppText.text(.displaySecondary, language: language)
+        case .allDisplays:
+            AppText.text(.displayAll, language: language)
         }
     }
 
@@ -34,6 +37,8 @@ enum DisplayPlacementMode: String, CaseIterable, Identifiable {
             AppText.text(.displayMainDetail, language: language)
         case .secondaryDisplay:
             AppText.text(.displaySecondaryDetail, language: language)
+        case .allDisplays:
+            AppText.text(.displayAllDetail, language: language)
         }
     }
 }

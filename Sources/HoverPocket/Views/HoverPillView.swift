@@ -61,6 +61,59 @@ struct HoverPillView: View {
     }
 }
 
+struct HoverMiniBarView: View {
+    let onBarEnter: () -> Void
+    let onBarExit: () -> Void
+    let onTap: () -> Void
+    @State private var isPointerNear = false
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color.black.opacity(0.001)
+                .contentShape(Rectangle())
+
+            VStack(spacing: 0) {
+                bar
+                    .offset(y: isPointerNear ? PanelLayout.miniBarExpandedTopOffset : 0)
+
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(
+            width: PanelLayout.miniBarTriggerWidth,
+            height: PanelLayout.miniBarTriggerHeight
+        )
+        .onHover { inside in
+            withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.86)) {
+                isPointerNear = inside
+            }
+            if !inside {
+                onBarExit()
+            }
+        }
+    }
+
+    private var bar: some View {
+        RoundedRectangle(cornerRadius: isPointerNear ? 3.5 : 1, style: .continuous)
+            .fill(Color.black.opacity(isPointerNear ? 0.58 : 0.26))
+            .frame(
+                width: isPointerNear ? PanelLayout.miniBarExpandedWidth : PanelLayout.miniBarRestWidth,
+                height: isPointerNear ? PanelLayout.miniBarExpandedHeight : PanelLayout.miniBarRestHeight
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: isPointerNear ? 3.5 : 1, style: .continuous)
+                    .stroke(Color.white.opacity(isPointerNear ? 0.16 : 0.05), lineWidth: 0.6)
+            )
+            .shadow(color: Color.black.opacity(isPointerNear ? 0.18 : 0), radius: 8, y: 4)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                inside ? onBarEnter() : onBarExit()
+            }
+            .onTapGesture(perform: onTap)
+            .animation(.interactiveSpring(response: 0.22, dampingFraction: 0.86), value: isPointerNear)
+    }
+}
+
 private struct PocketHandleGlyph: View {
     var body: some View {
         GeometryReader { geometry in

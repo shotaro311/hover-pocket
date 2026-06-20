@@ -17,8 +17,10 @@ private final class HoverMenuPanel: NSPanel {
 
 @MainActor
 final class HoverWindowController {
-    private var pillWindow: NSPanel?
+    private var accessWindows: [String: NSPanel] = [:]
+    private var accessWindowStyles: [String: PanelAccessStyle] = [:]
     private var previewWindow: NSPanel?
+    private var activePreviewScreen: NSScreen?
     private var closeTask: DispatchWorkItem?
     private var resetTask: DispatchWorkItem?
     private var hoverMonitorTimer: Timer?
@@ -43,20 +45,21 @@ final class HoverWindowController {
             providerStore: menuStore.providerStore
         )
 
-        configurePillWindow()
+        syncAccessWindows()
         configurePreviewWindow()
         observeSettings()
     }
 
     func showPill() {
-        pillWindow?.orderFrontRegardless()
+        syncAccessWindows()
+        accessWindows.values.forEach { $0.orderFrontRegardless() }
     }
 
     func positionWindows() {
-        guard let screen = targetScreen() else { return }
+        syncAccessWindows()
+        guard let screen = activePreviewScreen ?? targetScreen() else { return }
 
         let frames = panelFrames(on: screen)
-        pillWindow?.setFrame(frames.pill, display: true)
 
         if previewWindow?.isVisible == true {
             previewWindow?.setFrame(frames.preview, display: true)
@@ -66,7 +69,7 @@ final class HoverWindowController {
     }
 
     func openPanelFromMenu() {
-        showPreview()
+        showPreview(on: targetScreen())
     }
 
     func openSettingsFromMenu() {
@@ -81,21 +84,38 @@ final class HoverWindowController {
         )
     }
 
-    private func configurePillWindow() {
+    private func configureAccessWindow(for screen: NSScreen) -> NSPanel {
+        let frames = panelFrames(on: screen)
         let panel = makePanel(
-            size: NSSize(width: PanelLayout.defaultPillWidth, height: PanelLayout.pillHeight),
+            size: frames.access.size,
             acceptsKeyboardFocus: false
         )
         panel.hasShadow = false
-        panel.contentViewController = NSHostingController(
-            rootView: HoverPillView(
-                settings: settings,
-                onEnter: { [weak self] in self?.showPreview() },
-                onExit: { [weak self] in self?.scheduleClose() },
-                onTap: { [weak self] in self?.togglePreview() }
+        panel.contentViewController = NSHostingController(rootView: accessView(for: screen, style: frames.accessStyle))
+        panel.setFrame(frames.access, display: false)
+        return panel
+    }
+
+    private func accessView(for screen: NSScreen, style: PanelAccessStyle) -> AnyView {
+        switch style {
+        case .notchPill:
+            return AnyView(
+                HoverPillView(
+                    settings: settings,
+                    onEnter: { [weak self] in self?.showPreview(on: screen) },
+                    onExit: { [weak self] in self?.scheduleClose() },
+                    onTap: { [weak self] in self?.togglePreview(on: screen) }
+                )
             )
-        )
-        pillWindow = panel
+        case .miniBar:
+            return AnyView(
+                HoverMiniBarView(
+                    onBarEnter: { [weak self] in self?.showPreview(on: screen) },
+                    onBarExit: { [weak self] in self?.scheduleClose() },
+                    onTap: { [weak self] in self?.togglePreview(on: screen) }
+                )
+            )
+        }
     }
 
     private func configurePreviewWindow() {
@@ -136,11 +156,11 @@ final class HoverWindowController {
         return panel
     }
 
-    private func togglePreview() {
+    private func togglePreview(on screen: NSScreen?) {
         if previewWindow?.isVisible == true {
             closePreview()
         } else {
-            showPreview()
+            showPreview(on: screen)
         }
     }
 
@@ -173,23 +193,24 @@ final class HoverWindowController {
         previewWindow.hasShadow = true
         previewWindow.invalidateShadow()
         previewWindow.ignoresMouseEvents = false
-        if let screen = previewWindow.screen ?? targetScreen() {
+        if let screen = previewWindow.screen ?? activePreviewScreen ?? targetScreen() {
             previewWindow.setFrame(panelFrames(on: screen).preview, display: false)
         }
         previewWindow.orderOut(nil)
+        menuStore.providerStore.prepareForPanelClose()
     }
 
-    private func showPreview() {
+    private func showPreview(on requestedScreen: NSScreen?) {
         cancelClose()
         resetTask?.cancel()
         resetTask = nil
         mouseEventsEnableTask?.cancel()
         mouseEventsEnableTask = nil
 
-        guard let screen = targetScreen(), let previewWindow else { return }
+        guard let screen = requestedScreen ?? targetScreen(), let previewWindow else { return }
+        activePreviewScreen = screen
         let frames = panelFrames(on: screen)
-        pillWindow?.setFrame(frames.pill, display: true)
-        menuStore.providerStore.prepareForPanelOpen()
+        menuStore.providerStore.prepareForPanelOpen(isSecondaryDisplay: isSecondaryDisplay(screen))
         setProviderActive(true)
         menuStore.providerStore.refreshSelected(reason: .panelOpened)
 
@@ -279,7 +300,10 @@ final class HoverWindowController {
     }
 
     private func closePreview() {
-        guard let previewWindow, previewWindow.isVisible else { return }
+        guard let previewWindow, previewWindow.isVisible else {
+            menuStore.providerStore.prepareForPanelClose()
+            return
+        }
 
         stopHoverMonitor()
         mouseEventsEnableTask?.cancel()
@@ -290,11 +314,13 @@ final class HoverWindowController {
         resetTask = nil
         setProviderActive(false)
 
-        guard !shouldReduceMotion, let screen = previewWindow.screen ?? targetScreen() else {
+        guard !shouldReduceMotion, let screen = previewWindow.screen ?? activePreviewScreen ?? targetScreen() else {
             previewWindow.orderOut(nil)
             setPreviewContentVisible(false, animated: false)
             previewWindow.alphaValue = 1
             previewWindow.hasShadow = true
+            activePreviewScreen = nil
+            menuStore.providerStore.prepareForPanelClose()
             return
         }
 
@@ -335,6 +361,8 @@ final class HoverWindowController {
         mouseEventsEnableTask = nil
         previewWindow.orderOut(nil)
         setProviderActive(false)
+        activePreviewScreen = nil
+        menuStore.providerStore.prepareForPanelClose()
         setPreviewContentVisible(false, animated: false)
         previewWindow.alphaValue = 1
         previewWindow.hasShadow = true
@@ -345,9 +373,9 @@ final class HoverWindowController {
 
     private func isMouseInsideHoverRegion() -> Bool {
         let location = NSEvent.mouseLocation
-        let pillContainsMouse = pillWindow?.frame.insetBy(dx: -4, dy: -4).contains(location) ?? false
+        let accessContainsMouse = accessWindows.values.contains { $0.frame.insetBy(dx: -4, dy: -4).contains(location) }
         let previewContainsMouse = previewWindow?.frame.insetBy(dx: -4, dy: -4).contains(location) ?? false
-        return pillContainsMouse || previewContainsMouse
+        return accessContainsMouse || previewContainsMouse
     }
 
     private func startHoverMonitor() {
@@ -379,6 +407,53 @@ final class HoverWindowController {
         scheduleClose()
     }
 
+    private func syncAccessWindows() {
+        let screens = accessScreens()
+        let desiredKeys = Set(screens.map(screenKey))
+
+        let obsoleteKeys = accessWindows.keys.filter { !desiredKeys.contains($0) }
+        for key in obsoleteKeys {
+            accessWindows[key]?.orderOut(nil)
+            accessWindows.removeValue(forKey: key)
+            accessWindowStyles.removeValue(forKey: key)
+        }
+
+        for screen in screens {
+            let key = screenKey(screen)
+            let frames = panelFrames(on: screen)
+
+            if accessWindows[key] == nil || accessWindowStyles[key] != frames.accessStyle {
+                accessWindows[key]?.orderOut(nil)
+                accessWindows[key] = configureAccessWindow(for: screen)
+                accessWindowStyles[key] = frames.accessStyle
+            }
+
+            accessWindows[key]?.setFrame(frames.access, display: true)
+        }
+    }
+
+    private func accessScreens() -> [NSScreen] {
+        switch settings.displayPlacementMode {
+        case .allDisplays:
+            return NSScreen.screens.sorted { lhs, rhs in
+                if lhs.frame.minX == rhs.frame.minX {
+                    return lhs.frame.minY < rhs.frame.minY
+                }
+                return lhs.frame.minX < rhs.frame.minX
+            }
+        case .automatic, .mainDisplay, .secondaryDisplay:
+            return targetScreen().map { [$0] } ?? []
+        }
+    }
+
+    private func screenKey(_ screen: NSScreen) -> String {
+        if let displayID = screen.displayID {
+            return String(displayID)
+        }
+
+        return "\(screen.frame.origin.x),\(screen.frame.origin.y),\(screen.frame.width),\(screen.frame.height)"
+    }
+
     private func targetScreen() -> NSScreen? {
         switch settings.displayPlacementMode {
         case .automatic:
@@ -387,6 +462,8 @@ final class HoverWindowController {
             return mainDisplay()
         case .secondaryDisplay:
             return secondaryDisplay() ?? mainDisplay()
+        case .allDisplays:
+            return screenContainingMouse() ?? mainDisplay()
         }
     }
 
@@ -426,6 +503,11 @@ final class HoverWindowController {
         return lhs === rhs
     }
 
+    private func isSecondaryDisplay(_ screen: NSScreen) -> Bool {
+        guard let mainDisplay = mainDisplay() else { return false }
+        return !isSameDisplay(screen, mainDisplay)
+    }
+
     private var shouldReduceMotion: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
@@ -455,6 +537,7 @@ final class HoverWindowController {
                 guard let self else { return }
                 closePreview()
                 positionWindows()
+                showPill()
             }
             .store(in: &settingsCancellables)
 
@@ -473,16 +556,18 @@ final class HoverWindowController {
             .sink { [weak self] _ in
                 guard let self else { return }
                 DispatchQueue.main.async { [weak self] in
+                    self?.syncAccessWindows()
                     self?.resizePreviewForPanelSizeChange()
+                    self?.showPill()
                 }
             }
             .store(in: &settingsCancellables)
     }
 
     private func resizePreviewForPanelSizeChange() {
-        guard let screen = previewWindow?.screen ?? targetScreen() else { return }
+        syncAccessWindows()
+        guard let screen = activePreviewScreen ?? previewWindow?.screen ?? targetScreen() else { return }
         let frames = panelFrames(on: screen)
-        pillWindow?.setFrame(frames.pill, display: true)
 
         guard let previewWindow else { return }
         guard previewWindow.isVisible else {

@@ -6,6 +6,7 @@ final class ProviderStore: ObservableObject {
     let registry: ProviderRegistry
     @Published var selectedPluginID: PluginID?
     @Published private(set) var states: [PluginID: ProviderState]
+    @Published private(set) var isPanelOnSecondaryDisplay = false
 
     private let settings: AppSettings
     private var settingsCancellables = Set<AnyCancellable>()
@@ -23,7 +24,11 @@ final class ProviderStore: ObservableObject {
     }
 
     var visibleManifests: [PluginManifest] {
-        settings.visibleManifests(registry.manifests)
+        let manifests = settings.visibleManifests(registry.manifests)
+        guard isPanelOnSecondaryDisplay, !settings.showMirrorOnSecondaryDisplays else {
+            return manifests
+        }
+        return manifests.filter { $0.id != MirrorProvider.pluginID }
     }
 
     var selectedProvider: (any PocketProvider)? {
@@ -43,14 +48,24 @@ final class ProviderStore: ObservableObject {
         refreshSelected(reason: .userRequested)
     }
 
-    func prepareForPanelOpen() {
-        guard let id = settings.providerSelectionForPanelOpen(manifests: registry.manifests) else {
+    func prepareForPanelOpen(isSecondaryDisplay: Bool = false) {
+        if isPanelOnSecondaryDisplay != isSecondaryDisplay {
+            isPanelOnSecondaryDisplay = isSecondaryDisplay
+        }
+
+        guard let id = providerSelectionForCurrentPanel() else {
             selectedPluginID = nil
             return
         }
         if selectedPluginID != id {
             selectedPluginID = id
         }
+    }
+
+    func prepareForPanelClose() {
+        guard isPanelOnSecondaryDisplay else { return }
+        isPanelOnSecondaryDisplay = false
+        settingsDidChange()
     }
 
     func moveProvider(_ id: PluginID, by offset: Int) {
@@ -121,6 +136,13 @@ final class ProviderStore: ObservableObject {
                 self?.scheduleSettingsDidChange()
             }
             .store(in: &settingsCancellables)
+
+        settings.$showMirrorOnSecondaryDisplays
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.scheduleSettingsDidChange()
+            }
+            .store(in: &settingsCancellables)
     }
 
     private func scheduleSettingsDidChange() {
@@ -140,7 +162,7 @@ final class ProviderStore: ObservableObject {
         if let selectedPluginID, visibleIDs.contains(selectedPluginID) {
             return
         }
-        selectedPluginID = settings.providerSelectionForPanelOpen(manifests: registry.manifests)
+        selectedPluginID = providerSelectionForCurrentPanel()
     }
 
     private func syncProviderSideEffects() {
@@ -150,6 +172,21 @@ final class ProviderStore: ObservableObject {
         } else {
             ClipboardHistoryStore.shared.stopMonitoring()
         }
+    }
+
+    private func providerSelectionForCurrentPanel() -> PluginID? {
+        let visible = visibleManifests
+        let visibleIDs = Set(visible.map(\.id.rawValue))
+        if settings.rememberLastSelectedProvider,
+           let lastSelectedProviderRawValue = settings.lastSelectedProviderRawValue,
+           visibleIDs.contains(lastSelectedProviderRawValue) {
+            return PluginID(rawValue: lastSelectedProviderRawValue)
+        }
+        if let preferredProviderRawValue = settings.preferredProviderRawValue,
+           visibleIDs.contains(preferredProviderRawValue) {
+            return PluginID(rawValue: preferredProviderRawValue)
+        }
+        return visible.first?.id
     }
 
     private func shouldRefresh(provider: any PocketProvider, reason: RefreshReason) -> Bool {

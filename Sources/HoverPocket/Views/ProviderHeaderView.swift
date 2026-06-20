@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct ProviderHeaderView: View {
     @ObservedObject var providerStore: ProviderStore
     @ObservedObject var settings: AppSettings
+    @ObservedObject private var appUpdater = AppUpdater.shared
     let onOpenSettings: () -> Void
     @State private var draggingPluginID: PluginID?
 
@@ -17,6 +18,25 @@ struct ProviderHeaderView: View {
                 providerButtons
 
                 HeaderIconDivider()
+            }
+
+            if appUpdater.hasAvailableUpdate {
+                Button {
+                    appUpdater.checkForUpdates()
+                } label: {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.28, green: 0.58, blue: 1.0))
+                        .frame(width: 24, height: 24)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color(red: 0.28, green: 0.58, blue: 1.0).opacity(0.14))
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(settings.text(.updateAvailable))
+                .disabled(!appUpdater.canCheckForUpdates)
             }
 
             Button {

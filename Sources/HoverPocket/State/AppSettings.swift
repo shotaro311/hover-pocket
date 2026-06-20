@@ -75,6 +75,12 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var showMirrorOnSecondaryDisplays: Bool {
+        didSet {
+            defaults.set(showMirrorOnSecondaryDisplays, forKey: Self.showMirrorOnSecondaryDisplaysKey)
+        }
+    }
+
     @Published var showStickyNoteUndoToast: Bool {
         didSet {
             defaults.set(showStickyNoteUndoToast, forKey: Self.showStickyNoteUndoToastKey)
@@ -100,6 +106,7 @@ final class AppSettings: ObservableObject {
     private static let preferredProviderKey = "preferredProvider"
     private static let lastSelectedProviderKey = "lastSelectedProvider"
     private static let showMirrorMicrophoneCheckKey = "showMirrorMicrophoneCheck"
+    private static let showMirrorOnSecondaryDisplaysKey = "showMirrorOnSecondaryDisplays"
     private static let showStickyNoteUndoToastKey = "showStickyNoteUndoToast"
     private static let stickyNoteGridSizeKey = "stickyNoteGridSize"
 
@@ -134,6 +141,11 @@ final class AppSettings: ObservableObject {
             self.showMirrorMicrophoneCheck = false
         } else {
             self.showMirrorMicrophoneCheck = defaults.bool(forKey: Self.showMirrorMicrophoneCheckKey)
+        }
+        if defaults.object(forKey: Self.showMirrorOnSecondaryDisplaysKey) == nil {
+            self.showMirrorOnSecondaryDisplays = false
+        } else {
+            self.showMirrorOnSecondaryDisplays = defaults.bool(forKey: Self.showMirrorOnSecondaryDisplaysKey)
         }
         if defaults.object(forKey: Self.showStickyNoteUndoToastKey) == nil {
             self.showStickyNoteUndoToast = true

@@ -74,6 +74,15 @@ struct SettingsView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(settings.text(.showMirrorOnSecondaryDisplays), isOn: $settings.showMirrorOnSecondaryDisplays)
+
+                Text(settings.text(.showMirrorOnSecondaryDisplaysDetail))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -234,7 +243,7 @@ struct SettingsView: View {
                 .font(.system(size: 13, weight: .bold))
 
             HStack(spacing: 10) {
-                Label(appUpdater.statusText, systemImage: appUpdater.statusSystemImage)
+                Label(appUpdater.statusText(language: language), systemImage: appUpdater.statusSystemImage)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
 

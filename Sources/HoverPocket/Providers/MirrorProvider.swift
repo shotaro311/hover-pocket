@@ -1,8 +1,10 @@
 import SwiftUI
 
 struct MirrorProvider: PocketProvider {
+    static let pluginID = PluginID(rawValue: "mirror")
+
     let manifest = PluginManifest(
-        id: PluginID(rawValue: "mirror"),
+        id: Self.pluginID,
         title: "Mirror",
         symbolName: "person.crop.rectangle",
         defaultEnabled: true,
