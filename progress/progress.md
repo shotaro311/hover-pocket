@@ -75,6 +75,7 @@ status: active
 - 2026-06-20: Sticky Notes drag UX を改善。並び替え中の JSON 保存をドロップ完了時へ寄せ、ホバーウィンドウ外へ出た時点だけ外部ドラッグ閉じ処理を走らせるようにした。空タイトル/本文の新規付箋は確定時に破棄し、ドラッグ中の下部ゴミ箱ドロップでアーカイブできるようにした。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-20: top pill の handle icon を Settings から `B / C / None` で選べるようにした。ノッチに合わせた pill / preview の geometry は変更せず、中央アイコン描画だけを差し替える構成。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-20: top pill のノッチ横 handle area を Settings から表示/非表示に切り替えられるようにした。実ノッチありのときだけ横 handle 幅を外せるようにし、ノッチ本体の黒い領域と preview center は維持する。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
+- 2026-06-20: 最新コミット `1744fe3` を build `45` として配布。`APP_VERSION=0.1.0 APP_BUILD=45 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh` により notarization/staple、ZIP再生成、GitHub Release `v0.1.0-45` 公開、latest appcast 公開まで完了。remote ZIP の SHA256、Sparkle EdDSA署名、展開後 app の `codesign` / `stapler validate` / `spctl`、build 41 から Settings > Check for Updates 経由で build 45 へ更新されることを確認済み。
 
 ## 進行中
 
@@ -92,8 +93,6 @@ status: active
 - AI command palette の手動 UX 確認を行い、曖昧入力時の候補表示と Calendar write 承認導線を確認する。
 - Calendar editor の手入力/ドラッグ調整日時入力と日付ダブルクリック起動を実機操作で確認する。
 - 2026-06-22: 伊勢田さんに Calendar Pocket 検証を行い、`progress/2026-06/2026-06-22_calendar-pocket-validation.md` の観察項目に沿って記録する。
-- notarized ZIP を GitHub Releases にアップロードし、`HoverPocket-<version>-<build>.zip`、`.sha256`、`appcast.xml` を公開する。
-- GitHub Releases へ appcast を公開した後、実際の Sparkle 更新成功フローを手動確認する。
 - アプリ化の要件を決める: 終了/自動起動、Google OAuth consent screen、設定項目、今後追加する provider。
 - 次の本物のレビューコメント付きPRで、Codex Automation がレビュー内容を読んで修正commitを積むところまで確認する。
 
@@ -105,8 +104,7 @@ status: active
 - 機密情報や token は含めていない。
 - `.env.local` には Google OAuth 設定値が入るため、値を出力せず、repo に含めない。配布用 app bundle へは iOS OAuth client ID / URL scheme のみ注入し、Desktop OAuth client secret は通常入れない。
 - Google OAuth consent screen が Testing の場合、登録済み test user のみログイン可能。一般公開には Google OAuth app verification が必要になる可能性がある。
-- 現在のZIP成果物 `dist/releases/HoverPocket-0.1.0-41.zip` は Developer ID Application 署名と notarization/staple 済み。一般配布には GitHub Releases など公開先へのアップロードと、配布URL経由での最終 Gatekeeper 確認が必要。
-- GitHub Releases latest の `appcast.xml` は現時点で 404。公開前に更新確認を押しても Sparkle 汎用エラーを出さないよう修正済みだが、実更新成功確認は公開後に必要。
+- 現在の公開ZIP成果物 `dist/releases/HoverPocket-0.1.0-45.zip` は Developer ID Application 署名と notarization/staple 済みで、GitHub Release `v0.1.0-45` に公開済み。latest appcast も build `45` を指しており、build `41` から Sparkle 更新できることを確認済み。
 - Sparkle秘密鍵は macOS Keychain の `hover-pocket` アカウントにある。秘密鍵ファイルをGitに書き出さない。
 - Calendar event 書き込みには `calendar.events` scope が必要。既存の read-only token では再接続が必要。
 - AI native Phase 1 の Apple Foundation Models provider は SDK / OS が未対応の場合、deterministic fallback で候補生成する。モデル本体の実行確認は対応OSで別途必要。
