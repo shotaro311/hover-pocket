@@ -76,6 +76,7 @@ status: active
 - 2026-06-20: top pill のノッチ横 handle area を Settings から表示/非表示に切り替えられるようにした。実ノッチありのときだけ横 handle 幅を外せるようにし、ノッチ本体の黒い領域と preview center は維持する。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-20: 最新コミット `1744fe3` を build `45` として配布。`APP_VERSION=0.1.0 APP_BUILD=45 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh` により notarization/staple、ZIP再生成、GitHub Release `v0.1.0-45` 公開、latest appcast 公開まで完了。remote ZIP の SHA256、Sparkle EdDSA署名、展開後 app の `codesign` / `stapler validate` / `spctl`、build 41 から Settings > Check for Updates 経由で build 45 へ更新されることを確認済み。
 - 2026-06-20: README と AI architecture report を現在の `ホバーポケット` / `HoverPocket`、Sticky Notes、AI command lane、notarized GitHub Release、Sparkle 更新済みの状態へ同期。`publish_github_release.sh` の既定 release notes も初回配布向け文言から一般 release 文言へ更新。
+- 2026-06-20: GitHub Release の自動生成 Source code ZIP とアプリ配布ZIPの誤認対策として、README に一般ユーザー向け download `HoverPocket-macOS-app.zip` を明記。`publish_github_release.sh` も app-only の alias asset を upload するようにした。ZIP 作成は `ditto --norsrc --keepParent` に切り替え、公開ZIPのトップレベルは `HoverPocket.app` のみにした。
 
 ## 進行中
 
@@ -100,7 +101,7 @@ status: active
 - 機密情報や token は含めていない。
 - `.env.local` には Google OAuth 設定値が入るため、値を出力せず、repo に含めない。配布用 app bundle へは iOS OAuth client ID / URL scheme のみ注入し、Desktop OAuth client secret は通常入れない。
 - Google OAuth consent screen が Testing の場合、登録済み test user のみログイン可能。一般公開には Google OAuth app verification が必要になる可能性がある。
-- 現在の公開ZIP成果物 `dist/releases/HoverPocket-0.1.0-45.zip` は Developer ID Application 署名と notarization/staple 済みで、GitHub Release `v0.1.0-45` に公開済み。latest appcast も build `45` を指しており、build `41` から Sparkle 更新できることを確認済み。
+- 現在の公開ZIP成果物 `dist/releases/HoverPocket-0.1.0-45.zip` は Developer ID Application 署名と notarization/staple 済みで、GitHub Release `v0.1.0-45` に公開済み。latest appcast も build `45` を指しており、build `41` から Sparkle 更新できることを確認済み。一般ユーザー向けには同じ app-only payload を分かりやすい `HoverPocket-macOS-app.zip` として案内し、公開URLから再取得したZIPのトップレベルが `HoverPocket.app` のみであることを確認済み。
 - Sparkle秘密鍵は macOS Keychain の `hover-pocket` アカウントにある。秘密鍵ファイルをGitに書き出さない。
 - Calendar event 書き込みには `calendar.events` scope が必要。既存の read-only token では再接続が必要。
 - AI native Phase 1 の Apple Foundation Models provider は SDK / OS が未対応の場合、deterministic fallback で候補生成する。モデル本体の実行確認は対応OSで別途必要。
@@ -146,6 +147,7 @@ status: active
 ## 最近の更新
 
 - 2026-06-20: README と AI architecture report を最新状態へ同期。README は `ホバーポケット` / `HoverPocket` の名称、Sticky Notes、AI command lane、notarized GitHub Release、Sparkle 更新済みの状態へ更新し、古い「notarization 未整備」記述を削除。
+- 2026-06-20: GitHub Release の Source code ZIP 誤認対策として、README と release upload script に `HoverPocket-macOS-app.zip` の app-only download 導線を追加。配布ZIPは `__MACOSX` を含まない形式へ差し替え、公開URLからの再ダウンロードでもトップレベルが `HoverPocket.app` のみであることを確認。
 - 2026-06-20: top pill の handle icon を `B / C / None` から選択可能にした。ノッチに合わせた pill geometry は変更せず、Settings の `Handle icon` から切り替える。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-20: top pill のノッチ横 handle area を Settings から表示/非表示にできるようにした。非表示時もノッチ本体側の黒い領域と preview center は維持する。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-20: Sticky Notes のドラッグ改善として、並び替え中の保存頻度を下げ、外部ドラッグ閉じ判定をホバーウィンドウ外へ出た時点へ変更。空の新規付箋は確定時に破棄し、ドラッグ中の下部ゴミ箱ドロップでアーカイブできるようにした。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。

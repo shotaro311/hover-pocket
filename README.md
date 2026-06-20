@@ -14,6 +14,18 @@
 - 公開 ZIP は Developer ID 署名、Apple notarization、staple 済みです。
 - Sparkle の appcast は GitHub Releases で公開済みで、build `41` から build `45` への手動アップデート成功を確認済みです。
 
+## ダウンロードとインストール
+
+一般ユーザーは、GitHub Release の Assets から `HoverPocket-macOS-app.zip` をダウンロードしてください。
+
+```text
+https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip
+```
+
+解凍すると `HoverPocket.app` だけが出ます。この `HoverPocket.app` を `アプリケーション` フォルダへ移動して起動します。
+
+GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は開発者向けのソースコード一式です。アプリ本体ではないため、通常のインストールでは使いません。
+
 ## 現在できること
 
 現在は組み込みの `Mirror`、`Calendar`、`Clipboard`、`Sticky Notes` プロバイダーを搭載しています。パネル下部には AI command lane があり、Calendar 操作の一部を自然文から実行できます。

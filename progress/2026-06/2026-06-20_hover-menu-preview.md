@@ -33,6 +33,9 @@ status: active
 - README を現在の `ホバーポケット` / `HoverPocket`、Sticky Notes、AI command lane、handle icon / notch side handle 設定、notarized GitHub Release、Sparkle 更新済みの状態へ更新。
 - `docs/report/20260610-hoverpocket-local-cloud-llm-architecture.md` に 2026-06-20 時点の AI native Phase 1 実装状況を追記。
 - `script/publish_github_release.sh` の既定 release notes を、初回配布向け文言から一般 release 向け文言へ更新。
+- GitHub Release の `Source code (zip)` をユーザーがアプリZIPと誤認しやすい問題に対応。README に `HoverPocket-macOS-app.zip` を一般ユーザー向け download として明記し、`Source code` は開発者向けであることを追記。
+- `script/publish_github_release.sh` が今後の release で app-only の分かりやすい alias asset `HoverPocket-macOS-app.zip` も upload するように変更。Sparkle 用の versioned ZIP / SHA256 / appcast は維持。
+- ZIP 作成を `ditto --norsrc --keepParent` へ変更し、解凍時に `__MACOSX` がトップレベルに出ないようにした。build `45` の公開 asset も同じ形式で差し替えた。
 
 ## 成果物
 
@@ -45,7 +48,8 @@ status: active
 - ZIP SHA256: `362a6fcea234f3faf8b19eb5df625b48594eb573fc3fb5f79a765ff8ffd0986e`
 - Release: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-45`
 - Latest ZIP: `dist/releases/HoverPocket-0.1.0-45.zip`
-- Latest ZIP SHA256: `9971d5da8ccb5b6cdf3a4e7e24ce4cdb91375503001694c6d89029edc6b550ae`
+- Latest ZIP SHA256: `f2b33a63235f2bf7ca61490f1bebec4905bc462cc3af399aa3b0d6bc101eec82`
+- Latest install ZIP: `https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip`
 - Latest appcast: `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`
 - Latest notary submission ID: `e536914a-b908-47e5-9389-8796658492ca`
 - Latest notary status: `Accepted`
@@ -87,6 +91,14 @@ status: active
 - `git diff --check`: README / docs / progress / release notes 更新後に成功。
 - `bash -n script/publish_github_release.sh`: README / docs 更新後の release notes 文言変更に対して成功。
 - `swift build`: README / docs 更新後にも成功。
+- remote `HoverPocket-0.1.0-45.zip` の payload 確認: top-level は `HoverPocket.app` のみで、アプリ外ファイルなし。
+- GitHub 自動生成の Source code ZIP 確認: `Package.swift`、`progress/`、`Sources/` などを含むため、ユーザー向け download としては不適切。
+- `bash -n script/publish_github_release.sh`: `HoverPocket-macOS-app.zip` alias upload 対応後に成功。
+- `git diff --check`: README / publish script / progress 更新後に成功。
+- `ditto --norsrc --keepParent` の一時ZIP検証: top-level は `HoverPocket.app` のみ。展開後 app の `codesign`、`stapler validate`、`spctl` が成功。
+- `APP_VERSION=0.1.0 APP_BUILD=45 PUBLISH_DRY_RUN=1 ./script/publish_github_release.sh`: top-level が `HoverPocket.app` のみの ZIP で成功。
+- `APP_VERSION=0.1.0 APP_BUILD=45 PUBLISH_PREPARE_RELEASE=0 ./script/publish_github_release.sh`: GitHub Release `v0.1.0-45` に `HoverPocket-macOS-app.zip`、`HoverPocket-0.1.0-45.zip`、SHA256、`appcast.xml` を upload 済み。
+- 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip` を再ダウンロードし、top-level が `HoverPocket.app` のみ、SHA256 が `f2b33a63235f2bf7ca61490f1bebec4905bc462cc3af399aa3b0d6bc101eec82` であることを確認。
 
 ## 残り
 

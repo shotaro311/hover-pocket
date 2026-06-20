@@ -44,7 +44,7 @@ codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
 ZIP_PATH="$RELEASE_DIR/${APP_NAME}-${APP_VERSION}-${APP_BUILD}.zip"
 rm -f "$ZIP_PATH" "$ZIP_PATH.sha256"
-ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
+ditto -c -k --norsrc --keepParent "$APP_PATH" "$ZIP_PATH"
 shasum -a 256 "$ZIP_PATH" > "$ZIP_PATH.sha256"
 
 APP_VERSION="$APP_VERSION" APP_BUILD="$APP_BUILD" "$ROOT_DIR/script/generate_appcast.sh" >/dev/null
