@@ -306,9 +306,9 @@ struct SettingsView: View {
         case .restoring:
             return "Checking"
         case .needsReconnect:
-            return "Reconnect"
+            return "Reconnect Google"
         default:
-            return "Connect"
+            return "Open Google Login"
         }
     }
 

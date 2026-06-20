@@ -61,6 +61,14 @@ final class HoverWindowController {
         }
     }
 
+    func openPanelFromMenu() {
+        showPreview()
+    }
+
+    func openSettingsFromMenu() {
+        showSettings()
+    }
+
     private func panelFrames(on screen: NSScreen) -> PanelFrames {
         PanelGeometry.frames(
             on: screen,

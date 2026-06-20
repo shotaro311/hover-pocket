@@ -77,10 +77,11 @@ status: active
 - 2026-06-20: 最新コミット `1744fe3` を build `45` として配布。`APP_VERSION=0.1.0 APP_BUILD=45 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh` により notarization/staple、ZIP再生成、GitHub Release `v0.1.0-45` 公開、latest appcast 公開まで完了。remote ZIP の SHA256、Sparkle EdDSA署名、展開後 app の `codesign` / `stapler validate` / `spctl`、build 41 から Settings > Check for Updates 経由で build 45 へ更新されることを確認済み。
 - 2026-06-20: README と AI architecture report を現在の `ホバーポケット` / `HoverPocket`、Sticky Notes、AI command lane、notarized GitHub Release、Sparkle 更新済みの状態へ同期。`publish_github_release.sh` の既定 release notes も初回配布向け文言から一般 release 文言へ更新。
 - 2026-06-20: GitHub Release の自動生成 Source code ZIP とアプリ配布ZIPの誤認対策として、README に一般ユーザー向け download `HoverPocket-macOS-app.zip` を明記。`publish_github_release.sh` も app-only の alias asset を upload するようにした。ZIP 作成は `ditto --norsrc --keepParent` に切り替え、公開ZIPのトップレベルは `HoverPocket.app` のみにした。
+- 2026-06-20: Google OAuth credential を Data Protection Keychain 保存へ移行し、旧Keychain項目は認証UIなしで読める場合だけ移行するようにした。menu bar status item を追加し、設定 / 更新確認 / 終了へ進めるようにした。Camera / Microphone permission off 時の System Settings CTA と Calendar の Google login CTA も追加。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 
 ## 進行中
 
-- Codex: `ホバーポケット` / `HoverPocket` として GitHub public repository `shotaro311/hover-pocket` へ公開済み。`Mirror`、`Calendar`、`Clipboard`、`Sticky Notes` の built-in provider が有効。Calendar は Google iOS OAuth client + custom URL scheme + PKCE + `ASWebAuthenticationSession` で実アカウント接続、予定取得、追加、編集、削除まで実装済み。Sticky Notes は inline editor、title optional、drag reorder、外部 drag text payload、下部ゴミ箱 drop archive、S/M/L grid、Undo toast 設定に対応済み。AI native Phase 1 として Apple Foundation Models provider、Calendar read/write tool、ApprovalGate、AuditLog、下段 command lane、fallback candidates を実装済み。上部 handle は `B / C / None` とノッチ横 handle area 表示/非表示を Settings から選択可能。build `45` は notarized/stapled ZIP として GitHub Release `v0.1.0-45` に公開済みで、latest appcast と Sparkle 手動更新も検証済み。
+- Codex: `ホバーポケット` / `HoverPocket` として GitHub public repository `shotaro311/hover-pocket` へ公開済み。`Mirror`、`Calendar`、`Clipboard`、`Sticky Notes` の built-in provider が有効。Calendar は Google iOS OAuth client + custom URL scheme + PKCE + `ASWebAuthenticationSession` で実アカウント接続、予定取得、追加、編集、削除まで実装済み。Google OAuth credential は Data Protection Keychain 保存へ移行し、旧Keychain項目は認証UIなしで読める場合だけ移行する。Sticky Notes は inline editor、title optional、drag reorder、外部 drag text payload、下部ゴミ箱 drop archive、S/M/L grid、Undo toast 設定に対応済み。AI native Phase 1 として Apple Foundation Models provider、Calendar read/write tool、ApprovalGate、AuditLog、下段 command lane、fallback candidates を実装済み。上部 handle は `B / C / None` とノッチ横 handle area 表示/非表示を Settings から選択可能。macOS menu bar status item から設定 / 更新確認 / 終了を実行可能。Camera / Microphone permission off 時は System Settings へのCTA、Calendar未接続時はGoogle login CTAを表示する。build `45` は notarized/stapled ZIP として GitHub Release `v0.1.0-45` に公開済みで、latest appcast と Sparkle 手動更新も検証済み。
 
 ## 次アクション
 
@@ -103,6 +104,7 @@ status: active
 - Google OAuth consent screen が Testing の場合、登録済み test user のみログイン可能。一般公開には Google OAuth app verification が必要になる可能性がある。
 - 現在の公開ZIP成果物 `dist/releases/HoverPocket-0.1.0-45.zip` は Developer ID Application 署名と notarization/staple 済みで、GitHub Release `v0.1.0-45` に公開済み。latest appcast も build `45` を指しており、build `41` から Sparkle 更新できることを確認済み。一般ユーザー向けには同じ app-only payload を分かりやすい `HoverPocket-macOS-app.zip` として案内し、公開URLから再取得したZIPのトップレベルが `HoverPocket.app` のみであることを確認済み。
 - Sparkle秘密鍵は macOS Keychain の `hover-pocket` アカウントにある。秘密鍵ファイルをGitに書き出さない。
+- 旧 file-based Keychain の Google OAuth item が現在の署名で読めない場合は、Keychainパスワードダイアログを出さずに未接続扱いへ落とす。その場合はGoogle再ログインが必要。
 - Calendar event 書き込みには `calendar.events` scope が必要。既存の read-only token では再接続が必要。
 - AI native Phase 1 の Apple Foundation Models provider は SDK / OS が未対応の場合、deterministic fallback で候補生成する。モデル本体の実行確認は対応OSで別途必要。
 - Clipboard history は機密テキストも拾えるため、今後は除外ルール、保存期間設定、private mode を追加する余地がある。
@@ -146,6 +148,7 @@ status: active
 
 ## 最近の更新
 
+- 2026-06-20: Google OAuth Keychain の起動時パスワードダイアログ対策として Data Protection Keychain 保存へ移行。menu bar status item、Camera / Microphone privacy settings CTA、Calendar Google login CTA を追加。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-20: README と AI architecture report を最新状態へ同期。README は `ホバーポケット` / `HoverPocket` の名称、Sticky Notes、AI command lane、notarized GitHub Release、Sparkle 更新済みの状態へ更新し、古い「notarization 未整備」記述を削除。
 - 2026-06-20: GitHub Release の Source code ZIP 誤認対策として、README と release upload script に `HoverPocket-macOS-app.zip` の app-only download 導線を追加。配布ZIPは `__MACOSX` を含まない形式へ差し替え、公開URLからの再ダウンロードでもトップレベルが `HoverPocket.app` のみであることを確認。
 - 2026-06-20: top pill の handle icon を `B / C / None` から選択可能にした。ノッチに合わせた pill geometry は変更せず、Settings の `Handle icon` から切り替える。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。

@@ -425,9 +425,11 @@ struct GoogleCalendarPreviewView: View {
         case .restoring:
             return "Checking saved Google account."
         case .needsReconnect:
-            return "Reconnect to edit events."
+            return "Reconnect Google Calendar to load and edit events."
+        case .signingIn:
+            return "Complete Google sign-in in the browser."
         default:
-            return "Connect your Google account."
+            return "Open Google login to load your calendar."
         }
     }
 
@@ -438,9 +440,9 @@ struct GoogleCalendarPreviewView: View {
         case .restoring:
             return "Checking"
         case .needsReconnect:
-            return "Reconnect"
+            return "Reconnect Google"
         default:
-            return "Connect"
+            return "Open Google Login"
         }
     }
 

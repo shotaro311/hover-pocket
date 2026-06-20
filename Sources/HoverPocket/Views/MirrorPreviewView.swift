@@ -79,7 +79,7 @@ struct MirrorPreviewView: View {
                 .foregroundStyle(microphoneAccentColor)
                 .frame(width: 18)
 
-            Text("Mic Check")
+            Text(microphoneTitle)
                 .font(.system(size: 10.5, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.82))
                 .lineLimit(1)
@@ -94,27 +94,49 @@ struct MirrorPreviewView: View {
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button {
-                microphone.toggleRecordingPlayback()
-            } label: {
-                Image(systemName: microphoneControlIconName)
-                    .font(.system(size: 10.5, weight: .bold))
-                    .frame(width: 30, height: 30)
+            if microphoneNeedsPrivacySettings {
+                Button {
+                    SystemSettingsOpener.openMicrophonePrivacy()
+                } label: {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 10.5, weight: .bold))
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white.opacity(0.84))
+                .background(
+                    Circle()
+                        .fill(Color.yellow.opacity(0.24))
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                )
+                .contentShape(Circle())
+                .help("Open Microphone Privacy Settings")
+            } else {
+                Button {
+                    microphone.toggleRecordingPlayback()
+                } label: {
+                    Image(systemName: microphoneControlIconName)
+                        .font(.system(size: 10.5, weight: .bold))
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white.opacity(0.84))
+                .background(
+                    Circle()
+                        .fill(microphoneControlFillColor)
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                )
+                .contentShape(Circle())
+                .disabled(!microphone.canUseRecordingControl)
+                .opacity(microphone.canUseRecordingControl ? 1 : 0.42)
+                .help(microphoneControlHelp)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white.opacity(0.84))
-            .background(
-                Circle()
-                    .fill(microphoneControlFillColor)
-            )
-            .overlay(
-                Circle()
-                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
-            )
-            .contentShape(Circle())
-            .disabled(!microphone.canUseRecordingControl)
-            .opacity(microphone.canUseRecordingControl ? 1 : 0.42)
-            .help(microphoneControlHelp)
         }
         .frame(height: 34)
         .padding(.horizontal, 11)
@@ -156,6 +178,19 @@ struct MirrorPreviewView: View {
             return "exclamationmark.triangle.fill"
         case .idle:
             return "mic"
+        }
+    }
+
+    private var microphoneTitle: String {
+        microphoneNeedsPrivacySettings ? "Enable Mic" : "Mic Check"
+    }
+
+    private var microphoneNeedsPrivacySettings: Bool {
+        switch microphone.status {
+        case .denied, .restricted:
+            return true
+        default:
+            return false
         }
     }
 
@@ -231,13 +266,21 @@ struct MirrorPreviewView: View {
             messageOverlay(
                 symbol: "camera.fill",
                 title: "Camera access is off",
-                message: "Enable camera access in System Settings."
+                message: "Enable camera access in System Settings.",
+                actionTitle: "Open Camera Settings",
+                action: {
+                    SystemSettingsOpener.openCameraPrivacy()
+                }
             )
         case .restricted:
             messageOverlay(
                 symbol: "lock.fill",
                 title: "Camera is restricted",
-                message: "macOS is blocking camera access."
+                message: "macOS is blocking camera access.",
+                actionTitle: "Open Camera Settings",
+                action: {
+                    SystemSettingsOpener.openCameraPrivacy()
+                }
             )
         case .unavailable:
             messageOverlay(
@@ -269,7 +312,13 @@ struct MirrorPreviewView: View {
         .background(Color.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private func messageOverlay(symbol: String, title: String, message: String) -> some View {
+    private func messageOverlay(
+        symbol: String,
+        title: String,
+        message: String,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) -> some View {
         VStack(spacing: 10) {
             Image(systemName: symbol)
                 .font(.system(size: 22, weight: .semibold))
@@ -283,6 +332,17 @@ struct MirrorPreviewView: View {
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.white.opacity(0.52))
+
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.black.opacity(0.86))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Color.white.opacity(0.82), in: Capsule())
+                    .help(actionTitle)
+            }
         }
         .padding(18)
         .frame(maxWidth: 280)

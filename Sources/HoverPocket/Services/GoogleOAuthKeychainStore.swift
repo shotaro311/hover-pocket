@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 import Security
 
 struct GoogleOAuthStoredCredential: Codable, Equatable, Sendable {
@@ -14,19 +15,20 @@ enum GoogleOAuthKeychainError: Error {
 
 final class GoogleOAuthKeychainStore: @unchecked Sendable {
     private let service = "local.codex.hover-pocket.google-oauth"
-    private let legacyServices = [
+    private let legacyFileKeychainServices = [
+        "local.codex.hover-pocket.google-oauth",
         "local.codex.notch-pocket.google-oauth",
         "local.codex.hover-menu-preview.google-oauth"
     ]
     private let account = "default"
 
     func load() throws -> GoogleOAuthStoredCredential? {
-        if let credential = try load(service: service) {
+        if let credential = try load(service: service, usesDataProtectionKeychain: true) {
             return credential
         }
 
-        for legacyService in legacyServices {
-            if let credential = try load(service: legacyService) {
+        for legacyService in legacyFileKeychainServices {
+            if let credential = try load(service: legacyService, usesDataProtectionKeychain: false) {
                 try? save(credential)
                 return credential
             }
@@ -43,7 +45,7 @@ final class GoogleOAuthKeychainStore: @unchecked Sendable {
             throw GoogleOAuthKeychainError.encodeFailed
         }
 
-        var query = baseQuery(service: service)
+        var query = baseQuery(service: service, usesDataProtectionKeychain: true)
         let attributes: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
@@ -66,20 +68,23 @@ final class GoogleOAuthKeychainStore: @unchecked Sendable {
     }
 
     func delete() {
-        SecItemDelete(baseQuery(service: service) as CFDictionary)
-        for legacyService in legacyServices {
-            SecItemDelete(baseQuery(service: legacyService) as CFDictionary)
+        SecItemDelete(baseQuery(service: service, usesDataProtectionKeychain: true) as CFDictionary)
+        for legacyService in legacyFileKeychainServices {
+            SecItemDelete(baseQuery(service: legacyService, usesDataProtectionKeychain: false) as CFDictionary)
         }
     }
 
-    private func load(service: String) throws -> GoogleOAuthStoredCredential? {
-        var query = baseQuery(service: service)
+    private func load(service: String, usesDataProtectionKeychain: Bool) throws -> GoogleOAuthStoredCredential? {
+        var query = baseQuery(service: service, usesDataProtectionKeychain: usesDataProtectionKeychain)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         if status == errSecItemNotFound {
+            return nil
+        }
+        if Self.isNonInteractiveAccessFailure(status) {
             return nil
         }
         guard status == errSecSuccess else {
@@ -95,11 +100,28 @@ final class GoogleOAuthKeychainStore: @unchecked Sendable {
         }
     }
 
-    private func baseQuery(service: String) -> [String: Any] {
-        [
+    private func baseQuery(service: String, usesDataProtectionKeychain: Bool) -> [String: Any] {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
+        query[kSecUseAuthenticationContext as String] = Self.nonInteractiveAuthenticationContext()
+        if usesDataProtectionKeychain {
+            query[kSecUseDataProtectionKeychain as String] = true
+        }
+        return query
+    }
+
+    private static func nonInteractiveAuthenticationContext() -> LAContext {
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        return context
+    }
+
+    private static func isNonInteractiveAccessFailure(_ status: OSStatus) -> Bool {
+        status == errSecInteractionNotAllowed ||
+            status == errSecAuthFailed ||
+            status == errSecUserCanceled
     }
 }

@@ -36,6 +36,9 @@ status: active
 - GitHub Release の `Source code (zip)` をユーザーがアプリZIPと誤認しやすい問題に対応。README に `HoverPocket-macOS-app.zip` を一般ユーザー向け download として明記し、`Source code` は開発者向けであることを追記。
 - `script/publish_github_release.sh` が今後の release で app-only の分かりやすい alias asset `HoverPocket-macOS-app.zip` も upload するように変更。Sparkle 用の versioned ZIP / SHA256 / appcast は維持。
 - ZIP 作成を `ditto --norsrc --keepParent` へ変更し、解凍時に `__MACOSX` がトップレベルに出ないようにした。build `45` の公開 asset も同じ形式で差し替えた。
+- Google OAuth credential を Data Protection Keychain へ保存するように変更。旧 file-based Keychain 項目は認証UIなしで読める場合だけ移行し、読めない場合はKeychainパスワードダイアログを出さずGoogle再ログインへ誘導する。
+- macOS menu bar に HoverPocket の status item を追加。メニューから `Open HoverPocket`、`Settings...`、`Check for Updates`、`Quit HoverPocket` を実行できるようにした。
+- Mirror の camera denied / restricted 表示に `Open Camera Settings` を追加。microphone permission が off の場合は mic row の右端ボタンから Microphone Privacy 設定へ進めるようにした。Calendar の未接続 / 再接続CTAは Google login を開く文言にした。
 
 ## 成果物
 
@@ -99,6 +102,11 @@ status: active
 - `APP_VERSION=0.1.0 APP_BUILD=45 PUBLISH_DRY_RUN=1 ./script/publish_github_release.sh`: top-level が `HoverPocket.app` のみの ZIP で成功。
 - `APP_VERSION=0.1.0 APP_BUILD=45 PUBLISH_PREPARE_RELEASE=0 ./script/publish_github_release.sh`: GitHub Release `v0.1.0-45` に `HoverPocket-macOS-app.zip`、`HoverPocket-0.1.0-45.zip`、SHA256、`appcast.xml` を upload 済み。
 - 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip` を再ダウンロードし、top-level が `HoverPocket.app` のみ、SHA256 が `f2b33a63235f2bf7ca61490f1bebec4905bc462cc3af399aa3b0d6bc101eec82` であることを確認。
+- `swift build`: Keychain / menu bar / permission CTA 実装後に警告なしで成功。
+- `git diff --check`: Keychain / menu bar / permission CTA 実装後に成功。
+- `./script/build_and_run.sh --verify`: app bundle 再生成、Apple Development 署名、起動確認まで成功。
+- `codesign -dvvv --entitlements :- dist/HoverPocket.app`: bundle ID `local.codex.hover-pocket`、Apple Development 署名を確認。
+- `plutil -p dist/HoverPocket.app/Contents/Info.plist`: `CFBundleIconFile=AppIcon`、Camera / Microphone usage description、Google Sign-In client ID の注入を確認。
 
 ## 残り
 
