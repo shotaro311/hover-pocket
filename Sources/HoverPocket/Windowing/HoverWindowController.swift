@@ -51,7 +51,7 @@ final class HoverWindowController {
     func positionWindows() {
         guard let screen = targetScreen() else { return }
 
-        let frames = PanelGeometry.frames(on: screen, panelSize: settings.panelSize)
+        let frames = panelFrames(on: screen)
         pillWindow?.setFrame(frames.pill, display: true)
 
         if previewWindow?.isVisible == true {
@@ -59,6 +59,14 @@ final class HoverWindowController {
         } else {
             previewWindow?.setFrame(frames.preview, display: false)
         }
+    }
+
+    private func panelFrames(on screen: NSScreen) -> PanelFrames {
+        PanelGeometry.frames(
+            on: screen,
+            panelSize: settings.panelSize,
+            showsNotchSideHandleArea: settings.showNotchSideHandleArea
+        )
     }
 
     private func configurePillWindow() {
@@ -69,6 +77,7 @@ final class HoverWindowController {
         panel.hasShadow = false
         panel.contentViewController = NSHostingController(
             rootView: HoverPillView(
+                settings: settings,
                 onEnter: { [weak self] in self?.showPreview() },
                 onExit: { [weak self] in self?.scheduleClose() },
                 onTap: { [weak self] in self?.togglePreview() }
@@ -153,7 +162,7 @@ final class HoverWindowController {
         previewWindow.invalidateShadow()
         previewWindow.ignoresMouseEvents = false
         if let screen = previewWindow.screen ?? targetScreen() {
-            previewWindow.setFrame(PanelGeometry.frames(on: screen, panelSize: settings.panelSize).preview, display: false)
+            previewWindow.setFrame(panelFrames(on: screen).preview, display: false)
         }
         previewWindow.orderOut(nil)
     }
@@ -166,7 +175,7 @@ final class HoverWindowController {
         mouseEventsEnableTask = nil
 
         guard let screen = targetScreen(), let previewWindow else { return }
-        let frames = PanelGeometry.frames(on: screen, panelSize: settings.panelSize)
+        let frames = panelFrames(on: screen)
         pillWindow?.setFrame(frames.pill, display: true)
         menuStore.providerStore.prepareForPanelOpen()
         setProviderActive(true)
@@ -277,7 +286,7 @@ final class HoverWindowController {
             return
         }
 
-        let frames = PanelGeometry.frames(on: screen, panelSize: settings.panelSize)
+        let frames = panelFrames(on: screen)
         previewWindow.hasShadow = false
         previewWindow.ignoresMouseEvents = true
 
@@ -446,11 +455,21 @@ final class HoverWindowController {
                 }
             }
             .store(in: &settingsCancellables)
+
+        settings.$showNotchSideHandleArea
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                DispatchQueue.main.async { [weak self] in
+                    self?.resizePreviewForPanelSizeChange()
+                }
+            }
+            .store(in: &settingsCancellables)
     }
 
     private func resizePreviewForPanelSizeChange() {
         guard let screen = previewWindow?.screen ?? targetScreen() else { return }
-        let frames = PanelGeometry.frames(on: screen, panelSize: settings.panelSize)
+        let frames = panelFrames(on: screen)
         pillWindow?.setFrame(frames.pill, display: true)
 
         guard let previewWindow else { return }

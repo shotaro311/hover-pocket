@@ -55,9 +55,17 @@ struct PanelFrames {
 }
 
 enum PanelGeometry {
-    static func frames(on screen: NSScreen, panelSize: PanelSizeOption) -> PanelFrames {
+    static func frames(
+        on screen: NSScreen,
+        panelSize: PanelSizeOption,
+        showsNotchSideHandleArea: Bool = true
+    ) -> PanelFrames {
         let notchProfile = notchProfile(on: screen)
-        let pill = pillMetrics(on: screen, notchProfile: notchProfile)
+        let pill = pillMetrics(
+            on: screen,
+            notchProfile: notchProfile,
+            showsNotchSideHandleArea: showsNotchSideHandleArea
+        )
         let previewSize = PanelLayout.panelTotalSize(for: panelSize)
         let pillY = screen.frame.maxY - PanelLayout.pillHeight
         let pillFrame = NSRect(
@@ -102,9 +110,16 @@ enum PanelGeometry {
         return .none(centerX: screen.frame.midX)
     }
 
-    private static func pillMetrics(on screen: NSScreen, notchProfile: ScreenNotchProfile) -> PillMetrics {
+    private static func pillMetrics(
+        on screen: NSScreen,
+        notchProfile: ScreenNotchProfile,
+        showsNotchSideHandleArea: Bool
+    ) -> PillMetrics {
         switch notchProfile {
         case let .actual(minX, width, _):
+            guard showsNotchSideHandleArea else {
+                return PillMetrics(minX: minX, width: width)
+            }
             return PillMetrics(
                 minX: minX - PanelLayout.notchHandleWidth,
                 width: PanelLayout.notchHandleWidth + width

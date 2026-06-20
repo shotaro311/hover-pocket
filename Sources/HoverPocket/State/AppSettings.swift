@@ -21,6 +21,18 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var pillHandleIconStyle: PillHandleIconStyle {
+        didSet {
+            defaults.set(pillHandleIconStyle.rawValue, forKey: Self.pillHandleIconStyleKey)
+        }
+    }
+
+    @Published var showNotchSideHandleArea: Bool {
+        didSet {
+            defaults.set(showNotchSideHandleArea, forKey: Self.showNotchSideHandleAreaKey)
+        }
+    }
+
     @Published var providerOrderRawValues: [String] {
         didSet {
             defaults.set(providerOrderRawValues, forKey: Self.providerOrderKey)
@@ -73,6 +85,8 @@ final class AppSettings: ObservableObject {
     private static let displayPlacementModeKey = "displayPlacementMode"
     private static let panelSizeKey = "panelSize"
     private static let providerSwitchingModeKey = "providerSwitchingMode"
+    private static let pillHandleIconStyleKey = "pillHandleIconStyle"
+    private static let showNotchSideHandleAreaKey = "showNotchSideHandleArea"
     private static let providerOrderKey = "providerOrder"
     private static let hiddenProvidersKey = "hiddenProviders"
     private static let rememberLastSelectedProviderKey = "rememberLastSelectedProvider"
@@ -90,6 +104,13 @@ final class AppSettings: ObservableObject {
         self.panelSize = panelSizeRawValue.flatMap(PanelSizeOption.init(rawValue:)) ?? .medium
         let providerSwitchingModeRawValue = defaults.string(forKey: Self.providerSwitchingModeKey)
         self.providerSwitchingMode = providerSwitchingModeRawValue.flatMap(ProviderSwitchingMode.init(rawValue:)) ?? .click
+        let pillHandleIconStyleRawValue = defaults.string(forKey: Self.pillHandleIconStyleKey)
+        self.pillHandleIconStyle = pillHandleIconStyleRawValue.flatMap(PillHandleIconStyle.init(rawValue:)) ?? .chevron
+        if defaults.object(forKey: Self.showNotchSideHandleAreaKey) == nil {
+            self.showNotchSideHandleArea = true
+        } else {
+            self.showNotchSideHandleArea = defaults.bool(forKey: Self.showNotchSideHandleAreaKey)
+        }
         self.providerOrderRawValues = defaults.stringArray(forKey: Self.providerOrderKey) ?? []
         let hiddenValues = defaults.stringArray(forKey: Self.hiddenProvidersKey) ?? []
         self.hiddenProviderRawValues = Set(hiddenValues)

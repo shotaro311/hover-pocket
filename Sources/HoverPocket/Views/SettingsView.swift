@@ -77,6 +77,23 @@ struct SettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
+                Toggle("Show side handle beside notch", isOn: $settings.showNotchSideHandleArea)
+
+                Picker("Handle icon", selection: $settings.pillHandleIconStyle) {
+                    ForEach(PillHandleIconStyle.allCases) { style in
+                        Text(style.title).tag(style)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(!settings.showNotchSideHandleArea)
+
+                Text(handleIconDetail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
                 Picker("Icon switching", selection: $settings.providerSwitchingMode) {
                     ForEach(ProviderSwitchingMode.allCases) { mode in
                         Text(mode.title).tag(mode)
@@ -121,6 +138,13 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private var handleIconDetail: String {
+        if !settings.showNotchSideHandleArea {
+            return "ノッチ本体に合わせた黒い領域は残し、横の小さなアイコンエリアだけを隠します。"
+        }
+        return settings.pillHandleIconStyle.detail
     }
 
     private var mirrorSection: some View {
