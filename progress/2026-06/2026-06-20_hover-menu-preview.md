@@ -36,9 +36,10 @@ status: active
 - GitHub Release の `Source code (zip)` をユーザーがアプリZIPと誤認しやすい問題に対応。README に `HoverPocket-macOS-app.zip` を一般ユーザー向け download として明記し、`Source code` は開発者向けであることを追記。
 - `script/publish_github_release.sh` が今後の release で app-only の分かりやすい alias asset `HoverPocket-macOS-app.zip` も upload するように変更。Sparkle 用の versioned ZIP / SHA256 / appcast は維持。
 - ZIP 作成を `ditto --norsrc --keepParent` へ変更し、解凍時に `__MACOSX` がトップレベルに出ないようにした。build `45` の公開 asset も同じ形式で差し替えた。
-- Google OAuth credential を Data Protection Keychain へ保存するように変更。旧 file-based Keychain 項目は認証UIなしで読める場合だけ移行し、読めない場合はKeychainパスワードダイアログを出さずGoogle再ログインへ誘導する。
+- Google OAuth credential の Data Protection Keychain 保存は `errSecMissingEntitlement (-34018)` で保存できないことが判明したため撤回。通常 Keychain に戻し、認証UIなしで読める既存項目だけ移行し、読めない/重複する古い項目はログイン後の新credentialで上書き保存するようにした。
 - macOS menu bar に HoverPocket の status item を追加。メニューから `Open HoverPocket`、`Settings...`、`Check for Updates`、`Quit HoverPocket` を実行できるようにした。
 - Mirror の camera denied / restricted 表示に `Open Camera Settings` を追加。microphone permission が off の場合は mic row の右端ボタンから Microphone Privacy 設定へ進めるようにした。Calendar の未接続 / 再接続CTAは Google login を開く文言にした。
+- Camera Privacy 設定から許可した直後にミラーが復帰しない問題に対応。Camera Settings を開いた後に permission recovery polling を走らせ、アプリ復帰時にも authorization status を再確認して、許可済みに変わったらその場で camera session を開始する。
 - コミット `8a4489d` を build `51` として配布。初回の publish script 実行では notarytool submit が詳細なしで失敗したため、ZIP / Keychain profile / Developer ID 署名を確認後、単体 `xcrun notarytool submit` を再実行して `Accepted` を取得。staple、ZIP / appcast 再生成、GitHub Release `v0.1.0-51` 公開まで完了。
 
 ## 成果物
@@ -113,6 +114,9 @@ status: active
 - `./script/build_and_run.sh --verify`: app bundle 再生成、Apple Development 署名、起動確認まで成功。
 - `codesign -dvvv --entitlements :- dist/HoverPocket.app`: bundle ID `local.codex.hover-pocket`、Apple Development 署名を確認。
 - `plutil -p dist/HoverPocket.app/Contents/Info.plist`: `CFBundleIconFile=AppIcon`、Camera / Microphone usage description、Google Sign-In client ID の注入を確認。
+- `./script/verify_google_calendar.sh`: Data Protection Keychain 使用時は `GoogleOAuthKeychainError: unhandledStatus(-34018)` で失敗し、Googleログイン後にリンクされない原因を確認。
+- `./script/verify_google_calendar.sh`: 通常 Keychain 保存へ戻した後は `google_calendar_verify=ok`、`used_login_flow=true`、`calendar_sources=5`、`events_in_visible_grid=79`、`today_events=2` で成功。
+- `rg -n "shotaro|matsu|gmail|refresh_token|access_token|AIza|ya29" dist/HoverPocket.app Sources README.md Package.swift script`: app bundle に Google credential 値は含まれないことを確認。ヒットは source field names、repo URL、開発署名者名のみ。
 - `xcrun notarytool history --keychain-profile hover-pocket --output-format json --no-progress`: Keychain profile が有効で過去 submission を読めることを確認。
 - `xcrun notarytool submit dist/releases/HoverPocket-0.1.0-51.zip --keychain-profile hover-pocket --wait --timeout 30m --output-format json`: submission `17e76b3f-36d5-4caf-b714-474ec42854aa` が `Accepted`。
 - `xcrun stapler staple dist/HoverPocket.app`、`codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`、`xcrun stapler validate dist/HoverPocket.app`、`spctl --assess --type execute --verbose=2 dist/HoverPocket.app`: 成功、`source=Notarized Developer ID`。

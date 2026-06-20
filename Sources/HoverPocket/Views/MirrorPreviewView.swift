@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+import AppKit
 import OSLog
 import SwiftUI
 
@@ -33,6 +34,9 @@ struct MirrorPreviewView: View {
         }
         .onChange(of: settings.showMirrorMicrophoneCheck) { _, isVisible in
             syncMicrophoneMonitoring()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            camera.recheckPermissionAfterExternalChange()
         }
     }
 
@@ -269,7 +273,7 @@ struct MirrorPreviewView: View {
                 message: "Enable camera access in System Settings.",
                 actionTitle: "Open Camera Settings",
                 action: {
-                    SystemSettingsOpener.openCameraPrivacy()
+                    camera.openCameraPrivacySettings()
                 }
             )
         case .restricted:
@@ -279,7 +283,7 @@ struct MirrorPreviewView: View {
                 message: "macOS is blocking camera access.",
                 actionTitle: "Open Camera Settings",
                 action: {
-                    SystemSettingsOpener.openCameraPrivacy()
+                    camera.openCameraPrivacySettings()
                 }
             )
         case .unavailable:
@@ -370,6 +374,8 @@ final class MirrorCameraModel: ObservableObject {
     private var wantsCamera = false
     private var runIntentVersion = 0
     private var pendingStopTask: DispatchWorkItem?
+    private var permissionRecoveryTask: DispatchWorkItem?
+    private var permissionRecoveryAttempts = 0
 
     init() {
         self.session = sessionBox.session
@@ -406,9 +412,21 @@ final class MirrorCameraModel: ObservableObject {
             prepareIfAuthorized()
             activate()
         } else {
+            stopPermissionRecoveryPolling()
             updateStatus(.idle)
             scheduleStopSession()
         }
+    }
+
+    func openCameraPrivacySettings() {
+        SystemSettingsOpener.openCameraPrivacy()
+        startPermissionRecoveryPolling()
+    }
+
+    func recheckPermissionAfterExternalChange() {
+        guard wantsCamera else { return }
+        prepareIfAuthorized()
+        activate()
     }
 
     func markPreviewReady() {
@@ -499,6 +517,7 @@ final class MirrorCameraModel: ObservableObject {
 
     private func startSession() {
         guard !isStarting else { return }
+        stopPermissionRecoveryPolling()
 
         isStarting = true
         if !isSessionRunning {
@@ -542,6 +561,7 @@ final class MirrorCameraModel: ObservableObject {
     }
 
     private func scheduleStopSession() {
+        stopPermissionRecoveryPolling()
         pendingStopTask?.cancel()
         let stopIntentVersion = runIntentVersion
         let task = DispatchWorkItem { [weak self] in
@@ -584,6 +604,53 @@ final class MirrorCameraModel: ObservableObject {
     private func updateStatus(_ newStatus: MirrorCameraStatus) {
         guard status != newStatus else { return }
         status = newStatus
+    }
+
+    private func startPermissionRecoveryPolling() {
+        guard wantsCamera else { return }
+        permissionRecoveryAttempts = 0
+        schedulePermissionRecoveryPoll()
+    }
+
+    private func schedulePermissionRecoveryPoll() {
+        permissionRecoveryTask?.cancel()
+        let task = DispatchWorkItem { [weak self] in
+            self?.pollPermissionRecovery()
+        }
+        permissionRecoveryTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: task)
+    }
+
+    private func pollPermissionRecovery() {
+        permissionRecoveryTask = nil
+        guard wantsCamera else {
+            permissionRecoveryAttempts = 0
+            return
+        }
+
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            permissionRecoveryAttempts = 0
+            prepareIfAuthorized()
+            activate()
+        case .notDetermined:
+            permissionRecoveryAttempts = 0
+            activate()
+        case .denied, .restricted:
+            permissionRecoveryAttempts += 1
+            if permissionRecoveryAttempts < 120 {
+                schedulePermissionRecoveryPoll()
+            }
+        @unknown default:
+            permissionRecoveryAttempts = 0
+            updateStatus(.failed("Unknown camera permission state."))
+        }
+    }
+
+    private func stopPermissionRecoveryPolling() {
+        permissionRecoveryTask?.cancel()
+        permissionRecoveryTask = nil
+        permissionRecoveryAttempts = 0
     }
 
     private static func status(for error: Error) -> MirrorCameraStatus {

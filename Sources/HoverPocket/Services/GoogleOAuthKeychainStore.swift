@@ -16,19 +16,18 @@ enum GoogleOAuthKeychainError: Error {
 final class GoogleOAuthKeychainStore: @unchecked Sendable {
     private let service = "local.codex.hover-pocket.google-oauth"
     private let legacyFileKeychainServices = [
-        "local.codex.hover-pocket.google-oauth",
         "local.codex.notch-pocket.google-oauth",
         "local.codex.hover-menu-preview.google-oauth"
     ]
     private let account = "default"
 
     func load() throws -> GoogleOAuthStoredCredential? {
-        if let credential = try load(service: service, usesDataProtectionKeychain: true) {
+        if let credential = try load(service: service) {
             return credential
         }
 
         for legacyService in legacyFileKeychainServices {
-            if let credential = try load(service: legacyService, usesDataProtectionKeychain: false) {
+            if let credential = try load(service: legacyService) {
                 try? save(credential)
                 return credential
             }
@@ -45,7 +44,7 @@ final class GoogleOAuthKeychainStore: @unchecked Sendable {
             throw GoogleOAuthKeychainError.encodeFailed
         }
 
-        var query = baseQuery(service: service, usesDataProtectionKeychain: true)
+        let query = baseQuery(service: service, allowsAuthenticationUI: false)
         let attributes: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
@@ -55,27 +54,26 @@ final class GoogleOAuthKeychainStore: @unchecked Sendable {
         if updateStatus == errSecSuccess {
             return
         }
+        if Self.isNonInteractiveAccessFailure(updateStatus) || updateStatus == errSecDuplicateItem {
+            try replaceExistingItem(with: data)
+            return
+        }
         guard updateStatus == errSecItemNotFound else {
             throw GoogleOAuthKeychainError.unhandledStatus(updateStatus)
         }
 
-        query[kSecValueData as String] = data
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let addStatus = SecItemAdd(query as CFDictionary, nil)
-        guard addStatus == errSecSuccess else {
-            throw GoogleOAuthKeychainError.unhandledStatus(addStatus)
-        }
+        try add(data)
     }
 
     func delete() {
-        SecItemDelete(baseQuery(service: service, usesDataProtectionKeychain: true) as CFDictionary)
+        SecItemDelete(baseQuery(service: service, allowsAuthenticationUI: false) as CFDictionary)
         for legacyService in legacyFileKeychainServices {
-            SecItemDelete(baseQuery(service: legacyService, usesDataProtectionKeychain: false) as CFDictionary)
+            SecItemDelete(baseQuery(service: legacyService, allowsAuthenticationUI: false) as CFDictionary)
         }
     }
 
-    private func load(service: String, usesDataProtectionKeychain: Bool) throws -> GoogleOAuthStoredCredential? {
-        var query = baseQuery(service: service, usesDataProtectionKeychain: usesDataProtectionKeychain)
+    private func load(service: String) throws -> GoogleOAuthStoredCredential? {
+        var query = baseQuery(service: service, allowsAuthenticationUI: false)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
@@ -100,15 +98,42 @@ final class GoogleOAuthKeychainStore: @unchecked Sendable {
         }
     }
 
-    private func baseQuery(service: String, usesDataProtectionKeychain: Bool) -> [String: Any] {
+    private func add(_ data: Data) throws {
+        var query = baseQuery(service: service, allowsAuthenticationUI: false)
+        query[kSecValueData as String] = data
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+
+        let addStatus = SecItemAdd(query as CFDictionary, nil)
+        if addStatus == errSecSuccess {
+            return
+        }
+        if addStatus == errSecDuplicateItem || Self.isNonInteractiveAccessFailure(addStatus) {
+            try replaceExistingItem(with: data)
+            return
+        }
+        throw GoogleOAuthKeychainError.unhandledStatus(addStatus)
+    }
+
+    private func replaceExistingItem(with data: Data) throws {
+        SecItemDelete(baseQuery(service: service, allowsAuthenticationUI: false) as CFDictionary)
+
+        var query = baseQuery(service: service, allowsAuthenticationUI: false)
+        query[kSecValueData as String] = data
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let addStatus = SecItemAdd(query as CFDictionary, nil)
+        guard addStatus == errSecSuccess else {
+            throw GoogleOAuthKeychainError.unhandledStatus(addStatus)
+        }
+    }
+
+    private func baseQuery(service: String, allowsAuthenticationUI: Bool) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
-        query[kSecUseAuthenticationContext as String] = Self.nonInteractiveAuthenticationContext()
-        if usesDataProtectionKeychain {
-            query[kSecUseDataProtectionKeychain as String] = true
+        if !allowsAuthenticationUI {
+            query[kSecUseAuthenticationContext as String] = Self.nonInteractiveAuthenticationContext()
         }
         return query
     }
@@ -122,6 +147,7 @@ final class GoogleOAuthKeychainStore: @unchecked Sendable {
     private static func isNonInteractiveAccessFailure(_ status: OSStatus) -> Bool {
         status == errSecInteractionNotAllowed ||
             status == errSecAuthFailed ||
-            status == errSecUserCanceled
+            status == errSecUserCanceled ||
+            status == errSecMissingEntitlement
     }
 }
