@@ -9,7 +9,7 @@ status: active
 
 ## 概要
 
-- `ホバーポケット` は、macOS 画面上部へホバーすると、ミラー、Google Calendar、Clipboard 履歴を素早く開ける prototype app。
+- `ホバーポケット` は、macOS 画面上部へホバーすると、ミラー、Google Calendar、Clipboard 履歴、Sticky Notes を素早く開ける macOS app。
 - `/Users/shotaro/Documents/Codex/.../outputs/hover-menu-preview` で作成した prototype を、開発継続用に `/Users/shotaro/code/share/hover-menu-preview` へ移行済み。
 
 ## 最新の検証済み状態
@@ -43,7 +43,7 @@ status: active
 - 2026-06-07: Clipboard provider を追加。テキスト/画像 clipboard 履歴、画像の Application Support 保存、クリック再コピー、外部アプリへの drag/drop provider を実装。provider の表示/非表示、順番、最後に開いた panel / default panel 設定を追加。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。起動後 CPU 0.0% を確認。
 - 2026-06-07: Codex chat 欄への画像 drag/drop が効かない報告を受け、drag 開始直後に hover panel を一時非表示にし、画像 drag payload を file URL 起点の `NSItemProvider` に変更。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-07: Mirror provider に A案ベースの compact microphone check row を追加。設定で表示/非表示を切替可能。Mirror microphone row 表示中は `AVAudioEngine` で meter を自動起動し、panel 非表示/非active/設定OFFで停止。button は一時録音用に変更し、`録音 -> 停止 -> 再生 -> 再生完了後にメモリから削除` の流れにした。audio file は作成しない。`NSMicrophoneUsageDescription` を generated app bundle に追加。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
-- 2026-06-07: アプリ名を `ノッチポケット` に決定。SwiftPM package / executable / generated app bundle を `NotchPocket` に変更し、bundle 表示名を `ノッチポケット` に設定。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。`.env.local` は ignore 済みで、公開対象 tracked files に実OAuth値やtokenがないことを確認。GitHub public repository `shotaro311/notch-pocket` へ push 済み。
+- 2026-06-07: 一時的なアプリ名で GitHub public repository へ push。現在の正式名称は `ホバーポケット` / `HoverPocket`。
 - 2026-06-07: README を日本語中心へ全面更新。概要、機能、実行方法、Google Calendar 設定、表示先、実装メモ、ノッチサイズ、注意事項を日本語で読めるようにした。
 - 2026-06-08: パネルを開いたまま provider アイコンを切り替えると機能だけ切り替わりアイコン選択状態が更新されない問題を修正。ヘッダーを `ProviderStore` 監視の `ProviderHeaderView` に分離。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-08: GitHub Actions `Codex PR Router` を追加。PR作成/更新/レビュー時に変更ファイルを分類し、Mac worker 向け origin / autofix / human merge / docs-only auto-merge safe ラベルを付ける。trusted author の docs-only PR だけ auto-merge 有効化を試みる。
@@ -53,8 +53,7 @@ status: active
 - 2026-06-08: PR `#2` の追加修正として、ヘッダーのサイズ表示を現在サイズ1文字だけに変更。サイズ変更時は上端 `Y = 33` を維持することを実ウィンドウフレームで確認。今後のPR作成運用も Mac / Windows ともに Draft ではなく Ready PR 前提へ変更済み。
 - 2026-06-09: 上部ヘッダー右端の電源アイコンを廃止し、provider アイコン群と設定ボタンの間に薄い縦線の仕切りを追加。Settings で `Icon switching` を `Click / Hover` から選べるようにし、`Hover` ではアイコンにポインタを重ねた時点で provider が切り替わる。追加でヘッダーUIを `ProviderHeaderView.swift` へ分離し、`ProviderStore` の設定監視を provider 構成関連に限定。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-09: Google OAuth の Keychain 許可ダイアログが毎回出る問題を調査し、Calendar Store 初期化時の Keychain 読み込みを廃止。Calendar を開く / Connect を押すタイミングまで認証確認を遅延。`script/build_and_run.sh` で利用可能な `Apple Development` 署名IDを自動検出して app bundle を安定署名するよう変更。`codesign` で ad-hoc ではなく Apple Development 署名を確認済み。
-- 2026-06-09: アプリ名を `ノッチポケット` / `NotchPocket` へ変更。SwiftPM package / executable / generated app bundle / README / progress / OAuth callback page / permission descriptions を更新。Keychain service と Clipboard 保存先も新名へ変更し、旧保存先からの移行処理を追加。GitHub repository slug と local `origin` も `shotaro311/notch-pocket` へ変更済み。
-- 2026-06-09: アプリ名を `ホバーポケット` / `HoverPocket` へ変更。SwiftPM package / executable / generated app bundle / README / OAuth callback page / permission descriptions を更新。source path を `Sources/HoverPocket` へ移し、provider protocol を `PocketProvider` に改名。旧 `NotchPocket` / `HoverMenuPreview` の Keychain service と Clipboard 保存先からの移行は維持。GitHub repository slug と local `origin` は `shotaro311/hover-pocket` へ変更済み。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。generated app bundle は `HoverPocket.app`、bundle ID は `local.codex.hover-pocket`。
+- 2026-06-09: アプリ名を正式名称の `ホバーポケット` / `HoverPocket` へ変更。SwiftPM package / executable / generated app bundle / README / OAuth callback page / permission descriptions を更新。source path を `Sources/HoverPocket` へ移し、provider protocol を `PocketProvider` に改名。旧保存先からの Keychain service と Clipboard 保存先の移行は維持。GitHub repository slug と local `origin` は `shotaro311/hover-pocket` へ変更済み。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。generated app bundle は `HoverPocket.app`、bundle ID は `local.codex.hover-pocket`。
 - 2026-06-09: MIT License を `LICENSE` として追加し、README に `License` セクションを追加。ソースコードは MIT License、`ホバーポケット` / `HoverPocket` の名称・ロゴ・ブランド表示の商標的利用は別扱いであることを明記。`git diff --check` 成功。
 - 2026-06-10: AI native Phase 1 MVP を `feature/ai-native-phase1` で実装。Apple Foundation Models provider、`PocketAction` / `ToolResult` / `IntentPlan` / `ApprovalGate` / `AuditLog`、Calendar read/write tool、下段 command palette lane、構造化 action 由来の承認 UI、解釈候補 fallback UI を追加。`swift build` 成功。Ollama、Codex harness、Clipboard Tool、マルチステップ自律実行、チャット履歴は未実装。
 - 2026-06-10: AI native Phase 1 の review fix として、ApprovalCard が全 `approvalFields` を表示するよう修正。`PocketAction.requiresApproval` を `kind` 由来の computed property に変更し、Calendar write は常に承認必須にした。`swift build` 成功。
@@ -76,29 +75,26 @@ status: active
 - 2026-06-20: top pill の handle icon を Settings から `B / C / None` で選べるようにした。ノッチに合わせた pill / preview の geometry は変更せず、中央アイコン描画だけを差し替える構成。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-20: top pill のノッチ横 handle area を Settings から表示/非表示に切り替えられるようにした。実ノッチありのときだけ横 handle 幅を外せるようにし、ノッチ本体の黒い領域と preview center は維持する。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-20: 最新コミット `1744fe3` を build `45` として配布。`APP_VERSION=0.1.0 APP_BUILD=45 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh` により notarization/staple、ZIP再生成、GitHub Release `v0.1.0-45` 公開、latest appcast 公開まで完了。remote ZIP の SHA256、Sparkle EdDSA署名、展開後 app の `codesign` / `stapler validate` / `spctl`、build 41 から Settings > Check for Updates 経由で build 45 へ更新されることを確認済み。
+- 2026-06-20: README と AI architecture report を現在の `ホバーポケット` / `HoverPocket`、Sticky Notes、AI command lane、notarized GitHub Release、Sparkle 更新済みの状態へ同期。`publish_github_release.sh` の既定 release notes も初回配布向け文言から一般 release 文言へ更新。
 
 ## 進行中
 
-- Codex: `ホバーポケット` として GitHub public repository へ公開済み。`Mirror` provider は crash / 重さ / close 残像 / ちらつき / UI 枠との同期 / 繰り返し開閉時の処理蓄積対策まで実装済み。provider アイコン切替時のヘッダー選択状態更新バグも修正済み。`Calendar` provider は Google iOS OAuth client + custom URL scheme + PKCE + `ASWebAuthenticationSession` で Google account login、calendarList、events.list、日付別イベント抽出まで実アカウントで検証済み。追加で予定追加、編集、削除の API / UI は実装済み。Calendar editor は手入力/ドラッグ調整対応の日時入力と日付セルのダブルクリック新規予定起動を追加済み。`Clipboard` provider は text/image 履歴、local image 保存、再コピー、drag/drop まで実装済み。パネル表示領域は `小 / 中 / 大` で切替可能で、ヘッダーには現在サイズ1文字だけを表示する。AI native Phase 1 として、Apple Foundation Models provider、構造化 action、Calendar read/write tool、ApprovalGate、AuditLog、下段 command palette lane、解釈候補 fallback UI、自動フォーカスを追加済み。上部ヘッダーの電源アイコンは廃止済みで、provider アイコン切替は Settings から `Click / Hover` を選択できる。GitHub PR の自動分類と Mac / Windows Codex Automation による自動修正運用の入口動作も実PRで確認済み。
+- Codex: `ホバーポケット` / `HoverPocket` として GitHub public repository `shotaro311/hover-pocket` へ公開済み。`Mirror`、`Calendar`、`Clipboard`、`Sticky Notes` の built-in provider が有効。Calendar は Google iOS OAuth client + custom URL scheme + PKCE + `ASWebAuthenticationSession` で実アカウント接続、予定取得、追加、編集、削除まで実装済み。Sticky Notes は inline editor、title optional、drag reorder、外部 drag text payload、下部ゴミ箱 drop archive、S/M/L grid、Undo toast 設定に対応済み。AI native Phase 1 として Apple Foundation Models provider、Calendar read/write tool、ApprovalGate、AuditLog、下段 command lane、fallback candidates を実装済み。上部 handle は `B / C / None` とノッチ横 handle area 表示/非表示を Settings から選択可能。build `45` は notarized/stapled ZIP として GitHub Release `v0.1.0-45` に公開済みで、latest appcast と Sparkle 手動更新も検証済み。
 
 ## 次アクション
 
-- `./script/build_and_run.sh --verify` で移行先の build / launch を確認する。
-- Mirror の初回 permission UX と表示品質を調整する。
-- Calendar provider の初回表示UXと日付hover詳細の見た目を実画面で微調整する。
-- Calendar provider の一時イベント作成・編集・削除を実アカウントで確認する。
+- 別Macまたは quarantine 付きダウンロードで、GitHub Release ZIP の初回起動時 Gatekeeper UX を確認する。
+- Mirror の初回 permission UX と表示品質をユーザー実機で確認する。
 - Clipboard provider の text/image drag/drop を、Finder / Slack / browser input など複数アプリで手動確認する。
-- Clipboard image drag/drop を Codex chat 欄で再確認する。
 - Apple Foundation Models の実機可用性を macOS 26 / Apple Intelligence 環境で確認する。
-- AI command palette の手動 UX 確認を行い、曖昧入力時の候補表示と Calendar write 承認導線を確認する。
-- Calendar editor の手入力/ドラッグ調整日時入力と日付ダブルクリック起動を実機操作で確認する。
+- AI command lane の手動 UX 確認を行い、曖昧入力時の候補表示と Calendar write 承認導線を確認する。
 - 2026-06-22: 伊勢田さんに Calendar Pocket 検証を行い、`progress/2026-06/2026-06-22_calendar-pocket-validation.md` の観察項目に沿って記録する。
-- アプリ化の要件を決める: 終了/自動起動、Google OAuth consent screen、設定項目、今後追加する provider。
+- アプリ化の次要件を決める: 終了/自動起動、Google OAuth consent screen、正式 installer、今後追加する provider。
 - 次の本物のレビューコメント付きPRで、Codex Automation がレビュー内容を読んで修正commitを積むところまで確認する。
 
 ## Blocker / Risk
 
-- 現時点はローカル prototype。Developer ID 署名と notarization 済みZIPは作成済みだが、LaunchAgent、自動起動、正式インストーラは未実装。
+- Developer ID 署名、notarization 済み ZIP、GitHub Release、Sparkle appcast は整備済み。LaunchAgent、自動起動、正式 installer は未実装。
 - 初回 camera permission はユーザー操作が必要。
 - 自動検証では顔が写る映像確認は避けている。ユーザー側で mirror 映像の見え方確認が必要。
 - 機密情報や token は含めていない。
@@ -149,6 +145,7 @@ status: active
 
 ## 最近の更新
 
+- 2026-06-20: README と AI architecture report を最新状態へ同期。README は `ホバーポケット` / `HoverPocket` の名称、Sticky Notes、AI command lane、notarized GitHub Release、Sparkle 更新済みの状態へ更新し、古い「notarization 未整備」記述を削除。
 - 2026-06-20: top pill の handle icon を `B / C / None` から選択可能にした。ノッチに合わせた pill geometry は変更せず、Settings の `Handle icon` から切り替える。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-20: top pill のノッチ横 handle area を Settings から表示/非表示にできるようにした。非表示時もノッチ本体側の黒い領域と preview center は維持する。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-20: Sticky Notes のドラッグ改善として、並び替え中の保存頻度を下げ、外部ドラッグ閉じ判定をホバーウィンドウ外へ出た時点へ変更。空の新規付箋は確定時に破棄し、ドラッグ中の下部ゴミ箱ドロップでアーカイブできるようにした。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
@@ -166,7 +163,7 @@ status: active
 - 2026-06-07: Microphone meter 無反応対策として、input tap を `outputFormat(forBus:)` に変更し、dBFS ベースの感度へ調整。
 - 2026-06-07: Microphone meter を Mirror 表示中に自動起動する仕様へ変更。右端 button は一時録音/停止/再生にし、再生完了後にメモリ上の録音を削除する。
 - 2026-06-07: Microphone button 操作後に panel が閉じない問題を修正。preview 表示中だけ window controller 側で mouse location を監視して hover exit 取りこぼしを補完し、open animation 中の mouse event 無効時間を短縮。録音ボタンの hit area も 30pt に拡大。
-- 2026-06-07: アプリ名を `ノッチポケット` に決定し、SwiftPM package / executable / generated app bundle の公開名を `NotchPocket` へ変更。bundle 表示名は `ノッチポケット`。
+- 2026-06-07: 一時的なアプリ名で SwiftPM package / executable / generated app bundle の公開名を更新。
 - 2026-06-07: GitHub public repository `shotaro311/notch-pocket` を作成し、`main` を push。`gh repo view` で visibility `PUBLIC` を確認。
 - 2026-06-07: README を日本語中心へ更新し、公開 GitHub のトップで概要と使い方が伝わる状態にした。
 - 2026-06-08: provider アイコン切替時のヘッダー未更新バグを修正。`ProviderHeaderView` が `ProviderStore` を直接監視する構成に変更。
@@ -177,8 +174,7 @@ status: active
 - 2026-06-08: PR `#2` のサイズボタンを現在サイズ1文字表示へ変更し、サイズ変更時の上端固定を確認。Mac / Windows のPR作成手順も Ready PR 前提へ更新。
 - 2026-06-09: 上部ヘッダーの電源アイコンを廃止し、provider アイコン群と設定ボタンの間に薄い縦線の仕切りを追加。Settings の `Icon switching` で `Click / Hover` を選べるようにした。リファクタリングとして `ProviderHeaderView.swift` を分離し、`ProviderStore` の不要な設定変更再通知を減らした。
 - 2026-06-09: Google OAuth Keychain 許可の毎回表示対策として、起動時の Keychain 読み込みを遅延し、開発ビルドの app bundle を Apple Development 署名に変更。
-- 2026-06-09: アプリ名を `ノッチポケット` / `NotchPocket` に変更し、README、SwiftPM product、build script、callback文言、progressを同期。旧Keychain service / Clipboard保存先から新名への移行処理を追加。
-- 2026-06-09: アプリ名を `ホバーポケット` / `HoverPocket` に変更し、README、SwiftPM product、build script、callback文言、progressを同期。source path は `Sources/HoverPocket`、provider protocol は `PocketProvider` へ更新。旧 `NotchPocket` / `HoverMenuPreview` の Keychain service と Clipboard 保存先から移行できる状態を維持。
+- 2026-06-09: アプリ名を正式名称の `ホバーポケット` / `HoverPocket` に変更し、README、SwiftPM product、build script、callback文言、progressを同期。source path は `Sources/HoverPocket`、provider protocol は `PocketProvider` へ更新。旧保存先から移行できる状態を維持。
 - 2026-06-09: MIT License を追加し、README にライセンス欄を追加。GitHub 公開上のOSSライセンスを明確化。
 - 2026-06-10: AI native Phase 1 MVP として、Apple Foundation Models provider、構造化 action / tool / approval / audit 基盤、Calendar read/write tool、下段 command palette lane、解釈候補 fallback UI を追加。`swift build` 成功。
 - 2026-06-10: Review fix として ApprovalCard の全 approval field 表示と `requiresApproval` の computed 化を実施。`swift build` 成功。

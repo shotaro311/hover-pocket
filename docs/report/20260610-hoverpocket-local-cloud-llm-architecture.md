@@ -1,6 +1,7 @@
 # HoverPocket AIネイティブ化: ローカルLLM / クラウドLLM アーキテクチャ調査レポート
 
 作成日: 2026-06-10
+現状追記: 2026-06-20
 
 ## 1. 結論
 
@@ -24,7 +25,9 @@ HoverPocket をAIネイティブなアプリに進化させる場合、最も現
 
 ## 2. 前提
 
-HoverPocket は、macOS の画面上部ホバーから小さなパネルを開き、Mirror、Google Calendar、Clipboard などの Provider を切り替えて使うアプリです。現在の設計では、各機能は `PocketProvider` として実装され、`ProviderRegistry` に登録されます。
+HoverPocket は、macOS の画面上部ホバーから小さなパネルを開き、Mirror、Google Calendar、Clipboard、Sticky Notes などの Provider を切り替えて使うアプリです。現在の設計では、各機能は `PocketProvider` として実装され、`ProviderRegistry` に登録されます。
+
+2026-06-20 時点では、AI native Phase 1 として Apple Foundation Models provider、Calendar read/write tool、Approval Gate、Audit Log、パネル下部の AI command lane は実装済みです。Ollama、LM Studio、クラウド LLM、外部エージェント接続はまだ標準機能にはしていません。
 
 AIネイティブ化では、この Provider 群を単なるUI部品として見せるのではなく、AIがユーザーの目的を解釈し、必要な Provider や Action を選び、ユーザーの確認を取りながら実行する構成に変えます。
 
@@ -42,7 +45,7 @@ flowchart TD
     LocalServer["Local LLM Server\nOllama / LM Studio / llama.cpp"]
     Cloud["Cloud LLM API\nOpenAI / Gemini / Anthropic"]
     External["External Agent Bridge\nCodex app-server / Gemini CLI / Claude Agent SDK"]
-    Tools["Pocket Tools\nCalendar / Clipboard / Mirror / Files"]
+    Tools["Pocket Tools\nCalendar / Clipboard / Sticky Notes / Mirror / Files"]
     Approval["Approval Gate"]
     Audit["Local Audit Log"]
 
@@ -71,7 +74,7 @@ flowchart TD
 
 - `Intent Engine`: ユーザーの入力を「何をしたいか」に変換する
 - `Model Router`: どのAIモデルを使うかを判断する
-- `Tool Executor`: Calendar、Clipboard、Mirror などの実処理を行う
+- `Tool Executor`: Calendar、Clipboard、Sticky Notes、Mirror などの実処理を行う
 - `Approval Gate`: 削除、送信、予定作成、クリップボード書き換えなどの前に確認を取る
 - `Audit Log`: AIが何を提案し、何を実行したかをローカルに記録する
 

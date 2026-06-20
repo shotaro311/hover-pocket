@@ -30,6 +30,9 @@ status: active
 - 最新コミット `1744fe3` を build `45` として配布するため、`APP_VERSION=0.1.0 APP_BUILD=45 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh` を実行。
 - publish 処理で Apple notarization、staple、staple後ZIP再生成、SHA256 / appcast 再生成、GitHub Release `v0.1.0-45` 作成まで完了。
 - build `41` を一時展開して起動し、Settings > Updates > Check for Updates から Sparkle が build `45` を検出することを確認。`Install Update`、`Install and Relaunch` 後、一時展開 app の `CFBundleVersion` が `45` へ更新されたことを確認。
+- README を現在の `ホバーポケット` / `HoverPocket`、Sticky Notes、AI command lane、handle icon / notch side handle 設定、notarized GitHub Release、Sparkle 更新済みの状態へ更新。
+- `docs/report/20260610-hoverpocket-local-cloud-llm-architecture.md` に 2026-06-20 時点の AI native Phase 1 実装状況を追記。
+- `script/publish_github_release.sh` の既定 release notes を、初回配布向け文言から一般 release 向け文言へ更新。
 
 ## 成果物
 
@@ -80,6 +83,10 @@ status: active
 - Sparkle EdDSA signature: remote appcast の `sparkle:edSignature` と remote ZIP を `sign_update --account hover-pocket --verify` で検証し成功。
 - remote ZIP 展開後 app: `CFBundleVersion=45`、`codesign --verify --deep --strict`、`xcrun stapler validate`、`spctl --assess --type execute` 成功。
 - Sparkle manual update: build `41` を一時展開して起動し、Settings > Updates > Check for Updates で build `45` の更新ダイアログを確認。Install/Relaunch 後に一時展開 app の `CFBundleVersion=45` を確認。
+- README / docs / current progress で古い名称や未整備記述が消えていることを確認。旧名称は migration code と詳細履歴ログにのみ残す。
+- `git diff --check`: README / docs / progress / release notes 更新後に成功。
+- `bash -n script/publish_github_release.sh`: README / docs 更新後の release notes 文言変更に対して成功。
+- `swift build`: README / docs 更新後にも成功。
 
 ## 残り
 

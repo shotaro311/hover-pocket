@@ -7,7 +7,7 @@ APP_VERSION="${APP_VERSION:-0.1.0}"
 APP_BUILD="${APP_BUILD:-$(git -C "$ROOT_DIR" rev-list --count HEAD 2>/dev/null || date +%Y%m%d%H%M)}"
 SPARKLE_TAG="${SPARKLE_TAG:-v${APP_VERSION}-${APP_BUILD}}"
 RELEASE_TITLE="${RELEASE_TITLE:-HoverPocket ${APP_VERSION} (${APP_BUILD})}"
-RELEASE_NOTES="${RELEASE_NOTES:-Initial Sparkle-enabled build.}"
+RELEASE_NOTES="${RELEASE_NOTES:-HoverPocket release with notarized ZIP, SHA256 checksum, and Sparkle appcast.}"
 PUBLISH_DRY_RUN="${PUBLISH_DRY_RUN:-0}"
 PUBLISH_REQUIRE_NOTARIZED="${PUBLISH_REQUIRE_NOTARIZED:-1}"
 if [[ -z "${PUBLISH_PREPARE_RELEASE:-}" ]]; then
