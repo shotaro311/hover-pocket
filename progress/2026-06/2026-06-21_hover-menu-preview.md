@@ -105,3 +105,33 @@ status: active
 - `zipinfo -1 dist/releases/HoverPocket-0.1.0-63.zip`: top-level が `HoverPocket.app` のみであることを確認。
 - `shasum -a 256 dist/releases/HoverPocket-0.1.0-63.zip`: SHA256 が `.sha256` と一致。
 - `codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`、`stapler validate dist/HoverPocket.app`、`spctl --assess --type execute --verbose=4 dist/HoverPocket.app`: 成功、`source=Notarized Developer ID`。
+
+## 追加実施内容: ミニバー 8pt ヒット / Settings 整理
+
+- ノッチなし画面のミニバーは表示用ウィンドウを 12pt のまま残し、実際に hover で開く縦ヒット領域を上端 8pt に縮小した。
+- 上部の青い更新アイコンを押した後、Sparkle 更新 UI が見やすいようにホバーウィンドウを閉じるようにした。
+- Settings の構成を `表示 / 起点表示 / パネル / 機能 / 付箋 / ミラー / Google カレンダー / アップデート` へ整理し、パネル設定に混在していた起点表示と機能管理を分離した。
+- メインノッチ左のアイコンエリア設定を明確化し、オフの場合はアイコンだけでなく横の黒いエリア自体を描画しないようにした。
+- README の最新公開版、appcast、表示先ディスプレイ説明を build `65` に更新した。
+
+## 追加成果物: build 65
+
+- Release: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-65`
+- Latest install ZIP: `https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip`
+- Latest appcast: `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`
+- ZIP: `dist/releases/HoverPocket-0.1.0-65.zip`
+- ZIP SHA256: `0e511b4932c8da18bc224238683574b25c44c673dfc48efd57f44524097a787c`
+- Notary submission ID: `c92c3e8c-d555-4daf-8055-c7629fc9d29d`
+- Notary status: `Accepted`
+
+## 追加検証: build 65
+
+- `swift build`: 成功。
+- `git diff --check`: 成功。
+- `./script/build_and_run.sh --verify`: 成功。Apple Development 署名で `dist/HoverPocket.app` を起動確認。
+- `APP_VERSION=0.1.0 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh`: build `65` の notarization / staple / GitHub Release 公開まで成功。
+- `gh release view v0.1.0-65 --json assets,body,url,name,tagName`: `HoverPocket-macOS-app.zip`、`HoverPocket-0.1.0-65.zip`、SHA256、`appcast.xml` の4 asset を確認。
+- 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`: `sparkle:version` が `65`、enclosure が `v0.1.0-65/HoverPocket-0.1.0-65.zip` であることを確認。
+- `zipinfo -1 dist/releases/HoverPocket-0.1.0-65.zip`: top-level が `HoverPocket.app` のみであることを確認。
+- `shasum -a 256 dist/releases/HoverPocket-0.1.0-65.zip`: SHA256 が `.sha256` と一致。
+- `codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`、`stapler validate dist/HoverPocket.app`、`spctl --assess --type execute --verbose=4 dist/HoverPocket.app`: 成功、`source=Notarized Developer ID`。
