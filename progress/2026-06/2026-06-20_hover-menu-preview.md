@@ -42,6 +42,12 @@ status: active
 - Camera Privacy 設定から許可した直後にミラーが復帰しない問題に対応。Camera Settings を開いた後に permission recovery polling を走らせ、アプリ復帰時にも authorization status を再確認して、許可済みに変わったらその場で camera session を開始する。
 - コミット `e1b5a5e` を build `53` として配布。初回 publish script 実行では notarytool submit が詳細なしで失敗したため、ZIP / Developer ID 署名を確認後、単体 `xcrun notarytool submit` を再実行して `Accepted` を取得。staple、ZIP / appcast 再生成、GitHub Release `v0.1.0-53` 公開まで完了。
 - コミット `8a4489d` を build `51` として配布。初回の publish script 実行では notarytool submit が詳細なしで失敗したため、ZIP / Keychain profile / Developer ID 署名を確認後、単体 `xcrun notarytool submit` を再実行して `Accepted` を取得。staple、ZIP / appcast 再生成、GitHub Release `v0.1.0-51` 公開まで完了。
+- Keychain password prompt 再発を調査。`/Applications/HoverPocket.app` は build `51` で、現行修正済み build `53` より古い状態だったことを確認。さらに、Google OAuth Keychain store が旧 `local.codex.hover-pocket.google-oauth` を読み続けていたため、開発署名や旧 prototype で作られた Keychain item の ACL に触れて macOS の確認ダイアログが出る設計上の残りを確認した。
+- Google OAuth Keychain service を build channel ごとに分離。配布版は `local.codex.hover-pocket.google-oauth.release`、ローカル開発版は `local.codex.hover-pocket.google-oauth.development` を使うようにし、旧サービス名や旧アプリ名の Keychain item は自動読み取り / 自動削除しないように変更した。
+- `script/build_and_run.sh` が `HoverPocketKeychainServiceSuffix` を Info.plist に注入し、`script/package_zip.sh` が配布 ZIP では必ず `release` suffix を使うようにした。
+- Mirror は Settings から戻ったときの復帰を `MirrorPreviewView` だけでなく `AppDelegate` でも検知し、許可済みに変わった場合は permission request / starting flag を整理して再起動するよう補強した。
+- `HoverPocket-macOS-app.zip` alias が appcast 生成ディレクトリに残ると Sparkle `generate_appcast` が duplicate archive と判定する問題を確認し、appcast 生成時だけ current versioned ZIP を一時ディレクトリへ渡すようにした。
+- コミット `7401c1f` を build `55` として配布。`APP_VERSION=0.1.0 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh` で notarization、staple、ZIP / appcast 再生成、GitHub Release `v0.1.0-55` 公開まで完了。
 
 ## 成果物
 
@@ -69,6 +75,11 @@ status: active
 - Release 53 ZIP SHA256: `4243fb02dd1eb16ea4deb6d60d50dd2e31c2bbdd0419ef22cc68ce65f32cda0e`
 - Release 53 notary submission ID: `d309c2db-47e2-4db1-b880-73787671cc96`
 - Release 53 notary status: `Accepted`
+- Release 55: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-55`
+- Release 55 ZIP: `dist/releases/HoverPocket-0.1.0-55.zip`
+- Release 55 ZIP SHA256: `72bbe40bc178f789d16c8611c9efc4742700f0db61906810f20339684e0cc899`
+- Release 55 notary submission ID: `cf50cd19-f17c-4384-a256-3bd3f6e9dff5`
+- Release 55 notary status: `Accepted`
 
 ## 検証
 
@@ -138,6 +149,16 @@ status: active
 - `gh release view v0.1.0-51 --json assets,body,url,name,tagName`: `HoverPocket-macOS-app.zip`、`HoverPocket-0.1.0-51.zip`、SHA256、`appcast.xml` の4 asset を確認。
 - 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip` を再ダウンロードし、top-level が `HoverPocket.app` のみ、SHA256 が `ca9c21fe9f8be9e4d7517227504e3d72b1a0c71c6285f372a40817cac00cd96b` であることを確認。
 - 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`: `sparkle:version` が `51`、enclosure が `v0.1.0-51/HoverPocket-0.1.0-51.zip` であることを確認。
+- `swift build`: Keychain service 分離 / Mirror permission 復帰補強後に成功。
+- `bash -n script/build_and_run.sh script/package_zip.sh script/notarize_release.sh script/publish_github_release.sh script/generate_appcast.sh`: 成功。
+- `git diff --check`: Keychain service 分離 / Mirror permission 復帰補強後に成功。
+- `./script/build_and_run.sh --verify`: 開発ビルド `CFBundleVersion=54`、`HoverPocketKeychainServiceSuffix=development` で起動確認まで成功。
+- `./script/package_zip.sh`: 配布ビルド `CFBundleVersion=54`、`HoverPocketKeychainServiceSuffix=release` で ZIP / SHA256 / appcast 生成に成功。
+- `APP_BUILD=54 ./script/generate_appcast.sh`: `HoverPocket-macOS-app.zip` alias が残っていても current versioned ZIP だけで appcast を生成できることを確認。
+- `APP_VERSION=0.1.0 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh`: build `55` の notarization / staple / GitHub Release 公開まで成功。
+- `gh release view v0.1.0-55 --json assets,body,url,name,tagName`: `HoverPocket-macOS-app.zip`、`HoverPocket-0.1.0-55.zip`、SHA256、`appcast.xml` の4 asset を確認。
+- 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`: `sparkle:version` が `55`、enclosure が `v0.1.0-55/HoverPocket-0.1.0-55.zip` であることを確認。
+- 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip` を再ダウンロードし、SHA256 が `72bbe40bc178f789d16c8611c9efc4742700f0db61906810f20339684e0cc899`、top-level が `HoverPocket.app` のみ、Info.plist が `CFBundleVersion=55` / `HoverPocketKeychainServiceSuffix=release` であることを確認。
 
 ## 残り
 
