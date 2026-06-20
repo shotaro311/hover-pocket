@@ -14,12 +14,22 @@ enum GoogleOAuthKeychainError: Error {
 }
 
 final class GoogleOAuthKeychainStore: @unchecked Sendable {
-    private let service = "local.codex.hover-pocket.google-oauth"
-    private let legacyFileKeychainServices = [
-        "local.codex.notch-pocket.google-oauth",
-        "local.codex.hover-menu-preview.google-oauth"
-    ]
+    private static let serviceBase = "local.codex.hover-pocket.google-oauth"
+    private static let serviceSuffixInfoKey = "HoverPocketKeychainServiceSuffix"
+    private static let fallbackServiceSuffix = "release"
+
+    private let service: String
+    private let legacyFileKeychainServices: [String] = []
     private let account = "default"
+
+    init() {
+        let configuredSuffix = Bundle.main.object(forInfoDictionaryKey: Self.serviceSuffixInfoKey) as? String
+        let suffix = configuredSuffix?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/", with: "-")
+        let serviceSuffix = suffix?.isEmpty == false ? suffix! : Self.fallbackServiceSuffix
+        service = "\(Self.serviceBase).\(serviceSuffix)"
+    }
 
     func load() throws -> GoogleOAuthStoredCredential? {
         if let credential = try load(service: service) {
@@ -67,9 +77,6 @@ final class GoogleOAuthKeychainStore: @unchecked Sendable {
 
     func delete() {
         SecItemDelete(baseQuery(service: service, allowsAuthenticationUI: false) as CFDictionary)
-        for legacyService in legacyFileKeychainServices {
-            SecItemDelete(baseQuery(service: legacyService, allowsAuthenticationUI: false) as CFDictionary)
-        }
     }
 
     private func load(service: String) throws -> GoogleOAuthStoredCredential? {

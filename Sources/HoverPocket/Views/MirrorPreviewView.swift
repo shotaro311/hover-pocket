@@ -425,6 +425,12 @@ final class MirrorCameraModel: ObservableObject {
 
     func recheckPermissionAfterExternalChange() {
         guard wantsCamera else { return }
+        if AVCaptureDevice.authorizationStatus(for: .video) == .authorized {
+            isRequestingPermission = false
+            if status == .denied || status == .restricted || status == .requestingPermission {
+                isStarting = false
+            }
+        }
         prepareIfAuthorized()
         activate()
     }
@@ -484,10 +490,16 @@ final class MirrorCameraModel: ObservableObject {
         case .notDetermined:
             requestPermission()
         case .denied:
+            isStarting = false
+            isSessionRunning = false
             updateStatus(.denied)
         case .restricted:
+            isStarting = false
+            isSessionRunning = false
             updateStatus(.restricted)
         @unknown default:
+            isStarting = false
+            isSessionRunning = false
             updateStatus(.failed("Unknown camera permission state."))
         }
     }

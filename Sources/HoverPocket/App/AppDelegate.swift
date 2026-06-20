@@ -32,9 +32,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationBecameActive),
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
     }
 
     @objc private func screenParametersChanged() {
         hoverWindowController.positionWindows()
+    }
+
+    @objc private func applicationBecameActive() {
+        MirrorCameraModel.shared.recheckPermissionAfterExternalChange()
     }
 }
