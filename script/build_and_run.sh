@@ -10,6 +10,7 @@ BUNDLE_DIR="$ROOT_DIR/dist/$APP_NAME.app"
 EXECUTABLE_PATH="$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
 APP_ICON_NAME="AppIcon"
 APP_ICON_SOURCE="$ROOT_DIR/Resources/$APP_ICON_NAME.png"
+ENTITLEMENTS_PATH="${ENTITLEMENTS_PATH:-$ROOT_DIR/Resources/HoverPocket.entitlements}"
 APP_VERSION="${APP_VERSION:-0.1.0}"
 APP_BUILD="${APP_BUILD:-$(git -C "$ROOT_DIR" rev-list --count HEAD 2>/dev/null || date +%Y%m%d%H%M)}"
 DEFAULT_SPARKLE_FEED_URL="${DEFAULT_SPARKLE_FEED_URL:-}"
@@ -239,6 +240,9 @@ if [[ -n "$CODESIGN_IDENTITY" ]]; then
   codesign_args=(--force --deep --sign "$CODESIGN_IDENTITY")
   if [[ "$CODESIGN_HARDENED_RUNTIME" == "1" || "$CODESIGN_HARDENED_RUNTIME" == "true" ]]; then
     codesign_args+=(--options runtime --timestamp)
+  fi
+  if [[ -f "$ENTITLEMENTS_PATH" ]]; then
+    codesign_args+=(--entitlements "$ENTITLEMENTS_PATH")
   fi
   codesign "${codesign_args[@]}" "$BUNDLE_DIR" >/dev/null
   echo "Signed $APP_NAME.app with $CODESIGN_IDENTITY"
