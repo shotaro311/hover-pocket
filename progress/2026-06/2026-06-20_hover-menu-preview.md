@@ -1,0 +1,93 @@
+---
+project_slug: hover-menu-preview
+date: 2026-06-20
+updated_by: codex
+status: active
+---
+
+# 2026-06-20 hover-menu-preview
+
+## 実施内容
+
+- Sticky Notes の data/provider/settings 実装を追加。
+- `StickyNoteItem` / `StickyNoteColor` と `StickyNotesStore.shared` を追加し、`Application Support/HoverPocket/StickyNotes/notes.json` へ JSON 永続化する構成にした。
+- archive/delete の undo action、active notes の sortIndex 順、Settings の `Show undo after note actions` toggle、built-in provider registry 接続を追加。
+- UI worker 側の `StickyNotesView.swift` 実装と store/provider API の接続を確認。
+- `StickyNotesView.swift` に Pattern 1 Board Grid、hover archive、inline expanded editor、color swatches、context menu、drag reorder、外部 drag text payload、undo toast UI を追加。
+- 親側レビューで inline editor をフル幅行へ展開する構造に変更し、選択付箋が拡大して周囲の付箋が行単位で避けるようにした。空タイトル時は本文1行目を見出し代わりにし、本文プレビューの重複表示を抑制。
+- Sticky Notes の追加修正として、drag reorder 後にカードが薄い状態で残る問題を防ぐ drop reset、Ctrl+Enter の編集確定、付箋外クリックで一覧へ戻る挙動、別付箋クリック時の編集切替前保存、色スウォッチのダブルクリック新規作成、付箋グリッドサイズ `S/M/L` 切替を追加。
+- Sticky Notes UI をリファクタリングし、`StickyNotesView.swift` の責務を root state / action / layout に絞った。カード、ヘッダー、色スウォッチ、サイズ切替、Undo toast、empty state は `StickyNoteComponents.swift`、drop delegate と grid metrics は `StickyNoteDropDelegates.swift` へ分離。
+- Sticky Notes の drag UX を改善。drag reorder 中は JSON 保存を行わず、drop/reset 時にまとめて保存することでカクつきを抑えるようにした。
+- 付箋ドラッグ中はホバーウィンドウ内にいる間は閉じず、マウスポインタがホバーウィンドウ外へ出た時点で既存の外部ドラッグ閉じ処理へ渡すようにした。
+- 新規作成した付箋でタイトル/本文が空のまま確定された場合は、付箋を保存せず破棄するようにした。
+- 付箋ドラッグ中に下部ゴミ箱エリアを表示し、ゴミ箱アイコンへドロップすると対象付箋をアーカイブできるようにした。
+- top pill の handle icon を Settings から `B / C / None` で選べるようにした。ノッチに合わせた pill / preview の geometry は変更せず、`HoverPillView` の中央アイコン描画だけを切り替える構成にした。
+- top pill のノッチ横 handle area を Settings から表示/非表示にできるようにした。実ノッチありのときだけ横 handle 幅を外せるようにし、ノッチ本体側の黒い領域と preview center は維持する構成にした。
+- Apple Account のアプリ用パスワードを使い、`hover-pocket` notarytool Keychain profile を作成。
+- 作成済み profile を `xcrun notarytool history --keychain-profile hover-pocket` で検証。
+- `NOTARYTOOL_PROFILE=hover-pocket ./script/notarize_release.sh` を実行し、Apple notarization、staple、staple後ZIP再生成、SHA256 / appcast 再生成、ZIP展開後検証まで完了。
+- アプリ用パスワードはチャットやファイルに出力せず、Keychain profile 保存後にクリップボードを空にした。
+- 最新コミット `1744fe3` を build `45` として配布するため、`APP_VERSION=0.1.0 APP_BUILD=45 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh` を実行。
+- publish 処理で Apple notarization、staple、staple後ZIP再生成、SHA256 / appcast 再生成、GitHub Release `v0.1.0-45` 作成まで完了。
+- build `41` を一時展開して起動し、Settings > Updates > Check for Updates から Sparkle が build `45` を検出することを確認。`Install Update`、`Install and Relaunch` 後、一時展開 app の `CFBundleVersion` が `45` へ更新されたことを確認。
+- README を現在の `ホバーポケット` / `HoverPocket`、Sticky Notes、AI command lane、handle icon / notch side handle 設定、notarized GitHub Release、Sparkle 更新済みの状態へ更新。
+- `docs/report/20260610-hoverpocket-local-cloud-llm-architecture.md` に 2026-06-20 時点の AI native Phase 1 実装状況を追記。
+- `script/publish_github_release.sh` の既定 release notes を、初回配布向け文言から一般 release 向け文言へ更新。
+
+## 成果物
+
+- App: `dist/HoverPocket.app`
+- ZIP: `dist/releases/HoverPocket-0.1.0-41.zip`
+- SHA256: `dist/releases/HoverPocket-0.1.0-41.zip.sha256`
+- Appcast: `dist/releases/appcast.xml`
+- Notary submission ID: `dd941d6b-7078-4d6a-94a7-c5a0f8697637`
+- Notary status: `Accepted`
+- ZIP SHA256: `362a6fcea234f3faf8b19eb5df625b48594eb573fc3fb5f79a765ff8ffd0986e`
+- Release: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-45`
+- Latest ZIP: `dist/releases/HoverPocket-0.1.0-45.zip`
+- Latest ZIP SHA256: `9971d5da8ccb5b6cdf3a4e7e24ce4cdb91375503001694c6d89029edc6b550ae`
+- Latest appcast: `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`
+- Latest notary submission ID: `e536914a-b908-47e5-9389-8796658492ca`
+- Latest notary status: `Accepted`
+
+## 検証
+
+- `swift build`: 成功。
+- `swift build`: Sticky Notes UI 追加後に再実行し、警告なしで成功。
+- `git diff --check -- Sources/HoverPocket/Models/StickyNoteModels.swift Sources/HoverPocket/State/StickyNotesStore.swift Sources/HoverPocket/Providers/StickyNotesProvider.swift Sources/HoverPocket/Providers/ProviderRegistry.swift Sources/HoverPocket/State/AppSettings.swift Sources/HoverPocket/Views/SettingsView.swift Sources/HoverPocket/Views/StickyNotesView.swift`: 成功。
+- `git diff --check`: 成功。
+- `./script/build_and_run.sh --verify`: 成功。`dist/HoverPocket.app` を Apple Development 署名で再署名し、起動確認まで成功。
+- `swift build`: Sticky Notes 追加修正後に成功。
+- `git diff --check`: Sticky Notes 追加修正後に成功。
+- `./script/build_and_run.sh --verify`: Sticky Notes 追加修正後に成功。
+- `swift build`: Sticky Notes UI リファクタリング後に成功。
+- `swift build`: Sticky Notes drag UX 改善後に成功。
+- `git diff --check`: Sticky Notes drag UX 改善後に成功。
+- `./script/build_and_run.sh --verify`: Sticky Notes drag UX 改善後に成功。`dist/HoverPocket.app` を Apple Development 署名で再署名し、起動確認まで成功。
+- `swift build`: top pill handle icon 設定追加後に成功。
+- `git diff --check`: top pill handle icon 設定追加後に成功。
+- `./script/build_and_run.sh --verify`: top pill handle icon 設定追加後に成功。`dist/HoverPocket.app` を Apple Development 署名で再署名し、起動確認まで成功。
+- `swift build`: top pill handle area 表示設定追加後に成功。
+- `git diff --check`: top pill handle area 表示設定追加後に成功。
+- `./script/build_and_run.sh --verify`: top pill handle area 表示設定追加後に成功。`dist/HoverPocket.app` を Apple Development 署名で再署名し、起動確認まで成功。
+- `xcrun notarytool history --keychain-profile hover-pocket --output-format json --no-progress`: 成功。
+- `NOTARYTOOL_PROFILE=hover-pocket ./script/notarize_release.sh`: 成功。
+- `codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`: 成功。
+- `xcrun stapler validate dist/HoverPocket.app`: `The validate action worked!`
+- `spctl --assess --type execute --verbose=2 dist/HoverPocket.app`: `accepted`, `source=Notarized Developer ID`
+- `dist/releases/HoverPocket-0.1.0-41.zip` を一時ディレクトリへ展開し、展開後 `HoverPocket.app` でも `codesign`、`stapler validate`、`spctl` が成功。
+- `APP_VERSION=0.1.0 APP_BUILD=45 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh`: 成功。
+- GitHub Release `v0.1.0-45`: ZIP、SHA256、`appcast.xml` の3 asset が公開済み。
+- `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`: 200で取得でき、`sparkle:version` は `45`、enclosure は `v0.1.0-45/HoverPocket-0.1.0-45.zip`。
+- remote ZIP / SHA256 readback: GitHub Releases から取得した `.sha256` と ZIP の `shasum -a 256` が一致。
+- Sparkle EdDSA signature: remote appcast の `sparkle:edSignature` と remote ZIP を `sign_update --account hover-pocket --verify` で検証し成功。
+- remote ZIP 展開後 app: `CFBundleVersion=45`、`codesign --verify --deep --strict`、`xcrun stapler validate`、`spctl --assess --type execute` 成功。
+- Sparkle manual update: build `41` を一時展開して起動し、Settings > Updates > Check for Updates で build `45` の更新ダイアログを確認。Install/Relaunch 後に一時展開 app の `CFBundleVersion=45` を確認。
+- README / docs / current progress で古い名称や未整備記述が消えていることを確認。旧名称は migration code と詳細履歴ログにのみ残す。
+- `git diff --check`: README / docs / progress / release notes 更新後に成功。
+- `bash -n script/publish_github_release.sh`: README / docs 更新後の release notes 文言変更に対して成功。
+- `swift build`: README / docs 更新後にも成功。
+
+## 残り
+
+- 別Macまたは quarantine 付きダウンロードで、初回起動時の Gatekeeper UX を確認する。

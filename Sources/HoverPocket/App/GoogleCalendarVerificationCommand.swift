@@ -66,6 +66,10 @@ enum GoogleCalendarVerificationCommand {
         if let localized = (error as? LocalizedError)?.errorDescription, !localized.isEmpty {
             return localized
         }
+        let description = String(describing: error)
+        if !description.isEmpty {
+            return "\(type(of: error)): \(description)"
+        }
         return "Google Calendar verification failed."
     }
 }

@@ -4,6 +4,7 @@ struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var providerStore: ProviderStore
     @ObservedObject private var calendarStore = GoogleCalendarStore.shared
+    @ObservedObject private var appUpdater = AppUpdater.shared
 
     var body: some View {
         ScrollView {
@@ -16,11 +17,19 @@ struct SettingsView: View {
 
                 Divider()
 
+                stickyNotesSection
+
+                Divider()
+
                 mirrorSection
 
                 Divider()
 
                 googleCalendarSection
+
+                Divider()
+
+                updatesSection
             }
             .padding(20)
         }
@@ -62,6 +71,23 @@ struct SettingsView: View {
                 .pickerStyle(.segmented)
 
                 Text(settings.panelSize.detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("Show side handle beside notch", isOn: $settings.showNotchSideHandleArea)
+
+                Picker("Handle icon", selection: $settings.pillHandleIconStyle) {
+                    ForEach(PillHandleIconStyle.allCases) { style in
+                        Text(style.title).tag(style)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(!settings.showNotchSideHandleArea)
+
+                Text(handleIconDetail)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -114,6 +140,13 @@ struct SettingsView: View {
         }
     }
 
+    private var handleIconDetail: String {
+        if !settings.showNotchSideHandleArea {
+            return "ノッチ本体に合わせた黒い領域は残し、横の小さなアイコンエリアだけを隠します。"
+        }
+        return settings.pillHandleIconStyle.detail
+    }
+
     private var mirrorSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Mirror")
@@ -125,6 +158,15 @@ struct SettingsView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var stickyNotesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Sticky Notes")
+                .font(.system(size: 13, weight: .bold))
+
+            Toggle("Show undo after note actions", isOn: $settings.showStickyNoteUndoToast)
         }
     }
 
@@ -146,7 +188,7 @@ struct SettingsView: View {
                     Button(calendarConnectTitle) {
                         calendarStore.connect()
                     }
-                    .disabled(!calendarStore.isConfigured || calendarStore.connectionState == .signingIn)
+                    .disabled(!calendarStore.isConfigured || calendarStore.connectionState == .signingIn || calendarStore.connectionState == .restoring)
                 }
             }
 
@@ -155,6 +197,26 @@ struct SettingsView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var updatesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Updates")
+                .font(.system(size: 13, weight: .bold))
+
+            HStack(spacing: 10) {
+                Label(appUpdater.statusText, systemImage: appUpdater.statusSystemImage)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button("Check for Updates") {
+                    appUpdater.checkForUpdates()
+                }
+                .disabled(!appUpdater.canCheckForUpdates)
             }
         }
     }
@@ -207,6 +269,8 @@ struct SettingsView: View {
         switch calendarStore.connectionState {
         case .missingConfiguration:
             return "key.slash"
+        case .restoring:
+            return "arrow.triangle.2.circlepath"
         case .signedOut:
             return "person.crop.circle.badge.plus"
         case .needsReconnect:
@@ -222,6 +286,8 @@ struct SettingsView: View {
         switch calendarStore.connectionState {
         case .missingConfiguration:
             return "Set GOOGLE_CLIENT_ID and relaunch."
+        case .restoring:
+            return "Checking saved Google account"
         case .signedOut:
             return "Not connected"
         case .needsReconnect:
@@ -237,10 +303,13 @@ struct SettingsView: View {
         switch calendarStore.connectionState {
         case .signingIn:
             return "Connecting"
+        case .restoring:
+            return "Checking"
         case .needsReconnect:
             return "Reconnect"
         default:
             return "Connect"
         }
     }
+
 }

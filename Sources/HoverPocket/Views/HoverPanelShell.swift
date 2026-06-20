@@ -28,14 +28,21 @@ struct HoverPanelShell: View {
                     isPreviewActive: store.providerActive,
                     onExternalDragStarted: onExternalDragStarted
                 )
+                .frame(maxHeight: .infinity)
+
+                Divider()
+                    .overlay(Color.white.opacity(0.08))
+
+                AICommandPaletteView(store: store.aiCommandStore, isVisible: store.contentVisible)
+                    .frame(height: PanelLayout.aiPaletteHeight)
             }
             .opacity(store.contentVisible ? 1 : 0)
             .scaleEffect(store.contentVisible ? 1 : 0.92, anchor: .top)
             .offset(y: store.contentVisible ? 0 : -14)
         }
         .frame(
-            width: PanelLayout.previewSize(for: settings.panelSize).width,
-            height: PanelLayout.previewSize(for: settings.panelSize).height
+            width: PanelLayout.panelTotalSize(for: settings.panelSize).width,
+            height: PanelLayout.panelTotalSize(for: settings.panelSize).height
         )
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(

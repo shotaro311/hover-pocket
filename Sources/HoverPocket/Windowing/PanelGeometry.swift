@@ -11,6 +11,8 @@ enum PanelLayout {
         notchHandleWidth
     }
 
+    static let aiPaletteHeight: CGFloat = 132
+
     static func previewSize(for panelSize: PanelSizeOption) -> NSSize {
         switch panelSize {
         case .small:
@@ -20,6 +22,12 @@ enum PanelLayout {
         case .large:
             return NSSize(width: 600, height: 430)
         }
+    }
+
+    // AIパレットは Provider 領域を侵食せず、パネル全体の高さに加算する
+    static func panelTotalSize(for panelSize: PanelSizeOption) -> NSSize {
+        let preview = previewSize(for: panelSize)
+        return NSSize(width: preview.width, height: preview.height + aiPaletteHeight)
     }
 }
 
@@ -47,10 +55,18 @@ struct PanelFrames {
 }
 
 enum PanelGeometry {
-    static func frames(on screen: NSScreen, panelSize: PanelSizeOption) -> PanelFrames {
+    static func frames(
+        on screen: NSScreen,
+        panelSize: PanelSizeOption,
+        showsNotchSideHandleArea: Bool = true
+    ) -> PanelFrames {
         let notchProfile = notchProfile(on: screen)
-        let pill = pillMetrics(on: screen, notchProfile: notchProfile)
-        let previewSize = PanelLayout.previewSize(for: panelSize)
+        let pill = pillMetrics(
+            on: screen,
+            notchProfile: notchProfile,
+            showsNotchSideHandleArea: showsNotchSideHandleArea
+        )
+        let previewSize = PanelLayout.panelTotalSize(for: panelSize)
         let pillY = screen.frame.maxY - PanelLayout.pillHeight
         let pillFrame = NSRect(
             x: pill.minX,
@@ -94,9 +110,16 @@ enum PanelGeometry {
         return .none(centerX: screen.frame.midX)
     }
 
-    private static func pillMetrics(on screen: NSScreen, notchProfile: ScreenNotchProfile) -> PillMetrics {
+    private static func pillMetrics(
+        on screen: NSScreen,
+        notchProfile: ScreenNotchProfile,
+        showsNotchSideHandleArea: Bool
+    ) -> PillMetrics {
         switch notchProfile {
         case let .actual(minX, width, _):
+            guard showsNotchSideHandleArea else {
+                return PillMetrics(minX: minX, width: width)
+            }
             return PillMetrics(
                 minX: minX - PanelLayout.notchHandleWidth,
                 width: PanelLayout.notchHandleWidth + width

@@ -147,12 +147,13 @@ struct GoogleCalendarSnapshot: Equatable, Codable, Sendable {
     }
 
     private static func dayIdentifier(for date: Date, calendar: Calendar) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = calendar.timeZone
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d",
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0
+        )
     }
 }
 
@@ -167,6 +168,7 @@ struct CalendarDayCell: Identifiable, Equatable {
 
 enum GoogleCalendarConnectionState: Equatable {
     case missingConfiguration
+    case restoring
     case signedOut
     case needsReconnect
     case signingIn

@@ -46,7 +46,7 @@ final class GoogleOAuthKeychainStore: @unchecked Sendable {
         var query = baseQuery(service: service)
         let attributes: [String: Any] = [
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
 
         let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
@@ -58,7 +58,7 @@ final class GoogleOAuthKeychainStore: @unchecked Sendable {
         }
 
         query[kSecValueData as String] = data
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let addStatus = SecItemAdd(query as CFDictionary, nil)
         guard addStatus == errSecSuccess else {
             throw GoogleOAuthKeychainError.unhandledStatus(addStatus)

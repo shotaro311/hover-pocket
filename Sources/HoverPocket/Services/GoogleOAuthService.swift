@@ -1,46 +1,67 @@
 import AppKit
+import AuthenticationServices
 import CryptoKit
 import Foundation
 import Security
 
 struct GoogleOAuthConfiguration: Equatable, Sendable {
-    let clientID: String
-    let clientSecret: String?
+    let googleSignInClientID: String?
+    let legacyClientID: String?
+    let legacyClientSecret: String?
     let chromeProfileDirectory: String?
     let chromeUserDataDirectory: String?
     let chromeRemoteDebuggingPort: String?
 
     static var current: GoogleOAuthConfiguration? {
-        guard
-            let rawClientID = Bundle.main.object(forInfoDictionaryKey: "GoogleOAuthClientID") as? String
-        else {
+        let googleSignInClientID = Self.trimmedInfoValue("GIDClientID")
+        let legacyClientID = Self.trimmedInfoValue("GoogleOAuthClientID")
+        guard googleSignInClientID != nil || legacyClientID != nil else {
             return nil
         }
 
-        let clientID = rawClientID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clientID.isEmpty else {
-            return nil
-        }
-
-        let rawSecret = Bundle.main.object(forInfoDictionaryKey: "GoogleOAuthClientSecret") as? String
-        let secret = rawSecret?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let rawChromeProfile = Bundle.main.object(forInfoDictionaryKey: "GoogleOAuthChromeProfileDirectory") as? String
-        let chromeProfile = rawChromeProfile?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let rawChromeUserData = Bundle.main.object(forInfoDictionaryKey: "GoogleOAuthChromeUserDataDirectory") as? String
-        let chromeUserData = rawChromeUserData?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let rawRemoteDebuggingPort = Bundle.main.object(forInfoDictionaryKey: "GoogleOAuthChromeRemoteDebuggingPort") as? String
-        let remoteDebuggingPort = rawRemoteDebuggingPort?.trimmingCharacters(in: .whitespacesAndNewlines)
         return GoogleOAuthConfiguration(
-            clientID: clientID,
-            clientSecret: secret?.isEmpty == false ? secret : nil,
-            chromeProfileDirectory: chromeProfile?.isEmpty == false ? chromeProfile : nil,
-            chromeUserDataDirectory: chromeUserData?.isEmpty == false ? chromeUserData : nil,
-            chromeRemoteDebuggingPort: remoteDebuggingPort?.isEmpty == false ? remoteDebuggingPort : nil
+            googleSignInClientID: googleSignInClientID,
+            legacyClientID: legacyClientID,
+            legacyClientSecret: Self.trimmedInfoValue("GoogleOAuthClientSecret"),
+            chromeProfileDirectory: Self.trimmedInfoValue("GoogleOAuthChromeProfileDirectory"),
+            chromeUserDataDirectory: Self.trimmedInfoValue("GoogleOAuthChromeUserDataDirectory"),
+            chromeRemoteDebuggingPort: Self.trimmedInfoValue("GoogleOAuthChromeRemoteDebuggingPort")
         )
     }
 
     var shouldOpenWithChrome: Bool {
         chromeProfileDirectory != nil || chromeUserDataDirectory != nil || chromeRemoteDebuggingPort != nil
+    }
+
+    var oauthClientID: String? {
+        googleSignInClientID ?? legacyClientID
+    }
+
+    var usesNativeAppOAuth: Bool {
+        googleSignInClientID != nil
+    }
+
+    var nativeCallbackScheme: String? {
+        guard let googleSignInClientID else { return nil }
+        return Self.reversedClientID(googleSignInClientID)
+    }
+
+    var nativeRedirectURI: String? {
+        guard let nativeCallbackScheme else { return nil }
+        return "\(nativeCallbackScheme):/oauth2redirect/google"
+    }
+
+    private static func trimmedInfoValue(_ key: String) -> String? {
+        let rawValue = Bundle.main.object(forInfoDictionaryKey: key) as? String
+        let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : nil
+    }
+
+    private static func reversedClientID(_ clientID: String) -> String {
+        clientID
+            .split(separator: ".")
+            .reversed()
+            .joined(separator: ".")
     }
 }
 
@@ -104,6 +125,8 @@ final class GoogleOAuthService: @unchecked Sendable {
     private let keychain = GoogleOAuthKeychainStore()
     private let tokenLock = NSLock()
     private var currentToken: GoogleOAuthToken?
+    private var nativeOAuthSession: ASWebAuthenticationSession?
+    private var nativeOAuthPresentationProvider: NativeOAuthPresentationProvider?
 
     var isConfigured: Bool {
         GoogleOAuthConfiguration.current != nil
@@ -126,6 +149,37 @@ final class GoogleOAuthService: @unchecked Sendable {
 
     func signIn() async throws {
         guard let configuration = GoogleOAuthConfiguration.current else {
+            throw GoogleOAuthError.missingConfiguration
+        }
+
+        if configuration.usesNativeAppOAuth {
+            try await signInWithNativeAppOAuth(configuration: configuration)
+            return
+        }
+
+        try await signInWithLegacyOAuth(configuration: configuration)
+    }
+
+    func signOut() {
+        let refreshToken = try? keychain.load()?.refreshToken
+        setCurrentToken(nil)
+        keychain.delete()
+        if let refreshToken {
+            Task.detached(priority: .utility) {
+                try? await Self.revokeToken(refreshToken)
+            }
+        }
+    }
+
+    func accessToken() async throws -> String {
+        guard GoogleOAuthConfiguration.current != nil else {
+            throw GoogleOAuthError.missingConfiguration
+        }
+        return try await legacyAccessToken()
+    }
+
+    private func signInWithLegacyOAuth(configuration: GoogleOAuthConfiguration) async throws {
+        guard configuration.legacyClientID != nil else {
             throw GoogleOAuthError.missingConfiguration
         }
 
@@ -178,12 +232,7 @@ final class GoogleOAuthService: @unchecked Sendable {
         ))
     }
 
-    func signOut() {
-        setCurrentToken(nil)
-        keychain.delete()
-    }
-
-    func accessToken() async throws -> String {
+    private func legacyAccessToken() async throws -> String {
         if let currentToken = readCurrentToken(), currentToken.isFresh {
             guard Self.hasRequiredCalendarScopes(currentToken.grantedScopes) else {
                 throw GoogleOAuthError.insufficientScopes
@@ -248,9 +297,13 @@ final class GoogleOAuthService: @unchecked Sendable {
         state: String,
         codeChallenge: String
     ) throws -> URL {
+        guard let clientID = configuration.oauthClientID else {
+            throw GoogleOAuthError.missingConfiguration
+        }
+
         var components = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
         components.queryItems = [
-            URLQueryItem(name: "client_id", value: configuration.clientID),
+            URLQueryItem(name: "client_id", value: clientID),
             URLQueryItem(name: "redirect_uri", value: redirectURI),
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "scope", value: Self.calendarScopes.joined(separator: " ")),
@@ -308,38 +361,183 @@ final class GoogleOAuthService: @unchecked Sendable {
         return FileManager.default.fileExists(atPath: fallbackURL.path) ? fallbackURL : nil
     }
 
+    private func signInWithNativeAppOAuth(configuration: GoogleOAuthConfiguration) async throws {
+        guard
+            let redirectURI = configuration.nativeRedirectURI,
+            let callbackScheme = configuration.nativeCallbackScheme
+        else {
+            throw GoogleOAuthError.missingConfiguration
+        }
+
+        let state = try randomBase64URL(byteCount: 32)
+        let verifier = try randomBase64URL(byteCount: 64)
+        let challenge = codeChallenge(for: verifier)
+        let authURL = try authorizationURL(
+            configuration: configuration,
+            redirectURI: redirectURI,
+            state: state,
+            codeChallenge: challenge
+        )
+
+        let callback = try await runNativeOAuthSession(
+            url: authURL,
+            callbackScheme: callbackScheme
+        )
+        if let error = callback.error {
+            throw GoogleOAuthError.userDenied(error)
+        }
+        guard callback.state == state else {
+            throw GoogleOAuthError.stateMismatch
+        }
+        guard let code = callback.code, !code.isEmpty else {
+            throw GoogleOAuthError.missingAuthorizationCode
+        }
+
+        let response = try await exchangeAuthorizationCode(
+            code,
+            verifier: verifier,
+            redirectURI: redirectURI,
+            configuration: configuration
+        )
+        guard let refreshToken = response.refreshToken, !refreshToken.isEmpty else {
+            throw GoogleOAuthError.missingRefreshToken
+        }
+
+        let scopes = response.scope?.split(separator: " ").map(String.init) ?? Self.calendarScopes
+        try keychain.save(
+            GoogleOAuthStoredCredential(refreshToken: refreshToken, grantedScopes: scopes)
+        )
+        setCurrentToken(GoogleOAuthToken(
+            accessToken: response.accessToken,
+            expiresAt: Date().addingTimeInterval(TimeInterval(response.expiresIn)),
+            grantedScopes: scopes
+        ))
+    }
+
+    private func runNativeOAuthSession(url: URL, callbackScheme: String) async throws -> OAuthCallback {
+        let window = await presentationWindowForNativeOAuth()
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<OAuthCallback, Error>) in
+            let completion: (URL?, Error?) -> Void = { [weak self] callbackURL, error in
+                DispatchQueue.main.async {
+                    self?.nativeOAuthSession = nil
+                    self?.nativeOAuthPresentationProvider = nil
+                }
+
+                if let error {
+                    continuation.resume(throwing: GoogleOAuthError.userDenied(error.localizedDescription))
+                    return
+                }
+                guard let callbackURL, let callback = Self.oauthCallback(from: callbackURL) else {
+                    continuation.resume(throwing: GoogleOAuthError.missingAuthorizationCode)
+                    return
+                }
+                continuation.resume(returning: callback)
+            }
+
+            Task { @MainActor in
+                let provider = NativeOAuthPresentationProvider(window: window)
+                let session = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme, completionHandler: completion)
+                session.presentationContextProvider = provider
+                session.prefersEphemeralWebBrowserSession = false
+                nativeOAuthPresentationProvider = provider
+                nativeOAuthSession = session
+                guard session.start() else {
+                    nativeOAuthSession = nil
+                    nativeOAuthPresentationProvider = nil
+                    continuation.resume(throwing: GoogleOAuthError.browserOpenFailed)
+                    return
+                }
+            }
+        }
+    }
+
+    private static func oauthCallback(from url: URL) -> OAuthCallback? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        let items = components.queryItems ?? []
+        return OAuthCallback(
+            code: items.first { $0.name == "code" }?.value,
+            state: items.first { $0.name == "state" }?.value,
+            error: items.first { $0.name == "error" }?.value
+        )
+    }
+
+    @MainActor
+    private func presentationWindowForNativeOAuth() -> NSWindow {
+        let app = NSApplication.shared
+        if let keyWindow = app.keyWindow {
+            return keyWindow
+        }
+        if let mainWindow = app.mainWindow {
+            return mainWindow
+        }
+        if let visibleWindow = app.windows.first(where: { $0.isVisible }) {
+            return visibleWindow
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 120),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "HoverPocket Google Sign-In"
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        app.activate(ignoringOtherApps: true)
+        return window
+    }
+
     private func exchangeAuthorizationCode(
         _ code: String,
         verifier: String,
         redirectURI: String,
         configuration: GoogleOAuthConfiguration
     ) async throws -> GoogleOAuthTokenResponse {
+        guard let clientID = configuration.oauthClientID else {
+            throw GoogleOAuthError.missingConfiguration
+        }
+
         var form = [
-            "client_id": configuration.clientID,
+            "client_id": clientID,
             "code": code,
             "code_verifier": verifier,
             "grant_type": "authorization_code",
             "redirect_uri": redirectURI
         ]
-        if let clientSecret = configuration.clientSecret {
+        if !configuration.usesNativeAppOAuth, let clientSecret = configuration.legacyClientSecret {
             form["client_secret"] = clientSecret
         }
         return try await postTokenRequest(form: form)
     }
 
     private func refreshAccessToken(refreshToken: String) async throws -> GoogleOAuthTokenResponse {
-        guard let configuration = GoogleOAuthConfiguration.current else {
+        guard let configuration = GoogleOAuthConfiguration.current,
+              let clientID = configuration.oauthClientID else {
             throw GoogleOAuthError.missingConfiguration
         }
         var form = [
-            "client_id": configuration.clientID,
+            "client_id": clientID,
             "grant_type": "refresh_token",
             "refresh_token": refreshToken
         ]
-        if let clientSecret = configuration.clientSecret {
+        if !configuration.usesNativeAppOAuth, let clientSecret = configuration.legacyClientSecret {
             form["client_secret"] = clientSecret
         }
         return try await postTokenRequest(form: form)
+    }
+
+    private static func revokeToken(_ token: String) async throws {
+        var request = URLRequest(url: URL(string: "https://oauth2.googleapis.com/revoke")!)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = "token=\(formEscape(token))".data(using: .utf8)
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            return
+        }
     }
 
     private func postTokenRequest(form: [String: String]) async throws -> GoogleOAuthTokenResponse {
@@ -388,9 +586,27 @@ final class GoogleOAuthService: @unchecked Sendable {
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
+    private static func formEscape(_ value: String) -> String {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: ":#[]@!$&'()*+,;=")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
     private static func hasRequiredCalendarScopes(_ scopes: [String]) -> Bool {
         let granted = Set(scopes)
         return calendarScopes.allSatisfy { granted.contains($0) }
+    }
+}
+
+private final class NativeOAuthPresentationProvider: NSObject, ASWebAuthenticationPresentationContextProviding {
+    private let window: NSWindow
+
+    init(window: NSWindow) {
+        self.window = window
+    }
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        window
     }
 }
 
