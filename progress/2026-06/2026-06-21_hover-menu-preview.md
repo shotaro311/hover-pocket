@@ -43,3 +43,34 @@ status: active
 
 - 実機操作で Settings の言語切り替え後、Settings / Calendar / Mirror / Clipboard / Sticky Notes / AI lane の表層文言が意図通り即時反映されるかを見る。
 - Provider header の drag & drop reorder を、trackpad / mouse の両方で手動確認する。
+
+## 追加実施内容: サブディスプレイミニバー / 更新導線
+
+- 表示先に `すべて` を追加し、各ディスプレイ上部にホバーポケットの起点を出せるようにした。
+- ノッチあり画面は既存のノッチ形状を維持し、ノッチなし画面だけ控えめなミニバー起点へ分岐するようにした。
+- ミニバーは通常時 150 x 2pt、上部近接時に 168 x 7pt へ 5pt 下がって拡張し、バー自体の hover / tap でホバーウィンドウを開く。
+- Settings に `サブディスプレイでもミラーを表示` を追加。既定はオフで、サブディスプレイから開いたホバーポケットでは Mirror provider を非表示にする。
+- Sparkle の probing update check を使い、更新が見つかったときだけホバーウィンドウ上部に青い更新アイコンを表示するようにした。クリック時は標準の Sparkle 更新 UI を開く。
+- Settings の更新状態文言を日本語 / English 切り替えに対応させた。
+
+## 追加成果物
+
+- Release: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-61`
+- Latest install ZIP: `https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip`
+- Latest appcast: `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`
+- ZIP: `dist/releases/HoverPocket-0.1.0-61.zip`
+- ZIP SHA256: `800d8c23c5983d33d53fa59654b110a08bf3ef7a16b8c76c53f284a3bfe3baa2`
+- Notary submission ID: `d1083b9f-be49-4ef8-bf68-cdad9e330b40`
+- Notary status: `Accepted`
+
+## 追加検証
+
+- `swift build`: 成功。
+- `git diff --check`: 成功。
+- `./script/build_and_run.sh --verify`: 成功。Apple Development 署名で `dist/HoverPocket.app` を起動確認。
+- `APP_VERSION=0.1.0 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh`: build `61` の notarization / staple / GitHub Release 公開まで成功。
+- `gh release view v0.1.0-61 --json assets,body,url,name,tagName`: `HoverPocket-macOS-app.zip`、`HoverPocket-0.1.0-61.zip`、SHA256、`appcast.xml` の4 asset を確認。
+- 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`: `sparkle:version` が `61`、enclosure が `v0.1.0-61/HoverPocket-0.1.0-61.zip` であることを確認。
+- `zipinfo -1 dist/releases/HoverPocket-0.1.0-61.zip`: top-level が `HoverPocket.app` のみであることを確認。
+- `shasum -a 256 dist/releases/HoverPocket-0.1.0-61.zip`: SHA256 が `.sha256` と一致。
+- `codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`、`stapler validate dist/HoverPocket.app`、`spctl --assess --type execute --verbose=4 dist/HoverPocket.app`: 成功、`source=Notarized Developer ID`。
