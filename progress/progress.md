@@ -148,6 +148,8 @@ status: active
 
 ## 最近の更新
 
+- 2026-06-20: Sticky Notes の Board Grid UI を追加。hover archive、フル幅に拡大する inline editor、color swatches、context menu、drag reorder、外部 drag text payload、undo toast を `StickyNotesView.swift` に実装し、`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
+- 2026-06-20: Sticky Notes の model / store / provider / Settings toggle を追加。Application Support `HoverPocket/StickyNotes/notes.json` への JSON 永続化、archive/delete undo、provider registry 接続を実装し、`swift build` と `git diff --check` 成功。
 - 2026-06-20: Apple notarization を実行し、`HoverPocket-0.1.0-41.zip` を notarized/stapled ZIP として再生成。app 本体と ZIP 展開後 app の両方で Gatekeeper accepted を確認。
 - 2026-06-19: 決定アプリアイコンを app bundle に反映し、Mirror camera の遅延停止/再起動競合を修正。実マウス移動の hover open / close 5サイクルで preview 再open を確認。
 - 2026-06-07: Calendar provider に日付クリック固定、予定追加、編集、削除 UI / API を追加。OAuth scope は `calendar.events` に変更し、既存 read-only credential は再接続扱いにした。

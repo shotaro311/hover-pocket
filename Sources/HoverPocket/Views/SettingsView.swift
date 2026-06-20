@@ -17,6 +17,10 @@ struct SettingsView: View {
 
                 Divider()
 
+                stickyNotesSection
+
+                Divider()
+
                 mirrorSection
 
                 Divider()
@@ -130,6 +134,15 @@ struct SettingsView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var stickyNotesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Sticky Notes")
+                .font(.system(size: 13, weight: .bold))
+
+            Toggle("Show undo after note actions", isOn: $settings.showStickyNoteUndoToast)
         }
     }
 

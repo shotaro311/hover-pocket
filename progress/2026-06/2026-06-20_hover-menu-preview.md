@@ -9,6 +9,12 @@ status: active
 
 ## 実施内容
 
+- Sticky Notes の data/provider/settings 実装を追加。
+- `StickyNoteItem` / `StickyNoteColor` と `StickyNotesStore.shared` を追加し、`Application Support/HoverPocket/StickyNotes/notes.json` へ JSON 永続化する構成にした。
+- archive/delete の undo action、active notes の sortIndex 順、Settings の `Show undo after note actions` toggle、built-in provider registry 接続を追加。
+- UI worker 側の `StickyNotesView.swift` 実装と store/provider API の接続を確認。
+- `StickyNotesView.swift` に Pattern 1 Board Grid、hover archive、inline expanded editor、color swatches、context menu、drag reorder、外部 drag text payload、undo toast UI を追加。
+- 親側レビューで inline editor をフル幅行へ展開する構造に変更し、選択付箋が拡大して周囲の付箋が行単位で避けるようにした。空タイトル時は本文1行目を見出し代わりにし、本文プレビューの重複表示を抑制。
 - Apple Account のアプリ用パスワードを使い、`hover-pocket` notarytool Keychain profile を作成。
 - 作成済み profile を `xcrun notarytool history --keychain-profile hover-pocket` で検証。
 - `NOTARYTOOL_PROFILE=hover-pocket ./script/notarize_release.sh` を実行し、Apple notarization、staple、staple後ZIP再生成、SHA256 / appcast 再生成、ZIP展開後検証まで完了。
@@ -26,6 +32,11 @@ status: active
 
 ## 検証
 
+- `swift build`: 成功。
+- `swift build`: Sticky Notes UI 追加後に再実行し、警告なしで成功。
+- `git diff --check -- Sources/HoverPocket/Models/StickyNoteModels.swift Sources/HoverPocket/State/StickyNotesStore.swift Sources/HoverPocket/Providers/StickyNotesProvider.swift Sources/HoverPocket/Providers/ProviderRegistry.swift Sources/HoverPocket/State/AppSettings.swift Sources/HoverPocket/Views/SettingsView.swift Sources/HoverPocket/Views/StickyNotesView.swift`: 成功。
+- `git diff --check`: 成功。
+- `./script/build_and_run.sh --verify`: 成功。`dist/HoverPocket.app` を Apple Development 署名で再署名し、起動確認まで成功。
 - `xcrun notarytool history --keychain-profile hover-pocket --output-format json --no-progress`: 成功。
 - `NOTARYTOOL_PROFILE=hover-pocket ./script/notarize_release.sh`: 成功。
 - `codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`: 成功。

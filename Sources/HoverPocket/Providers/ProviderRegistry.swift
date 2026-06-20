@@ -10,7 +10,8 @@ struct ProviderRegistry: Sendable {
         providers: [
             MirrorProvider(),
             GoogleCalendarProvider(),
-            ClipboardProvider()
+            ClipboardProvider(),
+            StickyNotesProvider()
         ]
     )
 

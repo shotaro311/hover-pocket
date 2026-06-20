@@ -57,6 +57,12 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var showStickyNoteUndoToast: Bool {
+        didSet {
+            defaults.set(showStickyNoteUndoToast, forKey: Self.showStickyNoteUndoToastKey)
+        }
+    }
+
     private let defaults: UserDefaults
     private static let displayPlacementModeKey = "displayPlacementMode"
     private static let panelSizeKey = "panelSize"
@@ -67,6 +73,7 @@ final class AppSettings: ObservableObject {
     private static let preferredProviderKey = "preferredProvider"
     private static let lastSelectedProviderKey = "lastSelectedProvider"
     private static let showMirrorMicrophoneCheckKey = "showMirrorMicrophoneCheck"
+    private static let showStickyNoteUndoToastKey = "showStickyNoteUndoToast"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -90,6 +97,11 @@ final class AppSettings: ObservableObject {
             self.showMirrorMicrophoneCheck = false
         } else {
             self.showMirrorMicrophoneCheck = defaults.bool(forKey: Self.showMirrorMicrophoneCheckKey)
+        }
+        if defaults.object(forKey: Self.showStickyNoteUndoToastKey) == nil {
+            self.showStickyNoteUndoToast = true
+        } else {
+            self.showStickyNoteUndoToast = defaults.bool(forKey: Self.showStickyNoteUndoToastKey)
         }
     }
 
