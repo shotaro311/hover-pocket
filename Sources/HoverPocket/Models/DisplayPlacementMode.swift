@@ -8,24 +8,32 @@ enum DisplayPlacementMode: String, CaseIterable, Identifiable {
     }
 
     var title: String {
+        title(language: .english)
+    }
+
+    func title(language: AppLanguage) -> String {
         switch self {
         case .automatic:
-            "Auto"
+            AppText.text(.displayAutomatic, language: language)
         case .mainDisplay:
-            "Main"
+            AppText.text(.displayMain, language: language)
         case .secondaryDisplay:
-            "Sub"
+            AppText.text(.displaySecondary, language: language)
         }
     }
 
     var detail: String {
+        detail(language: .english)
+    }
+
+    func detail(language: AppLanguage) -> String {
         switch self {
         case .automatic:
-            "Uses the display under the pointer, then stays there while open."
+            AppText.text(.displayAutomaticDetail, language: language)
         case .mainDisplay:
-            "Always uses the primary macOS display."
+            AppText.text(.displayMainDetail, language: language)
         case .secondaryDisplay:
-            "Uses a secondary display when one is connected."
+            AppText.text(.displaySecondaryDetail, language: language)
         }
     }
 }

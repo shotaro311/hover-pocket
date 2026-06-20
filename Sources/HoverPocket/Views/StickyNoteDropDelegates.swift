@@ -37,6 +37,7 @@ struct StickyNoteArchiveDropDelegate: DropDelegate {
     @Binding var draggingNoteID: UUID?
     @Binding var isTargeted: Bool
     let resetDragState: () -> Void
+    let archiveMessage: String
     let showUndoToast: (String) -> Void
 
     func validateDrop(info: DropInfo) -> Bool {
@@ -57,7 +58,7 @@ struct StickyNoteArchiveDropDelegate: DropDelegate {
         let didArchive = store.archiveNote(id: draggingNoteID)
         resetDragState()
         if didArchive {
-            showUndoToast("Archived")
+            showUndoToast(archiveMessage)
         }
         return didArchive
     }

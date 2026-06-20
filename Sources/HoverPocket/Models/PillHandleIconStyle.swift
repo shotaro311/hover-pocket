@@ -8,24 +8,32 @@ enum PillHandleIconStyle: String, CaseIterable, Identifiable {
     }
 
     var title: String {
+        title(language: .english)
+    }
+
+    func title(language: AppLanguage) -> String {
         switch self {
         case .chevron:
             return "B"
         case .pocket:
             return "C"
         case .none:
-            return "None"
+            return AppText.text(.handleNone, language: language)
         }
     }
 
     var detail: String {
+        detail(language: .japanese)
+    }
+
+    func detail(language: AppLanguage) -> String {
         switch self {
         case .chevron:
-            return "小さな下向きマークを表示します。"
+            return AppText.text(.handleChevronDetail, language: language)
         case .pocket:
-            return "ポケット形状の小さなマークを表示します。"
+            return AppText.text(.handlePocketDetail, language: language)
         case .none:
-            return "マークなしで、ノッチに合わせた形だけを表示します。"
+            return AppText.text(.handleNoneDetail, language: language)
         }
     }
 }

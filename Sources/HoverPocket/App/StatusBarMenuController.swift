@@ -1,19 +1,24 @@
 import AppKit
+import Combine
 
 @MainActor
 final class StatusBarMenuController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let settings: AppSettings
     private let onOpenPanel: () -> Void
     private let onOpenSettings: () -> Void
     private let onCheckForUpdates: () -> Void
     private let onQuit: () -> Void
+    private var cancellables = Set<AnyCancellable>()
 
     init(
+        settings: AppSettings,
         onOpenPanel: @escaping () -> Void,
         onOpenSettings: @escaping () -> Void,
         onCheckForUpdates: @escaping () -> Void,
         onQuit: @escaping () -> Void
     ) {
+        self.settings = settings
         self.onOpenPanel = onOpenPanel
         self.onOpenSettings = onOpenSettings
         self.onCheckForUpdates = onCheckForUpdates
@@ -22,6 +27,7 @@ final class StatusBarMenuController: NSObject {
 
         configureButton()
         configureMenu()
+        observeSettings()
     }
 
     private func configureButton() {
@@ -33,12 +39,21 @@ final class StatusBarMenuController: NSObject {
 
     private func configureMenu() {
         let menu = NSMenu()
-        menu.addItem(menuItem(title: "Open HoverPocket", action: #selector(openPanel)))
-        menu.addItem(menuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
-        menu.addItem(menuItem(title: "Check for Updates", action: #selector(checkForUpdates)))
+        menu.addItem(menuItem(title: settings.text(.openHoverPocket), action: #selector(openPanel)))
+        menu.addItem(menuItem(title: settings.text(.settings), action: #selector(openSettings), keyEquivalent: ","))
+        menu.addItem(menuItem(title: settings.text(.checkForUpdates), action: #selector(checkForUpdates)))
         menu.addItem(.separator())
-        menu.addItem(menuItem(title: "Quit HoverPocket", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(menuItem(title: settings.text(.quitHoverPocket), action: #selector(quit), keyEquivalent: "q"))
         statusItem.menu = menu
+    }
+
+    private func observeSettings() {
+        settings.$appLanguage
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.configureMenu()
+            }
+            .store(in: &cancellables)
     }
 
     private func menuItem(title: String, action: Selector, keyEquivalent: String = "") -> NSMenuItem {

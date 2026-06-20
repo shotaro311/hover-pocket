@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         statusBarMenuController = StatusBarMenuController(
+            settings: hoverWindowController.appSettings,
             onOpenPanel: { [weak self] in
                 self?.hoverWindowController.openPanelFromMenu()
             },

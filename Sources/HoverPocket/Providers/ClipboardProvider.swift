@@ -21,6 +21,6 @@ struct ClipboardProvider: PocketProvider {
         state: ProviderState,
         actions: ProviderActions
     ) -> AnyView {
-        AnyView(ClipboardHistoryView(onExternalDragStarted: actions.beginExternalDrag))
+        AnyView(ClipboardHistoryView(settings: actions.settings, onExternalDragStarted: actions.beginExternalDrag))
     }
 }

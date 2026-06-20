@@ -3,6 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ClipboardHistoryView: View {
+    @ObservedObject var settings: AppSettings
     let onExternalDragStarted: @MainActor () -> Void
 
     @ObservedObject private var store = ClipboardHistoryStore.shared
@@ -29,7 +30,7 @@ struct ClipboardHistoryView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Label(store.isMonitoring ? "Watching clipboard" : "Clipboard paused", systemImage: "doc.on.clipboard")
+            Label(store.isMonitoring ? text(.clipboardWatching) : text(.clipboardPaused), systemImage: "doc.on.clipboard")
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.64))
 
@@ -49,16 +50,16 @@ struct ClipboardHistoryView: View {
             }
             .buttonStyle(IconButtonStyle(selected: false))
             .disabled(store.textItems.isEmpty && store.imageItems.isEmpty)
-            .help("Clear clipboard history")
+            .help(text(.clipboardClearHistory))
         }
     }
 
     private var textColumn: some View {
         VStack(alignment: .leading, spacing: 8) {
-            columnTitle("Text", count: store.textItems.count)
+            columnTitle(text(.clipboardText), count: store.textItems.count)
 
             if store.textItems.isEmpty {
-                emptyState(symbol: "text.alignleft", title: "No text yet")
+                emptyState(symbol: "text.alignleft", title: text(.clipboardNoText))
             } else {
                 ScrollView {
                     LazyVStack(spacing: 7) {
@@ -75,10 +76,10 @@ struct ClipboardHistoryView: View {
 
     private var imageColumn: some View {
         VStack(alignment: .leading, spacing: 8) {
-            columnTitle("Images", count: store.imageItems.count)
+            columnTitle(text(.clipboardImages), count: store.imageItems.count)
 
             if store.imageItems.isEmpty {
-                emptyState(symbol: "photo", title: "No images yet")
+                emptyState(symbol: "photo", title: text(.clipboardNoImages))
             } else {
                 ScrollView {
                     LazyVGrid(
@@ -116,7 +117,7 @@ struct ClipboardHistoryView: View {
     private func textItemRow(_ item: ClipboardTextHistoryItem) -> some View {
         HStack(alignment: .top, spacing: 7) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.previewText)
+                Text(previewText(for: item))
                     .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.86))
                     .lineLimit(3)
@@ -134,7 +135,7 @@ struct ClipboardHistoryView: View {
                 Image(systemName: "doc.on.doc")
             }
             .buttonStyle(IconButtonStyle(selected: false))
-            .help("Copy text")
+            .help(text(.copyText))
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
@@ -150,7 +151,7 @@ struct ClipboardHistoryView: View {
             onExternalDragStarted()
             return NSItemProvider(object: item.text as NSString)
         }
-        .help("Drag to drop text into another app")
+        .help(text(.clipboardDragText))
     }
 
     private func imageItemTile(_ item: ClipboardImageHistoryItem) -> some View {
@@ -188,7 +189,7 @@ struct ClipboardHistoryView: View {
                     Image(systemName: "doc.on.doc")
                 }
                 .buttonStyle(IconButtonStyle(selected: false))
-                .help("Copy image")
+                .help(text(.copyImage))
             }
         }
         .padding(6)
@@ -204,7 +205,18 @@ struct ClipboardHistoryView: View {
             onExternalDragStarted()
             return imageDragProvider(fileURL: fileURL)
         }
-        .help("Drag to drop image into another app")
+        .help(text(.clipboardDragImage))
+    }
+
+    private func previewText(for item: ClipboardTextHistoryItem) -> String {
+        let collapsed = item.text
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return collapsed.isEmpty ? text(.clipboardEmptyText) : collapsed
+    }
+
+    private func text(_ key: AppTextKey) -> String {
+        settings.text(key)
     }
 
     private func emptyState(symbol: String, title: String) -> some View {

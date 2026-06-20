@@ -5,6 +5,7 @@ struct CalendarDateTimeInputView: View {
     @Binding var date: Date
 
     let label: String
+    let language: AppLanguage
     let includesTime: Bool
     let onDateChanged: () -> Void
 
@@ -40,6 +41,7 @@ struct CalendarDateTimeInputView: View {
                     activeUnit: $activeUnit,
                     unit: .year,
                     calendar: calendar,
+                    language: language,
                     accentColor: accentColor,
                     onDateChanged: onDateChanged,
                     onDragChanged: updateDrag(unit:translationWidth:),
@@ -51,6 +53,7 @@ struct CalendarDateTimeInputView: View {
                     activeUnit: $activeUnit,
                     unit: .month,
                     calendar: calendar,
+                    language: language,
                     accentColor: accentColor,
                     onDateChanged: onDateChanged,
                     onDragChanged: updateDrag(unit:translationWidth:),
@@ -62,6 +65,7 @@ struct CalendarDateTimeInputView: View {
                     activeUnit: $activeUnit,
                     unit: .day,
                     calendar: calendar,
+                    language: language,
                     accentColor: accentColor,
                     onDateChanged: onDateChanged,
                     onDragChanged: updateDrag(unit:translationWidth:),
@@ -75,6 +79,7 @@ struct CalendarDateTimeInputView: View {
                         activeUnit: $activeUnit,
                         unit: .hour,
                         calendar: calendar,
+                        language: language,
                         accentColor: accentColor,
                         onDateChanged: onDateChanged,
                         onDragChanged: updateDrag(unit:translationWidth:),
@@ -86,6 +91,7 @@ struct CalendarDateTimeInputView: View {
                         activeUnit: $activeUnit,
                         unit: .minute,
                         calendar: calendar,
+                        language: language,
                         accentColor: accentColor,
                         onDateChanged: onDateChanged,
                         onDragChanged: updateDrag(unit:translationWidth:),
@@ -202,6 +208,7 @@ private struct DateTimeSegmentField: View {
 
     let unit: DateTimeUnit
     let calendar: Calendar
+    let language: AppLanguage
     let accentColor: Color
     let onDateChanged: () -> Void
     let onDragChanged: (DateTimeUnit, CGFloat) -> Void
@@ -228,7 +235,7 @@ private struct DateTimeSegmentField: View {
         .onAppear {
             syncText()
         }
-        .help(unit.helpText)
+        .help(unit.helpText(language: language))
     }
 
     private var isActive: Bool {
@@ -462,8 +469,8 @@ private enum DateTimeUnit: Equatable {
         self == .year ? 22 : 18
     }
 
-    var helpText: String {
-        "Type a value, or drag left/right to adjust."
+    func helpText(language: AppLanguage) -> String {
+        AppText.text(.dateTimeInputHelp, language: language)
     }
 
     func formattedValue(from date: Date, calendar: Calendar) -> String {

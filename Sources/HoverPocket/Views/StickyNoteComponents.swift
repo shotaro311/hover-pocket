@@ -6,6 +6,7 @@ struct StickyNoteHeaderView: View {
     let errorMessage: String?
     let selectedNewNoteColor: StickyNoteColor?
     let gridSize: StickyNoteGridSize
+    let language: AppLanguage
     let onSelectGridSize: (StickyNoteGridSize) -> Void
     let onSelectNewNoteColor: (StickyNoteColor) -> Void
     let onCreateWithColor: (StickyNoteColor) -> Void
@@ -13,7 +14,7 @@ struct StickyNoteHeaderView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Label("Notes", systemImage: "square.grid.2x2")
+            Label(AppText.text(.stickyNotes, language: language), systemImage: "square.grid.2x2")
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.64))
 
@@ -21,7 +22,7 @@ struct StickyNoteHeaderView: View {
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.38))
 
-            StickyNoteGridSizeControl(selectedSize: gridSize, onSelect: onSelectGridSize)
+            StickyNoteGridSizeControl(selectedSize: gridSize, language: language, onSelect: onSelectGridSize)
 
             if let errorMessage {
                 Text(errorMessage)
@@ -34,6 +35,7 @@ struct StickyNoteHeaderView: View {
 
             StickyNoteColorSwatches(
                 selectedColor: selectedNewNoteColor,
+                language: language,
                 onDoubleClick: onCreateWithColor,
                 onSelect: onSelectNewNoteColor
             )
@@ -42,7 +44,7 @@ struct StickyNoteHeaderView: View {
                 Image(systemName: "plus")
             }
             .buttonStyle(IconButtonStyle(selected: false))
-            .help("New note")
+            .help(AppText.text(.stickyNewNote, language: language))
         }
     }
 }
@@ -53,13 +55,14 @@ struct StickyNotePreviewCard<ContextMenu: View>: View {
     let isHovered: Bool
     let isDragging: Bool
     let isDropTarget: Bool
+    let language: AppLanguage
     let onArchive: () -> Void
     @ViewBuilder let contextMenu: () -> ContextMenu
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top, spacing: 6) {
-                Text(note.displayTitle)
+                Text(note.displayTitle(language: language))
                     .font(.system(size: gridSize.titleFontSize, weight: .bold))
                     .foregroundStyle(Color.black.opacity(0.78))
                     .lineLimit(2)
@@ -76,7 +79,7 @@ struct StickyNotePreviewCard<ContextMenu: View>: View {
                     .foregroundStyle(Color.black.opacity(0.54))
                     .frame(width: 18, height: 18)
                     .background(Circle().fill(Color.white.opacity(0.36)))
-                    .help("Archive")
+                    .help(AppText.text(.stickyArchive, language: language))
                     .transition(.scale.combined(with: .opacity))
                 }
             }
@@ -114,6 +117,7 @@ struct StickyNotePreviewCard<ContextMenu: View>: View {
 struct StickyNoteEditorCard<ContextMenu: View>: View {
     let note: StickyNoteItem
     let gridSize: StickyNoteGridSize
+    let language: AppLanguage
     @Binding var draftTitle: String
     @Binding var draftBody: String
     @Binding var draftColor: StickyNoteColor?
@@ -139,7 +143,7 @@ struct StickyNoteEditorCard<ContextMenu: View>: View {
 
     private var toolbar: some View {
         HStack(spacing: 6) {
-            StickyNoteColorSwatches(selectedColor: draftColor) { color in
+            StickyNoteColorSwatches(selectedColor: draftColor, language: language) { color in
                 draftColor = color
                 onDraftChanged()
             }
@@ -150,25 +154,25 @@ struct StickyNoteEditorCard<ContextMenu: View>: View {
                 Image(systemName: "checkmark")
             }
             .buttonStyle(IconButtonStyle(selected: false))
-            .help("Archive")
+            .help(AppText.text(.stickyArchive, language: language))
 
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")
             }
             .buttonStyle(IconButtonStyle(selected: false))
-            .help("Delete")
+            .help(AppText.text(.delete, language: language))
 
             Button(action: onDone) {
                 Image(systemName: "checkmark.circle.fill")
             }
             .buttonStyle(IconButtonStyle(selected: true))
             .keyboardShortcut(.return, modifiers: [.control])
-            .help("Done")
+            .help(AppText.text(.stickyDone, language: language))
         }
     }
 
     private var titleField: some View {
-        TextField("Title", text: $draftTitle)
+        TextField(AppText.text(.title, language: language), text: $draftTitle)
             .textFieldStyle(.plain)
             .font(.system(size: gridSize.titleFontSize + 1, weight: .bold))
             .foregroundStyle(Color.black.opacity(0.78))
@@ -202,6 +206,7 @@ struct StickyNoteEditorCard<ContextMenu: View>: View {
 
 struct StickyNoteColorSwatches: View {
     let selectedColor: StickyNoteColor?
+    let language: AppLanguage
     var onDoubleClick: ((StickyNoteColor) -> Void)?
     let onSelect: (StickyNoteColor) -> Void
 
@@ -229,14 +234,23 @@ struct StickyNoteColorSwatches: View {
                             onDoubleClick?(color)
                         }
                 )
-                .help(onDoubleClick == nil ? StickyNoteStyle.colorName(for: color) : "\(StickyNoteStyle.colorName(for: color)); double-click to create")
+                .help(swatchHelp(for: color))
             }
         }
+    }
+
+    private func swatchHelp(for color: StickyNoteColor) -> String {
+        let colorTitle = StickyNoteStyle.colorName(for: color, language: language)
+        guard onDoubleClick != nil else {
+            return colorTitle
+        }
+        return "\(colorTitle) / \(AppText.text(.stickyDoubleClickCreate, language: language))"
     }
 }
 
 struct StickyNoteGridSizeControl: View {
     let selectedSize: StickyNoteGridSize
+    let language: AppLanguage
     let onSelect: (StickyNoteGridSize) -> Void
 
     var body: some View {
@@ -245,7 +259,7 @@ struct StickyNoteGridSizeControl: View {
                 Button {
                     onSelect(size)
                 } label: {
-                    Text(size.shortTitle)
+                    Text(size.shortTitle(language: language))
                         .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                         .foregroundStyle(selectedSize == size ? .white : .white.opacity(0.42))
                         .frame(width: 16, height: 16)
@@ -255,7 +269,7 @@ struct StickyNoteGridSizeControl: View {
                         )
                 }
                 .buttonStyle(.plain)
-                .help("\(size.title) notes")
+                .help("\(size.title(language: language)) \(AppText.text(.stickyNotes, language: language))")
             }
         }
     }
@@ -268,6 +282,7 @@ struct StickyNoteUndoToast: Equatable {
 
 struct StickyNoteUndoToastView: View {
     let toast: StickyNoteUndoToast
+    let language: AppLanguage
     let onUndo: () -> Void
     let onHideFutureToasts: () -> Void
 
@@ -280,16 +295,16 @@ struct StickyNoteUndoToastView: View {
 
             Spacer(minLength: 4)
 
-            Button("Undo", action: onUndo)
+            Button(AppText.text(.stickyUndo, language: language), action: onUndo)
                 .buttonStyle(.plain)
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white)
 
-            Button("Don't show", action: onHideFutureToasts)
+            Button(AppText.text(.stickyDontShow, language: language), action: onHideFutureToasts)
                 .buttonStyle(.plain)
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.48))
-                .help("Hide undo toast from now on")
+                .help(AppText.text(.stickyHideUndoToast, language: language))
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -308,13 +323,14 @@ struct StickyNoteUndoToastView: View {
 
 struct StickyNoteArchiveDropZone: View {
     let isTargeted: Bool
+    let language: AppLanguage
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "trash.fill")
                 .font(.system(size: 13, weight: .bold))
 
-            Text("Archive")
+            Text(AppText.text(.stickyArchive, language: language))
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
         }
         .foregroundStyle(foregroundColor)
@@ -342,13 +358,15 @@ struct StickyNoteArchiveDropZone: View {
 }
 
 struct StickyNoteEmptyStateView: View {
+    let language: AppLanguage
+
     var body: some View {
         VStack(spacing: 7) {
             Image(systemName: "note.text")
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.28))
 
-            Text("No notes")
+            Text(AppText.text(.stickyNoNotes, language: language))
                 .font(.system(size: 10.5, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.5))
         }
@@ -401,8 +419,8 @@ enum StickyNoteStyle {
         paperColor(for: color).opacity(0.17)
     }
 
-    static func colorName(for color: StickyNoteColor) -> String {
-        color.title
+    static func colorName(for color: StickyNoteColor, language: AppLanguage = .english) -> String {
+        color.title(language: language)
     }
 }
 

@@ -57,6 +57,10 @@ final class ProviderStore: ObservableObject {
         settings.moveProvider(id, by: offset, manifests: registry.manifests)
     }
 
+    func moveProvider(_ id: PluginID, to targetID: PluginID) {
+        settings.moveProvider(id, to: targetID, manifests: registry.manifests)
+    }
+
     func canMoveProvider(_ id: PluginID, by offset: Int) -> Bool {
         let orderedIDs = visibleManifests.map(\.id)
         guard let index = orderedIDs.firstIndex(of: id) else { return false }

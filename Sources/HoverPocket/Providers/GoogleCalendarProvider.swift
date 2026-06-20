@@ -22,6 +22,6 @@ struct GoogleCalendarProvider: PocketProvider {
         state: ProviderState,
         actions: ProviderActions
     ) -> AnyView {
-        AnyView(GoogleCalendarPreviewView(isActive: actions.isPreviewActive))
+        AnyView(GoogleCalendarPreviewView(isActive: actions.isPreviewActive, settings: actions.settings))
     }
 }

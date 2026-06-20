@@ -6,35 +6,47 @@ enum PanelSizeOption: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var title: String {
+        title(language: .english)
+    }
+
+    func title(language: AppLanguage) -> String {
         switch self {
         case .small:
-            return "Small"
+            return AppText.text(.panelSizeSmall, language: language)
         case .medium:
-            return "Medium"
+            return AppText.text(.panelSizeMedium, language: language)
         case .large:
-            return "Large"
+            return AppText.text(.panelSizeLarge, language: language)
         }
     }
 
     var shortTitle: String {
+        shortTitle(language: .japanese)
+    }
+
+    func shortTitle(language: AppLanguage) -> String {
         switch self {
         case .small:
-            return "小"
+            return language == .japanese ? "小" : "S"
         case .medium:
-            return "中"
+            return language == .japanese ? "中" : "M"
         case .large:
-            return "大"
+            return language == .japanese ? "大" : "L"
         }
     }
 
     var detail: String {
+        detail(language: .japanese)
+    }
+
+    func detail(language: AppLanguage) -> String {
         switch self {
         case .small:
-            return "コンパクトに表示します。"
+            return AppText.text(.panelSizeSmallDetail, language: language)
         case .medium:
-            return "現在の標準サイズです。"
+            return AppText.text(.panelSizeMediumDetail, language: language)
         case .large:
-            return "予定やクリップ履歴を少し広く表示します。"
+            return AppText.text(.panelSizeLargeDetail, language: language)
         }
     }
 

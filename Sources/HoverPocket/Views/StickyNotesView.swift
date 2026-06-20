@@ -27,6 +27,10 @@ struct StickyNotesView: View {
         actions.settings.stickyNoteGridSize
     }
 
+    private var language: AppLanguage {
+        actions.settings.appLanguage
+    }
+
     var body: some View {
         VStack(spacing: 10) {
             StickyNoteHeaderView(
@@ -34,6 +38,7 @@ struct StickyNotesView: View {
                 errorMessage: store.lastErrorMessage,
                 selectedNewNoteColor: newNoteColor,
                 gridSize: actions.settings.stickyNoteGridSize,
+                language: language,
                 onSelectGridSize: { actions.settings.stickyNoteGridSize = $0 },
                 onSelectNewNoteColor: { newNoteColor = $0 },
                 onCreateWithColor: { createNote(color: $0) },
@@ -44,7 +49,7 @@ struct StickyNotesView: View {
                 notesGrid
 
                 if draggingNoteID != nil {
-                    StickyNoteArchiveDropZone(isTargeted: isArchiveDropTargeted)
+                    StickyNoteArchiveDropZone(isTargeted: isArchiveDropTargeted, language: language)
                         .padding(.horizontal, 4)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                         .onDrop(
@@ -54,6 +59,7 @@ struct StickyNotesView: View {
                                 draggingNoteID: $draggingNoteID,
                                 isTargeted: $isArchiveDropTargeted,
                                 resetDragState: resetDragState,
+                                archiveMessage: text(.stickyArchived),
                                 showUndoToast: showUndoToast
                             )
                         )
@@ -62,6 +68,7 @@ struct StickyNotesView: View {
                 if let undoToast, actions.settings.showStickyNoteUndoToast {
                     StickyNoteUndoToastView(
                         toast: undoToast,
+                        language: language,
                         onUndo: undoLastAction,
                         onHideFutureToasts: hideFutureUndoToasts
                     )
@@ -93,7 +100,7 @@ struct StickyNotesView: View {
     @ViewBuilder
     private var notesGrid: some View {
         if store.activeNotes.isEmpty {
-            StickyNoteEmptyStateView()
+            StickyNoteEmptyStateView(language: language)
         } else {
             GeometryReader { geometry in
                 let metrics = gridMetrics(for: geometry.size.width)
@@ -148,6 +155,7 @@ struct StickyNotesView: View {
             StickyNoteEditorCard(
                 note: note,
                 gridSize: gridSize,
+                language: language,
                 draftTitle: $draftTitle,
                 draftBody: $draftBody,
                 draftColor: $draftColor,
@@ -164,6 +172,7 @@ struct StickyNotesView: View {
                 isHovered: hoveredNoteID == note.id,
                 isDragging: draggingNoteID == note.id,
                 isDropTarget: dropTargetNoteID == note.id,
+                language: language,
                 onArchive: { archive(note) },
                 contextMenu: { contextMenu(for: note) }
             )
@@ -194,13 +203,13 @@ struct StickyNotesView: View {
 
     @ViewBuilder
     private func contextMenu(for note: StickyNoteItem) -> some View {
-        Button("Edit") {
+        Button(text(.stickyEdit)) {
             beginEditing(note)
         }
 
-        Menu("Color") {
+        Menu(text(.color)) {
             ForEach(Array(StickyNoteColor.allCases)) { color in
-                Button(StickyNoteStyle.colorName(for: color)) {
+                Button(StickyNoteStyle.colorName(for: color, language: language)) {
                     store.updateNote(id: note.id, title: note.title, body: note.body, color: color)
                     if selectedNoteID == note.id {
                         draftColor = color
@@ -209,11 +218,11 @@ struct StickyNotesView: View {
             }
         }
 
-        Button("Archive") {
+        Button(text(.stickyArchive)) {
             archive(note)
         }
 
-        Button("Delete", role: .destructive) {
+        Button(text(.delete), role: .destructive) {
             delete(note)
         }
     }
@@ -286,7 +295,7 @@ struct StickyNotesView: View {
             selectedNoteID = nil
         }
         pendingNewNoteIDs.remove(note.id)
-        showUndoToast("Archived")
+        showUndoToast(text(.stickyArchived))
     }
 
     private func delete(_ note: StickyNoteItem) {
@@ -295,7 +304,7 @@ struct StickyNotesView: View {
             selectedNoteID = nil
         }
         pendingNewNoteIDs.remove(note.id)
-        showUndoToast("Deleted")
+        showUndoToast(text(.stickyDeleted))
     }
 
     private func undoLastAction() {
@@ -411,12 +420,17 @@ struct StickyNotesView: View {
     }
 
     private func dragProvider(for note: StickyNoteItem) -> NSItemProvider {
-        let parts = [note.displayTitle, note.body]
+        let parts = [note.displayTitle(language: language), note.body]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         let text = parts.joined(separator: "\n\n")
         let provider = NSItemProvider(object: text as NSString)
-        provider.suggestedName = note.displayTitle.isEmpty ? "Sticky Note" : note.displayTitle
+        let title = note.displayTitle(language: language).trimmingCharacters(in: .whitespacesAndNewlines)
+        provider.suggestedName = title.isEmpty ? self.text(.stickyNoteSuggestedName) : title
         return provider
+    }
+
+    private func text(_ key: AppTextKey) -> String {
+        actions.settings.text(key)
     }
 }

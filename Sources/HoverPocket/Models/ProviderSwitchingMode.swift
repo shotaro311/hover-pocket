@@ -7,20 +7,28 @@ enum ProviderSwitchingMode: String, CaseIterable, Identifiable {
     }
 
     var title: String {
+        title(language: .english)
+    }
+
+    func title(language: AppLanguage) -> String {
         switch self {
         case .click:
-            return "Click"
+            return AppText.text(.click, language: language)
         case .hover:
-            return "Hover"
+            return AppText.text(.hover, language: language)
         }
     }
 
     var detail: String {
+        detail(language: .japanese)
+    }
+
+    func detail(language: AppLanguage) -> String {
         switch self {
         case .click:
-            return "アイコンをクリックしたときにパネルを切り替えます。"
+            return AppText.text(.iconSwitchingClickDetail, language: language)
         case .hover:
-            return "アイコンにポインタを重ねるだけでパネルを切り替えます。"
+            return AppText.text(.iconSwitchingHoverDetail, language: language)
         }
     }
 }

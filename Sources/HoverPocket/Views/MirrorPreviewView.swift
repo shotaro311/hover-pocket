@@ -117,7 +117,7 @@ struct MirrorPreviewView: View {
                         .stroke(Color.white.opacity(0.10), lineWidth: 1)
                 )
                 .contentShape(Circle())
-                .help("Open Microphone Privacy Settings")
+                .help(text(.mirrorOpenMicrophoneSettings))
             } else {
                 Button {
                     microphone.toggleRecordingPlayback()
@@ -186,7 +186,7 @@ struct MirrorPreviewView: View {
     }
 
     private var microphoneTitle: String {
-        microphoneNeedsPrivacySettings ? "Enable Mic" : "Mic Check"
+        microphoneNeedsPrivacySettings ? text(.mirrorEnableMic) : text(.mirrorMicCheck)
     }
 
     private var microphoneNeedsPrivacySettings: Bool {
@@ -238,13 +238,13 @@ struct MirrorPreviewView: View {
     private var microphoneControlHelp: String {
         switch microphone.recordingState {
         case .idle:
-            return "Record a temporary mic sample"
+            return text(.mirrorRecordMicSample)
         case .recording:
-            return "Stop recording"
+            return text(.mirrorStopRecording)
         case .readyToPlay:
-            return "Play temporary mic sample"
+            return text(.mirrorPlayMicSample)
         case .playing:
-            return "Stop playback and clear"
+            return text(.mirrorStopPlaybackAndClear)
         }
     }
 
@@ -258,20 +258,20 @@ struct MirrorPreviewView: View {
         switch camera.status {
         case .idle:
             if isActive {
-                loadingOverlay(text: "Starting camera")
+                loadingOverlay(text: text(.mirrorStartCamera))
             }
         case .requestingPermission:
-            loadingOverlay(text: "Camera permission")
+            loadingOverlay(text: text(.mirrorCameraPermission))
         case .starting:
-            loadingOverlay(text: "Starting camera")
+            loadingOverlay(text: text(.mirrorStartCamera))
         case .running:
             EmptyView()
         case .denied:
             messageOverlay(
                 symbol: "camera.fill",
-                title: "Camera access is off",
-                message: "Enable camera access in System Settings.",
-                actionTitle: "Open Camera Settings",
+                title: text(.mirrorCameraAccessOff),
+                message: text(.mirrorCameraAccessOffDetail),
+                actionTitle: text(.mirrorOpenCameraSettings),
                 action: {
                     camera.openCameraPrivacySettings()
                 }
@@ -279,9 +279,9 @@ struct MirrorPreviewView: View {
         case .restricted:
             messageOverlay(
                 symbol: "lock.fill",
-                title: "Camera is restricted",
-                message: "macOS is blocking camera access.",
-                actionTitle: "Open Camera Settings",
+                title: text(.mirrorCameraRestricted),
+                message: text(.mirrorCameraRestrictedDetail),
+                actionTitle: text(.mirrorOpenCameraSettings),
                 action: {
                     camera.openCameraPrivacySettings()
                 }
@@ -289,13 +289,13 @@ struct MirrorPreviewView: View {
         case .unavailable:
             messageOverlay(
                 symbol: "video.slash.fill",
-                title: "Camera not found",
-                message: "No available Mac camera was detected."
+                title: text(.mirrorCameraNotFound),
+                message: text(.mirrorCameraNotFoundDetail)
             )
         case let .failed(message):
             messageOverlay(
                 symbol: "exclamationmark.triangle.fill",
-                title: "Camera failed",
+                title: text(.mirrorCameraFailed),
                 message: message
             )
         }
@@ -351,6 +351,10 @@ struct MirrorPreviewView: View {
         .padding(18)
         .frame(maxWidth: 280)
         .background(Color.black.opacity(0.54), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func text(_ key: AppTextKey) -> String {
+        settings.text(key)
     }
 }
 

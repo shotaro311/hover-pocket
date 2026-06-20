@@ -12,6 +12,10 @@ struct StickyNoteItem: Identifiable, Codable, Equatable, Sendable {
     var sortIndex: Double
 
     var displayTitle: String {
+        displayTitle(language: .english)
+    }
+
+    func displayTitle(language: AppLanguage) -> String {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedTitle.isEmpty {
             return trimmedTitle
@@ -24,7 +28,7 @@ struct StickyNoteItem: Identifiable, Codable, Equatable, Sendable {
             return firstBodyLine
         }
 
-        return "Untitled note"
+        return AppText.text(.stickyUntitledNote, language: language)
     }
 
     var previewText: String {
@@ -59,17 +63,21 @@ enum StickyNoteColor: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 
     var title: String {
+        title(language: .english)
+    }
+
+    func title(language: AppLanguage) -> String {
         switch self {
         case .yellow:
-            return "Yellow"
+            return AppText.text(.stickyYellow, language: language)
         case .pink:
-            return "Pink"
+            return AppText.text(.stickyPink, language: language)
         case .mint:
-            return "Mint"
+            return AppText.text(.stickyMint, language: language)
         case .blue:
-            return "Blue"
+            return AppText.text(.stickyBlue, language: language)
         case .lavender:
-            return "Lavender"
+            return AppText.text(.stickyLavender, language: language)
         }
     }
 
@@ -99,24 +107,32 @@ enum StickyNoteGridSize: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 
     var title: String {
+        title(language: .english)
+    }
+
+    func title(language: AppLanguage) -> String {
         switch self {
         case .small:
-            return "Small"
+            return AppText.text(.panelSizeSmall, language: language)
         case .medium:
-            return "Medium"
+            return AppText.text(.panelSizeMedium, language: language)
         case .large:
-            return "Large"
+            return AppText.text(.panelSizeLarge, language: language)
         }
     }
 
     var shortTitle: String {
+        shortTitle(language: .english)
+    }
+
+    func shortTitle(language: AppLanguage) -> String {
         switch self {
         case .small:
-            return "S"
+            return language == .japanese ? "小" : "S"
         case .medium:
-            return "M"
+            return language == .japanese ? "中" : "M"
         case .large:
-            return "L"
+            return language == .japanese ? "大" : "L"
         }
     }
 
@@ -217,11 +233,15 @@ struct StickyNoteUndoAction: Identifiable, Equatable, Sendable {
     }
 
     var message: String {
+        message(language: .english)
+    }
+
+    func message(language: AppLanguage) -> String {
         switch kind {
         case .archived:
-            return "Note archived"
+            return AppText.text(.stickyArchived, language: language)
         case .deleted:
-            return "Note deleted"
+            return AppText.text(.stickyDeleted, language: language)
         }
     }
 }

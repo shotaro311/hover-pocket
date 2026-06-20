@@ -29,6 +29,10 @@ final class HoverWindowController {
     private let settingsWindowController: SettingsWindowController
     private var settingsCancellables = Set<AnyCancellable>()
 
+    var appSettings: AppSettings {
+        settings
+    }
+
     init() {
         let settings = AppSettings()
         let menuStore = HoverMenuStore(settings: settings)

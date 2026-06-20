@@ -25,7 +25,7 @@ struct PluginHostView: View {
                     )
                 )
             } else {
-                EmptyProviderView()
+                EmptyProviderView(language: settings.appLanguage)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -33,17 +33,19 @@ struct PluginHostView: View {
 }
 
 struct EmptyProviderView: View {
+    let language: AppLanguage
+
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "square.grid.3x3")
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.32))
 
-            Text("No providers")
+            Text(AppText.text(.noProviders, language: language))
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.72))
 
-            Text("Provider registry is ready.")
+            Text(AppText.text(.noProvidersDetail, language: language))
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.38))
         }

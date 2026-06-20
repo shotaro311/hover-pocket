@@ -9,6 +9,10 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                languageSection
+
+                Divider()
+
                 displaySection
 
                 Divider()
@@ -36,19 +40,37 @@ struct SettingsView: View {
         .frame(width: 460, height: 500)
     }
 
-    private var displaySection: some View {
+    private var language: AppLanguage {
+        settings.appLanguage
+    }
+
+    private var languageSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Display")
+            Text(settings.text(.language))
                 .font(.system(size: 13, weight: .bold))
 
-            Picker("Display", selection: $settings.displayPlacementMode) {
+            Picker(settings.text(.language), selection: $settings.appLanguage) {
+                ForEach(AppLanguage.allCases) { language in
+                    Text(language.title).tag(language)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    private var displaySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(settings.text(.displaySectionTitle))
+                .font(.system(size: 13, weight: .bold))
+
+            Picker(settings.text(.displayPickerTitle), selection: $settings.displayPlacementMode) {
                 ForEach(DisplayPlacementMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
+                    Text(mode.title(language: language)).tag(mode)
                 }
             }
             .pickerStyle(.segmented)
 
-            Text(settings.displayPlacementMode.detail)
+            Text(settings.displayPlacementMode.detail(language: language))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -57,31 +79,31 @@ struct SettingsView: View {
 
     private var panelsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Panels")
+            Text(settings.text(.panelsSectionTitle))
                 .font(.system(size: 13, weight: .bold))
 
-            Toggle("Open last used panel", isOn: $settings.rememberLastSelectedProvider)
+            Toggle(settings.text(.openLastUsedPanel), isOn: $settings.rememberLastSelectedProvider)
 
             VStack(alignment: .leading, spacing: 6) {
-                Picker("Panel size", selection: $settings.panelSize) {
+                Picker(settings.text(.panelSize), selection: $settings.panelSize) {
                     ForEach(PanelSizeOption.allCases) { option in
-                        Text(option.title).tag(option)
+                        Text(option.title(language: language)).tag(option)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                Text(settings.panelSize.detail)
+                Text(settings.panelSize.detail(language: language))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Toggle("Show side handle beside notch", isOn: $settings.showNotchSideHandleArea)
+                Toggle(settings.text(.showSideHandle), isOn: $settings.showNotchSideHandleArea)
 
-                Picker("Handle icon", selection: $settings.pillHandleIconStyle) {
+                Picker(settings.text(.handleIcon), selection: $settings.pillHandleIconStyle) {
                     ForEach(PillHandleIconStyle.allCases) { style in
-                        Text(style.title).tag(style)
+                        Text(style.title(language: language)).tag(style)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -94,23 +116,28 @@ struct SettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Picker("Icon switching", selection: $settings.providerSwitchingMode) {
+                Picker(settings.text(.iconSwitching), selection: $settings.providerSwitchingMode) {
                     ForEach(ProviderSwitchingMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                        Text(mode.title(language: language)).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                Text(settings.providerSwitchingMode.detail)
+                Text(settings.providerSwitchingMode.detail(language: language))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(settings.text(.providerOrderHint))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             if !settings.rememberLastSelectedProvider, !providerStore.visibleManifests.isEmpty {
-                Picker("Default panel", selection: preferredProviderSelection) {
+                Picker(settings.text(.defaultPanel), selection: preferredProviderSelection) {
                     ForEach(providerStore.visibleManifests) { manifest in
-                        Label(manifest.title, systemImage: manifest.symbolName)
+                        Label(manifest.title(language: language), systemImage: manifest.symbolName)
                             .tag(manifest.id.rawValue)
                     }
                 }
@@ -123,7 +150,7 @@ struct SettingsView: View {
                             .frame(width: 18)
                             .foregroundStyle(.secondary)
 
-                        Text(manifest.title)
+                        Text(manifest.title(language: language))
                             .font(.system(size: 12))
 
                         Spacer()
@@ -142,19 +169,19 @@ struct SettingsView: View {
 
     private var handleIconDetail: String {
         if !settings.showNotchSideHandleArea {
-            return "ノッチ本体に合わせた黒い領域は残し、横の小さなアイコンエリアだけを隠します。"
+            return settings.text(.handleIconHiddenDetail)
         }
-        return settings.pillHandleIconStyle.detail
+        return settings.pillHandleIconStyle.detail(language: language)
     }
 
     private var mirrorSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Mirror")
+            Text(settings.text(.mirror))
                 .font(.system(size: 13, weight: .bold))
 
-            Toggle("Show microphone test under mirror", isOn: $settings.showMirrorMicrophoneCheck)
+            Toggle(settings.text(.showMicrophoneTest), isOn: $settings.showMirrorMicrophoneCheck)
 
-            Text("Microphone starts only when you press the test button.")
+            Text(settings.text(.microphoneTestDetail))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -163,16 +190,16 @@ struct SettingsView: View {
 
     private var stickyNotesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Sticky Notes")
+            Text(settings.text(.stickyNotes))
                 .font(.system(size: 13, weight: .bold))
 
-            Toggle("Show undo after note actions", isOn: $settings.showStickyNoteUndoToast)
+            Toggle(settings.text(.showStickyNoteUndo), isOn: $settings.showStickyNoteUndoToast)
         }
     }
 
     private var googleCalendarSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Google Calendar")
+            Text(settings.text(.calendarSectionTitle))
                 .font(.system(size: 13, weight: .bold))
 
             HStack(spacing: 10) {
@@ -181,7 +208,7 @@ struct SettingsView: View {
                 Spacer()
 
                 if calendarStore.isSignedIn {
-                    Button("Disconnect") {
+                    Button(settings.text(.disconnect)) {
                         calendarStore.signOut()
                     }
                 } else {
@@ -203,7 +230,7 @@ struct SettingsView: View {
 
     private var updatesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Updates")
+            Text(settings.text(.updates))
                 .font(.system(size: 13, weight: .bold))
 
             HStack(spacing: 10) {
@@ -213,7 +240,7 @@ struct SettingsView: View {
 
                 Spacer()
 
-                Button("Check for Updates") {
+                Button(settings.text(.checkForUpdates)) {
                     appUpdater.checkForUpdates()
                 }
                 .disabled(!appUpdater.canCheckForUpdates)
@@ -285,30 +312,30 @@ struct SettingsView: View {
     private var calendarStatusText: String {
         switch calendarStore.connectionState {
         case .missingConfiguration:
-            return "Set GOOGLE_CLIENT_ID and relaunch."
+            return settings.text(.calendarConfigMissingDetail)
         case .restoring:
-            return "Checking saved Google account"
+            return settings.text(.calendarConnectionChecking)
         case .signedOut:
-            return "Not connected"
+            return settings.text(.calendarConnectionNotConnected)
         case .needsReconnect:
-            return "Reconnect to allow editing"
+            return settings.text(.calendarConnectionReconnect)
         case .signingIn:
-            return "Waiting for Google sign-in"
+            return settings.text(.calendarConnectionConnecting)
         case .signedIn:
-            return "Connected"
+            return settings.text(.calendarConnectionConnected)
         }
     }
 
     private var calendarConnectTitle: String {
         switch calendarStore.connectionState {
         case .signingIn:
-            return "Connecting"
+            return settings.text(.calendarConnectConnecting)
         case .restoring:
-            return "Checking"
+            return settings.text(.calendarConnectChecking)
         case .needsReconnect:
-            return "Reconnect Google"
+            return settings.text(.calendarConnectReconnect)
         default:
-            return "Open Google Login"
+            return settings.text(.calendarConnectOpenLogin)
         }
     }
 

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AICommandPaletteView: View {
     @ObservedObject var store: AICommandStore
+    @ObservedObject var settings: AppSettings
     let isVisible: Bool
     @FocusState private var isFocused: Bool
 
@@ -38,13 +39,13 @@ struct AICommandPaletteView: View {
             )
 
             if let pendingAction = store.pendingAction {
-                ApprovalCard(action: pendingAction, store: store)
+                ApprovalCard(action: pendingAction, store: store, language: settings.appLanguage)
             } else if !store.candidates.isEmpty {
-                CandidateRow(actions: store.candidates, store: store)
+                CandidateRow(actions: store.candidates, store: store, language: settings.appLanguage)
             } else if let result = store.result {
                 ResultRow(result: result)
             } else if let statusMessage = store.statusMessage {
-                Text(statusMessage)
+                Text(localizedStatusMessage(statusMessage))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Color.white.opacity(0.48))
                     .lineLimit(1)
@@ -72,28 +73,52 @@ struct AICommandPaletteView: View {
             isFocused = true
         }
     }
+
+    private func localizedStatusMessage(_ message: String) -> String {
+        switch message {
+        case AppText.text(.statusCanceled, language: .english):
+            return settings.text(.statusCanceled)
+        case AppText.text(.statusPlanning, language: .english):
+            return settings.text(.statusPlanning)
+        case AppText.text(.statusCouldNotMap, language: .english):
+            return settings.text(.statusCouldNotMap)
+        case AppText.text(.chooseIntendedAction, language: .english):
+            return settings.text(.chooseIntendedAction)
+        case AppText.text(.statusApprovalRequired, language: .english):
+            return settings.text(.statusApprovalRequired)
+        case AppText.text(.statusRunning, language: .english):
+            return settings.text(.statusRunning)
+        case AppText.text(.statusDone, language: .english):
+            return settings.text(.statusDone)
+        case AppText.text(.statusCommandCouldNotBePlanned, language: .english):
+            return settings.text(.statusCommandCouldNotBePlanned)
+        default:
+            return message
+        }
+    }
 }
 
 private struct ApprovalCard: View {
     let action: PocketAction
     @ObservedObject var store: AICommandStore
+    let language: AppLanguage
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(action.approvalTitle)
+                Text(action.approvalTitle(language: language))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.white.opacity(0.9))
                     .lineLimit(1)
 
                 if let parameters = action.createEventParameters {
-                    CalendarWriteApprovalSummary(parameters: parameters)
+                    CalendarWriteApprovalSummary(parameters: parameters, language: language)
                 }
 
                 // フィールドは省略しない（承認原則）。固定レーンに収まらない場合はスクロールで全件確認できるようにする
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 3) {
-                        ForEach(action.approvalFields) { field in
+                        ForEach(action.approvalFields(language: language)) { field in
                             HStack(alignment: .firstTextBaseline, spacing: 7) {
                                 Text(field.label.uppercased())
                                     .font(.system(size: 8, weight: .bold))
@@ -140,6 +165,7 @@ private struct ApprovalCard: View {
 
 private struct CalendarWriteApprovalSummary: View {
     let parameters: CalendarCreateEventParameters
+    let language: AppLanguage
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -148,7 +174,7 @@ private struct CalendarWriteApprovalSummary: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.green.opacity(0.9))
 
-                Text(parameters.title.isEmpty ? "Untitled event" : parameters.title)
+                Text(parameters.title.isEmpty ? AppText.text(.untitledEvent, language: language) : parameters.title)
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(Color.white.opacity(0.92))
                     .lineLimit(1)
@@ -197,40 +223,20 @@ private struct CalendarWriteApprovalSummary: View {
 
     private var timeText: String {
         if parameters.isAllDay {
-            return Self.dayFormatter.string(from: parameters.start)
+            return language.formattedDate(parameters.start, template: "yMMMd")
         }
-        return "\(Self.dateTimeFormatter.string(from: parameters.start)) - \(Self.timeFormatter.string(from: parameters.end))"
-    }
-
-    private static var dayFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter
-    }
-
-    private static var dateTimeFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }
-
-    private static var timeFormatter: DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter
+        return "\(language.formattedDate(parameters.start, template: "yMMMdHm")) - \(language.formattedDate(parameters.end, template: "Hm"))"
     }
 }
 
 private struct CandidateRow: View {
     let actions: [PocketAction]
     @ObservedObject var store: AICommandStore
+    let language: AppLanguage
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text("Choose the intended action")
+            Text(AppText.text(.chooseIntendedAction, language: language))
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(Color.white.opacity(0.42))
                 .lineLimit(1)
@@ -242,11 +248,11 @@ private struct CandidateRow: View {
                             store.selectCandidate(action)
                         } label: {
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(action.displayTitle)
+                                Text(action.displayTitle(language: language))
                                     .font(.system(size: 10, weight: .semibold))
                                     .foregroundStyle(Color.white.opacity(0.86))
                                     .lineLimit(1)
-                                Text(action.displaySubtitle)
+                                Text(action.displaySubtitle(language: language))
                                     .font(.system(size: 9, weight: .medium))
                                     .foregroundStyle(Color.white.opacity(0.42))
                                     .lineLimit(1)

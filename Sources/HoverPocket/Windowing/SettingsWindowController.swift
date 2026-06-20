@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -6,10 +7,12 @@ final class SettingsWindowController {
     private let settings: AppSettings
     private let providerStore: ProviderStore
     private var window: NSWindow?
+    private var cancellables = Set<AnyCancellable>()
 
     init(settings: AppSettings, providerStore: ProviderStore) {
         self.settings = settings
         self.providerStore = providerStore
+        observeSettings()
     }
 
     func show() {
@@ -29,11 +32,21 @@ final class SettingsWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Settings"
+        window.title = settings.text(.settingsWindowTitle)
         window.isReleasedWhenClosed = false
         window.contentViewController = NSHostingController(
             rootView: SettingsView(settings: settings, providerStore: providerStore)
         )
         return window
+    }
+
+    private func observeSettings() {
+        settings.$appLanguage
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.window?.title = self.settings.text(.settingsWindowTitle)
+            }
+            .store(in: &cancellables)
     }
 }

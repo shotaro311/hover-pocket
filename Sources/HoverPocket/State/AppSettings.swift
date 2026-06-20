@@ -3,6 +3,12 @@ import Foundation
 
 @MainActor
 final class AppSettings: ObservableObject {
+    @Published var appLanguage: AppLanguage {
+        didSet {
+            defaults.set(appLanguage.rawValue, forKey: Self.appLanguageKey)
+        }
+    }
+
     @Published var displayPlacementMode: DisplayPlacementMode {
         didSet {
             defaults.set(displayPlacementMode.rawValue, forKey: Self.displayPlacementModeKey)
@@ -82,6 +88,7 @@ final class AppSettings: ObservableObject {
     }
 
     private let defaults: UserDefaults
+    private static let appLanguageKey = "appLanguage"
     private static let displayPlacementModeKey = "displayPlacementMode"
     private static let panelSizeKey = "panelSize"
     private static let providerSwitchingModeKey = "providerSwitchingMode"
@@ -98,6 +105,8 @@ final class AppSettings: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        let languageRawValue = defaults.string(forKey: Self.appLanguageKey)
+        self.appLanguage = languageRawValue.flatMap(AppLanguage.init(rawValue:)) ?? .japanese
         let rawValue = defaults.string(forKey: Self.displayPlacementModeKey)
         self.displayPlacementMode = rawValue.flatMap(DisplayPlacementMode.init(rawValue:)) ?? .automatic
         let panelSizeRawValue = defaults.string(forKey: Self.panelSizeKey)
@@ -184,6 +193,20 @@ final class AppSettings: ObservableObject {
         guard let targetIndex = orderedIDs.firstIndex(of: targetID) else { return }
         let insertionIndex = offset > 0 ? targetIndex + 1 : targetIndex
         orderedIDs.insert(id.rawValue, at: insertionIndex)
+        providerOrderRawValues = orderedIDs
+    }
+
+    func moveProvider(_ id: PluginID, to targetID: PluginID, manifests: [PluginManifest]) {
+        guard id != targetID else { return }
+        let visibleIDs = visibleManifests(manifests).map(\.id.rawValue)
+        guard let sourceIndex = visibleIDs.firstIndex(of: id.rawValue),
+              let targetIndex = visibleIDs.firstIndex(of: targetID.rawValue) else { return }
+
+        var orderedIDs = orderedManifests(manifests).map(\.id.rawValue)
+        orderedIDs.removeAll { $0 == id.rawValue }
+        guard let adjustedTargetIndex = orderedIDs.firstIndex(of: targetID.rawValue) else { return }
+        let insertionIndex = sourceIndex < targetIndex ? adjustedTargetIndex + 1 : adjustedTargetIndex
+        orderedIDs.insert(id.rawValue, at: min(insertionIndex, orderedIDs.count))
         providerOrderRawValues = orderedIDs
     }
 

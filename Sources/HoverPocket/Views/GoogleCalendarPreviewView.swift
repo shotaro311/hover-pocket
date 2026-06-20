@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GoogleCalendarPreviewView: View {
     let isActive: Bool
+    @ObservedObject var settings: AppSettings
 
     @ObservedObject private var store = GoogleCalendarStore.shared
     @State private var displayedMonth = Calendar.current.startOfMonth(for: Date())
@@ -36,16 +37,20 @@ struct GoogleCalendarPreviewView: View {
                 refreshIfNeeded()
             }
         }
-        .alert("Delete event?", isPresented: deleteAlertBinding, presenting: deleteTarget) { event in
-            Button("Delete", role: .destructive) {
+        .alert(settings.text(.deleteEventAlertTitle), isPresented: deleteAlertBinding, presenting: deleteTarget) { event in
+            Button(settings.text(.delete), role: .destructive) {
                 deleteEvent(event)
             }
-            Button("Cancel", role: .cancel) {
+            Button(settings.text(.cancel), role: .cancel) {
                 deleteTarget = nil
             }
         } message: { event in
             Text(event.title)
         }
+    }
+
+    private var language: AppLanguage {
+        settings.appLanguage
     }
 
     private var calendarView: some View {
@@ -80,9 +85,9 @@ struct GoogleCalendarPreviewView: View {
                 Image(systemName: "chevron.left")
             }
             .buttonStyle(IconButtonStyle(selected: false))
-            .help("Previous month")
+            .help(settings.text(.previousMonth))
 
-            Text(displayedMonth.formatted(.dateTime.year().month(.wide)))
+            Text(language.formattedDate(displayedMonth, template: "yMMMM"))
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white)
                 .lineLimit(1)
@@ -94,7 +99,7 @@ struct GoogleCalendarPreviewView: View {
                 Image(systemName: "chevron.right")
             }
             .buttonStyle(IconButtonStyle(selected: false))
-            .help("Next month")
+            .help(settings.text(.nextMonth))
         }
     }
 
@@ -173,6 +178,7 @@ struct GoogleCalendarPreviewView: View {
                 sources: store.writableSources(),
                 isSaving: store.isMutatingEvent,
                 errorMessage: store.lastErrorMessage,
+                language: language,
                 onSave: saveDraft,
                 onCancel: {
                     draft = nil
@@ -193,7 +199,7 @@ struct GoogleCalendarPreviewView: View {
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(detailDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                    Text(language.formattedDate(detailDate, template: "MMMdEEEE"))
                         .font(.system(size: 12, weight: .bold, design: .monospaced))
                         .foregroundStyle(.white)
                         .lineLimit(1)
@@ -213,7 +219,7 @@ struct GoogleCalendarPreviewView: View {
                 }
                 .buttonStyle(IconButtonStyle(selected: false))
                 .disabled(store.writableSources().isEmpty || store.isMutatingEvent)
-                .help("Add event")
+                .help(settings.text(.addEvent))
 
                 if lockedDate != nil {
                     Button {
@@ -223,7 +229,7 @@ struct GoogleCalendarPreviewView: View {
                         Image(systemName: "xmark")
                     }
                     .buttonStyle(IconButtonStyle(selected: false))
-                    .help("Clear selected day")
+                    .help(settings.text(.clearSelectedDay))
                 }
             }
 
@@ -239,7 +245,7 @@ struct GoogleCalendarPreviewView: View {
                     Image(systemName: store.writableSources().isEmpty ? "calendar.badge.exclamationmark" : "calendar.badge.plus")
                         .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.28))
-                    Text(store.writableSources().isEmpty ? "Read only" : "No events")
+                    Text(store.writableSources().isEmpty ? settings.text(.readOnly) : settings.text(.noEvents))
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.62))
                 }
@@ -266,7 +272,7 @@ struct GoogleCalendarPreviewView: View {
                 .frame(width: 4, height: 24)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(event.title)
+                Text(eventTitle(for: event))
                     .font(.system(size: 10.5, weight: .bold))
                     .foregroundStyle(.white.opacity(0.88))
                     .lineLimit(2)
@@ -287,7 +293,7 @@ struct GoogleCalendarPreviewView: View {
                 }
                 .buttonStyle(IconButtonStyle(selected: false))
                 .disabled(!event.calendarCanWrite || store.isMutatingEvent)
-                .help("Edit event")
+                .help(settings.text(.editEvent))
 
                 Button {
                     deleteTarget = event
@@ -296,7 +302,7 @@ struct GoogleCalendarPreviewView: View {
                 }
                 .buttonStyle(IconButtonStyle(selected: false))
                 .disabled(!event.calendarCanWrite || store.isMutatingEvent)
-                .help("Delete event")
+                .help(settings.text(.delete))
             }
         }
     }
@@ -308,7 +314,7 @@ struct GoogleCalendarPreviewView: View {
                 .foregroundStyle(.white.opacity(0.5))
 
             VStack(spacing: 5) {
-                Text("Google Calendar")
+                Text(settings.text(.googleCalendar))
                     .font(.system(size: 14, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white)
                 Text(calendarConnectionPrompt)
@@ -349,11 +355,11 @@ struct GoogleCalendarPreviewView: View {
                 .font(.system(size: 28, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.48))
 
-            Text("Google OAuth is not configured")
+            Text(settings.text(.calendarConfigMissing))
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white)
 
-            Text("Set GOOGLE_SIGN_IN_CLIENT_ID before running the app.")
+            Text(settings.text(.calendarConfigMissingDetail))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
@@ -408,9 +414,9 @@ struct GoogleCalendarPreviewView: View {
 
     private var updatedText: String {
         guard let snapshot = store.loadState.snapshot else {
-            return "Not loaded"
+            return settings.text(.notLoaded)
         }
-        return "Updated \(snapshot.updatedAt.formatted(.dateTime.hour().minute()))"
+        return "\(settings.text(.updated)) \(formattedTime(snapshot.updatedAt))"
     }
 
     private var currentErrorMessage: String? {
@@ -423,26 +429,26 @@ struct GoogleCalendarPreviewView: View {
     private var calendarConnectionPrompt: String {
         switch store.connectionState {
         case .restoring:
-            return "Checking saved Google account."
+            return settings.text(.calendarConnectionChecking)
         case .needsReconnect:
-            return "Reconnect Google Calendar to load and edit events."
+            return settings.text(.calendarConnectionReconnectDetail)
         case .signingIn:
-            return "Complete Google sign-in in the browser."
+            return settings.text(.calendarConnectionSignInDetail)
         default:
-            return "Open Google login to load your calendar."
+            return settings.text(.calendarConnectionSignedOutDetail)
         }
     }
 
     private var calendarConnectTitle: String {
         switch store.connectionState {
         case .signingIn:
-            return "Connecting"
+            return settings.text(.calendarConnectConnecting)
         case .restoring:
-            return "Checking"
+            return settings.text(.calendarConnectChecking)
         case .needsReconnect:
-            return "Reconnect Google"
+            return settings.text(.calendarConnectReconnect)
         default:
-            return "Open Google Login"
+            return settings.text(.calendarConnectOpenLogin)
         }
     }
 
@@ -511,9 +517,18 @@ struct GoogleCalendarPreviewView: View {
 
     private func timeText(for event: GoogleCalendarEventOccurrence) -> String {
         if event.isAllDay {
-            return "All day"
+            return settings.text(.allDay)
         }
-        return "\(event.start.formatted(.dateTime.hour().minute()))-\(event.end.formatted(.dateTime.hour().minute()))"
+        return "\(formattedTime(event.start))-\(formattedTime(event.end))"
+    }
+
+    private func eventTitle(for event: GoogleCalendarEventOccurrence) -> String {
+        let trimmedTitle = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedTitle.isEmpty ? settings.text(.untitledEvent) : trimmedTitle
+    }
+
+    private func formattedTime(_ date: Date) -> String {
+        language.formattedDate(date, template: "Hm")
     }
 
     private func dayBackground(isSelected: Bool, isToday: Bool) -> Color {
@@ -540,6 +555,7 @@ private struct CalendarEventEditorView: View {
     let sources: [GoogleCalendarSource]
     let isSaving: Bool
     let errorMessage: String?
+    let language: AppLanguage
     let onSave: () -> Void
     let onCancel: () -> Void
     let onDelete: (() -> Void)?
@@ -554,10 +570,10 @@ private struct CalendarEventEditorView: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(draft.isNew ? "New event" : "Edit event")
+                    Text(draft.isNew ? text(.newEvent) : text(.editEvent))
                         .font(.system(size: 12, weight: .bold, design: .monospaced))
                         .foregroundStyle(.white)
-                    Text(draft.start.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                    Text(language.formattedDate(draft.start, template: "MMMEd"))
                         .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.38))
                 }
@@ -570,15 +586,15 @@ private struct CalendarEventEditorView: View {
                     Image(systemName: "xmark")
                 }
                 .buttonStyle(IconButtonStyle(selected: false))
-                .help("Cancel")
+                .help(text(.cancel))
             }
 
-            TextField("Title", text: $draft.title)
+            TextField(text(.title), text: $draft.title)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 11, weight: .medium))
                 .focused($focusedField, equals: .title)
 
-            Picker("Calendar", selection: $draft.calendarID) {
+            Picker(text(.calendar), selection: $draft.calendarID) {
                 ForEach(sources) { source in
                     Text(source.title).tag(source.id)
                 }
@@ -587,7 +603,7 @@ private struct CalendarEventEditorView: View {
             .labelsHidden()
             .disabled(!draft.isNew || sources.isEmpty || isSaving)
 
-            Toggle("All day", isOn: $draft.isAllDay)
+            Toggle(text(.allDay), isOn: $draft.isAllDay)
                 .toggleStyle(.checkbox)
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.white.opacity(0.8))
@@ -599,7 +615,8 @@ private struct CalendarEventEditorView: View {
             if draft.isAllDay {
                 CalendarDateTimeInputView(
                     date: allDayDateBinding,
-                    label: "Date",
+                    label: text(.date),
+                    language: language,
                     includesTime: false,
                     onDateChanged: normalizeDraftDates
                 )
@@ -607,13 +624,15 @@ private struct CalendarEventEditorView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     CalendarDateTimeInputView(
                         date: $draft.start,
-                        label: "Start",
+                        label: text(.start),
+                        language: language,
                         includesTime: true,
                         onDateChanged: normalizeDraftDates
                     )
                     CalendarDateTimeInputView(
                         date: $draft.end,
-                        label: "End",
+                        label: text(.end),
+                        language: language,
                         includesTime: true,
                         onDateChanged: normalizeDraftDates
                     )
@@ -626,11 +645,11 @@ private struct CalendarEventEditorView: View {
                 }
             }
 
-            TextField("Location", text: $draft.location)
+            TextField(text(.location), text: $draft.location)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 10, weight: .medium))
 
-            TextField("Notes", text: $draft.notes, axis: .vertical)
+            TextField(text(.notes), text: $draft.notes, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 10, weight: .medium))
                 .lineLimit(2...3)
@@ -649,7 +668,7 @@ private struct CalendarEventEditorView: View {
                     Button(role: .destructive) {
                         onDelete()
                     } label: {
-                        Label("Delete", systemImage: "trash")
+                        Label(text(.delete), systemImage: "trash")
                     }
                     .controlSize(.small)
                     .disabled(isSaving)
@@ -667,7 +686,7 @@ private struct CalendarEventEditorView: View {
                         } else {
                             Image(systemName: "checkmark")
                         }
-                        Text("Save")
+                        Text(text(.save))
                     }
                 }
                 .keyboardShortcut(.return, modifiers: .command)
@@ -701,6 +720,10 @@ private struct CalendarEventEditorView: View {
         if normalized != draft {
             draft = normalized
         }
+    }
+
+    private func text(_ key: AppTextKey) -> String {
+        AppText.text(key, language: language)
     }
 }
 
