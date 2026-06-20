@@ -48,6 +48,11 @@ status: active
 - Mirror は Settings から戻ったときの復帰を `MirrorPreviewView` だけでなく `AppDelegate` でも検知し、許可済みに変わった場合は permission request / starting flag を整理して再起動するよう補強した。
 - `HoverPocket-macOS-app.zip` alias が appcast 生成ディレクトリに残ると Sparkle `generate_appcast` が duplicate archive と判定する問題を確認し、appcast 生成時だけ current versioned ZIP を一時ディレクトリへ渡すようにした。
 - コミット `7401c1f` を build `55` として配布。`APP_VERSION=0.1.0 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh` で notarization、staple、ZIP / appcast 再生成、GitHub Release `v0.1.0-55` 公開まで完了。
+- Calendar login は成功したがMirrorが映らない状態を再調査。`/Applications/HoverPocket.app` は build `55`、TCC DB 上の camera permission は `authorized`、カメラデバイスは `MacBook Proのカメラ` として認識済み。一方で `codesign -d --entitlements :- /Applications/HoverPocket.app` は空で、Developer ID + hardened runtime の配布版に camera / audio-input entitlements が入っていないことを確認した。
+- `Resources/HoverPocket.entitlements` を追加し、`com.apple.security.device.camera` と `com.apple.security.device.audio-input` を付与。`script/build_and_run.sh` の codesign 引数に `--entitlements Resources/HoverPocket.entitlements` を追加した。
+- `--verify-camera` 診断コマンドを追加。bundle 起動でカメラ authorization status、選択デバイス、`AVCaptureSession.startRunning()` 成功可否を一時ファイルへ出力できるようにした。
+- Apple Development 署名の開発 bundle では `--verify-camera` が `camera_authorization_status=authorized`、`camera_device=MacBook Proのカメラ`、`camera_session_running=true`、`camera_verify=ok` になることを確認。
+- コミット `0c844fa` を build `57` として配布。`APP_VERSION=0.1.0 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh` で notarization、staple、ZIP / appcast 再生成、GitHub Release `v0.1.0-57` 公開まで完了。
 
 ## 成果物
 
@@ -80,6 +85,11 @@ status: active
 - Release 55 ZIP SHA256: `72bbe40bc178f789d16c8611c9efc4742700f0db61906810f20339684e0cc899`
 - Release 55 notary submission ID: `cf50cd19-f17c-4384-a256-3bd3f6e9dff5`
 - Release 55 notary status: `Accepted`
+- Release 57: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-57`
+- Release 57 ZIP: `dist/releases/HoverPocket-0.1.0-57.zip`
+- Release 57 ZIP SHA256: `9f586016b795ec87f2ef7553b4eee2671f7f1fea43a12762027ef18a1b57f399`
+- Release 57 notary submission ID: `dba4c3f9-8197-4bc2-b141-6cfe7b92347b`
+- Release 57 notary status: `Accepted`
 
 ## 検証
 
@@ -159,6 +169,19 @@ status: active
 - `gh release view v0.1.0-55 --json assets,body,url,name,tagName`: `HoverPocket-macOS-app.zip`、`HoverPocket-0.1.0-55.zip`、SHA256、`appcast.xml` の4 asset を確認。
 - 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`: `sparkle:version` が `55`、enclosure が `v0.1.0-55/HoverPocket-0.1.0-55.zip` であることを確認。
 - 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip` を再ダウンロードし、SHA256 が `72bbe40bc178f789d16c8611c9efc4742700f0db61906810f20339684e0cc899`、top-level が `HoverPocket.app` のみ、Info.plist が `CFBundleVersion=55` / `HoverPocketKeychainServiceSuffix=release` であることを確認。
+- `swift build`: Camera entitlement / `--verify-camera` 追加後に成功。
+- `bash -n script/build_and_run.sh script/package_zip.sh script/notarize_release.sh script/publish_github_release.sh script/generate_appcast.sh`: 成功。
+- `git diff --check`: Camera entitlement / `--verify-camera` 追加後に成功。
+- `./script/build_and_run.sh --build-only`: Apple Development 署名の app bundle 生成に成功。
+- `codesign -d --entitlements :- dist/HoverPocket.app`: `com.apple.security.device.camera=true`、`com.apple.security.device.audio-input=true` を確認。
+- `/usr/bin/open -n dist/HoverPocket.app --args --verify-camera --verify-output <tmp>`: Apple Development 署名 bundle で `camera_session_running=true` / `camera_verify=ok` を確認。
+- `./script/package_zip.sh`: Developer ID + hardened runtime の app bundle に camera / audio-input entitlements が入ることを確認。
+- `APP_VERSION=0.1.0 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh`: build `57` の notarization / staple / GitHub Release 公開まで成功。
+- `codesign -d --entitlements :- dist/HoverPocket.app`: build `57` の notarized app で camera / audio-input entitlements を確認。
+- `codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`、`xcrun stapler validate dist/HoverPocket.app`、`spctl --assess --type execute --verbose=2 dist/HoverPocket.app`: 成功、`source=Notarized Developer ID`。
+- `gh release view v0.1.0-57 --json assets,body,url,name,tagName`: `HoverPocket-macOS-app.zip`、`HoverPocket-0.1.0-57.zip`、SHA256、`appcast.xml` の4 asset を確認。
+- 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`: `sparkle:version` が `57`、enclosure が `v0.1.0-57/HoverPocket-0.1.0-57.zip` であることを確認。
+- 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip` を再ダウンロードし、SHA256 が `9f586016b795ec87f2ef7553b4eee2671f7f1fea43a12762027ef18a1b57f399`、top-level が `HoverPocket.app` のみ、Info.plist が `CFBundleVersion=57` / `HoverPocketKeychainServiceSuffix=release`、entitlements が camera / audio-input 入りであることを確認。展開後 app の `codesign`、`stapler validate`、`spctl` も成功。
 
 ## 残り
 
