@@ -39,6 +39,7 @@ status: active
 - Google OAuth credential を Data Protection Keychain へ保存するように変更。旧 file-based Keychain 項目は認証UIなしで読める場合だけ移行し、読めない場合はKeychainパスワードダイアログを出さずGoogle再ログインへ誘導する。
 - macOS menu bar に HoverPocket の status item を追加。メニューから `Open HoverPocket`、`Settings...`、`Check for Updates`、`Quit HoverPocket` を実行できるようにした。
 - Mirror の camera denied / restricted 表示に `Open Camera Settings` を追加。microphone permission が off の場合は mic row の右端ボタンから Microphone Privacy 設定へ進めるようにした。Calendar の未接続 / 再接続CTAは Google login を開く文言にした。
+- コミット `8a4489d` を build `51` として配布。初回の publish script 実行では notarytool submit が詳細なしで失敗したため、ZIP / Keychain profile / Developer ID 署名を確認後、単体 `xcrun notarytool submit` を再実行して `Accepted` を取得。staple、ZIP / appcast 再生成、GitHub Release `v0.1.0-51` 公開まで完了。
 
 ## 成果物
 
@@ -56,6 +57,11 @@ status: active
 - Latest appcast: `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`
 - Latest notary submission ID: `e536914a-b908-47e5-9389-8796658492ca`
 - Latest notary status: `Accepted`
+- Release 51: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-51`
+- Release 51 ZIP: `dist/releases/HoverPocket-0.1.0-51.zip`
+- Release 51 ZIP SHA256: `ca9c21fe9f8be9e4d7517227504e3d72b1a0c71c6285f372a40817cac00cd96b`
+- Release 51 notary submission ID: `17e76b3f-36d5-4caf-b714-474ec42854aa`
+- Release 51 notary status: `Accepted`
 
 ## 検証
 
@@ -107,6 +113,14 @@ status: active
 - `./script/build_and_run.sh --verify`: app bundle 再生成、Apple Development 署名、起動確認まで成功。
 - `codesign -dvvv --entitlements :- dist/HoverPocket.app`: bundle ID `local.codex.hover-pocket`、Apple Development 署名を確認。
 - `plutil -p dist/HoverPocket.app/Contents/Info.plist`: `CFBundleIconFile=AppIcon`、Camera / Microphone usage description、Google Sign-In client ID の注入を確認。
+- `xcrun notarytool history --keychain-profile hover-pocket --output-format json --no-progress`: Keychain profile が有効で過去 submission を読めることを確認。
+- `xcrun notarytool submit dist/releases/HoverPocket-0.1.0-51.zip --keychain-profile hover-pocket --wait --timeout 30m --output-format json`: submission `17e76b3f-36d5-4caf-b714-474ec42854aa` が `Accepted`。
+- `xcrun stapler staple dist/HoverPocket.app`、`codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`、`xcrun stapler validate dist/HoverPocket.app`、`spctl --assess --type execute --verbose=2 dist/HoverPocket.app`: 成功、`source=Notarized Developer ID`。
+- `dist/releases/HoverPocket-0.1.0-51.zip` 展開後 app の `codesign`、`stapler validate`、`spctl`: 成功。
+- `APP_VERSION=0.1.0 APP_BUILD=51 PUBLISH_PREPARE_RELEASE=0 ./script/publish_github_release.sh`: GitHub Release `v0.1.0-51` 作成成功。
+- `gh release view v0.1.0-51 --json assets,body,url,name,tagName`: `HoverPocket-macOS-app.zip`、`HoverPocket-0.1.0-51.zip`、SHA256、`appcast.xml` の4 asset を確認。
+- 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip` を再ダウンロードし、top-level が `HoverPocket.app` のみ、SHA256 が `ca9c21fe9f8be9e4d7517227504e3d72b1a0c71c6285f372a40817cac00cd96b` であることを確認。
+- 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`: `sparkle:version` が `51`、enclosure が `v0.1.0-51/HoverPocket-0.1.0-51.zip` であることを確認。
 
 ## 残り
 
