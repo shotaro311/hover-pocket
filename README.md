@@ -10,9 +10,9 @@
 - 実行ファイル / SwiftPM product / release asset 名: `HoverPocket`
 - Bundle ID: `local.codex.hover-pocket`
 - GitHub repository: `shotaro311/hover-pocket`
-- 最新の公開版は GitHub Release `v0.1.0-45` です。
+- 最新の公開版は GitHub Release `v0.1.0-63` です。
 - 公開 ZIP は Developer ID 署名、Apple notarization、staple 済みです。
-- Sparkle の appcast は GitHub Releases で公開済みで、build `41` から build `45` への手動アップデート成功を確認済みです。
+- Sparkle の appcast は GitHub Releases で公開済みで、latest appcast は build `63` を指しています。
 
 ## ダウンロードとインストール
 
@@ -215,7 +215,7 @@ https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml
 
 Sparkle の公開鍵は `SUPublicEDKey` として `Info.plist` に入ります。秘密鍵は macOS Keychain の `hover-pocket` アカウントに保存され、Git には含めません。
 
-2026-06-20 時点では、GitHub Release `v0.1.0-45` に `HoverPocket-0.1.0-45.zip`、`.sha256`、`appcast.xml` が公開済みです。remote ZIP の SHA256、Sparkle EdDSA signature、展開後 app の `codesign` / `stapler validate` / `spctl`、build `41` から build `45` への Sparkle 手動アップデートを確認済みです。
+2026-06-21 時点では、GitHub Release `v0.1.0-63` に `HoverPocket-0.1.0-63.zip`、`.sha256`、`HoverPocket-macOS-app.zip`、`appcast.xml` が公開済みです。remote appcast の `sparkle:version=63`、ZIP の SHA256、Sparkle EdDSA signature、展開後 app の `codesign` / `stapler validate` / `spctl` を確認済みです。
 
 ## 表示先ディスプレイ
 
