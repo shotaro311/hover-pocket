@@ -131,6 +131,7 @@ final class HoverWindowController {
                 store: menuStore,
                 settings: settings,
                 onOpenSettings: { [weak self] in self?.showSettings() },
+                onClosePanel: { [weak self] in self?.closePreview() },
                 onExternalDragStarted: { [weak self] in self?.prepareForExternalDrag() }
             )
         )

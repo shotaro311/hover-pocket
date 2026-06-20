@@ -92,6 +92,7 @@ enum AppTextKey: String, Sendable {
     case displaySectionTitle
     case editEvent
     case end
+    case entryPointSectionTitle
     case english
     case googleCalendar
     case handleChevronDetail
@@ -195,6 +196,7 @@ enum AppTextKey: String, Sendable {
     case dateTimeInputHelp
     case quitHoverPocket
     case providerOrderHint
+    case providersSectionTitle
     case microphoneTestDetail
 }
 
@@ -281,11 +283,12 @@ enum AppText {
         case .displaySectionTitle: return "表示"
         case .editEvent: return "予定を編集"
         case .end: return "終了"
+        case .entryPointSectionTitle: return "起点表示"
         case .english: return "英語"
         case .googleCalendar: return "Google カレンダー"
         case .handleChevronDetail: return "小さな下向きマークを表示します。"
         case .handleIcon: return "ハンドルアイコン"
-        case .handleIconHiddenDetail: return "ノッチ本体に合わせた黒い領域は残し、横の小さなアイコンエリアだけを隠します。"
+        case .handleIconHiddenDetail: return "オフの場合、ノッチ横には何も表示せず、ノッチ本体側の透明な反応領域だけを残します。"
         case .handleNone: return "なし"
         case .handleNoneDetail: return "マークなしで、ノッチに合わせた形だけを表示します。"
         case .handlePocketDetail: return "ポケット形状の小さなマークを表示します。"
@@ -343,7 +346,7 @@ enum AppText {
         case .showMicrophoneTest: return "ミラー下にマイクテストを表示"
         case .showMirrorOnSecondaryDisplays: return "サブディスプレイでもミラーを表示"
         case .showMirrorOnSecondaryDisplaysDetail: return "オフの場合、サブディスプレイから開いたホバーポケットではミラーを表示しません。"
-        case .showSideHandle: return "ノッチ横のハンドルエリアを表示"
+        case .showSideHandle: return "メインノッチ左のアイコンエリアを表示"
         case .showStickyNoteUndo: return "付箋操作後に Undo を表示"
         case .start: return "開始"
         case .statusApprovalRequired: return "承認が必要です。"
@@ -384,6 +387,7 @@ enum AppText {
         case .dateTimeInputHelp: return "数値を入力、または左右にドラッグして調整できます。"
         case .quitHoverPocket: return "ホバーポケットを終了"
         case .providerOrderHint: return "ヘッダーの機能アイコンはドラッグ&ドロップでも並べ替えできます。"
+        case .providersSectionTitle: return "機能"
         case .microphoneTestDetail: return "マイクはテストボタンを押したときだけ起動します。"
         }
     }
@@ -446,11 +450,12 @@ enum AppText {
         case .displaySectionTitle: return "Display"
         case .editEvent: return "Edit event"
         case .end: return "End"
+        case .entryPointSectionTitle: return "Entry Point"
         case .english: return "English"
         case .googleCalendar: return "Google Calendar"
         case .handleChevronDetail: return "Shows the compact downward mark."
         case .handleIcon: return "Handle icon"
-        case .handleIconHiddenDetail: return "Keeps the notch-shaped black base and hides only the small side icon area."
+        case .handleIconHiddenDetail: return "When off, nothing is drawn beside the notch; only the transparent notch trigger remains."
         case .handleNone: return "None"
         case .handleNoneDetail: return "Shows only the notch-shaped base without a mark."
         case .handlePocketDetail: return "Shows the compact pocket-shaped mark."
@@ -508,7 +513,7 @@ enum AppText {
         case .showMicrophoneTest: return "Show microphone test under mirror"
         case .showMirrorOnSecondaryDisplays: return "Show Mirror on secondary displays"
         case .showMirrorOnSecondaryDisplaysDetail: return "When off, Mirror is hidden when HoverPocket is opened from a secondary display."
-        case .showSideHandle: return "Show side handle beside notch"
+        case .showSideHandle: return "Show icon area beside the main notch"
         case .showStickyNoteUndo: return "Show undo after note actions"
         case .start: return "Start"
         case .statusApprovalRequired: return "Approval required."
@@ -549,6 +554,7 @@ enum AppText {
         case .dateTimeInputHelp: return "Type a value, or drag left/right to adjust."
         case .quitHoverPocket: return "Quit HoverPocket"
         case .providerOrderHint: return "You can also reorder header icons with drag and drop."
+        case .providersSectionTitle: return "Providers"
         case .microphoneTestDetail: return "Microphone starts only when you press the test button."
         }
     }

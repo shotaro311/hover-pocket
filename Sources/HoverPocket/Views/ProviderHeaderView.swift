@@ -6,6 +6,7 @@ struct ProviderHeaderView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject private var appUpdater = AppUpdater.shared
     let onOpenSettings: () -> Void
+    let onClosePanel: () -> Void
     @State private var draggingPluginID: PluginID?
 
     var body: some View {
@@ -23,6 +24,7 @@ struct ProviderHeaderView: View {
             if appUpdater.hasAvailableUpdate {
                 Button {
                     appUpdater.checkForUpdates()
+                    onClosePanel()
                 } label: {
                     Image(systemName: "arrow.down.circle.fill")
                         .font(.system(size: 13, weight: .semibold))

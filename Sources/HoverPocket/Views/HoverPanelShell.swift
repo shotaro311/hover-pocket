@@ -5,6 +5,7 @@ struct HoverPanelShell: View {
     @ObservedObject var store: HoverMenuStore
     @ObservedObject var settings: AppSettings
     let onOpenSettings: () -> Void
+    let onClosePanel: () -> Void
     let onExternalDragStarted: () -> Void
 
     var body: some View {
@@ -16,7 +17,8 @@ struct HoverPanelShell: View {
                 ProviderHeaderView(
                     providerStore: store.providerStore,
                     settings: settings,
-                    onOpenSettings: onOpenSettings
+                    onOpenSettings: onOpenSettings,
+                    onClosePanel: onClosePanel
                 )
 
                 Divider()

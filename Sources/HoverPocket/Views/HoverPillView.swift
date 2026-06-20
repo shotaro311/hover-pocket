@@ -7,6 +7,27 @@ struct HoverPillView: View {
     let onTap: () -> Void
 
     var body: some View {
+        Group {
+            if settings.showNotchSideHandleArea {
+                visiblePill
+            } else {
+                Color.black.opacity(0.001)
+            }
+        }
+        .frame(
+            minWidth: PanelLayout.notchHandleWidth,
+            idealWidth: PanelLayout.defaultPillWidth,
+            maxWidth: .infinity
+        )
+        .frame(height: PanelLayout.pillHeight)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
+        .onHover { inside in
+            inside ? onEnter() : onExit()
+        }
+    }
+
+    private var visiblePill: some View {
         ZStack(alignment: .leading) {
             TopDockedPillShape(radius: 10)
                 .fill(Color.black.opacity(0.94))
@@ -28,35 +49,20 @@ struct HoverPillView: View {
             }
             .frame(width: PanelLayout.notchHandleWidth, height: PanelLayout.pillHeight)
         }
-        .frame(
-            minWidth: PanelLayout.notchHandleWidth,
-            idealWidth: PanelLayout.defaultPillWidth,
-            maxWidth: .infinity
-        )
-        .frame(height: PanelLayout.pillHeight)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
-        .onHover { inside in
-            inside ? onEnter() : onExit()
-        }
     }
 
     @ViewBuilder
     private var handleIcon: some View {
-        if !settings.showNotchSideHandleArea {
+        switch settings.pillHandleIconStyle {
+        case .chevron:
+            Image(systemName: "chevron.down")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.white.opacity(0.72))
+        case .pocket:
+            PocketHandleGlyph()
+                .frame(width: 15, height: 13)
+        case .none:
             EmptyView()
-        } else {
-            switch settings.pillHandleIconStyle {
-            case .chevron:
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.72))
-            case .pocket:
-                PocketHandleGlyph()
-                    .frame(width: 15, height: 13)
-            case .none:
-                EmptyView()
-            }
         }
     }
 }
@@ -69,8 +75,28 @@ struct HoverMiniBarView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.opacity(0.001)
-                .contentShape(Rectangle())
+            VStack(spacing: 0) {
+                Color.black.opacity(0.001)
+                    .frame(
+                        width: PanelLayout.miniBarTriggerWidth,
+                        height: PanelLayout.miniBarHitHeight
+                    )
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.86)) {
+                            isPointerNear = inside
+                        }
+                        if inside {
+                            onBarEnter()
+                        } else {
+                            onBarExit()
+                        }
+                    }
+                    .onTapGesture(perform: onTap)
+
+                Spacer(minLength: 0)
+            }
+            .zIndex(1)
 
             VStack(spacing: 0) {
                 bar
@@ -84,16 +110,6 @@ struct HoverMiniBarView: View {
             height: PanelLayout.miniBarTriggerHeight
         )
         .contentShape(Rectangle())
-        .onHover { inside in
-            withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.86)) {
-                isPointerNear = inside
-            }
-            if inside {
-                onBarEnter()
-            } else {
-                onBarExit()
-            }
-        }
     }
 
     private var bar: some View {
@@ -109,9 +125,6 @@ struct HoverMiniBarView: View {
             )
             .shadow(color: Color.black.opacity(isPointerNear ? 0.18 : 0), radius: 8, y: 4)
             .contentShape(Rectangle())
-            .onHover { inside in
-                inside ? onBarEnter() : onBarExit()
-            }
             .onTapGesture(perform: onTap)
             .animation(.interactiveSpring(response: 0.22, dampingFraction: 0.86), value: isPointerNear)
     }

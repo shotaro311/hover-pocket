@@ -17,7 +17,15 @@ struct SettingsView: View {
 
                 Divider()
 
+                entryPointSection
+
+                Divider()
+
                 panelsSection
+
+                Divider()
+
+                providersSection
 
                 Divider()
 
@@ -86,6 +94,32 @@ struct SettingsView: View {
         }
     }
 
+    private var entryPointSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(settings.text(.entryPointSectionTitle))
+                .font(.system(size: 13, weight: .bold))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle(settings.text(.showSideHandle), isOn: $settings.showNotchSideHandleArea)
+
+                Text(handleIconDetail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Picker(settings.text(.handleIcon), selection: $settings.pillHandleIconStyle) {
+                    ForEach(PillHandleIconStyle.allCases) { style in
+                        Text(style.title(language: language)).tag(style)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(!settings.showNotchSideHandleArea)
+            }
+        }
+    }
+
     private var panelsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(settings.text(.panelsSectionTitle))
@@ -107,22 +141,21 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Toggle(settings.text(.showSideHandle), isOn: $settings.showNotchSideHandleArea)
-
-                Picker(settings.text(.handleIcon), selection: $settings.pillHandleIconStyle) {
-                    ForEach(PillHandleIconStyle.allCases) { style in
-                        Text(style.title(language: language)).tag(style)
+            if !settings.rememberLastSelectedProvider, !providerStore.visibleManifests.isEmpty {
+                Picker(settings.text(.defaultPanel), selection: preferredProviderSelection) {
+                    ForEach(providerStore.visibleManifests) { manifest in
+                        Label(manifest.title(language: language), systemImage: manifest.symbolName)
+                            .tag(manifest.id.rawValue)
                     }
                 }
-                .pickerStyle(.segmented)
-                .disabled(!settings.showNotchSideHandleArea)
-
-                Text(handleIconDetail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    private var providersSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(settings.text(.providersSectionTitle))
+                .font(.system(size: 13, weight: .bold))
 
             VStack(alignment: .leading, spacing: 6) {
                 Picker(settings.text(.iconSwitching), selection: $settings.providerSwitchingMode) {
@@ -141,15 +174,6 @@ struct SettingsView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if !settings.rememberLastSelectedProvider, !providerStore.visibleManifests.isEmpty {
-                Picker(settings.text(.defaultPanel), selection: preferredProviderSelection) {
-                    ForEach(providerStore.visibleManifests) { manifest in
-                        Label(manifest.title(language: language), systemImage: manifest.symbolName)
-                            .tag(manifest.id.rawValue)
-                    }
-                }
             }
 
             VStack(alignment: .leading, spacing: 8) {

@@ -5,12 +5,13 @@ enum PanelLayout {
     static let topEdgeOverfill: CGFloat = 3
     static let notchHandleWidth: CGFloat = 54
     static let miniBarTriggerWidth: CGFloat = 520
-    static let miniBarTriggerHeight: CGFloat = 64
+    static let miniBarHitHeight: CGFloat = 8
     static let miniBarRestWidth: CGFloat = 150
     static let miniBarRestHeight: CGFloat = 2
     static let miniBarExpandedWidth: CGFloat = 168
     static let miniBarExpandedHeight: CGFloat = 7
     static let miniBarExpandedTopOffset: CGFloat = 5
+    static let miniBarTriggerHeight: CGFloat = miniBarExpandedTopOffset + miniBarExpandedHeight
     static let previewGap: CGFloat = 0
     static let collapsedPreviewSize = NSSize(width: 72, height: 12)
 
