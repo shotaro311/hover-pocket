@@ -79,11 +79,12 @@ status: active
 - 2026-06-20: GitHub Release の自動生成 Source code ZIP とアプリ配布ZIPの誤認対策として、README に一般ユーザー向け download `HoverPocket-macOS-app.zip` を明記。`publish_github_release.sh` も app-only の alias asset を upload するようにした。ZIP 作成は `ditto --norsrc --keepParent` に切り替え、公開ZIPのトップレベルは `HoverPocket.app` のみにした。
 - 2026-06-20: Google OAuth credential は Data Protection Keychain 保存を試したが `errSecMissingEntitlement (-34018)` で保存できないため通常 Keychain に戻した。旧Keychain項目は認証UIなしで読める場合だけ移行し、読めない/重複する古い項目はログイン後の新credentialで上書きする。menu bar status item、Camera / Microphone permission off 時の System Settings CTA、Calendar の Google login CTA も追加。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify`、`./script/verify_google_calendar.sh` 成功。
 - 2026-06-20: Camera Privacy 設定で許可した直後にMirrorが復帰しない問題に対応。Camera Settings を開いた後の permission recovery polling と、アプリ復帰時の authorization status 再確認で、許可済みに変わったらその場で camera session を開始するようにした。
+- 2026-06-20: コミット `e1b5a5e` を build `53` として配布。notarytool submission `d309c2db-47e2-4db1-b880-73787671cc96` は `Accepted`。staple後に `HoverPocket-0.1.0-53.zip` / `HoverPocket-macOS-app.zip` / appcast を GitHub Release `v0.1.0-53` へ公開し、latest download ZIP のトップレベルが `HoverPocket.app` のみ、SHA256 が `4243fb02dd1eb16ea4deb6d60d50dd2e31c2bbdd0419ef22cc68ce65f32cda0e` であることを確認。
 - 2026-06-20: コミット `8a4489d` を build `51` として配布。notarytool submission `17e76b3f-36d5-4caf-b714-474ec42854aa` は `Accepted`。staple後に `HoverPocket-0.1.0-51.zip` / `HoverPocket-macOS-app.zip` / appcast を GitHub Release `v0.1.0-51` へ公開し、latest download ZIP のトップレベルが `HoverPocket.app` のみ、SHA256 が `ca9c21fe9f8be9e4d7517227504e3d72b1a0c71c6285f372a40817cac00cd96b` であることを確認。
 
 ## 進行中
 
-- Codex: `ホバーポケット` / `HoverPocket` として GitHub public repository `shotaro311/hover-pocket` へ公開済み。`Mirror`、`Calendar`、`Clipboard`、`Sticky Notes` の built-in provider が有効。Calendar は Google iOS OAuth client + custom URL scheme + PKCE + `ASWebAuthenticationSession` で実アカウント接続、予定取得、追加、編集、削除まで実装済み。Google OAuth credential は通常 Keychain に保存し、旧Keychain項目は認証UIなしで読める場合だけ移行する。Sticky Notes は inline editor、title optional、drag reorder、外部 drag text payload、下部ゴミ箱 drop archive、S/M/L grid、Undo toast 設定に対応済み。AI native Phase 1 として Apple Foundation Models provider、Calendar read/write tool、ApprovalGate、AuditLog、下段 command lane、fallback candidates を実装済み。上部 handle は `B / C / None` とノッチ横 handle area 表示/非表示を Settings から選択可能。macOS menu bar status item から設定 / 更新確認 / 終了を実行可能。Camera / Microphone permission off 時は System Settings へのCTA、Calendar未接続時はGoogle login CTAを表示する。Camera Settings で許可後はpermission recovery pollingでMirrorを再起動する。build `51` は notarized/stapled ZIP として GitHub Release `v0.1.0-51` に公開済みで、latest appcast も build `51` を指している。
+- Codex: `ホバーポケット` / `HoverPocket` として GitHub public repository `shotaro311/hover-pocket` へ公開済み。`Mirror`、`Calendar`、`Clipboard`、`Sticky Notes` の built-in provider が有効。Calendar は Google iOS OAuth client + custom URL scheme + PKCE + `ASWebAuthenticationSession` で実アカウント接続、予定取得、追加、編集、削除まで実装済み。Google OAuth credential は通常 Keychain に保存し、旧Keychain項目は認証UIなしで読める場合だけ移行する。Sticky Notes は inline editor、title optional、drag reorder、外部 drag text payload、下部ゴミ箱 drop archive、S/M/L grid、Undo toast 設定に対応済み。AI native Phase 1 として Apple Foundation Models provider、Calendar read/write tool、ApprovalGate、AuditLog、下段 command lane、fallback candidates を実装済み。上部 handle は `B / C / None` とノッチ横 handle area 表示/非表示を Settings から選択可能。macOS menu bar status item から設定 / 更新確認 / 終了を実行可能。Camera / Microphone permission off 時は System Settings へのCTA、Calendar未接続時はGoogle login CTAを表示する。Camera Settings で許可後はpermission recovery pollingでMirrorを再起動する。build `53` は notarized/stapled ZIP として GitHub Release `v0.1.0-53` に公開済みで、latest appcast も build `53` を指している。
 
 ## 次アクション
 
@@ -104,7 +105,7 @@ status: active
 - 機密情報や token は含めていない。
 - `.env.local` には Google OAuth 設定値が入るため、値を出力せず、repo に含めない。配布用 app bundle へは iOS OAuth client ID / URL scheme のみ注入し、Desktop OAuth client secret は通常入れない。
 - Google OAuth consent screen が Testing の場合、登録済み test user のみログイン可能。一般公開には Google OAuth app verification が必要になる可能性がある。
-- 現在の公開ZIP成果物 `dist/releases/HoverPocket-0.1.0-51.zip` は Developer ID Application 署名と notarization/staple 済みで、GitHub Release `v0.1.0-51` に公開済み。latest appcast も build `51` を指す。一般ユーザー向けには同じ app-only payload を分かりやすい `HoverPocket-macOS-app.zip` として案内し、公開URLから再取得したZIPのトップレベルが `HoverPocket.app` のみであることを確認済み。
+- 現在の公開ZIP成果物 `dist/releases/HoverPocket-0.1.0-53.zip` は Developer ID Application 署名と notarization/staple 済みで、GitHub Release `v0.1.0-53` に公開済み。latest appcast も build `53` を指す。一般ユーザー向けには同じ app-only payload を分かりやすい `HoverPocket-macOS-app.zip` として案内し、公開URLから再取得したZIPのトップレベルが `HoverPocket.app` のみであることを確認済み。
 - Sparkle秘密鍵は macOS Keychain の `hover-pocket` アカウントにある。秘密鍵ファイルをGitに書き出さない。
 - 旧 Keychain の Google OAuth item が現在の署名で読めない場合は、Keychainパスワードダイアログを出さずに未接続扱いへ落とす。Google再ログイン後は通常 Keychain に新credentialを保存する。credentialはローカルMacのKeychainに保存され、app bundle / ZIP / repo には含めない。
 - Calendar event 書き込みには `calendar.events` scope が必要。既存の read-only token では再接続が必要。
@@ -150,6 +151,7 @@ status: active
 
 ## 最近の更新
 
+- 2026-06-20: build `53` を notarized/stapled ZIP として GitHub Release `v0.1.0-53` に公開。latest `HoverPocket-macOS-app.zip` と appcast が build `53` を指すことを確認。
 - 2026-06-20: Camera permission 許可後にMirrorが復帰しない問題と、Googleログイン後にリンクされない問題を修正。Google側は Data Protection Keychain の `-34018` が原因だったため通常 Keychain 保存へ戻し、`./script/verify_google_calendar.sh` で Calendar API 到達まで確認。
 - 2026-06-20: build `51` を notarized/stapled ZIP として GitHub Release `v0.1.0-51` に公開。latest `HoverPocket-macOS-app.zip` と appcast が build `51` を指すことを確認。
 - 2026-06-20: Google OAuth Keychain の起動時パスワードダイアログ対策として Data Protection Keychain 保存へ移行。menu bar status item、Camera / Microphone privacy settings CTA、Calendar Google login CTA を追加。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。

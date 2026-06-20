@@ -40,6 +40,7 @@ status: active
 - macOS menu bar に HoverPocket の status item を追加。メニューから `Open HoverPocket`、`Settings...`、`Check for Updates`、`Quit HoverPocket` を実行できるようにした。
 - Mirror の camera denied / restricted 表示に `Open Camera Settings` を追加。microphone permission が off の場合は mic row の右端ボタンから Microphone Privacy 設定へ進めるようにした。Calendar の未接続 / 再接続CTAは Google login を開く文言にした。
 - Camera Privacy 設定から許可した直後にミラーが復帰しない問題に対応。Camera Settings を開いた後に permission recovery polling を走らせ、アプリ復帰時にも authorization status を再確認して、許可済みに変わったらその場で camera session を開始する。
+- コミット `e1b5a5e` を build `53` として配布。初回 publish script 実行では notarytool submit が詳細なしで失敗したため、ZIP / Developer ID 署名を確認後、単体 `xcrun notarytool submit` を再実行して `Accepted` を取得。staple、ZIP / appcast 再生成、GitHub Release `v0.1.0-53` 公開まで完了。
 - コミット `8a4489d` を build `51` として配布。初回の publish script 実行では notarytool submit が詳細なしで失敗したため、ZIP / Keychain profile / Developer ID 署名を確認後、単体 `xcrun notarytool submit` を再実行して `Accepted` を取得。staple、ZIP / appcast 再生成、GitHub Release `v0.1.0-51` 公開まで完了。
 
 ## 成果物
@@ -63,6 +64,11 @@ status: active
 - Release 51 ZIP SHA256: `ca9c21fe9f8be9e4d7517227504e3d72b1a0c71c6285f372a40817cac00cd96b`
 - Release 51 notary submission ID: `17e76b3f-36d5-4caf-b714-474ec42854aa`
 - Release 51 notary status: `Accepted`
+- Release 53: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-53`
+- Release 53 ZIP: `dist/releases/HoverPocket-0.1.0-53.zip`
+- Release 53 ZIP SHA256: `4243fb02dd1eb16ea4deb6d60d50dd2e31c2bbdd0419ef22cc68ce65f32cda0e`
+- Release 53 notary submission ID: `d309c2db-47e2-4db1-b880-73787671cc96`
+- Release 53 notary status: `Accepted`
 
 ## 検証
 
@@ -117,6 +123,13 @@ status: active
 - `./script/verify_google_calendar.sh`: Data Protection Keychain 使用時は `GoogleOAuthKeychainError: unhandledStatus(-34018)` で失敗し、Googleログイン後にリンクされない原因を確認。
 - `./script/verify_google_calendar.sh`: 通常 Keychain 保存へ戻した後は `google_calendar_verify=ok`、`used_login_flow=true`、`calendar_sources=5`、`events_in_visible_grid=79`、`today_events=2` で成功。
 - `rg -n "shotaro|matsu|gmail|refresh_token|access_token|AIza|ya29" dist/HoverPocket.app Sources README.md Package.swift script`: app bundle に Google credential 値は含まれないことを確認。ヒットは source field names、repo URL、開発署名者名のみ。
+- `xcrun notarytool submit dist/releases/HoverPocket-0.1.0-53.zip --keychain-profile hover-pocket --wait --timeout 30m --output-format json`: submission `d309c2db-47e2-4db1-b880-73787671cc96` が `Accepted`。
+- `xcrun stapler staple dist/HoverPocket.app`、`codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`、`xcrun stapler validate dist/HoverPocket.app`、`spctl --assess --type execute --verbose=2 dist/HoverPocket.app`: 成功、`source=Notarized Developer ID`。
+- `dist/releases/HoverPocket-0.1.0-53.zip` 展開後 app の `codesign`、`stapler validate`、`spctl`: 成功。
+- `APP_VERSION=0.1.0 APP_BUILD=53 PUBLISH_PREPARE_RELEASE=0 ./script/publish_github_release.sh`: GitHub Release `v0.1.0-53` 作成成功。
+- `gh release view v0.1.0-53 --json assets,body,url,name,tagName`: `HoverPocket-macOS-app.zip`、`HoverPocket-0.1.0-53.zip`、SHA256、`appcast.xml` の4 asset を確認。
+- 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip` を再ダウンロードし、top-level が `HoverPocket.app` のみ、SHA256 が `4243fb02dd1eb16ea4deb6d60d50dd2e31c2bbdd0419ef22cc68ce65f32cda0e` であることを確認。
+- 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`: `sparkle:version` が `53`、enclosure が `v0.1.0-53/HoverPocket-0.1.0-53.zip` であることを確認。
 - `xcrun notarytool history --keychain-profile hover-pocket --output-format json --no-progress`: Keychain profile が有効で過去 submission を読めることを確認。
 - `xcrun notarytool submit dist/releases/HoverPocket-0.1.0-51.zip --keychain-profile hover-pocket --wait --timeout 30m --output-format json`: submission `17e76b3f-36d5-4caf-b714-474ec42854aa` が `Accepted`。
 - `xcrun stapler staple dist/HoverPocket.app`、`codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`、`xcrun stapler validate dist/HoverPocket.app`、`spctl --assess --type execute --verbose=2 dist/HoverPocket.app`: 成功、`source=Notarized Developer ID`。
