@@ -82,8 +82,6 @@ enum AppTextKey: String, Sendable {
     case delete
     case deleteEventAlertTitle
     case disconnect
-    case displayAutomatic
-    case displayAutomaticDetail
     case displayAll
     case displayAllDetail
     case displayMain
@@ -273,8 +271,6 @@ enum AppText {
         case .delete: return "削除"
         case .deleteEventAlertTitle: return "予定を削除しますか？"
         case .disconnect: return "接続解除"
-        case .displayAutomatic: return "自動"
-        case .displayAutomaticDetail: return "ポインタがある画面に表示し、開いている間はその画面に固定します。"
         case .displayAll: return "すべて"
         case .displayAllDetail: return "各ディスプレイ上部に起点を表示します。ノッチがない画面では控えめなミニバーで表示します。"
         case .displayMain: return "メイン"
@@ -440,8 +436,6 @@ enum AppText {
         case .delete: return "Delete"
         case .deleteEventAlertTitle: return "Delete event?"
         case .disconnect: return "Disconnect"
-        case .displayAutomatic: return "Auto"
-        case .displayAutomaticDetail: return "Uses the display under the pointer, then stays there while open."
         case .displayAll: return "All"
         case .displayAllDetail: return "Shows an entry point on every display. Notchless displays use the subtle mini bar."
         case .displayMain: return "Main"

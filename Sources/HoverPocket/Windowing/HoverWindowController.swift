@@ -45,18 +45,17 @@ final class HoverWindowController {
             providerStore: menuStore.providerStore
         )
 
-        syncAccessWindows()
+        syncAccessWindows(orderFront: false)
         configurePreviewWindow()
         observeSettings()
     }
 
     func showPill() {
-        syncAccessWindows()
-        accessWindows.values.forEach { $0.orderFrontRegardless() }
+        syncAccessWindows(orderFront: true)
     }
 
     func positionWindows() {
-        syncAccessWindows()
+        syncAccessWindows(orderFront: false)
         guard let screen = activePreviewScreen ?? targetScreen() else { return }
 
         let frames = panelFrames(on: screen)
@@ -407,7 +406,7 @@ final class HoverWindowController {
         scheduleClose()
     }
 
-    private func syncAccessWindows() {
+    private func syncAccessWindows(orderFront: Bool) {
         let screens = accessScreens()
         let desiredKeys = Set(screens.map(screenKey))
 
@@ -429,6 +428,9 @@ final class HoverWindowController {
             }
 
             accessWindows[key]?.setFrame(frames.access, display: true)
+            if orderFront {
+                accessWindows[key]?.orderFrontRegardless()
+            }
         }
     }
 
@@ -441,7 +443,7 @@ final class HoverWindowController {
                 }
                 return lhs.frame.minX < rhs.frame.minX
             }
-        case .automatic, .mainDisplay, .secondaryDisplay:
+        case .mainDisplay, .secondaryDisplay:
             return targetScreen().map { [$0] } ?? []
         }
     }
@@ -456,8 +458,6 @@ final class HoverWindowController {
 
     private func targetScreen() -> NSScreen? {
         switch settings.displayPlacementMode {
-        case .automatic:
-            return screenContainingMouse() ?? mainDisplay()
         case .mainDisplay:
             return mainDisplay()
         case .secondaryDisplay:
@@ -536,8 +536,8 @@ final class HoverWindowController {
             .sink { [weak self] _ in
                 guard let self else { return }
                 closePreview()
-                positionWindows()
                 showPill()
+                positionWindows()
             }
             .store(in: &settingsCancellables)
 
@@ -556,7 +556,7 @@ final class HoverWindowController {
             .sink { [weak self] _ in
                 guard let self else { return }
                 DispatchQueue.main.async { [weak self] in
-                    self?.syncAccessWindows()
+                    self?.syncAccessWindows(orderFront: false)
                     self?.resizePreviewForPanelSizeChange()
                     self?.showPill()
                 }
@@ -565,7 +565,7 @@ final class HoverWindowController {
     }
 
     private func resizePreviewForPanelSizeChange() {
-        syncAccessWindows()
+        syncAccessWindows(orderFront: false)
         guard let screen = activePreviewScreen ?? previewWindow?.screen ?? targetScreen() else { return }
         let frames = panelFrames(on: screen)
 

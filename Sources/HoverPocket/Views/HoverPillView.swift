@@ -83,11 +83,14 @@ struct HoverMiniBarView: View {
             width: PanelLayout.miniBarTriggerWidth,
             height: PanelLayout.miniBarTriggerHeight
         )
+        .contentShape(Rectangle())
         .onHover { inside in
             withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.86)) {
                 isPointerNear = inside
             }
-            if !inside {
+            if inside {
+                onBarEnter()
+            } else {
                 onBarExit()
             }
         }

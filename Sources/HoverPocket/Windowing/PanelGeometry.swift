@@ -4,8 +4,8 @@ enum PanelLayout {
     static let pillHeight: CGFloat = 33
     static let topEdgeOverfill: CGFloat = 3
     static let notchHandleWidth: CGFloat = 54
-    static let miniBarTriggerWidth: CGFloat = 260
-    static let miniBarTriggerHeight: CGFloat = 32
+    static let miniBarTriggerWidth: CGFloat = 520
+    static let miniBarTriggerHeight: CGFloat = 64
     static let miniBarRestWidth: CGFloat = 150
     static let miniBarRestHeight: CGFloat = 2
     static let miniBarExpandedWidth: CGFloat = 168

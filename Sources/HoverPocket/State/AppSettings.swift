@@ -115,7 +115,7 @@ final class AppSettings: ObservableObject {
         let languageRawValue = defaults.string(forKey: Self.appLanguageKey)
         self.appLanguage = languageRawValue.flatMap(AppLanguage.init(rawValue:)) ?? .japanese
         let rawValue = defaults.string(forKey: Self.displayPlacementModeKey)
-        self.displayPlacementMode = rawValue.flatMap(DisplayPlacementMode.init(rawValue:)) ?? .automatic
+        self.displayPlacementMode = rawValue.flatMap(DisplayPlacementMode.init(rawValue:)) ?? .mainDisplay
         let panelSizeRawValue = defaults.string(forKey: Self.panelSizeKey)
         self.panelSize = panelSizeRawValue.flatMap(PanelSizeOption.init(rawValue:)) ?? .medium
         let providerSwitchingModeRawValue = defaults.string(forKey: Self.providerSwitchingModeKey)
