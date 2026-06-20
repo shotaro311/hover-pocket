@@ -89,6 +89,115 @@ enum StickyNoteColor: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum StickyNoteGridSize: String, Codable, CaseIterable, Identifiable, Sendable {
+    case small
+    case medium
+    case large
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .small:
+            return "Small"
+        case .medium:
+            return "Medium"
+        case .large:
+            return "Large"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .small:
+            return "S"
+        case .medium:
+            return "M"
+        case .large:
+            return "L"
+        }
+    }
+
+    var minimumCardWidth: CGFloat {
+        switch self {
+        case .small:
+            return 96
+        case .medium:
+            return 118
+        case .large:
+            return 150
+        }
+    }
+
+    var cardMinHeight: CGFloat {
+        switch self {
+        case .small:
+            return 88
+        case .medium:
+            return 108
+        case .large:
+            return 132
+        }
+    }
+
+    var titleFontSize: CGFloat {
+        switch self {
+        case .small:
+            return 11
+        case .medium:
+            return 12
+        case .large:
+            return 13
+        }
+    }
+
+    var bodyFontSize: CGFloat {
+        switch self {
+        case .small:
+            return 9.5
+        case .medium:
+            return 10.5
+        case .large:
+            return 11.5
+        }
+    }
+
+    var bodyLineLimit: Int {
+        switch self {
+        case .small:
+            return 3
+        case .medium:
+            return 4
+        case .large:
+            return 5
+        }
+    }
+
+    var editorMinHeight: CGFloat {
+        switch self {
+        case .small:
+            return 168
+        case .medium:
+            return 192
+        case .large:
+            return 232
+        }
+    }
+
+    var editorBodyMinHeight: CGFloat {
+        switch self {
+        case .small:
+            return 78
+        case .medium:
+            return 92
+        case .large:
+            return 126
+        }
+    }
+}
+
 enum StickyNoteUndoActionKind: Equatable, Sendable {
     case archived
     case deleted

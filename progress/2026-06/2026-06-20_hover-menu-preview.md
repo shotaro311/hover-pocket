@@ -15,6 +15,12 @@ status: active
 - UI worker 側の `StickyNotesView.swift` 実装と store/provider API の接続を確認。
 - `StickyNotesView.swift` に Pattern 1 Board Grid、hover archive、inline expanded editor、color swatches、context menu、drag reorder、外部 drag text payload、undo toast UI を追加。
 - 親側レビューで inline editor をフル幅行へ展開する構造に変更し、選択付箋が拡大して周囲の付箋が行単位で避けるようにした。空タイトル時は本文1行目を見出し代わりにし、本文プレビューの重複表示を抑制。
+- Sticky Notes の追加修正として、drag reorder 後にカードが薄い状態で残る問題を防ぐ drop reset、Ctrl+Enter の編集確定、付箋外クリックで一覧へ戻る挙動、別付箋クリック時の編集切替前保存、色スウォッチのダブルクリック新規作成、付箋グリッドサイズ `S/M/L` 切替を追加。
+- Sticky Notes UI をリファクタリングし、`StickyNotesView.swift` の責務を root state / action / layout に絞った。カード、ヘッダー、色スウォッチ、サイズ切替、Undo toast、empty state は `StickyNoteComponents.swift`、drop delegate と grid metrics は `StickyNoteDropDelegates.swift` へ分離。
+- Sticky Notes の drag UX を改善。drag reorder 中は JSON 保存を行わず、drop/reset 時にまとめて保存することでカクつきを抑えるようにした。
+- 付箋ドラッグ中はホバーウィンドウ内にいる間は閉じず、マウスポインタがホバーウィンドウ外へ出た時点で既存の外部ドラッグ閉じ処理へ渡すようにした。
+- 新規作成した付箋でタイトル/本文が空のまま確定された場合は、付箋を保存せず破棄するようにした。
+- 付箋ドラッグ中に下部ゴミ箱エリアを表示し、ゴミ箱アイコンへドロップすると対象付箋をアーカイブできるようにした。
 - Apple Account のアプリ用パスワードを使い、`hover-pocket` notarytool Keychain profile を作成。
 - 作成済み profile を `xcrun notarytool history --keychain-profile hover-pocket` で検証。
 - `NOTARYTOOL_PROFILE=hover-pocket ./script/notarize_release.sh` を実行し、Apple notarization、staple、staple後ZIP再生成、SHA256 / appcast 再生成、ZIP展開後検証まで完了。
@@ -37,6 +43,13 @@ status: active
 - `git diff --check -- Sources/HoverPocket/Models/StickyNoteModels.swift Sources/HoverPocket/State/StickyNotesStore.swift Sources/HoverPocket/Providers/StickyNotesProvider.swift Sources/HoverPocket/Providers/ProviderRegistry.swift Sources/HoverPocket/State/AppSettings.swift Sources/HoverPocket/Views/SettingsView.swift Sources/HoverPocket/Views/StickyNotesView.swift`: 成功。
 - `git diff --check`: 成功。
 - `./script/build_and_run.sh --verify`: 成功。`dist/HoverPocket.app` を Apple Development 署名で再署名し、起動確認まで成功。
+- `swift build`: Sticky Notes 追加修正後に成功。
+- `git diff --check`: Sticky Notes 追加修正後に成功。
+- `./script/build_and_run.sh --verify`: Sticky Notes 追加修正後に成功。
+- `swift build`: Sticky Notes UI リファクタリング後に成功。
+- `swift build`: Sticky Notes drag UX 改善後に成功。
+- `git diff --check`: Sticky Notes drag UX 改善後に成功。
+- `./script/build_and_run.sh --verify`: Sticky Notes drag UX 改善後に成功。`dist/HoverPocket.app` を Apple Development 署名で再署名し、起動確認まで成功。
 - `xcrun notarytool history --keychain-profile hover-pocket --output-format json --no-progress`: 成功。
 - `NOTARYTOOL_PROFILE=hover-pocket ./script/notarize_release.sh`: 成功。
 - `codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`: 成功。

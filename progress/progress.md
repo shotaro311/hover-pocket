@@ -72,6 +72,7 @@ status: active
 - 2026-06-19: 決定アプリアイコンを `Resources/AppIcon.png` として追加し、`script/build_and_run.sh` で `AppIcon.icns` を生成して `CFBundleIconFile=AppIcon` を app bundle に入れるようにした。Mirror は4秒遅延停止と再ホバー起動が競合しても、古い停止完了後に active intent が残っていれば自動再起動するよう修正。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。実マウス移動の hover open / close 5サイクルで毎回 preview が開き、最後の再openも成功。
 - 2026-06-19: 一般配布向けに `script/notarize_release.sh` を追加。ZIP作成、notarytool submit/wait、staple、spctl検証、staple後の再ZIP、SHA256 / appcast 再生成を1コマンド化した。`publish_github_release.sh` も既定で notarization を通し、既存ZIP利用時は展開後に `stapler validate` / `spctl` で未notarized ZIPを拒否する。`bash -n` と認証情報未設定時の安全な停止は確認済み。
 - 2026-06-20: `hover-pocket` notarytool Keychain profile を作成し、`NOTARYTOOL_PROFILE=hover-pocket ./script/notarize_release.sh` で Apple notarization を実行。submission `dd941d6b-7078-4d6a-94a7-c5a0f8697637` は `Accepted`。`dist/HoverPocket.app` と `dist/releases/HoverPocket-0.1.0-41.zip` 展開後 app の両方で `codesign --verify --deep --strict`、`stapler validate`、`spctl --assess --type execute` 成功。ZIP SHA256 は `362a6fcea234f3faf8b19eb5df625b48594eb573fc3fb5f79a765ff8ffd0986e`。
+- 2026-06-20: Sticky Notes drag UX を改善。並び替え中の JSON 保存をドロップ完了時へ寄せ、ホバーウィンドウ外へ出た時点だけ外部ドラッグ閉じ処理を走らせるようにした。空タイトル/本文の新規付箋は確定時に破棄し、ドラッグ中の下部ゴミ箱ドロップでアーカイブできるようにした。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 
 ## 進行中
 
@@ -148,6 +149,9 @@ status: active
 
 ## 最近の更新
 
+- 2026-06-20: Sticky Notes のドラッグ改善として、並び替え中の保存頻度を下げ、外部ドラッグ閉じ判定をホバーウィンドウ外へ出た時点へ変更。空の新規付箋は確定時に破棄し、ドラッグ中の下部ゴミ箱ドロップでアーカイブできるようにした。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
+- 2026-06-20: Sticky Notes UI をリファクタリング。`StickyNotesView.swift` を root state / action / layout に絞り、カード/ヘッダー/色スウォッチ/Undo toast などを `StickyNoteComponents.swift`、drop delegate を `StickyNoteDropDelegates.swift` へ分離。`swift build` 成功。
+- 2026-06-20: Sticky Notes の追加修正として、drag reorder 後の薄い表示残り対策、Ctrl+Enter確定、付箋外クリックで一覧へ戻る挙動、別付箋クリック時のリアルタイム保存付き編集切替、色ダブルクリック新規作成、付箋グリッドサイズ `S/M/L` 切替を実装。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-20: Sticky Notes の Board Grid UI を追加。hover archive、フル幅に拡大する inline editor、color swatches、context menu、drag reorder、外部 drag text payload、undo toast を `StickyNotesView.swift` に実装し、`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-06-20: Sticky Notes の model / store / provider / Settings toggle を追加。Application Support `HoverPocket/StickyNotes/notes.json` への JSON 永続化、archive/delete undo、provider registry 接続を実装し、`swift build` と `git diff --check` 成功。
 - 2026-06-20: Apple notarization を実行し、`HoverPocket-0.1.0-41.zip` を notarized/stapled ZIP として再生成。app 本体と ZIP 展開後 app の両方で Gatekeeper accepted を確認。

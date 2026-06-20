@@ -90,6 +90,14 @@ final class StickyNotesStore: ObservableObject {
     }
 
     @discardableResult
+    func discardNote(id: UUID) -> Bool {
+        guard let index = notes.firstIndex(where: { $0.id == id }) else { return false }
+        notes.remove(at: index)
+        save()
+        return true
+    }
+
+    @discardableResult
     func undoLastAction() -> Bool {
         guard let action = lastAction else { return false }
 
@@ -113,7 +121,7 @@ final class StickyNotesStore: ObservableObject {
     }
 
     @discardableResult
-    func moveNote(id: UUID, toIndex destinationIndex: Int) -> Bool {
+    func moveNote(id: UUID, toIndex destinationIndex: Int, saveImmediately: Bool = true) -> Bool {
         var active = activeNotes
         guard let currentIndex = active.firstIndex(where: { $0.id == id }) else { return false }
 
@@ -129,6 +137,14 @@ final class StickyNotesStore: ObservableObject {
                 notes[noteIndex].updatedAt = now
             }
         }
+        if saveImmediately {
+            save()
+        }
+        return true
+    }
+
+    @discardableResult
+    func saveNoteOrder() -> Bool {
         save()
         return true
     }

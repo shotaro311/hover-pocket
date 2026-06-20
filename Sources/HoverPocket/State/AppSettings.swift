@@ -63,6 +63,12 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var stickyNoteGridSize: StickyNoteGridSize {
+        didSet {
+            defaults.set(stickyNoteGridSize.rawValue, forKey: Self.stickyNoteGridSizeKey)
+        }
+    }
+
     private let defaults: UserDefaults
     private static let displayPlacementModeKey = "displayPlacementMode"
     private static let panelSizeKey = "panelSize"
@@ -74,6 +80,7 @@ final class AppSettings: ObservableObject {
     private static let lastSelectedProviderKey = "lastSelectedProvider"
     private static let showMirrorMicrophoneCheckKey = "showMirrorMicrophoneCheck"
     private static let showStickyNoteUndoToastKey = "showStickyNoteUndoToast"
+    private static let stickyNoteGridSizeKey = "stickyNoteGridSize"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -103,6 +110,8 @@ final class AppSettings: ObservableObject {
         } else {
             self.showStickyNoteUndoToast = defaults.bool(forKey: Self.showStickyNoteUndoToastKey)
         }
+        let stickyNoteGridSizeRawValue = defaults.string(forKey: Self.stickyNoteGridSizeKey)
+        self.stickyNoteGridSize = stickyNoteGridSizeRawValue.flatMap(StickyNoteGridSize.init(rawValue:)) ?? .medium
     }
 
     func orderedManifests(_ manifests: [PluginManifest]) -> [PluginManifest] {
