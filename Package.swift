@@ -3,17 +3,23 @@
 import PackageDescription
 
 let package = Package(
-    name: "NotchPokke",
+    name: "HoverPocket",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "NotchPokke", targets: ["NotchPokke"])
+        .executable(name: "HoverPocket", targets: ["HoverPocket"])
+    ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.3")
     ],
     targets: [
         .executableTarget(
-            name: "NotchPokke",
-            path: "Sources/HoverMenuPreview"
+            name: "HoverPocket",
+            dependencies: [
+                .product(name: "Sparkle", package: "Sparkle")
+            ],
+            path: "Sources/HoverPocket"
         )
     ]
 )
