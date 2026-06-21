@@ -74,9 +74,12 @@ enum AppTextKey: String, Sendable {
     case clipboardWatching
     case controls
     case controlsBack10
+    case controlsBackToBeginning
+    case controlsDecreasePlaybackRate
     case controlsDisplays
     case controlsExternalDisplay
     case controlsForward10
+    case controlsIncreasePlaybackRate
     case controlsInternalDisplay
     case controlsMaxBrightness
     case controlsMedia
@@ -87,6 +90,7 @@ enum AppTextKey: String, Sendable {
     case controlsNowPlaying
     case controlsPause
     case controlsPlay
+    case controlsPlaybackRate
     case controlsUnmute
     case controlsUnsupported
     case controlsVolume
@@ -285,9 +289,12 @@ enum AppText {
         case .clipboardWatching: return "クリップボードを監視中"
         case .controls: return "コントロール"
         case .controlsBack10: return "10秒戻す"
+        case .controlsBackToBeginning: return "冒頭に戻る"
+        case .controlsDecreasePlaybackRate: return "再生速度を下げる"
         case .controlsDisplays: return "ディスプレイ"
         case .controlsExternalDisplay: return "外部"
         case .controlsForward10: return "10秒送る"
+        case .controlsIncreasePlaybackRate: return "再生速度を上げる"
         case .controlsInternalDisplay: return "内蔵"
         case .controlsMaxBrightness: return "最大輝度にする"
         case .controlsMedia: return "メディア"
@@ -295,12 +302,13 @@ enum AppText {
         case .controlsMute: return "ミュート"
         case .controlsNoDisplays: return "ディスプレイを取得できません"
         case .controlsNoMedia: return "再生中のメディアはありません"
-        case .controlsNowPlaying: return "再生中"
+        case .controlsNowPlaying: return "メディア"
         case .controlsPause: return "一時停止"
         case .controlsPlay: return "再生"
+        case .controlsPlaybackRate: return "再生速度"
         case .controlsUnmute: return "ミュート解除"
         case .controlsUnsupported: return "非対応"
-        case .controlsVolume: return "音量"
+        case .controlsVolume: return "サウンド"
         case .clearSelectedDay: return "選択日を解除"
         case .click: return "クリック"
         case .color: return "色"
@@ -470,9 +478,12 @@ enum AppText {
         case .clipboardWatching: return "Watching clipboard"
         case .controls: return "Controls"
         case .controlsBack10: return "Back 10 seconds"
+        case .controlsBackToBeginning: return "Back to beginning"
+        case .controlsDecreasePlaybackRate: return "Decrease playback speed"
         case .controlsDisplays: return "Displays"
         case .controlsExternalDisplay: return "External"
         case .controlsForward10: return "Forward 10 seconds"
+        case .controlsIncreasePlaybackRate: return "Increase playback speed"
         case .controlsInternalDisplay: return "Internal"
         case .controlsMaxBrightness: return "Set maximum brightness"
         case .controlsMedia: return "Media"
@@ -480,12 +491,13 @@ enum AppText {
         case .controlsMute: return "Mute"
         case .controlsNoDisplays: return "No displays found"
         case .controlsNoMedia: return "No active media"
-        case .controlsNowPlaying: return "Now Playing"
+        case .controlsNowPlaying: return "Media"
         case .controlsPause: return "Pause"
         case .controlsPlay: return "Play"
+        case .controlsPlaybackRate: return "Playback speed"
         case .controlsUnmute: return "Unmute"
         case .controlsUnsupported: return "Unsupported"
-        case .controlsVolume: return "Volume"
+        case .controlsVolume: return "Sound"
         case .clearSelectedDay: return "Clear selected day"
         case .click: return "Click"
         case .color: return "Color"

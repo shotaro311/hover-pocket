@@ -29,6 +29,7 @@ struct ControlsNowPlayingState: Equatable, Sendable {
     var progress: TimeInterval
     var duration: TimeInterval
     var isPlaying: Bool
+    var playbackRate: Double
 
     static let empty = ControlsNowPlayingState(
         title: "",
@@ -37,7 +38,8 @@ struct ControlsNowPlayingState: Equatable, Sendable {
         artworkData: nil,
         progress: 0,
         duration: 0,
-        isPlaying: false
+        isPlaying: false,
+        playbackRate: 1
     )
 }
 
