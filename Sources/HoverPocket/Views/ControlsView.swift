@@ -138,21 +138,6 @@ struct ControlsView: View {
                 .frame(height: ControlsLayout.metricRowHeight)
                 .opacity(store.nowPlaying.hasMedia ? 1 : 0.38)
 
-                ControlsPlaybackRateControl(
-                    rateText: playbackRateText,
-                    isEnabled: store.nowPlaying.hasMedia,
-                    decreaseHelp: text(.controlsDecreasePlaybackRate),
-                    increaseHelp: text(.controlsIncreasePlaybackRate),
-                    labelHelp: text(.controlsPlaybackRate),
-                    onDecrease: {
-                        adjustPlaybackRate(by: -0.1)
-                    },
-                    onIncrease: {
-                        adjustPlaybackRate(by: 0.1)
-                    }
-                )
-                .opacity(store.nowPlaying.hasMedia ? 1 : 0.38)
-
                 HStack(spacing: 10) {
                     Text(timeText(store.nowPlaying.progress))
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
@@ -161,7 +146,14 @@ struct ControlsView: View {
 
                     Spacer(minLength: 8)
 
-                    HStack(spacing: 16) {
+                    HStack(spacing: 13) {
+                        ControlsMediaButton(symbolName: "minus") {
+                            adjustPlaybackRate(by: -0.1)
+                        }
+                        .disabled(!store.nowPlaying.hasMedia)
+                        .opacity(store.nowPlaying.hasMedia ? 1 : 0.38)
+                        .help("\(text(.controlsDecreasePlaybackRate)) / \(playbackRateText)")
+
                         ControlsMediaButton(symbolName: "gobackward.10") {
                             store.skipPlayback(by: -10)
                         }
@@ -184,6 +176,13 @@ struct ControlsView: View {
                         .disabled(!store.nowPlaying.hasMedia)
                         .opacity(store.nowPlaying.hasMedia ? 1 : 0.38)
                         .help(text(.controlsForward10))
+
+                        ControlsMediaButton(symbolName: "plus") {
+                            adjustPlaybackRate(by: 0.1)
+                        }
+                        .disabled(!store.nowPlaying.hasMedia)
+                        .opacity(store.nowPlaying.hasMedia ? 1 : 0.38)
+                        .help("\(text(.controlsIncreasePlaybackRate)) / \(playbackRateText)")
                     }
 
                     Spacer(minLength: 8)
@@ -478,56 +477,6 @@ private struct ControlsSlider: View {
     private func setValue(from xPosition: CGFloat, width: CGFloat) {
         let normalized = min(max(Double(xPosition / max(width, 1)), 0), 1)
         value = range.lowerBound + (range.upperBound - range.lowerBound) * normalized
-    }
-}
-
-private struct ControlsPlaybackRateControl: View {
-    let rateText: String
-    let isEnabled: Bool
-    let decreaseHelp: String
-    let increaseHelp: String
-    let labelHelp: String
-    let onDecrease: () -> Void
-    let onIncrease: () -> Void
-
-    var body: some View {
-        HStack(spacing: 0) {
-            rateButton(symbolName: "minus", help: decreaseHelp, action: onDecrease)
-
-            Spacer(minLength: 0)
-
-            Text(rateText)
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.70))
-                .help(labelHelp)
-
-            Spacer(minLength: 0)
-
-            rateButton(symbolName: "plus", help: increaseHelp, action: onIncrease)
-        }
-        .padding(.horizontal, 3)
-        .frame(height: 25)
-        .background(
-            Capsule()
-                .fill(Color.white.opacity(0.040))
-        )
-        .overlay(
-            Capsule()
-                .stroke(Color.white.opacity(0.075), lineWidth: 1)
-        )
-        .disabled(!isEnabled)
-    }
-
-    private func rateButton(symbolName: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbolName)
-                .font(.system(size: 9.5, weight: .bold))
-                .frame(width: 24, height: 21)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.white.opacity(0.64))
-        .contentShape(Rectangle())
-        .help(help)
     }
 }
 

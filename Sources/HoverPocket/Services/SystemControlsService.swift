@@ -600,6 +600,7 @@ private final class MediaRemoteService: @unchecked Sendable {
     private let sendCommand: SendCommand?
     private let setElapsedTimeFunction: SetElapsedTime?
     private let setPlaybackSpeedFunction: SetPlaybackSpeed?
+    private let browserFallback = BrowserNowPlayingService()
 
     init() {
         guard let handle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY) else {
@@ -632,6 +633,14 @@ private final class MediaRemoteService: @unchecked Sendable {
     }
 
     func nowPlaying() async -> ControlsNowPlayingState {
+        let remoteState = await mediaRemoteNowPlaying()
+        if remoteState.hasMedia {
+            return remoteState
+        }
+        return await browserFallback.nowPlaying() ?? remoteState
+    }
+
+    private func mediaRemoteNowPlaying() async -> ControlsNowPlayingState {
         guard let getNowPlayingInfo else { return .empty }
         return await withCheckedContinuation { continuation in
             getNowPlayingInfo(DispatchQueue.global(qos: .utility)) { info in
@@ -645,11 +654,19 @@ private final class MediaRemoteService: @unchecked Sendable {
     }
 
     func setElapsedTime(_ elapsedTime: TimeInterval) {
-        setElapsedTimeFunction?(max(0, elapsedTime))
+        let target = max(0, elapsedTime)
+        setElapsedTimeFunction?(target)
+        sendCommand?(24, [
+            "kMRMediaRemoteOptionPlaybackPosition": target
+        ] as CFDictionary)
     }
 
     func setPlaybackSpeed(_ speed: Double) {
-        setPlaybackSpeedFunction?(Float(speed.clamped(to: 0.5...3.0)))
+        let target = speed.clamped(to: 0.5...3.0)
+        setPlaybackSpeedFunction?(Float(target))
+        sendCommand?(19, [
+            "kMRMediaRemoteOptionPlaybackRate": target
+        ] as CFDictionary)
     }
 
     private static func parseNowPlaying(_ info: NSDictionary?) -> ControlsNowPlayingState {
@@ -705,5 +722,129 @@ private final class MediaRemoteService: @unchecked Sendable {
             isPlaying: playbackRate > 0,
             playbackRate: (playbackRate > 0 ? playbackRate : defaultPlaybackRate).clamped(to: 0.5...3.0)
         )
+    }
+}
+
+private final class BrowserNowPlayingService: @unchecked Sendable {
+    private struct BrowserTarget {
+        let bundleIdentifier: String
+        let appleScriptName: String
+        let scriptKind: ScriptKind
+    }
+
+    private enum ScriptKind {
+        case chromium
+        case safari
+    }
+
+    private let targets: [BrowserTarget] = [
+        BrowserTarget(bundleIdentifier: "com.google.Chrome", appleScriptName: "Google Chrome", scriptKind: .chromium),
+        BrowserTarget(bundleIdentifier: "com.apple.Safari", appleScriptName: "Safari", scriptKind: .safari),
+        BrowserTarget(bundleIdentifier: "com.microsoft.edgemac", appleScriptName: "Microsoft Edge", scriptKind: .chromium),
+        BrowserTarget(bundleIdentifier: "company.thebrowser.Browser", appleScriptName: "Arc", scriptKind: .chromium)
+    ]
+
+    func nowPlaying() async -> ControlsNowPlayingState? {
+        await Task.detached(priority: .utility) { [targets] in
+            for target in targets where Self.isRunning(bundleIdentifier: target.bundleIdentifier) {
+                guard let tab = Self.activeMediaTab(in: target) else { continue }
+                return ControlsNowPlayingState(
+                    title: Self.cleanedTitle(tab.title, sourceName: tab.sourceName),
+                    sourceName: tab.sourceName,
+                    hasMedia: true,
+                    artworkData: nil,
+                    progress: 0,
+                    duration: 0,
+                    isPlaying: false,
+                    playbackRate: 1
+                )
+            }
+            return nil
+        }.value
+    }
+
+    private static func isRunning(bundleIdentifier: String) -> Bool {
+        NSWorkspace.shared.runningApplications.contains { application in
+            application.bundleIdentifier == bundleIdentifier && !application.isTerminated
+        }
+    }
+
+    private static func activeMediaTab(in target: BrowserTarget) -> (title: String, sourceName: String)? {
+        guard let result = runAppleScript(source: scriptSource(for: target)),
+              let tab = parseTabResult(result)
+        else {
+            return nil
+        }
+        let mediaSource = sourceName(for: tab.url)
+        guard let mediaSource else { return nil }
+        return (tab.title, mediaSource)
+    }
+
+    private static func scriptSource(for target: BrowserTarget) -> String {
+        let escapedName = target.appleScriptName.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        switch target.scriptKind {
+        case .chromium:
+            return """
+            tell application "\(escapedName)"
+              if (count of windows) is 0 then return ""
+              set tabTitle to title of active tab of front window
+              set tabURL to URL of active tab of front window
+              return tabTitle & linefeed & tabURL
+            end tell
+            """
+        case .safari:
+            return """
+            tell application "\(escapedName)"
+              if (count of windows) is 0 then return ""
+              set tabTitle to name of current tab of front window
+              set tabURL to URL of current tab of front window
+              return tabTitle & linefeed & tabURL
+            end tell
+            """
+        }
+    }
+
+    private static func runAppleScript(source: String) -> String? {
+        var error: NSDictionary?
+        let result = NSAppleScript(source: source)?.executeAndReturnError(&error)
+        guard error == nil else { return nil }
+        let value = result?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : nil
+    }
+
+    private static func parseTabResult(_ result: String) -> (title: String, url: URL)? {
+        let lines = result.components(separatedBy: .newlines)
+        guard lines.count >= 2 else { return nil }
+        let title = lines[0].trimmingCharacters(in: .whitespacesAndNewlines)
+        let urlString = lines[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, let url = URL(string: urlString) else { return nil }
+        return (title, url)
+    }
+
+    private static func sourceName(for url: URL) -> String? {
+        let host = url.host(percentEncoded: false)?.lowercased() ?? ""
+        if host == "youtu.be" || host.hasSuffix(".youtube.com") || host == "youtube.com" {
+            return host == "music.youtube.com" ? "YouTube Music" : "YouTube"
+        }
+        if host.hasSuffix(".netflix.com") || host == "netflix.com" {
+            return "Netflix"
+        }
+        if host.hasSuffix(".twitch.tv") || host == "twitch.tv" {
+            return "Twitch"
+        }
+        if host.hasSuffix(".vimeo.com") || host == "vimeo.com" {
+            return "Vimeo"
+        }
+        return nil
+    }
+
+    private static func cleanedTitle(_ title: String, sourceName: String) -> String {
+        var cleaned = title
+        for suffix in [" - \(sourceName)", " | \(sourceName)"] where cleaned.hasSuffix(suffix) {
+            cleaned.removeLast(suffix.count)
+            break
+        }
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

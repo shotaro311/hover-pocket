@@ -226,6 +226,8 @@ ${SPARKLE_PLIST}  <key>SUEnableInstallerLauncherService</key>
   <string>ホバーポケット uses the Mac camera to show a mirror preview while the hover panel is open.</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>ホバーポケット uses the microphone only for the mirror microphone check.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>macOS の再生中メディアを取得できない場合に、ブラウザで再生中のメディアを検出するために使用します。</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
 </dict>
