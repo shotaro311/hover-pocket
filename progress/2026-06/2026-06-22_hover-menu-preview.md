@@ -87,3 +87,36 @@
 - `shasum -a 256 dist/releases/HoverPocket-0.1.0-71.zip`: SHA256 が `.sha256` と一致。
 - `codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`、`xcrun stapler validate dist/HoverPocket.app`、`spctl --assess --type execute --verbose=4 dist/HoverPocket.app`: 成功、`source=Notarized Developer ID`。
 - `git ls-remote --tags origin v0.1.0-71`: release tag が commit `f242649288d458c8612f3b71478a3367207b2a52` を指すことを確認。
+
+## 追加実施内容: 外部ディスプレイ輝度制御経路修正 / build 73
+
+- 外部ディスプレイでも `DisplayServicesSetBrightness` が成功扱いを返す場合に DDC/CI へ進まない問題を修正した。
+- 内蔵ディスプレイは従来どおり `DisplayServices` を使い、外部ディスプレイは DDC/CI を先に試す。DDC が使えない場合だけ `DisplayServices`、最後にソフト輝度 fallback へ落とす順序にした。
+
+## 追加検証: 外部輝度 / build 73
+
+- `swift build`: 成功。
+- `git diff --check`: 成功。
+- `./script/build_and_run.sh --verify`: 成功。Apple Development 署名で `dist/HoverPocket.app` を起動確認。
+- DDC change probe: `LG ULTRAGEAR` の VCP `0x10` を `28 -> 29 -> 28` へ変更/復元できることを確認済み。
+
+## 追加成果物: build 73
+
+- Commit: `ea144fc6ec8ef48690b2e928274703dff5ef63fd`
+- Release: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-73`
+- Latest install ZIP: `https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip`
+- Latest appcast: `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`
+- ZIP: `dist/releases/HoverPocket-0.1.0-73.zip`
+- ZIP SHA256: `3f2c4adca44b284b961186172b4aa465263da8a79b22221d939894d96a21c44d`
+- Notary submission ID: `a427e7d0-c245-45f0-b398-c55b7517debf`
+- Notary status: `Accepted`
+
+## 追加配信検証: build 73
+
+- `APP_VERSION=0.1.0 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh`: build `73` の notarization / staple / GitHub Release 公開まで成功。
+- `gh release view v0.1.0-73 --json assets,body,url,name,tagName`: `HoverPocket-macOS-app.zip`、`HoverPocket-0.1.0-73.zip`、SHA256、`appcast.xml` の4 asset を確認。
+- `dist/releases/appcast.xml`: `sparkle:version` が `73`、enclosure が `v0.1.0-73/HoverPocket-0.1.0-73.zip` であることを確認。
+- `zipinfo -1 dist/releases/HoverPocket-0.1.0-73.zip | awk -F/ '{print $1}' | sort -u`: top-level が `HoverPocket.app` のみであることを確認。
+- `shasum -a 256 -c dist/releases/HoverPocket-0.1.0-73.zip.sha256`: 成功。
+- `codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`、`xcrun stapler validate dist/HoverPocket.app`、`spctl --assess --type execute --verbose=4 dist/HoverPocket.app`: 成功、`source=Notarized Developer ID`。
+- `git ls-remote --tags origin v0.1.0-73`: release tag が commit `ea144fc6ec8ef48690b2e928274703dff5ef63fd` を指すことを確認。
