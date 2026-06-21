@@ -9,6 +9,7 @@ struct ProviderRegistry: Sendable {
     static let builtIn = ProviderRegistry(
         providers: [
             MirrorProvider(),
+            ControlsProvider(),
             GoogleCalendarProvider(),
             ClipboardProvider(),
             StickyNotesProvider()

@@ -72,6 +72,24 @@ enum AppTextKey: String, Sendable {
     case clipboardPaused
     case clipboardText
     case clipboardWatching
+    case controls
+    case controlsBack10
+    case controlsDisplays
+    case controlsExternalDisplay
+    case controlsForward10
+    case controlsInternalDisplay
+    case controlsMaxBrightness
+    case controlsMedia
+    case controlsMinBrightness
+    case controlsMute
+    case controlsNoDisplays
+    case controlsNoMedia
+    case controlsNowPlaying
+    case controlsPause
+    case controlsPlay
+    case controlsUnmute
+    case controlsUnsupported
+    case controlsVolume
     case clearSelectedDay
     case click
     case color
@@ -220,6 +238,8 @@ enum AppText {
             return text(.clipboard, language: language)
         case "sticky-notes":
             return text(.stickyNotes, language: language)
+        case "controls":
+            return text(.controls, language: language)
         default:
             return fallback
         }
@@ -263,6 +283,24 @@ enum AppText {
         case .clipboardPaused: return "監視を停止中"
         case .clipboardText: return "テキスト"
         case .clipboardWatching: return "クリップボードを監視中"
+        case .controls: return "コントロール"
+        case .controlsBack10: return "10秒戻す"
+        case .controlsDisplays: return "ディスプレイ"
+        case .controlsExternalDisplay: return "外部"
+        case .controlsForward10: return "10秒送る"
+        case .controlsInternalDisplay: return "内蔵"
+        case .controlsMaxBrightness: return "最大輝度にする"
+        case .controlsMedia: return "メディア"
+        case .controlsMinBrightness: return "最小輝度にする"
+        case .controlsMute: return "ミュート"
+        case .controlsNoDisplays: return "ディスプレイを取得できません"
+        case .controlsNoMedia: return "再生中のメディアはありません"
+        case .controlsNowPlaying: return "再生中"
+        case .controlsPause: return "一時停止"
+        case .controlsPlay: return "再生"
+        case .controlsUnmute: return "ミュート解除"
+        case .controlsUnsupported: return "非対応"
+        case .controlsVolume: return "音量"
         case .clearSelectedDay: return "選択日を解除"
         case .click: return "クリック"
         case .color: return "色"
@@ -430,6 +468,24 @@ enum AppText {
         case .clipboardPaused: return "Clipboard paused"
         case .clipboardText: return "Text"
         case .clipboardWatching: return "Watching clipboard"
+        case .controls: return "Controls"
+        case .controlsBack10: return "Back 10 seconds"
+        case .controlsDisplays: return "Displays"
+        case .controlsExternalDisplay: return "External"
+        case .controlsForward10: return "Forward 10 seconds"
+        case .controlsInternalDisplay: return "Internal"
+        case .controlsMaxBrightness: return "Set maximum brightness"
+        case .controlsMedia: return "Media"
+        case .controlsMinBrightness: return "Set minimum brightness"
+        case .controlsMute: return "Mute"
+        case .controlsNoDisplays: return "No displays found"
+        case .controlsNoMedia: return "No active media"
+        case .controlsNowPlaying: return "Now Playing"
+        case .controlsPause: return "Pause"
+        case .controlsPlay: return "Play"
+        case .controlsUnmute: return "Unmute"
+        case .controlsUnsupported: return "Unsupported"
+        case .controlsVolume: return "Volume"
         case .clearSelectedDay: return "Clear selected day"
         case .click: return "Click"
         case .color: return "Color"
