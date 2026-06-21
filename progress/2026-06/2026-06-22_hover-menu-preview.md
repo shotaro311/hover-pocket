@@ -47,3 +47,43 @@
 
 - DDC/CI は private `IOAVService*` symbol に依存するため、macOS 更新や接続経路によって使えない可能性がある。その場合は外部ディスプレイのみソフト輝度 fallback に落ちる。
 - 再生速度変更は MediaRemote 側の private symbol と再生アプリ側対応に依存する。非対応アプリでは UI 更新後に実プレイヤー側が追従しない可能性がある。
+
+## 追加実施内容: YouTube 認識 fallback / 倍速ボタン配置
+
+- YouTube が Controls で認識されない報告に対応し、MediaRemote が空を返した場合だけブラウザのアクティブタブ title / URL を Apple Events で確認する fallback を追加した。
+- fallback は Chrome / Safari / Microsoft Edge / Arc を対象にし、YouTube / YouTube Music / Netflix / Twitch / Vimeo の active tab をメディアとして扱う。Chrome の `Apple Events からの JavaScript を許可` には依存しない。
+- `NSAppleEventsUsageDescription` を generated app bundle の Info.plist に追加した。
+- MediaRemote の seek / playback rate 操作は、既存の private setter に加えて `MRMediaRemoteSendCommand` の `SeekToPlaybackPosition` / `ChangePlaybackRateCommand` option も併用するようにした。
+- 倍速 `-0.1 / +0.1` ボタンを独立カプセルから撤去し、10秒戻し / 再生停止 / 10秒送りの横へ同じ丸アイコンボタンとして配置した。
+
+## 追加検証: YouTube / build 71
+
+- `swift build`: 成功。
+- `git diff --check`: 成功。
+- `./script/build_and_run.sh --verify`: 成功。Apple Development 署名で `dist/HoverPocket.app` を起動確認。
+- YouTube probe: `MRMediaRemoteGetNowPlayingInfo` が YouTube の title / duration / elapsed / playbackRate / artwork を返すことを確認。
+- Chrome active tab probe: title `UE6はソードアートオンラインを目指す ep661 - YouTube` と YouTube URL を取得できることを確認。
+- Chrome JS probe: ユーザー環境では `AppleScript からの JavaScript の実行がオフ`。今回の fallback は JS を使わない title / URL 取得に限定した。
+- DDC change probe: `LG ULTRAGEAR` の VCP `0x10` を `28 -> 29 -> 28` へ変更/復元できることを確認。
+- Generated Info.plist: `CFBundleVersion=71` と `NSAppleEventsUsageDescription` 追加を確認。
+
+## 追加成果物: build 71
+
+- Commit: `f242649288d458c8612f3b71478a3367207b2a52`
+- Release: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-71`
+- Latest install ZIP: `https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip`
+- Latest appcast: `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`
+- ZIP: `dist/releases/HoverPocket-0.1.0-71.zip`
+- ZIP SHA256: `dba04b13588187b600f83b8ee93eb789d2b3e3ef6037e4181b8d424795a7c9fd`
+- Notary submission ID: `056c9b90-d400-457b-a5f8-3f27ef0d0cda`
+- Notary status: `Accepted`
+
+## 追加配信検証: build 71
+
+- `APP_VERSION=0.1.0 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh`: build `71` の notarization / staple / GitHub Release 公開まで成功。
+- `gh release view v0.1.0-71 --json assets,body,url,name,tagName`: `HoverPocket-macOS-app.zip`、`HoverPocket-0.1.0-71.zip`、SHA256、`appcast.xml` の4 asset を確認。
+- 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`: `sparkle:version` が `71`、enclosure が `v0.1.0-71/HoverPocket-0.1.0-71.zip` であることを確認。
+- `zipinfo -1 dist/releases/HoverPocket-0.1.0-71.zip | awk -F/ '{print $1}' | sort -u`: top-level が `HoverPocket.app` のみであることを確認。
+- `shasum -a 256 dist/releases/HoverPocket-0.1.0-71.zip`: SHA256 が `.sha256` と一致。
+- `codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`、`xcrun stapler validate dist/HoverPocket.app`、`spctl --assess --type execute --verbose=4 dist/HoverPocket.app`: 成功、`source=Notarized Developer ID`。
+- `git ls-remote --tags origin v0.1.0-71`: release tag が commit `f242649288d458c8612f3b71478a3367207b2a52` を指すことを確認。
