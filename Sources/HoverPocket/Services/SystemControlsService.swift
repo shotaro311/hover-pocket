@@ -141,9 +141,9 @@ private final class DisplayBrightnessService {
         NSScreen.screens.compactMap { screen in
             guard let displayID = screen.displayID else { return nil }
             let isInternal = CGDisplayIsBuiltin(displayID) != 0
-            let hardwareBrightness = bridge.getBrightness(for: displayID)
+            let ddcBrightness = isInternal ? nil : ddcBridge.getBrightness(for: displayID)
+            let hardwareBrightness = ddcBrightness == nil ? bridge.getBrightness(for: displayID) : nil
             let usesHardwareBrightness = hardwareBrightness != nil && bridge.canSetBrightness
-            let ddcBrightness = usesHardwareBrightness || isInternal ? nil : ddcBridge.getBrightness(for: displayID)
             let usesDDCBrightness = ddcBrightness != nil
             let usesSoftwareBrightness = !usesHardwareBrightness && !usesDDCBrightness && !isInternal
             let brightness = usesHardwareBrightness
@@ -163,14 +163,19 @@ private final class DisplayBrightnessService {
 
     func setBrightness(_ brightness: Double, for displayID: CGDirectDisplayID) -> Bool {
         let normalized = brightness.clamped(to: Self.minimumBrightness...1)
+        if CGDisplayIsBuiltin(displayID) == 0 {
+            if ddcBridge.setBrightness(normalized, for: displayID) {
+                return true
+            }
+            if bridge.setBrightness(Float(normalized), for: displayID) {
+                return true
+            }
+            return softwareBridge.setBrightness(normalized, for: displayID)
+        }
         if bridge.setBrightness(Float(normalized), for: displayID) {
             return true
         }
-        guard CGDisplayIsBuiltin(displayID) == 0 else { return false }
-        if ddcBridge.setBrightness(normalized, for: displayID) {
-            return true
-        }
-        return softwareBridge.setBrightness(normalized, for: displayID)
+        return false
     }
 }
 
