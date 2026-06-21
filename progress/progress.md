@@ -9,7 +9,7 @@ status: active
 
 ## 概要
 
-- `ホバーポケット` は、macOS 画面上部へホバーすると、ミラー、Google Calendar、Clipboard 履歴、Sticky Notes を素早く開ける macOS app。
+- `ホバーポケット` は、macOS 画面上部へホバーすると、ミラー、Controls、Google Calendar、Clipboard 履歴、Sticky Notes を素早く開ける macOS app。
 - `/Users/shotaro/Documents/Codex/.../outputs/hover-menu-preview` で作成した prototype を、開発継続用に `/Users/shotaro/code/share/hover-menu-preview` へ移行済み。
 
 ## 最新の検証済み状態
@@ -88,7 +88,7 @@ status: active
 
 ## 進行中
 
-- Codex: `ホバーポケット` / `HoverPocket` として GitHub public repository `shotaro311/hover-pocket` へ公開済み。`Mirror`、`Calendar`、`Clipboard`、`Sticky Notes` の built-in provider が有効。Calendar は Google iOS OAuth client + custom URL scheme + PKCE + `ASWebAuthenticationSession` で実アカウント接続、予定取得、追加、編集、削除まで実装済み。Google OAuth credential は通常 Keychain に保存し、開発版と配布版で Keychain service suffix を分離する。Sticky Notes は inline editor、title optional、drag reorder、外部 drag text payload、下部ゴミ箱 drop archive、S/M/L grid、Undo toast 設定に対応済み。AI native Phase 1 として Apple Foundation Models provider、Calendar read/write tool、ApprovalGate、AuditLog、下段 command lane、fallback candidates を実装済み。UI は Settings で `日本語` / `English` を切り替え可能で、既定は日本語。Provider header の機能アイコンは drag & drop で並べ替え可能。上部 handle は `B / C / None` とメインノッチ左アイコンエリア表示/非表示を Settings から選択可能で、非表示時は横エリア自体を描画しない。表示先は `メイン / サブ / すべて` で、ノッチなし画面は縦ヒット 8pt の控えめなミニバー起点を使う。サブディスプレイから開いた場合の Mirror 表示は Settings から制御でき、既定は非表示。macOS menu bar status item から設定 / 更新確認 / 終了を実行可能。更新がある場合はホバーウィンドウ上部にも青い更新アイコンを表示し、押下後はホバーウィンドウを閉じる。Camera / Microphone permission off 時は System Settings へのCTA、Calendar未接続時はGoogle login CTAを表示する。Camera Settings で許可後はpermission recovery pollingとアプリ復帰検知でMirrorを再起動する。配布版は hardened runtime 用の camera / audio-input entitlements 入り。build `65` は notarized/stapled ZIP として GitHub Release `v0.1.0-65` に公開済みで、latest appcast も build `65` を指している。
+- Codex: `ホバーポケット` / `HoverPocket` として GitHub public repository `shotaro311/hover-pocket` へ公開済み。`Mirror`、`Controls`、`Calendar`、`Clipboard`、`Sticky Notes` の built-in provider が有効。Controls は明るさ表示/調整、最小/最大輝度トグル、CoreAudio 音量/ミュート、MediaRemote bridge による Now Playing サムネイル/再生位置/再生制御を持つ。外部ディスプレイなど明るさ API が非対応の画面は `非対応` 表示で操作を無効化する。Calendar は Google iOS OAuth client + custom URL scheme + PKCE + `ASWebAuthenticationSession` で実アカウント接続、予定取得、追加、編集、削除まで実装済み。Google OAuth credential は通常 Keychain に保存し、開発版と配布版で Keychain service suffix を分離する。Sticky Notes は inline editor、title optional、drag reorder、外部 drag text payload、下部ゴミ箱 drop archive、S/M/L grid、Undo toast 設定に対応済み。AI native Phase 1 として Apple Foundation Models provider、Calendar read/write tool、ApprovalGate、AuditLog、下段 command lane、fallback candidates を実装済み。UI は Settings で `日本語` / `English` を切り替え可能で、既定は日本語。Provider header の機能アイコンは drag & drop で並べ替え可能。上部 handle は `B / C / None` とメインノッチ左アイコンエリア表示/非表示を Settings から選択可能で、非表示時は横エリア自体を描画しない。表示先は `メイン / サブ / すべて` で、ノッチなし画面は縦ヒット 8pt の控えめなミニバー起点を使う。サブディスプレイから開いた場合の Mirror 表示は Settings から制御でき、既定は非表示。macOS menu bar status item から設定 / 更新確認 / 終了を実行可能。更新がある場合はホバーウィンドウ上部にも青い更新アイコンを表示し、押下後はホバーウィンドウを閉じる。Camera / Microphone permission off 時は System Settings へのCTA、Calendar未接続時はGoogle login CTAを表示する。Camera Settings で許可後はpermission recovery pollingとアプリ復帰検知でMirrorを再起動する。配布版は hardened runtime 用の camera / audio-input entitlements 入り。build `67` は notarized/stapled ZIP として GitHub Release `v0.1.0-67` に公開済みで、latest appcast も build `67` を指している。
 
 ## 次アクション
 
@@ -109,7 +109,7 @@ status: active
 - 機密情報や token は含めていない。
 - `.env.local` には Google OAuth 設定値が入るため、値を出力せず、repo に含めない。配布用 app bundle へは iOS OAuth client ID / URL scheme のみ注入し、Desktop OAuth client secret は通常入れない。
 - Google OAuth consent screen が Testing の場合、登録済み test user のみログイン可能。一般公開には Google OAuth app verification が必要になる可能性がある。
-- 現在の公開ZIP成果物 `dist/releases/HoverPocket-0.1.0-65.zip` は Developer ID Application 署名と notarization/staple 済みで、GitHub Release `v0.1.0-65` に公開済み。latest appcast も build `65` を指す。一般ユーザー向けには同じ app-only payload を分かりやすい `HoverPocket-macOS-app.zip` として案内し、公開URLから再取得したZIPのトップレベルが `HoverPocket.app` のみであることを確認済み。SHA256 は `0e511b4932c8da18bc224238683574b25c44c673dfc48efd57f44524097a787c`。
+- 現在の公開ZIP成果物 `dist/releases/HoverPocket-0.1.0-67.zip` は Developer ID Application 署名と notarization/staple 済みで、GitHub Release `v0.1.0-67` に公開済み。latest appcast も build `67` を指す。一般ユーザー向けには同じ app-only payload を分かりやすい `HoverPocket-macOS-app.zip` として案内し、公開URLから再取得したZIPのトップレベルが `HoverPocket.app` のみであることを確認済み。SHA256 は `c1abd6c75ee8cdcc0f097320c1653fc2cc75f6fdaea03b0154338580c95f2f6f`。
 - Sparkle秘密鍵は macOS Keychain の `hover-pocket` アカウントにある。秘密鍵ファイルをGitに書き出さない。
 - 旧 Keychain の Google OAuth item が現在の署名で読めない場合は、Keychainパスワードダイアログを出さずに未接続扱いへ落とす。Google再ログイン後は通常 Keychain に新credentialを保存する。credentialはローカルMacのKeychainに保存され、app bundle / ZIP / repo には含めない。
 - Calendar event 書き込みには `calendar.events` scope が必要。既存の read-only token では再接続が必要。
@@ -156,6 +156,7 @@ status: active
 
 ## 最近の更新
 
+- 2026-06-21: Controls provider を追加。A案の縦積みコンパクトレイアウトで Displays / Volume / Now Playing をまとめ、Header は既存 `ProviderHeaderView` に任せる構成にした。内蔵ディスプレイの明るさ取得、CoreAudio 音量/ミュート、MediaRemote symbol 存在確認、`swift build`、`git diff --check`、`./script/build_and_run.sh --verify` が成功。build `67` を notarized/stapled ZIP として GitHub Release `v0.1.0-67` に公開し、latest appcast は build `67` を指す。
 - 2026-06-21: ノッチなし画面のミニバー縦ヒット領域を 8pt に縮小し、早く開きすぎる挙動を抑えた。更新アイコン押下後はホバーウィンドウを閉じて Sparkle 更新 UI を見やすくした。Settings を `表示 / 起点表示 / パネル / 機能` へ整理し、メインノッチ左のアイコンエリアはオフ時に横エリア自体を描画しないようにした。build `65` を notarized/stapled ZIP として GitHub Release `v0.1.0-65` に公開し、latest appcast は build `65` を指す。
 - 2026-06-21: 表示先の `自動` モードを廃止し、Settings は `メイン / サブ / すべて` の3択にした。`すべて` 選択時に全ディスプレイの起点ウィンドウを即時前面化し、ノッチなし画面のミニバー反応領域を 520 x 64pt へ拡大して、上端や横方向からの hover 取りこぼしを減らした。build `63` を notarized/stapled ZIP として GitHub Release `v0.1.0-63` に公開し、latest appcast は build `63` を指す。
 - 2026-06-21: サブディスプレイ向けに、ノッチなし画面だけ控えめなミニバー起点を使う `すべて` 表示を追加。サブディスプレイから開いた際に Mirror provider を表示するかどうかを Settings で切り替え可能にし、既定はオフ。更新がある場合はホバーウィンドウ上部に青い更新アイコンを表示し、クリックで Sparkle 更新 UI を開く。build `61` を notarized/stapled ZIP として GitHub Release `v0.1.0-61` に公開し、latest appcast は build `61` を指す。

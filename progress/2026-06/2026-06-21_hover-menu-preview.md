@@ -37,6 +37,7 @@ status: active
 - `zipinfo -1 dist/releases/HoverPocket-0.1.0-59.zip`: top-level が `HoverPocket.app` のみであることを確認。
 - `shasum -a 256 dist/releases/HoverPocket-0.1.0-59.zip`: SHA256 が `.sha256` と一致。
 - `codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`、`stapler validate dist/HoverPocket.app`、`spctl --assess --type execute --verbose=4 dist/HoverPocket.app`: 成功、`source=Notarized Developer ID`。
+
 - `codesign -d --entitlements :- dist/HoverPocket.app`: camera / audio-input entitlements 入りを確認。
 
 ## 残り
@@ -134,4 +135,46 @@ status: active
 - 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`: `sparkle:version` が `65`、enclosure が `v0.1.0-65/HoverPocket-0.1.0-65.zip` であることを確認。
 - `zipinfo -1 dist/releases/HoverPocket-0.1.0-65.zip`: top-level が `HoverPocket.app` のみであることを確認。
 - `shasum -a 256 dist/releases/HoverPocket-0.1.0-65.zip`: SHA256 が `.sha256` と一致。
+- `codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`、`stapler validate dist/HoverPocket.app`、`spctl --assess --type execute --verbose=4 dist/HoverPocket.app`: 成功、`source=Notarized Developer ID`。
+
+## 追加実施内容: Controls provider
+
+- A案の縦積みコンパクトレイアウトで `Controls` provider を追加した。
+- Header は既存 `ProviderHeaderView` に任せ、provider 内には手動メニューを置かない構成にした。
+- Displays セクションは複数 display 行、brightness slider、%表示、右端の sun / moon toggle を実装した。
+- 対応ディスプレイでは明るさを調整でき、非対応ディスプレイでは `非対応` 表示にして操作を無効化する。
+- Volume セクションは左に speaker icon、中央に volume slider、右端に mute toggle を置いた。音量取得/設定/ミュートは CoreAudio で実装した。
+- Now Playing セクションは video thumbnail を scrubber の上に置き、scrubber、現在/合計時間、10秒戻し、play/pause、10秒送りを縦にまとめた。アートワークが取れる場合はサムネイルへ表示する。
+- 明るさは optional な DisplayServices bridge、Now Playing は optional な MediaRemote bridge として `dlopen` / `dlsym` で扱い、直接リンクしない構成にした。
+- `ControlsStore.shared` へ View を接続し、日本語/英語の表示文言は `AppLocalization` に追加した。
+- `ProviderRegistry.builtIn` に `ControlsProvider()` を追加した。
+
+## 追加検証: Controls provider
+
+- `swift build`: 成功。
+- `git diff --check`: 成功。
+- `./script/build_and_run.sh --verify`: 成功。Apple Development 署名で `dist/HoverPocket.app` を起動確認。
+- CoreAudio 診断: default output device の volume / mute 取得成功。
+- DisplayServices 診断: `Built-in Retina Display` は明るさ取得成功、`LG ULTRAGEAR` は OS 側が非対応応答のため UI disabled fallback 対象。
+- MediaRemote 診断: `MRMediaRemoteGetNowPlayingInfo` / `MRMediaRemoteSendCommand` / `MRMediaRemoteSetElapsedTime` の symbol 存在確認。
+- `otool -L dist/HoverPocket.app/Contents/MacOS/HoverPocket | rg 'PrivateFrameworks|MediaRemote|DisplayServices' || true`: 直接リンクなし。
+- `codesign -d --entitlements :- dist/HoverPocket.app`: camera / audio-input entitlements 入りを確認。
+
+## 追加成果物: build 67
+
+- Release: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-67`
+- Latest install ZIP: `https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip`
+- Latest appcast: `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`
+- ZIP: `dist/releases/HoverPocket-0.1.0-67.zip`
+- ZIP SHA256: `c1abd6c75ee8cdcc0f097320c1653fc2cc75f6fdaea03b0154338580c95f2f6f`
+- Notary submission ID: `49999d36-1d00-498c-845c-9ab7fd178481`
+- Notary status: `Accepted`
+
+## 追加検証: build 67
+
+- `APP_VERSION=0.1.0 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh`: build `67` の notarization / staple / GitHub Release 公開まで成功。
+- `gh release view v0.1.0-67 --json assets,body,url,name,tagName`: `HoverPocket-macOS-app.zip`、`HoverPocket-0.1.0-67.zip`、SHA256、`appcast.xml` の4 asset を確認。
+- 公開URL `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`: `sparkle:version` が `67`、enclosure が `v0.1.0-67/HoverPocket-0.1.0-67.zip` であることを確認。
+- `zipinfo -1 dist/releases/HoverPocket-0.1.0-67.zip`: top-level が `HoverPocket.app` のみであることを確認。
+- `shasum -a 256 dist/releases/HoverPocket-0.1.0-67.zip`: SHA256 が `.sha256` と一致。
 - `codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`、`stapler validate dist/HoverPocket.app`、`spctl --assess --type execute --verbose=4 dist/HoverPocket.app`: 成功、`source=Notarized Developer ID`。

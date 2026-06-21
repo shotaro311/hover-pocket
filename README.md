@@ -1,6 +1,6 @@
 # ホバーポケット (HoverPocket)
 
-ホバーポケットは、画面上部のノッチ付近へマウスを重ねるだけで、ミラー、Google Calendar、クリップボード履歴、付箋メモを素早く開ける macOS アプリです。
+ホバーポケットは、画面上部のノッチ付近へマウスを重ねるだけで、ミラー、ディスプレイ/音量/メディア操作、Google Calendar、クリップボード履歴、付箋メモを素早く開ける macOS アプリです。
 
 画面上部に小さな黒いハンドルを置き、そこへホバーすると暗いユーティリティパネルが表示されます。通常のメニューバーアプリよりも、必要なものをポケットからパッと取り出す体験を重視しています。
 
@@ -10,9 +10,9 @@
 - 実行ファイル / SwiftPM product / release asset 名: `HoverPocket`
 - Bundle ID: `local.codex.hover-pocket`
 - GitHub repository: `shotaro311/hover-pocket`
-- 最新の公開版は GitHub Release `v0.1.0-65` です。
+- 最新の公開版は GitHub Release `v0.1.0-67` です。
 - 公開 ZIP は Developer ID 署名、Apple notarization、staple 済みです。
-- Sparkle の appcast は GitHub Releases で公開済みで、latest appcast は build `65` を指しています。
+- Sparkle の appcast は GitHub Releases で公開済みで、latest appcast は build `67` を指しています。
 
 ## ダウンロードとインストール
 
@@ -28,7 +28,7 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 
 ## 現在できること
 
-現在は組み込みの `Mirror`、`Calendar`、`Clipboard`、`Sticky Notes` プロバイダーを搭載しています。パネル下部には AI command lane があり、Calendar 操作の一部を自然文から実行できます。
+現在は組み込みの `Mirror`、`Controls`、`Calendar`、`Clipboard`、`Sticky Notes` プロバイダーを搭載しています。パネル下部には AI command lane があり、Calendar 操作の一部を自然文から実行できます。
 
 ### ミラー
 
@@ -74,6 +74,16 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 - 右クリックメニューから、編集、色変更、アーカイブ、削除ができます。
 - アーカイブ / 削除後の Undo toast は Settings から表示/非表示を切り替えられます。
 - データは `Application Support/HoverPocket/StickyNotes/notes.json` に JSON として保存します。
+
+### Controls
+
+- ディスプレイごとの明るさをバーで表示し、対応しているディスプレイではドラッグで調整できます。
+- 明るさバー右側の月 / 太陽アイコンで、最小輝度と最大輝度をトグルできます。
+- 外部ディスプレイなど OS 側の明るさ API が使えない画面は `非対応` と表示し、操作を無効化します。
+- 音量は CoreAudio 経由で取得、調整できます。
+- 音量バー右側のアイコンでミュートを切り替えられます。
+- 再生中メディアがある場合は、アートワークをサムネイルとして表示し、再生位置バー、10秒戻し、再生/一時停止、10秒送りを操作できます。
+- Now Playing 情報や一部の再生制御は macOS の MediaRemote bridge が使える場合だけ有効です。取得できない場合は空状態として表示します。
 
 ### AI command lane
 
@@ -215,7 +225,7 @@ https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml
 
 Sparkle の公開鍵は `SUPublicEDKey` として `Info.plist` に入ります。秘密鍵は macOS Keychain の `hover-pocket` アカウントに保存され、Git には含めません。
 
-2026-06-21 時点では、GitHub Release `v0.1.0-65` に `HoverPocket-0.1.0-65.zip`、`.sha256`、`HoverPocket-macOS-app.zip`、`appcast.xml` が公開済みです。remote appcast の `sparkle:version=65`、ZIP の SHA256、Sparkle EdDSA signature、展開後 app の `codesign` / `stapler validate` / `spctl` を確認済みです。
+2026-06-21 時点では、GitHub Release `v0.1.0-67` に `HoverPocket-0.1.0-67.zip`、`.sha256`、`HoverPocket-macOS-app.zip`、`appcast.xml` が公開済みです。remote appcast の `sparkle:version=67`、ZIP の SHA256、Sparkle EdDSA signature、展開後 app の `codesign` / `stapler validate` / `spctl` を確認済みです。
 
 ## 表示先ディスプレイ
 
@@ -241,7 +251,7 @@ Sources/HoverPocket/
   Models/      provider ID、action、permission、calendar、clipboard、sticky note model
   Providers/   PocketProvider protocol と ProviderRegistry
   Views/       pill、panel shell、provider UI、settings、AI command lane
-  Services/    OAuth、Calendar API、AI model provider、approval、audit、updater
+  Services/    OAuth、Calendar API、system controls、AI model provider、approval、audit、updater
   Support/     再利用 shape と小さな helper
 ```
 
