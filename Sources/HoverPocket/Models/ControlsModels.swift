@@ -26,6 +26,8 @@ struct ControlsNowPlayingState: Equatable, Sendable {
     var sourceName: String
     var hasMedia: Bool
     var artworkData: Data?
+    var mediaURLString: String?
+    var previewWindowID: UInt32?
     var progress: TimeInterval
     var duration: TimeInterval
     var isPlaying: Bool
@@ -36,6 +38,8 @@ struct ControlsNowPlayingState: Equatable, Sendable {
         sourceName: "",
         hasMedia: false,
         artworkData: nil,
+        mediaURLString: nil,
+        previewWindowID: nil,
         progress: 0,
         duration: 0,
         isPlaying: false,

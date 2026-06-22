@@ -1,4 +1,5 @@
 import AppKit
+import ScreenCaptureKit
 import SwiftUI
 
 struct ControlsView: View {
@@ -106,6 +107,15 @@ struct ControlsView: View {
                                 .foregroundStyle(.white.opacity(0.42))
                                 .lineLimit(1)
                         }
+
+                        Text(playbackRateText)
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.yellow.opacity(0.86))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                            .frame(minWidth: 38)
+                            .background(Capsule().fill(Color.white.opacity(0.055)))
+                            .overlay(Capsule().stroke(Color.yellow.opacity(0.16), lineWidth: 1))
 
                         Spacer(minLength: 0)
                     }
@@ -534,10 +544,16 @@ private struct ControlsMediaButton: View {
 private struct ControlsVideoThumbnail: View {
     let track: ControlsNowPlayingState
     let fallbackSourceName: String
+    @StateObject private var previewStore = ControlsWindowPreviewStore()
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            if let image = artworkImage {
+            if let image = previewStore.image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let image = artworkImage {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFill()
@@ -564,6 +580,15 @@ private struct ControlsVideoThumbnail: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.white.opacity(0.09), lineWidth: 1)
         )
+        .onAppear {
+            previewStore.update(windowID: track.previewWindowID)
+        }
+        .onDisappear {
+            previewStore.stop()
+        }
+        .onChange(of: track.previewWindowID) { _, windowID in
+            previewStore.update(windowID: windowID)
+        }
     }
 
     private var artworkImage: NSImage? {
@@ -589,6 +614,92 @@ private struct ControlsVideoThumbnail: View {
             Image(systemName: "play.rectangle.fill")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.76))
+        }
+    }
+}
+
+@MainActor
+private final class ControlsWindowPreviewStore: ObservableObject {
+    @Published var image: NSImage?
+
+    private var didRequestScreenCaptureAccess = false
+    private var timer: Timer?
+    private var captureTask: Task<Void, Never>?
+    private var windowID: UInt32?
+
+    func update(windowID: UInt32?) {
+        guard self.windowID != windowID else { return }
+        stop()
+        self.windowID = windowID
+        guard let windowID else { return }
+        guard canCaptureScreen() else { return }
+        capture(windowID: windowID)
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.capture(windowID: windowID)
+            }
+        }
+        self.timer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        captureTask?.cancel()
+        captureTask = nil
+        windowID = nil
+        image = nil
+    }
+
+    private func capture(windowID: UInt32) {
+        guard self.windowID == windowID else { return }
+        captureTask?.cancel()
+        if #available(macOS 14.0, *) {
+            captureTask = Task { [weak self] in
+                let cgImage = await Self.screenCaptureKitImage(windowID: windowID)
+                await MainActor.run {
+                    guard let self, self.windowID == windowID else { return }
+                    guard let cgImage else {
+                        self.image = nil
+                        return
+                    }
+                    self.image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+                }
+            }
+        } else {
+            image = nil
+        }
+    }
+
+    private func canCaptureScreen() -> Bool {
+        guard !CGPreflightScreenCaptureAccess() else { return true }
+        if !didRequestScreenCaptureAccess {
+            didRequestScreenCaptureAccess = true
+            _ = CGRequestScreenCaptureAccess()
+        }
+        return CGPreflightScreenCaptureAccess()
+    }
+
+    @available(macOS 14.0, *)
+    private nonisolated static func screenCaptureKitImage(windowID: UInt32) async -> CGImage? {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            guard let window = content.windows.first(where: { $0.windowID == CGWindowID(windowID) }) else {
+                return nil
+            }
+            let configuration = SCStreamConfiguration()
+            configuration.width = max(2, Int(window.frame.width.rounded()))
+            configuration.height = max(2, Int(window.frame.height.rounded()))
+            configuration.showsCursor = false
+            let filter = SCContentFilter(desktopIndependentWindow: window)
+            return await withCheckedContinuation { continuation in
+                SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, _ in
+                    continuation.resume(returning: image)
+                }
+            }
+        } catch {
+            return nil
         }
     }
 }

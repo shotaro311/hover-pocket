@@ -158,6 +158,7 @@ status: active
 
 ## 最近の更新
 
+- 2026-06-22: Controls のメディア表示に live video preview を追加。MediaRemote / JXA の再生情報にブラウザタブ URL と表示中 window id を合成し、ScreenCaptureKit で小さい映像枠を継続更新する。YouTube 判定は実動画URLだけに絞り、ブラウザタブ列挙 / JS 操作は timeout 付きにした。倍速操作は browser media tab へ試し、失敗時は YouTube keyboard fallback へ落とす。UI には現在速度 `1.0x` ピルを追加。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify`、`--verify-media`、`--set-playback-rate 1.1 -> 1.0` が成功。build local verified、未リリース。
 - 2026-06-22: Controls のメディア認識が YouTube で空になる問題を再修正。配布署名済み app から直接 `MRNowPlayingRequest` を読むと `Operation not permitted` になるため、JXA 経由の MediaRemote 取得を先に使い、既存 `MRMediaRemoteGetNowPlayingInfo` と browser tab fallback を後続にした。`--verify-media` 診断を追加し、生成済み `dist/HoverPocket.app` で YouTube の title / source / duration / progress が取れること、検証時間帯に `Operation not permitted` が出ないことを確認。build `74` local verified、未リリース。
 - 2026-06-22: YouTube が Controls で認識されない報告に対応。MediaRemote が空の場合だけ Chrome / Safari / Edge / Arc の active tab title / URL を Apple Events で読む fallback を追加し、YouTube などをメディアとして表示するようにした。倍速ボタンは独立カプセルをやめ、10秒戻し / 再生停止 / 10秒送りの横に同じ丸アイコンボタンで配置。build `71` を notarized/stapled ZIP として GitHub Release `v0.1.0-71` に公開し、latest appcast は build `71` を指す。
 - 2026-06-22: Controls provider のレイアウトを修正し、ディスプレイ / サウンド / メディアのバー幅と右端アクション位置を揃えた。ディスプレイ名はアイコン hover tooltip へ移動し、見出しアイコンを削除。外部ディスプレイは Apple Silicon の DDC/CI VCP `0x10` で明るさ取得/設定を試し、内蔵ディスプレイ最小輝度は 5% にした。MediaRemote の認識条件を広げ、再生速度 `-0.1 / +0.1` と冒頭へ戻る操作を追加。build `69` を notarized/stapled ZIP として GitHub Release `v0.1.0-69` に公開し、latest appcast は build `69` を指す。

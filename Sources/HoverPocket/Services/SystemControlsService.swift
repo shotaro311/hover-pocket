@@ -124,8 +124,13 @@ final class ControlsStore: ObservableObject {
     func adjustPlaybackRate(by delta: Double) {
         guard nowPlaying.hasMedia else { return }
         let target = (nowPlaying.playbackRate + delta).clamped(to: 0.5...3.0)
-        nowPlaying.playbackRate = target
-        mediaService.setPlaybackSpeed(target)
+        let appliedRate = mediaService.setPlaybackSpeed(target, delta: delta)
+        nowPlaying.playbackRate = appliedRate
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            Task { @MainActor in
+                self?.refresh()
+            }
+        }
     }
 }
 
@@ -607,6 +612,8 @@ final class MediaRemoteService: @unchecked Sendable {
     private let setPlaybackSpeedFunction: SetPlaybackSpeed?
     private let jxaFallback = JXANowPlayingService()
     private let browserFallback = BrowserNowPlayingService()
+    private let playbackRateLock = NSLock()
+    private var playbackRateOverride: (rate: Double, expiresAt: Date)?
 
     init() {
         guard let handle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY) else {
@@ -641,14 +648,20 @@ final class MediaRemoteService: @unchecked Sendable {
     func nowPlaying() async -> ControlsNowPlayingState {
         let jxaState = await jxaFallback.nowPlaying()
         if jxaState.hasMedia {
-            return jxaState
+            let context = await browserFallback.context(preferredTitle: jxaState.title)
+            return state(jxaState, enrichedWith: context)
         }
 
         let remoteState = await mediaRemoteNowPlaying()
         if remoteState.hasMedia {
-            return remoteState
+            let context = await browserFallback.context(preferredTitle: remoteState.title)
+            return state(remoteState, enrichedWith: context)
         }
-        return await browserFallback.nowPlaying() ?? remoteState
+        let context = await browserFallback.context()
+        if let context {
+            return state(BrowserNowPlayingService.state(from: context), enrichedWith: context)
+        }
+        return state(remoteState, enrichedWith: nil)
     }
 
     private func mediaRemoteNowPlaying() async -> ControlsNowPlayingState {
@@ -672,12 +685,57 @@ final class MediaRemoteService: @unchecked Sendable {
         ] as CFDictionary)
     }
 
-    func setPlaybackSpeed(_ speed: Double) {
+    @discardableResult
+    func setPlaybackSpeed(_ speed: Double, delta: Double = 0) -> Double {
         let target = speed.clamped(to: 0.5...3.0)
-        setPlaybackSpeedFunction?(Float(target))
-        sendCommand?(19, [
-            "kMRMediaRemoteOptionPlaybackRate": target
-        ] as CFDictionary)
+        let browserRate = browserFallback.setPlaybackSpeed(target, delta: delta)
+        if browserRate == nil {
+            setPlaybackSpeedFunction?(Float(target))
+            sendCommand?(19, [
+                "kMRMediaRemoteOptionPlaybackRate": target
+            ] as CFDictionary)
+        }
+        let appliedRate = browserRate ?? target
+        setPlaybackRateOverride(appliedRate)
+        return appliedRate
+    }
+
+    private func state(_ state: ControlsNowPlayingState, enrichedWith context: BrowserMediaContext?) -> ControlsNowPlayingState {
+        var enriched = state
+        if let context {
+            if enriched.title.isEmpty {
+                enriched.title = context.cleanedTitle
+            }
+            if enriched.sourceName.isEmpty || enriched.sourceName == "Media" {
+                enriched.sourceName = context.sourceName
+            }
+            enriched.mediaURLString = context.urlString
+            enriched.previewWindowID = context.windowID
+            if let contextPlaybackRate = context.playbackRate, contextPlaybackRate > 0 {
+                enriched.playbackRate = contextPlaybackRate.clamped(to: 0.5...3.0)
+            }
+        }
+        if let override = playbackRateOverrideValue() {
+            enriched.playbackRate = override
+        }
+        return enriched
+    }
+
+    private func setPlaybackRateOverride(_ rate: Double) {
+        playbackRateLock.lock()
+        playbackRateOverride = (rate, Date().addingTimeInterval(12))
+        playbackRateLock.unlock()
+    }
+
+    private func playbackRateOverrideValue() -> Double? {
+        playbackRateLock.lock()
+        defer { playbackRateLock.unlock() }
+        guard let playbackRateOverride else { return nil }
+        guard playbackRateOverride.expiresAt > Date() else {
+            self.playbackRateOverride = nil
+            return nil
+        }
+        return playbackRateOverride.rate
     }
 
     private static func parseNowPlaying(_ info: NSDictionary?) -> ControlsNowPlayingState {
@@ -728,6 +786,8 @@ final class MediaRemoteService: @unchecked Sendable {
             sourceName: sourceName,
             hasMedia: hasMedia,
             artworkData: artworkData,
+            mediaURLString: nil,
+            previewWindowID: nil,
             progress: elapsed.clamped(to: 0...max(duration, elapsed, 0)),
             duration: max(duration, elapsed, 0),
             isPlaying: playbackRate > 0,
@@ -849,12 +909,24 @@ private final class JXANowPlayingService: @unchecked Sendable {
             sourceName: sourceName,
             hasMedia: hasMedia,
             artworkData: nil,
+            mediaURLString: nil,
+            previewWindowID: nil,
             progress: payload.elapsed.clamped(to: 0...duration),
             duration: duration,
             isPlaying: payload.playbackRate > 0,
             playbackRate: playbackRate.clamped(to: 0.5...3.0)
         )
     }
+}
+
+private struct BrowserMediaContext: Sendable {
+    let processIdentifier: pid_t
+    let title: String
+    let cleanedTitle: String
+    let sourceName: String
+    let urlString: String
+    let windowID: UInt32?
+    let playbackRate: Double?
 }
 
 private final class BrowserNowPlayingService: @unchecked Sendable {
@@ -877,40 +949,105 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         BrowserTarget(bundleIdentifier: "company.thebrowser.dia", appleScriptName: "Dia", scriptKind: .chromium)
     ]
 
-    func nowPlaying() async -> ControlsNowPlayingState? {
+    func context(preferredTitle: String = "") async -> BrowserMediaContext? {
         await Task.detached(priority: .utility) { [targets] in
-            for target in targets where Self.isRunning(bundleIdentifier: target.bundleIdentifier) {
-                guard let tab = Self.activeMediaTab(in: target) else { continue }
-                return ControlsNowPlayingState(
-                    title: Self.cleanedTitle(tab.title, sourceName: tab.sourceName),
+            for target in targets {
+                guard let application = Self.runningApplication(bundleIdentifier: target.bundleIdentifier),
+                      let tab = Self.bestVisibleMediaTab(
+                        in: target,
+                        processIdentifier: application.processIdentifier,
+                        preferredTitle: preferredTitle
+                      )
+                else { continue }
+                let cleanedTitle = Self.cleanedTitle(tab.title, sourceName: tab.sourceName)
+                return BrowserMediaContext(
+                    processIdentifier: application.processIdentifier,
+                    title: tab.title,
+                    cleanedTitle: cleanedTitle,
                     sourceName: tab.sourceName,
-                    hasMedia: true,
-                    artworkData: nil,
-                    progress: 0,
-                    duration: 0,
-                    isPlaying: false,
-                    playbackRate: 1
+                    urlString: tab.url.absoluteString,
+                    windowID: tab.windowID,
+                    playbackRate: nil
                 )
             }
             return nil
         }.value
     }
 
-    private static func isRunning(bundleIdentifier: String) -> Bool {
-        NSWorkspace.shared.runningApplications.contains { application in
+    static func state(from context: BrowserMediaContext) -> ControlsNowPlayingState {
+        ControlsNowPlayingState(
+            title: context.cleanedTitle,
+            sourceName: context.sourceName,
+            hasMedia: true,
+            artworkData: nil,
+            mediaURLString: context.urlString,
+            previewWindowID: context.windowID,
+            progress: 0,
+            duration: 0,
+            isPlaying: false,
+            playbackRate: (context.playbackRate ?? 1).clamped(to: 0.5...3.0)
+        )
+    }
+
+    @discardableResult
+    func setPlaybackSpeed(_ speed: Double, delta: Double) -> Double? {
+        let targetSpeed = speed.clamped(to: 0.5...3.0)
+        for target in targets {
+            guard let application = Self.runningApplication(bundleIdentifier: target.bundleIdentifier),
+                  Self.activeMediaTab(in: target) != nil
+            else { continue }
+            if let appliedRate = Self.setHTMLPlaybackSpeed(targetSpeed, in: target) {
+                return appliedRate
+            }
+            if delta != 0, Self.postPlaybackRateShortcut(delta: delta, processIdentifier: application.processIdentifier) {
+                return targetSpeed
+            }
+        }
+        return nil
+    }
+
+    private static func runningApplication(bundleIdentifier: String) -> NSRunningApplication? {
+        NSWorkspace.shared.runningApplications.first { application in
             application.bundleIdentifier == bundleIdentifier && !application.isTerminated
         }
     }
 
-    private static func activeMediaTab(in target: BrowserTarget) -> (title: String, sourceName: String)? {
-        guard let result = runAppleScript(source: scriptSource(for: target)),
-              let tab = parseTabResults(result).first(where: { sourceName(for: $0.url) != nil })
-        else {
-            return nil
+    private static func bestVisibleMediaTab(in target: BrowserTarget, processIdentifier: pid_t, preferredTitle: String = "") -> (title: String, url: URL, sourceName: String, windowID: UInt32?)? {
+        let tabs = mediaTabs(in: target).map { tab in
+            let cleanedTitle = cleanedTitle(tab.title, sourceName: tab.sourceName)
+            return (
+                title: tab.title,
+                url: tab.url,
+                sourceName: tab.sourceName,
+                windowID: windowID(for: processIdentifier, title: tab.title, cleanedTitle: cleanedTitle)
+            )
         }
-        let mediaSource = sourceName(for: tab.url)
-        guard let mediaSource else { return nil }
-        return (tab.title, mediaSource)
+        let normalizedPreferredTitle = cleanedComparableTitle(preferredTitle)
+        if !normalizedPreferredTitle.isEmpty,
+           let matchingTab = tabs.first(where: { tab in
+            let normalizedTabTitle = cleanedComparableTitle(tab.title)
+            return normalizedTabTitle.localizedCaseInsensitiveContains(normalizedPreferredTitle)
+                || normalizedPreferredTitle.localizedCaseInsensitiveContains(normalizedTabTitle)
+           }) {
+            return matchingTab
+        }
+        return tabs.first(where: { $0.windowID != nil }) ?? tabs.first
+    }
+
+    private static func activeMediaTab(in target: BrowserTarget) -> (title: String, url: URL, sourceName: String)? {
+        mediaTabs(in: target).first
+    }
+
+    private static func mediaTabs(in target: BrowserTarget) -> [(title: String, url: URL, sourceName: String)] {
+        guard let result = runAppleScript(source: scriptSource(for: target)),
+              !result.isEmpty
+        else {
+            return []
+        }
+        return parseTabResults(result).compactMap { tab in
+            guard let mediaSource = sourceName(for: tab.url) else { return nil }
+            return (tab.title, tab.url, mediaSource)
+        }
     }
 
     private static func scriptSource(for target: BrowserTarget) -> String {
@@ -955,11 +1092,7 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
     }
 
     private static func runAppleScript(source: String) -> String? {
-        var error: NSDictionary?
-        let result = NSAppleScript(source: source)?.executeAndReturnError(&error)
-        guard error == nil else { return nil }
-        let value = result?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value?.isEmpty == false ? value : nil
+        runAppleScriptWithTimeout(source: source, timeout: .milliseconds(1200))
     }
 
     private static func parseTabResults(_ result: String) -> [(title: String, url: URL)] {
@@ -975,9 +1108,177 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         }
     }
 
+    private static func readPlaybackRate(in target: BrowserTarget) -> Double? {
+        let javascript = """
+        (() => {
+          const videos = Array.from(document.querySelectorAll('video'));
+          const video = videos.find((item) => !item.paused || item.currentTime > 0) || videos[0];
+          return video ? String(video.playbackRate || 1) : '';
+        })()
+        """
+        guard let result = runAppleScriptWithTimeout(source: browserJavaScriptSource(for: target, javascript: javascript), timeout: .milliseconds(800)) else {
+            return nil
+        }
+        return Double(result)
+    }
+
+    private static func setHTMLPlaybackSpeed(_ speed: Double, in target: BrowserTarget) -> Double? {
+        let javascript = """
+        (() => {
+          const videos = Array.from(document.querySelectorAll('video'));
+          const video = videos.find((item) => !item.paused || item.currentTime > 0) || videos[0];
+          if (!video) return '';
+          video.playbackRate = \(String(format: "%.1f", speed));
+          return String(video.playbackRate || \(String(format: "%.1f", speed)));
+        })()
+        """
+        guard let result = runAppleScriptWithTimeout(source: browserJavaScriptSource(for: target, javascript: javascript), timeout: .milliseconds(800)) else {
+            return nil
+        }
+        return Double(result)
+    }
+
+    private static func browserJavaScriptSource(for target: BrowserTarget, javascript: String) -> String {
+        let escapedName = target.appleScriptName.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let escapedJavaScript = javascript.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: " ")
+        let predicate = mediaURLPredicateAppleScript
+        switch target.scriptKind {
+        case .chromium:
+            return """
+            tell application "\(escapedName)"
+              if (count of windows) is 0 then return ""
+              repeat with browserWindow in windows
+                repeat with browserTab in tabs of browserWindow
+                  set tabURL to URL of browserTab
+                  if \(predicate) then
+                    try
+                      return execute browserTab javascript "\(escapedJavaScript)"
+                    end try
+                  end if
+                end repeat
+              end repeat
+              return ""
+            end tell
+            """
+        case .safari:
+            return """
+            tell application "\(escapedName)"
+              if (count of windows) is 0 then return ""
+              repeat with browserWindow in windows
+                repeat with browserTab in tabs of browserWindow
+                  set tabURL to URL of browserTab
+                  if \(predicate) then
+                    try
+                      return do JavaScript "\(escapedJavaScript)" in browserTab
+                    end try
+                  end if
+                end repeat
+              end repeat
+              return ""
+            end tell
+            """
+        }
+    }
+
+    private static var mediaURLPredicateAppleScript: String {
+        """
+        tabURL contains "youtube.com" or tabURL contains "youtu.be" or tabURL contains "music.youtube.com" or tabURL contains "netflix.com" or tabURL contains "twitch.tv" or tabURL contains "vimeo.com"
+        """
+    }
+
+    private static func runAppleScriptWithTimeout(source: String, timeout: DispatchTimeInterval = .seconds(2)) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", source]
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        let semaphore = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            process.waitUntilExit()
+            semaphore.signal()
+        }
+        guard semaphore.wait(timeout: .now() + timeout) == .success else {
+            process.terminate()
+            _ = semaphore.wait(timeout: .now() + .milliseconds(500))
+            return nil
+        }
+        guard process.terminationStatus == 0 else { return nil }
+        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        let value = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : nil
+    }
+
+    private static func windowID(for processIdentifier: pid_t, title: String, cleanedTitle: String) -> UInt32? {
+        guard let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return nil
+        }
+        let candidates = windowList.compactMap { info -> (id: UInt32, area: CGFloat, score: Int)? in
+            guard let ownerPID = info[kCGWindowOwnerPID as String] as? pid_t,
+                  ownerPID == processIdentifier,
+                  let number = info[kCGWindowNumber as String] as? UInt32,
+                  let bounds = info[kCGWindowBounds as String] as? [String: CGFloat],
+                  let width = bounds["Width"],
+                  let height = bounds["Height"],
+                  width > 120,
+                  height > 90
+            else {
+                return nil
+            }
+            let name = (info[kCGWindowName as String] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let titleMatches = !name.isEmpty
+                && (name.localizedCaseInsensitiveContains(title)
+                    || title.localizedCaseInsensitiveContains(name)
+                    || name.localizedCaseInsensitiveContains(cleanedTitle)
+                    || cleanedTitle.localizedCaseInsensitiveContains(name))
+            let layer = info[kCGWindowLayer as String] as? Int ?? 0
+            guard layer == 0 else { return nil }
+            let score = titleMatches ? 2 : (name.isEmpty ? 1 : 0)
+            return (number, width * height, score)
+        }
+        return candidates.max { lhs, rhs in
+            if lhs.score != rhs.score {
+                return lhs.score < rhs.score
+            }
+            return lhs.area < rhs.area
+        }?.id
+    }
+
+    private static func postPlaybackRateShortcut(delta: Double, processIdentifier: pid_t) -> Bool {
+        let keyCode: CGKeyCode = delta > 0 ? 47 : 43
+        guard let source = CGEventSource(stateID: .hidSystemState),
+              let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
+        else {
+            return false
+        }
+        keyDown.flags = .maskShift
+        keyUp.flags = .maskShift
+        keyDown.postToPid(processIdentifier)
+        keyUp.postToPid(processIdentifier)
+        return true
+    }
+
     private static func sourceName(for url: URL) -> String? {
         let host = url.host(percentEncoded: false)?.lowercased() ?? ""
-        if host == "youtu.be" || host.hasSuffix(".youtube.com") || host == "youtube.com" {
+        let path = url.path(percentEncoded: false).lowercased()
+        let query = url.query(percentEncoded: false)?.lowercased() ?? ""
+        let isYouTubeVideo = host == "youtu.be"
+            || path.hasPrefix("/shorts/")
+            || path.hasPrefix("/embed/")
+            || path.hasPrefix("/live/")
+            || (path == "/watch" && query.contains("v="))
+        if (host == "youtu.be" || host.hasSuffix(".youtube.com") || host == "youtube.com"), isYouTubeVideo {
             return host == "music.youtube.com" ? "YouTube Music" : "YouTube"
         }
         if host.hasSuffix(".netflix.com") || host == "netflix.com" {
@@ -995,6 +1296,15 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
     private static func cleanedTitle(_ title: String, sourceName: String) -> String {
         var cleaned = title
         for suffix in [" - \(sourceName)", " | \(sourceName)"] where cleaned.hasSuffix(suffix) {
+            cleaned.removeLast(suffix.count)
+            break
+        }
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func cleanedComparableTitle(_ title: String) -> String {
+        var cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        for suffix in [" - YouTube", " | YouTube", " - YouTube Music", " | YouTube Music"] where cleaned.hasSuffix(suffix) {
             cleaned.removeLast(suffix.count)
             break
         }

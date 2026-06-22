@@ -5,9 +5,16 @@ enum MediaVerificationCommand {
         let outputURL = outputFileURL()
         let semaphore = DispatchSemaphore(value: 0)
         let resultBox = MediaVerificationResultBox()
+        let requestedRate = requestedPlaybackRate()
 
-        Task {
-            let state = await MediaRemoteService().nowPlaying()
+        Task<Void, Never> {
+            let service = MediaRemoteService()
+            if let requestedRate {
+                _ = service.setPlaybackSpeed(requestedRate, delta: requestedRate - 1)
+                try? await Task.sleep(nanoseconds: 350_000_000)
+            }
+            let state = await service.nowPlaying()
+            let requestedRateText = requestedRate.map { String($0) } ?? ""
             resultBox.outputLines = [
                 "media_has_media=\(state.hasMedia)",
                 "media_title=\(state.title)",
@@ -16,7 +23,10 @@ enum MediaVerificationCommand {
                 "media_progress=\(state.progress)",
                 "media_is_playing=\(state.isPlaying)",
                 "media_playback_rate=\(state.playbackRate)",
+                "media_requested_playback_rate=\(requestedRateText)",
                 "media_has_artwork=\(state.artworkData != nil)",
+                "media_url=\(state.mediaURLString ?? "")",
+                "media_preview_window_id=\(state.previewWindowID.map(String.init) ?? "")",
                 "media_verify=\(state.hasMedia ? "ok" : "failed")"
             ]
             resultBox.exitCode = state.hasMedia ? 0 : 1
@@ -48,6 +58,18 @@ enum MediaVerificationCommand {
             return nil
         }
         return URL(fileURLWithPath: arguments[pathIndex])
+    }
+
+    private static func requestedPlaybackRate() -> Double? {
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: "--set-playback-rate") else {
+            return nil
+        }
+        let valueIndex = arguments.index(after: index)
+        guard arguments.indices.contains(valueIndex) else {
+            return nil
+        }
+        return Double(arguments[valueIndex])
     }
 }
 

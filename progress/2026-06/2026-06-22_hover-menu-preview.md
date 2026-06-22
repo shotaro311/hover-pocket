@@ -140,3 +140,26 @@
 - `log show --start <verify_start> --predicate 'process == "HoverPocket" AND eventMessage CONTAINS[c] "Operation not permitted"'`: 検証時間帯の拒否ログなし。
 - Generated Info.plist: `CFBundleVersion=74`、`NSAppleEventsUsageDescription` あり。
 - Entitlements readback: `com.apple.security.automation.apple-events`、`com.apple.security.device.camera`、`com.apple.security.device.audio-input` が入っていることを確認。
+
+## 追加実施内容: ライブ動画プレビュー / 倍速表示
+
+- Controls のメディア枠を、静止サムネイルではなく現在のブラウザウィンドウを ScreenCaptureKit で継続キャプチャする live preview 優先に変更した。
+- `ControlsNowPlayingState` に `mediaURLString` と `previewWindowID` を追加し、MediaRemote / JXA の再生情報とブラウザタブ URL / 表示中 window id を合成するようにした。
+- YouTube 判定はチャンネルページなどを除外し、`watch` / `shorts` / `embed` / `live` / `youtu.be` の実動画URLへ絞った。
+- Chrome の window title が tab title と完全一致しない場合でも、同じ browser process の表示中メインウィンドウへ fallback して preview window id を取得するようにした。
+- 倍速操作は browser media tab を持つ対象だけへ絞り、JS 経路は timeout 付きにした。JS が使えない場合は YouTube の `Shift + .` / `Shift + ,` 相当の keyboard fallback を送る。
+- ブラウザタブ列挙も timeout 付き `osascript` 実行へ統一し、Chrome 側の状態で AppleScript が戻らない場合でも診断や UI 更新が固まらないようにした。
+- ブラウザ経路で倍速操作できた場合は MediaRemote の倍速 setter を重ねて呼ばず、timeout を避けるようにした。
+- Controls UI のタイトル行右側に現在の再生速度 `1.0x` 形式のピル表示を追加した。
+- `--verify-media` に `--set-playback-rate`、`media_url`、`media_preview_window_id`、`media_requested_playback_rate` の診断出力を追加した。
+
+## 追加検証: live preview / playback rate local
+
+- `swift build`: 成功。
+- `git diff --check`: 成功。
+- `./script/build_and_run.sh --verify`: 成功。Apple Development 署名で `dist/HoverPocket.app` を起動確認。
+- YouTube テストタブ検証: `media_has_media=true`、title `【アセンダンス】CAPCOMが残した「復活モンスター」のサインを全部見つけました`、URL `https://www.youtube.com/watch?v=V7N_TpHBF9Q`、`media_preview_window_id=20987`、`media_verify=ok`。
+- 倍速診断: `--set-playback-rate 1.1` で `media_playback_rate=1.1` / `media_requested_playback_rate=1.1` を確認。検証後 `--set-playback-rate 1.0` で `media_playback_rate=1.0` に戻した。
+- 最終 YouTube テストタブ検証: `Me at the zoo` で `media_url=https://www.youtube.com/watch?v=jNQXAC9IVRw`、`media_preview_window_id=20987`、`media_playback_rate=1.1 -> 1.0` を確認。テスト後、開いたタブは閉じた。
+- メディアがない状態の `--verify-media` は timeout せず `media_verify=failed` を返すことを確認。
+- CLI Swift interpreter では GUI セッション初期化前に ScreenCaptureKit の単体 screenshot が落ちるため、live frame の実描画確認は app UI 内で行う。`previewWindowID` と ScreenCaptureKit 実装の build 成功までは確認済み。
