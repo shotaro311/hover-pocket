@@ -595,7 +595,7 @@ private final class SystemVolumeService: @unchecked Sendable {
     }
 }
 
-private final class MediaRemoteService: @unchecked Sendable {
+final class MediaRemoteService: @unchecked Sendable {
     typealias GetNowPlayingInfo = @convention(c) (DispatchQueue, @escaping @convention(block) (NSDictionary?) -> Void) -> Void
     typealias SendCommand = @convention(c) (Int32, CFDictionary?) -> Void
     typealias SetElapsedTime = @convention(c) (Double) -> Void
@@ -605,6 +605,7 @@ private final class MediaRemoteService: @unchecked Sendable {
     private let sendCommand: SendCommand?
     private let setElapsedTimeFunction: SetElapsedTime?
     private let setPlaybackSpeedFunction: SetPlaybackSpeed?
+    private let jxaFallback = JXANowPlayingService()
     private let browserFallback = BrowserNowPlayingService()
 
     init() {
@@ -638,6 +639,11 @@ private final class MediaRemoteService: @unchecked Sendable {
     }
 
     func nowPlaying() async -> ControlsNowPlayingState {
+        let jxaState = await jxaFallback.nowPlaying()
+        if jxaState.hasMedia {
+            return jxaState
+        }
+
         let remoteState = await mediaRemoteNowPlaying()
         if remoteState.hasMedia {
             return remoteState
@@ -730,6 +736,127 @@ private final class MediaRemoteService: @unchecked Sendable {
     }
 }
 
+private final class JXANowPlayingService: @unchecked Sendable {
+    private static let timeout: DispatchTimeInterval = .seconds(2)
+
+    private struct Payload: Decodable {
+        let title: String
+        let artist: String
+        let album: String
+        let duration: Double
+        let elapsed: Double
+        let playbackRate: Double
+        let defaultPlaybackRate: Double
+        let sourceName: String
+    }
+
+    private static let script = """
+    ObjC.import('Foundation');
+    $.NSBundle.bundleWithPath('/System/Library/PrivateFrameworks/MediaRemote.framework/').load;
+    const request = $.NSClassFromString('MRNowPlayingRequest');
+    const item = request ? request.localNowPlayingItem : null;
+    const info = item ? item.nowPlayingInfo : null;
+    const path = request ? request.localNowPlayingPlayerPath : null;
+    function unwrap(value) {
+      if (!value) return null;
+      const unwrapped = ObjC.unwrap(value);
+      return unwrapped === undefined ? null : unwrapped;
+    }
+    function s(key) {
+      if (!info) return '';
+      const value = unwrap(info.valueForKey(key));
+      return value === null ? '' : String(value);
+    }
+    function n(key) {
+      if (!info) return 0;
+      const value = unwrap(info.valueForKey(key));
+      const number = Number(value);
+      return Number.isFinite(number) ? number : 0;
+    }
+    const client = path ? path.client : null;
+    const displayName = client ? unwrap(client.displayName) : '';
+    JSON.stringify({
+      title: s('kMRMediaRemoteNowPlayingInfoTitle'),
+      artist: s('kMRMediaRemoteNowPlayingInfoArtist'),
+      album: s('kMRMediaRemoteNowPlayingInfoAlbum'),
+      duration: n('kMRMediaRemoteNowPlayingInfoDuration'),
+      elapsed: n('kMRMediaRemoteNowPlayingInfoElapsedTime'),
+      playbackRate: n('kMRMediaRemoteNowPlayingInfoPlaybackRate'),
+      defaultPlaybackRate: n('kMRMediaRemoteNowPlayingInfoDefaultPlaybackRate'),
+      sourceName: displayName ? String(displayName) : ''
+    })
+    """
+
+    func nowPlaying() async -> ControlsNowPlayingState {
+        await Task.detached(priority: .utility) {
+            guard let payload = Self.fetchPayload() else { return .empty }
+            return Self.state(from: payload)
+        }.value
+    }
+
+    private static func fetchPayload() -> Payload? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-l", "JavaScript", "-e", script]
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        let semaphore = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            process.waitUntilExit()
+            semaphore.signal()
+        }
+        guard semaphore.wait(timeout: .now() + timeout) == .success else {
+            process.terminate()
+            _ = semaphore.wait(timeout: .now() + .milliseconds(500))
+            return nil
+        }
+        guard process.terminationStatus == 0 else { return nil }
+
+        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        guard !data.isEmpty else { return nil }
+        return try? JSONDecoder().decode(Payload.self, from: data)
+    }
+
+    private static func state(from payload: Payload) -> ControlsNowPlayingState {
+        let duration = max(payload.duration, payload.elapsed, 0)
+        let playbackRate = payload.playbackRate > 0
+            ? payload.playbackRate
+            : (payload.defaultPlaybackRate > 0 ? payload.defaultPlaybackRate : 1)
+        let hasMedia = !payload.title.isEmpty
+            || !payload.artist.isEmpty
+            || !payload.album.isEmpty
+            || duration > 0
+        let sourceName: String
+        if !payload.artist.isEmpty {
+            sourceName = payload.artist
+        } else if !payload.album.isEmpty {
+            sourceName = payload.album
+        } else if !payload.sourceName.isEmpty {
+            sourceName = payload.sourceName
+        } else {
+            sourceName = hasMedia ? "Media" : ""
+        }
+        return ControlsNowPlayingState(
+            title: payload.title,
+            sourceName: sourceName,
+            hasMedia: hasMedia,
+            artworkData: nil,
+            progress: payload.elapsed.clamped(to: 0...duration),
+            duration: duration,
+            isPlaying: payload.playbackRate > 0,
+            playbackRate: playbackRate.clamped(to: 0.5...3.0)
+        )
+    }
+}
+
 private final class BrowserNowPlayingService: @unchecked Sendable {
     private struct BrowserTarget {
         let bundleIdentifier: String
@@ -746,7 +873,8 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         BrowserTarget(bundleIdentifier: "com.google.Chrome", appleScriptName: "Google Chrome", scriptKind: .chromium),
         BrowserTarget(bundleIdentifier: "com.apple.Safari", appleScriptName: "Safari", scriptKind: .safari),
         BrowserTarget(bundleIdentifier: "com.microsoft.edgemac", appleScriptName: "Microsoft Edge", scriptKind: .chromium),
-        BrowserTarget(bundleIdentifier: "company.thebrowser.Browser", appleScriptName: "Arc", scriptKind: .chromium)
+        BrowserTarget(bundleIdentifier: "company.thebrowser.Browser", appleScriptName: "Arc", scriptKind: .chromium),
+        BrowserTarget(bundleIdentifier: "company.thebrowser.dia", appleScriptName: "Dia", scriptKind: .chromium)
     ]
 
     func nowPlaying() async -> ControlsNowPlayingState? {
@@ -776,7 +904,7 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
 
     private static func activeMediaTab(in target: BrowserTarget) -> (title: String, sourceName: String)? {
         guard let result = runAppleScript(source: scriptSource(for: target)),
-              let tab = parseTabResult(result)
+              let tab = parseTabResults(result).first(where: { sourceName(for: $0.url) != nil })
         else {
             return nil
         }
@@ -793,18 +921,34 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
             return """
             tell application "\(escapedName)"
               if (count of windows) is 0 then return ""
-              set tabTitle to title of active tab of front window
-              set tabURL to URL of active tab of front window
-              return tabTitle & linefeed & tabURL
+              set tabOutput to ""
+              repeat with browserWindow in windows
+                repeat with browserTab in tabs of browserWindow
+                  set tabTitle to title of browserTab
+                  set tabURL to URL of browserTab
+                  if tabURL is not "" then
+                    set tabOutput to tabOutput & tabTitle & linefeed & tabURL & linefeed & "---HOVERPOCKET-TAB---" & linefeed
+                  end if
+                end repeat
+              end repeat
+              return tabOutput
             end tell
             """
         case .safari:
             return """
             tell application "\(escapedName)"
               if (count of windows) is 0 then return ""
-              set tabTitle to name of current tab of front window
-              set tabURL to URL of current tab of front window
-              return tabTitle & linefeed & tabURL
+              set tabOutput to ""
+              repeat with browserWindow in windows
+                repeat with browserTab in tabs of browserWindow
+                  set tabTitle to name of browserTab
+                  set tabURL to URL of browserTab
+                  if tabURL is not "" then
+                    set tabOutput to tabOutput & tabTitle & linefeed & tabURL & linefeed & "---HOVERPOCKET-TAB---" & linefeed
+                  end if
+                end repeat
+              end repeat
+              return tabOutput
             end tell
             """
         }
@@ -818,13 +962,17 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         return value?.isEmpty == false ? value : nil
     }
 
-    private static func parseTabResult(_ result: String) -> (title: String, url: URL)? {
-        let lines = result.components(separatedBy: .newlines)
-        guard lines.count >= 2 else { return nil }
-        let title = lines[0].trimmingCharacters(in: .whitespacesAndNewlines)
-        let urlString = lines[1].trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty, let url = URL(string: urlString) else { return nil }
-        return (title, url)
+    private static func parseTabResults(_ result: String) -> [(title: String, url: URL)] {
+        result.components(separatedBy: "---HOVERPOCKET-TAB---").compactMap { entry in
+            let lines = entry.components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            guard lines.count >= 2 else { return nil }
+            let title = lines[0]
+            let urlString = lines[1]
+            guard !title.isEmpty, let url = URL(string: urlString) else { return nil }
+            return (title, url)
+        }
     }
 
     private static func sourceName(for url: URL) -> String? {

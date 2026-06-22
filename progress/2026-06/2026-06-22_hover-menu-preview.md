@@ -120,3 +120,23 @@
 - `shasum -a 256 -c dist/releases/HoverPocket-0.1.0-73.zip.sha256`: 成功。
 - `codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app`、`xcrun stapler validate dist/HoverPocket.app`、`spctl --assess --type execute --verbose=4 dist/HoverPocket.app`: 成功、`source=Notarized Developer ID`。
 - `git ls-remote --tags origin v0.1.0-73`: release tag が commit `ea144fc6ec8ef48690b2e928274703dff5ef63fd` を指すことを確認。
+
+## 追加実施内容: MediaRemote 拒否回避 / build 74 local
+
+- 配布署名済みアプリから `MRNowPlayingRequest` を直接読むと `Operation not permitted` になるケースがあり、Controls のメディア表示が空になる問題を修正した。
+- `osascript -l JavaScript` 経由で `MediaRemote.framework` の now playing 情報を取得する JXA fallback を追加し、通常取得順序を `JXA -> MRMediaRemoteGetNowPlayingInfo -> browser tab fallback` に変更した。
+- JXA fallback は 2秒 timeout を付け、失敗時は既存の MediaRemote / browser fallback に落ちるようにした。
+- ブラウザ fallback は Dia も対象に追加し、active tab だけでなく全 window / tab から YouTube / YouTube Music / Netflix / Twitch / Vimeo を探すようにした。
+- app bundle の entitlements に `com.apple.security.automation.apple-events` を追加し、ブラウザ fallback が必要な場合の Apple Events 権限に対応した。
+- `--verify-media` 診断コマンドを追加し、生成済み app bundle からメディア認識結果を機械的に確認できるようにした。
+
+## 追加検証: media recognition / build 74 local
+
+- `swift build`: 成功。
+- `git diff --check`: 成功。
+- `./script/build_and_run.sh --verify`: 成功。Apple Development 署名で `dist/HoverPocket.app` を起動確認。
+- `dist/HoverPocket.app/Contents/MacOS/HoverPocket --verify-media --verify-output /tmp/hoverpocket-media-verify.txt`: 成功。
+- YouTube 検証結果: `media_has_media=true`、title `UE6はソードアートオンラインを目指す ep661`、source `backspace.fm`、duration `9300.041`、progress `2055.976503`、`media_verify=ok`。
+- `log show --start <verify_start> --predicate 'process == "HoverPocket" AND eventMessage CONTAINS[c] "Operation not permitted"'`: 検証時間帯の拒否ログなし。
+- Generated Info.plist: `CFBundleVersion=74`、`NSAppleEventsUsageDescription` あり。
+- Entitlements readback: `com.apple.security.automation.apple-events`、`com.apple.security.device.camera`、`com.apple.security.device.audio-input` が入っていることを確認。
