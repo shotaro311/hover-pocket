@@ -40,7 +40,15 @@ Google OAuth の既定ブラウザ化に合わせて古い Chrome profile overri
 - `git diff --check`: 成功。
 - `./script/verify_google_calendar.sh`: 成功。`used_login_flow=false` で保存済み credential 経路を確認。
 
+## 配信試行
+
+- 変更一式を commit `1fee413` として `main` へ push した。
+- `APP_VERSION=0.1.0 APP_BUILD=77 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh` を実行したが、Apple notarization の資格確認で停止した。
+- `xcrun notarytool history --keychain-profile hover-pocket` が `HTTP status code: 403` と `A required agreement is missing or has expired` を返したため、Apple Developer 側で必要な契約の承認または更新が必要。
+- 既存運用どおり、未notarized ZIP は GitHub Release / Sparkle appcast へ配信していない。
+
 ## Blocker / Risk
 
 - camera verify は権限状態が `notDetermined` の環境では実機映像確認を行わない。
 - `.env.local` の値、OAuth client secret、token、Keychain 内 credential は出力しない。
+- update 配信は Apple Developer 契約承認待ち。承認後は現在の build count を確認し、`APP_VERSION=0.1.0 APP_BUILD=<current build> NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh` を再実行する。
