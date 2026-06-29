@@ -79,8 +79,12 @@ final class HoverWindowController {
         PanelGeometry.frames(
             on: screen,
             panelSize: settings.panelSize,
-            showsNotchSideHandleArea: settings.showNotchSideHandleArea
+            showsNotchSideHandleArea: showsVisibleNotchSideHandle
         )
+    }
+
+    private var showsVisibleNotchSideHandle: Bool {
+        settings.showNotchSideHandleArea && settings.pillHandleIconStyle != .none
     }
 
     private func configureAccessWindow(for screen: NSScreen) -> NSPanel {
@@ -553,6 +557,18 @@ final class HoverWindowController {
             .store(in: &settingsCancellables)
 
         settings.$showNotchSideHandleArea
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                DispatchQueue.main.async { [weak self] in
+                    self?.syncAccessWindows(orderFront: false)
+                    self?.resizePreviewForPanelSizeChange()
+                    self?.showPill()
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        settings.$pillHandleIconStyle
             .dropFirst()
             .sink { [weak self] _ in
                 guard let self else { return }

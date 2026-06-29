@@ -8,7 +8,7 @@ struct HoverPillView: View {
 
     var body: some View {
         Group {
-            if settings.showNotchSideHandleArea {
+            if showsVisibleSideHandle {
                 visiblePill
             } else {
                 Color.black.opacity(0.001)
@@ -25,6 +25,10 @@ struct HoverPillView: View {
         .onHover { inside in
             inside ? onEnter() : onExit()
         }
+    }
+
+    private var showsVisibleSideHandle: Bool {
+        settings.showNotchSideHandleArea && settings.pillHandleIconStyle != .none
     }
 
     private var visiblePill: some View {

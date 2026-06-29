@@ -10,9 +10,9 @@
 - 実行ファイル / SwiftPM product / release asset 名: `HoverPocket`
 - Bundle ID: `local.codex.hover-pocket`
 - GitHub repository: `shotaro311/hover-pocket`
-- 最新の公開版は GitHub Release `v0.1.0-67` です。
+- 最新の公開版は GitHub Releases の `Latest` です。
 - 公開 ZIP は Developer ID 署名、Apple notarization、staple 済みです。
-- Sparkle の appcast は GitHub Releases で公開済みで、latest appcast は build `67` を指しています。
+- Sparkle の appcast は GitHub Releases の latest download として公開しています。
 
 ## ダウンロードとインストール
 
@@ -126,7 +126,7 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 
 ## Google Calendar の設定
 
-Calendar プロバイダーは、Google の iOS OAuth client、custom URL scheme、PKCE、ASWebAuthenticationSession を使うネイティブ認証フローを優先します。iOS OAuth client が未設定の場合だけ、既存の Desktop OAuth + loopback redirect + PKCE にフォールバックできます。
+Calendar プロバイダーは、Google の iOS OAuth client、custom URL scheme、PKCE を使うネイティブ認証フローを優先します。iOS OAuth client が未設定の場合だけ、既存の Desktop OAuth + loopback redirect + PKCE にフォールバックできます。Google の認証画面はどちらのフローでも OS 既定ブラウザで開きます。
 
 Google token は Keychain に保存します。OAuth client secret や token 類はソース管理に含めません。配布版のユーザーは、Calendar パネルまたは Settings から Google のログイン画面を開き、Google アカウントで許可すれば使えます。
 
@@ -160,13 +160,6 @@ GOOGLE_CLIENT_SECRET="YOUR_DESKTOP_OAUTH_CLIENT_SECRET"
 ./script/check_google_calendar_setup.sh
 ./script/build_and_run.sh --verify
 ./script/verify_google_calendar.sh
-```
-
-通常は OS 既定ブラウザで Google ログインを開きます。開発検証で特定の Chrome profile を使う場合だけ、次の値を `.env.local` に追加します。配布版には入れないでください。
-
-```bash
-GOOGLE_OAUTH_ENABLE_CHROME_OVERRIDE=1
-GOOGLE_OAUTH_CHROME_PROFILE="Default"
 ```
 
 ## ZIP アプリと公開リリース
@@ -225,7 +218,7 @@ https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml
 
 Sparkle の公開鍵は `SUPublicEDKey` として `Info.plist` に入ります。秘密鍵は macOS Keychain の `hover-pocket` アカウントに保存され、Git には含めません。
 
-2026-06-21 時点では、GitHub Release `v0.1.0-67` に `HoverPocket-0.1.0-67.zip`、`.sha256`、`HoverPocket-macOS-app.zip`、`appcast.xml` が公開済みです。remote appcast の `sparkle:version=67`、ZIP の SHA256、Sparkle EdDSA signature、展開後 app の `codesign` / `stapler validate` / `spctl` を確認済みです。
+公開時は GitHub Release に `HoverPocket-<version>-<build>.zip`、`.sha256`、`HoverPocket-macOS-app.zip`、`appcast.xml` をアップロードし、remote appcast の `sparkle:version`、ZIP の SHA256、Sparkle EdDSA signature、展開後 app の `codesign` / `stapler validate` / `spctl` を確認します。
 
 ## 表示先ディスプレイ
 
@@ -280,7 +273,7 @@ left handle width = 54pt
 pill frame = x: 609pt, width: 239pt
 ```
 
-これにより、左側のハンドル右端がノッチ左端に揃い、黒いベースがノッチ裏まで続く見た目になります。Settings でノッチ横 handle area を非表示にした場合も、ノッチ本体側の黒い領域と preview center は維持します。
+これにより、左側のハンドル右端がノッチ左端に揃い、黒いベースがノッチ裏まで続く見た目になります。Settings でノッチ横 handle area を非表示にした場合、または handle icon を `なし` にした場合は、ノッチ横の黒い背景も描画しません。preview center はノッチ中心を維持します。
 
 ## License
 

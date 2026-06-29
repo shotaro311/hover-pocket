@@ -227,7 +227,17 @@ private final class DisplayServicesBridge {
     }
 }
 
-private final class DDCBrightnessBridge {
+private final class DDCBrightnessBridge: @unchecked Sendable {
+    private enum VCPFeature: UInt8 {
+        case brightness = 0x10
+        case speakerVolume = 0x62
+    }
+
+    private struct VCPValue {
+        let current: Int
+        let max: Int
+    }
+
     private struct DisplayIdentity: Equatable {
         let vendorID: UInt32
         let productID: UInt32
@@ -243,7 +253,7 @@ private final class DDCBrightnessBridge {
     private final class DDCDisplay {
         let avService: CFTypeRef
         let identity: DisplayIdentity
-        var maxBrightness: Int?
+        var maxValuesByFeature: [UInt8: Int] = [:]
 
         init(avService: CFTypeRef, identity: DisplayIdentity) {
             self.avService = avService
@@ -256,7 +266,7 @@ private final class DDCBrightnessBridge {
     typealias ReadI2C = @convention(c) (CFTypeRef, UInt32, UInt32, UnsafeMutableRawPointer, UInt32) -> kern_return_t
     typealias WriteI2C = @convention(c) (CFTypeRef, UInt32, UInt32, UnsafeMutableRawPointer, UInt32) -> kern_return_t
 
-    private let queue = DispatchQueue(label: "local.codex.hover-pocket.ddc-brightness")
+    private let queue = DispatchQueue(label: "local.codex.hover-pocket.ddc-controls")
     private let createWithService: CreateWithService?
     private let copyEDID: CopyEDID?
     private let readI2C: ReadI2C?
@@ -288,11 +298,11 @@ private final class DDCBrightnessBridge {
     func getBrightness(for displayID: CGDirectDisplayID) -> Double? {
         queue.sync {
             guard let display = ddcDisplay(for: displayID),
-                  let value = readBrightness(display)
+                  let value = readValue(.brightness, from: display)
             else {
                 return nil
             }
-            display.maxBrightness = value.max
+            display.maxValuesByFeature[VCPFeature.brightness.rawValue] = value.max
             guard value.max > 0 else { return nil }
             return Double(value.current).clamped(to: 0...Double(value.max)) / Double(value.max)
         }
@@ -302,17 +312,61 @@ private final class DDCBrightnessBridge {
         queue.sync {
             guard let display = ddcDisplay(for: displayID) else { return false }
             let maxBrightness: Int
-            if let cachedMax = display.maxBrightness, cachedMax > 0 {
+            if let cachedMax = display.maxValuesByFeature[VCPFeature.brightness.rawValue], cachedMax > 0 {
                 maxBrightness = cachedMax
-            } else if let value = readBrightness(display), value.max > 0 {
+            } else if let value = readValue(.brightness, from: display), value.max > 0 {
                 maxBrightness = value.max
-                display.maxBrightness = value.max
+                display.maxValuesByFeature[VCPFeature.brightness.rawValue] = value.max
             } else {
                 return false
             }
             let rawValue = Int((brightness.clamped(to: DisplayBrightnessService.minimumBrightness...1) * Double(maxBrightness)).rounded())
                 .clamped(to: 1...maxBrightness)
-            return writeBrightness(rawValue, to: display)
+            return writeValue(rawValue, feature: .brightness, to: display)
+        }
+    }
+
+    func getSpeakerVolume() -> Double? {
+        queue.sync {
+            for displayID in externalDisplayIDs() {
+                guard let display = ddcDisplay(for: displayID),
+                      let value = readValue(.speakerVolume, from: display),
+                      value.max > 0
+                else {
+                    continue
+                }
+                display.maxValuesByFeature[VCPFeature.speakerVolume.rawValue] = value.max
+                return Double(value.current).clamped(to: 0...Double(value.max)) / Double(value.max)
+            }
+            return nil
+        }
+    }
+
+    func setSpeakerVolume(_ volume: Double) -> Bool {
+        queue.sync {
+            var didSet = false
+            for displayID in externalDisplayIDs() {
+                guard let display = ddcDisplay(for: displayID) else { continue }
+                let maxVolume: Int
+                if let cachedMax = display.maxValuesByFeature[VCPFeature.speakerVolume.rawValue], cachedMax > 0 {
+                    maxVolume = cachedMax
+                } else if let value = readValue(.speakerVolume, from: display), value.max > 0 {
+                    maxVolume = value.max
+                    display.maxValuesByFeature[VCPFeature.speakerVolume.rawValue] = value.max
+                } else {
+                    maxVolume = 100
+                }
+                let rawValue = Int((volume.clamped(to: 0...1) * Double(maxVolume)).rounded())
+                    .clamped(to: 0...maxVolume)
+                didSet = writeValue(rawValue, feature: .speakerVolume, to: display) || didSet
+            }
+            return didSet
+        }
+    }
+
+    func hasAddressableExternalDisplay() -> Bool {
+        queue.sync {
+            externalDisplayIDs().contains { ddcDisplay(for: $0) != nil }
         }
     }
 
@@ -376,9 +430,17 @@ private final class DDCBrightnessBridge {
         return edid as Data
     }
 
-    private func readBrightness(_ display: DDCDisplay) -> (current: Int, max: Int)? {
+    private func externalDisplayIDs() -> [CGDirectDisplayID] {
+        var count: UInt32 = 0
+        guard CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var displayIDs = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetOnlineDisplayList(count, &displayIDs, &count) == .success else { return [] }
+        return displayIDs.prefix(Int(count)).filter { CGDisplayIsBuiltin($0) == 0 }
+    }
+
+    private func readValue(_ feature: VCPFeature, from display: DDCDisplay) -> VCPValue? {
         guard let readI2C, let writeI2C else { return nil }
-        var request: [UInt8] = [0x82, 0x01, 0x10]
+        var request: [UInt8] = [0x82, 0x01, feature.rawValue]
         request.append(Self.checksum([0x6E, 0x51] + request))
         let requestSize = UInt32(request.count)
         let writeStatus = request.withUnsafeMutableBytes { pointer in
@@ -398,22 +460,22 @@ private final class DDCBrightnessBridge {
               response[1] == 0x88,
               response[2] == 0x02,
               response[3] == 0x00,
-              response[4] == 0x10,
+              response[4] == feature.rawValue,
               Self.checksum([0x50] + Array(response.prefix(10))) == response[10]
         else {
             return nil
         }
-        let maxBrightness = Int(response[6]) << 8 | Int(response[7])
-        let currentBrightness = Int(response[8]) << 8 | Int(response[9])
-        guard maxBrightness > 0 else { return nil }
-        return (currentBrightness, maxBrightness)
+        let maxValue = Int(response[6]) << 8 | Int(response[7])
+        let currentValue = Int(response[8]) << 8 | Int(response[9])
+        guard maxValue > 0 else { return nil }
+        return VCPValue(current: currentValue, max: maxValue)
     }
 
-    private func writeBrightness(_ value: Int, to display: DDCDisplay) -> Bool {
+    private func writeValue(_ value: Int, feature: VCPFeature, to display: DDCDisplay) -> Bool {
         guard let writeI2C else { return false }
         let highByte = UInt8((value >> 8) & 0xFF)
         let lowByte = UInt8(value & 0xFF)
-        var request: [UInt8] = [0x84, 0x03, 0x10, highByte, lowByte]
+        var request: [UInt8] = [0x84, 0x03, feature.rawValue, highByte, lowByte]
         request.append(Self.checksum([0x6E, 0x51] + request))
         let requestSize = UInt32(request.count)
         let status = request.withUnsafeMutableBytes { pointer in
@@ -492,33 +554,114 @@ private final class DisplaySoftwareBrightnessBridge {
 }
 
 private final class SystemVolumeService: @unchecked Sendable {
+    private let ddcBridge = DDCBrightnessBridge()
+    private let monitorVolumeMemoryQueue = DispatchQueue(label: "local.codex.hover-pocket.monitor-volume-memory")
+    private var lastAudibleMonitorVolume = 0.5
+    private var lastMonitorMuted = false
+
     func currentState() async -> ControlsVolumeState {
-        await Task.detached(priority: .utility) {
-            Self.readCurrentState()
+        await Task.detached(priority: .utility) { [self] in
+            readCurrentState()
         }.value ?? .empty
     }
 
     func setVolume(_ level: Double) async {
         let normalized = Float32(level.clamped(to: 0...1))
-        await Task.detached(priority: .utility) {
-            _ = Self.setVolume(normalized)
+        await Task.detached(priority: .utility) { [self] in
+            let deviceID = Self.defaultOutputDevice()
+            let shouldWriteMonitorVolume = deviceID.map { Self.isDisplayAudioOutput(deviceID: $0) } ?? true
+            let didSetCoreAudio = Self.setVolume(normalized)
             if normalized > 0 {
                 _ = Self.setMuted(false)
+            }
+            if shouldWriteMonitorVolume || !didSetCoreAudio {
+                let didSetMonitor = ddcBridge.setSpeakerVolume(Double(normalized))
+                if didSetMonitor, normalized > 0.01 {
+                    rememberAudibleMonitorVolume(Double(normalized))
+                }
+                if didSetMonitor {
+                    rememberMonitorMuted(normalized <= 0.005)
+                }
             }
         }.value
     }
 
     func setMuted(_ isMuted: Bool) async {
-        await Task.detached(priority: .utility) {
-            _ = Self.setMuted(isMuted)
+        await Task.detached(priority: .utility) { [self] in
+            let deviceID = Self.defaultOutputDevice()
+            let shouldWriteMonitorVolume = deviceID.map { Self.isDisplayAudioOutput(deviceID: $0) } ?? true
+            let didSetCoreAudio = Self.setMuted(isMuted)
+            guard shouldWriteMonitorVolume || !didSetCoreAudio else { return }
+
+            if isMuted {
+                if let currentVolume = ddcBridge.getSpeakerVolume(), currentVolume > 0.01 {
+                    rememberAudibleMonitorVolume(currentVolume)
+                }
+                if ddcBridge.setSpeakerVolume(0) {
+                    rememberMonitorMuted(true)
+                }
+            } else if (ddcBridge.getSpeakerVolume() ?? 0) <= 0.005 {
+                if ddcBridge.setSpeakerVolume(rememberedAudibleMonitorVolume()) {
+                    rememberMonitorMuted(false)
+                }
+            } else {
+                rememberMonitorMuted(false)
+            }
         }.value
     }
 
-    private static func readCurrentState() -> ControlsVolumeState? {
-        guard let deviceID = defaultOutputDevice() else { return nil }
-        let volume = readVolume(deviceID: deviceID) ?? 0
-        let isMuted = readMuted(deviceID: deviceID) ?? false
-        return ControlsVolumeState(level: Double(volume).clamped(to: 0...1), isMuted: isMuted)
+    private func readCurrentState() -> ControlsVolumeState? {
+        let deviceID = Self.defaultOutputDevice()
+        let coreAudioVolume = deviceID.flatMap { Self.readVolume(deviceID: $0) }
+        let coreAudioMuted = deviceID.flatMap { Self.readMuted(deviceID: $0) } ?? false
+        let shouldReadMonitorVolume = deviceID.map { Self.isDisplayAudioOutput(deviceID: $0) } ?? true
+        let canSetCoreAudioVolume = deviceID.map { Self.isVolumeSettable(deviceID: $0) } ?? false
+
+        if shouldReadMonitorVolume || coreAudioVolume == nil || !canSetCoreAudioVolume {
+            if let monitorVolume = ddcBridge.getSpeakerVolume() {
+                let normalized = monitorVolume.clamped(to: 0...1)
+                if normalized > 0.01 {
+                    rememberAudibleMonitorVolume(normalized)
+                }
+                rememberMonitorMuted(normalized <= 0.005)
+                return ControlsVolumeState(level: normalized, isMuted: coreAudioMuted || normalized <= 0.005)
+            }
+            if shouldReadMonitorVolume, ddcBridge.hasAddressableExternalDisplay() {
+                let rememberedVolume = rememberedAudibleMonitorVolume()
+                return ControlsVolumeState(level: rememberedVolume, isMuted: coreAudioMuted || rememberedMonitorMuted())
+            }
+        }
+
+        if let coreAudioVolume {
+            return ControlsVolumeState(level: Double(coreAudioVolume).clamped(to: 0...1), isMuted: coreAudioMuted)
+        }
+        return nil
+    }
+
+    private func rememberAudibleMonitorVolume(_ volume: Double) {
+        let normalized = volume.clamped(to: 0...1)
+        guard normalized > 0.01 else { return }
+        monitorVolumeMemoryQueue.sync {
+            lastAudibleMonitorVolume = normalized
+        }
+    }
+
+    private func rememberedAudibleMonitorVolume() -> Double {
+        monitorVolumeMemoryQueue.sync {
+            lastAudibleMonitorVolume
+        }
+    }
+
+    private func rememberMonitorMuted(_ isMuted: Bool) {
+        monitorVolumeMemoryQueue.sync {
+            lastMonitorMuted = isMuted
+        }
+    }
+
+    private func rememberedMonitorMuted() -> Bool {
+        monitorVolumeMemoryQueue.sync {
+            lastMonitorMuted
+        }
     }
 
     private static func defaultOutputDevice() -> AudioDeviceID? {
@@ -541,6 +684,26 @@ private final class SystemVolumeService: @unchecked Sendable {
         return deviceID
     }
 
+    private static func isDisplayAudioOutput(deviceID: AudioDeviceID) -> Bool {
+        guard let transportType = transportType(deviceID: deviceID) else { return false }
+        return transportType == kAudioDeviceTransportTypeHDMI
+            || transportType == kAudioDeviceTransportTypeDisplayPort
+    }
+
+    private static func transportType(deviceID: AudioDeviceID) -> UInt32? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        guard AudioObjectHasProperty(deviceID, &address) else { return nil }
+        var transportType = UInt32(0)
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &transportType)
+        guard status == noErr else { return nil }
+        return transportType
+    }
+
     private static func readVolume(deviceID: AudioDeviceID) -> Float32? {
         var address = volumeAddress()
         guard AudioObjectHasProperty(deviceID, &address) else { return nil }
@@ -549,6 +712,14 @@ private final class SystemVolumeService: @unchecked Sendable {
         let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &volume)
         guard status == noErr else { return nil }
         return volume.clamped(to: 0...1)
+    }
+
+    private static func isVolumeSettable(deviceID: AudioDeviceID) -> Bool {
+        var address = volumeAddress()
+        guard AudioObjectHasProperty(deviceID, &address) else { return false }
+        var settable = DarwinBoolean(false)
+        guard AudioObjectIsPropertySettable(deviceID, &address, &settable) == noErr else { return false }
+        return settable.boolValue
     }
 
     private static func setVolume(_ volume: Float32) -> Bool {

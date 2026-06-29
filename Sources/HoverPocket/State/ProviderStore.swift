@@ -1,3 +1,5 @@
+import AVFoundation
+import AppKit
 import Combine
 import Foundation
 
@@ -7,6 +9,7 @@ final class ProviderStore: ObservableObject {
     @Published var selectedPluginID: PluginID?
     @Published private(set) var states: [PluginID: ProviderState]
     @Published private(set) var isPanelOnSecondaryDisplay = false
+    @Published private(set) var mirrorAvailability: MirrorAvailabilitySnapshot
 
     private let settings: AppSettings
     private var settingsCancellables = Set<AnyCancellable>()
@@ -15,20 +18,26 @@ final class ProviderStore: ObservableObject {
     init(registry: ProviderRegistry = .empty, settings: AppSettings = AppSettings()) {
         self.registry = registry
         self.settings = settings
-        self.selectedPluginID = settings.providerSelectionForPanelOpen(manifests: registry.manifests)
+        self.selectedPluginID = nil
         self.states = Dictionary(
             uniqueKeysWithValues: registry.manifests.map { ($0.id, ProviderState.idle) }
         )
+        self.mirrorAvailability = MirrorCameraAvailability.currentSnapshot()
         observeSettings()
+        observeMirrorAvailability()
+        syncSelectionWithSettings()
         syncProviderSideEffects()
     }
 
     var visibleManifests: [PluginManifest] {
         let manifests = settings.visibleManifests(registry.manifests)
-        guard isPanelOnSecondaryDisplay, !settings.showMirrorOnSecondaryDisplays else {
-            return manifests
+        return manifests.filter { manifest in
+            guard manifest.id == MirrorProvider.pluginID else { return true }
+            if isPanelOnSecondaryDisplay, !settings.showMirrorOnSecondaryDisplays {
+                return false
+            }
+            return !mirrorAvailability.shouldHideProvider
         }
-        return manifests.filter { $0.id != MirrorProvider.pluginID }
     }
 
     var selectedProvider: (any PocketProvider)? {
@@ -52,6 +61,7 @@ final class ProviderStore: ObservableObject {
         if isPanelOnSecondaryDisplay != isSecondaryDisplay {
             isPanelOnSecondaryDisplay = isSecondaryDisplay
         }
+        refreshMirrorAvailability()
 
         guard let id = providerSelectionForCurrentPanel() else {
             selectedPluginID = nil
@@ -145,6 +155,30 @@ final class ProviderStore: ObservableObject {
             .store(in: &settingsCancellables)
     }
 
+    private func observeMirrorAvailability() {
+        let publishers: [AnyPublisher<Void, Never>] = [
+            NotificationCenter.default.publisher(for: AVCaptureDevice.wasConnectedNotification)
+                .map { _ in () }
+                .eraseToAnyPublisher(),
+            NotificationCenter.default.publisher(for: AVCaptureDevice.wasDisconnectedNotification)
+                .map { _ in () }
+                .eraseToAnyPublisher(),
+            NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
+                .map { _ in () }
+                .eraseToAnyPublisher(),
+            NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
+                .map { _ in () }
+                .eraseToAnyPublisher()
+        ]
+
+        Publishers.MergeMany(publishers)
+            .debounce(for: .milliseconds(150), scheduler: DispatchQueue.main)
+            .sink { [weak self] in
+                self?.refreshMirrorAvailability()
+            }
+            .store(in: &settingsCancellables)
+    }
+
     private func scheduleSettingsDidChange() {
         DispatchQueue.main.async { [weak self] in
             self?.settingsDidChange()
@@ -155,6 +189,14 @@ final class ProviderStore: ObservableObject {
         syncSelectionWithSettings()
         syncProviderSideEffects()
         objectWillChange.send()
+    }
+
+    private func refreshMirrorAvailability() {
+        let snapshot = MirrorCameraAvailability.currentSnapshot()
+        guard mirrorAvailability != snapshot else { return }
+        mirrorAvailability = snapshot
+        syncSelectionWithSettings()
+        syncProviderSideEffects()
     }
 
     private func syncSelectionWithSettings() {

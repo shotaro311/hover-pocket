@@ -713,25 +713,44 @@ final class CameraSessionBox: @unchecked Sendable {
     private var isConfigured = false
 
     func configureIfNeeded() throws {
-        guard !isConfigured else { return }
-
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
-            ?? AVCaptureDevice.default(for: .video) else {
+        guard let device = MirrorCameraAvailability.preferredCameraDevice() else {
+            resetConfiguration()
             throw MirrorCameraError.noCamera
+        }
+
+        if isConfigured, currentVideoInputDeviceID == device.uniqueID {
+            return
         }
 
         let input = try AVCaptureDeviceInput(device: device)
 
         session.beginConfiguration()
         session.sessionPreset = .vga640x480
+        session.inputs.forEach { session.removeInput($0) }
 
         guard session.canAddInput(input) else {
             session.commitConfiguration()
+            isConfigured = false
             throw MirrorCameraError.inputUnavailable
         }
 
         session.addInput(input)
         session.commitConfiguration()
         isConfigured = true
+    }
+
+    private var currentVideoInputDeviceID: String? {
+        session.inputs
+            .compactMap { ($0 as? AVCaptureDeviceInput)?.device.uniqueID }
+            .first
+    }
+
+    private func resetConfiguration() {
+        guard isConfigured || !session.inputs.isEmpty else { return }
+
+        session.beginConfiguration()
+        session.inputs.forEach { session.removeInput($0) }
+        session.commitConfiguration()
+        isConfigured = false
     }
 }

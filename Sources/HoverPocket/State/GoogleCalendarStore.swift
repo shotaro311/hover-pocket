@@ -119,12 +119,7 @@ final class GoogleCalendarStore: ObservableObject {
             } catch {
                 await MainActor.run {
                     guard !Task.isCancelled else { return }
-                    let message = Self.safeErrorMessage(error)
-                    if case GoogleOAuthError.insufficientScopes = error {
-                        self.connectionState = .needsReconnect
-                    }
-                    self.lastErrorMessage = message
-                    self.loadState = .failed(message: message, previous: previous)
+                    self.handleLoadFailure(error, previous: previous)
                 }
             }
         }
@@ -177,13 +172,12 @@ final class GoogleCalendarStore: ObservableObject {
             loadState = .loaded(snapshot)
             return snapshot
         } catch {
-            let message = Self.safeErrorMessage(error)
-            if case GoogleOAuthError.insufficientScopes = error {
-                connectionState = .needsReconnect
+            handleLoadFailure(error, previous: previous)
+            if Self.requiresReconnect(error) {
+                throw GoogleCalendarToolError.notConnected
+            } else {
+                throw error
             }
-            lastErrorMessage = message
-            loadState = .failed(message: message, previous: previous)
-            throw error
         }
     }
 
@@ -208,10 +202,7 @@ final class GoogleCalendarStore: ObservableObject {
             return true
         } catch {
             isMutatingEvent = false
-            if case GoogleOAuthError.insufficientScopes = error {
-                connectionState = .needsReconnect
-            }
-            lastErrorMessage = Self.safeErrorMessage(error)
+            handleMutationFailure(error)
             return false
         }
     }
@@ -229,10 +220,7 @@ final class GoogleCalendarStore: ObservableObject {
             return true
         } catch {
             isMutatingEvent = false
-            if case GoogleOAuthError.insufficientScopes = error {
-                connectionState = .needsReconnect
-            }
-            lastErrorMessage = Self.safeErrorMessage(error)
+            handleMutationFailure(error)
             return false
         }
     }
@@ -288,6 +276,47 @@ final class GoogleCalendarStore: ObservableObject {
             return localized
         }
         return "Google Calendar could not be loaded."
+    }
+
+    private static func requiresReconnect(_ error: Error) -> Bool {
+        if let oauthError = error as? GoogleOAuthError {
+            return oauthError.requiresReconnect
+        }
+        if let apiError = error as? GoogleCalendarAPIError {
+            return apiError.requiresReconnect
+        }
+        return false
+    }
+
+    private static func reconnectErrorMessage(_ error: Error) -> String {
+        if case GoogleOAuthError.insufficientScopes = error {
+            return safeErrorMessage(error)
+        }
+        return "Reconnect Google Calendar to continue."
+    }
+
+    private func handleLoadFailure(_ error: Error, previous: GoogleCalendarSnapshot?) {
+        if Self.requiresReconnect(error) {
+            oauth.removeStoredCredential()
+            connectionState = oauth.isConfigured ? .needsReconnect : .missingConfiguration
+            let message = Self.reconnectErrorMessage(error)
+            lastErrorMessage = message
+            loadState = .failed(message: message, previous: previous)
+            return
+        }
+        let message = Self.safeErrorMessage(error)
+        lastErrorMessage = message
+        loadState = .failed(message: message, previous: previous)
+    }
+
+    private func handleMutationFailure(_ error: Error) {
+        if Self.requiresReconnect(error) {
+            oauth.removeStoredCredential()
+            connectionState = oauth.isConfigured ? .needsReconnect : .missingConfiguration
+            lastErrorMessage = Self.reconnectErrorMessage(error)
+            return
+        }
+        lastErrorMessage = Self.safeErrorMessage(error)
     }
 
     private func updateConnectionStateFromStoredCredential() {

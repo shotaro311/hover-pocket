@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -7,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        registerURLSchemeCallbackHandler()
         statusBarMenuController = StatusBarMenuController(
             settings: hoverWindowController.appSettings,
             onOpenPanel: { [weak self] in
@@ -48,5 +50,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func applicationBecameActive() {
         MirrorCameraModel.shared.recheckPermissionAfterExternalChange()
+    }
+
+    private func registerURLSchemeCallbackHandler() {
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleGetURLEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass),
+            andEventID: AEEventID(kAEGetURL)
+        )
+    }
+
+    @objc private func handleGetURLEvent(
+        _ event: NSAppleEventDescriptor,
+        withReplyEvent replyEvent: NSAppleEventDescriptor
+    ) {
+        guard
+            let urlString = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+            let url = URL(string: urlString)
+        else {
+            return
+        }
+
+        OAuthURLCallbackCoordinator.shared.handle(url)
     }
 }

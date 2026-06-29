@@ -3,6 +3,8 @@ import Foundation
 enum GoogleCalendarAPIError: LocalizedError {
     case requestFailed(String)
     case invalidResponse
+    case authorizationExpired
+    case authorizationNeedsReconnect
 
     var errorDescription: String? {
         switch self {
@@ -10,6 +12,19 @@ enum GoogleCalendarAPIError: LocalizedError {
             return message
         case .invalidResponse:
             return "Google Calendar response could not be read."
+        case .authorizationExpired:
+            return "Google Calendar authorization expired."
+        case .authorizationNeedsReconnect:
+            return "Reconnect Google Calendar to continue."
+        }
+    }
+
+    var requiresReconnect: Bool {
+        switch self {
+        case .authorizationExpired, .authorizationNeedsReconnect:
+            return true
+        case .requestFailed, .invalidResponse:
+            return false
         }
     }
 }
@@ -24,41 +39,44 @@ final class GoogleCalendarAPIClient: @unchecked Sendable {
 
     func fetchMonth(containing monthAnchor: Date, calendar: Calendar = .current) async throws -> GoogleCalendarSnapshot {
         let visibleRange = Self.visibleGridRange(containing: monthAnchor, calendar: calendar)
-        let accessToken = try await oauth.accessToken()
-        let sources = try await fetchCalendarSources(accessToken: accessToken)
-        let selectedSources = sources.filter { !$0.id.isEmpty }
+        return try await withAuthorizedRetry { accessToken in
+            let sources = try await fetchCalendarSources(accessToken: accessToken)
+            let selectedSources = sources.filter { !$0.id.isEmpty }
 
-        var allEvents: [GoogleCalendarEventOccurrence] = []
-        for source in selectedSources {
-            let events = try await fetchEvents(
-                source: source,
-                accessToken: accessToken,
+            var allEvents: [GoogleCalendarEventOccurrence] = []
+            for source in selectedSources {
+                let events = try await fetchEvents(
+                    source: source,
+                    accessToken: accessToken,
+                    rangeStart: visibleRange.start,
+                    rangeEnd: visibleRange.end,
+                    timeZone: calendar.timeZone
+                )
+                allEvents.append(contentsOf: events)
+            }
+
+            return GoogleCalendarSnapshot(
+                sources: selectedSources,
+                events: allEvents.sorted { $0.start < $1.start },
                 rangeStart: visibleRange.start,
                 rangeEnd: visibleRange.end,
-                timeZone: calendar.timeZone
+                monthAnchor: calendar.startOfMonth(for: monthAnchor),
+                updatedAt: Date()
             )
-            allEvents.append(contentsOf: events)
         }
-
-        return GoogleCalendarSnapshot(
-            sources: selectedSources,
-            events: allEvents.sorted { $0.start < $1.start },
-            rangeStart: visibleRange.start,
-            rangeEnd: visibleRange.end,
-            monthAnchor: calendar.startOfMonth(for: monthAnchor),
-            updatedAt: Date()
-        )
     }
 
     func createEvent(_ draft: GoogleCalendarEventDraft, calendar: Calendar = .current) async throws {
-        let accessToken = try await oauth.accessToken()
         let normalized = draft.normalized(calendar: calendar)
-        var request = URLRequest(url: Self.eventsURL(calendarID: normalized.calendarID))
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(Self.writeResource(from: normalized, calendar: calendar))
-        _ = try await send(request)
+        let body = try JSONEncoder().encode(Self.writeResource(from: normalized, calendar: calendar))
+        try await withAuthorizedRetry { accessToken in
+            var request = URLRequest(url: Self.eventsURL(calendarID: normalized.calendarID))
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+            _ = try await send(request)
+        }
     }
 
     func updateEvent(_ draft: GoogleCalendarEventDraft, calendar: Calendar = .current) async throws {
@@ -66,22 +84,25 @@ final class GoogleCalendarAPIClient: @unchecked Sendable {
             throw GoogleCalendarAPIError.requestFailed("Google Calendar event ID is missing.")
         }
 
-        let accessToken = try await oauth.accessToken()
         let normalized = draft.normalized(calendar: calendar)
-        var request = URLRequest(url: Self.eventURL(calendarID: normalized.calendarID, eventID: eventID))
-        request.httpMethod = "PATCH"
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(Self.writeResource(from: normalized, calendar: calendar))
-        _ = try await send(request)
+        let body = try JSONEncoder().encode(Self.writeResource(from: normalized, calendar: calendar))
+        try await withAuthorizedRetry { accessToken in
+            var request = URLRequest(url: Self.eventURL(calendarID: normalized.calendarID, eventID: eventID))
+            request.httpMethod = "PATCH"
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+            _ = try await send(request)
+        }
     }
 
     func deleteEvent(calendarID: String, eventID: String) async throws {
-        let accessToken = try await oauth.accessToken()
-        var request = URLRequest(url: Self.eventURL(calendarID: calendarID, eventID: eventID))
-        request.httpMethod = "DELETE"
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        _ = try await send(request)
+        try await withAuthorizedRetry { accessToken in
+            var request = URLRequest(url: Self.eventURL(calendarID: calendarID, eventID: eventID))
+            request.httpMethod = "DELETE"
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            _ = try await send(request)
+        }
     }
 
     private func fetchCalendarSources(accessToken: String) async throws -> [GoogleCalendarSource] {
@@ -171,10 +192,31 @@ final class GoogleCalendarAPIClient: @unchecked Sendable {
             throw GoogleCalendarAPIError.invalidResponse
         }
         guard (200..<300).contains(http.statusCode) else {
-            let message = (try? decoder.decode(GoogleAPIErrorResponse.self, from: data))?.safeDescription
+            let apiError = try? decoder.decode(GoogleAPIErrorResponse.self, from: data)
+            if http.statusCode == 401 || apiError?.isAuthorizationExpired == true {
+                throw GoogleCalendarAPIError.authorizationExpired
+            }
+            if http.statusCode == 403, apiError?.isInsufficientPermissions == true {
+                throw GoogleCalendarAPIError.authorizationNeedsReconnect
+            }
+            let message = apiError?.safeDescription
             throw GoogleCalendarAPIError.requestFailed(message ?? "Google Calendar request failed.")
         }
         return data
+    }
+
+    private func withAuthorizedRetry<T>(_ operation: (String) async throws -> T) async throws -> T {
+        let accessToken = try await oauth.accessToken()
+        do {
+            return try await operation(accessToken)
+        } catch GoogleCalendarAPIError.authorizationExpired {
+            let refreshedAccessToken = try await oauth.accessToken(forceRefresh: true)
+            do {
+                return try await operation(refreshedAccessToken)
+            } catch GoogleCalendarAPIError.authorizationExpired {
+                throw GoogleCalendarAPIError.authorizationNeedsReconnect
+            }
+        }
     }
 
     private static func normalize(
@@ -368,13 +410,37 @@ private struct GoogleCalendarEventDateTimeWrite: Encodable {
 private struct GoogleAPIErrorResponse: Decodable {
     let error: GoogleAPIErrorBody?
 
+    var isAuthorizationExpired: Bool {
+        error?.code == 401 || error?.reasons.contains("authError") == true
+    }
+
+    var isInsufficientPermissions: Bool {
+        guard let error else { return false }
+        if error.reasons.contains("insufficientPermissions") {
+            return true
+        }
+        let message = error.message?.localizedLowercase ?? ""
+        return error.code == 403 && message.contains("insufficient")
+    }
+
     var safeDescription: String {
         error?.message ?? "Google Calendar request failed."
     }
 }
 
 private struct GoogleAPIErrorBody: Decodable {
+    let code: Int?
     let message: String?
+    let status: String?
+    let errors: [GoogleAPIErrorDetail]?
+
+    var reasons: Set<String> {
+        Set(errors?.compactMap(\.reason) ?? [])
+    }
+}
+
+private struct GoogleAPIErrorDetail: Decodable {
+    let reason: String?
 }
 
 extension Calendar {

@@ -21,8 +21,10 @@ struct GoogleCalendarPreviewView: View {
                 configurationView
             case .restoring:
                 calendarView
-            case .signedOut, .needsReconnect, .signingIn:
+            case .signedOut, .signingIn:
                 signedOutView
+            case .needsReconnect:
+                calendarView
             case .signedIn:
                 calendarView
             }
@@ -218,7 +220,7 @@ struct GoogleCalendarPreviewView: View {
                     Image(systemName: "plus")
                 }
                 .buttonStyle(IconButtonStyle(selected: false))
-                .disabled(store.writableSources().isEmpty || store.isMutatingEvent)
+                .disabled(!canModifyEvents || store.writableSources().isEmpty)
                 .help(settings.text(.addEvent))
 
                 if lockedDate != nil {
@@ -238,6 +240,10 @@ struct GoogleCalendarPreviewView: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.yellow.opacity(0.9))
                     .lineLimit(2)
+            }
+
+            if store.connectionState == .needsReconnect {
+                reconnectNotice
             }
 
             if events.isEmpty {
@@ -292,7 +298,7 @@ struct GoogleCalendarPreviewView: View {
                     Image(systemName: "pencil")
                 }
                 .buttonStyle(IconButtonStyle(selected: false))
-                .disabled(!event.calendarCanWrite || store.isMutatingEvent)
+                .disabled(!canModifyEvents || !event.calendarCanWrite)
                 .help(settings.text(.editEvent))
 
                 Button {
@@ -301,10 +307,36 @@ struct GoogleCalendarPreviewView: View {
                     Image(systemName: "trash")
                 }
                 .buttonStyle(IconButtonStyle(selected: false))
-                .disabled(!event.calendarCanWrite || store.isMutatingEvent)
+                .disabled(!canModifyEvents || !event.calendarCanWrite)
                 .help(settings.text(.delete))
             }
         }
+    }
+
+    private var reconnectNotice: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Label(settings.text(.calendarConnectionReconnectDetail), systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.yellow.opacity(0.92))
+                .lineLimit(2)
+
+            Spacer(minLength: 4)
+
+            Button(settings.text(.calendarConnectReconnect)) {
+                store.connect()
+            }
+            .font(.system(size: 10, weight: .bold))
+            .controlSize(.small)
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.yellow.opacity(0.11))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.yellow.opacity(0.18), lineWidth: 1)
+        )
     }
 
     private var signedOutView: some View {
@@ -420,6 +452,9 @@ struct GoogleCalendarPreviewView: View {
     }
 
     private var currentErrorMessage: String? {
+        guard store.connectionState != .needsReconnect else {
+            return nil
+        }
         if case .failed(let message, _) = store.loadState {
             return message
         }
@@ -452,6 +487,10 @@ struct GoogleCalendarPreviewView: View {
         }
     }
 
+    private var canModifyEvents: Bool {
+        store.connectionState == .signedIn && !store.isMutatingEvent
+    }
+
     private func refreshIfNeeded() {
         guard isActive else { return }
         store.restoreConnectionIfNeeded()
@@ -478,6 +517,10 @@ struct GoogleCalendarPreviewView: View {
     }
 
     private func beginNewEvent(on day: Date) {
+        guard store.connectionState == .signedIn else {
+            selectDay(day)
+            return
+        }
         guard let newDraft = GoogleCalendarEventDraft.new(on: day, sources: store.writableSources()) else {
             selectDay(day)
             return
@@ -489,6 +532,7 @@ struct GoogleCalendarPreviewView: View {
     }
 
     private func beginEditing(_ event: GoogleCalendarEventOccurrence) {
+        guard store.connectionState == .signedIn, event.calendarCanWrite else { return }
         selectedDate = event.start
         lockedDate = event.start
         hoveredDate = nil
