@@ -61,7 +61,6 @@ validate_notary_credentials() {
 
   if xcrun notarytool history \
     --output-format json \
-    --no-progress \
     "${auth_args[@]}" >"$validation_output" 2>&1; then
     rm -f "$validation_output"
     return
