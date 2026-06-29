@@ -18,6 +18,7 @@ final class ControlsStore: ObservableObject {
     private let mediaService = MediaRemoteService()
     private var pollTimer: Timer?
     private var refreshTask: Task<Void, Never>?
+    private var playbackRateRequestID = 0
 
     func startPolling() {
         refresh()
@@ -124,11 +125,27 @@ final class ControlsStore: ObservableObject {
     func adjustPlaybackRate(by delta: Double) {
         guard nowPlaying.hasMedia else { return }
         let target = (nowPlaying.playbackRate + delta).clamped(to: 0.5...3.0)
-        let appliedRate = mediaService.setPlaybackSpeed(target, delta: delta)
-        nowPlaying.playbackRate = appliedRate
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-            Task { @MainActor in
-                self?.refresh()
+        let mediaURLString = nowPlaying.mediaURLString
+        let preferredTitle = nowPlaying.title
+        let service = mediaService
+        playbackRateRequestID += 1
+        let requestID = playbackRateRequestID
+
+        refreshTask?.cancel()
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let appliedRate = service.setPlaybackSpeed(
+                target,
+                delta: delta,
+                mediaURLString: mediaURLString,
+                preferredTitle: preferredTitle
+            )
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            await MainActor.run {
+                guard let self, self.playbackRateRequestID == requestID else { return }
+                if let appliedRate {
+                    self.nowPlaying.playbackRate = appliedRate
+                }
+                self.refresh()
             }
         }
     }
@@ -857,18 +874,28 @@ final class MediaRemoteService: @unchecked Sendable {
     }
 
     @discardableResult
-    func setPlaybackSpeed(_ speed: Double, delta: Double = 0) -> Double {
+    func setPlaybackSpeed(
+        _ speed: Double,
+        delta: Double = 0,
+        mediaURLString: String? = nil,
+        preferredTitle: String = ""
+    ) -> Double? {
         let target = speed.clamped(to: 0.5...3.0)
-        let browserRate = browserFallback.setPlaybackSpeed(target, delta: delta)
-        if browserRate == nil {
-            setPlaybackSpeedFunction?(Float(target))
-            sendCommand?(19, [
-                "kMRMediaRemoteOptionPlaybackRate": target
-            ] as CFDictionary)
+        let browserRate = browserFallback.setPlaybackSpeed(
+            target,
+            delta: delta,
+            mediaURLString: mediaURLString,
+            preferredTitle: preferredTitle
+        )
+        if let browserRate {
+            setPlaybackRateOverride(browserRate)
+            return browserRate
         }
-        let appliedRate = browserRate ?? target
-        setPlaybackRateOverride(appliedRate)
-        return appliedRate
+        setPlaybackSpeedFunction?(Float(target))
+        sendCommand?(19, [
+            "kMRMediaRemoteOptionPlaybackRate": target
+        ] as CFDictionary)
+        return nil
     }
 
     private func state(_ state: ControlsNowPlayingState, enrichedWith context: BrowserMediaContext?) -> ControlsNowPlayingState {
@@ -894,7 +921,7 @@ final class MediaRemoteService: @unchecked Sendable {
 
     private func setPlaybackRateOverride(_ rate: Double) {
         playbackRateLock.lock()
-        playbackRateOverride = (rate, Date().addingTimeInterval(12))
+        playbackRateOverride = (rate, Date().addingTimeInterval(1.5))
         playbackRateLock.unlock()
     }
 
@@ -1105,6 +1132,19 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         let bundleIdentifier: String
         let appleScriptName: String
         let scriptKind: ScriptKind
+        let usesFocusCommand: Bool
+
+        init(
+            bundleIdentifier: String,
+            appleScriptName: String,
+            scriptKind: ScriptKind,
+            usesFocusCommand: Bool = false
+        ) {
+            self.bundleIdentifier = bundleIdentifier
+            self.appleScriptName = appleScriptName
+            self.scriptKind = scriptKind
+            self.usesFocusCommand = usesFocusCommand
+        }
     }
 
     private enum ScriptKind {
@@ -1117,7 +1157,7 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         BrowserTarget(bundleIdentifier: "com.apple.Safari", appleScriptName: "Safari", scriptKind: .safari),
         BrowserTarget(bundleIdentifier: "com.microsoft.edgemac", appleScriptName: "Microsoft Edge", scriptKind: .chromium),
         BrowserTarget(bundleIdentifier: "company.thebrowser.Browser", appleScriptName: "Arc", scriptKind: .chromium),
-        BrowserTarget(bundleIdentifier: "company.thebrowser.dia", appleScriptName: "Dia", scriptKind: .chromium)
+        BrowserTarget(bundleIdentifier: "company.thebrowser.dia", appleScriptName: "Dia", scriptKind: .chromium, usesFocusCommand: true)
     ]
 
     func context(preferredTitle: String = "") async -> BrowserMediaContext? {
@@ -1131,6 +1171,7 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
                       )
                 else { continue }
                 let cleanedTitle = Self.cleanedTitle(tab.title, sourceName: tab.sourceName)
+                let playbackRate = Self.readPlaybackRate(in: target, matchingURLString: tab.url.absoluteString)
                 return BrowserMediaContext(
                     processIdentifier: application.processIdentifier,
                     title: tab.title,
@@ -1138,7 +1179,7 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
                     sourceName: tab.sourceName,
                     urlString: tab.url.absoluteString,
                     windowID: tab.windowID,
-                    playbackRate: nil
+                    playbackRate: playbackRate
                 )
             }
             return nil
@@ -1161,17 +1202,33 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
     }
 
     @discardableResult
-    func setPlaybackSpeed(_ speed: Double, delta: Double) -> Double? {
+    func setPlaybackSpeed(
+        _ speed: Double,
+        delta: Double,
+        mediaURLString: String?,
+        preferredTitle: String
+    ) -> Double? {
         let targetSpeed = speed.clamped(to: 0.5...3.0)
         for target in targets {
             guard let application = Self.runningApplication(bundleIdentifier: target.bundleIdentifier),
-                  Self.activeMediaTab(in: target) != nil
+                  let tab = Self.selectedMediaTab(
+                    in: target,
+                    preferredURLString: mediaURLString,
+                    preferredTitle: preferredTitle
+                  )
             else { continue }
-            if let appliedRate = Self.setHTMLPlaybackSpeed(targetSpeed, in: target) {
+            let tabURLString = tab.url.absoluteString
+            if let appliedRate = Self.setHTMLPlaybackSpeed(targetSpeed, in: target, matchingURLString: tabURLString) {
                 return appliedRate
             }
-            if delta != 0, Self.postPlaybackRateShortcut(delta: delta, processIdentifier: application.processIdentifier) {
-                return targetSpeed
+            if delta != 0,
+               Self.focusTab(in: target, matchingURLString: tabURLString),
+               Self.postPlaybackRateShortcut(delta: delta, processIdentifier: application.processIdentifier) {
+                Thread.sleep(forTimeInterval: 0.25)
+                if let shortcutRate = Self.readPlaybackRate(in: target, matchingURLString: tabURLString),
+                   abs(shortcutRate - targetSpeed) < 0.05 {
+                    return shortcutRate
+                }
             }
         }
         return nil
@@ -1205,8 +1262,32 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         return tabs.first(where: { $0.windowID != nil }) ?? tabs.first
     }
 
-    private static func activeMediaTab(in target: BrowserTarget) -> (title: String, url: URL, sourceName: String)? {
-        mediaTabs(in: target).first
+    private static func selectedMediaTab(
+        in target: BrowserTarget,
+        preferredURLString: String?,
+        preferredTitle: String
+    ) -> (title: String, url: URL, sourceName: String)? {
+        let tabs = mediaTabs(in: target)
+        let normalizedPreferredURL = preferredURLString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let normalizedPreferredTitle = cleanedComparableTitle(preferredTitle)
+        let hasPreferredTarget = !normalizedPreferredURL.isEmpty || !normalizedPreferredTitle.isEmpty
+
+        if !normalizedPreferredURL.isEmpty,
+           let matchingURLTab = tabs.first(where: { $0.url.absoluteString == normalizedPreferredURL }) {
+            return matchingURLTab
+        }
+
+        if !normalizedPreferredTitle.isEmpty,
+           let matchingTitleTab = tabs.first(where: { tab in
+            let normalizedTabTitle = cleanedComparableTitle(tab.title)
+            return normalizedTabTitle.localizedCaseInsensitiveContains(normalizedPreferredTitle)
+                || normalizedPreferredTitle.localizedCaseInsensitiveContains(normalizedTabTitle)
+           }) {
+            return matchingTitleTab
+        }
+
+        guard !hasPreferredTarget else { return nil }
+        return tabs.first
     }
 
     private static func mediaTabs(in target: BrowserTarget) -> [(title: String, url: URL, sourceName: String)] {
@@ -1279,7 +1360,7 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         }
     }
 
-    private static func readPlaybackRate(in target: BrowserTarget) -> Double? {
+    private static func readPlaybackRate(in target: BrowserTarget, matchingURLString: String) -> Double? {
         let javascript = """
         (() => {
           const videos = Array.from(document.querySelectorAll('video'));
@@ -1287,13 +1368,16 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
           return video ? String(video.playbackRate || 1) : '';
         })()
         """
-        guard let result = runAppleScriptWithTimeout(source: browserJavaScriptSource(for: target, javascript: javascript), timeout: .milliseconds(800)) else {
+        guard let result = runAppleScriptWithTimeout(
+            source: browserJavaScriptSource(for: target, javascript: javascript, matchingURLString: matchingURLString),
+            timeout: .milliseconds(800)
+        ) else {
             return nil
         }
         return Double(result)
     }
 
-    private static func setHTMLPlaybackSpeed(_ speed: Double, in target: BrowserTarget) -> Double? {
+    private static func setHTMLPlaybackSpeed(_ speed: Double, in target: BrowserTarget, matchingURLString: String) -> Double? {
         let javascript = """
         (() => {
           const videos = Array.from(document.querySelectorAll('video'));
@@ -1303,19 +1387,22 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
           return String(video.playbackRate || \(String(format: "%.1f", speed)));
         })()
         """
-        guard let result = runAppleScriptWithTimeout(source: browserJavaScriptSource(for: target, javascript: javascript), timeout: .milliseconds(800)) else {
+        guard let result = runAppleScriptWithTimeout(
+            source: browserJavaScriptSource(for: target, javascript: javascript, matchingURLString: matchingURLString),
+            timeout: .milliseconds(800)
+        ) else {
             return nil
         }
         return Double(result)
     }
 
-    private static func browserJavaScriptSource(for target: BrowserTarget, javascript: String) -> String {
+    private static func browserJavaScriptSource(for target: BrowserTarget, javascript: String, matchingURLString: String? = nil) -> String {
         let escapedName = target.appleScriptName.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         let escapedJavaScript = javascript.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\n", with: " ")
-        let predicate = mediaURLPredicateAppleScript
+        let predicate = tabURLPredicateAppleScript(matchingURLString: matchingURLString)
         switch target.scriptKind {
         case .chromium:
             return """
@@ -1358,6 +1445,89 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         """
         tabURL contains "youtube.com" or tabURL contains "youtu.be" or tabURL contains "music.youtube.com" or tabURL contains "netflix.com" or tabURL contains "twitch.tv" or tabURL contains "vimeo.com"
         """
+    }
+
+    private static func tabURLPredicateAppleScript(matchingURLString: String?) -> String {
+        guard let matchingURLString,
+              !matchingURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return mediaURLPredicateAppleScript
+        }
+        return "tabURL is \"\(appleScriptEscaped(matchingURLString))\""
+    }
+
+    private static func focusTab(in target: BrowserTarget, matchingURLString: String) -> Bool {
+        guard !matchingURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return runAppleScriptWithTimeout(
+            source: focusTabSource(for: target, matchingURLString: matchingURLString),
+            timeout: .milliseconds(600)
+        ) == "ok"
+    }
+
+    private static func focusTabSource(for target: BrowserTarget, matchingURLString: String) -> String {
+        let escapedName = appleScriptEscaped(target.appleScriptName)
+        let escapedURL = appleScriptEscaped(matchingURLString)
+        switch target.scriptKind {
+        case .chromium:
+            if target.usesFocusCommand {
+                return """
+                tell application "\(escapedName)"
+                  if (count of windows) is 0 then return ""
+                  repeat with browserWindow in windows
+                    repeat with browserTab in tabs of browserWindow
+                      if URL of browserTab is "\(escapedURL)" then
+                        focus browserTab
+                        activate
+                        return "ok"
+                      end if
+                    end repeat
+                  end repeat
+                  return ""
+                end tell
+                """
+            }
+            return """
+            tell application "\(escapedName)"
+              if (count of windows) is 0 then return ""
+              repeat with windowIndex from 1 to count of windows
+                set browserWindow to window windowIndex
+                repeat with tabIndex from 1 to count of tabs of browserWindow
+                  set browserTab to tab tabIndex of browserWindow
+                  if URL of browserTab is "\(escapedURL)" then
+                    set active tab index of browserWindow to tabIndex
+                    set index of browserWindow to 1
+                    activate
+                    return "ok"
+                  end if
+                end repeat
+              end repeat
+              return ""
+            end tell
+            """
+        case .safari:
+            return """
+            tell application "\(escapedName)"
+              if (count of windows) is 0 then return ""
+              repeat with windowIndex from 1 to count of windows
+                set browserWindow to window windowIndex
+                repeat with browserTab in tabs of browserWindow
+                  if URL of browserTab is "\(escapedURL)" then
+                    set current tab of browserWindow to browserTab
+                    set index of browserWindow to 1
+                    activate
+                    return "ok"
+                  end if
+                end repeat
+              end repeat
+              return ""
+            end tell
+            """
+        }
+    }
+
+    private static func appleScriptEscaped(_ value: String) -> String {
+        value.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
     private static func runAppleScriptWithTimeout(source: String, timeout: DispatchTimeInterval = .seconds(2)) -> String? {

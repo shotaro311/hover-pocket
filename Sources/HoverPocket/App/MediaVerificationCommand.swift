@@ -9,12 +9,24 @@ enum MediaVerificationCommand {
 
         Task<Void, Never> {
             let service = MediaRemoteService()
+            let initialState = await service.nowPlaying()
             if let requestedRate {
-                _ = service.setPlaybackSpeed(requestedRate, delta: requestedRate - 1)
-                try? await Task.sleep(nanoseconds: 350_000_000)
+                _ = service.setPlaybackSpeed(
+                    requestedRate,
+                    delta: requestedRate - 1,
+                    mediaURLString: initialState.mediaURLString,
+                    preferredTitle: initialState.title
+                )
+                try? await Task.sleep(nanoseconds: 1_800_000_000)
             }
             let state = await service.nowPlaying()
             let requestedRateText = requestedRate.map { String($0) } ?? ""
+            let playbackRateVerified = playbackRateVerificationResult(
+                initialRate: initialState.playbackRate,
+                finalRate: state.playbackRate,
+                requestedRate: requestedRate
+            )
+            let didVerify = state.hasMedia && playbackRateVerified
             resultBox.outputLines = [
                 "media_has_media=\(state.hasMedia)",
                 "media_title=\(state.title)",
@@ -22,14 +34,16 @@ enum MediaVerificationCommand {
                 "media_duration=\(state.duration)",
                 "media_progress=\(state.progress)",
                 "media_is_playing=\(state.isPlaying)",
+                "media_playback_rate_before=\(initialState.playbackRate)",
                 "media_playback_rate=\(state.playbackRate)",
                 "media_requested_playback_rate=\(requestedRateText)",
+                "media_playback_rate_verified=\(playbackRateVerified)",
                 "media_has_artwork=\(state.artworkData != nil)",
                 "media_url=\(state.mediaURLString ?? "")",
                 "media_preview_window_id=\(state.previewWindowID.map(String.init) ?? "")",
-                "media_verify=\(state.hasMedia ? "ok" : "failed")"
+                "media_verify=\(didVerify ? "ok" : "failed")"
             ]
-            resultBox.exitCode = state.hasMedia ? 0 : 1
+            resultBox.exitCode = didVerify ? 0 : 1
             semaphore.signal()
         }
 
@@ -70,6 +84,26 @@ enum MediaVerificationCommand {
             return nil
         }
         return Double(arguments[valueIndex])
+    }
+
+    private static func playbackRateVerificationResult(
+        initialRate: Double,
+        finalRate: Double,
+        requestedRate: Double?
+    ) -> Bool {
+        guard let requestedRate else {
+            return true
+        }
+        if abs(finalRate - requestedRate) <= 0.06 {
+            return true
+        }
+        if requestedRate > initialRate {
+            return finalRate > initialRate + 0.05
+        }
+        if requestedRate < initialRate {
+            return finalRate < initialRate - 0.05
+        }
+        return abs(finalRate - initialRate) <= 0.05
     }
 }
 
