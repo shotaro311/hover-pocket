@@ -46,9 +46,14 @@ Google OAuth の既定ブラウザ化に合わせて古い Chrome profile overri
 - `APP_VERSION=0.1.0 APP_BUILD=77 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh` を実行したが、Apple notarization の資格確認で停止した。
 - `xcrun notarytool history --keychain-profile hover-pocket` が `HTTP status code: 403` と `A required agreement is missing or has expired` を返したため、Apple Developer 側で必要な契約の承認または更新が必要。
 - 既存運用どおり、未notarized ZIP は GitHub Release / Sparkle appcast へ配信していない。
+- Dia で Apple Developer Account の Apple Developer Program License Agreement を確認し、ユーザー承認のうえで同意した。
+- 同意後、`xcrun notarytool history --keychain-profile hover-pocket` は成功するようになった。`--no-progress` 付きの history validation だけが 403 を返したため、`script/notarize_release.sh` の事前検証から `--no-progress` を外した。
+- commit `c4571b8` を build `79` として配信し、notarytool submission `9c58d556-f64e-4e08-9cd4-3eee01740d8d` は `Accepted`。staple 後の `HoverPocket-0.1.0-79.zip` / `HoverPocket-macOS-app.zip` / `appcast.xml` を GitHub Release `v0.1.0-79` へ公開した。
+- GitHub Release から再取得した `HoverPocket-macOS-app.zip` の SHA256 は `37640b05fa518623b05482df1aec9fe549ee2df56eb62c650d84359b0ac57e89`。ZIP のトップレベルは `HoverPocket.app` で、展開後 app は `codesign --verify --deep --strict`、`xcrun stapler validate`、`spctl --assess --type execute` 成功。
+- appcast は `sparkle:version` が `79` で、enclosure は `https://github.com/shotaro311/hover-pocket/releases/download/v0.1.0-79/HoverPocket-0.1.0-79.zip` を指す。
 
 ## Blocker / Risk
 
 - camera verify は権限状態が `notDetermined` の環境では実機映像確認を行わない。
 - `.env.local` の値、OAuth client secret、token、Keychain 内 credential は出力しない。
-- update 配信は Apple Developer 契約承認待ち。承認後は現在の build count を確認し、`APP_VERSION=0.1.0 APP_BUILD=<current build> NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh` を再実行する。
+- App Store Connect の有料アプリ契約と EU DSA の trader compliance は未完了表示が残るが、今回の Developer ID notarization / Sparkle 配信は成功済み。
