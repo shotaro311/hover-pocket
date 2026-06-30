@@ -13,7 +13,7 @@ enum MediaVerificationCommand {
             if let requestedRate {
                 _ = service.setPlaybackSpeed(
                     requestedRate,
-                    delta: requestedRate - 1,
+                    delta: requestedRate - initialState.playbackRate,
                     mediaURLString: initialState.mediaURLString,
                     preferredTitle: initialState.title
                 )
@@ -94,16 +94,7 @@ enum MediaVerificationCommand {
         guard let requestedRate else {
             return true
         }
-        if abs(finalRate - requestedRate) <= 0.06 {
-            return true
-        }
-        if requestedRate > initialRate {
-            return finalRate > initialRate + 0.05
-        }
-        if requestedRate < initialRate {
-            return finalRate < initialRate - 0.05
-        }
-        return abs(finalRate - initialRate) <= 0.05
+        return abs(finalRate - requestedRate) <= 0.06
     }
 }
 

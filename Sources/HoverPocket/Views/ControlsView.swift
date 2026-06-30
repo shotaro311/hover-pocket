@@ -110,7 +110,7 @@ struct ControlsView: View {
 
                         Text(playbackRateText)
                             .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundStyle(.yellow.opacity(0.86))
+                            .foregroundStyle(.yellow.opacity(store.isPlaybackRateCommandPending ? 0.52 : 0.86))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 4)
                             .frame(minWidth: 38)
@@ -160,8 +160,8 @@ struct ControlsView: View {
                         ControlsMediaButton(symbolName: "minus") {
                             adjustPlaybackRate(by: -0.1)
                         }
-                        .disabled(!store.nowPlaying.hasMedia)
-                        .opacity(store.nowPlaying.hasMedia ? 1 : 0.38)
+                        .disabled(!store.nowPlaying.hasMedia || store.isPlaybackRateCommandPending)
+                        .opacity(store.nowPlaying.hasMedia && !store.isPlaybackRateCommandPending ? 1 : 0.38)
                         .help("\(text(.controlsDecreasePlaybackRate)) / \(playbackRateText)")
 
                         ControlsMediaButton(symbolName: "gobackward.10") {
@@ -172,12 +172,12 @@ struct ControlsView: View {
                         .help(text(.controlsBack10))
 
                         ControlsMediaButton(
-                            symbolName: store.nowPlaying.isPlaying ? "pause.fill" : "play.fill",
+                            symbolName: store.isPlaybackCommandPending ? "hourglass" : (store.nowPlaying.isPlaying ? "pause.fill" : "play.fill"),
                             isPrimary: true,
                             action: store.togglePlayback
                         )
-                        .disabled(!store.nowPlaying.hasMedia)
-                        .opacity(store.nowPlaying.hasMedia ? 1 : 0.38)
+                        .disabled(!store.nowPlaying.hasMedia || store.isPlaybackCommandPending)
+                        .opacity(store.nowPlaying.hasMedia && !store.isPlaybackCommandPending ? 1 : 0.38)
                         .help(store.nowPlaying.isPlaying ? text(.controlsPause) : text(.controlsPlay))
 
                         ControlsMediaButton(symbolName: "goforward.10") {
@@ -190,8 +190,8 @@ struct ControlsView: View {
                         ControlsMediaButton(symbolName: "plus") {
                             adjustPlaybackRate(by: 0.1)
                         }
-                        .disabled(!store.nowPlaying.hasMedia)
-                        .opacity(store.nowPlaying.hasMedia ? 1 : 0.38)
+                        .disabled(!store.nowPlaying.hasMedia || store.isPlaybackRateCommandPending)
+                        .opacity(store.nowPlaying.hasMedia && !store.isPlaybackRateCommandPending ? 1 : 0.38)
                         .help("\(text(.controlsIncreasePlaybackRate)) / \(playbackRateText)")
                     }
 
@@ -252,7 +252,13 @@ struct ControlsView: View {
     }
 
     private var playbackRateText: String {
-        String(format: "%.1fx", store.nowPlaying.playbackRate)
+        let rate = store.nowPlaying.playbackRate
+        let quarterRate = (rate * 4).rounded() / 4
+        let tenthRate = (rate * 10).rounded() / 10
+        if abs(rate - quarterRate) < 0.01, abs(rate - tenthRate) >= 0.01 {
+            return String(format: "%.2fx", rate)
+        }
+        return String(format: "%.1fx", rate)
     }
 
     private func adjustPlaybackRate(by delta: Double) {
@@ -622,7 +628,6 @@ private struct ControlsVideoThumbnail: View {
 private final class ControlsWindowPreviewStore: ObservableObject {
     @Published var image: NSImage?
 
-    private var didRequestScreenCaptureAccess = false
     private var timer: Timer?
     private var captureTask: Task<Void, Never>?
     private var windowID: UInt32?
@@ -632,9 +637,12 @@ private final class ControlsWindowPreviewStore: ObservableObject {
         stop()
         self.windowID = windowID
         guard let windowID else { return }
-        guard canCaptureScreen() else { return }
+        guard canCaptureScreen() else {
+            self.windowID = nil
+            return
+        }
         capture(windowID: windowID)
-        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.75, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.capture(windowID: windowID)
             }
@@ -673,12 +681,7 @@ private final class ControlsWindowPreviewStore: ObservableObject {
     }
 
     private func canCaptureScreen() -> Bool {
-        guard !CGPreflightScreenCaptureAccess() else { return true }
-        if !didRequestScreenCaptureAccess {
-            didRequestScreenCaptureAccess = true
-            _ = CGRequestScreenCaptureAccess()
-        }
-        return CGPreflightScreenCaptureAccess()
+        ControlsScreenCaptureAccessGate.canCapture()
     }
 
     @available(macOS 14.0, *)
@@ -692,6 +695,10 @@ private final class ControlsWindowPreviewStore: ObservableObject {
             configuration.width = max(2, Int(window.frame.width.rounded()))
             configuration.height = max(2, Int(window.frame.height.rounded()))
             configuration.showsCursor = false
+            configuration.capturesAudio = false
+            if #available(macOS 15.0, *) {
+                configuration.captureMicrophone = false
+            }
             let filter = SCContentFilter(desktopIndependentWindow: window)
             return await withCheckedContinuation { continuation in
                 SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, _ in
@@ -701,6 +708,13 @@ private final class ControlsWindowPreviewStore: ObservableObject {
         } catch {
             return nil
         }
+    }
+}
+
+@MainActor
+private enum ControlsScreenCaptureAccessGate {
+    static func canCapture() -> Bool {
+        CGPreflightScreenCaptureAccess()
     }
 }
 

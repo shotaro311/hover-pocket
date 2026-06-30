@@ -12,12 +12,18 @@ final class ControlsStore: ObservableObject {
     @Published private(set) var displays: [ControlsDisplay] = []
     @Published private(set) var volume: ControlsVolumeState = .empty
     @Published private(set) var nowPlaying: ControlsNowPlayingState = .empty
+    @Published private(set) var isPlaybackCommandPending = false
+    @Published private(set) var isPlaybackRateCommandPending = false
 
     private let brightnessService = DisplayBrightnessService()
     private let volumeService = SystemVolumeService()
     private let mediaService = MediaRemoteService()
     private var pollTimer: Timer?
     private var refreshTask: Task<Void, Never>?
+    private var nowPlayingRefreshTask: Task<Void, Never>?
+    private var playbackCommandTask: Task<Void, Never>?
+    private var playbackRateCommandTask: Task<Void, Never>?
+    private var playbackCommandRequestID = 0
     private var playbackRateRequestID = 0
 
     func startPolling() {
@@ -37,19 +43,30 @@ final class ControlsStore: ObservableObject {
         pollTimer = nil
         refreshTask?.cancel()
         refreshTask = nil
+        nowPlayingRefreshTask?.cancel()
+        nowPlayingRefreshTask = nil
+        playbackCommandTask?.cancel()
+        playbackCommandTask = nil
+        playbackRateCommandTask?.cancel()
+        playbackRateCommandTask = nil
+        isPlaybackCommandPending = false
+        isPlaybackRateCommandPending = false
     }
 
     func refresh() {
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             guard let self else { return }
+            let shouldRefreshMedia = !isPlaybackCommandPending && !isPlaybackRateCommandPending
             let displays = brightnessService.displays()
             let nextVolume = await volumeService.currentState()
-            let nextNowPlaying = await mediaService.nowPlaying()
+            let nextNowPlaying = shouldRefreshMedia ? await mediaService.nowPlaying() : nil
             guard !Task.isCancelled else { return }
             self.displays = displays
             self.volume = nextVolume
-            self.nowPlaying = nextNowPlaying
+            if let nextNowPlaying, !isPlaybackCommandPending, !isPlaybackRateCommandPending {
+                self.nowPlaying = nextNowPlaying
+            }
         }
     }
 
@@ -112,42 +129,143 @@ final class ControlsStore: ObservableObject {
     }
 
     func togglePlayback() {
-        guard nowPlaying.hasMedia else { return }
+        guard nowPlaying.hasMedia, !isPlaybackCommandPending else { return }
         nowPlaying.isPlaying.toggle()
-        mediaService.togglePlayPause()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-            Task { @MainActor in
-                self?.refresh()
+        isPlaybackCommandPending = true
+        playbackCommandRequestID += 1
+        let requestID = playbackCommandRequestID
+        let expectedIsPlaying = nowPlaying.isPlaying
+        let service = mediaService
+
+        playbackCommandTask?.cancel()
+        playbackCommandTask = Task.detached(priority: .userInitiated) { [weak self] in
+            service.togglePlayPause()
+            let readback = await Self.readNowPlayingAfterPlaybackToggle(
+                service: service,
+                expectedIsPlaying: expectedIsPlaying
+            )
+            await MainActor.run {
+                guard let self, self.playbackCommandRequestID == requestID else { return }
+                if let readback {
+                    self.nowPlaying = readback
+                } else {
+                    self.nowPlaying.isPlaying = expectedIsPlaying
+                }
+                self.isPlaybackCommandPending = false
             }
         }
     }
 
     func adjustPlaybackRate(by delta: Double) {
-        guard nowPlaying.hasMedia else { return }
+        guard nowPlaying.hasMedia, !isPlaybackRateCommandPending else { return }
+        let initialRate = nowPlaying.playbackRate
         let target = (nowPlaying.playbackRate + delta).clamped(to: 0.5...3.0)
         let mediaURLString = nowPlaying.mediaURLString
         let preferredTitle = nowPlaying.title
         let service = mediaService
         playbackRateRequestID += 1
         let requestID = playbackRateRequestID
+        isPlaybackRateCommandPending = true
 
-        refreshTask?.cancel()
-        Task.detached(priority: .userInitiated) { [weak self] in
+        nowPlayingRefreshTask?.cancel()
+        playbackRateCommandTask?.cancel()
+        playbackRateCommandTask = Task.detached(priority: .userInitiated) { [weak self] in
             let appliedRate = service.setPlaybackSpeed(
                 target,
                 delta: delta,
                 mediaURLString: mediaURLString,
                 preferredTitle: preferredTitle
             )
-            try? await Task.sleep(nanoseconds: 350_000_000)
+            let readback = appliedRate == nil
+                ? await Self.readNowPlayingAfterPlaybackRateChange(
+                    service: service,
+                    initialRate: initialRate,
+                    targetRate: target,
+                    delta: delta
+                )
+                : nil
             await MainActor.run {
                 guard let self, self.playbackRateRequestID == requestID else { return }
                 if let appliedRate {
                     self.nowPlaying.playbackRate = appliedRate
+                } else if let readback {
+                    self.nowPlaying = readback
                 }
-                self.refresh()
+                self.isPlaybackRateCommandPending = false
+                self.refreshNowPlaying()
             }
         }
+    }
+
+    private func refreshNowPlaying() {
+        nowPlayingRefreshTask?.cancel()
+        nowPlayingRefreshTask = Task { [weak self] in
+            guard let self else { return }
+            let nextNowPlaying = await mediaService.nowPlaying()
+            guard !Task.isCancelled else { return }
+            self.nowPlaying = nextNowPlaying
+        }
+    }
+
+    nonisolated private static func readNowPlayingAfterPlaybackToggle(
+        service: MediaRemoteService,
+        expectedIsPlaying: Bool
+    ) async -> ControlsNowPlayingState? {
+        var latestReadback: ControlsNowPlayingState?
+        for delay in [300_000_000, 450_000_000, 700_000_000] as [UInt64] {
+            guard !Task.isCancelled else { return nil }
+            try? await Task.sleep(nanoseconds: delay)
+            let state = await service.nowPlaying()
+            guard state.hasMedia else { continue }
+            latestReadback = state
+            if state.isPlaying == expectedIsPlaying {
+                break
+            }
+        }
+        return latestReadback
+    }
+
+    nonisolated private static func readNowPlayingAfterPlaybackRateChange(
+        service: MediaRemoteService,
+        initialRate: Double,
+        targetRate: Double,
+        delta: Double
+    ) async -> ControlsNowPlayingState? {
+        var latestReadback: ControlsNowPlayingState?
+        for delay in [450_000_000, 650_000_000, 850_000_000] as [UInt64] {
+            guard !Task.isCancelled else { return nil }
+            try? await Task.sleep(nanoseconds: delay)
+            let state = await service.nowPlaying()
+            guard state.hasMedia else { continue }
+            latestReadback = state
+            if playbackRateReadbackMatches(
+                state.playbackRate,
+                initialRate: initialRate,
+                targetRate: targetRate,
+                delta: delta
+            ) {
+                break
+            }
+        }
+        return latestReadback
+    }
+
+    nonisolated private static func playbackRateReadbackMatches(
+        _ readbackRate: Double,
+        initialRate: Double,
+        targetRate: Double,
+        delta: Double
+    ) -> Bool {
+        if abs(readbackRate - targetRate) <= 0.06 {
+            return true
+        }
+        if delta > 0 {
+            return readbackRate > initialRate + 0.05
+        }
+        if delta < 0 {
+            return readbackRate < initialRate - 0.05
+        }
+        return abs(readbackRate - initialRate) <= 0.05
     }
 }
 
@@ -921,7 +1039,7 @@ final class MediaRemoteService: @unchecked Sendable {
 
     private func setPlaybackRateOverride(_ rate: Double) {
         playbackRateLock.lock()
-        playbackRateOverride = (rate, Date().addingTimeInterval(1.5))
+        playbackRateOverride = (rate, Date().addingTimeInterval(6.0))
         playbackRateLock.unlock()
     }
 
@@ -1171,7 +1289,9 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
                       )
                 else { continue }
                 let cleanedTitle = Self.cleanedTitle(tab.title, sourceName: tab.sourceName)
-                let playbackRate = Self.readPlaybackRate(in: target, matchingURLString: tab.url.absoluteString)
+                let playbackRate = target.usesFocusCommand
+                    ? nil
+                    : Self.readPlaybackRate(in: target, matchingURLString: tab.url.absoluteString)
                 return BrowserMediaContext(
                     processIdentifier: application.processIdentifier,
                     title: tab.title,
@@ -1218,13 +1338,20 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
                   )
             else { continue }
             let tabURLString = tab.url.absoluteString
-            if let appliedRate = Self.setHTMLPlaybackSpeed(targetSpeed, in: target, matchingURLString: tabURLString) {
+            if !target.usesFocusCommand,
+               let appliedRate = Self.setHTMLPlaybackSpeed(targetSpeed, in: target, matchingURLString: tabURLString) {
                 return appliedRate
             }
             if delta != 0,
-               Self.focusTab(in: target, matchingURLString: tabURLString),
-               Self.postPlaybackRateShortcut(delta: delta, processIdentifier: application.processIdentifier) {
-                Thread.sleep(forTimeInterval: 0.25)
+               Self.focusTab(in: target, matchingURLString: tabURLString) {
+                Thread.sleep(forTimeInterval: target.usesFocusCommand ? 0.24 : 0.12)
+                guard Self.postPlaybackRateShortcut(delta: delta, processIdentifier: application.processIdentifier) else {
+                    continue
+                }
+                Thread.sleep(forTimeInterval: target.usesFocusCommand ? 0.32 : 0.25)
+                if target.usesFocusCommand {
+                    return Self.nextShortcutPlaybackRate(currentRate: targetSpeed - delta, delta: delta)
+                }
                 if let shortcutRate = Self.readPlaybackRate(in: target, matchingURLString: tabURLString),
                    abs(shortcutRate - targetSpeed) < 0.05 {
                     return shortcutRate
@@ -1593,6 +1720,18 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
             }
             return lhs.area < rhs.area
         }?.id
+    }
+
+    private static func nextShortcutPlaybackRate(currentRate: Double, delta: Double) -> Double {
+        let rates = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+        let normalized = currentRate.clamped(to: 0.5...2.0)
+        if delta > 0 {
+            return rates.first(where: { $0 > normalized + 0.01 }) ?? rates.last ?? 2.0
+        }
+        if delta < 0 {
+            return rates.reversed().first(where: { $0 < normalized - 0.01 }) ?? rates.first ?? 0.5
+        }
+        return normalized
     }
 
     private static func postPlaybackRateShortcut(delta: Double, processIdentifier: pid_t) -> Bool {

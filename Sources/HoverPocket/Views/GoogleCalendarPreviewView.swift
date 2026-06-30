@@ -12,8 +12,6 @@ struct GoogleCalendarPreviewView: View {
     @State private var draft: GoogleCalendarEventDraft?
     @State private var deleteTarget: GoogleCalendarEventOccurrence?
 
-    private let columns = Array(repeating: GridItem(.fixed(36), spacing: 5), count: 7)
-
     var body: some View {
         Group {
             switch store.connectionState {
@@ -29,8 +27,8 @@ struct GoogleCalendarPreviewView: View {
                 calendarView
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
+        .padding(.horizontal, metrics.outerHorizontalPadding)
+        .padding(.vertical, metrics.outerVerticalPadding)
         .onAppear {
             refreshIfNeeded()
         }
@@ -55,14 +53,22 @@ struct GoogleCalendarPreviewView: View {
         settings.appLanguage
     }
 
+    private var metrics: CalendarPreviewMetrics {
+        CalendarPreviewMetrics(panelSize: settings.panelSize)
+    }
+
+    private var columns: [GridItem] {
+        Array(repeating: GridItem(.fixed(metrics.dayWidth), spacing: metrics.gridSpacing), count: 7)
+    }
+
     private var calendarView: some View {
-        HStack(alignment: .top, spacing: 14) {
-            VStack(spacing: 10) {
+        HStack(alignment: .top, spacing: metrics.paneSpacing) {
+            VStack(spacing: metrics.calendarVerticalSpacing) {
                 monthHeader
                 weekdayHeader
                 dayGrid
             }
-            .frame(width: 282)
+            .frame(width: metrics.calendarWidth)
 
             Divider()
                 .overlay(Color.white.opacity(0.08))
@@ -90,9 +96,10 @@ struct GoogleCalendarPreviewView: View {
             .help(settings.text(.previousMonth))
 
             Text(language.formattedDate(displayedMonth, template: "yMMMM"))
-                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .font(.system(size: metrics.monthFontSize, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white)
                 .lineLimit(1)
+                .minimumScaleFactor(0.72)
                 .frame(maxWidth: .infinity)
 
             Button {
@@ -107,19 +114,19 @@ struct GoogleCalendarPreviewView: View {
 
     private var weekdayHeader: some View {
         let symbols = Calendar.current.shortStandaloneWeekdaySymbols
-        return HStack(spacing: 5) {
+        return HStack(spacing: metrics.gridSpacing) {
             ForEach(0..<7, id: \.self) { index in
                 let weekdayIndex = (Calendar.current.firstWeekday - 1 + index) % 7
                 Text(String(symbols[weekdayIndex].prefix(1)))
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .font(.system(size: metrics.weekdayFontSize, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.38))
-                    .frame(width: 36)
+                    .frame(width: metrics.dayWidth)
             }
         }
     }
 
     private var dayGrid: some View {
-        LazyVGrid(columns: columns, spacing: 5) {
+        LazyVGrid(columns: columns, spacing: metrics.gridSpacing) {
             ForEach(store.days(for: displayedMonth, hoveredDate: hoveredDate)) { day in
                 dayCell(day)
             }
@@ -128,9 +135,9 @@ struct GoogleCalendarPreviewView: View {
 
     private func dayCell(_ day: CalendarDayCell) -> some View {
         let isSelected = Calendar.current.isDate(day.date, inSameDayAs: detailDate)
-        return VStack(spacing: 3) {
+        return VStack(spacing: metrics.dayCellSpacing) {
             Text("\(day.dayNumber)")
-                .font(.system(size: 11, weight: day.isToday ? .bold : .semibold, design: .monospaced))
+                .font(.system(size: metrics.dayNumberFontSize, weight: day.isToday ? .bold : .semibold, design: .monospaced))
                 .foregroundStyle(day.isInDisplayedMonth ? Color.white : Color.white.opacity(0.28))
                 .lineLimit(1)
 
@@ -138,18 +145,18 @@ struct GoogleCalendarPreviewView: View {
                 ForEach(day.events.prefix(3)) { event in
                     Circle()
                         .fill(color(for: event.calendarColorHex))
-                        .frame(width: 4, height: 4)
+                        .frame(width: metrics.eventDotSize, height: metrics.eventDotSize)
                 }
             }
-            .frame(height: 5)
+            .frame(height: metrics.eventDotRowHeight)
         }
-        .frame(width: 36, height: 32)
+        .frame(width: metrics.dayWidth, height: metrics.dayHeight)
         .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
+            RoundedRectangle(cornerRadius: metrics.dayCornerRadius, style: .continuous)
                 .fill(dayBackground(isSelected: isSelected, isToday: day.isToday))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
+            RoundedRectangle(cornerRadius: metrics.dayCornerRadius, style: .continuous)
                 .stroke(day.isToday ? Color.white.opacity(0.42) : Color.white.opacity(isSelected ? 0.18 : 0), lineWidth: 1)
         )
         .contentShape(Rectangle())
@@ -768,6 +775,61 @@ private struct CalendarEventEditorView: View {
 
     private func text(_ key: AppTextKey) -> String {
         AppText.text(key, language: language)
+    }
+}
+
+private struct CalendarPreviewMetrics {
+    let outerHorizontalPadding: CGFloat
+    let outerVerticalPadding: CGFloat
+    let paneSpacing: CGFloat
+    let calendarVerticalSpacing: CGFloat
+    let calendarWidth: CGFloat
+    let dayWidth: CGFloat
+    let dayHeight: CGFloat
+    let gridSpacing: CGFloat
+    let dayCellSpacing: CGFloat
+    let dayCornerRadius: CGFloat
+    let eventDotSize: CGFloat
+    let eventDotRowHeight: CGFloat
+    let monthFontSize: CGFloat
+    let weekdayFontSize: CGFloat
+    let dayNumberFontSize: CGFloat
+
+    init(panelSize: PanelSizeOption) {
+        switch panelSize {
+        case .small:
+            outerHorizontalPadding = 12
+            outerVerticalPadding = 10
+            paneSpacing = 9
+            calendarVerticalSpacing = 8
+            calendarWidth = 248
+            dayWidth = 32
+            dayHeight = 28
+            gridSpacing = 4
+            dayCellSpacing = 2
+            dayCornerRadius = 6
+            eventDotSize = 3.5
+            eventDotRowHeight = 4
+            monthFontSize = 12
+            weekdayFontSize = 8.5
+            dayNumberFontSize = 10
+        case .medium, .large:
+            outerHorizontalPadding = 18
+            outerVerticalPadding = 14
+            paneSpacing = 14
+            calendarVerticalSpacing = 10
+            calendarWidth = 282
+            dayWidth = 36
+            dayHeight = 32
+            gridSpacing = 5
+            dayCellSpacing = 3
+            dayCornerRadius = 7
+            eventDotSize = 4
+            eventDotRowHeight = 5
+            monthFontSize = 13
+            weekdayFontSize = 9
+            dayNumberFontSize = 11
+        }
     }
 }
 
