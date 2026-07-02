@@ -182,9 +182,6 @@ struct StickyNoteEditorCard<ContextMenu: View>: View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(Color.white.opacity(0.28))
             )
-            .onChange(of: draftTitle) { _, _ in
-                onDraftChanged()
-            }
     }
 
     private var bodyEditor: some View {
@@ -198,9 +195,6 @@ struct StickyNoteEditorCard<ContextMenu: View>: View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(Color.white.opacity(0.22))
             )
-            .onChange(of: draftBody) { _, _ in
-                onDraftChanged()
-            }
     }
 }
 

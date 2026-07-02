@@ -160,8 +160,8 @@ struct StickyNotesView: View {
                 draftBody: $draftBody,
                 draftColor: $draftColor,
                 onDraftChanged: updateSelectedDraft,
-                onArchive: { archive(note) },
-                onDelete: { delete(note) },
+                onArchive: { archiveEdited(note) },
+                onDelete: { deleteEdited(note) },
                 onDone: finishEditing,
                 contextMenu: { contextMenu(for: note) }
             )
@@ -210,7 +210,9 @@ struct StickyNotesView: View {
         Menu(text(.color)) {
             ForEach(Array(StickyNoteColor.allCases)) { color in
                 Button(StickyNoteStyle.colorName(for: color, language: language)) {
-                    store.updateNote(id: note.id, title: note.title, body: note.body, color: color)
+                    let nextTitle = selectedNoteID == note.id ? draftTitle : note.title
+                    let nextBody = selectedNoteID == note.id ? draftBody : note.body
+                    store.updateNote(id: note.id, title: nextTitle, body: nextBody, color: color)
                     if selectedNoteID == note.id {
                         draftColor = color
                     }
@@ -250,6 +252,7 @@ struct StickyNotesView: View {
     }
 
     private func beginEditing(_ note: StickyNoteItem) {
+        NSApp.activate(ignoringOtherApps: true)
         if selectedNoteID != note.id {
             closeCurrentEditor()
         }
@@ -276,6 +279,7 @@ struct StickyNotesView: View {
 
     private func closeCurrentEditor() {
         guard let selectedNoteID else { return }
+        commitTextEditing()
         let isBlank = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             draftBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
@@ -287,6 +291,20 @@ struct StickyNotesView: View {
 
         updateSelectedDraft()
         pendingNewNoteIDs.remove(selectedNoteID)
+    }
+
+    private func commitTextEditing() {
+        NSApp.keyWindow?.makeFirstResponder(nil)
+    }
+
+    private func archiveEdited(_ note: StickyNoteItem) {
+        closeCurrentEditor()
+        archive(note)
+    }
+
+    private func deleteEdited(_ note: StickyNoteItem) {
+        closeCurrentEditor()
+        delete(note)
     }
 
     private func archive(_ note: StickyNoteItem) {

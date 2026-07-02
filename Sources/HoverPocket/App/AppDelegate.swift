@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        installMainMenu()
         registerURLSchemeCallbackHandler()
         statusBarMenuController = StatusBarMenuController(
             settings: hoverWindowController.appSettings,
@@ -73,5 +74,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         OAuthURLCallbackCoordinator.shared.handle(url)
+    }
+
+    private func installMainMenu() {
+        let mainMenu = NSMenu()
+
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu(title: "HoverPocket")
+        appMenu.addItem(NSMenuItem(title: "Quit HoverPocket", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+
+        let editMenuItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(menuItem("Undo", action: "undo:", key: "z"))
+        editMenu.addItem(menuItem("Redo", action: "redo:", key: "Z", modifiers: [.command, .shift]))
+        editMenu.addItem(.separator())
+        editMenu.addItem(menuItem("Cut", action: "cut:", key: "x"))
+        editMenu.addItem(menuItem("Copy", action: "copy:", key: "c"))
+        editMenu.addItem(menuItem("Paste", action: "paste:", key: "v"))
+        editMenu.addItem(menuItem("Paste and Match Style", action: "pasteAsPlainText:", key: "V", modifiers: [.command, .option, .shift]))
+        editMenu.addItem(menuItem("Delete", action: "delete:", key: ""))
+        editMenu.addItem(.separator())
+        editMenu.addItem(menuItem("Select All", action: "selectAll:", key: "a"))
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
+
+        NSApp.mainMenu = mainMenu
+    }
+
+    private func menuItem(
+        _ title: String,
+        action: String,
+        key: String,
+        modifiers: NSEvent.ModifierFlags = .command
+    ) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: Selector(action), keyEquivalent: key)
+        item.keyEquivalentModifierMask = key.isEmpty ? [] : modifiers
+        item.target = nil
+        return item
     }
 }
