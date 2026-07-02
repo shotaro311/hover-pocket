@@ -30,6 +30,7 @@ final class HoverWindowController {
     private let menuStore: HoverMenuStore
     private let settingsWindowController: SettingsWindowController
     private var settingsCancellables = Set<AnyCancellable>()
+    private let timerAlertOverlay = TimerAlertOverlayController()
 
     var appSettings: AppSettings {
         settings
@@ -48,6 +49,7 @@ final class HoverWindowController {
         syncAccessWindows(orderFront: false)
         configurePreviewWindow()
         observeSettings()
+        observeTimerAlerts()
     }
 
     func showPill() {
@@ -69,6 +71,14 @@ final class HoverWindowController {
 
     func openPanelFromMenu() {
         showPreview(on: targetScreen())
+    }
+
+    /// Opens the panel and switches to the given provider. `select` must run
+    /// after `showPreview` because panel opening restores the settings-based
+    /// provider selection.
+    func openPanel(showing pluginID: PluginID) {
+        showPreview(on: targetScreen())
+        menuStore.providerStore.select(pluginID)
     }
 
     func openSettingsFromMenu() {
@@ -385,12 +395,13 @@ final class HoverWindowController {
     private func startHoverMonitor() {
         guard hoverMonitorTimer == nil else { return }
 
-        let timer = Timer(timeInterval: 0.08, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.12, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
                 self.closeIfMouseLeftHoverRegion()
             }
         }
+        timer.tolerance = 0.04
         hoverMonitorTimer = timer
         RunLoop.main.add(timer, forMode: .common)
     }
@@ -403,6 +414,7 @@ final class HoverWindowController {
     private func closeIfMouseLeftHoverRegion() {
         guard previewWindow?.isVisible == true,
               closeTask == nil,
+              TimerStore.shared.activeAlert == nil,
               !isMouseInsideHoverRegion()
         else {
             return
@@ -576,6 +588,23 @@ final class HoverWindowController {
                     self?.syncAccessWindows(orderFront: false)
                     self?.resizePreviewForPanelSizeChange()
                     self?.showPill()
+                }
+            }
+            .store(in: &settingsCancellables)
+    }
+
+    private func observeTimerAlerts() {
+        TimerStore.shared.$activeAlert
+            .removeDuplicates()
+            .sink { [weak self] alert in
+                guard let self else { return }
+                if let alert {
+                    if let screen = targetScreen() {
+                        timerAlertOverlay.show(alert: alert, on: screen)
+                    }
+                    openPanel(showing: TimerProvider.pluginID)
+                } else {
+                    timerAlertOverlay.hide()
                 }
             }
             .store(in: &settingsCancellables)

@@ -1,7 +1,9 @@
+import AppKit
 import SwiftUI
 
 struct HoverPillView: View {
     @ObservedObject var settings: AppSettings
+    @ObservedObject private var timerStore = TimerStore.shared
     let onEnter: () -> Void
     let onExit: () -> Void
     let onTap: () -> Void
@@ -10,6 +12,7 @@ struct HoverPillView: View {
         Group {
             if showsVisibleSideHandle {
                 visiblePill
+                    .modifier(TimerAlertBounceModifier(alert: timerStore.activeAlert))
             } else {
                 Color.black.opacity(0.001)
             }
@@ -31,13 +34,17 @@ struct HoverPillView: View {
         settings.showNotchSideHandleArea && settings.pillHandleIconStyle != .none
     }
 
+    private var alertAccent: Color? {
+        timerStore.activeAlert?.color.color
+    }
+
     private var visiblePill: some View {
         ZStack(alignment: .leading) {
             TopDockedPillShape(radius: 10)
                 .fill(Color.black.opacity(0.94))
 
             TopDockedPillShape(radius: 10)
-                .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
+                .strokeBorder(alertAccent?.opacity(0.85) ?? Color.white.opacity(0.09), lineWidth: 1)
 
             VStack(spacing: 0) {
                 Rectangle()
@@ -61,7 +68,7 @@ struct HoverPillView: View {
         case .chevron:
             Image(systemName: "chevron.down")
                 .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Color.white.opacity(0.72))
+                .foregroundStyle(alertAccent ?? Color.white.opacity(0.72))
         case .pocket:
             PocketHandleGlyph()
                 .frame(width: 15, height: 13)
@@ -71,11 +78,38 @@ struct HoverPillView: View {
     }
 }
 
+/// Repeats a small downward bounce while a timer alert is active. The offset is
+/// derived from the alert's start time so it stays in phase with the ripple
+/// overlay, and it is skipped entirely when Reduce Motion is on.
+struct TimerAlertBounceModifier: ViewModifier {
+    let alert: TimerAlert?
+
+    func body(content: Content) -> some View {
+        if let alert, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            TimelineView(.animation) { context in
+                content.offset(
+                    y: Self.bounceOffset(elapsed: context.date.timeIntervalSince(alert.startedAt))
+                )
+            }
+        } else {
+            content
+        }
+    }
+
+    static func bounceOffset(elapsed: TimeInterval) -> CGFloat {
+        guard elapsed >= 0 else { return 0 }
+        let period = TimerAlertAnimation.bouncePeriod
+        let phase = elapsed.truncatingRemainder(dividingBy: period) / period
+        return CGFloat(3.5 * sin(.pi * phase))
+    }
+}
+
 struct HoverMiniBarView: View {
     let onBarEnter: () -> Void
     let onBarExit: () -> Void
     let onTap: () -> Void
     @State private var isPointerNear = false
+    @ObservedObject private var timerStore = TimerStore.shared
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -104,7 +138,8 @@ struct HoverMiniBarView: View {
 
             VStack(spacing: 0) {
                 bar
-                    .offset(y: isPointerNear ? PanelLayout.miniBarExpandedTopOffset : 0)
+                    .modifier(TimerAlertBounceModifier(alert: timerStore.activeAlert))
+                    .offset(y: isExpandedLook ? PanelLayout.miniBarExpandedTopOffset : 0)
 
                 Spacer(minLength: 0)
             }
@@ -116,21 +151,45 @@ struct HoverMiniBarView: View {
         .contentShape(Rectangle())
     }
 
+    private var alertAccent: Color? {
+        timerStore.activeAlert?.color.color
+    }
+
+    /// While a timer alert is active the bar keeps its expanded look even
+    /// without hover, so the bounce and tint stay visible.
+    private var isExpandedLook: Bool {
+        isPointerNear || alertAccent != nil
+    }
+
     private var bar: some View {
-        RoundedRectangle(cornerRadius: isPointerNear ? 3.5 : 1, style: .continuous)
-            .fill(Color.black.opacity(isPointerNear ? 0.58 : 0.26))
+        RoundedRectangle(cornerRadius: isExpandedLook ? 3.5 : 1, style: .continuous)
+            .fill(barFillColor)
             .frame(
-                width: isPointerNear ? PanelLayout.miniBarExpandedWidth : PanelLayout.miniBarRestWidth,
-                height: isPointerNear ? PanelLayout.miniBarExpandedHeight : PanelLayout.miniBarRestHeight
+                width: isExpandedLook ? PanelLayout.miniBarExpandedWidth : PanelLayout.miniBarRestWidth,
+                height: isExpandedLook ? PanelLayout.miniBarExpandedHeight : PanelLayout.miniBarRestHeight
             )
             .overlay(
-                RoundedRectangle(cornerRadius: isPointerNear ? 3.5 : 1, style: .continuous)
-                    .stroke(Color.white.opacity(isPointerNear ? 0.16 : 0.05), lineWidth: 0.6)
+                RoundedRectangle(cornerRadius: isExpandedLook ? 3.5 : 1, style: .continuous)
+                    .stroke(barStrokeColor, lineWidth: 0.6)
             )
-            .shadow(color: Color.black.opacity(isPointerNear ? 0.18 : 0), radius: 8, y: 4)
+            .shadow(color: Color.black.opacity(isExpandedLook ? 0.18 : 0), radius: 8, y: 4)
             .contentShape(Rectangle())
             .onTapGesture(perform: onTap)
-            .animation(.interactiveSpring(response: 0.22, dampingFraction: 0.86), value: isPointerNear)
+            .animation(.interactiveSpring(response: 0.22, dampingFraction: 0.86), value: isExpandedLook)
+    }
+
+    private var barFillColor: Color {
+        if let alertAccent {
+            return alertAccent.opacity(0.66)
+        }
+        return Color.black.opacity(isExpandedLook ? 0.58 : 0.26)
+    }
+
+    private var barStrokeColor: Color {
+        if let alertAccent {
+            return alertAccent.opacity(0.9)
+        }
+        return Color.white.opacity(isExpandedLook ? 0.16 : 0.05)
     }
 }
 

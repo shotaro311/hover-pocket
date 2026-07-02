@@ -206,6 +206,22 @@ enum AppTextKey: String, Sendable {
     case stickyUntitledNote
     case stickyUndo
     case stickyYellow
+    case timer
+    case timerBreak
+    case timerFinished
+    case timerNoRunning
+    case timerPause
+    case timerPomodoro
+    case timerPresetsSection
+    case timerResume
+    case timerRunningSection
+    case timerSlotsFull
+    case timerSoundToggle
+    case timerStart
+    case timerStop
+    case timerStopAlarm
+    case timerTitlePlaceholder
+    case timerWork
     case title
     case untitledEvent
     case updates
@@ -244,6 +260,8 @@ enum AppText {
             return text(.stickyNotes, language: language)
         case "controls":
             return text(.controls, language: language)
+        case "timer":
+            return text(.timer, language: language)
         default:
             return fallback
         }
@@ -421,6 +439,22 @@ enum AppText {
         case .stickyUntitledNote: return "無題の付箋"
         case .stickyUndo: return "元に戻す"
         case .stickyYellow: return "イエロー"
+        case .timer: return "タイマー"
+        case .timerBreak: return "休憩"
+        case .timerFinished: return "タイマー終了"
+        case .timerNoRunning: return "実行中のタイマーはありません"
+        case .timerPause: return "一時停止"
+        case .timerPomodoro: return "ポモドーロモード"
+        case .timerPresetsSection: return "プリセット"
+        case .timerResume: return "再開"
+        case .timerRunningSection: return "実行中"
+        case .timerSlotsFull: return "同時に実行できるタイマーは2つまでです"
+        case .timerSoundToggle: return "タイマー音のオン / オフ"
+        case .timerStart: return "開始"
+        case .timerStop: return "停止"
+        case .timerStopAlarm: return "アラームを停止"
+        case .timerTitlePlaceholder: return "タイトル（任意）"
+        case .timerWork: return "作業"
         case .title: return "タイトル"
         case .untitledEvent: return "無題の予定"
         case .updates: return "アップデート"
@@ -610,6 +644,22 @@ enum AppText {
         case .stickyUntitledNote: return "Untitled note"
         case .stickyUndo: return "Undo"
         case .stickyYellow: return "Yellow"
+        case .timer: return "Timer"
+        case .timerBreak: return "Break"
+        case .timerFinished: return "Time's up"
+        case .timerNoRunning: return "No running timers"
+        case .timerPause: return "Pause"
+        case .timerPomodoro: return "Pomodoro mode"
+        case .timerPresetsSection: return "Presets"
+        case .timerResume: return "Resume"
+        case .timerRunningSection: return "Running"
+        case .timerSlotsFull: return "Up to two timers can run at once"
+        case .timerSoundToggle: return "Toggle timer sound"
+        case .timerStart: return "Start"
+        case .timerStop: return "Stop"
+        case .timerStopAlarm: return "Stop alarm"
+        case .timerTitlePlaceholder: return "Title (optional)"
+        case .timerWork: return "Focus"
         case .title: return "Title"
         case .untitledEvent: return "Untitled event"
         case .updates: return "Updates"
