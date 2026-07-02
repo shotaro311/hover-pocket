@@ -211,8 +211,10 @@ enum AppTextKey: String, Sendable {
     case timerFinished
     case timerNoRunning
     case timerPause
-    case timerPomodoro
-    case timerPresetsSection
+    case timerPin
+    case timerPinLimit
+    case timerPinnedSection
+    case timerPomodoroSection
     case timerResume
     case timerRunningSection
     case timerSlotsFull
@@ -221,6 +223,7 @@ enum AppTextKey: String, Sendable {
     case timerStop
     case timerStopAlarm
     case timerTitlePlaceholder
+    case timerUnpin
     case timerWork
     case title
     case untitledEvent
@@ -444,8 +447,10 @@ enum AppText {
         case .timerFinished: return "タイマー終了"
         case .timerNoRunning: return "実行中のタイマーはありません"
         case .timerPause: return "一時停止"
-        case .timerPomodoro: return "ポモドーロモード"
-        case .timerPresetsSection: return "プリセット"
+        case .timerPin: return "ピン留めして繰り返し使う"
+        case .timerPinLimit: return "ピン留めは4つまでです"
+        case .timerPinnedSection: return "ピン留め"
+        case .timerPomodoroSection: return "ポモドーロタイマー"
         case .timerResume: return "再開"
         case .timerRunningSection: return "実行中"
         case .timerSlotsFull: return "同時に実行できるタイマーは2つまでです"
@@ -454,6 +459,7 @@ enum AppText {
         case .timerStop: return "停止"
         case .timerStopAlarm: return "アラームを停止"
         case .timerTitlePlaceholder: return "タイトル（任意）"
+        case .timerUnpin: return "ピン留めを解除"
         case .timerWork: return "作業"
         case .title: return "タイトル"
         case .untitledEvent: return "無題の予定"
@@ -649,8 +655,10 @@ enum AppText {
         case .timerFinished: return "Time's up"
         case .timerNoRunning: return "No running timers"
         case .timerPause: return "Pause"
-        case .timerPomodoro: return "Pomodoro mode"
-        case .timerPresetsSection: return "Presets"
+        case .timerPin: return "Pin to reuse"
+        case .timerPinLimit: return "Up to four pinned timers"
+        case .timerPinnedSection: return "Pinned"
+        case .timerPomodoroSection: return "Pomodoro timer"
         case .timerResume: return "Resume"
         case .timerRunningSection: return "Running"
         case .timerSlotsFull: return "Up to two timers can run at once"
@@ -659,6 +667,7 @@ enum AppText {
         case .timerStop: return "Stop"
         case .timerStopAlarm: return "Stop alarm"
         case .timerTitlePlaceholder: return "Title (optional)"
+        case .timerUnpin: return "Unpin"
         case .timerWork: return "Focus"
         case .title: return "Title"
         case .untitledEvent: return "Untitled event"

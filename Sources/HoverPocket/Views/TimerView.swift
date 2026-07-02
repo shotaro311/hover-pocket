@@ -15,7 +15,28 @@ struct TimerView: View {
         ScrollView {
             VStack(spacing: 10) {
                 runningSection
-                presetsSection
+
+                if !store.pinnedPresets.isEmpty {
+                    pinnedSection
+                }
+
+                TimerSection(title: text(.timer)) {
+                    TimerEntryCard(
+                        preset: draftTimerBinding,
+                        canStart: store.canStartTimer,
+                        settings: settings,
+                        onStart: { store.start(preset: $0) }
+                    )
+                }
+
+                TimerSection(title: text(.timerPomodoroSection)) {
+                    TimerEntryCard(
+                        preset: draftPomodoroBinding,
+                        canStart: store.canStartTimer,
+                        settings: settings,
+                        onStart: { store.start(preset: $0) }
+                    )
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 16)
@@ -32,6 +53,12 @@ struct TimerView: View {
                 TimerEmptyRow(message: text(.timerNoRunning))
             } else {
                 VStack(spacing: 8) {
+                    if !store.canStartTimer {
+                        Text(text(.timerSlotsFull))
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.yellow.opacity(0.75))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                     if let alert = store.activeAlert,
                        !store.runningTimers.contains(where: { $0.id == alert.id }) {
                         finishedAlertRow(alert)
@@ -119,7 +146,8 @@ struct TimerView: View {
             }
             .help(text(.timerStop))
         }
-        .padding(8)
+        .padding(.top, 10)
+        .padding([.horizontal, .bottom], 8)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(isAlerting ? timer.color.color.opacity(0.12) : Color.white.opacity(0.03))
@@ -128,6 +156,29 @@ struct TimerView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(isAlerting ? timer.color.color.opacity(0.5) : Color.white.opacity(0.05), lineWidth: 1)
         )
+        .overlay(alignment: .topTrailing) {
+            pinButton(for: timer)
+                .offset(x: -5, y: 4)
+        }
+    }
+
+    /// Top-right pin toggle on a running timer: pinning stores the timer's
+    /// configuration for reuse, up to four pins.
+    private func pinButton(for timer: RunningTimer) -> some View {
+        let isPinned = timer.pinnedPresetID != nil
+        let isEnabled = isPinned || store.canPin
+        return Button {
+            store.togglePin(timerID: timer.id)
+        } label: {
+            Image(systemName: isPinned ? "pin.fill" : "pin")
+                .font(.system(size: 8.5, weight: .bold))
+                .foregroundStyle(isPinned ? timer.color.color : .white.opacity(isEnabled ? 0.5 : 0.22))
+                .frame(width: 16, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .help(isPinned ? text(.timerUnpin) : (store.canPin ? text(.timerPin) : text(.timerPinLimit)))
     }
 
     private func stopAlarmButton(color: Color) -> some View {
@@ -159,37 +210,91 @@ struct TimerView: View {
         }
     }
 
-    // MARK: - Presets
+    // MARK: - Pinned presets
 
-    private var presetsSection: some View {
-        TimerSection(title: text(.timerPresetsSection)) {
-            VStack(spacing: 8) {
-                if !store.canStartTimer {
-                    Text(text(.timerSlotsFull))
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.yellow.opacity(0.75))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                ForEach(store.presets) { preset in
-                    TimerPresetCard(
-                        preset: presetBinding(preset),
-                        canStart: store.canStartTimer,
-                        settings: settings,
-                        onStart: { store.start(preset: $0) }
-                    )
+    private var pinnedSection: some View {
+        TimerSection(title: text(.timerPinnedSection)) {
+            VStack(spacing: 6) {
+                ForEach(store.pinnedPresets) { preset in
+                    pinnedRow(preset)
                 }
             }
         }
     }
 
-    private func presetBinding(_ preset: TimerPreset) -> Binding<TimerPreset> {
-        Binding(
-            get: { store.presets.first(where: { $0.id == preset.id }) ?? preset },
-            set: { store.updatePreset($0) }
+    private func pinnedRow(_ preset: TimerPreset) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "pin.fill")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(preset.color.color)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(pinnedTitle(preset))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.86))
+                    .lineLimit(1)
+                Text(pinnedDurationText(preset))
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.48))
+            }
+
+            Spacer(minLength: 8)
+
+            TimerIconButton(symbolName: "play.fill", accent: preset.color.color) {
+                store.start(preset: preset, pinnedPresetID: preset.id)
+            }
+            .disabled(!store.canStartTimer)
+            .opacity(store.canStartTimer ? 1 : 0.38)
+            .help(text(.timerStart))
+
+            TimerIconButton(symbolName: "pin.slash", accent: .white.opacity(0.45)) {
+                store.removePinnedPreset(id: preset.id)
+            }
+            .help(text(.timerUnpin))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.white.opacity(0.03))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(preset.color.color.opacity(0.24), lineWidth: 1)
         )
     }
 
-    // MARK: - Helpers
+    private func pinnedTitle(_ preset: TimerPreset) -> String {
+        if !preset.title.isEmpty {
+            return preset.title
+        }
+        return preset.isPomodoro ? text(.timerPomodoroSection) : text(.timer)
+    }
+
+    private func pinnedDurationText(_ preset: TimerPreset) -> String {
+        if preset.isPomodoro {
+            let work = Self.timeText(preset.workDuration)
+            let rest = Self.timeText(preset.breakDuration)
+            return "\(text(.timerWork)) \(work) / \(text(.timerBreak)) \(rest)"
+        }
+        return Self.timeText(preset.duration)
+    }
+
+    // MARK: - Bindings and helpers
+
+    private var draftTimerBinding: Binding<TimerPreset> {
+        Binding(
+            get: { store.draftTimer },
+            set: { store.updateDraftTimer($0) }
+        )
+    }
+
+    private var draftPomodoroBinding: Binding<TimerPreset> {
+        Binding(
+            get: { store.draftPomodoro },
+            set: { store.updateDraftPomodoro($0) }
+        )
+    }
 
     private func remainingText(for timer: RunningTimer) -> String {
         Self.timeText(timer.remaining(at: store.now))
@@ -216,9 +321,9 @@ struct TimerView: View {
     }
 }
 
-// MARK: - Preset card
+// MARK: - Entry card (normal or pomodoro, decided by the bound preset)
 
-private struct TimerPresetCard: View {
+private struct TimerEntryCard: View {
     @Binding var preset: TimerPreset
     let canStart: Bool
     @ObservedObject var settings: AppSettings
@@ -243,15 +348,6 @@ private struct TimerPresetCard: View {
                     preset.soundEnabled.toggle()
                 }
                 .help(text(.timerSoundToggle))
-
-                TimerIconButton(
-                    symbolName: "repeat",
-                    accent: preset.isPomodoro ? preset.color.color : .white.opacity(0.45),
-                    isActive: preset.isPomodoro
-                ) {
-                    preset.isPomodoro.toggle()
-                }
-                .help(text(.timerPomodoro))
             }
 
             HStack(alignment: .top, spacing: 10) {
@@ -290,15 +386,6 @@ private struct TimerPresetCard: View {
                     .padding(.top, 1)
             }
         }
-        .padding(9)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.white.opacity(0.03))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(preset.color.color.opacity(0.22), lineWidth: 1)
-        )
     }
 
     private var colorPicker: some View {

@@ -78,9 +78,9 @@ struct HoverPillView: View {
     }
 }
 
-/// Repeats a small downward bounce while a timer alert is active. The offset is
-/// derived from the alert's start time so it stays in phase with the ripple
-/// overlay, and it is skipped entirely when Reduce Motion is on.
+/// Repeats a small peeking bounce while a timer alert is active: the bar rests
+/// retracted into the top edge and pops downward, so it never detaches from
+/// the screen edge. Skipped entirely when Reduce Motion is on.
 struct TimerAlertBounceModifier: ViewModifier {
     let alert: TimerAlert?
 
@@ -96,11 +96,13 @@ struct TimerAlertBounceModifier: ViewModifier {
         }
     }
 
+    /// Always <= 0: the bar starts pulled up into the edge (clipped by the
+    /// window), pops down to its natural position mid-cycle, and pulls back.
     static func bounceOffset(elapsed: TimeInterval) -> CGFloat {
         guard elapsed >= 0 else { return 0 }
         let period = TimerAlertAnimation.bouncePeriod
         let phase = elapsed.truncatingRemainder(dividingBy: period) / period
-        return CGFloat(3.5 * sin(.pi * phase))
+        return CGFloat(-4.0 * (1 - abs(sin(.pi * phase))))
     }
 }
 

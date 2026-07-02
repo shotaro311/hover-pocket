@@ -41,49 +41,30 @@ struct TimerPreset: Codable, Equatable, Identifiable, Sendable {
     var color: TimerColor
     var soundEnabled: Bool
 
-    static func defaultPresets() -> [TimerPreset] {
-        [
-            TimerPreset(
-                id: UUID(),
-                title: "",
-                isPomodoro: false,
-                duration: 5 * 60,
-                workDuration: 25 * 60,
-                breakDuration: 5 * 60,
-                color: .blue,
-                soundEnabled: true
-            ),
-            TimerPreset(
-                id: UUID(),
-                title: "",
-                isPomodoro: true,
-                duration: 25 * 60,
-                workDuration: 25 * 60,
-                breakDuration: 5 * 60,
-                color: .green,
-                soundEnabled: true
-            ),
-            TimerPreset(
-                id: UUID(),
-                title: "",
-                isPomodoro: false,
-                duration: 45 * 60,
-                workDuration: 25 * 60,
-                breakDuration: 5 * 60,
-                color: .orange,
-                soundEnabled: true
-            ),
-            TimerPreset(
-                id: UUID(),
-                title: "",
-                isPomodoro: false,
-                duration: 60 * 60,
-                workDuration: 25 * 60,
-                breakDuration: 5 * 60,
-                color: .pink,
-                soundEnabled: true
-            )
-        ]
+    static func defaultTimerDraft() -> TimerPreset {
+        TimerPreset(
+            id: UUID(),
+            title: "",
+            isPomodoro: false,
+            duration: 10 * 60,
+            workDuration: 25 * 60,
+            breakDuration: 5 * 60,
+            color: .blue,
+            soundEnabled: true
+        )
+    }
+
+    static func defaultPomodoroDraft() -> TimerPreset {
+        TimerPreset(
+            id: UUID(),
+            title: "",
+            isPomodoro: true,
+            duration: 25 * 60,
+            workDuration: 25 * 60,
+            breakDuration: 5 * 60,
+            color: .green,
+            soundEnabled: true
+        )
     }
 }
 
@@ -102,6 +83,9 @@ struct RunningTimer: Codable, Equatable, Identifiable, Sendable {
     var pausedRemaining: TimeInterval?
     var workDuration: TimeInterval
     var breakDuration: TimeInterval
+    /// Links to a pinned preset when this timer was started from (or pinned as)
+    /// one, so the pin toggle on the running card reflects the pinned state.
+    var pinnedPresetID: UUID?
 
     var isPaused: Bool {
         pausedRemaining != nil

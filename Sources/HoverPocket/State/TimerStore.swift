@@ -6,9 +6,11 @@ import Foundation
 final class TimerStore: ObservableObject {
     static let shared = TimerStore()
     static let maxConcurrentTimers = 2
-    static let presetCount = 4
+    static let maxPinnedPresets = 4
 
-    @Published private(set) var presets: [TimerPreset] = []
+    @Published private(set) var draftTimer = TimerPreset.defaultTimerDraft()
+    @Published private(set) var draftPomodoro = TimerPreset.defaultPomodoroDraft()
+    @Published private(set) var pinnedPresets: [TimerPreset] = []
     @Published private(set) var runningTimers: [RunningTimer] = []
     @Published private(set) var activeAlert: TimerAlert?
     @Published private(set) var now = Date()
@@ -27,8 +29,12 @@ final class TimerStore: ObservableObject {
             .appendingPathComponent("Timer", isDirectory: true)
     }()
 
-    private var presetsURL: URL {
-        storageDirectory.appendingPathComponent("presets.json", isDirectory: false)
+    private var draftsURL: URL {
+        storageDirectory.appendingPathComponent("drafts.json", isDirectory: false)
+    }
+
+    private var pinnedURL: URL {
+        storageDirectory.appendingPathComponent("pinned.json", isDirectory: false)
     }
 
     private var runningURL: URL {
@@ -36,7 +42,8 @@ final class TimerStore: ObservableObject {
     }
 
     private init() {
-        loadPresets()
+        loadDrafts()
+        loadPinnedPresets()
         restoreRunningTimers()
         observeWake()
         syncTickTimer()
@@ -46,9 +53,13 @@ final class TimerStore: ObservableObject {
         runningTimers.count < Self.maxConcurrentTimers
     }
 
+    var canPin: Bool {
+        pinnedPresets.count < Self.maxPinnedPresets
+    }
+
     // MARK: - Timer lifecycle
 
-    func start(preset: TimerPreset) {
+    func start(preset: TimerPreset, pinnedPresetID: UUID? = nil) {
         guard canStartTimer else { return }
         let phaseDuration = preset.isPomodoro ? preset.workDuration : preset.duration
         guard phaseDuration > 0 else { return }
@@ -64,7 +75,8 @@ final class TimerStore: ObservableObject {
             phaseDuration: phaseDuration,
             pausedRemaining: nil,
             workDuration: preset.workDuration,
-            breakDuration: preset.breakDuration
+            breakDuration: preset.breakDuration,
+            pinnedPresetID: pinnedPresetID
         )
         runningTimers.append(timer)
         now = Date()
@@ -107,13 +119,54 @@ final class TimerStore: ObservableObject {
         activeAlert = nil
     }
 
-    // MARK: - Presets
+    // MARK: - Drafts and pinned presets
 
-    func updatePreset(_ preset: TimerPreset) {
-        guard let index = presets.firstIndex(where: { $0.id == preset.id }) else { return }
-        guard presets[index] != preset else { return }
-        presets[index] = preset
-        persistPresets()
+    func updateDraftTimer(_ preset: TimerPreset) {
+        guard draftTimer != preset else { return }
+        draftTimer = preset
+        persistDrafts()
+    }
+
+    func updateDraftPomodoro(_ preset: TimerPreset) {
+        guard draftPomodoro != preset else { return }
+        draftPomodoro = preset
+        persistDrafts()
+    }
+
+    /// Pins the running timer's configuration for reuse, or removes the pin if
+    /// the timer is already linked to a pinned preset.
+    func togglePin(timerID: UUID) {
+        guard let index = runningTimers.firstIndex(where: { $0.id == timerID }) else { return }
+        if let presetID = runningTimers[index].pinnedPresetID {
+            removePinnedPreset(id: presetID)
+        } else {
+            guard canPin else { return }
+            let timer = runningTimers[index]
+            let preset = TimerPreset(
+                id: UUID(),
+                title: timer.title,
+                isPomodoro: timer.isPomodoro,
+                duration: timer.isPomodoro ? timer.workDuration : timer.phaseDuration,
+                workDuration: timer.workDuration,
+                breakDuration: timer.breakDuration,
+                color: timer.color,
+                soundEnabled: timer.soundEnabled
+            )
+            pinnedPresets.append(preset)
+            runningTimers[index].pinnedPresetID = preset.id
+            persistPinnedPresets()
+            persistRunningTimers()
+        }
+    }
+
+    func removePinnedPreset(id: UUID) {
+        guard pinnedPresets.contains(where: { $0.id == id }) else { return }
+        pinnedPresets.removeAll { $0.id == id }
+        for index in runningTimers.indices where runningTimers[index].pinnedPresetID == id {
+            runningTimers[index].pinnedPresetID = nil
+        }
+        persistPinnedPresets()
+        persistRunningTimers()
     }
 
     // MARK: - Countdown
@@ -201,14 +254,24 @@ final class TimerStore: ObservableObject {
 
     // MARK: - Persistence
 
-    private func loadPresets() {
-        if let data = try? Data(contentsOf: presetsURL),
-           let decoded = try? JSONDecoder().decode([TimerPreset].self, from: data),
-           decoded.count == Self.presetCount {
-            presets = decoded
-        } else {
-            presets = TimerPreset.defaultPresets()
-        }
+    private struct DraftsSnapshot: Codable, Sendable {
+        var timer: TimerPreset
+        var pomodoro: TimerPreset
+    }
+
+    private func loadDrafts() {
+        guard let data = try? Data(contentsOf: draftsURL),
+              let decoded = try? JSONDecoder().decode(DraftsSnapshot.self, from: data)
+        else { return }
+        draftTimer = decoded.timer
+        draftPomodoro = decoded.pomodoro
+    }
+
+    private func loadPinnedPresets() {
+        guard let data = try? Data(contentsOf: pinnedURL),
+              let decoded = try? JSONDecoder().decode([TimerPreset].self, from: data)
+        else { return }
+        pinnedPresets = Array(decoded.prefix(Self.maxPinnedPresets))
     }
 
     /// Timers that expired while the app was not running are discarded quietly;
@@ -224,8 +287,12 @@ final class TimerStore: ObservableObject {
         }
     }
 
-    private func persistPresets() {
-        persist(presets, to: presetsURL)
+    private func persistDrafts() {
+        persist(DraftsSnapshot(timer: draftTimer, pomodoro: draftPomodoro), to: draftsURL)
+    }
+
+    private func persistPinnedPresets() {
+        persist(pinnedPresets, to: pinnedURL)
     }
 
     private func persistRunningTimers() {

@@ -30,7 +30,6 @@ final class HoverWindowController {
     private let menuStore: HoverMenuStore
     private let settingsWindowController: SettingsWindowController
     private var settingsCancellables = Set<AnyCancellable>()
-    private let timerAlertOverlay = TimerAlertOverlayController()
 
     var appSettings: AppSettings {
         settings
@@ -597,15 +596,8 @@ final class HoverWindowController {
         TimerStore.shared.$activeAlert
             .removeDuplicates()
             .sink { [weak self] alert in
-                guard let self else { return }
-                if let alert {
-                    if let screen = targetScreen() {
-                        timerAlertOverlay.show(alert: alert, on: screen)
-                    }
-                    openPanel(showing: TimerProvider.pluginID)
-                } else {
-                    timerAlertOverlay.hide()
-                }
+                guard let self, alert != nil else { return }
+                openPanel(showing: TimerProvider.pluginID)
             }
             .store(in: &settingsCancellables)
     }
