@@ -17,6 +17,8 @@ final class ClipboardHistoryStore: ObservableObject {
     private let fileManager = FileManager.default
     private var timer: Timer?
     private var lastChangeCount = NSPasteboard.general.changeCount
+    private var saveDebounceTask: Task<Void, Never>?
+    private var pendingWriteTask: Task<Void, Never>?
 
     private lazy var storageDirectory: URL = {
         let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
@@ -102,21 +104,17 @@ final class ClipboardHistoryStore: ObservableObject {
 
     private func captureCurrentPasteboardIfUseful() {
         let pasteboard = NSPasteboard.general
-        var didChange = false
 
         if let text = pasteboard.string(forType: .string),
            addTextIfUseful(text) {
-            didChange = true
-        }
-
-        if let image = NSImage(pasteboard: pasteboard),
-           addImageIfUseful(image) {
-            didChange = true
-        }
-
-        if didChange {
             trimHistory()
             save()
+        }
+
+        if let imageData = pasteboard.data(forType: .png)
+            ?? pasteboard.data(forType: .tiff)
+            ?? NSImage(pasteboard: pasteboard)?.tiffRepresentation {
+            captureImage(from: imageData)
         }
     }
 
@@ -132,33 +130,50 @@ final class ClipboardHistoryStore: ObservableObject {
         return true
     }
 
-    private func addImageIfUseful(_ image: NSImage) -> Bool {
-        guard let pngData = Self.pngData(from: image) else { return false }
-        let hash = Self.hashString(for: pngData)
-        imageItems.removeAll { $0.contentHash == hash }
-
-        do {
-            try ensureStorageDirectory()
+    /// Converts and hashes clipboard image data off the main actor; PNG encode,
+    /// SHA256 and file writes are too heavy for the 0.75s poll on the main thread.
+    private func captureImage(from imageData: Data) {
+        let storageDirectory = self.storageDirectory
+        Task.detached(priority: .utility) { [weak self] in
+            guard let bitmap = NSBitmapImageRep(data: imageData),
+                  let pngData = bitmap.representation(using: .png, properties: [:])
+            else { return }
+            let hash = Self.hashString(for: pngData)
+            let alreadyKnown = await MainActor.run { [weak self] in
+                self?.imageItems.first?.contentHash == hash
+            }
+            guard !alreadyKnown else { return }
             let id = UUID()
             let fileName = "\(id.uuidString).png"
             let fileURL = storageDirectory.appendingPathComponent(fileName, isDirectory: false)
-            try pngData.write(to: fileURL, options: .atomic)
-
-            imageItems.insert(
-                ClipboardImageHistoryItem(
-                    id: id,
-                    fileName: fileName,
-                    contentHash: hash,
-                    width: Int(image.size.width.rounded()),
-                    height: Int(image.size.height.rounded()),
-                    createdAt: Date()
-                ),
-                at: 0
-            )
-            return true
-        } catch {
-            lastErrorMessage = "Clipboard image could not be saved."
-            return false
+            let width = Int(bitmap.size.width.rounded())
+            let height = Int(bitmap.size.height.rounded())
+            do {
+                try FileManager.default.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
+                try pngData.write(to: fileURL, options: .atomic)
+            } catch {
+                await MainActor.run { [weak self] in
+                    self?.lastErrorMessage = "Clipboard image could not be saved."
+                }
+                return
+            }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.imageItems.removeAll { $0.contentHash == hash }
+                self.imageItems.insert(
+                    ClipboardImageHistoryItem(
+                        id: id,
+                        fileName: fileName,
+                        contentHash: hash,
+                        width: width,
+                        height: height,
+                        createdAt: Date()
+                    ),
+                    at: 0
+                )
+                self.trimHistory()
+                self.save()
+            }
         }
     }
 
@@ -199,22 +214,39 @@ final class ClipboardHistoryStore: ObservableObject {
         }
     }
 
+    /// Debounces rapid successive saves, then encodes and writes off the main actor.
+    /// Writes are chained so an older snapshot can never overwrite a newer one.
     private func save() {
-        do {
-            try ensureStorageDirectory()
-            let metadata = ClipboardHistoryMetadata(textItems: textItems, imageItems: imageItems)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(metadata)
-            try data.write(to: metadataURL, options: .atomic)
-            lastErrorMessage = nil
-        } catch {
-            lastErrorMessage = "Clipboard history could not be saved."
+        saveDebounceTask?.cancel()
+        saveDebounceTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            self?.writeMetadataNow()
         }
     }
 
-    private func ensureStorageDirectory() throws {
-        try fileManager.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
+    private func writeMetadataNow() {
+        let metadata = ClipboardHistoryMetadata(textItems: textItems, imageItems: imageItems)
+        let metadataURL = self.metadataURL
+        let storageDirectory = self.storageDirectory
+        let previousWrite = pendingWriteTask
+        pendingWriteTask = Task.detached(priority: .utility) { [weak self] in
+            await previousWrite?.value
+            do {
+                try FileManager.default.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let data = try encoder.encode(metadata)
+                try data.write(to: metadataURL, options: .atomic)
+                await MainActor.run { [weak self] in
+                    self?.lastErrorMessage = nil
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    self?.lastErrorMessage = "Clipboard history could not be saved."
+                }
+            }
+        }
     }
 
     private func migrateLegacyStorageIfNeeded() {
@@ -252,16 +284,7 @@ final class ClipboardHistoryStore: ObservableObject {
         }
     }
 
-    private static func pngData(from image: NSImage) -> Data? {
-        guard let tiffData = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffData)
-        else {
-            return nil
-        }
-        return bitmap.representation(using: .png, properties: [:])
-    }
-
-    private static func hashString(for data: Data) -> String {
+    private nonisolated static func hashString(for data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }

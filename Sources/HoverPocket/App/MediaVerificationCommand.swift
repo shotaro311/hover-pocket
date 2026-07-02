@@ -11,7 +11,7 @@ enum MediaVerificationCommand {
             let service = MediaRemoteService()
             let initialState = await service.nowPlaying()
             if let requestedRate {
-                _ = service.setPlaybackSpeed(
+                _ = await service.setPlaybackSpeed(
                     requestedRate,
                     delta: requestedRate - initialState.playbackRate,
                     mediaURLString: initialState.mediaURLString,

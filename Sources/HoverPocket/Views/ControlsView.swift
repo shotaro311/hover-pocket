@@ -6,6 +6,10 @@ struct ControlsView: View {
     @ObservedObject private var settings: AppSettings
     @ObservedObject private var store: ControlsStore
     private let isActive: Bool
+    @State private var showsPlaybackPendingIndicator = false
+    @State private var showsRatePendingIndicator = false
+    @State private var playbackPendingIndicatorTask: Task<Void, Never>?
+    @State private var ratePendingIndicatorTask: Task<Void, Never>?
 
     init(settings: AppSettings, isActive: Bool, store: ControlsStore = .shared) {
         self.settings = settings
@@ -33,6 +37,38 @@ struct ControlsView: View {
         }
         .onChange(of: isActive) { _, newValue in
             updatePolling(newValue)
+        }
+        .onChange(of: store.isPlaybackCommandPending) { _, pending in
+            updatePendingIndicator(
+                pending: pending,
+                task: &playbackPendingIndicatorTask,
+                indicator: $showsPlaybackPendingIndicator
+            )
+        }
+        .onChange(of: store.isPlaybackRateCommandPending) { _, pending in
+            updatePendingIndicator(
+                pending: pending,
+                task: &ratePendingIndicatorTask,
+                indicator: $showsRatePendingIndicator
+            )
+        }
+    }
+
+    private func updatePendingIndicator(
+        pending: Bool,
+        task: inout Task<Void, Never>?,
+        indicator: Binding<Bool>
+    ) {
+        task?.cancel()
+        task = nil
+        guard pending else {
+            indicator.wrappedValue = false
+            return
+        }
+        task = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            indicator.wrappedValue = true
         }
     }
 
@@ -110,7 +146,7 @@ struct ControlsView: View {
 
                         Text(playbackRateText)
                             .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundStyle(.yellow.opacity(store.isPlaybackRateCommandPending ? 0.52 : 0.86))
+                            .foregroundStyle(.yellow.opacity(showsRatePendingIndicator ? 0.52 : 0.86))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 4)
                             .frame(minWidth: 38)
@@ -161,7 +197,7 @@ struct ControlsView: View {
                             adjustPlaybackRate(by: -0.1)
                         }
                         .disabled(!store.nowPlaying.hasMedia || store.isPlaybackRateCommandPending)
-                        .opacity(store.nowPlaying.hasMedia && !store.isPlaybackRateCommandPending ? 1 : 0.38)
+                        .opacity(store.nowPlaying.hasMedia && !showsRatePendingIndicator ? 1 : 0.38)
                         .help("\(text(.controlsDecreasePlaybackRate)) / \(playbackRateText)")
 
                         ControlsMediaButton(symbolName: "gobackward.10") {
@@ -172,12 +208,12 @@ struct ControlsView: View {
                         .help(text(.controlsBack10))
 
                         ControlsMediaButton(
-                            symbolName: store.isPlaybackCommandPending ? "hourglass" : (store.nowPlaying.isPlaying ? "pause.fill" : "play.fill"),
+                            symbolName: showsPlaybackPendingIndicator ? "hourglass" : (store.nowPlaying.isPlaying ? "pause.fill" : "play.fill"),
                             isPrimary: true,
                             action: store.togglePlayback
                         )
                         .disabled(!store.nowPlaying.hasMedia || store.isPlaybackCommandPending)
-                        .opacity(store.nowPlaying.hasMedia && !store.isPlaybackCommandPending ? 1 : 0.38)
+                        .opacity(store.nowPlaying.hasMedia && !showsPlaybackPendingIndicator ? 1 : 0.38)
                         .help(store.nowPlaying.isPlaying ? text(.controlsPause) : text(.controlsPlay))
 
                         ControlsMediaButton(symbolName: "goforward.10") {
@@ -191,7 +227,7 @@ struct ControlsView: View {
                             adjustPlaybackRate(by: 0.1)
                         }
                         .disabled(!store.nowPlaying.hasMedia || store.isPlaybackRateCommandPending)
-                        .opacity(store.nowPlaying.hasMedia && !store.isPlaybackRateCommandPending ? 1 : 0.38)
+                        .opacity(store.nowPlaying.hasMedia && !showsRatePendingIndicator ? 1 : 0.38)
                         .help("\(text(.controlsIncreasePlaybackRate)) / \(playbackRateText)")
                     }
 
@@ -647,6 +683,7 @@ private final class ControlsWindowPreviewStore: ObservableObject {
                 self?.capture(windowID: windowID)
             }
         }
+        timer.tolerance = 0.1
         self.timer = timer
         RunLoop.main.add(timer, forMode: .common)
     }
@@ -660,12 +697,14 @@ private final class ControlsWindowPreviewStore: ObservableObject {
         image = nil
     }
 
+    private let windowCache = ControlsCaptureWindowCache()
+
     private func capture(windowID: UInt32) {
         guard self.windowID == windowID else { return }
         captureTask?.cancel()
         if #available(macOS 14.0, *) {
-            captureTask = Task { [weak self] in
-                let cgImage = await Self.screenCaptureKitImage(windowID: windowID)
+            captureTask = Task { [weak self, windowCache] in
+                let cgImage = await Self.screenCaptureKitImage(windowID: windowID, cache: windowCache)
                 await MainActor.run {
                     guard let self, self.windowID == windowID else { return }
                     guard let cgImage else {
@@ -685,29 +724,73 @@ private final class ControlsWindowPreviewStore: ObservableObject {
     }
 
     @available(macOS 14.0, *)
-    private nonisolated static func screenCaptureKitImage(windowID: UInt32) async -> CGImage? {
-        do {
-            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-            guard let window = content.windows.first(where: { $0.windowID == CGWindowID(windowID) }) else {
-                return nil
-            }
-            let configuration = SCStreamConfiguration()
-            configuration.width = max(2, Int(window.frame.width.rounded()))
-            configuration.height = max(2, Int(window.frame.height.rounded()))
-            configuration.showsCursor = false
-            configuration.capturesAudio = false
-            if #available(macOS 15.0, *) {
-                configuration.captureMicrophone = false
-            }
-            let filter = SCContentFilter(desktopIndependentWindow: window)
-            return await withCheckedContinuation { continuation in
-                SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, _ in
-                    continuation.resume(returning: image)
-                }
-            }
-        } catch {
+    private nonisolated static func screenCaptureKitImage(
+        windowID: UInt32,
+        cache: ControlsCaptureWindowCache
+    ) async -> CGImage? {
+        if let cachedWindow = cache.window(for: windowID),
+           let image = await captureImage(of: cachedWindow) {
+            return image
+        }
+        cache.invalidate()
+        guard let window = await resolveWindow(windowID: windowID) else { return nil }
+        cache.store(window: window, for: windowID)
+        return await captureImage(of: window)
+    }
+
+    @available(macOS 14.0, *)
+    private nonisolated static func resolveWindow(windowID: UInt32) async -> SCWindow? {
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
             return nil
         }
+        return content.windows.first(where: { $0.windowID == CGWindowID(windowID) })
+    }
+
+    @available(macOS 14.0, *)
+    private nonisolated static func captureImage(of window: SCWindow) async -> CGImage? {
+        let configuration = SCStreamConfiguration()
+        configuration.width = max(2, Int(window.frame.width.rounded()))
+        configuration.height = max(2, Int(window.frame.height.rounded()))
+        configuration.showsCursor = false
+        configuration.capturesAudio = false
+        if #available(macOS 15.0, *) {
+            configuration.captureMicrophone = false
+        }
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        return await withCheckedContinuation { continuation in
+            SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, _ in
+                continuation.resume(returning: image)
+            }
+        }
+    }
+}
+
+/// Caches the resolved SCWindow so the expensive full-window enumeration
+/// (SCShareableContent) only runs when the cache misses, expires, or a capture fails.
+private final class ControlsCaptureWindowCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cached: (windowID: UInt32, window: SCWindow, resolvedAt: Date)?
+    private let lifetime: TimeInterval = 5
+
+    func window(for windowID: UInt32) -> SCWindow? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let cached, cached.windowID == windowID,
+              Date().timeIntervalSince(cached.resolvedAt) < lifetime
+        else { return nil }
+        return cached.window
+    }
+
+    func store(window: SCWindow, for windowID: UInt32) {
+        lock.lock()
+        cached = (windowID, window, Date())
+        lock.unlock()
+    }
+
+    func invalidate() {
+        lock.lock()
+        cached = nil
+        lock.unlock()
     }
 }
 

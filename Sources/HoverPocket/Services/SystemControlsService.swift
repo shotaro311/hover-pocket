@@ -4,6 +4,9 @@ import CoreGraphics
 import CoreAudio
 import Darwin
 import Foundation
+import os
+
+private let mediaLog = Logger(subsystem: "local.codex.hover-pocket", category: "MediaControls")
 
 @MainActor
 final class ControlsStore: ObservableObject {
@@ -34,6 +37,7 @@ final class ControlsStore: ObservableObject {
                 self?.refresh()
             }
         }
+        timer.tolerance = 0.25
         pollTimer = timer
         RunLoop.main.add(timer, forMode: .common)
     }
@@ -49,6 +53,8 @@ final class ControlsStore: ObservableObject {
         playbackCommandTask = nil
         playbackRateCommandTask?.cancel()
         playbackRateCommandTask = nil
+        playbackCommandRequestID += 1
+        playbackRateRequestID += 1
         isPlaybackCommandPending = false
         isPlaybackRateCommandPending = false
     }
@@ -58,7 +64,8 @@ final class ControlsStore: ObservableObject {
         refreshTask = Task { [weak self] in
             guard let self else { return }
             let shouldRefreshMedia = !isPlaybackCommandPending && !isPlaybackRateCommandPending
-            let displays = brightnessService.displays()
+            let displays = await brightnessService.displays()
+            guard !Task.isCancelled else { return }
             let nextVolume = await volumeService.currentState()
             let nextNowPlaying = shouldRefreshMedia ? await mediaService.nowPlaying() : nil
             guard !Task.isCancelled else { return }
@@ -154,6 +161,12 @@ final class ControlsStore: ObservableObject {
                 self.isPlaybackCommandPending = false
             }
         }
+        schedulePendingWatchdog(
+            after: 2.5,
+            requestID: requestID,
+            requestIDPath: \.playbackCommandRequestID,
+            pendingPath: \.isPlaybackCommandPending
+        )
     }
 
     func adjustPlaybackRate(by delta: Double) {
@@ -166,11 +179,12 @@ final class ControlsStore: ObservableObject {
         playbackRateRequestID += 1
         let requestID = playbackRateRequestID
         isPlaybackRateCommandPending = true
+        nowPlaying.playbackRate = target
 
         nowPlayingRefreshTask?.cancel()
         playbackRateCommandTask?.cancel()
         playbackRateCommandTask = Task.detached(priority: .userInitiated) { [weak self] in
-            let appliedRate = service.setPlaybackSpeed(
+            let appliedRate = await service.setPlaybackSpeed(
                 target,
                 delta: delta,
                 mediaURLString: mediaURLString,
@@ -195,6 +209,30 @@ final class ControlsStore: ObservableObject {
                 self.refreshNowPlaying()
             }
         }
+        schedulePendingWatchdog(
+            after: 4.0,
+            requestID: requestID,
+            requestIDPath: \.playbackRateRequestID,
+            pendingPath: \.isPlaybackRateCommandPending
+        )
+    }
+
+    private func schedulePendingWatchdog(
+        after seconds: TimeInterval,
+        requestID: Int,
+        requestIDPath: KeyPath<ControlsStore, Int>,
+        pendingPath: ReferenceWritableKeyPath<ControlsStore, Bool>
+    ) {
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard let self,
+                  self[keyPath: requestIDPath] == requestID,
+                  self[keyPath: pendingPath]
+            else { return }
+            mediaLog.error("pending watchdog cleared a stuck media command after \(seconds, format: .fixed(precision: 1))s")
+            self[keyPath: pendingPath] = false
+            self.refreshNowPlaying()
+        }
     }
 
     private func refreshNowPlaying() {
@@ -203,6 +241,7 @@ final class ControlsStore: ObservableObject {
             guard let self else { return }
             let nextNowPlaying = await mediaService.nowPlaying()
             guard !Task.isCancelled else { return }
+            guard !isPlaybackCommandPending, !isPlaybackRateCommandPending else { return }
             self.nowPlaying = nextNowPlaying
         }
     }
@@ -212,7 +251,7 @@ final class ControlsStore: ObservableObject {
         expectedIsPlaying: Bool
     ) async -> ControlsNowPlayingState? {
         var latestReadback: ControlsNowPlayingState?
-        for delay in [300_000_000, 450_000_000, 700_000_000] as [UInt64] {
+        for delay in [150_000_000, 350_000_000, 700_000_000] as [UInt64] {
             guard !Task.isCancelled else { return nil }
             try? await Task.sleep(nanoseconds: delay)
             let state = await service.nowPlaying()
@@ -232,7 +271,7 @@ final class ControlsStore: ObservableObject {
         delta: Double
     ) async -> ControlsNowPlayingState? {
         var latestReadback: ControlsNowPlayingState?
-        for delay in [450_000_000, 650_000_000, 850_000_000] as [UInt64] {
+        for delay in [250_000_000, 500_000_000, 800_000_000] as [UInt64] {
             guard !Task.isCancelled else { return nil }
             try? await Task.sleep(nanoseconds: delay)
             let state = await service.nowPlaying()
@@ -269,35 +308,52 @@ final class ControlsStore: ObservableObject {
     }
 }
 
-private final class DisplayBrightnessService {
+private final class DisplayBrightnessService: @unchecked Sendable {
     static let minimumBrightness = 0.05
+
+    private struct DisplayProbe: Sendable {
+        let displayID: CGDirectDisplayID
+        let name: String
+    }
 
     private let bridge = DisplayServicesBridge()
     private let ddcBridge = DDCBrightnessBridge()
     private let softwareBridge = DisplaySoftwareBrightnessBridge()
 
-    @MainActor
-    func displays() -> [ControlsDisplay] {
-        NSScreen.screens.compactMap { screen in
-            guard let displayID = screen.displayID else { return nil }
-            let isInternal = CGDisplayIsBuiltin(displayID) != 0
-            let ddcBrightness = isInternal ? nil : ddcBridge.getBrightness(for: displayID)
-            let hardwareBrightness = ddcBrightness == nil ? bridge.getBrightness(for: displayID) : nil
-            let usesHardwareBrightness = hardwareBrightness != nil && bridge.canSetBrightness
-            let usesDDCBrightness = ddcBrightness != nil
-            let usesSoftwareBrightness = !usesHardwareBrightness && !usesDDCBrightness && !isInternal
-            let brightness = usesHardwareBrightness
-                ? Double(hardwareBrightness ?? 1)
-                : (ddcBrightness ?? softwareBridge.brightness(for: displayID))
+    /// Hardware reads (DDC over I2C in particular) can block for tens of milliseconds,
+    /// so they run off the main actor. The software gamma bridge holds main-thread-only
+    /// state and is consulted back on the main actor.
+    func displays() async -> [ControlsDisplay] {
+        let probes = await MainActor.run {
+            NSScreen.screens.compactMap { screen -> DisplayProbe? in
+                guard let displayID = screen.displayID else { return nil }
+                return DisplayProbe(displayID: displayID, name: screen.localizedName)
+            }
+        }
+        let readings = probes.map { probe -> (probe: DisplayProbe, isInternal: Bool, ddcBrightness: Double?, hardwareBrightness: Float?) in
+            let isInternal = CGDisplayIsBuiltin(probe.displayID) != 0
+            let ddcBrightness = isInternal ? nil : ddcBridge.getBrightness(for: probe.displayID)
+            let hardwareBrightness = ddcBrightness == nil ? bridge.getBrightness(for: probe.displayID) : nil
+            return (probe, isInternal, ddcBrightness, hardwareBrightness)
+        }
+        return await MainActor.run {
+            readings.map { reading in
+                let usesHardwareBrightness = reading.hardwareBrightness != nil && self.bridge.canSetBrightness
+                let usesDDCBrightness = reading.ddcBrightness != nil
+                let usesSoftwareBrightness = !usesHardwareBrightness && !usesDDCBrightness && !reading.isInternal
+                let brightness = usesHardwareBrightness
+                    ? Double(reading.hardwareBrightness ?? 1)
+                    : (reading.ddcBrightness ?? self.softwareBridge.brightness(for: reading.probe.displayID))
 
-            return ControlsDisplay(
-                id: String(displayID),
-                displayID: displayID,
-                name: screen.localizedName,
-                kind: isInternal ? .internalDisplay : .externalDisplay,
-                brightness: brightness.clamped(to: Self.minimumBrightness...1),
-                isControllable: usesHardwareBrightness || usesDDCBrightness || usesSoftwareBrightness
-            )
+                return ControlsDisplay(
+                    id: String(reading.probe.displayID),
+                    displayID: reading.probe.displayID,
+                    name: reading.probe.name,
+                    kind: reading.isInternal ? .internalDisplay : .externalDisplay,
+                    brightness: brightness.clamped(to: Self.minimumBrightness...1),
+                    isControllable: usesHardwareBrightness || usesDDCBrightness || usesSoftwareBrightness
+                )
+            }
         }
     }
 
@@ -997,9 +1053,9 @@ final class MediaRemoteService: @unchecked Sendable {
         delta: Double = 0,
         mediaURLString: String? = nil,
         preferredTitle: String = ""
-    ) -> Double? {
+    ) async -> Double? {
         let target = speed.clamped(to: 0.5...3.0)
-        let browserRate = browserFallback.setPlaybackSpeed(
+        let browserRate = await browserFallback.setPlaybackSpeed(
             target,
             delta: delta,
             mediaURLString: mediaURLString,
@@ -1113,8 +1169,6 @@ final class MediaRemoteService: @unchecked Sendable {
 }
 
 private final class JXANowPlayingService: @unchecked Sendable {
-    private static let timeout: DispatchTimeInterval = .seconds(2)
-
     private struct Payload: Decodable {
         let title: String
         let artist: String
@@ -1164,40 +1218,18 @@ private final class JXANowPlayingService: @unchecked Sendable {
     """
 
     func nowPlaying() async -> ControlsNowPlayingState {
-        await Task.detached(priority: .utility) {
-            guard let payload = Self.fetchPayload() else { return .empty }
-            return Self.state(from: payload)
-        }.value
+        guard let payload = await Self.fetchPayload() else { return .empty }
+        return Self.state(from: payload)
     }
 
-    private static func fetchPayload() -> Payload? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-l", "JavaScript", "-e", script]
-
-        let outputPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-        } catch {
+    private static func fetchPayload() async -> Payload? {
+        guard let output = await OSAScriptRunner.run(
+            arguments: ["-l", "JavaScript", "-e", script],
+            timeout: 2.0
+        ) else {
             return nil
         }
-        let semaphore = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .utility).async {
-            process.waitUntilExit()
-            semaphore.signal()
-        }
-        guard semaphore.wait(timeout: .now() + timeout) == .success else {
-            process.terminate()
-            _ = semaphore.wait(timeout: .now() + .milliseconds(500))
-            return nil
-        }
-        guard process.terminationStatus == 0 else { return nil }
-
-        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        guard !data.isEmpty else { return nil }
+        guard let data = output.data(using: .utf8), !data.isEmpty else { return nil }
         return try? JSONDecoder().decode(Payload.self, from: data)
     }
 
@@ -1278,32 +1310,113 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         BrowserTarget(bundleIdentifier: "company.thebrowser.dia", appleScriptName: "Dia", scriptKind: .chromium, usesFocusCommand: true)
     ]
 
+    private struct CachedTabContext {
+        let bundleIdentifier: String
+        let urlString: String
+        let timestamp: Date
+    }
+
+    private static let cacheLifetime: TimeInterval = 10
+    private let cacheLock = NSLock()
+    private var cachedTabContext: CachedTabContext?
+
     func context(preferredTitle: String = "") async -> BrowserMediaContext? {
-        await Task.detached(priority: .utility) { [targets] in
-            for target in targets {
-                guard let application = Self.runningApplication(bundleIdentifier: target.bundleIdentifier),
-                      let tab = Self.bestVisibleMediaTab(
-                        in: target,
-                        processIdentifier: application.processIdentifier,
-                        preferredTitle: preferredTitle
-                      )
-                else { continue }
-                let cleanedTitle = Self.cleanedTitle(tab.title, sourceName: tab.sourceName)
-                let playbackRate = target.usesFocusCommand
-                    ? nil
-                    : Self.readPlaybackRate(in: target, matchingURLString: tab.url.absoluteString)
-                return BrowserMediaContext(
+        if let cachedContext = await contextFromCache(preferredTitle: preferredTitle) {
+            return cachedContext
+        }
+        for target in targets {
+            guard let application = Self.runningApplication(bundleIdentifier: target.bundleIdentifier),
+                  let tab = await Self.bestVisibleMediaTab(
+                    in: target,
                     processIdentifier: application.processIdentifier,
-                    title: tab.title,
-                    cleanedTitle: cleanedTitle,
-                    sourceName: tab.sourceName,
-                    urlString: tab.url.absoluteString,
-                    windowID: tab.windowID,
-                    playbackRate: playbackRate
-                )
-            }
+                    preferredTitle: preferredTitle
+                  )
+            else { continue }
+            let cleanedTitle = Self.cleanedTitle(tab.title, sourceName: tab.sourceName)
+            let playbackRate = target.usesFocusCommand
+                ? nil
+                : await Self.readPlaybackRate(in: target, matchingURLString: tab.url.absoluteString)
+            storeCache(bundleIdentifier: target.bundleIdentifier, urlString: tab.url.absoluteString)
+            return BrowserMediaContext(
+                processIdentifier: application.processIdentifier,
+                title: tab.title,
+                cleanedTitle: cleanedTitle,
+                sourceName: tab.sourceName,
+                urlString: tab.url.absoluteString,
+                windowID: tab.windowID,
+                playbackRate: playbackRate
+            )
+        }
+        invalidateCache()
+        return nil
+    }
+
+    private func contextFromCache(preferredTitle: String) async -> BrowserMediaContext? {
+        guard let cached = currentCache(),
+              let target = targets.first(where: { $0.bundleIdentifier == cached.bundleIdentifier })
+        else { return nil }
+        guard let application = Self.runningApplication(bundleIdentifier: cached.bundleIdentifier) else {
+            invalidateCache()
             return nil
-        }.value
+        }
+        guard let tab = await Self.tabInfo(in: target, matchingURLString: cached.urlString),
+              let mediaSource = Self.sourceName(for: tab.url)
+        else {
+            invalidateCache()
+            return nil
+        }
+        let normalizedPreferredTitle = Self.cleanedComparableTitle(preferredTitle)
+        if !normalizedPreferredTitle.isEmpty {
+            let normalizedTabTitle = Self.cleanedComparableTitle(tab.title)
+            let matches = normalizedTabTitle.localizedCaseInsensitiveContains(normalizedPreferredTitle)
+                || normalizedPreferredTitle.localizedCaseInsensitiveContains(normalizedTabTitle)
+            guard matches else { return nil }
+        }
+        let cleanedTitle = Self.cleanedTitle(tab.title, sourceName: mediaSource)
+        let playbackRate = target.usesFocusCommand
+            ? nil
+            : await Self.readPlaybackRate(in: target, matchingURLString: tab.url.absoluteString)
+        storeCache(bundleIdentifier: target.bundleIdentifier, urlString: tab.url.absoluteString)
+        return BrowserMediaContext(
+            processIdentifier: application.processIdentifier,
+            title: tab.title,
+            cleanedTitle: cleanedTitle,
+            sourceName: mediaSource,
+            urlString: tab.url.absoluteString,
+            windowID: Self.windowID(
+                for: application.processIdentifier,
+                title: tab.title,
+                cleanedTitle: cleanedTitle
+            ),
+            playbackRate: playbackRate
+        )
+    }
+
+    private func currentCache() -> CachedTabContext? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        guard let cachedTabContext else { return nil }
+        guard Date().timeIntervalSince(cachedTabContext.timestamp) < Self.cacheLifetime else {
+            self.cachedTabContext = nil
+            return nil
+        }
+        return cachedTabContext
+    }
+
+    private func storeCache(bundleIdentifier: String, urlString: String) {
+        cacheLock.lock()
+        cachedTabContext = CachedTabContext(
+            bundleIdentifier: bundleIdentifier,
+            urlString: urlString,
+            timestamp: Date()
+        )
+        cacheLock.unlock()
+    }
+
+    private func invalidateCache() {
+        cacheLock.lock()
+        cachedTabContext = nil
+        cacheLock.unlock()
     }
 
     static func state(from context: BrowserMediaContext) -> ControlsNowPlayingState {
@@ -1327,11 +1440,11 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         delta: Double,
         mediaURLString: String?,
         preferredTitle: String
-    ) -> Double? {
+    ) async -> Double? {
         let targetSpeed = speed.clamped(to: 0.5...3.0)
         for target in targets {
             guard let application = Self.runningApplication(bundleIdentifier: target.bundleIdentifier),
-                  let tab = Self.selectedMediaTab(
+                  let tab = await Self.selectedMediaTab(
                     in: target,
                     preferredURLString: mediaURLString,
                     preferredTitle: preferredTitle
@@ -1339,20 +1452,20 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
             else { continue }
             let tabURLString = tab.url.absoluteString
             if !target.usesFocusCommand,
-               let appliedRate = Self.setHTMLPlaybackSpeed(targetSpeed, in: target, matchingURLString: tabURLString) {
+               let appliedRate = await Self.setHTMLPlaybackSpeed(targetSpeed, in: target, matchingURLString: tabURLString) {
                 return appliedRate
             }
             if delta != 0,
-               Self.focusTab(in: target, matchingURLString: tabURLString) {
-                Thread.sleep(forTimeInterval: target.usesFocusCommand ? 0.24 : 0.12)
+               await Self.focusTab(in: target, matchingURLString: tabURLString) {
+                try? await Task.sleep(nanoseconds: UInt64((target.usesFocusCommand ? 0.24 : 0.12) * 1_000_000_000))
                 guard Self.postPlaybackRateShortcut(delta: delta, processIdentifier: application.processIdentifier) else {
                     continue
                 }
-                Thread.sleep(forTimeInterval: target.usesFocusCommand ? 0.32 : 0.25)
+                try? await Task.sleep(nanoseconds: UInt64((target.usesFocusCommand ? 0.32 : 0.25) * 1_000_000_000))
                 if target.usesFocusCommand {
                     return Self.nextShortcutPlaybackRate(currentRate: targetSpeed - delta, delta: delta)
                 }
-                if let shortcutRate = Self.readPlaybackRate(in: target, matchingURLString: tabURLString),
+                if let shortcutRate = await Self.readPlaybackRate(in: target, matchingURLString: tabURLString),
                    abs(shortcutRate - targetSpeed) < 0.05 {
                     return shortcutRate
                 }
@@ -1367,8 +1480,8 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         }
     }
 
-    private static func bestVisibleMediaTab(in target: BrowserTarget, processIdentifier: pid_t, preferredTitle: String = "") -> (title: String, url: URL, sourceName: String, windowID: UInt32?)? {
-        let tabs = mediaTabs(in: target).map { tab in
+    private static func bestVisibleMediaTab(in target: BrowserTarget, processIdentifier: pid_t, preferredTitle: String = "") async -> (title: String, url: URL, sourceName: String, windowID: UInt32?)? {
+        let tabs = await mediaTabs(in: target).map { tab in
             let cleanedTitle = cleanedTitle(tab.title, sourceName: tab.sourceName)
             return (
                 title: tab.title,
@@ -1393,8 +1506,8 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         in target: BrowserTarget,
         preferredURLString: String?,
         preferredTitle: String
-    ) -> (title: String, url: URL, sourceName: String)? {
-        let tabs = mediaTabs(in: target)
+    ) async -> (title: String, url: URL, sourceName: String)? {
+        let tabs = await mediaTabs(in: target)
         let normalizedPreferredURL = preferredURLString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let normalizedPreferredTitle = cleanedComparableTitle(preferredTitle)
         let hasPreferredTarget = !normalizedPreferredURL.isEmpty || !normalizedPreferredTitle.isEmpty
@@ -1417,8 +1530,8 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         return tabs.first
     }
 
-    private static func mediaTabs(in target: BrowserTarget) -> [(title: String, url: URL, sourceName: String)] {
-        guard let result = runAppleScript(source: scriptSource(for: target)),
+    private static func mediaTabs(in target: BrowserTarget) async -> [(title: String, url: URL, sourceName: String)] {
+        guard let result = await runAppleScript(source: scriptSource(for: target)),
               !result.isEmpty
         else {
             return []
@@ -1470,8 +1583,43 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         }
     }
 
-    private static func runAppleScript(source: String) -> String? {
-        runAppleScriptWithTimeout(source: source, timeout: .milliseconds(1200))
+    private static func runAppleScript(source: String) async -> String? {
+        await runAppleScriptWithTimeout(source: source, timeout: 1.2)
+    }
+
+    private static func tabInfo(in target: BrowserTarget, matchingURLString: String) async -> (title: String, url: URL)? {
+        guard !matchingURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        guard let result = await runAppleScriptWithTimeout(
+            source: tabInfoSource(for: target, matchingURLString: matchingURLString),
+            timeout: 0.8
+        ) else {
+            return nil
+        }
+        let lines = result.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard lines.count >= 2, let url = URL(string: lines[1]) else { return nil }
+        return (lines[0], url)
+    }
+
+    private static func tabInfoSource(for target: BrowserTarget, matchingURLString: String) -> String {
+        let escapedName = appleScriptEscaped(target.appleScriptName)
+        let escapedURL = appleScriptEscaped(matchingURLString)
+        let titleProperty = target.scriptKind == .safari ? "name" : "title"
+        return """
+        tell application "\(escapedName)"
+          if (count of windows) is 0 then return ""
+          repeat with browserWindow in windows
+            repeat with browserTab in tabs of browserWindow
+              set tabURL to URL of browserTab
+              if tabURL is "\(escapedURL)" then
+                return (\(titleProperty) of browserTab) & linefeed & tabURL
+              end if
+            end repeat
+          end repeat
+          return ""
+        end tell
+        """
     }
 
     private static func parseTabResults(_ result: String) -> [(title: String, url: URL)] {
@@ -1487,7 +1635,7 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         }
     }
 
-    private static func readPlaybackRate(in target: BrowserTarget, matchingURLString: String) -> Double? {
+    private static func readPlaybackRate(in target: BrowserTarget, matchingURLString: String) async -> Double? {
         let javascript = """
         (() => {
           const videos = Array.from(document.querySelectorAll('video'));
@@ -1495,16 +1643,16 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
           return video ? String(video.playbackRate || 1) : '';
         })()
         """
-        guard let result = runAppleScriptWithTimeout(
+        guard let result = await runAppleScriptWithTimeout(
             source: browserJavaScriptSource(for: target, javascript: javascript, matchingURLString: matchingURLString),
-            timeout: .milliseconds(800)
+            timeout: 0.8
         ) else {
             return nil
         }
         return Double(result)
     }
 
-    private static func setHTMLPlaybackSpeed(_ speed: Double, in target: BrowserTarget, matchingURLString: String) -> Double? {
+    private static func setHTMLPlaybackSpeed(_ speed: Double, in target: BrowserTarget, matchingURLString: String) async -> Double? {
         let javascript = """
         (() => {
           const videos = Array.from(document.querySelectorAll('video'));
@@ -1514,9 +1662,9 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
           return String(video.playbackRate || \(String(format: "%.1f", speed)));
         })()
         """
-        guard let result = runAppleScriptWithTimeout(
+        guard let result = await runAppleScriptWithTimeout(
             source: browserJavaScriptSource(for: target, javascript: javascript, matchingURLString: matchingURLString),
-            timeout: .milliseconds(800)
+            timeout: 0.8
         ) else {
             return nil
         }
@@ -1583,11 +1731,11 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         return "tabURL is \"\(appleScriptEscaped(matchingURLString))\""
     }
 
-    private static func focusTab(in target: BrowserTarget, matchingURLString: String) -> Bool {
+    private static func focusTab(in target: BrowserTarget, matchingURLString: String) async -> Bool {
         guard !matchingURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        return runAppleScriptWithTimeout(
+        return await runAppleScriptWithTimeout(
             source: focusTabSource(for: target, matchingURLString: matchingURLString),
-            timeout: .milliseconds(600)
+            timeout: 0.6
         ) == "ok"
     }
 
@@ -1657,34 +1805,8 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
-    private static func runAppleScriptWithTimeout(source: String, timeout: DispatchTimeInterval = .seconds(2)) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", source]
-
-        let outputPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-        let semaphore = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .utility).async {
-            process.waitUntilExit()
-            semaphore.signal()
-        }
-        guard semaphore.wait(timeout: .now() + timeout) == .success else {
-            process.terminate()
-            _ = semaphore.wait(timeout: .now() + .milliseconds(500))
-            return nil
-        }
-        guard process.terminationStatus == 0 else { return nil }
-        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        let value = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value?.isEmpty == false ? value : nil
+    private static func runAppleScriptWithTimeout(source: String, timeout: TimeInterval = 2.0) async -> String? {
+        await OSAScriptRunner.run(arguments: ["-e", source], timeout: timeout)
     }
 
     private static func windowID(for processIdentifier: pid_t, title: String, cleanedTitle: String) -> UInt32? {
@@ -1789,5 +1911,82 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
             break
         }
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private enum OSAScriptRunner {
+    static func run(arguments: [String], timeout: TimeInterval) async -> String? {
+        let execution = OSAScriptExecution(arguments: arguments)
+        return await withCheckedContinuation { continuation in
+            execution.start { output in
+                continuation.resume(returning: output)
+            }
+            Task.detached(priority: .utility) {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                if execution.timeOut() {
+                    mediaLog.error("osascript timed out after \(timeout, format: .fixed(precision: 1))s")
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
+}
+
+private final class OSAScriptExecution: @unchecked Sendable {
+    private let process = Process()
+    private let outputPipe = Pipe()
+    private let lock = NSLock()
+    private var isResumed = false
+
+    init(arguments: [String]) {
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = arguments
+        process.standardOutput = outputPipe
+        process.standardError = Pipe()
+    }
+
+    func start(onCompletion: @escaping @Sendable (String?) -> Void) {
+        process.terminationHandler = { [weak self] finished in
+            guard let self, self.tryClaimResume() else { return }
+            guard finished.terminationStatus == 0 else {
+                mediaLog.debug("osascript exited with status \(finished.terminationStatus)")
+                onCompletion(nil)
+                return
+            }
+            let data = self.outputPipe.fileHandleForReading.readDataToEndOfFile()
+            let value = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            onCompletion(value?.isEmpty == false ? value : nil)
+        }
+        do {
+            try process.run()
+        } catch {
+            process.terminationHandler = nil
+            if tryClaimResume() {
+                mediaLog.error("osascript failed to launch: \(error.localizedDescription)")
+                onCompletion(nil)
+            }
+        }
+    }
+
+    /// Returns true when the caller claimed the timeout and must resume the continuation.
+    func timeOut() -> Bool {
+        guard tryClaimResume() else { return false }
+        guard process.isRunning else { return true }
+        let processIdentifier = process.processIdentifier
+        process.terminate()
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, self.process.isRunning else { return }
+            mediaLog.error("osascript ignored SIGTERM; sending SIGKILL to \(processIdentifier)")
+            kill(processIdentifier, SIGKILL)
+        }
+        return true
+    }
+
+    private func tryClaimResume() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if isResumed { return false }
+        isResumed = true
+        return true
     }
 }
