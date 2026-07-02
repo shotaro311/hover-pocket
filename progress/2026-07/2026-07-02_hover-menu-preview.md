@@ -111,3 +111,43 @@
 - メディア操作の体感改善（YouTube 再生中の連打等）は実機での手動確認が必要。OSLog `MediaControls` カテゴリで失敗経路を追跡可能。
 - タイマー発火演出（バウンス/波紋/自動オープン）は自動検証対象外。実機でプリセット開始 → 発火 → 停止の一連を確認するのが望ましい。
 - 配信手順の学び: `publish_github_release.sh` はリモート HEAD にタグを作るため、**公開前に必ずコミットを push する**こと。
+
+---
+
+# 2026-07-02 (3回目): タイマーUIのピン留め方式への変更と発火演出調整 (build 90)
+
+## 目的
+
+- タイマーUIをユーザーフィードバックに沿って変更: 下部は「タイマー」「ポモドーロタイマー」の2カードのみとし、実行中タイマーの右上ピン留めで最大4つまでストックできる方式にする。
+- 波紋アニメーションを削除し、バーのバウンスを「上端から下へぴょこぴょこ顔を出す」自然な動きにする。
+
+## 実施内容 (`1ab6787`)
+
+- `TimerStore`: 固定4プリセットを廃止し、`draftTimer` / `draftPomodoro`（2つの入力カード、drafts.json 保存）+ `pinnedPresets`（最大4、pinned.json 保存）に再構成。
+- `RunningTimer` に `pinnedPresetID` を追加し、実行中カードのピン状態を反映。`togglePin` / `removePinnedPreset` を追加。
+- `TimerView`: セクション構成を「実行中 → ピン留め → タイマー → ポモドーロタイマー」に変更。実行中カード右上に pin/pin.fill トグル、ピン留め行に再開始 + ピン解除ボタン。
+- `TimerAlertOverlayController`（波紋）を削除し、`HoverWindowController` の購読はパネル自動オープンのみに簡素化。
+- `TimerAlertBounceModifier`: オフセットを常に0以下（-4pt→0→-4pt）にし、バーが上端に接したまま下へ顔を出す動きに変更。切り離れて見える問題を解消。
+
+## 検証
+
+- `swift build` / `git diff --check` / `./script/build_and_run.sh --verify`: 成功。`HoverPocket launched` を確認。
+
+## 配信
+
+- Code commit: `1ab6787`（配信前に push 済み。タグ整合の教訓を反映）
+- Release: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-90`
+- ZIP: `dist/releases/HoverPocket-0.1.0-90.zip`
+- SHA256: `97d78300df694400e0cd1d18de96722ad29a685c63ab017923954252b8638dda`
+- Notary submission ID: `700fc5d1-2326-4279-87c9-ec36b5bd1b32`
+- Notary status: `Accepted`
+
+## 配信後 readback
+
+- `git ls-remote --tags origin v0.1.0-90`: tag が commit `1ab6787` を指すことを確認。
+- `gh release view v0.1.0-90 --json assets`: 4 asset を確認。
+- appcast: `sparkle:version` = `90` を確認。`shasum -c`: OK。`zipinfo`: top-level は `HoverPocket.app` のみ。
+
+## 残リスク
+
+- ピン留めUX（右上マークの視認性、ピン→再開始の導線）とバウンスの見た目は実機での体感確認が必要。
