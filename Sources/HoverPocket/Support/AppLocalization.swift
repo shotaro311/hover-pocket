@@ -39,6 +39,7 @@ enum AppTextKey: String, Sendable {
     case addEvent
     case allDay
     case calendar
+    case calculator
     case calendarAccessOff
     case calendarConfigMissing
     case calendarConfigMissingDetail
@@ -167,6 +168,13 @@ enum AppTextKey: String, Sendable {
     case panelSizeMediumDetail
     case panelSizeSmall
     case panelSizeSmallDetail
+    case panelTextSize
+    case panelTextSizeLarge
+    case panelTextSizeLargeDetail
+    case panelTextSizeMedium
+    case panelTextSizeMediumDetail
+    case panelTextSizeSmall
+    case panelTextSizeSmallDetail
     case panelsSectionTitle
     case previousMonth
     case readOnly
@@ -263,6 +271,8 @@ enum AppText {
             return text(.stickyNotes, language: language)
         case "controls":
             return text(.controls, language: language)
+        case "calculator":
+            return text(.calculator, language: language)
         case "timer":
             return text(.timer, language: language)
         default:
@@ -275,6 +285,7 @@ enum AppText {
         case .addEvent: return "予定を追加"
         case .allDay: return "終日"
         case .calendar: return "カレンダー"
+        case .calculator: return "電卓"
         case .calendarAccessOff: return "読み取り専用"
         case .calendarConfigMissing: return "Google OAuth が未設定です"
         case .calendarConfigMissingDetail: return "GOOGLE_SIGN_IN_CLIENT_ID を設定してからアプリを起動してください。"
@@ -403,6 +414,13 @@ enum AppText {
         case .panelSizeMediumDetail: return "現在の標準サイズです。"
         case .panelSizeSmall: return "小"
         case .panelSizeSmallDetail: return "コンパクトに表示します。"
+        case .panelTextSize: return "文字サイズ"
+        case .panelTextSizeLarge: return "大"
+        case .panelTextSizeLargeDetail: return "ホバーパネル内の可読テキストを大きく表示します。"
+        case .panelTextSizeMedium: return "中"
+        case .panelTextSizeMediumDetail: return "ホバーパネル内の可読テキストを少し大きく表示します。"
+        case .panelTextSizeSmall: return "小"
+        case .panelTextSizeSmallDetail: return "現在の文字サイズです。"
         case .panelsSectionTitle: return "パネル"
         case .previousMonth: return "前月"
         case .readOnly: return "読み取り専用"
@@ -483,6 +501,7 @@ enum AppText {
         case .addEvent: return "Add event"
         case .allDay: return "All day"
         case .calendar: return "Calendar"
+        case .calculator: return "Calculator"
         case .calendarAccessOff: return "Read only"
         case .calendarConfigMissing: return "Google OAuth is not configured"
         case .calendarConfigMissingDetail: return "Set GOOGLE_SIGN_IN_CLIENT_ID before running the app."
@@ -611,6 +630,13 @@ enum AppText {
         case .panelSizeMediumDetail: return "Current standard size."
         case .panelSizeSmall: return "Small"
         case .panelSizeSmallDetail: return "Shows panels compactly."
+        case .panelTextSize: return "Text size"
+        case .panelTextSizeLarge: return "Large"
+        case .panelTextSizeLargeDetail: return "Shows readable text in hover panels larger."
+        case .panelTextSizeMedium: return "Medium"
+        case .panelTextSizeMediumDetail: return "Shows readable text in hover panels a little larger."
+        case .panelTextSizeSmall: return "Small"
+        case .panelTextSizeSmallDetail: return "Current text size."
         case .panelsSectionTitle: return "Panels"
         case .previousMonth: return "Previous month"
         case .readOnly: return "Read only"

@@ -15,18 +15,18 @@ struct StickyNoteHeaderView: View {
     var body: some View {
         HStack(spacing: 8) {
             Label(AppText.text(.stickyNotes, language: language), systemImage: "square.grid.2x2")
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .panelTextFont(size: 10, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white.opacity(0.64))
 
             Text("\(count)")
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .panelTextFont(size: 9, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white.opacity(0.38))
 
             StickyNoteGridSizeControl(selectedSize: gridSize, language: language, onSelect: onSelectGridSize)
 
             if let errorMessage {
                 Text(errorMessage)
-                    .font(.system(size: 9, weight: .medium))
+                    .panelTextFont(size: 9, weight: .medium)
                     .foregroundStyle(.yellow.opacity(0.86))
                     .lineLimit(1)
             }
@@ -63,7 +63,7 @@ struct StickyNotePreviewCard<ContextMenu: View>: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top, spacing: 6) {
                 Text(note.displayTitle(language: language))
-                    .font(.system(size: gridSize.titleFontSize, weight: .bold))
+                    .panelTextFont(size: gridSize.titleFontSize, weight: .bold)
                     .foregroundStyle(Color.black.opacity(0.78))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -86,7 +86,7 @@ struct StickyNotePreviewCard<ContextMenu: View>: View {
 
             if !note.cardPreviewText.isEmpty {
                 Text(note.cardPreviewText)
-                    .font(.system(size: gridSize.bodyFontSize, weight: .medium))
+                    .panelTextFont(size: gridSize.bodyFontSize, weight: .medium)
                     .foregroundStyle(Color.black.opacity(0.58))
                     .lineLimit(gridSize.bodyLineLimit)
                     .fixedSize(horizontal: false, vertical: true)
@@ -95,7 +95,7 @@ struct StickyNotePreviewCard<ContextMenu: View>: View {
             Spacer(minLength: 0)
 
             Text(note.updatedAt.formatted(.dateTime.hour().minute()))
-                .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                .panelTextFont(size: 8.5, weight: .semibold, design: .monospaced)
                 .foregroundStyle(Color.black.opacity(0.34))
         }
         .padding(10)
@@ -174,7 +174,7 @@ struct StickyNoteEditorCard<ContextMenu: View>: View {
     private var titleField: some View {
         TextField(AppText.text(.title, language: language), text: $draftTitle)
             .textFieldStyle(.plain)
-            .font(.system(size: gridSize.titleFontSize + 1, weight: .bold))
+            .panelTextFont(size: gridSize.titleFontSize + 1, weight: .bold)
             .foregroundStyle(Color.black.opacity(0.78))
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -186,7 +186,7 @@ struct StickyNoteEditorCard<ContextMenu: View>: View {
 
     private var bodyEditor: some View {
         TextEditor(text: $draftBody)
-            .font(.system(size: gridSize.bodyFontSize + 1, weight: .medium))
+            .panelTextFont(size: gridSize.bodyFontSize + 1, weight: .medium)
             .foregroundStyle(Color.black.opacity(0.68))
             .scrollContentBackground(.hidden)
             .padding(6)
@@ -254,7 +254,7 @@ struct StickyNoteGridSizeControl: View {
                     onSelect(size)
                 } label: {
                     Text(size.shortTitle(language: language))
-                        .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                        .panelTextFont(size: 8.5, weight: .bold, design: .monospaced)
                         .foregroundStyle(selectedSize == size ? .white : .white.opacity(0.42))
                         .frame(width: 16, height: 16)
                         .background(
@@ -283,7 +283,7 @@ struct StickyNoteUndoToastView: View {
     var body: some View {
         HStack(spacing: 8) {
             Text(toast.message)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .panelTextFont(size: 10, weight: .semibold, design: .monospaced)
                 .foregroundStyle(.white.opacity(0.76))
                 .lineLimit(1)
 
@@ -291,12 +291,12 @@ struct StickyNoteUndoToastView: View {
 
             Button(AppText.text(.stickyUndo, language: language), action: onUndo)
                 .buttonStyle(.plain)
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .panelTextFont(size: 10, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white)
 
             Button(AppText.text(.stickyDontShow, language: language), action: onHideFutureToasts)
                 .buttonStyle(.plain)
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .panelTextFont(size: 9, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white.opacity(0.48))
                 .help(AppText.text(.stickyHideUndoToast, language: language))
         }
@@ -325,7 +325,7 @@ struct StickyNoteArchiveDropZone: View {
                 .font(.system(size: 13, weight: .bold))
 
             Text(AppText.text(.stickyArchive, language: language))
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .panelTextFont(size: 10, weight: .bold, design: .monospaced)
         }
         .foregroundStyle(foregroundColor)
         .frame(maxWidth: .infinity)
@@ -361,7 +361,7 @@ struct StickyNoteEmptyStateView: View {
                 .foregroundStyle(.white.opacity(0.28))
 
             Text(AppText.text(.stickyNoNotes, language: language))
-                .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                .panelTextFont(size: 10.5, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white.opacity(0.5))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

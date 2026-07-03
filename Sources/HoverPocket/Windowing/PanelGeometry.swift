@@ -24,11 +24,11 @@ enum PanelLayout {
     static func previewSize(for panelSize: PanelSizeOption) -> NSSize {
         switch panelSize {
         case .small:
-            return NSSize(width: 456, height: 326)
-        case .medium:
             return NSSize(width: 520, height: 372)
-        case .large:
+        case .medium:
             return NSSize(width: 600, height: 430)
+        case .large:
+            return NSSize(width: 680, height: 488)
         }
     }
 

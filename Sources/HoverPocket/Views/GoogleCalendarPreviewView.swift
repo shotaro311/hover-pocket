@@ -96,7 +96,7 @@ struct GoogleCalendarPreviewView: View {
             .help(settings.text(.previousMonth))
 
             Text(language.formattedDate(displayedMonth, template: "yMMMM"))
-                .font(.system(size: metrics.monthFontSize, weight: .bold, design: .monospaced))
+                .panelTextFont(size: metrics.monthFontSize, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
@@ -118,7 +118,7 @@ struct GoogleCalendarPreviewView: View {
             ForEach(0..<7, id: \.self) { index in
                 let weekdayIndex = (Calendar.current.firstWeekday - 1 + index) % 7
                 Text(String(symbols[weekdayIndex].prefix(1)))
-                    .font(.system(size: metrics.weekdayFontSize, weight: .semibold, design: .monospaced))
+                    .panelTextFont(size: metrics.weekdayFontSize, weight: .semibold, design: .monospaced)
                     .foregroundStyle(.white.opacity(0.38))
                     .frame(width: metrics.dayWidth)
             }
@@ -137,7 +137,7 @@ struct GoogleCalendarPreviewView: View {
         let isSelected = Calendar.current.isDate(day.date, inSameDayAs: detailDate)
         return VStack(spacing: metrics.dayCellSpacing) {
             Text("\(day.dayNumber)")
-                .font(.system(size: metrics.dayNumberFontSize, weight: day.isToday ? .bold : .semibold, design: .monospaced))
+                .panelTextFont(size: metrics.dayNumberFontSize, weight: day.isToday ? .bold : .semibold, design: .monospaced)
                 .foregroundStyle(day.isInDisplayedMonth ? Color.white : Color.white.opacity(0.28))
                 .lineLimit(1)
 
@@ -209,12 +209,12 @@ struct GoogleCalendarPreviewView: View {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(language.formattedDate(detailDate, template: "MMMdEEEE"))
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .panelTextFont(size: 12, weight: .bold, design: .monospaced)
                         .foregroundStyle(.white)
                         .lineLimit(1)
 
                     Text(updatedText)
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .panelTextFont(size: 9, weight: .medium, design: .monospaced)
                         .foregroundStyle(.white.opacity(0.36))
                         .lineLimit(1)
                 }
@@ -244,7 +244,7 @@ struct GoogleCalendarPreviewView: View {
 
             if let message = currentErrorMessage {
                 Label(message, systemImage: "exclamationmark.triangle")
-                    .font(.system(size: 10, weight: .semibold))
+                    .panelTextFont(size: 10, weight: .semibold)
                     .foregroundStyle(.yellow.opacity(0.9))
                     .lineLimit(2)
             }
@@ -259,7 +259,7 @@ struct GoogleCalendarPreviewView: View {
                         .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.28))
                     Text(store.writableSources().isEmpty ? settings.text(.readOnly) : settings.text(.noEvents))
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .panelTextFont(size: 11, weight: .bold, design: .monospaced)
                         .foregroundStyle(.white.opacity(0.62))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -286,12 +286,12 @@ struct GoogleCalendarPreviewView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(eventTitle(for: event))
-                    .font(.system(size: 10.5, weight: .bold))
+                    .panelTextFont(size: 10.5, weight: .bold)
                     .foregroundStyle(.white.opacity(0.88))
                     .lineLimit(2)
 
                 Text(timeText(for: event))
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .panelTextFont(size: 9, weight: .medium, design: .monospaced)
                     .foregroundStyle(.white.opacity(0.44))
                     .lineLimit(1)
             }
@@ -323,7 +323,7 @@ struct GoogleCalendarPreviewView: View {
     private var reconnectNotice: some View {
         HStack(alignment: .center, spacing: 8) {
             Label(settings.text(.calendarConnectionReconnectDetail), systemImage: "exclamationmark.arrow.triangle.2.circlepath")
-                .font(.system(size: 10, weight: .medium))
+                .panelTextFont(size: 10, weight: .medium)
                 .foregroundStyle(.yellow.opacity(0.92))
                 .lineLimit(2)
 
@@ -332,7 +332,7 @@ struct GoogleCalendarPreviewView: View {
             Button(settings.text(.calendarConnectReconnect)) {
                 store.connect()
             }
-            .font(.system(size: 10, weight: .bold))
+            .panelTextFont(size: 10, weight: .bold)
             .controlSize(.small)
         }
         .padding(8)
@@ -354,10 +354,10 @@ struct GoogleCalendarPreviewView: View {
 
             VStack(spacing: 5) {
                 Text(settings.text(.googleCalendar))
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .panelTextFont(size: 14, weight: .bold, design: .monospaced)
                     .foregroundStyle(.white)
                 Text(calendarConnectionPrompt)
-                    .font(.system(size: 11, weight: .medium))
+                    .panelTextFont(size: 11, weight: .medium)
                     .foregroundStyle(.white.opacity(0.48))
             }
 
@@ -373,13 +373,13 @@ struct GoogleCalendarPreviewView: View {
                     }
                     Text(calendarConnectTitle)
                 }
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .panelTextFont(size: 12, weight: .bold, design: .monospaced)
             }
             .disabled(store.connectionState == .signingIn)
 
             if let message = store.lastErrorMessage {
                 Text(message)
-                    .font(.system(size: 10, weight: .medium))
+                    .panelTextFont(size: 10, weight: .medium)
                     .foregroundStyle(.yellow.opacity(0.9))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
@@ -395,11 +395,11 @@ struct GoogleCalendarPreviewView: View {
                 .foregroundStyle(.white.opacity(0.48))
 
             Text(settings.text(.calendarConfigMissing))
-                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .panelTextFont(size: 13, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white)
 
             Text(settings.text(.calendarConfigMissingDetail))
-                .font(.system(size: 11, weight: .medium))
+                .panelTextFont(size: 11, weight: .medium)
                 .foregroundStyle(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
         }
@@ -622,10 +622,10 @@ private struct CalendarEventEditorView: View {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(draft.isNew ? text(.newEvent) : text(.editEvent))
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .panelTextFont(size: 12, weight: .bold, design: .monospaced)
                         .foregroundStyle(.white)
                     Text(language.formattedDate(draft.start, template: "MMMEd"))
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .panelTextFont(size: 9, weight: .medium, design: .monospaced)
                         .foregroundStyle(.white.opacity(0.38))
                 }
 
@@ -642,7 +642,7 @@ private struct CalendarEventEditorView: View {
 
             TextField(text(.title), text: $draft.title)
                 .textFieldStyle(.roundedBorder)
-                .font(.system(size: 11, weight: .medium))
+                .panelTextFont(size: 11, weight: .medium)
                 .focused($focusedField, equals: .title)
 
             Picker(text(.calendar), selection: $draft.calendarID) {
@@ -656,7 +656,7 @@ private struct CalendarEventEditorView: View {
 
             Toggle(text(.allDay), isOn: $draft.isAllDay)
                 .toggleStyle(.checkbox)
-                .font(.system(size: 10, weight: .medium))
+                .panelTextFont(size: 10, weight: .medium)
                 .foregroundStyle(.white.opacity(0.8))
                 .disabled(isSaving)
                 .onChange(of: draft.isAllDay) { _, _ in
@@ -698,16 +698,16 @@ private struct CalendarEventEditorView: View {
 
             TextField(text(.location), text: $draft.location)
                 .textFieldStyle(.roundedBorder)
-                .font(.system(size: 10, weight: .medium))
+                .panelTextFont(size: 10, weight: .medium)
 
             TextField(text(.notes), text: $draft.notes, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
-                .font(.system(size: 10, weight: .medium))
+                .panelTextFont(size: 10, weight: .medium)
                 .lineLimit(2...3)
 
             if let errorMessage {
                 Text(errorMessage)
-                    .font(.system(size: 9, weight: .medium))
+                    .panelTextFont(size: 9, weight: .medium)
                     .foregroundStyle(.yellow.opacity(0.9))
                     .lineLimit(2)
             }

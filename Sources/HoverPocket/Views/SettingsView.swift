@@ -141,6 +141,20 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            VStack(alignment: .leading, spacing: 6) {
+                Picker(settings.text(.panelTextSize), selection: $settings.panelTextSize) {
+                    ForEach(PanelTextSizeOption.allCases) { option in
+                        Text(option.title(language: language)).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(settings.panelTextSize.detail(language: language))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if !settings.rememberLastSelectedProvider, !providerStore.visibleManifests.isEmpty {
                 Picker(settings.text(.defaultPanel), selection: preferredProviderSelection) {
                     ForEach(providerStore.visibleManifests) { manifest in

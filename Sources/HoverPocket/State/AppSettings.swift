@@ -21,6 +21,12 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var panelTextSize: PanelTextSizeOption {
+        didSet {
+            defaults.set(panelTextSize.rawValue, forKey: Self.panelTextSizeKey)
+        }
+    }
+
     @Published var providerSwitchingMode: ProviderSwitchingMode {
         didSet {
             defaults.set(providerSwitchingMode.rawValue, forKey: Self.providerSwitchingModeKey)
@@ -97,6 +103,7 @@ final class AppSettings: ObservableObject {
     private static let appLanguageKey = "appLanguage"
     private static let displayPlacementModeKey = "displayPlacementMode"
     private static let panelSizeKey = "panelSize"
+    private static let panelTextSizeKey = "panelTextSize"
     private static let providerSwitchingModeKey = "providerSwitchingMode"
     private static let pillHandleIconStyleKey = "pillHandleIconStyle"
     private static let showNotchSideHandleAreaKey = "showNotchSideHandleArea"
@@ -118,6 +125,8 @@ final class AppSettings: ObservableObject {
         self.displayPlacementMode = rawValue.flatMap(DisplayPlacementMode.init(rawValue:)) ?? .mainDisplay
         let panelSizeRawValue = defaults.string(forKey: Self.panelSizeKey)
         self.panelSize = panelSizeRawValue.flatMap(PanelSizeOption.init(rawValue:)) ?? .medium
+        let panelTextSizeRawValue = defaults.string(forKey: Self.panelTextSizeKey)
+        self.panelTextSize = panelTextSizeRawValue.flatMap(PanelTextSizeOption.init(rawValue:)) ?? .small
         let providerSwitchingModeRawValue = defaults.string(forKey: Self.providerSwitchingModeKey)
         self.providerSwitchingMode = providerSwitchingModeRawValue.flatMap(ProviderSwitchingMode.init(rawValue:)) ?? .click
         let pillHandleIconStyleRawValue = defaults.string(forKey: Self.pillHandleIconStyleKey)

@@ -107,7 +107,7 @@ struct ControlsView: View {
                 ControlsSlider(value: volumeBinding, accent: .cyan.opacity(0.82))
 
                 Text(percentText(store.volume.level))
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .panelTextFont(size: 10, weight: .bold, design: .monospaced)
                     .foregroundStyle(.white.opacity(0.54))
                     .frame(width: ControlsLayout.valueWidth, alignment: .trailing)
 
@@ -134,18 +134,18 @@ struct ControlsView: View {
 
                         VStack(alignment: .leading, spacing: 4) {
                             Text(store.nowPlaying.title.isEmpty ? text(.controlsMedia) : store.nowPlaying.title)
-                                .font(.system(size: 11, weight: .bold))
+                                .panelTextFont(size: 11, weight: .bold)
                                 .foregroundStyle(.white.opacity(0.86))
                                 .lineLimit(2)
 
                             Text(store.nowPlaying.sourceName.isEmpty ? text(.controlsMedia) : store.nowPlaying.sourceName)
-                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                .panelTextFont(size: 9, weight: .medium, design: .monospaced)
                                 .foregroundStyle(.white.opacity(0.42))
                                 .lineLimit(1)
                         }
 
                         Text(playbackRateText)
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .panelTextFont(size: 9, weight: .bold, design: .monospaced)
                             .foregroundStyle(.yellow.opacity(showsRatePendingIndicator ? 0.52 : 0.86))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 4)
@@ -186,7 +186,7 @@ struct ControlsView: View {
 
                 HStack(spacing: 10) {
                     Text(timeText(store.nowPlaying.progress))
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .panelTextFont(size: 9, weight: .bold, design: .monospaced)
                         .foregroundStyle(.white.opacity(0.48))
                         .frame(width: 38, alignment: .leading)
 
@@ -234,7 +234,7 @@ struct ControlsView: View {
                     Spacer(minLength: 8)
 
                     Text(timeText(store.nowPlaying.duration))
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .panelTextFont(size: 9, weight: .bold, design: .monospaced)
                         .foregroundStyle(.white.opacity(0.48))
                         .frame(width: 38, alignment: .trailing)
                 }
@@ -338,7 +338,7 @@ private struct ControlsSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .panelTextFont(size: 10, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white.opacity(0.64))
 
             content()
@@ -382,7 +382,7 @@ private struct ControlsDisplayRow: View {
             )
 
             Text(display.isControllable ? "\(Int((brightness * 100).rounded()))%" : unsupportedText)
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .panelTextFont(size: 10, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white.opacity(0.54))
                 .frame(width: ControlsLayout.valueWidth, alignment: .trailing)
                 .minimumScaleFactor(0.7)
@@ -455,12 +455,12 @@ private struct ControlsDisplayIdentityIcon: View {
     private var displayNameBubble: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(displayName)
-                .font(.system(size: 9, weight: .bold))
+                .panelTextFont(size: 9, weight: .bold)
                 .foregroundStyle(.white.opacity(0.88))
                 .lineLimit(1)
 
             Text(kindText)
-                .font(.system(size: 7.5, weight: .medium, design: .monospaced))
+                .panelTextFont(size: 7.5, weight: .medium, design: .monospaced)
                 .foregroundStyle(.white.opacity(0.44))
                 .lineLimit(1)
         }
@@ -611,7 +611,7 @@ private struct ControlsVideoThumbnail: View {
             )
 
             Text(track.sourceName.isEmpty ? fallbackSourceName : track.sourceName)
-                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                .panelTextFont(size: 8, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white.opacity(0.72))
                 .lineLimit(1)
                 .padding(.horizontal, 6)
@@ -806,7 +806,7 @@ private struct ControlsEmptyRow: View {
 
     var body: some View {
         Text(message)
-            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .panelTextFont(size: 10, weight: .medium, design: .monospaced)
             .foregroundStyle(.white.opacity(0.38))
             .frame(height: 30, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)

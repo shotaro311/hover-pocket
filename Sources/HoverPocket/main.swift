@@ -10,6 +10,9 @@ if CommandLine.arguments.contains("--verify-camera") {
 if CommandLine.arguments.contains("--verify-media") {
     MediaVerificationCommand.run()
 }
+if CommandLine.arguments.contains("--verify-calculator") {
+    CalculatorVerificationCommand.run()
+}
 
 let app = NSApplication.shared
 let delegate = AppDelegate()

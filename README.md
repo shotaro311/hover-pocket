@@ -1,6 +1,6 @@
 # ホバーポケット (HoverPocket)
 
-ホバーポケットは、画面上部のノッチ付近へマウスを重ねるだけで、ミラー、ディスプレイ/音量/メディア操作、Google Calendar、クリップボード履歴、付箋メモを素早く開ける macOS アプリです。
+ホバーポケットは、画面上部のノッチ付近へマウスを重ねるだけで、ミラー、ディスプレイ/音量/メディア操作、Google Calendar、クリップボード履歴、付箋メモ、タイマー、電卓を素早く開ける macOS アプリです。
 
 画面上部に小さな黒いハンドルを置き、そこへホバーすると暗いユーティリティパネルが表示されます。通常のメニューバーアプリよりも、必要なものをポケットからパッと取り出す体験を重視しています。
 
@@ -28,7 +28,7 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 
 ## 現在できること
 
-現在は組み込みの `Mirror`、`Controls`、`Calendar`、`Clipboard`、`Sticky Notes`、`Timer` プロバイダーを搭載しています。パネル下部には AI command lane があり、Calendar 操作の一部を自然文から実行できます。
+現在は組み込みの `Mirror`、`Controls`、`Calendar`、`Clipboard`、`Sticky Notes`、`Timer`、`Calculator` プロバイダーを搭載しています。パネル下部には AI command lane があり、Calendar 操作の一部を自然文から実行できます。
 
 ### ミラー
 
@@ -87,6 +87,14 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 - パネル表示中は Now Playing の変更通知を購読し、イベント駆動で表示を更新します。adapter が使えない環境では従来のポーリング読み取りへフォールバックします。
 - 倍速調整はブラウザ（Chrome/Safari 等）の HTML5 動画を直接制御します。Chrome/Safari では「Apple Events からの JavaScript を許可」（開発メニュー）が有効な場合に最も確実に動作します。
 
+### 電卓
+
+- ホバーパネル内で四則演算ができます。
+- 小数入力、符号反転、パーセント、バックスペース、AC に対応しています。
+- 計算結果はコピーできます。
+- 数字、演算子、Enter、Escape、Backspace などのキーボード入力に対応しています。
+- 0 除算など計算できない入力は `Error` と表示します。
+
 ### Timer
 
 - 「タイマー」と「ポモドーロタイマー」の2つの入力カードから開始できます。各カードにタイトル（任意）、色（4色）、音あり/なしを設定できます。
@@ -113,7 +121,8 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 ## 設定
 
 - 表示先ディスプレイ: `Main / Sub / All`
-- パネルサイズ: `Small / Medium / Large`
+- パネルサイズ: `Small / Medium / Large`。現在は `Small` でも以前より一回り大きく、`Small=520x372`、`Medium=600x430`、`Large=680x488` です。
+- ホバーパネル内の文字サイズ: `Small / Medium / Large`
 - 表示するプロバイダーの ON / OFF
 - プロバイダーの表示順
 - 前回開いたプロバイダーを優先するか、固定のデフォルトパネルを使うか

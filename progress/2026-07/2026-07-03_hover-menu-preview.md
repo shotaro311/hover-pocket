@@ -47,3 +47,29 @@
 - 設定画面での Automation / Accessibility 権限状態の可視化（未実施）。
 - 倍速の MediaRemote フォールバックは adapter 未対応のため現状維持（ブラウザ HTML5 直接制御が第一経路）。
 - 楽観的更新 / readback / watchdog の完全削除は adapter 不使用環境のフォールバックとして温存中。
+
+---
+
+# 2026-07-03: パネルサイズ拡大とホバーパネル文字サイズ設定
+
+## 実施内容
+
+- `PanelLayout.previewSize(for:)` の raw value 対応は維持したまま、`small=520x372`、`medium=600x430`、`large=680x488` へ拡大した。
+- `PanelTextSizeOption` と `panelTextSize` 設定を追加し、既定値は現状相当の `small` にした。
+- Settings の `パネル` セクションに `文字サイズ` picker を追加した。
+- `PanelTextStyle` helper を追加し、`HoverPanelShell` から provider 本体と AI command lane にだけ文字サイズ環境値を渡すようにした。
+- 主要 provider の可読テキストへ `panelTextFont(...)` を適用した。対象は Google Calendar、Clipboard、Controls、Sticky Notes、Timer、Calculator、AI command lane。Provider header、Plugin host の空状態、純粋なアイコンは対象外。
+- `CalculatorProvider` を追加し、ProviderRegistry に日本語 title `電卓` として登録した。
+- Calculator は四則演算、小数、符号反転、パーセント、バックスペース、AC、コピー、キーボード入力、0 除算時の `Error` 表示に対応した。
+
+## 検証
+
+- `swift build` 成功。
+- `.build/debug/HoverPocket --verify-calculator` 成功（`calculator_verify=ok`, `display=25`）。
+- `.build/debug/HoverPocket --verify-calculator --calculator-sequence '7/0='` 成功（`display=Error`）。
+- `git diff --check` 成功。
+- `./script/build_and_run.sh --verify` 成功（`HoverPocket launched`）。
+
+## 補足
+
+- Calendar 専用の日時入力コンポーネント、Mirror、細かい tooltip/help 文言は今回の安全適用範囲から外した。主要 provider の本文・見出し・状態文を優先したため。

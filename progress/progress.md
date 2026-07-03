@@ -172,6 +172,7 @@ status: active
 
 ## 最近の更新
 
+- 2026-07-03: Calculator provider を追加し、ProviderRegistry に日本語 title `電卓` として登録。四則演算、小数、符号反転、パーセント、バックスペース、AC、コピー、キーボード入力、0除算時の `Error` 表示に対応。パネル preview size は `small=520x372`、`medium=600x430`、`large=680x488` へ拡大し、ホバーパネル内の可読テキスト用に `文字サイズ` 設定を追加。Google Calendar、Clipboard、Controls、Sticky Notes、Timer、Calculator、AI command lane の主要テキストへ適用。`swift build`、calculator verify 2系統、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-07-02: Sticky Notes の入力中毎キー保存を止め、外側クリック/別付箋切替/色変更/archive/delete で編集中 draft を確定する流れへ変更。app main menu に標準 Edit menu を追加し、付箋編集開始時に app を activate して、cut/copy/paste/select all/undo/redo が通常の macOS テキスト操作として届くようにした。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify`、`codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app` 成功。
 - 2026-07-02: build `85` を notarized/stapled ZIP として GitHub Release `v0.1.0-85` に公開。latest appcast は build `85`、公開 `HoverPocket-macOS-app.zip` の top-level は `HoverPocket.app` のみ、SHA256 は `56da2b0b609af0cd33edea1efae4afbcbf060632359ae38396ec5da4d347362f`。公開ZIP展開後の `codesign` / `stapler validate` / `spctl` 成功。
 - 2026-07-01: Calendar 小サイズ UI 崩れ、画面収録/システムオーディオ権限の再要求、Controls メディア操作のラグ/倍速不安定を修正。build `83` を notarized/stapled ZIP として GitHub Release `v0.1.0-83` に公開し、latest appcast が build `83` を指すことを確認。

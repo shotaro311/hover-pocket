@@ -31,14 +31,14 @@ struct ClipboardHistoryView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Label(store.isMonitoring ? text(.clipboardWatching) : text(.clipboardPaused), systemImage: "doc.on.clipboard")
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .panelTextFont(size: 10, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white.opacity(0.64))
 
             Spacer()
 
             if let message = store.lastErrorMessage {
                 Text(message)
-                    .font(.system(size: 9, weight: .medium))
+                    .panelTextFont(size: 9, weight: .medium)
                     .foregroundStyle(.yellow.opacity(0.86))
                     .lineLimit(1)
             }
@@ -103,11 +103,11 @@ struct ClipboardHistoryView: View {
     private func columnTitle(_ title: String, count: Int) -> some View {
         HStack(spacing: 6) {
             Text(title)
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .panelTextFont(size: 11, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white)
 
             Text("\(count)")
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .panelTextFont(size: 9, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white.opacity(0.42))
 
             Spacer(minLength: 0)
@@ -118,12 +118,12 @@ struct ClipboardHistoryView: View {
         HStack(alignment: .top, spacing: 7) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(previewText(for: item))
-                    .font(.system(size: 10.5, weight: .semibold))
+                    .panelTextFont(size: 10.5, weight: .semibold)
                     .foregroundStyle(.white.opacity(0.86))
                     .lineLimit(3)
 
                 Text(item.createdAt.formatted(.dateTime.hour().minute()))
-                    .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                    .panelTextFont(size: 8.5, weight: .medium, design: .monospaced)
                     .foregroundStyle(.white.opacity(0.34))
             }
 
@@ -177,7 +177,7 @@ struct ClipboardHistoryView: View {
 
             HStack(spacing: 4) {
                 Text("\(item.width)x\(item.height)")
-                    .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                    .panelTextFont(size: 8.5, weight: .medium, design: .monospaced)
                     .foregroundStyle(.white.opacity(0.38))
                     .lineLimit(1)
 
@@ -225,7 +225,7 @@ struct ClipboardHistoryView: View {
                 .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.28))
             Text(title)
-                .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                .panelTextFont(size: 10.5, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white.opacity(0.5))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)

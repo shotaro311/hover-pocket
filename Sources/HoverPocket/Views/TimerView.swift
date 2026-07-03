@@ -55,7 +55,7 @@ struct TimerView: View {
                 VStack(spacing: 8) {
                     if !store.canStartTimer {
                         Text(text(.timerSlotsFull))
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .panelTextFont(size: 9, weight: .medium, design: .monospaced)
                             .foregroundStyle(.yellow.opacity(0.75))
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -79,11 +79,11 @@ struct TimerView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(alert.title.isEmpty ? text(.timerFinished) : alert.title)
-                    .font(.system(size: 11, weight: .bold))
+                    .panelTextFont(size: 11, weight: .bold)
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
                 Text(text(.timerFinished))
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .panelTextFont(size: 9, weight: .medium, design: .monospaced)
                     .foregroundStyle(alert.color.color.opacity(0.9))
             }
 
@@ -110,18 +110,18 @@ struct TimerView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(timer.title.isEmpty ? text(.timer) : timer.title)
-                    .font(.system(size: 11, weight: .bold))
+                    .panelTextFont(size: 11, weight: .bold)
                     .foregroundStyle(.white.opacity(0.88))
                     .lineLimit(1)
 
                 HStack(spacing: 6) {
                     Text(remainingText(for: timer))
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .panelTextFont(size: 12, weight: .bold, design: .monospaced)
                         .foregroundStyle(timer.color.color)
 
                     if timer.isPomodoro {
                         Text(pomodoroPhaseText(for: timer))
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .panelTextFont(size: 9, weight: .bold, design: .monospaced)
                             .foregroundStyle(.white.opacity(0.5))
                     }
                 }
@@ -184,7 +184,7 @@ struct TimerView: View {
     private func stopAlarmButton(color: Color) -> some View {
         Button(action: store.stopAlert) {
             Text(text(.timerStopAlarm))
-                .font(.system(size: 10, weight: .bold))
+                .panelTextFont(size: 10, weight: .bold)
                 .foregroundStyle(.black.opacity(0.85))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
@@ -230,11 +230,11 @@ struct TimerView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(pinnedTitle(preset))
-                    .font(.system(size: 10, weight: .bold))
+                    .panelTextFont(size: 10, weight: .bold)
                     .foregroundStyle(.white.opacity(0.86))
                     .lineLimit(1)
                 Text(pinnedDurationText(preset))
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .panelTextFont(size: 9, weight: .bold, design: .monospaced)
                     .foregroundStyle(.white.opacity(0.48))
             }
 
@@ -336,7 +336,7 @@ private struct TimerEntryCard: View {
 
                 TextField(text(.timerTitlePlaceholder), text: $preset.title)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 10, weight: .bold))
+                    .panelTextFont(size: 10, weight: .bold)
                     .foregroundStyle(.white.opacity(0.86))
                     .frame(maxWidth: .infinity)
 
@@ -354,7 +354,7 @@ private struct TimerEntryCard: View {
                 if preset.isPomodoro {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(text(.timerWork))
-                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .panelTextFont(size: 8, weight: .bold, design: .monospaced)
                             .foregroundStyle(.white.opacity(0.42))
                         TimerDurationInputView(
                             duration: $preset.workDuration,
@@ -364,7 +364,7 @@ private struct TimerEntryCard: View {
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(text(.timerBreak))
-                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .panelTextFont(size: 8, weight: .bold, design: .monospaced)
                             .foregroundStyle(.white.opacity(0.42))
                         TimerDurationInputView(
                             duration: $preset.breakDuration,
@@ -418,7 +418,7 @@ private struct TimerEntryCard: View {
                 Image(systemName: "play.fill")
                     .font(.system(size: 8, weight: .bold))
                 Text(text(.timerStart))
-                    .font(.system(size: 10, weight: .bold))
+                    .panelTextFont(size: 10, weight: .bold)
             }
             .foregroundStyle(.black.opacity(0.85))
             .padding(.horizontal, 10)
@@ -444,7 +444,7 @@ private struct TimerSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .panelTextFont(size: 10, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white.opacity(0.64))
 
             content()
@@ -468,7 +468,7 @@ private struct TimerEmptyRow: View {
 
     var body: some View {
         Text(message)
-            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .panelTextFont(size: 10, weight: .medium, design: .monospaced)
             .foregroundStyle(.white.opacity(0.38))
             .frame(height: 30, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -16,7 +16,7 @@ struct AICommandPaletteView: View {
                 TextField("今日の予定 / 明日14時 打ち合わせ", text: $store.input)
                     .textFieldStyle(.plain)
                     .focused($isFocused)
-                    .font(.system(size: 12, weight: .medium))
+                    .panelTextFont(size: 12, weight: .medium)
                     .foregroundStyle(Color.white.opacity(0.88))
                     .onSubmit {
                         store.submit()
@@ -46,7 +46,7 @@ struct AICommandPaletteView: View {
                 ResultRow(result: result)
             } else if let statusMessage = store.statusMessage {
                 Text(localizedStatusMessage(statusMessage))
-                    .font(.system(size: 11, weight: .medium))
+                    .panelTextFont(size: 11, weight: .medium)
                     .foregroundStyle(Color.white.opacity(0.48))
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -107,7 +107,7 @@ private struct ApprovalCard: View {
         HStack(alignment: .top, spacing: 9) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(action.approvalTitle(language: language))
-                    .font(.system(size: 11, weight: .semibold))
+                    .panelTextFont(size: 11, weight: .semibold)
                     .foregroundStyle(Color.white.opacity(0.9))
                     .lineLimit(1)
 
@@ -121,12 +121,12 @@ private struct ApprovalCard: View {
                         ForEach(action.approvalFields(language: language)) { field in
                             HStack(alignment: .firstTextBaseline, spacing: 7) {
                                 Text(field.label.uppercased())
-                                    .font(.system(size: 8, weight: .bold))
+                                    .panelTextFont(size: 8, weight: .bold)
                                     .foregroundStyle(Color.white.opacity(0.32))
                                     .frame(width: 52, alignment: .leading)
 
                                 Text(field.value)
-                                    .font(.system(size: 10, weight: .medium))
+                                    .panelTextFont(size: 10, weight: .medium)
                                     .foregroundStyle(Color.white.opacity(0.68))
                                     .lineLimit(field.id == "notes" ? 2 : 1)
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -175,7 +175,7 @@ private struct CalendarWriteApprovalSummary: View {
                     .foregroundStyle(Color.green.opacity(0.9))
 
                 Text(parameters.title.isEmpty ? AppText.text(.untitledEvent, language: language) : parameters.title)
-                    .font(.system(size: 12, weight: .bold))
+                    .panelTextFont(size: 12, weight: .bold)
                     .foregroundStyle(Color.white.opacity(0.92))
                     .lineLimit(1)
             }
@@ -209,7 +209,7 @@ private struct CalendarWriteApprovalSummary: View {
 
     private func approvalLine(systemImage: String, text: String, isPrimary: Bool = false) -> some View {
         Label(text, systemImage: systemImage)
-            .font(.system(size: 10, weight: isPrimary ? .semibold : .medium, design: isPrimary ? .monospaced : .default))
+            .panelTextFont(size: 10, weight: isPrimary ? .semibold : .medium, design: isPrimary ? .monospaced : .default)
             .foregroundStyle(Color.white.opacity(isPrimary ? 0.76 : 0.58))
             .lineLimit(1)
     }
@@ -237,7 +237,7 @@ private struct CandidateRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(AppText.text(.chooseIntendedAction, language: language))
-                .font(.system(size: 10, weight: .semibold))
+                .panelTextFont(size: 10, weight: .semibold)
                 .foregroundStyle(Color.white.opacity(0.42))
                 .lineLimit(1)
 
@@ -249,11 +249,11 @@ private struct CandidateRow: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(action.displayTitle(language: language))
-                                    .font(.system(size: 10, weight: .semibold))
+                                    .panelTextFont(size: 10, weight: .semibold)
                                     .foregroundStyle(Color.white.opacity(0.86))
                                     .lineLimit(1)
                                 Text(action.displaySubtitle(language: language))
-                                    .font(.system(size: 9, weight: .medium))
+                                    .panelTextFont(size: 9, weight: .medium)
                                     .foregroundStyle(Color.white.opacity(0.42))
                                     .lineLimit(1)
                             }
@@ -283,11 +283,11 @@ private struct ResultRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(result.title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .panelTextFont(size: 11, weight: .semibold)
                     .foregroundStyle(Color.white.opacity(0.85))
                     .lineLimit(1)
                 Text(result.message)
-                    .font(.system(size: 10, weight: .medium))
+                    .panelTextFont(size: 10, weight: .medium)
                     .foregroundStyle(Color.white.opacity(0.5))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)

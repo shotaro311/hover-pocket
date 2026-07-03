@@ -31,12 +31,14 @@ struct HoverPanelShell: View {
                     onExternalDragStarted: onExternalDragStarted
                 )
                 .frame(maxHeight: .infinity)
+                .environment(\.panelTextSize, settings.panelTextSize)
 
                 Divider()
                     .overlay(Color.white.opacity(0.08))
 
                 AICommandPaletteView(store: store.aiCommandStore, settings: settings, isVisible: store.contentVisible)
                     .frame(height: PanelLayout.aiPaletteHeight)
+                    .environment(\.panelTextSize, settings.panelTextSize)
             }
             .opacity(store.contentVisible ? 1 : 0)
             .scaleEffect(store.contentVisible ? 1 : 0.92, anchor: .top)
