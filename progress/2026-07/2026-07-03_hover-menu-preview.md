@@ -73,3 +73,15 @@
 ## 補足
 
 - Calendar 専用の日時入力コンポーネント、Mirror、細かい tooltip/help 文言は今回の安全適用範囲から外した。主要 provider の本文・見出し・状態文を優先したため。
+
+## 配信（build 96）
+
+- コミット `af86e29` を build `96` として配信した。
+- Release: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-96`
+- Latest install ZIP: `https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip`
+- Notary submission ID: `e6e801d1-7a43-4d98-8b99-3804482bd322`
+- Notary status: `Accepted`
+- 公開 ZIP SHA256: `179917a6294b91cae94471fc97c8b6fae8d4d0d07247f78664c22a7106ad08e9`
+- GitHub Release asset の digest がローカル ZIP SHA256 と一致することを確認した。
+- latest appcast が `<sparkle:version>96</sparkle:version>` と `v0.1.0-96/HoverPocket-0.1.0-96.zip` を指すことを確認した。
+- 公開 ZIP の top-level は `HoverPocket.app` のみ。展開後 app の `codesign --verify --deep --strict`、`xcrun stapler validate`、`spctl --assess --type execute` はすべて成功し、Gatekeeper は `source=Notarized Developer ID` と判定した。
