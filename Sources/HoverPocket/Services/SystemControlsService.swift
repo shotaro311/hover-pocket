@@ -28,8 +28,13 @@ final class ControlsStore: ObservableObject {
     private var playbackRateCommandTask: Task<Void, Never>?
     private var playbackCommandRequestID = 0
     private var playbackRateRequestID = 0
+    private var isMediaStreamActive = false
+    private var lastAdapterEvent: AdapterNowPlaying?
+    private var mediaEventCounter = 0
+    private var enrichmentTask: Task<Void, Never>?
 
     func startPolling() {
+        startMediaStreamIfAvailable()
         refresh()
         guard pollTimer == nil else { return }
         let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
@@ -53,17 +58,25 @@ final class ControlsStore: ObservableObject {
         playbackCommandTask = nil
         playbackRateCommandTask?.cancel()
         playbackRateCommandTask = nil
+        enrichmentTask?.cancel()
+        enrichmentTask = nil
         playbackCommandRequestID += 1
         playbackRateRequestID += 1
+        mediaEventCounter += 1
         isPlaybackCommandPending = false
         isPlaybackRateCommandPending = false
+        mediaService.stopNowPlayingStream()
+        isMediaStreamActive = false
+        lastAdapterEvent = nil
     }
 
     func refresh() {
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             guard let self else { return }
-            let shouldRefreshMedia = !isPlaybackCommandPending && !isPlaybackRateCommandPending
+            let shouldRefreshMedia = !isPlaybackCommandPending
+                && !isPlaybackRateCommandPending
+                && !isMediaStreamActive
             let displays = await brightnessService.displays()
             guard !Task.isCancelled else { return }
             let nextVolume = await volumeService.currentState()
@@ -71,10 +84,72 @@ final class ControlsStore: ObservableObject {
             guard !Task.isCancelled else { return }
             self.displays = displays
             self.volume = nextVolume
-            if let nextNowPlaying, !isPlaybackCommandPending, !isPlaybackRateCommandPending {
+            if let nextNowPlaying, !isPlaybackCommandPending, !isPlaybackRateCommandPending, !isMediaStreamActive {
                 self.nowPlaying = nextNowPlaying
             }
+            if isMediaStreamActive {
+                self.updateExtrapolatedProgress()
+            }
         }
+    }
+
+    // MARK: - Adapter event stream
+
+    /// adapter が使える環境では、2秒ポーリングではなく Now Playing の変更通知で
+    /// メディア状態を更新する。ポーリングはディスプレイ/音量の取得に限定される。
+    private func startMediaStreamIfAvailable() {
+        guard !isMediaStreamActive, mediaService.isAdapterAvailable else { return }
+        isMediaStreamActive = true
+        mediaService.startNowPlayingStream { [weak self] event in
+            Task { @MainActor in
+                self?.applyAdapterEvent(event)
+            }
+        }
+    }
+
+    private func applyAdapterEvent(_ event: AdapterNowPlaying?) {
+        guard isMediaStreamActive else { return }
+        // 倍速操作の途中経過でイベントが割り込むと UI が暴れるため、確定後の
+        // refreshNowPlaying に任せる。play/pause はイベント自体が確定情報なので通す。
+        guard !isPlaybackRateCommandPending else { return }
+        mediaEventCounter += 1
+        let eventID = mediaEventCounter
+        lastAdapterEvent = event
+
+        guard let event else {
+            nowPlaying = .empty
+            enrichmentTask?.cancel()
+            return
+        }
+
+        var state = MediaRemoteService.state(fromAdapter: event)
+        if state.title == nowPlaying.title {
+            // 同一メディアの更新では、ブラウザ enrichment 済みの情報を引き継いで
+            // プレビューやアートワークのちらつきを防ぐ
+            state.mediaURLString = nowPlaying.mediaURLString
+            state.previewWindowID = nowPlaying.previewWindowID
+            if state.artworkData == nil {
+                state.artworkData = nowPlaying.artworkData
+            }
+        }
+        nowPlaying = state
+
+        enrichmentTask?.cancel()
+        let service = mediaService
+        enrichmentTask = Task { [weak self] in
+            let enriched = await service.enrich(state)
+            guard !Task.isCancelled else { return }
+            guard let self, self.mediaEventCounter == eventID else { return }
+            guard !self.isPlaybackRateCommandPending else { return }
+            self.nowPlaying = enriched
+        }
+    }
+
+    private func updateExtrapolatedProgress() {
+        guard let lastAdapterEvent, nowPlaying.hasMedia, nowPlaying.isPlaying else { return }
+        let progress = lastAdapterEvent.extrapolatedElapsed
+        let upperBound = nowPlaying.duration > 0 ? nowPlaying.duration : progress
+        nowPlaying.progress = progress.clamped(to: 0...max(upperBound, 0))
     }
 
     func setBrightness(_ brightness: Double, for displayID: ControlsDisplay.ID) {
@@ -124,6 +199,9 @@ final class ControlsStore: ObservableObject {
         guard nowPlaying.hasMedia, nowPlaying.duration > 0 else { return }
         let target = progress.clamped(to: 0...nowPlaying.duration)
         nowPlaying.progress = target
+        // 外挿の基準もシーク先へ動かし、次のイベントが届くまでの巻き戻りを防ぐ
+        lastAdapterEvent?.elapsed = target
+        lastAdapterEvent?.timestamp = Date()
         let service = mediaService
         Task.detached(priority: .userInitiated) {
             await service.setElapsedTime(target)
@@ -141,13 +219,28 @@ final class ControlsStore: ObservableObject {
     func togglePlayback() {
         guard nowPlaying.hasMedia, !isPlaybackCommandPending else { return }
         nowPlaying.isPlaying.toggle()
-        isPlaybackCommandPending = true
         playbackCommandRequestID += 1
         let requestID = playbackCommandRequestID
         let expectedIsPlaying = nowPlaying.isPlaying
         let service = mediaService
 
         playbackCommandTask?.cancel()
+
+        if isMediaStreamActive {
+            // ストリーム有効時は変更通知が実状態を運んでくるので、readback も
+            // watchdog も不要。コマンド送信の完了だけ待って連打を防ぐ。
+            isPlaybackCommandPending = true
+            lastAdapterEvent?.isPlaying = expectedIsPlaying
+            lastAdapterEvent?.timestamp = Date()
+            playbackCommandTask = Task { [weak self] in
+                await service.togglePlayPause()
+                guard let self, self.playbackCommandRequestID == requestID else { return }
+                self.isPlaybackCommandPending = false
+            }
+            return
+        }
+
+        isPlaybackCommandPending = true
         playbackCommandTask = Task.detached(priority: .userInitiated) { [weak self] in
             await service.togglePlayPause()
             let readback = await Self.readNowPlayingAfterPlaybackToggle(
@@ -1011,7 +1104,58 @@ final class MediaRemoteService: @unchecked Sendable {
         }
     }
 
+    var isAdapterAvailable: Bool {
+        adapterClient.isAvailable
+    }
+
+    func startNowPlayingStream(onEvent: @escaping @Sendable (AdapterNowPlaying?) -> Void) {
+        adapterClient.startListening(onEvent: onEvent)
+    }
+
+    func stopNowPlayingStream() {
+        adapterClient.stopListening()
+    }
+
+    /// ブラウザ由来のメタデータ（URL・プレビュー windowID・実 playbackRate）で状態を補強する
+    func enrich(_ baseState: ControlsNowPlayingState) async -> ControlsNowPlayingState {
+        let context = await browserFallback.context(preferredTitle: baseState.title)
+        return state(baseState, enrichedWith: context)
+    }
+
+    static func state(fromAdapter adapterState: AdapterNowPlaying) -> ControlsNowPlayingState {
+        let sourceName: String
+        if !adapterState.artist.isEmpty {
+            sourceName = adapterState.artist
+        } else if !adapterState.album.isEmpty {
+            sourceName = adapterState.album
+        } else if !adapterState.applicationName.isEmpty {
+            sourceName = adapterState.applicationName
+        } else {
+            sourceName = "Media"
+        }
+        let duration = max(adapterState.duration, adapterState.elapsed, 0)
+        let progress = adapterState.extrapolatedElapsed
+        return ControlsNowPlayingState(
+            title: adapterState.title,
+            sourceName: sourceName,
+            hasMedia: true,
+            artworkData: adapterState.artworkData,
+            mediaURLString: nil,
+            previewWindowID: nil,
+            progress: progress.clamped(to: 0...max(duration, progress)),
+            duration: duration,
+            isPlaying: adapterState.isPlaying,
+            playbackRate: (adapterState.playbackRate > 0 ? adapterState.playbackRate : 1).clamped(to: 0.5...3.0)
+        )
+    }
+
     func nowPlaying() async -> ControlsNowPlayingState {
+        if let adapterState = await adapterClient.fetchNowPlaying() {
+            let baseState = Self.state(fromAdapter: adapterState)
+            let context = await browserFallback.context(preferredTitle: baseState.title)
+            return state(baseState, enrichedWith: context)
+        }
+
         let jxaState = await jxaFallback.nowPlaying()
         if jxaState.hasMedia {
             let context = await browserFallback.context(preferredTitle: jxaState.title)
