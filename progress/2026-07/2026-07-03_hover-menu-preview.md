@@ -36,6 +36,12 @@
 - one-shot `get` の大出力（アートワーク base64）でパイプが詰まる問題を逐次読み出しで修正。`media_has_artwork=true` を確認。
 - `MediaRemoteService.nowPlaying()` の第一読み取り経路を adapter `get` に変更（JXA → MediaRemote → browser はフォールバック）。
 
+## 配信
+
+- Release: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-94`（notarization Accepted、`libMediaRemoteAdapter.dylib` 同梱を検証済み）
+- Latest install ZIP: `https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip`
+- notarize 済み本番ビルド（hardened runtime）で `--verify-media --toggle-playback` を実行し、`media_toggle_verified=true` / `media_has_artwork=true` / `media_verify=ok` を確認。
+
 ## 残タスク（Phase 3 以降）
 
 - 設定画面での Automation / Accessibility 権限状態の可視化（未実施）。
