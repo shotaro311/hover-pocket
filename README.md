@@ -83,8 +83,9 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 - 音量は CoreAudio 経由で取得、調整できます。
 - 音量バー右側のアイコンでミュートを切り替えられます。
 - 再生中メディアがある場合は、アートワークをサムネイルとして表示し、再生位置バー、10秒戻し、再生/一時停止、10秒送り、倍速調整を操作できます。
-- 再生/一時停止と倍速は操作直後に UI へ即時反映し、その後の読み戻しで実際の状態に補正します。
-- Now Playing 情報や一部の再生制御は macOS の MediaRemote bridge が使える場合だけ有効です。取得できない場合は空状態として表示します。
+- Now Playing の取得と再生/停止・シーク操作は、同梱の mediaremote-adapter（Apple 署名の perl 経由で MediaRemote を中継するヘルパー）で行います。macOS 15.4 以降ではこの経路がないとメディア操作コマンドが OS に遮断されるためです。
+- パネル表示中は Now Playing の変更通知を購読し、イベント駆動で表示を更新します。adapter が使えない環境では従来のポーリング読み取りへフォールバックします。
+- 倍速調整はブラウザ（Chrome/Safari 等）の HTML5 動画を直接制御します。Chrome/Safari では「Apple Events からの JavaScript を許可」（開発メニュー）が有効な場合に最も確実に動作します。
 
 ### Timer
 

@@ -93,7 +93,11 @@
 3. `MediaVerificationCommand` に **play/pause トグルの実効検証**（toggle → 状態変化を readback）を追加。「読めるだけで ok」を廃止
 4. 配信前チェックリストに実機での再生/停止・シーク確認を明記
 
-### Phase 2: イベント駆動化と状態管理の簡素化
+### Phase 2: イベント駆動化と状態管理の簡素化 — ✅ 2026-07-03 実装完了
+
+実装結果: `MediaRemoteAdapterClient` に loop ストリーム購読と one-shot get を追加。Controls パネル表示中はイベント駆動で更新し、2 秒ポーリングの media 読み取りと JXA spawn は adapter 不使用時のフォールバックに降格。ストリーム有効時の play/pause は readback/watchdog なし。再生位置はローカル外挿で補間。
+
+元の計画:
 1. adapter のストリームモード購読に切り替え、2 秒ポーリング・JXA spawn を廃止（JXA は adapter 死活時のフォールバックとして温存）
 2. 楽観的更新 / readback / watchdog / pending フラグ群を削除し、単方向フローへ
 3. ブラウザ AppleScript を enrichment（URL・プレビュー用 windowID・倍速 HTML5 制御）専用に降格。ショートカット送信経路を削除

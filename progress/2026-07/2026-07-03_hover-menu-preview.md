@@ -27,9 +27,17 @@
 - 署名済み `dist/HoverPocket.app` の実行ファイルで `--verify-media --toggle-playback` を実行し、`media_toggle_verified=true` / `media_verify=ok` を確認（Spotify 再生中、toggle → 反転確認 → 復元）。
 - 検証は必ず署名済みバンドルで行うこと。debug 実行（`swift` 経由）では署名条件が異なり、壊れていても動いて見える。
 
-## 残タスク（Phase 2 以降）
+## 実施内容（Phase 2）
 
-- adapter のストリームモード（push 通知）へ移行し、2 秒ポーリングと JXA/osascript spawn を廃止。
-- 楽観的更新 / readback / watchdog 群を削除し、状態管理を単方向フローへ簡素化。
-- ブラウザ AppleScript を enrichment 専用に降格。倍速の MediaRemote フォールバックは adapter 未対応のため現状維持（ブラウザ経路が第一）。
-- 配信（notarize + release）は未実施。
+- `MediaRemoteAdapterClient` に loop ストリーム購読（JSONL、diff マージ、自動再起動）と one-shot `get` を追加。
+- Controls パネル表示中は Now Playing 変更通知でイベント駆動更新。2 秒ポーリングの media 読み取りと JXA spawn は adapter 不使用環境のフォールバックへ降格（ディスプレイ/音量のポーリングは継続）。
+- ストリーム有効時の play/pause は readback リトライ / watchdog を使わず、イベントを状態の真実として扱う。
+- 再生位置はイベント間をローカル外挿（elapsed + Δt × rate）で補間。シーク直後は外挿基準も更新して巻き戻りを防止。
+- one-shot `get` の大出力（アートワーク base64）でパイプが詰まる問題を逐次読み出しで修正。`media_has_artwork=true` を確認。
+- `MediaRemoteService.nowPlaying()` の第一読み取り経路を adapter `get` に変更（JXA → MediaRemote → browser はフォールバック）。
+
+## 残タスク（Phase 3 以降）
+
+- 設定画面での Automation / Accessibility 権限状態の可視化（未実施）。
+- 倍速の MediaRemote フォールバックは adapter 未対応のため現状維持（ブラウザ HTML5 直接制御が第一経路）。
+- 楽観的更新 / readback / watchdog の完全削除は adapter 不使用環境のフォールバックとして温存中。
