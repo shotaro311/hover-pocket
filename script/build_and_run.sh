@@ -167,6 +167,20 @@ if [[ -n "$SPARKLE_FRAMEWORK_PATH" ]]; then
   fi
 fi
 
+# mediaremote-adapter: メディア操作コマンドを Apple 署名の perl 経由で送るための dylib と
+# スクリプト。macOS 15.4+ ではこれがないと再生/停止・シークが効かない。
+ADAPTER_DYLIB_PATH="$(find "$ROOT_DIR/.build" -maxdepth 3 -path '*/debug/libMediaRemoteAdapter.dylib' -type f 2>/dev/null | head -1)"
+ADAPTER_RUN_SCRIPT="$(find "$ROOT_DIR/.build" -maxdepth 4 -path '*/debug/MediaRemoteAdapter_MediaRemoteAdapter.bundle/run.pl' -type f 2>/dev/null | head -1)"
+if [[ -n "$ADAPTER_DYLIB_PATH" && -n "$ADAPTER_RUN_SCRIPT" ]]; then
+  cp "$ADAPTER_DYLIB_PATH" "$BUNDLE_DIR/Contents/Frameworks/libMediaRemoteAdapter.dylib"
+  cp "$ADAPTER_RUN_SCRIPT" "$BUNDLE_DIR/Contents/Resources/mediaremote-adapter.pl"
+  if ! otool -l "$EXECUTABLE_PATH" | grep -q '@executable_path/../Frameworks'; then
+    install_name_tool -add_rpath "@executable_path/../Frameworks" "$EXECUTABLE_PATH"
+  fi
+else
+  echo "warning: mediaremote-adapter artifacts not found; media commands will not work" >&2
+fi
+
 cat > "$BUNDLE_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

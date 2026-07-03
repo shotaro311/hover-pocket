@@ -7,6 +7,8 @@ enum MediaVerificationCommand {
         let resultBox = MediaVerificationResultBox()
         let requestedRate = requestedPlaybackRate()
 
+        let shouldTogglePlayback = CommandLine.arguments.contains("--toggle-playback")
+
         Task<Void, Never> {
             let service = MediaRemoteService()
             let initialState = await service.nowPlaying()
@@ -19,6 +21,20 @@ enum MediaVerificationCommand {
                 )
                 try? await Task.sleep(nanoseconds: 1_800_000_000)
             }
+            // 再生/停止コマンドが実際に効くか（状態が反転するか）を検証し、元の状態へ戻す。
+            // 読み取りが成功するだけでは macOS 15.4+ のコマンド遮断を検出できない。
+            var toggleVerified: Bool?
+            if shouldTogglePlayback, initialState.hasMedia {
+                let wasPlaying = initialState.isPlaying
+                await service.togglePlayPause()
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                let toggledState = await service.nowPlaying()
+                toggleVerified = toggledState.hasMedia && toggledState.isPlaying != wasPlaying
+                await service.togglePlayPause()
+                try? await Task.sleep(nanoseconds: 800_000_000)
+            } else if shouldTogglePlayback {
+                toggleVerified = false
+            }
             let state = await service.nowPlaying()
             let requestedRateText = requestedRate.map { String($0) } ?? ""
             let playbackRateVerified = playbackRateVerificationResult(
@@ -26,7 +42,7 @@ enum MediaVerificationCommand {
                 finalRate: state.playbackRate,
                 requestedRate: requestedRate
             )
-            let didVerify = state.hasMedia && playbackRateVerified
+            let didVerify = state.hasMedia && playbackRateVerified && (toggleVerified ?? true)
             resultBox.outputLines = [
                 "media_has_media=\(state.hasMedia)",
                 "media_title=\(state.title)",
@@ -38,6 +54,7 @@ enum MediaVerificationCommand {
                 "media_playback_rate=\(state.playbackRate)",
                 "media_requested_playback_rate=\(requestedRateText)",
                 "media_playback_rate_verified=\(playbackRateVerified)",
+                "media_toggle_verified=\(toggleVerified.map(String.init) ?? "skipped")",
                 "media_has_artwork=\(state.artworkData != nil)",
                 "media_url=\(state.mediaURLString ?? "")",
                 "media_preview_window_id=\(state.previewWindowID.map(String.init) ?? "")",
@@ -47,7 +64,7 @@ enum MediaVerificationCommand {
             semaphore.signal()
         }
 
-        if semaphore.wait(timeout: .now() + 8) == .timedOut {
+        if semaphore.wait(timeout: .now() + 16) == .timedOut {
             resultBox.outputLines = [
                 "media_has_media=false",
                 "media_verify=timeout"

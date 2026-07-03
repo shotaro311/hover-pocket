@@ -124,7 +124,10 @@ final class ControlsStore: ObservableObject {
         guard nowPlaying.hasMedia, nowPlaying.duration > 0 else { return }
         let target = progress.clamped(to: 0...nowPlaying.duration)
         nowPlaying.progress = target
-        mediaService.setElapsedTime(target)
+        let service = mediaService
+        Task.detached(priority: .userInitiated) {
+            await service.setElapsedTime(target)
+        }
     }
 
     func skipPlayback(by seconds: TimeInterval) {
@@ -146,7 +149,7 @@ final class ControlsStore: ObservableObject {
 
         playbackCommandTask?.cancel()
         playbackCommandTask = Task.detached(priority: .userInitiated) { [weak self] in
-            service.togglePlayPause()
+            await service.togglePlayPause()
             let readback = await Self.readNowPlayingAfterPlaybackToggle(
                 service: service,
                 expectedIsPlaying: expectedIsPlaying
@@ -972,6 +975,7 @@ final class MediaRemoteService: @unchecked Sendable {
     private let sendCommand: SendCommand?
     private let setElapsedTimeFunction: SetElapsedTime?
     private let setPlaybackSpeedFunction: SetPlaybackSpeed?
+    private let adapterClient = MediaRemoteAdapterClient()
     private let jxaFallback = JXANowPlayingService()
     private let browserFallback = BrowserNowPlayingService()
     private let playbackRateLock = NSLock()
@@ -1035,12 +1039,19 @@ final class MediaRemoteService: @unchecked Sendable {
         }
     }
 
-    func togglePlayPause() {
+    func togglePlayPause() async {
+        if await adapterClient.togglePlayPause() {
+            return
+        }
+        // macOS 15.4 未満などで adapter が使えない場合のみ直接呼ぶ
         sendCommand?(2, nil)
     }
 
-    func setElapsedTime(_ elapsedTime: TimeInterval) {
+    func setElapsedTime(_ elapsedTime: TimeInterval) async {
         let target = max(0, elapsedTime)
+        if await adapterClient.setElapsedTime(target) {
+            return
+        }
         setElapsedTimeFunction?(target)
         sendCommand?(24, [
             "kMRMediaRemoteOptionPlaybackPosition": target
