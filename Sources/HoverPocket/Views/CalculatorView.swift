@@ -17,8 +17,9 @@ struct CalculatorView: View {
             displayPanel
             keypad
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .frame(maxWidth: 430, maxHeight: .infinity, alignment: .top)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(
             CalculatorKeyCatcher { event in
@@ -28,34 +29,38 @@ struct CalculatorView: View {
     }
 
     private var displayPanel: some View {
-        VStack(alignment: .trailing, spacing: 8) {
-            HStack {
-                Text(label(.title))
-                    .panelTextFont(size: 10, weight: .bold, design: .monospaced)
-                    .foregroundStyle(.white.opacity(0.56))
-                Spacer()
-                Button {
-                    copyDisplay()
-                } label: {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(copied ? .green.opacity(0.9) : .white.opacity(0.68))
-                        .frame(width: 24, height: 22)
-                        .background(Capsule().fill(Color.white.opacity(0.055)))
+        VStack(alignment: .trailing, spacing: 10) {
+            HStack(spacing: 8) {
+                if copied {
+                    Text(label(.copied))
+                        .panelTextFont(size: 10, weight: .bold, design: .monospaced)
+                        .foregroundStyle(.green.opacity(0.9))
+                        .transition(.opacity.combined(with: .move(edge: .leading)))
                 }
-                .buttonStyle(.plain)
-                .help(label(.copy))
+                Spacer()
+                displayAction(systemName: "delete.left", help: label(.backspace)) {
+                    store.press(.backspace)
+                }
+                displayAction(
+                    systemName: copied ? "checkmark" : "doc.on.doc",
+                    active: copied,
+                    help: copied ? label(.copied) : label(.copy)
+                ) {
+                    copyDisplay()
+                }
+                .disabled(store.hasError)
             }
 
             Text(store.display)
-                .panelTextFont(size: 34, weight: .semibold, design: .rounded)
+                .panelTextFont(size: 40, weight: .semibold, design: .rounded)
                 .foregroundStyle(store.hasError ? .red.opacity(0.9) : .white.opacity(0.92))
                 .lineLimit(1)
                 .minimumScaleFactor(0.45)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .trailing)
+                .frame(maxWidth: .infinity, minHeight: 52, alignment: .trailing)
                 .contentTransition(.numericText())
         }
-        .padding(12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.white.opacity(0.035))
@@ -67,66 +72,70 @@ struct CalculatorView: View {
     }
 
     private var keypad: some View {
-        VStack(spacing: 7) {
-            HStack(spacing: 7) {
+        Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+            GridRow {
                 key(.allClear, title: "AC", style: .utility)
                 key(.toggleSign, title: "+/-", style: .utility)
                 key(.percent, title: "%", style: .utility)
-                key(.operation(.divide), title: "/", style: .operation)
+                key(.operation(.divide), title: "÷", style: .operation)
             }
-            HStack(spacing: 7) {
+            GridRow {
                 key(.digit(7), title: "7")
                 key(.digit(8), title: "8")
                 key(.digit(9), title: "9")
-                key(.operation(.multiply), title: "*", style: .operation)
+                key(.operation(.multiply), title: "×", style: .operation)
             }
-            HStack(spacing: 7) {
+            GridRow {
                 key(.digit(4), title: "4")
                 key(.digit(5), title: "5")
                 key(.digit(6), title: "6")
-                key(.operation(.subtract), title: "-", style: .operation)
+                key(.operation(.subtract), title: "−", style: .operation)
             }
-            HStack(spacing: 7) {
+            GridRow {
                 key(.digit(1), title: "1")
                 key(.digit(2), title: "2")
                 key(.digit(3), title: "3")
                 key(.operation(.add), title: "+", style: .operation)
             }
-            HStack(spacing: 7) {
-                key(.digit(0), title: "0", span: 2)
+            GridRow {
+                key(.digit(0), title: "0")
+                    .gridCellColumns(2)
                 key(.decimalSeparator, title: ".")
                 key(.equals, title: "=", style: .equals)
             }
-            HStack(spacing: 7) {
-                key(.backspace, systemName: "delete.left", style: .utility, span: 2)
-                Button {
-                    copyDisplay()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 11, weight: .bold))
-                        Text(copied ? label(.copied) : label(.copy))
-                            .panelTextFont(size: 11, weight: .bold, design: .monospaced)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 30)
-                    .foregroundStyle(copied ? .green.opacity(0.95) : .white.opacity(0.72))
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.white.opacity(0.045))
-                    )
-                }
-                .buttonStyle(.plain)
-                .help(label(.copy))
-            }
         }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func displayAction(
+        systemName: String,
+        active: Bool = false,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(active ? .green.opacity(0.92) : .white.opacity(0.68))
+                .frame(width: 30, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.white.opacity(active ? 0.09 : 0.055))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.white.opacity(active ? 0.12 : 0.07), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 
     private func key(
         _ button: CalculatorStore.Button,
         title: String? = nil,
         systemName: String? = nil,
-        style: CalculatorKeyStyle = .number,
-        span: CGFloat = 1
+        style: CalculatorKeyStyle = .number
     ) -> some View {
         Button {
             store.press(button)
@@ -140,7 +149,7 @@ struct CalculatorView: View {
                         .panelTextFont(size: 15, weight: .bold, design: .rounded)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 34)
+            .frame(maxWidth: .infinity, minHeight: 42)
             .foregroundStyle(style.foreground)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -153,7 +162,6 @@ struct CalculatorView: View {
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
-        .layoutPriority(span)
         .help(title ?? label(.backspace))
     }
 
@@ -208,16 +216,12 @@ struct CalculatorView: View {
 
     private func label(_ key: CalculatorLabel) -> String {
         switch (actions.settings.appLanguage, key) {
-        case (.japanese, .title):
-            return "電卓"
         case (.japanese, .copy):
             return "コピー"
         case (.japanese, .copied):
             return "コピー済み"
         case (.japanese, .backspace):
             return "1文字削除"
-        case (.english, .title):
-            return "Calculator"
         case (.english, .copy):
             return "Copy"
         case (.english, .copied):
@@ -229,7 +233,6 @@ struct CalculatorView: View {
 }
 
 private enum CalculatorLabel {
-    case title
     case copy
     case copied
     case backspace
@@ -257,11 +260,11 @@ private enum CalculatorKeyStyle {
     var background: Color {
         switch self {
         case .number:
-            return .white.opacity(0.052)
+            return .white.opacity(0.058)
         case .utility:
-            return .white.opacity(0.08)
+            return .white.opacity(0.085)
         case .operation:
-            return .yellow.opacity(0.15)
+            return .yellow.opacity(0.16)
         case .equals:
             return .yellow.opacity(0.88)
         }

@@ -1,6 +1,6 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-07-03
+updated: 2026-07-04
 updated_by: codex
 status: active
 ---
@@ -146,6 +146,8 @@ status: active
 
 ## 詳細ログ
 
+- [2026-07-04](2026-07/2026-07-04_hover-menu-preview.md)
+- [2026-07-03](2026-07/2026-07-03_hover-menu-preview.md)
 - [2026-07-02](2026-07/2026-07-02_hover-menu-preview.md)
 - [2026-07-01](2026-07/2026-07-01_hover-menu-preview.md)
 - [2026-06-30](2026-06/2026-06-30_hover-menu-preview.md)
@@ -174,6 +176,7 @@ status: active
 
 ## 最近の更新
 
+- 2026-07-04: Calculator UI を整理。電卓本体の最大幅を 430pt に制限し、大きいパネルでキーが横に伸びすぎないようにした。表示エリア内の重複タイトルを削除し、コピーは右上の `doc.on.doc` アイコン1つに統一。バックスペースは表示エリア右上へ移動。キーパッドを `Grid` 化して `0` の2列幅、演算子、`=` の配置崩れを防ぎ、演算子表記を `÷` / `×` / `−` に変更。`swift build`、calculator verify 2系統、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-07-03: Calculator provider を追加し、ProviderRegistry に日本語 title `電卓` として登録。四則演算、小数、符号反転、パーセント、バックスペース、AC、コピー、キーボード入力、0除算時の `Error` 表示に対応。パネル preview size は `small=520x372`、`medium=600x430`、`large=680x488` へ拡大し、ホバーパネル内の可読テキスト用に `文字サイズ` 設定を追加。Google Calendar、Clipboard、Controls、Sticky Notes、Timer、Calculator、AI command lane の主要テキストへ適用。`swift build`、calculator verify 2系統、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-07-03: build `96` を notarized/stapled ZIP として GitHub Release `v0.1.0-96` に公開。latest appcast は build `96`、公開 `HoverPocket-macOS-app.zip` の top-level は `HoverPocket.app` のみ、SHA256 は `179917a6294b91cae94471fc97c8b6fae8d4d0d07247f78664c22a7106ad08e9`。公開ZIP展開後の `codesign` / `stapler validate` / `spctl` 成功。
 - 2026-07-02: Sticky Notes の入力中毎キー保存を止め、外側クリック/別付箋切替/色変更/archive/delete で編集中 draft を確定する流れへ変更。app main menu に標準 Edit menu を追加し、付箋編集開始時に app を activate して、cut/copy/paste/select all/undo/redo が通常の macOS テキスト操作として届くようにした。`swift build`、`git diff --check`、`./script/build_and_run.sh --verify`、`codesign --verify --deep --strict --verbose=2 dist/HoverPocket.app` 成功。
