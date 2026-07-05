@@ -25,7 +25,14 @@ public partial class MainWindow : Window
 
         SeedTextButton.Click += (_, _) => WithClipboardRetry(() => Clipboard.SetText($"HoverPocket S2 text {DateTimeOffset.Now:HH:mm:ss}", TextDataFormat.UnicodeText));
         SeedImageButton.Click += (_, _) => WithClipboardRetry(() => Clipboard.SetImage(CreateProbeBitmap()));
-        DragLatestButton.Click += (_, _) => DragLatestItem();
+        // NOTE: Click (mouse-up) 起点だと DoDragDrop 開始時点でボタンが離れており、
+        // OLE の QueryContinueDrag が即 Drop 判定するため実ドラッグが成立しない。
+        // 標準パターンどおり mouse-down 起点で開始する(architect fix, 2026-07-05)。
+        DragLatestButton.PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            DragLatestItem();
+            e.Handled = true;
+        };
         ClearButton.Click += (_, _) => _history.Clear();
     }
 

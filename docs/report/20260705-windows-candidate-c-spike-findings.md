@@ -239,3 +239,18 @@ sandbox 内では WebView2 の子プロセス(renderer/GPU)起動が阻害され
   WebView2 UI)を Phase 1 の技術スタックとして採用確定**とする。
 - 持ち越し検証: S2 外部アプリへの実ドロップ(手動)、S3 カメラフロー(カメラ搭載機)、
   S1 click focus(手動)。いずれも採用判断を覆すリスクは低いと評価。
+
+### S2 実ドロップ再検証(2026-07-05、アーキテクト実施)
+
+UIAutomation + SendInput による自動実ドラッグで検証した。
+
+- 前提修正: `DragLatestButton` が Click(mouse-up 後)起点で `DoDragDrop` を呼んでいたため
+  実ドラッグが成立しない設計不備を発見し、mouse-down 起点(`PreviewMouseLeftButtonDown`)に
+  修正した。
+- **画像 → エクスプローラー: pass。** `FileDrop` 経由で実 PNG ファイル
+  (`89A883E6E306C8C6.png`)がドロップ先フォルダーに生成されることを確認。
+- テキスト → メモ帳: 不成立。Windows 11 のメモ帳はテキスト drag&drop を受け付けない
+  (ファイルドロップのみ)ためと判断。`UnicodeText` フォーマット自体は自動検証済みのため、
+  Word・ブラウザ等の受け入れ側での確認を後日手動で行う(リスク低)。
+- 製品実装への示唆: ドラッグ開始は必ず mouse-down 起点で実装する。ドロップ先による
+  受け入れフォーマット差(メモ帳の text 非対応等)は仕様として README に記載する。
