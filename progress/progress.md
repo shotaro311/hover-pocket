@@ -1,6 +1,6 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-07-04
+updated: 2026-07-05
 updated_by: codex
 status: active
 ---
@@ -14,6 +14,9 @@ status: active
 
 ## 最新の検証済み状態
 
+- 2026-07-05: Windows Phase 0 W3 candidate C risk spikes を `windows/spikes/HoverPocket.Spikes.sln` として本体 sln から分離して追加。S1 WebView2 x NOACTIVATE transparent overlay、S2 Clipboard listener + PNG 正規化 + drag payload、S3 WebView2 getUserMedia camera を実装。`dotnet build windows\spikes\HoverPocket.Spikes.sln --no-restore` は exit code 0 / 警告 0。S2 `--verify` は exit code 0。S1/S3 は WebView2 Runtime `150.0.4078.48` を検出したが、baseline から `RenderProcessExited:LaunchFailed` / `GpuProcessExited:Crashed` で exit code 1。候補Cは未確定、通常 desktop session での S1/S3 再検証が必要。詳細は `docs/report/20260705-windows-candidate-c-spike-findings.md` と `progress/2026-07/2026-07-05_windows-phase0-w3.md`。
+- 2026-07-05: Windows Phase 0 W2 multi-monitor / mixed DPI 対応を追加。`--display-placement <main|sub|all>`、`ShellSettings`、`DisplayLayoutService`、複数 access surface、`Sub` のサブなし fallback、`WM_DISPLAYCHANGE` / `WM_DPICHANGED` / display settings / sleep resume hook による再同期、`--verify display` を実装。現在の検証環境は monitor count `1`。`dotnet build windows\HoverPocket.Windows.sln`、`dotnet run --project windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify shell`、`dotnet run --project windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify display` はすべて exit code 0、build 警告 0。追加で `--display-placement sub --verify display` と `--display-placement all --verify display` も exit code 0。実マルチモニター / mixed DPI / display hotplug / sleep wake 実機手動確認は未実施。
+- 2026-07-05: Windows Phase 0 W1 shell spike を追加。`windows/HoverPocket.Windows.sln` + WPF `HoverPocket.Shell` で tray、top-edge access surface、NOACTIVATE panel、hover open/close、多重起動防止、Per-Monitor V2 manifest、`--verify shell` を実装。`dotnet build .\windows\HoverPocket.Windows.sln` と `dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify shell` はどちらも exit code 0、警告 0。手動 hover E2E は未検証。
 - 移行元 prototype は `./script/build_and_run.sh --verify` 成功済み。
 - 移行先 `/Users/shotaro/code/share/hover-menu-preview` で `./script/build_and_run.sh --verify` 成功済み。
 - 2026-06-03: 上部 pill の 5pt top inset を削除し、`CGWindowListCopyWindowInfo` で `Y = 0` を確認済み。
@@ -177,6 +180,8 @@ status: active
 
 ## 最近の更新
 
+- 2026-07-05: Windows 版要件定義を `docs/requirement/requirements.md` に作成。既存 macOS 版の README / progress / Swift source から HoverPocket の本質、Provider 機能、開閉操作感、Settings、保存/権限、配布更新を抽出し、3 つのサブエージェントで macOS 体験、Windows OS 代替、受け入れテスト/失敗モードを分担調査。Windows App SDK、WebView2、Tauri、Google OAuth、Microsoft Win32/Windows API の一次情報を確認し、技術選定は固定せず `top-edge overlay / tray / mixed DPI / Clipboard drag-drop / camera permission` の spike を Phase 0 とする方針にした。`git diff --check` 成功。Windows 環境では `swift` 未導入のため build は未実行。
+- 2026-07-05: Windows 側の作業準備として `C:\Users\shotaro\code\shared\hover-pocket` へ public repo `shotaro311/hover-pocket` を clone。HEAD は `0cd6ec1`、origin は `https://github.com/shotaro311/hover-pocket.git`、GitHub latest release は `v0.1.0-98`。Windows 環境では Bash は利用可能だが `swift` が PATH 上になく、`swift build` / `./script/build_and_run.sh --verify` は未実行。`git diff --check` と `git status -sb` は成功。現行構成は SwiftPM macOS 14+ の AppKit/SwiftUI/Sparkle/MediaRemote 依存が強いため、Windows 対応はまず domain/state と OS integration/UI shell の分離から始める。
 - 2026-07-04: Calculator UI を整理。電卓本体の最大幅を 430pt に制限し、大きいパネルでキーが横に伸びすぎないようにした。表示エリア内の重複タイトルを削除し、コピーは右上の `doc.on.doc` アイコン1つに統一。バックスペースは表示エリア右上へ移動。キーパッドを `Grid` 化して `0` の2列幅、演算子、`=` の配置崩れを防ぎ、演算子表記を `÷` / `×` / `−` に変更。`swift build`、calculator verify 2系統、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
 - 2026-07-04: build `98` を notarized/stapled ZIP として GitHub Release `v0.1.0-98` に公開。latest appcast は build `98`、公開 `HoverPocket-macOS-app.zip` の top-level は `HoverPocket.app` のみ、SHA256 は `33efbaf3e32d1f59b382b21b390c29376bf6a4ef35ab253f354e2c3166baeb0e`。公開ZIP再取得後の `codesign` / `stapler validate` / `spctl` 成功。
 - 2026-07-03: Calculator provider を追加し、ProviderRegistry に日本語 title `電卓` として登録。四則演算、小数、符号反転、パーセント、バックスペース、AC、コピー、キーボード入力、0除算時の `Error` 表示に対応。パネル preview size は `small=520x372`、`medium=600x430`、`large=680x488` へ拡大し、ホバーパネル内の可読テキスト用に `文字サイズ` 設定を追加。Google Calendar、Clipboard、Controls、Sticky Notes、Timer、Calculator、AI command lane の主要テキストへ適用。`swift build`、calculator verify 2系統、`git diff --check`、`./script/build_and_run.sh --verify` 成功。
