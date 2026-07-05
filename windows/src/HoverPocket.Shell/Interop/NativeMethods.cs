@@ -6,8 +6,10 @@ namespace HoverPocket.Shell.Interop;
 internal static partial class NativeMethods
 {
     public const int GwlExStyle = -20;
+    public const int WmMouseActivate = 0x0021;
     public const int WmDisplayChange = 0x007E;
     public const int WmDpiChanged = 0x02E0;
+    public const int MaNoActivate = 3;
 
     public const long WsExTopmost = 0x00000008L;
     public const long WsExToolWindow = 0x00000080L;
@@ -143,6 +145,20 @@ internal static partial class NativeMethods
         Console.SetError(standardError);
     }
 
+    public static void SetRoundedWindowRegion(IntPtr hwnd, int width, int height, int cornerEllipseWidth, int cornerEllipseHeight)
+    {
+        if (hwnd == IntPtr.Zero || width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        var region = CreateRoundRectRgn(0, 0, width + 1, height + 1, cornerEllipseWidth, cornerEllipseHeight);
+        if (region != IntPtr.Zero)
+        {
+            _ = SetWindowRgn(hwnd, region, true);
+        }
+    }
+
     [LibraryImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
     private static partial IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
 
@@ -185,6 +201,12 @@ internal static partial class NativeMethods
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool AttachConsole(uint processId);
+
+    [LibraryImport("gdi32.dll", SetLastError = true)]
+    private static partial IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int widthEllipse, int heightEllipse);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    private static partial int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, [MarshalAs(UnmanagedType.Bool)] bool redraw);
 
     private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
 

@@ -41,9 +41,14 @@ internal sealed class DisplayLayoutService
 
     public IReadOnlyList<DisplaySurfaceLayout> CreateLayouts(DisplayPlacement placement)
     {
+        return CreateLayouts(placement, PanelSize.Medium);
+    }
+
+    public IReadOnlyList<DisplaySurfaceLayout> CreateLayouts(DisplayPlacement placement, PanelSize panelSize)
+    {
         var monitors = EnumerateMonitors();
         return ResolveTargets(monitors, placement)
-            .Select(CreateLayout)
+            .Select(monitor => CreateLayout(monitor, panelSize))
             .ToArray();
     }
 
@@ -65,11 +70,17 @@ internal sealed class DisplayLayoutService
 
     public DisplaySurfaceLayout CreateLayout(DisplayMonitor monitor)
     {
+        return CreateLayout(monitor, PanelSize.Medium);
+    }
+
+    public DisplaySurfaceLayout CreateLayout(DisplayMonitor monitor, PanelSize panelSize)
+    {
+        var panelMetrics = PanelSizeCatalog.Get(panelSize);
         var accessWidth = DipToPhysical(AccessSurfaceWindow.SurfaceWidth, monitor.ScaleX);
         var accessHeight = DipToPhysical(AccessSurfaceWindow.SurfaceHeight, monitor.ScaleY);
-        var panelWidth = Math.Min(DipToPhysical(PanelWindow.PanelWidth, monitor.ScaleX), monitor.Bounds.Width);
+        var panelWidth = Math.Min(DipToPhysical(panelMetrics.Width, monitor.ScaleX), monitor.Bounds.Width);
         var panelHeight = Math.Min(
-            DipToPhysical(PanelWindow.PanelHeight, monitor.ScaleY),
+            DipToPhysical(panelMetrics.TotalHeight, monitor.ScaleY),
             Math.Max(1, monitor.Bounds.Height - accessHeight));
 
         var access = new PhysicalRect(

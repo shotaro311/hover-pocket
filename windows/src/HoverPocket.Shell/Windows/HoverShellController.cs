@@ -1,8 +1,10 @@
 using System.Windows;
 using System.Windows.Threading;
+using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Display;
 using HoverPocket.Shell.Interop;
+using HoverPocket.Shell.Providers;
 using Microsoft.Win32;
 using System.Runtime.InteropServices;
 using WinForms = System.Windows.Forms;
@@ -17,10 +19,11 @@ internal sealed class HoverShellController : IDisposable
 
     private readonly Dispatcher _dispatcher;
     private readonly ShellSettings _settings;
+    private readonly PanelBridgeController _panelBridgeController;
     private readonly DisplayLayoutService _displayLayoutService = new();
     private readonly List<AccessSurfaceWindow> _accessSurfaces = [];
     private readonly Dictionary<AccessSurfaceWindow, DisplaySurfaceLayout> _surfaceLayouts = [];
-    private readonly PanelWindow _panel = new();
+    private readonly PanelWindow _panel;
     private readonly DispatcherTimer _pollingTimer;
     private readonly DispatcherTimer _closeDelayTimer;
     private readonly DispatcherTimer _resyncTimer;
@@ -29,10 +32,19 @@ internal sealed class HoverShellController : IDisposable
     private bool _systemEventsSubscribed;
     private bool _disposed;
 
-    public HoverShellController(Dispatcher dispatcher, ShellSettings settings)
+    public HoverShellController(
+        Dispatcher dispatcher,
+        ShellSettings settings,
+        ProviderRegistry providerRegistry,
+        UserSettingsStore userSettingsStore,
+        bool enablePanelWebView)
     {
         _dispatcher = dispatcher;
         _settings = settings;
+        var userSettings = userSettingsStore.Load(providerRegistry.ProviderIds);
+        _panelBridgeController = new PanelBridgeController(providerRegistry, userSettingsStore, userSettings);
+        _panelBridgeController.SettingsChanged += OnPanelSettingsChanged;
+        _panel = new PanelWindow(_panelBridgeController, enablePanelWebView);
 
         _pollingTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
         {
@@ -74,6 +86,8 @@ internal sealed class HoverShellController : IDisposable
 
     public PanelWindow Panel => _panel;
 
+    public PanelBridgeController PanelBridgeController => _panelBridgeController;
+
     public void Start()
     {
         _panel.EnsureHandle();
@@ -89,6 +103,12 @@ internal sealed class HoverShellController : IDisposable
 
     public async Task ShowPanelForVerifyAsync()
     {
+        await ShowPanelAsync(ResolveLayoutForPointer());
+    }
+
+    public async Task ShowPanelForUiVerifyAsync()
+    {
+        await _panel.EnsureWebViewInitializedAsync();
         await ShowPanelAsync(ResolveLayoutForPointer());
     }
 
@@ -122,6 +142,7 @@ internal sealed class HoverShellController : IDisposable
         }
 
         _panel.Win32MessageReceived -= OnWindowWin32MessageReceived;
+        _panelBridgeController.SettingsChanged -= OnPanelSettingsChanged;
         _panel.Close();
         foreach (var accessSurface in _accessSurfaces)
         {
@@ -144,6 +165,7 @@ internal sealed class HoverShellController : IDisposable
 
         _activeLayout = layout;
         _closeDelayTimer.Stop();
+        await _panel.EnsureWebViewInitializedAsync();
         await _panel.OpenAsync(layout);
     }
 
@@ -212,7 +234,9 @@ internal sealed class HoverShellController : IDisposable
             return;
         }
 
-        _layouts = _displayLayoutService.CreateLayouts(_settings.DisplayPlacement);
+        _layouts = _displayLayoutService.CreateLayouts(
+            _settings.DisplayPlacement,
+            _panelBridgeController.CurrentSettings.PanelSize);
         EnsureAccessSurfaceCount(_layouts.Count);
         _surfaceLayouts.Clear();
 
@@ -326,6 +350,18 @@ internal sealed class HoverShellController : IDisposable
         {
             ScheduleDisplayResync();
         }
+    }
+
+    private void OnPanelSettingsChanged(object? sender, UserSettings settings)
+    {
+        if (!_dispatcher.CheckAccess())
+        {
+            _dispatcher.BeginInvoke(() => OnPanelSettingsChanged(sender, settings));
+            return;
+        }
+
+        _panel.ApplyPanelSize(settings.PanelSize);
+        ResyncDisplayLayout();
     }
 
     private void TrySubscribeSystemEvents()

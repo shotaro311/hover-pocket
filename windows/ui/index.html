@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HoverPocket</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main id="app" class="hp-shell" aria-live="polite">
+    <section class="hp-panel">
+      <header class="hp-header">
+        <div class="hp-provider-title" data-provider-title>HoverPocket</div>
+        <div class="hp-size-switch" data-size-switch></div>
+        <div class="hp-header-spacer"></div>
+        <nav class="hp-provider-icons" data-provider-icons aria-label="Providers"></nav>
+        <button class="hp-icon-button" type="button" data-refresh aria-label="Refresh"></button>
+        <button class="hp-icon-button" type="button" data-settings aria-label="Settings"></button>
+      </header>
+      <section class="hp-provider" data-provider-container></section>
+      <section class="hp-ai-lane" aria-label="AI command lane">
+        <div class="hp-ai-status">Calendar command lane</div>
+        <div class="hp-ai-row">
+          <input class="hp-ai-input" type="text" value="" placeholder="今日の予定" aria-label="AI command">
+          <button class="hp-ai-button" type="button" aria-label="Submit command"></button>
+        </div>
+      </section>
+    </section>
+  </main>
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

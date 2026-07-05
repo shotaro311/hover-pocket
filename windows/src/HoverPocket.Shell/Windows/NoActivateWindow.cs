@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media;
 using HoverPocket.Shell.Display;
 using HoverPocket.Shell.Interop;
 
@@ -13,7 +14,7 @@ internal abstract class NoActivateWindow : Window
 
     private HwndSource? _source;
 
-    protected NoActivateWindow()
+    protected NoActivateWindow(bool allowsTransparency = true)
     {
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
@@ -21,8 +22,10 @@ internal abstract class NoActivateWindow : Window
         ShowActivated = false;
         Topmost = true;
         Focusable = false;
-        AllowsTransparency = true;
-        Background = System.Windows.Media.Brushes.Transparent;
+        AllowsTransparency = allowsTransparency;
+        Background = allowsTransparency
+            ? System.Windows.Media.Brushes.Transparent
+            : new SolidColorBrush(System.Windows.Media.Color.FromRgb(3, 3, 5));
     }
 
     public void EnsureHandle()
@@ -100,6 +103,12 @@ internal abstract class NoActivateWindow : Window
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (msg == NativeMethods.WmMouseActivate)
+        {
+            handled = true;
+            return new IntPtr(NativeMethods.MaNoActivate);
+        }
+
         Win32MessageReceived?.Invoke(this, new Win32MessageEventArgs(hwnd, msg, wParam, lParam));
         return IntPtr.Zero;
     }

@@ -2,12 +2,19 @@ using HoverPocket.Shell.Configuration;
 
 namespace HoverPocket.Shell;
 
-internal sealed record StartupOptions(bool VerifyShell, bool VerifyDisplay, ShellSettings Settings)
+internal sealed record StartupOptions(
+    bool VerifyShell,
+    bool VerifyDisplay,
+    bool VerifyUi,
+    bool VerifyUiModel,
+    ShellSettings Settings)
 {
     public static StartupOptions Parse(string[] args)
     {
         var verifyShell = false;
         var verifyDisplay = false;
+        var verifyUi = false;
+        var verifyUiModel = false;
         var displayPlacement = DisplayPlacement.Main;
 
         for (var index = 0; index < args.Length; index++)
@@ -18,6 +25,8 @@ internal sealed record StartupOptions(bool VerifyShell, bool VerifyDisplay, Shel
                 var verifyTarget = args[++index];
                 verifyShell = string.Equals(verifyTarget, "shell", StringComparison.OrdinalIgnoreCase);
                 verifyDisplay = string.Equals(verifyTarget, "display", StringComparison.OrdinalIgnoreCase);
+                verifyUi = string.Equals(verifyTarget, "ui", StringComparison.OrdinalIgnoreCase);
+                verifyUiModel = string.Equals(verifyTarget, "ui-model", StringComparison.OrdinalIgnoreCase);
                 continue;
             }
 
@@ -32,6 +41,8 @@ internal sealed record StartupOptions(bool VerifyShell, bool VerifyDisplay, Shel
         return new StartupOptions(
             verifyShell,
             verifyDisplay,
+            verifyUi,
+            verifyUiModel,
             new ShellSettings(displayPlacement));
     }
 
