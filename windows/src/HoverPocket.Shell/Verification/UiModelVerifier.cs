@@ -81,7 +81,7 @@ internal sealed class UiModelVerifier
     private async Task VerifyBridgeDispatch(ProviderRegistry registry, UserSettingsStore store)
     {
         var settings = store.Load(registry.ProviderIds);
-        var controller = new PanelBridgeController(registry, store, settings);
+        using var controller = new PanelBridgeController(registry, store, settings);
         var postedEvents = new List<string>();
         var dispatcher = new BridgeDispatcher(json =>
         {
@@ -115,6 +115,20 @@ internal sealed class UiModelVerifier
         if (reloaded.PanelSize != PanelSize.Small || !ResponseContains(sizeResponse, "\"panelSize\":\"small\""))
         {
             _failures.Add("bridge dispatcher: settings.setPanelSize did not persist small size");
+        }
+
+        var calculatorResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"4","method":"calculator.press","params":{"input":"7"}}""");
+        if (!ResponseContains(calculatorResponse, "\"display\":\"7\""))
+        {
+            _failures.Add("bridge dispatcher: calculator.press did not return calculator state");
+        }
+
+        var timerResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"5","method":"timer.getState"}""");
+        if (!ResponseContains(timerResponse, "\"draftTimer\""))
+        {
+            _failures.Add("bridge dispatcher: timer.getState did not return timer state");
         }
     }
 

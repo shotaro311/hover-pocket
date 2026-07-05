@@ -1,13 +1,17 @@
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Threading;
 using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Display;
 using HoverPocket.Shell.Interop;
 using HoverPocket.Shell.Providers;
+using HoverPocket.Shell.Providers.Timer;
+using HoverPocket.Shell.Settings;
 using Microsoft.Win32;
 using System.Runtime.InteropServices;
 using WinForms = System.Windows.Forms;
+using WpfColor = System.Windows.Media.Color;
 
 namespace HoverPocket.Shell.Windows;
 
@@ -29,7 +33,10 @@ internal sealed class HoverShellController : IDisposable
     private readonly DispatcherTimer _resyncTimer;
     private IReadOnlyList<DisplaySurfaceLayout> _layouts = [];
     private DisplaySurfaceLayout? _activeLayout;
+    private TimerAlert? _activeTimerAlert;
+    private SettingsWindow? _settingsWindow;
     private bool _systemEventsSubscribed;
+    private bool _timerAlertActive;
     private bool _disposed;
 
     public HoverShellController(
@@ -44,6 +51,9 @@ internal sealed class HoverShellController : IDisposable
         var userSettings = userSettingsStore.Load(providerRegistry.ProviderIds);
         _panelBridgeController = new PanelBridgeController(providerRegistry, userSettingsStore, userSettings);
         _panelBridgeController.SettingsChanged += OnPanelSettingsChanged;
+        _panelBridgeController.SettingsOpenRequested += OnSettingsOpenRequested;
+        _panelBridgeController.TimerAlertFired += OnTimerAlertFired;
+        _panelBridgeController.TimerAlertChanged += OnTimerAlertChanged;
         _panel = new PanelWindow(_panelBridgeController, enablePanelWebView);
 
         _pollingTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
@@ -59,7 +69,7 @@ internal sealed class HoverShellController : IDisposable
         _closeDelayTimer.Tick += (_, _) =>
         {
             _closeDelayTimer.Stop();
-            if (!IsPointerInHoverRegion(out _))
+            if (!_timerAlertActive && !IsPointerInHoverRegion(out _))
             {
                 _ = HidePanelAsync();
             }
@@ -99,6 +109,11 @@ internal sealed class HoverShellController : IDisposable
     public void ShowPanelFromUser()
     {
         _ = ShowPanelAsync(ResolveLayoutForPointer());
+    }
+
+    public void OpenSettingsFromUser()
+    {
+        _ = OpenSettingsAsync();
     }
 
     public async Task ShowPanelForVerifyAsync()
@@ -143,6 +158,16 @@ internal sealed class HoverShellController : IDisposable
 
         _panel.Win32MessageReceived -= OnWindowWin32MessageReceived;
         _panelBridgeController.SettingsChanged -= OnPanelSettingsChanged;
+        _panelBridgeController.SettingsOpenRequested -= OnSettingsOpenRequested;
+        _panelBridgeController.TimerAlertFired -= OnTimerAlertFired;
+        _panelBridgeController.TimerAlertChanged -= OnTimerAlertChanged;
+        _panelBridgeController.Dispose();
+        if (_settingsWindow is not null)
+        {
+            _settingsWindow.Close();
+            _settingsWindow = null;
+        }
+
         _panel.Close();
         foreach (var accessSurface in _accessSurfaces)
         {
@@ -167,6 +192,7 @@ internal sealed class HoverShellController : IDisposable
         _closeDelayTimer.Stop();
         await _panel.EnsureWebViewInitializedAsync();
         await _panel.OpenAsync(layout);
+        await _panelBridgeController.NotifyPanelOpenedAsync();
     }
 
     private async Task HidePanelAsync()
@@ -177,6 +203,29 @@ internal sealed class HoverShellController : IDisposable
         }
 
         await _panel.CloseAsync(_activeLayout);
+    }
+
+    private async Task OpenSettingsAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _closeDelayTimer.Stop();
+        await HidePanelAsync();
+
+        if (_settingsWindow is not null)
+        {
+            _settingsWindow.Activate();
+            _settingsWindow.Focus();
+            return;
+        }
+
+        _settingsWindow = new SettingsWindow(_panelBridgeController);
+        _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+        _settingsWindow.Show();
+        _settingsWindow.Activate();
     }
 
     private void PollPointer()
@@ -192,7 +241,7 @@ internal sealed class HoverShellController : IDisposable
             return;
         }
 
-        if (_panel.IsVisible && !_closeDelayTimer.IsEnabled)
+        if (_panel.IsVisible && !_closeDelayTimer.IsEnabled && !_timerAlertActive)
         {
             _closeDelayTimer.Start();
         }
@@ -275,6 +324,11 @@ internal sealed class HoverShellController : IDisposable
             accessSurface.HoverEntered += OnAccessSurfaceHoverEntered;
             accessSurface.Win32MessageReceived += OnWindowWin32MessageReceived;
             accessSurface.EnsureHandle();
+            if (_activeTimerAlert is not null)
+            {
+                accessSurface.SetAlertHighlight(ToHighlightColor(_activeTimerAlert.Color));
+            }
+
             _accessSurfaces.Add(accessSurface);
         }
 
@@ -350,6 +404,82 @@ internal sealed class HoverShellController : IDisposable
         {
             ScheduleDisplayResync();
         }
+    }
+
+    private void OnSettingsOpenRequested(object? sender, EventArgs e)
+    {
+        OpenSettingsFromUser();
+    }
+
+    private void OnTimerAlertFired(object? sender, TimerAlert alert)
+    {
+        _ = sender;
+        if (!_dispatcher.CheckAccess())
+        {
+            _dispatcher.BeginInvoke(() => OnTimerAlertFired(sender, alert));
+            return;
+        }
+
+        _ = ShowTimerAlertAsync(alert);
+    }
+
+    private void OnTimerAlertChanged(object? sender, TimerAlert? alert)
+    {
+        _ = sender;
+        if (!_dispatcher.CheckAccess())
+        {
+            _dispatcher.BeginInvoke(() => OnTimerAlertChanged(sender, alert));
+            return;
+        }
+
+        _timerAlertActive = alert is not null;
+        _activeTimerAlert = alert;
+        if (alert is null)
+        {
+            foreach (var accessSurface in _accessSurfaces)
+            {
+                accessSurface.SetAlertHighlight(null);
+            }
+
+            return;
+        }
+
+        ApplyTimerAlertHighlight(alert);
+    }
+
+    private async Task ShowTimerAlertAsync(TimerAlert alert)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _timerAlertActive = true;
+        _activeTimerAlert = alert;
+        _closeDelayTimer.Stop();
+        ApplyTimerAlertHighlight(alert);
+        await _panelBridgeController.SelectProviderFromShellAsync("timer");
+        await ShowPanelAsync(ResolveLayoutForPointer());
+    }
+
+    private void ApplyTimerAlertHighlight(TimerAlert alert)
+    {
+        var color = ToHighlightColor(alert.Color);
+        foreach (var accessSurface in _accessSurfaces)
+        {
+            accessSurface.SetAlertHighlight(color);
+        }
+    }
+
+    private static WpfColor ToHighlightColor(TimerColor color)
+    {
+        return color switch
+        {
+            TimerColor.Green => WpfColor.FromRgb(36, 188, 126),
+            TimerColor.Orange => WpfColor.FromRgb(246, 149, 62),
+            TimerColor.Pink => WpfColor.FromRgb(232, 95, 151),
+            _ => WpfColor.FromRgb(65, 145, 255)
+        };
     }
 
     private void OnPanelSettingsChanged(object? sender, UserSettings settings)

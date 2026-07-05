@@ -21,20 +21,20 @@ internal sealed class ProviderRegistry
                 "calculator",
                 "Calculator",
                 "calculator",
-                "Placeholder provider",
-                "Calculator UI is reserved for W5. The bridge already switches this provider state."),
+                "Decimal calculator",
+                "Four operations, decimal input, percent, sign toggle, backspace, AC, and copy."),
             new ProviderDescriptor(
                 "timer",
                 "Timer",
                 "timer",
-                "Placeholder provider",
-                "Timer UI is reserved for W5. Settings and provider switching already persist through C#."),
+                "Timer and Pomodoro",
+                "Run up to two timers, pin up to four presets, pause, resume, stop, and restore state."),
             new ProviderDescriptor(
                 "sticky",
                 "Sticky Notes",
                 "note",
-                "Placeholder provider",
-                "Sticky Notes UI is reserved for W6. This slot proves the shared WebView shell.")
+                "Board grid provider",
+                "Create, edit, color, reorder, archive, delete, undo, and drag notes.")
         ]);
     }
 

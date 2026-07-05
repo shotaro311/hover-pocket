@@ -198,6 +198,9 @@ input {
   color: var(--hp-dim);
   font-size: 12px;
   font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hp-ai-row {
@@ -238,4 +241,66 @@ input {
   border-top: 6px solid transparent;
   border-bottom: 6px solid transparent;
   border-left: 9px solid currentColor;
+}
+
+:root[data-text-size="small"] .hp-provider-body,
+:root[data-text-size="small"] .hp-ai-lane {
+  font-size: 12px;
+}
+
+:root[data-text-size="large"] .hp-provider-body,
+:root[data-text-size="large"] .hp-ai-lane {
+  font-size: 15px;
+}
+
+.hp-ai-approval {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  min-height: 0;
+}
+
+.hp-ai-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.hp-ai-field {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.hp-ai-field span {
+  overflow: hidden;
+  color: var(--hp-dim);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hp-ai-field strong {
+  overflow: hidden;
+  color: var(--hp-text);
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hp-ai-actions {
+  display: grid;
+  align-content: center;
+  gap: 6px;
+}
+
+.hp-ai-actions button {
+  height: 28px;
+  border: 1px solid var(--hp-line);
+  border-radius: 7px;
+  padding: 0 10px;
+  color: var(--hp-text);
+  background: rgba(255, 255, 255, 0.06);
 }

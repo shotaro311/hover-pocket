@@ -1,41 +1,98 @@
+using System.IO;
 using System.Text.Json;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Providers;
+using HoverPocket.Shell.Providers.AiLane;
+using HoverPocket.Shell.Providers.Calculator;
+using HoverPocket.Shell.Providers.Sticky;
+using HoverPocket.Shell.Providers.Timer;
+using HoverPocket.Shell.Settings;
 
 namespace HoverPocket.Shell.Bridge;
 
-internal sealed class PanelBridgeController
+internal sealed class PanelBridgeController : IDisposable
 {
     private readonly ProviderRegistry _providerRegistry;
     private readonly UserSettingsStore _settingsStore;
-    private BridgeDispatcher? _dispatcher;
+    private readonly IStartupRegistrationService _startupRegistration;
+    private readonly AiLaneController _aiLaneController;
+    private readonly CalculatorBridgeHandlers _calculatorBridgeHandlers = new();
+    private readonly StickyBridgeController _stickyBridgeController;
+    private readonly TimerBridgeHandlers _timerBridgeHandlers;
+    private readonly List<BridgeDispatcher> _dispatchers = [];
     private string _selectedProviderId;
+    private bool _disposed;
 
-    public PanelBridgeController(ProviderRegistry providerRegistry, UserSettingsStore settingsStore, UserSettings settings)
+    public PanelBridgeController(
+        ProviderRegistry providerRegistry,
+        UserSettingsStore settingsStore,
+        UserSettings settings,
+        IStartupRegistrationService? startupRegistration = null,
+        AiLaneController? aiLaneController = null)
     {
         _providerRegistry = providerRegistry;
         _settingsStore = settingsStore;
+        _startupRegistration = startupRegistration ?? new RunKeyStartupRegistrationService();
+        _aiLaneController = aiLaneController ?? new AiLaneController(new AiLaneAuditLog(settingsStore.RootDirectory));
+        _stickyBridgeController = new StickyBridgeController(new StickyNotesStore(Path.Combine(settingsStore.RootDirectory, "sticky")));
+        _timerBridgeHandlers = new TimerBridgeHandlers(new TimerStore(Path.Combine(settingsStore.RootDirectory, "timer")));
+        _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
+        _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.Normalize(settings, providerRegistry.ProviderIds);
         _selectedProviderId = ResolveInitialProviderId();
     }
 
     public event EventHandler<UserSettings>? SettingsChanged;
 
+    public event EventHandler? SettingsOpenRequested;
+
+    public event EventHandler<TimerAlert>? TimerAlertFired;
+
+    public event EventHandler<TimerAlert?>? TimerAlertChanged;
+
     public UserSettings CurrentSettings { get; private set; }
 
     public string SelectedProviderId => _selectedProviderId;
 
-    public void Attach(BridgeDispatcher dispatcher)
+    public IDisposable Attach(BridgeDispatcher dispatcher)
     {
-        _dispatcher = dispatcher;
+        _dispatchers.Add(dispatcher);
         dispatcher.Register("app.getState", (_, _) => Task.FromResult<object?>(BuildState()));
         dispatcher.Register("app.ready", (_, _) => Task.FromResult<object?>(new { ok = true }));
         dispatcher.Register("diagnostics.echo", (parameters, _) => Task.FromResult<object?>(DeserializeObject(parameters)));
         dispatcher.Register("provider.select", SelectProviderAsync);
         dispatcher.Register("provider.refreshPlaceholder", RefreshPlaceholderAsync);
         dispatcher.Register("settings.setPanelSize", SetPanelSizeAsync);
+        dispatcher.Register("settings.setTextSize", SetTextSizeAsync);
         dispatcher.Register("settings.setSwitchingMode", SetSwitchingModeAsync);
-        dispatcher.Register("settings.openPlaceholder", (_, _) => Task.FromResult<object?>(new { opened = false, reason = "settings-ui-w7" }));
+        dispatcher.Register("settings.setLanguage", SetLanguageAsync);
+        dispatcher.Register("settings.setProviderVisibility", SetProviderVisibilityAsync);
+        dispatcher.Register("settings.moveProvider", MoveProviderAsync);
+        dispatcher.Register("settings.setProviderOrder", SetProviderOrderAsync);
+        dispatcher.Register("settings.setStartWithWindows", SetStartWithWindowsAsync);
+        dispatcher.Register("settings.resetDefaults", ResetDefaultsAsync);
+        dispatcher.Register("settings.open", OpenSettingsAsync);
+        dispatcher.Register("settings.openPlaceholder", OpenSettingsAsync);
+        dispatcher.Register("ailane.submit", SubmitAiLaneAsync);
+        dispatcher.Register("ailane.approve", ApproveAiLaneAsync);
+        dispatcher.Register("ailane.reject", RejectAiLaneAsync);
+        _calculatorBridgeHandlers.Register(dispatcher);
+        _stickyBridgeController.Attach(dispatcher);
+        _timerBridgeHandlers.Register(dispatcher);
+        return new BridgeAttachment(() => _dispatchers.Remove(dispatcher));
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _timerBridgeHandlers.AlertFired -= OnTimerAlertFired;
+        _timerBridgeHandlers.AlertChanged -= OnTimerAlertChanged;
+        _timerBridgeHandlers.Dispose();
     }
 
     public object BuildState()
@@ -58,6 +115,8 @@ internal sealed class PanelBridgeController
                 textSize = ToWireValue(CurrentSettings.TextSize),
                 switchingMode = ToWireValue(CurrentSettings.SwitchingMode),
                 language = ToWireValue(CurrentSettings.Language),
+                startWithWindows = CurrentSettings.StartWithWindows,
+                startWithWindowsRegistered = IsStartupRegistered(),
                 providerOrder = CurrentSettings.ProviderOrder,
                 providerVisibility = CurrentSettings.ProviderVisibility
             },
@@ -86,6 +145,14 @@ internal sealed class PanelBridgeController
                 body = provider.Body,
                 selected = selected is not null && string.Equals(provider.Id, selected.Id, StringComparison.OrdinalIgnoreCase)
             }),
+            allProviders = _providerRegistry.Providers.Select(provider => new
+            {
+                id = provider.Id,
+                title = provider.Title,
+                icon = provider.Icon,
+                summary = provider.Summary,
+                body = provider.Body
+            }),
             selectedProvider = selected is null
                 ? null
                 : new
@@ -96,6 +163,8 @@ internal sealed class PanelBridgeController
                     summary = selected.Summary,
                     body = selected.Body
                 }
+            ,
+            aiLane = _aiLaneController.CurrentState
         };
     }
 
@@ -131,6 +200,19 @@ internal sealed class PanelBridgeController
         return await PublishStateAsync(cancellationToken);
     }
 
+    private async Task<object?> SetTextSizeAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var textSize = ParseTextSize(ReadRequiredString(parameters, "textSize"));
+        if (CurrentSettings.TextSize != textSize)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.TextSize = textSize;
+            SaveSettings(updated);
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
     private async Task<object?> SetSwitchingModeAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         var switchingMode = ParseSwitchingMode(ReadRequiredString(parameters, "switchingMode"));
@@ -144,6 +226,137 @@ internal sealed class PanelBridgeController
         return await PublishStateAsync(cancellationToken);
     }
 
+    private async Task<object?> SetLanguageAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var language = ParseLanguage(ReadRequiredString(parameters, "language"));
+        if (CurrentSettings.Language != language)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.Language = language;
+            SaveSettings(updated);
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetProviderVisibilityAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var providerId = ReadRequiredString(parameters, "id");
+        var visible = ReadRequiredBool(parameters, "visible");
+        if (_providerRegistry.Find(providerId) is null)
+        {
+            throw new InvalidOperationException($"Unknown provider: {providerId}");
+        }
+
+        var updated = CurrentSettings.Clone();
+        updated.ProviderVisibility[providerId] = visible;
+        if (updated.ProviderVisibility.Count > 0 && updated.ProviderVisibility.Values.All(value => !value))
+        {
+            updated.ProviderVisibility[providerId] = true;
+        }
+
+        SaveSettings(updated);
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> MoveProviderAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var providerId = ReadRequiredString(parameters, "id");
+        var direction = ReadRequiredString(parameters, "direction");
+        var updated = CurrentSettings.Clone();
+        var index = updated.ProviderOrder.FindIndex(id => string.Equals(id, providerId, StringComparison.OrdinalIgnoreCase));
+        if (index < 0)
+        {
+            throw new InvalidOperationException($"Unknown provider: {providerId}");
+        }
+
+        var nextIndex = direction.Equals("up", StringComparison.OrdinalIgnoreCase)
+            ? Math.Max(0, index - 1)
+            : Math.Min(updated.ProviderOrder.Count - 1, index + 1);
+        if (nextIndex != index)
+        {
+            (updated.ProviderOrder[index], updated.ProviderOrder[nextIndex]) =
+                (updated.ProviderOrder[nextIndex], updated.ProviderOrder[index]);
+            SaveSettings(updated);
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetProviderOrderAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var order = ReadRequiredStringArray(parameters, "providerOrder");
+        var updated = CurrentSettings.Clone();
+        updated.ProviderOrder = order;
+        SaveSettings(updated);
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetStartWithWindowsAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var enabled = ReadRequiredBool(parameters, "enabled");
+        if (CurrentSettings.StartWithWindows != enabled || IsStartupRegistered() != enabled)
+        {
+            _startupRegistration.SetRegistered(enabled);
+            var updated = CurrentSettings.Clone();
+            updated.StartWithWindows = enabled;
+            SaveSettings(updated);
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> ResetDefaultsAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        _startupRegistration.SetRegistered(false);
+        SaveSettings(UserSettingsStore.CreateDefault(_providerRegistry.ProviderIds));
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> OpenSettingsAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        cancellationToken.ThrowIfCancellationRequested();
+        SettingsOpenRequested?.Invoke(this, EventArgs.Empty);
+        return await Task.FromResult<object?>(new { opened = true });
+    }
+
+    private async Task<object?> SubmitAiLaneAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        _aiLaneController.Submit(ReadRequiredString(parameters, "text"));
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> ApproveAiLaneAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        _aiLaneController.Approve(ReadRequiredString(parameters, "actionId"));
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> RejectAiLaneAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        _aiLaneController.Reject(ReadRequiredString(parameters, "actionId"));
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    public Task NotifyPanelOpenedAsync()
+    {
+        return PostEventAsync("panel.opened", BuildState());
+    }
+
+    public async Task SelectProviderFromShellAsync(string providerId, CancellationToken cancellationToken = default)
+    {
+        var provider = _providerRegistry.Find(providerId);
+        if (provider is null || !IsVisible(provider.Id))
+        {
+            return;
+        }
+
+        _selectedProviderId = provider.Id;
+        await PublishStateAsync(cancellationToken);
+    }
+
     private void SaveSettings(UserSettings settings)
     {
         CurrentSettings = UserSettingsStore.Normalize(settings, _providerRegistry.ProviderIds);
@@ -155,12 +368,16 @@ internal sealed class PanelBridgeController
     {
         cancellationToken.ThrowIfCancellationRequested();
         var state = BuildState();
-        if (_dispatcher is not null)
-        {
-            await _dispatcher.PostEventAsync("state.changed", state);
-        }
-
+        await PostEventAsync("state.changed", state);
         return state;
+    }
+
+    private async Task PostEventAsync(string eventName, object? payload)
+    {
+        foreach (var dispatcher in _dispatchers.ToArray())
+        {
+            await dispatcher.PostEventAsync(eventName, payload);
+        }
     }
 
     private string ResolveInitialProviderId()
@@ -209,6 +426,34 @@ internal sealed class PanelBridgeController
         return property.GetString() ?? string.Empty;
     }
 
+    private static bool ReadRequiredBool(JsonElement? parameters, string propertyName)
+    {
+        if (parameters is null
+            || !parameters.Value.TryGetProperty(propertyName, out var property)
+            || property.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            throw new InvalidOperationException($"Missing bool parameter: {propertyName}");
+        }
+
+        return property.GetBoolean();
+    }
+
+    private static List<string> ReadRequiredStringArray(JsonElement? parameters, string propertyName)
+    {
+        if (parameters is null
+            || !parameters.Value.TryGetProperty(propertyName, out var property)
+            || property.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException($"Missing string array parameter: {propertyName}");
+        }
+
+        return property.EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.String)
+            .Select(item => item.GetString() ?? string.Empty)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToList();
+    }
+
     private static PanelSize ParsePanelSize(string value)
     {
         return value.ToLowerInvariant() switch
@@ -224,6 +469,51 @@ internal sealed class PanelBridgeController
         return value.Equals("hover", StringComparison.OrdinalIgnoreCase)
             ? ProviderSwitchingMode.Hover
             : ProviderSwitchingMode.Click;
+    }
+
+    private static PanelTextSize ParseTextSize(string value)
+    {
+        return value.ToLowerInvariant() switch
+        {
+            "small" => PanelTextSize.Small,
+            "large" => PanelTextSize.Large,
+            _ => PanelTextSize.Medium
+        };
+    }
+
+    private static AppLanguage ParseLanguage(string value)
+    {
+        return value.Equals("en", StringComparison.OrdinalIgnoreCase)
+            ? AppLanguage.English
+            : AppLanguage.Japanese;
+    }
+
+    private bool IsStartupRegistered()
+    {
+        try
+        {
+            return _startupRegistration.IsRegistered();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return CurrentSettings.StartWithWindows;
+        }
+        catch (InvalidOperationException)
+        {
+            return CurrentSettings.StartWithWindows;
+        }
+    }
+
+    private void OnTimerAlertFired(object? sender, TimerAlert alert)
+    {
+        _ = sender;
+        TimerAlertFired?.Invoke(this, alert);
+    }
+
+    private void OnTimerAlertChanged(object? sender, TimerAlert? alert)
+    {
+        _ = sender;
+        TimerAlertChanged?.Invoke(this, alert);
     }
 
     private static string ToWireValue(PanelSize panelSize)
@@ -254,5 +544,27 @@ internal sealed class PanelBridgeController
     private static string ToWireValue(AppLanguage language)
     {
         return language == AppLanguage.English ? "en" : "ja";
+    }
+
+    private sealed class BridgeAttachment : IDisposable
+    {
+        private readonly Action _dispose;
+        private bool _disposed;
+
+        public BridgeAttachment(Action dispose)
+        {
+            _dispose = dispose;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            _dispose();
+        }
     }
 }

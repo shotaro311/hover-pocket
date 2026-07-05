@@ -1,0 +1,237 @@
+.hp-timer {
+  height: 100%;
+  overflow: hidden;
+}
+
+.hp-timer-stack {
+  display: grid;
+  height: 100%;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
+  padding-right: 2px;
+  scrollbar-width: none;
+}
+
+.hp-timer-stack::-webkit-scrollbar {
+  display: none;
+}
+
+.hp-timer-section {
+  padding: 9px 10px;
+  border: 1px solid var(--hp-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.hp-timer-section h2 {
+  margin: 0 0 8px;
+  color: rgba(255, 255, 255, 0.64);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.hp-timer-section-body {
+  display: grid;
+  gap: 7px;
+}
+
+.hp-timer-empty {
+  height: 28px;
+  color: rgba(255, 255, 255, 0.38);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+.hp-timer-running,
+.hp-timer-alert,
+.hp-timer-pinned {
+  display: grid;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.hp-timer-running {
+  grid-template-columns: 34px 1fr 24px 24px 24px;
+  padding: 8px;
+}
+
+.hp-timer-pinned,
+.hp-timer-alert {
+  grid-template-columns: 1fr 28px 28px;
+  padding: 6px 8px;
+}
+
+.hp-timer-alert {
+  grid-template-columns: 1fr 58px;
+}
+
+.hp-timer-running button,
+.hp-timer-alert button,
+.hp-timer-pinned button,
+.hp-timer-entry button {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.hp-timer-main,
+.hp-timer-pinned div,
+.hp-timer-alert div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.hp-timer-main strong,
+.hp-timer-pinned strong,
+.hp-timer-alert strong {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 11px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hp-timer-main span,
+.hp-timer-pinned span,
+.hp-timer-alert span {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.hp-timer-ring {
+  position: relative;
+  overflow: hidden;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.hp-timer-ring span {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  transform-origin: left center;
+  background: currentColor;
+}
+
+.hp-timer-entry {
+  display: grid;
+  gap: 8px;
+}
+
+.hp-timer-entry-head,
+.hp-timer-duration-row {
+  display: grid;
+  align-items: center;
+  gap: 8px;
+}
+
+.hp-timer-entry-head {
+  grid-template-columns: auto 1fr 28px;
+}
+
+.hp-timer-duration-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.hp-timer-entry.is-pomodoro .hp-timer-duration-row {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
+}
+
+.hp-timer-colors {
+  display: inline-flex;
+  gap: 5px;
+}
+
+.hp-timer-colors button {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.hp-timer-colors button[aria-pressed] {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.9);
+}
+
+.hp-timer-entry input[type="text"] {
+  min-width: 0;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 0 8px;
+  color: rgba(255, 255, 255, 0.86);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.hp-timer-duration {
+  display: grid;
+  grid-template-columns: 26px 4px 26px 4px 26px;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.hp-timer-duration input[type="text"],
+.hp-timer-duration input[inputmode="numeric"] {
+  width: 26px;
+  height: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.055);
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.hp-timer-duration span {
+  color: rgba(255, 255, 255, 0.28);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.hp-timer-duration input[type="range"] {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: currentColor;
+}
+
+.hp-timer-start,
+.hp-timer-pin {
+  width: 28px;
+  height: 28px;
+}
+
+.hp-timer-start:disabled {
+  opacity: 0.35;
+}
+
+.is-blue {
+  color: #5ca3ff;
+}
+
+.is-green {
+  color: #61d48c;
+}
+
+.is-orange {
+  color: #ffa047;
+}
+
+.is-pink {
+  color: #ff759e;
+}

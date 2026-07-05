@@ -11,7 +11,7 @@ internal sealed class TrayIconService : IDisposable
     {
         var menu = new WinForms.ContextMenuStrip();
         menu.Items.Add("Open Panel", null, (_, _) => shellController.ShowPanelFromUser());
-        menu.Items.Add(new WinForms.ToolStripMenuItem("Settings") { Enabled = false });
+        menu.Items.Add("Settings", null, (_, _) => shellController.OpenSettingsFromUser());
         menu.Items.Add(new WinForms.ToolStripMenuItem("Check for Updates") { Enabled = false });
         menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => System.Windows.Application.Current.Shutdown());

@@ -1,0 +1,448 @@
+.sticky-loading,
+.sticky-root {
+  height: 100%;
+  min-height: 0;
+}
+
+.sticky-root {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+  overflow: hidden;
+  color: var(--hp-text);
+}
+
+.sticky-loading {
+  display: grid;
+  place-items: center;
+  color: var(--hp-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sticky-header {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  gap: 8px;
+}
+
+.sticky-title {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.sticky-count {
+  min-width: 18px;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.sticky-header-spacer {
+  flex: 1 1 auto;
+}
+
+.sticky-error {
+  max-width: 170px;
+  overflow: hidden;
+  color: #ffd866;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sticky-grid-size,
+.sticky-swatches {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sticky-grid-size {
+  padding: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.sticky-mini-button,
+.sticky-icon-button,
+.sticky-swatch,
+.sticky-text-button,
+.sticky-menu-button {
+  border: 0;
+  font: inherit;
+  cursor: default;
+}
+
+.sticky-mini-button {
+  width: 17px;
+  height: 17px;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.45);
+  background: transparent;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.sticky-mini-button[aria-pressed="true"] {
+  color: white;
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.sticky-swatch {
+  width: 15px;
+  height: 15px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.16);
+}
+
+.sticky-swatch.is-selected {
+  outline: 2px solid rgba(255, 255, 255, 0.68);
+  outline-offset: 1px;
+}
+
+.sticky-icon-button {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sticky-icon-button:hover,
+.sticky-icon-button:focus-visible {
+  color: white;
+  background: rgba(255, 255, 255, 0.15);
+  outline: none;
+}
+
+.sticky-delete-button {
+  color: #ffd1d1;
+}
+
+.sticky-done-button {
+  color: #d8fff2;
+  background: rgba(99, 214, 181, 0.2);
+}
+
+.sticky-board {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sticky-grid {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  align-content: start;
+  gap: 10px;
+  overflow: auto;
+  padding: 1px 1px 58px;
+  scrollbar-width: none;
+}
+
+.sticky-grid::-webkit-scrollbar {
+  display: none;
+}
+
+.sticky-grid-small .sticky-grid {
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+}
+
+.sticky-grid-medium .sticky-grid {
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+}
+
+.sticky-grid-large .sticky-grid {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+.sticky-note {
+  display: grid;
+  min-width: 0;
+  min-height: 104px;
+  grid-template-rows: auto auto 1fr;
+  gap: 7px;
+  padding: 10px;
+  border-radius: 8px;
+  color: rgba(0, 0, 0, 0.76);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
+  transition: opacity 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+
+.sticky-grid-small .sticky-note {
+  min-height: 88px;
+}
+
+.sticky-grid-large .sticky-note {
+  min-height: 132px;
+}
+
+.sticky-note:hover,
+.sticky-note:focus-visible,
+.sticky-note.is-drop-target {
+  transform: translateY(-1px);
+  box-shadow: 0 13px 30px rgba(0, 0, 0, 0.28);
+  outline: none;
+}
+
+.sticky-note.is-drop-target {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.56), 0 13px 30px rgba(0, 0, 0, 0.3);
+}
+
+.sticky-note.is-dragging {
+  opacity: 0.65;
+}
+
+.sticky-note-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.sticky-note-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.sticky-grid-large .sticky-note-title {
+  font-size: 13px;
+}
+
+.sticky-note-body {
+  margin: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow-wrap: anywhere;
+  color: rgba(0, 0, 0, 0.58);
+  font-size: 10.5px;
+  line-height: 1.36;
+}
+
+.sticky-grid-small .sticky-note-body {
+  -webkit-line-clamp: 3;
+  font-size: 9.5px;
+}
+
+.sticky-grid-large .sticky-note-body {
+  -webkit-line-clamp: 5;
+  font-size: 11.5px;
+}
+
+.sticky-note-time {
+  align-self: end;
+  color: rgba(0, 0, 0, 0.36);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.sticky-external-drag-button,
+.sticky-archive-button {
+  opacity: 0;
+  flex: 0 0 auto;
+}
+
+.sticky-note:hover .sticky-external-drag-button,
+.sticky-note:hover .sticky-archive-button,
+.sticky-note:focus-within .sticky-external-drag-button,
+.sticky-note:focus-within .sticky-archive-button {
+  opacity: 1;
+}
+
+.sticky-editor {
+  grid-column: 1 / -1;
+  min-height: 190px;
+  grid-template-rows: auto auto 1fr;
+  color: rgba(0, 0, 0, 0.78);
+}
+
+.sticky-grid-large .sticky-editor {
+  min-height: 232px;
+}
+
+.sticky-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sticky-title-input,
+.sticky-body-input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 6px;
+  outline: none;
+  color: rgba(0, 0, 0, 0.76);
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.sticky-title-input {
+  height: 30px;
+  padding: 0 9px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.sticky-body-input {
+  min-height: 92px;
+  resize: none;
+  padding: 8px 9px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.sticky-grid-small .sticky-body-input {
+  min-height: 78px;
+}
+
+.sticky-grid-large .sticky-body-input {
+  min-height: 126px;
+}
+
+.sticky-empty {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sticky-trash {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  left: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9px;
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(0, 0, 0, 0.72);
+  font-size: 11px;
+  font-weight: 800;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.28);
+}
+
+.sticky-trash.is-targeted {
+  color: rgba(0, 0, 0, 0.76);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.sticky-toast {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.84);
+  background: rgba(0, 0, 0, 0.78);
+  font-size: 11px;
+  font-weight: 800;
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.3);
+}
+
+.sticky-text-button {
+  margin-left: auto;
+  color: white;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.sticky-text-button + .sticky-text-button {
+  margin-left: 0;
+  color: rgba(255, 255, 255, 0.54);
+}
+
+.sticky-menu {
+  position: fixed;
+  z-index: 20;
+  display: grid;
+  width: 146px;
+  gap: 3px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(15, 17, 22, 0.98);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
+}
+
+.sticky-menu-button {
+  height: 25px;
+  border-radius: 5px;
+  color: rgba(255, 255, 255, 0.82);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.sticky-menu-button:hover,
+.sticky-menu-button:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+}
+
+.sticky-menu-button.is-danger {
+  color: #ffd1d1;
+}
+
+.sticky-menu-label {
+  padding: 5px 6px 1px;
+  color: rgba(255, 255, 255, 0.44);
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.sticky-menu-colors {
+  display: flex;
+  gap: 6px;
+  padding: 4px 5px 6px;
+}
+
+.sticky-note-yellow {
+  background: linear-gradient(135deg, #ffe56e, #efd054);
+}
+
+.sticky-note-pink {
+  background: linear-gradient(135deg, #ffb3ca, #f594ad);
+}
+
+.sticky-note-mint {
+  background: linear-gradient(135deg, #aae9c1, #83dca8);
+}
+
+.sticky-note-blue {
+  background: linear-gradient(135deg, #a8d6ff, #83bdf6);
+}
+
+.sticky-note-lavender {
+  background: linear-gradient(135deg, #c9bcff, #b1a3f2);
+}

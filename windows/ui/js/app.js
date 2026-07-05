@@ -1,4 +1,15 @@
 import { on, request } from "./bridge.js";
+import { setLanguage, t } from "./i18n.js";
+import { focusAiLaneInput, renderAiLane } from "../ailane/ailane.js";
+import { renderCalculatorProvider } from "../providers/calculator/calculator.js";
+import { renderStickyProvider } from "../providers/sticky/sticky.js";
+import { renderTimerProvider } from "../providers/timer/timer.js";
+
+const providerRenderers = {
+  calculator: renderCalculatorProvider,
+  sticky: renderStickyProvider,
+  timer: renderTimerProvider,
+};
 
 const titleEl = document.querySelector("[data-provider-title]");
 const providerContainerEl = document.querySelector("[data-provider-container]");
@@ -6,12 +17,18 @@ const providerIconsEl = document.querySelector("[data-provider-icons]");
 const sizeSwitchEl = document.querySelector("[data-size-switch]");
 const refreshButtonEl = document.querySelector("[data-refresh]");
 const settingsButtonEl = document.querySelector("[data-settings]");
+const aiLaneEl = document.querySelector("[data-ai-lane]");
 
 /** @type {any} */
 let currentState = null;
 
 on("state.changed", (state) => {
   render(state);
+});
+
+on("panel.opened", (state) => {
+  render(state);
+  focusAiLaneInput();
 });
 
 bootstrap();
@@ -30,11 +47,14 @@ function render(state) {
   currentState = state;
   document.documentElement.style.setProperty("--hp-header-height", `${state.panel.headerHeight}px`);
   document.documentElement.style.setProperty("--hp-ai-height", `${state.panel.aiLaneHeight}px`);
+  document.documentElement.dataset.textSize = state.settings.textSize;
+  setLanguage(state.settings.language);
 
   renderTitle(state);
   renderSizeSwitch(state);
   renderProviderIcons(state);
   renderProvider(state);
+  renderAiLane(aiLaneEl, state, request, render);
   renderCommands();
 }
 
@@ -100,6 +120,18 @@ function renderProvider(state) {
   const provider = state.selectedProvider;
   providerContainerEl.replaceChildren();
 
+  const renderer = providerRenderers[provider?.id];
+  if (renderer) {
+    renderer({
+      container: providerContainerEl,
+      provider,
+      state,
+      request,
+      iconSvg,
+    });
+    return;
+  }
+
   const card = document.createElement("article");
   card.className = "hp-provider-card";
   card.innerHTML = `
@@ -117,10 +149,14 @@ function renderProvider(state) {
 
 function renderCommands() {
   refreshButtonEl.innerHTML = iconSvg("refresh");
+  refreshButtonEl.title = t("refresh");
+  refreshButtonEl.setAttribute("aria-label", t("refresh"));
   refreshButtonEl.onclick = () => request("provider.refreshPlaceholder").then(render);
 
   settingsButtonEl.innerHTML = iconSvg("settings");
-  settingsButtonEl.onclick = () => request("settings.openPlaceholder");
+  settingsButtonEl.title = t("settings");
+  settingsButtonEl.setAttribute("aria-label", t("settings"));
+  settingsButtonEl.onclick = () => request("settings.open");
 }
 
 /**

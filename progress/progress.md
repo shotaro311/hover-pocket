@@ -5,6 +5,21 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-05 W5 Integration Turn
+
+- Resolved the Windows Phase 1 integration blockers from W5: Calculator/Timer bridge handlers are now registered from `PanelBridgeController.Attach()`, Timer alerts now select the Timer provider, open the panel automatically, and statically highlight the access mini-bar.
+- Fixed the self-evident AI lane verifier regression where `14時` was parsed as `4時`.
+- `dotnet build windows\HoverPocket.Windows.sln --nologo` completed with exit code 0, warning 0, error 0.
+- Final verify exit codes: `shell=0`, `display=0`, `ui-model=0`, `calc=0`, `timer=0`, `sticky=0`, `settings=0`, `ailane=0`.
+- WebView2 runtime checks (`--verify ui`, Settings actual window launch) remain architect desktop-session verification items.
+
+## 2026-07-05 W7 Settings + AI command lane
+
+- Implemented Windows Phase 1 W7 Settings and AI command lane frame: Settings window, HKCU Run key service, settings verifier, deterministic AI stub, approval flow, audit JSONL, and AI lane UI.
+- W7 JS syntax checks passed with exit code 0 for app.js, ailane.js, settings.js, and i18n.js.
+- dotnet build and --verify settings / --verify ailane / --verify ui-model stopped before runtime because W5 Calculator has 3 compile errors. See progress/2026-07/2026-07-05_windows-phase1-w7.md.
+- Follow-up: exposed Sticky Notes Undo toast in Settings using the Sticky store as source of truth. Grid size remains provider-local because W6 already exposes S/M/L there. dotnet build and --verify settings / sticky / ui-model / ailane are now exit code 0.
+
 # Project Progress: ホバーポケット
 
 ## 概要
@@ -14,6 +29,8 @@ status: active
 
 ## 最新の検証済み状態
 
+- 2026-07-05: Windows Phase 1 W5 Calculator + Timer provider を実装し、統合ターンで共有基盤への接続まで完了。`Providers/Calculator/` に C# `CalculatorEngine` / bridge handler / verifier、`Providers/Timer/` に `%APPDATA%\HoverPocket\timer\` 永続化の Timer store / bridge handler / verifier、`windows/ui/providers/calculator/` と `windows/ui/providers/timer/` に Web UI を追加。`PanelBridgeController.Attach()` へ Calculator/Timer bridge handlers を登録し、Timer 終了時のパネル自動表示・Timer provider 選択・ミニバーハイライトを追加。`dotnet build windows\HoverPocket.Windows.sln --nologo` は exit code 0 / 警告 0、`--verify shell` / `display` / `ui-model` / `calc` / `timer` / `sticky` / `settings` / `ailane` はすべて exit code 0。WebView2 実行系検証はアーキテクト通常 desktop session 実行待ち。詳細は `progress/2026-07/2026-07-05_windows-phase1-w5.md`。
+- 2026-07-05: Windows Phase 1 W6 Sticky Notes provider を実装。`Providers/Sticky/` に C# model/store/bridge/verifier、`windows/ui/providers/sticky/` にボードグリッド、inline editor、色、S/M/L、drag reorder、下部 archive drop、右クリックメニュー、Undo toast、C# `DoDragDrop` 起点の外部ドラッグ入口を追加。共有ファイルは sticky descriptor、`--verify sticky` 分岐、app.js renderer 登録、sticky bridge handler 登録のみ追記。`dotnet build windows\HoverPocket.Windows.sln` は exit code 0 / 警告 0、`--verify sticky` と `--verify ui-model` は exit code 0、JS 構文チェックと `git diff --check` も exit code 0。WebView2 実行系の Sticky UI 操作確認と外部ドラッグ実アプリ drop はアーキテクト通常 desktop session 実行待ち。詳細は `progress/2026-07/2026-07-05_windows-phase1-w6.md`。
 - 2026-07-05: Windows Phase 1 W4 差し戻し対応。アーキテクト通常 desktop session の `--verify ui` で発覚した `ExecuteScriptAsync` 戻り値 decode バグを修正。`RunWebVerifyScriptAsync()` の `Deserialize<string>` 二重エンコード前提を削除し、JS 側の verify 結果を `window.__hoverPocketVerifyResult` に置いたうえで C# が `UiWebVerifyResult` として直接 deserialize する形へ統一。同種点検で `ExecuteScriptAsync` 使用箇所は `PanelWindow.cs` のみ、二重エンコード前提は残っていない。アーキテクト追加の `VerifyConsole` `HOVERPOCKET_VERIFY_LOG` は維持。`dotnet build windows\HoverPocket.Windows.sln` は exit code 0 / 警告 0、`--verify shell` / `--verify display` / `--verify ui-model` は exit code 0。修正後の `--verify ui` はアーキテクト通常 desktop session 実行待ち。詳細は `progress/2026-07/2026-07-05_windows-phase1-w4.md`。
 - 2026-07-05: Windows Phase 1 W4 WebView2 統合基盤を実装。`PanelWindow` に WebView2 host(透明背景、virtual host mapping、NOACTIVATE/TOOLWINDOW、`WM_MOUSEACTIVATE -> MA_NOACTIVATE`、rounded HWND region)を追加し、`windows/ui/` に bundler なしの HTML/CSS/ES modules、C# `Bridge/` dispatcher、JS `bridge.js`、provider header、placeholder provider registry 3枠、`%APPDATA%\HoverPocket\settings.json` store、`--verify ui` / `--verify ui-model` を追加。`dotnet build windows\HoverPocket.Windows.sln` は exit code 0 / 警告 0。`HoverPocket.Shell.exe --verify ui-model`、`--verify shell`、`--verify display` は exit code 0。`--verify ui` は sandbox 内 WebView2 初期化で `COMException E_UNEXPECTED` のため exit code 1、計画書 A4 に従いアーキテクト通常 desktop session 実行待ち。詳細は `progress/2026-07/2026-07-05_windows-phase1-w4.md`。
 - 2026-07-05: Windows Phase 0 W3 candidate C risk spikes を `windows/spikes/HoverPocket.Spikes.sln` として本体 sln から分離して追加。S1 WebView2 x NOACTIVATE transparent overlay、S2 Clipboard listener + PNG 正規化 + drag payload、S3 WebView2 getUserMedia camera を実装。`dotnet build windows\spikes\HoverPocket.Spikes.sln --no-restore` は exit code 0 / 警告 0。S2 `--verify` は exit code 0。S1/S3 は WebView2 Runtime `150.0.4078.48` を検出したが、baseline から `RenderProcessExited:LaunchFailed` / `GpuProcessExited:Crashed` で exit code 1。候補Cは未確定、通常 desktop session での S1/S3 再検証が必要。詳細は `docs/report/20260705-windows-candidate-c-spike-findings.md` と `progress/2026-07/2026-07-05_windows-phase0-w3.md`。

@@ -103,6 +103,7 @@ internal sealed class UserSettingsStore
             TextSize = PanelTextSize.Medium,
             SwitchingMode = ProviderSwitchingMode.Click,
             Language = AppLanguage.Japanese,
+            StartWithWindows = false,
             ProviderOrder = [.. providerIds],
             ProviderVisibility = providerIds.ToDictionary(id => id, _ => true, StringComparer.OrdinalIgnoreCase)
         };

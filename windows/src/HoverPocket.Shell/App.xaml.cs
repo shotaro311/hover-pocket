@@ -1,7 +1,12 @@
 using System.Windows;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Providers;
+using HoverPocket.Shell.Providers.AiLane;
+using HoverPocket.Shell.Providers.Calculator;
+using HoverPocket.Shell.Providers.Sticky;
+using HoverPocket.Shell.Providers.Timer;
 using HoverPocket.Shell.Services;
+using HoverPocket.Shell.Settings;
 using HoverPocket.Shell.Verification;
 using HoverPocket.Shell.Windows;
 
@@ -23,6 +28,40 @@ public partial class App : System.Windows.Application
         {
             VerifyConsole.AttachParent();
             Environment.ExitCode = new UiModelVerifier().Run();
+            Shutdown();
+            return;
+        }
+
+        if (options.VerifySettings)
+        {
+            VerifyConsole.AttachParent();
+            Environment.ExitCode = new SettingsVerifier().Run();
+            Shutdown();
+            return;
+        }
+
+        if (options.VerifyAiLane)
+        {
+            VerifyConsole.AttachParent();
+            Environment.ExitCode = new AiLaneVerifier().Run();
+            Shutdown();
+            return;
+        }
+
+        if (options.VerifySticky)
+        {
+            VerifyConsole.AttachParent();
+            Environment.ExitCode = new StickyVerifier().Run();
+            Shutdown();
+            return;
+        }
+
+        if (options.VerifyCalc || options.VerifyTimer)
+        {
+            VerifyConsole.AttachParent();
+            Environment.ExitCode = options.VerifyCalc
+                ? new CalculatorVerifier().Run()
+                : new TimerVerifier().Run();
             Shutdown();
             return;
         }

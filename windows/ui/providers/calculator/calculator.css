@@ -1,0 +1,101 @@
+.hp-calc {
+  display: grid;
+  height: 100%;
+  max-width: 430px;
+  margin: 0 auto;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+  outline: none;
+}
+
+.hp-calc-display {
+  display: grid;
+  min-height: 96px;
+  align-content: end;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--hp-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.hp-calc-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.hp-calc-tool,
+.hp-calc-key {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  color: var(--hp-text);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.hp-calc-tool {
+  width: 30px;
+  height: 28px;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.hp-calc-tool:disabled {
+  color: rgba(255, 255, 255, 0.2);
+}
+
+.hp-calc-tool.is-copied {
+  color: var(--hp-accent);
+}
+
+.hp-calc-output {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 40px;
+  font-weight: 650;
+  line-height: 1.1;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hp-calc.is-error .hp-calc-output {
+  color: var(--hp-danger);
+}
+
+.hp-calc-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(54px, 1fr));
+  grid-auto-rows: minmax(42px, 1fr);
+  gap: 8px;
+  min-height: 0;
+}
+
+.hp-calc-key {
+  min-width: 0;
+  min-height: 42px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.hp-calc-key.is-wide {
+  grid-column: span 2;
+}
+
+.hp-calc-key.is-utility {
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.085);
+}
+
+.hp-calc-key.is-op {
+  color: rgba(255, 226, 128, 0.95);
+  border-color: rgba(255, 226, 128, 0.2);
+  background: rgba(255, 226, 128, 0.15);
+}
+
+.hp-calc-key.is-equals {
+  color: rgba(0, 0, 0, 0.86);
+  border-color: rgba(255, 226, 128, 0.4);
+  background: rgba(255, 226, 128, 0.88);
+}

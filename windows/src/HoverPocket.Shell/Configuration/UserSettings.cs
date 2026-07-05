@@ -10,6 +10,8 @@ internal sealed class UserSettings
 
     public AppLanguage Language { get; set; } = AppLanguage.Japanese;
 
+    public bool StartWithWindows { get; set; }
+
     public List<string> ProviderOrder { get; set; } = [];
 
     public Dictionary<string, bool> ProviderVisibility { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -22,6 +24,7 @@ internal sealed class UserSettings
             TextSize = TextSize,
             SwitchingMode = SwitchingMode,
             Language = Language,
+            StartWithWindows = StartWithWindows,
             ProviderOrder = [.. ProviderOrder],
             ProviderVisibility = new Dictionary<string, bool>(ProviderVisibility, StringComparer.OrdinalIgnoreCase)
         };

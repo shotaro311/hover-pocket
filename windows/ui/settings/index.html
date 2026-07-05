@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HoverPocket Settings</title>
+  <link rel="stylesheet" href="./settings.css">
+</head>
+<body>
+  <main class="settings-shell">
+    <header class="settings-header">
+      <h1 data-i18n="settingsTitle">HoverPocket 設定</h1>
+      <button type="button" data-reset>Reset</button>
+    </header>
+    <section class="settings-section">
+      <h2 data-i18n="language">言語</h2>
+      <div class="segmented" data-language></div>
+    </section>
+    <section class="settings-section">
+      <h2 data-i18n="panelSize">パネルサイズ</h2>
+      <div class="segmented" data-panel-size></div>
+    </section>
+    <section class="settings-section">
+      <h2 data-i18n="textSize">文字サイズ</h2>
+      <div class="segmented" data-text-size></div>
+    </section>
+    <section class="settings-section">
+      <h2 data-i18n="switchingMode">Provider 切替</h2>
+      <div class="segmented" data-switching></div>
+    </section>
+    <section class="settings-section">
+      <h2 data-i18n="providerOrder">Provider 表示と順序</h2>
+      <div class="provider-list" data-provider-list></div>
+    </section>
+    <section class="settings-section">
+      <h2 data-i18n="stickyNotes">Sticky Notes</h2>
+      <label class="toggle-row">
+        <span data-i18n="stickyUndoToast">Undo toast を表示</span>
+        <input type="checkbox" data-sticky-undo-toast>
+      </label>
+    </section>
+    <section class="settings-section">
+      <label class="toggle-row">
+        <span data-i18n="startWithWindows">Windows 起動時に開始</span>
+        <input type="checkbox" data-startup>
+      </label>
+      <div class="settings-status" data-startup-status></div>
+    </section>
+    <footer class="settings-footer" data-status></footer>
+  </main>
+  <script type="module" src="./settings.js"></script>
+</body>
+</html>
