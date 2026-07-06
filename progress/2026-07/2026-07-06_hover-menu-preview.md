@@ -39,6 +39,28 @@
 - `git diff --check`: 成功。
 - `./script/build_and_run.sh --verify`: 成功。`HoverPocket launched`。
 
+### 配信
+
+- `APP_VERSION=0.1.0 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh`: 成功。
+- `notary_submission_id=2983802e-460f-490b-93c8-d0dcab3df943`、`notary_status=Accepted`。
+- GitHub Release:
+  - versioned: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-119`
+  - stable macOS feed: `https://github.com/shotaro311/hover-pocket/releases/tag/macos-latest`
+- `gh release list --repo shotaro311/hover-pocket --limit 6`: `v0.1.0-119` が GitHub Latest。
+- `gh release view v0.1.0-119`: `appcast.xml`、`HoverPocket-0.1.0-119.zip`、`HoverPocket-0.1.0-119.zip.sha256`、`HoverPocket-macOS-app.zip` を確認。
+- `gh release view macos-latest`: `appcast.xml` と `HoverPocket-macOS-app.zip` を確認。
+- `curl https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`: `sparkle:version=119`、versioned ZIP enclosure、edSignature を確認。
+- `curl https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`: `sparkle:version=119` を確認。
+- stable ZIP readback:
+  - remote asset digest と local SHA256 は `afc547f8b8def559a638483e79e6a8232df48ad18a48c21003aa1a509720b8b4` で一致。
+  - ZIP top-level は `HoverPocket.app/`。
+  - extracted app の `CFBundleVersion` は `119`。
+  - extracted app の `SUFeedURL` は `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`。
+  - extracted app で `codesign --verify --deep --strict --verbose=2`、`xcrun stapler validate`、`spctl --assess --type execute --verbose=2` が成功。
+- LINE-share ZIP:
+  - `/Users/shotaro/Downloads/HoverPocket-macOS-app-119.zip`
+  - SHA256: `afc547f8b8def559a638483e79e6a8232df48ad18a48c21003aa1a509720b8b4`
+
 ### 未実施
 
 - 物理テンキー Enter の実押下確認は未実施。実装では macOS keyCode `76` を `=` として処理する。

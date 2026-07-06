@@ -11,6 +11,7 @@ status: active
 - Moved Calculator history from an inline strip to a left sidebar with a top-left sidebar toggle. Added numpad keycode handling including keypad Enter for equals.
 - Removed the AI command lane from the visible macOS panel and restored panel total height to the provider area only. The AI implementation files remain in the repo for later planning, but the app no longer instantiates or renders the lane.
 - Verification passed: `swift build`, `.build/debug/HoverPocket --verify-calculator`, `--calculator-sequence '5+6='`, `--calculator-sequence '12+3=+4='`, `git diff --check`, and `./script/build_and_run.sh --verify`. Details: `progress/2026-07/2026-07-06_hover-menu-preview.md`.
+- Released build `119` as notarized/stapled macOS ZIP. `notarytool` submission `2983802e-460f-490b-93c8-d0dcab3df943` returned `Accepted`; GitHub Release `v0.1.0-119` is GitHub Latest and `macos-latest` assets now point to build `119`. Remote readback confirmed stable and legacy appcasts both report `sparkle:version=119`, stable ZIP SHA256 `afc547f8b8def559a638483e79e6a8232df48ad18a48c21003aa1a509720b8b4`, extracted app `CFBundleVersion=119`, macOS feed URL, and `codesign` / `stapler validate` / `spctl`. LINE-share ZIP copied to `~/Downloads/HoverPocket-macOS-app-119.zip`.
 
 ## 2026-07-06 Mac Sparkle Update Popup Foregrounding
 
