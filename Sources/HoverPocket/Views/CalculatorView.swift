@@ -6,6 +6,7 @@ struct CalculatorView: View {
     @ObservedObject private var store: CalculatorStore
     @State private var copied = false
     @State private var copyResetTask: Task<Void, Never>?
+    @State private var isHistorySidebarVisible = true
 
     init(actions: ProviderActions, store: CalculatorStore = .shared) {
         self.actions = actions
@@ -13,15 +14,29 @@ struct CalculatorView: View {
     }
 
     var body: some View {
-        VStack(spacing: store.history.isEmpty ? 10 : 8) {
-            displayPanel
-            historyPanel
-            keypad
+        VStack(alignment: .leading, spacing: 8) {
+            historyToggleButton
+
+            HStack(alignment: .top, spacing: 10) {
+                if isHistorySidebarVisible, !store.history.isEmpty {
+                    historySidebar
+                        .frame(width: 154)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                }
+
+                VStack(spacing: 10) {
+                    displayPanel
+                    keypad
+                }
+                .frame(maxWidth: 430, maxHeight: .infinity, alignment: .top)
+            }
         }
-        .frame(maxWidth: 430, maxHeight: .infinity, alignment: .top)
-        .padding(.horizontal, 18)
-        .padding(.vertical, store.history.isEmpty ? 14 : 10)
+        .frame(maxWidth: 610, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .animation(.interactiveSpring(response: 0.24, dampingFraction: 0.86), value: isHistorySidebarVisible)
+        .animation(.interactiveSpring(response: 0.24, dampingFraction: 0.86), value: store.history.isEmpty)
         .background(
             CalculatorKeyCatcher { event in
                 handleKey(event)
@@ -52,16 +67,25 @@ struct CalculatorView: View {
                 .disabled(store.hasError)
             }
 
-            Text(store.display)
-                .panelTextFont(size: store.history.isEmpty ? 40 : 34, weight: .semibold, design: .rounded)
+            if let expressionPreview = store.expressionPreview, !store.isShowingExpressionInput {
+                Text(expressionPreview)
+                    .panelTextFont(size: 12, weight: .semibold, design: .rounded)
+                    .foregroundStyle(.yellow.opacity(0.72))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+                    .frame(maxWidth: .infinity, minHeight: 16, alignment: .trailing)
+            }
+
+            Text(store.displayText)
+                .panelTextFont(size: store.isShowingExpressionInput ? 32 : 40, weight: .semibold, design: .rounded)
                 .foregroundStyle(store.hasError ? .red.opacity(0.9) : .white.opacity(0.92))
                 .lineLimit(1)
                 .minimumScaleFactor(0.45)
-                .frame(maxWidth: .infinity, minHeight: store.history.isEmpty ? 52 : 42, alignment: .trailing)
+                .frame(maxWidth: .infinity, minHeight: 52, alignment: .trailing)
                 .contentTransition(.numericText())
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, store.history.isEmpty ? 12 : 8)
+        .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.white.opacity(0.035))
@@ -73,7 +97,7 @@ struct CalculatorView: View {
     }
 
     private var keypad: some View {
-        Grid(horizontalSpacing: 8, verticalSpacing: store.history.isEmpty ? 8 : 6) {
+        Grid(horizontalSpacing: 8, verticalSpacing: 8) {
             GridRow {
                 key(.allClear, title: "AC", style: .utility)
                 key(.toggleSign, title: "+/-", style: .utility)
@@ -108,52 +132,94 @@ struct CalculatorView: View {
         .frame(maxWidth: .infinity)
     }
 
-    @ViewBuilder
-    private var historyPanel: some View {
-        if !store.history.isEmpty {
+    private var historyToggleButton: some View {
+        Button {
+            isHistorySidebarVisible.toggle()
+        } label: {
+            Image(systemName: isHistorySidebarVisible ? "sidebar.leading" : "sidebar.left")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.white.opacity(store.history.isEmpty ? 0.32 : 0.78))
+                .frame(width: 28, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.white.opacity(0.055))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(Color.white.opacity(0.07), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(store.history.isEmpty)
+        .help(label(.toggleHistory))
+    }
+
+    private var historySidebar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(label(.history))
+                    .panelTextFont(size: 11, weight: .bold, design: .monospaced)
+                    .foregroundStyle(.white.opacity(0.72))
+                Spacer()
+                Text("\(store.history.count)")
+                    .panelTextFont(size: 10, weight: .bold, design: .rounded)
+                    .foregroundStyle(.white.opacity(0.42))
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 9)
+
             ScrollView {
-                VStack(spacing: 6) {
+                VStack(spacing: 7) {
                     ForEach(store.history) { entry in
                         historyRow(entry)
                     }
                 }
-                .padding(.vertical, 2)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 8)
             }
             .scrollIndicators(.never)
-            .frame(maxHeight: 52)
         }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.028))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.white.opacity(0.055), lineWidth: 1)
+        )
     }
 
     private func historyRow(_ entry: CalculatorStore.HistoryEntry) -> some View {
-        HStack(spacing: 8) {
-            Text(entry.expression)
-                .panelTextFont(size: 11, weight: .medium, design: .rounded)
-                .foregroundStyle(.white.opacity(0.52))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-
-            Spacer(minLength: 4)
-
+        HStack(spacing: 6) {
             Button {
                 store.useHistoryResult(entry)
             } label: {
-                Text(entry.result)
-                    .panelTextFont(size: 12, weight: .bold, design: .rounded)
-                    .foregroundStyle(.white.opacity(0.86))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                    .frame(maxWidth: 116, alignment: .trailing)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(entry.inputExpression)
+                        .panelTextFont(size: 10, weight: .medium, design: .rounded)
+                        .foregroundStyle(.white.opacity(0.48))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+
+                    Text(entry.result)
+                        .panelTextFont(size: 13, weight: .bold, design: .rounded)
+                        .foregroundStyle(.white.opacity(0.88))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
             .help(label(.useHistoryValue))
 
             Button {
-                store.restore(entry)
+                store.useHistoryExpression(entry)
             } label: {
                 Image(systemName: "arrow.uturn.backward")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.yellow.opacity(0.86))
-                    .frame(width: 24, height: 24)
+                    .frame(width: 24, height: 34)
                     .background(
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
                             .fill(Color.yellow.opacity(0.10))
@@ -162,8 +228,8 @@ struct CalculatorView: View {
             .buttonStyle(.plain)
             .help(label(.restoreHistory))
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.white.opacity(0.035))
@@ -184,7 +250,7 @@ struct CalculatorView: View {
             Image(systemName: systemName)
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(active ? .green.opacity(0.92) : .white.opacity(0.68))
-            .frame(width: 30, height: store.history.isEmpty ? 28 : 24)
+                .frame(width: 30, height: 28)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(Color.white.opacity(active ? 0.09 : 0.055))
@@ -216,7 +282,7 @@ struct CalculatorView: View {
                         .panelTextFont(size: 15, weight: .bold, design: .rounded)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: store.history.isEmpty ? 42 : 32)
+            .frame(maxWidth: .infinity, minHeight: 42)
             .foregroundStyle(style.foreground)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -236,6 +302,9 @@ struct CalculatorView: View {
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
            event.charactersIgnoringModifiers?.lowercased() == "c" {
             copyDisplay()
+            return
+        }
+        if handleKeyCode(event.keyCode) {
             return
         }
         let key = event.characters ?? event.charactersIgnoringModifiers ?? ""
@@ -268,6 +337,48 @@ struct CalculatorView: View {
         }
     }
 
+    private func handleKeyCode(_ keyCode: UInt16) -> Bool {
+        switch keyCode {
+        case 36, 76:
+            store.press(.equals)
+        case 65:
+            store.press(.decimalSeparator)
+        case 67:
+            store.press(.operation(.multiply))
+        case 69:
+            store.press(.operation(.add))
+        case 75:
+            store.press(.operation(.divide))
+        case 78:
+            store.press(.operation(.subtract))
+        case 81:
+            store.press(.equals)
+        case 82:
+            store.press(.digit(0))
+        case 83:
+            store.press(.digit(1))
+        case 84:
+            store.press(.digit(2))
+        case 85:
+            store.press(.digit(3))
+        case 86:
+            store.press(.digit(4))
+        case 87:
+            store.press(.digit(5))
+        case 88:
+            store.press(.digit(6))
+        case 89:
+            store.press(.digit(7))
+        case 91:
+            store.press(.digit(8))
+        case 92:
+            store.press(.digit(9))
+        default:
+            return false
+        }
+        return true
+    }
+
     private func handleFallbackKey(_ key: String) {
         switch key {
         case "0"..."9":
@@ -287,7 +398,7 @@ struct CalculatorView: View {
         guard !store.hasError else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(store.display, forType: .string)
+        pasteboard.setString(store.displayText, forType: .string)
         copied = true
         copyResetTask?.cancel()
         copyResetTask = Task {
@@ -308,7 +419,11 @@ struct CalculatorView: View {
         case (.japanese, .useHistoryValue):
             return "履歴の数値を入力"
         case (.japanese, .restoreHistory):
-            return "この計算時点に戻る"
+            return "履歴の式を入力"
+        case (.japanese, .toggleHistory):
+            return "履歴サイドバーを表示/非表示"
+        case (.japanese, .history):
+            return "履歴"
         case (.english, .copy):
             return "Copy"
         case (.english, .copied):
@@ -318,7 +433,11 @@ struct CalculatorView: View {
         case (.english, .useHistoryValue):
             return "Use history value"
         case (.english, .restoreHistory):
-            return "Restore this calculation"
+            return "Use history expression"
+        case (.english, .toggleHistory):
+            return "Show or hide history sidebar"
+        case (.english, .history):
+            return "History"
         }
     }
 }
@@ -329,6 +448,8 @@ private enum CalculatorLabel {
     case backspace
     case useHistoryValue
     case restoreHistory
+    case toggleHistory
+    case history
 }
 
 private enum CalculatorKeyStyle {

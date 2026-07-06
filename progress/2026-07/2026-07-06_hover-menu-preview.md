@@ -1,5 +1,48 @@
 # 2026-07-06: Cross-platform agent read gate
 
+## Mac Calculator Sidebar and AI Lane Removal
+
+### 目的
+
+- 電卓で `+`、`-`、`×`、`÷` を押した時に、現在の計算式が視覚的に分かるようにする。
+- 履歴は左サイドバーへ移し、結果数値クリックと式入力を別操作に分ける。
+- テンキー付きキーボードの Enter で計算できるようにする。
+- AI command lane は計画・開発途中のため、現行アプリから一旦外す。
+
+### 変更
+
+- `Sources/HoverPocket/State/CalculatorStore.swift`
+  - pending operation の表示用 `expressionPreview` と、履歴から挿入した式用 `expressionInput` を追加。
+  - `5 +`、`5 + 6`、`5 + 6 = 11` のような式表示を保持。
+  - 履歴 entry に `inputExpression` を追加し、結果数値クリックは `11`、右アイコンは `5 + 6` を入力表示へ反映。
+  - 履歴から挿入した式は `=` で再評価できる。
+- `Sources/HoverPocket/Views/CalculatorView.swift`
+  - 履歴を display と keypad の間から左サイドバーへ移動。
+  - 左上に sidebar toggle アイコンを追加。
+  - 履歴行の本文クリックは結果数値入力、右の戻るアイコンは式入力へ変更。
+  - keyCode ベースでテンキー Enter (`76`) と numpad 数字・演算子を補足。
+- `Sources/HoverPocket/Views/HoverPanelShell.swift`
+  - AI command lane の描画を削除。
+- `Sources/HoverPocket/Windowing/PanelGeometry.swift`
+  - パネル総高から AI command lane 分の加算を削除。
+- `Sources/HoverPocket/State/HoverMenuStore.swift`
+  - 表示されない `AICommandStore` の生成を停止。
+- `README.md` / `docs/requirement/requirements.md`
+  - AI command lane を現行アプリ UI から一旦外した状態へ説明を更新。
+
+### 検証
+
+- `swift build`: 成功。
+- `.build/debug/HoverPocket --verify-calculator`: 成功。`calculator_display=25`、`calculator_display_text=25`、`calculator_history_count=1`。
+- `.build/debug/HoverPocket --verify-calculator --calculator-sequence '5+6='`: 成功。`calculator_display=11`、`calculator_history_count=1`。
+- `.build/debug/HoverPocket --verify-calculator --calculator-sequence '12+3=+4='`: 成功。`calculator_display=19`、`calculator_history_count=2`。
+- `git diff --check`: 成功。
+- `./script/build_and_run.sh --verify`: 成功。`HoverPocket launched`。
+
+### 未実施
+
+- 物理テンキー Enter の実押下確認は未実施。実装では macOS keyCode `76` を `=` として処理する。
+
 ## Mac Sparkle Update Popup Foregrounding
 
 ### 目的

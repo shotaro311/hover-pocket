@@ -17,7 +17,7 @@ Windows 版の本質は、「画面上端へポインターを運ぶだけで、
 
 - 画面上端の控えめな起点にホバーすると開き、離れると閉じる。
 - パネルは短いアニメーションで上端から展開し、道具を「ポケットから取り出す」感覚を保つ。
-- Mirror、Controls、Calendar、Clipboard、Sticky Notes、Timer、Calculator、AI command lane を同じシェル内で切り替える。
+- Mirror、Controls、Calendar、Clipboard、Sticky Notes、Timer、Calculator を同じシェル内で切り替える。
 - パネルは通常作業を邪魔せず、必要な時だけ最前面に出る。
 - クリップボード、カメラ、マイク、カレンダー、メディア制御などの強い権限は、明示的な状態表示、無効時の案内、最小保存で扱う。
 
@@ -167,7 +167,6 @@ Must:
 - `Small`: 幅 520、高さ 372。
 - `Medium`: 幅 600、高さ 430。
 - `Large`: 幅 680、高さ 488。
-- AI command lane は高さ 132 を追加し、Provider 領域を押し潰さない。
 - Header は高さ 54 を基準にする。
 - Windows 版では上記を DIPs 基準で扱い、DPI scaling 後の物理ピクセルで崩れないようにする。
 
@@ -394,22 +393,19 @@ Must:
 
 ### 4.8 AI command lane
 
-Must:
+Deferred:
 
-- パネル下部に固定高さの AI command lane を置く。
-- Provider 領域を侵食しない。
-- パネル表示時に、未承認 action がない場合は入力欄へ自動フォーカスする。
-- Phase 1 の対象 action は Calendar read day と Calendar create event とする。
-- 自然文例: `今日の予定`、`明日14時 打ち合わせ`、`金曜 デザイン納期`。
-- 低 confidence または複数候補の場合、候補選択 UI を表示する。
+- AI command lane は計画・開発途中のため、現行アプリ UI からは一旦外す。
+- 後続で戻す場合も、Provider 領域を侵食しない高さ設計にする。
+- Phase 1 の対象 action 候補は Calendar read day と Calendar create event とする。
+- 自然文例候補: `今日の予定`、`明日14時 打ち合わせ`、`金曜 デザイン納期`。
 - Calendar write は必ず承認 UI を通す。
-- 承認 UI は title、start/end、all-day、location、notes、calendar を省略せず表示する。
 - 実行結果、失敗、承認/却下は audit log に記録する。
 
 Windows 代替要件:
 
 - Apple Foundation Models は Windows では使えないため、AI provider は差し替え可能にする。
-- 初期 Windows MVP では deterministic fallback だけでもよいが、AI lane の UI と承認フローは実装する。
+- 初期 Windows MVP では deterministic fallback だけでもよいが、AI lane の UI は現行アプリからは一旦外す。
 - 将来の local LLM または cloud LLM 接続は、カレンダー書き込みの承認原則を変えない。
 
 受け入れ条件:
@@ -588,7 +584,6 @@ Must:
 - Timer。
 - Sticky Notes。
 - Settings。
-- AI command lane の UI と deterministic calendar planning の枠。
 
 理由:
 
@@ -660,8 +655,7 @@ Must:
 - Sticky Notes: 作成、編集、色変更、並び替え、archive/delete、undo が動く。
 - Timer: 2 件まで同時実行でき、pause/resume/stop と終了アラートが動く。
 - Calculator: 代表計算、キーボード入力、Error、copy が動く。
-- AI lane: `今日の予定` が read action になる。
-- AI lane: `明日14時 打ち合わせ` が create action になり、承認前には実行されない。
+- AI lane は後続検討へ戻し、現行アプリの初期体験からは外す。
 
 ### 10.3 非機能テスト
 
@@ -727,7 +721,7 @@ Must:
 - Windows 10 対応を必須にするか、Windows 11 専用でよいか。
 - Clipboard private mode を Windows 初回 MVP の Must に含めるか。
 - Controls の display brightness をどこまで保証するか。DDC/CI は機種差が大きい。
-- AI command lane の Windows 版 model provider を deterministic fallback のみで開始するか、local LLM も初期から入れるか。
+- AI command lane を再投入する時期と、Windows 版 model provider を deterministic fallback のみで開始するか local LLM も初期から入れるか。
 - 配布方式を MSIX、winget、installer、portable のどれにするか。
 - 自動更新を Sparkle 相当の独自 updater にするか、installer/Store/winget に任せるか。
 - Google の現行 macOS 実装は iOS OAuth client + custom scheme 優先だが、Windows desktop は loopback redirect + PKCE を第一候補にする。

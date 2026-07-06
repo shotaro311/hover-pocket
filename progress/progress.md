@@ -5,6 +5,13 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-06 Mac Calculator Sidebar and AI Lane Removal
+
+- Updated macOS Calculator so pending operations are visible in the display area (`5 +`, `5 + 6`, and completed expressions), history results click into the input as a single number, and each history row's restore icon inserts the expression itself such as `5 + 6`.
+- Moved Calculator history from an inline strip to a left sidebar with a top-left sidebar toggle. Added numpad keycode handling including keypad Enter for equals.
+- Removed the AI command lane from the visible macOS panel and restored panel total height to the provider area only. The AI implementation files remain in the repo for later planning, but the app no longer instantiates or renders the lane.
+- Verification passed: `swift build`, `.build/debug/HoverPocket --verify-calculator`, `--calculator-sequence '5+6='`, `--calculator-sequence '12+3=+4='`, `git diff --check`, and `./script/build_and_run.sh --verify`. Details: `progress/2026-07/2026-07-06_hover-menu-preview.md`.
+
 ## 2026-07-06 Mac Sparkle Update Popup Foregrounding
 
 - Updated macOS Sparkle integration so manual update checks from Settings, the menu bar, or the provider header activate HoverPocket and bring Sparkle update/status windows to the front.

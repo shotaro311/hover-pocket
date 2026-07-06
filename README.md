@@ -28,7 +28,7 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 
 ## 現在できること
 
-現在は組み込みの `Mirror`、`Controls`、`Calendar`、`Clipboard`、`Sticky Notes`、`Timer`、`Calculator` プロバイダーを搭載しています。パネル下部には AI command lane があり、Calendar 操作の一部を自然文から実行できます。
+現在は組み込みの `Mirror`、`Controls`、`Calendar`、`Clipboard`、`Sticky Notes`、`Timer`、`Calculator` プロバイダーを搭載しています。AI command lane は計画・開発途中のため、現在のアプリ UI からは一旦外しています。
 
 ### ミラー
 
@@ -110,15 +110,6 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 - 音ありの場合はシステムサウンドを停止まで繰り返し再生します。
 - Reduce Motion 有効時はアニメーションを省略し、静的なハイライトのみ表示します。
 - 入力カード・ピン留め・実行中タイマーは `Application Support/HoverPocket/Timer/` に JSON として保存します。
-
-### AI command lane
-
-- パネル下部の入力欄から、短い自然文で Calendar 操作を呼び出せます。
-- 例: `今日の予定`、`明日14時 打ち合わせ`、`金曜 デザイン納期`
-- Apple Foundation Models が使える環境では structured output を優先します。
-- SDK / OS が未対応の環境では deterministic fallback で候補を生成します。
-- Calendar 書き込みなどの変更操作は、Approval Gate の確認を通してから実行します。
-- 実行内容はローカルの audit log に記録する設計です。
 
 ## 設定
 
@@ -272,8 +263,8 @@ Sources/HoverPocket/
   State/       パネル表示状態、provider 選択、settings、store
   Models/      provider ID、action、permission、calendar、clipboard、sticky note model
   Providers/   PocketProvider protocol と ProviderRegistry
-  Views/       pill、panel shell、provider UI、settings、AI command lane
-  Services/    OAuth、Calendar API、system controls、AI model provider、approval、audit、updater
+  Views/       pill、panel shell、provider UI、settings
+  Services/    OAuth、Calendar API、system controls、updater
   Support/     再利用 shape と小さな helper
 ```
 

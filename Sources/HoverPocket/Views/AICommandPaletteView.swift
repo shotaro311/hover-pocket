@@ -54,7 +54,7 @@ struct AICommandPaletteView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        // 高さは親（HoverPanelShell）が aiPaletteHeight で固定する。
+        // 現行アプリでは非表示。再投入時は親側で固定高さを指定する。
         // ここで伸ばすと Provider 領域を押し潰すので、レーン内で上詰めにする。
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear {

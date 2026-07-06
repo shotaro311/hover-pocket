@@ -14,6 +14,7 @@ enum CalculatorVerificationCommand {
             "calculator_verify=\(ok ? "ok" : "failed")",
             "calculator_sequence=\(sequence)",
             "calculator_display=\(display)",
+            "calculator_display_text=\(store.displayText)",
             "calculator_history_count=\(store.history.count)"
         ]
 
@@ -48,20 +49,33 @@ enum CalculatorVerificationCommand {
         let store = CalculatorStore()
         guard store.runSequence([.digit(1), .operation(.add), .digit(2), .equals]) == "3",
               let entry = store.history.first,
+              store.expressionPreview == "1 + 2 = 3",
+              entry.inputExpression == "1 + 2",
               entry.expression == "1 + 2 = 3"
         else {
             return false
         }
 
+        let operatorStore = CalculatorStore()
+        operatorStore.runSequence([.digit(5), .operation(.add), .digit(6)])
+        guard operatorStore.expressionPreview == "5 + 6" else {
+            return false
+        }
+
         store.runSequence([.digit(9)])
         store.useHistoryResult(entry)
-        guard store.display == "3" else {
+        guard store.display == "3", store.displayText == "3" else {
             return false
         }
 
         store.runSequence([.digit(8)])
-        store.restore(entry)
-        guard store.display == "3" else {
+        store.useHistoryExpression(entry)
+        guard store.display == "3", store.displayText == "1 + 2" else {
+            return false
+        }
+
+        store.runSequence([.equals])
+        guard store.display == "3", store.displayText == "3" else {
             return false
         }
 

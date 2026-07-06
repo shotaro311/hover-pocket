@@ -19,8 +19,6 @@ enum PanelLayout {
         notchHandleWidth
     }
 
-    static let aiPaletteHeight: CGFloat = 132
-
     static func previewSize(for panelSize: PanelSizeOption) -> NSSize {
         switch panelSize {
         case .small:
@@ -32,10 +30,8 @@ enum PanelLayout {
         }
     }
 
-    // AIパレットは Provider 領域を侵食せず、パネル全体の高さに加算する
     static func panelTotalSize(for panelSize: PanelSizeOption) -> NSSize {
-        let preview = previewSize(for: panelSize)
-        return NSSize(width: preview.width, height: preview.height + aiPaletteHeight)
+        previewSize(for: panelSize)
     }
 }
 
