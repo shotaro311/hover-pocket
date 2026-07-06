@@ -24,12 +24,30 @@ final class CalculatorStore: ObservableObject {
 
     @Published private(set) var display = "0"
     @Published private(set) var hasError = false
+    @Published private(set) var history: [HistoryEntry] = []
 
     private var accumulator: Decimal?
     private var pendingOperation: Operation?
     private var isEnteringNewValue = true
     private var lastOperand: Decimal?
     private var lastOperation: Operation?
+
+    struct HistoryEntry: Identifiable {
+        let id: UUID
+        let expression: String
+        let result: String
+        fileprivate let state: CalculatorState
+    }
+
+    fileprivate struct CalculatorState {
+        let display: String
+        let hasError: Bool
+        let accumulator: Decimal?
+        let pendingOperation: Operation?
+        let isEnteringNewValue: Bool
+        let lastOperand: Decimal?
+        let lastOperation: Operation?
+    }
 
     init() {}
 
@@ -70,6 +88,21 @@ final class CalculatorStore: ObservableObject {
         lastOperation = nil
     }
 
+    func useHistoryResult(_ entry: HistoryEntry) {
+        guard !entry.result.isEmpty, entry.result != "Error" else { return }
+        display = entry.result
+        hasError = false
+        accumulator = nil
+        pendingOperation = nil
+        isEnteringNewValue = false
+        lastOperand = nil
+        lastOperation = nil
+    }
+
+    func restore(_ entry: HistoryEntry) {
+        apply(entry.state)
+    }
+
     private func inputDigit(_ digit: Int) {
         guard (0...9).contains(digit) else { return }
         recoverFromErrorIfNeeded()
@@ -107,8 +140,10 @@ final class CalculatorStore: ObservableObject {
                 showError()
                 return
             }
+            let expression = expressionText(lhs: accumulator, rhs: current, operation: pendingOperation, result: result)
             self.accumulator = result
             display = Self.format(result)
+            addHistory(expression: expression, result: display)
         } else {
             accumulator = current
         }
@@ -143,6 +178,7 @@ final class CalculatorStore: ObservableObject {
             showError()
             return
         }
+        let expression = expressionText(lhs: lhs, rhs: rhs, operation: operation, result: result)
 
         display = Self.format(result)
         accumulator = result
@@ -150,6 +186,7 @@ final class CalculatorStore: ObservableObject {
         lastOperation = operation
         lastOperand = rhs
         isEnteringNewValue = true
+        addHistory(expression: expression, result: display)
     }
 
     private func backspace() {
@@ -189,8 +226,10 @@ final class CalculatorStore: ObservableObject {
         recoverFromErrorIfNeeded()
         guard let current = currentDecimal else { return }
         let result = current / Decimal(100)
+        let expression = "\(Self.format(current))% = \(Self.format(result))"
         display = Self.format(result)
         isEnteringNewValue = false
+        addHistory(expression: expression, result: display)
     }
 
     private func calculate(_ lhs: Decimal, _ rhs: Decimal, _ operation: Operation) -> Decimal? {
@@ -221,6 +260,45 @@ final class CalculatorStore: ObservableObject {
         lastOperation = nil
     }
 
+    private func expressionText(lhs: Decimal, rhs: Decimal, operation: Operation, result: Decimal) -> String {
+        "\(Self.format(lhs)) \(operation.displaySymbol) \(Self.format(rhs)) = \(Self.format(result))"
+    }
+
+    private func addHistory(expression: String, result: String) {
+        let entry = HistoryEntry(
+            id: UUID(),
+            expression: expression,
+            result: result,
+            state: snapshot()
+        )
+        history.insert(entry, at: 0)
+        if history.count > 12 {
+            history.removeLast(history.count - 12)
+        }
+    }
+
+    private func snapshot() -> CalculatorState {
+        CalculatorState(
+            display: display,
+            hasError: hasError,
+            accumulator: accumulator,
+            pendingOperation: pendingOperation,
+            isEnteringNewValue: isEnteringNewValue,
+            lastOperand: lastOperand,
+            lastOperation: lastOperation
+        )
+    }
+
+    private func apply(_ state: CalculatorState) {
+        display = state.display
+        hasError = state.hasError
+        accumulator = state.accumulator
+        pendingOperation = state.pendingOperation
+        isEnteringNewValue = state.isEnteringNewValue
+        lastOperand = state.lastOperand
+        lastOperation = state.lastOperation
+    }
+
     private func recoverFromErrorIfNeeded() {
         if hasError {
             reset()
@@ -240,5 +318,20 @@ final class CalculatorStore: ObservableObject {
         formatter.maximumFractionDigits = 12
         formatter.roundingMode = .halfUp
         return formatter.string(from: number) ?? "\(number)"
+    }
+}
+
+extension CalculatorStore.Operation {
+    var displaySymbol: String {
+        switch self {
+        case .add:
+            return "+"
+        case .subtract:
+            return "−"
+        case .multiply:
+            return "×"
+        case .divide:
+            return "÷"
+        }
     }
 }

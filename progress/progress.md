@@ -5,6 +5,13 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-06 Mac Calculator History and macOS Feed Split
+
+- Updated macOS release packaging so distribution builds embed the macOS-only Sparkle feed `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`. `publish_github_release.sh` now marks versioned macOS releases as GitHub Latest for old builds that still read `latest/download/appcast.xml`, and also syncs `HoverPocket-macOS-app.zip` / `appcast.xml` to the stable `macos-latest` release.
+- Fixed notch-origin panel expansion by centering the final preview frame on the detected notch center instead of always using screen midpoint. This keeps the collapsed and expanded panel center aligned on notched MacBooks.
+- Added Calculator history on macOS: result history rows, result click-to-input, and per-row restore to the captured calculation state. Keyboard handling now reads shifted characters such as `+`, `*`, `%`, and symbolic `×` / `÷`.
+- Verification passed: `swift build`, `bash -n` for release scripts, `.build/debug/HoverPocket --verify-calculator` plus chain / percent / divide-by-zero sequences, `git diff --check`, and `./script/build_and_run.sh --verify`. Non-notarized dry-run packaging generated build `111` artifacts with the new `SUFeedURL`.
+
 ## 2026-07-06 Cross-platform Agent Read Gate
 
 - Added root `AGENTS.md` so Codex and other repo-aware AI agents have a mandatory entrypoint before implementation. It points agents to `progress/progress.md`, `docs/requirement/requirements.md`, and the OS-specific README/script files.

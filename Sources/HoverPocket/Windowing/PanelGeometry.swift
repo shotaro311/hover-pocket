@@ -91,7 +91,7 @@ enum PanelGeometry {
             height: access.height
         )
 
-        let previewX = screen.frame.midX - previewSize.width / 2
+        let previewX = notchProfile.centerX - previewSize.width / 2
         let previewY = access.previewTopY - previewSize.height - PanelLayout.previewGap
         let previewFrame = NSRect(
             x: previewX,

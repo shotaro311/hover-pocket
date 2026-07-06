@@ -13,7 +13,8 @@ enum CalculatorVerificationCommand {
         let outputLines = [
             "calculator_verify=\(ok ? "ok" : "failed")",
             "calculator_sequence=\(sequence)",
-            "calculator_display=\(display)"
+            "calculator_display=\(display)",
+            "calculator_history_count=\(store.history.count)"
         ]
 
         outputLines.forEach { print($0) }
@@ -39,7 +40,33 @@ enum CalculatorVerificationCommand {
                 return false
             }
         }
-        return true
+        return verifyHistoryCases()
+    }
+
+    @MainActor
+    private static func verifyHistoryCases() -> Bool {
+        let store = CalculatorStore()
+        guard store.runSequence([.digit(1), .operation(.add), .digit(2), .equals]) == "3",
+              let entry = store.history.first,
+              entry.expression == "1 + 2 = 3"
+        else {
+            return false
+        }
+
+        store.runSequence([.digit(9)])
+        store.useHistoryResult(entry)
+        guard store.display == "3" else {
+            return false
+        }
+
+        store.runSequence([.digit(8)])
+        store.restore(entry)
+        guard store.display == "3" else {
+            return false
+        }
+
+        store.runSequence([.operation(.add), .digit(4), .equals])
+        return store.display == "7"
     }
 
     private static func parse(_ sequence: String) -> [CalculatorStore.Button] {

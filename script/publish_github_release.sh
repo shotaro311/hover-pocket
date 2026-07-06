@@ -6,6 +6,8 @@ APP_NAME="HoverPocket"
 APP_VERSION="${APP_VERSION:-0.1.0}"
 APP_BUILD="${APP_BUILD:-$(git -C "$ROOT_DIR" rev-list --count HEAD 2>/dev/null || date +%Y%m%d%H%M)}"
 SPARKLE_TAG="${SPARKLE_TAG:-v${APP_VERSION}-${APP_BUILD}}"
+MACOS_FEED_TAG="${MACOS_FEED_TAG:-macos-latest}"
+MACOS_FEED_TITLE="${MACOS_FEED_TITLE:-HoverPocket macOS Update Feed}"
 RELEASE_TITLE="${RELEASE_TITLE:-HoverPocket ${APP_VERSION} (${APP_BUILD})}"
 RELEASE_NOTES="${RELEASE_NOTES:-Download ${APP_NAME}-macOS-app.zip for manual installation. ${APP_NAME}-${APP_VERSION}-${APP_BUILD}.zip is kept for Sparkle updates.}"
 PUBLISH_DRY_RUN="${PUBLISH_DRY_RUN:-0}"
@@ -55,6 +57,23 @@ prepare_install_zip_alias() {
   cp "$ZIP_PATH" "$INSTALL_ZIP_PATH"
 }
 
+publish_macos_feed_release() {
+  local notes_file
+  notes_file="$(mktemp)"
+  printf '%s\n' "Stable macOS Sparkle feed and manual install ZIP. Versioned release: $SPARKLE_TAG." > "$notes_file"
+
+  if gh release view "$MACOS_FEED_TAG" >/dev/null 2>&1; then
+    gh release upload "$MACOS_FEED_TAG" "$INSTALL_ZIP_PATH" "$APPCAST_PATH" --clobber
+  else
+    gh release create "$MACOS_FEED_TAG" "$INSTALL_ZIP_PATH" "$APPCAST_PATH" \
+      --title "$MACOS_FEED_TITLE" \
+      --notes-file "$notes_file" \
+      --latest=false
+  fi
+
+  rm -f "$notes_file"
+}
+
 if ! command -v gh >/dev/null 2>&1; then
   echo "error=gh CLI is required to publish a GitHub release" >&2
   exit 1
@@ -93,13 +112,18 @@ fi
 
 if gh release view "$SPARKLE_TAG" >/dev/null 2>&1; then
   gh release upload "$SPARKLE_TAG" "$INSTALL_ZIP_PATH" "$ZIP_PATH" "$SHA_PATH" "$APPCAST_PATH" --clobber
+  gh release edit "$SPARKLE_TAG" --latest
 else
   notes_file="$(mktemp)"
   trap 'rm -f "$notes_file"' EXIT
   printf '%s\n' "$RELEASE_NOTES" > "$notes_file"
   gh release create "$SPARKLE_TAG" "$INSTALL_ZIP_PATH" "$ZIP_PATH" "$SHA_PATH" "$APPCAST_PATH" \
     --title "$RELEASE_TITLE" \
-    --notes-file "$notes_file"
+    --notes-file "$notes_file" \
+    --latest
 fi
 
+publish_macos_feed_release
+
 echo "release=https://github.com/shotaro311/hover-pocket/releases/tag/$SPARKLE_TAG"
+echo "macos_feed=https://github.com/shotaro311/hover-pocket/releases/tag/$MACOS_FEED_TAG"

@@ -10,16 +10,16 @@
 - 実行ファイル / SwiftPM product / release asset 名: `HoverPocket`
 - Bundle ID: `local.codex.hover-pocket`
 - GitHub repository: `shotaro311/hover-pocket`
-- 最新の公開版は GitHub Releases の `Latest` です。
+- 最新の公開版は macOS 専用 release feed から配信します。
 - 公開 ZIP は Developer ID 署名、Apple notarization、staple 済みです。
-- Sparkle の appcast は GitHub Releases の latest download として公開しています。
+- Sparkle の appcast は GitHub Releases の `macos-latest` で公開しています。
 
 ## ダウンロードとインストール
 
 一般ユーザーは、GitHub Release の Assets から `HoverPocket-macOS-app.zip` をダウンロードしてください。
 
 ```text
-https://github.com/shotaro311/hover-pocket/releases/latest/download/HoverPocket-macOS-app.zip
+https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/HoverPocket-macOS-app.zip
 ```
 
 解凍すると `HoverPocket.app` だけが出ます。この `HoverPocket.app` を `アプリケーション` フォルダへ移動して起動します。
@@ -91,6 +91,8 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 
 - ホバーパネル内で四則演算ができます。
 - 小数入力、符号反転、パーセント、バックスペース、AC に対応しています。
+- 計算履歴を表示し、履歴の数値クリックで入力へ反映できます。
+- 履歴右側の戻るアイコンから、その時点の計算状態へ戻れます。
 - 計算結果はコピーできます。
 - 数字、演算子、Enter、Escape、Backspace などのキーボード入力に対応しています。
 - 0 除算など計算できない入力は `Error` と表示します。
@@ -238,12 +240,12 @@ PUBLISH_DRY_RUN=1 PUBLISH_REQUIRE_NOTARIZED=0 ./script/publish_github_release.sh
 配布 ZIP を作る `./script/package_zip.sh` と `./script/notarize_release.sh` では、既定で次の appcast を見に行く設定をアプリに入れます。
 
 ```text
-https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml
+https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml
 ```
 
 Sparkle の公開鍵は `SUPublicEDKey` として `Info.plist` に入ります。秘密鍵は macOS Keychain の `hover-pocket` アカウントに保存され、Git には含めません。
 
-公開時は GitHub Release に `HoverPocket-<version>-<build>.zip`、`.sha256`、`HoverPocket-macOS-app.zip`、`appcast.xml` をアップロードし、remote appcast の `sparkle:version`、ZIP の SHA256、Sparkle EdDSA signature、展開後 app の `codesign` / `stapler validate` / `spctl` を確認します。
+公開時は versioned GitHub Release に `HoverPocket-<version>-<build>.zip`、`.sha256`、`HoverPocket-macOS-app.zip`、`appcast.xml` をアップロードし、`macos-latest` release に手動インストール ZIP と appcast を同期します。remote appcast の `sparkle:version`、ZIP の SHA256、Sparkle EdDSA signature、展開後 app の `codesign` / `stapler validate` / `spctl` を確認します。
 
 ## 表示先ディスプレイ
 

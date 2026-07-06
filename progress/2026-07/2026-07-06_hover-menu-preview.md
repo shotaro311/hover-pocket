@@ -1,5 +1,52 @@
 # 2026-07-06: Cross-platform agent read gate
 
+## Mac Calculator History and Feed Split
+
+### 目的
+
+- macOS / Windows release の `latest` 衝突を避けるため、macOS distribution build の Sparkle feed を `macos-latest` へ分離する。
+- M2 MacBook Air などノッチ機で、パネルが右側から左へスライドするように見える挙動を抑え、ノッチ中心から展開する動きに戻す。
+- Calculator に履歴、履歴数値クリック、履歴時点への復元、Shift 入力を含むキーボード演算子対応を追加する。
+
+### 変更
+
+- `script/package_zip.sh`
+  - distribution build の既定 `SUFeedURL` を `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml` へ変更。
+- `script/publish_github_release.sh`
+  - versioned macOS release は GitHub Latest に明示設定し、旧 build 98 など `latest/download/appcast.xml` を見る既存ユーザーを維持。
+  - `macos-latest` release へ `HoverPocket-macOS-app.zip` と `appcast.xml` を同期する処理を追加。
+- `Sources/HoverPocket/Windowing/PanelGeometry.swift`
+  - preview frame の中心を `notchProfile.centerX` に合わせ、collapsed preview と expanded preview の中心を揃えた。
+- `Sources/HoverPocket/State/CalculatorStore.swift`
+  - `HistoryEntry` と計算状態 snapshot を追加。
+  - 計算結果、percent、chain calculation を履歴へ記録。
+  - 履歴数値の入力反映と履歴時点への復元を追加。
+- `Sources/HoverPocket/Views/CalculatorView.swift`
+  - display と keypad の間に compact history を追加。
+  - 履歴数値ボタンと戻るアイコンを追加。
+  - `event.characters` を優先し、`+`、`*`、`%`、`×`、`÷` など Shift / symbolic 入力を拾うよう補強。
+- `Sources/HoverPocket/App/CalculatorVerificationCommand.swift`
+  - 履歴作成、数値反映、restore 後の継続計算を verify に追加。
+- `README.md`
+  - macOS 専用 feed、Calculator 履歴、restore 操作を反映。
+
+### 検証
+
+- `swift build`: 成功。
+- `bash -n script/package_zip.sh script/publish_github_release.sh script/generate_appcast.sh script/notarize_release.sh script/build_and_run.sh`: 成功。
+- `.build/debug/HoverPocket --verify-calculator`: 成功。`calculator_display=25`、`calculator_history_count=1`。
+- `.build/debug/HoverPocket --verify-calculator --calculator-sequence '12+3=+4='`: 成功。`calculator_display=19`、`calculator_history_count=2`。
+- `.build/debug/HoverPocket --verify-calculator --calculator-sequence '20%+2='`: 成功。`calculator_display=2.2`、`calculator_history_count=2`。
+- `.build/debug/HoverPocket --verify-calculator --calculator-sequence '7/0='`: 成功。`calculator_display=Error`。
+- `git diff --check`: 成功。
+- `./script/build_and_run.sh --verify`: 成功。`HoverPocket launched`。
+- `APP_BUILD=$(git rev-list --count HEAD) PUBLISH_DRY_RUN=1 PUBLISH_PREPARE_RELEASE=1 PUBLISH_REQUIRE_NOTARIZED=0 ./script/publish_github_release.sh`: 成功。build `111` の dry-run artifact を生成。
+- dry-run artifact readback:
+  - `dist/HoverPocket.app` の `SUFeedURL` は `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`。
+  - `dist/releases/appcast.xml` の `sparkle:version` は `111`、enclosure は versioned release `v0.1.0-111`。
+
+## Cross-platform agent read gate
+
 ## 目的
 
 - Mac / Windows の 2 バージョン運用で、他の AI エージェントが作業前に同じ正本を読むようにする。
