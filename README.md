@@ -142,6 +142,12 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 
 成功すると `HoverPocket launched` と表示されます。
 
+Small / Medium / Large と文字サイズごとの provider layout を確認する場合は次のコマンドを使います。
+
+```bash
+.build/debug/HoverPocket --verify-panel-layout
+```
+
 `build_and_run.sh` は `dist/HoverPocket.app` を生成し、利用できる `Apple Development` 署名があれば app bundle を署名します。配布用 ZIP では Developer ID Application 署名と hardened runtime を使います。
 
 ## Google Calendar の設定

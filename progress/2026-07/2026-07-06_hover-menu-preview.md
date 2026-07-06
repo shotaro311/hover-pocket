@@ -1,5 +1,48 @@
 # 2026-07-06: Cross-platform agent read gate
 
+## Mac Calculator Responsive Panel Layout
+
+### 目的
+
+- Settings / provider header から Small / Medium / Large を切り替えたとき、電卓 UI が横幅・高さ不足で崩れないようにする。
+- 他 provider も、同じ panel size / panel text size の組み合わせで layout pass できることを確認する。
+
+### 変更
+
+- `Sources/HoverPocket/Views/CalculatorView.swift`
+  - `GeometryReader` で provider 領域の実サイズを読み、`CalculatorLayoutMetrics` から余白、sidebar 幅、display 高、keypad 高、spacing、font size を算出するよう変更。
+  - Small / Medium では keypad と display を段階的に縮め、履歴 sidebar 表示中でも本体列が 300pt 以上を保つようにした。
+  - Large でも expression preview 表示時に縦が溢れないよう、通常キー高さを 38pt に調整。
+- `Sources/HoverPocket/App/PanelLayoutVerificationCommand.swift`
+  - `--verify-panel-layout` を追加。
+  - 全 built-in provider を Small / Medium / Large と panel text size Small / Medium / Large の 63 ケースで `NSHostingView` に mount し、layout pass を確認。
+  - Calculator は履歴 sidebar 表示ありの推定最大高さも確認。
+- `Sources/HoverPocket/main.swift`
+  - `--verify-panel-layout` の起動分岐を追加。
+- `README.md`
+  - provider layout verifier のコマンドを追記。
+
+### 他 provider 確認
+
+- Calendar: `CalendarPreviewMetrics(panelSize:)` が Small 専用寸法を持つことを確認。
+- Sticky Notes: `GeometryReader` からカード幅を算出していることを確認。
+- Clipboard: flexible grid と scroll view 中心で panel 幅へ追従することを確認。
+- Controls / Mirror / Timer: fixed 部品はあるが、今回の `--verify-panel-layout` で全 panel size / text size の layout pass が成功。
+
+### 検証
+
+- `swift build`: 成功。
+- `.build/debug/HoverPocket --verify-panel-layout`: 成功。
+  - `panel_layout_verify=ok`
+  - `panel_layout_cases=63`
+  - `calculator_layout_small=height:310.0/317.0,mainWidth:368.0,fits:true`
+  - `calculator_layout_medium=height:359.0/375.0,mainWidth:422.0,fits:true`
+  - `calculator_layout_large=height:428.0/433.0,mainWidth:430.0,fits:true`
+- `.build/debug/HoverPocket --verify-calculator`: 成功。`calculator_display=25`、`calculator_history_count=1`。
+- `.build/debug/HoverPocket --verify-calculator --calculator-sequence '6+5+9/2+3-5='`: 成功。`calculator_display=13.5`、`calculator_history_count=1`。
+- `git diff --check`: 成功。
+- `./script/build_and_run.sh --verify`: 成功。`HoverPocket launched`。
+
 ## Mac Calculator Continuous Expressions and Clear History
 
 ### 目的

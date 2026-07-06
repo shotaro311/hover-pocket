@@ -5,6 +5,12 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-06 Mac Calculator Responsive Panel Layout
+
+- Fixed Calculator layout breakage when switching panel size. The Calculator now derives sidebar width, display height, keypad height, spacing, and font sizes from the available provider area, so Small / Medium / Large keep the history sidebar, expression display, and keypad inside the panel.
+- Added `--verify-panel-layout`, which mounts all built-in providers across Small / Medium / Large and panel text size Small / Medium / Large. The verifier also checks Calculator with history visible against the available content height.
+- Verification passed: `swift build`, `.build/debug/HoverPocket --verify-panel-layout`, `.build/debug/HoverPocket --verify-calculator`, `--calculator-sequence '6+5+9/2+3-5='`, `git diff --check`, and `./script/build_and_run.sh --verify`. Layout readback: 63 provider cases, Calculator `small=310.0/317.0`, `medium=359.0/375.0`, `large=428.0/433.0`, all `fits:true`.
+
 ## 2026-07-06 Mac Calculator Continuous Expressions and Clear History
 
 - Added a Calculator history clear action exposed from the left history sidebar header.

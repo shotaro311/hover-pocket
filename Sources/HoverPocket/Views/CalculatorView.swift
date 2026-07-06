@@ -14,26 +14,31 @@ struct CalculatorView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            historyToggleButton
+        GeometryReader { proxy in
+            let showsHistory = isHistorySidebarVisible && !store.history.isEmpty
+            let metrics = CalculatorLayoutMetrics(size: proxy.size, showsHistory: showsHistory)
 
-            HStack(alignment: .top, spacing: 10) {
-                if isHistorySidebarVisible, !store.history.isEmpty {
-                    historySidebar
-                        .frame(width: 154)
-                        .transition(.move(edge: .leading).combined(with: .opacity))
-                }
+            VStack(alignment: .leading, spacing: metrics.outerSpacing) {
+                historyToggleButton(metrics: metrics)
 
-                VStack(spacing: 10) {
-                    displayPanel
-                    keypad
+                HStack(alignment: .top, spacing: metrics.columnSpacing) {
+                    if showsHistory {
+                        historySidebar(metrics: metrics)
+                            .frame(width: metrics.historySidebarWidth)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                    }
+
+                    VStack(spacing: metrics.contentSpacing) {
+                        displayPanel(metrics: metrics)
+                        keypad(metrics: metrics)
+                    }
+                    .frame(maxWidth: metrics.mainMaxWidth, maxHeight: .infinity, alignment: .top)
                 }
-                .frame(maxWidth: 430, maxHeight: .infinity, alignment: .top)
             }
+            .padding(.horizontal, metrics.horizontalPadding)
+            .padding(.vertical, metrics.verticalPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(maxWidth: 610, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.interactiveSpring(response: 0.24, dampingFraction: 0.86), value: isHistorySidebarVisible)
         .animation(.interactiveSpring(response: 0.24, dampingFraction: 0.86), value: store.history.isEmpty)
@@ -44,8 +49,8 @@ struct CalculatorView: View {
         )
     }
 
-    private var displayPanel: some View {
-        VStack(alignment: .trailing, spacing: 10) {
+    private func displayPanel(metrics: CalculatorLayoutMetrics) -> some View {
+        VStack(alignment: .trailing, spacing: metrics.displaySpacing) {
             HStack(spacing: 8) {
                 if copied {
                     Text(label(.copied))
@@ -69,23 +74,23 @@ struct CalculatorView: View {
 
             if let expressionPreview = store.expressionPreview, !store.isShowingExpressionInput {
                 Text(expressionPreview)
-                    .panelTextFont(size: 12, weight: .semibold, design: .rounded)
+                    .panelTextFont(size: metrics.previewFontSize, weight: .semibold, design: .rounded)
                     .foregroundStyle(.yellow.opacity(0.72))
                     .lineLimit(1)
                     .minimumScaleFactor(0.65)
-                    .frame(maxWidth: .infinity, minHeight: 16, alignment: .trailing)
+                    .frame(maxWidth: .infinity, minHeight: metrics.previewMinHeight, alignment: .trailing)
             }
 
             Text(store.displayText)
-                .panelTextFont(size: store.isShowingExpressionInput ? 32 : 40, weight: .semibold, design: .rounded)
+                .panelTextFont(size: store.isShowingExpressionInput ? metrics.expressionInputFontSize : metrics.displayFontSize, weight: .semibold, design: .rounded)
                 .foregroundStyle(store.hasError ? .red.opacity(0.9) : .white.opacity(0.92))
                 .lineLimit(1)
                 .minimumScaleFactor(0.45)
-                .frame(maxWidth: .infinity, minHeight: 52, alignment: .trailing)
+                .frame(maxWidth: .infinity, minHeight: metrics.displayMinHeight, alignment: .trailing)
                 .contentTransition(.numericText())
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, metrics.displayHorizontalPadding)
+        .padding(.vertical, metrics.displayVerticalPadding)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.white.opacity(0.035))
@@ -96,50 +101,50 @@ struct CalculatorView: View {
         )
     }
 
-    private var keypad: some View {
-        Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+    private func keypad(metrics: CalculatorLayoutMetrics) -> some View {
+        Grid(horizontalSpacing: metrics.keySpacing, verticalSpacing: metrics.keySpacing) {
             GridRow {
-                key(.allClear, title: "AC", style: .utility)
-                key(.toggleSign, title: "+/-", style: .utility)
-                key(.percent, title: "%", style: .utility)
-                key(.operation(.divide), title: "÷", style: .operation)
+                key(.allClear, title: "AC", style: .utility, metrics: metrics)
+                key(.toggleSign, title: "+/-", style: .utility, metrics: metrics)
+                key(.percent, title: "%", style: .utility, metrics: metrics)
+                key(.operation(.divide), title: "÷", style: .operation, metrics: metrics)
             }
             GridRow {
-                key(.digit(7), title: "7")
-                key(.digit(8), title: "8")
-                key(.digit(9), title: "9")
-                key(.operation(.multiply), title: "×", style: .operation)
+                key(.digit(7), title: "7", metrics: metrics)
+                key(.digit(8), title: "8", metrics: metrics)
+                key(.digit(9), title: "9", metrics: metrics)
+                key(.operation(.multiply), title: "×", style: .operation, metrics: metrics)
             }
             GridRow {
-                key(.digit(4), title: "4")
-                key(.digit(5), title: "5")
-                key(.digit(6), title: "6")
-                key(.operation(.subtract), title: "−", style: .operation)
+                key(.digit(4), title: "4", metrics: metrics)
+                key(.digit(5), title: "5", metrics: metrics)
+                key(.digit(6), title: "6", metrics: metrics)
+                key(.operation(.subtract), title: "−", style: .operation, metrics: metrics)
             }
             GridRow {
-                key(.digit(1), title: "1")
-                key(.digit(2), title: "2")
-                key(.digit(3), title: "3")
-                key(.operation(.add), title: "+", style: .operation)
+                key(.digit(1), title: "1", metrics: metrics)
+                key(.digit(2), title: "2", metrics: metrics)
+                key(.digit(3), title: "3", metrics: metrics)
+                key(.operation(.add), title: "+", style: .operation, metrics: metrics)
             }
             GridRow {
-                key(.digit(0), title: "0")
+                key(.digit(0), title: "0", metrics: metrics)
                     .gridCellColumns(2)
-                key(.decimalSeparator, title: ".")
-                key(.equals, title: "=", style: .equals)
+                key(.decimalSeparator, title: ".", metrics: metrics)
+                key(.equals, title: "=", style: .equals, metrics: metrics)
             }
         }
         .frame(maxWidth: .infinity)
     }
 
-    private var historyToggleButton: some View {
+    private func historyToggleButton(metrics: CalculatorLayoutMetrics) -> some View {
         Button {
             isHistorySidebarVisible.toggle()
         } label: {
             Image(systemName: isHistorySidebarVisible ? "sidebar.leading" : "sidebar.left")
-                .font(.system(size: 13, weight: .bold))
+                .font(.system(size: metrics.toggleIconSize, weight: .bold))
                 .foregroundStyle(.white.opacity(store.history.isEmpty ? 0.32 : 0.78))
-                .frame(width: 28, height: 26)
+                .frame(width: metrics.toggleButtonSize.width, height: metrics.toggleButtonSize.height)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .fill(Color.white.opacity(0.055))
@@ -154,15 +159,15 @@ struct CalculatorView: View {
         .help(label(.toggleHistory))
     }
 
-    private var historySidebar: some View {
+    private func historySidebar(metrics: CalculatorLayoutMetrics) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(label(.history))
-                    .panelTextFont(size: 11, weight: .bold, design: .monospaced)
+                    .panelTextFont(size: metrics.historyHeaderFontSize, weight: .bold, design: .monospaced)
                     .foregroundStyle(.white.opacity(0.72))
                 Spacer()
                 Text("\(store.history.count)")
-                    .panelTextFont(size: 10, weight: .bold, design: .rounded)
+                    .panelTextFont(size: metrics.historyCountFontSize, weight: .bold, design: .rounded)
                     .foregroundStyle(.white.opacity(0.42))
                 Button {
                     store.clearHistory()
@@ -186,7 +191,7 @@ struct CalculatorView: View {
             ScrollView {
                 VStack(spacing: 7) {
                     ForEach(store.history) { entry in
-                        historyRow(entry)
+                        historyRow(entry, metrics: metrics)
                     }
                 }
                 .padding(.horizontal, 8)
@@ -205,20 +210,20 @@ struct CalculatorView: View {
         )
     }
 
-    private func historyRow(_ entry: CalculatorStore.HistoryEntry) -> some View {
+    private func historyRow(_ entry: CalculatorStore.HistoryEntry, metrics: CalculatorLayoutMetrics) -> some View {
         HStack(spacing: 6) {
             Button {
                 store.useHistoryResult(entry)
             } label: {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(entry.inputExpression)
-                        .panelTextFont(size: 10, weight: .medium, design: .rounded)
+                        .panelTextFont(size: metrics.historyExpressionFontSize, weight: .medium, design: .rounded)
                         .foregroundStyle(.white.opacity(0.48))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
 
                     Text(entry.result)
-                        .panelTextFont(size: 13, weight: .bold, design: .rounded)
+                        .panelTextFont(size: metrics.historyResultFontSize, weight: .bold, design: .rounded)
                         .foregroundStyle(.white.opacity(0.88))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
@@ -283,7 +288,8 @@ struct CalculatorView: View {
         _ button: CalculatorStore.Button,
         title: String? = nil,
         systemName: String? = nil,
-        style: CalculatorKeyStyle = .number
+        style: CalculatorKeyStyle = .number,
+        metrics: CalculatorLayoutMetrics
     ) -> some View {
         Button {
             store.press(button)
@@ -291,13 +297,13 @@ struct CalculatorView: View {
             Group {
                 if let systemName {
                     Image(systemName: systemName)
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.system(size: metrics.keyFontSize, weight: .bold))
                 } else {
                     Text(title ?? "")
-                        .panelTextFont(size: 15, weight: .bold, design: .rounded)
+                        .panelTextFont(size: metrics.keyFontSize, weight: .bold, design: .rounded)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 42)
+            .frame(maxWidth: .infinity, minHeight: metrics.keyMinHeight)
             .foregroundStyle(style.foreground)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -470,6 +476,150 @@ private enum CalculatorLabel {
     case toggleHistory
     case history
     case clearHistory
+}
+
+struct CalculatorLayoutMetrics {
+    let size: CGSize
+    let showsHistory: Bool
+
+    private var veryCompactHeight: Bool {
+        size.height < 340
+    }
+
+    private var compactHeight: Bool {
+        size.height < 395
+    }
+
+    private var compactWidth: Bool {
+        size.width < 560
+    }
+
+    var horizontalPadding: CGFloat {
+        compactWidth ? 10 : 14
+    }
+
+    var verticalPadding: CGFloat {
+        veryCompactHeight ? 8 : (compactHeight ? 10 : 12)
+    }
+
+    var outerSpacing: CGFloat {
+        veryCompactHeight ? 5 : (compactHeight ? 7 : 8)
+    }
+
+    var columnSpacing: CGFloat {
+        compactWidth ? 8 : 10
+    }
+
+    var contentSpacing: CGFloat {
+        veryCompactHeight ? 6 : (compactHeight ? 7 : 10)
+    }
+
+    var historySidebarWidth: CGFloat {
+        if compactWidth {
+            return 124
+        }
+        if size.width < 640 {
+            return 140
+        }
+        return 154
+    }
+
+    var mainMaxWidth: CGFloat {
+        let availableWidth = max(0, size.width - horizontalPadding * 2)
+        let historyWidth = showsHistory ? historySidebarWidth + columnSpacing : 0
+        let remainingWidth = max(0, availableWidth - historyWidth)
+        let preferredWidth: CGFloat = compactWidth ? 380 : 430
+        return min(preferredWidth, remainingWidth)
+    }
+
+    var toggleButtonSize: CGSize {
+        veryCompactHeight ? CGSize(width: 26, height: 24) : CGSize(width: 28, height: 26)
+    }
+
+    var toggleIconSize: CGFloat {
+        veryCompactHeight ? 12 : 13
+    }
+
+    var displaySpacing: CGFloat {
+        veryCompactHeight ? 6 : (compactHeight ? 7 : 10)
+    }
+
+    var displayHorizontalPadding: CGFloat {
+        compactWidth ? 10 : 14
+    }
+
+    var displayVerticalPadding: CGFloat {
+        veryCompactHeight ? 8 : (compactHeight ? 10 : 12)
+    }
+
+    var previewFontSize: CGFloat {
+        veryCompactHeight ? 10 : (compactHeight ? 11 : 12)
+    }
+
+    var previewMinHeight: CGFloat {
+        veryCompactHeight ? 12 : (compactHeight ? 14 : 16)
+    }
+
+    var displayFontSize: CGFloat {
+        veryCompactHeight ? 30 : (compactHeight ? 34 : 38)
+    }
+
+    var expressionInputFontSize: CGFloat {
+        veryCompactHeight ? 24 : (compactHeight ? 28 : 32)
+    }
+
+    var displayMinHeight: CGFloat {
+        veryCompactHeight ? 36 : (compactHeight ? 44 : 50)
+    }
+
+    var keySpacing: CGFloat {
+        veryCompactHeight ? 5 : (compactHeight ? 6 : 8)
+    }
+
+    var keyMinHeight: CGFloat {
+        veryCompactHeight ? 27 : (compactHeight ? 31 : 38)
+    }
+
+    var keyFontSize: CGFloat {
+        veryCompactHeight ? 13 : (compactHeight ? 14 : 15)
+    }
+
+    var historyHeaderFontSize: CGFloat {
+        veryCompactHeight ? 10 : 11
+    }
+
+    var historyCountFontSize: CGFloat {
+        veryCompactHeight ? 9 : 10
+    }
+
+    var historyExpressionFontSize: CGFloat {
+        veryCompactHeight ? 9 : 10
+    }
+
+    var historyResultFontSize: CGFloat {
+        veryCompactHeight ? 12 : 13
+    }
+
+    var estimatedMaxContentHeight: CGFloat {
+        let displayActionHeight: CGFloat = 28
+        let displayHeight = displayActionHeight
+            + displaySpacing
+            + previewMinHeight
+            + displaySpacing
+            + displayMinHeight
+            + displayVerticalPadding * 2
+        let keypadHeight = keyMinHeight * 5 + keySpacing * 4
+        return verticalPadding * 2
+            + toggleButtonSize.height
+            + outerSpacing
+            + displayHeight
+            + contentSpacing
+            + keypadHeight
+    }
+
+    var hasUsableMainColumnWidth: Bool {
+        mainMaxWidth >= 300
+    }
 }
 
 private enum CalculatorKeyStyle {
