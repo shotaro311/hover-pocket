@@ -432,13 +432,13 @@ internal sealed class CalendarStore
                 "Google Cloud Console で Google Calendar API を有効化します。",
                 "Google Auth Platform の Clients で Desktop app の OAuth クライアントを作成します。",
                 "%APPDATA%\\HoverPocket\\oauth.json にダウンロードした JSON を配置します。",
-                "必要な scope は calendar.events と calendar.readonly です。予定の作成/編集とカレンダー一覧取得に限定します。"
+                "必要な scope は calendar.events と calendar.calendarlist.readonly です。予定の作成/編集とカレンダー一覧取得に限定します。"
             ],
             [
                 "Enable the Google Calendar API in Google Cloud Console.",
                 "Create a Desktop app OAuth client in Google Auth Platform > Clients.",
                 "Place the downloaded JSON at %APPDATA%\\HoverPocket\\oauth.json.",
-                "HoverPocket requests calendar.events and calendar.readonly only, for event writes and calendar-list reads."
+                "HoverPocket requests calendar.events and calendar.calendarlist.readonly only, for event writes and calendar-list reads."
             ]);
     }
 

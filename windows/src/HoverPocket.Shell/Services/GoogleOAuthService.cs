@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -17,21 +18,55 @@ internal sealed record GoogleOAuthConfiguration(
 
     public static GoogleOAuthConfiguration? Load()
     {
-        if (!File.Exists(ConfigurationPath))
+        return LoadFromSources(LoadEmbedded(), ConfigurationPath);
+    }
+
+    internal static GoogleOAuthConfiguration? LoadEmbedded()
+    {
+        var metadata = Assembly.GetExecutingAssembly()
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .ToArray();
+        return FromValues(
+            ReadMetadata(metadata, "GoogleOAuthClientId"),
+            ReadMetadata(metadata, "GoogleOAuthClientSecret"));
+    }
+
+    internal static GoogleOAuthConfiguration? LoadFromSources(
+        GoogleOAuthConfiguration? embeddedConfiguration,
+        string configurationPath)
+    {
+        return embeddedConfiguration ?? LoadFromJsonFile(configurationPath);
+    }
+
+    internal static GoogleOAuthConfiguration? FromValues(string? clientId, string? clientSecret)
+    {
+        var normalizedClientId = clientId?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedClientId))
+        {
+            return null;
+        }
+
+        var normalizedClientSecret = clientSecret?.Trim();
+        return new GoogleOAuthConfiguration(
+            normalizedClientId,
+            string.IsNullOrWhiteSpace(normalizedClientSecret) ? null : normalizedClientSecret);
+    }
+
+    private static GoogleOAuthConfiguration? LoadFromJsonFile(string configurationPath)
+    {
+        if (!File.Exists(configurationPath))
         {
             return null;
         }
 
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(ConfigurationPath));
+            using var document = JsonDocument.Parse(File.ReadAllText(configurationPath));
             var root = document.RootElement;
             var container = root.TryGetProperty("installed", out var installed) ? installed : root;
             var clientId = ReadString(container, "client_id") ?? ReadString(root, "clientId");
             var clientSecret = ReadString(container, "client_secret") ?? ReadString(root, "clientSecret");
-            return string.IsNullOrWhiteSpace(clientId)
-                ? null
-                : new GoogleOAuthConfiguration(clientId, string.IsNullOrWhiteSpace(clientSecret) ? null : clientSecret);
+            return FromValues(clientId, clientSecret);
         }
         catch (JsonException)
         {
@@ -45,6 +80,14 @@ internal sealed record GoogleOAuthConfiguration(
         {
             return null;
         }
+    }
+
+    private static string? ReadMetadata(IEnumerable<AssemblyMetadataAttribute> metadata, string key)
+    {
+        return metadata
+            .Where(item => string.Equals(item.Key, key, StringComparison.Ordinal))
+            .Select(item => item.Value)
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
     }
 
     private static string? ReadString(JsonElement element, string propertyName)
@@ -93,13 +136,16 @@ internal sealed record GoogleOAuthAuthorizationRequest(
 
 internal sealed class GoogleOAuthService
 {
+    public const string CalendarScope = "https://www.googleapis.com/auth/calendar";
     public const string CalendarEventsScope = "https://www.googleapis.com/auth/calendar.events";
     public const string CalendarReadonlyScope = "https://www.googleapis.com/auth/calendar.readonly";
+    public const string CalendarListScope = "https://www.googleapis.com/auth/calendar.calendarlist";
+    public const string CalendarListReadonlyScope = "https://www.googleapis.com/auth/calendar.calendarlist.readonly";
 
     public static readonly IReadOnlyList<string> CalendarScopes =
     [
         CalendarEventsScope,
-        CalendarReadonlyScope
+        CalendarListReadonlyScope
     ];
 
     private static readonly HttpClient HttpClient = new();
@@ -294,7 +340,20 @@ internal sealed class GoogleOAuthService
     internal static bool HasRequiredCalendarScopes(IEnumerable<string> scopes)
     {
         var granted = scopes.ToHashSet(StringComparer.Ordinal);
-        return CalendarScopes.All(granted.Contains);
+        return HasCalendarEventsScope(granted) && HasCalendarListScope(granted);
+    }
+
+    private static bool HasCalendarEventsScope(ISet<string> granted)
+    {
+        return granted.Contains(CalendarEventsScope) || granted.Contains(CalendarScope);
+    }
+
+    private static bool HasCalendarListScope(ISet<string> granted)
+    {
+        return granted.Contains(CalendarListReadonlyScope)
+            || granted.Contains(CalendarListScope)
+            || granted.Contains(CalendarReadonlyScope)
+            || granted.Contains(CalendarScope);
     }
 
     internal static string CodeChallenge(string verifier)

@@ -1,5 +1,9 @@
 .DS_Store
 .build/
+bin/
+obj/
+**/bin/
+**/obj/
 dist/
 *.xcuserstate
 *.xcuserdata/
@@ -9,3 +13,5 @@ dist/
 *oauth*.json
 *credentials*.json
 *token*.json
+*client-secret*.json
+*client_secret*.json

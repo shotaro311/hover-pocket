@@ -5,6 +5,18 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-06 W14 OAuth Public Pages and User Steps
+
+- Added GitHub Pages-ready static pages under `site/`: `index.html` for the app homepage and `privacy.html` for the Japanese/English privacy policy. The policy reflects the current Windows behavior: Google refresh tokens in Windows Credential Manager, local app data under `%APPDATA%\HoverPocket`, Clipboard Private mode and Clear, Sticky Notes delete/archive distinction, AI lane minimal audit metadata with 90-day pruning, and GitHub Releases as the update source.
+- Added `docs/report/20260706-oauth-scope-justification.md` using W13's final scopes: `calendar.events` plus `calendar.calendarlist.readonly`. Legacy `calendar.readonly` is documented only as an accepted existing-token compatibility case, not as a new Cloud Console scope.
+- Added `docs/plan/20260706-google-cloud-console-steps.md` with user-run steps for GitHub Pages, Search Console ownership verification, Google Auth Platform Branding/Audience/Data Access, and Prepare for verification. Recommended Pages path is GitHub Actions deploying `site/` because branch publishing supports only `/` or `/docs`. Details: `progress/2026-07/2026-07-06_oauth-docs-w14.md`.
+
+## 2026-07-06 W13 Windows OAuth Review Prep
+
+- Changed Windows Google OAuth configuration loading to prefer build-time embedded `AssemblyMetadata`, then `%APPDATA%\HoverPocket\oauth.json`, then the existing missing-configuration state. `publish_release.ps1` now passes `HOVERPOCKET_GOOGLE_CLIENT_ID` / `HOVERPOCKET_GOOGLE_CLIENT_SECRET` to `dotnet publish` as MSBuild properties without printing values, and `.gitignore` excludes build outputs and local secret JSON.
+- Google official Calendar API docs confirm `calendar.events` alone cannot call CalendarList.list. Requested scopes are minimized from `calendar.events` + `calendar.readonly` to `calendar.events` + `calendar.calendarlist.readonly`; legacy stored credentials with `calendar.readonly` remain accepted because Google still authorizes CalendarList.list with that broader scope.
+- Verification: `dotnet build windows\HoverPocket.Windows.sln --nologo -p:NuGetAudit=false`, `--verify calendar`, `--verify ui-model`, dummy embedded-property `--verify calendar`, final normal rebuild, and `git diff --check` all completed with exit code 0 and build warnings 0. WebView2 `--verify ui` remains architect desktop-session follow-up. Details: `progress/2026-07/2026-07-06_windows-oauth-w13.md`.
+
 ## 2026-07-06 W12 Windows Security Review Fixes
 
 - Fixed security review F-1/F-2/F-3 for the Windows build. DevTools and default WebView2 context menus now enable only in Debug builds or with explicit `--devtools`; Release without the flag disables both. Panel and Settings WebView2 now block navigation outside their virtual hosts and route external `http(s)` URLs to the OS default browser while suppressing all `NewWindowRequested` popups.

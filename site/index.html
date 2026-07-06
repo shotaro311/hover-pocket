@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HoverPocket | ホバーポケット</title>
+  <meta name="description" content="HoverPocket is a desktop utility panel that opens from the top edge of the screen for Calendar, Clipboard, Sticky Notes, Timer, Calculator, and AI-assisted calendar actions.">
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1b1d22;
+      --muted: #606773;
+      --line: #d9dee7;
+      --panel: #ffffff;
+      --soft: #f5f7fb;
+      --accent: #1e6f66;
+      --accent-strong: #134d47;
+      --warm: #f0b84f;
+      --blue: #4377c7;
+      --shadow: 0 18px 48px rgba(21, 30, 48, 0.14);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", "Hiragino Sans", Meiryo, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: linear-gradient(180deg, #fbfcff 0%, #eef3f0 100%);
+      line-height: 1.65;
+    }
+
+    a {
+      color: var(--accent-strong);
+      font-weight: 700;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .nav {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .mark {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--ink);
+      position: relative;
+      box-shadow: inset 0 -8px 0 rgba(255, 255, 255, 0.12);
+    }
+
+    .mark::after {
+      content: "";
+      position: absolute;
+      left: 9px;
+      top: 9px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--warm);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      font-size: 14px;
+    }
+
+    .hero {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 72px 24px 56px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.04fr) minmax(320px, 0.96fr);
+      gap: 42px;
+      align-items: center;
+    }
+
+    .eyebrow {
+      margin: 0 0 12px;
+      color: var(--accent-strong);
+      font-weight: 800;
+      font-size: 14px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(42px, 7vw, 76px);
+      line-height: 0.96;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      margin: 22px 0 0;
+      color: #37404c;
+      font-size: 18px;
+      max-width: 650px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--accent-strong);
+      text-decoration: none;
+      background: var(--accent-strong);
+      color: #fff;
+      font-weight: 800;
+    }
+
+    .button.secondary {
+      background: #fff;
+      color: var(--accent-strong);
+    }
+
+    .mock {
+      min-height: 410px;
+      padding: 28px;
+      border: 1px solid #cbd3df;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #f9fbff, #e8eef4);
+      box-shadow: var(--shadow);
+    }
+
+    .screen-edge {
+      height: 54px;
+      border-radius: 8px 8px 3px 3px;
+      background: #151820;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 0;
+    }
+
+    .notch {
+      width: 168px;
+      height: 30px;
+      border-radius: 0 0 18px 18px;
+      background: #030507;
+    }
+
+    .pocket {
+      margin: 18px auto 0;
+      max-width: 430px;
+      border-radius: 8px;
+      background: #20242e;
+      color: #f5f7fb;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .pocket-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .chips {
+      display: flex;
+      gap: 7px;
+    }
+
+    .chip {
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      background: #343b48;
+    }
+
+    .chip:nth-child(2) {
+      background: var(--accent);
+    }
+
+    .chip:nth-child(3) {
+      background: var(--warm);
+    }
+
+    .pocket-grid {
+      padding: 16px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .tile {
+      min-height: 74px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #2a303c;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 13px;
+      color: #d9e2ef;
+    }
+
+    .tile strong {
+      display: block;
+      color: #fff;
+      margin-bottom: 3px;
+    }
+
+    main section {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 36px 24px;
+    }
+
+    .section-title {
+      margin: 0 0 16px;
+      font-size: 30px;
+      letter-spacing: 0;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .feature {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      min-height: 158px;
+    }
+
+    .feature h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+
+    .feature p,
+    .note p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    .note {
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px;
+    }
+
+    footer {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 36px 24px 52px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    @media (max-width: 840px) {
+      .nav {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .nav-links,
+      .actions {
+        align-items: stretch;
+      }
+
+      .hero,
+      .split,
+      .feature-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        padding-top: 46px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <nav class="nav" aria-label="Primary">
+      <div class="brand"><span class="mark" aria-hidden="true"></span><span>HoverPocket / ホバーポケット</span></div>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#download">Download</a>
+        <a href="privacy.html">Privacy Policy</a>
+        <a href="#contact">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Top-edge desktop utility panel</p>
+        <h1>HoverPocket</h1>
+        <p class="lead">
+          HoverPocket opens a compact utility panel from the top edge of your desktop, so calendar work,
+          clipboard history, sticky notes, timers, and quick calculations stay one hover away.
+        </p>
+        <p class="lead" lang="ja">
+          ホバーポケットは、画面上部へマウスを重ねるだけで、小さなユーティリティパネルを開けるデスクトップアプリです。
+          Calendar、Clipboard、Sticky Notes、Timer、Calculator、AI lane をひとつの場所から扱えます。
+        </p>
+        <div class="actions">
+          <a class="button" href="https://github.com/shotaro311/hover-pocket/releases/latest">Download from GitHub Releases</a>
+          <a class="button secondary" href="privacy.html">Read the Privacy Policy</a>
+        </div>
+      </div>
+
+      <div class="mock" aria-label="Illustration of the HoverPocket panel">
+        <div class="screen-edge"><div class="notch"></div></div>
+        <div class="pocket">
+          <div class="pocket-head">
+            <span>Calendar</span>
+            <div class="chips" aria-hidden="true">
+              <span class="chip"></span>
+              <span class="chip"></span>
+              <span class="chip"></span>
+            </div>
+          </div>
+          <div class="pocket-grid">
+            <div class="tile"><strong>Today</strong>Preview events before opening a full calendar.</div>
+            <div class="tile"><strong>Clipboard</strong>Reuse recent text and images locally.</div>
+            <div class="tile"><strong>Sticky</strong>Keep notes near the work surface.</div>
+            <div class="tile"><strong>AI lane</strong>Confirm suggested calendar actions before applying them.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <h2 class="section-title">Features / 主な機能</h2>
+      <div class="feature-grid">
+        <article class="feature">
+          <h3>Hover panel</h3>
+          <p>Open the panel from the top edge, switch providers, and keep common tools close without a full app window.</p>
+        </article>
+        <article class="feature">
+          <h3>Calendar</h3>
+          <p>Connect Google Calendar, view events in the panel, and create, edit, or delete events on writable calendars.</p>
+        </article>
+        <article class="feature">
+          <h3>Clipboard</h3>
+          <p>Keep recent text and image clipboard history on your device, copy items back, drag them out, or clear the history.</p>
+        </article>
+        <article class="feature">
+          <h3>Sticky Notes</h3>
+          <p>Create local notes, edit them inline, reorder them, archive them, or delete them from the board.</p>
+        </article>
+        <article class="feature">
+          <h3>Timer and Calculator</h3>
+          <p>Run timers, pin timer presets, use Pomodoro-style sessions, and perform quick arithmetic inside the panel.</p>
+        </article>
+        <article class="feature">
+          <h3>AI lane</h3>
+          <p>Enter short natural-language calendar requests. Calendar changes use a confirmation step before execution.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="download">
+      <h2 class="section-title">Download / ダウンロード</h2>
+      <div class="split">
+        <div class="note">
+          <p>
+            Public builds are distributed from GitHub Releases. Use the latest release and choose the asset for your platform.
+            Windows release assets use the <strong>HoverPocketWin</strong> name, and macOS release assets use the <strong>HoverPocket</strong> app package name.
+          </p>
+        </div>
+        <div class="note">
+          <p lang="ja">
+            公開ビルドは GitHub Releases から配布します。最新版のリリースを開き、利用するOS向けのアセットを選んでください。
+            更新確認も GitHub Releases を配信元として使います。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="privacy">
+      <h2 class="section-title">Privacy / プライバシー</h2>
+      <div class="split">
+        <div class="note">
+          <p>
+            HoverPocket stores Google refresh tokens in Windows Credential Manager and stores app data locally under
+            <code>%APPDATA%\HoverPocket</code>. It does not run telemetry and does not sell or share Google Calendar data.
+          </p>
+        </div>
+        <div class="note">
+          <p lang="ja">
+            Google Calendar データは、接続時にパネル表示と予定操作のためだけに使います。詳しくは
+            <a href="privacy.html">プライバシーポリシー</a>を確認してください。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="contact">
+      <h2 class="section-title">Contact / 問い合わせ</h2>
+      <div class="note">
+        <p>
+          For support, privacy questions, or OAuth verification questions, use GitHub Issues:
+          <a href="https://github.com/shotaro311/hover-pocket/issues">https://github.com/shotaro311/hover-pocket/issues</a>
+        </p>
+        <p lang="ja">
+          サポート、プライバシー、OAuth審査に関する問い合わせは GitHub Issues で受け付けます。
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Copyright © 2026 HoverPocket project. This page is a static GitHub Pages site for app information and OAuth verification.</p>
+  </footer>
+</body>
+</html>

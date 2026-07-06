@@ -13,6 +13,8 @@
     <StartupObject>HoverPocket.Shell.Program</StartupObject>
     <Version>0.2.1</Version>
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
+    <GoogleOAuthClientId Condition="'$(GoogleOAuthClientId)' == ''"></GoogleOAuthClientId>
+    <GoogleOAuthClientSecret Condition="'$(GoogleOAuthClientSecret)' == ''"></GoogleOAuthClientSecret>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,6 +22,20 @@
     <Using Include="System.Net.Http" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4022.49" />
     <PackageReference Include="Velopack" Version="1.2.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(GoogleOAuthClientId)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>GoogleOAuthClientId</_Parameter1>
+      <_Parameter2>$(GoogleOAuthClientId)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(GoogleOAuthClientSecret)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>GoogleOAuthClientSecret</_Parameter1>
+      <_Parameter2>$(GoogleOAuthClientSecret)</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
 
   <ItemGroup>

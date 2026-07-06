@@ -13,6 +13,8 @@ internal sealed class CalendarVerifier
     {
         try
         {
+            VerifyConsole.WriteLine("calendar verify: oauth-configuration");
+            VerifyOAuthConfigurationResolution();
             VerifyConsole.WriteLine("calendar verify: oauth-url/pkce");
             VerifyOAuthUrlAndPkce();
             VerifyConsole.WriteLine("calendar verify: loopback");
@@ -33,7 +35,7 @@ internal sealed class CalendarVerifier
 
         if (_failures.Count == 0)
         {
-            VerifyConsole.WriteLine("PASS calendar verify: oauth-url/pkce, loopback, credential-manager, request-builders, month-grid, read-only guards");
+            VerifyConsole.WriteLine("PASS calendar verify: oauth-configuration, oauth-url/pkce, loopback, credential-manager, request-builders, month-grid, read-only guards");
             return 0;
         }
 
@@ -44,6 +46,81 @@ internal sealed class CalendarVerifier
         }
 
         return 1;
+    }
+
+    private void VerifyOAuthConfigurationResolution()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "HoverPocket", "OAuthVerify", Guid.NewGuid().ToString("N"));
+        var fallbackPath = Path.Combine(root, "oauth.json");
+        var missingPath = Path.Combine(root, "missing-oauth.json");
+        var embedded = new GoogleOAuthConfiguration(
+            "verify-embedded-client.apps.googleusercontent.com",
+            "verify-embedded-secret");
+
+        try
+        {
+            Directory.CreateDirectory(root);
+            var embeddedOnly = GoogleOAuthConfiguration.LoadFromSources(embedded, missingPath);
+            if (embeddedOnly?.ClientId != embedded.ClientId || embeddedOnly.ClientSecret != embedded.ClientSecret)
+            {
+                _failures.Add("oauth-config: embedded configuration did not load without oauth.json");
+            }
+
+            File.WriteAllText(
+                fallbackPath,
+                """
+                {
+                  "installed": {
+                    "client_id": "verify-file-client.apps.googleusercontent.com",
+                    "client_secret": "verify-file-secret"
+                  }
+                }
+                """);
+            var fallback = GoogleOAuthConfiguration.LoadFromSources(null, fallbackPath);
+            if (fallback?.ClientId != "verify-file-client.apps.googleusercontent.com"
+                || fallback.ClientSecret != "verify-file-secret")
+            {
+                _failures.Add("oauth-config: oauth.json fallback did not load");
+            }
+
+            var precedence = GoogleOAuthConfiguration.LoadFromSources(embedded, fallbackPath);
+            if (precedence?.ClientId != embedded.ClientId || precedence.ClientSecret != embedded.ClientSecret)
+            {
+                _failures.Add("oauth-config: embedded configuration did not take precedence over oauth.json");
+            }
+
+            if (GoogleOAuthConfiguration.LoadFromSources(null, missingPath) is not null)
+            {
+                _failures.Add("oauth-config: missing embedded and oauth.json configuration did not return null");
+            }
+
+            var assemblyEmbedded = GoogleOAuthConfiguration.LoadEmbedded();
+            VerifyConsole.WriteLine($"oauth_embedded_metadata={(assemblyEmbedded is null ? "absent" : "present")}");
+            if (assemblyEmbedded is not null)
+            {
+                var resolved = GoogleOAuthConfiguration.LoadFromSources(assemblyEmbedded, missingPath);
+                if (resolved is null)
+                {
+                    _failures.Add("oauth-config: assembly metadata was present but did not resolve without oauth.json");
+                }
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
     }
 
     private void VerifyOAuthUrlAndPkce()
@@ -74,9 +151,10 @@ internal sealed class CalendarVerifier
 
         if (!query.TryGetValue("scope", out var scope)
             || !scope.Contains(GoogleOAuthService.CalendarEventsScope, StringComparison.Ordinal)
-            || !scope.Contains(GoogleOAuthService.CalendarReadonlyScope, StringComparison.Ordinal))
+            || !scope.Contains(GoogleOAuthService.CalendarListReadonlyScope, StringComparison.Ordinal)
+            || scope.Contains(GoogleOAuthService.CalendarReadonlyScope, StringComparison.Ordinal))
         {
-            _failures.Add("oauth: required Calendar scopes were not present");
+            _failures.Add("oauth: minimized Calendar scopes were not correct");
         }
 
         if (!query.TryGetValue("access_type", out var accessType) || accessType != "offline")
@@ -115,7 +193,7 @@ internal sealed class CalendarVerifier
         {
             var credential = new GoogleOAuthStoredCredential(
                 "verify-refresh-token",
-                [GoogleOAuthService.CalendarEventsScope, GoogleOAuthService.CalendarReadonlyScope]);
+                [GoogleOAuthService.CalendarEventsScope, GoogleOAuthService.CalendarListReadonlyScope]);
             store.Save(credential);
             var loaded = store.Load();
             if (loaded is null
@@ -123,6 +201,12 @@ internal sealed class CalendarVerifier
                 || !loaded.GrantedScopes.SequenceEqual(credential.GrantedScopes))
             {
                 _failures.Add("credential-manager: saved credential did not load");
+            }
+
+            if (!GoogleOAuthService.HasRequiredCalendarScopes(
+                    [GoogleOAuthService.CalendarEventsScope, GoogleOAuthService.CalendarReadonlyScope]))
+            {
+                _failures.Add("credential-manager: legacy calendar.readonly scope was not accepted as calendar-list access");
             }
 
             store.Delete();

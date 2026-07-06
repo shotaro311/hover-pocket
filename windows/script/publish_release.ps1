@@ -46,6 +46,8 @@ if ([string]::IsNullOrWhiteSpace($version)) {
 $publishDir = Join-Path $outputRootPath "publish\$Runtime\$version"
 $releaseDir = Join-Path $outputRootPath "releases\$version"
 New-Item -ItemType Directory -Force -Path $publishDir, $releaseDir | Out-Null
+$googleOAuthClientId = [string]$env:HOVERPOCKET_GOOGLE_CLIENT_ID
+$googleOAuthClientSecret = [string]$env:HOVERPOCKET_GOOGLE_CLIENT_SECRET
 
 $publishArgs = @(
     "publish",
@@ -55,7 +57,9 @@ $publishArgs = @(
     "--self-contained", "true",
     "--output", $publishDir,
     "-p:PublishSingleFile=false",
-    "-p:Version=$version"
+    "-p:Version=$version",
+    "-p:GoogleOAuthClientId=$googleOAuthClientId",
+    "-p:GoogleOAuthClientSecret=$googleOAuthClientSecret"
 )
 
 if ($NoRestore) {
