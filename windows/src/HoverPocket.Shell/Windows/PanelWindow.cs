@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
@@ -23,6 +24,7 @@ internal sealed class PanelWindow : NoActivateWindow
 
     private readonly PanelBridgeController _bridgeController;
     private readonly bool _enableWebView;
+    private readonly bool _enableDevTools;
     private readonly Grid _root = new();
     private readonly Border _fallbackVisual;
     private readonly List<string> _processFailures = [];
@@ -30,11 +32,12 @@ internal sealed class PanelWindow : NoActivateWindow
     private WebView2? _webView;
     private Task? _initializationTask;
 
-    public PanelWindow(PanelBridgeController bridgeController, bool enableWebView)
+    public PanelWindow(PanelBridgeController bridgeController, bool enableWebView, bool enableDevTools)
         : base(allowsTransparency: false)
     {
         _bridgeController = bridgeController;
         _enableWebView = enableWebView;
+        _enableDevTools = enableDevTools;
 
         var metrics = PanelSizeCatalog.Get(_bridgeController.CurrentSettings.PanelSize);
         Width = metrics.Width;
@@ -311,8 +314,22 @@ internal sealed class PanelWindow : NoActivateWindow
         {
             _processFailures.Add($"{args.ProcessFailedKind}:{args.Reason}");
         };
-        webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
-        webView.CoreWebView2.Settings.AreDevToolsEnabled = true;
+        WebViewSecurityPolicy.ApplyBrowserDebugSettings(webView.CoreWebView2.Settings, _enableDevTools);
+        webView.CoreWebView2.NavigationStarting += (_, args) =>
+        {
+            if (WebViewSecurityPolicy.IsAllowedVirtualHostNavigation(args.Uri, UiHostName))
+            {
+                return;
+            }
+
+            args.Cancel = true;
+            WebViewSecurityPolicy.TryOpenExternalBrowser(args.Uri, UiHostName);
+        };
+        webView.CoreWebView2.NewWindowRequested += (_, args) =>
+        {
+            args.Handled = true;
+            WebViewSecurityPolicy.TryOpenExternalBrowser(args.Uri, UiHostName);
+        };
         webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
             UiHostName,
             uiFolder,
@@ -377,3 +394,68 @@ internal sealed record UiWebVerifyResult(
     string SwitchedProvider,
     string OriginalPanelSize,
     string ProbePanelSize);
+
+internal static class WebViewSecurityPolicy
+{
+    internal const string PanelHostName = "app.hoverpocket.local";
+    internal const string SettingsHostName = "settings.hoverpocket.local";
+
+    public static bool IsDebugBuild
+    {
+        get
+        {
+#if DEBUG
+            return true;
+#else
+            return false;
+#endif
+        }
+    }
+
+    public static bool ShouldEnableBrowserDebugFeatures(bool devToolsFlag, bool? isDebugBuild = null)
+    {
+        return devToolsFlag || (isDebugBuild ?? IsDebugBuild);
+    }
+
+    public static void ApplyBrowserDebugSettings(CoreWebView2Settings settings, bool devToolsFlag)
+    {
+        var enabled = ShouldEnableBrowserDebugFeatures(devToolsFlag);
+        settings.AreDefaultContextMenusEnabled = enabled;
+        settings.AreDevToolsEnabled = enabled;
+    }
+
+    public static bool IsAllowedVirtualHostNavigation(string? uri, string hostName)
+    {
+        return Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
+            && parsed.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            && parsed.Host.Equals(hostName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool ShouldOpenExternalBrowser(string? uri, string hostName)
+    {
+        return Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
+            && (parsed.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                || parsed.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            && !IsAllowedVirtualHostNavigation(parsed.AbsoluteUri, hostName);
+    }
+
+    public static void TryOpenExternalBrowser(string? uri, string hostName)
+    {
+        if (!ShouldOpenExternalBrowser(uri, hostName)
+            || !Uri.TryCreate(uri, UriKind.Absolute, out var parsed))
+        {
+            return;
+        }
+
+        try
+        {
+            using var _ = Process.Start(new ProcessStartInfo(parsed.AbsoluteUri)
+            {
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or ArgumentException)
+        {
+        }
+    }
+}

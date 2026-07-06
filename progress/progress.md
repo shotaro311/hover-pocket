@@ -5,6 +5,12 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-06 W12 Windows Security Review Fixes
+
+- Fixed security review F-1/F-2/F-3 for the Windows build. DevTools and default WebView2 context menus now enable only in Debug builds or with explicit `--devtools`; Release without the flag disables both. Panel and Settings WebView2 now block navigation outside their virtual hosts and route external `http(s)` URLs to the OS default browser while suppressing all `NewWindowRequested` popups.
+- Minimized AI lane audit JSONL to `timestamp` / `action` / `actionType` / `result` / `eventId` / `calendarId`, removed action id, field keys, title, location, notes, command text, and free-form failure reason text, and added 90-day write-time pruning for old daily audit files.
+- Verification: `dotnet build windows\HoverPocket.Windows.sln --nologo -p:NuGetAudit=false`, `dotnet build windows\HoverPocket.Windows.sln --nologo -c Release -p:NuGetAudit=false`, `--verify ailane`, `ui-model`, `settings`, `shell`, Release `--verify settings`, and `git diff --check` completed with exit code 0 and build warnings 0. `--verify ui` remains architect desktop-session follow-up because this sandbox cannot launch the WebView2 renderer. Details: `progress/2026-07/2026-07-06_windows-security-w12.md`.
+
 ## 2026-07-06 W11 Velopack Windows Updates
 
 - Implemented Windows Phase 2 W11 Velopack updater and release packaging: `VelopackApp.Build().Run()` now runs from `Program.Main` except verify/probe paths, updater checks GitHub Releases `shotaro311/hover-pocket`, tray and Settings `Check for Updates` are wired, startup auto-check defaults on and is non-blocking, and `--verify updater` covers local-folder no-update/update-available dry-runs.

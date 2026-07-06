@@ -3,6 +3,7 @@ using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Providers;
 using HoverPocket.Shell.Verification;
+using HoverPocket.Shell.Windows;
 
 namespace HoverPocket.Shell.Settings;
 
@@ -38,6 +39,7 @@ internal sealed class SettingsVerifier
         using var _ = controller.Attach(dispatcher);
 
         VerifyDefaults(store, registry, startup);
+        VerifyWebViewSecurityPolicy();
 
         await Send(dispatcher, """{"id":"1","method":"settings.setLanguage","params":{"language":"en"}}""");
         await Send(dispatcher, """{"id":"2","method":"settings.setTextSize","params":{"textSize":"large"}}""");
@@ -97,6 +99,58 @@ internal sealed class SettingsVerifier
 
         await Send(dispatcher, """{"id":"9","method":"settings.resetDefaults"}""");
         VerifyDefaults(store, registry, startup);
+    }
+
+    private void VerifyWebViewSecurityPolicy()
+    {
+        if (WebViewSecurityPolicy.ShouldEnableBrowserDebugFeatures(devToolsFlag: false, isDebugBuild: false))
+        {
+            _failures.Add("webview security: release without --devtools enabled debug browser features");
+        }
+
+        if (!WebViewSecurityPolicy.ShouldEnableBrowserDebugFeatures(devToolsFlag: true, isDebugBuild: false)
+            || !WebViewSecurityPolicy.ShouldEnableBrowserDebugFeatures(devToolsFlag: false, isDebugBuild: true))
+        {
+            _failures.Add("webview security: debug build or --devtools did not enable browser debug features");
+        }
+
+        if (!StartupOptions.Parse(["--devtools"]).EnableDevTools)
+        {
+            _failures.Add("webview security: --devtools flag was not parsed");
+        }
+
+        if (!WebViewSecurityPolicy.IsAllowedVirtualHostNavigation(
+                "https://app.hoverpocket.local/index.html",
+                WebViewSecurityPolicy.PanelHostName)
+            || !WebViewSecurityPolicy.IsAllowedVirtualHostNavigation(
+                "https://settings.hoverpocket.local/settings/index.html",
+                WebViewSecurityPolicy.SettingsHostName))
+        {
+            _failures.Add("webview security: virtual-host URLs were not allowed");
+        }
+
+        if (WebViewSecurityPolicy.IsAllowedVirtualHostNavigation(
+                "https://example.com/",
+                WebViewSecurityPolicy.PanelHostName)
+            || WebViewSecurityPolicy.IsAllowedVirtualHostNavigation(
+                "http://app.hoverpocket.local/",
+                WebViewSecurityPolicy.PanelHostName))
+        {
+            _failures.Add("webview security: non-virtual-host URL was allowed");
+        }
+
+        if (!WebViewSecurityPolicy.ShouldOpenExternalBrowser(
+                "https://example.com/",
+                WebViewSecurityPolicy.PanelHostName)
+            || WebViewSecurityPolicy.ShouldOpenExternalBrowser(
+                "https://app.hoverpocket.local/index.html",
+                WebViewSecurityPolicy.PanelHostName)
+            || WebViewSecurityPolicy.ShouldOpenExternalBrowser(
+                "file:///C:/temp/test.html",
+                WebViewSecurityPolicy.PanelHostName))
+        {
+            _failures.Add("webview security: external browser routing did not match policy");
+        }
     }
 
     private void VerifyDefaults(UserSettingsStore store, ProviderRegistry registry, InMemoryStartupRegistrationService startup)

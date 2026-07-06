@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Verification;
 
@@ -30,10 +31,11 @@ internal sealed class AiLaneVerifier
 
         VerifyUnknown(controller);
         VerifyAuditLog(auditLog);
+        VerifyAuditRetention(auditLog);
 
         if (_failures.Count == 0)
         {
-            VerifyConsole.WriteLine("PASS ailane verify: read/create/unknown interpretation, approval transitions, audit JSONL");
+            VerifyConsole.WriteLine("PASS ailane verify: read/create/unknown interpretation, approval transitions, minimized audit JSONL, 90-day retention");
             VerifyConsole.WriteLine($"auditlog_path={auditLog.LogDirectory}");
             return 0;
         }
@@ -127,17 +129,59 @@ internal sealed class AiLaneVerifier
         }
 
         var joined = string.Join('\n', lines);
-        if (!joined.Contains("\"outcome\":\"approved\"", StringComparison.Ordinal)
-            || !joined.Contains("\"outcome\":\"rejected\"", StringComparison.Ordinal)
-            || !joined.Contains("\"event\":\"failure\"", StringComparison.Ordinal))
+        if (!joined.Contains("\"result\":\"approved\"", StringComparison.Ordinal)
+            || !joined.Contains("\"result\":\"rejected\"", StringComparison.Ordinal)
+            || !joined.Contains("\"action\":\"failure\"", StringComparison.Ordinal))
         {
             _failures.Add("audit log missing required decision or failure event");
         }
 
         if (joined.Contains("打ち合わせ", StringComparison.Ordinal)
-            || joined.Contains("今日の予定", StringComparison.Ordinal))
+            || joined.Contains("今日の予定", StringComparison.Ordinal)
+            || joined.Contains("title", StringComparison.OrdinalIgnoreCase)
+            || joined.Contains("location", StringComparison.OrdinalIgnoreCase)
+            || joined.Contains("notes", StringComparison.OrdinalIgnoreCase)
+            || joined.Contains("reason", StringComparison.OrdinalIgnoreCase)
+            || joined.Contains("fieldKeys", StringComparison.OrdinalIgnoreCase)
+            || joined.Contains("actionId", StringComparison.OrdinalIgnoreCase))
         {
             _failures.Add("audit log included command text or personal content");
+        }
+
+        var allowedProperties = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "timestamp",
+            "action",
+            "actionType",
+            "result",
+            "eventId",
+            "calendarId"
+        };
+        foreach (var line in lines)
+        {
+            using var document = JsonDocument.Parse(line);
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (!allowedProperties.Contains(property.Name))
+                {
+                    _failures.Add($"audit log included unexpected property: {property.Name}");
+                }
+            }
+        }
+    }
+
+    private void VerifyAuditRetention(AiLaneAuditLog auditLog)
+    {
+        Directory.CreateDirectory(auditLog.LogDirectory);
+        var oldPath = Path.Combine(
+            auditLog.LogDirectory,
+            $"ailane-{DateTimeOffset.UtcNow.AddDays(-91):yyyyMMdd}.jsonl");
+        File.WriteAllText(oldPath, """{"timestamp":"2026-01-01T00:00:00Z","action":"failure","result":"failed"}""" + Environment.NewLine);
+
+        auditLog.WriteFailure("retention_probe");
+        if (File.Exists(oldPath))
+        {
+            _failures.Add("audit log retention did not prune entries older than 90 days");
         }
     }
 

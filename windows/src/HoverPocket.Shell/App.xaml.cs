@@ -109,6 +109,7 @@ public partial class App : System.Windows.Application
             providerRegistry,
             settingsStore,
             enablePanelWebView,
+            options.EnableDevTools,
             updaterService);
         _shellController = shellController;
         singleInstanceGate.ShowPanelRequested += (_, _) =>

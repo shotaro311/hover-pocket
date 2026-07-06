@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using HoverPocket.Shell.Bridge;
+using HoverPocket.Shell.Windows;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
@@ -13,14 +14,16 @@ internal sealed class SettingsWindow : Window
     private const string SettingsUrl = "https://settings.hoverpocket.local/settings/index.html";
 
     private readonly PanelBridgeController _bridgeController;
+    private readonly bool _enableDevTools;
     private readonly Grid _root = new();
     private IDisposable? _bridgeAttachment;
     private WebView2? _webView;
     private Task? _initializationTask;
 
-    public SettingsWindow(PanelBridgeController bridgeController)
+    public SettingsWindow(PanelBridgeController bridgeController, bool enableDevTools)
     {
         _bridgeController = bridgeController;
+        _enableDevTools = enableDevTools;
         Title = "HoverPocket Settings";
         Width = 620;
         Height = 720;
@@ -52,8 +55,22 @@ internal sealed class SettingsWindow : Window
         _root.Children.Add(webView);
 
         await webView.EnsureCoreWebView2Async();
-        webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
-        webView.CoreWebView2.Settings.AreDevToolsEnabled = true;
+        WebViewSecurityPolicy.ApplyBrowserDebugSettings(webView.CoreWebView2.Settings, _enableDevTools);
+        webView.CoreWebView2.NavigationStarting += (_, args) =>
+        {
+            if (WebViewSecurityPolicy.IsAllowedVirtualHostNavigation(args.Uri, UiHostName))
+            {
+                return;
+            }
+
+            args.Cancel = true;
+            WebViewSecurityPolicy.TryOpenExternalBrowser(args.Uri, UiHostName);
+        };
+        webView.CoreWebView2.NewWindowRequested += (_, args) =>
+        {
+            args.Handled = true;
+            WebViewSecurityPolicy.TryOpenExternalBrowser(args.Uri, UiHostName);
+        };
         webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
             UiHostName,
             ResolveUiFolder(),

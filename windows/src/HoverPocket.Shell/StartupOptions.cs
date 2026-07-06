@@ -16,6 +16,7 @@ internal sealed record StartupOptions(
     bool VerifyAiLane,
     bool VerifyUpdater,
     bool SecondInstanceProbe,
+    bool EnableDevTools,
     ShellSettings Settings)
 {
     public bool IsVerify =>
@@ -47,6 +48,7 @@ internal sealed record StartupOptions(
         var verifyAiLane = false;
         var verifyUpdater = false;
         var secondInstanceProbe = false;
+        var enableDevTools = false;
         var displayPlacement = DisplayPlacement.Main;
 
         for (var index = 0; index < args.Length; index++)
@@ -76,6 +78,12 @@ internal sealed record StartupOptions(
                 continue;
             }
 
+            if (string.Equals(args[index], "--devtools", StringComparison.OrdinalIgnoreCase))
+            {
+                enableDevTools = true;
+                continue;
+            }
+
             if (string.Equals(args[index], "--display-placement", StringComparison.OrdinalIgnoreCase)
                 && index + 1 < args.Length
                 && TryParseDisplayPlacement(args[++index], out var parsedPlacement))
@@ -98,6 +106,7 @@ internal sealed record StartupOptions(
             verifyAiLane,
             verifyUpdater,
             secondInstanceProbe,
+            enableDevTools,
             new ShellSettings(displayPlacement));
     }
 

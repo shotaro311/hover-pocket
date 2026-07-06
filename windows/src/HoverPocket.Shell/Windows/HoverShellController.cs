@@ -24,6 +24,7 @@ internal sealed class HoverShellController : IDisposable
 
     private readonly Dispatcher _dispatcher;
     private readonly ShellSettings _settings;
+    private readonly bool _enableDevTools;
     private readonly PanelBridgeController _panelBridgeController;
     private readonly DisplayLayoutService _displayLayoutService = new();
     private readonly List<AccessSurfaceWindow> _accessSurfaces = [];
@@ -49,10 +50,12 @@ internal sealed class HoverShellController : IDisposable
         ProviderRegistry providerRegistry,
         UserSettingsStore userSettingsStore,
         bool enablePanelWebView,
+        bool enableDevTools,
         Services.UpdaterService? updaterService = null)
     {
         _dispatcher = dispatcher;
         _settings = settings;
+        _enableDevTools = enableDevTools;
         var userSettings = userSettingsStore.Load(providerRegistry.ProviderIds);
         _panelBridgeController = new PanelBridgeController(
             providerRegistry,
@@ -64,7 +67,7 @@ internal sealed class HoverShellController : IDisposable
         _panelBridgeController.TimerAlertFired += OnTimerAlertFired;
         _panelBridgeController.TimerAlertChanged += OnTimerAlertChanged;
         _panelBridgeController.ExternalDragStarted += OnExternalDragStarted;
-        _panel = new PanelWindow(_panelBridgeController, enablePanelWebView);
+        _panel = new PanelWindow(_panelBridgeController, enablePanelWebView, enableDevTools);
 
         _pollingTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
         {
@@ -302,7 +305,7 @@ internal sealed class HoverShellController : IDisposable
             return;
         }
 
-        _settingsWindow = new SettingsWindow(_panelBridgeController);
+        _settingsWindow = new SettingsWindow(_panelBridgeController, _enableDevTools);
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         _settingsWindow.Show();
         _settingsWindow.Activate();
