@@ -5,6 +5,11 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-06 Cross-platform Agent Read Gate
+
+- Added root `AGENTS.md` so Codex and other repo-aware AI agents have a mandatory entrypoint before implementation. It points agents to `progress/progress.md`, `docs/requirement/requirements.md`, and the OS-specific README/script files.
+- Added `docs/requirement/requirements.md` section `1.4 Mac / Windows 横断ワークフロー` to keep the existing docs structure instead of introducing a separate `product.md`. It defines OS ownership, shared-spec flow, release feed separation, and readback completion gates.
+
 ## 2026-07-06 W14 OAuth Public Pages and User Steps
 
 - Added GitHub Pages-ready static pages under `site/`: `index.html` for the app homepage and `privacy.html` for the Japanese/English privacy policy. The policy reflects the current Windows behavior: Google refresh tokens in Windows Credential Manager, local app data under `%APPDATA%\HoverPocket`, Clipboard Private mode and Clear, Sticky Notes delete/archive distinction, AI lane minimal audit metadata with 90-day pruning, and GitHub Releases as the update source.

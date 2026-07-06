@@ -44,6 +44,30 @@ Windows 版の本質は、「画面上端へポインターを運ぶだけで、
 - 永続化ファイルの最終スキーマ。
 - インストーラー方式、署名証明書、更新配信方式の最終選択。
 
+### 1.4 Mac / Windows 横断ワークフロー
+
+Must:
+
+- macOS 版は Mac 実機の Codex が担当し、SwiftPM build、macOS UI、Sparkle、notarization、Gatekeeper、macOS appcast readback を確認する。
+- Windows 版は Windows 実機の Codex が担当し、Windows build、installer、Velopack feed、Windows 実機 UI、update apply / restart を確認する。
+- 共通仕様は先にこの `requirements.md` に書き、OS 別に実装する。
+- 片方の OS だけで確認した挙動を、もう片方の完了として扱わない。
+- 実装や配信に入る AI エージェントは、作業前に project root の `AGENTS.md`、`progress/progress.md`、この `requirements.md` を読む。
+
+Release policy:
+
+- macOS と Windows は GitHub Releases の `latest` を共有しない。
+- macOS は macOS 専用 appcast URL を使う。
+- Windows は Windows 専用 feed を使う。
+- release asset 名は OS ごとに衝突しない名前にする。
+- 配信後は各 OS の feed と成果物を別経路で readback する。
+
+受け入れ条件:
+
+- macOS release の後、macOS appcast と `HoverPocket.app` ZIP が読める。
+- Windows release の後、Windows feed と installer / portable / package asset が読める。
+- どちらかの release により、もう片方の更新 URL が 404 にならない。
+
 ## 2. 体験原則
 
 ### R-UX-001: 画面上端が入口である
