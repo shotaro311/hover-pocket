@@ -27,6 +27,7 @@ status: active
 - Added Calculator history to the Windows bridge/UI. History is stored chronologically in the C# engine; clicking a history result puts that value into the current input, and the restore button restores display plus accumulator, pending operation, entering-new-value flag, last operation, and last operand.
 - Explicitly pinned Windows updates to Velopack channel `win` / `releases.win.json`, added updater verifier metadata checks, and updated Windows release packaging docs/script output so Windows releases use `win-v...` tags with `--latest=false` and read back Windows feed separately from the macOS `macos-latest` appcast.
 - Verification completed: `dotnet build windows\HoverPocket.Windows.sln --nologo -p:NuGetAudit=false`, `dotnet run --project windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify calc`, `--verify ui-model`, `--verify updater`, `node --check windows/ui/providers/calculator/calculator.js`, Windows feed readback for `win-v0.2.1/releases.win.json`, macOS appcast readback for `macos-latest/appcast.xml`, and `git diff --check`. Details: `progress/2026-07/2026-07-06_windows-calc-history-feed.md`.
+- Windows-side commit `e4dcaf3` was pushed to `origin/main` after rebasing on the macOS build `112` log. Final Windows status was clean.
 
 ## 2026-07-06 Cross-platform Agent Read Gate
 

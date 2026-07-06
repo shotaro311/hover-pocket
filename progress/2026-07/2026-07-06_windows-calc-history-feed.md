@@ -39,9 +39,20 @@ Workspace: `C:\Users\shotaro\code\shared\hover-pocket`
 - `gh release list --repo shotaro311/hover-pocket --limit 4` showed `macos-latest`, latest macOS `v0.1.0-112`, and Windows `win-v0.2.1` / `win-v0.2.0` as separate releases.
 - `git diff --check`: exit 0.
 
+## Final Integration
+
+- After macOS build `112` progress was pushed as `6987f1a`, Windows Codex rebased on `origin/main` and preserved both the macOS release log and this Windows log.
+- Commit `e4dcaf3706037ab58f49438e99488fca675eb5f8` (`Windows電卓履歴と更新フィード分離を追加`) was pushed to `origin/main`.
+- Final Windows status was clean: `## main...origin/main`.
+- Final rechecks after staging:
+  - `git diff --check`: exit 0.
+  - `git diff --cached --check`: exit 0.
+  - `dotnet run --project windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify calc`: exit 0.
+  - `dotnet run --project windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify updater`: exit 0.
+  - `node --check windows/ui/providers/calculator/calculator.js`: exit 0.
+
 ## Not Completed
 
 - No Windows release was created or uploaded in this turn.
-- No commit or push was made in this turn.
 - Real WebView2 hands-on clicking of Calculator history rows is not manually verified; covered by bridge/UI syntax and C# verifier.
 - Real updater download/apply/restart is not executed; updater verification remains local-feed dry-run plus public feed readback.
