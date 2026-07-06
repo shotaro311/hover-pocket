@@ -5,6 +5,14 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-06 OAuth Public Verification Console Execution
+
+- Enabled GitHub Pages for `site/` through `.github/workflows/pages.yml`, manually dispatched the workflow after Pages creation, and verified public readback for `https://shotaro311.github.io/hover-pocket/`, `privacy.html`, and `googlea0eda7d7223f8019.html`.
+- Completed Search Console ownership verification for both `https://shotaro311.github.io/hover-pocket/` and the root `https://shotaro311.github.io/`. Created the auxiliary public repo `shotaro311/shotaro311.github.io` so the root verification file can remain available.
+- Kept the existing Google Cloud project `hoverpocket`: project is active, `shotaro.matsu0311@gmail.com` is a project owner, and no separate Google Cloud project is needed for this app.
+- Updated Google Auth Platform: Branding has `HoverPocket`, support/contact email, privacy URL, authorized domain `shotaro311.github.io`, and root homepage URL `https://shotaro311.github.io/` because the original `/hover-pocket/` homepage failed Google's branding ownership check. Audience is External / In production. Data Access is saved with `calendar.calendarlist.readonly` and `calendar.events` only.
+- Reached `Prepare for verification`. Final submit remains blocked by Google's required YouTube demo video field; the scope reason text is prepared but cannot be saved in the form until a YouTube video URL is supplied. Details: `progress/2026-07/2026-07-06_hover-menu-preview.md`.
+
 ## 2026-07-06 Mac Calculator History and macOS Feed Split
 
 - Updated macOS release packaging so distribution builds embed the macOS-only Sparkle feed `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`. `publish_github_release.sh` now marks versioned macOS releases as GitHub Latest for old builds that still read `latest/download/appcast.xml`, and also syncs `HoverPocket-macOS-app.zip` / `appcast.xml` to the stable `macos-latest` release.

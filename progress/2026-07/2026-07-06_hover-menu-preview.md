@@ -84,3 +84,66 @@
 ## 検証
 
 - `git diff --check`: 成功。
+
+## OAuth public verification console execution
+
+## 目的
+
+- Google OAuth sensitive-scope verification に向けて、GitHub Pages 公開、Search Console 所有権確認、Google Auth Platform の Branding / Audience / Data Access / Prepare for verification を実画面で進める。
+- Google Cloud は専用プロジェクトを新規作成せず、既存 `hoverpocket` プロジェクトを使うべきか確認する。
+
+## 実施
+
+- `git pull --ff-only` で `site/` と OAuth docs を含む upstream を取り込んだ。
+- `.github/workflows/pages.yml` を追加し、GitHub Actions から `site/` を Pages artifact として公開する構成にした。
+- `gh api repos/shotaro311/hover-pocket/pages` で GitHub Pages を workflow publishing として有効化した。
+- 初回 push-triggered Pages run は Pages site 未作成のため失敗したため、Pages 作成後に `gh workflow run pages.yml --ref main` を手動 dispatch した。
+- Search Console 確認用に `site/googlea0eda7d7223f8019.html` を追加し、project site 側で `https://shotaro311.github.io/hover-pocket/googlea0eda7d7223f8019.html` を配信した。
+- Search Console で `https://shotaro311.github.io/hover-pocket/` の所有権を HTML file 方式で自動確認した。
+- Google Cloud project `hoverpocket` を確認した。`gcloud projects describe hoverpocket` は ACTIVE、`shotaro.matsu0311@gmail.com` は `roles/owner`。既存 OAuth client と同じ project で進める方が審査・設定の分散を避けられるため、専用 project は作らない判断にした。
+- Google Auth Platform Branding を保存した。
+  - App name: `HoverPocket`
+  - User support email / developer contact: `shotaro.matsu0311@gmail.com`
+  - Privacy policy URL: `https://shotaro311.github.io/hover-pocket/privacy.html`
+  - Authorized domain: `shotaro311.github.io`
+- Google Auth Platform Audience を External / In production に変更した。
+- Google Auth Platform Data Access に以下 2 スコープだけを保存した。
+  - `.../auth/calendar.calendarlist.readonly`
+  - `.../auth/calendar.events`
+- Google Auth Platform の Branding verification で `https://shotaro311.github.io/hover-pocket/` が registered website として認識されなかったため、補助 public repo `shotaro311/shotaro311.github.io` を作成し、root 直下に同じ Search Console 確認ファイルと `/hover-pocket/` への最小 redirect `index.html` を追加した。
+- `https://shotaro311.github.io/googlea0eda7d7223f8019.html` が 200 で確認ファイルを返すことを確認し、Search Console で root property `https://shotaro311.github.io/` も HTML file 方式で自動確認した。
+- Branding の homepage URL は Google の ownership check を通すため、`https://shotaro311.github.io/` に変更した。root は `https://shotaro311.github.io/hover-pocket/` へ即時 redirect する。
+- Branding issue の追加確認を経由して `https://console.cloud.google.com/auth/verification/submit?authuser=1&project=hoverpocket` まで到達した。
+
+## 検証
+
+- Pages API readback:
+  - `shotaro311/hover-pocket`: `html_url=https://shotaro311.github.io/hover-pocket/`, `build_type=workflow`
+  - `shotaro311/shotaro311.github.io`: `html_url=https://shotaro311.github.io/`, `source=main:/`, `status=built`
+- Public URL readback:
+  - `https://shotaro311.github.io/hover-pocket/`: HTTP 200
+  - `https://shotaro311.github.io/hover-pocket/privacy.html`: HTTP 200
+  - `https://shotaro311.github.io/hover-pocket/googlea0eda7d7223f8019.html`: HTTP 200
+  - `https://shotaro311.github.io/googlea0eda7d7223f8019.html`: HTTP 200
+- Search Console readback:
+  - `https://shotaro311.github.io/hover-pocket/`: verified property opens the Performance page and shows "データを処理しています"。
+  - `https://shotaro311.github.io/`: verified property opens the Performance page and shows "データを処理しています"。
+- GitHub Releases readback:
+  - `gh release edit v0.1.0-98 --latest` を実行し、old appcast path `releases/latest/download/appcast.xml` が macOS appcast を返す状態に戻した。
+  - その後、別作業の build 112 release により latest は `v0.1.0-112` へ更新済み。
+- Data Access readback:
+  - 再読込後も `.../auth/calendar.calendarlist.readonly` と `.../auth/calendar.events` が表示され、Save / 変更破棄は disabled。
+- Audience readback:
+  - `公開ステータス 本番環境`
+  - `ユーザーの種類 外部`
+- Prepare for verification readback:
+  - Branding summary、Data Access summary、scope table が表示される。
+  - Blocker: "1 つ以上のリクエストされたスコープに次のフィールドがありません: スコープの理由, デモ動画。"
+  - Scope reason textarea は入力できるが、YouTube video URL が空のため Data Access editor の Save が disabled。
+
+## 未完了 / ブロッカー
+
+- Google のフォームが demo video を必須としているため、YouTube URL がない限り final submit はできない。
+- 既存の repo / Downloads / Movies / Desktop から HoverPocket OAuth demo video は見つからなかった。
+- `youtube_list_videos` は現 Google MCP token の YouTube scope 不足で `invalid_scope` になった。
+- 次に進めるには、OAuth 同意画面、Calendar panel の予定表示、予定作成/編集/削除、AI lane の承認後 Calendar 操作が映る YouTube 動画 URL が必要。
