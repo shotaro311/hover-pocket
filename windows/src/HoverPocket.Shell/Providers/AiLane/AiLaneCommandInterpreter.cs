@@ -34,8 +34,9 @@ internal sealed class AiLaneCommandInterpreter
         {
             return new AiLaneInterpretation(
                 AiLaneCommandKind.ReadCalendar,
-                "Calendar は Phase 2 で接続予定です。",
-                null);
+                "Calendar を確認します。",
+                null,
+                ResolveDate(normalized));
         }
 
         return Unknown("unknown_command");
@@ -64,9 +65,7 @@ internal sealed class AiLaneCommandInterpreter
 
     private DateTime ResolveStart(string input)
     {
-        var date = input.Contains("明日", StringComparison.OrdinalIgnoreCase)
-            ? _todayProvider().Date.AddDays(1)
-            : _todayProvider().Date;
+        var date = ResolveDate(input).Date;
 
         var match = Regex.Match(input, @"(?<!\d)([01]?\d|2[0-3])時", RegexOptions.CultureInvariant);
         if (match.Success && int.TryParse(match.Groups[1].Value, CultureInfo.InvariantCulture, out var hour))
@@ -75,6 +74,14 @@ internal sealed class AiLaneCommandInterpreter
         }
 
         return date.AddHours(9);
+    }
+
+    private DateTimeOffset ResolveDate(string input)
+    {
+        var date = input.Contains("明日", StringComparison.OrdinalIgnoreCase)
+            ? _todayProvider().Date.AddDays(1)
+            : _todayProvider().Date;
+        return new DateTimeOffset(date);
     }
 
     private static string ResolveTitle(string input)

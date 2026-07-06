@@ -25,6 +25,15 @@ internal readonly record struct PhysicalRect(int Left, int Top, int Width, int H
             && rect.Bottom <= Bottom;
     }
 
+    public PhysicalRect Inflate(int horizontal, int vertical)
+    {
+        return new PhysicalRect(
+            Left - horizontal,
+            Top - vertical,
+            Width + (horizontal * 2),
+            Height + (vertical * 2));
+    }
+
     public PhysicalRect ClampTo(PhysicalRect bounds)
     {
         var width = Math.Min(Width, bounds.Width);

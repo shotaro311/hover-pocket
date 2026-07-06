@@ -42,6 +42,8 @@ internal sealed class UiModelVerifier
         settings.TextSize = PanelTextSize.Large;
         settings.SwitchingMode = ProviderSwitchingMode.Hover;
         settings.Language = AppLanguage.English;
+        settings.AutoCheckForUpdates = false;
+        settings.ClipboardPrivateMode = true;
         settings.ProviderOrder = ["sticky", "calculator", "timer"];
         settings.ProviderVisibility["timer"] = false;
         store.Save(settings);
@@ -50,12 +52,15 @@ internal sealed class UiModelVerifier
         if (reloaded.PanelSize != PanelSize.Large
             || reloaded.TextSize != PanelTextSize.Large
             || reloaded.SwitchingMode != ProviderSwitchingMode.Hover
-            || reloaded.Language != AppLanguage.English)
+            || reloaded.Language != AppLanguage.English
+            || reloaded.AutoCheckForUpdates
+            || !reloaded.ClipboardPrivateMode)
         {
             _failures.Add("settings round-trip: scalar values were not preserved");
         }
 
-        if (!reloaded.ProviderOrder.SequenceEqual(["sticky", "calculator", "timer"]))
+        if (!HasExpectedOrderPrefix(reloaded.ProviderOrder, ["sticky", "calculator", "timer"])
+            || reloaded.ProviderOrder.Count != registry.ProviderIds.Count)
         {
             _failures.Add("settings round-trip: provider order was not preserved");
         }
@@ -72,7 +77,8 @@ internal sealed class UiModelVerifier
         var settings = store.Load(registry.ProviderIds);
         if (settings.PanelSize != PanelSize.Medium
             || settings.ProviderOrder.Count != registry.ProviderIds.Count
-            || settings.ProviderVisibility.Values.Any(visible => !visible))
+            || settings.ProviderVisibility.Values.Any(visible => !visible)
+            || !settings.AutoCheckForUpdates)
         {
             _failures.Add("settings corrupt fallback: defaults were not restored");
         }
@@ -130,6 +136,20 @@ internal sealed class UiModelVerifier
         {
             _failures.Add("bridge dispatcher: timer.getState did not return timer state");
         }
+
+        var clipboardResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"6","method":"clipboard.getState"}""");
+        if (!ResponseContains(clipboardResponse, "\"textItems\""))
+        {
+            _failures.Add("bridge dispatcher: clipboard.getState did not return clipboard state");
+        }
+
+        var clipboardPrivateResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"7","method":"settings.setClipboardPrivateMode","params":{"enabled":true}}""");
+        if (!ResponseContains(clipboardPrivateResponse, "\"clipboardPrivateMode\":true"))
+        {
+            _failures.Add("bridge dispatcher: clipboard private mode did not persist");
+        }
     }
 
     private static bool ResponseContains(string? response, string expected)
@@ -141,5 +161,11 @@ internal sealed class UiModelVerifier
 
         using var _ = JsonDocument.Parse(response);
         return response.Contains(expected, StringComparison.Ordinal);
+    }
+
+    private static bool HasExpectedOrderPrefix(IReadOnlyList<string> actual, IReadOnlyList<string> expectedPrefix)
+    {
+        return actual.Count >= expectedPrefix.Count
+            && actual.Take(expectedPrefix.Count).SequenceEqual(expectedPrefix, StringComparer.OrdinalIgnoreCase);
     }
 }

@@ -2,11 +2,15 @@ import { on, request } from "./bridge.js";
 import { setLanguage, t } from "./i18n.js";
 import { focusAiLaneInput, renderAiLane } from "../ailane/ailane.js";
 import { renderCalculatorProvider } from "../providers/calculator/calculator.js";
+import { renderCalendarProvider } from "../providers/calendar/calendar.js";
+import { renderClipboardProvider } from "../providers/clipboard/clipboard.js";
 import { renderStickyProvider } from "../providers/sticky/sticky.js";
 import { renderTimerProvider } from "../providers/timer/timer.js";
 
 const providerRenderers = {
   calculator: renderCalculatorProvider,
+  calendar: renderCalendarProvider,
+  clipboard: renderClipboardProvider,
   sticky: renderStickyProvider,
   timer: renderTimerProvider,
 };
@@ -176,6 +180,8 @@ function escapeHtml(value) {
 function iconSvg(name) {
   const icons = {
     calculator: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M9 7h6M9 11h.01M12 11h.01M15 11h.01M9 15h.01M12 15h.01M15 15h.01"/></svg>',
+    calendar: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01"/></svg>',
+    clipboard: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M9 4h6l1 2h2v15H6V6h2z"/><path d="M9 4h6v4H9zM9 12h6M9 16h4"/></svg>',
     timer: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M10 2h4M12 14l3-3"/><circle cx="12" cy="13" r="8"/></svg>',
     note: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M6 3h9l3 3v15H6z"/><path d="M14 3v4h4M9 11h6M9 15h4"/></svg>',
     refresh: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v6h-6"/></svg>',

@@ -118,12 +118,26 @@ button[aria-pressed="true"] {
   justify-content: space-between;
 }
 
+.settings-action-row {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .settings-status,
-.settings-footer {
+.settings-footer,
+.settings-note {
   color: var(--muted);
   font-size: 12px;
 }
 
 .settings-footer {
   min-height: 18px;
+}
+
+.settings-note {
+  margin: 10px 0 0;
+  line-height: 1.45;
 }

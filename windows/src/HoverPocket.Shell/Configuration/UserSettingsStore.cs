@@ -104,6 +104,7 @@ internal sealed class UserSettingsStore
             SwitchingMode = ProviderSwitchingMode.Click,
             Language = AppLanguage.Japanese,
             StartWithWindows = false,
+            AutoCheckForUpdates = true,
             ProviderOrder = [.. providerIds],
             ProviderVisibility = providerIds.ToDictionary(id => id, _ => true, StringComparer.OrdinalIgnoreCase)
         };

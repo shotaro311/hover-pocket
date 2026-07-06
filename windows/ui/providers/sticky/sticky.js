@@ -165,10 +165,7 @@ function renderBoard() {
     board.append(grid);
   }
 
-  if (draggingNoteId) {
-    board.append(renderTrashDropZone());
-  }
-
+  board.append(renderTrashDropZone());
   return board;
 }
 
@@ -179,6 +176,7 @@ function renderPreviewCard(note, index) {
     tabIndex: "0",
     ariaLabel: `Edit ${displayTitle(note)}`,
   });
+  card.dataset.stickyNoteId = note.id;
 
   card.addEventListener("click", () => void beginEditing(note));
   card.addEventListener("keydown", (event) => {
@@ -194,23 +192,24 @@ function renderPreviewCard(note, index) {
   card.addEventListener("dragstart", (event) => {
     draggingNoteId = note.id;
     dropTargetNoteId = null;
+    trashTargeted = false;
     if (event.dataTransfer) {
       event.dataTransfer.setData("text/plain", externalText(note));
       event.dataTransfer.setData("application/x-hoverpocket-sticky-id", note.id);
-      event.dataTransfer.effectAllowed = "moveCopy";
+      event.dataTransfer.effectAllowed = "move";
     }
-    requestAnimationFrame(render);
+    card.classList.add("is-dragging");
+    setTrashVisible(true);
   });
   card.addEventListener("dragover", (event) => {
     if (!draggingNoteId || draggingNoteId === note.id) {
       return;
     }
     event.preventDefault();
-    dropTargetNoteId = note.id;
+    setDropTarget(note.id);
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = "move";
     }
-    render();
   });
   card.addEventListener("drop", async (event) => {
     event.preventDefault();
@@ -312,31 +311,35 @@ function renderExternalDragButton(note) {
 }
 
 function renderTrashDropZone() {
-  const zone = element("div", { className: `sticky-trash${trashTargeted ? " is-targeted" : ""}` });
+  const zone = element("div", { className: `sticky-trash${draggingNoteId ? " is-visible" : ""}${trashTargeted ? " is-targeted" : ""}` });
   zone.append(element("span", { className: "sticky-trash-icon" }, "⌫"), element("span", {}, "Drop to archive"));
   zone.addEventListener("dragover", (event) => {
+    if (!draggingNoteId) {
+      return;
+    }
+
     event.preventDefault();
     trashTargeted = true;
+    zone.classList.add("is-targeted");
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = "move";
     }
-    render();
   });
   zone.addEventListener("dragleave", () => {
     trashTargeted = false;
-    render();
+    zone.classList.remove("is-targeted");
   });
   zone.addEventListener("drop", async (event) => {
     event.preventDefault();
+    event.stopPropagation();
     if (!draggingNoteId) {
       resetDragState();
       return;
     }
 
-    const note = stickyState.notes.find((candidate) => candidate.id === draggingNoteId);
-    if (note) {
-      await archiveNote(note);
-    }
+    const droppedNoteId = draggingNoteId;
+    await updateState("sticky.archiveDropped", { id: droppedNoteId });
+    toast = "archived";
     resetDragState({ renderAfter: true });
   });
   return zone;
@@ -601,11 +604,49 @@ function handleEditorKeyDown(event) {
 }
 
 function resetDragState({ renderAfter = false } = {}) {
+  clearDropTarget();
+  setTrashVisible(false);
   draggingNoteId = null;
-  dropTargetNoteId = null;
   trashTargeted = false;
   if (renderAfter) {
     render();
+  }
+}
+
+function setDropTarget(noteId) {
+  if (dropTargetNoteId === noteId) {
+    return;
+  }
+
+  clearDropTarget();
+  dropTargetNoteId = noteId;
+  for (const card of containerEl?.querySelectorAll("[data-sticky-note-id]") ?? []) {
+    if (card.dataset.stickyNoteId === noteId) {
+      card.classList.add("is-drop-target");
+      return;
+    }
+  }
+}
+
+function clearDropTarget() {
+  dropTargetNoteId = null;
+  for (const card of containerEl?.querySelectorAll(".sticky-note.is-drop-target") ?? []) {
+    card.classList.remove("is-drop-target");
+  }
+  for (const card of containerEl?.querySelectorAll(".sticky-note.is-dragging") ?? []) {
+    card.classList.remove("is-dragging");
+  }
+}
+
+function setTrashVisible(visible) {
+  const trash = containerEl?.querySelector(".sticky-trash");
+  if (!trash) {
+    return;
+  }
+
+  trash.classList.toggle("is-visible", visible);
+  if (!visible) {
+    trash.classList.remove("is-targeted");
   }
 }
 

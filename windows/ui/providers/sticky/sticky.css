@@ -341,7 +341,17 @@
   background: rgba(0, 0, 0, 0.72);
   font-size: 11px;
   font-weight: 800;
+  opacity: 0;
+  pointer-events: none;
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.28);
+  transform: translateY(8px);
+  transition: opacity 120ms ease, transform 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.sticky-trash.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .sticky-trash.is-targeted {

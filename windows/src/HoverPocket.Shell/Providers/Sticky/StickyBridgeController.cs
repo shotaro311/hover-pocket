@@ -29,6 +29,7 @@ internal sealed class StickyBridgeController
         dispatcher.Register("sticky.create", CreateNoteAsync);
         dispatcher.Register("sticky.update", UpdateNoteAsync);
         dispatcher.Register("sticky.archive", ArchiveNoteAsync);
+        dispatcher.Register("sticky.archiveDropped", ArchiveDroppedNoteAsync);
         dispatcher.Register("sticky.delete", DeleteNoteAsync);
         dispatcher.Register("sticky.discard", DiscardNoteAsync);
         dispatcher.Register("sticky.undo", UndoAsync);
@@ -61,6 +62,13 @@ internal sealed class StickyBridgeController
     {
         cancellationToken.ThrowIfCancellationRequested();
         var archived = _store.ArchiveNote(ReadRequiredGuid(parameters, "id"));
+        return Task.FromResult<object?>(new { archived, state = _store.BuildState() });
+    }
+
+    private Task<object?> ArchiveDroppedNoteAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var archived = _store.ArchiveDroppedNote(ReadRequiredGuid(parameters, "id"));
         return Task.FromResult<object?>(new { archived, state = _store.BuildState() });
     }
 

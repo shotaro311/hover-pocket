@@ -35,6 +35,22 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 
 `--verify display` は現在のモニター構成を列挙し、`Main` / `Sub` / `All` の対象 display 数、`Sub` のサブなし fallback、access surface / panel / collapsed rect の画面内収まり、DIPs と物理ピクセルの round-trip を検査して exit code で返します。WinExe のため標準出力が空になる場合があります。
 
+`--verify updater` は Velopack のローカルフォルダーフィードを一時生成し、更新なし / 更新ありの dry-run を確認します。実ダウンロードと適用は行いません。
+
+## Windows updates and release packaging
+
+Windows 版の更新確認は Velopack と GitHub Releases (`shotaro311/hover-pocket`) を使います。トレイと Settings の `Check for Updates` は実フィードへ接続し、更新が見つかった場合はダウンロード前と適用/再起動前に確認します。起動時の自動チェックは既定オンで、失敗しても起動を止めません。
+
+Phase 2 では Windows 配布物に Authenticode 署名を付けません。そのため、Setup.exe の初回実行時に Microsoft Defender SmartScreen の警告が出る可能性があります。署名証明書や signing credentials は Git、ログ、README、progress に記録しません。
+
+Release asset は macOS Sparkle 資産と衝突しない `HoverPocketWin-*` 系です。ローカルで publish と Velopack pack だけを行うには次を実行します。GitHub Release の作成・アップロードはこのスクリプトでは実行しません。
+
+```powershell
+.\windows\script\publish_release.ps1
+```
+
+NuGet TLS 問題がある環境では、一時ローカル NuGet ソースと `-NuGetSource` / `-VpkPath` を指定して実行します。workspace に nupkg を残さないでください。
+
 ## Implementation Notes
 
 - WPF Window の HWND 取得は Microsoft Learn の `WindowInteropHelper.Handle` に沿い、`GetWindowLongPtrW` / `SetWindowLongPtrW` で `GWL_EXSTYLE` に `WS_EX_NOACTIVATE` と `WS_EX_TOOLWINDOW` を追加しています。topmost は WPF `Topmost=true` に加え、`SetWindowPos(..., HWND_TOPMOST, ..., SWP_NOACTIVATE)` で補強しています。

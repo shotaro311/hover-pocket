@@ -6,9 +6,13 @@ const panelSizeEl = document.querySelector("[data-panel-size]");
 const textSizeEl = document.querySelector("[data-text-size]");
 const switchingEl = document.querySelector("[data-switching]");
 const providerListEl = document.querySelector("[data-provider-list]");
+const clipboardPrivateEl = document.querySelector("[data-clipboard-private]");
 const stickyUndoToastEl = document.querySelector("[data-sticky-undo-toast]");
 const startupEl = document.querySelector("[data-startup]");
 const startupStatusEl = document.querySelector("[data-startup-status]");
+const autoUpdatesEl = document.querySelector("[data-auto-updates]");
+const checkUpdatesEl = document.querySelector("[data-check-updates]");
+const updateStatusEl = document.querySelector("[data-update-status]");
 const statusEl = document.querySelector("[data-status]");
 const resetEl = document.querySelector("[data-reset]");
 
@@ -33,6 +37,7 @@ function render(state) {
     node.textContent = t(node.getAttribute("data-i18n"));
   });
   resetEl.textContent = t("resetDefaults");
+  checkUpdatesEl.textContent = t("checkForUpdates");
 
   renderSegment(languageEl, [
     { id: "ja", label: "JA" },
@@ -55,9 +60,12 @@ function render(state) {
   ], state.settings.switchingMode, (switchingMode) => update("settings.setSwitchingMode", { switchingMode }));
 
   renderProviders(state);
+  clipboardPrivateEl.checked = Boolean(state.settings.clipboardPrivateMode);
   renderStickySettings();
   startupEl.checked = Boolean(state.settings.startWithWindows);
   startupStatusEl.textContent = state.settings.startWithWindowsRegistered ? t("registered") : t("off");
+  autoUpdatesEl.checked = state.settings.autoCheckForUpdates !== false;
+  updateStatusEl.textContent = state.updater?.message ?? "";
 }
 
 function renderStickySettings() {
@@ -120,6 +128,28 @@ function moveButton(label, id, direction) {
 
 startupEl.addEventListener("change", () => {
   update("settings.setStartWithWindows", { enabled: startupEl.checked });
+});
+
+autoUpdatesEl.addEventListener("change", () => {
+  update("settings.setAutoCheckForUpdates", { enabled: autoUpdatesEl.checked });
+});
+
+clipboardPrivateEl.addEventListener("change", () => {
+  update("settings.setClipboardPrivateMode", { enabled: clipboardPrivateEl.checked });
+});
+
+checkUpdatesEl.addEventListener("click", async () => {
+  checkUpdatesEl.disabled = true;
+  try {
+    statusEl.textContent = "";
+    updateStatusEl.textContent = t("checkingForUpdates");
+    const result = await request("updates.check");
+    updateStatusEl.textContent = result?.message ?? t("saved");
+  } catch (error) {
+    updateStatusEl.textContent = String(error?.message ?? error);
+  } finally {
+    checkUpdatesEl.disabled = false;
+  }
 });
 
 stickyUndoToastEl.addEventListener("change", async () => {

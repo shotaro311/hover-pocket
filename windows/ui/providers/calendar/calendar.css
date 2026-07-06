@@ -1,0 +1,234 @@
+.hp-calendar {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: 36px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.hp-calendar-toolbar {
+  display: grid;
+  grid-template-columns: 30px auto 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.hp-calendar-toolbar button,
+.hp-calendar-add,
+.hp-calendar-editor button {
+  height: 30px;
+  border: 1px solid var(--hp-line);
+  border-radius: 7px;
+  color: var(--hp-text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.hp-calendar-toolbar strong {
+  min-width: 92px;
+  font-size: 13px;
+}
+
+.hp-calendar-toolbar span {
+  overflow: hidden;
+  color: var(--hp-dim);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hp-calendar-body {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1.45fr) minmax(160px, 0.75fr);
+  gap: 12px;
+}
+
+.hp-calendar-grid {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-rows: 20px repeat(6, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.hp-calendar-weekday {
+  display: grid;
+  place-items: center;
+  color: var(--hp-dim);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.hp-calendar-day {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto 1fr;
+  border: 1px solid var(--hp-line);
+  border-radius: 7px;
+  padding: 6px;
+  color: var(--hp-text);
+  background: rgba(255, 255, 255, 0.035);
+  text-align: left;
+}
+
+.hp-calendar-day span {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.hp-calendar-day i {
+  align-self: end;
+  justify-self: end;
+  min-width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  color: #03110d;
+  background: transparent;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 15px;
+  text-align: center;
+}
+
+.hp-calendar-day.has-events i {
+  background: var(--hp-accent);
+}
+
+.hp-calendar-day.is-outside {
+  color: var(--hp-dim);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.hp-calendar-day.is-today {
+  border-color: rgba(99, 214, 181, 0.72);
+}
+
+.hp-calendar-day.is-selected {
+  background: rgba(105, 167, 255, 0.16);
+}
+
+.hp-calendar-side {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+  border: 1px solid var(--hp-line);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.hp-calendar-side-title {
+  color: var(--hp-accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.hp-calendar-empty {
+  display: grid;
+  min-height: 42px;
+  place-items: center;
+  color: var(--hp-dim);
+  font-size: 12px;
+}
+
+.hp-calendar-event {
+  display: grid;
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--hp-line);
+  border-radius: 7px;
+  padding: 7px;
+  color: var(--hp-text);
+  background: rgba(0, 0, 0, 0.16);
+  text-align: left;
+}
+
+.hp-calendar-event b,
+.hp-calendar-event span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hp-calendar-event b {
+  font-size: 12px;
+}
+
+.hp-calendar-event span {
+  color: var(--hp-muted);
+  font-size: 11px;
+}
+
+.hp-calendar-event.is-readonly {
+  opacity: 0.62;
+}
+
+.hp-calendar-add {
+  width: 34px;
+  margin-top: auto;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.hp-calendar-editor {
+  display: grid;
+  min-height: 0;
+  gap: 7px;
+}
+
+.hp-calendar-editor input,
+.hp-calendar-editor select,
+.hp-calendar-editor textarea {
+  min-width: 0;
+  border: 1px solid var(--hp-line);
+  border-radius: 7px;
+  padding: 7px;
+  color: var(--hp-text);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.hp-calendar-editor textarea {
+  min-height: 56px;
+  resize: none;
+}
+
+.hp-calendar-editor label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--hp-muted);
+  font-size: 12px;
+}
+
+.hp-calendar-editor div {
+  display: flex;
+  gap: 7px;
+}
+
+.hp-calendar-setup {
+  display: grid;
+  gap: 8px;
+  overflow: auto;
+  color: var(--hp-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.hp-calendar-setup strong {
+  color: var(--hp-text);
+}
+
+.hp-calendar-setup code {
+  overflow-wrap: anywhere;
+  color: var(--hp-accent);
+}
+
+.hp-calendar-setup ol {
+  margin: 0;
+  padding-left: 18px;
+}

@@ -15,6 +15,7 @@ internal sealed class StickyVerifier
         VerifyCrud(store);
         VerifyReorder(store);
         VerifyArchiveUndo(store);
+        VerifyDropArchiveUndo(store);
         VerifyDeleteUndo(store);
         VerifyBlankDiscard(store);
         VerifyPreferencesPersistence(store);
@@ -23,7 +24,7 @@ internal sealed class StickyVerifier
 
         if (_failures.Count == 0)
         {
-            VerifyConsole.WriteLine("PASS sticky verify: CRUD, reorder, archive/delete undo, blank discard, persistence, corrupt JSON recovery");
+            VerifyConsole.WriteLine("PASS sticky verify: CRUD, reorder, archive/drop/delete undo, blank discard, persistence, corrupt JSON recovery");
             VerifyConsole.WriteLine($"sticky_root={root}");
             return 0;
         }
@@ -110,6 +111,30 @@ internal sealed class StickyVerifier
         {
             _failures.Add("archive: undo did not restore archived note");
         }
+    }
+
+    private void VerifyDropArchiveUndo(StickyNotesStore store)
+    {
+        var dropped = store.CreateNote(StickyNoteColor.Lavender);
+        store.UpdateNote(dropped.Id, "Drop archive", "Drop body", StickyNoteColor.Lavender);
+
+        if (!store.ArchiveDroppedNote(dropped.Id))
+        {
+            _failures.Add("drop archive: archive dropped returned false");
+            return;
+        }
+
+        if (store.ActiveNotes.Any(candidate => candidate.Id == dropped.Id) || store.LastAction?.Kind != StickyNoteUndoActionKind.Archived)
+        {
+            _failures.Add("drop archive: note remained active or undo action was not archived");
+        }
+
+        if (!store.UndoLastAction() || store.ActiveNotes.All(candidate => candidate.Id != dropped.Id))
+        {
+            _failures.Add("drop archive: undo did not restore dropped note");
+        }
+
+        store.DiscardNote(dropped.Id);
     }
 
     private void VerifyDeleteUndo(StickyNotesStore store)

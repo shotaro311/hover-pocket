@@ -4,8 +4,11 @@ using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Providers;
 using HoverPocket.Shell.Providers.AiLane;
 using HoverPocket.Shell.Providers.Calculator;
+using HoverPocket.Shell.Providers.Calendar;
+using HoverPocket.Shell.Providers.Clipboard;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
+using HoverPocket.Shell.Services;
 using HoverPocket.Shell.Settings;
 
 namespace HoverPocket.Shell.Bridge;
@@ -15,8 +18,11 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly ProviderRegistry _providerRegistry;
     private readonly UserSettingsStore _settingsStore;
     private readonly IStartupRegistrationService _startupRegistration;
+    private readonly UpdaterService _updaterService;
     private readonly AiLaneController _aiLaneController;
     private readonly CalculatorBridgeHandlers _calculatorBridgeHandlers = new();
+    private readonly CalendarBridgeController _calendarBridgeController;
+    private readonly ClipboardBridgeController _clipboardBridgeController;
     private readonly StickyBridgeController _stickyBridgeController;
     private readonly TimerBridgeHandlers _timerBridgeHandlers;
     private readonly List<BridgeDispatcher> _dispatchers = [];
@@ -28,17 +34,30 @@ internal sealed class PanelBridgeController : IDisposable
         UserSettingsStore settingsStore,
         UserSettings settings,
         IStartupRegistrationService? startupRegistration = null,
-        AiLaneController? aiLaneController = null)
+        AiLaneController? aiLaneController = null,
+        UpdaterService? updaterService = null)
     {
         _providerRegistry = providerRegistry;
         _settingsStore = settingsStore;
         _startupRegistration = startupRegistration ?? new RunKeyStartupRegistrationService();
-        _aiLaneController = aiLaneController ?? new AiLaneController(new AiLaneAuditLog(settingsStore.RootDirectory));
+        _updaterService = updaterService ?? new UpdaterService();
+        _calendarBridgeController = new CalendarBridgeController();
+        _aiLaneController = aiLaneController ?? new AiLaneController(
+            new AiLaneAuditLog(settingsStore.RootDirectory),
+            new CalendarAiLaneConnector(_calendarBridgeController.Store));
         _stickyBridgeController = new StickyBridgeController(new StickyNotesStore(Path.Combine(settingsStore.RootDirectory, "sticky")));
         _timerBridgeHandlers = new TimerBridgeHandlers(new TimerStore(Path.Combine(settingsStore.RootDirectory, "timer")));
         _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.Normalize(settings, providerRegistry.ProviderIds);
+        _clipboardBridgeController = new ClipboardBridgeController(
+            new ClipboardHistoryStore(Path.Combine(settingsStore.RootDirectory, "clipboard")),
+            new ClipboardNativeListener(System.Windows.Application.Current?.Dispatcher ?? System.Windows.Threading.Dispatcher.CurrentDispatcher),
+            () => CurrentSettings,
+            SetClipboardPrivateModeAsync,
+            () => IsVisible("clipboard"));
+        _clipboardBridgeController.ExternalDragStarted += OnClipboardExternalDragStarted;
+        _clipboardBridgeController.ApplySettings(CurrentSettings, IsVisible("clipboard"));
         _selectedProviderId = ResolveInitialProviderId();
     }
 
@@ -49,6 +68,8 @@ internal sealed class PanelBridgeController : IDisposable
     public event EventHandler<TimerAlert>? TimerAlertFired;
 
     public event EventHandler<TimerAlert?>? TimerAlertChanged;
+
+    public event EventHandler? ExternalDragStarted;
 
     public UserSettings CurrentSettings { get; private set; }
 
@@ -70,13 +91,18 @@ internal sealed class PanelBridgeController : IDisposable
         dispatcher.Register("settings.moveProvider", MoveProviderAsync);
         dispatcher.Register("settings.setProviderOrder", SetProviderOrderAsync);
         dispatcher.Register("settings.setStartWithWindows", SetStartWithWindowsAsync);
+        dispatcher.Register("settings.setAutoCheckForUpdates", SetAutoCheckForUpdatesAsync);
+        dispatcher.Register("settings.setClipboardPrivateMode", SetClipboardPrivateModeAsync);
         dispatcher.Register("settings.resetDefaults", ResetDefaultsAsync);
         dispatcher.Register("settings.open", OpenSettingsAsync);
         dispatcher.Register("settings.openPlaceholder", OpenSettingsAsync);
+        dispatcher.Register("updates.check", CheckForUpdatesAsync);
         dispatcher.Register("ailane.submit", SubmitAiLaneAsync);
         dispatcher.Register("ailane.approve", ApproveAiLaneAsync);
         dispatcher.Register("ailane.reject", RejectAiLaneAsync);
         _calculatorBridgeHandlers.Register(dispatcher);
+        _calendarBridgeController.Attach(dispatcher);
+        _clipboardBridgeController.Attach(dispatcher);
         _stickyBridgeController.Attach(dispatcher);
         _timerBridgeHandlers.Register(dispatcher);
         return new BridgeAttachment(() => _dispatchers.Remove(dispatcher));
@@ -93,6 +119,8 @@ internal sealed class PanelBridgeController : IDisposable
         _timerBridgeHandlers.AlertFired -= OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged -= OnTimerAlertChanged;
         _timerBridgeHandlers.Dispose();
+        _clipboardBridgeController.ExternalDragStarted -= OnClipboardExternalDragStarted;
+        _clipboardBridgeController.Dispose();
     }
 
     public object BuildState()
@@ -117,9 +145,12 @@ internal sealed class PanelBridgeController : IDisposable
                 language = ToWireValue(CurrentSettings.Language),
                 startWithWindows = CurrentSettings.StartWithWindows,
                 startWithWindowsRegistered = IsStartupRegistered(),
+                autoCheckForUpdates = CurrentSettings.AutoCheckForUpdates,
+                clipboardPrivateMode = CurrentSettings.ClipboardPrivateMode,
                 providerOrder = CurrentSettings.ProviderOrder,
                 providerVisibility = CurrentSettings.ProviderVisibility
             },
+            updater = _updaterService.Snapshot,
             panel = new
             {
                 headerHeight = PanelSizeCatalog.HeaderHeight,
@@ -306,6 +337,36 @@ internal sealed class PanelBridgeController : IDisposable
         return await PublishStateAsync(cancellationToken);
     }
 
+    private async Task<object?> SetAutoCheckForUpdatesAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var enabled = ReadRequiredBool(parameters, "enabled");
+        if (CurrentSettings.AutoCheckForUpdates != enabled)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.AutoCheckForUpdates = enabled;
+            SaveSettings(updated);
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetClipboardPrivateModeAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        return await SetClipboardPrivateModeAsync(ReadRequiredBool(parameters, "enabled"), cancellationToken);
+    }
+
+    private async Task<object?> SetClipboardPrivateModeAsync(bool enabled, CancellationToken cancellationToken)
+    {
+        if (CurrentSettings.ClipboardPrivateMode != enabled)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.ClipboardPrivateMode = enabled;
+            SaveSettings(updated);
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
     private async Task<object?> ResetDefaultsAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         _ = parameters;
@@ -322,15 +383,22 @@ internal sealed class PanelBridgeController : IDisposable
         return await Task.FromResult<object?>(new { opened = true });
     }
 
+    private async Task<object?> CheckForUpdatesAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        cancellationToken.ThrowIfCancellationRequested();
+        return await _updaterService.CheckWithPromptsAsync(cancellationToken: cancellationToken);
+    }
+
     private async Task<object?> SubmitAiLaneAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
-        _aiLaneController.Submit(ReadRequiredString(parameters, "text"));
+        await _aiLaneController.SubmitAsync(ReadRequiredString(parameters, "text"), cancellationToken);
         return await PublishStateAsync(cancellationToken);
     }
 
     private async Task<object?> ApproveAiLaneAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
-        _aiLaneController.Approve(ReadRequiredString(parameters, "actionId"));
+        await _aiLaneController.ApproveAsync(ReadRequiredString(parameters, "actionId"), cancellationToken);
         return await PublishStateAsync(cancellationToken);
     }
 
@@ -360,6 +428,7 @@ internal sealed class PanelBridgeController : IDisposable
     private void SaveSettings(UserSettings settings)
     {
         CurrentSettings = UserSettingsStore.Normalize(settings, _providerRegistry.ProviderIds);
+        _clipboardBridgeController.ApplySettings(CurrentSettings, IsVisible("clipboard"));
         _settingsStore.Save(CurrentSettings);
         SettingsChanged?.Invoke(this, CurrentSettings);
     }
@@ -514,6 +583,13 @@ internal sealed class PanelBridgeController : IDisposable
     {
         _ = sender;
         TimerAlertChanged?.Invoke(this, alert);
+    }
+
+    private void OnClipboardExternalDragStarted(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        ExternalDragStarted?.Invoke(this, EventArgs.Empty);
     }
 
     private static string ToWireValue(PanelSize panelSize)

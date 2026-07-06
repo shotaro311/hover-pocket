@@ -12,6 +12,10 @@ internal sealed class UserSettings
 
     public bool StartWithWindows { get; set; }
 
+    public bool AutoCheckForUpdates { get; set; } = true;
+
+    public bool ClipboardPrivateMode { get; set; }
+
     public List<string> ProviderOrder { get; set; } = [];
 
     public Dictionary<string, bool> ProviderVisibility { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -25,6 +29,8 @@ internal sealed class UserSettings
             SwitchingMode = SwitchingMode,
             Language = Language,
             StartWithWindows = StartWithWindows,
+            AutoCheckForUpdates = AutoCheckForUpdates,
+            ClipboardPrivateMode = ClipboardPrivateMode,
             ProviderOrder = [.. ProviderOrder],
             ProviderVisibility = new Dictionary<string, bool>(ProviderVisibility, StringComparer.OrdinalIgnoreCase)
         };

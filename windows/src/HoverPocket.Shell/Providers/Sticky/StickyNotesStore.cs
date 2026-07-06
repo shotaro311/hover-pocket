@@ -104,6 +104,11 @@ internal sealed class StickyNotesStore
         return true;
     }
 
+    public bool ArchiveDroppedNote(Guid id)
+    {
+        return ArchiveNote(id);
+    }
+
     public bool DeleteNote(Guid id)
     {
         var index = _notes.FindIndex(note => note.Id == id);

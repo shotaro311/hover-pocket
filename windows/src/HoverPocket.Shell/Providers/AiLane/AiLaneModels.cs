@@ -10,7 +10,8 @@ internal enum AiLaneCommandKind
 internal sealed record AiLaneInterpretation(
     AiLaneCommandKind Kind,
     string Message,
-    AiLaneApprovalCard? ApprovalCard);
+    AiLaneApprovalCard? ApprovalCard,
+    DateTimeOffset? ReadDate = null);
 
 internal sealed record AiLaneApprovalCard(
     string ActionId,
@@ -42,5 +43,5 @@ internal sealed record AiLaneState(
     string Message,
     AiLaneApprovalCard? PendingApproval)
 {
-    public static AiLaneState Ready { get; } = new("ready", "Calendar は Phase 2 で接続予定です。", null);
+    public static AiLaneState Ready { get; } = new("ready", "Calendar に接続できます。", null);
 }

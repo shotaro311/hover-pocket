@@ -13,7 +13,7 @@ internal sealed class AiLaneVerifier
         var root = UserSettingsStore.CreateTemporary("AiLaneVerify").RootDirectory;
         var auditLog = new AiLaneAuditLog(root);
         var interpreter = new AiLaneCommandInterpreter(() => new DateTime(2026, 7, 5));
-        var controller = new AiLaneController(interpreter, auditLog);
+        var controller = new AiLaneController(interpreter, auditLog, new FakeCalendarConnector());
 
         VerifyRead(controller);
         var approvedActionId = VerifyCreatePending(controller);
@@ -52,9 +52,9 @@ internal sealed class AiLaneVerifier
         var state = controller.Submit("今日の予定");
         if (state.Status != "complete"
             || state.PendingApproval is not null
-            || !state.Message.Contains("Phase 2", StringComparison.Ordinal))
+            || !state.Message.Contains("予定は 2 件", StringComparison.Ordinal))
         {
-            _failures.Add("read interpretation did not return Phase 2 calendar guidance");
+            _failures.Add("read interpretation did not call calendar connector");
         }
     }
 
@@ -88,9 +88,9 @@ internal sealed class AiLaneVerifier
         var state = controller.Approve(actionId);
         if (state.Status != "complete"
             || state.PendingApproval is not null
-            || !state.Message.Contains("Phase 2", StringComparison.Ordinal))
+            || !state.Message.Contains("追加しました", StringComparison.Ordinal))
         {
-            _failures.Add("approve transition did not complete without execution");
+            _failures.Add("approve transition did not execute approved calendar connector action");
         }
     }
 
@@ -138,6 +138,22 @@ internal sealed class AiLaneVerifier
             || joined.Contains("今日の予定", StringComparison.Ordinal))
         {
             _failures.Add("audit log included command text or personal content");
+        }
+    }
+
+    private sealed class FakeCalendarConnector : IAiLaneCalendarConnector
+    {
+        public Task<string> ReadCalendarAsync(DateTimeOffset day, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult($"{day:yyyy-MM-dd} の予定は 2 件です。");
+        }
+
+        public Task<string> CreateCalendarEventAsync(AiLaneApprovalCard card, CancellationToken cancellationToken)
+        {
+            _ = card;
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult("承認済みの予定を Google Calendar に追加しました。");
         }
     }
 }

@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Threading;
+using System.IO;
 using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Display;
@@ -27,6 +28,7 @@ internal sealed class HoverShellController : IDisposable
     private readonly DisplayLayoutService _displayLayoutService = new();
     private readonly List<AccessSurfaceWindow> _accessSurfaces = [];
     private readonly Dictionary<AccessSurfaceWindow, DisplaySurfaceLayout> _surfaceLayouts = [];
+    private readonly string? _hoverTracePath = NormalizeTracePath();
     private readonly PanelWindow _panel;
     private readonly DispatcherTimer _pollingTimer;
     private readonly DispatcherTimer _closeDelayTimer;
@@ -35,6 +37,8 @@ internal sealed class HoverShellController : IDisposable
     private DisplaySurfaceLayout? _activeLayout;
     private TimerAlert? _activeTimerAlert;
     private SettingsWindow? _settingsWindow;
+    private (int X, int Y)? _pointerOverrideForVerify;
+    private Task? _closingTask;
     private bool _systemEventsSubscribed;
     private bool _timerAlertActive;
     private bool _disposed;
@@ -44,16 +48,22 @@ internal sealed class HoverShellController : IDisposable
         ShellSettings settings,
         ProviderRegistry providerRegistry,
         UserSettingsStore userSettingsStore,
-        bool enablePanelWebView)
+        bool enablePanelWebView,
+        Services.UpdaterService? updaterService = null)
     {
         _dispatcher = dispatcher;
         _settings = settings;
         var userSettings = userSettingsStore.Load(providerRegistry.ProviderIds);
-        _panelBridgeController = new PanelBridgeController(providerRegistry, userSettingsStore, userSettings);
+        _panelBridgeController = new PanelBridgeController(
+            providerRegistry,
+            userSettingsStore,
+            userSettings,
+            updaterService: updaterService);
         _panelBridgeController.SettingsChanged += OnPanelSettingsChanged;
         _panelBridgeController.SettingsOpenRequested += OnSettingsOpenRequested;
         _panelBridgeController.TimerAlertFired += OnTimerAlertFired;
         _panelBridgeController.TimerAlertChanged += OnTimerAlertChanged;
+        _panelBridgeController.ExternalDragStarted += OnExternalDragStarted;
         _panel = new PanelWindow(_panelBridgeController, enablePanelWebView);
 
         _pollingTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
@@ -69,7 +79,10 @@ internal sealed class HoverShellController : IDisposable
         _closeDelayTimer.Tick += (_, _) =>
         {
             _closeDelayTimer.Stop();
-            if (!_timerAlertActive && !IsPointerInHoverRegion(out _))
+            var pointer = GetPointerPosition();
+            var inside = IsPointerInHoverRegion(pointer, out var hoveredLayout);
+            TraceHover("close-delay", pointer, inside, hoveredLayout, inside ? "keep-open" : "close");
+            if (!_timerAlertActive && !inside)
             {
                 _ = HidePanelAsync();
             }
@@ -98,6 +111,8 @@ internal sealed class HoverShellController : IDisposable
 
     public PanelBridgeController PanelBridgeController => _panelBridgeController;
 
+    public DisplaySurfaceLayout? ActiveLayoutForVerify => _activeLayout;
+
     public void Start()
     {
         _panel.EnsureHandle();
@@ -118,19 +133,56 @@ internal sealed class HoverShellController : IDisposable
 
     public async Task ShowPanelForVerifyAsync()
     {
-        await ShowPanelAsync(ResolveLayoutForPointer());
+        await RunWithPollingPausedForVerifyAsync(() => ShowPanelAsync(ResolveLayoutForPointer()));
     }
 
     public async Task ShowPanelForUiVerifyAsync()
     {
         await _panel.EnsureWebViewInitializedAsync();
-        await ShowPanelAsync(ResolveLayoutForPointer());
+        await RunWithPollingPausedForVerifyAsync(() => ShowPanelAsync(ResolveLayoutForPointer()));
     }
 
     public async Task HidePanelForVerifyAsync()
     {
         _closeDelayTimer.Stop();
-        await HidePanelAsync();
+        await RunWithPollingPausedForVerifyAsync(HidePanelAsync);
+    }
+
+    public void SimulatePointerMoveForVerify(int x, int y)
+    {
+        SetPointerSimulationForVerify(x, y);
+        PollPointer();
+    }
+
+    public void SetPointerSimulationForVerify(int x, int y)
+    {
+        _pointerOverrideForVerify = (x, y);
+    }
+
+    public void ClearPointerSimulationForVerify()
+    {
+        _pointerOverrideForVerify = null;
+    }
+
+    private async Task RunWithPollingPausedForVerifyAsync(Func<Task> action)
+    {
+        var restartPolling = _pollingTimer.IsEnabled;
+        if (restartPolling)
+        {
+            _pollingTimer.Stop();
+        }
+
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            if (restartPolling && !_disposed)
+            {
+                _pollingTimer.Start();
+            }
+        }
     }
 
     public int CountCurrentProcessTopLevelWindows()
@@ -161,6 +213,7 @@ internal sealed class HoverShellController : IDisposable
         _panelBridgeController.SettingsOpenRequested -= OnSettingsOpenRequested;
         _panelBridgeController.TimerAlertFired -= OnTimerAlertFired;
         _panelBridgeController.TimerAlertChanged -= OnTimerAlertChanged;
+        _panelBridgeController.ExternalDragStarted -= OnExternalDragStarted;
         _panelBridgeController.Dispose();
         if (_settingsWindow is not null)
         {
@@ -188,8 +241,22 @@ internal sealed class HoverShellController : IDisposable
             return;
         }
 
+        if (_closingTask is { IsCompleted: false })
+        {
+            await _closingTask;
+        }
+
+        if (_panel.IsVisible)
+        {
+            _activeLayout ??= layout;
+            _closeDelayTimer.Stop();
+            TraceHover("open-skip", GetPointerPosition(), true, _activeLayout, "panel-already-visible");
+            return;
+        }
+
         _activeLayout = layout;
         _closeDelayTimer.Stop();
+        TraceHover("open", GetPointerPosition(), true, layout, "panel-open");
         await _panel.EnsureWebViewInitializedAsync();
         await _panel.OpenAsync(layout);
         await _panelBridgeController.NotifyPanelOpenedAsync();
@@ -197,11 +264,24 @@ internal sealed class HoverShellController : IDisposable
 
     private async Task HidePanelAsync()
     {
+        if (_closingTask is { IsCompleted: false } closingTask)
+        {
+            await closingTask;
+            return;
+        }
+
+        _closingTask = HidePanelCoreAsync();
+        await _closingTask;
+    }
+
+    private async Task HidePanelCoreAsync()
+    {
         if (_activeLayout is null)
         {
             return;
         }
 
+        TraceHover("close", GetPointerPosition(), false, _activeLayout, "panel-close");
         await _panel.CloseAsync(_activeLayout);
     }
 
@@ -230,50 +310,81 @@ internal sealed class HoverShellController : IDisposable
 
     private void PollPointer()
     {
-        if (IsPointerInHoverRegion(out var hoveredLayout))
+        var pointer = GetPointerPosition();
+        if (IsPointerInHoverRegion(pointer, out var hoveredLayout))
         {
             _closeDelayTimer.Stop();
-            if (!_panel.IsVisible || _panel.Opacity < 0.99)
+            TraceHover("poll", pointer, true, hoveredLayout, _panel.IsVisible ? "keep-open" : "open");
+            if (!_panel.IsVisible)
             {
-                _ = ShowPanelAsync(hoveredLayout ?? ResolveLayoutForPointer());
+                _ = ShowPanelAsync(hoveredLayout ?? ResolveLayoutForPointer(pointer));
             }
 
             return;
         }
 
-        if (_panel.IsVisible && !_closeDelayTimer.IsEnabled && !_timerAlertActive)
+        if (_panel.IsVisible
+            && _closingTask is not { IsCompleted: false }
+            && !_closeDelayTimer.IsEnabled
+            && !_timerAlertActive)
         {
+            TraceHover("poll", pointer, false, _activeLayout, "start-close-delay");
             _closeDelayTimer.Start();
         }
     }
 
-    private bool IsPointerInHoverRegion(out DisplaySurfaceLayout? hoveredLayout)
+    private bool IsPointerInHoverRegion((int X, int Y) pointer, out DisplaySurfaceLayout? hoveredLayout)
     {
         hoveredLayout = null;
-        var pointer = WinForms.Control.MousePosition;
-        foreach (var accessSurface in _accessSurfaces)
+        if (_panel.IsVisible)
         {
-            if (!IsInsideInflatedWindow(accessSurface.Hwnd, pointer.X, pointer.Y))
+            var activeLayout = _activeLayout;
+            if (activeLayout is null)
             {
-                continue;
+                return false;
             }
 
-            hoveredLayout = _surfaceLayouts.GetValueOrDefault(accessSurface);
-            return true;
+            hoveredLayout = activeLayout;
+            return IsInsideInflatedPlacement(activeLayout.AccessSurface, activeLayout.Monitor, pointer)
+                || IsInsideInflatedPlacement(activeLayout.PanelTarget, activeLayout.Monitor, pointer);
         }
 
-        return _panel.IsVisible && IsInsideInflatedWindow(_panel.Hwnd, pointer.X, pointer.Y);
+        foreach (var layout in _surfaceLayouts.Values)
+        {
+            if (IsInsideInflatedPlacement(layout.AccessSurface, layout.Monitor, pointer))
+            {
+                hoveredLayout = layout;
+                return true;
+            }
+        }
+
+        return false;
     }
 
-    private static bool IsInsideInflatedWindow(IntPtr hwnd, int x, int y)
+    private (int X, int Y) GetPointerPosition()
     {
-        if (hwnd == IntPtr.Zero || !NativeMethods.TryGetWindowRect(hwnd, out var rect))
+        if (_pointerOverrideForVerify is { } pointer)
         {
-            return false;
+            return pointer;
         }
 
-        var padding = (int)Math.Ceiling(HoverToleranceDips * NativeMethods.GetScaleForWindow(hwnd));
-        return rect.Inflate(padding).Contains(x, y);
+        var mousePosition = WinForms.Control.MousePosition;
+        return (mousePosition.X, mousePosition.Y);
+    }
+
+    private static bool IsInsideInflatedPlacement(
+        WindowPlacement placement,
+        DisplayMonitor monitor,
+        (int X, int Y) pointer)
+    {
+        var paddingX = DipPaddingToPhysical(monitor.ScaleX);
+        var paddingY = DipPaddingToPhysical(monitor.ScaleY);
+        return placement.PhysicalRect.Inflate(paddingX, paddingY).Contains(pointer.X, pointer.Y);
+    }
+
+    private static int DipPaddingToPhysical(double scale)
+    {
+        return Math.Max(0, (int)Math.Ceiling(HoverToleranceDips * scale));
     }
 
     private void ResyncDisplayLayout()
@@ -283,6 +394,7 @@ internal sealed class HoverShellController : IDisposable
             return;
         }
 
+        var previousActiveLayout = _activeLayout;
         _layouts = _displayLayoutService.CreateLayouts(
             _settings.DisplayPlacement,
             _panelBridgeController.CurrentSettings.PanelSize);
@@ -297,10 +409,9 @@ internal sealed class HoverShellController : IDisposable
             accessSurface.ApplyPlacement(layout.AccessSurface, show: true);
         }
 
-        _activeLayout = ResolveLayoutForPointer() ?? _layouts.FirstOrDefault();
-
         if (!_panel.IsVisible)
         {
+            _activeLayout = ResolveLayoutForPointer() ?? _layouts.FirstOrDefault();
             if (_activeLayout is not null)
             {
                 _panel.ApplyPlacement(_activeLayout.PanelCollapsed, show: false);
@@ -310,6 +421,7 @@ internal sealed class HoverShellController : IDisposable
             return;
         }
 
+        _activeLayout = ResolveLayoutMatching(previousActiveLayout) ?? _layouts.FirstOrDefault();
         if (_activeLayout is not null)
         {
             _panel.ApplyPlacement(_activeLayout.PanelTarget, show: true);
@@ -346,6 +458,13 @@ internal sealed class HoverShellController : IDisposable
 
     private void OnAccessSurfaceHoverEntered(object? sender, EventArgs e)
     {
+        if (_panel.IsVisible)
+        {
+            _closeDelayTimer.Stop();
+            TraceHover("surface-enter", GetPointerPosition(), true, _activeLayout, "panel-already-visible");
+            return;
+        }
+
         if (sender is AccessSurfaceWindow accessSurface && _surfaceLayouts.TryGetValue(accessSurface, out var layout))
         {
             _ = ShowPanelAsync(layout);
@@ -355,17 +474,91 @@ internal sealed class HoverShellController : IDisposable
         ShowPanelFromUser();
     }
 
-    private DisplaySurfaceLayout? ResolveLayoutForPointer()
+    private DisplaySurfaceLayout? ResolveLayoutForPointer((int X, int Y)? pointer = null)
     {
         if (_layouts.Count == 0)
         {
             return null;
         }
 
-        var pointer = WinForms.Control.MousePosition;
-        return _layouts.FirstOrDefault(layout => layout.Monitor.Bounds.Contains(pointer.X, pointer.Y))
+        var resolvedPointer = pointer ?? GetPointerPosition();
+        return _layouts.FirstOrDefault(layout => layout.Monitor.Bounds.Contains(resolvedPointer.X, resolvedPointer.Y))
             ?? _activeLayout
             ?? _layouts[0];
+    }
+
+    private DisplaySurfaceLayout? ResolveLayoutMatching(DisplaySurfaceLayout? previousLayout)
+    {
+        if (previousLayout is null)
+        {
+            return null;
+        }
+
+        return _layouts.FirstOrDefault(layout => layout.Monitor.Id == previousLayout.Monitor.Id)
+            ?? _layouts.FirstOrDefault(layout =>
+                layout.Monitor.Bounds.Left == previousLayout.Monitor.Bounds.Left
+                && layout.Monitor.Bounds.Top == previousLayout.Monitor.Bounds.Top
+                && layout.Monitor.Bounds.Width == previousLayout.Monitor.Bounds.Width
+                && layout.Monitor.Bounds.Height == previousLayout.Monitor.Bounds.Height);
+    }
+
+    private void TraceHover(
+        string eventName,
+        (int X, int Y) pointer,
+        bool inside,
+        DisplaySurfaceLayout? layout,
+        string decision)
+    {
+        if (string.IsNullOrWhiteSpace(_hoverTracePath))
+        {
+            return;
+        }
+
+        try
+        {
+            var directory = Path.GetDirectoryName(_hoverTracePath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.AppendAllText(
+                _hoverTracePath,
+                string.Join(
+                    '\t',
+                    DateTimeOffset.UtcNow.ToString("O"),
+                    $"event={eventName}",
+                    $"pointer={pointer.X},{pointer.Y}",
+                    $"inside={inside}",
+                    $"decision={decision}",
+                    $"active={_activeLayout?.Monitor.Id ?? "null"}",
+                    $"layout={layout?.Monitor.Id ?? "null"}",
+                    $"access={FormatTraceRect(layout?.AccessSurface.PhysicalRect)}",
+                    $"panel={FormatTraceRect(layout?.PanelTarget.PhysicalRect)}")
+                + Environment.NewLine);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+        catch (ArgumentException)
+        {
+        }
+    }
+
+    private static string? NormalizeTracePath()
+    {
+        var path = Environment.GetEnvironmentVariable("HOVERPOCKET_HOVER_TRACE");
+        return string.IsNullOrWhiteSpace(path) ? null : path;
+    }
+
+    private static string FormatTraceRect(PhysicalRect? rect)
+    {
+        return rect is null
+            ? "null"
+            : $"{rect.Value.Left},{rect.Value.Top},{rect.Value.Width},{rect.Value.Height}";
     }
 
     private void ScheduleDisplayResync()
@@ -409,6 +602,20 @@ internal sealed class HoverShellController : IDisposable
     private void OnSettingsOpenRequested(object? sender, EventArgs e)
     {
         OpenSettingsFromUser();
+    }
+
+    private void OnExternalDragStarted(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_dispatcher.CheckAccess())
+        {
+            _dispatcher.BeginInvoke(() => OnExternalDragStarted(sender, e));
+            return;
+        }
+
+        _closeDelayTimer.Stop();
+        _ = HidePanelAsync();
     }
 
     private void OnTimerAlertFired(object? sender, TimerAlert alert)

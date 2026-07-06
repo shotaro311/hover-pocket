@@ -1,9 +1,45 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-07-05
+updated: 2026-07-06
 updated_by: codex
 status: active
 ---
+
+## 2026-07-06 W11 Velopack Windows Updates
+
+- Implemented Windows Phase 2 W11 Velopack updater and release packaging: `VelopackApp.Build().Run()` now runs from `Program.Main` except verify/probe paths, updater checks GitHub Releases `shotaro311/hover-pocket`, tray and Settings `Check for Updates` are wired, startup auto-check defaults on and is non-blocking, and `--verify updater` covers local-folder no-update/update-available dry-runs.
+- Added `windows/script/publish_release.ps1` for `dotnet publish` self-contained `win-x64` plus `vpk pack`, generated `HoverPocketWin-*` assets, and printed a `gh release upload` command example without uploading. README documents unsigned Phase 2 SmartScreen warnings and keeps signing credentials out of Git/log/progress/README.
+- Verification: `dotnet build` completed with warnings 0/errors 0; `--verify updater`, `ui-model`, `settings`, `ailane`, `sticky`, `calc`, `timer`, `display`, `clipboard`, `calendar`, and exe-based `shell` all completed with exit code 0; JS syntax checks completed with exit code 0; publish dry-run generated the Windows Velopack assets under `dist/windows/releases/0.2.0/`. Real GitHub update apply/restart and WebView2 runtime checks remain architect/user follow-up. Details: `progress/2026-07/2026-07-06_windows-phase2-w11.md`.
+
+## 2026-07-06 W9 Clipboard Provider
+
+- Implemented Windows Phase 2 Clipboard provider: `AddClipboardFormatListener` / `WM_CLIPBOARDUPDATE` monitoring while provider visibility is ON, text 30 / image 20 history limits, PNG normalization, SHA-256 image deduplication, `%APPDATA%\HoverPocket\clipboard\history.json` + PNG persistence, corrupt JSON fallback, private mode, click-to-copy, clear all, and C# `DoDragDrop` external drag payloads.
+- Added Clipboard WebView UI under `windows/ui/providers/clipboard/` with text/image history lists, private mode status/button, clear action, copy-on-click, and mouse-down drag handles. Settings now exposes Clipboard private mode plus the ja/en confidentiality note.
+- Shared files were limited to provider registration, bridge registration, `--verify clipboard`, panel hide notification for external drag, Settings/app/i18n wiring, and ui-model coverage.
+- Verification: `node --check` for `app.js` / `settings.js` / `clipboard.js`, `dotnet build windows\HoverPocket.Windows.sln --nologo -p:NuGetAudit=false`, `--verify clipboard`, `--verify ui-model`, and `git diff --check` completed with exit code 0. Initial plain build hit an existing `HoverPocket.Shell` file lock, then succeeded after the required wait; plain NuGet audit emitted `NU1900` while `api.nuget.org` was unreachable.
+- WebView2 hands-on Clipboard UI, long-running real clipboard listener, and external app drop remain architect desktop-session confirmation. Details: `progress/2026-07/2026-07-06_windows-phase2-w9.md`.
+
+## 2026-07-06 W10 Google Calendar Provider
+
+- Implemented Windows Phase 2 Google Calendar provider: Desktop-app OAuth with loopback redirect + PKCE S256, external `%APPDATA%\HoverPocket\oauth.json` client configuration, refresh-token storage in Windows Credential Manager, in-memory access tokens only, Calendar API v3 REST calendar/event read and CRUD, 42-cell month grid UI, read-only calendar guards, and AI lane calendar read/create connection through the existing approval flow.
+- Scope choice is `calendar.events` plus `calendar.readonly`: event CRUD requires `calendar.events`, while calendar list/read-only metadata requires `calendar.readonly`; this keeps the Windows provider narrower than full calendar account access.
+- Credential storage choice is Win32 `CredWrite` / `CredRead` / `CredDelete` generic credentials instead of `PasswordVault`, because the task requires Windows Credential Manager verification and direct cleanup of verification entries.
+- Verification: `dotnet build windows\HoverPocket.Windows.sln --nologo -p:NuGetAudit=false`, `--verify calendar`, `--verify ailane`, `--verify ui-model`, JS syntax checks, and `git diff --check` completed with exit code 0. The previous default-output file lock cleared and the standard build now passes with warnings 0 / errors 0.
+- Real Google account E2E is waiting for architect/user after placing `%APPDATA%\HoverPocket\oauth.json`. Details: `progress/2026-07/2026-07-06_windows-phase2-w10.md`.
+
+## 2026-07-06 W8 Hover Open/Close Stability
+
+- Fixed the hover controller path so an already-visible panel no longer re-opens or re-anchors from cursor polling, and display resync preserves the display chosen when the panel opened.
+- Unified close detection around the active access-surface/panel physical rectangles inflated by +4 DIPs converted per monitor scale, with optional `HOVERPOCKET_HOVER_TRACE` file tracing.
+- Extended `--verify shell` with simulated pointer checks for stable panel `Left/Top` while moving inside the panel and close after simulated pointer leaves the active hover region.
+- Verification: `dotnet build windows\HoverPocket.Windows.sln --nologo --no-restore`, expanded `--verify shell`, and existing `--verify display` / `ui-model` / `calc` / `timer` / `sticky` / `settings` / `ailane` all completed with exit code 0. `--verify shell` reported `stable_position=true` and `outside_close=true`. Real mouse feel remains user-confirmation pending. Details: `progress/2026-07/2026-07-06_windows-bugfix-w8.md`.
+
+## 2026-07-06 W6 Sticky Trash Drop Bugfix
+
+- Fixed Sticky Notes bottom trash drop archiving. The cause was re-rendering the board/trash DOM during Chromium/WebView2 HTML5 drag, which could replace the active drop target before `drop` fired.
+- Separated internal panel drag from external drag: note body/card drag now handles reorder and trash archive inside the panel, while external app drag remains on the dedicated top-right export handle through C# `DoDragDrop`.
+- Added `sticky.archiveDropped` and `StickyNotesStore.ArchiveDroppedNote()` so `--verify sticky` covers the trash-drop archive state transition plus undo.
+- Verification: `node --check windows/ui/providers/sticky/sticky.js`, `dotnet build windows\HoverPocket.Windows.sln --nologo`, `--verify sticky`, `--verify ui-model`, and `git diff --check` completed with exit code 0. WebView2 hands-on drag/drop remains user/architect desktop-session confirmation.
 
 ## 2026-07-05 W5 Integration Turn
 
