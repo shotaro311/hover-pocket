@@ -14,6 +14,7 @@ internal sealed class CalculatorBridgeHandlers
         dispatcher.Register("calculator.press", PressAsync);
         dispatcher.Register("calculator.useHistoryValue", UseHistoryValueAsync);
         dispatcher.Register("calculator.restoreHistory", RestoreHistoryAsync);
+        dispatcher.Register("calculator.clearHistory", ClearHistoryAsync);
         dispatcher.Register("calculator.copy", CopyAsync);
     }
 
@@ -36,6 +37,13 @@ internal sealed class CalculatorBridgeHandlers
         cancellationToken.ThrowIfCancellationRequested();
         var id = ReadRequiredString(parameters, "id");
         return Task.FromResult<object?>(_engine.RestoreHistory(id));
+    }
+
+    private Task<object?> ClearHistoryAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult<object?>(_engine.ClearHistory());
     }
 
     private Task<object?> CopyAsync(JsonElement? parameters, CancellationToken cancellationToken)

@@ -3,7 +3,7 @@ namespace HoverPocket.Shell.Configuration;
 internal static class PanelSizeCatalog
 {
     public const double HeaderHeight = 54;
-    public const double AiLaneHeight = 132;
+    public const double AiLaneHeight = 0;
 
     public static PanelSizeMetrics Get(PanelSize panelSize)
     {

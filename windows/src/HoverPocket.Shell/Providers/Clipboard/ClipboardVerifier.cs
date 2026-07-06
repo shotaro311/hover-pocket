@@ -19,6 +19,7 @@ internal sealed class ClipboardVerifier
         {
             VerifyCrud(root);
             VerifyTrim(root);
+            VerifyFavoritesAndLegacyCompatibility(root);
             VerifyPngNormalizationAndDedup(root);
             VerifyPersistenceAndRestore(root);
             VerifyCorruptJsonRecovery(root);
@@ -38,7 +39,7 @@ internal sealed class ClipboardVerifier
 
         if (_failures.Count == 0)
         {
-            VerifyConsole.WriteLine("PASS clipboard verify: CRUD, limits, PNG normalization, dedup, persistence, corrupt fallback, private mode");
+            VerifyConsole.WriteLine("PASS clipboard verify: CRUD, limits, favorites, legacy defaults, PNG normalization, dedup, persistence, corrupt fallback, private mode");
             return 0;
         }
 
@@ -106,6 +107,119 @@ internal sealed class ClipboardVerifier
         if (pngCount != ClipboardHistoryStore.MaxImageItems)
         {
             _failures.Add($"trim: expected 20 PNG files after image trim, got {pngCount}");
+        }
+    }
+
+    private void VerifyFavoritesAndLegacyCompatibility(string root)
+    {
+        var store = NewStore(root, "favorites");
+        store.AddText("favorite text");
+        store.ToggleFavorite(ClipboardHistoryItemKind.Text, store.TextItems[0].Id);
+        store.AddText("regular text");
+        store.AddImage(ClipboardHistoryStore.CreateProbeBitmap(40));
+        store.ToggleFavorite(ClipboardHistoryItemKind.Image, store.ImageItems[0].Id);
+        var favoriteImage = store.ImageItems[0];
+        var favoriteImagePath = store.ImagePath(favoriteImage);
+        store.AddImage(ClipboardHistoryStore.CreateProbeBitmap(41));
+        var regularImagePath = store.ImagePath(store.ImageItems[0]);
+
+        store.Clear();
+        if (store.TextItems.Count != 1
+            || store.TextItems[0].Text != "favorite text"
+            || !store.TextItems[0].Favorite
+            || store.ImageItems.Count != 1
+            || !store.ImageItems[0].Favorite)
+        {
+            _failures.Add("favorites: clear did not preserve favorite text and image only");
+        }
+
+        if (File.Exists(regularImagePath))
+        {
+            _failures.Add("favorites: clear did not delete non-favorite image file");
+        }
+
+        if (!File.Exists(favoriteImagePath))
+        {
+            _failures.Add("favorites: clear deleted favorite image file");
+        }
+
+        store.DeleteItem(ClipboardHistoryItemKind.Image, store.ImageItems[0].Id);
+        if (store.ImageItems.Count != 0 || File.Exists(favoriteImagePath))
+        {
+            _failures.Add("favorites: explicit favorite image delete did not remove item and PNG");
+        }
+
+        var trimStore = NewStore(root, "favorite-trim");
+        trimStore.AddText("keep text");
+        var favoriteTextId = trimStore.TextItems[0].Id;
+        trimStore.ToggleFavorite(ClipboardHistoryItemKind.Text, favoriteTextId);
+        for (var index = 0; index < ClipboardHistoryStore.MaxTextItems + 5; index++)
+        {
+            trimStore.AddText($"bulk-text-{index}");
+        }
+
+        if (!trimStore.TextItems.Any(item => item.Id == favoriteTextId && item.Favorite))
+        {
+            _failures.Add("favorites: text trim removed a favorite item");
+        }
+
+        trimStore.AddImage(ClipboardHistoryStore.CreateProbeBitmap(60));
+        var favoriteImageId = trimStore.ImageItems[0].Id;
+        var preservedImagePath = trimStore.ImagePath(trimStore.ImageItems[0]);
+        trimStore.ToggleFavorite(ClipboardHistoryItemKind.Image, favoriteImageId);
+        for (var index = 0; index < ClipboardHistoryStore.MaxImageItems + 4; index++)
+        {
+            trimStore.AddImage(ClipboardHistoryStore.CreateProbeBitmap(61 + index));
+        }
+
+        if (!trimStore.ImageItems.Any(item => item.Id == favoriteImageId && item.Favorite)
+            || !File.Exists(preservedImagePath))
+        {
+            _failures.Add("favorites: image trim removed a favorite item or PNG");
+        }
+
+        VerifyLegacyFavoriteDefaults(root);
+    }
+
+    private void VerifyLegacyFavoriteDefaults(string root)
+    {
+        var directory = Path.Combine(root, "legacy-favorite");
+        Directory.CreateDirectory(directory);
+        var imageFileName = $"{Guid.NewGuid():N}.png";
+        var seeded = new ClipboardHistoryStore(directory);
+        seeded.AddImage(ClipboardHistoryStore.CreateProbeBitmap(70));
+        File.Copy(seeded.ImagePath(seeded.ImageItems[0]), Path.Combine(directory, imageFileName), overwrite: true);
+        File.WriteAllText(
+            Path.Combine(directory, "history.json"),
+            $$"""
+            {
+              "textItems": [
+                {
+                  "id": "{{Guid.NewGuid()}}",
+                  "text": "legacy text",
+                  "createdAt": "{{DateTimeOffset.UtcNow:o}}"
+                }
+              ],
+              "imageItems": [
+                {
+                  "id": "{{Guid.NewGuid()}}",
+                  "fileName": "{{imageFileName}}",
+                  "contentHash": "{{new string('a', 64)}}",
+                  "width": 48,
+                  "height": 48,
+                  "createdAt": "{{DateTimeOffset.UtcNow:o}}"
+                }
+              ]
+            }
+            """);
+
+        var restored = new ClipboardHistoryStore(directory);
+        if (restored.TextItems.Count != 1
+            || restored.TextItems[0].Favorite
+            || restored.ImageItems.Count != 1
+            || restored.ImageItems[0].Favorite)
+        {
+            _failures.Add("legacy favorite: missing favorite fields did not default to false");
         }
     }
 

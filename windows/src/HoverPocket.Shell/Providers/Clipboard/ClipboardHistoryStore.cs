@@ -215,14 +215,71 @@ internal sealed class ClipboardHistoryStore
     {
         lock (_gate)
         {
-            foreach (var image in _imageItems)
+            foreach (var image in _imageItems.Where(item => !item.Favorite).ToArray())
             {
                 TryDeleteFile(ImagePath(image));
             }
 
-            _textItems.Clear();
-            _imageItems.Clear();
+            _textItems.RemoveAll(item => !item.Favorite);
+            _imageItems.RemoveAll(item => !item.Favorite);
             SaveHistoryLocked();
+        }
+    }
+
+    public bool ToggleFavorite(ClipboardHistoryItemKind kind, Guid id)
+    {
+        lock (_gate)
+        {
+            if (kind == ClipboardHistoryItemKind.Text)
+            {
+                var text = _textItems.FirstOrDefault(item => item.Id == id);
+                if (text is null)
+                {
+                    return false;
+                }
+
+                text.Favorite = !text.Favorite;
+                SaveHistoryLocked();
+                return true;
+            }
+
+            var image = _imageItems.FirstOrDefault(item => item.Id == id);
+            if (image is null)
+            {
+                return false;
+            }
+
+            image.Favorite = !image.Favorite;
+            SaveHistoryLocked();
+            return true;
+        }
+    }
+
+    public bool DeleteItem(ClipboardHistoryItemKind kind, Guid id)
+    {
+        lock (_gate)
+        {
+            if (kind == ClipboardHistoryItemKind.Text)
+            {
+                var removed = _textItems.RemoveAll(item => item.Id == id) > 0;
+                if (removed)
+                {
+                    SaveHistoryLocked();
+                }
+
+                return removed;
+            }
+
+            var image = _imageItems.FirstOrDefault(item => item.Id == id);
+            if (image is null)
+            {
+                return false;
+            }
+
+            _imageItems.Remove(image);
+            TryDeleteFile(ImagePath(image));
+            SaveHistoryLocked();
+            return true;
         }
     }
 
@@ -281,6 +338,7 @@ internal sealed class ClipboardHistoryStore
                     kind = "text",
                     text = item.Text,
                     previewText = item.PreviewText,
+                    favorite = item.Favorite,
                     createdAt = item.CreatedAt
                 }).ToArray(),
                 imageItems = _imageItems.Select(item => new
@@ -292,6 +350,7 @@ internal sealed class ClipboardHistoryStore
                     contentHash = item.ContentHash,
                     width = item.Width,
                     height = item.Height,
+                    favorite = item.Favorite,
                     createdAt = item.CreatedAt,
                     dataUrl = TryReadImageDataUrl(item)
                 }).ToArray(),
@@ -388,9 +447,11 @@ internal sealed class ClipboardHistoryStore
                 var metadata = JsonSerializer.Deserialize<ClipboardHistoryMetadata>(File.ReadAllText(HistoryPath), JsonOptions)
                     ?? new ClipboardHistoryMetadata();
                 _textItems.Clear();
-                _textItems.AddRange(NormalizeText(metadata.TextItems).Take(MaxTextItems));
+                _textItems.AddRange(NormalizeText(metadata.TextItems));
+                TrimTextLocked();
                 _imageItems.Clear();
-                _imageItems.AddRange(NormalizeImages(metadata.ImageItems).Where(item => File.Exists(ImagePath(item))).Take(MaxImageItems));
+                _imageItems.AddRange(NormalizeImages(metadata.ImageItems).Where(item => File.Exists(ImagePath(item))));
+                TrimImagesLocked();
                 LastErrorMessage = null;
             }
             catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
@@ -435,7 +496,16 @@ internal sealed class ClipboardHistoryStore
             return;
         }
 
-        _textItems.RemoveRange(MaxTextItems, _textItems.Count - MaxTextItems);
+        while (_textItems.Count > MaxTextItems)
+        {
+            var removeIndex = _textItems.FindLastIndex(item => !item.Favorite);
+            if (removeIndex < 0)
+            {
+                return;
+            }
+
+            _textItems.RemoveAt(removeIndex);
+        }
     }
 
     private void TrimImagesLocked()
@@ -445,11 +515,17 @@ internal sealed class ClipboardHistoryStore
             return;
         }
 
-        var removed = _imageItems.Skip(MaxImageItems).ToArray();
-        _imageItems.RemoveRange(MaxImageItems, _imageItems.Count - MaxImageItems);
-        foreach (var item in removed)
+        while (_imageItems.Count > MaxImageItems)
         {
-            TryDeleteFile(ImagePath(item));
+            var removeIndex = _imageItems.FindLastIndex(item => !item.Favorite);
+            if (removeIndex < 0)
+            {
+                return;
+            }
+
+            var removed = _imageItems[removeIndex];
+            _imageItems.RemoveAt(removeIndex);
+            TryDeleteFile(ImagePath(removed));
         }
     }
 

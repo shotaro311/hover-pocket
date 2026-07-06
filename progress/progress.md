@@ -5,6 +5,14 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-06 Windows Build 124 Clipboard and Calculator Parity
+
+- Added Windows Clipboard parity for macOS build 124: `Text` / `Images` / `Favorites` tabs, star favorite toggles for text and image items, favorite-preserving clear, explicit favorite deletion from the Favorites tab, saved image file deletion on explicit image removal, and full-panel text/image preview. Card click now opens preview; copy stays on the copy icon/button. Existing `%APPDATA%\HoverPocket\clipboard\history.json` entries without `favorite` fields load as `favorite=false`.
+- Added Windows Calculator JIS keyboard parity and Mac calculator follow-up parity: `;` maps to `+`, `:` maps to `×`, plain `8` remains numeric, continuous expressions are evaluated on final equals with precedence (`6+5+9/2+3-5=` -> `13.5`), pending expressions are visible, and a history clear action is available. History result click still inputs only the result value, while restore returns to the captured calculation state.
+- Removed the AI command lane from the normal Windows panel UI and set Windows panel metrics so visible panel height no longer includes the deferred AI lane.
+- Verification passed: `node --check` for `windows\ui\providers\clipboard\clipboard.js`, `windows\ui\providers\calculator\calculator.js`, and `windows\ui\js\app.js`; `dotnet build windows\HoverPocket.Windows.sln --nologo -p:NuGetAudit=false`; `dotnet run --no-build --project windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify calc`; `--verify clipboard`; `--verify ui-model`; `--verify updater`; and `git diff --check`. Details: `progress/2026-07/2026-07-06_windows-build124-parity.md`.
+- No Windows release was created. Windows feed/updater code was not changed; `--verify updater` remains green. Hands-on WebView2 Clipboard/Calculator UI confirmation is still pending.
+
 ## 2026-07-06 Mac Calculator JIS Keyboard Shortcuts
 
 - Added Japanese keyboard-friendly Calculator operator input. On JIS keyboards, the unshifted `;` key now inputs `+`, and the unshifted `:` key now inputs `×`, so addition and multiplication no longer require Shift for those physical keys.

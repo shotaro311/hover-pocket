@@ -14,6 +14,8 @@ internal sealed class CalculatorVerifier
         Verify("divide", ["8", "/", "4", "="], "2");
         Verify("operator glyphs", ["8", "÷", "4", "Enter"], "2");
         Verify("numpad tokens", ["Numpad9", "NumpadAdd", "Numpad3", "NumpadEnter"], "12");
+        Verify("JIS keyboard operators", ["5", ";", "6", ":", "2", "="], "17");
+        Verify("continuous expression precedence", ["6", "+", "5", "+", "9", "/", "2", "+", "3", "-", "5", "="], "13.5");
         Verify("decimal", ["0", ".", "1", "+", "0", ".", "2", "="], "0.3");
         Verify("percent", ["2", "0", "%"], "0.2");
         Verify("sign", ["1", "2", ".", "5", "+/-"], "-12.5");
@@ -22,12 +24,14 @@ internal sealed class CalculatorVerifier
         Verify("error recovery", ["7", "/", "0", "=", "9"], "9");
         Verify("backspace", ["1", "2", "BS"], "1");
         Verify("all clear", ["1", "2", "3", "AC"], "0");
+        VerifyExpressionDisplay();
         VerifyHistoryValueInput();
         VerifyHistoryRestore();
+        VerifyHistoryClear();
 
         if (_failures.Count == 0)
         {
-            VerifyConsole.WriteLine("PASS calc verify: arithmetic, keyboard tokens, history value input, restore, error, recovery, backspace, AC");
+            VerifyConsole.WriteLine("PASS calc verify: arithmetic, precedence, JIS keyboard tokens, expression display, history value input, restore, clear, error, recovery, backspace, AC");
             return 0;
         }
 
@@ -91,32 +95,66 @@ internal sealed class CalculatorVerifier
     private void VerifyHistoryRestore()
     {
         var engine = new CalculatorEngine();
-        var snapshot = PressAll(engine, ["1", "+", "2", "+"]);
+        var snapshot = PressAll(engine, ["1", "+", "2", "="]);
         var historyItem = snapshot.History.LastOrDefault();
         if (historyItem is null || historyItem.Result != "3")
         {
-            _failures.Add("history restore: expected chain result 3 in history");
+            _failures.Add("history restore: expected result 3 in history");
             return;
         }
 
-        snapshot = PressAll(engine, ["9", "="]);
-        if (snapshot.Display != "12")
+        snapshot = PressAll(engine, ["9", "+", "1", "="]);
+        if (snapshot.Display != "10")
         {
-            _failures.Add($"history restore setup: expected 12 before restore, got {snapshot.Display}");
+            _failures.Add($"history restore setup: expected 10 before restore, got {snapshot.Display}");
             return;
         }
 
         snapshot = engine.RestoreHistory(historyItem.Id);
-        if (snapshot.Display != "3")
+        if (snapshot.Display != "3" || snapshot.ExpressionDisplay != "1 + 2")
         {
-            _failures.Add($"history restore: expected restored display 3, got {snapshot.Display}");
+            _failures.Add($"history restore: expected restored display 3 with expression 1 + 2, got {snapshot.Display} / {snapshot.ExpressionDisplay}");
             return;
         }
 
-        snapshot = PressAll(engine, ["4", "="]);
+        snapshot = PressAll(engine, ["+", "4", "="]);
         if (snapshot.Display != "7")
         {
-            _failures.Add($"history restore: expected pending operation to survive restore and produce 7, got {snapshot.Display}");
+            _failures.Add($"history restore: expected restored result to continue with +4 and produce 7, got {snapshot.Display}");
+        }
+    }
+
+    private void VerifyHistoryClear()
+    {
+        var engine = new CalculatorEngine();
+        var snapshot = PressAll(engine, ["1", "+", "2", "="]);
+        if (snapshot.History.Count == 0)
+        {
+            _failures.Add("history clear setup: expected at least one history entry");
+            return;
+        }
+
+        snapshot = engine.ClearHistory();
+        if (snapshot.History.Count != 0 || snapshot.Display != "3")
+        {
+            _failures.Add($"history clear: expected empty history with display preserved at 3, got {snapshot.History.Count} / {snapshot.Display}");
+        }
+    }
+
+    private void VerifyExpressionDisplay()
+    {
+        var engine = new CalculatorEngine();
+        var snapshot = PressAll(engine, ["5", "+"]);
+        if (snapshot.ExpressionDisplay != "5 +")
+        {
+            _failures.Add($"expression display: expected '5 +', got '{snapshot.ExpressionDisplay}'");
+            return;
+        }
+
+        snapshot = PressAll(engine, ["6"]);
+        if (snapshot.ExpressionDisplay != "5 + 6")
+        {
+            _failures.Add($"expression display: expected '5 + 6', got '{snapshot.ExpressionDisplay}'");
         }
     }
 

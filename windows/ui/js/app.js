@@ -1,6 +1,5 @@
 import { on, request } from "./bridge.js";
 import { setLanguage, t } from "./i18n.js";
-import { focusAiLaneInput, renderAiLane } from "../ailane/ailane.js";
 import { renderCalculatorProvider } from "../providers/calculator/calculator.js";
 import { renderCalendarProvider } from "../providers/calendar/calendar.js";
 import { renderClipboardProvider } from "../providers/clipboard/clipboard.js";
@@ -21,7 +20,6 @@ const providerIconsEl = document.querySelector("[data-provider-icons]");
 const sizeSwitchEl = document.querySelector("[data-size-switch]");
 const refreshButtonEl = document.querySelector("[data-refresh]");
 const settingsButtonEl = document.querySelector("[data-settings]");
-const aiLaneEl = document.querySelector("[data-ai-lane]");
 
 /** @type {any} */
 let currentState = null;
@@ -32,7 +30,6 @@ on("state.changed", (state) => {
 
 on("panel.opened", (state) => {
   render(state);
-  focusAiLaneInput();
 });
 
 bootstrap();
@@ -58,7 +55,6 @@ function render(state) {
   renderSizeSwitch(state);
   renderProviderIcons(state);
   renderProvider(state);
-  renderAiLane(aiLaneEl, state, request, render);
   renderCommands();
 }
 
@@ -145,7 +141,7 @@ function renderProvider(state) {
     </div>
     <div class="hp-provider-body">
       <p>${escapeHtml(provider?.body ?? "No visible provider is available.")}</p>
-      <p>Header, provider content, and AI lane are rendered from C# state.</p>
+      <p>Header and provider content are rendered from C# state.</p>
     </div>
   `;
   providerContainerEl.append(card);

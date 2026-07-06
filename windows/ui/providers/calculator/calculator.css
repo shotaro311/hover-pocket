@@ -60,6 +60,25 @@
   white-space: nowrap;
 }
 
+.hp-calc-expression {
+  width: 100%;
+  min-width: 0;
+  min-height: 15px;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.2;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hp-calc-expression[hidden] {
+  display: block;
+  visibility: hidden;
+}
+
 .hp-calc-history {
   display: grid;
   max-height: 76px;

@@ -1,6 +1,8 @@
 let bridgeRequest = null;
 let containerEl = null;
 let clipboardState = null;
+let activeTab = "text";
+let activePreview = null;
 
 /**
  * @param {{ container: HTMLElement, request: (method: string, params?: unknown) => Promise<unknown> }} options
@@ -19,8 +21,11 @@ export function renderClipboardProvider(options) {
 
 export async function runClipboardUiVerify(request) {
   const state = await request("clipboard.getState");
+  const textItems = Array.isArray(state?.textItems) ? state.textItems : [];
+  const imageItems = Array.isArray(state?.imageItems) ? state.imageItems : [];
   return {
     clipboardBridgeOk: Array.isArray(state?.textItems) && Array.isArray(state?.imageItems),
+    clipboardFavoriteFieldOk: [...textItems, ...imageItems].every((item) => typeof item.favorite === "boolean"),
     clipboardPrivateMode: Boolean(state?.privateMode),
     clipboardMonitoringKnown: typeof state?.isMonitoring === "boolean",
   };
@@ -28,6 +33,7 @@ export async function runClipboardUiVerify(request) {
 
 async function refreshState() {
   clipboardState = await send("clipboard.getState");
+  validateViewState();
   render();
 }
 
@@ -42,8 +48,20 @@ async function send(method, params = undefined) {
 async function updateState(method, params = undefined) {
   const result = await send(method, params);
   clipboardState = result?.state ?? result;
+  validateViewState();
   render();
   return result;
+}
+
+function validateViewState() {
+  if (!clipboardState) {
+    activePreview = null;
+    return;
+  }
+
+  if (activePreview && !findItem(activePreview.kind, activePreview.id)) {
+    activePreview = null;
+  }
 }
 
 function renderLoading() {
@@ -61,12 +79,15 @@ function render() {
 
   const root = element("section", { className: "clipboard-root" });
   root.append(renderHeader());
-  root.append(renderColumns());
+  root.append(activePreview ? renderPreview(activePreview) : renderBrowser());
   containerEl.replaceChildren(root);
 }
 
 function renderHeader() {
   const header = element("header", { className: "clipboard-header" });
+  const textItems = clipboardState.textItems ?? [];
+  const imageItems = clipboardState.imageItems ?? [];
+  const favoriteCount = getFavoriteItems().length;
   const status = clipboardState.privateMode
     ? "Private mode"
     : clipboardState.isMonitoring
@@ -76,13 +97,15 @@ function renderHeader() {
         : "Provider hidden";
   header.append(
     element("div", { className: "clipboard-status" }, status),
-    element("div", { className: "clipboard-count" }, `${clipboardState.textItems?.length ?? 0}/${clipboardState.textLimit} text`),
-    element("div", { className: "clipboard-count" }, `${clipboardState.imageItems?.length ?? 0}/${clipboardState.imageLimit} image`),
+    element("div", { className: "clipboard-count" }, `${textItems.length}/${clipboardState.textLimit} text`),
+    element("div", { className: "clipboard-count" }, `${imageItems.length}/${clipboardState.imageLimit} image`),
+    element("div", { className: "clipboard-count" }, `${favoriteCount} favorite`),
     element("div", { className: "clipboard-spacer" }),
     renderTextButton(clipboardState.privateMode ? "Resume" : "Private", () => {
       void updateState("clipboard.setPrivateMode", { enabled: !clipboardState.privateMode });
     }, clipboardState.privateMode ? "is-active" : ""),
-    renderIconButton("⌫", "Clear clipboard history", () => {
+    renderIconButton("⌫", "Clear non-favorite history", () => {
+      activePreview = null;
       void updateState("clipboard.clear");
     })
   );
@@ -94,88 +117,130 @@ function renderHeader() {
   return header;
 }
 
-function renderColumns() {
-  const columns = element("div", { className: "clipboard-columns" });
-  columns.append(renderTextColumn(), renderImageColumn());
-  return columns;
+function renderBrowser() {
+  const browser = element("div", { className: "clipboard-browser" });
+  browser.append(renderTabs(), renderTabPanel());
+  return browser;
 }
 
-function renderTextColumn() {
-  const column = element("section", { className: "clipboard-column" });
-  column.append(renderColumnTitle("Text", clipboardState.textItems?.length ?? 0));
+function renderTabs() {
+  const tabs = element("div", { className: "clipboard-tabs", role: "tablist" });
+  for (const tab of [
+    { id: "text", label: "Text", count: clipboardState.textItems?.length ?? 0 },
+    { id: "images", label: "Images", count: clipboardState.imageItems?.length ?? 0 },
+    { id: "favorites", label: "Favorites", count: getFavoriteItems().length },
+  ]) {
+    const button = element("button", {
+      className: `clipboard-tab${activeTab === tab.id ? " is-active" : ""}`,
+      type: "button",
+      role: "tab",
+      ariaSelected: String(activeTab === tab.id),
+    }, tab.label, element("strong", {}, String(tab.count)));
+    button.addEventListener("click", () => {
+      activeTab = tab.id;
+      activePreview = null;
+      render();
+    });
+    tabs.append(button);
+  }
 
-  const items = clipboardState.textItems ?? [];
+  return tabs;
+}
+
+function renderTabPanel() {
+  if (activeTab === "images") {
+    return renderImagePanel(clipboardState.imageItems ?? [], false);
+  }
+
+  if (activeTab === "favorites") {
+    return renderFavoritesPanel();
+  }
+
+  return renderTextPanel(clipboardState.textItems ?? [], false);
+}
+
+function renderTextPanel(items, showDelete) {
+  const panel = element("section", { className: "clipboard-panel" });
   if (items.length === 0) {
-    column.append(renderEmpty("No text"));
-    return column;
+    panel.append(renderEmpty("No text"));
+    return panel;
   }
 
   const list = element("div", { className: "clipboard-text-list" });
   for (const item of items) {
-    list.append(renderTextItem(item));
+    list.append(renderTextItem(item, showDelete));
   }
-  column.append(list);
-  return column;
+  panel.append(list);
+  return panel;
 }
 
-function renderImageColumn() {
-  const column = element("section", { className: "clipboard-column" });
-  column.append(renderColumnTitle("Images", clipboardState.imageItems?.length ?? 0));
-
-  const items = clipboardState.imageItems ?? [];
+function renderImagePanel(items, showDelete) {
+  const panel = element("section", { className: "clipboard-panel" });
   if (items.length === 0) {
-    column.append(renderEmpty("No images"));
-    return column;
+    panel.append(renderEmpty("No images"));
+    return panel;
   }
 
   const grid = element("div", { className: "clipboard-image-grid" });
   for (const item of items) {
-    grid.append(renderImageItem(item));
+    grid.append(renderImageItem(item, showDelete));
   }
-  column.append(grid);
-  return column;
+  panel.append(grid);
+  return panel;
 }
 
-function renderColumnTitle(title, count) {
-  const row = element("div", { className: "clipboard-column-title" });
-  row.append(element("span", {}, title), element("strong", {}, String(count)));
-  return row;
+function renderFavoritesPanel() {
+  const favorites = getFavoriteItems();
+  const panel = element("section", { className: "clipboard-panel clipboard-favorites-panel" });
+  if (favorites.length === 0) {
+    panel.append(renderEmpty("No favorites"));
+    return panel;
+  }
+
+  const list = element("div", { className: "clipboard-favorites-list" });
+  for (const item of favorites) {
+    list.append(item.kind === "text"
+      ? renderTextItem(item, true)
+      : renderImageItem(item, true));
+  }
+  panel.append(list);
+  return panel;
 }
 
-function renderTextItem(item) {
+function renderTextItem(item, showDelete) {
   const row = element("article", {
-    className: "clipboard-text-item",
+    className: `clipboard-text-item${item.favorite ? " is-favorite" : ""}`,
     tabIndex: "0",
-    title: "Copy text",
+    title: "Preview text",
   });
-  row.addEventListener("click", () => void updateState("clipboard.copyText", { id: item.id }));
+  row.addEventListener("click", () => togglePreview("text", item.id));
   row.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
+    if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      void updateState("clipboard.copyText", { id: item.id });
+      togglePreview("text", item.id);
     }
   });
 
   const preview = element("p", { className: "clipboard-text-preview" }, item.previewText ?? item.text ?? "");
   const meta = element("div", { className: "clipboard-meta" }, formatTime(item.createdAt));
-  const drag = renderDragButton("↗", "Drag text to another app", () => {
-    void send("clipboard.startExternalDrag", { kind: "text", id: item.id });
-  });
-  row.append(element("div", { className: "clipboard-text-main" }, preview, meta), drag);
+  row.append(
+    element("div", { className: "clipboard-text-main" }, preview, meta),
+    renderItemActions(item, "text", showDelete)
+  );
   return row;
 }
 
-function renderImageItem(item) {
+function renderImageItem(item, showDelete) {
   const tile = element("article", {
-    className: "clipboard-image-item",
+    className: `clipboard-image-item${item.favorite ? " is-favorite" : ""}`,
     tabIndex: "0",
-    title: "Copy image",
+    title: "Preview image",
   });
-  tile.addEventListener("click", () => void updateState("clipboard.copyImage", { id: item.id }));
+  tile.addEventListener("click", () => togglePreview("image", item.id));
   tile.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
+    if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      void updateState("clipboard.copyImage", { id: item.id });
+      togglePreview("image", item.id);
     }
   });
 
@@ -186,24 +251,111 @@ function renderImageItem(item) {
     preview.append(element("span", {}, "Image"));
   }
 
-  const meta = element("div", { className: "clipboard-image-meta" });
-  meta.append(
-    element("span", {}, `${item.width}x${item.height}`),
-    renderDragButton("↗", "Drag image to another app", () => {
-      void send("clipboard.startExternalDrag", { kind: "image", id: item.id });
+  const meta = element("div", { className: "clipboard-image-meta" }, `${item.width}x${item.height}`);
+  tile.append(preview, element("div", { className: "clipboard-image-footer" }, meta, renderItemActions(item, "image", showDelete)));
+  return tile;
+}
+
+function renderItemActions(item, kind, showDelete) {
+  const actions = element("div", { className: "clipboard-item-actions" });
+  actions.append(
+    renderIconButton(item.favorite ? "★" : "☆", item.favorite ? "Remove favorite" : "Add favorite", () => {
+      void updateState("clipboard.toggleFavorite", { kind, id: item.id });
+    }),
+    renderIconButton("⧉", kind === "image" ? "Copy image" : "Copy text", () => {
+      activePreview = null;
+      void updateState(kind === "image" ? "clipboard.copyImage" : "clipboard.copyText", { id: item.id });
+    }),
+    renderDragButton("↗", kind === "image" ? "Drag image to another app" : "Drag text to another app", () => {
+      void send("clipboard.startExternalDrag", { kind, id: item.id });
     })
   );
-  tile.append(preview, meta);
-  return tile;
+
+  if (showDelete) {
+    actions.append(renderIconButton("🗑", "Delete favorite", () => {
+      activePreview = null;
+      void updateState("clipboard.deleteItem", { kind, id: item.id });
+    }, "is-danger"));
+  }
+
+  return actions;
+}
+
+function renderPreview(previewRef) {
+  const item = findItem(previewRef.kind, previewRef.id);
+  if (!item) {
+    activePreview = null;
+    return renderBrowser();
+  }
+
+  const preview = element("section", { className: `clipboard-full-preview is-${previewRef.kind}` });
+  const title = previewRef.kind === "image"
+    ? `${item.width}x${item.height}`
+    : formatTime(item.createdAt);
+  preview.append(
+    element("header", { className: "clipboard-preview-header" },
+      element("span", {}, title),
+      element("div", { className: "clipboard-spacer" }),
+      renderIconButton(item.favorite ? "★" : "☆", item.favorite ? "Remove favorite" : "Add favorite", () => {
+        void updateState("clipboard.toggleFavorite", { kind: previewRef.kind, id: item.id });
+      }),
+      renderIconButton("⧉", previewRef.kind === "image" ? "Copy image" : "Copy text", () => {
+        activePreview = null;
+        void updateState(previewRef.kind === "image" ? "clipboard.copyImage" : "clipboard.copyText", { id: item.id });
+      }),
+      renderIconButton("✕", "Close preview", () => {
+        activePreview = null;
+        render();
+      })
+    )
+  );
+
+  if (previewRef.kind === "image") {
+    const imageWrap = element("div", { className: "clipboard-preview-image" });
+    if (item.dataUrl) {
+      imageWrap.append(element("img", { src: item.dataUrl, alt: `${item.width} by ${item.height}` }));
+    } else {
+      imageWrap.append(element("span", {}, "Image unavailable"));
+    }
+    preview.append(imageWrap);
+  } else {
+    preview.append(element("pre", { className: "clipboard-preview-text" }, item.text ?? ""));
+  }
+
+  return preview;
+}
+
+function togglePreview(kind, id) {
+  if (activePreview?.kind === kind && activePreview?.id === id) {
+    activePreview = null;
+  } else {
+    activePreview = { kind, id };
+  }
+  render();
+}
+
+function findItem(kind, id) {
+  const source = kind === "image" ? clipboardState?.imageItems : clipboardState?.textItems;
+  return (source ?? []).find((item) => String(item.id) === String(id)) ?? null;
+}
+
+function getFavoriteItems() {
+  const texts = (clipboardState?.textItems ?? [])
+    .filter((item) => item.favorite)
+    .map((item) => ({ ...item, kind: "text" }));
+  const images = (clipboardState?.imageItems ?? [])
+    .filter((item) => item.favorite)
+    .map((item) => ({ ...item, kind: "image" }));
+  return [...texts, ...images].sort((a, b) => new Date(b.createdAt ?? 0) - new Date(a.createdAt ?? 0));
 }
 
 function renderEmpty(label) {
   return element("div", { className: "clipboard-empty" }, label);
 }
 
-function renderIconButton(text, label, onClick) {
+function renderIconButton(text, label, onClick, tone = "") {
   const button = element("button", {
-    className: "clipboard-icon-button",
+    className: `clipboard-icon-button ${tone}`.trim(),
     type: "button",
     ariaLabel: label,
     title: label,
@@ -276,6 +428,8 @@ function element(tagName, props = {}, ...children) {
       node.className = value;
     } else if (key === "ariaLabel") {
       node.setAttribute("aria-label", value);
+    } else if (key === "ariaSelected") {
+      node.setAttribute("aria-selected", value);
     } else if (key === "tabIndex") {
       node.tabIndex = value;
     } else if (key in node) {

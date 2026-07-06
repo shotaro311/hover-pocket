@@ -12,9 +12,11 @@ export function renderCalculatorProvider(context) {
     <div class="hp-calc-display">
       <div class="hp-calc-actions">
         <button class="hp-calc-tool" type="button" data-input="BS" aria-label="Backspace">⌫</button>
+        <button class="hp-calc-tool" type="button" data-clear-history aria-label="Clear history">↺</button>
         <button class="hp-calc-tool" type="button" data-copy aria-label="Copy">⧉</button>
       </div>
       <div class="hp-calc-history" data-history aria-label="Calculation history"></div>
+      <output class="hp-calc-expression" data-expression></output>
       <output class="hp-calc-output" data-display>0</output>
     </div>
     <div class="hp-calc-grid" data-grid></div>
@@ -24,6 +26,8 @@ export function renderCalculatorProvider(context) {
   const display = root.querySelector("[data-display]");
   const grid = root.querySelector("[data-grid]");
   const copyButton = root.querySelector("[data-copy]");
+  const clearHistoryButton = root.querySelector("[data-clear-history]");
+  const expressionDisplay = root.querySelector("[data-expression]");
   const history = root.querySelector("[data-history]");
   const keys = [
     ["AC", "utility"], ["+/-", "utility"], ["%", "utility"], ["÷", "op"],
@@ -52,6 +56,7 @@ export function renderCalculatorProvider(context) {
   });
 
   copyButton.addEventListener("click", copy);
+  clearHistoryButton.addEventListener("click", clearHistory);
   history.addEventListener("click", (event) => {
     const restoreTarget = /** @type {HTMLElement | null} */ (event.target.closest("[data-history-restore]"));
     if (restoreTarget) {
@@ -119,6 +124,16 @@ export function renderCalculatorProvider(context) {
     }
   }
 
+  async function clearHistory() {
+    try {
+      update(await context.request("calculator.clearHistory"));
+    } catch (error) {
+      display.textContent = "Error";
+      root.classList.add("is-error");
+      copyButton.disabled = true;
+    }
+  }
+
   /**
    * @param {string} id
    */
@@ -154,12 +169,15 @@ export function renderCalculatorProvider(context) {
   }
 
   /**
-   * @param {{ display?: string, hasError?: boolean, canCopy?: boolean, history?: Array<{ id?: string, expression?: string, result?: string }> }} state
+   * @param {{ display?: string, expressionDisplay?: string, hasError?: boolean, canCopy?: boolean, history?: Array<{ id?: string, expression?: string, result?: string }> }} state
    */
   function update(state) {
     display.textContent = state?.display ?? "0";
+    expressionDisplay.textContent = state?.expressionDisplay ?? "";
+    expressionDisplay.hidden = !state?.expressionDisplay;
     root.classList.toggle("is-error", Boolean(state?.hasError));
     copyButton.disabled = state?.canCopy === false;
+    clearHistoryButton.disabled = !Array.isArray(state?.history) || state.history.length === 0;
     renderHistory(Array.isArray(state?.history) ? state.history : []);
   }
 
@@ -242,6 +260,10 @@ function keyToInput(event) {
     case "+":
     case "%":
       return event.key;
+    case ";":
+      return "+";
+    case ":":
+      return "×";
     case "-":
       return "−";
     case "*":

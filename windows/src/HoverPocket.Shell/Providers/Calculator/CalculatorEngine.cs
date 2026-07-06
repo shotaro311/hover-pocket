@@ -11,14 +11,20 @@ internal sealed class CalculatorEngine
     private bool _isEnteringNewValue = true;
     private decimal? _lastOperand;
     private CalculatorOperation? _lastOperation;
+    private bool _justEvaluated;
+    private string? _completedExpressionDisplay;
+    private readonly List<CalculatorExpressionPart> _expressionParts = [];
     private readonly List<CalculatorHistoryEntry> _history = [];
 
     public string Display { get; private set; } = "0";
+
+    public string ExpressionDisplay => BuildExpressionDisplay();
 
     public bool HasError { get; private set; }
 
     public CalculatorSnapshot Snapshot => new(
         Display,
+        ExpressionDisplay,
         HasError,
         !HasError,
         _history.Select(entry => entry.Item).ToArray());
@@ -86,7 +92,14 @@ internal sealed class CalculatorEngine
         RecoverFromErrorIfNeeded();
         Display = entry.Item.Result;
         HasError = false;
+        _accumulator = null;
+        _pendingOperation = null;
         _isEnteringNewValue = false;
+        _lastOperand = null;
+        _lastOperation = null;
+        _justEvaluated = false;
+        _completedExpressionDisplay = null;
+        _expressionParts.Clear();
         return Snapshot;
     }
 
@@ -102,6 +115,12 @@ internal sealed class CalculatorEngine
         return Snapshot;
     }
 
+    public CalculatorSnapshot ClearHistory()
+    {
+        _history.Clear();
+        return Snapshot;
+    }
+
     public void Reset()
     {
         Display = "0";
@@ -111,6 +130,9 @@ internal sealed class CalculatorEngine
         _isEnteringNewValue = true;
         _lastOperand = null;
         _lastOperation = null;
+        _justEvaluated = false;
+        _completedExpressionDisplay = null;
+        _expressionParts.Clear();
     }
 
     private void InputDigit(int digit)
@@ -123,6 +145,11 @@ internal sealed class CalculatorEngine
         RecoverFromErrorIfNeeded();
         if (_isEnteringNewValue)
         {
+            if (_justEvaluated)
+            {
+                ClearExpressionForFreshInput();
+            }
+
             Display = digit.ToString(CultureInfo.InvariantCulture);
             _isEnteringNewValue = false;
             return;
@@ -141,6 +168,11 @@ internal sealed class CalculatorEngine
         RecoverFromErrorIfNeeded();
         if (_isEnteringNewValue)
         {
+            if (_justEvaluated)
+            {
+                ClearExpressionForFreshInput();
+            }
+
             Display = "0.";
             _isEnteringNewValue = false;
             return;
@@ -160,40 +192,45 @@ internal sealed class CalculatorEngine
             return;
         }
 
-        CalculatorOperation? historyOperation = null;
-        decimal historyLhs = 0m;
-        decimal historyRhs = 0m;
-        decimal historyResult = 0m;
-        if (_pendingOperation is not null && _accumulator is not null && !_isEnteringNewValue)
+        if (_justEvaluated)
         {
-            var lhs = _accumulator.Value;
-            var operationToRecord = _pendingOperation.Value;
-            if (!TryCalculate(lhs, current, operationToRecord, out var result))
-            {
-                ShowError();
-                return;
-            }
+            _expressionParts.Clear();
+            _completedExpressionDisplay = null;
+            _justEvaluated = false;
+        }
 
-            _accumulator = result;
-            Display = Format(result);
-            historyOperation = operationToRecord;
-            historyLhs = lhs;
-            historyRhs = current;
-            historyResult = result;
+        if (_expressionParts.Count == 0)
+        {
+            _expressionParts.Add(CalculatorExpressionPart.FromNumber(current));
+        }
+        else if (_expressionParts[^1].IsOperation && _isEnteringNewValue)
+        {
+            _expressionParts[^1] = CalculatorExpressionPart.FromOperation(operation);
+            _pendingOperation = operation;
+            _accumulator = current;
+            _lastOperand = null;
+            _lastOperation = null;
+            return;
+        }
+        else if (!_isEnteringNewValue)
+        {
+            _expressionParts.Add(CalculatorExpressionPart.FromNumber(current));
+        }
+
+        if (_expressionParts.Count == 0 || !_expressionParts[^1].IsOperation)
+        {
+            _expressionParts.Add(CalculatorExpressionPart.FromOperation(operation));
         }
         else
         {
-            _accumulator = current;
+            _expressionParts[^1] = CalculatorExpressionPart.FromOperation(operation);
         }
 
         _pendingOperation = operation;
+        _accumulator = current;
         _lastOperand = null;
         _lastOperation = null;
         _isEnteringNewValue = true;
-        if (historyOperation is not null)
-        {
-            AddHistory(historyOperation.Value, historyLhs, historyRhs, historyResult);
-        }
     }
 
     private void InputEquals()
@@ -204,47 +241,62 @@ internal sealed class CalculatorEngine
             return;
         }
 
-        CalculatorOperation? operation = null;
-        decimal rhs = current;
-        decimal? lhs = null;
-        if (_pendingOperation is not null && _accumulator is not null)
+        if (_expressionParts.Count == 0)
         {
-            operation = _pendingOperation;
-            lhs = _accumulator.Value;
-            rhs = current;
-        }
-        else if (_lastOperation is not null && _lastOperand is not null)
-        {
-            operation = _lastOperation;
-            rhs = _lastOperand.Value;
-            lhs = current;
-            _accumulator = current;
-        }
-        else
-        {
-            _isEnteringNewValue = true;
+            RepeatLastOperation(current);
             return;
         }
 
-        if (operation is null || _accumulator is null)
+        var parts = _expressionParts.ToList();
+        if (parts[^1].IsOperation)
         {
-            return;
+            parts.Add(CalculatorExpressionPart.FromNumber(current));
+        }
+        else if (!_isEnteringNewValue)
+        {
+            parts.Add(CalculatorExpressionPart.FromNumber(current));
         }
 
-        lhs ??= _accumulator.Value;
-        if (!TryCalculate(_accumulator.Value, rhs, operation.Value, out var result))
+        if (!TryEvaluate(parts, out var result))
         {
             ShowError();
             return;
         }
 
+        var expression = FormatExpression(parts);
+        Display = Format(result);
+        _expressionParts.Clear();
+        _completedExpressionDisplay = expression;
+        _accumulator = result;
+        _pendingOperation = null;
+        (_lastOperation, _lastOperand) = LastOperationAndOperand(parts);
+        _isEnteringNewValue = true;
+        _justEvaluated = true;
+        AddHistory(expression, result);
+    }
+
+    private void RepeatLastOperation(decimal current)
+    {
+        if (_lastOperation is null || _lastOperand is null)
+        {
+            _isEnteringNewValue = true;
+            return;
+        }
+
+        if (!TryCalculate(current, _lastOperand.Value, _lastOperation.Value, out var result))
+        {
+            ShowError();
+            return;
+        }
+
+        var expression = $"{Format(current)} {OperationSymbol(_lastOperation.Value)} {Format(_lastOperand.Value)}";
         Display = Format(result);
         _accumulator = result;
         _pendingOperation = null;
-        _lastOperation = operation;
-        _lastOperand = rhs;
+        _completedExpressionDisplay = expression;
         _isEnteringNewValue = true;
-        AddHistory(operation.Value, lhs.Value, rhs, result);
+        _justEvaluated = true;
+        AddHistory(expression, result);
     }
 
     private void Backspace()
@@ -253,6 +305,8 @@ internal sealed class CalculatorEngine
         if (_isEnteringNewValue)
         {
             Display = "0";
+            _completedExpressionDisplay = null;
+            _justEvaluated = false;
             return;
         }
 
@@ -274,6 +328,8 @@ internal sealed class CalculatorEngine
     private void ToggleSign()
     {
         RecoverFromErrorIfNeeded();
+        _completedExpressionDisplay = null;
+        _justEvaluated = false;
         if (Display == "0")
         {
             Display = "-0";
@@ -295,6 +351,8 @@ internal sealed class CalculatorEngine
             return;
         }
 
+        _completedExpressionDisplay = null;
+        _justEvaluated = false;
         var result = current / 100m;
         Display = Format(result);
         _isEnteringNewValue = false;
@@ -303,6 +361,74 @@ internal sealed class CalculatorEngine
     private bool TryCurrentDecimal(out decimal current)
     {
         return decimal.TryParse(Display, NumberStyles.Number, CultureInfo.InvariantCulture, out current);
+    }
+
+    private static bool TryEvaluate(IReadOnlyList<CalculatorExpressionPart> parts, out decimal result)
+    {
+        var values = new List<decimal>();
+        var operations = new List<CalculatorOperation>();
+        var expectNumber = true;
+        foreach (var part in parts)
+        {
+            if (expectNumber)
+            {
+                if (!part.IsNumber)
+                {
+                    result = 0m;
+                    return false;
+                }
+
+                values.Add(part.Number!.Value);
+                expectNumber = false;
+                continue;
+            }
+
+            if (!part.IsOperation)
+            {
+                result = 0m;
+                return false;
+            }
+
+            operations.Add(part.Operation!.Value);
+            expectNumber = true;
+        }
+
+        if (expectNumber || values.Count == 0 || values.Count != operations.Count + 1)
+        {
+            result = 0m;
+            return false;
+        }
+
+        for (var index = 0; index < operations.Count;)
+        {
+            var operation = operations[index];
+            if (operation is not (CalculatorOperation.Multiply or CalculatorOperation.Divide))
+            {
+                index++;
+                continue;
+            }
+
+            if (!TryCalculate(values[index], values[index + 1], operation, out var partial))
+            {
+                result = 0m;
+                return false;
+            }
+
+            values[index] = partial;
+            values.RemoveAt(index + 1);
+            operations.RemoveAt(index);
+        }
+
+        result = values[0];
+        for (var index = 0; index < operations.Count; index++)
+        {
+            if (!TryCalculate(result, values[index + 1], operations[index], out result))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool TryCalculate(
@@ -346,6 +472,9 @@ internal sealed class CalculatorEngine
         _isEnteringNewValue = true;
         _lastOperand = null;
         _lastOperation = null;
+        _justEvaluated = false;
+        _completedExpressionDisplay = null;
+        _expressionParts.Clear();
     }
 
     private CalculatorHistoryEntry? FindHistoryEntry(string historyId)
@@ -354,11 +483,11 @@ internal sealed class CalculatorEngine
             string.Equals(entry.Item.Id, historyId, StringComparison.Ordinal));
     }
 
-    private void AddHistory(CalculatorOperation operation, decimal lhs, decimal rhs, decimal result)
+    private void AddHistory(string expression, decimal result)
     {
         var item = new CalculatorHistoryItem(
             Guid.NewGuid().ToString("N"),
-            $"{Format(lhs)} {OperationSymbol(operation)} {Format(rhs)}",
+            expression,
             Format(result));
         _history.Add(new CalculatorHistoryEntry(item, CaptureState()));
         if (_history.Count > MaxHistoryItems)
@@ -376,7 +505,10 @@ internal sealed class CalculatorEngine
             _pendingOperation,
             _isEnteringNewValue,
             _lastOperand,
-            _lastOperation);
+            _lastOperation,
+            _justEvaluated,
+            _completedExpressionDisplay,
+            _expressionParts.ToArray());
     }
 
     private void RestoreState(CalculatorInternalState state)
@@ -388,6 +520,10 @@ internal sealed class CalculatorEngine
         _isEnteringNewValue = state.IsEnteringNewValue;
         _lastOperand = state.LastOperand;
         _lastOperation = state.LastOperation;
+        _justEvaluated = state.JustEvaluated;
+        _completedExpressionDisplay = state.CompletedExpressionDisplay;
+        _expressionParts.Clear();
+        _expressionParts.AddRange(state.ExpressionParts);
     }
 
     private void RecoverFromErrorIfNeeded()
@@ -396,6 +532,43 @@ internal sealed class CalculatorEngine
         {
             Reset();
         }
+    }
+
+    private void ClearExpressionForFreshInput()
+    {
+        _accumulator = null;
+        _pendingOperation = null;
+        _lastOperand = null;
+        _lastOperation = null;
+        _justEvaluated = false;
+        _completedExpressionDisplay = null;
+        _expressionParts.Clear();
+    }
+
+    private string BuildExpressionDisplay()
+    {
+        if (HasError)
+        {
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_completedExpressionDisplay))
+        {
+            return _completedExpressionDisplay;
+        }
+
+        if (_expressionParts.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var parts = _expressionParts.ToList();
+        if (!_isEnteringNewValue && parts[^1].IsOperation && TryCurrentDecimal(out var current))
+        {
+            parts.Add(CalculatorExpressionPart.FromNumber(current));
+        }
+
+        return FormatExpression(parts);
     }
 
     private static string NormalizeToken(string token)
@@ -411,8 +584,9 @@ internal sealed class CalculatorEngine
         return trimmed switch
         {
             "÷" => "/",
-            "×" or "x" or "X" => "*",
+            "×" or "x" or "X" or ":" => "*",
             "−" => "-",
+            ";" => "+",
             "\r" or "\n" or "Enter" or "NumpadEnter" or "NumpadEqual" => "=",
             "Escape" or "Esc" or "C" => "AC",
             "Backspace" or "Delete" => "BS",
@@ -424,6 +598,28 @@ internal sealed class CalculatorEngine
             "±" => "+/-",
             var normalized => normalized
         };
+    }
+
+    private static (CalculatorOperation? Operation, decimal? Operand) LastOperationAndOperand(
+        IReadOnlyList<CalculatorExpressionPart> parts)
+    {
+        for (var index = parts.Count - 2; index >= 0; index--)
+        {
+            if (parts[index].IsOperation && index + 1 < parts.Count && parts[index + 1].IsNumber)
+            {
+                return (parts[index].Operation, parts[index + 1].Number);
+            }
+        }
+
+        return (null, null);
+    }
+
+    private static string FormatExpression(IEnumerable<CalculatorExpressionPart> parts)
+    {
+        return string.Join(" ", parts.Select(part =>
+            part.IsNumber
+                ? Format(part.Number!.Value)
+                : OperationSymbol(part.Operation!.Value)));
     }
 
     private static string OperationSymbol(CalculatorOperation operation)
@@ -453,7 +649,29 @@ internal sealed class CalculatorEngine
         CalculatorOperation? PendingOperation,
         bool IsEnteringNewValue,
         decimal? LastOperand,
-        CalculatorOperation? LastOperation);
+        CalculatorOperation? LastOperation,
+        bool JustEvaluated,
+        string? CompletedExpressionDisplay,
+        IReadOnlyList<CalculatorExpressionPart> ExpressionParts);
+
+    private readonly record struct CalculatorExpressionPart(
+        decimal? Number,
+        CalculatorOperation? Operation)
+    {
+        public bool IsNumber => Number is not null;
+
+        public bool IsOperation => Operation is not null;
+
+        public static CalculatorExpressionPart FromNumber(decimal value)
+        {
+            return new CalculatorExpressionPart(value, null);
+        }
+
+        public static CalculatorExpressionPart FromOperation(CalculatorOperation operation)
+        {
+            return new CalculatorExpressionPart(null, operation);
+        }
+    }
 }
 
 internal enum CalculatorOperation
@@ -466,6 +684,7 @@ internal enum CalculatorOperation
 
 internal sealed record CalculatorSnapshot(
     string Display,
+    string ExpressionDisplay,
     bool HasError,
     bool CanCopy,
     IReadOnlyList<CalculatorHistoryItem> History);

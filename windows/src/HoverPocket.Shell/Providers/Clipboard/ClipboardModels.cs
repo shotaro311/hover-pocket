@@ -14,6 +14,8 @@ internal sealed class ClipboardTextHistoryItem
 
     public string Text { get; set; } = string.Empty;
 
+    public bool Favorite { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     [JsonIgnore]
@@ -34,6 +36,7 @@ internal sealed class ClipboardTextHistoryItem
         {
             Id = Id,
             Text = Text,
+            Favorite = Favorite,
             CreatedAt = CreatedAt
         };
     }
@@ -51,6 +54,8 @@ internal sealed class ClipboardImageHistoryItem
 
     public int Height { get; set; }
 
+    public bool Favorite { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public ClipboardImageHistoryItem Clone()
@@ -62,6 +67,7 @@ internal sealed class ClipboardImageHistoryItem
             ContentHash = ContentHash,
             Width = Width,
             Height = Height,
+            Favorite = Favorite,
             CreatedAt = CreatedAt
         };
     }

@@ -41,6 +41,8 @@ internal sealed class ClipboardBridgeController : IDisposable
         dispatcher.Register("clipboard.copyText", CopyTextAsync);
         dispatcher.Register("clipboard.copyImage", CopyImageAsync);
         dispatcher.Register("clipboard.clear", ClearAsync);
+        dispatcher.Register("clipboard.toggleFavorite", ToggleFavoriteAsync);
+        dispatcher.Register("clipboard.deleteItem", DeleteItemAsync);
         dispatcher.Register("clipboard.setPrivateMode", SetPrivateModeAsync);
         dispatcher.Register("clipboard.startExternalDrag", StartExternalDragAsync);
     }
@@ -114,6 +116,30 @@ internal sealed class ClipboardBridgeController : IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         _store.Clear();
         return Task.FromResult<object?>(BuildState());
+    }
+
+    private Task<object?> ToggleFavoriteAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult<object?>(new
+        {
+            updated = _store.ToggleFavorite(
+                ParseKind(ReadRequiredString(parameters, "kind")),
+                ReadRequiredGuid(parameters, "id")),
+            state = BuildState()
+        });
+    }
+
+    private Task<object?> DeleteItemAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult<object?>(new
+        {
+            deleted = _store.DeleteItem(
+                ParseKind(ReadRequiredString(parameters, "kind")),
+                ReadRequiredGuid(parameters, "id")),
+            state = BuildState()
+        });
     }
 
     private Task<object?> SetPrivateModeAsync(JsonElement? parameters, CancellationToken cancellationToken)

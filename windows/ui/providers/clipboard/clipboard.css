@@ -15,6 +15,7 @@
 .clipboard-loading,
 .clipboard-empty {
   display: grid;
+  min-height: 0;
   place-items: center;
   color: rgba(255, 255, 255, 0.48);
   font-size: 12px;
@@ -56,7 +57,8 @@
 
 .clipboard-icon-button,
 .clipboard-text-button,
-.clipboard-drag-button {
+.clipboard-drag-button,
+.clipboard-tab {
   border: 0;
   font: inherit;
   cursor: default;
@@ -67,12 +69,18 @@
   display: inline-grid;
   width: 22px;
   height: 22px;
+  flex: 0 0 auto;
   place-items: center;
   border-radius: 6px;
   color: rgba(255, 255, 255, 0.72);
   background: rgba(255, 255, 255, 0.08);
   font-size: 12px;
   font-weight: 900;
+}
+
+.clipboard-icon-button.is-danger {
+  color: #ffb6b6;
+  background: rgba(255, 124, 124, 0.14);
 }
 
 .clipboard-text-button {
@@ -93,61 +101,80 @@
 .clipboard-icon-button:hover,
 .clipboard-text-button:hover,
 .clipboard-drag-button:hover,
+.clipboard-tab:hover,
 .clipboard-icon-button:focus-visible,
 .clipboard-text-button:focus-visible,
-.clipboard-drag-button:focus-visible {
+.clipboard-drag-button:focus-visible,
+.clipboard-tab:focus-visible {
   color: white;
   background: rgba(255, 255, 255, 0.15);
   outline: none;
 }
 
-.clipboard-columns {
+.clipboard-browser {
   display: grid;
-  min-height: 0;
-  grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
-  gap: 12px;
-}
-
-.clipboard-column {
-  display: grid;
-  min-width: 0;
   min-height: 0;
   grid-template-rows: auto 1fr;
-  gap: 8px;
+  gap: 9px;
 }
 
-.clipboard-column + .clipboard-column {
-  padding-left: 12px;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+.clipboard-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
 }
 
-.clipboard-column-title {
+.clipboard-tab {
   display: flex;
+  height: 28px;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  color: white;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.62);
+  background: transparent;
   font-size: 11px;
   font-weight: 900;
 }
 
-.clipboard-column-title strong {
-  color: rgba(255, 255, 255, 0.42);
+.clipboard-tab strong {
+  color: rgba(255, 255, 255, 0.38);
   font-size: 10px;
 }
 
-.clipboard-text-list,
-.clipboard-image-grid {
+.clipboard-tab.is-active {
+  color: white;
+  background: rgba(99, 214, 181, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(99, 214, 181, 0.22);
+}
+
+.clipboard-panel {
   min-height: 0;
+  overflow: hidden;
+}
+
+.clipboard-text-list,
+.clipboard-image-grid,
+.clipboard-favorites-list {
+  min-height: 0;
+  max-height: 100%;
   overflow: auto;
   scrollbar-width: none;
 }
 
 .clipboard-text-list::-webkit-scrollbar,
-.clipboard-image-grid::-webkit-scrollbar {
+.clipboard-image-grid::-webkit-scrollbar,
+.clipboard-favorites-list::-webkit-scrollbar,
+.clipboard-preview-text::-webkit-scrollbar {
   display: none;
 }
 
-.clipboard-text-list {
+.clipboard-text-list,
+.clipboard-favorites-list {
   display: grid;
   align-content: start;
   gap: 7px;
@@ -162,6 +189,11 @@
   border: 1px solid rgba(255, 255, 255, 0.055);
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.045);
+}
+
+.clipboard-text-item.is-favorite,
+.clipboard-image-item.is-favorite {
+  border-color: rgba(255, 226, 128, 0.2);
 }
 
 .clipboard-text-item:hover,
@@ -198,11 +230,22 @@
   font-weight: 800;
 }
 
+.clipboard-item-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
 .clipboard-image-grid {
   display: grid;
   align-content: start;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+
+.clipboard-favorites-list .clipboard-image-item {
+  max-width: none;
 }
 
 .clipboard-image-item {
@@ -217,7 +260,7 @@
 
 .clipboard-image-preview {
   display: grid;
-  height: 78px;
+  height: 76px;
   place-items: center;
   overflow: hidden;
   border-radius: 7px;
@@ -232,9 +275,61 @@
   padding: 5px;
 }
 
-.clipboard-image-meta {
+.clipboard-image-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
+}
+
+.clipboard-full-preview {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.clipboard-preview-header {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.clipboard-preview-text {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  color: rgba(255, 255, 255, 0.9);
+  font: 650 12px/1.45 "Segoe UI", system-ui, sans-serif;
+  overflow-wrap: anywhere;
+  scrollbar-width: none;
+  white-space: pre-wrap;
+}
+
+.clipboard-preview-image {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+  overflow: hidden;
+  padding: 12px;
+}
+
+.clipboard-preview-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
 }
