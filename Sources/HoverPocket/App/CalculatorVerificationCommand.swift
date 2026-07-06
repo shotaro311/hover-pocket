@@ -47,6 +47,10 @@ enum CalculatorVerificationCommand {
                 return false
             }
         }
+        let jisKeyboardStore = CalculatorStore()
+        guard jisKeyboardStore.runSequence(parse("5;6:2=")) == "17" else {
+            return false
+        }
         return verifyHistoryCases()
     }
 
@@ -123,11 +127,11 @@ enum CalculatorVerificationCommand {
                 return Int(String(character)).map(CalculatorStore.Button.digit)
             case ".":
                 return .decimalSeparator
-            case "+":
+            case "+", "＋", ";":
                 return .operation(.add)
             case "-":
                 return .operation(.subtract)
-            case "*", "x", "X":
+            case "*", "＊", "x", "X", ":":
                 return .operation(.multiply)
             case "/":
                 return .operation(.divide)

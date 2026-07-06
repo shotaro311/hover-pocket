@@ -757,11 +757,11 @@ final class CalculatorStore: ObservableObject {
 extension CalculatorStore.Operation {
     init?(inputSymbol: Character) {
         switch inputSymbol {
-        case "+":
+        case "+", "＋", ";":
             self = .add
         case "-", "−":
             self = .subtract
-        case "*", "×", "x", "X":
+        case "*", "＊", "×", "x", "X", ":":
             self = .multiply
         case "/", "÷":
             self = .divide

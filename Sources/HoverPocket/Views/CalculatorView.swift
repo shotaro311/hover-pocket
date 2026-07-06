@@ -337,11 +337,11 @@ struct CalculatorView: View {
             }
         case ".", ",":
             store.press(.decimalSeparator)
-        case "+", "=":
+        case "+", "＋", ";", "=":
             store.press(key == "=" ? .equals : .operation(.add))
         case "-":
             store.press(.operation(.subtract))
-        case "*", "×", "x", "X":
+        case "*", "＊", "×", "x", "X", ":":
             store.press(.operation(.multiply))
         case "/", "÷":
             store.press(.operation(.divide))
@@ -360,6 +360,10 @@ struct CalculatorView: View {
 
     private func handleKeyCode(_ keyCode: UInt16) -> Bool {
         switch keyCode {
+        case 39:
+            store.press(.operation(.multiply))
+        case 41:
+            store.press(.operation(.add))
         case 36, 76:
             store.press(.equals)
         case 65:
@@ -408,6 +412,10 @@ struct CalculatorView: View {
             }
         case ".":
             store.press(.decimalSeparator)
+        case ";":
+            store.press(.operation(.add))
+        case ":":
+            store.press(.operation(.multiply))
         case "=":
             store.press(.equals)
         default:

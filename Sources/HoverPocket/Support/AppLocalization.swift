@@ -64,14 +64,19 @@ enum AppTextKey: String, Sendable {
     case chooseIntendedAction
     case clipboard
     case clipboardClearHistory
+    case clipboardDeleteFavorite
     case clipboardDragImage
     case clipboardDragText
     case clipboardEmptyText
+    case clipboardFavorite
+    case clipboardFavorites
     case clipboardImages
+    case clipboardNoFavorites
     case clipboardNoImages
     case clipboardNoText
     case clipboardPaused
     case clipboardText
+    case clipboardUnfavorite
     case clipboardWatching
     case controls
     case controlsBack10
@@ -309,15 +314,20 @@ enum AppText {
         case .checkForUpdates: return "アップデートを確認"
         case .chooseIntendedAction: return "実行する操作を選択"
         case .clipboard: return "クリップボード"
-        case .clipboardClearHistory: return "クリップボード履歴を消去"
+        case .clipboardClearHistory: return "お気に入り以外の履歴を消去"
+        case .clipboardDeleteFavorite: return "履歴から削除"
         case .clipboardDragImage: return "画像を他のアプリへドラッグ"
         case .clipboardDragText: return "テキストを他のアプリへドラッグ"
         case .clipboardEmptyText: return "空のテキスト"
+        case .clipboardFavorite: return "お気に入りに追加"
+        case .clipboardFavorites: return "お気に入り"
         case .clipboardImages: return "画像"
+        case .clipboardNoFavorites: return "お気に入りはまだありません"
         case .clipboardNoImages: return "画像はまだありません"
         case .clipboardNoText: return "テキストはまだありません"
         case .clipboardPaused: return "監視を停止中"
         case .clipboardText: return "テキスト"
+        case .clipboardUnfavorite: return "お気に入りを解除"
         case .clipboardWatching: return "クリップボードを監視中"
         case .controls: return "コントロール"
         case .controlsBack10: return "10秒戻す"
@@ -525,15 +535,20 @@ enum AppText {
         case .checkForUpdates: return "Check for Updates"
         case .chooseIntendedAction: return "Choose the intended action"
         case .clipboard: return "Clipboard"
-        case .clipboardClearHistory: return "Clear clipboard history"
+        case .clipboardClearHistory: return "Clear non-favorite history"
+        case .clipboardDeleteFavorite: return "Delete from history"
         case .clipboardDragImage: return "Drag to drop image into another app"
         case .clipboardDragText: return "Drag to drop text into another app"
         case .clipboardEmptyText: return "Empty text"
+        case .clipboardFavorite: return "Add to favorites"
+        case .clipboardFavorites: return "Favorites"
         case .clipboardImages: return "Images"
+        case .clipboardNoFavorites: return "No favorites yet"
         case .clipboardNoImages: return "No images yet"
         case .clipboardNoText: return "No text yet"
         case .clipboardPaused: return "Clipboard paused"
         case .clipboardText: return "Text"
+        case .clipboardUnfavorite: return "Remove from favorites"
         case .clipboardWatching: return "Watching clipboard"
         case .controls: return "Controls"
         case .controlsBack10: return "Back 10 seconds"

@@ -13,6 +13,9 @@ if CommandLine.arguments.contains("--verify-media") {
 if CommandLine.arguments.contains("--verify-calculator") {
     CalculatorVerificationCommand.run()
 }
+if CommandLine.arguments.contains("--verify-clipboard") {
+    ClipboardVerificationCommand.run()
+}
 if CommandLine.arguments.contains("--verify-panel-layout") {
     PanelLayoutVerificationCommand.run()
 }

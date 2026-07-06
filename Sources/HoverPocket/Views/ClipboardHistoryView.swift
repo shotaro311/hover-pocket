@@ -2,27 +2,52 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+private enum ClipboardHistoryTab: CaseIterable {
+    case text
+    case images
+    case favorites
+}
+
+private enum ClipboardExpandedItem: Identifiable, Equatable {
+    case text(ClipboardTextHistoryItem)
+    case image(ClipboardImageHistoryItem)
+
+    var id: String {
+        switch self {
+        case .text(let item):
+            return "text-\(item.id.uuidString)"
+        case .image(let item):
+            return "image-\(item.id.uuidString)"
+        }
+    }
+}
+
 struct ClipboardHistoryView: View {
     @ObservedObject var settings: AppSettings
     let onExternalDragStarted: @MainActor () -> Void
 
     @ObservedObject private var store = ClipboardHistoryStore.shared
+    @State private var selectedTab: ClipboardHistoryTab = .text
+    @State private var expandedItem: ClipboardExpandedItem?
 
     var body: some View {
-        VStack(spacing: 10) {
-            header
+        ZStack {
+            VStack(spacing: 10) {
+                header
+                tabBar
+                content
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
 
-            HStack(alignment: .top, spacing: 12) {
-                textColumn
-
-                Divider()
-                    .overlay(Color.white.opacity(0.08))
-
-                imageColumn
+            if let expandedItem {
+                expandedPreview(expandedItem)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .animation(.easeOut(duration: 0.16), value: expandedItem)
         .onAppear {
             store.startMonitoring()
         }
@@ -49,22 +74,68 @@ struct ClipboardHistoryView: View {
                 Image(systemName: "trash")
             }
             .buttonStyle(IconButtonStyle(selected: false))
-            .disabled(store.textItems.isEmpty && store.imageItems.isEmpty)
+            .disabled(store.nonFavoriteItemCount == 0)
             .help(text(.clipboardClearHistory))
         }
     }
 
-    private var textColumn: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            columnTitle(text(.clipboardText), count: store.textItems.count)
+    private var tabBar: some View {
+        HStack(spacing: 6) {
+            ForEach(ClipboardHistoryTab.allCases, id: \.self) { tab in
+                Button {
+                    selectedTab = tab
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: tabIcon(tab))
+                            .font(.system(size: 10, weight: .bold))
+                        Text(tabTitle(tab))
+                            .panelTextFont(size: 10.5, weight: .bold, design: .monospaced)
+                        Text("\(tabCount(tab))")
+                            .panelTextFont(size: 9, weight: .bold, design: .monospaced)
+                            .foregroundStyle(tab == selectedTab ? .white.opacity(0.58) : .white.opacity(0.34))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 30)
+                    .foregroundStyle(tab == selectedTab ? .white : .white.opacity(0.5))
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(tab == selectedTab ? Color.white.opacity(0.11) : Color.white.opacity(0.035))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(tab == selectedTab ? Color.white.opacity(0.11) : Color.white.opacity(0.045), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
 
-            if store.textItems.isEmpty {
-                emptyState(symbol: "text.alignleft", title: text(.clipboardNoText))
+    @ViewBuilder
+    private var content: some View {
+        switch selectedTab {
+        case .text:
+            textList(store.textItems, emptyTitle: text(.clipboardNoText), showDelete: false)
+        case .images:
+            imageGrid(store.imageItems, emptyTitle: text(.clipboardNoImages), showDelete: false)
+        case .favorites:
+            favoritesContent
+        }
+    }
+
+    private func textList(
+        _ items: [ClipboardTextHistoryItem],
+        emptyTitle: String,
+        showDelete: Bool
+    ) -> some View {
+        Group {
+            if items.isEmpty {
+                emptyState(symbol: "text.alignleft", title: emptyTitle)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 7) {
-                        ForEach(store.textItems) { item in
-                            textItemRow(item)
+                        ForEach(items) { item in
+                            textItemRow(item, showDelete: showDelete)
                         }
                     }
                 }
@@ -74,23 +145,22 @@ struct ClipboardHistoryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private var imageColumn: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            columnTitle(text(.clipboardImages), count: store.imageItems.count)
-
-            if store.imageItems.isEmpty {
-                emptyState(symbol: "photo", title: text(.clipboardNoImages))
+    private func imageGrid(
+        _ items: [ClipboardImageHistoryItem],
+        emptyTitle: String,
+        showDelete: Bool
+    ) -> some View {
+        Group {
+            if items.isEmpty {
+                emptyState(symbol: "photo", title: emptyTitle)
             } else {
                 ScrollView {
                     LazyVGrid(
-                        columns: [
-                            GridItem(.flexible(), spacing: 8),
-                            GridItem(.flexible(), spacing: 8)
-                        ],
+                        columns: [GridItem(.adaptive(minimum: 112), spacing: 8)],
                         spacing: 8
                     ) {
-                        ForEach(store.imageItems) { item in
-                            imageItemTile(item)
+                        ForEach(items) { item in
+                            imageItemTile(item, showDelete: showDelete)
                         }
                     }
                 }
@@ -100,21 +170,57 @@ struct ClipboardHistoryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private func columnTitle(_ title: String, count: Int) -> some View {
+    private var favoritesContent: some View {
+        let favoriteTextItems = store.favoriteTextItems
+        let favoriteImageItems = store.favoriteImageItems
+        return Group {
+            if favoriteTextItems.isEmpty && favoriteImageItems.isEmpty {
+                emptyState(symbol: "star", title: text(.clipboardNoFavorites))
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        if !favoriteTextItems.isEmpty {
+                            sectionTitle(text(.clipboardText), count: favoriteTextItems.count)
+                            ForEach(favoriteTextItems) { item in
+                                textItemRow(item, showDelete: true)
+                            }
+                        }
+
+                        if !favoriteImageItems.isEmpty {
+                            sectionTitle(text(.clipboardImages), count: favoriteImageItems.count)
+                            LazyVGrid(
+                                columns: [GridItem(.adaptive(minimum: 112), spacing: 8)],
+                                spacing: 8
+                            ) {
+                                ForEach(favoriteImageItems) { item in
+                                    imageItemTile(item, showDelete: true)
+                                }
+                            }
+                        }
+                    }
+                }
+                .scrollIndicators(.never)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func sectionTitle(_ title: String, count: Int) -> some View {
         HStack(spacing: 6) {
             Text(title)
-                .panelTextFont(size: 11, weight: .bold, design: .monospaced)
-                .foregroundStyle(.white)
+                .panelTextFont(size: 10.5, weight: .bold, design: .monospaced)
+                .foregroundStyle(.white.opacity(0.76))
 
             Text("\(count)")
                 .panelTextFont(size: 9, weight: .bold, design: .monospaced)
-                .foregroundStyle(.white.opacity(0.42))
+                .foregroundStyle(.white.opacity(0.38))
 
             Spacer(minLength: 0)
         }
+        .padding(.top, 2)
     }
 
-    private func textItemRow(_ item: ClipboardTextHistoryItem) -> some View {
+    private func textItemRow(_ item: ClipboardTextHistoryItem, showDelete: Bool) -> some View {
         HStack(alignment: .top, spacing: 7) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(previewText(for: item))
@@ -126,16 +232,32 @@ struct ClipboardHistoryView: View {
                     .panelTextFont(size: 8.5, weight: .medium, design: .monospaced)
                     .foregroundStyle(.white.opacity(0.34))
             }
-
-            Spacer(minLength: 4)
-
-            Button {
-                store.copyText(item)
-            } label: {
-                Image(systemName: "doc.on.doc")
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                expandedItem = .text(item)
             }
-            .buttonStyle(IconButtonStyle(selected: false))
-            .help(text(.copyText))
+
+            HStack(spacing: 2) {
+                favoriteButton(
+                    isFavorite: item.isFavorite,
+                    action: { store.toggleTextFavorite(item) }
+                )
+
+                Button {
+                    store.copyText(item)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(IconButtonStyle(selected: false))
+                .help(text(.copyText))
+
+                if showDelete {
+                    deleteButton {
+                        store.deleteText(item)
+                    }
+                }
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
@@ -145,7 +267,7 @@ struct ClipboardHistoryView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .stroke(Color.white.opacity(0.055), lineWidth: 1)
+                .stroke(item.isFavorite ? Color.yellow.opacity(0.22) : Color.white.opacity(0.055), lineWidth: 1)
         )
         .onDrag {
             onExternalDragStarted()
@@ -154,10 +276,10 @@ struct ClipboardHistoryView: View {
         .help(text(.clipboardDragText))
     }
 
-    private func imageItemTile(_ item: ClipboardImageHistoryItem) -> some View {
+    private func imageItemTile(_ item: ClipboardImageHistoryItem, showDelete: Bool) -> some View {
         let fileURL = store.fileURL(for: item)
         return VStack(alignment: .leading, spacing: 5) {
-            ZStack {
+            ZStack(alignment: .topTrailing) {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(Color.white.opacity(0.05))
 
@@ -171,9 +293,19 @@ struct ClipboardHistoryView: View {
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.34))
                 }
+
+                favoriteButton(
+                    isFavorite: item.isFavorite,
+                    action: { store.toggleImageFavorite(item) }
+                )
+                .padding(4)
             }
-            .frame(height: 78)
+            .frame(height: 96)
             .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .contentShape(Rectangle())
+            .onTapGesture {
+                expandedItem = .image(item)
+            }
 
             HStack(spacing: 4) {
                 Text("\(item.width)x\(item.height)")
@@ -190,6 +322,12 @@ struct ClipboardHistoryView: View {
                 }
                 .buttonStyle(IconButtonStyle(selected: false))
                 .help(text(.copyImage))
+
+                if showDelete {
+                    deleteButton {
+                        store.deleteImage(item)
+                    }
+                }
             }
         }
         .padding(6)
@@ -199,7 +337,7 @@ struct ClipboardHistoryView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.055), lineWidth: 1)
+                .stroke(item.isFavorite ? Color.yellow.opacity(0.22) : Color.white.opacity(0.055), lineWidth: 1)
         )
         .onDrag {
             onExternalDragStarted()
@@ -208,11 +346,133 @@ struct ClipboardHistoryView: View {
         .help(text(.clipboardDragImage))
     }
 
+    private func favoriteButton(isFavorite: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: isFavorite ? "star.fill" : "star")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isFavorite ? Color.yellow.opacity(0.92) : Color.white.opacity(0.36))
+                .frame(width: 24, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isFavorite ? Color.yellow.opacity(0.13) : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+        .help(isFavorite ? text(.clipboardUnfavorite) : text(.clipboardFavorite))
+    }
+
+    private func deleteButton(action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "trash")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.red.opacity(0.74))
+                .frame(width: 24, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.red.opacity(0.08))
+                )
+        }
+        .buttonStyle(.plain)
+        .help(text(.clipboardDeleteFavorite))
+    }
+
+    private func expandedPreview(_ item: ClipboardExpandedItem) -> some View {
+        ZStack(alignment: .topTrailing) {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.black.opacity(0.94))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
+
+            expandedPreviewBody(item)
+                .padding(14)
+
+            Button {
+                expandedItem = nil
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(IconButtonStyle(selected: false))
+            .padding(8)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            expandedItem = nil
+        }
+    }
+
+    @ViewBuilder
+    private func expandedPreviewBody(_ item: ClipboardExpandedItem) -> some View {
+        switch item {
+        case .text(let textItem):
+            ScrollView {
+                Text(textItem.text.isEmpty ? text(.clipboardEmptyText) : textItem.text)
+                    .panelTextFont(size: 13, weight: .semibold)
+                    .foregroundStyle(.white.opacity(0.9))
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .textSelection(.enabled)
+                    .padding(.trailing, 26)
+                    .onTapGesture {
+                        expandedItem = nil
+                    }
+            }
+            .scrollIndicators(.visible)
+        case .image(let imageItem):
+            let fileURL = store.fileURL(for: imageItem)
+            if let image = NSImage(contentsOf: fileURL) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(24)
+                    .onTapGesture {
+                        expandedItem = nil
+                    }
+            } else {
+                emptyState(symbol: "photo.badge.exclamationmark", title: text(.clipboardNoImages))
+            }
+        }
+    }
+
     private func previewText(for item: ClipboardTextHistoryItem) -> String {
         let collapsed = item.text
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return collapsed.isEmpty ? text(.clipboardEmptyText) : collapsed
+    }
+
+    private func tabTitle(_ tab: ClipboardHistoryTab) -> String {
+        switch tab {
+        case .text:
+            return text(.clipboardText)
+        case .images:
+            return text(.clipboardImages)
+        case .favorites:
+            return text(.clipboardFavorites)
+        }
+    }
+
+    private func tabIcon(_ tab: ClipboardHistoryTab) -> String {
+        switch tab {
+        case .text:
+            return "text.alignleft"
+        case .images:
+            return "photo"
+        case .favorites:
+            return "star"
+        }
+    }
+
+    private func tabCount(_ tab: ClipboardHistoryTab) -> Int {
+        switch tab {
+        case .text:
+            return store.textItems.count
+        case .images:
+            return store.imageItems.count
+        case .favorites:
+            return store.favoriteTextItems.count + store.favoriteImageItems.count
+        }
     }
 
     private func text(_ key: AppTextKey) -> String {

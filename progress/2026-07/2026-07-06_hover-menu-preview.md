@@ -1,5 +1,85 @@
 # 2026-07-06: Cross-platform agent read gate
 
+## Mac Calculator JIS Keyboard Shortcuts
+
+### 目的
+
+- 日本語キーボードで `+` と `×` の入力に Shift が必要な状態を解消する。
+- JIS キーボードの物理キーに合わせ、Shift なしの `;` を `+`、`:` を `×` として扱う。
+
+### 変更
+
+- `Sources/HoverPocket/Views/CalculatorView.swift`
+  - `characters` として届く `;` を `+`、`:` を `×` として扱うよう変更。
+  - JIS 配列の `;` / `:` 物理キーに対応する keyCode fallback も追加。
+  - 既存の `+`、`*`、`×`、numpad operator、Enter、Escape、Backspace の挙動は維持。
+- `Sources/HoverPocket/State/CalculatorStore.swift`
+  - 式 parser の `Operation(inputSymbol:)` でも `;` を `+`、`:` を `×` として扱うよう変更。
+- `Sources/HoverPocket/App/CalculatorVerificationCommand.swift`
+  - `--calculator-sequence` parser に `;` / `:` を追加。
+  - built-in verifier に `5;6:2=` -> `17` の JIS キーボード相当ケースを追加。
+- `README.md`
+  - 日本語キーボードでは Shift なしの `;` / `:` で `+` / `×` を入力できることを追記。
+
+### 検証
+
+- `swift build`: 成功。
+- `.build/debug/HoverPocket --verify-calculator`: 成功。
+- `.build/debug/HoverPocket --verify-calculator --calculator-sequence '5;6:2='`: 成功。`calculator_display=17`。
+- `.build/debug/HoverPocket --verify-clipboard`: 成功。前回の Clipboard お気に入り変更も回帰なし。
+- `.build/debug/HoverPocket --verify-panel-layout`: 成功。`panel_layout_cases=63`。
+- `git diff --check`: 成功。
+
+## Mac Clipboard Favorites and Full Preview
+
+### 目的
+
+- Clipboard のテキスト履歴と画像履歴を、星アイコンでお気に入り登録できるようにする。
+- お気に入り登録した履歴は通常のクリアでは消さず、Favorites タブから明示削除できるようにする。
+- テキストと画像をクリックしたとき、パネル内で大きく確認できるようにする。
+
+### 変更
+
+- `Sources/HoverPocket/Models/ClipboardModels.swift`
+  - `ClipboardTextHistoryItem` / `ClipboardImageHistoryItem` に `isFavorite` を追加。
+  - 既存 `history.json` から `isFavorite` なしで decode された場合は `false` を既定にする互換処理を追加。
+- `Sources/HoverPocket/State/ClipboardHistoryStore.swift`
+  - `favoriteTextItems` / `favoriteImageItems` / `nonFavoriteItemCount` を追加。
+  - `clear()` は未お気に入りだけを削除し、お気に入りのテキストと画像ファイルは保持するよう変更。
+  - `toggleTextFavorite()` / `toggleImageFavorite()` / `deleteText()` / `deleteImage()` を追加。
+  - 同じテキストや画像を再取得した場合も、既存のお気に入り状態を引き継ぐよう変更。
+  - 履歴上限の trim は、お気に入りを対象外にして未お気に入りだけに適用。
+- `Sources/HoverPocket/Views/ClipboardHistoryView.swift`
+  - 旧2カラム表示を `Text` / `Images` / `Favorites` タブへ変更。
+  - テキスト/画像カードへ星アイコンを追加。
+  - Favorites タブのカードにゴミ箱アイコンを追加し、ここから明示削除できるようにした。
+  - テキスト/画像カードの本体クリックでパネル内の拡大プレビューを開き、再クリックまたは `xmark` で閉じるようにした。
+  - 長いテキストプレビューは `ScrollView` でスクロール可能にした。
+- `Sources/HoverPocket/App/ClipboardVerificationCommand.swift`
+  - `--verify-clipboard` を追加。
+  - 一時ディレクトリの `history.json` と画像ファイルを使い、本番の clipboard 履歴を触らず検証する。
+- `Sources/HoverPocket/main.swift`
+  - `--verify-clipboard` の起動分岐を追加。
+- `README.md`
+  - Clipboard のタブ、お気に入り、クリア仕様、拡大プレビュー、検証コマンドを追記。
+
+### 検証
+
+- `swift build`: 成功。
+- `.build/debug/HoverPocket --verify-clipboard`: 成功。
+  - `clipboard_verify=ok`
+  - `clipboard_favorite_text_after_clear=1`
+  - `clipboard_favorite_image_after_clear=1`
+  - `clipboard_regular_image_removed=true`
+  - `clipboard_legacy_decode_default_favorite=true`
+- `.build/debug/HoverPocket --verify-panel-layout`: 成功。
+  - `panel_layout_verify=ok`
+  - `panel_layout_cases=63`
+  - Calculator layout も `small` / `medium` / `large` すべて `fits:true`。
+- `.build/debug/HoverPocket --verify-calculator`: 成功。既存電卓 verifier の回帰なし。
+- `git diff --check`: 成功。
+- `./script/build_and_run.sh --verify`: 成功。`HoverPocket launched`。
+
 ## Mac Calculator Responsive Panel Layout
 
 ### 目的

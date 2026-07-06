@@ -5,6 +5,20 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-06 Mac Calculator JIS Keyboard Shortcuts
+
+- Added Japanese keyboard-friendly Calculator operator input. On JIS keyboards, the unshifted `;` key now inputs `+`, and the unshifted `:` key now inputs `×`, so addition and multiplication no longer require Shift for those physical keys.
+- The mapping is applied in the SwiftUI key handler, keyCode fallback, Calculator expression parser, and `--verify-calculator` sequence parser. Existing `+`, `*`, `×`, numpad operators, Enter, Escape, and Backspace behavior remains intact.
+- Verification passed: `swift build`, `.build/debug/HoverPocket --verify-calculator`, `--calculator-sequence '5;6:2='` producing `17`, `.build/debug/HoverPocket --verify-clipboard`, `.build/debug/HoverPocket --verify-panel-layout`, and `git diff --check`.
+
+## 2026-07-06 Mac Clipboard Favorites and Full Preview
+
+- Updated macOS Clipboard from a fixed text/image split into `Text` / `Images` / `Favorites` tabs. Text and image cards now have star buttons; favorite items remain visible in their original tabs and are collected in the Favorites tab.
+- Changed Clipboard clear behavior so it removes only non-favorite history. Favorite text/image items survive clear; favorite-tab trash buttons delete those favorite items explicitly, including image files.
+- Added full-panel preview for text and images. Clicking a text or image card opens an expanded preview inside the panel; clicking again or the close icon dismisses it. Long text previews are scrollable.
+- Added `--verify-clipboard` with temp-storage coverage for favorite preservation, favorite image deletion, non-favorite image cleanup, and legacy JSON decode defaults.
+- Verification passed: `swift build`, `.build/debug/HoverPocket --verify-clipboard`, `.build/debug/HoverPocket --verify-panel-layout`, `.build/debug/HoverPocket --verify-calculator`, `git diff --check`, and `./script/build_and_run.sh --verify`. Clipboard verifier readback: favorite text/image after clear `1/1`, regular image removed `true`, legacy decode default favorite `true`.
+
 ## 2026-07-06 Mac Calculator Responsive Panel Layout
 
 - Fixed Calculator layout breakage when switching panel size. The Calculator now derives sidebar width, display height, keypad height, spacing, and font sizes from the available provider area, so Small / Medium / Large keep the history sidebar, expression display, and keypad inside the panel.

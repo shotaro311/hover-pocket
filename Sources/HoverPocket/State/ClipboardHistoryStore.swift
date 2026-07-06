@@ -11,6 +11,18 @@ final class ClipboardHistoryStore: ObservableObject {
     @Published private(set) var isMonitoring = false
     @Published private(set) var lastErrorMessage: String?
 
+    var favoriteTextItems: [ClipboardTextHistoryItem] {
+        textItems.filter(\.isFavorite)
+    }
+
+    var favoriteImageItems: [ClipboardImageHistoryItem] {
+        imageItems.filter(\.isFavorite)
+    }
+
+    var nonFavoriteItemCount: Int {
+        textItems.filter { !$0.isFavorite }.count + imageItems.filter { !$0.isFavorite }.count
+    }
+
     private let maxTextItems = 30
     private let maxImageItems = 20
     private let pollInterval: TimeInterval = 0.75
@@ -19,18 +31,22 @@ final class ClipboardHistoryStore: ObservableObject {
     private var lastChangeCount = NSPasteboard.general.changeCount
     private var saveDebounceTask: Task<Void, Never>?
     private var pendingWriteTask: Task<Void, Never>?
+    private let storageDirectory: URL
+    private let legacyStorageDirectories: [URL]
 
-    private lazy var storageDirectory: URL = {
-        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+    private static func applicationSupportBaseDirectory() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        return base
+    }
+
+    private static func defaultStorageDirectory() -> URL {
+        applicationSupportBaseDirectory()
             .appendingPathComponent("HoverPocket", isDirectory: true)
             .appendingPathComponent("Clipboard", isDirectory: true)
-    }()
+    }
 
-    private lazy var legacyStorageDirectories: [URL] = {
-        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+    private static func defaultLegacyStorageDirectories() -> [URL] {
+        let base = applicationSupportBaseDirectory()
         return [
             base
                 .appendingPathComponent("NotchPocket", isDirectory: true)
@@ -39,13 +55,22 @@ final class ClipboardHistoryStore: ObservableObject {
                 .appendingPathComponent("HoverMenuPreview", isDirectory: true)
                 .appendingPathComponent("Clipboard", isDirectory: true)
         ]
-    }()
+    }
 
     private var metadataURL: URL {
         storageDirectory.appendingPathComponent("history.json", isDirectory: false)
     }
 
     private init() {
+        self.storageDirectory = Self.defaultStorageDirectory()
+        self.legacyStorageDirectories = Self.defaultLegacyStorageDirectories()
+        migrateLegacyStorageIfNeeded()
+        load()
+    }
+
+    init(storageDirectory: URL, legacyStorageDirectories: [URL] = []) {
+        self.storageDirectory = storageDirectory
+        self.legacyStorageDirectories = legacyStorageDirectories
         migrateLegacyStorageIfNeeded()
         load()
     }
@@ -85,9 +110,35 @@ final class ClipboardHistoryStore: ObservableObject {
     }
 
     func clear() {
-        textItems = []
-        imageItems = []
-        try? fileManager.removeItem(at: storageDirectory)
+        let removedImages = imageItems.filter { !$0.isFavorite }
+        textItems.removeAll { !$0.isFavorite }
+        imageItems.removeAll { !$0.isFavorite }
+        for item in removedImages {
+            try? fileManager.removeItem(at: item.fileURL(in: storageDirectory))
+        }
+        save()
+    }
+
+    func toggleTextFavorite(_ item: ClipboardTextHistoryItem) {
+        guard let index = textItems.firstIndex(where: { $0.id == item.id }) else { return }
+        textItems[index] = textItems[index].withFavorite(!textItems[index].isFavorite)
+        save()
+    }
+
+    func toggleImageFavorite(_ item: ClipboardImageHistoryItem) {
+        guard let index = imageItems.firstIndex(where: { $0.id == item.id }) else { return }
+        imageItems[index] = imageItems[index].withFavorite(!imageItems[index].isFavorite)
+        save()
+    }
+
+    func deleteText(_ item: ClipboardTextHistoryItem) {
+        textItems.removeAll { $0.id == item.id }
+        save()
+    }
+
+    func deleteImage(_ item: ClipboardImageHistoryItem) {
+        imageItems.removeAll { $0.id == item.id }
+        try? fileManager.removeItem(at: item.fileURL(in: storageDirectory))
         save()
     }
 
@@ -122,9 +173,10 @@ final class ClipboardHistoryStore: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
 
+        let wasFavorite = textItems.first(where: { $0.text == text })?.isFavorite ?? false
         textItems.removeAll { $0.text == text }
         textItems.insert(
-            ClipboardTextHistoryItem(id: UUID(), text: text, createdAt: Date()),
+            ClipboardTextHistoryItem(id: UUID(), text: text, createdAt: Date(), isFavorite: wasFavorite),
             at: 0
         )
         return true
@@ -139,6 +191,9 @@ final class ClipboardHistoryStore: ObservableObject {
                   let pngData = bitmap.representation(using: .png, properties: [:])
             else { return }
             let hash = Self.hashString(for: pngData)
+            let existingFavorite = await MainActor.run { [weak self] in
+                self?.imageItems.first(where: { $0.contentHash == hash })?.isFavorite ?? false
+            }
             let alreadyKnown = await MainActor.run { [weak self] in
                 self?.imageItems.first?.contentHash == hash
             }
@@ -159,7 +214,11 @@ final class ClipboardHistoryStore: ObservableObject {
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                let replacedItems = self.imageItems.filter { $0.contentHash == hash }
                 self.imageItems.removeAll { $0.contentHash == hash }
+                for item in replacedItems {
+                    try? self.fileManager.removeItem(at: item.fileURL(in: self.storageDirectory))
+                }
                 self.imageItems.insert(
                     ClipboardImageHistoryItem(
                         id: id,
@@ -167,7 +226,8 @@ final class ClipboardHistoryStore: ObservableObject {
                         contentHash: hash,
                         width: width,
                         height: height,
-                        createdAt: Date()
+                        createdAt: Date(),
+                        isFavorite: existingFavorite
                     ),
                     at: 0
                 )
@@ -190,14 +250,13 @@ final class ClipboardHistoryStore: ObservableObject {
     }
 
     private func trimHistory() {
-        if textItems.count > maxTextItems {
-            textItems = Array(textItems.prefix(maxTextItems))
-        }
+        let retainedTextIDs = Set(textItems.filter { !$0.isFavorite }.prefix(maxTextItems).map(\.id))
+        textItems = textItems.filter { $0.isFavorite || retainedTextIDs.contains($0.id) }
 
-        guard imageItems.count > maxImageItems else { return }
-        let removed = imageItems.dropFirst(maxImageItems)
-        imageItems = Array(imageItems.prefix(maxImageItems))
-        for item in removed {
+        let retainedImageIDs = Set(imageItems.filter { !$0.isFavorite }.prefix(maxImageItems).map(\.id))
+        let removedImages = imageItems.filter { !$0.isFavorite && !retainedImageIDs.contains($0.id) }
+        imageItems = imageItems.filter { $0.isFavorite || retainedImageIDs.contains($0.id) }
+        for item in removedImages {
             try? fileManager.removeItem(at: item.fileURL(in: storageDirectory))
         }
     }
@@ -208,10 +267,11 @@ final class ClipboardHistoryStore: ObservableObject {
         else {
             return
         }
-        textItems = Array(metadata.textItems.prefix(maxTextItems))
-        imageItems = Array(metadata.imageItems.prefix(maxImageItems)).filter {
+        textItems = metadata.textItems
+        imageItems = metadata.imageItems.filter {
             fileManager.fileExists(atPath: $0.fileURL(in: storageDirectory).path)
         }
+        trimHistory()
     }
 
     /// Debounces rapid successive saves, then encodes and writes off the main actor.
