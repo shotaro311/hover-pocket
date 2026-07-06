@@ -10,6 +10,7 @@ status: active
 - Added Japanese keyboard-friendly Calculator operator input. On JIS keyboards, the unshifted `;` key now inputs `+`, and the unshifted `:` key now inputs `×`, so addition and multiplication no longer require Shift for those physical keys.
 - The mapping is applied in the SwiftUI key handler, keyCode fallback, Calculator expression parser, and `--verify-calculator` sequence parser. Existing `+`, `*`, `×`, numpad operators, Enter, Escape, and Backspace behavior remains intact.
 - Verification passed: `swift build`, `.build/debug/HoverPocket --verify-calculator`, `--calculator-sequence '5;6:2='` producing `17`, `.build/debug/HoverPocket --verify-clipboard`, `.build/debug/HoverPocket --verify-panel-layout`, and `git diff --check`.
+- Released build `124` as notarized/stapled macOS ZIP including the Clipboard favorites/full-preview work and JIS Calculator keyboard fix. `notarytool` submission `f8bac523-7bf7-4612-ad77-e2d9f9506bf6` returned `Accepted`; GitHub Release `v0.1.0-124` is GitHub Latest and `macos-latest` assets now point to build `124`. Remote readback confirmed stable and legacy appcasts both report `sparkle:version=124`, stable ZIP SHA256 `cd951f79b2e10826022f9231f105b48c1d98cb523f6b5fe36b8f955cede5ef89`, extracted app `CFBundleVersion=124`, macOS feed URL, and `codesign` / `stapler validate` / `spctl`.
 
 ## 2026-07-06 Mac Clipboard Favorites and Full Preview
 
