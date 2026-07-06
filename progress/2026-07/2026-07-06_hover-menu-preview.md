@@ -1,5 +1,43 @@
 # 2026-07-06: Cross-platform agent read gate
 
+## Mac Calculator Continuous Expressions and Clear History
+
+### 目的
+
+- 電卓の履歴をユーザー操作でまとめて消せるようにする。
+- `6+5+9/2+3-5` のような連続式を、途中で確定せず最後の `=` でまとめて計算できるようにする。
+- 履歴には連続式の内容をそのまま残し、履歴右アイコンから同じ式を入力欄へ戻せる状態を維持する。
+
+### 変更
+
+- `Sources/HoverPocket/State/CalculatorStore.swift`
+  - `clearHistory()` を追加。
+  - 演算子入力時に中間計算せず、`expressionInput` に連続式を組み立てるよう変更。
+  - `=` 押下時に連続式をトークン化し、`×` / `÷` を `+` / `−` より先に評価する処理を追加。
+  - 入力中の `displayText` は `6 + 5 + 9 ÷ 2 + 3 − 5` のような式を維持し、履歴にも同じ式を保存。
+  - `×`、`÷`、`−`、`x`、`X` を演算子入力として扱うよう補強。
+- `Sources/HoverPocket/Views/CalculatorView.swift`
+  - 履歴サイドバー上部へゴミ箱アイコンの clear ボタンを追加。
+- `Sources/HoverPocket/App/CalculatorVerificationCommand.swift`
+  - 連続式、履歴式、履歴クリアの検証を追加。
+- `README.md`
+  - 電卓の連続式入力と履歴クリアを追記。
+
+### 検証
+
+- `swift build`: 成功。
+- `.build/debug/HoverPocket --verify-calculator`: 成功。`calculator_display=25`、`calculator_history_count=1`。
+- `.build/debug/HoverPocket --verify-calculator --calculator-sequence '6+5+9/2+3-5='`: 成功。`calculator_display=13.5`、`calculator_history_count=1`。
+- `.build/debug/HoverPocket --verify-calculator --calculator-sequence '6+5+9/2+3-5'`: 成功。`calculator_display_text=6 + 5 + 9 ÷ 2 + 3 − 5`、`calculator_history_count=0`。
+- `.build/debug/HoverPocket --verify-calculator --calculator-sequence '12+3=+4='`: 成功。`calculator_display=19`、`calculator_history_count=2`。
+- `.build/debug/HoverPocket --verify-calculator --calculator-sequence '20%+2='`: 成功。`calculator_display=2.2`、`calculator_history_count=2`。
+- `.build/debug/HoverPocket --verify-calculator --calculator-sequence '6++5='`: 成功。`calculator_display=11`。
+- `.build/debug/HoverPocket --verify-calculator --calculator-sequence '1.5+2.25*2='`: 成功。`calculator_display=6`。
+- `.build/debug/HoverPocket --verify-calculator --calculator-sequence '6+5b9='`: 成功。`calculator_display=15`。
+- `.build/debug/HoverPocket --verify-calculator --calculator-sequence '6+5/0='`: 成功。`calculator_display=Error`、`calculator_history_count=0`。
+- `git diff --check`: 成功。
+- `./script/build_and_run.sh --verify`: 成功。`HoverPocket launched`。
+
 ## Mac Calculator Sidebar and AI Lane Removal
 
 ### 目的

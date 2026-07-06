@@ -5,6 +5,12 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-06 Mac Calculator Continuous Expressions and Clear History
+
+- Added a Calculator history clear action exposed from the left history sidebar header.
+- Reworked macOS Calculator operation input so chained expressions stay visible until equals and are evaluated together with standard precedence. Example: `6+5+9/2+3-5=` now produces `13.5`, and the history row keeps `6 + 5 + 9 ÷ 2 + 3 − 5`.
+- Verification passed: `swift build`, `.build/debug/HoverPocket --verify-calculator`, targeted calculator sequences for continuous expressions, decimal precedence, backspace editing, divide-by-zero, `git diff --check`, and `./script/build_and_run.sh --verify`. Details: `progress/2026-07/2026-07-06_hover-menu-preview.md`.
+
 ## 2026-07-06 Mac Calculator Sidebar and AI Lane Removal
 
 - Updated macOS Calculator so pending operations are visible in the display area (`5 +`, `5 + 6`, and completed expressions), history results click into the input as a single number, and each history row's restore icon inserts the expression itself such as `5 + 6`.

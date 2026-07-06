@@ -100,7 +100,11 @@ final class CalculatorStore: ObservableObject {
         lastOperand = nil
         lastOperation = nil
         expressionPreview = nil
-        expressionInput = nil
+        self.expressionInput = nil
+    }
+
+    func clearHistory() {
+        history.removeAll()
     }
 
     func useHistoryResult(_ entry: HistoryEntry) {
@@ -108,7 +112,7 @@ final class CalculatorStore: ObservableObject {
         display = entry.result
         hasError = false
         expressionPreview = nil
-        expressionInput = nil
+        self.expressionInput = nil
         accumulator = nil
         pendingOperation = nil
         isEnteringNewValue = false
@@ -137,6 +141,10 @@ final class CalculatorStore: ObservableObject {
         guard (0...9).contains(digit) else { return }
         beginFreshInputIfShowingExpression()
         recoverFromErrorIfNeeded()
+        if expressionInput != nil {
+            appendDigitToExpression(digit)
+            return
+        }
         clearPreviewForFreshEntryIfNeeded()
         if isEnteringNewValue {
             display = String(digit)
@@ -157,6 +165,10 @@ final class CalculatorStore: ObservableObject {
     private func inputDecimalSeparator() {
         beginFreshInputIfShowingExpression()
         recoverFromErrorIfNeeded()
+        if expressionInput != nil {
+            appendDecimalSeparatorToExpression()
+            return
+        }
         clearPreviewForFreshEntryIfNeeded()
         if isEnteringNewValue {
             display = "0."
@@ -171,28 +183,27 @@ final class CalculatorStore: ObservableObject {
 
     private func inputOperation(_ operation: Operation) {
         recoverFromErrorIfNeeded()
-        guard commitExpressionInputIfNeeded(addToHistory: false) else { return }
         guard let current = currentDecimal else { return }
 
-        if let pendingOperation, let accumulator, !isEnteringNewValue {
-            guard let result = calculate(accumulator, current, pendingOperation) else {
-                showError()
-                return
+        if let expressionInput {
+            let expression = expressionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            if expression.isEmpty {
+                self.expressionInput = "\(Self.format(current)) \(operation.displaySymbol)"
+            } else if Self.expressionEndsWithOperator(expression) {
+                self.expressionInput = Self.replacingTrailingOperator(in: expression, with: operation)
+            } else {
+                self.expressionInput = "\(expression) \(operation.displaySymbol)"
             }
-            let inputExpression = expressionInputText(lhs: accumulator, rhs: current, operation: pendingOperation)
-            let expression = expressionText(inputExpression: inputExpression, result: result)
-            self.accumulator = result
-            display = Self.format(result)
-            addHistory(inputExpression: inputExpression, expression: expression, result: display)
         } else {
-            accumulator = current
+            expressionInput = "\(Self.format(current)) \(operation.displaySymbol)"
         }
 
-        pendingOperation = operation
+        accumulator = nil
+        pendingOperation = nil
         lastOperand = nil
         lastOperation = nil
         isEnteringNewValue = true
-        updatePendingExpressionPreview()
+        expressionPreview = expressionInput
     }
 
     private func inputEquals() {
@@ -238,10 +249,24 @@ final class CalculatorStore: ObservableObject {
 
     private func backspace() {
         recoverFromErrorIfNeeded()
-        if expressionInput != nil {
-            expressionInput?.removeLast()
-            if expressionInput?.isEmpty != false {
+        if let expressionInput {
+            var expression = expressionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !expression.isEmpty {
+                expression.removeLast()
+            }
+            expression = expression.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !expression.isEmpty else {
                 reset()
+                return
+            }
+            self.expressionInput = expression
+            expressionPreview = expression
+            if Self.expressionEndsWithOperator(expression) {
+                isEnteringNewValue = true
+                display = Self.trailingOperand(in: Self.removingTrailingOperator(from: expression)) ?? "0"
+            } else {
+                isEnteringNewValue = false
+                display = Self.trailingOperand(in: expression) ?? display
             }
             return
         }
@@ -264,6 +289,32 @@ final class CalculatorStore: ObservableObject {
 
     private func toggleSign() {
         recoverFromErrorIfNeeded()
+        if let expressionInput {
+            let expression = expressionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            if isEnteringNewValue, Self.expressionEndsWithOperator(expression) {
+                display = "-0"
+                self.expressionInput = "\(expression) -0"
+                expressionPreview = self.expressionInput
+                isEnteringNewValue = false
+                return
+            }
+            guard display != "0" else {
+                display = "-0"
+                self.expressionInput = Self.replaceTrailingOperand(in: expressionInput, with: display)
+                expressionPreview = self.expressionInput
+                isEnteringNewValue = false
+                return
+            }
+            if display.hasPrefix("-") {
+                display.removeFirst()
+            } else {
+                display = "-\(display)"
+            }
+            self.expressionInput = Self.replaceTrailingOperand(in: expressionInput, with: display)
+            expressionPreview = self.expressionInput
+            isEnteringNewValue = false
+            return
+        }
         guard commitExpressionInputIfNeeded(addToHistory: false) else { return }
         guard display != "0" else {
             display = "-0"
@@ -282,6 +333,15 @@ final class CalculatorStore: ObservableObject {
 
     private func percent() {
         recoverFromErrorIfNeeded()
+        if let expressionInput {
+            guard let current = currentDecimal else { return }
+            let result = current / Decimal(100)
+            display = Self.format(result)
+            self.expressionInput = Self.replaceTrailingOperand(in: expressionInput, with: display)
+            expressionPreview = self.expressionInput
+            isEnteringNewValue = false
+            return
+        }
         guard commitExpressionInputIfNeeded(addToHistory: false) else { return }
         guard let current = currentDecimal else { return }
         let result = current / Decimal(100)
@@ -372,8 +432,12 @@ final class CalculatorStore: ObservableObject {
     }
 
     private func beginFreshInputIfShowingExpression() {
-        guard expressionInput != nil else { return }
-        expressionInput = nil
+        guard
+            let expressionInput,
+            isEnteringNewValue,
+            !Self.expressionEndsWithOperator(expressionInput)
+        else { return }
+        self.expressionInput = nil
         expressionPreview = nil
         display = "0"
         hasError = false
@@ -392,7 +456,10 @@ final class CalculatorStore: ObservableObject {
     }
 
     private func updatePendingExpressionPreview() {
-        guard expressionInput == nil else { return }
+        if expressionInput != nil {
+            expressionPreview = expressionInput
+            return
+        }
         guard let accumulator, let pendingOperation else { return }
         let lhs = Self.format(accumulator)
         if isEnteringNewValue {
@@ -436,42 +503,20 @@ final class CalculatorStore: ObservableObject {
         let result: Decimal
     }
 
+    private enum ExpressionToken {
+        case number(Decimal)
+        case operation(Operation)
+    }
+
     private func evaluateExpressionInput(_ input: String) -> ExpressionEvaluation? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        let normalized = trimmed
-            .replacingOccurrences(of: "−", with: "-")
-            .replacingOccurrences(of: "×", with: "*")
-            .replacingOccurrences(of: "÷", with: "/")
-            .replacingOccurrences(of: ",", with: ".")
-            .filter { !$0.isWhitespace }
 
-        if normalized.hasSuffix("%") {
-            let numberText = String(normalized.dropLast())
-            guard let value = Self.decimal(from: numberText) else { return nil }
-            let result = value / Decimal(100)
-            let inputExpression = "\(Self.format(value))%"
-            return ExpressionEvaluation(
-                inputExpression: inputExpression,
-                expression: "\(inputExpression) = \(Self.format(result))",
-                result: result
-            )
-        }
+        let normalized = Self.normalizedExpression(trimmed)
+        guard let tokens = Self.expressionTokens(from: normalized) else { return nil }
+        guard let result = evaluate(tokens: tokens) else { return nil }
 
-        guard let operationIndex = Self.binaryOperationIndex(in: normalized) else { return nil }
-        let lhsText = String(normalized[..<operationIndex])
-        let rhsStart = normalized.index(after: operationIndex)
-        let rhsText = String(normalized[rhsStart...])
-        guard
-            let lhs = Self.decimal(from: lhsText),
-            let rhs = Self.decimal(from: rhsText),
-            let operation = Operation(inputSymbol: normalized[operationIndex]),
-            let result = calculate(lhs, rhs, operation)
-        else {
-            return nil
-        }
-
-        let inputExpression = expressionInputText(lhs: lhs, rhs: rhs, operation: operation)
+        let inputExpression = Self.displayExpression(from: tokens)
         return ExpressionEvaluation(
             inputExpression: inputExpression,
             expression: expressionText(inputExpression: inputExpression, result: result),
@@ -479,22 +524,214 @@ final class CalculatorStore: ObservableObject {
         )
     }
 
-    private static func binaryOperationIndex(in text: String) -> String.Index? {
-        guard text.count >= 3 else { return nil }
-        var index = text.index(after: text.startIndex)
-        while index < text.endIndex {
-            if Operation(inputSymbol: text[index]) != nil {
-                return index
+    private func evaluate(tokens: [ExpressionToken]) -> Decimal? {
+        var values: [Decimal] = []
+        var operations: [Operation] = []
+        var expectsNumber = true
+
+        for token in tokens {
+            switch token {
+            case .number(let value):
+                guard expectsNumber else { return nil }
+                values.append(value)
+                expectsNumber = false
+            case .operation(let operation):
+                guard !expectsNumber else { return nil }
+                operations.append(operation)
+                expectsNumber = true
             }
-            index = text.index(after: index)
         }
-        return nil
+
+        guard !expectsNumber, values.count == operations.count + 1, let firstValue = values.first else {
+            return nil
+        }
+
+        var reducedValues = [firstValue]
+        var reducedOperations: [Operation] = []
+
+        for (index, operation) in operations.enumerated() {
+            let rhs = values[index + 1]
+            switch operation {
+            case .multiply, .divide:
+                guard let lhs = reducedValues.popLast(),
+                      let result = calculate(lhs, rhs, operation)
+                else { return nil }
+                reducedValues.append(result)
+            case .add, .subtract:
+                reducedOperations.append(operation)
+                reducedValues.append(rhs)
+            }
+        }
+
+        guard var result = reducedValues.first else { return nil }
+        for (index, operation) in reducedOperations.enumerated() {
+            guard index + 1 < reducedValues.count,
+                  let value = calculate(result, reducedValues[index + 1], operation)
+            else { return nil }
+            result = value
+        }
+        return result
     }
 
     private func recoverFromErrorIfNeeded() {
         if hasError {
             reset()
         }
+    }
+
+    private func appendDigitToExpression(_ digit: Int) {
+        guard let expressionInput else { return }
+        let digitText = String(digit)
+        if isEnteringNewValue {
+            let expression = expressionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            if Self.expressionEndsWithOperator(expression) {
+                self.expressionInput = "\(expression) \(digitText)"
+            } else {
+                self.expressionInput = digitText
+            }
+            display = digitText
+            isEnteringNewValue = false
+            expressionPreview = self.expressionInput
+            return
+        }
+
+        if display == "0" {
+            display = digitText
+        } else if display == "-0" {
+            display = "-\(digitText)"
+        } else {
+            display += digitText
+        }
+        self.expressionInput = Self.replaceTrailingOperand(in: expressionInput, with: display)
+        expressionPreview = self.expressionInput
+    }
+
+    private func appendDecimalSeparatorToExpression() {
+        guard let expressionInput else { return }
+        if isEnteringNewValue {
+            let expression = expressionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            if Self.expressionEndsWithOperator(expression) {
+                self.expressionInput = "\(expression) 0."
+            } else {
+                self.expressionInput = "0."
+            }
+            display = "0."
+            isEnteringNewValue = false
+            expressionPreview = self.expressionInput
+            return
+        }
+
+        guard !display.contains(".") else { return }
+        display += "."
+        self.expressionInput = Self.replaceTrailingOperand(in: expressionInput, with: display)
+        expressionPreview = self.expressionInput
+    }
+
+    private static func normalizedExpression(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "−", with: "-")
+            .replacingOccurrences(of: "×", with: "*")
+            .replacingOccurrences(of: "÷", with: "/")
+            .replacingOccurrences(of: ",", with: ".")
+            .filter { !$0.isWhitespace }
+    }
+
+    private static func expressionTokens(from text: String) -> [ExpressionToken]? {
+        var tokens: [ExpressionToken] = []
+        var numberText = ""
+        var expectsNumber = true
+
+        for character in text {
+            if character == "%" {
+                guard let value = decimal(from: numberText) else { return nil }
+                numberText = format(value / Decimal(100))
+                expectsNumber = false
+                continue
+            }
+
+            if let operation = Operation(inputSymbol: character) {
+                if expectsNumber {
+                    if (character == "-" || character == "−"), numberText.isEmpty {
+                        numberText = "-"
+                        continue
+                    }
+                    if character == "+", numberText.isEmpty {
+                        continue
+                    }
+                    return nil
+                }
+                guard let value = decimal(from: numberText) else { return nil }
+                tokens.append(.number(value))
+                tokens.append(.operation(operation))
+                numberText = ""
+                expectsNumber = true
+                continue
+            }
+
+            guard character.isNumber || character == "." else { return nil }
+            numberText.append(character)
+            expectsNumber = false
+        }
+
+        guard !expectsNumber, let value = decimal(from: numberText) else { return nil }
+        tokens.append(.number(value))
+        return tokens
+    }
+
+    private static func displayExpression(from tokens: [ExpressionToken]) -> String {
+        tokens.map { token in
+            switch token {
+            case .number(let value):
+                return format(value)
+            case .operation(let operation):
+                return operation.displaySymbol
+            }
+        }
+        .joined(separator: " ")
+    }
+
+    private static func expressionEndsWithOperator(_ text: String) -> Bool {
+        guard let last = text.trimmingCharacters(in: .whitespacesAndNewlines).last else { return false }
+        return Operation(inputSymbol: last) != nil
+    }
+
+    private static func replacingTrailingOperator(in text: String, with operation: Operation) -> String {
+        var expression = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard expressionEndsWithOperator(expression) else {
+            return "\(expression) \(operation.displaySymbol)"
+        }
+        expression.removeLast()
+        expression = expression.trimmingCharacters(in: .whitespacesAndNewlines)
+        return "\(expression) \(operation.displaySymbol)"
+    }
+
+    private static func removingTrailingOperator(from text: String) -> String {
+        var expression = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if expressionEndsWithOperator(expression) {
+            expression.removeLast()
+        }
+        return expression.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func replaceTrailingOperand(in text: String, with operand: String) -> String {
+        let expression = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !expression.isEmpty else { return operand }
+        if expressionEndsWithOperator(expression) {
+            return "\(expression) \(operand)"
+        }
+        var parts = expression.split(separator: " ").map(String.init)
+        guard !parts.isEmpty else { return operand }
+        parts[parts.count - 1] = operand
+        return parts.joined(separator: " ")
+    }
+
+    private static func trailingOperand(in text: String) -> String? {
+        let expression = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !expression.isEmpty else { return nil }
+        if expressionEndsWithOperator(expression) {
+            return trailingOperand(in: removingTrailingOperator(from: expression))
+        }
+        return expression.split(separator: " ").last.map(String.init)
     }
 
     private static func decimal(from text: String) -> Decimal? {
@@ -522,11 +759,11 @@ extension CalculatorStore.Operation {
         switch inputSymbol {
         case "+":
             self = .add
-        case "-":
+        case "-", "−":
             self = .subtract
-        case "*":
+        case "*", "×", "x", "X":
             self = .multiply
-        case "/":
+        case "/", "÷":
             self = .divide
         default:
             return nil

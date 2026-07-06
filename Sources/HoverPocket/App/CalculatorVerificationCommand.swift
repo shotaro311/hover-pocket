@@ -33,7 +33,13 @@ enum CalculatorVerificationCommand {
             ([.digit(7), .operation(.divide), .digit(0), .equals], "Error"),
             ([.digit(1), .digit(2), .decimalSeparator, .digit(5), .toggleSign], "-12.5"),
             ([.digit(2), .digit(0), .percent], "0.2"),
-            ([.digit(1), .digit(2), .backspace], "1")
+            ([.digit(1), .digit(2), .backspace], "1"),
+            ([
+                .digit(6), .operation(.add), .digit(5),
+                .operation(.add), .digit(9), .operation(.divide), .digit(2),
+                .operation(.add), .digit(3), .operation(.subtract), .digit(5),
+                .equals
+            ], "13.5")
         ]
         for (buttons, expected) in cases {
             let store = CalculatorStore()
@@ -59,6 +65,33 @@ enum CalculatorVerificationCommand {
         let operatorStore = CalculatorStore()
         operatorStore.runSequence([.digit(5), .operation(.add), .digit(6)])
         guard operatorStore.expressionPreview == "5 + 6" else {
+            return false
+        }
+
+        let continuousStore = CalculatorStore()
+        continuousStore.runSequence([
+            .digit(6), .operation(.add), .digit(5),
+            .operation(.add), .digit(9), .operation(.divide), .digit(2),
+            .operation(.add), .digit(3), .operation(.subtract), .digit(5),
+            .equals
+        ])
+        guard continuousStore.display == "13.5",
+              let continuousEntry = continuousStore.history.first,
+              continuousEntry.inputExpression == "6 + 5 + 9 ÷ 2 + 3 − 5",
+              continuousEntry.expression == "6 + 5 + 9 ÷ 2 + 3 − 5 = 13.5"
+        else {
+            return false
+        }
+        continuousStore.useHistoryExpression(continuousEntry)
+        guard continuousStore.displayText == "6 + 5 + 9 ÷ 2 + 3 − 5" else {
+            return false
+        }
+        continuousStore.runSequence([.equals])
+        guard continuousStore.display == "13.5" else {
+            return false
+        }
+        continuousStore.clearHistory()
+        guard continuousStore.history.isEmpty else {
             return false
         }
 

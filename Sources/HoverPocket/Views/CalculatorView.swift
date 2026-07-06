@@ -164,6 +164,21 @@ struct CalculatorView: View {
                 Text("\(store.history.count)")
                     .panelTextFont(size: 10, weight: .bold, design: .rounded)
                     .foregroundStyle(.white.opacity(0.42))
+                Button {
+                    store.clearHistory()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.66))
+                        .frame(width: 22, height: 20)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.white.opacity(0.055))
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(store.history.isEmpty)
+                .help(label(.clearHistory))
             }
             .padding(.horizontal, 10)
             .padding(.top, 9)
@@ -424,6 +439,8 @@ struct CalculatorView: View {
             return "履歴サイドバーを表示/非表示"
         case (.japanese, .history):
             return "履歴"
+        case (.japanese, .clearHistory):
+            return "履歴をクリア"
         case (.english, .copy):
             return "Copy"
         case (.english, .copied):
@@ -438,6 +455,8 @@ struct CalculatorView: View {
             return "Show or hide history sidebar"
         case (.english, .history):
             return "History"
+        case (.english, .clearHistory):
+            return "Clear history"
         }
     }
 }
@@ -450,6 +469,7 @@ private enum CalculatorLabel {
     case restoreHistory
     case toggleHistory
     case history
+    case clearHistory
 }
 
 private enum CalculatorKeyStyle {
