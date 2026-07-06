@@ -10,6 +10,7 @@ status: active
 - Updated macOS Sparkle integration so manual update checks from Settings, the menu bar, or the provider header activate HoverPocket and bring Sparkle update/status windows to the front.
 - The foregrounding window is bounded to user-initiated checks only; the launch-time update probe still updates the in-panel badge/status without stealing focus.
 - Verification passed: `swift build`, `git diff --check`, and `./script/build_and_run.sh --verify`. Details: `progress/2026-07/2026-07-06_hover-menu-preview.md`.
+- Released build `117` as notarized/stapled macOS ZIP. `notarytool` submission `715e3a67-4c6f-4bb7-94b5-5970fd6af407` returned `Accepted`; GitHub Release `v0.1.0-117` is GitHub Latest and `macos-latest` assets now point to build `117`. Remote readback confirmed stable and legacy appcasts both report `sparkle:version=117`, stable ZIP SHA256 `b3031f5cfac919a7eff91e3e7023fd96911725353a8a5e4aee9c1d89e6928dae`, extracted app `CFBundleVersion=117`, macOS feed URL, and `codesign` / `stapler validate` / `spctl`.
 
 ## 2026-07-06 OAuth Public Verification Console Execution
 

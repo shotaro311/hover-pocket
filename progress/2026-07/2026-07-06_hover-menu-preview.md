@@ -23,9 +23,28 @@
 - `git diff --check`: 成功。
 - `./script/build_and_run.sh --verify`: 成功。`HoverPocket launched`。
 
+### 配信
+
+- `APP_VERSION=0.1.0 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh`: 成功。
+- `notary_submission_id=715e3a67-4c6f-4bb7-94b5-5970fd6af407`、`notary_status=Accepted`。
+- GitHub Release:
+  - versioned: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-117`
+  - stable macOS feed: `https://github.com/shotaro311/hover-pocket/releases/tag/macos-latest`
+- `gh release list --repo shotaro311/hover-pocket --limit 6`: `v0.1.0-117` が GitHub Latest。
+- `gh release view v0.1.0-117`: `appcast.xml`、`HoverPocket-0.1.0-117.zip`、`HoverPocket-0.1.0-117.zip.sha256`、`HoverPocket-macOS-app.zip` を確認。
+- `gh release view macos-latest`: `appcast.xml` と `HoverPocket-macOS-app.zip` を確認。
+- `curl https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`: `sparkle:version=117`、versioned ZIP enclosure、edSignature を確認。
+- `curl https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`: `sparkle:version=117` を確認。
+- stable ZIP readback:
+  - remote asset digest と local SHA256 は `b3031f5cfac919a7eff91e3e7023fd96911725353a8a5e4aee9c1d89e6928dae` で一致。
+  - ZIP top-level は `HoverPocket.app/`。
+  - extracted app の `CFBundleVersion` は `117`。
+  - extracted app の `SUFeedURL` は `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`。
+  - extracted app で `codesign --verify --deep --strict --verbose=2`、`xcrun stapler validate`、`spctl --assess --type execute --verbose=2` が成功。
+
 ### 未実施
 
-- 実際に新しい appcast を用意して Sparkle の更新ダイアログをクリック操作する E2E は未実施。今回は前面化処理の build / bundle 起動検証まで。
+- 既存 install 済みアプリから Sparkle UI を開き、更新ダイアログが前面化する実機操作確認は未実施。配信済み build `117` の appcast / ZIP / Gatekeeper readback までは完了。
 
 ## Mac Calculator History and Feed Split
 
