@@ -12,6 +12,8 @@ internal sealed class CalculatorBridgeHandlers
     {
         dispatcher.Register("calculator.getState", (_, _) => Task.FromResult<object?>(_engine.Snapshot));
         dispatcher.Register("calculator.press", PressAsync);
+        dispatcher.Register("calculator.useHistoryValue", UseHistoryValueAsync);
+        dispatcher.Register("calculator.restoreHistory", RestoreHistoryAsync);
         dispatcher.Register("calculator.copy", CopyAsync);
     }
 
@@ -20,6 +22,20 @@ internal sealed class CalculatorBridgeHandlers
         cancellationToken.ThrowIfCancellationRequested();
         var input = ReadRequiredString(parameters, "input");
         return Task.FromResult<object?>(_engine.PressToken(input));
+    }
+
+    private Task<object?> UseHistoryValueAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var id = ReadRequiredString(parameters, "id");
+        return Task.FromResult<object?>(_engine.UseHistoryValue(id));
+    }
+
+    private Task<object?> RestoreHistoryAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var id = ReadRequiredString(parameters, "id");
+        return Task.FromResult<object?>(_engine.RestoreHistory(id));
     }
 
     private Task<object?> CopyAsync(JsonElement? parameters, CancellationToken cancellationToken)

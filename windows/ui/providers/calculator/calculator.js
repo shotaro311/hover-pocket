@@ -14,6 +14,7 @@ export function renderCalculatorProvider(context) {
         <button class="hp-calc-tool" type="button" data-input="BS" aria-label="Backspace">⌫</button>
         <button class="hp-calc-tool" type="button" data-copy aria-label="Copy">⧉</button>
       </div>
+      <div class="hp-calc-history" data-history aria-label="Calculation history"></div>
       <output class="hp-calc-output" data-display>0</output>
     </div>
     <div class="hp-calc-grid" data-grid></div>
@@ -23,6 +24,7 @@ export function renderCalculatorProvider(context) {
   const display = root.querySelector("[data-display]");
   const grid = root.querySelector("[data-grid]");
   const copyButton = root.querySelector("[data-copy]");
+  const history = root.querySelector("[data-history]");
   const keys = [
     ["AC", "utility"], ["+/-", "utility"], ["%", "utility"], ["÷", "op"],
     ["7", "num"], ["8", "num"], ["9", "num"], ["×", "op"],
@@ -50,6 +52,18 @@ export function renderCalculatorProvider(context) {
   });
 
   copyButton.addEventListener("click", copy);
+  history.addEventListener("click", (event) => {
+    const restoreTarget = /** @type {HTMLElement | null} */ (event.target.closest("[data-history-restore]"));
+    if (restoreTarget) {
+      restoreHistory(restoreTarget.dataset.historyId ?? "");
+      return;
+    }
+
+    const valueTarget = /** @type {HTMLElement | null} */ (event.target.closest("[data-history-value]"));
+    if (valueTarget) {
+      useHistoryValue(valueTarget.dataset.historyId ?? "");
+    }
+  });
   root.addEventListener("keydown", (event) => {
     const input = keyToInput(event);
     if (!input) {
@@ -106,12 +120,90 @@ export function renderCalculatorProvider(context) {
   }
 
   /**
-   * @param {{ display?: string, hasError?: boolean, canCopy?: boolean }} state
+   * @param {string} id
+   */
+  async function useHistoryValue(id) {
+    if (!id) {
+      return;
+    }
+
+    try {
+      update(await context.request("calculator.useHistoryValue", { id }));
+    } catch (error) {
+      display.textContent = "Error";
+      root.classList.add("is-error");
+      copyButton.disabled = true;
+    }
+  }
+
+  /**
+   * @param {string} id
+   */
+  async function restoreHistory(id) {
+    if (!id) {
+      return;
+    }
+
+    try {
+      update(await context.request("calculator.restoreHistory", { id }));
+    } catch (error) {
+      display.textContent = "Error";
+      root.classList.add("is-error");
+      copyButton.disabled = true;
+    }
+  }
+
+  /**
+   * @param {{ display?: string, hasError?: boolean, canCopy?: boolean, history?: Array<{ id?: string, expression?: string, result?: string }> }} state
    */
   function update(state) {
     display.textContent = state?.display ?? "0";
     root.classList.toggle("is-error", Boolean(state?.hasError));
     copyButton.disabled = state?.canCopy === false;
+    renderHistory(Array.isArray(state?.history) ? state.history : []);
+  }
+
+  /**
+   * @param {Array<{ id?: string, expression?: string, result?: string }>} items
+   */
+  function renderHistory(items) {
+    history.replaceChildren();
+    for (const item of items) {
+      const id = item.id ?? "";
+      const row = document.createElement("div");
+      row.className = "hp-calc-history-row";
+
+      const valueButton = document.createElement("button");
+      valueButton.className = "hp-calc-history-value";
+      valueButton.type = "button";
+      valueButton.dataset.historyValue = "true";
+      valueButton.dataset.historyId = id;
+      valueButton.title = "Use result";
+
+      const expression = document.createElement("span");
+      expression.className = "hp-calc-history-expression";
+      expression.textContent = item.expression ?? "";
+
+      const result = document.createElement("span");
+      result.className = "hp-calc-history-result";
+      result.textContent = item.result ?? "";
+
+      valueButton.append(expression, result);
+
+      const restoreButton = document.createElement("button");
+      restoreButton.className = "hp-calc-history-restore";
+      restoreButton.type = "button";
+      restoreButton.dataset.historyRestore = "true";
+      restoreButton.dataset.historyId = id;
+      restoreButton.title = "Restore state";
+      restoreButton.setAttribute("aria-label", "Restore calculation state");
+      restoreButton.textContent = "↩";
+
+      row.append(valueButton, restoreButton);
+      history.append(row);
+    }
+
+    history.scrollTop = history.scrollHeight;
   }
 }
 
@@ -121,6 +213,26 @@ export function renderCalculatorProvider(context) {
 function keyToInput(event) {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
     return "COPY";
+  }
+  if (/^Numpad[0-9]$/.test(event.code)) {
+    return event.code.at(-1) ?? null;
+  }
+  switch (event.code) {
+    case "NumpadDecimal":
+      return ".";
+    case "NumpadAdd":
+      return "+";
+    case "NumpadSubtract":
+      return "−";
+    case "NumpadMultiply":
+      return "×";
+    case "NumpadDivide":
+      return "÷";
+    case "NumpadEnter":
+    case "NumpadEqual":
+      return "=";
+    default:
+      break;
   }
   if (/^[0-9]$/.test(event.key)) {
     return event.key;

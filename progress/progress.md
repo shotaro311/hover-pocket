@@ -13,6 +13,13 @@ status: active
 - Verification passed: `swift build`, `bash -n` for release scripts, `.build/debug/HoverPocket --verify-calculator` plus chain / percent / divide-by-zero sequences, `git diff --check`, and `./script/build_and_run.sh --verify`. Non-notarized dry-run packaging generated build `111` artifacts with the new `SUFeedURL`.
 - Released build `112` as notarized/stapled macOS ZIP. `notarytool` submission `70397200-f50b-4dfb-a0b1-2a51821f7904` returned `Accepted`; versioned release `v0.1.0-112` and stable macOS feed release `macos-latest` are published. Remote readback confirmed `macos-latest/appcast.xml` and legacy `latest/download/appcast.xml` both report `sparkle:version=112`, the stable ZIP SHA256 is `b13fda6a78544fb27c5cb03f1ad67ccd060bfb3028bcd08643d8fca49df86eb2`, extracted app `CFBundleVersion=112`, `SUFeedURL=https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`, and `codesign` / `stapler validate` / `spctl` all pass.
 
+## 2026-07-06 Windows Calculator History and Feed Separation
+
+- Implemented Windows Calculator keyboard normalization for normal keys, shifted operator input, and numpad-equivalent tokens on both the WebView key handler and C# engine boundary.
+- Added Calculator history to the Windows bridge/UI. History is stored chronologically in the C# engine; clicking a history result puts that value into the current input, and the restore button restores display plus accumulator, pending operation, entering-new-value flag, last operation, and last operand.
+- Explicitly pinned Windows updates to Velopack channel `win` / `releases.win.json`, added updater verifier metadata checks, and updated Windows release packaging docs/script output so Windows releases use `win-v...` tags with `--latest=false` and read back Windows feed separately from the macOS `macos-latest` appcast.
+- Verification completed: `dotnet build windows\HoverPocket.Windows.sln --nologo -p:NuGetAudit=false`, `dotnet run --project windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify calc`, `--verify ui-model`, `--verify updater`, `node --check windows/ui/providers/calculator/calculator.js`, Windows feed readback for `win-v0.2.1/releases.win.json`, macOS appcast readback for `macos-latest/appcast.xml`, and `git diff --check`. Details: `progress/2026-07/2026-07-06_windows-calc-history-feed.md`.
+
 ## 2026-07-06 Cross-platform Agent Read Gate
 
 - Added root `AGENTS.md` so Codex and other repo-aware AI agents have a mandatory entrypoint before implementation. It points agents to `progress/progress.md`, `docs/requirement/requirements.md`, and the OS-specific README/script files.

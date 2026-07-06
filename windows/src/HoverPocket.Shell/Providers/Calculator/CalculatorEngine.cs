@@ -4,21 +4,29 @@ namespace HoverPocket.Shell.Providers.Calculator;
 
 internal sealed class CalculatorEngine
 {
+    private const int MaxHistoryItems = 24;
+
     private decimal? _accumulator;
     private CalculatorOperation? _pendingOperation;
     private bool _isEnteringNewValue = true;
     private decimal? _lastOperand;
     private CalculatorOperation? _lastOperation;
+    private readonly List<CalculatorHistoryEntry> _history = [];
 
     public string Display { get; private set; } = "0";
 
     public bool HasError { get; private set; }
 
-    public CalculatorSnapshot Snapshot => new(Display, HasError, !HasError);
+    public CalculatorSnapshot Snapshot => new(
+        Display,
+        HasError,
+        !HasError,
+        _history.Select(entry => entry.Item).ToArray());
 
     public CalculatorSnapshot PressToken(string token)
     {
-        switch (NormalizeToken(token))
+        var normalizedToken = NormalizeToken(token);
+        switch (normalizedToken)
         {
             case "0":
             case "1":
@@ -30,7 +38,7 @@ internal sealed class CalculatorEngine
             case "7":
             case "8":
             case "9":
-                InputDigit(token[0] - '0');
+                InputDigit(normalizedToken[0] - '0');
                 break;
             case ".":
                 InputDecimalSeparator();
@@ -64,6 +72,33 @@ internal sealed class CalculatorEngine
                 break;
         }
 
+        return Snapshot;
+    }
+
+    public CalculatorSnapshot UseHistoryValue(string historyId)
+    {
+        var entry = FindHistoryEntry(historyId);
+        if (entry is null)
+        {
+            return Snapshot;
+        }
+
+        RecoverFromErrorIfNeeded();
+        Display = entry.Item.Result;
+        HasError = false;
+        _isEnteringNewValue = false;
+        return Snapshot;
+    }
+
+    public CalculatorSnapshot RestoreHistory(string historyId)
+    {
+        var entry = FindHistoryEntry(historyId);
+        if (entry is null)
+        {
+            return Snapshot;
+        }
+
+        RestoreState(entry.State);
         return Snapshot;
     }
 
@@ -125,9 +160,15 @@ internal sealed class CalculatorEngine
             return;
         }
 
+        CalculatorOperation? historyOperation = null;
+        decimal historyLhs = 0m;
+        decimal historyRhs = 0m;
+        decimal historyResult = 0m;
         if (_pendingOperation is not null && _accumulator is not null && !_isEnteringNewValue)
         {
-            if (!TryCalculate(_accumulator.Value, current, _pendingOperation.Value, out var result))
+            var lhs = _accumulator.Value;
+            var operationToRecord = _pendingOperation.Value;
+            if (!TryCalculate(lhs, current, operationToRecord, out var result))
             {
                 ShowError();
                 return;
@@ -135,6 +176,10 @@ internal sealed class CalculatorEngine
 
             _accumulator = result;
             Display = Format(result);
+            historyOperation = operationToRecord;
+            historyLhs = lhs;
+            historyRhs = current;
+            historyResult = result;
         }
         else
         {
@@ -145,6 +190,10 @@ internal sealed class CalculatorEngine
         _lastOperand = null;
         _lastOperation = null;
         _isEnteringNewValue = true;
+        if (historyOperation is not null)
+        {
+            AddHistory(historyOperation.Value, historyLhs, historyRhs, historyResult);
+        }
     }
 
     private void InputEquals()
@@ -157,15 +206,18 @@ internal sealed class CalculatorEngine
 
         CalculatorOperation? operation = null;
         decimal rhs = current;
+        decimal? lhs = null;
         if (_pendingOperation is not null && _accumulator is not null)
         {
             operation = _pendingOperation;
+            lhs = _accumulator.Value;
             rhs = current;
         }
         else if (_lastOperation is not null && _lastOperand is not null)
         {
             operation = _lastOperation;
             rhs = _lastOperand.Value;
+            lhs = current;
             _accumulator = current;
         }
         else
@@ -179,6 +231,7 @@ internal sealed class CalculatorEngine
             return;
         }
 
+        lhs ??= _accumulator.Value;
         if (!TryCalculate(_accumulator.Value, rhs, operation.Value, out var result))
         {
             ShowError();
@@ -191,6 +244,7 @@ internal sealed class CalculatorEngine
         _lastOperation = operation;
         _lastOperand = rhs;
         _isEnteringNewValue = true;
+        AddHistory(operation.Value, lhs.Value, rhs, result);
     }
 
     private void Backspace()
@@ -294,6 +348,48 @@ internal sealed class CalculatorEngine
         _lastOperation = null;
     }
 
+    private CalculatorHistoryEntry? FindHistoryEntry(string historyId)
+    {
+        return _history.FirstOrDefault(entry =>
+            string.Equals(entry.Item.Id, historyId, StringComparison.Ordinal));
+    }
+
+    private void AddHistory(CalculatorOperation operation, decimal lhs, decimal rhs, decimal result)
+    {
+        var item = new CalculatorHistoryItem(
+            Guid.NewGuid().ToString("N"),
+            $"{Format(lhs)} {OperationSymbol(operation)} {Format(rhs)}",
+            Format(result));
+        _history.Add(new CalculatorHistoryEntry(item, CaptureState()));
+        if (_history.Count > MaxHistoryItems)
+        {
+            _history.RemoveAt(0);
+        }
+    }
+
+    private CalculatorInternalState CaptureState()
+    {
+        return new CalculatorInternalState(
+            Display,
+            HasError,
+            _accumulator,
+            _pendingOperation,
+            _isEnteringNewValue,
+            _lastOperand,
+            _lastOperation);
+    }
+
+    private void RestoreState(CalculatorInternalState state)
+    {
+        Display = state.Display;
+        HasError = state.HasError;
+        _accumulator = state.Accumulator;
+        _pendingOperation = state.PendingOperation;
+        _isEnteringNewValue = state.IsEnteringNewValue;
+        _lastOperand = state.LastOperand;
+        _lastOperation = state.LastOperation;
+    }
+
     private void RecoverFromErrorIfNeeded()
     {
         if (HasError)
@@ -304,16 +400,41 @@ internal sealed class CalculatorEngine
 
     private static string NormalizeToken(string token)
     {
-        return token.Trim() switch
+        var trimmed = token.Trim();
+        if (trimmed.Length == "Numpad0".Length
+            && trimmed.StartsWith("Numpad", StringComparison.Ordinal)
+            && char.IsDigit(trimmed[^1]))
+        {
+            return trimmed[^1].ToString();
+        }
+
+        return trimmed switch
         {
             "÷" => "/",
             "×" or "x" or "X" => "*",
             "−" => "-",
-            "\r" or "\n" or "Enter" => "=",
+            "\r" or "\n" or "Enter" or "NumpadEnter" or "NumpadEqual" => "=",
             "Escape" or "Esc" or "C" => "AC",
-            "Backspace" => "BS",
+            "Backspace" or "Delete" => "BS",
+            "NumpadDecimal" => ".",
+            "NumpadAdd" => "+",
+            "NumpadSubtract" => "-",
+            "NumpadMultiply" => "*",
+            "NumpadDivide" => "/",
             "±" => "+/-",
             var normalized => normalized
+        };
+    }
+
+    private static string OperationSymbol(CalculatorOperation operation)
+    {
+        return operation switch
+        {
+            CalculatorOperation.Add => "+",
+            CalculatorOperation.Subtract => "−",
+            CalculatorOperation.Multiply => "×",
+            CalculatorOperation.Divide => "÷",
+            _ => "?"
         };
     }
 
@@ -322,6 +443,17 @@ internal sealed class CalculatorEngine
         var rounded = Math.Round(value, 12, MidpointRounding.AwayFromZero);
         return rounded.ToString("0.############", CultureInfo.InvariantCulture);
     }
+
+    private sealed record CalculatorHistoryEntry(CalculatorHistoryItem Item, CalculatorInternalState State);
+
+    private sealed record CalculatorInternalState(
+        string Display,
+        bool HasError,
+        decimal? Accumulator,
+        CalculatorOperation? PendingOperation,
+        bool IsEnteringNewValue,
+        decimal? LastOperand,
+        CalculatorOperation? LastOperation);
 }
 
 internal enum CalculatorOperation
@@ -332,4 +464,10 @@ internal enum CalculatorOperation
     Divide
 }
 
-internal sealed record CalculatorSnapshot(string Display, bool HasError, bool CanCopy);
+internal sealed record CalculatorSnapshot(
+    string Display,
+    bool HasError,
+    bool CanCopy,
+    IReadOnlyList<CalculatorHistoryItem> History);
+
+internal sealed record CalculatorHistoryItem(string Id, string Expression, string Result);

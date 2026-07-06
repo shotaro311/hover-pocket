@@ -7,6 +7,8 @@ namespace HoverPocket.Shell.Services;
 internal sealed class UpdaterService
 {
     public const string AppId = "HoverPocketWin";
+    public const string WindowsChannel = "win";
+    public const string WindowsFeedFileName = "releases.win.json";
     public const string GitHubRepositoryUrl = "https://github.com/shotaro311/hover-pocket";
 
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -139,7 +141,7 @@ internal sealed class UpdaterService
         Velopack.Locators.IVelopackLocator locator,
         CancellationToken cancellationToken = default)
     {
-        var manager = new UpdateManager(source, options: null, locator: locator);
+        var manager = new UpdateManager(source, options: CreateWindowsUpdateOptions(), locator: locator);
         if (!manager.IsInstalled)
         {
             return UpdaterCheckResult.NotInstalled();
@@ -156,7 +158,14 @@ internal sealed class UpdaterService
 
     private static UpdateManager CreateGitHubUpdateManager()
     {
-        return new UpdateManager(new GithubSource(GitHubRepositoryUrl, string.Empty, prerelease: false));
+        return new UpdateManager(
+            new GithubSource(GitHubRepositoryUrl, string.Empty, prerelease: false),
+            options: CreateWindowsUpdateOptions());
+    }
+
+    private static UpdateOptions CreateWindowsUpdateOptions()
+    {
+        return new UpdateOptions { ExplicitChannel = WindowsChannel };
     }
 
     private static void ShowInfo(Window? owner, string title, string message)

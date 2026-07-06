@@ -7,6 +7,7 @@ param(
     [string]$PackId = "HoverPocketWin",
     [string]$PackTitle = "HoverPocket",
     [string]$PackAuthors = "Shotaro Matsumoto",
+    [string]$ReleaseTag = "",
     [string]$VpkPath = "",
     [string]$NuGetSource = "",
     [switch]$NoRestore
@@ -41,6 +42,10 @@ $version = $projectXml.Project.PropertyGroup |
 
 if ([string]::IsNullOrWhiteSpace($version)) {
     throw "Version is missing from $projectPath."
+}
+
+if ([string]::IsNullOrWhiteSpace($ReleaseTag)) {
+    $ReleaseTag = "win-v$version"
 }
 
 $publishDir = Join-Path $outputRootPath "publish\$Runtime\$version"
@@ -116,7 +121,15 @@ $assets | Format-Table Name, Length -AutoSize
 
 Write-Host ""
 Write-Host "Upload is intentionally not executed by this script."
-Write-Host "After the architect creates or selects a GitHub Release, upload with:"
+Write-Host "If a Windows GitHub Release does not exist yet, create it without changing GitHub Latest:"
+Write-Host "gh release create $ReleaseTag --repo shotaro311/hover-pocket --title `"HoverPocket Windows $version`" --notes `"Windows Velopack release $version.`" --latest=false"
+Write-Host ""
+Write-Host "Upload only Windows Velopack assets to the Windows release:"
 $assetArguments = $assets |
     ForEach-Object { '"' + $_.FullName + '"' }
-Write-Host ("gh release upload <release-tag> " + ($assetArguments -join " ") + " --repo shotaro311/hover-pocket --clobber")
+Write-Host ("gh release upload $ReleaseTag " + ($assetArguments -join " ") + " --repo shotaro311/hover-pocket --clobber")
+Write-Host ""
+Write-Host "Read back the Windows feed and assets without using releases/latest:"
+Write-Host "gh release view $ReleaseTag --repo shotaro311/hover-pocket --json tagName,assets,url"
+Write-Host "Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pocket/releases/download/$ReleaseTag/releases.win.json"
+Write-Host "Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml"

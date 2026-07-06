@@ -35,6 +35,7 @@ internal sealed class UpdaterVerifier
 
     private async Task VerifyAsync()
     {
+        VerifyWindowsFeedMetadata();
         await VerifyCaseAsync(
             "no-update",
             [CurrentVersion],
@@ -43,6 +44,24 @@ internal sealed class UpdaterVerifier
             "update-available",
             [CurrentVersion, NextVersion],
             expectUpdate: true);
+    }
+
+    private void VerifyWindowsFeedMetadata()
+    {
+        if (!string.Equals(UpdaterService.WindowsChannel, "win", StringComparison.Ordinal))
+        {
+            _failures.Add($"feed metadata: expected Windows channel win, got {UpdaterService.WindowsChannel}");
+        }
+
+        if (!string.Equals(UpdaterService.WindowsFeedFileName, "releases.win.json", StringComparison.Ordinal))
+        {
+            _failures.Add($"feed metadata: expected releases.win.json, got {UpdaterService.WindowsFeedFileName}");
+        }
+
+        if (UpdaterService.GitHubRepositoryUrl.Contains("/latest/", StringComparison.OrdinalIgnoreCase))
+        {
+            _failures.Add("feed metadata: updater repository URL must not use GitHub latest download URLs");
+        }
     }
 
     private async Task VerifyCaseAsync(string label, IReadOnlyList<string> versions, bool expectUpdate)
@@ -97,7 +116,7 @@ internal sealed class UpdaterVerifier
         }
 
         File.WriteAllText(
-            Path.Combine(feedDirectory, "releases.win.json"),
+            Path.Combine(feedDirectory, UpdaterService.WindowsFeedFileName),
             JsonSerializer.Serialize(new Feed(assets), new JsonSerializerOptions { WriteIndented = false }));
         File.WriteAllLines(Path.Combine(feedDirectory, "RELEASES"), releaseLines);
     }
