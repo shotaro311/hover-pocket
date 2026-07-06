@@ -45,6 +45,25 @@
   - `dist/HoverPocket.app` の `SUFeedURL` は `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`。
   - `dist/releases/appcast.xml` の `sparkle:version` は `111`、enclosure は versioned release `v0.1.0-111`。
 
+### 配信
+
+- `APP_VERSION=0.1.0 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh`: 成功。
+- `notary_submission_id=70397200-f50b-4dfb-a0b1-2a51821f7904`、`notary_status=Accepted`。
+- GitHub Release:
+  - versioned: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-112`
+  - stable macOS feed: `https://github.com/shotaro311/hover-pocket/releases/tag/macos-latest`
+- `gh release view v0.1.0-112`: `appcast.xml`、`HoverPocket-0.1.0-112.zip`、`HoverPocket-0.1.0-112.zip.sha256`、`HoverPocket-macOS-app.zip` を確認。
+- `gh release view macos-latest`: `appcast.xml` と `HoverPocket-macOS-app.zip` を確認。
+- `gh release view`: latest release が `v0.1.0-112` であることを確認し、旧 build の `latest/download/appcast.xml` 経路を維持。
+- `curl https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`: `sparkle:version=112`、versioned ZIP enclosure、edSignature を確認。
+- `curl https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`: `sparkle:version=112` を確認。
+- stable ZIP readback:
+  - remote asset digest と local SHA256 は `b13fda6a78544fb27c5cb03f1ad67ccd060bfb3028bcd08643d8fca49df86eb2` で一致。
+  - ZIP top-level は `HoverPocket.app/`。
+  - extracted app の `CFBundleVersion` は `112`。
+  - extracted app の `SUFeedURL` は `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`。
+  - extracted app で `codesign --verify --deep --strict --verbose=2`、`xcrun stapler validate`、`spctl --assess --type execute --verbose=2` が成功。
+
 ## Cross-platform agent read gate
 
 ## 目的

@@ -11,6 +11,7 @@ status: active
 - Fixed notch-origin panel expansion by centering the final preview frame on the detected notch center instead of always using screen midpoint. This keeps the collapsed and expanded panel center aligned on notched MacBooks.
 - Added Calculator history on macOS: result history rows, result click-to-input, and per-row restore to the captured calculation state. Keyboard handling now reads shifted characters such as `+`, `*`, `%`, and symbolic `×` / `÷`.
 - Verification passed: `swift build`, `bash -n` for release scripts, `.build/debug/HoverPocket --verify-calculator` plus chain / percent / divide-by-zero sequences, `git diff --check`, and `./script/build_and_run.sh --verify`. Non-notarized dry-run packaging generated build `111` artifacts with the new `SUFeedURL`.
+- Released build `112` as notarized/stapled macOS ZIP. `notarytool` submission `70397200-f50b-4dfb-a0b1-2a51821f7904` returned `Accepted`; versioned release `v0.1.0-112` and stable macOS feed release `macos-latest` are published. Remote readback confirmed `macos-latest/appcast.xml` and legacy `latest/download/appcast.xml` both report `sparkle:version=112`, the stable ZIP SHA256 is `b13fda6a78544fb27c5cb03f1ad67ccd060bfb3028bcd08643d8fca49df86eb2`, extracted app `CFBundleVersion=112`, `SUFeedURL=https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`, and `codesign` / `stapler validate` / `spctl` all pass.
 
 ## 2026-07-06 Cross-platform Agent Read Gate
 
