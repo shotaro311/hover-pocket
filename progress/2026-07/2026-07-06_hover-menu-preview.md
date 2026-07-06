@@ -43,6 +43,37 @@
 - `git diff --check`: 成功。
 - `./script/build_and_run.sh --verify`: 成功。`HoverPocket launched`。
 
+### 配信
+
+- `APP_VERSION=0.1.0 NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh`: 成功。
+- `notarytool` submission `84ea8472-6967-44a0-aa01-ddcf277c4836`: `Accepted`。
+- GitHub Release: `https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-122`。
+- macOS stable feed release: `https://github.com/shotaro311/hover-pocket/releases/tag/macos-latest`。
+- `gh release list --limit 6`: `v0.1.0-122` が `Latest` として表示されることを確認。
+- Versioned release assets:
+  - `appcast.xml` (`896` bytes)
+  - `HoverPocket-0.1.0-122.zip` (`5953681` bytes)
+  - `HoverPocket-0.1.0-122.zip.sha256`
+  - `HoverPocket-macOS-app.zip` (`5953681` bytes)
+- `macos-latest` assets:
+  - `appcast.xml` (`896` bytes)
+  - `HoverPocket-macOS-app.zip` (`5953681` bytes)
+- Public appcast readback:
+  - `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`: `sparkle:version=122`、`length=5953681`、`sparkle:edSignature` あり。
+  - `https://github.com/shotaro311/hover-pocket/releases/latest/download/appcast.xml`: `sparkle:version=122`、`length=5953681`、`sparkle:edSignature` あり。
+- Public stable ZIP readback:
+  - Download URL: `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/HoverPocket-macOS-app.zip`
+  - SHA256: `2ed3b4ae8865414a54d2ae3a84d1352c7e0303ec7cf2d7c99564ca1982b40c6b`
+  - Top-level entry: `HoverPocket.app/`
+- Extracted app readback:
+  - `CFBundleShortVersionString=0.1.0`
+  - `CFBundleVersion=122`
+  - `SUFeedURL=https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`
+  - `codesign --verify --deep --strict --verbose=2`: 成功。
+  - `xcrun stapler validate`: 成功。
+  - `spctl --assess --type execute --verbose=2`: `accepted` / `source=Notarized Developer ID`。
+- LINE 共有用 ZIP: `~/Downloads/HoverPocket-macOS-app-122.zip`。SHA256 は公開 stable ZIP と一致。
+
 ## Mac Calculator Continuous Expressions and Clear History
 
 ### 目的
