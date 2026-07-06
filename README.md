@@ -237,6 +237,8 @@ PUBLISH_DRY_RUN=1 PUBLISH_REQUIRE_NOTARIZED=0 ./script/publish_github_release.sh
 
 自動アップデートは Sparkle 2 を使います。ローカル開発ビルドでは、未公開の更新フィードを見に行かないよう `SPARKLE_FEED_URL` を明示した場合だけ Settings の `Check for Updates` が有効になります。
 
+ユーザーが Settings、メニューバー、パネル上部から手動でアップデート確認を実行した場合、Sparkle の更新ダイアログと進行状況ウィンドウは前面に表示されます。起動後の自動プローブでは作業を邪魔しないよう前面化しません。
+
 配布 ZIP を作る `./script/package_zip.sh` と `./script/notarize_release.sh` では、既定で次の appcast を見に行く設定をアプリに入れます。
 
 ```text

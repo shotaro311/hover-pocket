@@ -1,5 +1,32 @@
 # 2026-07-06: Cross-platform agent read gate
 
+## Mac Sparkle Update Popup Foregrounding
+
+### 目的
+
+- ユーザーがアップデート確認を実行したときに、Sparkle の更新ダイアログや進行状況ウィンドウが他アプリの背面へ回らないようにする。
+- 起動後の自動 update probe では、作業中のウィンドウを奪わない。
+
+### 変更
+
+- `Sources/HoverPocket/Services/AppUpdater.swift`
+  - `SPUStandardUserDriverDelegate` を接続し、Sparkle の標準 UI 表示前後を捕捉。
+  - `checkForUpdates()` の手動実行時だけ foreground window を 12 秒間開き、`SUUpdateAlert` / `SUStatus` / `Sparkle` 由来ウィンドウを短い retry で前面化。
+  - no-update などの modal alert では `NSApp.modalWindow` を fallback として前面化。
+  - `refreshAvailableUpdateStatus()` の自動プローブでは前面化しない。
+- `README.md`
+  - 手動アップデート確認時は Sparkle UI を前面化し、自動プローブでは前面化しないことを追記。
+
+### 検証
+
+- `swift build`: 成功。
+- `git diff --check`: 成功。
+- `./script/build_and_run.sh --verify`: 成功。`HoverPocket launched`。
+
+### 未実施
+
+- 実際に新しい appcast を用意して Sparkle の更新ダイアログをクリック操作する E2E は未実施。今回は前面化処理の build / bundle 起動検証まで。
+
 ## Mac Calculator History and Feed Split
 
 ### 目的

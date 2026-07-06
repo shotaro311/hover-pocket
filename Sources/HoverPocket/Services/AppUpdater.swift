@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Sparkle
 
@@ -7,7 +8,7 @@ private enum UpdateFeedAvailability: Sendable {
 }
 
 @MainActor
-final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
+final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, @preconcurrency SPUStandardUserDriverDelegate {
     static let shared = AppUpdater()
 
     private var updaterController: SPUStandardUpdaterController?
@@ -15,6 +16,8 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     private let hasPublicKey: Bool
     private var hasStartedUpdater = false
     private var statusResetTask: DispatchWorkItem?
+    private var foregroundUpdateUIUntil: Date?
+    private var foregroundUpdateTasks: [DispatchWorkItem] = []
 
     @Published private(set) var isCheckingFeed = false
     @Published private(set) var hasAvailableUpdate = false
@@ -74,7 +77,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
         updaterController = SPUStandardUpdaterController(
             startingUpdater: false,
             updaterDelegate: self,
-            userDriverDelegate: nil
+            userDriverDelegate: self
         )
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
@@ -88,6 +91,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
             return
         }
 
+        beginForegroundUpdatePresentation()
         isCheckingFeed = true
         lastStatusKey = nil
 
@@ -98,9 +102,11 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
             switch availability {
             case .available:
                 startUpdaterIfNeeded(updaterController)
+                beginForegroundUpdatePresentation()
                 updaterController.checkForUpdates(nil)
             case .unavailable(let message):
                 lastStatusKey = message
+                finishForegroundUpdatePresentation()
             }
         }
     }
@@ -134,6 +140,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
         hasAvailableUpdate = true
         availableUpdateVersion = item.displayVersionString
         lastStatusKey = nil
+        foregroundSparkleUpdateWindowsSoon()
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) {
@@ -142,6 +149,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
         hasAvailableUpdate = false
         availableUpdateVersion = nil
         lastStatusKey = .updateUnavailable
+        foregroundSparkleUpdateWindowsSoon(allowModalFallback: true)
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
@@ -150,6 +158,34 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
         hasAvailableUpdate = false
         availableUpdateVersion = nil
         lastStatusKey = .updateUnavailable
+        foregroundSparkleUpdateWindowsSoon(allowModalFallback: true)
+    }
+
+    func standardUserDriverWillShowModalAlert() {
+        guard shouldForegroundUpdateUI else { return }
+        activateApplicationForUpdatePresentation()
+    }
+
+    func standardUserDriverDidShowModalAlert() {
+        foregroundSparkleUpdateWindowsSoon(allowModalFallback: true)
+    }
+
+    @objc(standardUserDriverWillHandleShowingUpdate:forUpdate:state:)
+    func standardUserDriverWillHandleShowingUpdate(
+        _ handleShowingUpdate: Bool,
+        forUpdate update: SUAppcastItem,
+        state: SPUUserUpdateState
+    ) {
+        guard handleShowingUpdate, state.userInitiated || shouldForegroundUpdateUI else { return }
+        beginForegroundUpdatePresentation()
+    }
+
+    func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
+        finishForegroundUpdatePresentation()
+    }
+
+    func standardUserDriverWillFinishUpdateSession() {
+        finishForegroundUpdatePresentation()
     }
 
     private func startUpdaterIfNeeded(_ updaterController: SPUStandardUpdaterController) {
@@ -166,6 +202,76 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
         }
         statusResetTask = task
         DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: task)
+    }
+
+    private var shouldForegroundUpdateUI: Bool {
+        guard let foregroundUpdateUIUntil else { return false }
+        return foregroundUpdateUIUntil > Date()
+    }
+
+    private func beginForegroundUpdatePresentation() {
+        foregroundUpdateUIUntil = Date().addingTimeInterval(12)
+        activateApplicationForUpdatePresentation()
+        foregroundSparkleUpdateWindowsSoon()
+    }
+
+    private func finishForegroundUpdatePresentation() {
+        foregroundUpdateUIUntil = nil
+        foregroundUpdateTasks.forEach { $0.cancel() }
+        foregroundUpdateTasks.removeAll()
+    }
+
+    private func foregroundSparkleUpdateWindowsSoon(allowModalFallback: Bool = false) {
+        guard shouldForegroundUpdateUI else { return }
+
+        foregroundUpdateTasks.forEach { $0.cancel() }
+        foregroundUpdateTasks.removeAll()
+
+        for delay in [0.05, 0.2, 0.5, 1.0, 1.8, 3.0, 5.0, 8.0] {
+            let task = DispatchWorkItem { [weak self] in
+                self?.foregroundSparkleUpdateWindows(allowModalFallback: allowModalFallback)
+            }
+            foregroundUpdateTasks.append(task)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: task)
+        }
+    }
+
+    private func foregroundSparkleUpdateWindows(allowModalFallback: Bool) {
+        guard shouldForegroundUpdateUI else { return }
+
+        var windows = NSApp.windows.filter(Self.isSparkleUpdateWindow)
+        if windows.isEmpty, allowModalFallback, let modalWindow = NSApp.modalWindow {
+            windows = [modalWindow]
+        }
+        guard !windows.isEmpty else { return }
+
+        activateApplicationForUpdatePresentation()
+        for window in windows {
+            window.deminiaturize(nil)
+            window.orderFrontRegardless()
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    private func activateApplicationForUpdatePresentation() {
+        NSApp.unhide(nil)
+        if #available(macOS 14.0, *) {
+            NSRunningApplication.current.activate(options: [.activateAllWindows])
+        } else {
+            NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        }
+    }
+
+    private static func isSparkleUpdateWindow(_ window: NSWindow) -> Bool {
+        let identifier = window.identifier?.rawValue.lowercased() ?? ""
+        if identifier == "suupdatealert" || identifier == "sustatus" || identifier.contains("sparkle") {
+            return true
+        }
+
+        let title = window.title.lowercased()
+        return title.contains("software update")
+            || title.contains("update")
+            || title.contains("アップデート")
     }
 
     private nonisolated static func validateFeed(_ url: URL) async -> UpdateFeedAvailability {

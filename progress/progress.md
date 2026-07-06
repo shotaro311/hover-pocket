@@ -5,6 +5,12 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-06 Mac Sparkle Update Popup Foregrounding
+
+- Updated macOS Sparkle integration so manual update checks from Settings, the menu bar, or the provider header activate HoverPocket and bring Sparkle update/status windows to the front.
+- The foregrounding window is bounded to user-initiated checks only; the launch-time update probe still updates the in-panel badge/status without stealing focus.
+- Verification passed: `swift build`, `git diff --check`, and `./script/build_and_run.sh --verify`. Details: `progress/2026-07/2026-07-06_hover-menu-preview.md`.
+
 ## 2026-07-06 OAuth Public Verification Console Execution
 
 - Enabled GitHub Pages for `site/` through `.github/workflows/pages.yml`, manually dispatched the workflow after Pages creation, and verified public readback for `https://shotaro311.github.io/hover-pocket/`, `privacy.html`, and `googlea0eda7d7223f8019.html`.
