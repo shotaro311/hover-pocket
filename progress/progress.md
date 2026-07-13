@@ -1,9 +1,32 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-07-06
+updated: 2026-07-13
 updated_by: codex
 status: active
 ---
+
+## 2026-07-13 Mac Build 127 Release
+
+- メディア操作の応答性改善、前後トラック操作、ScreenCaptureKit 30fpsライブプレビュー、取得不能時のサムネイルフォールバックを含むcommit `01fb33d`を`origin/main`へpushし、macOS build `127`を配信した。
+- Apple公証submission `453cc3ff-3033-4d43-b544-8d457c5d8508`は`Accepted`。Developer ID署名、staple、Gatekeeper評価に合格したZIPをGitHub Release `v0.1.0-127`とmacOS専用`macos-latest`へ公開し、GitHub Latestもbuild `127`へ更新した。
+- 公開URLから再取得したZIPのSHA-256は`6dda40d9b9d2012b80f2e25398131b2fa1c265a43cc3f982ada58cb3f515056c`でローカル成果物と一致した。展開後の`CFBundleVersion=127`、`CFBundleShortVersionString=0.1.0`、`SUFeedURL=https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`、`codesign`、`stapler validate`、`spctl`を確認した。
+- macOS専用appcastとGitHub Latest経由のlegacy appcastは、どちらも`version=127`とversioned ZIP URLを返した。tag `v0.1.0-127`はcommit `01fb33d`を指し、最終の`HEAD...origin/main`は`0/0`だった。
+
+## 2026-07-13 Mac Media Live Preview
+
+- Controls のメディア画像を、0.75秒ごとの `SCScreenshotManager` 静止画取得から、ScreenCaptureKit `SCStream` の392×220・30fps連続キャプチャへ置き換えた。
+- `CMSampleBuffer` の IOSurface を小さな `NSViewRepresentable` / CALayer bridge へ直接渡し、NSImage変換を廃止した。描画待ちフレームは最新1枚へ集約し、UI負荷時に古いフレームが溜まらないようにした。
+- アートワーク／プレースホルダーを常にライブ層の背面へ置き、画面収録未許可、window IDなし、対象window解決失敗、stream開始失敗、初回2秒以内のframe未到達、stream停止時はライブ層を透明化して自動フォールバックする。
+- 画面収録権限は従来どおりpreflightのみで、Controlsの受動表示から許可ダイアログを再要求しない。ライブcaptureはControls表示中だけ起動し、view破棄時に停止する。
+- 署名済みアプリのGUIでYouTubeプレビュー表示を確認。`--verify-media --toggle-playback --verify-live-preview` は0.7秒で完全frame 22枚、`media_live_preview_mode=live`、`media_toggle_verified=true`、`media_verify=ok`。`--verify-live-preview-fallback` は `fallback_no_window`、`media_live_preview_fallback=true`、`media_verify=ok`。
+
+## 2026-07-13 Mac Media Control Responsiveness and Track Navigation
+
+- Controls の常駐 mediaremote-adapter loop が受け付ける stdin コマンド経路を利用し、再生/停止とシークのたびに別の perl プロセスを起動していた遅延・取りこぼしを解消した。常駐 stream が使えない場合は既存 one-shot / MediaRemote fallback を維持する。
+- 再生/停止は pipe への書き込み完了ではなく、media stream から期待した実状態が返った時点で成功確定する。通知が欠けた場合は 1.5 秒後に readback して楽観表示と pending 状態を復旧する。
+- メディア操作列に前のトラック、次のトラックのボタンを追加した。既存の冒頭へ戻るボタンは `arrow.counterclockwise` に変更し、前のトラックとのアイコン重複を避けた。
+- 各メディアボタンのクリック領域を 32pt、主ボタンを 34pt へ拡大し、透明部分を含む矩形全体を hit-test 対象にした。
+- 検証は `swift build`、`git diff --check`、`./script/build_and_run.sh --verify`、`--verify-panel-layout` が成功。`--verify-media --toggle-playback` は `media_toggle_transport=adapter_stream`、`media_toggle_verified=true`、`media_verify=ok` を返し、再生状態を元へ復元した。
 
 ## 2026-07-06 Windows Build 124 Clipboard and Calculator Parity
 
