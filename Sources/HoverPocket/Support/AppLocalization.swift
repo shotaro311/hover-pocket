@@ -94,9 +94,11 @@ enum AppTextKey: String, Sendable {
     case controlsNoDisplays
     case controlsNoMedia
     case controlsNowPlaying
+    case controlsNextTrack
     case controlsPause
     case controlsPlay
     case controlsPlaybackRate
+    case controlsPreviousTrack
     case controlsUnmute
     case controlsUnsupported
     case controlsVolume
@@ -345,9 +347,11 @@ enum AppText {
         case .controlsNoDisplays: return "ディスプレイを取得できません"
         case .controlsNoMedia: return "再生中のメディアはありません"
         case .controlsNowPlaying: return "メディア"
+        case .controlsNextTrack: return "次へ進む"
         case .controlsPause: return "一時停止"
         case .controlsPlay: return "再生"
         case .controlsPlaybackRate: return "再生速度"
+        case .controlsPreviousTrack: return "前へ戻る"
         case .controlsUnmute: return "ミュート解除"
         case .controlsUnsupported: return "非対応"
         case .controlsVolume: return "サウンド"
@@ -566,9 +570,11 @@ enum AppText {
         case .controlsNoDisplays: return "No displays found"
         case .controlsNoMedia: return "No active media"
         case .controlsNowPlaying: return "Media"
+        case .controlsNextTrack: return "Next"
         case .controlsPause: return "Pause"
         case .controlsPlay: return "Play"
         case .controlsPlaybackRate: return "Playback speed"
+        case .controlsPreviousTrack: return "Previous"
         case .controlsUnmute: return "Unmute"
         case .controlsUnsupported: return "Unsupported"
         case .controlsVolume: return "Sound"

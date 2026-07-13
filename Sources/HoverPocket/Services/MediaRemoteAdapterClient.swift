@@ -68,6 +68,7 @@ final class MediaRemoteAdapterClient: @unchecked Sendable {
 
     private let streamLock = NSLock()
     private var streamProcess: Process?
+    private var streamInputPipe: Pipe?
     private var streamBuffer = Data()
     private var mergedPayload: [String: Any] = [:]
     private var isListening = false
@@ -88,6 +89,14 @@ final class MediaRemoteAdapterClient: @unchecked Sendable {
 
     func togglePlayPause() async -> Bool {
         await run(command: "toggle_play_pause")
+    }
+
+    func nextTrack() async -> Bool {
+        await run(command: "next_track")
+    }
+
+    func previousTrack() async -> Bool {
+        await run(command: "previous_track")
     }
 
     func setElapsedTime(_ seconds: TimeInterval) async -> Bool {
@@ -167,11 +176,14 @@ final class MediaRemoteAdapterClient: @unchecked Sendable {
         streamLock.lock()
         let process = streamProcess
         streamProcess = nil
+        let inputPipe = streamInputPipe
+        streamInputPipe = nil
         isListening = false
         onStreamEvent = nil
         streamBuffer = Data()
         mergedPayload = [:]
         streamLock.unlock()
+        try? inputPipe?.fileHandleForWriting.close()
         process?.terminationHandler = nil
         if let process, process.isRunning {
             process.terminate()
@@ -183,8 +195,8 @@ final class MediaRemoteAdapterClient: @unchecked Sendable {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
         process.arguments = [scriptPath, dylibPath, "loop"]
-        // stdin を繋いでおくと、親プロセス終了時に perl 側が EOF を検知して自終了する
-        process.standardInput = Pipe()
+        let inputPipe = Pipe()
+        process.standardInput = inputPipe
         let outputPipe = Pipe()
         process.standardOutput = outputPipe
         process.standardError = Pipe()
@@ -203,8 +215,10 @@ final class MediaRemoteAdapterClient: @unchecked Sendable {
         do {
             try process.run()
             streamProcess = process
+            streamInputPipe = inputPipe
         } catch {
             adapterLog.error("adapter loop launch failed: \(error.localizedDescription)")
+            streamInputPipe = nil
             isListening = false
         }
     }
@@ -212,6 +226,7 @@ final class MediaRemoteAdapterClient: @unchecked Sendable {
     private func handleStreamTermination() {
         streamLock.lock()
         streamProcess = nil
+        streamInputPipe = nil
         streamBuffer = Data()
         let shouldRestart = isListening
         let restartCount = streamRestartCount
@@ -290,6 +305,9 @@ final class MediaRemoteAdapterClient: @unchecked Sendable {
     }
 
     private func run(command: String, arguments: [String] = [], timeout: TimeInterval = 3.0) async -> Bool {
+        if sendToStream(command: command, arguments: arguments) {
+            return true
+        }
         guard let dylibPath, let scriptPath else { return false }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
@@ -330,6 +348,29 @@ final class MediaRemoteAdapterClient: @unchecked Sendable {
                 }
                 continuation.resume(returning: false)
             }
+        }
+    }
+
+    /// 状態購読中は同じ長寿命プロセスへコマンドを送る。
+    /// ボタン操作ごとの perl 起動を避け、クリック直後に MediaRemote へ届ける。
+    private func sendToStream(command: String, arguments: [String]) -> Bool {
+        let line = ([command] + arguments).joined(separator: " ") + "\n"
+        guard let data = line.data(using: .utf8) else { return false }
+
+        streamLock.lock()
+        defer { streamLock.unlock() }
+        guard isListening,
+              streamProcess?.isRunning == true,
+              let handle = streamInputPipe?.fileHandleForWriting
+        else {
+            return false
+        }
+        do {
+            try handle.write(contentsOf: data)
+            return true
+        } catch {
+            adapterLog.error("adapter stream command \(command) failed: \(error.localizedDescription)")
+            return false
         }
     }
 

@@ -8,6 +8,8 @@ enum MediaVerificationCommand {
         let requestedRate = requestedPlaybackRate()
 
         let shouldTogglePlayback = CommandLine.arguments.contains("--toggle-playback")
+        let shouldVerifyLivePreview = CommandLine.arguments.contains("--verify-live-preview")
+        let shouldVerifyLivePreviewFallback = CommandLine.arguments.contains("--verify-live-preview-fallback")
 
         Task<Void, Never> {
             let service = MediaRemoteService()
@@ -24,6 +26,11 @@ enum MediaVerificationCommand {
             // 再生/停止コマンドが実際に効くか（状態が反転するか）を検証し、元の状態へ戻す。
             // 読み取りが成功するだけでは macOS 15.4+ のコマンド遮断を検出できない。
             var toggleVerified: Bool?
+            let usesCommandStream = shouldTogglePlayback && service.isAdapterAvailable
+            if usesCommandStream {
+                service.startNowPlayingStream { _ in }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
             if shouldTogglePlayback, initialState.hasMedia {
                 let wasPlaying = initialState.isPlaying
                 await service.togglePlayPause()
@@ -35,14 +42,26 @@ enum MediaVerificationCommand {
             } else if shouldTogglePlayback {
                 toggleVerified = false
             }
+            if usesCommandStream {
+                service.stopNowPlayingStream()
+            }
             let state = await service.nowPlaying()
+            let livePreviewResult = shouldVerifyLivePreview || shouldVerifyLivePreviewFallback
+                ? await ControlsMediaPreviewVerifier.verify(
+                    windowID: shouldVerifyLivePreviewFallback ? nil : state.previewWindowID,
+                    requireLivePreview: shouldVerifyLivePreview
+                )
+                : .skipped
             let requestedRateText = requestedRate.map { String($0) } ?? ""
             let playbackRateVerified = playbackRateVerificationResult(
                 initialRate: initialState.playbackRate,
                 finalRate: state.playbackRate,
                 requestedRate: requestedRate
             )
-            let didVerify = state.hasMedia && playbackRateVerified && (toggleVerified ?? true)
+            let didVerify = state.hasMedia
+                && playbackRateVerified
+                && (toggleVerified ?? true)
+                && livePreviewResult.verified
             resultBox.outputLines = [
                 "media_has_media=\(state.hasMedia)",
                 "media_title=\(state.title)",
@@ -55,9 +74,15 @@ enum MediaVerificationCommand {
                 "media_requested_playback_rate=\(requestedRateText)",
                 "media_playback_rate_verified=\(playbackRateVerified)",
                 "media_toggle_verified=\(toggleVerified.map(String.init) ?? "skipped")",
+                "media_toggle_transport=\(usesCommandStream ? "adapter_stream" : "one_shot")",
                 "media_has_artwork=\(state.artworkData != nil)",
                 "media_url=\(state.mediaURLString ?? "")",
                 "media_preview_window_id=\(state.previewWindowID.map(String.init) ?? "")",
+                "media_live_preview_mode=\(livePreviewResult.mode)",
+                "media_live_preview_frames=\(livePreviewResult.frameCount)",
+                "media_live_preview_active=\(livePreviewResult.livePreviewActive)",
+                "media_live_preview_fallback=\(livePreviewResult.fallbackActive)",
+                "media_live_preview_verified=\(livePreviewResult.verified)",
                 "media_verify=\(didVerify ? "ok" : "failed")"
             ]
             resultBox.exitCode = didVerify ? 0 : 1

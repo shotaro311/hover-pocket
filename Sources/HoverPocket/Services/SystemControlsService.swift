@@ -28,6 +28,7 @@ final class ControlsStore: ObservableObject {
     private var playbackRateCommandTask: Task<Void, Never>?
     private var playbackCommandRequestID = 0
     private var playbackRateRequestID = 0
+    private var pendingPlaybackTarget: Bool?
     private var isMediaStreamActive = false
     private var lastAdapterEvent: AdapterNowPlaying?
     private var mediaEventCounter = 0
@@ -62,6 +63,7 @@ final class ControlsStore: ObservableObject {
         enrichmentTask = nil
         playbackCommandRequestID += 1
         playbackRateRequestID += 1
+        pendingPlaybackTarget = nil
         mediaEventCounter += 1
         isPlaybackCommandPending = false
         isPlaybackRateCommandPending = false
@@ -133,6 +135,13 @@ final class ControlsStore: ObservableObject {
             }
         }
         nowPlaying = state
+
+        if isPlaybackCommandPending, pendingPlaybackTarget == state.isPlaying {
+            isPlaybackCommandPending = false
+            pendingPlaybackTarget = nil
+            playbackCommandTask?.cancel()
+            playbackCommandTask = nil
+        }
 
         enrichmentTask?.cancel()
         let service = mediaService
@@ -216,6 +225,22 @@ final class ControlsStore: ObservableObject {
         setPlaybackProgress(0)
     }
 
+    func playPreviousTrack() {
+        guard nowPlaying.hasMedia else { return }
+        let service = mediaService
+        Task.detached(priority: .userInitiated) {
+            await service.previousTrack()
+        }
+    }
+
+    func playNextTrack() {
+        guard nowPlaying.hasMedia else { return }
+        let service = mediaService
+        Task.detached(priority: .userInitiated) {
+            await service.nextTrack()
+        }
+    }
+
     func togglePlayback() {
         guard nowPlaying.hasMedia, !isPlaybackCommandPending else { return }
         nowPlaying.isPlaying.toggle()
@@ -227,15 +252,31 @@ final class ControlsStore: ObservableObject {
         playbackCommandTask?.cancel()
 
         if isMediaStreamActive {
-            // ストリーム有効時は変更通知が実状態を運んでくるので、readback も
-            // watchdog も不要。コマンド送信の完了だけ待って連打を防ぐ。
+            // 書き込み完了ではなく、stream の状態通知で操作成功を確定する。
+            // 通知が欠けた場合だけ readback し、楽観表示のまま固まるのを防ぐ。
             isPlaybackCommandPending = true
+            pendingPlaybackTarget = expectedIsPlaying
             lastAdapterEvent?.isPlaying = expectedIsPlaying
             lastAdapterEvent?.timestamp = Date()
             playbackCommandTask = Task { [weak self] in
                 await service.togglePlayPause()
                 guard let self, self.playbackCommandRequestID == requestID else { return }
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                guard !Task.isCancelled,
+                      self.playbackCommandRequestID == requestID,
+                      self.isPlaybackCommandPending
+                else { return }
+                let readback = await service.nowPlaying()
+                guard !Task.isCancelled,
+                      self.playbackCommandRequestID == requestID,
+                      self.isPlaybackCommandPending
+                else { return }
+                if readback.hasMedia {
+                    self.nowPlaying = readback
+                }
                 self.isPlaybackCommandPending = false
+                self.pendingPlaybackTarget = nil
+                self.playbackCommandTask = nil
             }
             return
         }
@@ -255,6 +296,7 @@ final class ControlsStore: ObservableObject {
                     self.nowPlaying.isPlaying = expectedIsPlaying
                 }
                 self.isPlaybackCommandPending = false
+                self.pendingPlaybackTarget = nil
             }
         }
         schedulePendingWatchdog(
@@ -1189,6 +1231,20 @@ final class MediaRemoteService: @unchecked Sendable {
         }
         // macOS 15.4 未満などで adapter が使えない場合のみ直接呼ぶ
         sendCommand?(2, nil)
+    }
+
+    func nextTrack() async {
+        if await adapterClient.nextTrack() {
+            return
+        }
+        sendCommand?(4, nil)
+    }
+
+    func previousTrack() async {
+        if await adapterClient.previousTrack() {
+            return
+        }
+        sendCommand?(5, nil)
     }
 
     func setElapsedTime(_ elapsedTime: TimeInterval) async {

@@ -1,5 +1,4 @@
 import AppKit
-import ScreenCaptureKit
 import SwiftUI
 
 struct ControlsView: View {
@@ -173,7 +172,7 @@ struct ControlsView: View {
                     Color.clear
                         .frame(width: ControlsLayout.valueWidth)
 
-                    ControlsMediaButton(symbolName: "backward.end.fill") {
+                    ControlsMediaButton(symbolName: "arrow.counterclockwise") {
                         store.restartPlayback()
                     }
                     .frame(width: ControlsLayout.actionWidth, height: ControlsLayout.actionWidth)
@@ -192,13 +191,20 @@ struct ControlsView: View {
 
                     Spacer(minLength: 8)
 
-                    HStack(spacing: 13) {
+                    HStack(spacing: 8) {
                         ControlsMediaButton(symbolName: "minus") {
                             adjustPlaybackRate(by: -0.1)
                         }
                         .disabled(!store.nowPlaying.hasMedia || store.isPlaybackRateCommandPending)
                         .opacity(store.nowPlaying.hasMedia && !showsRatePendingIndicator ? 1 : 0.38)
                         .help("\(text(.controlsDecreasePlaybackRate)) / \(playbackRateText)")
+
+                        ControlsMediaButton(symbolName: "backward.end.fill") {
+                            store.playPreviousTrack()
+                        }
+                        .disabled(!store.nowPlaying.hasMedia)
+                        .opacity(store.nowPlaying.hasMedia ? 1 : 0.38)
+                        .help(text(.controlsPreviousTrack))
 
                         ControlsMediaButton(symbolName: "gobackward.10") {
                             store.skipPlayback(by: -10)
@@ -223,6 +229,13 @@ struct ControlsView: View {
                         .opacity(store.nowPlaying.hasMedia ? 1 : 0.38)
                         .help(text(.controlsForward10))
 
+                        ControlsMediaButton(symbolName: "forward.end.fill") {
+                            store.playNextTrack()
+                        }
+                        .disabled(!store.nowPlaying.hasMedia)
+                        .opacity(store.nowPlaying.hasMedia ? 1 : 0.38)
+                        .help(text(.controlsNextTrack))
+
                         ControlsMediaButton(symbolName: "plus") {
                             adjustPlaybackRate(by: 0.1)
                         }
@@ -238,7 +251,7 @@ struct ControlsView: View {
                         .foregroundStyle(.white.opacity(0.48))
                         .frame(width: 38, alignment: .trailing)
                 }
-                .frame(height: 27)
+                .frame(height: 34)
             }
         }
     }
@@ -554,7 +567,7 @@ private struct ControlsCircleButton: View {
             Circle()
                 .stroke(Color.white.opacity(isActive ? 0.16 : 0.08), lineWidth: 1)
         )
-        .contentShape(Circle())
+        .contentShape(Rectangle())
     }
 }
 
@@ -567,7 +580,8 @@ private struct ControlsMediaButton: View {
         Button(action: action) {
             Image(systemName: symbolName)
                 .font(.system(size: isPrimary ? 12 : 10.5, weight: .bold))
-                .frame(width: isPrimary ? 29 : 25, height: isPrimary ? 29 : 25)
+                .frame(width: isPrimary ? 34 : 32, height: isPrimary ? 34 : 32)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white.opacity(isPrimary ? 0.92 : 0.68))
@@ -579,225 +593,7 @@ private struct ControlsMediaButton: View {
             Circle()
                 .stroke(Color.white.opacity(isPrimary ? 0.16 : 0.08), lineWidth: 1)
         )
-        .contentShape(Circle())
-    }
-}
-
-private struct ControlsVideoThumbnail: View {
-    let track: ControlsNowPlayingState
-    let fallbackSourceName: String
-    @StateObject private var previewStore = ControlsWindowPreviewStore()
-
-    var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            if let image = previewStore.image {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let image = artworkImage {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                placeholder
-            }
-
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.56)],
-                startPoint: .center,
-                endPoint: .bottom
-            )
-
-            Text(track.sourceName.isEmpty ? fallbackSourceName : track.sourceName)
-                .panelTextFont(size: 8, weight: .bold, design: .monospaced)
-                .foregroundStyle(.white.opacity(0.72))
-                .lineLimit(1)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 4)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.09), lineWidth: 1)
-        )
-        .onAppear {
-            previewStore.update(windowID: track.previewWindowID)
-        }
-        .onDisappear {
-            previewStore.stop()
-        }
-        .onChange(of: track.previewWindowID) { _, windowID in
-            previewStore.update(windowID: windowID)
-        }
-    }
-
-    private var artworkImage: NSImage? {
-        guard let artworkData = track.artworkData else { return nil }
-        return NSImage(data: artworkData)
-    }
-
-    private var placeholder: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(red: 0.10, green: 0.11, blue: 0.13))
-
-            HStack(spacing: 5) {
-                ForEach(0..<4, id: \.self) { index in
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(Color.white.opacity(index.isMultiple(of: 2) ? 0.12 : 0.06))
-                        .frame(width: 14)
-                }
-            }
-            .rotationEffect(.degrees(-18))
-            .offset(x: 25, y: -5)
-
-            Image(systemName: "play.rectangle.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.76))
-        }
-    }
-}
-
-@MainActor
-private final class ControlsWindowPreviewStore: ObservableObject {
-    @Published var image: NSImage?
-
-    private var timer: Timer?
-    private var captureTask: Task<Void, Never>?
-    private var windowID: UInt32?
-
-    func update(windowID: UInt32?) {
-        guard self.windowID != windowID else { return }
-        stop()
-        self.windowID = windowID
-        guard let windowID else { return }
-        guard canCaptureScreen() else {
-            self.windowID = nil
-            return
-        }
-        capture(windowID: windowID)
-        let timer = Timer(timeInterval: 0.75, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.capture(windowID: windowID)
-            }
-        }
-        timer.tolerance = 0.1
-        self.timer = timer
-        RunLoop.main.add(timer, forMode: .common)
-    }
-
-    func stop() {
-        timer?.invalidate()
-        timer = nil
-        captureTask?.cancel()
-        captureTask = nil
-        windowID = nil
-        image = nil
-    }
-
-    private let windowCache = ControlsCaptureWindowCache()
-
-    private func capture(windowID: UInt32) {
-        guard self.windowID == windowID else { return }
-        captureTask?.cancel()
-        if #available(macOS 14.0, *) {
-            captureTask = Task { [weak self, windowCache] in
-                let cgImage = await Self.screenCaptureKitImage(windowID: windowID, cache: windowCache)
-                await MainActor.run {
-                    guard let self, self.windowID == windowID else { return }
-                    guard let cgImage else {
-                        self.image = nil
-                        return
-                    }
-                    self.image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-                }
-            }
-        } else {
-            image = nil
-        }
-    }
-
-    private func canCaptureScreen() -> Bool {
-        ControlsScreenCaptureAccessGate.canCapture()
-    }
-
-    @available(macOS 14.0, *)
-    private nonisolated static func screenCaptureKitImage(
-        windowID: UInt32,
-        cache: ControlsCaptureWindowCache
-    ) async -> CGImage? {
-        if let cachedWindow = cache.window(for: windowID),
-           let image = await captureImage(of: cachedWindow) {
-            return image
-        }
-        cache.invalidate()
-        guard let window = await resolveWindow(windowID: windowID) else { return nil }
-        cache.store(window: window, for: windowID)
-        return await captureImage(of: window)
-    }
-
-    @available(macOS 14.0, *)
-    private nonisolated static func resolveWindow(windowID: UInt32) async -> SCWindow? {
-        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
-            return nil
-        }
-        return content.windows.first(where: { $0.windowID == CGWindowID(windowID) })
-    }
-
-    @available(macOS 14.0, *)
-    private nonisolated static func captureImage(of window: SCWindow) async -> CGImage? {
-        let configuration = SCStreamConfiguration()
-        configuration.width = max(2, Int(window.frame.width.rounded()))
-        configuration.height = max(2, Int(window.frame.height.rounded()))
-        configuration.showsCursor = false
-        configuration.capturesAudio = false
-        if #available(macOS 15.0, *) {
-            configuration.captureMicrophone = false
-        }
-        let filter = SCContentFilter(desktopIndependentWindow: window)
-        return await withCheckedContinuation { continuation in
-            SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, _ in
-                continuation.resume(returning: image)
-            }
-        }
-    }
-}
-
-/// Caches the resolved SCWindow so the expensive full-window enumeration
-/// (SCShareableContent) only runs when the cache misses, expires, or a capture fails.
-private final class ControlsCaptureWindowCache: @unchecked Sendable {
-    private let lock = NSLock()
-    private var cached: (windowID: UInt32, window: SCWindow, resolvedAt: Date)?
-    private let lifetime: TimeInterval = 5
-
-    func window(for windowID: UInt32) -> SCWindow? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let cached, cached.windowID == windowID,
-              Date().timeIntervalSince(cached.resolvedAt) < lifetime
-        else { return nil }
-        return cached.window
-    }
-
-    func store(window: SCWindow, for windowID: UInt32) {
-        lock.lock()
-        cached = (windowID, window, Date())
-        lock.unlock()
-    }
-
-    func invalidate() {
-        lock.lock()
-        cached = nil
-        lock.unlock()
-    }
-}
-
-@MainActor
-private enum ControlsScreenCaptureAccessGate {
-    static func canCapture() -> Bool {
-        CGPreflightScreenCaptureAccess()
+        .contentShape(Rectangle())
     }
 }
 
