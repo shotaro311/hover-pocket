@@ -121,14 +121,14 @@
       <a href="https://github.com/shotaro311/hover-pocket/issues">Contact</a>
     </nav>
     <h1>プライバシーポリシー</h1>
-    <p class="updated">HoverPocket / ホバーポケット | 最終更新日: 2026-07-06</p>
+    <p class="updated">HoverPocket / ホバーポケット | 最終更新日: 2026-07-15</p>
   </header>
 
   <main>
     <section class="card" lang="ja">
       <p>
-        このポリシーは、Windows 版 HoverPocket の Google Calendar 連携、Clipboard、Sticky Notes、
-        AI lane、更新確認に関するデータの扱いを説明します。HoverPocket はローカル優先のデスクトップアプリであり、
+        このポリシーは、macOS 版および Windows 版 HoverPocket の Google Calendar 連携、Clipboard、Sticky Notes、
+        更新確認に関するデータの扱いを説明します。HoverPocket はローカル優先のデスクトップアプリであり、
         Google Calendar 連携時を除き、ユーザーデータを外部サービスへ送信しません。
       </p>
     </section>
@@ -151,7 +151,6 @@
       <ul>
         <li>Google Calendar の予定を HoverPocket のパネル内に表示するため。</li>
         <li>ユーザー操作に基づいて Google Calendar の予定を作成、編集、削除するため。</li>
-        <li>AI lane で作成されたカレンダー操作候補を、ユーザーの承認後に実行するため。</li>
         <li>Clipboard 履歴、Sticky Notes、Timer、設定をローカルで復元するため。</li>
         <li>GitHub Releases から更新の有無を確認し、ユーザーが同意した場合に更新をダウンロードするため。</li>
       </ul>
@@ -162,20 +161,31 @@
         Google ユーザーデータは、アプリ内で明示されているカレンダー表示と予定操作のためだけに使います。
       </p>
 
+      <h3>AI / ML サービスと Limited Use</h3>
+      <p>
+        現在の公開版 HoverPocket は、Google Workspace または Google Photos のユーザーデータを、第三者のAI / MLサービスへ送信しません。
+        HoverPocket が連携している第三者AIサービスはありません。Googleユーザーデータを、基盤モデル、汎用モデル、その他のAI / MLモデルの
+        作成、学習、改善に使用、転送、販売することもありません。
+      </p>
+      <p>
+        現在の公開版ではAI command laneをユーザーインターフェースから無効化しています。リポジトリ内の実験的なmacOS実装は、
+        対応端末上でApple Foundation Modelsを端末内処理として使用する設計であり、GoogleユーザーデータをAppleまたはモデル提供者へ送信しません。
+        Windows側の実験的なコマンド解釈も、外部AI APIを呼ばないローカルの決定的処理です。
+      </p>
+
       <h3>保存場所</h3>
       <p>
         Google Calendar の予定本文は、パネル表示とユーザー操作の処理中に使います。HoverPocket は予定タイトル、場所、メモを予定キャッシュとしてローカルファイルへ保存しません。
       </p>
       <ul>
-        <li>Google refresh token は Windows Credential Manager に保存します。access token はメモリ上だけで扱います。</li>
+        <li>Google refresh token は macOS Keychain または Windows Credential Manager に保存します。access token はメモリ上だけで扱います。</li>
         <li>OAuth client 設定をユーザーが配置する場合、設定ファイルは <code>%APPDATA%\HoverPocket\oauth.json</code> に置きます。</li>
         <li>Clipboard 履歴は <code>%APPDATA%\HoverPocket\clipboard\history.json</code> と同フォルダー内の画像PNGとして保存します。</li>
         <li>Sticky Notes は <code>%APPDATA%\HoverPocket\sticky\notes.json</code> と <code>%APPDATA%\HoverPocket\sticky\settings.json</code> に保存します。</li>
-        <li>AI lane の監査ログは <code>%APPDATA%\HoverPocket\auditlog\ailane-YYYYMMDD.jsonl</code> に保存します。現在の実装では、予定タイトル、場所、メモ、ユーザー入力本文、承認カード本文は保存せず、時刻、操作種別、結果、イベントID、カレンダーIDなどの最小メタデータだけを保存します。ログファイルは90日より古いものを削除します。</li>
         <li>その他の設定、Timer 情報、ローカル状態も <code>%APPDATA%\HoverPocket</code> 配下に保存します。</li>
       </ul>
       <p>
-        上記データはユーザーのWindows環境内に保存されます。HoverPocket は独自のサーバーへこれらのデータをアップロードしません。
+        上記データはユーザーのmacOSまたはWindows環境内に保存されます。HoverPocket は独自のサーバーへこれらのデータをアップロードしません。
       </p>
 
       <h3>削除方法と Private mode</h3>
@@ -202,7 +212,8 @@
 
       <h3>問い合わせ</h3>
       <p>
-        プライバシーに関する問い合わせは GitHub Issues
+        プライバシーに関する問い合わせは
+        <a href="mailto:shotaro.matsu0311@gmail.com">shotaro.matsu0311@gmail.com</a> または GitHub Issues
         (<a href="https://github.com/shotaro311/hover-pocket/issues">https://github.com/shotaro311/hover-pocket/issues</a>)
         から連絡してください。
       </p>
@@ -226,7 +237,6 @@
       <ul>
         <li>To display Google Calendar events inside the HoverPocket panel.</li>
         <li>To create, edit, and delete Google Calendar events when you request those actions.</li>
-        <li>To execute AI-lane calendar action candidates only after you approve them.</li>
         <li>To restore local Clipboard history, Sticky Notes, Timer data, and app settings.</li>
         <li>To check GitHub Releases for updates and download an update only after user confirmation.</li>
       </ul>
@@ -237,21 +247,33 @@
         Google user data is used only for the calendar display and event actions that are visible in the app.
       </p>
 
+      <h3>AI / ML services and Limited Use</h3>
+      <p>
+        The current public version of HoverPocket does not transfer Google Workspace or Google Photos user data to any
+        third-party AI or ML service. HoverPocket has no third-party AI service integrations. It does not use, transfer,
+        or sell Google user data to create, train, or improve foundational, generalized, or other AI/ML models.
+      </p>
+      <p>
+        The AI command lane is disabled in the user interface of the current public version. Experimental macOS code in
+        the repository is designed to use Apple Foundation Models entirely on-device on supported hardware and does not
+        transmit Google user data to Apple or any model provider. The experimental Windows command interpreter is also a
+        deterministic local parser and does not call an external AI API.
+      </p>
+
       <h3>Where data is stored</h3>
       <p>
         Google Calendar event contents are used while displaying the panel and handling user-requested actions.
         HoverPocket does not save event titles, locations, or notes as a local event cache.
       </p>
       <ul>
-        <li>Google refresh tokens are stored in Windows Credential Manager. Access tokens are kept in memory only.</li>
+        <li>Google refresh tokens are stored in macOS Keychain or Windows Credential Manager. Access tokens are kept in memory only.</li>
         <li>If a user-provided OAuth client configuration is used, the configuration file is stored at <code>%APPDATA%\HoverPocket\oauth.json</code>.</li>
         <li>Clipboard history is stored at <code>%APPDATA%\HoverPocket\clipboard\history.json</code> and as PNG image files in the same folder.</li>
         <li>Sticky Notes are stored at <code>%APPDATA%\HoverPocket\sticky\notes.json</code> and <code>%APPDATA%\HoverPocket\sticky\settings.json</code>.</li>
-        <li>The AI lane audit log is stored at <code>%APPDATA%\HoverPocket\auditlog\ailane-YYYYMMDD.jsonl</code>. In the current implementation, it stores only minimal metadata such as timestamp, action type, result, event ID, and calendar ID. It does not store event titles, locations, notes, user command text, or approval-card body text. Log files older than 90 days are pruned.</li>
         <li>Other settings, Timer data, and local app state are also stored under <code>%APPDATA%\HoverPocket</code>.</li>
       </ul>
       <p>
-        These data files stay on your Windows device. HoverPocket does not upload them to a HoverPocket-operated server.
+        These data files stay on your macOS or Windows device. HoverPocket does not upload them to a HoverPocket-operated server.
       </p>
 
       <h3>Deletion and Private mode</h3>
@@ -278,7 +300,8 @@
 
       <h3>Contact</h3>
       <p>
-        For privacy questions, contact the project through GitHub Issues:
+        For privacy questions, email <a href="mailto:shotaro.matsu0311@gmail.com">shotaro.matsu0311@gmail.com</a>
+        or contact the project through GitHub Issues:
         <a href="https://github.com/shotaro311/hover-pocket/issues">https://github.com/shotaro311/hover-pocket/issues</a>.
       </p>
     </section>

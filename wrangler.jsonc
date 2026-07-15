@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "hoverpocket-site",
+  "compatibility_date": "2026-07-15",
+  "assets": {
+    "directory": "./site",
+    "not_found_handling": "404-page"
+  },
+  "routes": [
+    {
+      "pattern": "hoverpocket.shotaromatsumoto.com",
+      "custom_domain": true
+    }
+  ]
+}
