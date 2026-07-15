@@ -1,16 +1,16 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-07-13
+updated: 2026-07-15
 updated_by: codex
 status: active
 ---
 
 ## 2026-07-15 Google OAuth Review Remediation
 
-- Google OAuth reviewerの追加要求に対応し、公式サイトとプライバシーポリシーを所有ドメイン `https://hoverpocket.shotaromatsumoto.com/` へ移した。Cloudflare Worker `hoverpocket-site` のcustom domainとして公開し、ローカルHTMLと公開GET本文のSHA-256一致を確認した。
+- Google OAuth reviewerの追加要求に対応し、公式サイトとプライバシーポリシーの正本を `https://hoverpocket.s-original.com/` へ移した。Cloudflare Worker `hoverpocket-site` のcustom domainとして公開し、ローカルHTMLと公開GET本文のSHA-256一致を確認した。旧 `hoverpocket.shotaromatsumoto.com` は移行用aliasとして維持している。
 - 公開ページから現行UIに存在しないAI lane表記を除去し、第三者AIサービス連携はないこと、GoogleユーザーデータをAI/MLモデルの作成・学習・改善へ使わないこと、実験的Apple Foundation Models処理は端末内のみであることを日英で明記した。
-- `shotaro.matsu0311@gmail.com` でSearch ConsoleのURL-prefix property `https://hoverpocket.shotaromatsumoto.com/` の所有権をHTMLファイルで自動確認した。Google Auth Platformのhomepage、privacy policy、authorized domainを新URL / `shotaromatsumoto.com` へ更新し、検証センターが引き続き「ブランディングとデータアクセスは現在審査中」と表示することを確認した。
-- 審査スレッドへ変更内容とAI/MLデータ経路を英語で返信した。送信message IDは `19f65ca35f1d977d`、thread IDは `19f658cbca0ca966`。Gmail画面で対象アカウント、送信本文、新URL、`Third-party AI service integrations: None` をreadbackした。
+- `shotaro.matsu0311@gmail.com` でSearch ConsoleのURL-prefix property `https://hoverpocket.s-original.com/` の所有権をHTMLファイルで自動確認した。Google Auth Platformのhomepage、privacy policy、authorized domainを新URL / `s-original.com` へ更新し、検証センターが引き続き「ブランディングとデータアクセスは現在審査中」と表示することを確認した。
+- 審査スレッドへ最終canonical URLの訂正を英語で返信した。送信message IDは `19f65d9ac9d51760`、thread IDは `19f658cbca0ca966`。Gmail connectorで対象アカウント、送信本文、新URL、`SENT`をreadbackした。
 - 詳細: `progress/2026-07/2026-07-15_hover-menu-preview.md`
 
 ## 2026-07-13 Mac Build 127 Release
