@@ -1,4 +1,5 @@
 using System.IO;
+using System.Diagnostics;
 using System.Text.Json;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Providers;
@@ -6,6 +7,7 @@ using HoverPocket.Shell.Providers.AiLane;
 using HoverPocket.Shell.Providers.Calculator;
 using HoverPocket.Shell.Providers.Calendar;
 using HoverPocket.Shell.Providers.Clipboard;
+using HoverPocket.Shell.Providers.Controls;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
 using HoverPocket.Shell.Services;
@@ -23,10 +25,15 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly CalculatorBridgeHandlers _calculatorBridgeHandlers = new();
     private readonly CalendarBridgeController _calendarBridgeController;
     private readonly ClipboardBridgeController _clipboardBridgeController;
+    private readonly ControlsBridgeController _controlsBridgeController = new();
     private readonly StickyBridgeController _stickyBridgeController;
     private readonly TimerBridgeHandlers _timerBridgeHandlers;
     private readonly List<BridgeDispatcher> _dispatchers = [];
+    private readonly object _previewFrameSync = new();
     private string _selectedProviderId;
+    private MediaPreviewFrame? _pendingPreviewFrame;
+    private bool _previewPostScheduled;
+    private bool _panelOpen;
     private bool _disposed;
 
     public PanelBridgeController(
@@ -59,6 +66,9 @@ internal sealed class PanelBridgeController : IDisposable
         _clipboardBridgeController.ExternalDragStarted += OnClipboardExternalDragStarted;
         _clipboardBridgeController.ApplySettings(CurrentSettings, IsVisible("clipboard"));
         _selectedProviderId = ResolveInitialProviderId();
+        _controlsBridgeController.SnapshotChanged += OnControlsSnapshotChanged;
+        _controlsBridgeController.PreviewStateChanged += OnControlsPreviewStateChanged;
+        _controlsBridgeController.PreviewFrameArrived += OnControlsPreviewFrameArrived;
     }
 
     public event EventHandler<UserSettings>? SettingsChanged;
@@ -84,16 +94,24 @@ internal sealed class PanelBridgeController : IDisposable
         dispatcher.Register("provider.select", SelectProviderAsync);
         dispatcher.Register("provider.refreshPlaceholder", RefreshPlaceholderAsync);
         dispatcher.Register("settings.setPanelSize", SetPanelSizeAsync);
+        dispatcher.Register("settings.setDisplayPlacement", SetDisplayPlacementAsync);
         dispatcher.Register("settings.setTextSize", SetTextSizeAsync);
         dispatcher.Register("settings.setSwitchingMode", SetSwitchingModeAsync);
         dispatcher.Register("settings.setLanguage", SetLanguageAsync);
         dispatcher.Register("settings.setProviderVisibility", SetProviderVisibilityAsync);
         dispatcher.Register("settings.moveProvider", MoveProviderAsync);
         dispatcher.Register("settings.setProviderOrder", SetProviderOrderAsync);
+        dispatcher.Register("settings.setProviderSelection", SetProviderSelectionAsync);
+        dispatcher.Register("settings.setPreferredProvider", SetPreferredProviderAsync);
+        dispatcher.Register("settings.setHandleIcon", SetHandleIconAsync);
+        dispatcher.Register("settings.setShowTopHandleSideArea", SetShowTopHandleSideAreaAsync);
+        dispatcher.Register("settings.setDisableTopEdgeInFullscreen", SetDisableTopEdgeInFullscreenAsync);
         dispatcher.Register("settings.setStartWithWindows", SetStartWithWindowsAsync);
         dispatcher.Register("settings.setAutoCheckForUpdates", SetAutoCheckForUpdatesAsync);
         dispatcher.Register("settings.setClipboardPrivateMode", SetClipboardPrivateModeAsync);
         dispatcher.Register("settings.resetDefaults", ResetDefaultsAsync);
+        dispatcher.Register("settings.resetPanelBinding", ResetPanelBindingAsync);
+        dispatcher.Register("settings.openDataFolder", OpenDataFolderAsync);
         dispatcher.Register("settings.open", OpenSettingsAsync);
         dispatcher.Register("settings.openPlaceholder", OpenSettingsAsync);
         dispatcher.Register("updates.check", CheckForUpdatesAsync);
@@ -101,6 +119,7 @@ internal sealed class PanelBridgeController : IDisposable
         dispatcher.Register("ailane.approve", ApproveAiLaneAsync);
         dispatcher.Register("ailane.reject", RejectAiLaneAsync);
         _calculatorBridgeHandlers.Register(dispatcher);
+        _controlsBridgeController.Attach(dispatcher);
         _calendarBridgeController.Attach(dispatcher);
         _clipboardBridgeController.Attach(dispatcher);
         _stickyBridgeController.Attach(dispatcher);
@@ -121,6 +140,10 @@ internal sealed class PanelBridgeController : IDisposable
         _timerBridgeHandlers.Dispose();
         _clipboardBridgeController.ExternalDragStarted -= OnClipboardExternalDragStarted;
         _clipboardBridgeController.Dispose();
+        _controlsBridgeController.SnapshotChanged -= OnControlsSnapshotChanged;
+        _controlsBridgeController.PreviewStateChanged -= OnControlsPreviewStateChanged;
+        _controlsBridgeController.PreviewFrameArrived -= OnControlsPreviewFrameArrived;
+        _controlsBridgeController.Dispose();
     }
 
     public object BuildState()
@@ -139,6 +162,7 @@ internal sealed class PanelBridgeController : IDisposable
         {
             settings = new
             {
+                displayPlacement = ToWireValue(CurrentSettings.DisplayPlacement),
                 panelSize = ToWireValue(CurrentSettings.PanelSize),
                 textSize = ToWireValue(CurrentSettings.TextSize),
                 switchingMode = ToWireValue(CurrentSettings.SwitchingMode),
@@ -147,6 +171,12 @@ internal sealed class PanelBridgeController : IDisposable
                 startWithWindowsRegistered = IsStartupRegistered(),
                 autoCheckForUpdates = CurrentSettings.AutoCheckForUpdates,
                 clipboardPrivateMode = CurrentSettings.ClipboardPrivateMode,
+                rememberLastSelectedProvider = CurrentSettings.RememberLastSelectedProvider,
+                preferredProviderId = CurrentSettings.PreferredProviderId,
+                lastSelectedProviderId = CurrentSettings.LastSelectedProviderId,
+                handleIcon = ToWireValue(CurrentSettings.HandleIconStyle),
+                showTopHandleSideArea = CurrentSettings.ShowTopHandleSideArea,
+                disableTopEdgeInFullscreen = CurrentSettings.DisableTopEdgeInFullscreen,
                 providerOrder = CurrentSettings.ProviderOrder,
                 providerVisibility = CurrentSettings.ProviderVisibility
             },
@@ -170,29 +200,29 @@ internal sealed class PanelBridgeController : IDisposable
             providers = orderedProviders.Select(provider => new
             {
                 id = provider.Id,
-                title = provider.Title,
+                title = ProviderText(provider, ProviderTextKind.Title),
                 icon = provider.Icon,
-                summary = provider.Summary,
-                body = provider.Body,
+                summary = ProviderText(provider, ProviderTextKind.Summary),
+                body = ProviderText(provider, ProviderTextKind.Body),
                 selected = selected is not null && string.Equals(provider.Id, selected.Id, StringComparison.OrdinalIgnoreCase)
             }),
             allProviders = _providerRegistry.Providers.Select(provider => new
             {
                 id = provider.Id,
-                title = provider.Title,
+                title = ProviderText(provider, ProviderTextKind.Title),
                 icon = provider.Icon,
-                summary = provider.Summary,
-                body = provider.Body
+                summary = ProviderText(provider, ProviderTextKind.Summary),
+                body = ProviderText(provider, ProviderTextKind.Body)
             }),
             selectedProvider = selected is null
                 ? null
                 : new
                 {
                     id = selected.Id,
-                    title = selected.Title,
+                    title = ProviderText(selected, ProviderTextKind.Title),
                     icon = selected.Icon,
-                    summary = selected.Summary,
-                    body = selected.Body
+                    summary = ProviderText(selected, ProviderTextKind.Summary),
+                    body = ProviderText(selected, ProviderTextKind.Body)
                 }
             ,
             aiLane = _aiLaneController.CurrentState
@@ -209,6 +239,7 @@ internal sealed class PanelBridgeController : IDisposable
         }
 
         _selectedProviderId = provider.Id;
+        PersistLastSelectedProvider(provider.Id);
         return await PublishStateAsync(cancellationToken);
     }
 
@@ -225,6 +256,19 @@ internal sealed class PanelBridgeController : IDisposable
         {
             var updated = CurrentSettings.Clone();
             updated.PanelSize = panelSize;
+            SaveSettings(updated);
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetDisplayPlacementAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var placement = ParseDisplayPlacement(ReadRequiredString(parameters, "displayPlacement"));
+        if (CurrentSettings.DisplayPlacement != placement)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.DisplayPlacement = placement;
             SaveSettings(updated);
         }
 
@@ -323,6 +367,83 @@ internal sealed class PanelBridgeController : IDisposable
         return await PublishStateAsync(cancellationToken);
     }
 
+    private async Task<object?> SetProviderSelectionAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var rememberLast = ReadRequiredBool(parameters, "rememberLast");
+        if (CurrentSettings.RememberLastSelectedProvider != rememberLast)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.RememberLastSelectedProvider = rememberLast;
+            SaveSettings(updated);
+        }
+
+        if (!rememberLast)
+        {
+            _selectedProviderId = ResolvePreferredProviderId();
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetPreferredProviderAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var providerId = ReadRequiredString(parameters, "id");
+        var provider = _providerRegistry.Find(providerId);
+        if (provider is null || !IsVisible(provider.Id))
+        {
+            throw new InvalidOperationException($"Provider is not visible: {providerId}");
+        }
+
+        var updated = CurrentSettings.Clone();
+        updated.PreferredProviderId = provider.Id;
+        SaveSettings(updated);
+        if (!updated.RememberLastSelectedProvider)
+        {
+            _selectedProviderId = provider.Id;
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetHandleIconAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var style = ParseHandleIcon(ReadRequiredString(parameters, "handleIcon"));
+        if (CurrentSettings.HandleIconStyle != style)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.HandleIconStyle = style;
+            SaveSettings(updated);
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetShowTopHandleSideAreaAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var visible = ReadRequiredBool(parameters, "visible");
+        if (CurrentSettings.ShowTopHandleSideArea != visible)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.ShowTopHandleSideArea = visible;
+            SaveSettings(updated);
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetDisableTopEdgeInFullscreenAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var disabled = ReadRequiredBool(parameters, "disabled");
+        if (CurrentSettings.DisableTopEdgeInFullscreen != disabled)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.DisableTopEdgeInFullscreen = disabled;
+            SaveSettings(updated);
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
     private async Task<object?> SetStartWithWindowsAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         var enabled = ReadRequiredBool(parameters, "enabled");
@@ -375,6 +496,27 @@ internal sealed class PanelBridgeController : IDisposable
         return await PublishStateAsync(cancellationToken);
     }
 
+    private async Task<object?> ResetPanelBindingAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        var updated = CurrentSettings.Clone();
+        updated.DisplayPlacement = DisplayPlacement.Main;
+        SaveSettings(updated);
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private Task<object?> OpenDataFolderAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        cancellationToken.ThrowIfCancellationRequested();
+        Directory.CreateDirectory(_settingsStore.RootDirectory);
+        using var process = Process.Start(new ProcessStartInfo(_settingsStore.RootDirectory)
+        {
+            UseShellExecute = true
+        });
+        return Task.FromResult<object?>(new { opened = true });
+    }
+
     private async Task<object?> OpenSettingsAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         _ = parameters;
@@ -408,9 +550,24 @@ internal sealed class PanelBridgeController : IDisposable
         return await PublishStateAsync(cancellationToken);
     }
 
-    public Task NotifyPanelOpenedAsync()
+    public async Task NotifyPanelOpenedAsync()
     {
-        return PostEventAsync("panel.opened", BuildState());
+        _panelOpen = true;
+        if (!CurrentSettings.RememberLastSelectedProvider)
+        {
+            _selectedProviderId = ResolvePreferredProviderId();
+        }
+
+        var state = BuildState();
+        await SynchronizeControlsLifecycleAsync();
+        await PostEventAsync("panel.opened", state);
+    }
+
+    public async Task NotifyPanelClosedAsync()
+    {
+        _panelOpen = false;
+        await SynchronizeControlsLifecycleAsync();
+        await PostEventAsync("panel.closed", new { closed = true });
     }
 
     public async Task SelectProviderFromShellAsync(string providerId, CancellationToken cancellationToken = default)
@@ -422,6 +579,7 @@ internal sealed class PanelBridgeController : IDisposable
         }
 
         _selectedProviderId = provider.Id;
+        PersistLastSelectedProvider(provider.Id);
         await PublishStateAsync(cancellationToken);
     }
 
@@ -437,8 +595,88 @@ internal sealed class PanelBridgeController : IDisposable
     {
         cancellationToken.ThrowIfCancellationRequested();
         var state = BuildState();
+        await SynchronizeControlsLifecycleAsync(cancellationToken);
         await PostEventAsync("state.changed", state);
         return state;
+    }
+
+    private Task SynchronizeControlsLifecycleAsync(CancellationToken cancellationToken = default)
+    {
+        var shouldBeActive = _panelOpen
+            && string.Equals(_selectedProviderId, "controls", StringComparison.OrdinalIgnoreCase)
+            && IsVisible("controls");
+        return _controlsBridgeController.SetActiveAsync(shouldBeActive, cancellationToken);
+    }
+
+    private void OnControlsSnapshotChanged(object? sender, ControlsSnapshot snapshot)
+    {
+        _ = sender;
+        _ = PostEventOnUiThreadAsync("controls.stateChanged", snapshot);
+    }
+
+    private void OnControlsPreviewStateChanged(object? sender, MediaPreviewState preview)
+    {
+        _ = sender;
+        _ = PostEventOnUiThreadAsync("controls.previewState", preview);
+    }
+
+    private void OnControlsPreviewFrameArrived(object? sender, MediaPreviewFrame frame)
+    {
+        _ = sender;
+        lock (_previewFrameSync)
+        {
+            _pendingPreviewFrame = frame;
+            if (_previewPostScheduled)
+            {
+                return;
+            }
+
+            _previewPostScheduled = true;
+        }
+
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null)
+        {
+            lock (_previewFrameSync)
+            {
+                _previewPostScheduled = false;
+            }
+
+            return;
+        }
+
+        _ = dispatcher.InvokeAsync(DrainPreviewFramesAsync).Task.Unwrap();
+    }
+
+    private async Task DrainPreviewFramesAsync()
+    {
+        while (true)
+        {
+            MediaPreviewFrame? frame;
+            lock (_previewFrameSync)
+            {
+                frame = _pendingPreviewFrame;
+                _pendingPreviewFrame = null;
+                if (frame is null)
+                {
+                    _previewPostScheduled = false;
+                    return;
+                }
+            }
+
+            await PostEventAsync("controls.previewFrame", frame);
+        }
+    }
+
+    private Task PostEventOnUiThreadAsync(string eventName, object? payload)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            return PostEventAsync(eventName, payload);
+        }
+
+        return dispatcher.InvokeAsync(() => PostEventAsync(eventName, payload)).Task.Unwrap();
     }
 
     private async Task PostEventAsync(string eventName, object? payload)
@@ -451,6 +689,17 @@ internal sealed class PanelBridgeController : IDisposable
 
     private string ResolveInitialProviderId()
     {
+        if (CurrentSettings.RememberLastSelectedProvider
+            && IsSelectableProvider(CurrentSettings.LastSelectedProviderId))
+        {
+            return CurrentSettings.LastSelectedProviderId!;
+        }
+
+        if (IsSelectableProvider(CurrentSettings.PreferredProviderId))
+        {
+            return CurrentSettings.PreferredProviderId!;
+        }
+
         return OrderedProviders().FirstOrDefault()?.Id
             ?? _providerRegistry.Providers.FirstOrDefault()?.Id
             ?? string.Empty;
@@ -471,6 +720,34 @@ internal sealed class PanelBridgeController : IDisposable
     private bool IsVisible(string providerId)
     {
         return !CurrentSettings.ProviderVisibility.TryGetValue(providerId, out var visible) || visible;
+    }
+
+    private string ResolvePreferredProviderId()
+    {
+        return IsSelectableProvider(CurrentSettings.PreferredProviderId)
+            ? CurrentSettings.PreferredProviderId!
+            : OrderedProviders().FirstOrDefault()?.Id ?? string.Empty;
+    }
+
+    private bool IsSelectableProvider(string? providerId)
+    {
+        return !string.IsNullOrWhiteSpace(providerId)
+            && _providerRegistry.Find(providerId) is not null
+            && IsVisible(providerId);
+    }
+
+    private void PersistLastSelectedProvider(string providerId)
+    {
+        if (!CurrentSettings.RememberLastSelectedProvider
+            || string.Equals(CurrentSettings.LastSelectedProviderId, providerId, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var updated = CurrentSettings.Clone();
+        updated.LastSelectedProviderId = providerId;
+        CurrentSettings = UserSettingsStore.Normalize(updated, _providerRegistry.ProviderIds);
+        _settingsStore.Save(CurrentSettings);
     }
 
     private static object? DeserializeObject(JsonElement? parameters)
@@ -530,6 +807,26 @@ internal sealed class PanelBridgeController : IDisposable
             "small" => PanelSize.Small,
             "large" => PanelSize.Large,
             _ => PanelSize.Medium
+        };
+    }
+
+    private static DisplayPlacement ParseDisplayPlacement(string value)
+    {
+        return value.ToLowerInvariant() switch
+        {
+            "sub" => DisplayPlacement.Sub,
+            "all" => DisplayPlacement.All,
+            _ => DisplayPlacement.Main
+        };
+    }
+
+    private static HandleIconStyle ParseHandleIcon(string value)
+    {
+        return value.ToLowerInvariant() switch
+        {
+            "c" => HandleIconStyle.C,
+            "none" => HandleIconStyle.None,
+            _ => HandleIconStyle.B
         };
     }
 
@@ -602,6 +899,26 @@ internal sealed class PanelBridgeController : IDisposable
         };
     }
 
+    private static string ToWireValue(DisplayPlacement placement)
+    {
+        return placement switch
+        {
+            DisplayPlacement.Sub => "sub",
+            DisplayPlacement.All => "all",
+            _ => "main"
+        };
+    }
+
+    private static string ToWireValue(HandleIconStyle style)
+    {
+        return style switch
+        {
+            HandleIconStyle.C => "c",
+            HandleIconStyle.None => "none",
+            _ => "b"
+        };
+    }
+
     private static string ToWireValue(PanelTextSize textSize)
     {
         return textSize switch
@@ -620,6 +937,54 @@ internal sealed class PanelBridgeController : IDisposable
     private static string ToWireValue(AppLanguage language)
     {
         return language == AppLanguage.English ? "en" : "ja";
+    }
+
+    private string ProviderText(ProviderDescriptor provider, ProviderTextKind kind)
+    {
+        if (CurrentSettings.Language == AppLanguage.English)
+        {
+            return kind switch
+            {
+                ProviderTextKind.Summary => provider.Summary,
+                ProviderTextKind.Body => provider.Body,
+                _ => provider.Title
+            };
+        }
+
+        return (provider.Id.ToLowerInvariant(), kind) switch
+        {
+            ("controls", ProviderTextKind.Title) => "コントロール",
+            ("controls", ProviderTextKind.Summary) => "ディスプレイ・音量・メディア",
+            ("controls", ProviderTextKind.Body) => "明るさ、音量、ミュート、再生中のメディアを操作します。",
+            ("calculator", ProviderTextKind.Title) => "電卓",
+            ("calculator", ProviderTextKind.Summary) => "履歴付き電卓",
+            ("calculator", ProviderTextKind.Body) => "四則演算、履歴、キーボード入力、コピーに対応しています。",
+            ("calendar", ProviderTextKind.Title) => "カレンダー",
+            ("calendar", ProviderTextKind.Summary) => "Google カレンダー",
+            ("calendar", ProviderTextKind.Body) => "月間予定の確認と予定の追加・編集・削除ができます。",
+            ("clipboard", ProviderTextKind.Title) => "クリップボード",
+            ("clipboard", ProviderTextKind.Summary) => "クリップボード履歴",
+            ("clipboard", ProviderTextKind.Body) => "テキストと画像の履歴を確認し、コピーやドラッグで再利用します。",
+            ("sticky", ProviderTextKind.Title) => "付箋",
+            ("sticky", ProviderTextKind.Summary) => "付箋ボード",
+            ("sticky", ProviderTextKind.Body) => "付箋の作成、編集、色分け、並び替え、アーカイブができます。",
+            ("timer", ProviderTextKind.Title) => "タイマー",
+            ("timer", ProviderTextKind.Summary) => "タイマーとポモドーロ",
+            ("timer", ProviderTextKind.Body) => "タイマーの同時実行、プリセット、休止、再開に対応しています。",
+            _ => kind switch
+            {
+                ProviderTextKind.Summary => provider.Summary,
+                ProviderTextKind.Body => provider.Body,
+                _ => provider.Title
+            }
+        };
+    }
+
+    private enum ProviderTextKind
+    {
+        Title,
+        Summary,
+        Body
     }
 
     private sealed class BridgeAttachment : IDisposable

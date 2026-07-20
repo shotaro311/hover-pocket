@@ -18,17 +18,17 @@ internal sealed class ProviderRegistry
         return new ProviderRegistry(
         [
             new ProviderDescriptor(
+                "controls",
+                "Controls",
+                "controls",
+                "Display, volume, and media",
+                "Adjust supported display brightness, system volume, mute, and the active Windows media session."),
+            new ProviderDescriptor(
                 "calculator",
                 "Calculator",
                 "calculator",
                 "Decimal calculator",
                 "Four operations, decimal input, percent, sign toggle, backspace, AC, and copy."),
-            new ProviderDescriptor(
-                "timer",
-                "Timer",
-                "timer",
-                "Timer and Pomodoro",
-                "Run up to two timers, pin up to four presets, pause, resume, stop, and restore state."),
             new ProviderDescriptor(
                 "calendar",
                 "Calendar",
@@ -46,7 +46,13 @@ internal sealed class ProviderRegistry
                 "Sticky Notes",
                 "note",
                 "Board grid provider",
-                "Create, edit, color, reorder, archive, delete, undo, and drag notes.")
+                "Create, edit, color, reorder, archive, delete, undo, and drag notes."),
+            new ProviderDescriptor(
+                "timer",
+                "Timer",
+                "timer",
+                "Timer and Pomodoro",
+                "Run up to two timers, pin up to four presets, pause, resume, stop, and restore state.")
         ]);
     }
 

@@ -37,6 +37,91 @@ internal sealed class UiVerifier
                     _failures.Add("bridge: diagnostics.echo round-trip failed");
                 }
 
+                if (!result.ControlsRenderedOk)
+                {
+                    _failures.Add("controls: three live sections did not render");
+                }
+
+                if (!result.ControlsLayoutOk)
+                {
+                    _failures.Add("controls: rendered sections overflowed the provider bounds");
+                }
+
+                if (!result.ControlsHitAreasOk)
+                {
+                    _failures.Add("controls: media buttons did not keep 32px rectangular hit areas");
+                }
+
+                if (!result.ControlsFallbackLayerOk)
+                {
+                    _failures.Add("controls: live preview did not retain an artwork/fallback layer");
+                }
+
+                if (!result.ControlsStableRefreshOk)
+                {
+                    _failures.Add("controls: unchanged refresh replaced the live preview DOM");
+                }
+
+                if (!result.ControlsBrightnessResolvedOk)
+                {
+                    _failures.Add("controls: background brightness detection remained in its temporary state");
+                }
+
+                if (!result.ClipboardStableProviderOk)
+                {
+                    _failures.Add("clipboard: selecting the active provider remounted the view");
+                }
+
+                if (!result.ClipboardStableRefreshOk)
+                {
+                    _failures.Add("clipboard: unchanged refresh replaced the rendered view");
+                }
+
+                if (!result.ClipboardSplitViewOk)
+                {
+                    _failures.Add("clipboard: text and image split view did not render together");
+                }
+
+                if (!result.ProviderIconStableOk)
+                {
+                    _failures.Add("provider icons: state refresh replaced the hovered icon node");
+                }
+
+                if (!result.ProviderDragReorderReadyOk)
+                {
+                    _failures.Add("provider icons: drag reorder affordance was not enabled");
+                }
+
+                if (!result.TextInputActivationOk)
+                {
+                    _failures.Add("text input: panel activation mode did not toggle with the no-activate style");
+                }
+
+                if (!result.CalendarMacLayoutOk)
+                {
+                    _failures.Add("calendar: Mac-style month/detail panes or 42-day dot grid did not render");
+                }
+
+                if (!result.CalendarEditorStableOk)
+                {
+                    _failures.Add("calendar: editor was replaced after the pointer left the day cell");
+                }
+
+                if (!result.TimerLayoutOk)
+                {
+                    _failures.Add("timer: responsive cards overflowed or did not use the available width");
+                }
+
+                if (!result.TimerInteractionStableOk)
+                {
+                    _failures.Add("timer: duration adjustment replaced the active input DOM");
+                }
+
+                if (!result.TextSizeScaleReadyOk)
+                {
+                    _failures.Add("text size: global small/medium/large scaling was not active");
+                }
+
                 if (!result.ProviderSwitchOk)
                 {
                     _failures.Add($"provider: switch failed from {result.OriginalProvider} to {result.SwitchedProvider}");
@@ -60,7 +145,8 @@ internal sealed class UiVerifier
 
         if (_failures.Count == 0)
         {
-            VerifyConsole.WriteLine("PASS ui verify: webview initialized, bridge round-trip, provider switch, settings read/write");
+            VerifyConsole.WriteLine(
+                "PASS ui verify: stable Controls refresh, responsive Timer cards/input, media fallback, clipboard split/stability, draggable stable icons, text scaling/input activation, stable Mac-style calendar editor, bridge/provider/settings round-trip");
             return 0;
         }
 

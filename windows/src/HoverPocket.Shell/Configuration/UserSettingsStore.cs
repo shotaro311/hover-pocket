@@ -99,12 +99,18 @@ internal sealed class UserSettingsStore
     {
         var settings = new UserSettings
         {
+            DisplayPlacement = DisplayPlacement.Main,
             PanelSize = PanelSize.Medium,
             TextSize = PanelTextSize.Medium,
             SwitchingMode = ProviderSwitchingMode.Click,
             Language = AppLanguage.Japanese,
             StartWithWindows = false,
             AutoCheckForUpdates = true,
+            RememberLastSelectedProvider = true,
+            PreferredProviderId = providerIds.FirstOrDefault(),
+            HandleIconStyle = HandleIconStyle.B,
+            ShowTopHandleSideArea = true,
+            DisableTopEdgeInFullscreen = true,
             ProviderOrder = [.. providerIds],
             ProviderVisibility = providerIds.ToDictionary(id => id, _ => true, StringComparer.OrdinalIgnoreCase)
         };
@@ -123,7 +129,14 @@ internal sealed class UserSettingsStore
         {
             if (!order.Contains(providerId, StringComparer.OrdinalIgnoreCase))
             {
-                order.Add(providerId);
+                if (providerId.Equals("controls", StringComparison.OrdinalIgnoreCase))
+                {
+                    order.Insert(0, providerId);
+                }
+                else
+                {
+                    order.Add(providerId);
+                }
             }
         }
 
@@ -140,6 +153,14 @@ internal sealed class UserSettingsStore
 
         settings.ProviderOrder = order;
         settings.ProviderVisibility = visibility;
+        settings.PreferredProviderId = NormalizeProviderId(settings.PreferredProviderId, providerIds)
+            ?? providerIds.FirstOrDefault();
+        settings.LastSelectedProviderId = NormalizeProviderId(settings.LastSelectedProviderId, providerIds);
         return settings;
+    }
+
+    private static string? NormalizeProviderId(string? providerId, IReadOnlyList<string> providerIds)
+    {
+        return providerIds.FirstOrDefault(id => string.Equals(id, providerId, StringComparison.OrdinalIgnoreCase));
     }
 }

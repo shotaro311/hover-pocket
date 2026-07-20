@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -6,6 +7,7 @@ namespace HoverPocket.Shell.Providers.Sticky;
 
 internal sealed class StickyNotesStore
 {
+    internal const int MaxTitleHalfWidthCharacters = 30;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -80,7 +82,7 @@ internal sealed class StickyNotesStore
             return false;
         }
 
-        note.Title = title;
+        note.Title = NormalizeTitle(title);
         note.Body = body;
         note.Color = color;
         note.UpdatedAt = DateTimeOffset.UtcNow;
@@ -373,10 +375,30 @@ internal sealed class StickyNotesStore
     {
         foreach (var note in notes.Where(note => note.Id != Guid.Empty))
         {
-            note.Title ??= string.Empty;
+            note.Title = NormalizeTitle(note.Title);
             note.Body ??= string.Empty;
             yield return note;
         }
+    }
+
+    internal static string NormalizeTitle(string? title)
+    {
+        var normalized = title ?? string.Empty;
+        var width = 0;
+        var result = new StringBuilder();
+        foreach (var rune in normalized.EnumerateRunes())
+        {
+            var runeWidth = rune.Value <= 0x7f || rune.Value is >= 0xff61 and <= 0xff9f ? 1 : 2;
+            if (width + runeWidth > MaxTitleHalfWidthCharacters)
+            {
+                break;
+            }
+
+            result.Append(rune.ToString());
+            width += runeWidth;
+        }
+
+        return result.ToString();
     }
 
     private static StickyNotePreferences Normalize(StickyNotePreferences? preferences)

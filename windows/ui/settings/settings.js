@@ -2,12 +2,19 @@ import { on, request } from "../js/bridge.js";
 import { labelForSize, setLanguage, t } from "../js/i18n.js";
 
 const languageEl = document.querySelector("[data-language]");
+const displayPlacementEl = document.querySelector("[data-display-placement]");
 const panelSizeEl = document.querySelector("[data-panel-size]");
 const textSizeEl = document.querySelector("[data-text-size]");
 const switchingEl = document.querySelector("[data-switching]");
 const providerListEl = document.querySelector("[data-provider-list]");
+const providerSelectionEl = document.querySelector("[data-provider-selection]");
+const preferredProviderEl = document.querySelector("[data-preferred-provider]");
+const handleIconEl = document.querySelector("[data-handle-icon]");
+const handleSideAreaEl = document.querySelector("[data-handle-side-area]");
+const disableFullscreenEl = document.querySelector("[data-disable-fullscreen]");
 const clipboardPrivateEl = document.querySelector("[data-clipboard-private]");
 const stickyUndoToastEl = document.querySelector("[data-sticky-undo-toast]");
+const stickyGridSizeEl = document.querySelector("[data-sticky-grid-size]");
 const startupEl = document.querySelector("[data-startup]");
 const startupStatusEl = document.querySelector("[data-startup-status]");
 const autoUpdatesEl = document.querySelector("[data-auto-updates]");
@@ -15,6 +22,8 @@ const checkUpdatesEl = document.querySelector("[data-check-updates]");
 const updateStatusEl = document.querySelector("[data-update-status]");
 const statusEl = document.querySelector("[data-status]");
 const resetEl = document.querySelector("[data-reset]");
+const resetBindingEl = document.querySelector("[data-reset-binding]");
+const openDataFolderEl = document.querySelector("[data-open-data-folder]");
 
 let currentState = null;
 let stickyState = null;
@@ -44,6 +53,12 @@ function render(state) {
     { id: "en", label: "EN" },
   ], state.settings.language, (language) => update("settings.setLanguage", { language }));
 
+  renderSegment(displayPlacementEl, [
+    { id: "main", label: t("mainDisplay") },
+    { id: "sub", label: t("subDisplay") },
+    { id: "all", label: t("allDisplays") },
+  ], state.settings.displayPlacement, (displayPlacement) => update("settings.setDisplayPlacement", { displayPlacement }));
+
   renderSegment(panelSizeEl, state.panel.sizes.map((size) => ({
     id: size.id,
     label: labelForSize(size.id),
@@ -60,6 +75,14 @@ function render(state) {
   ], state.settings.switchingMode, (switchingMode) => update("settings.setSwitchingMode", { switchingMode }));
 
   renderProviders(state);
+  renderProviderSelection(state);
+  renderSegment(handleIconEl, [
+    { id: "b", label: "B" },
+    { id: "c", label: "C" },
+    { id: "none", label: t("none") },
+  ], state.settings.handleIcon, (handleIcon) => update("settings.setHandleIcon", { handleIcon }));
+  handleSideAreaEl.checked = state.settings.showTopHandleSideArea !== false;
+  disableFullscreenEl.checked = state.settings.disableTopEdgeInFullscreen !== false;
   clipboardPrivateEl.checked = Boolean(state.settings.clipboardPrivateMode);
   renderStickySettings();
   startupEl.checked = Boolean(state.settings.startWithWindows);
@@ -70,6 +93,33 @@ function render(state) {
 
 function renderStickySettings() {
   stickyUndoToastEl.checked = stickyState?.preferences?.showUndoToast !== false;
+  renderSegment(stickyGridSizeEl, ["small", "medium", "large"].map((size) => ({
+    id: size,
+    label: labelForSize(size),
+  })), stickyState?.preferences?.gridSize ?? "medium", async (gridSize) => {
+    stickyState = await request("sticky.setGridSize", { gridSize });
+    renderStickySettings();
+    statusEl.textContent = t("saved");
+  });
+}
+
+function renderProviderSelection(state) {
+  renderSegment(providerSelectionEl, [
+    { id: "last", label: t("rememberLastProvider") },
+    { id: "fixed", label: t("fixedProvider") },
+  ], state.settings.rememberLastSelectedProvider === false ? "fixed" : "last", (mode) => {
+    update("settings.setProviderSelection", { rememberLast: mode === "last" });
+  });
+
+  preferredProviderEl.replaceChildren();
+  for (const provider of state.providers) {
+    const option = document.createElement("option");
+    option.value = provider.id;
+    option.textContent = provider.title;
+    option.selected = provider.id === state.settings.preferredProviderId;
+    preferredProviderEl.append(option);
+  }
+  preferredProviderEl.disabled = state.settings.rememberLastSelectedProvider !== false;
 }
 
 function renderSegment(root, options, selectedId, onSelect) {
@@ -138,6 +188,18 @@ clipboardPrivateEl.addEventListener("change", () => {
   update("settings.setClipboardPrivateMode", { enabled: clipboardPrivateEl.checked });
 });
 
+preferredProviderEl.addEventListener("change", () => {
+  update("settings.setPreferredProvider", { id: preferredProviderEl.value });
+});
+
+handleSideAreaEl.addEventListener("change", () => {
+  update("settings.setShowTopHandleSideArea", { visible: handleSideAreaEl.checked });
+});
+
+disableFullscreenEl.addEventListener("change", () => {
+  update("settings.setDisableTopEdgeInFullscreen", { disabled: disableFullscreenEl.checked });
+});
+
 checkUpdatesEl.addEventListener("click", async () => {
   checkUpdatesEl.disabled = true;
   try {
@@ -166,6 +228,19 @@ stickyUndoToastEl.addEventListener("change", async () => {
 
 resetEl.addEventListener("click", () => {
   update("settings.resetDefaults");
+});
+
+resetBindingEl.addEventListener("click", () => {
+  update("settings.resetPanelBinding");
+});
+
+openDataFolderEl.addEventListener("click", async () => {
+  try {
+    await request("settings.openDataFolder");
+    statusEl.textContent = t("opened");
+  } catch (error) {
+    statusEl.textContent = String(error?.message ?? error);
+  }
 });
 
 async function update(method, params = undefined) {

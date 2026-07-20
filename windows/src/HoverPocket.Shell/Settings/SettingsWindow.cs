@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using HoverPocket.Shell.Bridge;
+using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Windows;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
@@ -24,7 +25,7 @@ internal sealed class SettingsWindow : Window
     {
         _bridgeController = bridgeController;
         _enableDevTools = enableDevTools;
-        Title = "HoverPocket Settings";
+        ApplyLanguage(_bridgeController.CurrentSettings.Language);
         Width = 620;
         Height = 720;
         MinWidth = 520;
@@ -34,7 +35,23 @@ internal sealed class SettingsWindow : Window
         Content = _root;
 
         Loaded += (_, _) => _initializationTask ??= InitializeAsync();
-        Closed += (_, _) => _bridgeAttachment?.Dispose();
+        _bridgeController.SettingsChanged += OnSettingsChanged;
+        Closed += (_, _) =>
+        {
+            _bridgeController.SettingsChanged -= OnSettingsChanged;
+            _bridgeAttachment?.Dispose();
+        };
+    }
+
+    private void OnSettingsChanged(object? sender, UserSettings settings)
+    {
+        _ = sender;
+        ApplyLanguage(settings.Language);
+    }
+
+    private void ApplyLanguage(AppLanguage language)
+    {
+        Title = language == AppLanguage.English ? "HoverPocket Settings" : "HoverPocket 設定";
     }
 
     private async Task InitializeAsync()

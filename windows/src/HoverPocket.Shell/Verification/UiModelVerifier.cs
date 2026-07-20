@@ -39,27 +39,39 @@ internal sealed class UiModelVerifier
     {
         var settings = store.Load(registry.ProviderIds);
         settings.PanelSize = PanelSize.Large;
+        settings.DisplayPlacement = DisplayPlacement.All;
         settings.TextSize = PanelTextSize.Large;
         settings.SwitchingMode = ProviderSwitchingMode.Hover;
         settings.Language = AppLanguage.English;
         settings.AutoCheckForUpdates = false;
         settings.ClipboardPrivateMode = true;
+        settings.RememberLastSelectedProvider = false;
+        settings.PreferredProviderId = "sticky";
+        settings.HandleIconStyle = HandleIconStyle.C;
+        settings.ShowTopHandleSideArea = false;
+        settings.DisableTopEdgeInFullscreen = false;
         settings.ProviderOrder = ["sticky", "calculator", "timer"];
         settings.ProviderVisibility["timer"] = false;
         store.Save(settings);
 
         var reloaded = store.ReloadOrDefault(registry.ProviderIds);
         if (reloaded.PanelSize != PanelSize.Large
+            || reloaded.DisplayPlacement != DisplayPlacement.All
             || reloaded.TextSize != PanelTextSize.Large
             || reloaded.SwitchingMode != ProviderSwitchingMode.Hover
             || reloaded.Language != AppLanguage.English
             || reloaded.AutoCheckForUpdates
-            || !reloaded.ClipboardPrivateMode)
+            || !reloaded.ClipboardPrivateMode
+            || reloaded.RememberLastSelectedProvider
+            || reloaded.PreferredProviderId != "sticky"
+            || reloaded.HandleIconStyle != HandleIconStyle.C
+            || reloaded.ShowTopHandleSideArea
+            || reloaded.DisableTopEdgeInFullscreen)
         {
             _failures.Add("settings round-trip: scalar values were not preserved");
         }
 
-        if (!HasExpectedOrderPrefix(reloaded.ProviderOrder, ["sticky", "calculator", "timer"])
+        if (!HasExpectedOrderPrefix(reloaded.ProviderOrder, ["controls", "sticky", "calculator", "timer"])
             || reloaded.ProviderOrder.Count != registry.ProviderIds.Count)
         {
             _failures.Add("settings round-trip: provider order was not preserved");

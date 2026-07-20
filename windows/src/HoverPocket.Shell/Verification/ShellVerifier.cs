@@ -19,6 +19,7 @@ internal sealed class ShellVerifier
     public async Task<int> RunAsync()
     {
         await Task.Delay(200);
+        VerifyFullscreenGeometryPolicy();
 
         var beforeWindowCount = _controller.CountCurrentProcessTopLevelWindows();
         if (_controller.AccessSurfaces.Count == 0)
@@ -34,6 +35,11 @@ internal sealed class ShellVerifier
         VerifyWindow("panel", _controller.Panel.Hwnd);
         await VerifySecondInstanceAsync();
         await ResetPanelAfterSecondInstanceProbeAsync();
+        await VerifyPollingOnlyOpenAsync();
+        await VerifyAccessSurfaceHealthRecoveryAsync();
+        await VerifyPanelHealthRecoveryAsync();
+        await VerifyUnrecoverableWindowRecreationAsync();
+        await VerifyStagedRecoverySchedulerAsync();
         await VerifyPanelPositionStableWhilePointerMovesAsync();
         await VerifyPointerOutsideClosesPanelAsync();
 
@@ -45,6 +51,8 @@ internal sealed class ShellVerifier
             await WaitForPanelHiddenAsync();
         }
 
+        VerifyAnimationDiagnostics();
+
         var afterWindowCount = _controller.CountCurrentProcessTopLevelWindows();
         if (afterWindowCount != beforeWindowCount)
         {
@@ -54,7 +62,10 @@ internal sealed class ShellVerifier
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
-                $"PASS shell verify: windows={afterWindowCount}, cycles={StressCycles}, stable_position=true, outside_close=true");
+                $"PASS shell verify: windows={afterWindowCount}, cycles={StressCycles}, stable_position=true, outside_close=true, "
+                + "polling_open=true, health_repair=true, window_recreate=true, staged_recovery=true, "
+                + $"animation_frames={_controller.Panel.LastAnimationDiagnostics.FrameCount}, "
+                + $"animation_max_gap_ms={_controller.Panel.LastAnimationDiagnostics.MaxFrameGap.TotalMilliseconds:0.0}");
             return 0;
         }
 
@@ -65,6 +76,31 @@ internal sealed class ShellVerifier
         }
 
         return 1;
+    }
+
+    private void VerifyAnimationDiagnostics()
+    {
+        if (!System.Windows.SystemParameters.ClientAreaAnimation)
+        {
+            return;
+        }
+
+        var diagnostics = _controller.Panel.LastAnimationDiagnostics;
+        if (diagnostics.FrameCount < 6)
+        {
+            _failures.Add($"animation: too few rendered frames ({diagnostics.FrameCount})");
+        }
+
+        if (diagnostics.Elapsed < TimeSpan.FromMilliseconds(140)
+            || diagnostics.Elapsed > TimeSpan.FromMilliseconds(700))
+        {
+            _failures.Add($"animation: unexpected elapsed time {diagnostics.Elapsed.TotalMilliseconds:0.0}ms");
+        }
+
+        if (diagnostics.MaxFrameGap > TimeSpan.FromMilliseconds(120))
+        {
+            _failures.Add($"animation: frame gap reached {diagnostics.MaxFrameGap.TotalMilliseconds:0.0}ms");
+        }
     }
 
     private void VerifyWindow(string name, IntPtr hwnd)
@@ -86,6 +122,231 @@ internal sealed class ShellVerifier
         if ((styles & expected) != expected)
         {
             _failures.Add($"{name}: missing {label}; exStyle=0x{styles:X}");
+        }
+    }
+
+    private void VerifyFullscreenGeometryPolicy()
+    {
+        var monitor = new NativeRect(0, 0, 2560, 1440);
+        var fullBounds = new NativeRect(0, 0, 2560, 1440);
+        var maximizedBounds = new NativeRect(-8, -8, 2568, 1448);
+        var workAreaBounds = new NativeRect(0, 0, 2560, 1400);
+
+        if (!NativeMethods.IsFullscreenWindowGeometry(fullBounds, monitor, isMaximized: false))
+        {
+            _failures.Add("fullscreen policy: borderless monitor-sized window was not suppressed");
+        }
+
+        if (NativeMethods.IsFullscreenWindowGeometry(maximizedBounds, monitor, isMaximized: true))
+        {
+            _failures.Add("fullscreen policy: maximized desktop window was treated as fullscreen");
+        }
+
+        if (NativeMethods.IsFullscreenWindowGeometry(workAreaBounds, monitor, isMaximized: false))
+        {
+            _failures.Add("fullscreen policy: work-area-sized window was treated as fullscreen");
+        }
+    }
+
+    private async Task VerifyPollingOnlyOpenAsync()
+    {
+        var layout = _controller.Layouts.FirstOrDefault();
+        if (layout is null)
+        {
+            _failures.Add("polling open: no display layout available");
+            return;
+        }
+
+        var accessCenter = CenterOf(layout.AccessSurface.PhysicalRect);
+        _controller.SetPointerSimulationForVerify(accessCenter.X, accessCenter.Y);
+        try
+        {
+            _controller.SimulatePointerMoveForVerify(accessCenter.X, accessCenter.Y);
+            await WaitForPanelPlacementAsync(layout);
+            if (!_controller.Panel.IsVisible)
+            {
+                _failures.Add("polling open: panel did not open from PollPointer without direct show");
+            }
+        }
+        finally
+        {
+            _controller.ClearPointerSimulationForVerify();
+            await _controller.HidePanelForVerifyAsync();
+            await WaitForPanelHiddenAsync();
+        }
+    }
+
+    private async Task VerifyAccessSurfaceHealthRecoveryAsync()
+    {
+        var layout = _controller.Layouts.FirstOrDefault();
+        var access = _controller.AccessSurfaces.FirstOrDefault();
+        if (layout is null || access is null)
+        {
+            _failures.Add("access health: no access surface available");
+            return;
+        }
+
+        NativeMethods.SetWindowBoundsNoActivate(
+            access.Hwnd,
+            layout.AccessSurface.PhysicalRect.Left + 73,
+            layout.AccessSurface.PhysicalRect.Top + 41,
+            layout.AccessSurface.PhysicalRect.Width,
+            layout.AccessSurface.PhysicalRect.Height,
+            show: true);
+        var requiredStyles = NativeMethods.WsExNoActivate
+            | NativeMethods.WsExToolWindow
+            | NativeMethods.WsExTopmost;
+        NativeMethods.SetExtendedStylesForVerify(
+            access.Hwnd,
+            NativeMethods.GetExtendedStyles(access.Hwnd) & ~requiredStyles);
+        NativeMethods.HideWindow(access.Hwnd);
+
+        var report = await _controller.RunHealthCheckForVerifyAsync();
+        if (report.AccessRepaired == 0)
+        {
+            _failures.Add("access health: injected native faults were not reported as repaired");
+        }
+
+        VerifyWindow("access health", access.Hwnd);
+        VerifyNativeWindowState("access health", access.Hwnd, layout.AccessSurface.PhysicalRect, expectedVisible: true);
+    }
+
+    private async Task VerifyPanelHealthRecoveryAsync()
+    {
+        var layout = _controller.Layouts.FirstOrDefault();
+        if (layout is null)
+        {
+            _failures.Add("panel health: no display layout available");
+            return;
+        }
+
+        var accessCenter = CenterOf(layout.AccessSurface.PhysicalRect);
+        _controller.SetPointerSimulationForVerify(accessCenter.X, accessCenter.Y);
+        try
+        {
+            _controller.SimulatePointerMoveForVerify(accessCenter.X, accessCenter.Y);
+            await WaitForPanelPlacementAsync(layout);
+            var panel = _controller.Panel;
+            if (!_controller.PanelExpectedVisibleForVerify)
+            {
+                _failures.Add("panel health: controller did not retain expected-visible state after polling open");
+            }
+            NativeMethods.SetWindowBoundsNoActivate(
+                panel.Hwnd,
+                layout.PanelTarget.PhysicalRect.Left + 91,
+                layout.PanelTarget.PhysicalRect.Top + 53,
+                layout.PanelTarget.PhysicalRect.Width,
+                layout.PanelTarget.PhysicalRect.Height,
+                show: true);
+            var requiredStyles = NativeMethods.WsExNoActivate
+                | NativeMethods.WsExToolWindow
+                | NativeMethods.WsExTopmost;
+            NativeMethods.SetExtendedStylesForVerify(
+                panel.Hwnd,
+                NativeMethods.GetExtendedStyles(panel.Hwnd) & ~requiredStyles);
+            NativeMethods.HideWindow(panel.Hwnd);
+
+            var report = await _controller.RunHealthCheckForVerifyAsync();
+            if (!report.PanelRepaired || !ReferenceEquals(panel, _controller.Panel))
+            {
+                _failures.Add("panel health: recoverable native faults did not repair the existing panel instance");
+            }
+
+            VerifyWindow("panel health", panel.Hwnd);
+            VerifyNativeWindowState("panel health", panel.Hwnd, layout.PanelTarget.PhysicalRect, expectedVisible: true);
+        }
+        finally
+        {
+            _controller.ClearPointerSimulationForVerify();
+            await _controller.HidePanelForVerifyAsync();
+            await WaitForPanelHiddenAsync();
+        }
+    }
+
+    private async Task VerifyUnrecoverableWindowRecreationAsync()
+    {
+        var layout = _controller.Layouts.FirstOrDefault();
+        var oldAccess = _controller.AccessSurfaces.FirstOrDefault();
+        if (layout is null || oldAccess is null)
+        {
+            _failures.Add("window recreate: no layout or access surface available");
+            return;
+        }
+
+        oldAccess.Close();
+        var accessReport = await _controller.RunHealthCheckForVerifyAsync();
+        var newAccess = _controller.AccessSurfaces.FirstOrDefault();
+        if (accessReport.AccessRecreated == 0
+            || newAccess is null
+            || ReferenceEquals(oldAccess, newAccess))
+        {
+            _failures.Add("window recreate: closed access surface was not replaced");
+        }
+        else
+        {
+            VerifyWindow("recreated access", newAccess.Hwnd);
+            VerifyNativeWindowState("recreated access", newAccess.Hwnd, layout.AccessSurface.PhysicalRect, expectedVisible: true);
+        }
+
+        var oldPanel = _controller.Panel;
+        oldPanel.Close();
+        var panelReport = await _controller.RunHealthCheckForVerifyAsync();
+        if (!panelReport.PanelRecreated || ReferenceEquals(oldPanel, _controller.Panel))
+        {
+            _failures.Add("window recreate: closed panel was not replaced");
+        }
+        else
+        {
+            VerifyWindow("recreated panel", _controller.Panel.Hwnd);
+            VerifyNativeWindowState("recreated panel", _controller.Panel.Hwnd, layout.PanelCollapsed.PhysicalRect, expectedVisible: false);
+        }
+    }
+
+    private async Task VerifyStagedRecoverySchedulerAsync()
+    {
+        var initialStageCount = _controller.RecoveryStageCountForVerify;
+        _controller.ScheduleStagedRecoveryForVerify();
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(3);
+        while (DateTimeOffset.UtcNow < deadline
+            && _controller.RecoveryStageCountForVerify < initialStageCount + HoverShellController.RecoveryDelays.Length)
+        {
+            await Task.Delay(25);
+        }
+
+        if (_controller.RecoveryStageCountForVerify < initialStageCount + HoverShellController.RecoveryDelays.Length)
+        {
+            _failures.Add("staged recovery: immediate/450ms/1400ms stages did not all execute");
+        }
+
+        if (!_controller.PollingEnabledForVerify || !_controller.HealthTimerEnabledForVerify)
+        {
+            _failures.Add("staged recovery: polling or health timer was not restarted");
+        }
+    }
+
+    private void VerifyNativeWindowState(
+        string label,
+        IntPtr hwnd,
+        PhysicalRect expectedFrame,
+        bool expectedVisible)
+    {
+        if (NativeMethods.IsWindowShown(hwnd) != expectedVisible)
+        {
+            _failures.Add(
+                $"{label}: native visibility did not recover to {expectedVisible}; "
+                + $"actual={NativeMethods.IsWindowShown(hwnd)}");
+        }
+
+        if (!NativeMethods.TryGetWindowRect(hwnd, out var actual)
+            || Math.Abs(actual.Left - expectedFrame.Left) > 2
+            || Math.Abs(actual.Top - expectedFrame.Top) > 2
+            || Math.Abs(actual.Width - expectedFrame.Width) > 2
+            || Math.Abs(actual.Height - expectedFrame.Height) > 2)
+        {
+            _failures.Add(
+                $"{label}: native frame did not recover; expected="
+                + $"{expectedFrame.Left},{expectedFrame.Top} {expectedFrame.Width}x{expectedFrame.Height}, "
+                + $"actual={actual.Left},{actual.Top} {actual.Width}x{actual.Height}");
         }
     }
 
@@ -264,7 +525,8 @@ internal sealed class ShellVerifier
                 return;
             }
 
-            if (PositionMatches(position.Value, layout.PanelTarget.PhysicalRect, layout.PanelTarget.DipRect))
+            if (PositionMatches(position.Value, layout.PanelTarget.PhysicalRect, layout.PanelTarget.DipRect)
+                && !_controller.Panel.IsAnimating)
             {
                 return;
             }

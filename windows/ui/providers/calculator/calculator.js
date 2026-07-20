@@ -11,11 +11,11 @@ export function renderCalculatorProvider(context) {
   root.innerHTML = `
     <div class="hp-calc-display">
       <div class="hp-calc-actions">
-        <button class="hp-calc-tool" type="button" data-input="BS" aria-label="Backspace">⌫</button>
-        <button class="hp-calc-tool" type="button" data-clear-history aria-label="Clear history">↺</button>
-        <button class="hp-calc-tool" type="button" data-copy aria-label="Copy">⧉</button>
+        <button class="hp-calc-tool" type="button" data-input="BS" aria-label="${tx(context.state, "1文字削除", "Backspace")}">⌫</button>
+        <button class="hp-calc-tool" type="button" data-clear-history aria-label="${tx(context.state, "履歴を消去", "Clear history")}" title="${tx(context.state, "履歴を消去", "Clear history")}">↺</button>
+        <button class="hp-calc-tool" type="button" data-copy aria-label="${tx(context.state, "結果をコピー", "Copy")}" title="${tx(context.state, "結果をコピー", "Copy")}">⧉</button>
       </div>
-      <div class="hp-calc-history" data-history aria-label="Calculation history"></div>
+      <div class="hp-calc-history" data-history aria-label="${tx(context.state, "計算履歴", "Calculation history")}"></div>
       <output class="hp-calc-expression" data-expression></output>
       <output class="hp-calc-output" data-display>0</output>
     </div>
@@ -89,7 +89,7 @@ export function renderCalculatorProvider(context) {
     try {
       update(await context.request("calculator.getState"));
     } catch (error) {
-      display.textContent = "Error";
+      display.textContent = tx(context.state, "エラー", "Error");
       root.classList.add("is-error");
       copyButton.disabled = true;
     }
@@ -102,7 +102,7 @@ export function renderCalculatorProvider(context) {
     try {
       update(await context.request("calculator.press", { input }));
     } catch (error) {
-      display.textContent = "Error";
+      display.textContent = tx(context.state, "エラー", "Error");
       root.classList.add("is-error");
       copyButton.disabled = true;
     }
@@ -128,7 +128,7 @@ export function renderCalculatorProvider(context) {
     try {
       update(await context.request("calculator.clearHistory"));
     } catch (error) {
-      display.textContent = "Error";
+      display.textContent = tx(context.state, "エラー", "Error");
       root.classList.add("is-error");
       copyButton.disabled = true;
     }
@@ -145,7 +145,7 @@ export function renderCalculatorProvider(context) {
     try {
       update(await context.request("calculator.useHistoryValue", { id }));
     } catch (error) {
-      display.textContent = "Error";
+      display.textContent = tx(context.state, "エラー", "Error");
       root.classList.add("is-error");
       copyButton.disabled = true;
     }
@@ -162,7 +162,7 @@ export function renderCalculatorProvider(context) {
     try {
       update(await context.request("calculator.restoreHistory", { id }));
     } catch (error) {
-      display.textContent = "Error";
+      display.textContent = tx(context.state, "エラー", "Error");
       root.classList.add("is-error");
       copyButton.disabled = true;
     }
@@ -196,7 +196,7 @@ export function renderCalculatorProvider(context) {
       valueButton.type = "button";
       valueButton.dataset.historyValue = "true";
       valueButton.dataset.historyId = id;
-      valueButton.title = "Use result";
+      valueButton.title = tx(context.state, "結果を使用", "Use result");
 
       const expression = document.createElement("span");
       expression.className = "hp-calc-history-expression";
@@ -213,8 +213,8 @@ export function renderCalculatorProvider(context) {
       restoreButton.type = "button";
       restoreButton.dataset.historyRestore = "true";
       restoreButton.dataset.historyId = id;
-      restoreButton.title = "Restore state";
-      restoreButton.setAttribute("aria-label", "Restore calculation state");
+      restoreButton.title = tx(context.state, "この計算を復元", "Restore state");
+      restoreButton.setAttribute("aria-label", tx(context.state, "この計算を復元", "Restore calculation state"));
       restoreButton.textContent = "↩";
 
       row.append(valueButton, restoreButton);
@@ -228,6 +228,10 @@ export function renderCalculatorProvider(context) {
 /**
  * @param {KeyboardEvent} event
  */
+function tx(state, ja, en) {
+  return state?.settings?.language === "en" ? en : ja;
+}
+
 function keyToInput(event) {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
     return "COPY";

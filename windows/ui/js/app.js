@@ -1,12 +1,14 @@
 import { on, request } from "./bridge.js";
-import { setLanguage, t } from "./i18n.js";
+import { labelForSize, setLanguage, t } from "./i18n.js";
 import { renderCalculatorProvider } from "../providers/calculator/calculator.js";
 import { renderCalendarProvider } from "../providers/calendar/calendar.js";
-import { renderClipboardProvider } from "../providers/clipboard/clipboard.js";
+import { renderClipboardProvider, runClipboardUiVerify } from "../providers/clipboard/clipboard.js";
+import { renderControlsProvider } from "../providers/controls/controls.js";
 import { renderStickyProvider } from "../providers/sticky/sticky.js";
 import { renderTimerProvider } from "../providers/timer/timer.js";
 
 const providerRenderers = {
+  controls: renderControlsProvider,
   calculator: renderCalculatorProvider,
   calendar: renderCalendarProvider,
   clipboard: renderClipboardProvider,
@@ -23,13 +25,21 @@ const settingsButtonEl = document.querySelector("[data-settings]");
 
 /** @type {any} */
 let currentState = null;
+let providerCleanup = null;
+let providerRefresh = null;
+let activeProviderKey = "";
+let pendingProviderId = null;
+let providerSelectionTask = null;
+let textInputActivationTask = null;
+let draggingProviderId = null;
+let suppressProviderSelection = false;
 
 on("state.changed", (state) => {
   render(state);
 });
 
 on("panel.opened", (state) => {
-  render(state);
+  render(state, { refreshProvider: true });
 });
 
 bootstrap();
@@ -43,18 +53,20 @@ async function bootstrap() {
 
 /**
  * @param {any} state
+ * @param {{ forceProvider?: boolean, refreshProvider?: boolean }=} options
  */
-function render(state) {
+function render(state, options = {}) {
   currentState = state;
   document.documentElement.style.setProperty("--hp-header-height", `${state.panel.headerHeight}px`);
   document.documentElement.style.setProperty("--hp-ai-height", `${state.panel.aiLaneHeight}px`);
   document.documentElement.dataset.textSize = state.settings.textSize;
+  document.documentElement.dataset.panelSize = state.settings.panelSize;
   setLanguage(state.settings.language);
 
   renderTitle(state);
   renderSizeSwitch(state);
   renderProviderIcons(state);
-  renderProvider(state);
+  renderProvider(state, options);
   renderCommands();
 }
 
@@ -74,8 +86,8 @@ function renderSizeSwitch(state) {
     const button = document.createElement("button");
     button.className = "hp-size-button";
     button.type = "button";
-    button.textContent = size.label;
-    button.setAttribute("aria-label", `Panel size ${size.label}`);
+    button.textContent = labelForSize(size.id);
+    button.setAttribute("aria-label", `${t("panelSize")} ${labelForSize(size.id)}`);
     button.setAttribute("aria-pressed", String(size.id === state.settings.panelSize));
     button.addEventListener("click", () => {
       request("settings.setPanelSize", { panelSize: size.id }).then(render);
@@ -88,47 +100,211 @@ function renderSizeSwitch(state) {
  * @param {any} state
  */
 function renderProviderIcons(state) {
-  providerIconsEl.replaceChildren();
-  const switchOnHover = state.settings.switchingMode === "hover";
-
-  for (const provider of state.providers) {
-    const button = document.createElement("button");
-    button.className = `hp-icon-button${provider.selected ? " is-selected" : ""}`;
-    button.type = "button";
-    button.setAttribute("aria-label", provider.title);
-    button.innerHTML = iconSvg(provider.icon);
-
-    const select = () => request("provider.select", { id: provider.id }).then(render);
-    button.addEventListener("click", () => {
-      if (!switchOnHover) {
-        select();
-      }
-    });
-    button.addEventListener("mouseenter", () => {
-      if (switchOnHover) {
-        select();
-      }
-    });
-    providerIconsEl.append(button);
+  const providerIds = new Set(state.providers.map((provider) => provider.id));
+  for (const child of [...providerIconsEl.children]) {
+    if (!providerIds.has(child.dataset.providerId)) {
+      child.remove();
+    }
   }
+
+  state.providers.forEach((provider, index) => {
+    let button = [...providerIconsEl.children]
+      .find((candidate) => candidate.dataset.providerId === provider.id);
+    if (!button) {
+      button = createProviderIconButton(provider.id);
+    }
+    if (providerIconsEl.children[index] !== button) {
+      providerIconsEl.insertBefore(button, providerIconsEl.children[index] ?? null);
+    }
+    button.innerHTML = iconSvg(provider.icon);
+    button.setAttribute("aria-label", provider.title);
+    button.classList.toggle("is-selected", provider.selected);
+    button.setAttribute("aria-pressed", String(provider.selected));
+    button.title = provider.title;
+  });
+}
+
+function createProviderIconButton(providerId) {
+  const button = document.createElement("button");
+  button.className = "hp-icon-button";
+  button.type = "button";
+  button.draggable = true;
+  button.dataset.providerId = providerId;
+  button.addEventListener("click", () => {
+    if (!suppressProviderSelection && currentState?.settings?.switchingMode !== "hover") {
+      queueProviderSelection(button.dataset.providerId);
+    }
+  });
+  button.addEventListener("mouseenter", () => {
+    if (!draggingProviderId && currentState?.settings?.switchingMode === "hover") {
+      queueProviderSelection(button.dataset.providerId);
+    }
+  });
+  button.addEventListener("dragstart", (event) => {
+    draggingProviderId = button.dataset.providerId;
+    suppressProviderSelection = true;
+    button.classList.add("is-dragging");
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", draggingProviderId);
+    }
+  });
+  button.addEventListener("dragenter", (event) => {
+    if (!draggingProviderId || draggingProviderId === button.dataset.providerId) {
+      return;
+    }
+    event.preventDefault();
+    const dragged = [...providerIconsEl.children]
+      .find((candidate) => candidate.dataset.providerId === draggingProviderId);
+    if (!dragged) {
+      return;
+    }
+    const bounds = button.getBoundingClientRect();
+    providerIconsEl.insertBefore(dragged, event.clientX > bounds.left + bounds.width / 2 ? button.nextSibling : button);
+  });
+  button.addEventListener("dragover", (event) => {
+    if (draggingProviderId) {
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "move";
+      }
+    }
+  });
+  button.addEventListener("drop", (event) => {
+    event.preventDefault();
+    void persistProviderIconOrder();
+  });
+  button.addEventListener("dragend", () => {
+    if (draggingProviderId) {
+      draggingProviderId = null;
+      renderProviderIcons(currentState);
+    }
+    button.classList.remove("is-dragging");
+    window.setTimeout(() => {
+      suppressProviderSelection = false;
+    }, 0);
+  });
+  return button;
+}
+
+async function persistProviderIconOrder() {
+  if (!currentState || !draggingProviderId) {
+    return;
+  }
+  const visibleOrder = [...providerIconsEl.children].map((button) => button.dataset.providerId);
+  const visibleIds = new Set(visibleOrder);
+  let visibleIndex = 0;
+  const providerOrder = currentState.settings.providerOrder.map((id) => (
+    visibleIds.has(id) ? visibleOrder[visibleIndex++] : id
+  ));
+  draggingProviderId = null;
+  for (const button of providerIconsEl.children) {
+    button.classList.remove("is-dragging");
+  }
+  try {
+    render(await request("settings.setProviderOrder", { providerOrder }));
+  } catch {
+    renderProviderIcons(currentState);
+  } finally {
+    window.setTimeout(() => {
+      suppressProviderSelection = false;
+    }, 0);
+  }
+}
+
+function queueProviderSelection(providerId) {
+  if (!providerId || currentState?.selectedProvider?.id === providerId) {
+    return;
+  }
+
+  pendingProviderId = providerId;
+  providerSelectionTask ??= flushProviderSelection().finally(() => {
+    providerSelectionTask = null;
+  });
+}
+
+async function flushProviderSelection() {
+  while (pendingProviderId) {
+    const providerId = pendingProviderId;
+    pendingProviderId = null;
+    if (currentState?.selectedProvider?.id === providerId) {
+      continue;
+    }
+    render(await request("provider.select", { id: providerId }));
+  }
+}
+
+document.addEventListener("focusin", (event) => {
+  const target = event.target;
+  if (!isTextEntryTarget(target) || textInputActivationTask) {
+    return;
+  }
+
+  textInputActivationTask = request("panel.beginTextInput")
+    .then(() => {
+      if (target.isConnected && document.activeElement !== target) {
+        target.focus({ preventScroll: true });
+      }
+    })
+    .finally(() => {
+      textInputActivationTask = null;
+    });
+}, true);
+
+function isTextEntryTarget(target) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  if (target instanceof HTMLTextAreaElement || target.isContentEditable) {
+    return true;
+  }
+  if (!(target instanceof HTMLInputElement)) {
+    return false;
+  }
+  return !["button", "checkbox", "color", "file", "hidden", "radio", "range", "reset", "submit"]
+    .includes(target.type);
 }
 
 /**
  * @param {any} state
+ * @param {{ forceProvider?: boolean, refreshProvider?: boolean }} options
  */
-function renderProvider(state) {
+function renderProvider(state, options) {
   const provider = state.selectedProvider;
+  const providerKey = `${provider?.id ?? "none"}:${state.settings.language}`;
+  if (!options.forceProvider && providerKey === activeProviderKey) {
+    if (options.refreshProvider) {
+      void providerRefresh?.();
+    }
+    return;
+  }
+
+  providerCleanup?.();
+  providerCleanup = null;
+  providerRefresh = null;
+  activeProviderKey = providerKey;
   providerContainerEl.replaceChildren();
+  providerContainerEl.classList.remove("is-provider-entering");
+  void providerContainerEl.offsetWidth;
+  providerContainerEl.classList.add("is-provider-entering");
 
   const renderer = providerRenderers[provider?.id];
   if (renderer) {
-    renderer({
+    const lifecycle = renderer({
       container: providerContainerEl,
       provider,
       state,
       request,
       iconSvg,
     });
+    providerCleanup = typeof lifecycle === "function"
+      ? lifecycle
+      : typeof lifecycle?.dispose === "function"
+        ? () => lifecycle.dispose()
+        : null;
+    providerRefresh = typeof lifecycle?.refresh === "function"
+      ? () => lifecycle.refresh()
+      : null;
     return;
   }
 
@@ -136,12 +312,11 @@ function renderProvider(state) {
   card.className = "hp-provider-card";
   card.innerHTML = `
     <div>
-      <div class="hp-provider-kicker">${escapeHtml(provider?.summary ?? "Provider")}</div>
-      <h1 class="hp-provider-heading">${escapeHtml(provider?.title ?? "No provider")}</h1>
+      <div class="hp-provider-kicker">${escapeHtml(provider?.summary ?? t("tool"))}</div>
+      <h1 class="hp-provider-heading">${escapeHtml(provider?.title ?? t("noTool"))}</h1>
     </div>
     <div class="hp-provider-body">
-      <p>${escapeHtml(provider?.body ?? "No visible provider is available.")}</p>
-      <p>Header and provider content are rendered from C# state.</p>
+      <p>${escapeHtml(provider?.body ?? t("noVisibleTool"))}</p>
     </div>
   `;
   providerContainerEl.append(card);
@@ -151,7 +326,13 @@ function renderCommands() {
   refreshButtonEl.innerHTML = iconSvg("refresh");
   refreshButtonEl.title = t("refresh");
   refreshButtonEl.setAttribute("aria-label", t("refresh"));
-  refreshButtonEl.onclick = () => request("provider.refreshPlaceholder").then(render);
+  refreshButtonEl.onclick = () => {
+    if (providerRefresh) {
+      void providerRefresh();
+      return;
+    }
+    request("provider.refreshPlaceholder").then((state) => render(state, { forceProvider: true }));
+  };
 
   settingsButtonEl.innerHTML = iconSvg("settings");
   settingsButtonEl.title = t("settings");
@@ -175,6 +356,7 @@ function escapeHtml(value) {
  */
 function iconSvg(name) {
   const icons = {
+    controls: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6"/><circle cx="14" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>',
     calculator: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M9 7h6M9 11h.01M12 11h.01M15 11h.01M9 15h.01M12 15h.01M15 15h.01"/></svg>',
     calendar: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01"/></svg>',
     clipboard: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M9 4h6l1 2h2v15H6V6h2z"/><path d="M9 4h6v4H9zM9 12h6M9 16h4"/></svg>',
@@ -188,18 +370,149 @@ function iconSvg(name) {
 
 window.__hoverPocketVerify = {
   async run() {
+    window.__hoverPocketVerifyStep = "get-state";
     const state = await request("app.getState");
+    window.__hoverPocketVerifyStep = "echo";
     const echo = await request("diagnostics.echo", { value: "ui-round-trip" });
     const originalProvider = state.selectedProvider?.id;
+    const controlsProvider = state.providers.find((provider) => provider.id === "controls");
+    let controlsRenderedOk = false;
+    let controlsLayoutOk = false;
+    let controlsHitAreasOk = false;
+    let controlsFallbackLayerOk = false;
+    let controlsStableRefreshOk = false;
+    let controlsBrightnessResolvedOk = false;
+    if (controlsProvider) {
+      window.__hoverPocketVerifyStep = "select-controls";
+      await request("provider.select", { id: controlsProvider.id });
+      window.__hoverPocketVerifyStep = "render-controls";
+      const controlsRoot = await waitForElement(".hp-controls:not(.is-loading)", 4500);
+      if (controlsRoot) {
+        window.__hoverPocketVerifyStep = "resolve-controls-brightness";
+        controlsBrightnessResolvedOk = Boolean(await waitForElement(
+          ".hp-controls-section:first-child .hp-control-row:not(.is-detecting)",
+          4500,
+        ));
+        const rootBounds = controlsRoot.getBoundingClientRect();
+        const sections = [...controlsRoot.querySelectorAll(":scope > .hp-controls-section")];
+        controlsRenderedOk = !controlsRoot.classList.contains("is-error") && sections.length === 3;
+        controlsLayoutOk = rootBounds.width > 0
+          && rootBounds.height > 0
+          && sections.every((section) => {
+            const bounds = section.getBoundingClientRect();
+            return bounds.left >= rootBounds.left - 1
+              && bounds.top >= rootBounds.top - 1
+              && bounds.right <= rootBounds.right + 1
+              && bounds.bottom <= rootBounds.bottom + 1;
+          });
+        const mediaButtons = [...controlsRoot.querySelectorAll(".hp-media-commands button")];
+        controlsHitAreasOk = mediaButtons.length >= 6 && mediaButtons.every((button) => {
+          const bounds = button.getBoundingClientRect();
+          return bounds.width >= 32 && bounds.height >= 32;
+        });
+        controlsFallbackLayerOk = Boolean(
+          controlsRoot.querySelector(".hp-media-fallback")
+          && controlsRoot.querySelector("canvas[data-live-preview]"),
+        ) || Boolean(controlsRoot.querySelector(".hp-media.is-empty"));
+        controlsStableRefreshOk = Boolean(await controlsRoot.__verifyStableRefresh?.());
+      }
+    }
+    const clipboardProvider = state.providers.find((provider) => provider.id === "clipboard");
+    let clipboardStableProviderOk = false;
+    let clipboardStableRefreshOk = false;
+    let clipboardSplitViewOk = false;
+    let providerIconStableOk = false;
+    if (clipboardProvider) {
+      window.__hoverPocketVerifyStep = "select-clipboard";
+      await request("provider.select", { id: clipboardProvider.id });
+      window.__hoverPocketVerifyStep = "render-clipboard";
+      const clipboardRoot = await waitForElement(".clipboard-root", 4500);
+      window.__hoverPocketVerifyStep = "verify-clipboard-refresh";
+      const clipboardVerify = await runClipboardUiVerify(request);
+      window.__hoverPocketVerifyStep = "render-same-clipboard";
+      const clipboardIcon = [...providerIconsEl.children]
+        .find((candidate) => candidate.dataset.providerId === clipboardProvider.id);
+      render(currentState);
+      clipboardStableProviderOk = clipboardRoot === document.querySelector(".clipboard-root");
+      clipboardStableRefreshOk = clipboardVerify.clipboardStableRefreshOk;
+      clipboardSplitViewOk = clipboardVerify.clipboardSplitViewOk;
+      providerIconStableOk = clipboardIcon === [...providerIconsEl.children]
+        .find((candidate) => candidate.dataset.providerId === clipboardProvider.id);
+    }
+    window.__hoverPocketVerifyStep = "begin-text-input";
+    const textInputBegin = await request("panel.beginTextInput");
+    window.__hoverPocketVerifyStep = "end-text-input";
+    const textInputEnd = await request("panel.endTextInput");
+    const textInputActivationOk = textInputBegin?.keyboardInteractionEnabled === true
+      && textInputBegin?.noActivateStyle === false
+      && textInputEnd?.keyboardInteractionEnabled === false
+      && textInputEnd?.noActivateStyle === true;
+    const calendarProvider = state.providers.find((provider) => provider.id === "calendar");
+    let calendarMacLayoutOk = false;
+    let calendarEditorStableOk = false;
+    if (calendarProvider) {
+      window.__hoverPocketVerifyStep = "select-calendar";
+      render(await request("provider.select", { id: calendarProvider.id }));
+      const calendarRoot = await waitForElement(".hp-calendar", 4500);
+      const dayCells = [...(calendarRoot?.querySelectorAll(".hp-calendar-day") ?? [])];
+      calendarMacLayoutOk = Boolean(
+        calendarRoot?.querySelector(".hp-calendar-month-pane")
+        && calendarRoot.querySelector(".hp-calendar-divider")
+        && calendarRoot.querySelector(".hp-calendar-detail")
+        && dayCells.length === 42
+        && dayCells.every((cell) => cell.querySelectorAll(".hp-calendar-event-dots i").length <= 3)
+        && !calendarRoot.querySelector(".hp-calendar-event-count"),
+      );
+      calendarEditorStableOk = Boolean(await calendarRoot?.__verifyEditorStability?.());
+    }
+    const timerProvider = state.providers.find((provider) => provider.id === "timer");
+    let timerLayoutOk = false;
+    let timerInteractionStableOk = false;
+    if (timerProvider) {
+      window.__hoverPocketVerifyStep = "select-timer";
+      render(await request("provider.select", { id: timerProvider.id }));
+      const pomodoroCard = await waitForElement(".hp-timer .hp-timer-section.is-pomodoro", 4500);
+      const timerRoot = pomodoroCard?.closest(".hp-timer");
+      const timerCard = timerRoot?.querySelector(".hp-timer-section.is-timer");
+      const timerStack = timerRoot?.querySelector(".hp-timer-stack");
+      const sections = [...(timerRoot?.querySelectorAll(".hp-timer-section") ?? [])];
+      timerLayoutOk = Boolean(timerRoot && timerStack && timerCard && pomodoroCard)
+        && timerRoot.clientWidth > 0
+        && timerStack.scrollWidth <= timerStack.clientWidth + 1
+        && sections.every((section) => section.scrollWidth <= section.clientWidth + 1);
+      const durationRail = timerRoot?.querySelector("[data-duration-rail]");
+      durationRail?.dispatchEvent(new Event("input", { bubbles: true }));
+      timerInteractionStableOk = Boolean(durationRail?.isConnected && durationRail === timerRoot?.querySelector("[data-duration-rail]"));
+    }
     const targetProvider = state.providers.find((provider) => provider.id !== originalProvider) ?? state.providers[0];
+    window.__hoverPocketVerifyStep = "switch-provider";
     const switchedState = await request("provider.select", { id: targetProvider.id });
     const originalPanelSize = state.settings.panelSize;
     const probePanelSize = originalPanelSize === "small" ? "medium" : "small";
+    window.__hoverPocketVerifyStep = "resize-probe";
     const resizedState = await request("settings.setPanelSize", { panelSize: probePanelSize });
     await request("settings.setPanelSize", { panelSize: originalPanelSize });
+    window.__hoverPocketVerifyStep = "complete";
 
     return {
       echoOk: echo?.value === "ui-round-trip",
+      controlsRenderedOk,
+      controlsLayoutOk,
+      controlsHitAreasOk,
+      controlsFallbackLayerOk,
+      controlsStableRefreshOk,
+      controlsBrightnessResolvedOk,
+      clipboardStableProviderOk,
+      clipboardStableRefreshOk,
+      clipboardSplitViewOk,
+      providerIconStableOk,
+      providerDragReorderReadyOk: [...providerIconsEl.children].every((button) => button.draggable),
+      textInputActivationOk,
+      calendarMacLayoutOk,
+      calendarEditorStableOk,
+      timerLayoutOk,
+      timerInteractionStableOk,
+      textSizeScaleReadyOk: getComputedStyle(document.documentElement).getPropertyValue("--hp-text-scale").trim() !== "",
       providerSwitchOk: switchedState.selectedProvider?.id === targetProvider.id,
       settingsWriteOk: resizedState.settings?.panelSize === probePanelSize,
       originalProvider,
@@ -209,3 +522,27 @@ window.__hoverPocketVerify = {
     };
   },
 };
+
+function waitForElement(selector, timeoutMs) {
+  return new Promise((resolve) => {
+    const existing = document.querySelector(selector);
+    if (existing) {
+      resolve(existing);
+      return;
+    }
+
+    const observer = new MutationObserver(() => {
+      const match = document.querySelector(selector);
+      if (match) {
+        observer.disconnect();
+        window.clearTimeout(timeout);
+        resolve(match);
+      }
+    });
+    const timeout = window.setTimeout(() => {
+      observer.disconnect();
+      resolve(null);
+    }, timeoutMs);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+  });
+}

@@ -21,7 +21,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -77,6 +78,16 @@ button[aria-pressed="true"] {
   background: rgba(99, 214, 181, 0.16);
 }
 
+select {
+  min-width: 180px;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--surface-2);
+}
+
 .provider-list {
   display: grid;
   gap: 8px;
@@ -116,6 +127,33 @@ button[aria-pressed="true"] {
 
 .toggle-row {
   justify-content: space-between;
+}
+
+.select-row,
+.settings-spaced-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.select-row {
+  margin-top: 12px;
+}
+
+.settings-spaced-row {
+  margin-top: 12px;
+}
+
+.settings-inline-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .settings-action-row {

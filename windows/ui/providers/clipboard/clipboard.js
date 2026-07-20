@@ -1,45 +1,80 @@
 let bridgeRequest = null;
 let containerEl = null;
+let appState = null;
 let clipboardState = null;
-let activeTab = "text";
+let clipboardStateSignature = "";
 let activePreview = null;
+let activeMount = 0;
+let refreshPromise = null;
+let renderCount = 0;
 
 /**
  * @param {{ container: HTMLElement, request: (method: string, params?: unknown) => Promise<unknown> }} options
  */
 export function renderClipboardProvider(options) {
+  const mount = ++activeMount;
   containerEl = options.container;
   bridgeRequest = options.request;
+  appState = options.state;
   ensureStylesheet();
 
-  if (!clipboardState) {
+  if (clipboardState) {
+    validateViewState();
+    render();
+  } else {
     renderLoading();
   }
 
   void refreshState();
+  return {
+    refresh: refreshState,
+    dispose() {
+      if (mount === activeMount) {
+        containerEl = null;
+        bridgeRequest = null;
+      }
+    },
+  };
 }
 
 export async function runClipboardUiVerify(request) {
   const state = await request("clipboard.getState");
   const textItems = Array.isArray(state?.textItems) ? state.textItems : [];
   const imageItems = Array.isArray(state?.imageItems) ? state.imageItems : [];
+  const rootBeforeRefresh = containerEl?.querySelector(".clipboard-root") ?? null;
+  const renderCountBeforeRefresh = renderCount;
+  await refreshState();
   return {
     clipboardBridgeOk: Array.isArray(state?.textItems) && Array.isArray(state?.imageItems),
     clipboardFavoriteFieldOk: [...textItems, ...imageItems].every((item) => typeof item.favorite === "boolean"),
     clipboardPrivateMode: Boolean(state?.privateMode),
     clipboardMonitoringKnown: typeof state?.isMonitoring === "boolean",
+    clipboardStableRefreshOk: rootBeforeRefresh === containerEl?.querySelector(".clipboard-root")
+      && renderCount === renderCountBeforeRefresh,
+    clipboardSplitViewOk: Boolean(
+      containerEl?.querySelector(".clipboard-split .clipboard-pane.is-text")
+      && containerEl?.querySelector(".clipboard-split .clipboard-pane.is-image"),
+    ),
   };
 }
 
 async function refreshState() {
-  clipboardState = await send("clipboard.getState");
-  validateViewState();
-  render();
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise = send("clipboard.getState").then((state) => {
+    applyClipboardState(state, false);
+    return state;
+  }).finally(() => {
+    refreshPromise = null;
+  });
+  return refreshPromise;
 }
 
 async function send(method, params = undefined) {
   if (!bridgeRequest) {
-    throw new Error("Clipboard bridge is unavailable.");
+    throw new Error(tx("クリップボードを読み込めません。", "Clipboard bridge is unavailable."));
   }
 
   return bridgeRequest(method, params);
@@ -47,10 +82,42 @@ async function send(method, params = undefined) {
 
 async function updateState(method, params = undefined) {
   const result = await send(method, params);
-  clipboardState = result?.state ?? result;
-  validateViewState();
-  render();
+  applyClipboardState(result?.state ?? result, true);
   return result;
+}
+
+function applyClipboardState(state, forceRender) {
+  const nextSignature = stateSignature(state);
+  const changed = nextSignature !== clipboardStateSignature;
+  clipboardState = state;
+  clipboardStateSignature = nextSignature;
+  validateViewState();
+  if (forceRender || changed) {
+    render();
+  }
+}
+
+function stateSignature(state) {
+  const texts = (state?.textItems ?? []).map((item) => [
+    item.id,
+    item.createdAt,
+    item.favorite,
+    item.text?.length ?? 0,
+  ].join(":"));
+  const images = (state?.imageItems ?? []).map((item) => [
+    item.id,
+    item.createdAt,
+    item.favorite,
+    item.contentHash,
+  ].join(":"));
+  return JSON.stringify([
+    state?.isMonitoring,
+    state?.privateMode,
+    state?.providerVisible,
+    state?.lastErrorMessage,
+    texts,
+    images,
+  ]);
 }
 
 function validateViewState() {
@@ -69,7 +136,7 @@ function renderLoading() {
     return;
   }
 
-  containerEl.replaceChildren(element("div", { className: "clipboard-loading" }, "Loading clipboard history..."));
+  containerEl.replaceChildren(element("div", { className: "clipboard-loading" }, tx("クリップボード履歴を読み込んでいます…", "Loading clipboard history...")));
 }
 
 function render() {
@@ -77,10 +144,38 @@ function render() {
     return;
   }
 
+  const scrollState = captureScrollState();
   const root = element("section", { className: "clipboard-root" });
+  renderCount++;
   root.append(renderHeader());
-  root.append(activePreview ? renderPreview(activePreview) : renderBrowser());
+  root.append(activePreview ? renderPreview(activePreview) : renderSplit());
   containerEl.replaceChildren(root);
+  restoreScrollState(scrollState);
+}
+
+function captureScrollState() {
+  if (!containerEl) {
+    return null;
+  }
+
+  const scrollable = containerEl.querySelector(
+    ".clipboard-text-list, .clipboard-image-grid, .clipboard-favorites-list, .clipboard-preview-text"
+  );
+  return scrollable ? { top: scrollable.scrollTop, left: scrollable.scrollLeft } : null;
+}
+
+function restoreScrollState(scrollState) {
+  if (!containerEl || !scrollState) {
+    return;
+  }
+
+  const scrollable = containerEl.querySelector(
+    ".clipboard-text-list, .clipboard-image-grid, .clipboard-favorites-list, .clipboard-preview-text"
+  );
+  if (scrollable) {
+    scrollable.scrollTop = scrollState.top;
+    scrollable.scrollLeft = scrollState.left;
+  }
 }
 
 function renderHeader() {
@@ -89,22 +184,22 @@ function renderHeader() {
   const imageItems = clipboardState.imageItems ?? [];
   const favoriteCount = getFavoriteItems().length;
   const status = clipboardState.privateMode
-    ? "Private mode"
+    ? tx("プライベート", "Private mode")
     : clipboardState.isMonitoring
-      ? "Watching"
+      ? tx("監視中", "Watching")
       : clipboardState.providerVisible
-        ? "Paused"
-        : "Provider hidden";
+        ? tx("一時停止", "Paused")
+        : tx("非表示", "Provider hidden");
   header.append(
     element("div", { className: "clipboard-status" }, status),
-    element("div", { className: "clipboard-count" }, `${textItems.length}/${clipboardState.textLimit} text`),
-    element("div", { className: "clipboard-count" }, `${imageItems.length}/${clipboardState.imageLimit} image`),
-    element("div", { className: "clipboard-count" }, `${favoriteCount} favorite`),
+    element("div", { className: "clipboard-count" }, `${tx("文字", "Text")} ${textItems.length}/${clipboardState.textLimit}`),
+    element("div", { className: "clipboard-count" }, `${tx("画像", "Images")} ${imageItems.length}/${clipboardState.imageLimit}`),
+    element("div", { className: "clipboard-count" }, `★ ${favoriteCount}`),
     element("div", { className: "clipboard-spacer" }),
-    renderTextButton(clipboardState.privateMode ? "Resume" : "Private", () => {
+    renderTextButton(clipboardState.privateMode ? tx("再開", "Resume") : tx("プライベート", "Private"), () => {
       void updateState("clipboard.setPrivateMode", { enabled: !clipboardState.privateMode });
     }, clipboardState.privateMode ? "is-active" : ""),
-    renderIconButton("⌫", "Clear non-favorite history", () => {
+    renderIconButton("⌫", tx("お気に入り以外の履歴を消去", "Clear non-favorite history"), () => {
       activePreview = null;
       void updateState("clipboard.clear");
     })
@@ -117,58 +212,40 @@ function renderHeader() {
   return header;
 }
 
-function renderBrowser() {
-  const browser = element("div", { className: "clipboard-browser" });
-  browser.append(renderTabs(), renderTabPanel());
-  return browser;
+function renderSplit() {
+  const split = element("div", { className: "clipboard-split" });
+  split.append(
+    renderSplitPane("text", tx("テキスト", "Text"), clipboardState.textItems ?? []),
+    element("div", { className: "clipboard-split-divider", ariaHidden: "true" }),
+    renderSplitPane("image", tx("画像", "Images"), clipboardState.imageItems ?? []),
+  );
+  return split;
 }
 
-function renderTabs() {
-  const tabs = element("div", { className: "clipboard-tabs", role: "tablist" });
-  for (const tab of [
-    { id: "text", label: "Text", count: clipboardState.textItems?.length ?? 0 },
-    { id: "images", label: "Images", count: clipboardState.imageItems?.length ?? 0 },
-    { id: "favorites", label: "Favorites", count: getFavoriteItems().length },
-  ]) {
-    const button = element("button", {
-      className: `clipboard-tab${activeTab === tab.id ? " is-active" : ""}`,
-      type: "button",
-      role: "tab",
-      ariaSelected: String(activeTab === tab.id),
-    }, tab.label, element("strong", {}, String(tab.count)));
-    button.addEventListener("click", () => {
-      activeTab = tab.id;
-      activePreview = null;
-      render();
-    });
-    tabs.append(button);
-  }
-
-  return tabs;
-}
-
-function renderTabPanel() {
-  if (activeTab === "images") {
-    return renderImagePanel(clipboardState.imageItems ?? [], false);
-  }
-
-  if (activeTab === "favorites") {
-    return renderFavoritesPanel();
-  }
-
-  return renderTextPanel(clipboardState.textItems ?? [], false);
+function renderSplitPane(kind, title, items) {
+  const pane = element("section", { className: `clipboard-pane is-${kind}` });
+  const favoriteCount = items.filter((item) => item.favorite).length;
+  pane.append(
+    element("header", { className: "clipboard-pane-header" },
+      element("strong", {}, title),
+      element("span", {}, String(items.length)),
+      element("small", {}, `★ ${favoriteCount}`),
+    ),
+    kind === "image" ? renderImagePanel(items, false) : renderTextPanel(items, false),
+  );
+  return pane;
 }
 
 function renderTextPanel(items, showDelete) {
   const panel = element("section", { className: "clipboard-panel" });
   if (items.length === 0) {
-    panel.append(renderEmpty("No text"));
+    panel.append(renderEmpty(tx("テキスト履歴はありません", "No text")));
     return panel;
   }
 
   const list = element("div", { className: "clipboard-text-list" });
   for (const item of items) {
-    list.append(renderTextItem(item, showDelete));
+    list.append(renderTextItem(item, showDelete || item.favorite));
   }
   panel.append(list);
   return panel;
@@ -177,33 +254,15 @@ function renderTextPanel(items, showDelete) {
 function renderImagePanel(items, showDelete) {
   const panel = element("section", { className: "clipboard-panel" });
   if (items.length === 0) {
-    panel.append(renderEmpty("No images"));
+    panel.append(renderEmpty(tx("画像履歴はありません", "No images")));
     return panel;
   }
 
   const grid = element("div", { className: "clipboard-image-grid" });
   for (const item of items) {
-    grid.append(renderImageItem(item, showDelete));
+    grid.append(renderImageItem(item, showDelete || item.favorite));
   }
   panel.append(grid);
-  return panel;
-}
-
-function renderFavoritesPanel() {
-  const favorites = getFavoriteItems();
-  const panel = element("section", { className: "clipboard-panel clipboard-favorites-panel" });
-  if (favorites.length === 0) {
-    panel.append(renderEmpty("No favorites"));
-    return panel;
-  }
-
-  const list = element("div", { className: "clipboard-favorites-list" });
-  for (const item of favorites) {
-    list.append(item.kind === "text"
-      ? renderTextItem(item, true)
-      : renderImageItem(item, true));
-  }
-  panel.append(list);
   return panel;
 }
 
@@ -211,7 +270,7 @@ function renderTextItem(item, showDelete) {
   const row = element("article", {
     className: `clipboard-text-item${item.favorite ? " is-favorite" : ""}`,
     tabIndex: "0",
-    title: "Preview text",
+    title: tx("テキストをプレビュー", "Preview text"),
   });
   row.addEventListener("click", () => togglePreview("text", item.id));
   row.addEventListener("keydown", (event) => {
@@ -234,7 +293,7 @@ function renderImageItem(item, showDelete) {
   const tile = element("article", {
     className: `clipboard-image-item${item.favorite ? " is-favorite" : ""}`,
     tabIndex: "0",
-    title: "Preview image",
+    title: tx("画像をプレビュー", "Preview image"),
   });
   tile.addEventListener("click", () => togglePreview("image", item.id));
   tile.addEventListener("keydown", (event) => {
@@ -248,7 +307,7 @@ function renderImageItem(item, showDelete) {
   if (item.dataUrl) {
     preview.append(element("img", { src: item.dataUrl, alt: `${item.width} by ${item.height}` }));
   } else {
-    preview.append(element("span", {}, "Image"));
+    preview.append(element("span", {}, tx("画像", "Image")));
   }
 
   const meta = element("div", { className: "clipboard-image-meta" }, `${item.width}x${item.height}`);
@@ -259,20 +318,20 @@ function renderImageItem(item, showDelete) {
 function renderItemActions(item, kind, showDelete) {
   const actions = element("div", { className: "clipboard-item-actions" });
   actions.append(
-    renderIconButton(item.favorite ? "★" : "☆", item.favorite ? "Remove favorite" : "Add favorite", () => {
+    renderIconButton(item.favorite ? "★" : "☆", item.favorite ? tx("お気に入りを解除", "Remove favorite") : tx("お気に入りに追加", "Add favorite"), () => {
       void updateState("clipboard.toggleFavorite", { kind, id: item.id });
     }),
-    renderIconButton("⧉", kind === "image" ? "Copy image" : "Copy text", () => {
+    renderIconButton("⧉", kind === "image" ? tx("画像をコピー", "Copy image") : tx("テキストをコピー", "Copy text"), () => {
       activePreview = null;
       void updateState(kind === "image" ? "clipboard.copyImage" : "clipboard.copyText", { id: item.id });
     }),
-    renderDragButton("↗", kind === "image" ? "Drag image to another app" : "Drag text to another app", () => {
+    renderDragButton("↗", kind === "image" ? tx("画像を別のアプリへドラッグ", "Drag image to another app") : tx("テキストを別のアプリへドラッグ", "Drag text to another app"), () => {
       void send("clipboard.startExternalDrag", { kind, id: item.id });
     })
   );
 
   if (showDelete) {
-    actions.append(renderIconButton("🗑", "Delete favorite", () => {
+    actions.append(renderIconButton("🗑", tx("項目を削除", "Delete item"), () => {
       activePreview = null;
       void updateState("clipboard.deleteItem", { kind, id: item.id });
     }, "is-danger"));
@@ -285,7 +344,7 @@ function renderPreview(previewRef) {
   const item = findItem(previewRef.kind, previewRef.id);
   if (!item) {
     activePreview = null;
-    return renderBrowser();
+    return renderSplit();
   }
 
   const preview = element("section", { className: `clipboard-full-preview is-${previewRef.kind}` });
@@ -296,14 +355,14 @@ function renderPreview(previewRef) {
     element("header", { className: "clipboard-preview-header" },
       element("span", {}, title),
       element("div", { className: "clipboard-spacer" }),
-      renderIconButton(item.favorite ? "★" : "☆", item.favorite ? "Remove favorite" : "Add favorite", () => {
+      renderIconButton(item.favorite ? "★" : "☆", item.favorite ? tx("お気に入りを解除", "Remove favorite") : tx("お気に入りに追加", "Add favorite"), () => {
         void updateState("clipboard.toggleFavorite", { kind: previewRef.kind, id: item.id });
       }),
-      renderIconButton("⧉", previewRef.kind === "image" ? "Copy image" : "Copy text", () => {
+      renderIconButton("⧉", previewRef.kind === "image" ? tx("画像をコピー", "Copy image") : tx("テキストをコピー", "Copy text"), () => {
         activePreview = null;
         void updateState(previewRef.kind === "image" ? "clipboard.copyImage" : "clipboard.copyText", { id: item.id });
       }),
-      renderIconButton("✕", "Close preview", () => {
+      renderIconButton("✕", tx("プレビューを閉じる", "Close preview"), () => {
         activePreview = null;
         render();
       })
@@ -315,7 +374,7 @@ function renderPreview(previewRef) {
     if (item.dataUrl) {
       imageWrap.append(element("img", { src: item.dataUrl, alt: `${item.width} by ${item.height}` }));
     } else {
-      imageWrap.append(element("span", {}, "Image unavailable"));
+      imageWrap.append(element("span", {}, tx("画像を表示できません", "Image unavailable")));
     }
     preview.append(imageWrap);
   } else {
@@ -402,7 +461,11 @@ function formatTime(value) {
     return "";
   }
 
-  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(value).toLocaleTimeString(appState?.settings?.language === "en" ? "en-US" : "ja-JP", { hour: "2-digit", minute: "2-digit" });
+}
+
+function tx(ja, en) {
+  return appState?.settings?.language === "en" ? en : ja;
 }
 
 function ensureStylesheet() {

@@ -9,6 +9,7 @@ internal sealed record StartupOptions(
     bool VerifyUiModel,
     bool VerifySticky,
     bool VerifyClipboard,
+    bool VerifyControls,
     bool VerifyCalc,
     bool VerifyTimer,
     bool VerifyCalendar,
@@ -17,6 +18,10 @@ internal sealed record StartupOptions(
     bool VerifyUpdater,
     bool SecondInstanceProbe,
     bool EnableDevTools,
+    bool ChangeBrightnessForVerify,
+    bool TogglePlaybackForVerify,
+    bool VerifyLivePreview,
+    bool VerifyLivePreviewFallback,
     ShellSettings Settings)
 {
     public bool IsVerify =>
@@ -26,6 +31,7 @@ internal sealed record StartupOptions(
         || VerifyUiModel
         || VerifySticky
         || VerifyClipboard
+        || VerifyControls
         || VerifyCalc
         || VerifyTimer
         || VerifyCalendar
@@ -41,6 +47,7 @@ internal sealed record StartupOptions(
         var verifyUiModel = false;
         var verifySticky = false;
         var verifyClipboard = false;
+        var verifyControls = false;
         var verifyCalc = false;
         var verifyTimer = false;
         var verifyCalendar = false;
@@ -49,7 +56,11 @@ internal sealed record StartupOptions(
         var verifyUpdater = false;
         var secondInstanceProbe = false;
         var enableDevTools = false;
-        var displayPlacement = DisplayPlacement.Main;
+        var changeBrightnessForVerify = false;
+        var togglePlaybackForVerify = false;
+        var verifyLivePreview = false;
+        var verifyLivePreviewFallback = false;
+        DisplayPlacement? displayPlacement = null;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -63,6 +74,7 @@ internal sealed record StartupOptions(
                 verifyUiModel = string.Equals(verifyTarget, "ui-model", StringComparison.OrdinalIgnoreCase);
                 verifySticky = string.Equals(verifyTarget, "sticky", StringComparison.OrdinalIgnoreCase);
                 verifyClipboard = string.Equals(verifyTarget, "clipboard", StringComparison.OrdinalIgnoreCase);
+                verifyControls = string.Equals(verifyTarget, "controls", StringComparison.OrdinalIgnoreCase);
                 verifyCalc = string.Equals(verifyTarget, "calc", StringComparison.OrdinalIgnoreCase);
                 verifyTimer = string.Equals(verifyTarget, "timer", StringComparison.OrdinalIgnoreCase);
                 verifyCalendar = string.Equals(verifyTarget, "calendar", StringComparison.OrdinalIgnoreCase);
@@ -84,6 +96,30 @@ internal sealed record StartupOptions(
                 continue;
             }
 
+            if (string.Equals(args[index], "--change-brightness", StringComparison.OrdinalIgnoreCase))
+            {
+                changeBrightnessForVerify = true;
+                continue;
+            }
+
+            if (string.Equals(args[index], "--toggle-playback", StringComparison.OrdinalIgnoreCase))
+            {
+                togglePlaybackForVerify = true;
+                continue;
+            }
+
+            if (string.Equals(args[index], "--verify-live-preview", StringComparison.OrdinalIgnoreCase))
+            {
+                verifyLivePreview = true;
+                continue;
+            }
+
+            if (string.Equals(args[index], "--verify-live-preview-fallback", StringComparison.OrdinalIgnoreCase))
+            {
+                verifyLivePreviewFallback = true;
+                continue;
+            }
+
             if (string.Equals(args[index], "--display-placement", StringComparison.OrdinalIgnoreCase)
                 && index + 1 < args.Length
                 && TryParseDisplayPlacement(args[++index], out var parsedPlacement))
@@ -99,6 +135,7 @@ internal sealed record StartupOptions(
             verifyUiModel,
             verifySticky,
             verifyClipboard,
+            verifyControls,
             verifyCalc,
             verifyTimer,
             verifyCalendar,
@@ -107,6 +144,10 @@ internal sealed record StartupOptions(
             verifyUpdater,
             secondInstanceProbe,
             enableDevTools,
+            changeBrightnessForVerify,
+            togglePlaybackForVerify,
+            verifyLivePreview,
+            verifyLivePreviewFallback,
             new ShellSettings(displayPlacement));
     }
 
