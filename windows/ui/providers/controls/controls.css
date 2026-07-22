@@ -39,9 +39,11 @@
 
 .hp-controls-list {
   display: grid;
+  min-width: 0;
   max-height: 82px;
   gap: 6px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   scrollbar-width: thin;
 }
 
@@ -86,6 +88,7 @@
 
 .hp-control-row input[type="range"],
 .hp-media-timeline input[type="range"] {
+  box-sizing: border-box;
   width: 100%;
   min-width: 0;
   accent-color: var(--hp-accent-2);

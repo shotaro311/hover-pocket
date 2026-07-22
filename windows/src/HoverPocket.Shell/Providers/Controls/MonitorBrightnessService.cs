@@ -15,6 +15,8 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
     private const uint ErrorGraphicsDdcInvalidMessageChecksum = 0xC026258B;
     private static readonly TimeSpan CacheLifetime = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan DiscoveryLifetime = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan DdcCommandSpacing = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan DdcRetryDelay = TimeSpan.FromMilliseconds(55);
     private readonly DisplayLayoutService _displays = new();
     private readonly object _readSync = new();
     private readonly object _ddcSync = new();
@@ -294,6 +296,8 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
                     endpoints.Add(new DdcMonitorEndpoint(
                         DdcId(display.NativeHandle, index),
                         name,
+                        display.NativeHandle,
+                        index,
                         handle,
                         usedHighLevel,
                         minimum,
@@ -431,6 +435,8 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
             {
                 break;
             }
+
+            Thread.Sleep(DdcRetryDelay);
         }
 
         minimum = 0;
@@ -447,6 +453,11 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
             return true;
         }
 
+        if (endpoint.UseHighLevel)
+        {
+            Thread.Sleep(DdcRetryDelay);
+        }
+
         for (var attempt = 0; attempt < 2; attempt++)
         {
             if (SetVCPFeature(endpoint.Handle, VcpLuminance, value))
@@ -455,10 +466,12 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
                 return true;
             }
 
-            if (attempt > 0 || !IsTransientDdcError(Marshal.GetLastWin32Error()))
+            if (attempt > 0)
             {
                 break;
             }
+
+            Thread.Sleep(DdcRetryDelay);
         }
 
         return false;
@@ -616,6 +629,8 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
     private sealed class DdcMonitorEndpoint(
         string id,
         string name,
+        IntPtr logicalMonitorHandle,
+        int physicalMonitorIndex,
         SafePhysicalMonitorHandle handle,
         bool useHighLevel,
         uint minimum,
@@ -626,7 +641,7 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
 
         public string Name { get; } = name;
 
-        public SafePhysicalMonitorHandle Handle { get; } = handle;
+        public SafePhysicalMonitorHandle Handle { get; private set; } = handle;
 
         public bool UseHighLevel { get; set; } = useHighLevel;
 
@@ -635,6 +650,8 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         public uint Maximum { get; private set; } = maximum;
 
         public int Value { get; private set; } = ToPercentage(minimum, current, maximum);
+
+        private DateTimeOffset _lastCommandStartedAt = DateTimeOffset.MinValue;
 
         public DisplayBrightnessState ReadState(bool refreshValue)
         {
@@ -658,12 +675,19 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         public bool SetBrightness(int value)
         {
             var normalized = Math.Clamp(value, 0, 100);
-            var target = Minimum + (uint)Math.Round(
-                (Maximum - Minimum) * normalized / 100d,
-                MidpointRounding.AwayFromZero);
-            if (!TrySetBrightness(this, target))
+            WaitForCommandSpacing();
+            if (!TrySetNormalizedBrightness(normalized))
             {
-                return false;
+                if (!Reconnect())
+                {
+                    return false;
+                }
+
+                WaitForCommandSpacing();
+                if (!TrySetNormalizedBrightness(normalized))
+                {
+                    return false;
+                }
             }
 
             Value = normalized;
@@ -674,6 +698,69 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
 
         private DisplayBrightnessState State(string? error = null) =>
             new(Id, Name, true, Value, error);
+
+        private bool TrySetNormalizedBrightness(int normalized)
+        {
+            _lastCommandStartedAt = DateTimeOffset.UtcNow;
+            var target = Minimum + (uint)Math.Round(
+                (Maximum - Minimum) * normalized / 100d,
+                MidpointRounding.AwayFromZero);
+            return TrySetBrightness(this, target);
+        }
+
+        private void WaitForCommandSpacing()
+        {
+            var remaining = DdcCommandSpacing - (DateTimeOffset.UtcNow - _lastCommandStartedAt);
+            if (remaining > TimeSpan.Zero)
+            {
+                Thread.Sleep(remaining);
+            }
+        }
+
+        private bool Reconnect()
+        {
+            var monitors = GetPhysicalMonitors(logicalMonitorHandle);
+            if (physicalMonitorIndex < 0 || physicalMonitorIndex >= monitors.Length)
+            {
+                DestroyUnusedMonitors(monitors, -1);
+                return false;
+            }
+
+            var replacement = new SafePhysicalMonitorHandle(monitors[physicalMonitorIndex].Handle);
+            DestroyUnusedMonitors(monitors, physicalMonitorIndex);
+            if (!TryReadBrightness(
+                    replacement,
+                    UseHighLevel,
+                    out var nextMinimum,
+                    out var nextCurrent,
+                    out var nextMaximum,
+                    out var nextUseHighLevel))
+            {
+                replacement.Dispose();
+                return false;
+            }
+
+            var previous = Handle;
+            Handle = replacement;
+            UseHighLevel = nextUseHighLevel;
+            Minimum = nextMinimum;
+            Maximum = nextMaximum;
+            Value = ToPercentage(nextMinimum, nextCurrent, nextMaximum);
+            previous.Dispose();
+            _lastCommandStartedAt = DateTimeOffset.UtcNow;
+            return true;
+        }
+
+        private static void DestroyUnusedMonitors(IReadOnlyList<PhysicalMonitor> monitors, int retainedIndex)
+        {
+            for (var index = 0; index < monitors.Count; index++)
+            {
+                if (index != retainedIndex && monitors[index].Handle != IntPtr.Zero)
+                {
+                    _ = DestroyPhysicalMonitor(monitors[index].Handle);
+                }
+            }
+        }
 
         private static int ToPercentage(uint minimum, uint current, uint maximum) =>
             Math.Clamp((int)Math.Round(

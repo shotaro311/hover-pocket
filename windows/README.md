@@ -51,7 +51,7 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 
 `--verify controls` は音量・ミュート・輝度・メディア操作の決定的テストと、実機の読み取り専用 probe を実行します。外部ディスプレイの輝度は DDC/CI 非対応や応答遅延を許容し、パネル全体を停止させずに非対応表示へフォールバックします。
 
-`--verify ui` はWebView2とbridgeに加え、Controlsの実描画・領域内収まり、Clipboardの同一provider再描画抑止と同内容refresh時のDOM維持を検査します。
+`--verify ui` はWebView2とbridgeに加え、Controlsの実描画・領域内収まり、Clipboardの同一provider再描画抑止、通常/お気に入りタブ、中央split view、全体プレビュー、個別削除UI、Calculator履歴サイドバーを検査します。
 
 `--verify updater` は Velopack のローカルフォルダーフィードを一時生成し、更新なし / 更新ありの dry-run を確認します。実ダウンロードと適用は行いません。
 

@@ -189,7 +189,7 @@ Must:
 
 受け入れ条件:
 
-- Clipboard 画像/テキスト、Sticky Notes の外部ドラッグで、ドラッグ元パネルがドロップ先を覆い続けない。
+- Sticky Notes の外部ドラッグで、ドラッグ元パネルがドロップ先を覆い続けない。
 - パネル閉鎖中に内部 state が壊れず、再表示時に provider が正常に戻る。
 
 ### R-SHELL-005: Access window と Preview window の責務分離
@@ -296,8 +296,10 @@ Must:
 - テキスト履歴は最大 30 件、画像履歴は最大 20 件を基準にする。
 - クリップボード監視は軽量に行い、既存版の目安として 0.75 秒間隔を基準にする。
 - provider が有効な間だけ clipboard monitoring を開始し、provider が非表示/無効の場合は停止できる。
-- 履歴項目クリックで再コピーできる。
-- テキストと画像を外部アプリへドラッグできる。
+- 履歴項目クリックで全体プレビューを開き、コピー操作は各項目のコピーボタンから実行できる。
+- テキストと画像の各履歴は、ゴミ箱ボタンから個別に削除できる。
+- 通常タブはテキストと画像を中央で等分した split view、お気に入りタブはお気に入りだけを同じ split view で表示する。
+- 全体プレビューでは画像全体をパネル内へ収め、テキストはスクロールして全文を読める。
 - 画像は PNG 相当に正規化し、重複はハッシュで抑制する。
 - 画像ファイルと履歴 metadata をローカル Application Data 配下に保存する。
 - metadata は `history.json` 相当、画像実体は個別 PNG ファイルとして分ける。
@@ -477,7 +479,7 @@ Must:
 - monitor 追加/削除、sleep/wake 復帰時の再同期。
 - グローバルなマウス位置監視または上端ホットゾーン window。
 - Win32 Clipboard 変更通知、または同等の clipboard listener。
-- クリップボード読み書きと画像ファイル drag/drop。
+- クリップボード読み書きと、画像履歴のローカルPNG保存・個別削除。
 - Windows 音量取得/設定/ミュート。
 - Windows media session 読み取りと再生制御。未対応アプリには fallback を設計する。
 - ディスプレイ輝度操作と unsupported fallback。
@@ -539,7 +541,7 @@ Should:
 推奨前提:
 
 - 要件定義段階では、技術選定より先に「Windows native shell 能力」と「provider UI/logic の分離」を固定する。
-- 最初の実装検証では、top-edge overlay、tray、多画面 DPI、Clipboard drag/drop、Controls API の 5 点を spike する。
+- 最初の実装検証では、top-edge overlay、tray、多画面 DPI、Clipboard履歴保存・個別削除、Controls API の 5 点を spike する。
 
 ## 9. MVP と段階的リリース
 
@@ -630,8 +632,8 @@ Must:
 - Calendar: 保存済み認証で予定が取得される。
 - Calendar: 日付 hover、クリック固定、追加、編集、削除が動く。
 - Calendar: 権限不足 token は再接続扱いになる。
-- Clipboard: テキスト/画像を履歴化し、クリックで再コピーできる。
-- Clipboard: 画像/テキストを外部アプリへ drag/drop できる。
+- Clipboard: テキスト/画像を履歴化し、全体プレビュー、コピー、お気に入り、個別削除ができる。
+- Clipboard: 通常/お気に入りタブと、中央で等分したテキスト/画像 split view が崩れない。
 - Sticky Notes: 作成、編集、色変更、並び替え、archive/delete、undo が動く。
 - Timer: 2 件まで同時実行でき、pause/resume/stop と終了アラートが動く。
 - Calculator: 代表計算、キーボード入力、Error、copy が動く。

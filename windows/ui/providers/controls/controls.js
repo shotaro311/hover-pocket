@@ -2,7 +2,7 @@ import { on } from "../../js/bridge.js";
 
 const styleHref = "./providers/controls/controls.css";
 const playbackRates = [1, 1.25, 1.5, 1.75, 2];
-const brightnessUpdateDelayMs = 60;
+const brightnessUpdateDelayMs = 110;
 
 export function renderControlsProvider(context) {
   ensureStylesheet();
@@ -114,7 +114,7 @@ export function renderControlsProvider(context) {
 
     let state = brightnessUpdates.get(id);
     if (!state) {
-      state = { inFlight: false, queuedValue: null, timer: null };
+      state = { inFlight: false, queuedValue: null, timer: null, lastSentAt: 0 };
       brightnessUpdates.set(id, state);
     }
 
@@ -143,9 +143,21 @@ export function renderControlsProvider(context) {
       return;
     }
 
+    const spacing = brightnessUpdateDelayMs - (performance.now() - state.lastSentAt);
+    if (spacing > 1) {
+      if (state.timer == null) {
+        state.timer = window.setTimeout(() => {
+          state.timer = null;
+          sendBrightness(id, state);
+        }, spacing);
+      }
+      return;
+    }
+
     const value = state.queuedValue;
     state.queuedValue = null;
     state.inFlight = true;
+    state.lastSentAt = performance.now();
     const operationKey = `controls.setBrightness:${id}`;
     pendingOperations.add(operationKey);
     root.classList.add("is-busy");
@@ -670,6 +682,9 @@ function localizeError(message, state) {
   }
   if (/^Brightness readback did not match \d+%\.$/.test(message)) {
     return `明るさが指定値（${message.match(/\d+%/)?.[0] ?? ""}）に反映されたことを確認できませんでした。`;
+  }
+  if (/^Brightness command failed for \d+%\.$/.test(message)) {
+    return `明るさを${message.match(/\d+%/)?.[0] ?? "指定値"}へ変更できませんでした。もう一度操作してください。`;
   }
   return message;
 }

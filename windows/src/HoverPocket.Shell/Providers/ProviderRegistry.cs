@@ -40,7 +40,7 @@ internal sealed class ProviderRegistry
                 "Clipboard",
                 "clipboard",
                 "Clipboard history",
-                "Capture text and PNG-normalized images, copy them back, clear history, and drag items out."),
+                "Capture text and PNG-normalized images, preview, favorite, copy, and delete history items."),
             new ProviderDescriptor(
                 "sticky",
                 "Sticky Notes",

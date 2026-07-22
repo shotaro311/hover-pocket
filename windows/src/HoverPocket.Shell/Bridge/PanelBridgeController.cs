@@ -964,7 +964,7 @@ internal sealed class PanelBridgeController : IDisposable
             ("calendar", ProviderTextKind.Body) => "月間予定の確認と予定の追加・編集・削除ができます。",
             ("clipboard", ProviderTextKind.Title) => "クリップボード",
             ("clipboard", ProviderTextKind.Summary) => "クリップボード履歴",
-            ("clipboard", ProviderTextKind.Body) => "テキストと画像の履歴を確認し、コピーやドラッグで再利用します。",
+            ("clipboard", ProviderTextKind.Body) => "テキストと画像の履歴を確認し、お気に入り、全体プレビュー、コピー、個別削除を行えます。",
             ("sticky", ProviderTextKind.Title) => "付箋",
             ("sticky", ProviderTextKind.Summary) => "付箋ボード",
             ("sticky", ProviderTextKind.Body) => "付箋の作成、編集、色分け、並び替え、アーカイブができます。",

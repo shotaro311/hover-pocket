@@ -1,6 +1,6 @@
 import { on, request } from "./bridge.js";
 import { labelForSize, setLanguage, t } from "./i18n.js";
-import { renderCalculatorProvider } from "../providers/calculator/calculator.js";
+import { renderCalculatorProvider, runCalculatorUiVerify } from "../providers/calculator/calculator.js";
 import { renderCalendarProvider } from "../providers/calendar/calendar.js";
 import { renderClipboardProvider, runClipboardUiVerify } from "../providers/clipboard/clipboard.js";
 import { renderControlsProvider } from "../providers/controls/controls.js";
@@ -421,6 +421,12 @@ window.__hoverPocketVerify = {
     let clipboardStableProviderOk = false;
     let clipboardStableRefreshOk = false;
     let clipboardSplitViewOk = false;
+    let clipboardCenteredSplitOk = false;
+    let clipboardTabsOk = false;
+    let clipboardDeleteActionsOk = false;
+    let clipboardNoDragActionOk = false;
+    let clipboardNoResolutionOk = false;
+    let clipboardPreviewBehaviorOk = false;
     let providerIconStableOk = false;
     if (clipboardProvider) {
       window.__hoverPocketVerifyStep = "select-clipboard";
@@ -430,14 +436,30 @@ window.__hoverPocketVerify = {
       window.__hoverPocketVerifyStep = "verify-clipboard-refresh";
       const clipboardVerify = await runClipboardUiVerify(request);
       window.__hoverPocketVerifyStep = "render-same-clipboard";
+      const clipboardRootAfterInteraction = document.querySelector(".clipboard-root");
       const clipboardIcon = [...providerIconsEl.children]
         .find((candidate) => candidate.dataset.providerId === clipboardProvider.id);
       render(currentState);
-      clipboardStableProviderOk = clipboardRoot === document.querySelector(".clipboard-root");
+      clipboardStableProviderOk = clipboardRootAfterInteraction === document.querySelector(".clipboard-root");
       clipboardStableRefreshOk = clipboardVerify.clipboardStableRefreshOk;
       clipboardSplitViewOk = clipboardVerify.clipboardSplitViewOk;
+      clipboardCenteredSplitOk = clipboardVerify.clipboardCenteredSplitOk;
+      clipboardTabsOk = clipboardVerify.clipboardTabsOk;
+      clipboardDeleteActionsOk = clipboardVerify.clipboardDeleteActionsOk;
+      clipboardNoDragActionOk = clipboardVerify.clipboardNoDragActionOk;
+      clipboardNoResolutionOk = clipboardVerify.clipboardNoResolutionOk;
+      clipboardPreviewBehaviorOk = clipboardVerify.clipboardPreviewBehaviorOk;
       providerIconStableOk = clipboardIcon === [...providerIconsEl.children]
         .find((candidate) => candidate.dataset.providerId === clipboardProvider.id);
+    }
+    const calculatorProvider = state.providers.find((provider) => provider.id === "calculator");
+    let calculatorHistorySidebarOk = false;
+    if (calculatorProvider) {
+      window.__hoverPocketVerifyStep = "select-calculator";
+      await request("provider.select", { id: calculatorProvider.id });
+      await waitForElement(".hp-calc", 4500);
+      window.__hoverPocketVerifyStep = "verify-calculator-history-sidebar";
+      calculatorHistorySidebarOk = await runCalculatorUiVerify();
     }
     window.__hoverPocketVerifyStep = "begin-text-input";
     const textInputBegin = await request("panel.beginTextInput");
@@ -505,6 +527,13 @@ window.__hoverPocketVerify = {
       clipboardStableProviderOk,
       clipboardStableRefreshOk,
       clipboardSplitViewOk,
+      clipboardCenteredSplitOk,
+      clipboardTabsOk,
+      clipboardDeleteActionsOk,
+      clipboardNoDragActionOk,
+      clipboardNoResolutionOk,
+      clipboardPreviewBehaviorOk,
+      calculatorHistorySidebarOk,
       providerIconStableOk,
       providerDragReorderReadyOk: [...providerIconsEl.children].every((button) => button.draggable),
       textInputActivationOk,

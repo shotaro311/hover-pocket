@@ -285,22 +285,28 @@ internal sealed class ControlsVerifier
             return;
         }
 
-        var requested = original < 100 ? original + 1 : original - 1;
+        var firstRequested = original >= 8 ? original - 8 : original + 8;
+        var requested = original >= 16 ? original - 16 : original + 16;
         try
         {
             timer.Restart();
+            var firstChanged = await brightness.SetBrightnessAsync(target.Id, firstRequested, cancellationToken);
             var changed = await brightness.SetBrightnessAsync(target.Id, requested, cancellationToken);
             timer.Stop();
-            VerifyConsole.WriteLine($"brightness_write_ms={timer.Elapsed.TotalMilliseconds:F1}");
+            VerifyConsole.WriteLine($"brightness_drag_sequence={original}->{firstRequested}->{requested}");
+            VerifyConsole.WriteLine($"brightness_drag_write_ms={timer.Elapsed.TotalMilliseconds:F1}");
+            var firstAccepted = firstChanged.FirstOrDefault(display =>
+                string.Equals(display.Id, target.Id, StringComparison.OrdinalIgnoreCase));
             var accepted = changed.FirstOrDefault(display => string.Equals(display.Id, target.Id, StringComparison.OrdinalIgnoreCase));
             var readback = await brightness.ReadTargetFreshAsync(target.Id, cancellationToken);
-            var verified = accepted?.WriteVerified == true
+            var verified = firstAccepted?.WriteVerified == true
+                && accepted?.WriteVerified == true
                 && readback is { Error: null, Value: { } readbackValue }
                 && Math.Abs(readbackValue - requested) <= 1;
-            VerifyConsole.WriteLine($"brightness_change_verified={verified}");
+            VerifyConsole.WriteLine($"brightness_drag_verified={verified}");
             if (!verified)
             {
-                _failures.Add("brightness change did not read back the requested value");
+                _failures.Add("brightness drag sequence did not read back the final requested value");
             }
         }
         finally

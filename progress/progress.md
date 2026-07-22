@@ -1,9 +1,16 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-07-20
+updated: 2026-07-21
 updated_by: codex
 status: active
 ---
+
+## 2026-07-21 Windows Clipboard Tabs / Calculator Sidebar / Brightness Drag Reliability
+
+- Clipboardを既定の「すべて」と「お気に入り」の2タブへ整理し、両タブでテキスト/画像を中央50:50のsplit viewにした。外部ドラッグボタンを全項目の赤いゴミ箱へ置き換え、画像の解像度表示を時刻へ変更した。全体プレビューは画像をパネル内へcontainし、テキストを選択可能な全文スクロールにした。
+- CalculatorはmacOS版と同じ左履歴サイドバーへ変更した。履歴がある時だけ表示し、上部ボタンで開閉、結果の再利用、式の復元、履歴全消去を維持する。実画面で`7+5=12`の履歴サイドバー表示と収まりを確認した。
+- BrightnessはDDC/CIの約50ms API特性に対して連続送信が詰まらないよう、WebViewを110msのlatest-only、nativeを100msの最小間隔にした。書き込み失敗時は55ms待機で1回再試行し、それでも失敗した時だけ対象の物理モニターハンドルを開き直す。英語の失敗文を日本語化し、display一覧の横overflowも止めた。
+- Debug buildはwarnings 0 / errors 0。`clipboard`、`calc`、`ui-model`、`controls`、`ui` verifierはexit 0。実機`Generic PnP Monitor`で85→77→69を169.3msで連続writeし最終値をreadback、85への復元にも成功した。通常起動は最新Debug TFMの1processをreadbackした。詳細: `progress/2026-07/2026-07-21_hover-pocket-windows-clipboard-calculator-brightness.md`。
 
 ## 2026-07-20 Windows Monitorian-style Brightness Control
 

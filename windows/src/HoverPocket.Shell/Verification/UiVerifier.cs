@@ -82,6 +82,36 @@ internal sealed class UiVerifier
                     _failures.Add("clipboard: text and image split view did not render together");
                 }
 
+                if (!result.ClipboardCenteredSplitOk)
+                {
+                    _failures.Add("clipboard: text and image panes were not split equally around the center divider");
+                }
+
+                if (!result.ClipboardTabsOk)
+                {
+                    _failures.Add("clipboard: all/favorites tabs did not switch the split view");
+                }
+
+                if (!result.ClipboardDeleteActionsOk || !result.ClipboardNoDragActionOk)
+                {
+                    _failures.Add("clipboard: trash actions did not replace external drag actions");
+                }
+
+                if (!result.ClipboardNoResolutionOk)
+                {
+                    _failures.Add("clipboard: image resolution metadata was still rendered");
+                }
+
+                if (!result.ClipboardPreviewBehaviorOk)
+                {
+                    _failures.Add("clipboard: full image/text preview did not keep contain/scroll behavior");
+                }
+
+                if (!result.CalculatorHistorySidebarOk)
+                {
+                    _failures.Add("calculator: Mac-style collapsible history sidebar did not render");
+                }
+
                 if (!result.ProviderIconStableOk)
                 {
                     _failures.Add("provider icons: state refresh replaced the hovered icon node");
@@ -146,7 +176,7 @@ internal sealed class UiVerifier
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
-                "PASS ui verify: stable Controls refresh, responsive Timer cards/input, media fallback, clipboard split/stability, draggable stable icons, text scaling/input activation, stable Mac-style calendar editor, bridge/provider/settings round-trip");
+                "PASS ui verify: stable Controls refresh, responsive Timer cards/input, media fallback, tabbed centered Clipboard split/full preview/trash actions, Calculator history sidebar, draggable stable icons, text scaling/input activation, stable Mac-style calendar editor, bridge/provider/settings round-trip");
             return 0;
         }
 
