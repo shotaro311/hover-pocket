@@ -1,5 +1,14 @@
 import AppKit
 
+extension NSRect {
+    func isApproximatelyEqual(to other: NSRect, tolerance: CGFloat = 0.5) -> Bool {
+        abs(minX - other.minX) <= tolerance
+            && abs(minY - other.minY) <= tolerance
+            && abs(width - other.width) <= tolerance
+            && abs(height - other.height) <= tolerance
+    }
+}
+
 enum PanelLayout {
     static let pillHeight: CGFloat = 33
     static let topEdgeOverfill: CGFloat = 3

@@ -42,15 +42,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSApplication.didBecomeActiveNotification,
             object: nil
         )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceDidWake),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceSessionDidBecomeActive),
+            name: NSWorkspace.sessionDidBecomeActiveNotification,
+            object: nil
+        )
     }
 
     @objc private func screenParametersChanged() {
-        hoverWindowController.positionWindows()
-        hoverWindowController.showPill()
+        hoverWindowController.recoverAfterSystemTransition()
     }
 
     @objc private func applicationBecameActive() {
         MirrorCameraModel.shared.recheckPermissionAfterExternalChange()
+        hoverWindowController.ensureAccessWindowsAvailable()
+    }
+
+    @objc private func workspaceDidWake() {
+        hoverWindowController.recoverAfterSystemTransition()
+    }
+
+    @objc private func workspaceSessionDidBecomeActive() {
+        hoverWindowController.recoverAfterSystemTransition()
     }
 
     private func registerURLSchemeCallbackHandler() {

@@ -1,9 +1,26 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-07-15
-updated_by: codex
+updated: 2026-07-24
+updated_by: claude
 status: active
 ---
+
+## 2026-07-24 Mac Panel Open Animation Anchor Fix
+
+- 妻のM2 Mac（配布版build 127）で、パネル開閉アニメーションが上部中央からではなく右上部から左へスライドして見える報告に対応した。原因機構は `NSHostingController` の既定 `sizingOptions` で、`HoverPanelShell` の固定frameがウィンドウのmin/maxサイズとして確定し、開始フレーム `collapsedPreview`（72x12）が左上を起点に全幅へ引き伸ばされる。
+- プレビュー／アクセス両ウィンドウの `NSHostingController` に `sizingOptions = []` を設定した。寸法制約の明示クリアはプローブで単独無効と分かったため採用していない。
+- 未確認事項: **開発機（macOS 26、ノッチなし、miniBar経路）では build 127 の時点で既に症状が再現しない。** 実アプリreadbackで127・修正版とも開始70x12・中心オフセット0だった。確認できたのは「単体プローブで既定設定が中心を304pt右へずらす＝症状を再現する」ことと「修正版に回帰がない」ことのみ。妻のM2 Macでの実機確認が必要。
+- `swift build`、`--verify-panel-layout`（63ケース）、`--verify-calculator`、`--verify-clipboard`、`git diff --check` が成功。
+- 詳細: `progress/2026-07/2026-07-24_hover-panel-open-anchor.md`
+
+## 2026-07-17 Mac Hover Entry Self-Recovery
+
+- build 127 を3日以上連続稼働した状態で、プロセスと上端のアクセスウィンドウは存在するがホバーしてもプレビューが開かない事象を確認した。アプリ再起動後は同じ公開バイナリで復旧したため、永続設定やOAuth改修ではなく、長時間稼働・スリープ・画面遷移後の入力状態不整合として対策した。
+- SwiftUIの `.onHover` に加え、アクセスウィンドウと現在のマウス座標を0.12秒間隔で照合するAppKitフォールバックを追加した。通常のホバー通知が失われてもプレビューを開ける。
+- 2秒間隔でアクセスウィンドウの存在、表示状態、スタイル、位置を検査し、不整合時は入口だけを自動再生成する。スリープ復帰、ログインセッション再開、ディスプレイ構成変更時は画面情報が安定するまで即時・0.45秒後・1.4秒後の3段階で再構築する。
+- `swift build`、`--verify-panel-layout`（63ケース）、`--verify-calculator`、`--verify-clipboard`、`./script/build_and_run.sh --verify`、`git diff --check`が成功した。通常の `.onHover` を無効化した診断起動でも、カーソルを上端へ移すと680x488のプレビューがオンスクリーンになり、退避後に閉じることをCoreGraphics readbackで確認した。通常起動でも同じ開閉を確認した。
+- 公開版build 127、GitHub Release、appcastは変更していない。修正はローカル開発ビルドで検証済みで、正式配布には次buildの署名・公証・release/appcast更新が必要。
+- 詳細: `progress/2026-07/2026-07-17_hover-panel-recovery.md`
 
 ## 2026-07-15 Google OAuth Review Remediation
 
@@ -35,6 +52,24 @@ status: active
 - メディア操作列に前のトラック、次のトラックのボタンを追加した。既存の冒頭へ戻るボタンは `arrow.counterclockwise` に変更し、前のトラックとのアイコン重複を避けた。
 - 各メディアボタンのクリック領域を 32pt、主ボタンを 34pt へ拡大し、透明部分を含む矩形全体を hit-test 対象にした。
 - 検証は `swift build`、`git diff --check`、`./script/build_and_run.sh --verify`、`--verify-panel-layout` が成功。`--verify-media --toggle-playback` は `media_toggle_transport=adapter_stream`、`media_toggle_verified=true`、`media_verify=ok` を返し、再生状態を元へ復元した。
+
+## 2026-07-12 Google OAuth Verification Submitted
+
+- Uploaded the final OAuth review recording to YouTube as unlisted: `https://youtu.be/swDXmcJxJrE` (`HoverPocket Google OAuth Verification Demo`). YouTube readback confirmed the 1:04 video, unlisted selection, and completed copyright/community-guidelines checks with no issues detected. Anonymous HTTP readback returned `200` and the expected video title.
+- Confirmed Search Console still reports `shotaro.matsu0311@gmail.com` as a verified owner of the exact URL-prefix property `https://shotaro311.github.io/`. Updated the Google Auth Platform homepage to the actual app page `https://shotaro311.github.io/hover-pocket/`; homepage and privacy-policy URLs both returned HTTP `200`.
+- Google Auth's automated branding check continued to report the GitHub Pages homepage as unregistered despite the Search Console ownership readback. Continued through the `detected issue is incorrect` manual-review path and added the ownership evidence to the submission details.
+- Saved the combined justification for `calendar.events` and `calendar.calendarlist.readonly`, the YouTube demo URL, and the supplemental ownership/project information. Submitted the verification questionnaire with HoverPocket classified as public, external, production-ready software rather than personal, internal, test/staging, or a WordPress SMTP plugin.
+- Final Google Cloud readback: Verification Center displays `Branding and data access are currently under review` for project `hoverpocket`.
+- Created active automation `hoverpocket-oauth` (`HoverPocket OAuth審査メール監視`) to check `shotaro.matsu0311@gmail.com` twice daily at 09:00 and 18:00 JST. It reports only new OAuth-review mail, excludes the ordinary Google-account access security notification, and does not send, archive, delete, label, or mark messages read.
+- Initial Gmail readback found only the ordinary `HoverPocket` Google-account access security notification from 2026-07-12 12:32; no verification-submission or reviewer-response mail was present yet.
+
+## 2026-07-12 Google OAuth Review Video Final Edit
+
+- Reviewed `/Users/shotaro/Downloads/画面収録 2026-07-12 12.31.26.mov` for the Google OAuth verification demo. The original is 83.51s, 3024x1964, H.264, and has no audio stream.
+- Rebuilt the final from the two video materials currently remaining in Downloads. The original opening now remains from 0:00, only the Japanese OAuth consent section is replaced by the English consent section from `/Users/shotaro/Downloads/画面収録 2026-07-12 12.46.52.mov`, and the original Calendar create/delete flow resumes afterward.
+- Created `/Users/shotaro/Downloads/HoverPocket-Google-OAuth-verification-final.mov` with no blur or mosaic processing, as requested.
+- Verification passed: full decode produced no warnings; `ffprobe` reports 63.90s, 3024x1928, H.264, yuv420p, 30fps, no audio. Full contact-sheet and targeted-frame review confirmed the restored opening, English consent and both scopes, both replacement boundaries, Calendar operations, completed event deletion, and an ending before the unrelated article card.
+- Submission caveat: the source does not show clicking the final OAuth `Continue` button. It transitions from selected English scopes into HoverPocket's connected state, so Google may request a retake under the end-to-end OAuth grant-flow requirement.
 
 ## 2026-07-06 Windows Build 124 Clipboard and Calculator Parity
 

@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import OSLog
 import QuartzCore
 import SwiftUI
 
@@ -24,8 +25,13 @@ final class HoverWindowController {
     private var closeTask: DispatchWorkItem?
     private var resetTask: DispatchWorkItem?
     private var hoverMonitorTimer: Timer?
+    private var accessMonitorTimer: Timer?
     private var mouseEventsEnableTask: DispatchWorkItem?
+    private var systemRecoveryTasks: [DispatchWorkItem] = []
+    private var lastAccessWindowHealthCheck = Date.distantPast
     private var previewAnimationToken = 0
+    private let usesDirectHoverEvents = !CommandLine.arguments.contains("--verify-hover-recovery")
+    private let logger = Logger(subsystem: "com.hoverpocket.app", category: "HoverWindowRecovery")
     private let settings: AppSettings
     private let menuStore: HoverMenuStore
     private let settingsWindowController: SettingsWindowController
@@ -53,6 +59,27 @@ final class HoverWindowController {
 
     func showPill() {
         syncAccessWindows(orderFront: true)
+        startAccessMonitor()
+    }
+
+    func ensureAccessWindowsAvailable() {
+        startAccessMonitor()
+        repairAccessWindowsIfNeeded()
+    }
+
+    func recoverAfterSystemTransition() {
+        systemRecoveryTasks.forEach { $0.cancel() }
+        systemRecoveryTasks.removeAll()
+
+        for delay in [0.0, 0.45, 1.4] {
+            let task = DispatchWorkItem { [weak self] in
+                Task { @MainActor in
+                    self?.performSystemRecovery()
+                }
+            }
+            systemRecoveryTasks.append(task)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: task)
+        }
     }
 
     func positionWindows() {
@@ -103,7 +130,9 @@ final class HoverWindowController {
             acceptsKeyboardFocus: false
         )
         panel.hasShadow = false
-        panel.contentViewController = NSHostingController(rootView: accessView(for: screen, style: frames.accessStyle))
+        let hostingController = NSHostingController(rootView: accessView(for: screen, style: frames.accessStyle))
+        hostingController.sizingOptions = []
+        panel.contentViewController = hostingController
         panel.setFrame(frames.access, display: false)
         return panel
     }
@@ -114,7 +143,7 @@ final class HoverWindowController {
             return AnyView(
                 HoverPillView(
                     settings: settings,
-                    onEnter: { [weak self] in self?.showPreview(on: screen) },
+                    onEnter: { [weak self] in self?.handleDirectHover(on: screen) },
                     onExit: { [weak self] in self?.scheduleClose() },
                     onTap: { [weak self] in self?.togglePreview(on: screen) }
                 )
@@ -122,7 +151,7 @@ final class HoverWindowController {
         case .miniBar:
             return AnyView(
                 HoverMiniBarView(
-                    onBarEnter: { [weak self] in self?.showPreview(on: screen) },
+                    onBarEnter: { [weak self] in self?.handleDirectHover(on: screen) },
                     onBarExit: { [weak self] in self?.scheduleClose() },
                     onTap: { [weak self] in self?.togglePreview(on: screen) }
                 )
@@ -138,7 +167,7 @@ final class HoverWindowController {
 
         let panel = makePanel(size: PanelLayout.previewSize(for: settings.panelSize), acceptsKeyboardFocus: true)
         panel.hasShadow = true
-        panel.contentViewController = NSHostingController(
+        let hostingController = NSHostingController(
             rootView: HoverPanelShell(
                 hoverState: hoverState,
                 store: menuStore,
@@ -148,6 +177,12 @@ final class HoverWindowController {
                 onExternalDragStarted: { [weak self] in self?.prepareForExternalDrag() }
             )
         )
+        // 既定の`sizingOptions`だと、HoverPanelShellの固定frameがウィンドウの
+        // min/maxサイズとして確定し、開くアニメーションの開始フレーム
+        // (collapsedPreview 72x12)が左上を起点に全幅へ引き伸ばされる。パネルが
+        // 中央ではなく右寄りから現れて左へスライドする原因になるため無効化する。
+        hostingController.sizingOptions = []
+        panel.contentViewController = hostingController
         previewWindow = panel
     }
 
@@ -175,6 +210,11 @@ final class HoverWindowController {
         } else {
             showPreview(on: screen)
         }
+    }
+
+    private func handleDirectHover(on screen: NSScreen) {
+        guard usesDirectHoverEvents else { return }
+        showPreview(on: screen)
     }
 
     private func showSettings() {
@@ -420,6 +460,81 @@ final class HoverWindowController {
         }
 
         scheduleClose()
+    }
+
+    private func startAccessMonitor() {
+        guard accessMonitorTimer == nil else { return }
+
+        let timer = Timer(timeInterval: 0.12, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.monitorAccessWindows()
+            }
+        }
+        timer.tolerance = 0.04
+        accessMonitorTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func monitorAccessWindows() {
+        let now = Date()
+        if now.timeIntervalSince(lastAccessWindowHealthCheck) >= 2 {
+            lastAccessWindowHealthCheck = now
+            repairAccessWindowsIfNeeded()
+        }
+
+        guard previewWindow?.isVisible != true else { return }
+
+        let mouseLocation = NSEvent.mouseLocation
+        for screen in accessScreens() {
+            guard let accessWindow = accessWindows[screenKey(screen)],
+                  accessWindow.isVisible,
+                  accessWindow.frame.contains(mouseLocation)
+            else {
+                continue
+            }
+
+            showPreview(on: screen)
+            return
+        }
+    }
+
+    private func repairAccessWindowsIfNeeded() {
+        guard !accessWindowsAreHealthy() else { return }
+        logger.notice("Rebuilding unavailable hover access windows")
+        rebuildAccessWindows(orderFront: true)
+    }
+
+    private func accessWindowsAreHealthy() -> Bool {
+        let screens = accessScreens()
+        guard screens.count == accessWindows.count else { return false }
+
+        for screen in screens {
+            let key = screenKey(screen)
+            let expected = panelFrames(on: screen)
+            guard let accessWindow = accessWindows[key],
+                  accessWindowStyles[key] == expected.accessStyle,
+                  accessWindow.isVisible,
+                  accessWindow.frame.isApproximatelyEqual(to: expected.access)
+            else {
+                return false
+            }
+        }
+
+        return true
+    }
+
+    private func rebuildAccessWindows(orderFront: Bool) {
+        accessWindows.values.forEach { $0.orderOut(nil) }
+        accessWindows.removeAll()
+        accessWindowStyles.removeAll()
+        syncAccessWindows(orderFront: orderFront)
+    }
+
+    private func performSystemRecovery() {
+        logger.notice("Recovering hover access windows after a system transition")
+        rebuildAccessWindows(orderFront: true)
+        positionWindows()
+        startAccessMonitor()
     }
 
     private func syncAccessWindows(orderFront: Bool) {
