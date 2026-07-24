@@ -5,6 +5,15 @@ updated_by: claude
 status: active
 ---
 
+## 2026-07-24 Mac Build 131 Release
+
+- commit `83a7e23`（ホバー入口の自動復旧＋パネル開始位置のずれ修正）を `origin/main` へpushし、macOS build `131` を配信した。tag `v0.1.0-131` は `83a7e23` を指す。
+- Apple公証 submission `ae7f4e7e-aed6-41e2-9d60-22af75c644aa` は `Accepted`。Developer ID署名、staple、Gatekeeper評価に合格したZIPをGitHub Release `v0.1.0-131` とmacOS専用 `macos-latest` へ公開し、GitHub Latestもbuild `131` へ更新した。
+- 公開URLから再取得したZIPのSHA-256は `97c4819fa5c9a442e72334b12530ad2be02c24218397fc96aff01fb4561dd79c` でローカル成果物と一致した。`macos-latest` の手動インストール用 `HoverPocket-macOS-app.zip` も同一ハッシュだった。
+- 展開後の `CFBundleVersion=131`、`CFBundleShortVersionString=0.1.0`、`SUFeedURL=https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`、`codesign --verify --deep --strict`、`stapler validate`、`spctl --assess` を確認した。
+- macOS専用appcastは `sparkle:version=131` とversioned ZIP URLを返した。**初回取得はCDNキャッシュで127を返したため、`Cache-Control: no-cache` とクエリ付きで再取得して確認した。** 配信直後のfeed確認では同じ注意が必要。
+- rollback手順: `gh release edit v0.1.0-127 --latest` でLatestを戻し、`v0.1.0-127` のassetから `appcast.xml` と `HoverPocket-macOS-app.zip` を `macos-latest` へ `gh release upload macos-latest ... --clobber` で再アップロードする。これでSparkleクライアントは127へ戻る。
+
 ## 2026-07-24 Mac Panel Open Animation Anchor Fix
 
 - 妻のM2 Mac（配布版build 127）で、パネル開閉アニメーションが上部中央からではなく右上部から左へスライドして見える報告に対応した。原因機構は `NSHostingController` の既定 `sizingOptions` で、`HoverPanelShell` の固定frameがウィンドウのmin/maxサイズとして確定し、開始フレーム `collapsedPreview`（72x12）が左上を起点に全幅へ引き伸ばされる。

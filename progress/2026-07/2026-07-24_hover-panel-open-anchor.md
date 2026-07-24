@@ -44,3 +44,12 @@
 
 - 妻のM2 Macへbuild 131を導入し、開くアニメーションが中央起点になるか実機確認する。
 - 直らない場合は、そのMacのmacOSバージョン、ノッチ有無、外部ディスプレイ構成、`displayPlacementMode` 設定を取得して再調査する。原因が別（ウィンドウ位置の持ち越し、複数ディスプレイ選択）である可能性が残る。
+
+## Release (build 131)
+
+- commit `83a7e23` を `origin/main` へpush後、`NOTARYTOOL_PROFILE=hover-pocket ./script/publish_github_release.sh` を実行した。
+- 公証 submission `ae7f4e7e-aed6-41e2-9d60-22af75c644aa` = `Accepted`。
+- Release: https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-131
+- macOS feed: https://github.com/shotaro311/hover-pocket/releases/tag/macos-latest
+- readback: 公開ZIP SHA-256 `97c4819f...1dd79c` がローカルと一致、手動インストールZIPも同一。`CFBundleVersion=131`、codesign / stapler / spctl 合格、appcast `sparkle:version=131`。
+- 注意: 配信直後のappcast取得はCDNキャッシュで旧versionを返すことがある。`Cache-Control: no-cache` とクエリ付きで再取得すること。
