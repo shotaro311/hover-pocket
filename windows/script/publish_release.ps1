@@ -44,8 +44,16 @@ if ([string]::IsNullOrWhiteSpace($version)) {
     throw "Version is missing from $projectPath."
 }
 
+if (-not [string]::Equals($Configuration, "Release", [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Windows release packaging requires Configuration=Release."
+}
+
 if ([string]::IsNullOrWhiteSpace($ReleaseTag)) {
     $ReleaseTag = "win-v$version"
+}
+
+if (-not [string]::Equals($ReleaseTag, "win-v$version", [System.StringComparison]::Ordinal)) {
+    throw "ReleaseTag must match the project version: win-v$version."
 }
 
 $publishDir = Join-Path $outputRootPath "publish\$Runtime\$version"
@@ -53,6 +61,11 @@ $releaseDir = Join-Path $outputRootPath "releases\$version"
 New-Item -ItemType Directory -Force -Path $publishDir, $releaseDir | Out-Null
 $googleOAuthClientId = [string]$env:HOVERPOCKET_GOOGLE_CLIENT_ID
 $googleOAuthClientSecret = [string]$env:HOVERPOCKET_GOOGLE_CLIENT_SECRET
+
+if ([string]::IsNullOrWhiteSpace($googleOAuthClientId) -or
+    [string]::IsNullOrWhiteSpace($googleOAuthClientSecret)) {
+    throw "HOVERPOCKET_GOOGLE_CLIENT_ID and HOVERPOCKET_GOOGLE_CLIENT_SECRET are required for a Windows release."
+}
 
 $publishArgs = @(
     "publish",
@@ -89,6 +102,25 @@ finally {
 
 $vpk = Resolve-VpkPath $VpkPath
 $mainExe = "HoverPocket.Shell.exe"
+$publishedExe = Join-Path $publishDir $mainExe
+$previousExpectedVersion = [Environment]::GetEnvironmentVariable("HOVERPOCKET_RELEASE_EXPECTED_VERSION")
+$env:HOVERPOCKET_RELEASE_EXPECTED_VERSION = $version
+try {
+    Write-Host "Verifying release configuration without printing OAuth values..."
+    & $publishedExe --verify release-config
+    if ($LASTEXITCODE -ne 0) {
+        throw "release-config verification failed with exit code $LASTEXITCODE."
+    }
+}
+finally {
+    if ($null -eq $previousExpectedVersion) {
+        Remove-Item Env:HOVERPOCKET_RELEASE_EXPECTED_VERSION -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:HOVERPOCKET_RELEASE_EXPECTED_VERSION = $previousExpectedVersion
+    }
+}
+
 $packArgs = @(
     "pack",
     "--packId", $PackId,
@@ -110,6 +142,37 @@ Write-Host "Packing Velopack assets..."
 if ($LASTEXITCODE -ne 0) {
     throw "vpk pack failed with exit code $LASTEXITCODE."
 }
+
+$releaseManifestPath = Join-Path $releaseDir "release-manifest.win.json"
+$releaseManifest = [ordered]@{
+    schemaVersion = 1
+    product = "HoverPocket"
+    packageId = $PackId
+    version = $version
+    runtime = $Runtime
+    updateChannel = "win"
+    updateFeed = "releases.win.json"
+    oauthMetadata = "embedded-and-verified"
+    authenticode = "unsigned"
+}
+$releaseManifestJson = $releaseManifest | ConvertTo-Json
+[System.IO.File]::WriteAllText(
+    $releaseManifestPath,
+    $releaseManifestJson,
+    [System.Text.UTF8Encoding]::new($false))
+
+$checksumPath = Join-Path $releaseDir "SHA256SUMS-win.txt"
+$checksumLines = Get-ChildItem -LiteralPath $releaseDir -File |
+    Where-Object { $_.Name -ne "SHA256SUMS-win.txt" } |
+    Sort-Object Name |
+    ForEach-Object {
+        $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$hash  $($_.Name)"
+    }
+[System.IO.File]::WriteAllLines(
+    $checksumPath,
+    $checksumLines,
+    [System.Text.Encoding]::ASCII)
 
 $assets = Get-ChildItem -LiteralPath $releaseDir -File |
     Sort-Object Name |

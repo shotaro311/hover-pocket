@@ -15,6 +15,7 @@ internal sealed record StartupOptions(
     bool VerifySettings,
     bool VerifyAiLane,
     bool VerifyUpdater,
+    bool VerifyReleaseConfig,
     bool SecondInstanceProbe,
     bool EnableDevTools,
     ShellSettings Settings)
@@ -31,7 +32,8 @@ internal sealed record StartupOptions(
         || VerifyCalendar
         || VerifySettings
         || VerifyAiLane
-        || VerifyUpdater;
+        || VerifyUpdater
+        || VerifyReleaseConfig;
 
     public static StartupOptions Parse(string[] args)
     {
@@ -47,6 +49,7 @@ internal sealed record StartupOptions(
         var verifySettings = false;
         var verifyAiLane = false;
         var verifyUpdater = false;
+        var verifyReleaseConfig = false;
         var secondInstanceProbe = false;
         var enableDevTools = false;
         var displayPlacement = DisplayPlacement.Main;
@@ -69,6 +72,7 @@ internal sealed record StartupOptions(
                 verifySettings = string.Equals(verifyTarget, "settings", StringComparison.OrdinalIgnoreCase);
                 verifyAiLane = string.Equals(verifyTarget, "ailane", StringComparison.OrdinalIgnoreCase);
                 verifyUpdater = string.Equals(verifyTarget, "updater", StringComparison.OrdinalIgnoreCase);
+                verifyReleaseConfig = string.Equals(verifyTarget, "release-config", StringComparison.OrdinalIgnoreCase);
                 continue;
             }
 
@@ -105,6 +109,7 @@ internal sealed record StartupOptions(
             verifySettings,
             verifyAiLane,
             verifyUpdater,
+            verifyReleaseConfig,
             secondInstanceProbe,
             enableDevTools,
             new ShellSettings(displayPlacement));

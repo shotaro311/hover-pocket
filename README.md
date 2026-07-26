@@ -1,8 +1,8 @@
 # ホバーポケット (HoverPocket)
 
-ホバーポケットは、画面上部のノッチ付近へマウスを重ねるだけで、ミラー、ディスプレイ/音量/メディア操作、Google Calendar、クリップボード履歴、付箋メモ、タイマー、電卓を素早く開ける macOS アプリです。
+ホバーポケットは、画面上端へマウスを重ねるだけで、ミラー、ディスプレイ/音量/メディア操作、Google Calendar、クリップボード履歴、付箋メモ、タイマー、電卓を素早く開ける macOS / Windows アプリです。
 
-画面上部に小さな黒いハンドルを置き、そこへホバーすると暗いユーティリティパネルが表示されます。通常のメニューバーアプリよりも、必要なものをポケットからパッと取り出す体験を重視しています。
+画面上部に小さな黒いハンドルを置き、そこへホバーすると暗いユーティリティパネルが表示されます。必要なものをポケットからパッと取り出す体験を、両OSで共通して重視しています。
 
 ## 名前と配布状態
 
@@ -10,19 +10,23 @@
 - 実行ファイル / SwiftPM product / release asset 名: `HoverPocket`
 - Bundle ID: `local.codex.hover-pocket`
 - GitHub repository: `shotaro311/hover-pocket`
-- 最新の公開版は macOS 専用 release feed から配信します。
-- 公開 ZIP は Developer ID 署名、Apple notarization、staple 済みです。
-- Sparkle の appcast は GitHub Releases の `macos-latest` で公開しています。
+- macOS は `macos-latest`、Windows は `win-v...` の専用Releaseから配信します。
+- macOS公開ZIPはDeveloper ID署名、Apple notarization、staple済みです。
+- Windows公開版はVelopackの`win` channelを使い、macOSのLatest / appcastと分離しています。
 
 ## ダウンロードとインストール
 
-一般ユーザーは、GitHub Release の Assets から `HoverPocket-macOS-app.zip` をダウンロードしてください。
+### macOS
 
-```text
-https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/HoverPocket-macOS-app.zip
-```
+[HoverPocket-macOS-app.zipをダウンロード](https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/HoverPocket-macOS-app.zip)
 
 解凍すると `HoverPocket.app` だけが出ます。この `HoverPocket.app` を `アプリケーション` フォルダへ移動して起動します。
+
+### Windows
+
+[HoverPocket Windows 0.2.2 Setup.exeをダウンロード](https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.2/HoverPocketWin-win-Setup.exe)
+
+インストールせずに試す場合は、[Portable ZIP](https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.2/HoverPocketWin-win-Portable.zip)を利用できます。Windows版0.2.2はWindows 11 x64向けです。現時点ではAuthenticode未署名のため、初回起動時にMicrosoft Defender SmartScreenの警告が表示される場合があります。
 
 GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は開発者向けのソースコード一式です。アプリ本体ではないため、通常のインストールでは使いません。
 

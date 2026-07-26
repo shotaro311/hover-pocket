@@ -87,6 +87,14 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (options.VerifyReleaseConfig)
+        {
+            VerifyConsole.AttachParent();
+            Environment.ExitCode = new ReleaseConfigVerifier().Run();
+            Shutdown();
+            return;
+        }
+
         if (!SingleInstanceGate.TryAcquire(out var singleInstanceGate))
         {
             Environment.ExitCode = 0;

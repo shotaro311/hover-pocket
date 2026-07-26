@@ -1,6 +1,6 @@
-# HoverPocket Windows Shell Spike
+# HoverPocket Windows
 
-Phase 0 の Windows ネイティブシェル検証です。WebView2 はこの spike では使いません。
+Windows 11 x64向けのHoverPocketネイティブシェルです。画面上端の入口、WPF / WebView2パネル、各provider、Google Calendar、Velopack更新を提供します。
 
 ## Build
 
@@ -44,15 +44,22 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 
 `--verify updater` は Velopack のローカルフォルダーフィードを一時生成し、更新なし / 更新ありの dry-run を確認します。実ダウンロードと適用は行いません。
 
+`--verify release-config` は、配布成果物がRelease構成・期待バージョン・Windows更新channel・Google OAuth AssemblyMetadataを持ち、ビルド時の設定と一致することを値を表示せず確認します。
+
 ## Windows updates and release packaging
 
 Windows 版の更新確認は Velopack と GitHub Releases (`shotaro311/hover-pocket`) を使います。トレイと Settings の `Check for Updates` は Windows channel `win` の feed (`releases.win.json`) へ接続し、更新が見つかった場合はダウンロード前と適用/再起動前に確認します。起動時の自動チェックは既定オンで、失敗しても起動を止めません。
 
-Windows は macOS Sparkle の `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml` を使いません。Windows release は `win-v0.2.1` のような Windows 専用 tag / asset を使い、GitHub Release を作る場合は `--latest=false` を付けて macOS の appcast release を動かさないでください。
+Windows は macOS Sparkle の `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml` を使いません。Windows release は `win-v0.2.2` のような Windows 専用 tag / asset を使い、GitHub Release を作る場合は `--latest=false` を付けてmacOSのLatest / appcastを動かさないでください。
 
-Phase 2 では Windows 配布物に Authenticode 署名を付けません。そのため、Setup.exe の初回実行時に Microsoft Defender SmartScreen の警告が出る可能性があります。署名証明書や signing credentials は Git、ログ、README、progress に記録しません。
+### 署名方針
 
-Release asset は macOS Sparkle 資産と衝突しない `HoverPocketWin-*` 系です。ローカルで publish と Velopack pack だけを行うには次を実行します。GitHub Release の作成・アップロードはこのスクリプトでは実行しません。
+- Windows 0.2.xは、コード署名証明書を取得するまでAuthenticode未署名の公開版として配布します。
+- Setup.exeの初回実行時にMicrosoft Defender SmartScreenの警告が出る可能性があることを、ダウンロード導線とRelease notesに明記します。
+- 1.0正式版では、タイムスタンプ付きAuthenticode署名と公開成果物の署名readbackを必須gateにします。
+- 署名証明書やsigning credentialsはGit、ログ、README、progressに記録しません。
+
+Release assetはmacOS Sparkle資産と衝突しない`HoverPocketWin-*`系です。`publish_release.ps1`は、OAuth環境変数が未設定の場合に停止し、Release成果物内のmetadata一致を確認してからVelopack package、`release-manifest.win.json`、`SHA256SUMS-win.txt`を生成します。GitHub Releaseの作成・アップロードはこのスクリプトでは実行しません。
 
 ```powershell
 .\windows\script\publish_release.ps1
@@ -63,8 +70,8 @@ NuGet TLS 問題がある環境では、一時ローカル NuGet ソースと `-
 スクリプトの出力する GitHub 手順は、Windows release 作成時に `--latest=false` を含みます。アップロード後は次を readback し、Windows feed と asset だけが読めること、macOS `macos-latest/appcast.xml` が変わっていないことを別々に確認します。
 
 ```powershell
-gh release view win-v0.2.1 --repo shotaro311/hover-pocket --json tagName,assets,url
-Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.1/releases.win.json
+gh release view win-v0.2.2 --repo shotaro311/hover-pocket --json tagName,assets,url
+Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.2/releases.win.json
 Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml
 ```
 
