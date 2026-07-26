@@ -5,6 +5,15 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-26 Windows 0.2.3 Public Beta Release
+
+- exact main `7bfbee4`をtargetに、GitHub Release `win-v0.2.3`を`draft=false`、`prerelease=false`、`latest=false`で公開した。8 assetのGitHub API size / digest、匿名公開URL、feed 0.2.3、unsigned manifest、checksum 7件を別経路でreadbackし、全件一致した。
+- Debug / Release buildはwarnings 0 / errors 0。全12 JS、Release重要verifier、`release-config`はexit 0。OAuth metadataはprocess内注入で`present-and-matched`、channelは`win`、ProductVersionはexact mainを含む。
+- 実機baselineのアプリ0.2.2 / ARP 0.2.1から、公開nupkgを実install rootのVelopack 1.2.0経路で検出・download・apply / restartした。更新後はcurrent / root / process / locatorが0.2.3、ARP両viewが0.2.3、InstallLocationと静的valueは保持、一時test keyは0。
+- 更新後のself-healは両viewとも`AlreadyCurrent`でno-op。Velopack applyが`InstallDate` / `EstimatedSize`だけをinstall metadataとして更新した。インストール済み0.2.3のControls / 実WebView2 UI verifierはexit 0、2回目の更新確認はup-to-date。
+- `--verify calendar-live`は既存credentialでCalendar 6件 / event 91件をread-only取得してexit 0。予定の作成・更新・削除は行っていない。
+- GitHub LatestはmacOS `v0.1.0-131`、appcastはSparkle 131 / SHA-256 `b66fe0cc0d65cef699992cf7998a35831c5d340cc59c9ce2474f599fe8e56655`で公開前から不変。詳細: `progress/2026-07/2026-07-26_hover-pocket-windows-0.2.3-release.md`。
+
 ## 2026-07-26 Windows 0.2.3 ARP DisplayVersion Repair Candidate
 
 - 0.2.2実update後にARP `DisplayVersion`だけ0.2.1へ残った事象へ、通常再起動processでのself-healを追加した。`VelopackLocator.Current`が示す実インストールrootと既存`HoverPocketWin` keyの`InstallLocation`が一致する場合だけ、Registry64/Registry32の`DisplayVersion`を現在versionへ更新する。
