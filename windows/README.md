@@ -1,6 +1,8 @@
-# HoverPocket Windows
+# HoverPocket for Windows
 
-Windows 11 x64向けのHoverPocketネイティブシェルです。画面上端の入口、WPF / WebView2パネル、各provider、Google Calendar、Velopack更新を提供します。
+WPF の常駐シェルと WebView2 のパネルで構成する Windows 版です。画面上端の access surface、非アクティブ表示のパネル、タスクトレイ、設定画面を提供します。
+
+Windows 版の provider は Controls、Calendar、Clipboard、Sticky Notes、Timer、Calculator です。Mirror と Microphone は Windows 版の対象外で、macOS 版の実装には影響しません。
 
 ## Build
 
@@ -14,9 +16,9 @@ dotnet build .\windows\HoverPocket.Windows.sln
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj
 ```
 
-起動すると通常ウィンドウやタスクバー項目は出さず、タスクトレイに `HoverPocket` を表示します。トレイメニューは `Open Panel`、無効状態の `Settings` / `Check for Updates`、`Quit` です。
+起動すると通常ウィンドウやタスクバー項目は出さず、タスクトレイに `HoverPocket` を表示します。トレイからパネル、設定、更新確認を開けます。
 
-表示先は Phase 0 では設定 UI を持たず、コマンドラインで指定します。既定は `main` です。
+表示先は設定画面で `Main` / `Sub` / `All` を選べます。確認用にコマンドラインで一時上書きすることもできます。
 
 ```powershell
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --display-placement main
@@ -31,16 +33,25 @@ WebView2 の DevTools と既定 context menu は、Debug ビルドまたは明�
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --devtools
 ```
 
+WebView2 は通常、GPU 描画を有効にして開閉とリサイズのカクつきを抑えます。GPUドライバーとの相性問題を切り分ける場合だけ、`HOVERPOCKET_WEBVIEW_DISABLE_GPU=1` を設定して起動します。
+
 ## Verify
 
 ```powershell
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify shell
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify display
+dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify controls
+dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify ui
+dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify settings
 ```
 
-`--verify shell` は access surface と panel の `WS_EX_NOACTIVATE`、`WS_EX_TOOLWINDOW`、`WS_EX_TOPMOST` を検査し、2 回目起動が既存インスタンスへ通知して exit 0 で終了することを確認し、open/close を 25 回実行してプロセス内 top-level window 数が増えないことを exit code で返します。
+`--verify shell` は access surface と panel の `WS_EX_NOACTIVATE`、`WS_EX_TOOLWINDOW`、`WS_EX_TOPMOST`、2 回目起動、120ms pollingだけによるopen、hidden / 位置ずれ / style欠落の自己修復、window再生成、3段階recovery、ポインター移動、open/close 25回、描画フレーム数と最大フレーム間隔を検査します。
 
 `--verify display` は現在のモニター構成を列挙し、`Main` / `Sub` / `All` の対象 display 数、`Sub` のサブなし fallback、access surface / panel / collapsed rect の画面内収まり、DIPs と物理ピクセルの round-trip を検査して exit code で返します。WinExe のため標準出力が空になる場合があります。
+
+`--verify controls` は音量・ミュート・輝度・メディア操作の決定的テストと、実機の読み取り専用 probe を実行します。外部ディスプレイの輝度は DDC/CI 非対応や応答遅延を許容し、パネル全体を停止させずに非対応表示へフォールバックします。
+
+`--verify ui` はWebView2とbridgeに加え、Controlsの実描画・領域内収まり、Clipboardの同一provider再描画抑止、通常/お気に入りタブ、中央split view、全体プレビュー、個別削除UI、Calculator履歴サイドバーを検査します。
 
 `--verify updater` は Velopack のローカルフォルダーフィードを一時生成し、更新なし / 更新ありの dry-run を確認します。実ダウンロードと適用は行いません。
 
@@ -88,4 +99,6 @@ AI command lane の audit log は `%APPDATA%\HoverPocket\auditlog\ailane-YYYYMMD
 - トレイは `System.Windows.Forms.NotifyIcon` を使います。Microsoft の通知領域ドキュメントと WinForms `NotifyIcon` はこの用途の first-party API で、WPF には同等の標準トレイコンポーネントがないためです。`Shell_NotifyIcon` の直接 P/Invoke は制御範囲が広い一方、今回の W1 では保守コストに見合わないため採用しません。
 - DPI awareness は manifest で `PerMonitorV2` を宣言しています。Microsoft の High DPI guidance は manifest で既定 DPI awareness を指定することを推奨しているため、API 呼び出しではなく manifest を正本にしています。WinForms を tray 用に併用すると SDK は `ApplicationHighDpiMode` を推奨する警告を出しますが、W1 の manifest 要件を優先し、プロジェクト側にも `ApplicationHighDpiMode=PerMonitorV2` を併記したうえで該当警告だけ抑制しています。
 - モニター列挙と座標は `EnumDisplayMonitors` / `GetMonitorInfo` / `GetDpiForMonitor` を使い、DIPs と物理ピクセルの変換は `DisplayLayoutService` に集約しています。実際の HWND 位置とサイズは `SetWindowPos` の物理ピクセルを正とし、WPF 側の DIPs は同じ layout から同期します。
-- display 再同期は WPF の `HwndSource.AddHook` で `WM_DISPLAYCHANGE` / `WM_DPICHANGED` を受け、加えて `SystemEvents.DisplaySettingsChanged` と `SystemEvents.PowerModeChanged` の resume で debounce 後に再計算します。
+- display 再同期は WPF の `HwndSource.AddHook` で `WM_DISPLAYCHANGE` / `WM_DPICHANGED` を受け、加えて `SystemEvents.DisplaySettingsChanged`、`SystemEvents.PowerModeChanged`、`SystemEvents.SessionSwitch`から段階的に再計算します。
+- 120ms pointer pollingとは別に約2秒ごとのshell health checkを行い、access surface / panelのHWND、native visibility、WPF visibility、必須extended styles、期待frameを照合します。修復可能な異常は同じwindowへ再適用し、HWNDが無効なwindowだけを再生成します。panel再生成時もprovider stateを持つ`PanelBridgeController`は維持します。
+- display / DPI change、Power Resume、`SystemEvents.SessionSwitch`のunlock / console connect / remote connectでは、polling timerを再始動し、即時・0.45秒後・1.4秒後の3段階でdisplay再同期とhealth checkを実行します。

@@ -11,9 +11,17 @@ internal sealed class SettingsVerifier
 {
     private readonly List<string> _failures = [];
 
-    public int Run()
+    public async Task<int> RunAsync()
     {
-        VerifyAsync().GetAwaiter().GetResult();
+        try
+        {
+            await VerifyAsync();
+        }
+        catch (Exception ex)
+        {
+            _failures.Add($"unexpected exception: {ex.GetType().Name}: {ex.Message}");
+        }
+
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine("PASS settings verify: settings read/write, defaults, HKCU Run dry-run registration, update auto-check");
@@ -34,7 +42,7 @@ internal sealed class SettingsVerifier
         var registry = ProviderRegistry.CreateDefault();
         var store = UserSettingsStore.CreateTemporary("SettingsVerify");
         var startup = new InMemoryStartupRegistrationService();
-        var controller = new PanelBridgeController(registry, store, store.Load(registry.ProviderIds), startup);
+        using var controller = new PanelBridgeController(registry, store, store.Load(registry.ProviderIds), startup);
         var dispatcher = new BridgeDispatcher();
         using var _ = controller.Attach(dispatcher);
 
@@ -50,19 +58,32 @@ internal sealed class SettingsVerifier
         await Send(dispatcher, """{"id":"7","method":"settings.setStartWithWindows","params":{"enabled":true}}""");
         await Send(dispatcher, """{"id":"7u","method":"settings.setAutoCheckForUpdates","params":{"enabled":false}}""");
         await Send(dispatcher, """{"id":"7s","method":"sticky.setUndoToastVisible","params":{"visible":false}}""");
+        await Send(dispatcher, """{"id":"7d","method":"settings.setDisplayPlacement","params":{"displayPlacement":"all"}}""");
+        await Send(dispatcher, """{"id":"7p","method":"settings.setProviderSelection","params":{"rememberLast":false}}""");
+        await Send(dispatcher, """{"id":"7f","method":"settings.setPreferredProvider","params":{"id":"sticky"}}""");
+        await Send(dispatcher, """{"id":"7i","method":"settings.setHandleIcon","params":{"handleIcon":"c"}}""");
+        await Send(dispatcher, """{"id":"7a","method":"settings.setShowTopHandleSideArea","params":{"visible":false}}""");
+        await Send(dispatcher, """{"id":"7x","method":"settings.setDisableTopEdgeInFullscreen","params":{"disabled":false}}""");
+        await Send(dispatcher, """{"id":"7z","method":"sticky.setGridSize","params":{"gridSize":"large"}}""");
 
         var written = store.ReloadOrDefault(registry.ProviderIds);
         if (written.Language != AppLanguage.English
             || written.TextSize != PanelTextSize.Large
             || written.PanelSize != PanelSize.Small
             || written.SwitchingMode != ProviderSwitchingMode.Hover
+            || written.DisplayPlacement != DisplayPlacement.All
+            || written.RememberLastSelectedProvider
+            || written.PreferredProviderId != "sticky"
+            || written.HandleIconStyle != HandleIconStyle.C
+            || written.ShowTopHandleSideArea
+            || written.DisableTopEdgeInFullscreen
             || !written.StartWithWindows
             || written.AutoCheckForUpdates)
         {
             _failures.Add("settings write/read did not preserve scalar values");
         }
 
-        if (!HasExpectedOrderPrefix(written.ProviderOrder, ["sticky", "calculator", "timer"])
+        if (!HasExpectedOrderPrefix(written.ProviderOrder, ["controls", "sticky", "calculator", "timer"])
             || written.ProviderOrder.Count != registry.ProviderIds.Count)
         {
             _failures.Add("settings write/read did not preserve provider order");
@@ -79,9 +100,10 @@ internal sealed class SettingsVerifier
         }
 
         var stickyHidden = await Send(dispatcher, """{"id":"7g","method":"sticky.getState"}""");
-        if (!stickyHidden.Contains("\"showUndoToast\":false", StringComparison.Ordinal))
+        if (!stickyHidden.Contains("\"showUndoToast\":false", StringComparison.Ordinal)
+            || !stickyHidden.Contains("\"gridSize\":\"large\"", StringComparison.Ordinal))
         {
-            _failures.Add("sticky undo toast visibility was not disabled through settings bridge");
+            _failures.Add("sticky preferences were not updated through settings bridge");
         }
 
         await Send(dispatcher, """{"id":"7t","method":"sticky.setUndoToastVisible","params":{"visible":true}}""");
@@ -157,11 +179,17 @@ internal sealed class SettingsVerifier
     {
         var defaults = store.ReloadOrDefault(registry.ProviderIds);
         if (defaults.Language != AppLanguage.Japanese
+            || defaults.DisplayPlacement != DisplayPlacement.Main
             || defaults.TextSize != PanelTextSize.Medium
             || defaults.PanelSize != PanelSize.Medium
             || defaults.SwitchingMode != ProviderSwitchingMode.Click
             || defaults.StartWithWindows
-            || !defaults.AutoCheckForUpdates)
+            || !defaults.AutoCheckForUpdates
+            || !defaults.RememberLastSelectedProvider
+            || defaults.PreferredProviderId != "controls"
+            || defaults.HandleIconStyle != HandleIconStyle.B
+            || !defaults.ShowTopHandleSideArea
+            || !defaults.DisableTopEdgeInFullscreen)
         {
             _failures.Add("defaults were not restored");
         }

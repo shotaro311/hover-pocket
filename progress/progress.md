@@ -39,6 +39,55 @@ status: active
 - 審査スレッドへ最終canonical URLの訂正を英語で返信した。送信message IDは `19f65d9ac9d51760`、thread IDは `19f658cbca0ca966`。Gmail connectorで対象アカウント、送信本文、新URL、`SENT`をreadbackした。
 - 詳細: `progress/2026-07/2026-07-15_hover-menu-preview.md`
 
+## 2026-07-21 Windows Clipboard Tabs / Calculator Sidebar / Brightness Drag Reliability
+
+- Clipboardを既定の「すべて」と「お気に入り」の2タブへ整理し、両タブでテキスト/画像を中央50:50のsplit viewにした。外部ドラッグボタンを全項目の赤いゴミ箱へ置き換え、画像の解像度表示を時刻へ変更した。全体プレビューは画像をパネル内へcontainし、テキストを選択可能な全文スクロールにした。
+- CalculatorはmacOS版と同じ左履歴サイドバーへ変更した。履歴がある時だけ表示し、上部ボタンで開閉、結果の再利用、式の復元、履歴全消去を維持する。実画面で`7+5=12`の履歴サイドバー表示と収まりを確認した。
+- BrightnessはDDC/CIの約50ms API特性に対して連続送信が詰まらないよう、WebViewを110msのlatest-only、nativeを100msの最小間隔にした。書き込み失敗時は55ms待機で1回再試行し、それでも失敗した時だけ対象の物理モニターハンドルを開き直す。英語の失敗文を日本語化し、display一覧の横overflowも止めた。
+- Debug buildはwarnings 0 / errors 0。`clipboard`、`calc`、`ui-model`、`controls`、`ui` verifierはexit 0。実機`Generic PnP Monitor`で85→77→69を169.3msで連続writeし最終値をreadback、85への復元にも成功した。通常起動は最新Debug TFMの1processをreadbackした。詳細: `progress/2026-07/2026-07-21_hover-pocket-windows-clipboard-calculator-brightness.md`。
+
+## 2026-07-20 Windows Monitorian-style Brightness Control
+
+- 実アプリで「明るさを検出しています。」が残るreadbackを受け、検出完了とControls初期snapshot作成、非表示中のprovider mountが競合して確定値を失う2経路を修正した。最新display結果を独立保持して通常・cached snapshotへ必ず合成し、検出中だけ900ms間隔・最大3回の軽量再確認を行う。UI上の一時状態は「非対応」ではなく「検出中…」と表示する。
+- `controls_brightness_detection_race=ok`、`controls_brightness_cached_merge=ok`を追加し、WebView2 UI verifierも一時状態が4.5秒以内に解消しなければ失敗するよう強化した。Debug buildはwarnings 0 / errors 0、Controls実機変更・復元とUI verifierはexit 0。
+- Monitorian公式実装を参照し、DDC/CIの物理モニターハンドル、対応方式、raw最小・最大値を検出後に保持する方式へ変更した。輝度変更ごとのdisplay再列挙、capability再取得、全画面readbackを廃止し、対象モニターへ直接書き込んでローカル状態を更新する。
+- high-level brightness APIが使えないモニターではVCP luminance `0x10`へfallbackし、一時的なDDC通信エラーだけを1回再試行する。実機の`Generic PnP Monitor`が従来の非対応判定から39%の対応表示へ変わった。
+- 応答しないDDC検出はUIから180msで切り離し、完了後にnative eventで表示を更新する。スライダーは60ms間隔のlatest-only送信とし、処理中に古い値を積まず、輝度変更時の音量・メディア再取得も廃止した。
+- Debug buildはwarnings 0 / errors 0。実機`--verify controls --change-brightness`で初回応答188.6ms、cached read 0.0ms、直接write 61.1ms、39→40→39の実readbackと復元に成功した。`--verify ui`もexit 0。詳細: `progress/2026-07/2026-07-20_hover-pocket-windows-monitorian-brightness.md`。
+
+## 2026-07-20 Windows Sticky Actions / Timer Layout / Controls Performance
+
+- 付箋編集の右上操作をarchive / trash / saveのSVGアイコンへ変更し、淡色カード上で判別できる青・赤・緑の高コントラスト背景、境界線、focus表示を追加した。削除はbackspace記号からゴミ箱マークへ置き換えた。
+- Timerは実行中とプリセットを全幅、通常TimerとPomodoroを必要幅に応じた左右カードとし、小幅では1列に戻るresponsive layoutへ変更した。時間バーの`input`でbridge更新とDOM全置換を繰り返さず、ドラッグ中は数値表示だけを更新し、操作完了時に保存する。空のプリセット欄はMac版と同様に非表示にした。
+- ControlsはJavaScript側の5秒pollingを廃止してnative event + 10秒fallbackに一本化。750ms snapshot cacheと15秒brightness cacheを追加した。media eventは90msで合流し、artworkは曲情報が変わるまで再利用する。Windows Graphics Captureのsoftware JPEG / Base64変換は最新frame 1枚のみ、最大10fpsに制限した。timeline更新だけでmedia canvasを再生成しない。
+- Debug buildはwarnings 0 / errors 0。`sticky`、`timer`、`controls`、`ui-model`、`ui`はすべてexit 0。UI verifierでControlsの同一DOM refresh、Timerの横overflowなし、duration input DOM維持を検査した。実機はmedia sessionなしのため、再生中live previewのCPU実測は未実施。詳細: `progress/2026-07/2026-07-20_hover-pocket-windows-sticky-timer-controls.md`。
+
+## 2026-07-18 Windows Hover / Text Input / Clipboard Flicker / Calendar UI
+
+- 最大化した通常ウィンドウを全画面表示と誤判定して上端ホバーを抑止していたため、`IsZoomed` を使って最大化を除外し、画面全体を覆うボーダーレス表示だけを抑止するようにした。実カーソルを `2560x1440` 主画面の上端中央へ移動したreadbackで、最大化中でもpanelが `940,9,1620,497` に開き、上端を離れると閉じることを確認した。
+- panelはホバー中の非アクティブ表示を維持し、panel内をクリックした時とテキスト入力開始時だけ `WS_EX_NOACTIVATE` を外してkeyboard focusを受ける。編集終了・provider切替・panel closeではstyleを復元する。live Win32 probeで `MA_ACTIVATE=1`、入力中のno-activate解除、close後の復元をreadbackした。
+- provider iconをstate更新ごとに全再生成していた経路を、同じ構成では同一DOM nodeを再利用する方式へ変更し、hover選択要求も直列・最新値へ集約した。既存Clipboard root / unchanged refresh維持と合わせ、clipboard icon上の微小移動でmouseenterと再生成が循環しないようにした。
+- Windows CalendarをmacOS `GoogleCalendarPreviewView`と同じ左右2paneへ変更した。小サイズ248px、中・大282pxの月表示、42日grid、各日最大3色dot、縦divider、右側の日付・更新時刻・色bar付き予定行へ揃え、接続/setup/editor状態は維持した。
+- 最終検証はDebug build warnings 0 / errors 0、`--verify shell` 25 cycle、`sticky`、`clipboard`、`calendar`、`ui-model`、`settings`、`ui`がすべてexit 0。通常起動はPID `41980`の1process、期待Debug path、`Responding=True`をreadbackした。詳細: `progress/2026-07/2026-07-18_hover-pocket-windows-hover-input-calendar.md`。
+
+## 2026-07-18 Windows Google Calendar Login Diagnosis
+
+- 実際に稼働していたのはインストール先ではなく、正本cloneのDebug `HoverPocket.Shell.exe` 0.2.1.0だった。実assemblyにGoogle OAuth client metadataはなく、`%APPDATA%\HoverPocket\oauth.json`とCredential ManagerのHoverPocket refresh tokenも存在しないため、ログイン不能の原因は`missing_configuration`で確定した。
+- 現行コードと一時copyの`--verify calendar`は、承認済み2 scope、S256 PKCE、state、動的`127.0.0.1` loopback、Credential Manager、request builder、read-only guardを通過した。コード修正ではなく、承認済みprojectのWindows Desktop OAuth clientを次のWindows build / releaseへ安全に設定する必要がある。
+- Windows上には利用可能なclient設定、gcloud session、GitHub Actions variable / secretがなく、Chromeの既存Cloud Console sessionも指定対象アカウントではなかった。アカウント切替、MFA/利用規約操作、同意、token取得、Calendar read/writeは行わず停止した。詳細: `progress/2026-07/2026-07-18_hover-pocket-windows-calendar-login-diagnosis.md`。
+- 再確認でもOAuth設定は未配置だった。missing-configuration setup cardにはJSON配置先はあったが再起動案内がなかったため、配置後にHoverPocketを終了・再起動する手順を日英で追加し、`--verify calendar`へ配置先と再起動案内の検査を追加した。一時copyのbuild、calendar、ui verifierはすべてexit 0。設定不足のため実アカウントE2Eはblockedのまま。
+- 指定対象アカウントでGoogle Cloud Consoleの`hoverpocket` projectをreadbackしたが、既存OAuth clientはmacOS用iOS client 1件だけでDesktop appは0件だった。新規client作成は禁止されているため、JSON取得・配置、アプリ再起動、同意、Calendar read / refresh / reconnectは実施せずblocked。client ID / secret / JSON / tokenは出力していない。
+- ユーザー承認後、対象アカウントと`hoverpocket` projectを再確認し、Desktop app `HoverPocket Windows`を1件作成して成功ダイアログをreadbackした。作成後にChrome ExtensionのCloud Console操作が連続timeoutとなり、DownloadsにもJSONがないため、重複作成せずclient詳細画面での手動JSON download待ち。oauth.json配置、アプリ再起動、同意、Calendar E2E、審査status確認は未実施。
+- 手動downloadされたDesktop OAuth JSONを構造検査して`%APPDATA%\HoverPocket\oauth.json`へatomic配置し、Downloads原本を保持した。指定対象アカウントだけで初回同意とCalendar readに成功し、Credential Manager保存、Debug本体再起動後のrefresh/read、切断によるcredential消失、再同意・再接続、再起動後readまでexit 0で確認した。Google Auth Platformは同じ対象アカウント・`hoverpocket` projectでbranding / data accessとも検証済み表示を維持し、再審査要求は表示されなかった。正式Windows artifactへの安全なclient設定注入は未実施。
+- 現行作業ツリーをWindows Debugとして再ビルドし、warnings 0 / errors 0を確認した。旧`net10.0-windows`プロセスを終了し、生成直後の`net10.0-windows10.0.22621.0\HoverPocket.Shell.exe`へ切り替えた。再起動後は1プロセスのみ、期待path、`Responding=True`をreadbackした。
+
+## 2026-07-17 Windows Hover Self-Recovery and OAuth Audit
+
+- 既存の120ms pointer pollingを維持し、約2秒ごとのaccess surface / panel health checkを追加した。HWND、WPF/native visibility、`WS_EX_NOACTIVATE` / `WS_EX_TOOLWINDOW` / `WS_EX_TOPMOST`、期待frameを検査し、修復可能な異常は同じwindowへ再適用、無効HWNDだけを再生成する。panel再生成時は既存`PanelBridgeController`とprovider stateを維持する。
+- display / DPI change、Power Resume、session unlock / console connect / remote connectで、pollingとhealth timerを再始動し、即時・450ms・1.4秒後の3段階recoveryを実行する。Disposeではtimer、予約task、SystemEvents、HWND hooks、WebView bridge attachmentを解除する。
+- 一時copyで`dotnet build`、`--verify shell`、`--verify display`、`--verify calendar`がexit 0。shell verifierはpolling-only open、hidden / 位置ずれ / style欠落の修復、window再生成、3段階scheduler、25回open/closeを通過した。実カーソルreadback中にcloseとhealth checkの競合を検出して修正し、最終GUI再試行は全画面抑止またはタイミングの影響でopenを再現できなかったため、最終の実GUI open/closeは未確定として残す。
+- Windows OAuthコードは承認scope 2件、S256 PKCE、state、動的`127.0.0.1` loopback、offline refresh token、Credential Manager、再接続判定に対応済み。現在インストール済み0.2.1と公開`win-v0.2.1`の実assemblyにはOAuth metadataがなく、ローカル`oauth.json`と本番Credential Manager資格情報もないため、現行配布物のログインは未対応。実アカウントE2Eは外部操作を避けて未実施。詳細: `progress/2026-07/2026-07-17_hover-pocket-windows-recovery-oauth-audit.md`。
+
 ## 2026-07-13 Mac Build 127 Release
 
 - メディア操作の応答性改善、前後トラック操作、ScreenCaptureKit 30fpsライブプレビュー、取得不能時のサムネイルフォールバックを含むcommit `01fb33d`を`origin/main`へpushし、macOS build `127`を配信した。
@@ -79,6 +128,20 @@ status: active
 - Created `/Users/shotaro/Downloads/HoverPocket-Google-OAuth-verification-final.mov` with no blur or mosaic processing, as requested.
 - Verification passed: full decode produced no warnings; `ffprobe` reports 63.90s, 3024x1928, H.264, yuv420p, 30fps, no audio. Full contact-sheet and targeted-frame review confirmed the restored opening, English consent and both scopes, both replacement boundaries, Calendar operations, completed event deletion, and an ending before the unrelated article card.
 - Submission caveat: the source does not show clicking the final OAuth `Continue` button. It transitions from selected English scopes into HoverPocket's connected state, so Google may request a retake under the end-to-end OAuth grant-flow requirement.
+
+## 2026-07-10 Windows Clipboard Flicker Fix
+
+- Clipboard表示のちらつきは、同じproviderのstate更新でもprovider DOMを全削除し、Clipboard rootを再生成して登場animationを再発火していたことが原因だった。
+- provider id / languageが同じ場合はmountを維持し、登場animationをprovider切替時だけcontainerへ適用した。Clipboardはcached stateを即時表示し、同じstate signatureのrefreshではDOMを置換しない。scroll位置維持、refresh合流、選択済みproviderのno-opも追加した。
+- Debug `--verify ui` 10回連続、Release `--verify ui` 5回連続、Clipboard verifier、Release shell 25 cycleがすべてexit code 0。最終Release shellは20 frames / 最大gap 20.1ms。`0.2.1`ローカル配布物を再生成したが未署名・未公開。詳細: `progress/2026-07/2026-07-10_hover-pocket-windows-clipboard-flicker.md`。
+
+## 2026-07-10 Windows Controls, Settings, and Smooth Motion
+
+- Windows 版から Mirror / Microphone を除外し、macOS 版は変更しない方針を requirements に反映した。
+- Windows Controls provider を追加した。Core Audio の音量・ミュート、WMI / DDC/CI の輝度、Windows system media session の Now Playing・再生/停止・シーク・再生速度に対応し、各APIの遅延・非対応はタイムアウト付きで個別に fallbackする。
+- Settings に表示先、provider復元方式、固定provider、上端ハンドル B / C / None、ハンドル横幅、全画面抑止、Sticky grid、表示先リセット、データフォルダー導線を追加した。実ハンドルは文字ではなくmacOS相当のchevron / pocket glyphを描画する。
+- パネル開閉・リサイズを描画タイミング同期、WebView snapshot morph / crossfade、反転可能な animationへ変更し、通常時のWebView2 GPUを有効化した。Debugの最終closeは18 frames / 最大gap 23.6ms、Releaseは18 frames / 最大gap 26.1ms。open/close 25 cycle、WebView2 Controls 3領域の実描画・収まり、Debug全verifier、Releaseのsettings/controls/ui/shellがすべてexit code 0。
+- `publish_release.ps1` で `0.2.1` のSetup / Portable / Velopack feedをローカル生成した。未署名で、GitHub公開は未実施。詳細: `progress/2026-07/2026-07-10_hover-pocket-windows-controls-motion.md`。
 
 ## 2026-07-06 Windows Build 124 Clipboard and Calculator Parity
 

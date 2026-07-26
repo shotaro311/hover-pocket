@@ -148,6 +148,7 @@ internal sealed record CalendarProviderState(
     IReadOnlyList<CalendarSource> Sources,
     IReadOnlyList<CalendarDayCell> DayCells,
     IReadOnlyList<CalendarEventOccurrence> SelectedEvents,
+    DateTimeOffset? UpdatedAt,
     CalendarSetupInstructions Setup);
 
 internal static class CalendarDateMath

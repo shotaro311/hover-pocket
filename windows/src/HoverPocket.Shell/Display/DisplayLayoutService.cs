@@ -12,6 +12,8 @@ internal sealed class DisplayLayoutService
         var monitors = NativeMethods.EnumerateDisplayMonitors()
             .Select((monitor, index) => new DisplayMonitor(
                 $"monitor-{index}-{monitor.Handle.ToInt64():X}",
+                string.IsNullOrWhiteSpace(monitor.DeviceName) ? $"Display {index + 1}" : monitor.DeviceName,
+                monitor.Handle,
                 PhysicalRect.FromNative(monitor.MonitorBounds),
                 PhysicalRect.FromNative(monitor.WorkArea),
                 monitor.IsPrimary,
@@ -28,6 +30,8 @@ internal sealed class DisplayLayoutService
             [
                 new DisplayMonitor(
                     "fallback-primary",
+                    "Primary display",
+                    IntPtr.Zero,
                     new PhysicalRect(0, 0, 1920, 1080),
                     new PhysicalRect(0, 0, 1920, 1040),
                     true,
@@ -41,14 +45,17 @@ internal sealed class DisplayLayoutService
 
     public IReadOnlyList<DisplaySurfaceLayout> CreateLayouts(DisplayPlacement placement)
     {
-        return CreateLayouts(placement, PanelSize.Medium);
+        return CreateLayouts(placement, PanelSize.Medium, AccessSurfaceWindow.ExpandedWidth);
     }
 
-    public IReadOnlyList<DisplaySurfaceLayout> CreateLayouts(DisplayPlacement placement, PanelSize panelSize)
+    public IReadOnlyList<DisplaySurfaceLayout> CreateLayouts(
+        DisplayPlacement placement,
+        PanelSize panelSize,
+        double accessWidthDips = AccessSurfaceWindow.ExpandedWidth)
     {
         var monitors = EnumerateMonitors();
         return ResolveTargets(monitors, placement)
-            .Select(monitor => CreateLayout(monitor, panelSize))
+            .Select(monitor => CreateLayout(monitor, panelSize, accessWidthDips))
             .ToArray();
     }
 
@@ -70,13 +77,16 @@ internal sealed class DisplayLayoutService
 
     public DisplaySurfaceLayout CreateLayout(DisplayMonitor monitor)
     {
-        return CreateLayout(monitor, PanelSize.Medium);
+        return CreateLayout(monitor, PanelSize.Medium, AccessSurfaceWindow.ExpandedWidth);
     }
 
-    public DisplaySurfaceLayout CreateLayout(DisplayMonitor monitor, PanelSize panelSize)
+    public DisplaySurfaceLayout CreateLayout(
+        DisplayMonitor monitor,
+        PanelSize panelSize,
+        double accessWidthDips = AccessSurfaceWindow.ExpandedWidth)
     {
         var panelMetrics = PanelSizeCatalog.Get(panelSize);
-        var accessWidth = DipToPhysical(AccessSurfaceWindow.SurfaceWidth, monitor.ScaleX);
+        var accessWidth = DipToPhysical(accessWidthDips, monitor.ScaleX);
         var accessHeight = DipToPhysical(AccessSurfaceWindow.SurfaceHeight, monitor.ScaleY);
         var panelWidth = Math.Min(DipToPhysical(panelMetrics.Width, monitor.ScaleX), monitor.Bounds.Width);
         var panelHeight = Math.Min(

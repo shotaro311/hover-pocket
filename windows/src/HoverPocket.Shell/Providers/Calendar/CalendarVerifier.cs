@@ -15,6 +15,8 @@ internal sealed class CalendarVerifier
         {
             VerifyConsole.WriteLine("calendar verify: oauth-configuration");
             VerifyOAuthConfigurationResolution();
+            VerifyConsole.WriteLine("calendar verify: setup-instructions");
+            VerifySetupInstructions();
             VerifyConsole.WriteLine("calendar verify: oauth-url/pkce");
             VerifyOAuthUrlAndPkce();
             VerifyConsole.WriteLine("calendar verify: loopback");
@@ -35,7 +37,7 @@ internal sealed class CalendarVerifier
 
         if (_failures.Count == 0)
         {
-            VerifyConsole.WriteLine("PASS calendar verify: oauth-configuration, oauth-url/pkce, loopback, credential-manager, request-builders, month-grid, read-only guards");
+            VerifyConsole.WriteLine("PASS calendar verify: oauth-configuration, setup-instructions, oauth-url/pkce, loopback, credential-manager, request-builders, month-grid, read-only guards");
             return 0;
         }
 
@@ -120,6 +122,23 @@ internal sealed class CalendarVerifier
             catch (UnauthorizedAccessException)
             {
             }
+        }
+    }
+
+    private void VerifySetupInstructions()
+    {
+        var setup = CalendarStore.SetupInstructions();
+        if (!string.Equals(setup.Path, GoogleOAuthConfiguration.ConfigurationPath, StringComparison.Ordinal)
+            || !setup.Ja.Any(step => step.Contains("%APPDATA%\\HoverPocket\\oauth.json", StringComparison.Ordinal))
+            || !setup.En.Any(step => step.Contains("%APPDATA%\\HoverPocket\\oauth.json", StringComparison.Ordinal)))
+        {
+            _failures.Add("setup: oauth.json placement path was not included");
+        }
+
+        if (!setup.Ja.Any(step => step.Contains("再起動", StringComparison.Ordinal))
+            || !setup.En.Any(step => step.Contains("restart", StringComparison.OrdinalIgnoreCase)))
+        {
+            _failures.Add("setup: restart guidance was not included");
         }
     }
 

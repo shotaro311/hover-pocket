@@ -13,6 +13,7 @@ internal abstract class NoActivateWindow : Window
     public event EventHandler<Win32MessageEventArgs>? Win32MessageReceived;
 
     private HwndSource? _source;
+    private bool _activationEnabled;
 
     protected NoActivateWindow(bool allowsTransparency = true)
     {
@@ -54,6 +55,36 @@ internal abstract class NoActivateWindow : Window
         }
     }
 
+    protected bool ActivationEnabled => _activationEnabled;
+
+    protected virtual bool ActivatesOnMouseInteraction => false;
+
+    protected bool SetActivationEnabled(bool enabled)
+    {
+        _activationEnabled = enabled;
+        Focusable = enabled;
+        if (Hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        NativeMethods.SetNoActivateStyle(Hwnd, !enabled);
+        if (!enabled)
+        {
+            NativeMethods.SetTopmostNoActivate(Hwnd);
+            return true;
+        }
+
+        if (!IsVisible)
+        {
+            return false;
+        }
+
+        _ = Activate();
+        _ = Focus();
+        return NativeMethods.ActivateWindowForTextInput(Hwnd);
+    }
+
     public void ApplyPlacement(WindowPlacement placement, bool show)
     {
         Left = placement.DipRect.Left;
@@ -84,7 +115,7 @@ internal abstract class NoActivateWindow : Window
         Hwnd = new WindowInteropHelper(this).Handle;
         NativeMethods.AddExtendedStyles(
             Hwnd,
-            NativeMethods.WsExNoActivate | NativeMethods.WsExToolWindow);
+            NativeMethods.WsExToolWindow | (_activationEnabled ? 0 : NativeMethods.WsExNoActivate));
         NativeMethods.SetTopmostNoActivate(Hwnd);
         _source = HwndSource.FromHwnd(Hwnd);
         _source?.AddHook(WndProc);
@@ -105,8 +136,12 @@ internal abstract class NoActivateWindow : Window
     {
         if (msg == NativeMethods.WmMouseActivate)
         {
+            if (!_activationEnabled && ActivatesOnMouseInteraction)
+            {
+                _ = SetActivationEnabled(true);
+            }
             handled = true;
-            return new IntPtr(NativeMethods.MaNoActivate);
+            return new IntPtr(_activationEnabled ? NativeMethods.MaActivate : NativeMethods.MaNoActivate);
         }
 
         Win32MessageReceived?.Invoke(this, new Win32MessageEventArgs(hwnd, msg, wParam, lParam));

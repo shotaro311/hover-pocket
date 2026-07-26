@@ -1,6 +1,6 @@
 namespace HoverPocket.Shell.Configuration;
 
-internal sealed record ShellSettings(DisplayPlacement DisplayPlacement)
+internal sealed record ShellSettings(DisplayPlacement? DisplayPlacementOverride)
 {
-    public static ShellSettings Default { get; } = new(DisplayPlacement.Main);
+    public static ShellSettings Default { get; } = new((DisplayPlacement?)null);
 }

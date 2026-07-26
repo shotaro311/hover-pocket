@@ -39,6 +39,7 @@ internal sealed class CalendarStore
                 snapshot.Sources,
                 snapshot.DayCells(_monthAnchor, _selectedDate, _hoveredDate),
                 selectedEvents,
+                _snapshot?.UpdatedAt,
                 SetupInstructions());
         }
     }
@@ -424,7 +425,7 @@ internal sealed class CalendarStore
             DateTimeOffset.UtcNow);
     }
 
-    private static CalendarSetupInstructions SetupInstructions()
+    internal static CalendarSetupInstructions SetupInstructions()
     {
         return new CalendarSetupInstructions(
             GoogleOAuthConfiguration.ConfigurationPath,
@@ -432,12 +433,14 @@ internal sealed class CalendarStore
                 "Google Cloud Console で Google Calendar API を有効化します。",
                 "Google Auth Platform の Clients で Desktop app の OAuth クライアントを作成します。",
                 "%APPDATA%\\HoverPocket\\oauth.json にダウンロードした JSON を配置します。",
+                "JSON を配置した後、HoverPocket を終了して再起動します。",
                 "必要な scope は calendar.events と calendar.calendarlist.readonly です。予定の作成/編集とカレンダー一覧取得に限定します。"
             ],
             [
                 "Enable the Google Calendar API in Google Cloud Console.",
                 "Create a Desktop app OAuth client in Google Auth Platform > Clients.",
                 "Place the downloaded JSON at %APPDATA%\\HoverPocket\\oauth.json.",
+                "After placing the JSON, quit and restart HoverPocket.",
                 "HoverPocket requests calendar.events and calendar.calendarlist.readonly only, for event writes and calendar-list reads."
             ]);
     }

@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.IO;
+using System.Text;
 
 namespace HoverPocket.Shell.Interop;
 
@@ -9,6 +10,7 @@ internal static partial class NativeMethods
     public const int WmMouseActivate = 0x0021;
     public const int WmDisplayChange = 0x007E;
     public const int WmDpiChanged = 0x02E0;
+    public const int MaActivate = 1;
     public const int MaNoActivate = 3;
 
     public const long WsExTopmost = 0x00000008L;
@@ -16,10 +18,13 @@ internal static partial class NativeMethods
     public const long WsExNoActivate = 0x08000000L;
 
     private const uint MonitorinfofPrimary = 0x00000001;
+    private const int SwHide = 0;
     private const int SwShownoactivate = 4;
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;
+    private const uint SwpFrameChanged = 0x0020;
     private const uint SwpShowWindow = 0x0040;
     private static readonly IntPtr HwndTopmost = new(-1);
 
@@ -29,9 +34,65 @@ internal static partial class NativeMethods
         _ = SetWindowLongPtr(hwnd, GwlExStyle, new IntPtr(current | styles));
     }
 
+    public static void SetNoActivateStyle(IntPtr hwnd, bool enabled)
+    {
+        var current = GetWindowLongPtr(hwnd, GwlExStyle).ToInt64();
+        var updated = enabled
+            ? current | WsExNoActivate
+            : current & ~WsExNoActivate;
+        if (updated == current)
+        {
+            return;
+        }
+
+        _ = SetWindowLongPtr(hwnd, GwlExStyle, new IntPtr(updated));
+        var flags = SwpNoMove | SwpNoSize | SwpNoZOrder | SwpFrameChanged;
+        if (enabled)
+        {
+            flags |= SwpNoActivate;
+        }
+
+        _ = SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, flags);
+    }
+
+    public static bool ActivateWindowForTextInput(IntPtr hwnd)
+    {
+        if (!IsWindowHandleValid(hwnd))
+        {
+            return false;
+        }
+
+        _ = SetActiveWindow(hwnd);
+        _ = SetFocus(hwnd);
+        return SetForegroundWindow(hwnd) || GetForegroundWindow() == hwnd;
+    }
+
     public static long GetExtendedStyles(IntPtr hwnd)
     {
         return GetWindowLongPtr(hwnd, GwlExStyle).ToInt64();
+    }
+
+    public static bool IsWindowHandleValid(IntPtr hwnd)
+    {
+        return hwnd != IntPtr.Zero && IsWindow(hwnd);
+    }
+
+    public static bool IsWindowShown(IntPtr hwnd)
+    {
+        return IsWindowHandleValid(hwnd) && IsWindowVisible(hwnd);
+    }
+
+    public static void HideWindow(IntPtr hwnd)
+    {
+        if (IsWindowHandleValid(hwnd))
+        {
+            _ = ShowWindow(hwnd, SwHide);
+        }
+    }
+
+    internal static void SetExtendedStylesForVerify(IntPtr hwnd, long styles)
+    {
+        _ = SetWindowLongPtr(hwnd, GwlExStyle, new IntPtr(styles));
     }
 
     public static void SetTopmostNoActivate(IntPtr hwnd)
@@ -81,6 +142,49 @@ internal static partial class NativeMethods
         return count;
     }
 
+    public static bool IsForegroundWindowFullscreen()
+    {
+        var window = GetForegroundWindow();
+        if (window == IntPtr.Zero || !IsWindowVisible(window) || IsIconic(window))
+        {
+            return false;
+        }
+
+        GetWindowThreadProcessId(window, out var processId);
+        if (processId == Environment.ProcessId || IsShellSurface(window))
+        {
+            return false;
+        }
+
+        var monitor = MonitorFromWindow(window, 2);
+        var monitorInfo = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+        if (monitor == IntPtr.Zero
+            || !GetMonitorInfo(monitor, ref monitorInfo)
+            || !GetWindowRect(window, out var windowRect))
+        {
+            return false;
+        }
+
+        return IsFullscreenWindowGeometry(windowRect, monitorInfo.Monitor, IsZoomed(window));
+    }
+
+    internal static bool IsFullscreenWindowGeometry(
+        NativeRect windowRect,
+        NativeRect monitorRect,
+        bool isMaximized)
+    {
+        if (isMaximized)
+        {
+            return false;
+        }
+
+        const int tolerance = 2;
+        return windowRect.Left <= monitorRect.Left + tolerance
+            && windowRect.Top <= monitorRect.Top + tolerance
+            && windowRect.Right >= monitorRect.Right - tolerance
+            && windowRect.Bottom >= monitorRect.Bottom - tolerance;
+    }
+
     public static double GetScaleForWindow(IntPtr hwnd)
     {
         var dpi = GetDpiForWindow(hwnd);
@@ -112,6 +216,7 @@ internal static partial class NativeMethods
 
             monitors.Add(new NativeDisplayMonitor(
                 hMonitor,
+                GetMonitorDeviceName(ref monitorInfo),
                 monitorInfo.Monitor,
                 monitorInfo.WorkArea,
                 (monitorInfo.Flags & MonitorinfofPrimary) == MonitorinfofPrimary,
@@ -177,6 +282,38 @@ internal static partial class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool GetWindowRect(IntPtr hWnd, out NativeRect lpRect);
 
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindow(IntPtr hWnd);
+
+    [LibraryImport("user32.dll")]
+    private static partial IntPtr GetForegroundWindow();
+
+    [LibraryImport("user32.dll")]
+    private static partial IntPtr SetActiveWindow(IntPtr hWnd);
+
+    [LibraryImport("user32.dll")]
+    private static partial IntPtr SetFocus(IntPtr hWnd);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetForegroundWindow(IntPtr hWnd);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindowVisible(IntPtr hWnd);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsIconic(IntPtr hWnd);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsZoomed(IntPtr hWnd);
+
+    [LibraryImport("user32.dll")]
+    private static partial IntPtr MonitorFromWindow(IntPtr hWnd, uint flags);
+
     [LibraryImport("user32.dll")]
     private static partial uint GetDpiForWindow(IntPtr hwnd);
 
@@ -194,6 +331,9 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll", EntryPoint = "GetMonitorInfoW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool GetMonitorInfo(IntPtr hMonitor, ref MonitorInfo lpmi);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxCount);
 
     [LibraryImport("shcore.dll")]
     private static partial int GetDpiForMonitor(IntPtr hmonitor, MonitorDpiType dpiType, out uint dpiX, out uint dpiY);
@@ -217,18 +357,36 @@ internal static partial class NativeMethods
         Effective = 0
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MonitorInfo
+    private static bool IsShellSurface(IntPtr window)
+    {
+        var className = new StringBuilder(64);
+        _ = GetClassName(window, className, className.Capacity);
+        return className.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd";
+    }
+
+    private static unsafe string GetMonitorDeviceName(ref MonitorInfo monitorInfo)
+    {
+        fixed (char* deviceName = monitorInfo.DeviceName)
+        {
+            return new string(deviceName).TrimEnd('\0');
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private unsafe struct MonitorInfo
     {
         public int Size;
         public NativeRect Monitor;
         public NativeRect WorkArea;
         public uint Flags;
+
+        public fixed char DeviceName[32];
     }
 }
 
 internal sealed record NativeDisplayMonitor(
     IntPtr Handle,
+    string DeviceName,
     NativeRect MonitorBounds,
     NativeRect WorkArea,
     bool IsPrimary,

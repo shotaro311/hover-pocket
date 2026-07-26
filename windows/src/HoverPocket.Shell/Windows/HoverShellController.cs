@@ -20,29 +20,42 @@ internal sealed class HoverShellController : IDisposable
 {
     public static readonly TimeSpan CloseDelay = TimeSpan.FromMilliseconds(60);
     public static readonly TimeSpan PollingInterval = TimeSpan.FromMilliseconds(120);
+    public static readonly TimeSpan HealthCheckInterval = TimeSpan.FromSeconds(2);
+    internal static readonly TimeSpan[] RecoveryDelays =
+    [
+        TimeSpan.Zero,
+        TimeSpan.FromMilliseconds(450),
+        TimeSpan.FromMilliseconds(1400)
+    ];
     public const double HoverToleranceDips = 4;
 
     private readonly Dispatcher _dispatcher;
-    private readonly ShellSettings _settings;
+    private readonly bool _enablePanelWebView;
     private readonly bool _enableDevTools;
     private readonly PanelBridgeController _panelBridgeController;
     private readonly DisplayLayoutService _displayLayoutService = new();
     private readonly List<AccessSurfaceWindow> _accessSurfaces = [];
     private readonly Dictionary<AccessSurfaceWindow, DisplaySurfaceLayout> _surfaceLayouts = [];
     private readonly string? _hoverTracePath = NormalizeTracePath();
-    private readonly PanelWindow _panel;
+    private PanelWindow _panel;
     private readonly DispatcherTimer _pollingTimer;
     private readonly DispatcherTimer _closeDelayTimer;
-    private readonly DispatcherTimer _resyncTimer;
+    private readonly DispatcherTimer _healthTimer;
     private IReadOnlyList<DisplaySurfaceLayout> _layouts = [];
     private DisplaySurfaceLayout? _activeLayout;
     private TimerAlert? _activeTimerAlert;
     private SettingsWindow? _settingsWindow;
     private (int X, int Y)? _pointerOverrideForVerify;
     private Task? _closingTask;
+    private Task<ShellHealthReport>? _healthRecoveryTask;
+    private Task? _recoveryTask;
+    private CancellationTokenSource? _recoveryCancellation;
+    private UserSettings _lastAppliedSettings;
     private bool _systemEventsSubscribed;
+    private bool _panelExpectedVisible;
     private bool _timerAlertActive;
     private bool _disposed;
+    private int _recoveryStageCountForVerify;
 
     public HoverShellController(
         Dispatcher dispatcher,
@@ -54,9 +67,15 @@ internal sealed class HoverShellController : IDisposable
         Services.UpdaterService? updaterService = null)
     {
         _dispatcher = dispatcher;
-        _settings = settings;
+        _enablePanelWebView = enablePanelWebView;
         _enableDevTools = enableDevTools;
         var userSettings = userSettingsStore.Load(providerRegistry.ProviderIds);
+        if (settings.DisplayPlacementOverride is { } displayPlacementOverride)
+        {
+            userSettings.DisplayPlacement = displayPlacementOverride;
+        }
+
+        _lastAppliedSettings = userSettings.Clone();
         _panelBridgeController = new PanelBridgeController(
             providerRegistry,
             userSettingsStore,
@@ -67,7 +86,7 @@ internal sealed class HoverShellController : IDisposable
         _panelBridgeController.TimerAlertFired += OnTimerAlertFired;
         _panelBridgeController.TimerAlertChanged += OnTimerAlertChanged;
         _panelBridgeController.ExternalDragStarted += OnExternalDragStarted;
-        _panel = new PanelWindow(_panelBridgeController, enablePanelWebView, enableDevTools);
+        _panel = CreatePanelWindow();
 
         _pollingTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
         {
@@ -91,15 +110,11 @@ internal sealed class HoverShellController : IDisposable
             }
         };
 
-        _resyncTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
+        _healthTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
         {
-            Interval = TimeSpan.FromMilliseconds(180)
+            Interval = HealthCheckInterval
         };
-        _resyncTimer.Tick += (_, _) =>
-        {
-            _resyncTimer.Stop();
-            ResyncDisplayLayout();
-        };
+        _healthTimer.Tick += OnHealthTimerTick;
 
         TrySubscribeSystemEvents();
     }
@@ -116,17 +131,25 @@ internal sealed class HoverShellController : IDisposable
 
     public DisplaySurfaceLayout? ActiveLayoutForVerify => _activeLayout;
 
+    public int RecoveryStageCountForVerify => _recoveryStageCountForVerify;
+
+    public bool PollingEnabledForVerify => _pollingTimer.IsEnabled;
+
+    public bool HealthTimerEnabledForVerify => _healthTimer.IsEnabled;
+
+    public bool PanelExpectedVisibleForVerify => _panelExpectedVisible;
+
     public void Start()
     {
-        _panel.EnsureHandle();
-        _panel.Win32MessageReceived += OnWindowWin32MessageReceived;
+        AttachPanelWindow(_panel);
         ResyncDisplayLayout();
         _pollingTimer.Start();
+        _healthTimer.Start();
     }
 
     public void ShowPanelFromUser()
     {
-        _ = ShowPanelAsync(ResolveLayoutForPointer());
+        _ = ShowPanelAsync(ResolveLayoutForPointer(), bypassFullscreenSuppression: true);
     }
 
     public void OpenSettingsFromUser()
@@ -136,13 +159,13 @@ internal sealed class HoverShellController : IDisposable
 
     public async Task ShowPanelForVerifyAsync()
     {
-        await RunWithPollingPausedForVerifyAsync(() => ShowPanelAsync(ResolveLayoutForPointer()));
+        await RunWithPollingPausedForVerifyAsync(() => ShowPanelAsync(ResolveLayoutForPointer(), bypassFullscreenSuppression: true));
     }
 
     public async Task ShowPanelForUiVerifyAsync()
     {
         await _panel.EnsureWebViewInitializedAsync();
-        await RunWithPollingPausedForVerifyAsync(() => ShowPanelAsync(ResolveLayoutForPointer()));
+        await RunWithPollingPausedForVerifyAsync(() => ShowPanelAsync(ResolveLayoutForPointer(), bypassFullscreenSuppression: true));
     }
 
     public async Task HidePanelForVerifyAsync()
@@ -165,6 +188,16 @@ internal sealed class HoverShellController : IDisposable
     public void ClearPointerSimulationForVerify()
     {
         _pointerOverrideForVerify = null;
+    }
+
+    public Task<ShellHealthReport> RunHealthCheckForVerifyAsync()
+    {
+        return RunHealthCheckAsync();
+    }
+
+    public void ScheduleStagedRecoveryForVerify()
+    {
+        ScheduleStagedRecovery();
     }
 
     private async Task RunWithPollingPausedForVerifyAsync(Func<Task> action)
@@ -203,11 +236,17 @@ internal sealed class HoverShellController : IDisposable
         _disposed = true;
         _pollingTimer.Stop();
         _closeDelayTimer.Stop();
-        _resyncTimer.Stop();
+        _healthTimer.Stop();
+        _healthTimer.Tick -= OnHealthTimerTick;
+        _recoveryCancellation?.Cancel();
+        _recoveryCancellation?.Dispose();
+        _recoveryCancellation = null;
+        _recoveryTask = null;
         if (_systemEventsSubscribed)
         {
             SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            SystemEvents.SessionSwitch -= OnSessionSwitch;
             _systemEventsSubscribed = false;
         }
 
@@ -217,6 +256,7 @@ internal sealed class HoverShellController : IDisposable
         _panelBridgeController.TimerAlertFired -= OnTimerAlertFired;
         _panelBridgeController.TimerAlertChanged -= OnTimerAlertChanged;
         _panelBridgeController.ExternalDragStarted -= OnExternalDragStarted;
+        _panel.ReleaseBridgeAttachment();
         _panelBridgeController.Dispose();
         if (_settingsWindow is not null)
         {
@@ -236,17 +276,34 @@ internal sealed class HoverShellController : IDisposable
         _surfaceLayouts.Clear();
     }
 
-    private async Task ShowPanelAsync(DisplaySurfaceLayout? layout)
+    private async Task ShowPanelAsync(
+        DisplaySurfaceLayout? layout,
+        bool bypassFullscreenSuppression = false)
     {
+        if (!bypassFullscreenSuppression
+            && _pointerOverrideForVerify is null
+            && IsTopEdgeSuppressed())
+        {
+            return;
+        }
+
         layout ??= _layouts.FirstOrDefault();
         if (layout is null)
         {
             return;
         }
 
+        _panelExpectedVisible = true;
+
         if (_closingTask is { IsCompleted: false })
         {
-            await _closingTask;
+            _activeLayout = layout;
+            _closeDelayTimer.Stop();
+            TraceHover("reopen", GetPointerPosition(), true, layout, "reverse-close");
+            await _panel.OpenAsync(layout);
+            _closingTask = null;
+            await _panelBridgeController.NotifyPanelOpenedAsync();
+            return;
         }
 
         if (_panel.IsVisible)
@@ -281,11 +338,14 @@ internal sealed class HoverShellController : IDisposable
     {
         if (_activeLayout is null)
         {
+            _panelExpectedVisible = false;
             return;
         }
 
         TraceHover("close", GetPointerPosition(), false, _activeLayout, "panel-close");
+        _panelExpectedVisible = false;
         await _panel.CloseAsync(_activeLayout);
+        await _panelBridgeController.NotifyPanelClosedAsync();
     }
 
     private async Task OpenSettingsAsync()
@@ -313,6 +373,14 @@ internal sealed class HoverShellController : IDisposable
 
     private void PollPointer()
     {
+        if (_pointerOverrideForVerify is null
+            && !_panel.IsVisible
+            && IsTopEdgeSuppressed())
+        {
+            _closeDelayTimer.Stop();
+            return;
+        }
+
         var pointer = GetPointerPosition();
         if (IsPointerInHoverRegion(pointer, out var hoveredLayout))
         {
@@ -390,7 +458,7 @@ internal sealed class HoverShellController : IDisposable
         return Math.Max(0, (int)Math.Ceiling(HoverToleranceDips * scale));
     }
 
-    private void ResyncDisplayLayout()
+    private void ResyncDisplayLayout(bool animateVisiblePanel = false)
     {
         if (_disposed)
         {
@@ -398,9 +466,14 @@ internal sealed class HoverShellController : IDisposable
         }
 
         var previousActiveLayout = _activeLayout;
+        var userSettings = _panelBridgeController.CurrentSettings;
+        var accessWidth = userSettings.ShowTopHandleSideArea
+            ? AccessSurfaceWindow.ExpandedWidth
+            : AccessSurfaceWindow.CompactWidth;
         _layouts = _displayLayoutService.CreateLayouts(
-            _settings.DisplayPlacement,
-            _panelBridgeController.CurrentSettings.PanelSize);
+            userSettings.DisplayPlacement,
+            userSettings.PanelSize,
+            accessWidth);
         EnsureAccessSurfaceCount(_layouts.Count);
         _surfaceLayouts.Clear();
 
@@ -408,15 +481,17 @@ internal sealed class HoverShellController : IDisposable
         {
             var accessSurface = _accessSurfaces[index];
             var layout = _layouts[index];
+            accessSurface.UpdateAppearance(userSettings);
             _surfaceLayouts[accessSurface] = layout;
             accessSurface.ApplyPlacement(layout.AccessSurface, show: true);
         }
 
-        if (!_panel.IsVisible)
+        if (!_panelExpectedVisible)
         {
             _activeLayout = ResolveLayoutForPointer() ?? _layouts.FirstOrDefault();
             if (_activeLayout is not null)
             {
+                _panel.PrepareCollapsedState();
                 _panel.ApplyPlacement(_activeLayout.PanelCollapsed, show: false);
             }
 
@@ -427,7 +502,14 @@ internal sealed class HoverShellController : IDisposable
         _activeLayout = ResolveLayoutMatching(previousActiveLayout) ?? _layouts.FirstOrDefault();
         if (_activeLayout is not null)
         {
-            _panel.ApplyPlacement(_activeLayout.PanelTarget, show: true);
+            if (animateVisiblePanel)
+            {
+                _ = _panel.ResizeAsync(_activeLayout.PanelTarget);
+            }
+            else
+            {
+                _panel.ApplyPlacement(_activeLayout.PanelTarget, show: true);
+            }
         }
     }
 
@@ -435,32 +517,286 @@ internal sealed class HoverShellController : IDisposable
     {
         while (_accessSurfaces.Count < count)
         {
-            var accessSurface = new AccessSurfaceWindow();
-            accessSurface.HoverEntered += OnAccessSurfaceHoverEntered;
-            accessSurface.Win32MessageReceived += OnWindowWin32MessageReceived;
-            accessSurface.EnsureHandle();
-            if (_activeTimerAlert is not null)
-            {
-                accessSurface.SetAlertHighlight(ToHighlightColor(_activeTimerAlert.Color));
-            }
-
-            _accessSurfaces.Add(accessSurface);
+            _accessSurfaces.Add(CreateAccessSurfaceWindow());
         }
 
         while (_accessSurfaces.Count > count)
         {
             var lastIndex = _accessSurfaces.Count - 1;
             var accessSurface = _accessSurfaces[lastIndex];
-            accessSurface.HoverEntered -= OnAccessSurfaceHoverEntered;
-            accessSurface.Win32MessageReceived -= OnWindowWin32MessageReceived;
-            accessSurface.Close();
+            DetachAndCloseAccessSurface(accessSurface);
             _surfaceLayouts.Remove(accessSurface);
             _accessSurfaces.RemoveAt(lastIndex);
         }
     }
 
+    private AccessSurfaceWindow CreateAccessSurfaceWindow()
+    {
+        var accessSurface = new AccessSurfaceWindow();
+        accessSurface.UpdateAppearance(_panelBridgeController.CurrentSettings);
+        accessSurface.HoverEntered += OnAccessSurfaceHoverEntered;
+        accessSurface.Win32MessageReceived += OnWindowWin32MessageReceived;
+        accessSurface.EnsureHandle();
+        if (_activeTimerAlert is not null)
+        {
+            accessSurface.SetAlertHighlight(ToHighlightColor(_activeTimerAlert.Color));
+        }
+
+        return accessSurface;
+    }
+
+    private void DetachAndCloseAccessSurface(AccessSurfaceWindow accessSurface)
+    {
+        accessSurface.HoverEntered -= OnAccessSurfaceHoverEntered;
+        accessSurface.Win32MessageReceived -= OnWindowWin32MessageReceived;
+        try
+        {
+            accessSurface.Close();
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private PanelWindow CreatePanelWindow()
+    {
+        return new PanelWindow(_panelBridgeController, _enablePanelWebView, _enableDevTools);
+    }
+
+    private void AttachPanelWindow(PanelWindow panel)
+    {
+        panel.EnsureHandle();
+        panel.Win32MessageReceived += OnWindowWin32MessageReceived;
+    }
+
+    private void OnHealthTimerTick(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        _ = RunHealthCheckFromTimerAsync();
+    }
+
+    private async Task RunHealthCheckFromTimerAsync()
+    {
+        try
+        {
+            await RunHealthCheckAsync();
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (ExternalException)
+        {
+        }
+    }
+
+    private Task<ShellHealthReport> RunHealthCheckAsync()
+    {
+        if (_disposed)
+        {
+            return Task.FromResult(ShellHealthReport.Empty);
+        }
+
+        if (_healthRecoveryTask is { IsCompleted: false })
+        {
+            return _healthRecoveryTask;
+        }
+
+        _healthRecoveryTask = RunHealthCheckCoreAsync();
+        return _healthRecoveryTask;
+    }
+
+    private async Task<ShellHealthReport> RunHealthCheckCoreAsync()
+    {
+        if (_layouts.Count == 0 || _layouts.Count != _accessSurfaces.Count)
+        {
+            ResyncDisplayLayout();
+        }
+
+        var accessRecreated = 0;
+        var accessRepaired = 0;
+        for (var index = 0; index < _layouts.Count && index < _accessSurfaces.Count; index++)
+        {
+            var layout = _layouts[index];
+            var accessSurface = _accessSurfaces[index];
+            if (!NativeMethods.IsWindowHandleValid(accessSurface.Hwnd))
+            {
+                _surfaceLayouts.Remove(accessSurface);
+                DetachAndCloseAccessSurface(accessSurface);
+                var replacement = CreateAccessSurfaceWindow();
+                _accessSurfaces[index] = replacement;
+                _surfaceLayouts[replacement] = layout;
+                replacement.ApplyPlacement(layout.AccessSurface, show: true);
+                accessRecreated++;
+                continue;
+            }
+
+            if (NeedsNativeRepair(
+                    accessSurface.Hwnd,
+                    accessSurface.IsVisible,
+                    expectedVisible: true,
+                    layout.AccessSurface.PhysicalRect,
+                    checkFrame: true,
+                    requireNoActivate: true))
+            {
+                RepairStyles(accessSurface.Hwnd, requireNoActivate: true);
+                accessSurface.UpdateAppearance(_panelBridgeController.CurrentSettings);
+                accessSurface.ApplyPlacement(layout.AccessSurface, show: true);
+                accessSurface.ShowNoActivate();
+                accessRepaired++;
+            }
+        }
+
+        var panelRecreated = false;
+        var panelRepaired = false;
+        var panelLayout = ResolveLayoutMatching(_activeLayout) ?? _layouts.FirstOrDefault();
+        if (!NativeMethods.IsWindowHandleValid(_panel.Hwnd))
+        {
+            await RecreatePanelWindowAsync(panelLayout);
+            panelRecreated = true;
+        }
+        else if (panelLayout is not null && !_panel.IsAnimating)
+        {
+            var expectedPlacement = _panelExpectedVisible
+                ? panelLayout.PanelTarget
+                : panelLayout.PanelCollapsed;
+            if (NeedsNativeRepair(
+                    _panel.Hwnd,
+                    _panel.IsVisible,
+                    _panelExpectedVisible,
+                    expectedPlacement.PhysicalRect,
+                    checkFrame: true,
+                    requireNoActivate: !_panel.KeyboardInteractionEnabled))
+            {
+                RepairStyles(_panel.Hwnd, requireNoActivate: !_panel.KeyboardInteractionEnabled);
+                if (_panelExpectedVisible)
+                {
+                    _panel.ApplyPlacement(expectedPlacement, show: true);
+                    _panel.Opacity = 1;
+                    _panel.ShowNoActivate();
+                }
+                else
+                {
+                    if (_panel.IsVisible)
+                    {
+                        _panel.Hide();
+                    }
+
+                    _panel.PrepareCollapsedState();
+                    _panel.ApplyPlacement(expectedPlacement, show: false);
+                    _panel.Opacity = 0;
+                    NativeMethods.HideWindow(_panel.Hwnd);
+                }
+
+                panelRepaired = true;
+            }
+        }
+
+        return new ShellHealthReport(accessRecreated, accessRepaired, panelRecreated, panelRepaired);
+    }
+
+    private async Task RecreatePanelWindowAsync(DisplaySurfaceLayout? layout)
+    {
+        var previous = _panel;
+        previous.Win32MessageReceived -= OnWindowWin32MessageReceived;
+        previous.ReleaseBridgeAttachment();
+        try
+        {
+            previous.Close();
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        _closingTask = null;
+        var replacement = CreatePanelWindow();
+        _panel = replacement;
+        AttachPanelWindow(replacement);
+        if (layout is null)
+        {
+            return;
+        }
+
+        _activeLayout = layout;
+        if (_panelExpectedVisible)
+        {
+            try
+            {
+                await replacement.EnsureWebViewInitializedAsync();
+            }
+            catch (InvalidOperationException) when (_disposed)
+            {
+                return;
+            }
+
+            if (_disposed)
+            {
+                return;
+            }
+
+            replacement.ApplyPlacement(layout.PanelTarget, show: true);
+            replacement.Opacity = 1;
+            replacement.ShowNoActivate();
+        }
+        else
+        {
+            replacement.PrepareCollapsedState();
+            replacement.ApplyPlacement(layout.PanelCollapsed, show: false);
+            replacement.Opacity = 0;
+            NativeMethods.HideWindow(replacement.Hwnd);
+        }
+    }
+
+    private static bool NeedsNativeRepair(
+        IntPtr hwnd,
+        bool wpfVisible,
+        bool expectedVisible,
+        PhysicalRect expectedFrame,
+        bool checkFrame,
+        bool requireNoActivate)
+    {
+        var styles = NativeMethods.GetExtendedStyles(hwnd);
+        var requiredStyles = NativeMethods.WsExToolWindow | NativeMethods.WsExTopmost;
+        if (requireNoActivate)
+        {
+            requiredStyles |= NativeMethods.WsExNoActivate;
+        }
+
+        var styleHealthy = (styles & requiredStyles) == requiredStyles
+            && (requireNoActivate || (styles & NativeMethods.WsExNoActivate) == 0);
+        var visibilityHealthy = wpfVisible == expectedVisible
+            && NativeMethods.IsWindowShown(hwnd) == expectedVisible;
+        var frameHealthy = !checkFrame
+            || (NativeMethods.TryGetWindowRect(hwnd, out var actual)
+                && FrameMatches(actual, expectedFrame));
+        return !styleHealthy || !visibilityHealthy || !frameHealthy;
+    }
+
+    private static void RepairStyles(IntPtr hwnd, bool requireNoActivate)
+    {
+        NativeMethods.AddExtendedStyles(
+            hwnd,
+            NativeMethods.WsExToolWindow | (requireNoActivate ? NativeMethods.WsExNoActivate : 0));
+        NativeMethods.SetNoActivateStyle(hwnd, requireNoActivate);
+        NativeMethods.SetTopmostNoActivate(hwnd);
+    }
+
+    private static bool FrameMatches(NativeRect actual, PhysicalRect expected)
+    {
+        const int tolerance = 2;
+        return Math.Abs(actual.Left - expected.Left) <= tolerance
+            && Math.Abs(actual.Top - expected.Top) <= tolerance
+            && Math.Abs(actual.Width - expected.Width) <= tolerance
+            && Math.Abs(actual.Height - expected.Height) <= tolerance;
+    }
+
     private void OnAccessSurfaceHoverEntered(object? sender, EventArgs e)
     {
+        if (!_panel.IsVisible && IsTopEdgeSuppressed())
+        {
+            return;
+        }
+
         if (_panel.IsVisible)
         {
             _closeDelayTimer.Stop();
@@ -564,7 +900,7 @@ internal sealed class HoverShellController : IDisposable
             : $"{rect.Value.Left},{rect.Value.Top},{rect.Value.Width},{rect.Value.Height}";
     }
 
-    private void ScheduleDisplayResync()
+    private void ScheduleStagedRecovery()
     {
         if (_disposed)
         {
@@ -573,32 +909,94 @@ internal sealed class HoverShellController : IDisposable
 
         if (!_dispatcher.CheckAccess())
         {
-            _dispatcher.BeginInvoke(ScheduleDisplayResync);
+            _dispatcher.BeginInvoke(ScheduleStagedRecovery);
             return;
         }
 
-        _resyncTimer.Stop();
-        _resyncTimer.Start();
+        _pollingTimer.Stop();
+        _pollingTimer.Start();
+        _healthTimer.Stop();
+        _healthTimer.Start();
+        _recoveryCancellation?.Cancel();
+        _recoveryCancellation?.Dispose();
+        var cancellation = new CancellationTokenSource();
+        _recoveryCancellation = cancellation;
+        _recoveryTask = RunStagedRecoveryAsync(cancellation.Token);
+    }
+
+    private async Task RunStagedRecoveryAsync(CancellationToken cancellationToken)
+    {
+        var previousDelay = TimeSpan.Zero;
+        try
+        {
+            foreach (var targetDelay in RecoveryDelays)
+            {
+                var delay = targetDelay - previousDelay;
+                previousDelay = targetDelay;
+                if (delay > TimeSpan.Zero)
+                {
+                    await Task.Delay(delay, cancellationToken);
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                await RunRecoveryStageAsync();
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task RunRecoveryStageAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (!_dispatcher.CheckAccess())
+        {
+            await _dispatcher.InvokeAsync(RunRecoveryStageAsync).Task.Unwrap();
+            return;
+        }
+
+        _pollingTimer.Stop();
+        _pollingTimer.Start();
+        _healthTimer.Stop();
+        _healthTimer.Start();
+        ResyncDisplayLayout();
+        await RunHealthCheckAsync();
+        _recoveryStageCountForVerify++;
     }
 
     private void OnWindowWin32MessageReceived(object? sender, Win32MessageEventArgs e)
     {
         if (e.Message is NativeMethods.WmDisplayChange or NativeMethods.WmDpiChanged)
         {
-            ScheduleDisplayResync();
+            ScheduleStagedRecovery();
         }
     }
 
     private void OnDisplaySettingsChanged(object? sender, EventArgs e)
     {
-        ScheduleDisplayResync();
+        ScheduleStagedRecovery();
     }
 
     private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
     {
         if (e.Mode == PowerModes.Resume)
         {
-            ScheduleDisplayResync();
+            ScheduleStagedRecovery();
+        }
+    }
+
+    private void OnSessionSwitch(object? sender, SessionSwitchEventArgs e)
+    {
+        if (e.Reason is SessionSwitchReason.SessionUnlock
+            or SessionSwitchReason.ConsoleConnect
+            or SessionSwitchReason.RemoteConnect)
+        {
+            ScheduleStagedRecovery();
         }
     }
 
@@ -669,7 +1067,7 @@ internal sealed class HoverShellController : IDisposable
         _closeDelayTimer.Stop();
         ApplyTimerAlertHighlight(alert);
         await _panelBridgeController.SelectProviderFromShellAsync("timer");
-        await ShowPanelAsync(ResolveLayoutForPointer());
+        await ShowPanelAsync(ResolveLayoutForPointer(), bypassFullscreenSuppression: true);
     }
 
     private void ApplyTimerAlertHighlight(TimerAlert alert)
@@ -700,35 +1098,49 @@ internal sealed class HoverShellController : IDisposable
             return;
         }
 
-        _panel.ApplyPanelSize(settings.PanelSize);
-        ResyncDisplayLayout();
+        var panelSizeChanged = _lastAppliedSettings.PanelSize != settings.PanelSize;
+        var placementChanged = _lastAppliedSettings.DisplayPlacement != settings.DisplayPlacement;
+        _lastAppliedSettings = settings.Clone();
+        ResyncDisplayLayout(animateVisiblePanel: panelSizeChanged && !placementChanged);
+    }
+
+    private bool IsTopEdgeSuppressed()
+    {
+        return _panelBridgeController.CurrentSettings.DisableTopEdgeInFullscreen
+            && NativeMethods.IsForegroundWindowFullscreen();
     }
 
     private void TrySubscribeSystemEvents()
     {
         var displaySubscribed = false;
         var powerSubscribed = false;
+        var sessionSubscribed = false;
         try
         {
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
             displaySubscribed = true;
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
             powerSubscribed = true;
+            SystemEvents.SessionSwitch += OnSessionSwitch;
+            sessionSubscribed = true;
             _systemEventsSubscribed = true;
         }
         catch (ExternalException)
         {
-            RollBackSystemEventSubscriptions(displaySubscribed, powerSubscribed);
+            RollBackSystemEventSubscriptions(displaySubscribed, powerSubscribed, sessionSubscribed);
             _systemEventsSubscribed = false;
         }
         catch (InvalidOperationException)
         {
-            RollBackSystemEventSubscriptions(displaySubscribed, powerSubscribed);
+            RollBackSystemEventSubscriptions(displaySubscribed, powerSubscribed, sessionSubscribed);
             _systemEventsSubscribed = false;
         }
     }
 
-    private void RollBackSystemEventSubscriptions(bool displaySubscribed, bool powerSubscribed)
+    private void RollBackSystemEventSubscriptions(
+        bool displaySubscribed,
+        bool powerSubscribed,
+        bool sessionSubscribed)
     {
         if (displaySubscribed)
         {
@@ -739,5 +1151,19 @@ internal sealed class HoverShellController : IDisposable
         {
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         }
+
+        if (sessionSubscribed)
+        {
+            SystemEvents.SessionSwitch -= OnSessionSwitch;
+        }
     }
+}
+
+internal readonly record struct ShellHealthReport(
+    int AccessRecreated,
+    int AccessRepaired,
+    bool PanelRecreated,
+    bool PanelRepaired)
+{
+    public static ShellHealthReport Empty { get; } = new(0, 0, false, false);
 }
