@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using HoverPocket.Shell.Verification;
+using Microsoft.Win32;
 using Velopack.Locators;
 using Velopack.Sources;
 
@@ -10,8 +11,8 @@ namespace HoverPocket.Shell.Services;
 
 internal sealed class UpdaterVerifier
 {
-    private const string CurrentVersion = "0.2.1";
-    private const string NextVersion = "0.2.2";
+    private const string CurrentVersion = "0.2.2";
+    private const string NextVersion = "0.2.3";
     private readonly List<string> _failures = [];
     private readonly UpdaterService _updaterService = new();
 
@@ -20,7 +21,7 @@ internal sealed class UpdaterVerifier
         VerifyAsync().GetAwaiter().GetResult();
         if (_failures.Count == 0)
         {
-            VerifyConsole.WriteLine("PASS updater verify: local feed dry-run no-update and update-available cases");
+            VerifyConsole.WriteLine("PASS updater verify: local feed dry-run and ARP DisplayVersion repair cases");
             return 0;
         }
 
@@ -36,6 +37,7 @@ internal sealed class UpdaterVerifier
     private async Task VerifyAsync()
     {
         VerifyWindowsFeedMetadata();
+        VerifyArpDisplayVersionRepair();
         await VerifyCaseAsync(
             "no-update",
             [CurrentVersion],
@@ -44,6 +46,111 @@ internal sealed class UpdaterVerifier
             "update-available",
             [CurrentVersion, NextVersion],
             expectUpdate: true);
+    }
+
+    private void VerifyArpDisplayVersionRepair()
+    {
+        var testRoot = Path.Combine(
+            "Software",
+            "HoverPocket",
+            "UpdaterVerify",
+            Guid.NewGuid().ToString("N"));
+        var testAppId = "HoverPocketWin.Verify";
+        var installRoot = Path.Combine(Path.GetTempPath(), "HoverPocket", "Installed");
+        var keyPath = $@"{testRoot}\{testAppId}";
+        try
+        {
+            using (var currentUser = RegistryKey.OpenBaseKey(
+                       RegistryHive.CurrentUser,
+                       RegistryView.Registry64))
+            using (var appKey = currentUser.CreateSubKey(keyPath, writable: true))
+            {
+                appKey.SetValue("DisplayVersion", CurrentVersion, RegistryValueKind.String);
+                appKey.SetValue("InstallLocation", installRoot, RegistryValueKind.String);
+                appKey.SetValue("PreservedValue", "keep", RegistryValueKind.String);
+            }
+
+            var repairResults = ArpDisplayVersionRepairService.Repair(
+                testRoot,
+                testAppId,
+                installRoot,
+                NextVersion);
+            using (var currentUser = RegistryKey.OpenBaseKey(
+                       RegistryHive.CurrentUser,
+                       RegistryView.Registry64))
+            using (var appKey = currentUser.OpenSubKey(keyPath, writable: true))
+            {
+                if (!string.Equals(appKey?.GetValue("DisplayVersion") as string, NextVersion, StringComparison.Ordinal)
+                    || repairResults.All(result => result.Status != ArpDisplayVersionRepairStatus.Updated))
+                {
+                    _failures.Add("arp repair: stale DisplayVersion was not updated");
+                }
+                else
+                {
+                    VerifyConsole.WriteLine("updater_arp_repair_stale_to_current=ok");
+                }
+
+                if (!string.Equals(appKey?.GetValue("PreservedValue") as string, "keep", StringComparison.Ordinal)
+                    || !string.Equals(appKey?.GetValue("InstallLocation") as string, installRoot, StringComparison.Ordinal))
+                {
+                    _failures.Add("arp repair: non-DisplayVersion values changed");
+                }
+                else
+                {
+                    VerifyConsole.WriteLine("updater_arp_repair_other_values_preserved=ok");
+                }
+
+                appKey?.SetValue("DisplayVersion", CurrentVersion, RegistryValueKind.String);
+                appKey?.SetValue(
+                    "InstallLocation",
+                    Path.Combine(Path.GetTempPath(), "HoverPocket", "OtherInstall"),
+                    RegistryValueKind.String);
+            }
+
+            _ = ArpDisplayVersionRepairService.Repair(
+                testRoot,
+                testAppId,
+                installRoot,
+                NextVersion);
+            using (var currentUser = RegistryKey.OpenBaseKey(
+                       RegistryHive.CurrentUser,
+                       RegistryView.Registry64))
+            using (var appKey = currentUser.OpenSubKey(keyPath))
+            {
+                if (!string.Equals(appKey?.GetValue("DisplayVersion") as string, CurrentVersion, StringComparison.Ordinal))
+                {
+                    _failures.Add("arp repair: path mismatch changed DisplayVersion");
+                }
+                else
+                {
+                    VerifyConsole.WriteLine("updater_arp_repair_path_mismatch_noop=ok");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _failures.Add($"arp repair: {ex.GetType().Name}");
+        }
+        finally
+        {
+            foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+            {
+                try
+                {
+                    using var currentUser = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, view);
+                    currentUser.DeleteSubKeyTree(testRoot, throwOnMissingSubKey: false);
+                }
+                catch (Exception ex)
+                {
+                    _failures.Add($"arp repair cleanup ({view}): {ex.GetType().Name}");
+                }
+            }
+
+            if (_failures.All(failure => !failure.StartsWith("arp repair cleanup", StringComparison.Ordinal)))
+            {
+                VerifyConsole.WriteLine("updater_arp_repair_test_key_cleanup=ok");
+            }
+        }
     }
 
     private void VerifyWindowsFeedMetadata()
