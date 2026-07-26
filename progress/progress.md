@@ -1,9 +1,18 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-07-24
-updated_by: claude
+updated: 2026-07-26
+updated_by: codex
 status: active
 ---
+
+## 2026-07-26 Windows 0.2.2 Release Candidate Verification
+
+- `origin/codex/windows-0.2.2-release`をtrackingするローカルbranchへ、cleanな状態からswitchした。開始時のlocal / origin / GitHub SHAは`4873e19`で一致し、Windowsローカル`main`とrecovery branchは動かしていない。
+- Release候補の実アカウントread-only gateとして`--verify calendar-live`を追加し、予定内容を出さずCalendar / event件数だけを返すようにした。commit `df4c652`を同branchへ通常pushし、origin SHA一致をreadbackした。
+- Debug / Release buildは最終的にwarnings 0 / errors 0。Debugの指定12 verifierとReleaseの重要6 verifier、全12 JSの`node --check`、`git diff --check`はすべてexit 0。最初のDebug buildだけは正本Debugプロセスのfile lockで失敗し、該当プロセスだけを終了して再実行後に成功した。
+- process内だけでOAuth設定を注入して`publish_release.ps1`を実行し、0.2.2のSetup / Portable / nupkg / Windows feed / manifest / checksumを生成した。`release-config`は0.2.2・Release・OAuth metadata一致・channel `win`でexit 0、feed / manifest readbackとchecksum 7件も一致した。成果物は0.2.x方針どおり未署名で、GitHub Release作成・asset uploadは行っていない。
+- Portable Release候補を別processで2回起動し、既存Credential Manager資格情報によるCalendar refresh / readがともにexit 0。Calendar 6件、event 91件で一致し、予定の作成・更新・削除は行っていない。インストール済み0.2.1は実行ファイル2件・uninstall entry 1件・version 0.2.1のまま保持した。
+- 残件は、requirementsの現行配布署名必須記述とREADME / manifestの0.2.x未署名方針の不一致、公開後にのみ可能な0.2.1→0.2.2 update apply / restart、端末ポリシーに拒否されたTemp展開物の後片付け。詳細: `progress/2026-07/2026-07-26_hover-pocket-windows-0.2.2-release-candidate.md`。
 
 ## 2026-07-24 Mac Build 131 Release
 
