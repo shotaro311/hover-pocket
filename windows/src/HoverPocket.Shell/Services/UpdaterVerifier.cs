@@ -10,8 +10,8 @@ namespace HoverPocket.Shell.Services;
 
 internal sealed class UpdaterVerifier
 {
-    private const string CurrentVersion = "0.2.0";
-    private const string NextVersion = "0.2.1";
+    private const string CurrentVersion = "0.2.1";
+    private const string NextVersion = "0.2.2";
     private readonly List<string> _failures = [];
     private readonly UpdaterService _updaterService = new();
 

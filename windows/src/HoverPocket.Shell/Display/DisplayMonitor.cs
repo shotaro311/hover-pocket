@@ -2,6 +2,8 @@ namespace HoverPocket.Shell.Display;
 
 internal sealed record DisplayMonitor(
     string Id,
+    string Name,
+    IntPtr NativeHandle,
     PhysicalRect Bounds,
     PhysicalRect WorkArea,
     bool IsPrimary,

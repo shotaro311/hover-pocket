@@ -39,7 +39,7 @@ internal sealed class ClipboardVerifier
 
         if (_failures.Count == 0)
         {
-            VerifyConsole.WriteLine("PASS clipboard verify: CRUD, limits, favorites, legacy defaults, PNG normalization, dedup, persistence, corrupt fallback, private mode");
+            VerifyConsole.WriteLine("PASS clipboard verify: CRUD/explicit delete, limits, favorites, legacy defaults, PNG normalization, dedup, persistence, corrupt fallback, private mode");
             return 0;
         }
 
@@ -67,6 +67,17 @@ internal sealed class ClipboardVerifier
         {
             _failures.Add("CRUD: image PNG file was not written");
         }
+
+        store.DeleteItem(ClipboardHistoryItemKind.Text, store.TextItems[0].Id);
+        store.DeleteItem(ClipboardHistoryItemKind.Image, store.ImageItems[0].Id);
+        if (store.TextItems.Count != 0 || store.ImageItems.Count != 0 || File.Exists(imagePath))
+        {
+            _failures.Add("CRUD: explicit item delete did not remove text, image, and the PNG file");
+        }
+
+        store.AddText("clear clipboard");
+        store.AddImage(ClipboardHistoryStore.CreateProbeBitmap(2));
+        imagePath = store.ImagePath(store.ImageItems[0]);
 
         store.Clear();
         if (store.TextItems.Count != 0 || store.ImageItems.Count != 0)

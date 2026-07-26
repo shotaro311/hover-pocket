@@ -5,6 +5,7 @@ using HoverPocket.Shell.Providers.AiLane;
 using HoverPocket.Shell.Providers.Calculator;
 using HoverPocket.Shell.Providers.Calendar;
 using HoverPocket.Shell.Providers.Clipboard;
+using HoverPocket.Shell.Providers.Controls;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
 using HoverPocket.Shell.Services;
@@ -38,8 +39,7 @@ public partial class App : System.Windows.Application
         if (options.VerifySettings)
         {
             VerifyConsole.AttachParent();
-            Environment.ExitCode = new SettingsVerifier().Run();
-            Shutdown();
+            _ = RunSettingsVerificationAsync();
             return;
         }
 
@@ -67,6 +67,18 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (options.VerifyControls)
+        {
+            VerifyConsole.AttachParent();
+            Environment.ExitCode = new ControlsVerifier(
+                options.ChangeBrightnessForVerify,
+                options.TogglePlaybackForVerify,
+                options.VerifyLivePreview,
+                options.VerifyLivePreviewFallback).Run();
+            Shutdown();
+            return;
+        }
+
         if (options.VerifyCalc || options.VerifyTimer || options.VerifyCalendar)
         {
             VerifyConsole.AttachParent();
@@ -79,10 +91,25 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (options.VerifyCalendarLive)
+        {
+            VerifyConsole.AttachParent();
+            _ = RunCalendarLiveVerificationAsync();
+            return;
+        }
+
         if (options.VerifyUpdater)
         {
             VerifyConsole.AttachParent();
             Environment.ExitCode = new UpdaterVerifier().Run();
+            Shutdown();
+            return;
+        }
+
+        if (options.VerifyReleaseConfig)
+        {
+            VerifyConsole.AttachParent();
+            Environment.ExitCode = new ReleaseConfigVerifier().Run();
             Shutdown();
             return;
         }
@@ -153,6 +180,18 @@ public partial class App : System.Windows.Application
 
         var verifier = new ShellVerifier(_shellController);
         Environment.ExitCode = await verifier.RunAsync();
+        Shutdown();
+    }
+
+    private async Task RunSettingsVerificationAsync()
+    {
+        Environment.ExitCode = await new SettingsVerifier().RunAsync();
+        Shutdown();
+    }
+
+    private async Task RunCalendarLiveVerificationAsync()
+    {
+        Environment.ExitCode = await new CalendarLiveVerifier().RunAsync();
         Shutdown();
     }
 

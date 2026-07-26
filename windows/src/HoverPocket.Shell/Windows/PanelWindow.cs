@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Display;
@@ -18,6 +19,7 @@ internal sealed class PanelWindow : NoActivateWindow
     public const double CollapsedWidth = AccessSurfaceWindow.SurfaceWidth;
     public const double CollapsedHeight = AccessSurfaceWindow.SurfaceHeight;
     public static readonly TimeSpan AnimationDuration = TimeSpan.FromMilliseconds(220);
+    public static readonly TimeSpan ResizeAnimationDuration = TimeSpan.FromMilliseconds(180);
     private const string UiHostName = "app.hoverpocket.local";
     private const string UiBaseUrl = "https://app.hoverpocket.local/index.html";
     private const double CornerRadiusDips = 18;
@@ -27,10 +29,25 @@ internal sealed class PanelWindow : NoActivateWindow
     private readonly bool _enableDevTools;
     private readonly Grid _root = new();
     private readonly Border _fallbackVisual;
+    private readonly System.Windows.Controls.Image _morphImage = new()
+    {
+        Stretch = Stretch.Fill,
+        Visibility = Visibility.Collapsed,
+        IsHitTestVisible = false
+    };
     private readonly List<string> _processFailures = [];
+    private readonly SemaphoreSlim _snapshotCaptureGate = new(1, 1);
     private int _animationGeneration;
+    private int _snapshotRefreshGeneration;
+    private bool _isAnimating;
+    private bool _morphActive;
+    private BitmapSource? _lastSnapshot;
     private WebView2? _webView;
     private Task? _initializationTask;
+    private IDisposable? _bridgeAttachment;
+    private bool _closed;
+
+    public AnimationDiagnostics LastAnimationDiagnostics { get; private set; } = AnimationDiagnostics.Empty;
 
     public PanelWindow(PanelBridgeController bridgeController, bool enableWebView, bool enableDevTools)
         : base(allowsTransparency: false)
@@ -66,18 +83,50 @@ internal sealed class PanelWindow : NoActivateWindow
             }
         };
         _root.Children.Add(_fallbackVisual);
+        _root.Children.Add(_morphImage);
+        System.Windows.Controls.Panel.SetZIndex(_morphImage, 2);
         Content = _root;
 
-        SizeChanged += (_, _) => ApplyRoundedRegion();
+        SizeChanged += (_, _) =>
+        {
+            if (!_isAnimating)
+            {
+                ApplyRoundedRegion();
+            }
+        };
     }
 
     public IReadOnlyList<string> ProcessFailures => _processFailures;
 
+    public bool IsAnimating => _isAnimating;
+
+    public bool KeyboardInteractionEnabled => ActivationEnabled;
+
+    protected override bool ActivatesOnMouseInteraction => true;
+
     public WebView2? WebView => _webView;
+
+    public void ReleaseBridgeAttachment()
+    {
+        _bridgeAttachment?.Dispose();
+        _bridgeAttachment = null;
+    }
+
+    public void PrepareCollapsedState()
+    {
+        MinWidth = 1;
+        MinHeight = 1;
+    }
+
+    public void RestorePanelMinimums()
+    {
+        MinWidth = PanelSizeCatalog.Get(PanelSize.Small).Width;
+        MinHeight = PanelSizeCatalog.Get(PanelSize.Small).TotalHeight;
+    }
 
     public async Task EnsureWebViewInitializedAsync()
     {
-        if (!_enableWebView)
+        if (!_enableWebView || _closed)
         {
             return;
         }
@@ -129,7 +178,7 @@ internal sealed class PanelWindow : NoActivateWindow
             """;
 
         _ = await _webView.ExecuteScriptAsync(startScript);
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(8);
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(18);
         while (DateTimeOffset.UtcNow < deadline)
         {
             var errorJson = await _webView.ExecuteScriptAsync("window.__hoverPocketVerifyError");
@@ -148,7 +197,9 @@ internal sealed class PanelWindow : NoActivateWindow
             await Task.Delay(100);
         }
 
-        return null;
+        var stepJson = await _webView.ExecuteScriptAsync("window.__hoverPocketVerifyStep");
+        var step = JsonSerializer.Deserialize<string?>(stepJson, BridgeJson.Options);
+        throw new TimeoutException($"UI verification timed out at step: {step ?? "unknown"}");
     }
 
     public void ApplyPanelSize(PanelSize panelSize)
@@ -166,6 +217,7 @@ internal sealed class PanelWindow : NoActivateWindow
 
         if (!IsVisible)
         {
+            PrepareCollapsedState();
             ApplyPlacement(layout.PanelCollapsed, show: true);
             Opacity = 0;
             from = layout.PanelCollapsed;
@@ -176,16 +228,30 @@ internal sealed class PanelWindow : NoActivateWindow
             from = GetCurrentPlacement(layout.PanelCollapsed);
         }
 
-        await AnimateToAsync(from, layout.PanelTarget, 1, generation);
+        if (_lastSnapshot is not null)
+        {
+            BeginMorph(_lastSnapshot);
+        }
+
+        await AnimateToAsync(
+            from,
+            layout.PanelTarget,
+            1,
+            generation,
+            AnimationDuration,
+            MorphDirection.Open);
         if (generation == _animationGeneration)
         {
             ApplyPlacement(layout.PanelTarget, show: true);
             Opacity = 1;
+            ResetMorphState();
+            ScheduleSnapshotRefresh();
         }
     }
 
     public async Task CloseAsync(DisplaySurfaceLayout layout)
     {
+        EndKeyboardInteraction();
         if (!IsVisible)
         {
             return;
@@ -194,12 +260,56 @@ internal sealed class PanelWindow : NoActivateWindow
         var generation = ++_animationGeneration;
         var from = GetCurrentPlacement(layout.PanelTarget);
 
-        await AnimateToAsync(from, layout.PanelCollapsed, 0, generation);
+        if (_lastSnapshot is not null)
+        {
+            BeginMorph(_lastSnapshot);
+        }
+
+        await AnimateToAsync(
+            from,
+            layout.PanelCollapsed,
+            0,
+            generation,
+            AnimationDuration,
+            MorphDirection.Close);
         if (generation == _animationGeneration)
         {
+            PrepareCollapsedState();
             Hide();
             ApplyPlacement(layout.PanelCollapsed, show: false);
             Opacity = 0;
+            ResetMorphState(restoreMinimums: false);
+        }
+    }
+
+    public async Task ResizeAsync(WindowPlacement target)
+    {
+        if (!IsVisible)
+        {
+            ApplyPlacement(target, show: false);
+            return;
+        }
+
+        var generation = ++_animationGeneration;
+        var from = GetCurrentPlacement(target);
+        if (_lastSnapshot is not null)
+        {
+            BeginMorph(_lastSnapshot);
+        }
+
+        await AnimateToAsync(
+            from,
+            target,
+            1,
+            generation,
+            ResizeAnimationDuration,
+            MorphDirection.Resize);
+        if (generation == _animationGeneration)
+        {
+            ApplyPlacement(target, show: true);
+            Opacity = 1;
+            ResetMorphState();
+            ScheduleSnapshotRefresh();
         }
     }
 
@@ -214,34 +324,223 @@ internal sealed class PanelWindow : NoActivateWindow
         return new WindowPlacement(dipRect, PhysicalRect.FromNative(nativeRect));
     }
 
+    private void BeginMorph(BitmapSource snapshot)
+    {
+        _morphImage.Source = snapshot;
+        _morphImage.Opacity = 1;
+        _morphImage.Visibility = Visibility.Visible;
+        _morphActive = true;
+        if (_webView is not null)
+        {
+            _webView.Visibility = Visibility.Hidden;
+        }
+
+        // Allow the WPF layout to shrink together with the native window rect so the
+        // Stretch=Fill snapshot scales down instead of being clipped at the small-panel minimum.
+        MinWidth = 1;
+        MinHeight = 1;
+    }
+
+    private void ResetMorphState(bool restoreMinimums = true)
+    {
+        _morphActive = false;
+        _morphImage.Visibility = Visibility.Collapsed;
+        _morphImage.Source = null;
+        if (_webView is not null)
+        {
+            _webView.Visibility = Visibility.Visible;
+        }
+        if (restoreMinimums)
+        {
+            RestorePanelMinimums();
+        }
+    }
+
+    private async Task<BitmapSource?> CaptureWebViewAsync()
+    {
+        var core = _webView?.CoreWebView2;
+        if (core is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var stream = new MemoryStream();
+            await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, stream);
+            stream.Position = 0;
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.StreamSource = stream;
+            bitmap.EndInit();
+            bitmap.Freeze();
+            return bitmap;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void ScheduleSnapshotRefresh()
+    {
+        if (!IsVisible || _webView?.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        var generation = ++_snapshotRefreshGeneration;
+        _ = RefreshSnapshotAsync(generation);
+    }
+
+    private async Task RefreshSnapshotAsync(int generation)
+    {
+        await Task.Delay(120);
+        if (generation != _snapshotRefreshGeneration || !IsVisible || _morphActive)
+        {
+            return;
+        }
+
+        await _snapshotCaptureGate.WaitAsync();
+        try
+        {
+            if (generation != _snapshotRefreshGeneration || !IsVisible || _morphActive)
+            {
+                return;
+            }
+
+            var snapshot = await CaptureWebViewAsync();
+            if (snapshot is not null
+                && generation == _snapshotRefreshGeneration
+                && !_morphActive)
+            {
+                _lastSnapshot = snapshot;
+            }
+        }
+        finally
+        {
+            _snapshotCaptureGate.Release();
+        }
+    }
+
     private async Task AnimateToAsync(
         WindowPlacement from,
         WindowPlacement to,
         double targetOpacity,
-        int generation)
+        int generation,
+        TimeSpan duration,
+        MorphDirection direction)
     {
-        var startOpacity = Opacity;
-        var start = DateTimeOffset.UtcNow;
-
-        while (true)
+        if (!SystemParameters.ClientAreaAnimation)
         {
-            if (generation != _animationGeneration)
+            ApplyPlacement(to, show: targetOpacity > 0);
+            Opacity = targetOpacity;
+            return;
+        }
+
+        var startOpacity = Opacity;
+        var start = Stopwatch.GetTimestamp();
+        var previousFrame = start;
+        var frameCount = 0;
+        var maxFrameGap = TimeSpan.Zero;
+        _isAnimating = true;
+        ApplyRoundedRegion(to);
+        try
+        {
+            while (true)
+            {
+                if (generation != _animationGeneration)
+                {
+                    return;
+                }
+
+                var elapsed = Stopwatch.GetElapsedTime(start);
+                var frameGap = Stopwatch.GetElapsedTime(previousFrame);
+                previousFrame = Stopwatch.GetTimestamp();
+                maxFrameGap = frameGap > maxFrameGap ? frameGap : maxFrameGap;
+                frameCount++;
+                var progress = Math.Clamp(elapsed.TotalMilliseconds / duration.TotalMilliseconds, 0, 1);
+                var eased = direction == MorphDirection.Close
+                    ? EaseInOutCubic(progress)
+                    : EaseOutCubic(progress);
+                ApplyPlacement(Interpolate(from, to, eased), show: true);
+                Opacity = Interpolate(startOpacity, targetOpacity, eased);
+                UpdateMorphCrossfade(direction, progress, targetOpacity);
+
+                if (progress >= 1)
+                {
+                    return;
+                }
+
+                await WaitForNextFrameAsync(previousFrame);
+            }
+        }
+        finally
+        {
+            if (generation == _animationGeneration)
+            {
+                LastAnimationDiagnostics = new AnimationDiagnostics(
+                    direction.ToString(),
+                    frameCount,
+                    Stopwatch.GetElapsedTime(start),
+                    maxFrameGap);
+                _isAnimating = false;
+                ApplyRoundedRegion();
+            }
+        }
+    }
+
+    private void UpdateMorphCrossfade(MorphDirection direction, double progress, double targetOpacity)
+    {
+        if (!_morphActive)
+        {
+            return;
+        }
+
+        if (direction == MorphDirection.Close)
+        {
+            _morphImage.Opacity = progress < 0.78
+                ? 1
+                : Interpolate(1, targetOpacity, SmoothStep((progress - 0.78) / 0.22));
+            return;
+        }
+
+        if (progress >= 0.72 && _webView is not null)
+        {
+            _webView.Visibility = Visibility.Visible;
+        }
+
+        _morphImage.Opacity = progress < 0.68
+            ? 1
+            : 1 - SmoothStep((progress - 0.68) / 0.32);
+    }
+
+    private static async Task WaitForNextFrameAsync(long previousFrameTimestamp)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        EventHandler? handler = null;
+        handler = (_, _) =>
+        {
+            // WPF may raise multiple Rendering events for one native resize. Limiting
+            // placement updates to 200 Hz still covers 144/165 Hz displays without
+            // creating a SetWindowPos feedback loop.
+            if (Stopwatch.GetElapsedTime(previousFrameTimestamp) < TimeSpan.FromMilliseconds(5))
             {
                 return;
             }
 
-            var elapsed = DateTimeOffset.UtcNow - start;
-            var progress = Math.Clamp(elapsed.TotalMilliseconds / AnimationDuration.TotalMilliseconds, 0, 1);
-            var eased = EaseOutCubic(progress);
-            ApplyPlacement(Interpolate(from, to, eased), show: true);
-            Opacity = Interpolate(startOpacity, targetOpacity, eased);
-
-            if (progress >= 1)
-            {
-                return;
-            }
-
-            await Task.Delay(16);
+            CompositionTarget.Rendering -= handler;
+            completion.TrySetResult();
+        };
+        CompositionTarget.Rendering += handler;
+        try
+        {
+            _ = await Task.WhenAny(completion.Task, Task.Delay(50));
+        }
+        finally
+        {
+            CompositionTarget.Rendering -= handler;
         }
     }
 
@@ -276,6 +575,19 @@ internal sealed class PanelWindow : NoActivateWindow
         return 1 - (inverse * inverse * inverse);
     }
 
+    private static double EaseInOutCubic(double progress)
+    {
+        return progress < 0.5
+            ? 4 * progress * progress * progress
+            : 1 - (Math.Pow(-2 * progress + 2, 3) / 2);
+    }
+
+    private static double SmoothStep(double progress)
+    {
+        var clamped = Math.Clamp(progress, 0, 1);
+        return clamped * clamped * (3 - (2 * clamped));
+    }
+
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
@@ -294,7 +606,7 @@ internal sealed class PanelWindow : NoActivateWindow
         {
             CreationProperties = new CoreWebView2CreationProperties
             {
-                AdditionalBrowserArguments = "--disable-gpu",
+                AdditionalBrowserArguments = DisableGpuRequested() ? "--disable-gpu" : string.Empty,
                 UserDataFolder = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                     "HoverPocket",
@@ -309,6 +621,12 @@ internal sealed class PanelWindow : NoActivateWindow
         _fallbackVisual.Visibility = Visibility.Collapsed;
 
         await webView.EnsureCoreWebView2Async();
+        if (_closed)
+        {
+            webView.Dispose();
+            return;
+        }
+
         webView.DefaultBackgroundColor = System.Drawing.Color.Transparent;
         webView.CoreWebView2.ProcessFailed += (_, args) =>
         {
@@ -338,14 +656,54 @@ internal sealed class PanelWindow : NoActivateWindow
         var dispatcher = new BridgeDispatcher(json =>
         {
             webView.CoreWebView2.PostWebMessageAsJson(json);
+            ScheduleSnapshotRefresh();
             return Task.CompletedTask;
         });
-        _bridgeController.Attach(dispatcher);
+        _bridgeAttachment = _bridgeController.Attach(dispatcher);
+        dispatcher.Register("panel.beginTextInput", (_, _) =>
+            Task.FromResult<object?>(BeginKeyboardInteraction()));
+        dispatcher.Register("panel.endTextInput", (_, _) =>
+            Task.FromResult<object?>(EndKeyboardInteraction()));
         webView.CoreWebView2.WebMessageReceived += async (_, args) =>
         {
             await dispatcher.HandleRawMessageAsync(args.TryGetWebMessageAsString());
+            ScheduleSnapshotRefresh();
         };
         webView.CoreWebView2.Navigate(UiBaseUrl);
+    }
+
+    private object BeginKeyboardInteraction()
+    {
+        var activated = SetActivationEnabled(true);
+        _ = _webView?.Focus();
+        return KeyboardInteractionState(activated);
+    }
+
+    private object EndKeyboardInteraction()
+    {
+        var changed = SetActivationEnabled(false);
+        return KeyboardInteractionState(changed);
+    }
+
+    private object KeyboardInteractionState(bool activationResult)
+    {
+        var styles = Hwnd == IntPtr.Zero ? 0 : NativeMethods.GetExtendedStyles(Hwnd);
+        return new
+        {
+            keyboardInteractionEnabled = KeyboardInteractionEnabled,
+            noActivateStyle = (styles & NativeMethods.WsExNoActivate) != 0,
+            activationResult
+        };
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _closed = true;
+        EndKeyboardInteraction();
+        ReleaseBridgeAttachment();
+        _webView?.Dispose();
+        _webView = null;
+        base.OnClosed(e);
     }
 
     private static string ResolveUiFolder()
@@ -384,10 +742,75 @@ internal sealed class PanelWindow : NoActivateWindow
         var ellipse = Math.Max(1, (int)Math.Round(CornerRadiusDips * 2 * dpi.DpiScaleX));
         NativeMethods.SetRoundedWindowRegion(Hwnd, width, height, ellipse, ellipse);
     }
+
+    private void ApplyRoundedRegion(WindowPlacement placement)
+    {
+        if (Hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var ellipse = Math.Max(1, (int)Math.Round(CornerRadiusDips * 2 * dpi.DpiScaleX));
+        NativeMethods.SetRoundedWindowRegion(
+            Hwnd,
+            Math.Max(1, placement.PhysicalRect.Width),
+            Math.Max(1, placement.PhysicalRect.Height),
+            ellipse,
+            ellipse);
+    }
+
+    private static bool DisableGpuRequested()
+    {
+        return string.Equals(
+            Environment.GetEnvironmentVariable("HOVERPOCKET_WEBVIEW_DISABLE_GPU"),
+            "1",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private enum MorphDirection
+    {
+        Open,
+        Close,
+        Resize
+    }
+}
+
+internal sealed record AnimationDiagnostics(
+    string Direction,
+    int FrameCount,
+    TimeSpan Elapsed,
+    TimeSpan MaxFrameGap)
+{
+    public static AnimationDiagnostics Empty { get; } = new("None", 0, TimeSpan.Zero, TimeSpan.Zero);
 }
 
 internal sealed record UiWebVerifyResult(
     bool EchoOk,
+    bool ControlsRenderedOk,
+    bool ControlsLayoutOk,
+    bool ControlsHitAreasOk,
+    bool ControlsFallbackLayerOk,
+    bool ControlsStableRefreshOk,
+    bool ControlsBrightnessResolvedOk,
+    bool ClipboardStableProviderOk,
+    bool ClipboardStableRefreshOk,
+    bool ClipboardSplitViewOk,
+    bool ClipboardCenteredSplitOk,
+    bool ClipboardTabsOk,
+    bool ClipboardDeleteActionsOk,
+    bool ClipboardNoDragActionOk,
+    bool ClipboardNoResolutionOk,
+    bool ClipboardPreviewBehaviorOk,
+    bool CalculatorHistorySidebarOk,
+    bool ProviderIconStableOk,
+    bool ProviderDragReorderReadyOk,
+    bool TextInputActivationOk,
+    bool CalendarMacLayoutOk,
+    bool CalendarEditorStableOk,
+    bool TimerLayoutOk,
+    bool TimerInteractionStableOk,
+    bool TextSizeScaleReadyOk,
     bool ProviderSwitchOk,
     bool SettingsWriteOk,
     string OriginalProvider,

@@ -13,6 +13,7 @@ internal sealed class StickyVerifier
         var store = new StickyNotesStore(root);
 
         VerifyCrud(store);
+        VerifyTitleLimit(store);
         VerifyReorder(store);
         VerifyArchiveUndo(store);
         VerifyDropArchiveUndo(store);
@@ -37,6 +38,26 @@ internal sealed class StickyVerifier
 
         VerifyConsole.WriteLine($"sticky_root={root}");
         return 1;
+    }
+
+    private void VerifyTitleLimit(StickyNotesStore store)
+    {
+        var note = store.CreateNote(StickyNoteColor.Yellow);
+        store.UpdateNote(note.Id, new string('a', 31), "ASCII title", StickyNoteColor.Yellow);
+        var ascii = store.ActiveNotes.Single(candidate => candidate.Id == note.Id);
+        if (ascii.Title.Length != 30)
+        {
+            _failures.Add($"title limit: expected 30 half-width characters, got {ascii.Title.Length}");
+        }
+
+        store.UpdateNote(note.Id, "あいうえおかきくけこさしすせそた", "Full-width title", StickyNoteColor.Yellow);
+        var fullWidth = store.ActiveNotes.Single(candidate => candidate.Id == note.Id);
+        if (fullWidth.Title != "あいうえおかきくけこさしすせそ")
+        {
+            _failures.Add($"title limit: full-width characters were not limited to 15, got '{fullWidth.Title}'");
+        }
+
+        store.DiscardNote(note.Id);
     }
 
     private void VerifyCrud(StickyNotesStore store)

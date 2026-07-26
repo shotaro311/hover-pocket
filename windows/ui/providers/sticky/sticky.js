@@ -1,9 +1,9 @@
 const COLORS = [
-  { id: "yellow", label: "Yellow" },
-  { id: "pink", label: "Pink" },
-  { id: "mint", label: "Mint" },
-  { id: "blue", label: "Blue" },
-  { id: "lavender", label: "Lavender" },
+  { id: "yellow", ja: "黄", en: "Yellow" },
+  { id: "pink", ja: "ピンク", en: "Pink" },
+  { id: "mint", ja: "ミント", en: "Mint" },
+  { id: "blue", ja: "青", en: "Blue" },
+  { id: "lavender", ja: "ラベンダー", en: "Lavender" },
 ];
 
 const GRID_SIZES = [
@@ -14,6 +14,7 @@ const GRID_SIZES = [
 
 let bridgeRequest = null;
 let containerEl = null;
+let appState = null;
 let stickyState = null;
 let selectedNoteId = null;
 let selectedNewColor = "yellow";
@@ -31,6 +32,9 @@ const pendingNewNoteIds = new Set();
 export function renderStickyProvider(options) {
   containerEl = options.container;
   bridgeRequest = options.request;
+  appState = options.state;
+  const mountedContainer = options.container;
+  const mountedRequest = options.request;
   ensureStylesheet();
 
   if (!stickyState) {
@@ -38,6 +42,17 @@ export function renderStickyProvider(options) {
   }
 
   void refreshState();
+  return {
+    refresh: refreshState,
+    dispose() {
+      if (containerEl !== mountedContainer) {
+        return;
+      }
+      void mountedRequest("panel.endTextInput").catch(() => {});
+      containerEl = null;
+      bridgeRequest = null;
+    },
+  };
 }
 
 export async function runStickyVerify() {
@@ -56,7 +71,7 @@ async function refreshState() {
 
 async function send(method, params = undefined) {
   if (!bridgeRequest) {
-    throw new Error("Sticky bridge is unavailable.");
+    throw new Error(tx("付箋を読み込めません。", "Sticky bridge is unavailable."));
   }
 
   return bridgeRequest(method, params);
@@ -73,7 +88,7 @@ function renderLoading() {
     return;
   }
 
-  containerEl.replaceChildren(element("div", { className: "sticky-loading" }, "Loading sticky notes..."));
+  containerEl.replaceChildren(element("div", { className: "sticky-loading" }, tx("付箋を読み込んでいます…", "Loading sticky notes...")));
 }
 
 function render() {
@@ -102,7 +117,7 @@ function renderHeader() {
   const header = element("header", { className: "sticky-header" });
   const count = stickyState.notes?.length ?? 0;
   header.append(
-    element("div", { className: "sticky-title" }, "Sticky Notes"),
+    element("div", { className: "sticky-title" }, tx("付箋", "Sticky Notes")),
     element("div", { className: "sticky-count" }, String(count)),
     renderGridSizeButtons(),
     element("div", { className: "sticky-header-spacer" }),
@@ -114,7 +129,7 @@ function renderHeader() {
       },
       onDoubleClick: (color) => void createNote(color),
     }),
-    renderIconButton("+", "New note", () => void createNote(selectedNewColor), "sticky-new-button")
+    renderIconButton("+", tx("付箋を追加", "New note"), () => void createNote(selectedNewColor), "sticky-new-button")
   );
 
   if (stickyState.lastErrorMessage) {
@@ -125,7 +140,7 @@ function renderHeader() {
 }
 
 function renderGridSizeButtons() {
-  const wrapper = element("div", { className: "sticky-grid-size", role: "group", ariaLabel: "Sticky note grid size" });
+  const wrapper = element("div", { className: "sticky-grid-size", role: "group", ariaLabel: tx("付箋サイズ", "Sticky note grid size") });
   const current = stickyState.preferences?.gridSize ?? "medium";
 
   for (const size of GRID_SIZES) {
@@ -133,7 +148,7 @@ function renderGridSizeButtons() {
       className: "sticky-mini-button",
       type: "button",
       ariaPressed: String(current === size.id),
-      ariaLabel: `Grid size ${size.label}`,
+      ariaLabel: `${tx("付箋サイズ", "Grid size")} ${size.label}`,
     }, size.label);
     button.addEventListener("click", async () => {
       await finishEditing();
@@ -151,7 +166,7 @@ function renderBoard() {
   const notes = stickyState.notes ?? [];
 
   if (notes.length === 0) {
-    board.append(element("div", { className: "sticky-empty" }, "No notes"));
+    board.append(element("div", { className: "sticky-empty" }, tx("付箋はありません", "No notes")));
   } else {
     const grid = element("div", { className: "sticky-grid" });
     grid.addEventListener("click", (event) => {
@@ -174,7 +189,7 @@ function renderPreviewCard(note, index) {
     className: `sticky-note sticky-note-${note.color}${dropTargetNoteId === note.id ? " is-drop-target" : ""}${draggingNoteId === note.id ? " is-dragging" : ""}`,
     draggable: "true",
     tabIndex: "0",
-    ariaLabel: `Edit ${displayTitle(note)}`,
+    ariaLabel: `${tx("編集", "Edit")} ${displayTitle(note)}`,
   });
   card.dataset.stickyNoteId = note.id;
 
@@ -226,7 +241,7 @@ function renderPreviewCard(note, index) {
   titleRow.append(
     element("h2", { className: "sticky-note-title" }, displayTitle(note)),
     renderExternalDragButton(note),
-    renderIconButton("✓", "Archive note", async (event) => {
+    renderIconButton(stickyActionIcon("archive"), tx("付箋をアーカイブ", "Archive note"), async (event) => {
       event.stopPropagation();
       await archiveNote(note);
     }, "sticky-archive-button")
@@ -262,25 +277,31 @@ function renderEditor(note) {
       onSelect: (color) => void changeDraftColor(color),
     }),
     element("div", { className: "sticky-header-spacer" }),
-    renderIconButton("✓", "Archive note", () => void archiveNote(note), "sticky-archive-button"),
-    renderIconButton("⌫", "Delete note", () => void deleteNote(note), "sticky-delete-button"),
-    renderIconButton("↵", "Done", () => void finishEditing(), "sticky-done-button")
+    renderIconButton(stickyActionIcon("archive"), tx("付箋をアーカイブ", "Archive note"), () => void archiveNote(note), "sticky-archive-button"),
+    renderIconButton(stickyActionIcon("trash"), tx("付箋を削除", "Delete note"), () => void deleteNote(note), "sticky-delete-button"),
+    renderIconButton(stickyActionIcon("save"), tx("付箋を保存", "Save note"), () => void finishEditing(), "sticky-done-button")
   );
 
   const titleInput = element("input", {
     className: "sticky-title-input",
     type: "text",
-    placeholder: "Title",
+    placeholder: tx("タイトル", "Title"),
     value: draft.title,
   });
+  const titleCounter = element("span", { className: "sticky-title-counter" }, `${titleWidth(draft.title)}/30`);
   titleInput.addEventListener("input", () => {
-    draft.title = titleInput.value;
+    const limited = limitTitle(titleInput.value);
+    if (titleInput.value !== limited) {
+      titleInput.value = limited;
+    }
+    draft.title = limited;
+    titleCounter.textContent = `${titleWidth(limited)}/30`;
   });
   titleInput.addEventListener("keydown", handleEditorKeyDown);
 
   const bodyInput = element("textarea", {
     className: "sticky-body-input",
-    placeholder: "Body",
+    placeholder: tx("本文", "Body"),
   });
   bodyInput.value = draft.body;
   bodyInput.addEventListener("input", () => {
@@ -288,17 +309,23 @@ function renderEditor(note) {
   });
   bodyInput.addEventListener("keydown", handleEditorKeyDown);
 
-  card.append(toolbar, titleInput, bodyInput);
+  card.append(toolbar, element("div", { className: "sticky-title-field" }, titleInput, titleCounter), bodyInput);
   queueMicrotask(() => {
-    if (document.activeElement !== titleInput && document.activeElement !== bodyInput) {
-      titleInput.focus();
-    }
+    void send("panel.beginTextInput")
+      .catch(() => null)
+      .then(() => {
+        if (titleInput.isConnected
+            && document.activeElement !== titleInput
+            && document.activeElement !== bodyInput) {
+          titleInput.focus({ preventScroll: true });
+        }
+      });
   });
   return card;
 }
 
 function renderExternalDragButton(note) {
-  const button = renderIconButton("↗", "Drag body to another app", async (event) => {
+  const button = renderIconButton("↗", tx("本文を別のアプリへドラッグ", "Drag body to another app"), async (event) => {
     event.stopPropagation();
   }, "sticky-external-drag-button");
   button.draggable = false;
@@ -312,7 +339,7 @@ function renderExternalDragButton(note) {
 
 function renderTrashDropZone() {
   const zone = element("div", { className: `sticky-trash${draggingNoteId ? " is-visible" : ""}${trashTargeted ? " is-targeted" : ""}` });
-  zone.append(element("span", { className: "sticky-trash-icon" }, "⌫"), element("span", {}, "Drop to archive"));
+  zone.append(element("span", { className: "sticky-trash-icon" }, "⌫"), element("span", {}, tx("ここにドロップしてアーカイブ", "Drop to archive")));
   zone.addEventListener("dragover", (event) => {
     if (!draggingNoteId) {
       return;
@@ -346,16 +373,16 @@ function renderTrashDropZone() {
 }
 
 function renderUndoToast() {
-  const message = toast === "deleted" ? "Note deleted" : "Note archived";
+  const message = toast === "deleted" ? tx("付箋を削除しました", "Note deleted") : tx("付箋をアーカイブしました", "Note archived");
   const wrapper = element("div", { className: "sticky-toast" });
   wrapper.append(
     element("span", {}, message),
-    renderTextButton("Undo", async () => {
+    renderTextButton(tx("元に戻す", "Undo"), async () => {
       await updateState("sticky.undo");
       toast = null;
       render();
     }),
-    renderTextButton("Don't show", async () => {
+    renderTextButton(tx("今後表示しない", "Don't show"), async () => {
       stickyState = await send("sticky.setUndoToastVisible", { visible: false });
       toast = null;
       render();
@@ -376,16 +403,16 @@ function renderContextMenu() {
     style: `left:${menu.x}px;top:${menu.y}px;`,
   });
   wrapper.append(
-    renderMenuButton("Edit", () => {
+    renderMenuButton(tx("編集", "Edit"), () => {
       menu = null;
       void beginEditing(note);
     }),
-    element("div", { className: "sticky-menu-label" }, "Color")
+    element("div", { className: "sticky-menu-label" }, tx("色", "Color"))
   );
 
   const colors = element("div", { className: "sticky-menu-colors" });
   for (const color of COLORS) {
-    const swatch = renderSwatch(color.id, note.color === color.id, color.label);
+    const swatch = renderSwatch(color.id, note.color === color.id, tx(color.ja, color.en));
     swatch.addEventListener("click", async () => {
       menu = null;
       await finishEditing();
@@ -401,11 +428,11 @@ function renderContextMenu() {
   }
   wrapper.append(colors);
   wrapper.append(
-    renderMenuButton("Archive", () => {
+    renderMenuButton(tx("アーカイブ", "Archive"), () => {
       menu = null;
       void archiveNote(note);
     }),
-    renderMenuButton("Delete", () => {
+    renderMenuButton(tx("削除", "Delete"), () => {
       menu = null;
       void deleteNote(note);
     }, "danger")
@@ -416,7 +443,7 @@ function renderContextMenu() {
 function renderColorSwatches({ selectedColor, onSelect, onDoubleClick }) {
   const wrapper = element("div", { className: "sticky-swatches" });
   for (const color of COLORS) {
-    const swatch = renderSwatch(color.id, selectedColor === color.id, color.label);
+    const swatch = renderSwatch(color.id, selectedColor === color.id, tx(color.ja, color.en));
     swatch.addEventListener("click", (event) => {
       event.stopPropagation();
       onSelect(color.id);
@@ -441,15 +468,28 @@ function renderSwatch(color, selected, label) {
   });
 }
 
-function renderIconButton(text, label, onClick, className = "") {
+function renderIconButton(content, label, onClick, className = "") {
   const button = element("button", {
     className: `sticky-icon-button ${className}`.trim(),
     type: "button",
     ariaLabel: label,
     title: label,
-  }, text);
+  }, content);
   button.addEventListener("click", onClick);
   return button;
+}
+
+function stickyActionIcon(name) {
+  const paths = {
+    archive: '<path d="M4 7h16v12H4z"/><path d="M3 3h18v4H3z"/><path d="M9 12h6"/>',
+    trash: '<path d="M4 7h16"/><path d="M9 3h6l1 4H8z"/><path d="M7 7l1 14h8l1-14"/><path d="M10 11v6M14 11v6"/>',
+    save: '<path d="M5 3h12l2 2v16H5z"/><path d="M8 3v6h8V3M8 21v-7h8v7"/>',
+  };
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = paths[name] ?? paths.save;
+  return svg;
 }
 
 function renderTextButton(text, onClick) {
@@ -526,6 +566,7 @@ async function finishEditing() {
   selectedNoteId = null;
   draft = null;
   render();
+  void send("panel.endTextInput").catch(() => {});
   return !(isPendingNew && isBlank);
 }
 
@@ -679,7 +720,7 @@ function displayTitle(note) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find(Boolean);
-  return firstBodyLine || "Untitled";
+  return firstBodyLine || tx("無題", "Untitled");
 }
 
 function cardPreview(note) {
@@ -694,6 +735,30 @@ function cardPreview(note) {
   }
 
   return lines.slice(1).join(" ");
+}
+
+function titleWidth(value) {
+  return [...String(value ?? "")].reduce((width, character) => (
+    width + (/^[\u0000-\u007f\uff61-\uff9f]$/u.test(character) ? 1 : 2)
+  ), 0);
+}
+
+function limitTitle(value) {
+  let width = 0;
+  let result = "";
+  for (const character of String(value ?? "")) {
+    const next = /^[\u0000-\u007f\uff61-\uff9f]$/u.test(character) ? 1 : 2;
+    if (width + next > 30) {
+      break;
+    }
+    result += character;
+    width += next;
+  }
+  return result;
+}
+
+function tx(ja, en) {
+  return appState?.settings?.language === "en" ? en : ja;
 }
 
 function externalText(note) {

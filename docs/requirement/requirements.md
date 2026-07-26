@@ -17,9 +17,9 @@ Windows 版の本質は、「画面上端へポインターを運ぶだけで、
 
 - 画面上端の控えめな起点にホバーすると開き、離れると閉じる。
 - パネルは短いアニメーションで上端から展開し、道具を「ポケットから取り出す」感覚を保つ。
-- Mirror、Controls、Calendar、Clipboard、Sticky Notes、Timer、Calculator を同じシェル内で切り替える。
+- Windows 版は Controls、Calendar、Clipboard、Sticky Notes、Timer、Calculator を同じシェル内で切り替える。Mirror は Windows 版の対象外とし、macOS 版には残す。
 - パネルは通常作業を邪魔せず、必要な時だけ最前面に出る。
-- クリップボード、カメラ、マイク、カレンダー、メディア制御などの強い権限は、明示的な状態表示、無効時の案内、最小保存で扱う。
+- クリップボード、カレンダー、メディア制御などの強い権限は、明示的な状態表示、無効時の案内、最小保存で扱う。
 
 ## 1. 前提と範囲
 
@@ -42,7 +42,7 @@ Windows 版の本質は、「画面上端へポインターを運ぶだけで、
 - 最終技術スタック。
 - UI コンポーネント単位の詳細設計。
 - 永続化ファイルの最終スキーマ。
-- インストーラー方式、署名証明書、更新配信方式の最終選択。
+- Windows 1.0で使用する署名証明書と発行元の最終選択。
 
 ### 1.4 Mac / Windows 横断ワークフロー
 
@@ -61,6 +61,8 @@ Release policy:
 - Windows は Windows 専用 feed を使う。
 - release asset 名は OS ごとに衝突しない名前にする。
 - 配信後は各 OS の feed と成果物を別経路で readback する。
+- Windows 0.2.xは公開ベータとし、コード署名証明書を取得するまで未署名であることをREADME、Release notes、成果物manifestへ明記する。
+- Windows 1.0またはmacOS版と同等の正式版では、タイムスタンプ付きAuthenticode署名と公開成果物の署名readbackを必須にする。
 
 受け入れ条件:
 
@@ -96,14 +98,14 @@ Must:
 受け入れ条件:
 
 - 25 回以上の連続 open/close で、ウィンドウが増殖しない。
-- close 後にカメラ映像やパネル残像が残らない。
+- close 後に WebView2 やパネルの残像が残らない。
 - 開閉直後にクリックが誤って下のアプリへ抜けない。
 
 ### R-UX-003: 全機能は同じポケット内で切り替わる
 
 Must:
 
-- Provider は `Mirror`、`Controls`、`Calculator`、`Calendar`、`Clipboard`、`Sticky Notes`、`Timer` の順を初期登録候補にする。
+- Windows の Provider は `Controls`、`Calculator`、`Calendar`、`Clipboard`、`Sticky Notes`、`Timer` の順を初期登録候補にする。
 - Provider header には現在の provider 名、パネルサイズ切り替え、provider アイコン、更新アイコン、設定アイコンを置く。
 - provider アイコンは Click 切り替えと Hover 切り替えを設定で選べる。
 - provider はドラッグまたは代替操作で並び替えられる。
@@ -189,7 +191,7 @@ Must:
 
 受け入れ条件:
 
-- Clipboard 画像/テキスト、Sticky Notes の外部ドラッグで、ドラッグ元パネルがドロップ先を覆い続けない。
+- Sticky Notes の外部ドラッグで、ドラッグ元パネルがドロップ先を覆い続けない。
 - パネル閉鎖中に内部 state が壊れず、再表示時に provider が正常に戻る。
 
 ### R-SHELL-005: Access window と Preview window の責務分離
@@ -199,44 +201,24 @@ Must:
 - Windows 版でも、上端ホットゾーンを担当する軽量 access surface と、入力可能な preview panel surface を概念上分離する。
 - access surface は常時控えめに表示し、入力可能な preview panel は開いている間だけ前面化する。
 - preview panel はキーボード入力、ドラッグ、テキスト編集、Google OAuth 後の復帰を受けられる。
+- Windows 版は約2秒ごとに access surface / preview panel の HWND、表示状態、必須 window style、frame を検査し、修復不能な window だけを再生成する。
+- display / DPI変更、sleep復帰、session unlock / console・remote再接続では、即時・約0.45秒後・約1.4秒後に再同期とhealth checkを行う。
 
 受け入れ条件:
 
 - access surface だけが残っている idle 状態で、通常アプリの入力を奪わない。
 - preview panel 表示中は TextBox、drag/drop、context menu、shortcut が provider に届く。
+- WPFのhover通知またはnative window状態が失われても、120ms pointer pollingとhealth checkで再び開ける。
 
 ## 4. Provider 機能要件
 
 ### 4.1 Mirror
 
-Must:
+Windows scope decision (2026-07-10):
 
-- Web カメラ映像を鏡として表示する。
-- 映像は左右反転する。
-- カメラは Mirror provider が active な間だけ起動する。
-- close 後はすぐ破棄せず、短い再ホバーに備えた grace を持つ。既存版の目安は 4 秒。
-- 初回利用時に Windows のカメラ権限が必要であることを表示する。
-- camera permission の requesting、denied、restricted、no camera、failed を状態として扱い、クラッシュせず案内を表示する。
-- 外部モニター利用時にカメラが存在しない場合、Mirror を自動非表示または利用不可表示にできる。
-
-Should:
-
-- カメラ権限が許可済みなら、アプリ起動時に軽く prewarm して初回表示を短縮する。
-- 表示中にカメラ接続/切断が起きても、provider 表示を更新する。
-
-Microphone row:
-
-- 設定で表示/非表示を切り替えられる。
-- 表示中だけマイクレベルメーターを動かす。
-- 一時録音、停止、再生を提供する。
-- 録音データはメモリ上だけで扱い、音声ファイルとして保存しない。
-- 録音は短時間用途に限定する。既存版の要件抽出では最大 20 秒を基準にする。
-
-受け入れ条件:
-
-- 連続 open/close 後もカメラが掴みっぱなしにならない。
-- Mirror を閉じた後、CPU/カメラ/マイク利用が停止する。
-- 権限拒否後、設定から復帰できる導線がある。
+- ユーザー判断により、Mirror と Microphone row は Windows 版の対象外とする。
+- Windows 版はカメラ・マイク権限、録音、camera session を持たない。
+- macOS 版の Mirror 実装と配布要件は変更しない。
 
 ### 4.2 Controls
 
@@ -316,8 +298,10 @@ Must:
 - テキスト履歴は最大 30 件、画像履歴は最大 20 件を基準にする。
 - クリップボード監視は軽量に行い、既存版の目安として 0.75 秒間隔を基準にする。
 - provider が有効な間だけ clipboard monitoring を開始し、provider が非表示/無効の場合は停止できる。
-- 履歴項目クリックで再コピーできる。
-- テキストと画像を外部アプリへドラッグできる。
+- 履歴項目クリックで全体プレビューを開き、コピー操作は各項目のコピーボタンから実行できる。
+- テキストと画像の各履歴は、ゴミ箱ボタンから個別に削除できる。
+- 通常タブはテキストと画像を中央で等分した split view、お気に入りタブはお気に入りだけを同じ split view で表示する。
+- 全体プレビューでは画像全体をパネル内へ収め、テキストはスクロールして全文を読める。
 - 画像は PNG 相当に正規化し、重複はハッシュで抑制する。
 - 画像ファイルと履歴 metadata をローカル Application Data 配下に保存する。
 - metadata は `history.json` 相当、画像実体は個別 PNG ファイルとして分ける。
@@ -437,8 +421,6 @@ Must:
 - Provider selection: 前回開いた provider を優先するか、固定 default provider を使うか。
 - Handle icon: B / C / None 相当。
 - Top handle side area: 表示 / 非表示。
-- Mirror microphone row: 表示 / 非表示。
-- Mirror on secondary displays: 表示 / 非表示。
 - Sticky Notes undo toast: 表示 / 非表示。
 - Sticky Notes grid size: S / M / L。
 - Check for Updates。
@@ -450,7 +432,6 @@ Windows 追加 Must:
 - Disable top-edge trigger while full-screen app is active。
 - Reset panel position and display binding。
 - Open data folder。
-- Open Windows privacy settings for Camera/Microphone when permission is blocked。
 
 ## 6. データ保存とセキュリティ
 
@@ -479,7 +460,6 @@ Must:
 - Clipboard history は機密情報を保存しうるため、README と Settings で明示する。
 - Private Mode で一時停止できる。
 - ユーザーが履歴を全削除できる。
-- Mirror の一時録音はメモリ上だけで扱い、ファイル保存しない。
 
 Should:
 
@@ -501,8 +481,7 @@ Must:
 - monitor 追加/削除、sleep/wake 復帰時の再同期。
 - グローバルなマウス位置監視または上端ホットゾーン window。
 - Win32 Clipboard 変更通知、または同等の clipboard listener。
-- クリップボード読み書きと画像ファイル drag/drop。
-- カメラとマイク利用、権限状態の検出。
+- クリップボード読み書きと、画像履歴のローカルPNG保存・個別削除。
 - Windows 音量取得/設定/ミュート。
 - Windows media session 読み取りと再生制御。未対応アプリには fallback を設計する。
 - ディスプレイ輝度操作と unsupported fallback。
@@ -510,7 +489,8 @@ Must:
 - Credential Manager などの資格情報保存。
 - ETW/EventSource または rotating file log などの診断ログ。
 - 自動更新または更新通知。
-- Authenticode 署名付き配布。
+- Windows 0.2.x公開ベータでは、署名状態を成果物manifestへ記録し、未署名時のSmartScreen警告を利用者へ明示する。
+- Windows 1.0またはmacOS版と同等の正式版では、Authenticode署名付きで配布する。
 
 Should:
 
@@ -546,7 +526,7 @@ Should:
 
 懸念:
 
-- Controls、Mirror、media、DDC/CI、Credential Manager などは Rust/Win32 側の実装品質が成否を握る。
+- Controls、media、DDC/CI、Credential Manager などは Rust/Win32 側の実装品質が成否を握る。
 - ネイティブらしい overlay/window focus/drag/drop は追加検証が必要。
 
 ### 候補 C: Native shell + WebView2 UI
@@ -564,7 +544,7 @@ Should:
 推奨前提:
 
 - 要件定義段階では、技術選定より先に「Windows native shell 能力」と「provider UI/logic の分離」を固定する。
-- 最初の実装検証では、top-edge overlay、tray、多画面 DPI、Clipboard drag/drop、camera permission の 5 点を spike する。
+- 最初の実装検証では、top-edge overlay、tray、多画面 DPI、Clipboard履歴保存・個別削除、Controls API の 5 点を spike する。
 
 ## 9. MVP と段階的リリース
 
@@ -612,12 +592,10 @@ Must:
 
 - 実用性が高いが、プライバシーと認証の設計が必要。
 
-### Phase 3: Mirror と Controls
+### Phase 3: Controls
 
 Must:
 
-- Camera mirror。
-- Microphone row。
 - Volume。
 - Display brightness。
 - Now Playing。
@@ -631,7 +609,8 @@ Must:
 
 Must:
 
-- 署名付き installer/package。
+- Windows 0.2.x公開ベータでは、署名状態、checksum、OAuth metadata、feed versionをreadbackできるinstaller/package。
+- Windows 1.0またはmacOS版と同等の正式版では、タイムスタンプ付きAuthenticode署名済みinstaller/package。
 - 自動更新または更新確認。
 - GitHub Releases への Windows asset。
 - 初回起動、権限、アンインストール時のデータ扱いを確認。
@@ -651,16 +630,14 @@ Must:
 
 ### 10.2 Provider E2E
 
-- Mirror: カメラ権限許可後に左右反転表示し、閉じるとカメラが停止する。
-- Mirror mic: 一時録音、停止、再生ができ、ファイルが作られない。
 - Controls: 音量/ミュートが実 OS 状態と一致する。
 - Controls: unsupported display brightness が安全に無効化される。
 - Controls: ブラウザ動画の再生情報と倍速が読み戻し確認される。
 - Calendar: 保存済み認証で予定が取得される。
 - Calendar: 日付 hover、クリック固定、追加、編集、削除が動く。
 - Calendar: 権限不足 token は再接続扱いになる。
-- Clipboard: テキスト/画像を履歴化し、クリックで再コピーできる。
-- Clipboard: 画像/テキストを外部アプリへ drag/drop できる。
+- Clipboard: テキスト/画像を履歴化し、全体プレビュー、コピー、お気に入り、個別削除ができる。
+- Clipboard: 通常/お気に入りタブと、中央で等分したテキスト/画像 split view が崩れない。
 - Sticky Notes: 作成、編集、色変更、並び替え、archive/delete、undo が動く。
 - Timer: 2 件まで同時実行でき、pause/resume/stop と終了アラートが動く。
 - Calculator: 代表計算、キーボード入力、Error、copy が動く。
@@ -682,12 +659,11 @@ Must:
 
 - warm hover から空または軽量 provider のパネル表示まで 150ms 以内を目標にする。
 - 通常 provider の初回表示は 500ms 以内を目標にする。
-- Mirror は初回権限やデバイス初期化を除き、1 秒以内に表示を開始する。
-- idle 時 CPU 使用率は低負荷を維持し、camera/mic/media preview/clipboard polling が不要時に動き続けない。
+- idle 時 CPU 使用率は低負荷を維持し、media preview/clipboard polling が不要時に動き続けない。
 
 受け入れ条件:
 
-- 100 回 open/close stress 後に window、thread、timer、camera session が増え続けない。
+- 100 回 open/close stress 後に window、thread、timer が増え続けない。
 - 長時間常駐後も tray、hot zone、provider switching が反応する。
 
 ## 11. Windows 固有の失敗モード
@@ -701,7 +677,6 @@ Must:
 - 上端 hover が、自動非表示 taskbar、Snap Layouts、全画面アプリ、RDP、mixed DPI で誤発火する、または開かない。
 - 常時最前面 panel が UAC secure desktop、ゲーム、管理者権限アプリ、仮想デスクトップで前面化できない。
 - Explorer 再起動後に tray icon が消える。
-- camera/mic が Windows privacy、ドライバ、別アプリ使用中、仮想デバイス、デバイス抜き差しで失敗する。
 - display brightness が DDC/CI、WMI、GPU、HDR、Night light、外部モニター固有仕様で取得/設定不能になる。
 - media control が Windows Media Session 非対応アプリ、ブラウザタブ特定不可、保護コンテンツ、複数同時再生で不安定になる。
 - clipboard が巨大画像、HTML/RTF/file clipboard、管理者/非管理者間 drag/drop、clipboard lock、企業ポリシーで失敗する。
@@ -710,14 +685,14 @@ Must:
 
 ## 12. リリース判定チェックリスト
 
-Windows 版を「macOS 版と同等に使える」と判断するため、初回公開前に次を満たす。
+Windows 版を「macOS 版と同等に使える正式版」と判断するため、1.0公開前に次を満たす。0.2.x公開ベータはこのチェックリストを未達のまま正式版扱いしない。
 
 Must:
 
 - Windows 署名済み installer/package で初回起動、更新、アンインストール、再インストールが通る。
-- macOS 版 verify 相当の Windows CLI 検証がある: Calendar、Camera、Media、Calculator。
+- macOS 版 verify 相当の Windows CLI 検証がある: Calendar、Controls/Media、Calculator。
 - 追加で hover/panel、Clipboard、Sticky Notes、Timer、AI lane の smoke verify がある。
-- Windows 11、通常ユーザー、混在 DPI 複数モニター、camera/mic あり/なし、外部ディスプレイ、Chrome/Edge 再生で手動 E2E が通る。
+- Windows 11、通常ユーザー、混在 DPI 複数モニター、外部ディスプレイ、Chrome/Edge 再生で手動 E2E が通る。
 - 権限拒否、ネットワーク断、破損 JSON、sleep/wake、update 失敗の復旧シナリオが通る。
 - token、OAuth secret、個人情報、clipboard 本文、audit log の扱いがレビュー済みで、不要な外部送信がない。
 - macOS 専用差分が残る場合は README/release notes に明記する。
