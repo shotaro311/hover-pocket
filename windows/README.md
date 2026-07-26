@@ -57,6 +57,8 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 
 `--verify release-config` は、配布成果物がRelease構成・期待バージョン・Windows更新channel・Google OAuth AssemblyMetadataを持ち、ビルド時の設定と一致することを値を表示せず確認します。
 
+`--verify calendar-live` は、既存のWindows Credential Manager資格情報を使って当月のCalendarを読み取り、予定内容を表示せずcalendar数とevent数だけを出力します。予定の作成・更新・削除は行いません。
+
 ## Windows updates and release packaging
 
 Windows 版の更新確認は Velopack と GitHub Releases (`shotaro311/hover-pocket`) を使います。トレイと Settings の `Check for Updates` は Windows channel `win` の feed (`releases.win.json`) へ接続し、更新が見つかった場合はダウンロード前と適用/再起動前に確認します。起動時の自動チェックは既定オンで、失敗しても起動を止めません。

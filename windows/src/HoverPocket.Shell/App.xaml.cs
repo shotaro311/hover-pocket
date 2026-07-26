@@ -91,6 +91,13 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (options.VerifyCalendarLive)
+        {
+            VerifyConsole.AttachParent();
+            _ = RunCalendarLiveVerificationAsync();
+            return;
+        }
+
         if (options.VerifyUpdater)
         {
             VerifyConsole.AttachParent();
@@ -179,6 +186,12 @@ public partial class App : System.Windows.Application
     private async Task RunSettingsVerificationAsync()
     {
         Environment.ExitCode = await new SettingsVerifier().RunAsync();
+        Shutdown();
+    }
+
+    private async Task RunCalendarLiveVerificationAsync()
+    {
+        Environment.ExitCode = await new CalendarLiveVerifier().RunAsync();
         Shutdown();
     }
 
