@@ -1,4 +1,5 @@
 using System.Windows;
+using HoverPocket.Shell.Services;
 using Velopack;
 
 namespace HoverPocket.Shell;
@@ -12,6 +13,7 @@ internal static class Program
         if (!options.IsVerify && !options.SecondInstanceProbe)
         {
             VelopackApp.Build().Run();
+            ArpDisplayVersionRepairService.TryRepairFromCurrentLocator();
         }
 
         var app = new App();

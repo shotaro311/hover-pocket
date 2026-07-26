@@ -24,9 +24,9 @@
 
 ### Windows公開ベータ
 
-[HoverPocket Windows 0.2.2 Setup.exeをダウンロード](https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.2/HoverPocketWin-win-Setup.exe)
+[HoverPocket Windows 0.2.3 Setup.exeをダウンロード](https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.3/HoverPocketWin-win-Setup.exe)
 
-インストールせずに試す場合は、[Portable ZIP](https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.2/HoverPocketWin-win-Portable.zip)を利用できます。Windows版0.2.2はWindows 11 x64向けの公開ベータです。現時点ではAuthenticode未署名のため、初回起動時にMicrosoft Defender SmartScreenの警告が表示される場合があります。1.0正式版ではタイムスタンプ付きAuthenticode署名を必須にします。
+インストールせずに試す場合は、[Portable ZIP](https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.3/HoverPocketWin-win-Portable.zip)を利用できます。Windows版0.2.3はWindows 11 x64向けの公開ベータです。現時点ではAuthenticode未署名のため、初回起動時にMicrosoft Defender SmartScreenの警告が表示される場合があります。1.0正式版ではタイムスタンプ付きAuthenticode署名を必須にします。
 
 GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は開発者向けのソースコード一式です。アプリ本体ではないため、通常のインストールでは使いません。
 

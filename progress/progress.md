@@ -5,6 +5,14 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-26 Windows 0.2.3 ARP DisplayVersion Repair Candidate
+
+- 0.2.2実update後にARP `DisplayVersion`だけ0.2.1へ残った事象へ、通常再起動processでのself-healを追加した。`VelopackLocator.Current`が示す実インストールrootと既存`HoverPocketWin` keyの`InstallLocation`が一致する場合だけ、Registry64/Registry32の`DisplayVersion`を現在versionへ更新する。
+- portable、非インストール、keyなし、path mismatch、例外、verify、second-instance probeではproduction ARPを変更しない。UpdaterVerifierの一時test keyでstale 0.2.2→0.2.3、path mismatch no-op、他value維持、cleanupをDebug / Releaseともに確認した。
+- Debug / Release buildはwarnings 0 / errors 0。Debug主要12 verifier、Release重要6 verifier、全12 JSの`node --check`、`git diff --check`はすべてexit 0。
+- OAuth値をprocess内だけで注入して0.2.3 candidateを生成した。`release-config`は0.2.3・Release・OAuth metadata一致・channel `win`でexit 0、nupkg / Portable内部version、feed、unsigned manifest、checksum 7件も一致した。GitHub Release作成・asset uploadは行っていない。
+- インストール済み0.2.2とARP 0.2.1は上書きせず保持した。残るgateは0.2.3公開後の実update apply/restartと、ARP `DisplayVersion`および他value維持のreadback。詳細: `progress/2026-07/2026-07-26_hover-pocket-windows-0.2.3-arp-fix.md`。
+
 ## 2026-07-26 Windows 0.2.2 Release Candidate Verification
 
 - `origin/codex/windows-0.2.2-release`をtrackingするローカルbranchへ、cleanな状態からswitchした。開始時のlocal / origin / GitHub SHAは`4873e19`で一致し、Windowsローカル`main`とrecovery branchは動かしていない。
