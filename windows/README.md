@@ -67,9 +67,9 @@ Windows は macOS Sparkle の `https://github.com/shotaro311/hover-pocket/releas
 
 ### 署名方針
 
-- Windows 0.2.xは、コード署名証明書を取得するまでAuthenticode未署名の公開版として配布します。
+- Windows 0.2.xは、コード署名証明書を取得するまでAuthenticode未署名の公開ベータとして配布します。
 - Setup.exeの初回実行時にMicrosoft Defender SmartScreenの警告が出る可能性があることを、ダウンロード導線とRelease notesに明記します。
-- 1.0正式版では、タイムスタンプ付きAuthenticode署名と公開成果物の署名readbackを必須gateにします。
+- 1.0またはmacOS版と同等の正式版では、タイムスタンプ付きAuthenticode署名と公開成果物の署名readbackを必須gateにします。
 - 署名証明書やsigning credentialsはGit、ログ、README、progressに記録しません。
 
 Release assetはmacOS Sparkle資産と衝突しない`HoverPocketWin-*`系です。`publish_release.ps1`は、OAuth環境変数が未設定の場合に停止し、Release成果物内のmetadata一致を確認してからVelopack package、`release-manifest.win.json`、`SHA256SUMS-win.txt`を生成します。GitHub Releaseの作成・アップロードはこのスクリプトでは実行しません。

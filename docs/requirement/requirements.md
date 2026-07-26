@@ -42,7 +42,7 @@ Windows 版の本質は、「画面上端へポインターを運ぶだけで、
 - 最終技術スタック。
 - UI コンポーネント単位の詳細設計。
 - 永続化ファイルの最終スキーマ。
-- インストーラー方式、署名証明書、更新配信方式の最終選択。
+- Windows 1.0で使用する署名証明書と発行元の最終選択。
 
 ### 1.4 Mac / Windows 横断ワークフロー
 
@@ -61,6 +61,8 @@ Release policy:
 - Windows は Windows 専用 feed を使う。
 - release asset 名は OS ごとに衝突しない名前にする。
 - 配信後は各 OS の feed と成果物を別経路で readback する。
+- Windows 0.2.xは公開ベータとし、コード署名証明書を取得するまで未署名であることをREADME、Release notes、成果物manifestへ明記する。
+- Windows 1.0またはmacOS版と同等の正式版では、タイムスタンプ付きAuthenticode署名と公開成果物の署名readbackを必須にする。
 
 受け入れ条件:
 
@@ -487,7 +489,8 @@ Must:
 - Credential Manager などの資格情報保存。
 - ETW/EventSource または rotating file log などの診断ログ。
 - 自動更新または更新通知。
-- Authenticode 署名付き配布。
+- Windows 0.2.x公開ベータでは、署名状態を成果物manifestへ記録し、未署名時のSmartScreen警告を利用者へ明示する。
+- Windows 1.0またはmacOS版と同等の正式版では、Authenticode署名付きで配布する。
 
 Should:
 
@@ -606,7 +609,8 @@ Must:
 
 Must:
 
-- 署名付き installer/package。
+- Windows 0.2.x公開ベータでは、署名状態、checksum、OAuth metadata、feed versionをreadbackできるinstaller/package。
+- Windows 1.0またはmacOS版と同等の正式版では、タイムスタンプ付きAuthenticode署名済みinstaller/package。
 - 自動更新または更新確認。
 - GitHub Releases への Windows asset。
 - 初回起動、権限、アンインストール時のデータ扱いを確認。
@@ -681,7 +685,7 @@ Must:
 
 ## 12. リリース判定チェックリスト
 
-Windows 版を「macOS 版と同等に使える」と判断するため、初回公開前に次を満たす。
+Windows 版を「macOS 版と同等に使える正式版」と判断するため、1.0公開前に次を満たす。0.2.x公開ベータはこのチェックリストを未達のまま正式版扱いしない。
 
 Must:
 
