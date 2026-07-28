@@ -243,6 +243,9 @@ enum AppTextKey: String, Sendable {
     case title
     case untitledEvent
     case updates
+    case weather
+    case weatherRegion
+    case weatherRegionDetail
     case updateAvailable
     case updateChecking
     case updateFeedMissing
@@ -496,6 +499,9 @@ enum AppText {
         case .title: return "タイトル"
         case .untitledEvent: return "無題の予定"
         case .updates: return "アップデート"
+        case .weather: return "天気"
+        case .weatherRegion: return "表示地域"
+        case .weatherRegionDetail: return "選択した都道府県の県庁所在地付近を代表地点として表示します。地域設定と直近の予報はこのMacに保存され、取得できない時は保存済み予報を表示します。"
         case .updateAvailable: return "アップデートがあります"
         case .updateChecking: return "アップデートを確認中"
         case .updateFeedMissing: return "アップデート配信が未設定です"
@@ -719,6 +725,9 @@ enum AppText {
         case .title: return "Title"
         case .untitledEvent: return "Untitled event"
         case .updates: return "Updates"
+        case .weather: return "Weather"
+        case .weatherRegion: return "Forecast region"
+        case .weatherRegionDetail: return "Uses the prefectural capital as the representative point. The selected region and latest forecast are saved on this Mac for offline display."
         case .updateAvailable: return "Update available"
         case .updateChecking: return "Checking for updates"
         case .updateFeedMissing: return "Update feed is not configured"

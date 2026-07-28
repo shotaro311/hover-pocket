@@ -53,6 +53,9 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 - 編集では、タイトル、開始/終了時刻、終日、場所、メモを変更できます。
 - 日時入力は手入力に加えて、インラインの調整バー、スクロール、ドラッグで微調整できます。
 - 日付セルのダブルクリックから、新規予定作成を起動できます。
+- macOS版では月グリッド下部に、選択地域の現在気温、天気、最高/最低気温、降水確率と、今後7日間の予報を表示します。
+- 天気の地域はSettingsから日本47都道府県を選択できます。都道府県庁所在地付近を代表地点とし、選択内容と直近の予報をこのMacへ保存します。
+- 通信できない場合は保存済み予報を警告付きで表示し、保存済み予報もない場合は再試行表示へ切り替えます。
 
 ### クリップボード
 
@@ -137,6 +140,7 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 - handle icon: `B / C / None`
 - Mirror の microphone check row 表示 / 非表示
 - Sticky Notes の Undo toast 表示 / 非表示
+- Calendar天気の表示地域（日本47都道府県）
 - Sparkle による手動アップデート確認
 
 ## 動かし方
@@ -165,7 +169,22 @@ Clipboard のお気に入り保護と旧履歴 JSON 互換を確認する場合�
 .build/debug/HoverPocket --verify-clipboard
 ```
 
+天気APIへの実接続、47都道府県コード、地域設定の保存、オフラインキャッシュ、7日予報、SwiftUI描画を確認する場合は次のコマンドを使います。
+
+```bash
+.build/debug/HoverPocket --verify-weather --render-weather-preview
+```
+
 `build_and_run.sh` は `dist/HoverPocket.app` を生成し、利用できる `Apple Development` 署名があれば app bundle を署名します。配布用 ZIP では Developer ID Application 署名と hardened runtime を使います。
+
+## 天気の地域とデータ取得
+
+- 保存する地域IDは都道府県コード（JIS X 0401）の2桁値です。地域名そのものを保存キーにしないため、表示言語を変えても同じ地域を維持します。
+- 初期値は東京都（`13`）です。Settingsの「天気 > 表示地域」から変更できます。
+- 予報地点は選択した都道府県の都道府県庁所在地付近です。Open-Meteoへ送るのは、このアプリに同梱した代表座標だけで、Macの位置情報は取得しません。
+- Open-Meteo Forecast APIから、当日と今後7日間の計8日分を`Asia/Tokyo`で取得します。APIキーや秘密情報は使いません。
+- 取得データはOpen-Meteoへの帰属表示付きです。無料APIは非商用利用向けのため、商用配布へ切り替える場合は有料APIまたはセルフホストへの移行確認が必要です。
+- Windows版には今回の天気UIをまだ追加していません。Windows側へ展開する際も、同じ都道府県コードと表示仕様を基準にします。
 
 ## Google Calendar の設定
 
@@ -286,10 +305,10 @@ Sources/HoverPocket/
   App/         アプリ delegate と起動処理
   Windowing/   NSPanel 作成、ノッチ位置計算、hover close、animation timing
   State/       パネル表示状態、provider 選択、settings、store
-  Models/      provider ID、action、permission、calendar、clipboard、sticky note model
+  Models/      provider ID、action、permission、calendar、weather、clipboard、sticky note model
   Providers/   PocketProvider protocol と ProviderRegistry
   Views/       pill、panel shell、provider UI、settings
-  Services/    OAuth、Calendar API、system controls、updater
+  Services/    OAuth、Calendar API、weather API、system controls、updater
   Support/     再利用 shape と小さな helper
 ```
 

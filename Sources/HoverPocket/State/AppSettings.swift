@@ -27,6 +27,12 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var weatherRegion: WeatherRegion {
+        didSet {
+            defaults.set(weatherRegion.id, forKey: Self.weatherRegionIDKey)
+        }
+    }
+
     @Published var providerSwitchingMode: ProviderSwitchingMode {
         didSet {
             defaults.set(providerSwitchingMode.rawValue, forKey: Self.providerSwitchingModeKey)
@@ -104,6 +110,7 @@ final class AppSettings: ObservableObject {
     private static let displayPlacementModeKey = "displayPlacementMode"
     private static let panelSizeKey = "panelSize"
     private static let panelTextSizeKey = "panelTextSize"
+    private static let weatherRegionIDKey = "weatherRegionID"
     private static let providerSwitchingModeKey = "providerSwitchingMode"
     private static let pillHandleIconStyleKey = "pillHandleIconStyle"
     private static let showNotchSideHandleAreaKey = "showNotchSideHandleArea"
@@ -127,6 +134,8 @@ final class AppSettings: ObservableObject {
         self.panelSize = panelSizeRawValue.flatMap(PanelSizeOption.init(rawValue:)) ?? .medium
         let panelTextSizeRawValue = defaults.string(forKey: Self.panelTextSizeKey)
         self.panelTextSize = panelTextSizeRawValue.flatMap(PanelTextSizeOption.init(rawValue:)) ?? .small
+        let weatherRegionID = defaults.string(forKey: Self.weatherRegionIDKey)
+        self.weatherRegion = weatherRegionID.flatMap(WeatherRegion.region(id:)) ?? .defaultRegion
         let providerSwitchingModeRawValue = defaults.string(forKey: Self.providerSwitchingModeKey)
         self.providerSwitchingMode = providerSwitchingModeRawValue.flatMap(ProviderSwitchingMode.init(rawValue:)) ?? .click
         let pillHandleIconStyleRawValue = defaults.string(forKey: Self.pillHandleIconStyleKey)

@@ -67,8 +67,15 @@ struct GoogleCalendarPreviewView: View {
                 monthHeader
                 weekdayHeader
                 dayGrid
+                WeatherForecastView(
+                    panelSize: settings.panelSize,
+                    language: language,
+                    isActive: isActive,
+                    region: settings.weatherRegion
+                )
             }
             .frame(width: metrics.calendarWidth)
+            .frame(maxHeight: .infinity, alignment: .top)
 
             Divider()
                 .overlay(Color.white.opacity(0.08))

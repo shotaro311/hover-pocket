@@ -1,0 +1,138 @@
+import Foundation
+
+struct WeatherForecast: Codable, Equatable, Sendable {
+    let regionID: String
+    let currentTemperature: Double
+    let currentCondition: WeatherCondition
+    let today: WeatherForecastDay
+    let upcomingDays: [WeatherForecastDay]
+    let fetchedAt: Date
+    let timezoneIdentifier: String
+}
+
+struct WeatherForecastDay: Codable, Identifiable, Equatable, Sendable {
+    let date: Date
+    let condition: WeatherCondition
+    let highTemperature: Double
+    let lowTemperature: Double
+    let precipitationProbability: Int
+
+    var id: Date {
+        date
+    }
+}
+
+enum WeatherCondition: String, Codable, Equatable, Sendable {
+    case clear
+    case mostlyClear
+    case cloudy
+    case fog
+    case drizzle
+    case rain
+    case freezingRain
+    case snow
+    case showers
+    case thunderstorm
+    case unknown
+
+    init(wmoCode: Int) {
+        switch wmoCode {
+        case 0:
+            self = .clear
+        case 1, 2:
+            self = .mostlyClear
+        case 3:
+            self = .cloudy
+        case 45, 48:
+            self = .fog
+        case 51, 53, 55:
+            self = .drizzle
+        case 56, 57, 66, 67:
+            self = .freezingRain
+        case 61, 63, 65:
+            self = .rain
+        case 71, 73, 75, 77, 85, 86:
+            self = .snow
+        case 80, 81, 82:
+            self = .showers
+        case 95, 96, 99:
+            self = .thunderstorm
+        default:
+            self = .unknown
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .clear:
+            return "sun.max.fill"
+        case .mostlyClear:
+            return "cloud.sun.fill"
+        case .cloudy:
+            return "cloud.fill"
+        case .fog:
+            return "cloud.fog.fill"
+        case .drizzle:
+            return "cloud.drizzle.fill"
+        case .rain, .freezingRain:
+            return "cloud.rain.fill"
+        case .snow:
+            return "cloud.snow.fill"
+        case .showers:
+            return "cloud.heavyrain.fill"
+        case .thunderstorm:
+            return "cloud.bolt.rain.fill"
+        case .unknown:
+            return "cloud.fill"
+        }
+    }
+
+    func title(language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.clear, .japanese):
+            return "晴れ"
+        case (.mostlyClear, .japanese):
+            return "晴れ時々くもり"
+        case (.cloudy, .japanese):
+            return "くもり"
+        case (.fog, .japanese):
+            return "霧"
+        case (.drizzle, .japanese):
+            return "霧雨"
+        case (.rain, .japanese):
+            return "雨"
+        case (.freezingRain, .japanese):
+            return "凍雨"
+        case (.snow, .japanese):
+            return "雪"
+        case (.showers, .japanese):
+            return "にわか雨"
+        case (.thunderstorm, .japanese):
+            return "雷雨"
+        case (.unknown, .japanese):
+            return "天気不明"
+        case (.clear, .english):
+            return "Clear"
+        case (.mostlyClear, .english):
+            return "Partly cloudy"
+        case (.cloudy, .english):
+            return "Cloudy"
+        case (.fog, .english):
+            return "Fog"
+        case (.drizzle, .english):
+            return "Drizzle"
+        case (.rain, .english):
+            return "Rain"
+        case (.freezingRain, .english):
+            return "Freezing rain"
+        case (.snow, .english):
+            return "Snow"
+        case (.showers, .english):
+            return "Showers"
+        case (.thunderstorm, .english):
+            return "Thunderstorm"
+        case (.unknown, .english):
+            return "Unknown"
+        }
+    }
+}

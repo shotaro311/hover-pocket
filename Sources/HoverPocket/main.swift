@@ -19,6 +19,9 @@ if CommandLine.arguments.contains("--verify-clipboard") {
 if CommandLine.arguments.contains("--verify-panel-layout") {
     PanelLayoutVerificationCommand.run()
 }
+if CommandLine.arguments.contains("--verify-weather") {
+    WeatherVerificationCommand.run()
+}
 
 let app = NSApplication.shared
 let delegate = AppDelegate()

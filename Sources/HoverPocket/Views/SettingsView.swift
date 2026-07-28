@@ -37,6 +37,10 @@ struct SettingsView: View {
 
                 Divider()
 
+                weatherSection
+
+                Divider()
+
                 googleCalendarSection
 
                 Divider()
@@ -241,6 +245,25 @@ struct SettingsView: View {
                 .font(.system(size: 13, weight: .bold))
 
             Toggle(settings.text(.showStickyNoteUndo), isOn: $settings.showStickyNoteUndoToast)
+        }
+    }
+
+    private var weatherSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(settings.text(.weather))
+                .font(.system(size: 13, weight: .bold))
+
+            Picker(settings.text(.weatherRegion), selection: $settings.weatherRegion) {
+                ForEach(WeatherRegion.allRegions) { region in
+                    Text(region.name(language: language))
+                        .tag(region)
+                }
+            }
+
+            Text(settings.text(.weatherRegionDetail))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

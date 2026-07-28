@@ -1,9 +1,17 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-07-26
+updated: 2026-07-28
 updated_by: codex
 status: active
 ---
+
+## 2026-07-28 Mac Calendar Weather
+
+- Calendar月グリッド下部へ、当日の天気アイコン・状態・現在気温・最高/最低・降水確率と、今後7日間の曜日・天気・最高/最低・降水確率を追加した。既存の暗色、角丸、低opacity borderへ合わせ、Small / Medium / Largeで`50 / 64 / 116pt`へ適応する。
+- Settingsへ日本47都道府県の表示地域pickerを追加した。保存値は都道府県コード（JIS X 0401）、初期値は東京都`13`、予報地点は都道府県庁所在地付近。Macの位置情報、APIキー、秘密情報は使わない。
+- Open-Meteoから`Asia/Tokyo`の当日＋7日を取得し、地域単位のローカルキャッシュ、保存済み予報の警告付きオフライン表示、キャッシュなし時の再試行、画面内の帰属リンクを実装した。無料APIの非商用条件と商用化時の移行要件をREADME / requirementsへ記録した。
+- `swift build`、実APIを使う`--verify-weather --render-weather-preview`、地域設定save/readback、オフラインcache readback、`--verify-panel-layout` 63ケース、`./script/build_and_run.sh --verify`、bundle内weather verifier、codesign、`git diff --check`が成功した。生成appは期待pathの1 processで起動し、位置情報permission keyがないことを確認した。
+- SwiftUI component画像`dist/verification/calendar-weather-preview.png`で表示欠けがないことを確認した。Computer UseではLSUIElementのhover panel全体を対象windowとして取得できず、全体スクリーンショットは未取得。Windows版は未変更でparity残件。詳細: `progress/2026-07/2026-07-28_hover-pocket-calendar-weather.md`。
 
 ## 2026-07-26 Windows 0.2.3 Public Beta Release
 
