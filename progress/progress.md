@@ -8,15 +8,15 @@ status: active
 ## 2026-07-28 Mac Calendar Weather
 
 - Calendarの下段全幅を天気エリアへ変更し、上段とは区切り線で分離した。下段左側に当日の天気、右側に拡大した今後7日間の曜日・天気・最高/最低・降水確率を配置し、Small / Medium / Largeで`58 / 67 / 122pt`へ適応する。
-- Calendar表示時に本日のSF Symbolから週間7個へ70ms間隔で続く一回限りの出現モーションを追加した。本日のアイコンは晴れ・曇り・降水の3種類のSF Symbols標準効果で約5秒だけ動き、表示中は再ループしない。Reduce Motion有効時は即時表示する。
+- Calendar表示時に本日のSF Symbolから週間7個へ70ms間隔で続く一回限りの出現モーションを追加した。本日のアイコンはmacOS 15以上で、晴れをRotate、晴れ時々曇りを雲固定・太陽のみRotate、曇り・霧をBreathe、雨をVariable Color、雪をWiggle、雷をPulseで約5秒だけ動かす。macOS 14はPulse / Variable Colorへ戻り、Reduce Motion有効時は即時表示する。
 - 週間7列を上揃えにし、SF Symbolを固定高さの枠へ収めた。晴れ・曇り・雨などアイコン固有の寸法が違っても、曜日・アイコン・気温・降水確率のY位置が揃う。
 - 高さが短くなった上段右側は予定詳細・予定編集を縦スクロール化し、長い予定一覧や編集フォームが天気エリアへ重ならないようにした。
 - Settingsへ日本47都道府県の表示地域pickerを追加した。保存値は都道府県コード（JIS X 0401）、初期値は東京都`13`、予報地点は都道府県庁所在地付近。Macの位置情報、APIキー、秘密情報は使わない。
 - Open-Meteoから`Asia/Tokyo`の当日＋7日を取得し、地域単位のローカルキャッシュ、保存済み予報の警告付きオフライン表示、キャッシュなし時の再試行、画面内の帰属リンクを実装した。無料APIの非商用条件と商用化時の移行要件をREADME / requirementsへ記録した。
-- `swift build`、実APIを使う`--verify-weather --render-weather-preview`、地域設定save/readback、オフラインcache readback、天候別3プリセットと5秒設定、週間行の固定配置、`--verify-panel-layout` 63ケース、`./script/build_and_run.sh --verify`、bundle内weather verifier、codesign、`git diff --check`が成功した。`swift test`はPackageにtest targetがないため`no tests found`で、専用verifierを検証経路とした。生成appは期待pathの1 processで起動した。
+- `swift build`、実APIを使う`--verify-weather --render-weather-preview`、地域設定save/readback、オフラインcache readback、天候別6プリセット・macOS 14フォールバック・5秒設定、週間行の固定配置、`--verify-panel-layout` 63ケース、`./script/build_and_run.sh --verify`、bundle内weather verifier、codesign、`git diff --check`が成功した。`swift test`はPackageにtest targetがないため`no tests found`で、専用verifierを検証経路とした。生成appは期待pathの1 processで起動した。
 - SwiftUI component画像`dist/verification/calendar-weather-preview.png`と、起動したLargeパネルの画面合成画像`dist/verification/calendar-panel-layout.png`で、月グリッド・予定3件・区切り線・下段天気の表示欠けや重なりがないことを確認した。Windows版は未変更でparity残件。詳細: `progress/2026-07/2026-07-28_hover-pocket-calendar-weather.md`。
 - 実アプリの120fps録画`dist/verification/calendar-weather-motion.mov`で、本日→週間の順序、8個の最終表示維持、常時ループなしをフレーム確認した。
-- 実アプリの9.0秒録画`dist/verification/calendar-weather-condition-motion.mov`で、本日の「晴れ時々くもり」がレイヤー単位で脈動し、約5秒後に通常表示へ戻ること、週間曜日のY位置が再生中も揃うことを確認した。
+- 実アプリの8.9秒録画`dist/verification/calendar-weather-modern-motion.mov`で、本日の「晴れ時々くもり」は雲が固定されたまま太陽の光線だけが回転し、約5秒後に停止することを確認した。停止後の7.5秒・8.0秒・8.5秒フレームは画像ハッシュが完全一致した。
 
 ## 2026-07-26 Windows 0.2.3 Public Beta Release
 

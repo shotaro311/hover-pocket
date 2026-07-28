@@ -89,12 +89,18 @@ enum WeatherCondition: String, Codable, Equatable, Sendable {
 
     var symbolMotionPreset: WeatherSymbolMotionPreset {
         switch self {
-        case .clear, .mostlyClear:
-            return .sunlightPulse
+        case .clear:
+            return .solarRotation
+        case .mostlyClear:
+            return .partlyCloudyRotation
         case .cloudy, .fog, .unknown:
-            return .cloudPulse
-        case .drizzle, .rain, .freezingRain, .snow, .showers, .thunderstorm:
+            return .cloudBreathing
+        case .drizzle, .rain, .freezingRain, .showers:
             return .precipitationCycle
+        case .snow:
+            return .snowDrift
+        case .thunderstorm:
+            return .thunderPulse
         }
     }
 
@@ -149,7 +155,10 @@ enum WeatherCondition: String, Codable, Equatable, Sendable {
 }
 
 enum WeatherSymbolMotionPreset: String, Equatable, Sendable {
-    case sunlightPulse
-    case cloudPulse
+    case solarRotation
+    case partlyCloudyRotation
+    case cloudBreathing
     case precipitationCycle
+    case snowDrift
+    case thunderPulse
 }

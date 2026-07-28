@@ -26,10 +26,12 @@ enum WeatherVerificationCommand {
                       WeatherCondition(wmoCode: 95) == .thunderstorm else {
                     throw WeatherForecastServiceError.malformedForecast
                 }
-                guard WeatherCondition.clear.symbolMotionPreset == .sunlightPulse,
-                      WeatherCondition.cloudy.symbolMotionPreset == .cloudPulse,
+                guard WeatherCondition.clear.symbolMotionPreset == .solarRotation,
+                      WeatherCondition.mostlyClear.symbolMotionPreset == .partlyCloudyRotation,
+                      WeatherCondition.cloudy.symbolMotionPreset == .cloudBreathing,
                       WeatherCondition.rain.symbolMotionPreset == .precipitationCycle,
-                      WeatherCondition.snow.symbolMotionPreset == .precipitationCycle else {
+                      WeatherCondition.snow.symbolMotionPreset == .snowDrift,
+                      WeatherCondition.thunderstorm.symbolMotionPreset == .thunderPulse else {
                     throw WeatherForecastServiceError.malformedForecast
                 }
                 try verifyPersistence(forecast: forecast)
@@ -45,7 +47,9 @@ enum WeatherVerificationCommand {
                 print("weather_region_persistence=ok")
                 print("weather_offline_cache=ok")
                 print("weather_weekday_alignment=fixed")
-                print("weather_symbol_motion_presets=3")
+                print("weather_symbol_motion_presets=6")
+                print("weather_symbol_motion_modern=rotate,breathe,variable-color,wiggle,pulse")
+                print("weather_symbol_motion_fallback=pulse,variable-color")
                 print(
                     "weather_condition_motion_duration_seconds="
                         + "\(WeatherForecastAnimation.currentConditionEffectDurationSeconds)"

@@ -151,12 +151,6 @@ struct WeatherForecastView: View {
             }
             currentConditionEffectActive = true
 
-            Task { @MainActor in
-                try? await Task.sleep(for: WeatherForecastAnimation.currentConditionEffectDuration)
-                guard generation == revealGeneration, isActive else { return }
-                currentConditionEffectActive = false
-            }
-
             for count in 2...Self.totalIconCount {
                 try? await Task.sleep(for: .milliseconds(70))
                 guard generation == revealGeneration, isActive else { return }
@@ -165,6 +159,10 @@ struct WeatherForecastView: View {
                     revealedIconCount = count
                 }
             }
+
+            try? await Task.sleep(for: WeatherForecastAnimation.conditionEffectTailDuration)
+            guard generation == revealGeneration, isActive else { return }
+            currentConditionEffectActive = false
         }
     }
 
@@ -344,9 +342,7 @@ struct WeatherLoadedContent: View {
 
 enum WeatherForecastAnimation {
     static let currentConditionEffectDurationSeconds = 5.0
-    static let currentConditionEffectDuration: Duration = .seconds(
-        currentConditionEffectDurationSeconds
-    )
+    static let conditionEffectTailDuration: Duration = .milliseconds(4_510)
 }
 
 private struct WeatherCurrentAnimatedSymbol: View {
@@ -387,28 +383,143 @@ private struct WeatherConditionEffectSymbol: View {
 
     @ViewBuilder
     var body: some View {
+        if #available(macOS 15.0, *) {
+            modernSymbol
+        } else {
+            legacySymbol
+        }
+    }
+
+    @available(macOS 15.0, *)
+    @ViewBuilder
+    private var modernSymbol: some View {
         switch motionPreset {
-        case .sunlightPulse:
-            symbol
-                .symbolEffect(
-                    .pulse.byLayer,
-                    options: .repeating.speed(0.7),
-                    isActive: isActive
-                )
-        case .cloudPulse:
-            symbol
-                .symbolEffect(
-                    .pulse.wholeSymbol,
-                    options: .repeating.speed(0.55),
-                    isActive: isActive
-                )
+        case .solarRotation:
+            if isActive {
+                symbol
+                    .symbolEffect(
+                        .rotate.clockwise.wholeSymbol,
+                        options: .speed(0.35),
+                        isActive: true
+                    )
+            } else {
+                symbol
+            }
+        case .partlyCloudyRotation:
+            partlyCloudySymbol
+        case .cloudBreathing:
+            if isActive {
+                symbol
+                    .symbolEffect(
+                        .breathe.pulse.wholeSymbol,
+                        options: .speed(0.5),
+                        isActive: true
+                    )
+            } else {
+                symbol
+            }
         case .precipitationCycle:
-            symbol
-                .symbolEffect(
-                    .variableColor.iterative.reversing,
-                    options: .repeating.speed(0.8),
-                    isActive: isActive
-                )
+            if isActive {
+                symbol
+                    .symbolEffect(
+                        .variableColor.iterative.reversing,
+                        options: .speed(0.8),
+                        isActive: true
+                    )
+            } else {
+                symbol
+            }
+        case .snowDrift:
+            if isActive {
+                symbol
+                    .symbolEffect(
+                        .wiggle.down.byLayer,
+                        options: .speed(0.55),
+                        isActive: true
+                    )
+            } else {
+                symbol
+            }
+        case .thunderPulse:
+            if isActive {
+                symbol
+                    .symbolEffect(
+                        .pulse.byLayer,
+                        options: .speed(0.85),
+                        isActive: true
+                    )
+            } else {
+                symbol
+            }
+        }
+    }
+
+    @available(macOS 15.0, *)
+    private var partlyCloudySymbol: some View {
+        ZStack {
+            if isActive {
+                sunSymbol
+                    .symbolEffect(
+                        .rotate.clockwise.wholeSymbol,
+                        options: .speed(0.35),
+                        isActive: true
+                    )
+            } else {
+                sunSymbol
+            }
+
+            Image(systemName: "cloud.fill")
+                .symbolRenderingMode(.multicolor)
+                .font(.system(size: size * 0.82, weight: .semibold))
+                .offset(x: -width * 0.08, y: size * 0.12)
+        }
+        .frame(width: width, height: size)
+    }
+
+    @available(macOS 15.0, *)
+    private var sunSymbol: some View {
+        Image(systemName: "sun.max.fill")
+            .symbolRenderingMode(.multicolor)
+            .font(.system(size: size * 0.68, weight: .semibold))
+            .offset(x: width * 0.24, y: -size * 0.17)
+    }
+
+    @ViewBuilder
+    private var legacySymbol: some View {
+        switch motionPreset {
+        case .solarRotation, .partlyCloudyRotation:
+            if isActive {
+                symbol
+                    .symbolEffect(
+                        .pulse.byLayer,
+                        options: .speed(0.7),
+                        isActive: true
+                    )
+            } else {
+                symbol
+            }
+        case .cloudBreathing:
+            if isActive {
+                symbol
+                    .symbolEffect(
+                        .pulse.wholeSymbol,
+                        options: .speed(0.55),
+                        isActive: true
+                    )
+            } else {
+                symbol
+            }
+        case .precipitationCycle, .snowDrift, .thunderPulse:
+            if isActive {
+                symbol
+                    .symbolEffect(
+                        .variableColor.iterative.reversing,
+                        options: .speed(0.8),
+                        isActive: true
+                    )
+            } else {
+                symbol
+            }
         }
     }
 
