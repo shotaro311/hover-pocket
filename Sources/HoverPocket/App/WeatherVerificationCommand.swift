@@ -90,6 +90,7 @@ enum WeatherVerificationCommand {
             withIntermediateDirectories: true
         )
         let outputURL = outputDirectory.appendingPathComponent("calendar-weather-preview.png")
+        let metrics = WeatherPanelMetrics(panelSize: .large)
 
         let content = WeatherLoadedContent(
             forecast: forecast,
@@ -99,7 +100,27 @@ enum WeatherVerificationCommand {
             warning: nil,
             onRefresh: {}
         )
-        .frame(width: 282, height: 116)
+        .frame(width: 644, height: metrics.height)
+        .background(
+            RoundedRectangle(
+                cornerRadius: metrics.cornerRadius,
+                style: .continuous
+            )
+            .fill(Color.white.opacity(0.035))
+        )
+        .overlay(
+            RoundedRectangle(
+                cornerRadius: metrics.cornerRadius,
+                style: .continuous
+            )
+            .stroke(Color.white.opacity(0.075), lineWidth: 1)
+        )
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: metrics.cornerRadius,
+                style: .continuous
+            )
+        )
         .background(Color(red: 0.02, green: 0.02, blue: 0.025))
         .environment(\.panelTextSize, .medium)
 

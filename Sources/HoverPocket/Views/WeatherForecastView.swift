@@ -111,117 +111,124 @@ struct WeatherLoadedContent: View {
     let onRefresh: () -> Void
 
     var body: some View {
-        VStack(spacing: metrics.sectionSpacing) {
+        HStack(spacing: metrics.sectionSpacing) {
             currentWeather
+                .frame(width: metrics.currentSectionWidth, alignment: .leading)
 
             Rectangle()
                 .fill(Color.white.opacity(0.07))
-                .frame(height: 1)
+                .frame(width: 1)
 
             upcomingForecast
+                .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, metrics.horizontalPadding)
         .padding(.vertical, metrics.verticalPadding)
     }
 
     private var currentWeather: some View {
-        HStack(spacing: metrics.currentSpacing) {
-            Image(systemName: forecast.currentCondition.symbolName)
-                .symbolRenderingMode(.multicolor)
-                .font(.system(size: metrics.currentIconSize, weight: .semibold))
-                .frame(width: metrics.currentIconWidth)
+        VStack(alignment: .leading, spacing: metrics.currentBlockSpacing) {
+            HStack(spacing: metrics.currentSpacing) {
+                Image(systemName: forecast.currentCondition.symbolName)
+                    .symbolRenderingMode(.multicolor)
+                    .font(.system(size: metrics.currentIconSize, weight: .semibold))
+                    .frame(width: metrics.currentIconWidth)
 
-            Text(temperature(forecast.currentTemperature))
-                .panelTextFont(size: metrics.currentTemperatureSize, weight: .bold, design: .rounded)
-                .foregroundStyle(.white)
-                .lineLimit(1)
+                Text(temperature(forecast.currentTemperature))
+                    .panelTextFont(size: metrics.currentTemperatureSize, weight: .bold, design: .rounded)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
 
-            VStack(alignment: .leading, spacing: panelSize == .large ? 2 : 0) {
-                Text(region.name(language: language))
-                    .panelTextFont(size: metrics.regionFontSize, weight: .bold)
-                    .foregroundStyle(.white.opacity(0.9))
-                    .lineLimit(1)
-                Text(forecast.currentCondition.title(language: language))
-                    .panelTextFont(size: metrics.conditionFontSize, weight: .semibold)
-                    .foregroundStyle(.white.opacity(0.58))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
+                VStack(alignment: .leading, spacing: panelSize == .large ? 2 : 0) {
+                    Text(region.name(language: language))
+                        .panelTextFont(size: metrics.regionFontSize, weight: .bold)
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(1)
+                    Text(forecast.currentCondition.title(language: language))
+                        .panelTextFont(size: metrics.conditionFontSize, weight: .semibold)
+                        .foregroundStyle(.white.opacity(0.58))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
             }
 
-            Spacer(minLength: 2)
+            HStack(spacing: metrics.currentDetailSpacing) {
+                Text("H \(temperature(forecast.today.highTemperature))")
+                    .foregroundStyle(.white.opacity(0.78))
+                Text("L \(temperature(forecast.today.lowTemperature))")
+                    .foregroundStyle(.white.opacity(0.46))
 
-            VStack(alignment: .trailing, spacing: 1) {
-                HStack(spacing: metrics.currentDetailSpacing) {
-                    Text("H \(temperature(forecast.today.highTemperature))")
-                        .foregroundStyle(.white.opacity(0.78))
-                    Text("L \(temperature(forecast.today.lowTemperature))")
-                        .foregroundStyle(.white.opacity(0.46))
+                Label(
+                    "\(forecast.today.precipitationProbability)%",
+                    systemImage: "drop.fill"
+                )
+                .foregroundStyle(.cyan.opacity(0.72))
+
+                Spacer(minLength: 0)
+
+                Link(destination: WeatherForecastService.attributionURL) {
+                    Text("Open-Meteo")
+                        .panelTextFont(size: metrics.attributionSize, weight: .medium)
+                        .foregroundStyle(.white.opacity(0.32))
+                        .lineLimit(1)
                 }
+                .buttonStyle(.plain)
 
-                HStack(spacing: metrics.currentDetailSpacing) {
-                    Label(
-                        "\(forecast.today.precipitationProbability)%",
-                        systemImage: "drop.fill"
-                    )
-                    .foregroundStyle(.cyan.opacity(0.72))
-
-                    Link(destination: WeatherForecastService.attributionURL) {
-                        Text("Open-Meteo")
-                            .panelTextFont(size: metrics.attributionSize, weight: .medium)
-                            .foregroundStyle(.white.opacity(0.28))
-                            .lineLimit(1)
-                    }
-                    .buttonStyle(.plain)
+                Button(action: onRefresh) {
+                    Image(systemName: warning == nil ? "arrow.clockwise" : "exclamationmark.triangle.fill")
+                        .font(.system(size: metrics.refreshIconSize, weight: .semibold))
+                        .foregroundStyle(warning == nil ? Color.white.opacity(0.34) : Color.yellow.opacity(0.82))
                 }
+                .buttonStyle(.plain)
+                .help(
+                    warning == nil
+                        ? text(japanese: "天気を更新", english: "Refresh weather")
+                        : text(
+                            japanese: "保存済みの予報を表示しています。更新に失敗しました。",
+                            english: "Showing a saved forecast because the update failed."
+                        )
+                )
             }
             .panelTextFont(size: metrics.currentDetailSize, weight: .semibold, design: .monospaced)
             .lineLimit(1)
-
-            Button(action: onRefresh) {
-                Image(systemName: warning == nil ? "arrow.clockwise" : "exclamationmark.triangle.fill")
-                    .font(.system(size: metrics.refreshIconSize, weight: .semibold))
-                    .foregroundStyle(warning == nil ? Color.white.opacity(0.3) : Color.yellow.opacity(0.82))
-            }
-            .buttonStyle(.plain)
-            .help(
-                warning == nil
-                    ? text(japanese: "天気を更新", english: "Refresh weather")
-                    : text(
-                        japanese: "保存済みの予報を表示しています。更新に失敗しました。",
-                        english: "Showing a saved forecast because the update failed."
-                    )
-            )
         }
     }
 
     private var upcomingForecast: some View {
-        HStack(spacing: metrics.daySpacing) {
-            ForEach(forecast.upcomingDays) { day in
-                VStack(spacing: metrics.dayItemSpacing) {
-                    Text(weekday(for: day.date))
-                        .panelTextFont(size: metrics.weekdaySize, weight: .bold, design: .monospaced)
-                        .foregroundStyle(.white.opacity(0.48))
+        VStack(alignment: .leading, spacing: metrics.forecastHeadingSpacing) {
+            Text(text(japanese: "週間予報", english: "7-day forecast"))
+                .panelTextFont(size: metrics.forecastHeadingSize, weight: .bold)
+                .foregroundStyle(.white.opacity(0.52))
+                .lineLimit(1)
 
-                    Image(systemName: day.condition.symbolName)
-                        .symbolRenderingMode(.multicolor)
-                        .font(.system(size: metrics.dayIconSize, weight: .semibold))
+            HStack(spacing: metrics.daySpacing) {
+                ForEach(forecast.upcomingDays) { day in
+                    VStack(spacing: metrics.dayItemSpacing) {
+                        Text(weekday(for: day.date))
+                            .panelTextFont(size: metrics.weekdaySize, weight: .bold, design: .monospaced)
+                            .foregroundStyle(.white.opacity(0.52))
 
-                    HStack(spacing: 1) {
-                        Text(temperature(day.highTemperature))
-                            .foregroundStyle(.white.opacity(0.78))
-                        Text(temperature(day.lowTemperature))
-                            .foregroundStyle(.white.opacity(0.4))
-                    }
-                    .panelTextFont(size: metrics.dayTemperatureSize, weight: .semibold, design: .monospaced)
-                    .lineLimit(1)
+                        Image(systemName: day.condition.symbolName)
+                            .symbolRenderingMode(.multicolor)
+                            .font(.system(size: metrics.dayIconSize, weight: .semibold))
 
-                    Label("\(day.precipitationProbability)%", systemImage: "drop.fill")
-                        .labelStyle(.titleAndIcon)
-                        .panelTextFont(size: metrics.precipitationSize, weight: .semibold, design: .monospaced)
-                        .foregroundStyle(.cyan.opacity(0.62))
+                        HStack(spacing: 1) {
+                            Text(temperature(day.highTemperature))
+                                .foregroundStyle(.white.opacity(0.82))
+                            Text(temperature(day.lowTemperature))
+                                .foregroundStyle(.white.opacity(0.44))
+                        }
+                        .panelTextFont(size: metrics.dayTemperatureSize, weight: .semibold, design: .monospaced)
                         .lineLimit(1)
+
+                        Label("\(day.precipitationProbability)%", systemImage: "drop.fill")
+                            .labelStyle(.titleAndIcon)
+                            .panelTextFont(size: metrics.precipitationSize, weight: .semibold, design: .monospaced)
+                            .foregroundStyle(.cyan.opacity(0.68))
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity)
             }
         }
     }
@@ -253,6 +260,8 @@ struct WeatherPanelMetrics {
     let horizontalPadding: CGFloat
     let verticalPadding: CGFloat
     let sectionSpacing: CGFloat
+    let currentSectionWidth: CGFloat
+    let currentBlockSpacing: CGFloat
     let currentSpacing: CGFloat
     let currentDetailSpacing: CGFloat
     let currentIconSize: CGFloat
@@ -263,6 +272,8 @@ struct WeatherPanelMetrics {
     let currentDetailSize: CGFloat
     let attributionSize: CGFloat
     let refreshIconSize: CGFloat
+    let forecastHeadingSpacing: CGFloat
+    let forecastHeadingSize: CGFloat
     let daySpacing: CGFloat
     let dayItemSpacing: CGFloat
     let weekdaySize: CGFloat
@@ -277,82 +288,94 @@ struct WeatherPanelMetrics {
     init(panelSize: PanelSizeOption) {
         switch panelSize {
         case .small:
-            height = 50
-            cornerRadius = 7
-            horizontalPadding = 6
-            verticalPadding = 3
-            sectionSpacing = 2
-            currentSpacing = 3
-            currentDetailSpacing = 3
-            currentIconSize = 12
-            currentIconWidth = 14
-            currentTemperatureSize = 12
-            regionFontSize = 6.5
-            conditionFontSize = 5.5
+            height = 58
+            cornerRadius = 8
+            horizontalPadding = 8
+            verticalPadding = 4
+            sectionSpacing = 7
+            currentSectionWidth = 145
+            currentBlockSpacing = 2
+            currentSpacing = 4
+            currentDetailSpacing = 2
+            currentIconSize = 20
+            currentIconWidth = 22
+            currentTemperatureSize = 18
+            regionFontSize = 7
+            conditionFontSize = 6
             currentDetailSize = 6.5
             attributionSize = 5.5
-            refreshIconSize = 7
+            refreshIconSize = 7.5
+            forecastHeadingSpacing = 2
+            forecastHeadingSize = 6.5
             daySpacing = 1
-            dayItemSpacing = 0
-            weekdaySize = 6
-            dayIconSize = 7
-            dayTemperatureSize = 5.5
-            precipitationSize = 5.5
+            dayItemSpacing = 1
+            weekdaySize = 6.5
+            dayIconSize = 11
+            dayTemperatureSize = 6
+            precipitationSize = 5.7
             statusSpacing = 5
             statusIconSize = 13
             statusTitleSize = 8
             buttonFontSize = 7
         case .medium:
-            height = 64
+            height = 67
             cornerRadius = 8
-            horizontalPadding = 7
-            verticalPadding = 4
-            sectionSpacing = 3
-            currentSpacing = 4
-            currentDetailSpacing = 4
-            currentIconSize = 15
-            currentIconWidth = 17
-            currentTemperatureSize = 15
-            regionFontSize = 7.5
-            conditionFontSize = 6.5
-            currentDetailSize = 7
+            horizontalPadding = 10
+            verticalPadding = 5
+            sectionSpacing = 9
+            currentSectionWidth = 165
+            currentBlockSpacing = 3
+            currentSpacing = 6
+            currentDetailSpacing = 3
+            currentIconSize = 26
+            currentIconWidth = 28
+            currentTemperatureSize = 22
+            regionFontSize = 8.5
+            conditionFontSize = 7
+            currentDetailSize = 7.5
             attributionSize = 6
-            refreshIconSize = 8
+            refreshIconSize = 8.5
+            forecastHeadingSpacing = 3
+            forecastHeadingSize = 7.5
             daySpacing = 2
-            dayItemSpacing = 0.5
-            weekdaySize = 6.5
-            dayIconSize = 8.5
-            dayTemperatureSize = 6
-            precipitationSize = 6
+            dayItemSpacing = 1.5
+            weekdaySize = 7.5
+            dayIconSize = 15
+            dayTemperatureSize = 7
+            precipitationSize = 6.5
             statusSpacing = 6
             statusIconSize = 15
             statusTitleSize = 9
             buttonFontSize = 8
         case .large:
-            height = 116
-            cornerRadius = 9
-            horizontalPadding = 9
-            verticalPadding = 7
-            sectionSpacing = 5
-            currentSpacing = 6
-            currentDetailSpacing = 6
-            currentIconSize = 26
-            currentIconWidth = 29
-            currentTemperatureSize = 24
-            regionFontSize = 9
-            conditionFontSize = 8
-            currentDetailSize = 8
-            attributionSize = 6.5
-            refreshIconSize = 9
-            daySpacing = 3
-            dayItemSpacing = 2
-            weekdaySize = 7
-            dayIconSize = 12
-            dayTemperatureSize = 6.5
-            precipitationSize = 6.5
+            height = 122
+            cornerRadius = 10
+            horizontalPadding = 12
+            verticalPadding = 8
+            sectionSpacing = 14
+            currentSectionWidth = 205
+            currentBlockSpacing = 7
+            currentSpacing = 7
+            currentDetailSpacing = 5
+            currentIconSize = 38
+            currentIconWidth = 42
+            currentTemperatureSize = 32
+            regionFontSize = 11
+            conditionFontSize = 9.5
+            currentDetailSize = 9
+            attributionSize = 7
+            refreshIconSize = 10
+            forecastHeadingSpacing = 6
+            forecastHeadingSize = 9
+            daySpacing = 4
+            dayItemSpacing = 4
+            weekdaySize = 9
+            dayIconSize = 22
+            dayTemperatureSize = 8.5
+            precipitationSize = 8
             statusSpacing = 8
             statusIconSize = 22
-            statusTitleSize = 10
+            statusTitleSize = 11
             buttonFontSize = 9
         }
     }

@@ -62,32 +62,40 @@ struct GoogleCalendarPreviewView: View {
     }
 
     private var calendarView: some View {
-        HStack(alignment: .top, spacing: metrics.paneSpacing) {
-            VStack(spacing: metrics.calendarVerticalSpacing) {
-                monthHeader
-                weekdayHeader
-                dayGrid
-                WeatherForecastView(
-                    panelSize: settings.panelSize,
-                    language: language,
-                    isActive: isActive,
-                    region: settings.weatherRegion
-                )
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: metrics.paneSpacing) {
+                VStack(spacing: metrics.calendarVerticalSpacing) {
+                    monthHeader
+                    weekdayHeader
+                    dayGrid
+                }
+                .frame(width: metrics.calendarWidth)
+                .frame(maxHeight: .infinity, alignment: .top)
+
+                Divider()
+                    .overlay(Color.white.opacity(0.08))
+
+                detailPane
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .frame(width: metrics.calendarWidth)
-            .frame(maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             Divider()
                 .overlay(Color.white.opacity(0.08))
+                .padding(.vertical, metrics.weatherDividerPadding)
 
-            detailPane
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            WeatherForecastView(
+                panelSize: settings.panelSize,
+                language: language,
+                isActive: isActive,
+                region: settings.weatherRegion
+            )
         }
-        .overlay(alignment: .bottomLeading) {
+        .overlay(alignment: .topLeading) {
             if case .loading(let previous) = store.loadState, previous != nil {
                 ProgressView()
                     .controlSize(.small)
-                    .padding(.bottom, 2)
+                    .padding(.top, 2)
             }
         }
     }
@@ -186,8 +194,16 @@ struct GoogleCalendarPreviewView: View {
         .help(day.date.formatted(date: .abbreviated, time: .omitted))
     }
 
-    @ViewBuilder
     private var detailPane: some View {
+        ScrollView {
+            detailContent
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .scrollIndicators(.automatic)
+    }
+
+    @ViewBuilder
+    private var detailContent: some View {
         if draft != nil {
             CalendarEventEditorView(
                 draft: draftBinding,
@@ -269,19 +285,14 @@ struct GoogleCalendarPreviewView: View {
                         .panelTextFont(size: 11, weight: .bold, design: .monospaced)
                         .foregroundStyle(.white.opacity(0.62))
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .frame(maxWidth: .infinity, minHeight: 84, alignment: .center)
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(events) { event in
-                            eventRow(event)
-                        }
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(events) { event in
+                        eventRow(event)
                     }
                 }
-                .scrollIndicators(.never)
             }
-
-            Spacer(minLength: 0)
         }
     }
 
@@ -719,8 +730,6 @@ private struct CalendarEventEditorView: View {
                     .lineLimit(2)
             }
 
-            Spacer(minLength: 0)
-
             HStack(spacing: 8) {
                 if let onDelete {
                     Button(role: .destructive) {
@@ -790,6 +799,7 @@ private struct CalendarPreviewMetrics {
     let outerVerticalPadding: CGFloat
     let paneSpacing: CGFloat
     let calendarVerticalSpacing: CGFloat
+    let weatherDividerPadding: CGFloat
     let calendarWidth: CGFloat
     let dayWidth: CGFloat
     let dayHeight: CGFloat
@@ -808,7 +818,8 @@ private struct CalendarPreviewMetrics {
             outerHorizontalPadding = 12
             outerVerticalPadding = 10
             paneSpacing = 9
-            calendarVerticalSpacing = 8
+            calendarVerticalSpacing = 5
+            weatherDividerPadding = 4
             calendarWidth = 248
             dayWidth = 32
             dayHeight = 28
@@ -825,6 +836,7 @@ private struct CalendarPreviewMetrics {
             outerVerticalPadding = 14
             paneSpacing = 14
             calendarVerticalSpacing = 10
+            weatherDividerPadding = panelSize == .large ? 5 : 4.5
             calendarWidth = 282
             dayWidth = 36
             dayHeight = 32

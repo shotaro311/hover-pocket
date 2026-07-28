@@ -7,11 +7,12 @@ status: active
 
 ## 2026-07-28 Mac Calendar Weather
 
-- Calendar月グリッド下部へ、当日の天気アイコン・状態・現在気温・最高/最低・降水確率と、今後7日間の曜日・天気・最高/最低・降水確率を追加した。既存の暗色、角丸、低opacity borderへ合わせ、Small / Medium / Largeで`50 / 64 / 116pt`へ適応する。
+- Calendarの下段全幅を天気エリアへ変更し、上段とは区切り線で分離した。下段左側に当日の天気、右側に拡大した今後7日間の曜日・天気・最高/最低・降水確率を配置し、Small / Medium / Largeで`58 / 67 / 122pt`へ適応する。
+- 高さが短くなった上段右側は予定詳細・予定編集を縦スクロール化し、長い予定一覧や編集フォームが天気エリアへ重ならないようにした。
 - Settingsへ日本47都道府県の表示地域pickerを追加した。保存値は都道府県コード（JIS X 0401）、初期値は東京都`13`、予報地点は都道府県庁所在地付近。Macの位置情報、APIキー、秘密情報は使わない。
 - Open-Meteoから`Asia/Tokyo`の当日＋7日を取得し、地域単位のローカルキャッシュ、保存済み予報の警告付きオフライン表示、キャッシュなし時の再試行、画面内の帰属リンクを実装した。無料APIの非商用条件と商用化時の移行要件をREADME / requirementsへ記録した。
 - `swift build`、実APIを使う`--verify-weather --render-weather-preview`、地域設定save/readback、オフラインcache readback、`--verify-panel-layout` 63ケース、`./script/build_and_run.sh --verify`、bundle内weather verifier、codesign、`git diff --check`が成功した。生成appは期待pathの1 processで起動し、位置情報permission keyがないことを確認した。
-- SwiftUI component画像`dist/verification/calendar-weather-preview.png`で表示欠けがないことを確認した。Computer UseではLSUIElementのhover panel全体を対象windowとして取得できず、全体スクリーンショットは未取得。Windows版は未変更でparity残件。詳細: `progress/2026-07/2026-07-28_hover-pocket-calendar-weather.md`。
+- SwiftUI component画像`dist/verification/calendar-weather-preview.png`と、起動したLargeパネルの画面合成画像`dist/verification/calendar-panel-layout.png`で、月グリッド・予定3件・区切り線・下段天気の表示欠けや重なりがないことを確認した。Windows版は未変更でparity残件。詳細: `progress/2026-07/2026-07-28_hover-pocket-calendar-weather.md`。
 
 ## 2026-07-26 Windows 0.2.3 Public Beta Release
 
