@@ -56,6 +56,17 @@
 - 生成Info.plistに位置情報permission keyがないこと、通常起動が期待したbundle pathの1 processであることをreadbackした。
 - `bash -n script/build_and_run.sh`、`git diff --check`: 成功。
 
+## Build 150 release
+
+- 天気機能とモーションを含む機能commit `96d11ce`までの5 commitを`origin/main`へpushし、push直後のlocal / origin SHAは`96d11cedfd5d4571b3fa35735b55ef24d1caf408`で一致した。
+- `APP_VERSION=0.1.0`、`APP_BUILD=150`でDeveloper ID Application署名・hardened runtime付きの配布ZIPを作成した。アプリ内feedはmacOS専用`https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml`、最小OSは14.0。
+- Apple公証submission `e0430c08-b7da-457f-ab3f-94afd8011358`は`Accepted`。staple後のアプリ本体とZIP展開後アプリは`codesign --verify --deep --strict`、`stapler validate`、`spctl --assess`に合格した。
+- GitHub Release [`v0.1.0-150`](https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-150)をdraft / prereleaseではないGitHub Latestとして公開した。4 assetは`appcast.xml`、versioned ZIP、SHA256、手動インストールZIP。`macos-latest`は手動インストールZIPとappcastを同じbuildへ同期した。
+- GitHub APIのversioned ZIP digest、匿名公開URLから再取得したZIP、ローカルZIPのSHA-256はすべて`507fe20a598794588f845d29170c904f4db82f4b1f301924b0ddb08caf2364e0`で一致した。
+- versioned / stable appcastはSHA-256 `0618463faabe19d7abf945e1963afd0475d5ae504848d3d61089b88ededa4ff1`で一致し、`sparkle:version=150`、`v0.1.0-150/HoverPocket-0.1.0-150.zip`、88文字のEdDSA署名を返した。
+- 公開ZIP展開後の`HoverPocket --verify-weather`は47地域、当日＋7日、地域保存、オフラインcache、週間行固定、6モーションプリセット、5秒設定を再確認して成功した。
+- Windows release `win-v0.2.3`は8 asset、target commit `7bfbee4ed54ed989b1ad470fd4420b0d8efeda13`で公開前から不変。macOS Latest更新によってWindows feedやassetは変更していない。
+
 ## Remaining constraints
 
 - Open-Meteo無料APIは非商用条件。現行の無料配布前提から商用化する場合は配信前にAPI契約またはセルフホストへ切り替える。

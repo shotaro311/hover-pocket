@@ -5,6 +5,14 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-28 Mac Build 150 Release
+
+- Calendarの日本47都道府県天気、当日＋7日予報、週間行の整列、上段予定詳細・編集スクロール、天候別SF Symbolsモーションを含む機能commit `96d11ce`までの5 commitを`origin/main`へpushし、local / origin SHA一致を確認した。
+- macOS build `150`をDeveloper ID Application署名とhardened runtimeで作成した。Apple公証submission `e0430c08-b7da-457f-ab3f-94afd8011358`は`Accepted`。staple、`codesign`、`stapler validate`、Gatekeeper、ZIP展開後の再検証に合格した。
+- GitHub Release [`v0.1.0-150`](https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-150)をGitHub Latestとして公開し、macOS専用`macos-latest`の手動インストールZIPとappcastをbuild 150へ同期した。tagは機能commit `96d11ce`を指す。
+- 匿名公開URLから再取得したZIPのSHA-256 `507fe20a598794588f845d29170c904f4db82f4b1f301924b0ddb08caf2364e0`はローカルと一致した。versioned / stable appcastは同一SHA、`sparkle:version=150`、同じversioned ZIP URL、88文字のEdDSA署名を返した。
+- 公開ZIPの展開後アプリは`0.1.0 (150)`、macOS専用feed URL、Developer ID、公証staple、Gatekeeper、実API weather verifierへ合格した。Windows `win-v0.2.3`は8 asset・target commit `7bfbee4`のまま不変。
+
 ## 2026-07-28 Mac Calendar Weather
 
 - Calendarの下段全幅を天気エリアへ変更し、上段とは区切り線で分離した。下段左側に当日の天気、右側に拡大した今後7日間の曜日・天気・最高/最低・降水確率を配置し、Small / Medium / Largeで`58 / 67 / 122pt`へ適応する。
