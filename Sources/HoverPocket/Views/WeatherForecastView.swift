@@ -6,7 +6,11 @@ struct WeatherForecastView: View {
     let isActive: Bool
     let region: WeatherRegion
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var store = WeatherForecastStore.shared
+    @State private var revealedIconCount = 0
+    @State private var hasPlayedIconReveal = false
+    @State private var revealGeneration = 0
 
     var body: some View {
         Group {
@@ -20,6 +24,8 @@ struct WeatherForecastView: View {
                     panelSize: panelSize,
                     language: language,
                     warning: warning,
+                    revealedIconCount: revealedIconCount,
+                    animatesIconReveal: !reduceMotion,
                     onRefresh: { store.refresh(region: region) }
                 )
             case .failed:
@@ -33,17 +39,32 @@ struct WeatherForecastView: View {
         .onAppear {
             if isActive {
                 store.loadIfNeeded(region: region)
+                playIconRevealIfReady()
             }
         }
         .onChange(of: isActive) { _, active in
             if active {
                 store.loadIfNeeded(region: region)
+                playIconRevealIfReady()
+            } else {
+                resetIconReveal()
             }
+        }
+        .onChange(of: store.state) { _, _ in
+            playIconRevealIfReady()
         }
         .onChange(of: region) { _, selectedRegion in
             if isActive {
                 store.regionDidChange(to: selectedRegion)
             }
+        }
+        .onChange(of: reduceMotion) { _, enabled in
+            guard enabled else { return }
+            revealGeneration += 1
+            revealedIconCount = Self.totalIconCount
+        }
+        .onDisappear {
+            resetIconReveal()
         }
     }
 
@@ -100,6 +121,50 @@ struct WeatherForecastView: View {
     private func text(japanese: String, english: String) -> String {
         language == .japanese ? japanese : english
     }
+
+    private func playIconRevealIfReady() {
+        guard isActive,
+              case .loaded = store.state,
+              !hasPlayedIconReveal else {
+            return
+        }
+
+        hasPlayedIconReveal = true
+        revealGeneration += 1
+        let generation = revealGeneration
+
+        if reduceMotion {
+            revealedIconCount = Self.totalIconCount
+            return
+        }
+
+        revealedIconCount = 0
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(70))
+            guard generation == revealGeneration, isActive else { return }
+
+            withAnimation(.easeOut(duration: 0.3)) {
+                revealedIconCount = 1
+            }
+
+            for count in 2...Self.totalIconCount {
+                try? await Task.sleep(for: .milliseconds(70))
+                guard generation == revealGeneration, isActive else { return }
+
+                withAnimation(.easeOut(duration: 0.26)) {
+                    revealedIconCount = count
+                }
+            }
+        }
+    }
+
+    private func resetIconReveal() {
+        revealGeneration += 1
+        hasPlayedIconReveal = false
+        revealedIconCount = 0
+    }
+
+    private static let totalIconCount = 8
 }
 
 struct WeatherLoadedContent: View {
@@ -108,6 +173,8 @@ struct WeatherLoadedContent: View {
     let panelSize: PanelSizeOption
     let language: AppLanguage
     let warning: String?
+    let revealedIconCount: Int
+    let animatesIconReveal: Bool
     let onRefresh: () -> Void
 
     var body: some View {
@@ -129,10 +196,13 @@ struct WeatherLoadedContent: View {
     private var currentWeather: some View {
         VStack(alignment: .leading, spacing: metrics.currentBlockSpacing) {
             HStack(spacing: metrics.currentSpacing) {
-                Image(systemName: forecast.currentCondition.symbolName)
-                    .symbolRenderingMode(.multicolor)
-                    .font(.system(size: metrics.currentIconSize, weight: .semibold))
-                    .frame(width: metrics.currentIconWidth)
+                WeatherAnimatedSymbol(
+                    name: forecast.currentCondition.symbolName,
+                    size: metrics.currentIconSize,
+                    width: metrics.currentIconWidth,
+                    isRevealed: revealedIconCount >= 1,
+                    animatesReveal: animatesIconReveal
+                )
 
                 Text(temperature(forecast.currentTemperature))
                     .panelTextFont(size: metrics.currentTemperatureSize, weight: .bold, design: .rounded)
@@ -202,15 +272,19 @@ struct WeatherLoadedContent: View {
                 .lineLimit(1)
 
             HStack(spacing: metrics.daySpacing) {
-                ForEach(forecast.upcomingDays) { day in
+                ForEach(forecast.upcomingDays.indices, id: \.self) { index in
+                    let day = forecast.upcomingDays[index]
                     VStack(spacing: metrics.dayItemSpacing) {
                         Text(weekday(for: day.date))
                             .panelTextFont(size: metrics.weekdaySize, weight: .bold, design: .monospaced)
                             .foregroundStyle(.white.opacity(0.52))
 
-                        Image(systemName: day.condition.symbolName)
-                            .symbolRenderingMode(.multicolor)
-                            .font(.system(size: metrics.dayIconSize, weight: .semibold))
+                        WeatherAnimatedSymbol(
+                            name: day.condition.symbolName,
+                            size: metrics.dayIconSize,
+                            isRevealed: revealedIconCount >= index + 2,
+                            animatesReveal: animatesIconReveal
+                        )
 
                         HStack(spacing: 1) {
                             Text(temperature(day.highTemperature))
@@ -251,6 +325,39 @@ struct WeatherLoadedContent: View {
 
     private var metrics: WeatherPanelMetrics {
         WeatherPanelMetrics(panelSize: panelSize)
+    }
+}
+
+private struct WeatherAnimatedSymbol: View {
+    let name: String
+    let size: CGFloat
+    var width: CGFloat?
+    let isRevealed: Bool
+    let animatesReveal: Bool
+
+    var body: some View {
+        Group {
+            if !animatesReveal {
+                symbol
+            } else {
+                ZStack {
+                    Color.clear
+                        .frame(width: width, height: size)
+
+                    if isRevealed {
+                        symbol
+                            .transition(.symbolEffect(.appear, options: .nonRepeating))
+                    }
+                }
+            }
+        }
+    }
+
+    private var symbol: some View {
+        Image(systemName: name)
+            .symbolRenderingMode(.multicolor)
+            .font(.system(size: size, weight: .semibold))
+            .frame(width: width)
     }
 }
 

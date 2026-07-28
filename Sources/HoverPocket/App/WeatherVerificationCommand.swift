@@ -42,6 +42,7 @@ enum WeatherVerificationCommand {
                 if shouldRender {
                     let outputURL = try renderPreview(forecast: forecast)
                     print("weather_preview=\(outputURL.path)")
+                    print("weather_reduce_motion_render=immediate")
                 }
                 exitCode = 0
             } catch {
@@ -98,6 +99,8 @@ enum WeatherVerificationCommand {
             panelSize: .large,
             language: .japanese,
             warning: nil,
+            revealedIconCount: 0,
+            animatesIconReveal: false,
             onRefresh: {}
         )
         .frame(width: 644, height: metrics.height)
