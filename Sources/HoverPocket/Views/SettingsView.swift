@@ -5,6 +5,7 @@ struct SettingsView: View {
     @ObservedObject var providerStore: ProviderStore
     @ObservedObject private var calendarStore = GoogleCalendarStore.shared
     @ObservedObject private var appUpdater = AppUpdater.shared
+    @StateObject private var weatherLocationModel = WeatherLocationSettingsModel()
 
     var body: some View {
         ScrollView {
@@ -253,18 +254,167 @@ struct SettingsView: View {
             Text(settings.text(.weather))
                 .font(.system(size: 13, weight: .bold))
 
-            Picker(settings.text(.weatherRegion), selection: $settings.weatherRegion) {
-                ForEach(WeatherRegion.allRegions) { region in
-                    Text(region.name(language: language))
-                        .tag(region)
+            HStack(spacing: 8) {
+                Image(systemName: locationSymbol)
+                    .frame(width: 18)
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(settings.weatherLocation.displayName(language: language))
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                    Text(settings.weatherLocation.detail(language: language))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                if weatherLocationModel.isLocating {
+                    ProgressView()
+                        .controlSize(.small)
                 }
             }
+
+            Button {
+                weatherLocationModel.requestCurrentLocation(language: language) { location in
+                    if let location {
+                        settings.weatherLocation = location
+                    }
+                }
+            } label: {
+                Label(
+                    localized(
+                        japanese: "現在地を使用",
+                        english: "Use current location"
+                    ),
+                    systemImage: "location.fill"
+                )
+            }
+            .disabled(weatherLocationModel.isLocating)
+
+            HStack(spacing: 8) {
+                TextField(
+                    localized(
+                        japanese: "都市名または郵便番号",
+                        english: "City or postal code"
+                    ),
+                    text: $weatherLocationModel.searchText
+                )
+                .textFieldStyle(.roundedBorder)
+                .onSubmit {
+                    weatherLocationModel.search(language: language)
+                }
+
+                Button {
+                    weatherLocationModel.search(language: language)
+                } label: {
+                    if weatherLocationModel.isSearching {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "magnifyingglass")
+                    }
+                }
+                .disabled(weatherLocationModel.isSearching)
+                .help(localized(japanese: "地域を検索", english: "Search locations"))
+            }
+
+            if !weatherLocationModel.searchResults.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(weatherLocationModel.searchResults.prefix(6)) { location in
+                        Button {
+                            settings.weatherLocation = location
+                            weatherLocationModel.clearSearch()
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "mappin")
+                                    .frame(width: 14)
+                                    .foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(location.displayName(language: language))
+                                        .font(.system(size: 11, weight: .medium))
+                                    Text(location.detail(language: language))
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                            }
+                            .contentShape(Rectangle())
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                        }
+                        .buttonStyle(.plain)
+
+                        if location.id != weatherLocationModel.searchResults.prefix(6).last?.id {
+                            Divider()
+                        }
+                    }
+                }
+                .background(.quaternary.opacity(0.35))
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            }
+
+            if let message = weatherLocationModel.message {
+                Text(message)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Picker(
+                localized(
+                    japanese: "日本の都道府県",
+                    english: "Japanese prefecture"
+                ),
+                selection: japaneseRegionSelection
+            ) {
+                Text(localized(japanese: "選択してください", english: "Choose…"))
+                    .tag("")
+                ForEach(WeatherRegion.allRegions) { region in
+                    Text(region.name(language: language))
+                        .tag(region.id)
+                }
+            }
+
+            Picker(
+                localized(japanese: "温度単位", english: "Temperature unit"),
+                selection: $settings.weatherTemperatureUnit
+            ) {
+                ForEach(WeatherTemperatureUnitOption.allCases) { option in
+                    Text(option.title(language: language))
+                        .tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
 
             Text(settings.text(.weatherRegionDetail))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var japaneseRegionSelection: Binding<String> {
+        Binding(
+            get: { settings.weatherLocation.legacyRegionID ?? "" },
+            set: { regionID in
+                guard let region = WeatherRegion.region(id: regionID) else { return }
+                settings.weatherLocation = WeatherLocation.from(region: region)
+                weatherLocationModel.clearSearch()
+            }
+        )
+    }
+
+    private var locationSymbol: String {
+        settings.weatherLocation.source == .currentLocation
+            ? "location.fill"
+            : "mappin.and.ellipse"
+    }
+
+    private func localized(japanese: String, english: String) -> String {
+        language == .japanese ? japanese : english
     }
 
     private var googleCalendarSection: some View {

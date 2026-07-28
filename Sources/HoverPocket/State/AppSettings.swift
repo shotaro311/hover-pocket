@@ -27,9 +27,20 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    @Published var weatherRegion: WeatherRegion {
+    @Published var weatherLocation: WeatherLocation {
         didSet {
-            defaults.set(weatherRegion.id, forKey: Self.weatherRegionIDKey)
+            if let data = try? JSONEncoder().encode(weatherLocation) {
+                defaults.set(data, forKey: Self.weatherLocationKey)
+            }
+            if let legacyRegionID = weatherLocation.legacyRegionID {
+                defaults.set(legacyRegionID, forKey: Self.weatherRegionIDKey)
+            }
+        }
+    }
+
+    @Published var weatherTemperatureUnit: WeatherTemperatureUnitOption {
+        didSet {
+            defaults.set(weatherTemperatureUnit.rawValue, forKey: Self.weatherTemperatureUnitKey)
         }
     }
 
@@ -110,7 +121,9 @@ final class AppSettings: ObservableObject {
     private static let displayPlacementModeKey = "displayPlacementMode"
     private static let panelSizeKey = "panelSize"
     private static let panelTextSizeKey = "panelTextSize"
+    private static let weatherLocationKey = "weatherLocation"
     private static let weatherRegionIDKey = "weatherRegionID"
+    private static let weatherTemperatureUnitKey = "weatherTemperatureUnit"
     private static let providerSwitchingModeKey = "providerSwitchingMode"
     private static let pillHandleIconStyleKey = "pillHandleIconStyle"
     private static let showNotchSideHandleAreaKey = "showNotchSideHandleArea"
@@ -134,8 +147,23 @@ final class AppSettings: ObservableObject {
         self.panelSize = panelSizeRawValue.flatMap(PanelSizeOption.init(rawValue:)) ?? .medium
         let panelTextSizeRawValue = defaults.string(forKey: Self.panelTextSizeKey)
         self.panelTextSize = panelTextSizeRawValue.flatMap(PanelTextSizeOption.init(rawValue:)) ?? .small
-        let weatherRegionID = defaults.string(forKey: Self.weatherRegionIDKey)
-        self.weatherRegion = weatherRegionID.flatMap(WeatherRegion.region(id:)) ?? .defaultRegion
+        if let weatherLocationData = defaults.data(forKey: Self.weatherLocationKey),
+           let weatherLocation = try? JSONDecoder().decode(
+               WeatherLocation.self,
+               from: weatherLocationData
+           ) {
+            self.weatherLocation = weatherLocation
+        } else {
+            let weatherRegionID = defaults.string(forKey: Self.weatherRegionIDKey)
+            let weatherRegion = weatherRegionID.flatMap(WeatherRegion.region(id:))
+                ?? .defaultRegion
+            self.weatherLocation = WeatherLocation.from(region: weatherRegion)
+        }
+        let weatherTemperatureUnitRawValue = defaults.string(
+            forKey: Self.weatherTemperatureUnitKey
+        )
+        self.weatherTemperatureUnit = weatherTemperatureUnitRawValue
+            .flatMap(WeatherTemperatureUnitOption.init(rawValue:)) ?? .automatic
         let providerSwitchingModeRawValue = defaults.string(forKey: Self.providerSwitchingModeKey)
         self.providerSwitchingMode = providerSwitchingModeRawValue.flatMap(ProviderSwitchingMode.init(rawValue:)) ?? .click
         let pillHandleIconStyleRawValue = defaults.string(forKey: Self.pillHandleIconStyleKey)
@@ -172,6 +200,11 @@ final class AppSettings: ObservableObject {
         }
         let stickyNoteGridSizeRawValue = defaults.string(forKey: Self.stickyNoteGridSizeKey)
         self.stickyNoteGridSize = stickyNoteGridSizeRawValue.flatMap(StickyNoteGridSize.init(rawValue:)) ?? .medium
+
+        if defaults.data(forKey: Self.weatherLocationKey) == nil,
+           let weatherLocationData = try? JSONEncoder().encode(weatherLocation) {
+            defaults.set(weatherLocationData, forKey: Self.weatherLocationKey)
+        }
     }
 
     func orderedManifests(_ manifests: [PluginManifest]) -> [PluginManifest] {

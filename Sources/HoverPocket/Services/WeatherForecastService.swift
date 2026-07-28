@@ -29,8 +29,12 @@ struct WeatherForecastService: Sendable {
         self.session = session
     }
 
-    func fetch(region: WeatherRegion) async throws -> WeatherForecast {
-        let url = try requestURL(region: region)
+    func fetch(
+        location: WeatherLocation,
+        temperatureUnit: WeatherTemperatureUnitOption
+    ) async throws -> WeatherForecast {
+        let temperatureScale = temperatureUnit.resolvedScale(for: location)
+        let url = try requestURL(location: location, temperatureScale: temperatureScale)
         let (data, response) = try await session.data(from: url)
         guard let response = response as? HTTPURLResponse else {
             throw WeatherForecastServiceError.invalidResponse
@@ -38,20 +42,28 @@ struct WeatherForecastService: Sendable {
         guard (200..<300).contains(response.statusCode) else {
             throw WeatherForecastServiceError.unavailable(statusCode: response.statusCode)
         }
-        return try decode(data: data, regionID: region.id)
+        return try decode(
+            data: data,
+            locationID: location.id,
+            temperatureScale: temperatureScale
+        )
     }
 
-    func requestURL(region: WeatherRegion) throws -> URL {
+    func requestURL(
+        location: WeatherLocation,
+        temperatureScale: WeatherTemperatureScale
+    ) throws -> URL {
         var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")
         components?.queryItems = [
-            URLQueryItem(name: "latitude", value: Self.coordinateString(region.latitude)),
-            URLQueryItem(name: "longitude", value: Self.coordinateString(region.longitude)),
+            URLQueryItem(name: "latitude", value: Self.coordinateString(location.latitude)),
+            URLQueryItem(name: "longitude", value: Self.coordinateString(location.longitude)),
             URLQueryItem(name: "current", value: "temperature_2m,weather_code"),
             URLQueryItem(
                 name: "daily",
                 value: "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
             ),
-            URLQueryItem(name: "timezone", value: "Asia/Tokyo"),
+            URLQueryItem(name: "timezone", value: "auto"),
+            URLQueryItem(name: "temperature_unit", value: temperatureScale.queryValue),
             URLQueryItem(name: "forecast_days", value: "8")
         ]
         guard let url = components?.url else {
@@ -60,7 +72,12 @@ struct WeatherForecastService: Sendable {
         return url
     }
 
-    func decode(data: Data, regionID: String, fetchedAt: Date = Date()) throws -> WeatherForecast {
+    func decode(
+        data: Data,
+        locationID: String,
+        temperatureScale: WeatherTemperatureScale,
+        fetchedAt: Date = Date()
+    ) throws -> WeatherForecast {
         let response = try JSONDecoder().decode(OpenMeteoForecastResponse.self, from: data)
         let count = [
             response.daily.time.count,
@@ -96,18 +113,19 @@ struct WeatherForecastService: Sendable {
         }
 
         return WeatherForecast(
-            regionID: regionID,
+            locationID: locationID,
             currentTemperature: response.current.temperature,
             currentCondition: WeatherCondition(wmoCode: response.current.weatherCode),
             today: days[0],
             upcomingDays: Array(days.dropFirst().prefix(7)),
             fetchedAt: fetchedAt,
-            timezoneIdentifier: response.timezone
+            timezoneIdentifier: response.timezone,
+            temperatureScale: temperatureScale
         )
     }
 
     private static func coordinateString(_ value: Double) -> String {
-        String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), value)
+        String(format: "%.5f", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 }
 

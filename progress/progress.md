@@ -5,6 +5,14 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-28 Mac Global Weather Locations
+
+- Calendar天気の地点設定を、現在地、世界の都市・郵便番号検索、日本47都道府県の簡易選択へ拡張した。既存の都道府県コードは同じ代表地点へ自動移行する。
+- Open-Meteo Geocoding API、地点別`timezone=auto`、高精度座標、自動 / ℃ / ℉、地点・単位別キャッシュを追加した。Core Locationは「現在地を使用」を押した時だけ単発取得する。
+- `swift build`、63 panel layout、calculator、clipboard、bundle起動、位置情報説明文、codesignが成功した。実Settingsのアクセシビリティreadbackで福岡、現在地、都市・郵便番号検索、都道府県、温度単位を確認した。
+- weather verifierは東京とロンドンの実API取得を一度通過した。最終再実行時はOpen-Meteoの無料Forecast / Statusホストだけが接続タイムアウトし、Geocoding / 公式サイト / customer APIホストは到達できたため、外部側の一時障害として記録した。保存済み予報フォールバックは維持している。
+- 現在地の実座標取得は位置情報許可を自動承認せず未実施。Windows版と公開配信は未変更。詳細: `progress/2026-07/2026-07-28_hover-pocket-global-weather-locations.md`。
+
 ## 2026-07-28 Mac Build 150 Release
 
 - Calendarの日本47都道府県天気、当日＋7日予報、週間行の整列、上段予定詳細・編集スクロール、天候別SF Symbolsモーションを含む機能commit `96d11ce`までの5 commitを`origin/main`へpushし、local / origin SHA一致を確認した。

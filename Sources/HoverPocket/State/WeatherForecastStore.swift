@@ -26,33 +26,53 @@ final class WeatherForecastStore: ObservableObject {
         cache = WeatherForecastCache(defaults: defaults)
     }
 
-    func loadIfNeeded(region: WeatherRegion) {
+    func loadIfNeeded(
+        location: WeatherLocation,
+        temperatureUnit: WeatherTemperatureUnitOption
+    ) {
+        let scale = temperatureUnit.resolvedScale(for: location)
         if case .loaded(let forecast, _) = state,
-           forecast.regionID == region.id,
+           forecast.locationID == location.id,
+           forecast.temperatureScale == scale,
            Date().timeIntervalSince(forecast.fetchedAt) < cacheLifetime {
             return
         }
-        load(region: region, force: false)
+        load(location: location, temperatureUnit: temperatureUnit, force: false)
     }
 
-    func refresh(region: WeatherRegion) {
-        load(region: region, force: true)
+    func refresh(
+        location: WeatherLocation,
+        temperatureUnit: WeatherTemperatureUnitOption
+    ) {
+        load(location: location, temperatureUnit: temperatureUnit, force: true)
     }
 
-    func regionDidChange(to region: WeatherRegion) {
-        load(region: region, force: true)
+    func locationDidChange(
+        to location: WeatherLocation,
+        temperatureUnit: WeatherTemperatureUnitOption
+    ) {
+        load(location: location, temperatureUnit: temperatureUnit, force: true)
     }
 
-    private func load(region: WeatherRegion, force: Bool) {
+    private func load(
+        location: WeatherLocation,
+        temperatureUnit: WeatherTemperatureUnitOption,
+        force: Bool
+    ) {
+        let temperatureScale = temperatureUnit.resolvedScale(for: location)
         if !force,
            case .loaded(let forecast, _) = state,
-           forecast.regionID == region.id,
+           forecast.locationID == location.id,
+           forecast.temperatureScale == temperatureScale,
            Date().timeIntervalSince(forecast.fetchedAt) < cacheLifetime {
             return
         }
 
         fetchTask?.cancel()
-        let cachedForecast = cache.load(regionID: region.id)
+        let cachedForecast = cache.load(
+            locationID: location.id,
+            temperatureScale: temperatureScale
+        )
         if let cachedForecast {
             let isFresh = Date().timeIntervalSince(cachedForecast.fetchedAt) < cacheLifetime
             state = .loaded(
@@ -68,7 +88,10 @@ final class WeatherForecastStore: ObservableObject {
 
         fetchTask = Task { [weak self, service, cache] in
             do {
-                let forecast = try await service.fetch(region: region)
+                let forecast = try await service.fetch(
+                    location: location,
+                    temperatureUnit: temperatureUnit
+                )
                 guard !Task.isCancelled else { return }
                 cache.save(forecast)
                 self?.state = .loaded(forecast, warning: nil)
@@ -100,12 +123,19 @@ struct WeatherForecastCache {
         self.defaults = defaults
     }
 
-    func load(regionID: String) -> WeatherForecast? {
-        guard let data = defaults.data(forKey: keyPrefix + regionID) else {
+    func load(
+        locationID: String,
+        temperatureScale: WeatherTemperatureScale
+    ) -> WeatherForecast? {
+        let scaleKey = keyPrefix + locationID + "." + temperatureScale.rawValue
+        let legacyKey = keyPrefix + locationID
+        guard let data = defaults.data(forKey: scaleKey)
+            ?? (temperatureScale == .celsius ? defaults.data(forKey: legacyKey) : nil) else {
             return nil
         }
         guard let forecast = try? JSONDecoder().decode(WeatherForecast.self, from: data),
-              forecast.regionID == regionID else {
+              forecast.locationID == locationID,
+              forecast.temperatureScale == temperatureScale else {
             return nil
         }
         return forecast
@@ -113,6 +143,7 @@ struct WeatherForecastCache {
 
     func save(_ forecast: WeatherForecast) {
         guard let data = try? JSONEncoder().encode(forecast) else { return }
-        defaults.set(data, forKey: keyPrefix + forecast.regionID)
+        let key = keyPrefix + forecast.locationID + "." + forecast.temperatureScale.rawValue
+        defaults.set(data, forKey: key)
     }
 }

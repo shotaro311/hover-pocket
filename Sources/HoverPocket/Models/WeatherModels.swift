@@ -1,13 +1,74 @@
 import Foundation
 
 struct WeatherForecast: Codable, Equatable, Sendable {
-    let regionID: String
+    let locationID: String
     let currentTemperature: Double
     let currentCondition: WeatherCondition
     let today: WeatherForecastDay
     let upcomingDays: [WeatherForecastDay]
     let fetchedAt: Date
     let timezoneIdentifier: String
+    let temperatureScale: WeatherTemperatureScale
+
+    private enum CodingKeys: String, CodingKey {
+        case locationID
+        case legacyRegionID = "regionID"
+        case currentTemperature
+        case currentCondition
+        case today
+        case upcomingDays
+        case fetchedAt
+        case timezoneIdentifier
+        case temperatureScale
+    }
+
+    init(
+        locationID: String,
+        currentTemperature: Double,
+        currentCondition: WeatherCondition,
+        today: WeatherForecastDay,
+        upcomingDays: [WeatherForecastDay],
+        fetchedAt: Date,
+        timezoneIdentifier: String,
+        temperatureScale: WeatherTemperatureScale
+    ) {
+        self.locationID = locationID
+        self.currentTemperature = currentTemperature
+        self.currentCondition = currentCondition
+        self.today = today
+        self.upcomingDays = upcomingDays
+        self.fetchedAt = fetchedAt
+        self.timezoneIdentifier = timezoneIdentifier
+        self.temperatureScale = temperatureScale
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        locationID = try container.decodeIfPresent(String.self, forKey: .locationID)
+            ?? container.decode(String.self, forKey: .legacyRegionID)
+        currentTemperature = try container.decode(Double.self, forKey: .currentTemperature)
+        currentCondition = try container.decode(WeatherCondition.self, forKey: .currentCondition)
+        today = try container.decode(WeatherForecastDay.self, forKey: .today)
+        upcomingDays = try container.decode([WeatherForecastDay].self, forKey: .upcomingDays)
+        fetchedAt = try container.decode(Date.self, forKey: .fetchedAt)
+        timezoneIdentifier = try container.decode(String.self, forKey: .timezoneIdentifier)
+        temperatureScale = try container.decodeIfPresent(
+            WeatherTemperatureScale.self,
+            forKey: .temperatureScale
+        ) ?? .celsius
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(locationID, forKey: .locationID)
+        try container.encode(currentTemperature, forKey: .currentTemperature)
+        try container.encode(currentCondition, forKey: .currentCondition)
+        try container.encode(today, forKey: .today)
+        try container.encode(upcomingDays, forKey: .upcomingDays)
+        try container.encode(fetchedAt, forKey: .fetchedAt)
+        try container.encode(timezoneIdentifier, forKey: .timezoneIdentifier)
+        try container.encode(temperatureScale, forKey: .temperatureScale)
+    }
 }
 
 struct WeatherForecastDay: Codable, Identifiable, Equatable, Sendable {

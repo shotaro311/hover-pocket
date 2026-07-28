@@ -88,7 +88,8 @@ struct GoogleCalendarPreviewView: View {
                 panelSize: settings.panelSize,
                 language: language,
                 isActive: isActive,
-                region: settings.weatherRegion
+                location: settings.weatherLocation,
+                temperatureUnit: settings.weatherTemperatureUnit
             )
         }
         .overlay(alignment: .topLeading) {

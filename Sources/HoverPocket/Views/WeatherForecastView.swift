@@ -4,7 +4,8 @@ struct WeatherForecastView: View {
     let panelSize: PanelSizeOption
     let language: AppLanguage
     let isActive: Bool
-    let region: WeatherRegion
+    let location: WeatherLocation
+    let temperatureUnit: WeatherTemperatureUnitOption
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var store = WeatherForecastStore.shared
@@ -21,14 +22,19 @@ struct WeatherForecastView: View {
             case .loaded(let forecast, let warning):
                 WeatherLoadedContent(
                     forecast: forecast,
-                    region: region,
+                    location: location,
                     panelSize: panelSize,
                     language: language,
                     warning: warning,
                     revealedIconCount: revealedIconCount,
                     animatesIconReveal: !reduceMotion,
                     currentConditionEffectActive: currentConditionEffectActive,
-                    onRefresh: { store.refresh(region: region) }
+                    onRefresh: {
+                        store.refresh(
+                            location: location,
+                            temperatureUnit: temperatureUnit
+                        )
+                    }
                 )
             case .failed:
                 failedView
@@ -40,13 +46,13 @@ struct WeatherForecastView: View {
         .clipShape(RoundedRectangle(cornerRadius: metrics.cornerRadius, style: .continuous))
         .onAppear {
             if isActive {
-                store.loadIfNeeded(region: region)
+                store.loadIfNeeded(location: location, temperatureUnit: temperatureUnit)
                 playIconRevealIfReady()
             }
         }
         .onChange(of: isActive) { _, active in
             if active {
-                store.loadIfNeeded(region: region)
+                store.loadIfNeeded(location: location, temperatureUnit: temperatureUnit)
                 playIconRevealIfReady()
             } else {
                 resetIconReveal()
@@ -55,9 +61,20 @@ struct WeatherForecastView: View {
         .onChange(of: store.state) { _, _ in
             playIconRevealIfReady()
         }
-        .onChange(of: region) { _, selectedRegion in
+        .onChange(of: location) { _, selectedLocation in
             if isActive {
-                store.regionDidChange(to: selectedRegion)
+                store.locationDidChange(
+                    to: selectedLocation,
+                    temperatureUnit: temperatureUnit
+                )
+            }
+        }
+        .onChange(of: temperatureUnit) { _, selectedUnit in
+            if isActive {
+                store.locationDidChange(
+                    to: location,
+                    temperatureUnit: selectedUnit
+                )
             }
         }
         .onChange(of: reduceMotion) { _, enabled in
@@ -76,8 +93,8 @@ struct WeatherForecastView: View {
             ProgressView()
                 .controlSize(.small)
             Text(text(
-                japanese: "\(region.japaneseName)の天気を取得中…",
-                english: "Loading weather for \(region.englishName)…"
+                japanese: "\(location.displayName(language: .japanese))の天気を取得中…",
+                english: "Loading weather for \(location.displayName(language: .english))…"
             ))
             .panelTextFont(size: metrics.statusTitleSize, weight: .bold)
             .foregroundStyle(.white.opacity(0.68))
@@ -99,7 +116,7 @@ struct WeatherForecastView: View {
             Spacer(minLength: 2)
 
             Button(text(japanese: "再試行", english: "Retry")) {
-                store.refresh(region: region)
+                store.refresh(location: location, temperatureUnit: temperatureUnit)
             }
             .panelTextFont(size: metrics.buttonFontSize, weight: .bold)
             .buttonStyle(WeatherActionButtonStyle())
@@ -178,7 +195,7 @@ struct WeatherForecastView: View {
 
 struct WeatherLoadedContent: View {
     let forecast: WeatherForecast
-    let region: WeatherRegion
+    let location: WeatherLocation
     let panelSize: PanelSizeOption
     let language: AppLanguage
     let warning: String?
@@ -222,7 +239,7 @@ struct WeatherLoadedContent: View {
                     .lineLimit(1)
 
                 VStack(alignment: .leading, spacing: panelSize == .large ? 2 : 0) {
-                    Text(region.name(language: language))
+                    Text(location.displayName(language: language))
                         .panelTextFont(size: metrics.regionFontSize, weight: .bold)
                         .foregroundStyle(.white.opacity(0.9))
                         .lineLimit(1)
@@ -326,6 +343,7 @@ struct WeatherLoadedContent: View {
     private func weekday(for date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = language.locale
+        formatter.timeZone = TimeZone(identifier: forecast.timezoneIdentifier)
         formatter.setLocalizedDateFormatFromTemplate("EEE")
         let result = formatter.string(from: date)
         return language == .japanese ? String(result.prefix(1)) : String(result.prefix(3))
