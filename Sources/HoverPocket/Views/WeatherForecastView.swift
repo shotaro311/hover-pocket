@@ -11,6 +11,7 @@ struct WeatherForecastView: View {
     @State private var revealedIconCount = 0
     @State private var hasPlayedIconReveal = false
     @State private var revealGeneration = 0
+    @State private var currentConditionEffectActive = false
 
     var body: some View {
         Group {
@@ -26,6 +27,7 @@ struct WeatherForecastView: View {
                     warning: warning,
                     revealedIconCount: revealedIconCount,
                     animatesIconReveal: !reduceMotion,
+                    currentConditionEffectActive: currentConditionEffectActive,
                     onRefresh: { store.refresh(region: region) }
                 )
             case .failed:
@@ -62,6 +64,7 @@ struct WeatherForecastView: View {
             guard enabled else { return }
             revealGeneration += 1
             revealedIconCount = Self.totalIconCount
+            currentConditionEffectActive = false
         }
         .onDisappear {
             resetIconReveal()
@@ -146,6 +149,13 @@ struct WeatherForecastView: View {
             withAnimation(.easeOut(duration: 0.3)) {
                 revealedIconCount = 1
             }
+            currentConditionEffectActive = true
+
+            Task { @MainActor in
+                try? await Task.sleep(for: WeatherForecastAnimation.currentConditionEffectDuration)
+                guard generation == revealGeneration, isActive else { return }
+                currentConditionEffectActive = false
+            }
 
             for count in 2...Self.totalIconCount {
                 try? await Task.sleep(for: .milliseconds(70))
@@ -162,6 +172,7 @@ struct WeatherForecastView: View {
         revealGeneration += 1
         hasPlayedIconReveal = false
         revealedIconCount = 0
+        currentConditionEffectActive = false
     }
 
     private static let totalIconCount = 8
@@ -175,6 +186,7 @@ struct WeatherLoadedContent: View {
     let warning: String?
     let revealedIconCount: Int
     let animatesIconReveal: Bool
+    let currentConditionEffectActive: Bool
     let onRefresh: () -> Void
 
     var body: some View {
@@ -196,12 +208,14 @@ struct WeatherLoadedContent: View {
     private var currentWeather: some View {
         VStack(alignment: .leading, spacing: metrics.currentBlockSpacing) {
             HStack(spacing: metrics.currentSpacing) {
-                WeatherAnimatedSymbol(
+                WeatherCurrentAnimatedSymbol(
                     name: forecast.currentCondition.symbolName,
+                    motionPreset: forecast.currentCondition.symbolMotionPreset,
                     size: metrics.currentIconSize,
                     width: metrics.currentIconWidth,
                     isRevealed: revealedIconCount >= 1,
-                    animatesReveal: animatesIconReveal
+                    animatesReveal: animatesIconReveal,
+                    conditionEffectActive: currentConditionEffectActive
                 )
 
                 Text(temperature(forecast.currentTemperature))
@@ -271,7 +285,7 @@ struct WeatherLoadedContent: View {
                 .foregroundStyle(.white.opacity(0.52))
                 .lineLimit(1)
 
-            HStack(spacing: metrics.daySpacing) {
+            HStack(alignment: .top, spacing: metrics.daySpacing) {
                 ForEach(forecast.upcomingDays.indices, id: \.self) { index in
                     let day = forecast.upcomingDays[index]
                     VStack(spacing: metrics.dayItemSpacing) {
@@ -301,7 +315,7 @@ struct WeatherLoadedContent: View {
                             .foregroundStyle(.cyan.opacity(0.68))
                             .lineLimit(1)
                     }
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .top)
                 }
             }
         }
@@ -328,6 +342,84 @@ struct WeatherLoadedContent: View {
     }
 }
 
+enum WeatherForecastAnimation {
+    static let currentConditionEffectDurationSeconds = 5.0
+    static let currentConditionEffectDuration: Duration = .seconds(
+        currentConditionEffectDurationSeconds
+    )
+}
+
+private struct WeatherCurrentAnimatedSymbol: View {
+    let name: String
+    let motionPreset: WeatherSymbolMotionPreset
+    let size: CGFloat
+    let width: CGFloat
+    let isRevealed: Bool
+    let animatesReveal: Bool
+    let conditionEffectActive: Bool
+
+    var body: some View {
+        ZStack {
+            Color.clear
+                .frame(width: width, height: size)
+
+            if !animatesReveal || isRevealed {
+                WeatherConditionEffectSymbol(
+                    name: name,
+                    motionPreset: motionPreset,
+                    size: size,
+                    width: width,
+                    isActive: conditionEffectActive
+                )
+                .transition(.symbolEffect(.appear, options: .nonRepeating))
+            }
+        }
+        .frame(width: width, height: size)
+    }
+}
+
+private struct WeatherConditionEffectSymbol: View {
+    let name: String
+    let motionPreset: WeatherSymbolMotionPreset
+    let size: CGFloat
+    let width: CGFloat
+    let isActive: Bool
+
+    @ViewBuilder
+    var body: some View {
+        switch motionPreset {
+        case .sunlightPulse:
+            symbol
+                .symbolEffect(
+                    .pulse.byLayer,
+                    options: .repeating.speed(0.7),
+                    isActive: isActive
+                )
+        case .cloudPulse:
+            symbol
+                .symbolEffect(
+                    .pulse.wholeSymbol,
+                    options: .repeating.speed(0.55),
+                    isActive: isActive
+                )
+        case .precipitationCycle:
+            symbol
+                .symbolEffect(
+                    .variableColor.iterative.reversing,
+                    options: .repeating.speed(0.8),
+                    isActive: isActive
+                )
+        }
+    }
+
+    private var symbol: some View {
+        Image(systemName: name)
+            .symbolRenderingMode(.multicolor)
+            .font(.system(size: size, weight: .semibold))
+            .frame(width: width, height: size)
+    }
+}
+
 private struct WeatherAnimatedSymbol: View {
     let name: String
     let size: CGFloat
@@ -336,28 +428,23 @@ private struct WeatherAnimatedSymbol: View {
     let animatesReveal: Bool
 
     var body: some View {
-        Group {
-            if !animatesReveal {
-                symbol
-            } else {
-                ZStack {
-                    Color.clear
-                        .frame(width: width, height: size)
+        ZStack {
+            Color.clear
+                .frame(width: width, height: size)
 
-                    if isRevealed {
-                        symbol
-                            .transition(.symbolEffect(.appear, options: .nonRepeating))
-                    }
-                }
+            if !animatesReveal || isRevealed {
+                symbol
+                    .transition(.symbolEffect(.appear, options: .nonRepeating))
             }
         }
+        .frame(height: size)
     }
 
     private var symbol: some View {
         Image(systemName: name)
             .symbolRenderingMode(.multicolor)
             .font(.system(size: size, weight: .semibold))
-            .frame(width: width)
+            .frame(width: width, height: size)
     }
 }
 

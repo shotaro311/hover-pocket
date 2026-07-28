@@ -87,6 +87,17 @@ enum WeatherCondition: String, Codable, Equatable, Sendable {
         }
     }
 
+    var symbolMotionPreset: WeatherSymbolMotionPreset {
+        switch self {
+        case .clear, .mostlyClear:
+            return .sunlightPulse
+        case .cloudy, .fog, .unknown:
+            return .cloudPulse
+        case .drizzle, .rain, .freezingRain, .snow, .showers, .thunderstorm:
+            return .precipitationCycle
+        }
+    }
+
     func title(language: AppLanguage) -> String {
         switch (self, language) {
         case (.clear, .japanese):
@@ -135,4 +146,10 @@ enum WeatherCondition: String, Codable, Equatable, Sendable {
             return "Unknown"
         }
     }
+}
+
+enum WeatherSymbolMotionPreset: String, Equatable, Sendable {
+    case sunlightPulse
+    case cloudPulse
+    case precipitationCycle
 }

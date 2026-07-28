@@ -14,8 +14,8 @@
 - Open-Meteo Forecast APIへ`Asia/Tokyo`、`forecast_days=8`で問い合わせ、現在気温と当日の最高/最低・降水確率、翌日から7日分の天気コード・最高/最低・降水確率を取得する。
 - WMO weather codeをSF Symbolsと日英の天気状態へ変換した。
 - Calendarの下段全幅へ、既存の暗色、白の低opacity border、角丸に合わせた天気カードを配置した。上段とは区切り線で分離し、カード内も当日天気と週間予報の間を縦線で分けた。Small / Medium / Largeで高さを`58 / 67 / 122pt`に切り替える。
-- 週間予報へ見出しを追加し、曜日、アイコン、最高/最低気温、降水確率を拡大した。上段右側の予定詳細と予定編集は単一の縦ScrollViewで扱い、内容が上段の高さを超える場合だけスクロールできる。
-- Calendar表示ごとに、本日のSF Symbolを先に、週間7個を70ms間隔で続けて挿入する一回限りの`symbolEffect(.appear)`を追加した。表示中の天気更新では再生せず、パネルを閉じた時だけ次回分をリセットする。Reduce Motion有効時と静止画検証時は全アイコンを即時表示する。
+- 週間予報へ見出しを追加し、曜日、アイコン、最高/最低気温、降水確率を拡大した。7列を上揃えにし、各SF Symbolを同じ高さの枠へ収めたため、晴れ・曇り・雨など固有寸法が異なっても曜日・アイコン・数値の各Y位置が揃う。上段右側の予定詳細と予定編集は単一の縦ScrollViewで扱い、内容が上段の高さを超える場合だけスクロールできる。
+- Calendar表示ごとに、本日のSF Symbolを先に、週間7個を70ms間隔で続けて挿入する一回限りの`symbolEffect(.appear)`を追加した。本日のアイコンはmacOS 14対応のSF Symbols標準効果を使い、晴れは`pulse.byLayer`、曇りは`pulse.wholeSymbol`、雨・雪・雷は`variableColor.iterative.reversing`を約5秒再生する。表示中の天気更新では再生せず、パネルを閉じた時だけ次回分をリセットする。Reduce Motion有効時と静止画検証時は全アイコンを即時表示する。
 - 取得結果は地域単位でUserDefaultsへ保存する。通信失敗時は保存済み予報を黄色の警告付きで維持し、保存済み予報がない場合は再試行表示にする。
 - 画面内へOpen-Meteoの帰属リンクを表示する。
 
@@ -37,8 +37,11 @@
   - `weather_timezone=Asia/Tokyo`
   - `weather_region_persistence=ok`
   - `weather_offline_cache=ok`
+  - `weather_weekday_alignment=fixed`
+  - `weather_symbol_motion_presets=3`
+  - `weather_condition_motion_duration_seconds=5.0`
   - `weather_reduce_motion_render=immediate`
-- 実際のOpen-Meteo応答を使ったSwiftUI描画を`dist/verification/calendar-weather-preview.png`へ保存し、当日気温、状態、最高/最低、降水確率、今後7日間が左右に分かれて欠けずに収まることを画像確認した。
+- 実際のOpen-Meteo応答を使ったSwiftUI描画を`dist/verification/calendar-weather-preview.png`へ保存し、当日気温、状態、最高/最低、降水確率、今後7日間が左右に分かれて欠けずに収まり、週間7列の曜日・アイコン・気温・降水確率がそれぞれ同じY位置へ揃うことを画像確認した。
 - `.build/debug/HoverPocket --verify-panel-layout`: `panel_layout_verify=ok`、63ケース成功。
 - `./script/build_and_run.sh --verify`: Apple Development署名付き`dist/HoverPocket.app`を生成し、起動成功。
 - `dist/HoverPocket.app/Contents/MacOS/HoverPocket --verify-weather`: bundle内実行ファイルでも同じweather verifierが成功。
@@ -46,6 +49,8 @@
 - 起動したLargeパネルを画面合成経路で`dist/verification/calendar-panel-layout.png`へ保存し、6週の月グリッド、右側の実予定3件、上下の区切り線、下段全幅の天気カードが重ならず収まることを確認した。
 - 新規予定フォームを開いた実画面を`dist/verification/calendar-editor-layout.png`へ保存し、上段右側だけに縦スクロールバーが現れ、フォームが下段の天気エリアへ重ならないことを確認した。保存は実行せず、検証後にアプリを再起動して未保存draftを破棄した。
 - 実アプリを120fps・3.0秒で`dist/verification/calendar-weather-motion.mov`へ録画した。1.2秒で本日のアイコン、1.4〜1.8秒で週間アイコンが左から順に表示され、2.0秒で8個が揃い、2.8秒でも全アイコンが維持されて再ループしないことをフレーム確認した。
+- 実アプリを約54fps・9.0秒で`dist/verification/calendar-weather-condition-motion.mov`へ録画した。本日の「晴れ時々くもり」が太陽と雲のレイヤーごとに脈動して約5秒後に通常の明るさへ戻り、その後は再ループしないことを確認した。モーション中も週間7列の曜日位置は固定されていた。
+- `swift test`はPackageにtest targetがないため`no tests found`。代わりに実API weather verifier、63ケースのlayout verifier、静止画、実アプリ録画で今回の変更を検証した。
 - 生成Info.plistに位置情報permission keyがないこと、通常起動が期待したbundle pathの1 processであることをreadbackした。
 - `bash -n script/build_and_run.sh`、`git diff --check`: 成功。
 

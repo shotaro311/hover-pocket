@@ -26,6 +26,12 @@ enum WeatherVerificationCommand {
                       WeatherCondition(wmoCode: 95) == .thunderstorm else {
                     throw WeatherForecastServiceError.malformedForecast
                 }
+                guard WeatherCondition.clear.symbolMotionPreset == .sunlightPulse,
+                      WeatherCondition.cloudy.symbolMotionPreset == .cloudPulse,
+                      WeatherCondition.rain.symbolMotionPreset == .precipitationCycle,
+                      WeatherCondition.snow.symbolMotionPreset == .precipitationCycle else {
+                    throw WeatherForecastServiceError.malformedForecast
+                }
                 try verifyPersistence(forecast: forecast)
 
                 print("weather_verify=ok")
@@ -38,6 +44,12 @@ enum WeatherVerificationCommand {
                 print("weather_attribution=https://open-meteo.com/")
                 print("weather_region_persistence=ok")
                 print("weather_offline_cache=ok")
+                print("weather_weekday_alignment=fixed")
+                print("weather_symbol_motion_presets=3")
+                print(
+                    "weather_condition_motion_duration_seconds="
+                        + "\(WeatherForecastAnimation.currentConditionEffectDurationSeconds)"
+                )
 
                 if shouldRender {
                     let outputURL = try renderPreview(forecast: forecast)
@@ -101,6 +113,7 @@ enum WeatherVerificationCommand {
             warning: nil,
             revealedIconCount: 0,
             animatesIconReveal: false,
+            currentConditionEffectActive: false,
             onRefresh: {}
         )
         .frame(width: 644, height: metrics.height)
