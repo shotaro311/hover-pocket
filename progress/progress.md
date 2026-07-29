@@ -5,6 +5,14 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-29 Mac Timer Compact Cards
+
+- 実装前にローカル`main`の3コミットを`origin/main`へpushし、local / originが`bf954b028767db6d8b1559f8ee378ca095d4eff5`、ahead / behind `0 / 0`で一致することを確認した。
+- Timer / Pomodoroの横並び入力カードは、外側padding、内部spacing、Pomodoroのwork / rest間隔、startボタンを詰めて縦幅を縮めた。
+- 実行中セクションの大きな外枠を外し、進捗リング、タイトル、残り時間、pin、pause / resume、stopを1行へ収めた高さ`44pt`の横長カードへ変更した。複数タイマーと終了アラートは`5pt`間隔で縦に並ぶ。
+- 時間入力、調整バー、sound、start、pause / resume / stop、pin / unpin、アラーム停止の動作は維持した。`--verify-timer`へcompact layout値の回帰検証を追加した。詳細: `progress/2026-07/2026-07-29_hover-pocket-timer-compact-cards.md`。
+- `swift build`、`--verify-timer`のside-by-side / compact、`--verify-panel-layout` 112ケース、`--verify-clipboard`、`./script/build_and_run.sh --verify`が成功した。
+
 ## 2026-07-29 Mac Browser Media Playback Rate DOM Readback
 
 - Controlsの再生速度操作を、対象ブラウザタブの`HTMLMediaElement.playbackRate`へ直接設定し、同じvideo要素から読み戻した値だけを成功表示する方式へ変更した。UIと専用verifierは同じ`MediaRemoteService` / browser fallback経路を使う。

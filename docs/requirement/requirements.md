@@ -372,14 +372,14 @@ Must:
 Must:
 
 - 「タイマー」と「ポモドーロタイマー」の 2 種類の入力カードを持つ。
-- macOS版は2つの入力カードを横並びにし、Small / Medium / Large / Extra Largeの各パネルへ収める。
+- macOS版は2つの入力カードをコンパクトな横並びにし、Small / Medium / Large / Extra Largeの各パネルへ収める。
 - 各カードに title、color、sound on/off を設定できる。
 - 通常 Timer の既定値は 10 分、Pomodoro の既定値は work 25 分 / rest 5 分を基準にする。
 - 時間は直接入力とインライン調整バーで調整できる。
 - ポモドーロは work/rest を交互に切り替える。
 - Pomodoro は work cycle count を表示する。
 - 実行中タイマーは最大 2 つ。
-- macOS版は実行中セクションをtimer colorで強調し、大きな残り時間と進捗リングを表示する。
+- macOS版の実行中タイマーはtimer colorで識別できる薄い横長カードとし、進捗リング、残り時間、操作ボタンを1行へまとめる。タイマーを追加するとカードが縦に並ぶ。
 - ピン留め preset は最大 4 つ。
 - 実行中タイマーは pause、resume、stop できる。
 - 残り時間は絶対終了時刻ベースで計算し、スリープ復帰後も大きく狂わない。

@@ -4,6 +4,9 @@ struct TimerLayoutMetrics {
     static let horizontalPadding: CGFloat = 16
     static let entrySectionSpacing: CGFloat = 10
     static let minimumEntryCardWidth: CGFloat = 220
+    static let compactSectionVerticalPadding: CGFloat = 6
+    static let runningCardHeight: CGFloat = 44
+    static let runningCardSpacing: CGFloat = 5
 
     let availableWidth: CGFloat
 
@@ -32,7 +35,7 @@ struct TimerView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 10) {
+            VStack(spacing: 8) {
                 runningSection
 
                 entrySections
@@ -43,7 +46,7 @@ struct TimerView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.horizontal, TimerLayoutMetrics.horizontalPadding)
-            .padding(.vertical, 12)
+            .padding(.vertical, 10)
         }
         .scrollIndicators(.never)
     }
@@ -76,31 +79,39 @@ struct TimerView: View {
     // MARK: - Running timers
 
     private var runningSection: some View {
-        TimerSection(
-            title: text(.timerRunningSection),
-            accentColor: runningAccentColor,
-            isEmphasized: true
-        ) {
+        VStack(alignment: .leading, spacing: TimerLayoutMetrics.runningCardSpacing) {
+            Text(text(.timerRunningSection))
+                .panelTextFont(size: 10, weight: .bold, design: .monospaced)
+                .foregroundStyle(runningAccentColor.opacity(0.9))
+
             if store.runningTimers.isEmpty, store.activeAlert == nil {
                 TimerEmptyRow(message: text(.timerNoRunning))
+                    .padding(.horizontal, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.white.opacity(0.025))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(Color.white.opacity(0.055), lineWidth: 1)
+                    )
             } else {
-                VStack(spacing: 8) {
-                    if !store.canStartTimer {
-                        Text(text(.timerSlotsFull))
-                            .panelTextFont(size: 9, weight: .medium, design: .monospaced)
-                            .foregroundStyle(.yellow.opacity(0.75))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    if let alert = store.activeAlert,
-                       !store.runningTimers.contains(where: { $0.id == alert.id }) {
-                        finishedAlertRow(alert)
-                    }
-                    ForEach(store.runningTimers) { timer in
-                        runningRow(timer)
-                    }
+                if !store.canStartTimer {
+                    Text(text(.timerSlotsFull))
+                        .panelTextFont(size: 8.5, weight: .medium, design: .monospaced)
+                        .foregroundStyle(.yellow.opacity(0.72))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let alert = store.activeAlert,
+                   !store.runningTimers.contains(where: { $0.id == alert.id }) {
+                    finishedAlertRow(alert)
+                }
+                ForEach(store.runningTimers) { timer in
+                    runningRow(timer)
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var runningAccentColor: Color {
@@ -111,18 +122,18 @@ struct TimerView: View {
     }
 
     private func finishedAlertRow(_ alert: TimerAlert) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Circle()
                 .fill(alert.color.color)
-                .frame(width: 10, height: 10)
+                .frame(width: 8, height: 8)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(alert.title.isEmpty ? text(.timerFinished) : alert.title)
-                    .panelTextFont(size: 11, weight: .bold)
+                    .panelTextFont(size: 10.5, weight: .bold)
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
                 Text(text(.timerFinished))
-                    .panelTextFont(size: 9, weight: .medium, design: .monospaced)
+                    .panelTextFont(size: 8.5, weight: .medium, design: .monospaced)
                     .foregroundStyle(alert.color.color.opacity(0.9))
             }
 
@@ -130,7 +141,9 @@ struct TimerView: View {
 
             stopAlarmButton(color: alert.color.color)
         }
-        .padding(8)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .frame(minHeight: TimerLayoutMetrics.runningCardHeight)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(alert.color.color.opacity(0.12))
@@ -143,31 +156,33 @@ struct TimerView: View {
 
     private func runningRow(_ timer: RunningTimer) -> some View {
         let isAlerting = store.activeAlert?.id == timer.id
-        return HStack(spacing: 10) {
+        return HStack(spacing: 8) {
             progressRing(for: timer)
-                .frame(width: 44, height: 44)
+                .frame(width: 30, height: 30)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(timer.title.isEmpty ? text(.timer) : timer.title)
-                    .panelTextFont(size: 11.5, weight: .bold)
+                    .panelTextFont(size: 10, weight: .bold)
                     .foregroundStyle(.white.opacity(0.88))
                     .lineLimit(1)
 
                 HStack(spacing: 6) {
                     Text(remainingText(for: timer))
-                        .panelTextFont(size: 18, weight: .bold, design: .monospaced)
+                        .panelTextFont(size: 14, weight: .bold, design: .monospaced)
                         .foregroundStyle(timer.color.color)
                         .minimumScaleFactor(0.75)
 
                     if timer.isPomodoro {
                         Text(pomodoroPhaseText(for: timer))
-                            .panelTextFont(size: 9, weight: .bold, design: .monospaced)
+                            .panelTextFont(size: 8.5, weight: .bold, design: .monospaced)
                             .foregroundStyle(.white.opacity(0.5))
                     }
                 }
             }
 
             Spacer(minLength: 8)
+
+            pinButton(for: timer)
 
             if isAlerting {
                 stopAlarmButton(color: timer.color.color)
@@ -186,23 +201,20 @@ struct TimerView: View {
             }
             .help(text(.timerStop))
         }
-        .padding(.top, 10)
-        .padding([.horizontal, .bottom], 8)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .frame(minHeight: TimerLayoutMetrics.runningCardHeight)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isAlerting ? timer.color.color.opacity(0.12) : Color.white.opacity(0.03))
+                .fill(isAlerting ? timer.color.color.opacity(0.12) : timer.color.color.opacity(0.045))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(isAlerting ? timer.color.color.opacity(0.5) : Color.white.opacity(0.05), lineWidth: 1)
+                .stroke(isAlerting ? timer.color.color.opacity(0.5) : timer.color.color.opacity(0.22), lineWidth: 1)
         )
-        .overlay(alignment: .topTrailing) {
-            pinButton(for: timer)
-                .offset(x: -5, y: 4)
-        }
     }
 
-    /// Top-right pin toggle on a running timer: pinning stores the timer's
+    /// Inline pin toggle on a running timer: pinning stores the timer's
     /// configuration for reuse, up to four pins.
     private func pinButton(for timer: RunningTimer) -> some View {
         let isPinned = timer.pinnedPresetID != nil
@@ -224,10 +236,10 @@ struct TimerView: View {
     private func stopAlarmButton(color: Color) -> some View {
         Button(action: store.stopAlert) {
             Text(text(.timerStopAlarm))
-                .panelTextFont(size: 10, weight: .bold)
+                .panelTextFont(size: 9.5, weight: .bold)
                 .foregroundStyle(.black.opacity(0.85))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
                 .background(Capsule().fill(color))
         }
         .buttonStyle(.plain)
@@ -370,8 +382,8 @@ private struct TimerEntryCard: View {
     let onStart: (TimerPreset) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
                 colorPicker
 
                 TextField(text(.timerTitlePlaceholder), text: $preset.title)
@@ -400,7 +412,7 @@ private struct TimerEntryCard: View {
     @ViewBuilder
     private var durationEditor: some View {
         if preset.isPomodoro {
-            VStack(spacing: 7) {
+            VStack(spacing: 4) {
                 pomodoroDurationRow(
                     title: text(.timerWork),
                     duration: $preset.workDuration
@@ -423,11 +435,11 @@ private struct TimerEntryCard: View {
         title: String,
         duration: Binding<TimeInterval>
     ) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 6) {
             Text(title)
                 .panelTextFont(size: 8, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white.opacity(0.42))
-                .frame(width: 30, height: 26, alignment: .leading)
+                .frame(width: 28, height: 24, alignment: .leading)
 
             TimerDurationInputView(
                 duration: duration,
@@ -439,11 +451,11 @@ private struct TimerEntryCard: View {
     }
 
     private var colorPicker: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 4) {
             ForEach(TimerColor.allCases, id: \.self) { color in
                 Circle()
                     .fill(color.color.opacity(preset.color == color ? 1 : 0.35))
-                    .frame(width: 10, height: 10)
+                    .frame(width: 9, height: 9)
                     .overlay(
                         Circle()
                             .stroke(Color.white.opacity(preset.color == color ? 0.85 : 0), lineWidth: 1)
@@ -468,11 +480,11 @@ private struct TimerEntryCard: View {
                 Image(systemName: "play.fill")
                     .font(.system(size: 8, weight: .bold))
                 Text(text(.timerStart))
-                    .panelTextFont(size: 10, weight: .bold)
+                    .panelTextFont(size: 9.5, weight: .bold)
             }
             .foregroundStyle(.black.opacity(0.85))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
             .background(Capsule().fill(preset.color.color.opacity(isStartEnabled ? 1 : 0.3)))
         }
         .buttonStyle(.plain)
@@ -489,48 +501,35 @@ private struct TimerEntryCard: View {
 
 private struct TimerSection<Content: View>: View {
     let title: String
-    let accentColor: Color?
-    let isEmphasized: Bool
     @ViewBuilder let content: () -> Content
 
     init(
         title: String,
-        accentColor: Color? = nil,
-        isEmphasized: Bool = false,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.title = title
-        self.accentColor = accentColor
-        self.isEmphasized = isEmphasized
         self.content = content
     }
 
     var body: some View {
-        let accent = accentColor ?? .white
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 5) {
             Text(title)
                 .panelTextFont(size: 10, weight: .bold, design: .monospaced)
-                .foregroundStyle(
-                    isEmphasized ? accent.opacity(0.9) : Color.white.opacity(0.64)
-                )
+                .foregroundStyle(Color.white.opacity(0.64))
 
             content()
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
+        .padding(.horizontal, 8)
+        .padding(.vertical, TimerLayoutMetrics.compactSectionVerticalPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isEmphasized ? accent.opacity(0.075) : Color.white.opacity(0.035))
+                .fill(Color.white.opacity(0.035))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(
-                    isEmphasized ? accent.opacity(0.55) : Color.white.opacity(0.065),
-                    lineWidth: 1
-                )
+                .stroke(Color.white.opacity(0.065), lineWidth: 1)
         )
-        .shadow(color: isEmphasized ? accent.opacity(0.08) : .clear, radius: 10)
     }
 }
 

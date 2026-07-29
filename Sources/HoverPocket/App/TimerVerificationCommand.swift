@@ -13,6 +13,7 @@ enum TimerVerificationCommand {
             "timer_pin=\(result.pinValid ? "ok" : "failed")",
             "timer_storage_isolation=\(result.storageIsolationValid ? "ok" : "failed")",
             "timer_layout_side_by_side=\(result.layoutFits ? "true" : "false")",
+            "timer_layout_compact=\(result.compactLayoutValid ? "true" : "false")",
             "timer_entry_widths=\(result.entryWidths)"
         ]
 
@@ -72,6 +73,9 @@ enum TimerVerificationCommand {
             )
         }
         let layoutFits = layoutResults.allSatisfy(\.metrics.fitsSideBySide)
+        let compactLayoutValid = TimerLayoutMetrics.compactSectionVerticalPadding <= 6
+            && TimerLayoutMetrics.runningCardHeight <= 44
+            && TimerLayoutMetrics.runningCardSpacing <= 5
         let entryWidths = layoutResults.map { result in
             "\(result.option.rawValue):\(format(result.metrics.entryCardWidth))"
         }
@@ -84,7 +88,8 @@ enum TimerVerificationCommand {
                 && storeOperations.lifecycleValid
                 && storeOperations.pinValid
                 && storeOperations.storageIsolationValid
-                && layoutFits,
+                && layoutFits
+                && compactLayoutValid,
             defaultsValid: defaultsValid,
             formattingValid: formattingValid,
             progressValid: progressValid,
@@ -92,6 +97,7 @@ enum TimerVerificationCommand {
             pinValid: storeOperations.pinValid,
             storageIsolationValid: storeOperations.storageIsolationValid,
             layoutFits: layoutFits,
+            compactLayoutValid: compactLayoutValid,
             entryWidths: entryWidths
         )
     }
@@ -186,5 +192,6 @@ private struct TimerVerificationResult {
     let pinValid: Bool
     let storageIsolationValid: Bool
     let layoutFits: Bool
+    let compactLayoutValid: Bool
     let entryWidths: String
 }
