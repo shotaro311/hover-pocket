@@ -651,6 +651,23 @@ private struct CalendarEventEditorView: View {
                 Spacer(minLength: 0)
 
                 Button {
+                    onSave()
+                } label: {
+                    HStack(spacing: 6) {
+                        if isSaving {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "checkmark")
+                        }
+                        Text(text(.save))
+                    }
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .controlSize(.small)
+                .disabled(isSaving || sources.isEmpty)
+
+                Button {
                     onCancel()
                 } label: {
                     Image(systemName: "xmark")
@@ -731,35 +748,14 @@ private struct CalendarEventEditorView: View {
                     .lineLimit(2)
             }
 
-            HStack(spacing: 8) {
-                if let onDelete {
-                    Button(role: .destructive) {
-                        onDelete()
-                    } label: {
-                        Label(text(.delete), systemImage: "trash")
-                    }
-                    .controlSize(.small)
-                    .disabled(isSaving)
-                }
-
-                Spacer(minLength: 0)
-
-                Button {
-                    onSave()
+            if let onDelete {
+                Button(role: .destructive) {
+                    onDelete()
                 } label: {
-                    HStack(spacing: 6) {
-                        if isSaving {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "checkmark")
-                        }
-                        Text(text(.save))
-                    }
+                    Label(text(.delete), systemImage: "trash")
                 }
-                .keyboardShortcut(.return, modifiers: .command)
                 .controlSize(.small)
-                .disabled(isSaving || sources.isEmpty)
+                .disabled(isSaving)
             }
         }
         .onAppear {

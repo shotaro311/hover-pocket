@@ -1,9 +1,15 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-07-28
+updated: 2026-07-29
 updated_by: codex
 status: active
 ---
+
+## 2026-07-29 Mac Calendar Save Button Placement
+
+- Calendarの新規予定・予定編集フォームで、下端にあった保存ボタンをフォーム上部ヘッダーへ移動した。スクロールせずに保存操作へ到達できる。
+- 保存処理、保存中表示、入力不能時の無効化、`Command + Return`ショートカットは維持した。編集時の削除ボタンは誤操作を避けるためフォーム下部に残した。
+- `swift build`、`./script/build_and_run.sh --verify`、`--verify-panel-layout` 63ケース、`git diff --check`が成功した。Computer Useではホバー専用ウィンドウのフォームをアクセシビリティ経由で開けなかったため、実画面の目視readbackは未確認。詳細: `progress/2026-07/2026-07-29_hover-pocket-calendar-save-button.md`。
 
 ## 2026-07-28 Mac Global Weather Locations
 
