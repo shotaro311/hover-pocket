@@ -1,7 +1,8 @@
 enum PanelSizeOption: String, CaseIterable, Identifiable {
-    case small
-    case medium
-    case large
+    case small = "small"
+    case medium = "medium"
+    case large = "large"
+    case extraLarge = "extraLarge"
 
     var id: String { rawValue }
 
@@ -17,6 +18,8 @@ enum PanelSizeOption: String, CaseIterable, Identifiable {
             return AppText.text(.panelSizeMedium, language: language)
         case .large:
             return AppText.text(.panelSizeLarge, language: language)
+        case .extraLarge:
+            return AppText.text(.panelSizeExtraLarge, language: language)
         }
     }
 
@@ -32,6 +35,8 @@ enum PanelSizeOption: String, CaseIterable, Identifiable {
             return language == .japanese ? "中" : "M"
         case .large:
             return language == .japanese ? "大" : "L"
+        case .extraLarge:
+            return language == .japanese ? "特大" : "XL"
         }
     }
 
@@ -47,6 +52,8 @@ enum PanelSizeOption: String, CaseIterable, Identifiable {
             return AppText.text(.panelSizeMediumDetail, language: language)
         case .large:
             return AppText.text(.panelSizeLargeDetail, language: language)
+        case .extraLarge:
+            return AppText.text(.panelSizeExtraLargeDetail, language: language)
         }
     }
 
@@ -57,6 +64,8 @@ enum PanelSizeOption: String, CaseIterable, Identifiable {
         case .medium:
             return .large
         case .large:
+            return .extraLarge
+        case .extraLarge:
             return .small
         }
     }

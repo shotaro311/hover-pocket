@@ -3,8 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 private enum ClipboardHistoryTab: CaseIterable {
-    case text
-    case images
+    case all
     case favorites
 }
 
@@ -27,7 +26,7 @@ struct ClipboardHistoryView: View {
     let onExternalDragStarted: @MainActor () -> Void
 
     @ObservedObject private var store = ClipboardHistoryStore.shared
-    @State private var selectedTab: ClipboardHistoryTab = .text
+    @State private var selectedTab: ClipboardHistoryTab = .all
     @State private var expandedItem: ClipboardExpandedItem?
 
     var body: some View {
@@ -114,19 +113,65 @@ struct ClipboardHistoryView: View {
     @ViewBuilder
     private var content: some View {
         switch selectedTab {
-        case .text:
-            textList(store.textItems, emptyTitle: text(.clipboardNoText), showDelete: false)
-        case .images:
-            imageGrid(store.imageItems, emptyTitle: text(.clipboardNoImages), showDelete: false)
+        case .all:
+            splitContent(
+                textItems: store.textItems,
+                imageItems: store.imageItems,
+                textEmptyTitle: text(.clipboardNoText),
+                imageEmptyTitle: text(.clipboardNoImages)
+            )
         case .favorites:
-            favoritesContent
+            splitContent(
+                textItems: store.favoriteTextItems,
+                imageItems: store.favoriteImageItems,
+                textEmptyTitle: text(.clipboardNoFavorites),
+                imageEmptyTitle: text(.clipboardNoFavorites)
+            )
         }
+    }
+
+    private func splitContent(
+        textItems: [ClipboardTextHistoryItem],
+        imageItems: [ClipboardImageHistoryItem],
+        textEmptyTitle: String,
+        imageEmptyTitle: String
+    ) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            historyColumn(
+                title: text(.clipboardText),
+                count: textItems.count
+            ) {
+                textList(textItems, emptyTitle: textEmptyTitle)
+            }
+
+            Divider()
+                .overlay(Color.white.opacity(0.08))
+
+            historyColumn(
+                title: text(.clipboardImages),
+                count: imageItems.count
+            ) {
+                imageGrid(imageItems, emptyTitle: imageEmptyTitle)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func historyColumn<Content: View>(
+        title: String,
+        count: Int,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle(title, count: count)
+            content()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func textList(
         _ items: [ClipboardTextHistoryItem],
-        emptyTitle: String,
-        showDelete: Bool
+        emptyTitle: String
     ) -> some View {
         Group {
             if items.isEmpty {
@@ -135,7 +180,7 @@ struct ClipboardHistoryView: View {
                 ScrollView {
                     LazyVStack(spacing: 7) {
                         ForEach(items) { item in
-                            textItemRow(item, showDelete: showDelete)
+                            textItemRow(item)
                         }
                     }
                 }
@@ -147,8 +192,7 @@ struct ClipboardHistoryView: View {
 
     private func imageGrid(
         _ items: [ClipboardImageHistoryItem],
-        emptyTitle: String,
-        showDelete: Bool
+        emptyTitle: String
     ) -> some View {
         Group {
             if items.isEmpty {
@@ -160,42 +204,7 @@ struct ClipboardHistoryView: View {
                         spacing: 8
                     ) {
                         ForEach(items) { item in
-                            imageItemTile(item, showDelete: showDelete)
-                        }
-                    }
-                }
-                .scrollIndicators(.never)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private var favoritesContent: some View {
-        let favoriteTextItems = store.favoriteTextItems
-        let favoriteImageItems = store.favoriteImageItems
-        return Group {
-            if favoriteTextItems.isEmpty && favoriteImageItems.isEmpty {
-                emptyState(symbol: "star", title: text(.clipboardNoFavorites))
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        if !favoriteTextItems.isEmpty {
-                            sectionTitle(text(.clipboardText), count: favoriteTextItems.count)
-                            ForEach(favoriteTextItems) { item in
-                                textItemRow(item, showDelete: true)
-                            }
-                        }
-
-                        if !favoriteImageItems.isEmpty {
-                            sectionTitle(text(.clipboardImages), count: favoriteImageItems.count)
-                            LazyVGrid(
-                                columns: [GridItem(.adaptive(minimum: 112), spacing: 8)],
-                                spacing: 8
-                            ) {
-                                ForEach(favoriteImageItems) { item in
-                                    imageItemTile(item, showDelete: true)
-                                }
-                            }
+                            imageItemTile(item)
                         }
                     }
                 }
@@ -220,7 +229,7 @@ struct ClipboardHistoryView: View {
         .padding(.top, 2)
     }
 
-    private func textItemRow(_ item: ClipboardTextHistoryItem, showDelete: Bool) -> some View {
+    private func textItemRow(_ item: ClipboardTextHistoryItem) -> some View {
         HStack(alignment: .top, spacing: 7) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(previewText(for: item))
@@ -252,10 +261,8 @@ struct ClipboardHistoryView: View {
                 .buttonStyle(IconButtonStyle(selected: false))
                 .help(text(.copyText))
 
-                if showDelete {
-                    deleteButton {
-                        store.deleteText(item)
-                    }
+                deleteButton {
+                    store.deleteText(item)
                 }
             }
         }
@@ -276,7 +283,7 @@ struct ClipboardHistoryView: View {
         .help(text(.clipboardDragText))
     }
 
-    private func imageItemTile(_ item: ClipboardImageHistoryItem, showDelete: Bool) -> some View {
+    private func imageItemTile(_ item: ClipboardImageHistoryItem) -> some View {
         let fileURL = store.fileURL(for: item)
         return VStack(alignment: .leading, spacing: 5) {
             ZStack(alignment: .topTrailing) {
@@ -323,10 +330,8 @@ struct ClipboardHistoryView: View {
                 .buttonStyle(IconButtonStyle(selected: false))
                 .help(text(.copyImage))
 
-                if showDelete {
-                    deleteButton {
-                        store.deleteImage(item)
-                    }
+                deleteButton {
+                    store.deleteImage(item)
                 }
             }
         }
@@ -444,10 +449,8 @@ struct ClipboardHistoryView: View {
 
     private func tabTitle(_ tab: ClipboardHistoryTab) -> String {
         switch tab {
-        case .text:
-            return text(.clipboardText)
-        case .images:
-            return text(.clipboardImages)
+        case .all:
+            return text(.displayAll)
         case .favorites:
             return text(.clipboardFavorites)
         }
@@ -455,10 +458,8 @@ struct ClipboardHistoryView: View {
 
     private func tabIcon(_ tab: ClipboardHistoryTab) -> String {
         switch tab {
-        case .text:
-            return "text.alignleft"
-        case .images:
-            return "photo"
+        case .all:
+            return "rectangle.split.2x1"
         case .favorites:
             return "star"
         }
@@ -466,10 +467,8 @@ struct ClipboardHistoryView: View {
 
     private func tabCount(_ tab: ClipboardHistoryTab) -> Int {
         switch tab {
-        case .text:
-            return store.textItems.count
-        case .images:
-            return store.imageItems.count
+        case .all:
+            return store.textItems.count + store.imageItems.count
         case .favorites:
             return store.favoriteTextItems.count + store.favoriteImageItems.count
         }

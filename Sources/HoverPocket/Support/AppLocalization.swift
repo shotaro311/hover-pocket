@@ -168,6 +168,8 @@ enum AppTextKey: String, Sendable {
     case openLastUsedPanel
     case panelSize
     case panelSizeAccessibility
+    case panelSizeExtraLarge
+    case panelSizeExtraLargeDetail
     case panelSizeHelp
     case panelSizeLarge
     case panelSizeLargeDetail
@@ -176,6 +178,8 @@ enum AppTextKey: String, Sendable {
     case panelSizeSmall
     case panelSizeSmallDetail
     case panelTextSize
+    case panelTextSizeExtraLarge
+    case panelTextSizeExtraLargeDetail
     case panelTextSizeLarge
     case panelTextSizeLargeDetail
     case panelTextSizeMedium
@@ -424,6 +428,8 @@ enum AppText {
         case .openLastUsedPanel: return "最後に使ったパネルを開く"
         case .panelSize: return "パネルサイズ"
         case .panelSizeAccessibility: return "パネルサイズ"
+        case .panelSizeExtraLarge: return "特大"
+        case .panelSizeExtraLargeDetail: return "予定やクリップ履歴をさらに広く表示します。"
         case .panelSizeHelp: return "パネルサイズ"
         case .panelSizeLarge: return "大"
         case .panelSizeLargeDetail: return "予定やクリップ履歴を少し広く表示します。"
@@ -432,6 +438,8 @@ enum AppText {
         case .panelSizeSmall: return "小"
         case .panelSizeSmallDetail: return "コンパクトに表示します。"
         case .panelTextSize: return "文字サイズ"
+        case .panelTextSizeExtraLarge: return "特大"
+        case .panelTextSizeExtraLargeDetail: return "ホバーパネル内の可読テキストを特大で表示します。"
         case .panelTextSizeLarge: return "大"
         case .panelTextSizeLargeDetail: return "ホバーパネル内の可読テキストを大きく表示します。"
         case .panelTextSizeMedium: return "中"
@@ -650,6 +658,8 @@ enum AppText {
         case .openLastUsedPanel: return "Open last used panel"
         case .panelSize: return "Panel size"
         case .panelSizeAccessibility: return "Panel size"
+        case .panelSizeExtraLarge: return "Extra Large"
+        case .panelSizeExtraLargeDetail: return "Shows events and clipboard history with the most room."
         case .panelSizeHelp: return "Panel size"
         case .panelSizeLarge: return "Large"
         case .panelSizeLargeDetail: return "Shows events and clipboard history with a little more room."
@@ -658,6 +668,8 @@ enum AppText {
         case .panelSizeSmall: return "Small"
         case .panelSizeSmallDetail: return "Shows panels compactly."
         case .panelTextSize: return "Text size"
+        case .panelTextSizeExtraLarge: return "Extra Large"
+        case .panelTextSizeExtraLargeDetail: return "Shows readable text in hover panels at the largest size."
         case .panelTextSizeLarge: return "Large"
         case .panelTextSizeLargeDetail: return "Shows readable text in hover panels larger."
         case .panelTextSizeMedium: return "Medium"

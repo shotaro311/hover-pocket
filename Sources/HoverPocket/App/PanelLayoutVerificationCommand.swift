@@ -11,6 +11,48 @@ enum PanelLayoutVerificationCommand {
         var failures: [String] = []
         var layoutCaseCount = 0
         let providers = ProviderRegistry.builtIn.providers
+        let expectedPanelSizes: [(option: PanelSizeOption, width: CGFloat, height: CGFloat)] = [
+            (.small, 520, 372),
+            (.medium, 600, 430),
+            (.large, 680, 488),
+            (.extraLarge, 760, 546)
+        ]
+        let expectedTextSizes: [(option: PanelTextSizeOption, rawValue: String)] = [
+            (.small, "small"),
+            (.medium, "medium"),
+            (.large, "large"),
+            (.extraLarge, "extraLarge")
+        ]
+        let panelSizeCompatibility = PanelSizeOption.allCases == expectedPanelSizes.map { $0.option }
+            && expectedPanelSizes.allSatisfy { expected in
+                let actual = PanelLayout.previewSize(for: expected.option)
+                return expected.option.rawValue == expectedRawValue(for: expected.option)
+                    && actual.width == expected.width
+                    && actual.height == expected.height
+            }
+        let textSizeCompatibility = PanelTextSizeOption.allCases == expectedTextSizes.map { $0.option }
+            && expectedTextSizes.allSatisfy { expected in
+                expected.option.rawValue == expected.rawValue
+            }
+        let persistenceCompatibility = verifySettingsPersistence()
+
+        if !panelSizeCompatibility {
+            failures.append("panel-size-compatibility")
+        }
+        if !textSizeCompatibility {
+            failures.append("panel-text-size-compatibility")
+        }
+        if !persistenceCompatibility {
+            failures.append("panel-settings-persistence")
+        }
+        lines.append("panel_size_compatibility=\(panelSizeCompatibility ? "ok" : "failed")")
+        lines.append("panel_text_size_compatibility=\(textSizeCompatibility ? "ok" : "failed")")
+        lines.append("panel_settings_persistence=\(persistenceCompatibility ? "ok" : "failed")")
+        lines.append(
+            "panel_dimensions=" + expectedPanelSizes.map {
+                "\($0.option.rawValue):\(Int($0.width))x\(Int($0.height))"
+            }.joined(separator: ",")
+        )
 
         for panelSize in PanelSizeOption.allCases {
             let panel = PanelLayout.previewSize(for: panelSize)
@@ -90,6 +132,47 @@ enum PanelLayoutVerificationCommand {
 
     private static func cleanupSettingsSuite(_ suiteName: String) {
         UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName)
+    }
+
+    @MainActor
+    private static func verifySettingsPersistence() -> Bool {
+        let suiteName = "local.codex.hover-pocket.panel-settings.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            return false
+        }
+        defaults.removePersistentDomain(forName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        for panelSize in PanelSizeOption.allCases {
+            for textSize in PanelTextSizeOption.allCases {
+                let settings = AppSettings(defaults: defaults)
+                settings.panelSize = panelSize
+                settings.panelTextSize = textSize
+
+                let reloaded = AppSettings(defaults: defaults)
+                guard reloaded.panelSize == panelSize,
+                      reloaded.panelTextSize == textSize else {
+                    return false
+                }
+            }
+        }
+
+        return true
+    }
+
+    private static func expectedRawValue(for option: PanelSizeOption) -> String {
+        switch option {
+        case .small:
+            return "small"
+        case .medium:
+            return "medium"
+        case .large:
+            return "large"
+        case .extraLarge:
+            return "extraLarge"
+        }
     }
 
     private static func format(_ value: CGFloat) -> String {

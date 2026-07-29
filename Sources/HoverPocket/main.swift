@@ -16,6 +16,9 @@ if CommandLine.arguments.contains("--verify-calculator") {
 if CommandLine.arguments.contains("--verify-clipboard") {
     ClipboardVerificationCommand.run()
 }
+if CommandLine.arguments.contains("--verify-timer") {
+    TimerVerificationCommand.run()
+}
 if CommandLine.arguments.contains("--verify-panel-layout") {
     PanelLayoutVerificationCommand.run()
 }

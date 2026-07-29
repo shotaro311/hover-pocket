@@ -5,6 +5,28 @@ updated_by: codex
 status: active
 ---
 
+## 2026-07-29 Mac Browser Media Playback Rate DOM Readback
+
+- Controlsの再生速度操作を、対象ブラウザタブの`HTMLMediaElement.playbackRate`へ直接設定し、同じvideo要素から読み戻した値だけを成功表示する方式へ変更した。UIと専用verifierは同じ`MediaRemoteService` / browser fallback経路を使う。
+- DiaがJavaScript実行結果を引用符付き文字列で返すのに直接`Double`変換していたため、DOM読取成功後に数値化だけ失敗していた。JSON文字列としてdecodeしてから数値化するよう修正した。あわせて、小数1桁への整形で`1.25`が`1.2`へ丸められる問題を解消した。
+- UIの先行値更新、未確認shortcut期待値、6秒間の再生速度override、ブラウザ対象への未確認MediaRemote fallbackを撤去した。DOM readback不能時は表示を変更せず失敗扱いにする。
+- Apple Development署名とAutomation entitlementを含む製品bundleで、実DOM値`1.0 → 1.25`、`browser_dom` readback、`1.0`への復元、`media_verify=ok`を確認した。verifier終了後も別経路のDOM readbackで`1.0`を確認した。`swift build`、bundle生成、`codesign --verify --deep --strict`、`git diff --check`が成功した。
+- DOM操作は、DiaではAppleScript JavaScript有効の起動条件、Chrome / SafariではApple EventsからのJavaScript実行が許可されている場合に利用できる。既存ブラウザ設定、Windows版、公開release / feed、他providerは変更していない。詳細: `progress/2026-07/2026-07-29_hover-pocket-media-playback-rate.md`。
+
+## 2026-07-29 Mac Clipboard / Timer / Extra Large Integration
+
+- Clipboardを「すべて / お気に入り」の2タブへ整理し、両タブでテキストと画像を50:50のsplit viewにした。各項目のコピー、星、個別削除、外部ドラッグ、全体プレビュー、favorite保護clearは維持した。
+- Timer入力カードを横並びにし、実行中セクションをtimer color、大きな残り時間、進捗リングで強調した。既存の調整バー、start、pause / resume / stop、pin / unpin、アラーム停止は維持した。
+- パネルと文字を4段階へ拡張し、Extra Largeパネル`760x546`、文字`+3pt`を追加した。旧3段階の寸法とraw valueは維持した。
+- READMEとrequirementsを同期した。requirementsではmacOSのExtra Largeを追加し、Windows版の現行3段階は変更しないことを明記した。
+- 統合検証は`swift build`、`--verify-timer`、`git diff --check`が成功した。Timer verifierは本番保存先を作らず、start / pause / resume / stop、pin / unpin、4段階の横並び幅を確認した。詳細: `progress/2026-07/2026-07-29_hover-pocket-clipboard-timer-extra-large.md`。
+
+## 2026-07-29 Mac Extra Large Panel and Text Sizes
+
+- パネルサイズと文字サイズを`Small / Medium / Large / Extra Large`の4段階へ拡張した。Extra Largeパネルは`760x546`、Extra Large文字は基準フォント`+3pt`。
+- 既存3段階の寸法と保存値は維持した。上部サイズ切り替え、Settings、AppSettings永続化、日英表示、Calendar/Weatherメトリクスを4段階へ対応させた。
+- `swift build`、panel layout 112ケース、旧raw value・寸法・UserDefaults再読込、calculator、clipboard、`git diff --check`が成功した。実画面の目視readbackとWindows版は未実施。詳細: `progress/2026-07/2026-07-29_hover-pocket-extra-large-sizes.md`。
+
 ## 2026-07-29 Mac Calendar Save Button Placement
 
 - Calendarの新規予定・予定編集フォームで、下端にあった保存ボタンをフォーム上部ヘッダーへ移動した。スクロールせずに保存操作へ到達できる。
@@ -454,7 +476,7 @@ status: active
 
 ## 進行中
 
-- Codex: `ホバーポケット` / `HoverPocket` として GitHub public repository `shotaro311/hover-pocket` へ公開済み。`Mirror`、`Controls`、`Calculator`、`Calendar`、`Clipboard`、`Sticky Notes` の built-in provider が有効。Controls は明るさ表示/調整、最小/最大輝度トグル、CoreAudio 音量/ミュート、MediaRemote bridge による Now Playing サムネイル/再生位置/再生制御/再生速度調整を持つ。MediaRemote が空の場合はブラウザの active tab title / URL で YouTube などを fallback 認識する。再生/停止と倍速操作は pending state 付きの background task で直列化し、操作中の stale refresh と連打を抑える。倍速は対象 media URL / title に一致するブラウザタブまたは MediaRemote へ反映し、確認できた実 `playbackRate` または YouTube shortcut の既知段階を表示へ反映する。画面収録サムネイルは未許可時に自動 permission request を出さず、許可済みの場合だけ ScreenCaptureKit preview を使う。外部ディスプレイは DDC/CI を先に試し、DDC が使えない場合だけ DisplayServices とソフト輝度 fallback を使う。Calendar は Google iOS OAuth client + custom URL scheme + PKCE + OS 既定ブラウザで実アカウント接続、予定取得、追加、編集、削除まで実装済み。Google OAuth credential は通常 Keychain に保存し、開発版と配布版で Keychain service suffix を分離する。パネル preview size は `small=520x372`、`medium=600x430`、`large=680x488`。Settings の `文字サイズ` で hover panel の主要可読テキストを小/中/大に切り替え可能。Sticky Notes は inline editor、title optional、drag reorder、外部 drag text payload、下部ゴミ箱 drop archive、S/M/L grid、Undo toast 設定に対応し、入力中 draft は外側クリック/別付箋切替/操作実行時に確定する。標準 Edit menu 経由の cut/copy/paste/select all/undo/redo も使える。AI native Phase 1 として Apple Foundation Models provider、Calendar read/write tool、ApprovalGate、AuditLog、下段 command lane、fallback candidates を実装済み。UI は Settings で `日本語` / `English` を切り替え可能で、既定は日本語。Provider header の機能アイコンは drag & drop で並べ替え可能。上部 handle は `B / C / None` とメインノッチ左アイコンエリア表示/非表示を Settings から選択可能で、非表示時は横エリア自体を描画しない。表示先は `メイン / サブ / すべて` で、ノッチなし画面は縦ヒット 8pt の控えめなミニバー起点を使う。サブディスプレイから開いた場合の Mirror 表示は Settings から制御でき、既定は非表示。macOS menu bar status item から設定 / 更新確認 / 終了を実行可能。更新がある場合はホバーウィンドウ上部にも青い更新アイコンを表示し、押下後はホバーウィンドウを閉じる。Camera / Microphone permission off 時は System Settings へのCTA、Calendar未接続時はGoogle login CTAを表示する。Camera Settings で許可後はpermission recovery pollingとアプリ復帰検知でMirrorを再起動する。配布版は hardened runtime 用の camera / audio-input entitlements 入り。build `98` は notarized/stapled ZIP として GitHub Release `v0.1.0-98` に公開済みで、latest appcast も build `98` を指している。
+- Codex: `ホバーポケット` / `HoverPocket` として GitHub public repository `shotaro311/hover-pocket` へ公開済み。`Mirror`、`Controls`、`Calculator`、`Calendar`、`Clipboard`、`Sticky Notes` の built-in provider が有効。Controls は明るさ表示/調整、最小/最大輝度トグル、CoreAudio 音量/ミュート、MediaRemote bridge による Now Playing サムネイル/再生位置/再生制御/再生速度調整を持つ。MediaRemote が空の場合はブラウザの active tab title / URL で YouTube などを fallback 認識する。再生/停止と倍速操作は pending state 付きの background task で直列化し、操作中の stale refresh と連打を抑える。ブラウザ由来メディアの倍速は、対象media URLに一致するタブの同一video DOMへ設定し、実`playbackRate`のreadbackに成功した場合だけUIへ反映する。DOM readback不能時は未確認値を表示せず失敗扱いにする。画面収録サムネイルは未許可時に自動 permission request を出さず、許可済みの場合だけ ScreenCaptureKit preview を使う。外部ディスプレイは DDC/CI を先に試し、DDC が使えない場合だけ DisplayServices とソフト輝度 fallback を使う。Calendar は Google iOS OAuth client + custom URL scheme + PKCE + OS 既定ブラウザで実アカウント接続、予定取得、追加、編集、削除まで実装済み。Google OAuth credential は通常 Keychain に保存し、開発版と配布版で Keychain service suffix を分離する。パネル preview size は `small=520x372`、`medium=600x430`、`large=680x488`、`extraLarge=760x546`。Settings の`文字サイズ`でhover panelの主要可読テキストを小/中/大/特大の4段階に切り替え可能。Sticky Notes は inline editor、title optional、drag reorder、外部 drag text payload、下部ゴミ箱 drop archive、S/M/L grid、Undo toast 設定に対応し、入力中 draft は外側クリック/別付箋切替/操作実行時に確定する。標準 Edit menu 経由の cut/copy/paste/select all/undo/redo も使える。AI native Phase 1 として Apple Foundation Models provider、Calendar read/write tool、ApprovalGate、AuditLog、下段 command lane、fallback candidates を実装済み。UI は Settings で `日本語` / `English` を切り替え可能で、既定は日本語。Provider header の機能アイコンは drag & drop で並べ替え可能。上部 handle は `B / C / None` とメインノッチ左アイコンエリア表示/非表示を Settings から選択可能で、非表示時は横エリア自体を描画しない。表示先は `メイン / サブ / すべて` で、ノッチなし画面は縦ヒット 8pt の控えめなミニバー起点を使う。サブディスプレイから開いた場合の Mirror 表示は Settings から制御でき、既定は非表示。macOS menu bar status item から設定 / 更新確認 / 終了を実行可能。更新がある場合はホバーウィンドウ上部にも青い更新アイコンを表示し、押下後はホバーウィンドウを閉じる。Camera / Microphone permission off 時は System Settings へのCTA、Calendar未接続時はGoogle login CTAを表示する。Camera Settings で許可後はpermission recovery pollingとアプリ復帰検知でMirrorを再起動する。配布版は hardened runtime 用の camera / audio-input entitlements 入り。build `98` は notarized/stapled ZIP として GitHub Release `v0.1.0-98` に公開済みで、latest appcast も build `98` を指している。
 
 ## 次アクション
 
@@ -478,7 +500,7 @@ status: active
 - 現在の公開ZIP成果物 `dist/releases/HoverPocket-0.1.0-98.zip` は Developer ID Application 署名と notarization/staple 済みで、GitHub Release `v0.1.0-98` に公開済み。latest appcast も build `98` を指す。一般ユーザー向けには同じ app-only payload を分かりやすい `HoverPocket-macOS-app.zip` として案内し、公開URLから再取得したZIPのトップレベルが `HoverPocket.app` のみであることを確認済み。SHA256 は `33efbaf3e32d1f59b382b21b390c29376bf6a4ef35ab253f354e2c3166baeb0e`。
 - Sparkle秘密鍵は macOS Keychain の `hover-pocket` アカウントにある。秘密鍵ファイルをGitに書き出さない。
 - App Store Connect の有料アプリ契約と EU DSA の trader compliance は未完了表示が残るが、今回の Developer ID notarization / Sparkle 配信は成功済み。
-- Dia では AppleScript 経由の JavaScript 実行が `--enable-applescript-javascript` なしでは拒否されるため、倍速変更は YouTube shortcut / MediaRemote fallback 経路になり、0.25 刻みで反映される場合がある。
+- ブラウザ動画の倍速変更にはDOM readbackが必要。DiaはAppleScript JavaScriptを許可した起動条件、Chrome / SafariはApple EventsからのJavaScript実行を許可した状態で利用する。DOMを利用できない場合はshortcut / MediaRemoteへ未確認fallbackせず、UI値を変更しないで失敗扱いにする。
 - 旧 Keychain の Google OAuth item が現在の署名で読めない場合は、Keychainパスワードダイアログを出さずに未接続扱いへ落とす。Google再ログイン後は通常 Keychain に新credentialを保存する。credentialはローカルMacのKeychainに保存され、app bundle / ZIP / repo には含めない。
 - Calendar event 書き込みには `calendar.events` scope が必要。既存の read-only token では再接続が必要。
 - AI native Phase 1 の Apple Foundation Models provider は SDK / OS が未対応の場合、deterministic fallback で候補生成する。モデル本体の実行確認は対応OSで別途必要。

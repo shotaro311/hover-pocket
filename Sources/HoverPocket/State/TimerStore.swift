@@ -15,19 +15,13 @@ final class TimerStore: ObservableObject {
     @Published private(set) var activeAlert: TimerAlert?
     @Published private(set) var now = Date()
 
-    private let fileManager = FileManager.default
+    private let fileManager: FileManager
+    private let storageDirectory: URL
+    private let persistenceEnabled: Bool
     private var tickTimer: Timer?
     private var alertSound: NSSound?
     private var pendingWriteTask: Task<Void, Never>?
     private var wakeObserver: NSObjectProtocol?
-
-    private lazy var storageDirectory: URL = {
-        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        return base
-            .appendingPathComponent("HoverPocket", isDirectory: true)
-            .appendingPathComponent("Timer", isDirectory: true)
-    }()
 
     private var draftsURL: URL {
         storageDirectory.appendingPathComponent("drafts.json", isDirectory: false)
@@ -41,12 +35,32 @@ final class TimerStore: ObservableObject {
         storageDirectory.appendingPathComponent("running.json", isDirectory: false)
     }
 
-    private init() {
+    init(
+        storageDirectory: URL? = nil,
+        fileManager: FileManager = .default,
+        observesWake: Bool = true,
+        persistenceEnabled: Bool = true
+    ) {
+        self.fileManager = fileManager
+        self.storageDirectory = storageDirectory ?? Self.defaultStorageDirectory(
+            fileManager: fileManager
+        )
+        self.persistenceEnabled = persistenceEnabled
         loadDrafts()
         loadPinnedPresets()
         restoreRunningTimers()
-        observeWake()
+        if observesWake {
+            observeWake()
+        }
         syncTickTimer()
+    }
+
+    private static func defaultStorageDirectory(fileManager: FileManager) -> URL {
+        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        return base
+            .appendingPathComponent("HoverPocket", isDirectory: true)
+            .appendingPathComponent("Timer", isDirectory: true)
     }
 
     var canStartTimer: Bool {
@@ -300,6 +314,7 @@ final class TimerStore: ObservableObject {
     }
 
     private func persist<Value: Encodable & Sendable>(_ value: Value, to url: URL) {
+        guard persistenceEnabled else { return }
         let storageDirectory = self.storageDirectory
         let previousWrite = pendingWriteTask
         pendingWriteTask = Task.detached(priority: .utility) {

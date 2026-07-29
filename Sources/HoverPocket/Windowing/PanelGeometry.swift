@@ -36,6 +36,8 @@ enum PanelLayout {
             return NSSize(width: 600, height: 430)
         case .large:
             return NSSize(width: 680, height: 488)
+        case .extraLarge:
+            return NSSize(width: 760, height: 546)
         }
     }
 

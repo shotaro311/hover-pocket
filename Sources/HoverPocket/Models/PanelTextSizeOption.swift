@@ -1,9 +1,10 @@
 import CoreGraphics
 
 enum PanelTextSizeOption: String, CaseIterable, Identifiable {
-    case small
-    case medium
-    case large
+    case small = "small"
+    case medium = "medium"
+    case large = "large"
+    case extraLarge = "extraLarge"
 
     var id: String { rawValue }
 
@@ -15,6 +16,8 @@ enum PanelTextSizeOption: String, CaseIterable, Identifiable {
             return AppText.text(.panelTextSizeMedium, language: language)
         case .large:
             return AppText.text(.panelTextSizeLarge, language: language)
+        case .extraLarge:
+            return AppText.text(.panelTextSizeExtraLarge, language: language)
         }
     }
 
@@ -26,6 +29,8 @@ enum PanelTextSizeOption: String, CaseIterable, Identifiable {
             return AppText.text(.panelTextSizeMediumDetail, language: language)
         case .large:
             return AppText.text(.panelTextSizeLargeDetail, language: language)
+        case .extraLarge:
+            return AppText.text(.panelTextSizeExtraLargeDetail, language: language)
         }
     }
 
@@ -37,6 +42,8 @@ enum PanelTextSizeOption: String, CaseIterable, Identifiable {
             return size + 1
         case .large:
             return size + 2
+        case .extraLarge:
+            return size + 3
         }
     }
 }

@@ -828,12 +828,12 @@ private struct CalendarPreviewMetrics {
             monthFontSize = 12
             weekdayFontSize = 8.5
             dayNumberFontSize = 10
-        case .medium, .large:
+        case .medium, .large, .extraLarge:
             outerHorizontalPadding = 18
             outerVerticalPadding = 14
             paneSpacing = 14
             calendarVerticalSpacing = 10
-            weatherDividerPadding = panelSize == .large ? 5 : 4.5
+            weatherDividerPadding = panelSize == .medium ? 4.5 : 5
             calendarWidth = 282
             dayWidth = 36
             dayHeight = 32

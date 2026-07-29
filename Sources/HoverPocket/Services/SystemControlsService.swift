@@ -317,7 +317,6 @@ final class ControlsStore: ObservableObject {
         playbackRateRequestID += 1
         let requestID = playbackRateRequestID
         isPlaybackRateCommandPending = true
-        nowPlaying.playbackRate = target
 
         nowPlayingRefreshTask?.cancel()
         playbackRateCommandTask?.cancel()
@@ -328,23 +327,17 @@ final class ControlsStore: ObservableObject {
                 mediaURLString: mediaURLString,
                 preferredTitle: preferredTitle
             )
-            let readback = appliedRate == nil
-                ? await Self.readNowPlayingAfterPlaybackRateChange(
-                    service: service,
-                    initialRate: initialRate,
-                    targetRate: target,
-                    delta: delta
-                )
-                : nil
             await MainActor.run {
                 guard let self, self.playbackRateRequestID == requestID else { return }
                 if let appliedRate {
                     self.nowPlaying.playbackRate = appliedRate
-                } else if let readback {
-                    self.nowPlaying = readback
+                } else {
+                    self.nowPlaying.playbackRate = initialRate
                 }
                 self.isPlaybackRateCommandPending = false
-                self.refreshNowPlaying()
+                if appliedRate != nil {
+                    self.refreshNowPlaying()
+                }
             }
         }
         schedulePendingWatchdog(
@@ -402,48 +395,6 @@ final class ControlsStore: ObservableObject {
         return latestReadback
     }
 
-    nonisolated private static func readNowPlayingAfterPlaybackRateChange(
-        service: MediaRemoteService,
-        initialRate: Double,
-        targetRate: Double,
-        delta: Double
-    ) async -> ControlsNowPlayingState? {
-        var latestReadback: ControlsNowPlayingState?
-        for delay in [250_000_000, 500_000_000, 800_000_000] as [UInt64] {
-            guard !Task.isCancelled else { return nil }
-            try? await Task.sleep(nanoseconds: delay)
-            let state = await service.nowPlaying()
-            guard state.hasMedia else { continue }
-            latestReadback = state
-            if playbackRateReadbackMatches(
-                state.playbackRate,
-                initialRate: initialRate,
-                targetRate: targetRate,
-                delta: delta
-            ) {
-                break
-            }
-        }
-        return latestReadback
-    }
-
-    nonisolated private static func playbackRateReadbackMatches(
-        _ readbackRate: Double,
-        initialRate: Double,
-        targetRate: Double,
-        delta: Double
-    ) -> Bool {
-        if abs(readbackRate - targetRate) <= 0.06 {
-            return true
-        }
-        if delta > 0 {
-            return readbackRate > initialRate + 0.05
-        }
-        if delta < 0 {
-            return readbackRate < initialRate - 0.05
-        }
-        return abs(readbackRate - initialRate) <= 0.05
-    }
 }
 
 private final class DisplayBrightnessService: @unchecked Sendable {
@@ -1113,8 +1064,6 @@ final class MediaRemoteService: @unchecked Sendable {
     private let adapterClient = MediaRemoteAdapterClient()
     private let jxaFallback = JXANowPlayingService()
     private let browserFallback = BrowserNowPlayingService()
-    private let playbackRateLock = NSLock()
-    private var playbackRateOverride: (rate: Double, expiresAt: Date)?
 
     init() {
         guard let handle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY) else {
@@ -1273,14 +1222,26 @@ final class MediaRemoteService: @unchecked Sendable {
             preferredTitle: preferredTitle
         )
         if let browserRate {
-            setPlaybackRateOverride(browserRate)
             return browserRate
+        }
+        if mediaURLString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            return nil
         }
         setPlaybackSpeedFunction?(Float(target))
         sendCommand?(19, [
             "kMRMediaRemoteOptionPlaybackRate": target
         ] as CFDictionary)
         return nil
+    }
+
+    func browserPlaybackRate(
+        mediaURLString: String?,
+        preferredTitle: String = ""
+    ) async -> Double? {
+        await browserFallback.playbackRate(
+            mediaURLString: mediaURLString,
+            preferredTitle: preferredTitle
+        )
     }
 
     private func state(_ state: ControlsNowPlayingState, enrichedWith context: BrowserMediaContext?) -> ControlsNowPlayingState {
@@ -1298,27 +1259,7 @@ final class MediaRemoteService: @unchecked Sendable {
                 enriched.playbackRate = contextPlaybackRate.clamped(to: 0.5...3.0)
             }
         }
-        if let override = playbackRateOverrideValue() {
-            enriched.playbackRate = override
-        }
         return enriched
-    }
-
-    private func setPlaybackRateOverride(_ rate: Double) {
-        playbackRateLock.lock()
-        playbackRateOverride = (rate, Date().addingTimeInterval(6.0))
-        playbackRateLock.unlock()
-    }
-
-    private func playbackRateOverrideValue() -> Double? {
-        playbackRateLock.lock()
-        defer { playbackRateLock.unlock() }
-        guard let playbackRateOverride else { return nil }
-        guard playbackRateOverride.expiresAt > Date() else {
-            self.playbackRateOverride = nil
-            return nil
-        }
-        return playbackRateOverride.rate
     }
 
     private static func parseNowPlaying(_ info: NSDictionary?) -> ControlsNowPlayingState {
@@ -1544,9 +1485,10 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
                   )
             else { continue }
             let cleanedTitle = Self.cleanedTitle(tab.title, sourceName: tab.sourceName)
-            let playbackRate = target.usesFocusCommand
-                ? nil
-                : await Self.readPlaybackRate(in: target, matchingURLString: tab.url.absoluteString)
+            let playbackRate = await Self.readPlaybackRate(
+                in: target,
+                matchingURLString: tab.url.absoluteString
+            )
             storeCache(bundleIdentifier: target.bundleIdentifier, urlString: tab.url.absoluteString)
             return BrowserMediaContext(
                 processIdentifier: application.processIdentifier,
@@ -1584,9 +1526,10 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
             guard matches else { return nil }
         }
         let cleanedTitle = Self.cleanedTitle(tab.title, sourceName: mediaSource)
-        let playbackRate = target.usesFocusCommand
-            ? nil
-            : await Self.readPlaybackRate(in: target, matchingURLString: tab.url.absoluteString)
+        let playbackRate = await Self.readPlaybackRate(
+            in: target,
+            matchingURLString: tab.url.absoluteString
+        )
         storeCache(bundleIdentifier: target.bundleIdentifier, urlString: tab.url.absoluteString)
         return BrowserMediaContext(
             processIdentifier: application.processIdentifier,
@@ -1653,17 +1596,42 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         preferredTitle: String
     ) async -> Double? {
         let targetSpeed = speed.clamped(to: 0.5...3.0)
+        let exactURLString = mediaURLString?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         for target in targets {
-            guard let application = Self.runningApplication(bundleIdentifier: target.bundleIdentifier),
-                  let tab = await Self.selectedMediaTab(
-                    in: target,
-                    preferredURLString: mediaURLString,
-                    preferredTitle: preferredTitle
-                  )
+            guard let application = Self.runningApplication(bundleIdentifier: target.bundleIdentifier)
             else { continue }
-            let tabURLString = tab.url.absoluteString
-            if !target.usesFocusCommand,
-               let appliedRate = await Self.setHTMLPlaybackSpeed(targetSpeed, in: target, matchingURLString: tabURLString) {
+            let tabURLString: String
+            if !exactURLString.isEmpty {
+                guard await Self.readPlaybackRate(
+                    in: target,
+                    matchingURLString: exactURLString
+                ) != nil else {
+                    continue
+                }
+                tabURLString = exactURLString
+            } else {
+                guard let tab = await Self.selectedMediaTab(
+                    in: target,
+                    preferredURLString: nil,
+                    preferredTitle: preferredTitle
+                ) else {
+                    continue
+                }
+                tabURLString = tab.url.absoluteString
+            }
+            let initialRate = await Self.readPlaybackRate(
+                in: target,
+                matchingURLString: tabURLString
+            )
+            guard initialRate != nil else {
+                continue
+            }
+            if let appliedRate = await Self.setHTMLPlaybackSpeed(
+                targetSpeed,
+                in: target,
+                matchingURLString: tabURLString
+            ) {
                 return appliedRate
             }
             if delta != 0,
@@ -1673,13 +1641,45 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
                     continue
                 }
                 try? await Task.sleep(nanoseconds: UInt64((target.usesFocusCommand ? 0.32 : 0.25) * 1_000_000_000))
-                if target.usesFocusCommand {
-                    return Self.nextShortcutPlaybackRate(currentRate: targetSpeed - delta, delta: delta)
-                }
                 if let shortcutRate = await Self.readPlaybackRate(in: target, matchingURLString: tabURLString),
                    abs(shortcutRate - targetSpeed) < 0.05 {
                     return shortcutRate
                 }
+            }
+        }
+        return nil
+    }
+
+    func playbackRate(
+        mediaURLString: String?,
+        preferredTitle: String
+    ) async -> Double? {
+        let exactURLString = mediaURLString?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        for target in targets {
+            guard Self.runningApplication(bundleIdentifier: target.bundleIdentifier) != nil
+            else { continue }
+            if !exactURLString.isEmpty {
+                if let rate = await Self.readPlaybackRate(
+                    in: target,
+                    matchingURLString: exactURLString
+                ) {
+                    return rate
+                }
+                continue
+            }
+            guard let tab = await Self.selectedMediaTab(
+                in: target,
+                preferredURLString: nil,
+                preferredTitle: preferredTitle
+            ) else {
+                continue
+            }
+            if let rate = await Self.readPlaybackRate(
+                in: target,
+                matchingURLString: tab.url.absoluteString
+            ) {
+                return rate
             }
         }
         return nil
@@ -1860,17 +1860,18 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         ) else {
             return nil
         }
-        return Double(result)
+        return parseJavaScriptNumber(result)
     }
 
     private static func setHTMLPlaybackSpeed(_ speed: Double, in target: BrowserTarget, matchingURLString: String) async -> Double? {
+        let speedLiteral = String(speed)
         let javascript = """
         (() => {
           const videos = Array.from(document.querySelectorAll('video'));
           const video = videos.find((item) => !item.paused || item.currentTime > 0) || videos[0];
           if (!video) return '';
-          video.playbackRate = \(String(format: "%.1f", speed));
-          return String(video.playbackRate || \(String(format: "%.1f", speed)));
+          video.playbackRate = \(speedLiteral);
+          return String(video.playbackRate || \(speedLiteral));
         })()
         """
         guard let result = await runAppleScriptWithTimeout(
@@ -1879,7 +1880,19 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         ) else {
             return nil
         }
-        return Double(result)
+        return parseJavaScriptNumber(result)
+    }
+
+    private static func parseJavaScriptNumber(_ result: String) -> Double? {
+        if let directValue = Double(result) {
+            return directValue
+        }
+        guard let data = result.data(using: .utf8),
+              let quotedValue = try? JSONDecoder().decode(String.self, from: data)
+        else {
+            return nil
+        }
+        return Double(quotedValue)
     }
 
     private static func browserJavaScriptSource(for target: BrowserTarget, javascript: String, matchingURLString: String? = nil) -> String {
@@ -2053,18 +2066,6 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
             }
             return lhs.area < rhs.area
         }?.id
-    }
-
-    private static func nextShortcutPlaybackRate(currentRate: Double, delta: Double) -> Double {
-        let rates = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
-        let normalized = currentRate.clamped(to: 0.5...2.0)
-        if delta > 0 {
-            return rates.first(where: { $0 > normalized + 0.01 }) ?? rates.last ?? 2.0
-        }
-        if delta < 0 {
-            return rates.reversed().first(where: { $0 < normalized - 0.01 }) ?? rates.first ?? 0.5
-        }
-        return normalized
     }
 
     private static func postPlaybackRateShortcut(delta: Double, processIdentifier: pid_t) -> Bool {

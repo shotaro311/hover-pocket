@@ -238,7 +238,10 @@ struct WeatherLoadedContent: View {
                     .foregroundStyle(.white)
                     .lineLimit(1)
 
-                VStack(alignment: .leading, spacing: panelSize == .large ? 2 : 0) {
+                VStack(
+                    alignment: .leading,
+                    spacing: panelSize == .large || panelSize == .extraLarge ? 2 : 0
+                ) {
                     Text(location.displayName(language: language))
                         .panelTextFont(size: metrics.regionFontSize, weight: .bold)
                         .foregroundStyle(.white.opacity(0.9))
@@ -670,7 +673,7 @@ struct WeatherPanelMetrics {
             statusIconSize = 15
             statusTitleSize = 9
             buttonFontSize = 8
-        case .large:
+        case .large, .extraLarge:
             height = 122
             cornerRadius = 10
             horizontalPadding = 12

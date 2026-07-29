@@ -1,5 +1,24 @@
 import SwiftUI
 
+struct TimerLayoutMetrics {
+    static let horizontalPadding: CGFloat = 16
+    static let entrySectionSpacing: CGFloat = 10
+    static let minimumEntryCardWidth: CGFloat = 220
+
+    let availableWidth: CGFloat
+
+    var entryCardWidth: CGFloat {
+        max(
+            0,
+            (availableWidth - (Self.horizontalPadding * 2) - Self.entrySectionSpacing) / 2
+        )
+    }
+
+    var fitsSideBySide: Bool {
+        entryCardWidth >= Self.minimumEntryCardWidth
+    }
+}
+
 struct TimerView: View {
     @ObservedObject private var settings: AppSettings
     @ObservedObject private var store: TimerStore
@@ -16,39 +35,52 @@ struct TimerView: View {
             VStack(spacing: 10) {
                 runningSection
 
+                entrySections
+
                 if !store.pinnedPresets.isEmpty {
                     pinnedSection
                 }
-
-                TimerSection(title: text(.timer)) {
-                    TimerEntryCard(
-                        preset: draftTimerBinding,
-                        canStart: store.canStartTimer,
-                        settings: settings,
-                        onStart: { store.start(preset: $0) }
-                    )
-                }
-
-                TimerSection(title: text(.timerPomodoroSection)) {
-                    TimerEntryCard(
-                        preset: draftPomodoroBinding,
-                        canStart: store.canStartTimer,
-                        settings: settings,
-                        onStart: { store.start(preset: $0) }
-                    )
-                }
             }
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, TimerLayoutMetrics.horizontalPadding)
             .padding(.vertical, 12)
         }
         .scrollIndicators(.never)
     }
 
+    private var entrySections: some View {
+        HStack(alignment: .top, spacing: TimerLayoutMetrics.entrySectionSpacing) {
+            TimerSection(title: text(.timer)) {
+                TimerEntryCard(
+                    preset: draftTimerBinding,
+                    canStart: store.canStartTimer,
+                    settings: settings,
+                    onStart: { store.start(preset: $0) }
+                )
+            }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
+
+            TimerSection(title: text(.timerPomodoroSection)) {
+                TimerEntryCard(
+                    preset: draftPomodoroBinding,
+                    canStart: store.canStartTimer,
+                    settings: settings,
+                    onStart: { store.start(preset: $0) }
+                )
+            }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
     // MARK: - Running timers
 
     private var runningSection: some View {
-        TimerSection(title: text(.timerRunningSection)) {
+        TimerSection(
+            title: text(.timerRunningSection),
+            accentColor: runningAccentColor,
+            isEmphasized: true
+        ) {
             if store.runningTimers.isEmpty, store.activeAlert == nil {
                 TimerEmptyRow(message: text(.timerNoRunning))
             } else {
@@ -69,6 +101,13 @@ struct TimerView: View {
                 }
             }
         }
+    }
+
+    private var runningAccentColor: Color {
+        if let alert = store.activeAlert {
+            return alert.color.color
+        }
+        return store.runningTimers.first?.color.color ?? .cyan
     }
 
     private func finishedAlertRow(_ alert: TimerAlert) -> some View {
@@ -106,18 +145,19 @@ struct TimerView: View {
         let isAlerting = store.activeAlert?.id == timer.id
         return HStack(spacing: 10) {
             progressRing(for: timer)
-                .frame(width: 34, height: 34)
+                .frame(width: 44, height: 44)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(timer.title.isEmpty ? text(.timer) : timer.title)
-                    .panelTextFont(size: 11, weight: .bold)
+                    .panelTextFont(size: 11.5, weight: .bold)
                     .foregroundStyle(.white.opacity(0.88))
                     .lineLimit(1)
 
                 HStack(spacing: 6) {
                     Text(remainingText(for: timer))
-                        .panelTextFont(size: 12, weight: .bold, design: .monospaced)
+                        .panelTextFont(size: 18, weight: .bold, design: .monospaced)
                         .foregroundStyle(timer.color.color)
+                        .minimumScaleFactor(0.75)
 
                     if timer.isPomodoro {
                         Text(pomodoroPhaseText(for: timer))
@@ -350,42 +390,52 @@ private struct TimerEntryCard: View {
                 .help(text(.timerSoundToggle))
             }
 
-            HStack(alignment: .top, spacing: 10) {
-                if preset.isPomodoro {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(text(.timerWork))
-                            .panelTextFont(size: 8, weight: .bold, design: .monospaced)
-                            .foregroundStyle(.white.opacity(0.42))
-                        TimerDurationInputView(
-                            duration: $preset.workDuration,
-                            accentColor: preset.color.color,
-                            onChanged: {}
-                        )
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(text(.timerBreak))
-                            .panelTextFont(size: 8, weight: .bold, design: .monospaced)
-                            .foregroundStyle(.white.opacity(0.42))
-                        TimerDurationInputView(
-                            duration: $preset.breakDuration,
-                            accentColor: preset.color.color,
-                            onChanged: {}
-                        )
-                    }
-                } else {
-                    TimerDurationInputView(
-                        duration: $preset.duration,
-                        accentColor: preset.color.color,
-                        onChanged: {}
-                    )
-                }
+            durationEditor
 
-                Spacer(minLength: 0)
-
-                startButton
-                    .padding(.top, 1)
-            }
+            startButton
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
+    }
+
+    @ViewBuilder
+    private var durationEditor: some View {
+        if preset.isPomodoro {
+            VStack(spacing: 7) {
+                pomodoroDurationRow(
+                    title: text(.timerWork),
+                    duration: $preset.workDuration
+                )
+                pomodoroDurationRow(
+                    title: text(.timerBreak),
+                    duration: $preset.breakDuration
+                )
+            }
+        } else {
+            TimerDurationInputView(
+                duration: $preset.duration,
+                accentColor: preset.color.color,
+                onChanged: {}
+            )
+        }
+    }
+
+    private func pomodoroDurationRow(
+        title: String,
+        duration: Binding<TimeInterval>
+    ) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(title)
+                .panelTextFont(size: 8, weight: .bold, design: .monospaced)
+                .foregroundStyle(.white.opacity(0.42))
+                .frame(width: 30, height: 26, alignment: .leading)
+
+            TimerDurationInputView(
+                duration: duration,
+                accentColor: preset.color.color,
+                onChanged: {}
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var colorPicker: some View {
@@ -439,13 +489,30 @@ private struct TimerEntryCard: View {
 
 private struct TimerSection<Content: View>: View {
     let title: String
+    let accentColor: Color?
+    let isEmphasized: Bool
     @ViewBuilder let content: () -> Content
 
+    init(
+        title: String,
+        accentColor: Color? = nil,
+        isEmphasized: Bool = false,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.accentColor = accentColor
+        self.isEmphasized = isEmphasized
+        self.content = content
+    }
+
     var body: some View {
+        let accent = accentColor ?? .white
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .panelTextFont(size: 10, weight: .bold, design: .monospaced)
-                .foregroundStyle(.white.opacity(0.64))
+                .foregroundStyle(
+                    isEmphasized ? accent.opacity(0.9) : Color.white.opacity(0.64)
+                )
 
             content()
         }
@@ -454,12 +521,16 @@ private struct TimerSection<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.white.opacity(0.035))
+                .fill(isEmphasized ? accent.opacity(0.075) : Color.white.opacity(0.035))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.065), lineWidth: 1)
+                .stroke(
+                    isEmphasized ? accent.opacity(0.55) : Color.white.opacity(0.065),
+                    lineWidth: 1
+                )
         )
+        .shadow(color: isEmphasized ? accent.opacity(0.08) : .clear, radius: 10)
     }
 }
 

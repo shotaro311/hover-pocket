@@ -169,13 +169,14 @@ Must:
 - `Small`: 幅 520、高さ 372。
 - `Medium`: 幅 600、高さ 430。
 - `Large`: 幅 680、高さ 488。
+- macOS版は追加で`Extra Large`: 幅 760、高さ 546を持つ。Windows版の現行3段階は変更しない。
 - Header は高さ 54 を基準にする。
 - Windows 版では上記を DIPs 基準で扱い、DPI scaling 後の物理ピクセルで崩れないようにする。
 
 受け入れ条件:
 
 - サイズ切り替え時、上端基準位置を維持したまま滑らかにリサイズする。
-- テキストサイズ `Small`、`Medium`、`Large` で主要 UI がはみ出さない。
+- Windows版はテキストサイズ`Small`、`Medium`、`Large`、macOS版は追加の`Extra Large`を含めて主要UIがはみ出さない。
 - Windows の DIPs と物理ピクセルの差を吸収し、見た目のサイズ感を保つ。
 
 ### R-SHELL-004: 閉じる条件
@@ -303,7 +304,7 @@ OAuth:
 - 世界都市検索で地点を選択でき、地点、タイムゾーン、温度単位が再起動後も復元される。
 - 既存の47都道府県コード設定が同じ代表地点へ移行され、都道府県の簡易選択も継続して利用できる。
 - 位置情報を拒否した場合も都市検索と都道府県選択を利用できる。
-- 当日と今後7日間の予報がSmall / Medium / Largeの各パネル内へ収まる。
+- 当日と今後7日間の予報が、macOS版のSmall / Medium / Large / Extra Largeの各パネル内へ収まる。
 - 月グリッドと予定詳細・編集が下段の天気エリアへ重ならず、長い予定一覧と編集フォームを右ペイン内でスクロールできる。
 - 天気アイコンは本日から週間の順で一度だけ表示され、本日の天候別効果は約5秒で静止状態へ戻り、表示完了後に消えたり再ループしたりしない。晴れ時々曇りでは雲の形を変形させず、太陽だけが回転する。
 - 週間予報で晴れ、曇り、雨など高さが異なるアイコンが混在しても、曜日と各データ行が水平に揃う。
@@ -371,12 +372,14 @@ Must:
 Must:
 
 - 「タイマー」と「ポモドーロタイマー」の 2 種類の入力カードを持つ。
+- macOS版は2つの入力カードを横並びにし、Small / Medium / Large / Extra Largeの各パネルへ収める。
 - 各カードに title、color、sound on/off を設定できる。
 - 通常 Timer の既定値は 10 分、Pomodoro の既定値は work 25 分 / rest 5 分を基準にする。
 - 時間は直接入力とインライン調整バーで調整できる。
 - ポモドーロは work/rest を交互に切り替える。
 - Pomodoro は work cycle count を表示する。
 - 実行中タイマーは最大 2 つ。
+- macOS版は実行中セクションをtimer colorで強調し、大きな残り時間と進捗リングを表示する。
 - ピン留め preset は最大 4 つ。
 - 実行中タイマーは pause、resume、stop できる。
 - 残り時間は絶対終了時刻ベースで計算し、スリープ復帰後も大きく狂わない。
@@ -439,6 +442,7 @@ Must:
 - Display placement: Main / Sub / All。
 - Panel size: Small / Medium / Large。
 - Panel text size: Small / Medium / Large。
+- macOS版はPanel size / Panel text sizeへExtra Largeを追加する。Windows版の現行3段階は変更しない。
 - Provider switching: Click / Hover。
 - Provider visibility: provider ごとの ON / OFF。
 - Provider order: 並び替え。
