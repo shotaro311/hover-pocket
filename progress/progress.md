@@ -1,9 +1,18 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-07-29
+updated: 2026-08-01
 updated_by: codex
 status: active
 ---
+
+## 2026-08-01 Mac Build 155 Release
+
+- exact `main` / `origin/main`の`274217e`をtargetに、macOS build `155`をDeveloper ID Application署名とhardened runtimeで作成した。Apple公証submission `b20ce703-0722-4e20-a0a1-0816cecf2eba`は`Accepted`。
+- staple、`codesign --verify --deep --strict`、`stapler validate`、Gatekeeper、ZIP展開後の再検証に合格した。
+- GitHub Release [`v0.1.0-155`](https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-155)をGitHub Latestとして公開し、macOS専用`macos-latest`のappcastと手動インストールZIPをbuild 155へ同期した。
+- versioned / stable appcastはSHA-256 `c0aa1ec496b8e6ffdfc8a7c6a82e2a4d1871ef0e3952efa41653acdcb8f0da43`で一致し、`sparkle:version=155`、versioned ZIP URL、88文字のEdDSA署名を返した。
+- 匿名公開URLから再取得したversioned / stable ZIPのSHA-256は`a6965480b0e35892ea4a4bf2a943597ff2e8da994e22fbcb099c4113f299870b`でローカルと一致した。ZIP top-levelは`HoverPocket.app`のみで、展開後も`0.1.0 (155)`、release Keychain suffix、macOS専用feed、Developer ID、公証staple、Gatekeeperを確認した。
+- 配信前に`swift build`、`./script/build_and_run.sh --verify`、panel layout 112ケース、Clipboard、Timer compact、Calculator、Weatherの実API / cache verifierが成功した。Windows `win-v0.2.3`は8 asset・target commit `7bfbee4`のまま変更していない。詳細: `progress/2026-08/2026-08-01_hover-pocket-build-155-release.md`。
 
 ## 2026-07-29 Mac Timer Compact Cards
 
