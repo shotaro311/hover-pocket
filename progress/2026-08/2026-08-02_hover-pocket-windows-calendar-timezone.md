@@ -1,7 +1,7 @@
 ---
 project_slug: hover-menu-preview
 date: 2026-08-02
-status: implemented; verified; 0.2.5-release-in-progress
+status: implemented; released; installed; verified
 ---
 
 # Windows Calendar time zone error fix
@@ -30,9 +30,11 @@ Windows版HoverPocketでGoogle Calendarの予定を編集すると、`Invalid ti
 - Debug `HoverPocket.Shell.exe --verify calendar-live`: exit 0、Calendar 6件 / event 65件、`PASS calendar-live verify`。予定内容は出力せず、作成・編集・削除も行っていない。
 - `git diff --check`: exit 0。CRLF正規化warningのみ。
 - 実行中のインストール版0.2.3を対象pathと1 processであることを確認して終了し、修正版Debug 0.2.4を起動した。起動後は期待Debug pathの1 process、`Responding=True`をreadbackした。インストール内容とショートカットは変更していない。
-- 配布承認後にWindows版を0.2.5へ版上げした。Debug / Releaseの全13 verifierとWindows UI JavaScript 12ファイルの構文検査はすべてexit 0。成果物生成・公開・公開後readbackは未実施。
+- 配布承認後にWindows版を0.2.5へ版上げした。Debug / Releaseの全13 verifierとWindows UI JavaScript 12ファイルの構文検査はすべてexit 0。
+- `win-v0.2.5`をsource target `12771730b82a103bdea050c7a4e3e143a7d25a57`、`latest=false`で公開し、8 assetのGitHub API digest、匿名公開URL、Windows feed、公式サイトのSetup導線をreadbackした。
+- このPCのインストール済み0.2.3をVelopackで0.2.5へ更新した。ARP両view、root / current exe、通常起動processが0.2.5を示し、インストール済み実体の`calendar`、`ui`、`calendar-live` verifierがexit 0。詳細: `progress/2026-08/2026-08-02_hover-pocket-windows-0.2.5-release.md`。
 
-## 残件
+## 境界
 
 - 実予定の更新はGoogle Calendarへの外部書き込みになるため未実施。
-- 配布ビルドのファイルロックを避けるため、修正版Debug processは停止済み。インストール版とショートカットは0.2.3のままで、0.2.5公開・適用までは修正前の状態である。
+- 実予定の書き込みを除く修正、配布、公開導線、ローカル更新、起動確認は完了した。

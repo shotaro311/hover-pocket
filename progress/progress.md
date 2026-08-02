@@ -5,11 +5,14 @@ updated_by: codex
 status: active
 ---
 
-## 2026-08-02 Windows Calendar Time Zone Fix
+## 2026-08-02 Windows 0.2.5 Public Beta Release
 
 - Windows版で予定の作成・編集時に `Invalid time zone definition for start time.` が出る原因は、Google Calendar APIがIANA形式を要求する`start.timeZone` / `end.timeZone`へ、Windows形式の`TimeZoneInfo.Local.Id`（本端末では`Tokyo Standard Time`）を送っていたことだった。
 - ローカルtime zoneを.NET標準APIでIANA形式へ変換し、本端末では`Asia/Tokyo`を送るようにした。変換不能時は不正な値を送らず`timeZone`を省略し、offset付きRFC3339日時へフォールバックする。予定一覧の`timeZone` queryにも同じ変換を適用した。
-- Debug / Release buildはwarnings 0 / errors 0、両構成の`--verify calendar`はexit 0。Debugの`--verify calendar-live`はCalendar 6件 / event 65件を読み取り専用で取得してexit 0。実予定の更新は外部書き込みになるため未実施。0.2.5へ版上げし、両構成の全13 verifierとWindows UI JavaScript 12ファイルを配布前に再検証した。現在は成果物生成・公開前。詳細: `progress/2026-08/2026-08-02_hover-pocket-windows-calendar-timezone.md`。
+- source target `1277173`からWindows専用release [`win-v0.2.5`](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.5)を`latest=false`で公開した。8 assetのGitHub API digestと匿名download SHA-256、Windows feed、GitHub Pages、公式Cloudflare custom domain 2件のSetup導線をreadbackした。
+- Debug / Release buildはwarnings 0 / errors 0、両構成の全13 verifierとWindows UI JavaScript 12ファイルがexit 0。self-contained publish実体のrelease-config / shell / ui / calendar-liveもexit 0。
+- このPCのインストール済み0.2.3をVelopack経路で0.2.5へ更新した。ARP両view、root / current exe、通常起動processが0.2.5を示し、インストール済み実体のcalendar / UI / Calendar live読み取り検証が成功した。実予定の更新は外部書き込みになるため未実施。
+- GitHub LatestとmacOS専用appcastはbuild 155のまま不変。詳細: `progress/2026-08/2026-08-02_hover-pocket-windows-0.2.5-release.md`、`progress/2026-08/2026-08-02_hover-pocket-windows-calendar-timezone.md`。
 
 ## 2026-08-01 Mac Build 155 Release
 
