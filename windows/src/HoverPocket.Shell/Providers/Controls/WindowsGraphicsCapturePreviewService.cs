@@ -171,7 +171,9 @@ internal sealed class WindowsGraphicsCapturePreviewService : IMediaPreviewServic
 
         lock (_sync)
         {
-            if (_captureSession is null)
+            if (_captureSession is null
+                || _captureCancellation is null
+                || _captureCancellation.IsCancellationRequested)
             {
                 newest.Dispose();
                 return;
@@ -301,6 +303,7 @@ internal sealed class WindowsGraphicsCapturePreviewService : IMediaPreviewServic
             {
                 if (_pendingFrame is not null
                     && _captureSession is not null
+                    && _captureCancellation is { IsCancellationRequested: false }
                     && Interlocked.CompareExchange(ref _processingFrames, 1, 0) == 0)
                 {
                     _ = ProcessLatestFramesAsync();

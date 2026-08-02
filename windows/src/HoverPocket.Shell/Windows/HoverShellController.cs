@@ -322,16 +322,33 @@ internal sealed class HoverShellController : IDisposable
         await _panelBridgeController.NotifyPanelOpenedAsync();
     }
 
-    private async Task HidePanelAsync()
+    private Task HidePanelAsync()
     {
         if (_closingTask is { IsCompleted: false } closingTask)
         {
-            await closingTask;
-            return;
+            return closingTask;
         }
 
-        _closingTask = HidePanelCoreAsync();
-        await _closingTask;
+        // Hide() can pump window messages and re-enter this method, so publish the
+        // in-flight task before starting the synchronous part of the close path.
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _closingTask = completion.Task;
+        _ = CompleteHidePanelAsync(completion);
+        return _closingTask;
+    }
+
+    private async Task CompleteHidePanelAsync(TaskCompletionSource<bool> completion)
+    {
+        try
+        {
+            await HidePanelCoreAsync();
+            completion.TrySetResult(true);
+        }
+        catch (Exception exception)
+        {
+            completion.TrySetException(exception);
+        }
     }
 
     private async Task HidePanelCoreAsync()

@@ -116,7 +116,7 @@ internal sealed class GoogleCalendarApiClient
         string calendarId,
         DateTimeOffset rangeStart,
         DateTimeOffset rangeEnd,
-        string timeZone)
+        string? timeZone)
     {
         var query = new Dictionary<string, string>
         {
@@ -124,11 +124,27 @@ internal sealed class GoogleCalendarApiClient
             ["timeMax"] = Rfc3339(rangeEnd),
             ["singleEvents"] = "true",
             ["orderBy"] = "startTime",
-            ["timeZone"] = timeZone,
             ["maxResults"] = "2500"
         };
+        if (!string.IsNullOrWhiteSpace(timeZone))
+        {
+            query["timeZone"] = timeZone;
+        }
+
         var url = $"{EventsUrl(calendarId)}?{PercentEncodedForm(query)}";
         return AuthorizedRequest(HttpMethod.Get, url, accessToken);
+    }
+
+    internal static string? IanaTimeZoneId(TimeZoneInfo timeZone)
+    {
+        if (timeZone.HasIanaId)
+        {
+            return timeZone.Id;
+        }
+
+        return TimeZoneInfo.TryConvertWindowsIdToIanaId(timeZone.Id, out var ianaId)
+            ? ianaId
+            : null;
     }
 
     internal static HttpRequestMessage BuildCreateEventRequest(string accessToken, CalendarEventDraft draft)
@@ -177,7 +193,12 @@ internal sealed class GoogleCalendarApiClient
         string? pageToken = null;
         do
         {
-            using var request = BuildEventsListRequest(accessToken, source.Id, rangeStart, rangeEnd, TimeZoneInfo.Local.Id);
+            using var request = BuildEventsListRequest(
+                accessToken,
+                source.Id,
+                rangeStart,
+                rangeEnd,
+                IanaTimeZoneId(TimeZoneInfo.Local));
             if (!string.IsNullOrWhiteSpace(pageToken))
             {
                 var separator = request.RequestUri?.Query.Length > 0 ? "&" : "?";
@@ -344,8 +365,8 @@ internal sealed class GoogleCalendarApiClient
             draft.Title,
             draft.Location,
             draft.Notes,
-            new GoogleCalendarEventDateTimeWrite(null, Rfc3339(draft.Start), TimeZoneInfo.Local.Id),
-            new GoogleCalendarEventDateTimeWrite(null, Rfc3339(draft.End), TimeZoneInfo.Local.Id));
+            new GoogleCalendarEventDateTimeWrite(null, Rfc3339(draft.Start), IanaTimeZoneId(TimeZoneInfo.Local)),
+            new GoogleCalendarEventDateTimeWrite(null, Rfc3339(draft.End), IanaTimeZoneId(TimeZoneInfo.Local)));
     }
 
     private static HttpRequestMessage AuthorizedRequest(HttpMethod method, string url, string accessToken)

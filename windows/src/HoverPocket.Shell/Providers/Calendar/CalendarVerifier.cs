@@ -254,6 +254,25 @@ internal sealed class CalendarVerifier
         var rangeEnd = rangeStart.AddDays(42);
         using var calendarList = GoogleCalendarApiClient.BuildCalendarListRequest(accessToken);
         using var eventsList = GoogleCalendarApiClient.BuildEventsListRequest(accessToken, "primary", rangeStart, rangeEnd, "Asia/Tokyo");
+        var localTimeZone = GoogleCalendarApiClient.IanaTimeZoneId(TimeZoneInfo.Local);
+        using var eventsListForLocalTimeZone = GoogleCalendarApiClient.BuildEventsListRequest(
+            accessToken,
+            "primary",
+            rangeStart,
+            rangeEnd,
+            localTimeZone);
+        var customTimeZone = TimeZoneInfo.CreateCustomTimeZone(
+            "HoverPocket Unknown",
+            TimeSpan.Zero,
+            "HoverPocket Unknown",
+            "HoverPocket Unknown");
+        var unknownTimeZone = GoogleCalendarApiClient.IanaTimeZoneId(customTimeZone);
+        using var eventsListWithoutTimeZone = GoogleCalendarApiClient.BuildEventsListRequest(
+            accessToken,
+            "primary",
+            rangeStart,
+            rangeEnd,
+            unknownTimeZone);
         var draft = new CalendarEventDraft(
             "primary",
             null,
@@ -280,6 +299,35 @@ internal sealed class CalendarVerifier
             _failures.Add("request: events.list request was not correct");
         }
 
+        var localEventsQuery = ParseQuery(eventsListForLocalTimeZone.RequestUri?.Query ?? string.Empty);
+        if (localTimeZone is null)
+        {
+            if (localEventsQuery.ContainsKey("timeZone"))
+            {
+                _failures.Add("request: unresolved local time zone should be omitted from events.list");
+            }
+        }
+        else if (!localEventsQuery.TryGetValue("timeZone", out var localQueryTimeZone)
+            || localQueryTimeZone != localTimeZone)
+        {
+            _failures.Add($"request: events.list did not use IANA time zone {localTimeZone}");
+        }
+
+        if (unknownTimeZone is not null
+            || ParseQuery(eventsListWithoutTimeZone.RequestUri?.Query ?? string.Empty).ContainsKey("timeZone"))
+        {
+            _failures.Add("request: unknown local time zone was not omitted from events.list");
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            var tokyoTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Tokyo Standard Time");
+            if (GoogleCalendarApiClient.IanaTimeZoneId(tokyoTimeZone) != "Asia/Tokyo")
+            {
+                _failures.Add("request: Windows Tokyo time zone did not convert to Asia/Tokyo");
+            }
+        }
+
         if (create.Method != HttpMethod.Post || update.Method.Method != "PATCH" || delete.Method != HttpMethod.Delete)
         {
             _failures.Add("request: CRUD HTTP methods were not correct");
@@ -289,12 +337,51 @@ internal sealed class CalendarVerifier
             ? string.Empty
             : await create.Content.ReadAsStringAsync().ConfigureAwait(false);
         using var document = JsonDocument.Parse(createBody);
+        var start = default(JsonElement);
         if (!document.RootElement.TryGetProperty("summary", out var summary)
             || summary.GetString() != "Verify event"
-            || !document.RootElement.TryGetProperty("start", out var start)
+            || !document.RootElement.TryGetProperty("start", out start)
             || !start.TryGetProperty("dateTime", out _))
         {
             _failures.Add("request: event write body omitted expected fields");
+        }
+
+        if (start.ValueKind == JsonValueKind.Object)
+        {
+            var hasStartTimeZone = start.TryGetProperty("timeZone", out var startTimeZone);
+            if (localTimeZone is null)
+            {
+                if (hasStartTimeZone)
+                {
+                    _failures.Add("request: unresolved local time zone should be omitted from event write body");
+                }
+            }
+            else if (!hasStartTimeZone || startTimeZone.GetString() != localTimeZone)
+            {
+                _failures.Add($"request: event write body did not use IANA time zone {localTimeZone}");
+            }
+
+            var end = default(JsonElement);
+            var endTimeZone = default(JsonElement);
+            var hasEnd = document.RootElement.TryGetProperty("end", out end);
+            var hasEndTimeZone = hasEnd
+                && end.ValueKind == JsonValueKind.Object
+                && end.TryGetProperty("timeZone", out endTimeZone);
+            if (!hasEnd || end.ValueKind != JsonValueKind.Object)
+            {
+                _failures.Add("request: event write body omitted the expected end object");
+            }
+            else if (localTimeZone is null)
+            {
+                if (hasEndTimeZone)
+                {
+                    _failures.Add("request: unresolved local time zone should be omitted from event end");
+                }
+            }
+            else if (!hasEndTimeZone || endTimeZone.GetString() != localTimeZone)
+            {
+                _failures.Add($"request: event end did not use IANA time zone {localTimeZone}");
+            }
         }
     }
 

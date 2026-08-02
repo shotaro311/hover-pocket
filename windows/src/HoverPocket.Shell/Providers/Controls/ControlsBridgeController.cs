@@ -72,10 +72,12 @@ internal sealed class ControlsBridgeController : IDisposable
                 var cancellation = _activeCancellation;
                 _activeCancellation = null;
                 _fallbackRefreshTask = null;
+                // Stop capture while its linked token is still valid. Canceling first can
+                // make the frame processor synchronously restart against an active session.
+                _preview.Stop();
                 cancellation?.Cancel();
                 _volume.StopMonitoring();
                 _media.StopMonitoring();
-                _preview.Stop();
                 cancellation?.Dispose();
                 return;
             }

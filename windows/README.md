@@ -64,7 +64,7 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 Windows 版の更新確認は Velopack と GitHub Releases (`shotaro311/hover-pocket`) を使います。トレイと Settings の `Check for Updates` は Windows channel `win` の feed (`releases.win.json`) へ接続し、更新が見つかった場合はダウンロード前と適用/再起動前に確認します。起動時の自動チェックは既定オンで、失敗しても起動を止めません。
 更新後の通常起動では、実インストールのrootと既存ARP entryの`InstallLocation`が一致する場合だけ、HKCUの`HoverPocketWin` entryにある`DisplayVersion`を現在versionへ補正します。portable、verify、second-instance probe、path不一致、keyなしでは変更しません。
 
-Windows は macOS Sparkle の `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml` を使いません。Windows release は `win-v0.2.3` のような Windows 専用 tag / asset を使い、GitHub Release を作る場合は `--latest=false` を付けてmacOSのLatest / appcastを動かさないでください。
+Windows は macOS Sparkle の `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml` を使いません。Windows release は `win-v0.2.5` のような Windows 専用 tag / asset を使い、GitHub Release を作る場合は `--latest=false` を付けてmacOSのLatest / appcastを動かさないでください。
 
 ### 署名方針
 
@@ -84,8 +84,8 @@ NuGet TLS 問題がある環境では、一時ローカル NuGet ソースと `-
 スクリプトの出力する GitHub 手順は、Windows release 作成時に `--latest=false` を含みます。アップロード後は次を readback し、Windows feed と asset だけが読めること、macOS `macos-latest/appcast.xml` が変わっていないことを別々に確認します。
 
 ```powershell
-gh release view win-v0.2.3 --repo shotaro311/hover-pocket --json tagName,assets,url
-Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.3/releases.win.json
+gh release view win-v0.2.5 --repo shotaro311/hover-pocket --json tagName,assets,url
+Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.5/releases.win.json
 Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml
 ```
 

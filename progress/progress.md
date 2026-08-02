@@ -1,9 +1,15 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-08-01
+updated: 2026-08-02
 updated_by: codex
 status: active
 ---
+
+## 2026-08-02 Windows Calendar Time Zone Fix
+
+- Windows版で予定の作成・編集時に `Invalid time zone definition for start time.` が出る原因は、Google Calendar APIがIANA形式を要求する`start.timeZone` / `end.timeZone`へ、Windows形式の`TimeZoneInfo.Local.Id`（本端末では`Tokyo Standard Time`）を送っていたことだった。
+- ローカルtime zoneを.NET標準APIでIANA形式へ変換し、本端末では`Asia/Tokyo`を送るようにした。変換不能時は不正な値を送らず`timeZone`を省略し、offset付きRFC3339日時へフォールバックする。予定一覧の`timeZone` queryにも同じ変換を適用した。
+- Debug / Release buildはwarnings 0 / errors 0、両構成の`--verify calendar`はexit 0。Debugの`--verify calendar-live`はCalendar 6件 / event 65件を読み取り専用で取得してexit 0。実予定の更新は外部書き込みになるため未実施。0.2.5へ版上げし、両構成の全13 verifierとWindows UI JavaScript 12ファイルを配布前に再検証した。現在は成果物生成・公開前。詳細: `progress/2026-08/2026-08-02_hover-pocket-windows-calendar-timezone.md`。
 
 ## 2026-08-01 Mac Build 155 Release
 
@@ -13,6 +19,27 @@ status: active
 - versioned / stable appcastはSHA-256 `c0aa1ec496b8e6ffdfc8a7c6a82e2a4d1871ef0e3952efa41653acdcb8f0da43`で一致し、`sparkle:version=155`、versioned ZIP URL、88文字のEdDSA署名を返した。
 - 匿名公開URLから再取得したversioned / stable ZIPのSHA-256は`a6965480b0e35892ea4a4bf2a943597ff2e8da994e22fbcb099c4113f299870b`でローカルと一致した。ZIP top-levelは`HoverPocket.app`のみで、展開後も`0.1.0 (155)`、release Keychain suffix、macOS専用feed、Developer ID、公証staple、Gatekeeperを確認した。
 - 配信前に`swift build`、`./script/build_and_run.sh --verify`、panel layout 112ケース、Clipboard、Timer compact、Calculator、Weatherの実API / cache verifierが成功した。Windows `win-v0.2.3`は8 asset・target commit `7bfbee4`のまま変更していない。詳細: `progress/2026-08/2026-08-01_hover-pocket-build-155-release.md`。
+
+## 2026-07-29 Windows 0.2.4 Release Candidate
+
+- panel instant close、Controls preview停止競合修正、0.2.4版上げ、README / Webサイト導線更新をsource commit `7a51fd7`へ確定した。
+- Debug / Release buildはwarnings 0 / errors 0。両構成の全13 verifier、Windows UI JavaScript 12ファイル、self-contained publish実体のrelease-config / shell / ui / calendar-liveに合格した。
+- Windows専用channel `win`の8 assetを生成し、ProductVersion `0.2.4+7a51fd7...`、Google OAuth metadata一致、NUPKG / feed 0.2.4、checksum 7件一致、0.2.x方針どおりAuthenticode未署名を確認した。
+- 外部書き込みは未実施。`win-v0.2.4`はsource commit `7a51fd7`をtargetに`--latest=false`で公開し、macOS Latest `v0.1.0-150`とappcast SHA-256 `0618463f...`の不変を公開後に確認する。詳細: `progress/2026-07/2026-07-29_hover-pocket-windows-0.2.4-release-candidate.md`。
+
+## 2026-07-29 Windows Instant Panel Close
+
+- パネルを閉じる終盤に細長い黒いバーが横へ滑る問題は、commit `b9dcdc4`で追加されたWebView2静止画モーフィングが原因だった。全幅の静止画を220msかけてcollapsed `72x12`へ`Stretch.Fill`で圧縮し、進捗78%まで不透明のまま表示するため、内容がバー状へ潰れていた。
+- 開く時とパネルサイズ変更時の静止画モーフィングは維持し、閉じる時だけanimation generationとsnapshot refreshを停止して、opacity 0、hide、collapsed配置を同一ターンで行うようにした。使われなくなったclose easing / crossfade分岐も削除した。
+- 即時closeで露出したControlsライブプレビューの停止競合をクラッシュダンプで特定した。capture停止より先にlinked tokenをcancelするとframe processorが同期再起動を繰り返して`0xC00000FD`になるため、captureを先に停止し、cancel済みsessionでは再起動しないようにした。
+- `--verify shell`へ「close要求開始直後にWPF/nativeの中間表示が残らない」検査を追加し、Debug / Releaseとも25 cycleで`instant_close=true`、open animation `31 / 29` frames、最大frame gap `17.5 / 18.1ms`を確認した。両構成のbuildはwarnings 0 / errors 0、全13 verifierとWindows UI JavaScript 12ファイルのsyntax checkがexit 0。0.2.4へ版上げし、updater dry-runは0.2.3から0.2.4を検出した。詳細: `progress/2026-07/2026-07-29_hover-pocket-windows-instant-close.md`。
+
+## 2026-07-29 Windows Start Menu Shortcut Repair
+
+- ユーザーのスタートメニューに `HoverPocket.lnk` と `HoverPocket.Shell.lnk` の2件があり、前者はインストール済み0.2.3、後者は2026-07-09作成のDebug 0.2.1を指していた。
+- 古い `HoverPocket.Shell.lnk` のtarget、working directory、iconを、インストール済みの `C:\Users\shotaro\AppData\Local\HoverPocketWin\current\HoverPocket.Shell.exe`へ揃えた。
+- WScript.Shellで両ショートカットを独立readbackし、target存在、ProductVersion `0.2.3+7bfbee4ed54ed989b1ad470fd4420b0d8efeda13`、working directory、iconの一致を確認した。
+- Git管理外の古い `windows\src\HoverPocket.Shell\bin\Debug`（76ファイル、34,244,026 bytes）を対象範囲確認後にWindowsのゴミ箱へ移し、対象不存在と親 `bin` の保持をreadbackした。インストール済み0.2.3とその実行中プロセスは保持した。詳細: `progress/2026-07/2026-07-29_hover-pocket-windows-start-menu-shortcut.md`。
 
 ## 2026-07-29 Mac Timer Compact Cards
 

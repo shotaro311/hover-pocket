@@ -249,37 +249,23 @@ internal sealed class PanelWindow : NoActivateWindow
         }
     }
 
-    public async Task CloseAsync(DisplaySurfaceLayout layout)
+    public Task CloseAsync(DisplaySurfaceLayout layout)
     {
         EndKeyboardInteraction();
         if (!IsVisible)
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        var generation = ++_animationGeneration;
-        var from = GetCurrentPlacement(layout.PanelTarget);
-
-        if (_lastSnapshot is not null)
-        {
-            BeginMorph(_lastSnapshot);
-        }
-
-        await AnimateToAsync(
-            from,
-            layout.PanelCollapsed,
-            0,
-            generation,
-            AnimationDuration,
-            MorphDirection.Close);
-        if (generation == _animationGeneration)
-        {
-            PrepareCollapsedState();
-            Hide();
-            ApplyPlacement(layout.PanelCollapsed, show: false);
-            Opacity = 0;
-            ResetMorphState(restoreMinimums: false);
-        }
+        ++_animationGeneration;
+        ++_snapshotRefreshGeneration;
+        _isAnimating = false;
+        Opacity = 0;
+        PrepareCollapsedState();
+        Hide();
+        ApplyPlacement(layout.PanelCollapsed, show: false);
+        ResetMorphState(restoreMinimums: false);
+        return Task.CompletedTask;
     }
 
     public async Task ResizeAsync(WindowPlacement target)
@@ -461,9 +447,7 @@ internal sealed class PanelWindow : NoActivateWindow
                 maxFrameGap = frameGap > maxFrameGap ? frameGap : maxFrameGap;
                 frameCount++;
                 var progress = Math.Clamp(elapsed.TotalMilliseconds / duration.TotalMilliseconds, 0, 1);
-                var eased = direction == MorphDirection.Close
-                    ? EaseInOutCubic(progress)
-                    : EaseOutCubic(progress);
+                var eased = EaseOutCubic(progress);
                 ApplyPlacement(Interpolate(from, to, eased), show: true);
                 Opacity = Interpolate(startOpacity, targetOpacity, eased);
                 UpdateMorphCrossfade(direction, progress, targetOpacity);
@@ -495,14 +479,6 @@ internal sealed class PanelWindow : NoActivateWindow
     {
         if (!_morphActive)
         {
-            return;
-        }
-
-        if (direction == MorphDirection.Close)
-        {
-            _morphImage.Opacity = progress < 0.78
-                ? 1
-                : Interpolate(1, targetOpacity, SmoothStep((progress - 0.78) / 0.22));
             return;
         }
 
@@ -573,13 +549,6 @@ internal sealed class PanelWindow : NoActivateWindow
     {
         var inverse = 1 - progress;
         return 1 - (inverse * inverse * inverse);
-    }
-
-    private static double EaseInOutCubic(double progress)
-    {
-        return progress < 0.5
-            ? 4 * progress * progress * progress
-            : 1 - (Math.Pow(-2 * progress + 2, 3) / 2);
     }
 
     private static double SmoothStep(double progress)
@@ -771,7 +740,6 @@ internal sealed class PanelWindow : NoActivateWindow
     private enum MorphDirection
     {
         Open,
-        Close,
         Resize
     }
 }

@@ -42,6 +42,7 @@ internal sealed class ShellVerifier
         await VerifyStagedRecoverySchedulerAsync();
         await VerifyPanelPositionStableWhilePointerMovesAsync();
         await VerifyPointerOutsideClosesPanelAsync();
+        await VerifyPanelClosesWithoutVisibleCollapseAsync();
 
         for (var cycle = 0; cycle < StressCycles; cycle++)
         {
@@ -63,7 +64,7 @@ internal sealed class ShellVerifier
         {
             VerifyConsole.WriteLine(
                 $"PASS shell verify: windows={afterWindowCount}, cycles={StressCycles}, stable_position=true, outside_close=true, "
-                + "polling_open=true, health_repair=true, window_recreate=true, staged_recovery=true, "
+                + "instant_close=true, polling_open=true, health_repair=true, window_recreate=true, staged_recovery=true, "
                 + $"animation_frames={_controller.Panel.LastAnimationDiagnostics.FrameCount}, "
                 + $"animation_max_gap_ms={_controller.Panel.LastAnimationDiagnostics.MaxFrameGap.TotalMilliseconds:0.0}");
             return 0;
@@ -86,6 +87,11 @@ internal sealed class ShellVerifier
         }
 
         var diagnostics = _controller.Panel.LastAnimationDiagnostics;
+        if (!diagnostics.Direction.Equals("Open", StringComparison.Ordinal))
+        {
+            _failures.Add($"animation: expected latest animated transition to be Open, got {diagnostics.Direction}");
+        }
+
         if (diagnostics.FrameCount < 6)
         {
             _failures.Add($"animation: too few rendered frames ({diagnostics.FrameCount})");
@@ -451,6 +457,26 @@ internal sealed class ShellVerifier
             {
                 await _controller.HidePanelForVerifyAsync();
             }
+        }
+    }
+
+    private async Task VerifyPanelClosesWithoutVisibleCollapseAsync()
+    {
+        await _controller.ShowPanelForVerifyAsync();
+        await WaitForPanelPlacementAsync(_controller.ActiveLayoutForVerify);
+
+        var closeTask = _controller.HidePanelForVerifyAsync();
+        if (_controller.Panel.IsVisible)
+        {
+            _failures.Add("instant close: panel remained visible after the close request started");
+        }
+
+        await closeTask;
+        if (_controller.Panel.IsVisible || _controller.Panel.IsAnimating)
+        {
+            _failures.Add(
+                "instant close: panel retained a visible or animated intermediate state; "
+                + $"visible={_controller.Panel.IsVisible}, animating={_controller.Panel.IsAnimating}");
         }
     }
 
