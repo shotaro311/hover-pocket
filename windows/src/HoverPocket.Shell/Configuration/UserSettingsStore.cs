@@ -111,6 +111,8 @@ internal sealed class UserSettingsStore
             HandleIconStyle = HandleIconStyle.B,
             ShowTopHandleSideArea = true,
             DisableTopEdgeInFullscreen = true,
+            CodexVoiceEnabled = false,
+            CodexVoiceLayoutMode = VoiceLaneLayoutMode.Compact,
             ProviderOrder = [.. providerIds],
             ProviderVisibility = providerIds.ToDictionary(id => id, _ => true, StringComparer.OrdinalIgnoreCase)
         };
@@ -149,6 +151,11 @@ internal sealed class UserSettingsStore
         if (visibility.Count > 0 && visibility.Values.All(visible => !visible))
         {
             visibility[providerIds[0]] = true;
+        }
+
+        if (settings.CodexVoiceLayoutMode is not (VoiceLaneLayoutMode.Compact or VoiceLaneLayoutMode.Expanded))
+        {
+            settings.CodexVoiceLayoutMode = VoiceLaneLayoutMode.Compact;
         }
 
         settings.ProviderOrder = order;
