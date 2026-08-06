@@ -12,11 +12,12 @@ internal sealed class VoiceLaneLayoutVerifier
         VerifyCatalogMetrics();
         VerifyDisplayLayoutGeometry();
         VerifySmallDisplayClamp();
+        VerifySettingsDefaultOff();
 
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
-                "PASS voice-lane-layout verify: disabled/compact/expanded metrics, display geometry, small-screen clamp");
+                "PASS voice-lane-layout verify: disabled/compact/expanded metrics, display geometry, small-screen clamp, default-off settings persistence");
             return 0;
         }
 
@@ -137,6 +138,39 @@ internal sealed class VoiceLaneLayoutVerifier
             monitor.Bounds.Height - layout.AccessSurface.PhysicalRect.Height,
             layout.PanelTarget.PhysicalRect.Height,
             "small display height clamp");
+    }
+
+    private void VerifySettingsDefaultOff()
+    {
+        var store = UserSettingsStore.CreateTemporary("VoiceLaneLayoutVerify");
+        IReadOnlyList<string> providerIds = ["controls", "calendar"];
+        var defaults = store.Load(providerIds);
+        if (defaults.CodexVoiceEnabled
+            || defaults.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Compact
+            || defaults.EffectiveVoiceLaneLayout != VoiceLaneLayoutState.Disabled)
+        {
+            _failures.Add("new or upgraded settings did not keep Codex Voice disabled");
+        }
+
+        var enabled = defaults.Clone();
+        enabled.CodexVoiceEnabled = true;
+        enabled.CodexVoiceLayoutMode = VoiceLaneLayoutMode.Expanded;
+        store.Save(enabled);
+        var reloaded = store.ReloadOrDefault(providerIds);
+        if (!reloaded.CodexVoiceEnabled
+            || reloaded.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Expanded
+            || reloaded.EffectiveVoiceLaneLayout != VoiceLaneLayoutState.Expanded)
+        {
+            _failures.Add("Codex Voice settings did not round-trip when explicitly enabled");
+        }
+
+        reloaded.CodexVoiceEnabled = false;
+        store.Save(reloaded);
+        var disabledAgain = store.ReloadOrDefault(providerIds);
+        if (disabledAgain.EffectiveVoiceLaneLayout != VoiceLaneLayoutState.Disabled)
+        {
+            _failures.Add("disabling Codex Voice did not restore disabled geometry");
+        }
     }
 
     private static DisplayMonitor CreateMonitor(
