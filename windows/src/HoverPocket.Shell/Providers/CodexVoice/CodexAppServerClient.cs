@@ -22,6 +22,34 @@ internal sealed record CodexAppServerClientOptions
     public bool ExperimentalApi { get; init; } = true;
 }
 
+internal sealed record CodexAppServerRequest(
+    JsonElement Id,
+    string Method,
+    JsonElement? Params);
+
+internal sealed record CodexAppServerReply(
+    object? Result,
+    CodexAppServerReplyError? Error)
+{
+    public static CodexAppServerReply Success(object? result = null)
+    {
+        return new CodexAppServerReply(result, null);
+    }
+
+    public static CodexAppServerReply Failure(
+        int code,
+        string message,
+        object? data = null)
+    {
+        return new CodexAppServerReply(null, new CodexAppServerReplyError(code, message, data));
+    }
+}
+
+internal sealed record CodexAppServerReplyError(
+    int Code,
+    string Message,
+    object? Data = null);
+
 internal sealed class CodexAppServerClient : IAsyncDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -45,6 +73,8 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
     private int _disposeState;
     private int _malformedStdoutLineCount;
     private int _unknownResponseCount;
+    private int _unhandledServerRequestCount;
+    private int _notificationHandlerFailureCount;
     private bool _initialized;
 
     private CodexAppServerClient(
@@ -61,6 +91,8 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
 
     public event EventHandler<CodexAppServerNotificationEventArgs>? NotificationReceived;
 
+    public Func<CodexAppServerRequest, CancellationToken, Task<CodexAppServerReply>>? ServerRequestHandler { get; set; }
+
     public string ExecutablePath { get; }
 
     public int ProcessId => _process.Id;
@@ -70,6 +102,10 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
     public int MalformedStdoutLineCount => Volatile.Read(ref _malformedStdoutLineCount);
 
     public int UnknownResponseCount => Volatile.Read(ref _unknownResponseCount);
+
+    public int UnhandledServerRequestCount => Volatile.Read(ref _unhandledServerRequestCount);
+
+    public int NotificationHandlerFailureCount => Volatile.Read(ref _notificationHandlerFailureCount);
 
     public IReadOnlyList<string> StderrTail
     {
@@ -125,6 +161,35 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         }
 
         return SendRequestCoreAsync(method, parameters, cancellationToken);
+    }
+
+    public async Task<JsonElement> SendIdempotentRequestWithRetryAsync(
+        string method,
+        object? parameters = null,
+        int maxAttempts = 3,
+        CancellationToken cancellationToken = default)
+    {
+        if (maxAttempts < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxAttempts), maxAttempts, "At least one attempt is required.");
+        }
+
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await SendRequestAsync(method, parameters, cancellationToken);
+            }
+            catch (CodexAppServerRpcException exception)
+                when (exception.IsRetryableOverload && attempt < maxAttempts)
+            {
+                var exponentialMilliseconds = Math.Min(2_000, 100 * Math.Pow(2, attempt - 1));
+                var jitterMilliseconds = Random.Shared.Next(25, 126);
+                await Task.Delay(
+                    TimeSpan.FromMilliseconds(exponentialMilliseconds + jitterMilliseconds),
+                    cancellationToken);
+            }
+        }
     }
 
     public Task SendNotificationAsync(
@@ -240,7 +305,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             await _process.StandardInput.WriteLineAsync(json.AsMemory(), cancellationToken);
             await _process.StandardInput.FlushAsync(cancellationToken);
         }
-        catch (InvalidOperationException exception)
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or ObjectDisposedException)
         {
             throw new IOException("codex app-server stdin is unavailable.", exception);
         }
@@ -275,9 +340,18 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         }
         finally
         {
-            var exitDescription = _process.HasExited
-                ? $"exit code {_process.ExitCode}"
-                : "stdout closed";
+            var exitDescription = "stdout closed";
+            try
+            {
+                if (_process.HasExited)
+                {
+                    exitDescription = $"exit code {_process.ExitCode}";
+                }
+            }
+            catch (InvalidOperationException)
+            {
+            }
+
             FailPendingRequests(
                 terminalError
                 ?? new IOException($"codex app-server transport ended: {exitDescription}."));
@@ -332,57 +406,163 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             return;
         }
 
-        if (TryReadResponseId(root, out var responseId))
+        if (TryReadMethod(root, out var method))
         {
-            if (!_pendingRequests.TryRemove(responseId, out var completion))
+            JsonElement? parameters = null;
+            if (root.TryGetProperty("params", out var paramsElement))
             {
-                Interlocked.Increment(ref _unknownResponseCount);
+                parameters = paramsElement.Clone();
+            }
+
+            if (TryReadIdElement(root, out var requestId))
+            {
+                _ = HandleServerRequestAsync(
+                    new CodexAppServerRequest(requestId, method, parameters),
+                    _lifetimeCancellation.Token);
                 return;
             }
 
-            if (root.TryGetProperty("error", out var error)
-                && error.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
-            {
-                completion.TrySetException(CodexAppServerRpcException.From(error));
-                return;
-            }
-
-            completion.TrySetResult(
-                root.TryGetProperty("result", out var result)
-                    ? result.Clone()
-                    : EmptyObject.Clone());
+            RaiseNotificationSafely(method, parameters);
             return;
         }
 
+        if (!TryReadResponseId(root, out var responseId))
+        {
+            Interlocked.Increment(ref _malformedStdoutLineCount);
+            return;
+        }
+
+        if (!_pendingRequests.TryRemove(responseId, out var completion))
+        {
+            Interlocked.Increment(ref _unknownResponseCount);
+            return;
+        }
+
+        if (root.TryGetProperty("error", out var error)
+            && error.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
+        {
+            completion.TrySetException(CodexAppServerRpcException.From(error));
+            return;
+        }
+
+        completion.TrySetResult(
+            root.TryGetProperty("result", out var result)
+                ? result.Clone()
+                : EmptyObject.Clone());
+    }
+
+    private async Task HandleServerRequestAsync(
+        CodexAppServerRequest request,
+        CancellationToken cancellationToken)
+    {
+        CodexAppServerReply reply;
+        try
+        {
+            var handler = ServerRequestHandler;
+            if (handler is null)
+            {
+                Interlocked.Increment(ref _unhandledServerRequestCount);
+                reply = CodexAppServerReply.Failure(
+                    -32601,
+                    $"Unsupported app-server request: {request.Method}");
+            }
+            else
+            {
+                reply = await handler(request, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception)
+        {
+            reply = CodexAppServerReply.Failure(-32603, "Client request handler failed.");
+        }
+
+        try
+        {
+            if (reply.Error is null)
+            {
+                await WriteMessageAsync(
+                    new
+                    {
+                        id = request.Id,
+                        result = reply.Result ?? new { }
+                    },
+                    cancellationToken);
+            }
+            else
+            {
+                await WriteMessageAsync(
+                    new
+                    {
+                        id = request.Id,
+                        error = reply.Error
+                    },
+                    cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+        {
+        }
+    }
+
+    private void RaiseNotificationSafely(string method, JsonElement? parameters)
+    {
+        var handlers = NotificationReceived;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        var eventArgs = new CodexAppServerNotificationEventArgs(method, parameters);
+        foreach (EventHandler<CodexAppServerNotificationEventArgs> handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler(this, eventArgs);
+            }
+            catch (Exception)
+            {
+                Interlocked.Increment(ref _notificationHandlerFailureCount);
+            }
+        }
+    }
+
+    private static bool TryReadMethod(JsonElement root, out string method)
+    {
+        method = string.Empty;
         if (!root.TryGetProperty("method", out var methodElement)
             || methodElement.ValueKind != JsonValueKind.String)
         {
-            Interlocked.Increment(ref _malformedStdoutLineCount);
-            return;
+            return false;
         }
 
-        var method = methodElement.GetString();
-        if (string.IsNullOrWhiteSpace(method))
+        method = methodElement.GetString() ?? string.Empty;
+        return !string.IsNullOrWhiteSpace(method);
+    }
+
+    private static bool TryReadIdElement(JsonElement root, out JsonElement id)
+    {
+        id = default;
+        if (!root.TryGetProperty("id", out var idElement)
+            || idElement.ValueKind is not (JsonValueKind.Number or JsonValueKind.String))
         {
-            Interlocked.Increment(ref _malformedStdoutLineCount);
-            return;
+            return false;
         }
 
-        JsonElement? parameters = null;
-        if (root.TryGetProperty("params", out var paramsElement))
-        {
-            parameters = paramsElement.Clone();
-        }
-
-        NotificationReceived?.Invoke(
-            this,
-            new CodexAppServerNotificationEventArgs(method, parameters));
+        id = idElement.Clone();
+        return true;
     }
 
     private static bool TryReadResponseId(JsonElement root, out string id)
     {
         id = string.Empty;
-        if (!root.TryGetProperty("id", out var idElement))
+        if (!TryReadIdElement(root, out var idElement))
         {
             return false;
         }
@@ -428,7 +608,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         {
             _process.StandardInput.Close();
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException)
         {
         }
 
@@ -442,7 +622,9 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             {
                 _process.Kill(entireProcessTree: true);
             }
-            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+            catch (Exception exception) when (exception is InvalidOperationException
+                or System.ComponentModel.Win32Exception
+                or ObjectDisposedException)
             {
             }
         }
@@ -482,13 +664,13 @@ internal sealed class CodexAppServerNotificationEventArgs(
 internal sealed class CodexAppServerRpcException(
     int code,
     string rpcMessage,
-    JsonElement? data) : Exception($"codex app-server RPC error {code}: {rpcMessage}")
+    JsonElement? rpcData) : Exception($"codex app-server RPC error {code}: {rpcMessage}")
 {
     public int Code { get; } = code;
 
     public string RpcMessage { get; } = rpcMessage;
 
-    public JsonElement? Data { get; } = data;
+    public JsonElement? RpcData { get; } = rpcData;
 
     public bool IsRetryableOverload => Code == -32001;
 
@@ -552,7 +734,7 @@ internal static class CodexExecutableResolver
             startInfo.ArgumentList.Add("/d");
             startInfo.ArgumentList.Add("/s");
             startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add($"\"{executablePath}\" app-server --stdio");
+            startInfo.ArgumentList.Add($"\"\"{executablePath}\" app-server --stdio\"");
         }
         else if (extension.Equals(".ps1", StringComparison.OrdinalIgnoreCase))
         {
