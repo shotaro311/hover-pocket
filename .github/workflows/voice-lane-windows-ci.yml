@@ -1,0 +1,112 @@
+name: Voice Lane Windows CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "windows/**"
+      - ".github/workflows/voice-lane-windows-ci.yml"
+      - "AGENTS.md"
+      - "docs/plan/20260806-codex-voice-lane-plan.md"
+      - "docs/report/20260806-codex-voice-lane-architecture-review.md"
+      - "progress/2026-08/2026-08-06_hover-pocket-codex-voice-lane-review.md"
+  push:
+    branches:
+      - feature/codex-voice-lane
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voice-lane-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-build-and-deterministic-verifiers:
+    name: Windows build and deterministic verifiers
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check patch whitespace
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "pull_request") {
+            $base = "origin/${{ github.base_ref }}"
+          } else {
+            $base = "origin/main"
+          }
+
+          git diff --check "$base...HEAD"
+          if ($LASTEXITCODE -ne 0) {
+            throw "git diff --check failed."
+          }
+
+      - name: Restore Windows solution
+        shell: pwsh
+        run: dotnet restore .\windows\HoverPocket.Windows.sln
+
+      - name: Build Debug with warnings as errors
+        shell: pwsh
+        run: dotnet build .\windows\HoverPocket.Windows.sln -c Debug --no-restore -p:TreatWarningsAsErrors=true
+
+      - name: Build Release with warnings as errors
+        shell: pwsh
+        run: dotnet build .\windows\HoverPocket.Windows.sln -c Release --no-restore -p:TreatWarningsAsErrors=true
+
+      - name: Check Windows UI JavaScript syntax
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Path .\windows\ui -Recurse -File -Filter *.js
+          if ($files.Count -eq 0) {
+            throw "No JavaScript files were found under windows/ui."
+          }
+
+          foreach ($file in $files) {
+            node --check $file.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "JavaScript syntax check failed: $($file.FullName)"
+            }
+          }
+
+          Write-Host "Checked $($files.Count) JavaScript files."
+
+      - name: Run deterministic Windows verifiers
+        shell: pwsh
+        run: |
+          $project = ".\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj"
+          $targets = @(
+            "ui-model",
+            "sticky",
+            "calc",
+            "timer",
+            "calendar",
+            "settings",
+            "ailane",
+            "updater"
+          )
+
+          foreach ($target in $targets) {
+            Write-Host "Running verifier: $target"
+            dotnet run --project $project -c Debug --no-build -- --verify $target
+            if ($LASTEXITCODE -ne 0) {
+              throw "Verifier failed: $target (exit $LASTEXITCODE)"
+            }
+          }
