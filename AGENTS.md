@@ -19,15 +19,20 @@
 
 - `docs/plan/20260806-codex-voice-lane-plan.md`
 - `docs/report/20260806-codex-voice-lane-architecture-review.md`
+- `docs/report/20260806-codex-app-server-upstream-verification.md`
 - `progress/2026-08/2026-08-06_hover-pocket-codex-voice-lane-review.md`
 
-アーキテクチャレビューのCritical 3件を解消しないまま本実装へ進めない。
+アーキテクチャレビューのCritical 3件を解消しないまま、UI・microphone・WebRTCの本実装へ進めない。
 
 1. voice session / app-server / thread状態を `PanelWindow` とWebView2の寿命から分離する。
 2. UI用 `BridgeDispatcher` をapp-server clientとして流用せず、専用 `CodexAppServerClient` を作る。
 3. `AiLaneHeight` を静的定数のまま使わず、disabled / compact / expandedを含む動的レイアウトへ変更する。
 
-各milestoneのpush後はPR #6へ、到達点、変更ファイル、実行コマンド、verifier結果、実機確認、未確認事項を記録する。Critical 3件とPhase 0 / 0.5の実測が揃うまで、PRをDraftのまま維持し、mergeしない。
+現在のブランチには上記3件の基盤型とVerifierがあるが、`PanelWindow` / `HoverShellController` / WebView2 UIへの本番接続は未実装である。基盤が存在することを、機能が完成した証拠として扱わない。
+
+Codex app-serverのwire仕様は、対象PCにインストールされたCodex自身が生成するJSON Schemaを正本とする。現行公式資料では`v2 + WebRTC`は非対応とされているため、その組み合わせをハードコードしない。Phase 0で利用可能versionとtransportを実測し、互換性がない場合はVoice Laneだけをfail closedで無効化する。
+
+各milestoneのpush後はPR #6へ、到達点、変更ファイル、実行コマンド、verifier結果、実機確認、未確認事項を記録する。Phase 0 / 0.5の実測と実音声E2Eが揃うまで、PRをDraftのまま維持し、mergeしない。
 
 ## 横断リリース方針
 
