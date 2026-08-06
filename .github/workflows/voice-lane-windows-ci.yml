@@ -116,7 +116,9 @@ jobs:
             "calendar",
             "settings",
             "ailane",
+            "voice-lane-layout",
             "codex-app-server-protocol",
+            "codex-voice-coordinator",
             "updater"
           )
 
