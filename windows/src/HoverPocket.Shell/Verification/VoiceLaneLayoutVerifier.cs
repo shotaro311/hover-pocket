@@ -141,8 +141,8 @@ internal sealed class VoiceLaneLayoutVerifier
 
     private static DisplayMonitor CreateMonitor(
         PhysicalRect bounds,
-        int dpiX,
-        int dpiY)
+        uint dpiX,
+        uint dpiY)
     {
         return new DisplayMonitor(
             "voice-lane-layout-verify",
