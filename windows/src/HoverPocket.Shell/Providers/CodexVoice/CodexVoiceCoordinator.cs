@@ -58,6 +58,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
     private bool _transportAttached;
     private bool _isMuted = true;
     private string? _lastErrorCode;
+    private int? _appServerProcessId;
     private int _disposeState;
 
     public CodexVoiceCoordinator(
@@ -118,6 +119,11 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                 client.NotificationReceived += OnAppServerNotification;
                 client.ServerRequestHandler = HandleServerRequestAsync;
                 _client = client;
+                lock (_stateSync)
+                {
+                    _appServerProcessId = client.ProcessId;
+                }
+
                 UpdateState(
                     availability: CodexVoiceAvailability.Ready,
                     sessionStatus: CodexVoiceSessionStatus.Idle,
@@ -370,7 +376,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             _isMuted,
             _transcript.Snapshot(),
             _lastErrorCode,
-            _client?.ProcessId);
+            _appServerProcessId);
     }
 
     private static string? ReadString(JsonElement? parameters, string propertyName)
@@ -412,6 +418,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
 
             lock (_stateSync)
             {
+                _appServerProcessId = null;
                 _transportAttached = false;
                 _isMuted = true;
                 _sessionStatus = CodexVoiceSessionStatus.Closed;
