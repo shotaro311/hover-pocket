@@ -58,6 +58,13 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (options.VerifyCodexAppServerProtocol)
+        {
+            VerifyConsole.AttachParent();
+            _ = RunCodexAppServerProtocolVerificationAsync();
+            return;
+        }
+
         if (options.VerifySticky)
         {
             VerifyConsole.AttachParent();
@@ -199,6 +206,12 @@ public partial class App : System.Windows.Application
     private async Task RunCodexAppServerVerificationAsync()
     {
         Environment.ExitCode = await new CodexAppServerVerifier().RunAsync();
+        Shutdown();
+    }
+
+    private async Task RunCodexAppServerProtocolVerificationAsync()
+    {
+        Environment.ExitCode = await new CodexAppServerProtocolVerifier().RunAsync();
         Shutdown();
     }
 
