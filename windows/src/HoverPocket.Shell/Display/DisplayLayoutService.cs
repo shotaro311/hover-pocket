@@ -45,17 +45,26 @@ internal sealed class DisplayLayoutService
 
     public IReadOnlyList<DisplaySurfaceLayout> CreateLayouts(DisplayPlacement placement)
     {
-        return CreateLayouts(placement, PanelSize.Medium, AccessSurfaceWindow.ExpandedWidth);
+        return CreateLayouts(
+            placement,
+            PanelSize.Medium,
+            AccessSurfaceWindow.ExpandedWidth,
+            VoiceLaneLayoutState.Disabled);
     }
 
     public IReadOnlyList<DisplaySurfaceLayout> CreateLayouts(
         DisplayPlacement placement,
         PanelSize panelSize,
-        double accessWidthDips = AccessSurfaceWindow.ExpandedWidth)
+        double accessWidthDips = AccessSurfaceWindow.ExpandedWidth,
+        VoiceLaneLayoutState voiceLaneLayout = default)
     {
         var monitors = EnumerateMonitors();
         return ResolveTargets(monitors, placement)
-            .Select(monitor => CreateLayout(monitor, panelSize, accessWidthDips))
+            .Select(monitor => CreateLayout(
+                monitor,
+                panelSize,
+                accessWidthDips,
+                voiceLaneLayout))
             .ToArray();
     }
 
@@ -77,15 +86,20 @@ internal sealed class DisplayLayoutService
 
     public DisplaySurfaceLayout CreateLayout(DisplayMonitor monitor)
     {
-        return CreateLayout(monitor, PanelSize.Medium, AccessSurfaceWindow.ExpandedWidth);
+        return CreateLayout(
+            monitor,
+            PanelSize.Medium,
+            AccessSurfaceWindow.ExpandedWidth,
+            VoiceLaneLayoutState.Disabled);
     }
 
     public DisplaySurfaceLayout CreateLayout(
         DisplayMonitor monitor,
         PanelSize panelSize,
-        double accessWidthDips = AccessSurfaceWindow.ExpandedWidth)
+        double accessWidthDips = AccessSurfaceWindow.ExpandedWidth,
+        VoiceLaneLayoutState voiceLaneLayout = default)
     {
-        var panelMetrics = PanelSizeCatalog.Get(panelSize);
+        var panelMetrics = PanelSizeCatalog.Get(panelSize, voiceLaneLayout);
         var accessWidth = DipToPhysical(accessWidthDips, monitor.ScaleX);
         var accessHeight = DipToPhysical(AccessSurfaceWindow.SurfaceHeight, monitor.ScaleY);
         var panelWidth = Math.Min(DipToPhysical(panelMetrics.Width, monitor.ScaleX), monitor.Bounds.Width);
