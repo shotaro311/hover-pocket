@@ -16,6 +16,7 @@ internal sealed record StartupOptions(
     bool VerifyCalendarLive,
     bool VerifySettings,
     bool VerifyAiLane,
+    bool VerifyCodexAppServer,
     bool VerifyUpdater,
     bool VerifyReleaseConfig,
     bool SecondInstanceProbe,
@@ -40,6 +41,7 @@ internal sealed record StartupOptions(
         || VerifyCalendarLive
         || VerifySettings
         || VerifyAiLane
+        || VerifyCodexAppServer
         || VerifyUpdater
         || VerifyReleaseConfig;
 
@@ -58,6 +60,7 @@ internal sealed record StartupOptions(
         var verifyCalendarLive = false;
         var verifySettings = false;
         var verifyAiLane = false;
+        var verifyCodexAppServer = false;
         var verifyUpdater = false;
         var verifyReleaseConfig = false;
         var secondInstanceProbe = false;
@@ -87,6 +90,7 @@ internal sealed record StartupOptions(
                 verifyCalendarLive = string.Equals(verifyTarget, "calendar-live", StringComparison.OrdinalIgnoreCase);
                 verifySettings = string.Equals(verifyTarget, "settings", StringComparison.OrdinalIgnoreCase);
                 verifyAiLane = string.Equals(verifyTarget, "ailane", StringComparison.OrdinalIgnoreCase);
+                verifyCodexAppServer = string.Equals(verifyTarget, "codex-app-server", StringComparison.OrdinalIgnoreCase);
                 verifyUpdater = string.Equals(verifyTarget, "updater", StringComparison.OrdinalIgnoreCase);
                 verifyReleaseConfig = string.Equals(verifyTarget, "release-config", StringComparison.OrdinalIgnoreCase);
                 continue;
@@ -150,6 +154,7 @@ internal sealed record StartupOptions(
             verifyCalendarLive,
             verifySettings,
             verifyAiLane,
+            verifyCodexAppServer,
             verifyUpdater,
             verifyReleaseConfig,
             secondInstanceProbe,
