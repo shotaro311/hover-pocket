@@ -58,6 +58,14 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (options.VerifyVoiceLaneLayout)
+        {
+            VerifyConsole.AttachParent();
+            Environment.ExitCode = new VoiceLaneLayoutVerifier().Run();
+            Shutdown();
+            return;
+        }
+
         if (options.VerifyCodexAppServer)
         {
             VerifyConsole.AttachParent();
@@ -69,6 +77,13 @@ public partial class App : System.Windows.Application
         {
             VerifyConsole.AttachParent();
             _ = RunCodexAppServerProtocolVerificationAsync();
+            return;
+        }
+
+        if (options.VerifyCodexVoiceCoordinator)
+        {
+            VerifyConsole.AttachParent();
+            _ = RunCodexVoiceCoordinatorVerificationAsync();
             return;
         }
 
@@ -219,6 +234,12 @@ public partial class App : System.Windows.Application
     private async Task RunCodexAppServerProtocolVerificationAsync()
     {
         Environment.ExitCode = await new CodexAppServerProtocolVerifier().RunAsync();
+        Shutdown();
+    }
+
+    private async Task RunCodexVoiceCoordinatorVerificationAsync()
+    {
+        Environment.ExitCode = await new CodexVoiceCoordinatorVerifier().RunAsync();
         Shutdown();
     }
 
