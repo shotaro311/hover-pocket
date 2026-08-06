@@ -33,6 +33,10 @@ Write-Host "Repository: $repoRoot"
 Write-Host "HEAD      : $(git rev-parse HEAD)"
 Write-Host "Branch    : $(git branch --show-current)"
 
+Invoke-Checked "Fetch remote refs" {
+    git fetch origin --prune
+}
+
 Invoke-Checked "Patch whitespace" {
     git diff --check origin/main...HEAD
 }
