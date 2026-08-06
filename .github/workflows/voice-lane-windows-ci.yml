@@ -10,6 +10,7 @@ on:
       - "AGENTS.md"
       - "docs/plan/20260806-codex-voice-lane-plan.md"
       - "docs/report/20260806-codex-voice-lane-architecture-review.md"
+      - "docs/report/20260806-codex-app-server-upstream-verification.md"
       - "progress/2026-08/2026-08-06_hover-pocket-codex-voice-lane-review.md"
   push:
     branches:
@@ -57,6 +58,21 @@ jobs:
           git diff --check "$base...HEAD"
           if ($LASTEXITCODE -ne 0) {
             throw "git diff --check failed."
+          }
+
+      - name: Parse Phase 0 PowerShell probe
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path ".\windows\script\phase0_codex_app_server_probe.ps1"),
+            [ref]$tokens,
+            [ref]$errors)
+
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "PowerShell syntax validation failed."
           }
 
       - name: Restore Windows solution
