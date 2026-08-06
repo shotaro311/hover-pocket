@@ -78,7 +78,7 @@ jobs:
               [ref]$errors)
 
             if ($errors.Count -gt 0) {
-              $errors | ForEach-Object { Write-Error ("$script: " + $_.Message) }
+              $errors | ForEach-Object { Write-Error ("${script}: " + $_.Message) }
               throw "PowerShell syntax validation failed: $script"
             }
           }
