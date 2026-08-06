@@ -122,8 +122,21 @@ jobs:
 
           foreach ($target in $targets) {
             Write-Host "Running verifier: $target"
+            $logPath = Join-Path $env:RUNNER_TEMP ("hoverpocket-verify-" + $target + ".log")
+            Remove-Item -Path $logPath -Force -ErrorAction SilentlyContinue
+            $env:HOVERPOCKET_VERIFY_LOG = $logPath
+
             dotnet run --project $project -c Debug --no-build -- --verify $target
-            if ($LASTEXITCODE -ne 0) {
-              throw "Verifier failed: $target (exit $LASTEXITCODE)"
+            $exitCode = $LASTEXITCODE
+
+            if (Test-Path $logPath) {
+              Get-Content -Path $logPath
+            } else {
+              Write-Warning "Verifier did not create a log: $target"
+            }
+
+            Remove-Item Env:HOVERPOCKET_VERIFY_LOG -ErrorAction SilentlyContinue
+            if ($exitCode -ne 0) {
+              throw "Verifier failed: $target (exit $exitCode)"
             }
           }
