@@ -116,6 +116,7 @@ jobs:
             "calendar",
             "settings",
             "ailane",
+            "codex-app-server-protocol",
             "updater"
           )
 
