@@ -28,6 +28,13 @@ public partial class App : System.Windows.Application
         base.OnStartup(e);
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        if (FakeCodexAppServer.ShouldRun(e.Args))
+        {
+            Environment.ExitCode = FakeCodexAppServer.Run();
+            Shutdown();
+            return;
+        }
+
         if (options.VerifyUiModel)
         {
             VerifyConsole.AttachParent();
