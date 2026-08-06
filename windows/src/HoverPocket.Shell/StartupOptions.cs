@@ -16,8 +16,10 @@ internal sealed record StartupOptions(
     bool VerifyCalendarLive,
     bool VerifySettings,
     bool VerifyAiLane,
+    bool VerifyVoiceLaneLayout,
     bool VerifyCodexAppServer,
     bool VerifyCodexAppServerProtocol,
+    bool VerifyCodexVoiceCoordinator,
     bool VerifyUpdater,
     bool VerifyReleaseConfig,
     bool SecondInstanceProbe,
@@ -42,8 +44,10 @@ internal sealed record StartupOptions(
         || VerifyCalendarLive
         || VerifySettings
         || VerifyAiLane
+        || VerifyVoiceLaneLayout
         || VerifyCodexAppServer
         || VerifyCodexAppServerProtocol
+        || VerifyCodexVoiceCoordinator
         || VerifyUpdater
         || VerifyReleaseConfig;
 
@@ -62,8 +66,10 @@ internal sealed record StartupOptions(
         var verifyCalendarLive = false;
         var verifySettings = false;
         var verifyAiLane = false;
+        var verifyVoiceLaneLayout = false;
         var verifyCodexAppServer = false;
         var verifyCodexAppServerProtocol = false;
+        var verifyCodexVoiceCoordinator = false;
         var verifyUpdater = false;
         var verifyReleaseConfig = false;
         var secondInstanceProbe = false;
@@ -93,10 +99,18 @@ internal sealed record StartupOptions(
                 verifyCalendarLive = string.Equals(verifyTarget, "calendar-live", StringComparison.OrdinalIgnoreCase);
                 verifySettings = string.Equals(verifyTarget, "settings", StringComparison.OrdinalIgnoreCase);
                 verifyAiLane = string.Equals(verifyTarget, "ailane", StringComparison.OrdinalIgnoreCase);
+                verifyVoiceLaneLayout = string.Equals(
+                    verifyTarget,
+                    "voice-lane-layout",
+                    StringComparison.OrdinalIgnoreCase);
                 verifyCodexAppServer = string.Equals(verifyTarget, "codex-app-server", StringComparison.OrdinalIgnoreCase);
                 verifyCodexAppServerProtocol = string.Equals(
                     verifyTarget,
                     "codex-app-server-protocol",
+                    StringComparison.OrdinalIgnoreCase);
+                verifyCodexVoiceCoordinator = string.Equals(
+                    verifyTarget,
+                    "codex-voice-coordinator",
                     StringComparison.OrdinalIgnoreCase);
                 verifyUpdater = string.Equals(verifyTarget, "updater", StringComparison.OrdinalIgnoreCase);
                 verifyReleaseConfig = string.Equals(verifyTarget, "release-config", StringComparison.OrdinalIgnoreCase);
@@ -161,8 +175,10 @@ internal sealed record StartupOptions(
             verifyCalendarLive,
             verifySettings,
             verifyAiLane,
+            verifyVoiceLaneLayout,
             verifyCodexAppServer,
             verifyCodexAppServerProtocol,
+            verifyCodexVoiceCoordinator,
             verifyUpdater,
             verifyReleaseConfig,
             secondInstanceProbe,
