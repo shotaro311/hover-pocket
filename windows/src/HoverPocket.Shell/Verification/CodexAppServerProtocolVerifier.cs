@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using HoverPocket.Shell.Providers.CodexVoice;
 
@@ -6,36 +5,17 @@ namespace HoverPocket.Shell.Verification;
 
 internal sealed class CodexAppServerProtocolVerifier
 {
+    private const string FakeServerEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_APP_SERVER";
     private readonly List<string> _failures = [];
 
     public async Task<int> RunAsync(CancellationToken cancellationToken = default)
     {
-        var root = Path.Combine(
-            Path.GetTempPath(),
-            "HoverPocket",
-            "CodexAppServerProtocolVerify",
-            Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        var fakeServerPath = Path.Combine(root, "fake-codex.ps1");
-        File.WriteAllText(fakeServerPath, FakeServerScript, new UTF8Encoding(false));
-
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(30));
 
-            await using var client = await CodexAppServerClient.StartAsync(
-                new CodexAppServerClientOptions
-                {
-                    ExecutablePath = fakeServerPath,
-                    ClientName = "hover_pocket_protocol_verify",
-                    ClientTitle = "HoverPocket Protocol Verifier",
-                    ClientVersion = "0.0.0",
-                    ExperimentalApi = true,
-                    RequestTimeout = TimeSpan.FromSeconds(5)
-                },
-                timeout.Token);
-
+            await using var client = await StartFakeServerClientAsync(timeout.Token);
             VerifyInitialize(client);
             await VerifyNotificationsAsync(client, timeout.Token);
             await VerifyServerRequestAsync(client, timeout.Token);
@@ -52,16 +32,6 @@ internal sealed class CodexAppServerProtocolVerifier
         {
             _failures.Add($"protocol verifier threw {exception.GetType().Name}: {exception.Message}");
         }
-        finally
-        {
-            try
-            {
-                Directory.Delete(root, recursive: true);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-            }
-        }
 
         if (_failures.Count == 0)
         {
@@ -76,6 +46,33 @@ internal sealed class CodexAppServerProtocolVerifier
         }
 
         return 1;
+    }
+
+    private static async Task<CodexAppServerClient> StartFakeServerClientAsync(
+        CancellationToken cancellationToken)
+    {
+        var executablePath = Environment.ProcessPath
+            ?? throw new InvalidOperationException("Current executable path is unavailable.");
+        var previousValue = Environment.GetEnvironmentVariable(FakeServerEnvironmentVariable);
+        Environment.SetEnvironmentVariable(FakeServerEnvironmentVariable, "1");
+        try
+        {
+            return await CodexAppServerClient.StartAsync(
+                new CodexAppServerClientOptions
+                {
+                    ExecutablePath = executablePath,
+                    ClientName = "hover_pocket_protocol_verify",
+                    ClientTitle = "HoverPocket Protocol Verifier",
+                    ClientVersion = "0.0.0",
+                    ExperimentalApi = true,
+                    RequestTimeout = TimeSpan.FromSeconds(5)
+                },
+                cancellationToken);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(FakeServerEnvironmentVariable, previousValue);
+        }
     }
 
     private void VerifyInitialize(CodexAppServerClient client)
@@ -230,114 +227,4 @@ internal sealed class CodexAppServerProtocolVerifier
             _failures.Add($"unhandled server request count was {client.UnhandledServerRequestCount}");
         }
     }
-
-    private const string FakeServerScript = """
-        $ErrorActionPreference = "Stop"
-        $rateLimitAttempts = 0
-        $serverReplyReceived = $false
-
-        function Send-Json {
-            param([object]$Value)
-            $json = $Value | ConvertTo-Json -Depth 20 -Compress
-            [Console]::Out.WriteLine($json)
-            [Console]::Out.Flush()
-        }
-
-        while ($true) {
-            $line = [Console]::In.ReadLine()
-            if ($null -eq $line) {
-                break
-            }
-
-            try {
-                $message = $line | ConvertFrom-Json -ErrorAction Stop
-            }
-            catch {
-                continue
-            }
-
-            $hasMethod = $null -ne $message.PSObject.Properties["method"]
-            $hasId = $null -ne $message.PSObject.Properties["id"]
-            if (-not $hasMethod -and $hasId) {
-                if ([string]$message.id -eq "900"
-                    -and $null -ne $message.PSObject.Properties["result"]
-                    -and $message.result.accepted -eq $true) {
-                    $serverReplyReceived = $true
-                }
-                continue
-            }
-
-            $method = [string]$message.method
-            switch ($method) {
-                "initialize" {
-                    Send-Json @{
-                        id = $message.id
-                        result = @{
-                            userAgent = "fake-codex"
-                            codexHome = "C:\fake"
-                            platformFamily = "windows"
-                            platformOs = "windows"
-                        }
-                    }
-                }
-                "initialized" {
-                }
-                "fake/emitNotification" {
-                    Send-Json @{
-                        method = "fake/notification"
-                        params = @{ ok = $true }
-                    }
-                    Send-Json @{ id = $message.id; result = @{ emitted = $true } }
-                }
-                "fake/emitServerRequest" {
-                    Send-Json @{
-                        id = 900
-                        method = "fake/approval"
-                        params = @{ action = "test" }
-                    }
-                    Send-Json @{ id = $message.id; result = @{ emitted = $true } }
-                }
-                "fake/checkServerReply" {
-                    Send-Json @{
-                        id = $message.id
-                        result = @{ received = $serverReplyReceived }
-                    }
-                }
-                "account/rateLimits/read" {
-                    $rateLimitAttempts++
-                    if ($rateLimitAttempts -eq 1) {
-                        Send-Json @{
-                            id = $message.id
-                            error = @{
-                                code = -32001
-                                message = "Server overloaded; retry later."
-                            }
-                        }
-                    }
-                    else {
-                        Send-Json @{
-                            id = $message.id
-                            result = @{ attempt = $rateLimitAttempts }
-                        }
-                    }
-                }
-                "fake/emitMalformed" {
-                    [Console]::Out.WriteLine("not-json")
-                    [Console]::Out.Flush()
-                    Send-Json @{ id = $message.id; result = @{ emitted = $true } }
-                }
-                default {
-                    if ($hasId) {
-                        Send-Json @{
-                            id = $message.id
-                            error = @{
-                                code = -32601
-                                message = "Unknown fake method: $method"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        """;
 }
