@@ -15,6 +15,8 @@ jobs:
   verify:
     runs-on: windows-latest
     timeout-minutes: 15
+    env:
+      HOVERPOCKET_VERIFY_LOG: ${{ runner.temp }}/hoverpocket-verify.log
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -35,3 +37,11 @@ jobs:
 
       - name: Verify rendered WebView UI
         run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify ui
+
+      - name: Print verification log
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path -LiteralPath $env:HOVERPOCKET_VERIFY_LOG) {
+            Get-Content -LiteralPath $env:HOVERPOCKET_VERIFY_LOG
+          }
