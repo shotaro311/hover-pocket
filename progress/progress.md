@@ -1,9 +1,16 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-08-02
+updated: 2026-08-12
 updated_by: codex
 status: active
 ---
+
+## 2026-08-12 Repository Sync and Development Audit
+
+- `git fetch origin`後、ローカル`main`が`origin/main`より2 commit遅れていることを確認し、履歴を分岐させない`git merge --ff-only origin/main`で`bb8f06a`へ更新した。
+- macOS最新公開版はGitHub Latest `v0.1.0-155`、appcastはbuild 155のZIPを参照している。Windows最新公開版は専用release `win-v0.2.5`で、feedは0.2.5のfull packageを返した。
+- `feature/codex-voice-lane`は監査開始時の`main` `bb8f06a`を含む40 commit先行のDraft PR #6。最新CIは成功しているが、production UI接続、microphone / WebRTC、実音声E2Eなどが未完了のため未マージを維持した。今回の監査ログcommitはmainだけに追加する。
+- 最新`main`で`swift build`、panel layout 112ケース、Clipboard、Timer、Calculator verifier、`git diff --check`が成功した。監査ログcommitのpush後にlocal / origin SHA一致、ahead / behind `0 / 0`、未コミット・未追跡なしをreadbackする。詳細: `progress/2026-08/2026-08-12_hover-pocket-repository-audit.md`。
 
 ## 2026-08-02 Windows 0.2.5 Public Beta Release
 
