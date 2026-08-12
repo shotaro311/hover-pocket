@@ -77,3 +77,11 @@ updated_by: codex
 - Windows公開前後のmacOS appcast SHA-256は`401e5a385a38edd337758915b421d502f08fde661ceaef2c280f977456f04cab`で不変。
 - Windows公開後のGitHub Latestは`v0.1.0-161`。
 - macOS tagとWindows tagはいずれも同じsource commitを指し、各OS専用feedを使用している。
+
+## macOSローカル再インストール
+
+- 2026-08-12 14:41 JST、インストール済み`/Applications/HoverPocket.app`が`0.1.0 (155)`、公開最新版が`0.1.0 (161)`であることを確認した。
+- `HoverPocket-macOS-app.zip`をGitHub公開URLから再取得し、SHA-256 `f49811508e46d47dbbf2c37ae25e721d554105fd357242146185c2e44b6b0801`がGitHub API digestと一致した。展開後appはDeveloper ID Application署名、hardened runtime、公証staple、Gatekeeper `Notarized Developer ID`に合格した。
+- 旧appを終了し、アプリ本体だけを`/Users/shotaro/.Trash/HoverPocket-0.1.0-build155-20260812-144116.app`へ移動した。`/Users/shotaro/Library/Application Support/HoverPocket`は保持し、再インストール前後とも30ファイルを確認した。
+- 検証済みappを`/Applications/HoverPocket.app`へ設置した。インストール元と設置先の実行ファイルSHA-256は`4ec75b794b37c3dff2f3f14e007d27573c89d87b68bf0fca515e4d449a022cb1`で一致した。
+- 設置先を別経路で再検証し、`0.1.0 (161)`、bundle ID `local.codex.hover-pocket`、署名、公証staple、Gatekeeper受理を確認した。通常起動後のprocess pathは`/Applications/HoverPocket.app/Contents/MacOS/HoverPocket`。

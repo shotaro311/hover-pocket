@@ -5,6 +5,12 @@ updated_by: codex
 status: active
 ---
 
+## 2026-08-12 macOS Latest Reinstall Readback
+
+- `/Applications/HoverPocket.app`の旧`0.1.0 (155)`を終了し、アプリ本体だけをmacOSのゴミ箱へ退避して、GitHub Latest `v0.1.0-161`の公開手動インストールZIPから`0.1.0 (161)`を再インストールした。Application Support内の設定・保存データは削除していない。
+- 公開ZIP SHA-256 `f4981150...b6b0801`のGitHub digest一致、展開後appとインストール先の実行ファイルSHA-256一致、Developer ID Application署名、公証staple、Gatekeeper `Notarized Developer ID`をreadbackした。
+- 再インストール後に`/Applications/HoverPocket.app/Contents/MacOS/HoverPocket`の起動を確認した。詳細: `progress/2026-08/2026-08-12_hover-pocket-build-161-windows-0.2.6-release.md`。
+
 ## 2026-08-12 macOS Build 161 / Windows 0.2.6 Public Release
 
 - 共通source commit `f0172f2`から、macOS build 161とWindows 0.2.6をOS別releaseへ公開した。macOSはGitHub Latest `v0.1.0-161`と`macos-latest` appcast、Windowsは`latest=false`の`win-v0.2.6`と`releases.win.json`を使用した。
