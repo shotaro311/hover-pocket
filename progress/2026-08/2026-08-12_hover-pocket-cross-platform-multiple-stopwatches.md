@@ -1,7 +1,7 @@
 ---
 project_slug: hover-menu-preview
 date: 2026-08-12
-status: active
+status: completed
 updated_by: codex
 ---
 
@@ -22,7 +22,7 @@ updated_by: codex
 - Windows Timerを、上段のコンパクトな1列リストと下段の3追加カードへ再構成した。カードは「名前を設定（任意）」、左上アイコンの4色メニュー、直接入力、時間rail、sound、start、pinを維持する。
 - 種類アイコンをストップウォッチ、砂時計、ターゲットへ分けた。Windows実行中タイマーのpin操作も維持した。
 - Windows 0.2.7へ版上げし、Windows runnerでRelease buildとtimer / ui-model / updater / WebView UIを確認するworkflowを追加した。
-- README、Windows README、requirementsを両OS共通仕様へ同期した。公開ダウンロード導線は0.2.7公開後に切り替える。
+- README、Windows README、requirementsを両OS共通仕様へ同期し、公開ダウンロード導線をWindows 0.2.7へ切り替えた。
 
 ## 検証
 
@@ -34,9 +34,13 @@ updated_by: codex
 - Windows JavaScript syntax checkと`git diff --check`: 成功。
 - in-app browserでWindows Timerを600x430と520x372で描画し、ストップウォッチ2件 + カウントダウン4件、実行中pin 4件、追加カード3件、placeholder 3件を確認した。両サイズともsection overlapと横overflowはなく、カード高188px、必要な範囲だけ縦スクロールする。
 - 「配信テスト」とorangeを指定した3件目のストップウォッチ追加に成功し、console warning / errorは0件。
-- Windows旧`drafts.json`からTimer / Pomodoro設定を維持したままStopwatch draftを補う移行テストと、4件開始 + 5件目拒否のテストを追加した。Windows runnerでの実行待ち。
+- Windows旧`drafts.json`からTimer / Pomodoro設定を維持したままStopwatch draftを補う移行テストと、4件開始 + 5件目拒否のテストを追加した。
+- GitHub ActionsのWindows runnerでRelease build、timer / ui-model / updater / WebView UIを含む全工程が成功した。最終runは[`31572544363`](https://github.com/shotaro311/hover-pocket/actions/runs/31572544363)。
 
 ## 配信状態
 
-- 実装とローカル検証は完了した。
-- source commitのpush、Windows runner、macOS公証、GitHub Releases、各OS feedと公開成果物のreadbackは未実施。
+- 共通source commit `fefc4c6`を`origin/main`へpushした。
+- macOSをGitHub Latest [`v0.1.0-168`](https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-168)へ公開した。Apple公証submission `bae039ba-df8b-4215-93a5-6be3b51b83cb`は`Accepted`で、staple、Developer ID署名、Gatekeeper、公開ZIPの再取得とSHA-256一致を確認した。`macos-latest` appcastはbuild 168とversioned ZIPを返す。
+- `/Applications/HoverPocket.app`を公開版`0.1.0 (168)`へ再インストールし、旧build 161は`~/.Trash/HoverPocket-before-build-168.app`へ退避した。インストール後の署名、公証staple、Gatekeeper、公開ZIP展開物との実行ファイルSHA-256一致、通常起動を確認した。
+- Windowsを専用release [`win-v0.2.7`](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.7)へ`latest=false`で公開した。release targetは`fefc4c6`、8 assetの公開URL再取得、GitHub digest、ローカル生成物のsize / SHA-256一致、`SHA256SUMS-win.txt`、manifest、`releases.win.json`を確認した。
+- Windows公開後もGitHub LatestはmacOS `v0.1.0-168`、macOS appcast SHA-256は`bcf3a215...986d72`のままで、Windows feedは0.2.7 full packageを返す。Windows 0.2.xは方針どおりAuthenticode未署名。

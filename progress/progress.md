@@ -2,14 +2,15 @@
 project_slug: hover-menu-preview
 updated: 2026-08-12
 updated_by: codex
-status: active
+status: completed
 ---
 
 ## 2026-08-12 Cross-platform Multiple Stopwatches and Timer UI
 
 - macOSとWindowsのストップウォッチを、名前・色・独立したpause / resume / stopを持つ最大4件の同時実行へ拡張した。カウントダウンも両OSで最大4件とし、別枠で扱う。
 - Windows Timerを「実行中」の1列コンパクトリストと「新しく追加」のストップウォッチ / タイマー / ポモドーロ3カードへ再構成した。名前欄、左上アイコンの色メニュー、種類別アイコン、sound、時間編集、pinを維持している。
-- macOSのSwift / 112 layout / 署名済みbundleと、WindowsのRelease cross-build / JavaScript / 600x430・520x372ブラウザ描画を検証した。Windows runnerと両OSの公開配信は未実施。詳細: `progress/2026-08/2026-08-12_hover-pocket-cross-platform-multiple-stopwatches.md`。
+- macOSのSwift / 112 layout / 署名済みbundleと、WindowsのRelease cross-build / JavaScript / 600x430・520x372ブラウザ描画を検証した。GitHub ActionsのWindows runnerもRelease build、timer / ui-model / updater / WebView UIを含めて成功した。
+- 共通source `fefc4c6`から、macOS Latest [`v0.1.0-168`](https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-168)とWindows専用 [`win-v0.2.7`](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.7)を公開した。macOSはApple公証、署名、staple、Gatekeeper、appcast、公開ZIP、ローカル再インストールを確認し、Windowsは8 asset、checksum、manifest、専用feedを公開URLから再取得して一致を確認した。Windows公開後もGitHub LatestとmacOS appcastはmacOS build 168のまま維持した。詳細: `progress/2026-08/2026-08-12_hover-pocket-cross-platform-multiple-stopwatches.md`。
 
 ## 2026-08-12 macOS Timer Organized List UI
 
