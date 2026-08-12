@@ -43,6 +43,7 @@ export function renderCalendarProvider(context) {
   const connectionMessageEl = root.querySelector("[data-connection-message]");
   const authButton = root.querySelector("[data-auth]");
   const setupEl = root.querySelector("[data-setup]");
+  let initialLoadPromise = Promise.resolve();
   setDetailMode("browse");
 
   root.querySelector("[data-prev]").addEventListener("click", () => shiftMonth(-1));
@@ -65,6 +66,7 @@ export function renderCalendarProvider(context) {
   });
 
   root.__verifyEditorStability = async () => {
+    await initialLoadPromise;
     const base = cachedState ?? emptyState();
     const start = new Date(base.selectedDate ?? new Date());
     start.setHours(10, 0, 0, 0);
@@ -89,7 +91,7 @@ export function renderCalendarProvider(context) {
   };
 
   draw(cachedState ?? emptyState());
-  context.request("calendar.getState")
+  initialLoadPromise = context.request("calendar.getState")
     .then((state) => {
       if (disposed) {
         return;
