@@ -14,6 +14,7 @@ internal sealed class ControlsBridgeController : IDisposable
     private readonly IMonitorBrightnessService _brightness;
     private readonly IMediaSessionService _media;
     private readonly IMediaPreviewService _preview;
+    private readonly IMediaSourceActivator _sourceActivator;
     private readonly SemaphoreSlim _activationGate = new(1, 1);
     private readonly SemaphoreSlim _snapshotGate = new(1, 1);
     private CancellationTokenSource? _activeCancellation;
@@ -27,12 +28,14 @@ internal sealed class ControlsBridgeController : IDisposable
         IVolumeEndpointService? volume = null,
         IMonitorBrightnessService? brightness = null,
         IMediaSessionService? media = null,
-        IMediaPreviewService? preview = null)
+        IMediaPreviewService? preview = null,
+        IMediaSourceActivator? sourceActivator = null)
     {
         _volume = volume ?? new CoreAudioEndpointService();
         _brightness = brightness ?? new MonitorBrightnessService();
         _media = media ?? new WindowsMediaSessionService();
         _preview = preview ?? new WindowsGraphicsCapturePreviewService();
+        _sourceActivator = sourceActivator ?? new MediaSourceActivator();
         _volume.StateChanged += OnVolumeStateChanged;
         _brightness.StateChanged += OnBrightnessStateChanged;
         _media.StateChanged += OnMediaStateChanged;
@@ -46,6 +49,8 @@ internal sealed class ControlsBridgeController : IDisposable
 
     public event EventHandler<MediaPreviewFrame>? PreviewFrameArrived;
 
+    public event EventHandler? MediaSourceOpened;
+
     public void Attach(BridgeDispatcher dispatcher)
     {
         dispatcher.Register("controls.getState", async (_, cancellationToken) => await GetSnapshotAsync(cancellationToken));
@@ -53,6 +58,7 @@ internal sealed class ControlsBridgeController : IDisposable
         dispatcher.Register("controls.toggleMute", HandleToggleMuteAsync);
         dispatcher.Register("controls.setBrightness", HandleSetBrightnessAsync);
         dispatcher.Register("controls.mediaCommand", HandleMediaCommandAsync);
+        dispatcher.Register("controls.openMediaSource", HandleOpenMediaSourceAsync);
     }
 
     public async Task SetActiveAsync(bool active, CancellationToken cancellationToken = default)
@@ -229,6 +235,25 @@ internal sealed class ControlsBridgeController : IDisposable
             await _preview.StartAsync(snapshot.Media, cancellationToken);
         }
 
+        return snapshot;
+    }
+
+    public async Task<ControlsSnapshot> OpenMediaSourceAsync(CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        var snapshot = await GetSnapshotAsync(cancellationToken);
+        if (!snapshot.Media.Available
+            || !_sourceActivator.TryActivate(snapshot.Media.PreviewWindowHandle))
+        {
+            var unavailable = snapshot with
+            {
+                Media = snapshot.Media with { Error = "The playing window could not be brought to the front." }
+            };
+            PublishSnapshot(unavailable, force: true);
+            return unavailable;
+        }
+
+        MediaSourceOpened?.Invoke(this, EventArgs.Empty);
         return snapshot;
     }
 
@@ -425,6 +450,12 @@ internal sealed class ControlsBridgeController : IDisposable
             ReadRequiredString(parameters, "command"),
             ReadOptionalDouble(parameters, "value"),
             cancellationToken);
+    }
+
+    private async Task<object?> HandleOpenMediaSourceAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        return await OpenMediaSourceAsync(cancellationToken);
     }
 
     private static string ReadRequiredString(JsonElement? parameters, string propertyName)

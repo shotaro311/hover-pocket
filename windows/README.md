@@ -4,6 +4,8 @@ WPF の常駐シェルと WebView2 のパネルで構成する Windows 版です
 
 Windows 版の provider は Controls、Calendar、Clipboard、Sticky Notes、Timer、Calculator です。Mirror と Microphone は Windows 版の対象外で、macOS 版の実装には影響しません。
 
+Controlsでは再生速度を「− / ＋」で0.25倍刻みに変更し、Windowsメディアセッションの読み戻し値を表示します。再生サムネイルを押すと、一意に特定できた再生元ウィンドウだけを前面へ表示してパネルを閉じます。Timerには100分の1秒表示のストップウォッチがあり、providerを切り替えたりパネルを閉じたりしてもアプリ稼働中は計測を続けます。
+
 ## Build
 
 ```powershell
@@ -49,9 +51,9 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 
 `--verify display` は現在のモニター構成を列挙し、`Main` / `Sub` / `All` の対象 display 数、`Sub` のサブなし fallback、access surface / panel / collapsed rect の画面内収まり、DIPs と物理ピクセルの round-trip を検査して exit code で返します。WinExe のため標準出力が空になる場合があります。
 
-`--verify controls` は音量・ミュート・輝度・メディア操作の決定的テストと、実機の読み取り専用 probe を実行します。外部ディスプレイの輝度は DDC/CI 非対応や応答遅延を許容し、パネル全体を停止させずに非対応表示へフォールバックします。
+`--verify controls` は音量・ミュート・輝度・メディア操作・再生元ウィンドウ解決の決定的テストと、実機の読み取り専用 probe を実行します。外部ディスプレイの輝度は DDC/CI 非対応や応答遅延を許容し、パネル全体を停止させずに非対応表示へフォールバックします。
 
-`--verify ui` はWebView2とbridgeに加え、Controlsの実描画・領域内収まり、Clipboardの同一provider再描画抑止、通常/お気に入りタブ、中央split view、全体プレビュー、個別削除UI、Calculator履歴サイドバーを検査します。
+`--verify ui` はWebView2とbridgeに加え、Controlsの実描画・領域内収まり・サムネイル/倍速操作、Timerのストップウォッチ、Clipboardの同一provider再描画抑止、通常/お気に入りタブ、中央split view、全体プレビュー、個別削除UI、Calculator履歴サイドバーを検査します。
 
 `--verify updater` は Velopack のローカルフォルダーフィードを一時生成し、更新なし / 更新ありの dry-run を確認します。実ダウンロードと適用は行いません。
 
@@ -64,7 +66,7 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 Windows 版の更新確認は Velopack と GitHub Releases (`shotaro311/hover-pocket`) を使います。トレイと Settings の `Check for Updates` は Windows channel `win` の feed (`releases.win.json`) へ接続し、更新が見つかった場合はダウンロード前と適用/再起動前に確認します。起動時の自動チェックは既定オンで、失敗しても起動を止めません。
 更新後の通常起動では、実インストールのrootと既存ARP entryの`InstallLocation`が一致する場合だけ、HKCUの`HoverPocketWin` entryにある`DisplayVersion`を現在versionへ補正します。portable、verify、second-instance probe、path不一致、keyなしでは変更しません。
 
-Windows は macOS Sparkle の `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml` を使いません。Windows release は `win-v0.2.5` のような Windows 専用 tag / asset を使い、GitHub Release を作る場合は `--latest=false` を付けてmacOSのLatest / appcastを動かさないでください。
+Windows は macOS Sparkle の `https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml` を使いません。Windows release は `win-v0.2.6` のような Windows 専用 tag / asset を使い、GitHub Release を作る場合は `--latest=false` を付けてmacOSのLatest / appcastを動かさないでください。
 
 ### 署名方針
 
@@ -84,8 +86,8 @@ NuGet TLS 問題がある環境では、一時ローカル NuGet ソースと `-
 スクリプトの出力する GitHub 手順は、Windows release 作成時に `--latest=false` を含みます。アップロード後は次を readback し、Windows feed と asset だけが読めること、macOS `macos-latest/appcast.xml` が変わっていないことを別々に確認します。
 
 ```powershell
-gh release view win-v0.2.5 --repo shotaro311/hover-pocket --json tagName,assets,url
-Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.5/releases.win.json
+gh release view win-v0.2.6 --repo shotaro311/hover-pocket --json tagName,assets,url
+Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.6/releases.win.json
 Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml
 ```
 

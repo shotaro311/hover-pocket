@@ -4,9 +4,33 @@ using System.Text;
 
 namespace HoverPocket.Shell.Providers.Controls;
 
+internal sealed class MediaSourceActivator : IMediaSourceActivator
+{
+    public bool TryActivate(nint? windowHandle)
+    {
+        return MediaWindowResolver.TryActivate(windowHandle);
+    }
+}
+
 internal static class MediaWindowResolver
 {
     private const uint GetWindowOwner = 4;
+    private const int ShowRestore = 9;
+
+    public static bool TryActivate(nint? windowHandle)
+    {
+        if (windowHandle is not { } window || window == IntPtr.Zero || !IsWindow(window))
+        {
+            return false;
+        }
+
+        if (IsIconic(window))
+        {
+            _ = ShowWindowAsync(window, ShowRestore);
+        }
+
+        return SetForegroundWindow(window);
+    }
 
     public static nint? ResolveUnique(string sourceAppUserModelId, string mediaTitle)
     {
@@ -178,6 +202,22 @@ internal static class MediaWindowResolver
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWindowVisible(IntPtr window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(IntPtr window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindowAsync(IntPtr window, int command);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr window);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetWindow(IntPtr window, uint command);

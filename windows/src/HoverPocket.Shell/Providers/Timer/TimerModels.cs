@@ -109,12 +109,19 @@ internal sealed record RunningTimerSnapshot(
     double RemainingSeconds,
     double Progress);
 
+internal sealed record StopwatchSnapshot(
+    double AccumulatedSeconds,
+    DateTimeOffset? StartedAtUtc,
+    bool IsRunning,
+    double ElapsedSeconds);
+
 internal sealed record TimerSnapshot(
     TimerPreset DraftTimer,
     TimerPreset DraftPomodoro,
     IReadOnlyList<TimerPreset> PinnedPresets,
     IReadOnlyList<RunningTimerSnapshot> RunningTimers,
     TimerAlert? ActiveAlert,
+    StopwatchSnapshot Stopwatch,
     bool CanStartTimer,
     bool CanPin,
     DateTimeOffset NowUtc);

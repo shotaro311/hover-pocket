@@ -86,6 +86,7 @@ internal sealed class HoverShellController : IDisposable
         _panelBridgeController.TimerAlertFired += OnTimerAlertFired;
         _panelBridgeController.TimerAlertChanged += OnTimerAlertChanged;
         _panelBridgeController.ExternalDragStarted += OnExternalDragStarted;
+        _panelBridgeController.PanelCloseRequested += OnPanelCloseRequested;
         _panel = CreatePanelWindow();
 
         _pollingTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
@@ -256,6 +257,7 @@ internal sealed class HoverShellController : IDisposable
         _panelBridgeController.TimerAlertFired -= OnTimerAlertFired;
         _panelBridgeController.TimerAlertChanged -= OnTimerAlertChanged;
         _panelBridgeController.ExternalDragStarted -= OnExternalDragStarted;
+        _panelBridgeController.PanelCloseRequested -= OnPanelCloseRequested;
         _panel.ReleaseBridgeAttachment();
         _panelBridgeController.Dispose();
         if (_settingsWindow is not null)
@@ -1029,6 +1031,20 @@ internal sealed class HoverShellController : IDisposable
         if (!_dispatcher.CheckAccess())
         {
             _dispatcher.BeginInvoke(() => OnExternalDragStarted(sender, e));
+            return;
+        }
+
+        _closeDelayTimer.Stop();
+        _ = HidePanelAsync();
+    }
+
+    private void OnPanelCloseRequested(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_dispatcher.CheckAccess())
+        {
+            _dispatcher.BeginInvoke(() => OnPanelCloseRequested(sender, e));
             return;
         }
 

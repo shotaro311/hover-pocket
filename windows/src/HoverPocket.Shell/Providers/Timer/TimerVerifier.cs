@@ -18,6 +18,7 @@ internal sealed class TimerVerifier
             VerifyPersistenceAndRestore(root);
             VerifyExpiredDiscard(root);
             VerifyAbsoluteTimeAndPomodoro(root);
+            VerifyStopwatch(root);
         }
         finally
         {
@@ -32,7 +33,7 @@ internal sealed class TimerVerifier
 
         if (_failures.Count == 0)
         {
-            VerifyConsole.WriteLine("PASS timer verify: start, pause, resume, stop, persistence, expired discard, absolute time");
+            VerifyConsole.WriteLine("PASS timer verify: start, pause, resume, stop, stopwatch, persistence, expired discard, absolute time");
             return 0;
         }
 
@@ -189,6 +190,36 @@ internal sealed class TimerVerifier
         if (alertSound.StartCount != 1)
         {
             _failures.Add("alert sound: sound-enabled timer did not start the system sound loop");
+        }
+    }
+
+    private void VerifyStopwatch(string root)
+    {
+        var clock = new ManualTimerClock(new DateTimeOffset(2026, 8, 12, 0, 0, 0, TimeSpan.Zero));
+        using var store = NewStore(root, "stopwatch", clock);
+
+        var started = store.StartStopwatch();
+        clock.Advance(TimeSpan.FromSeconds(2.25));
+        var running = store.GetSnapshot().Stopwatch;
+        store.PauseStopwatch();
+        clock.Advance(TimeSpan.FromSeconds(10));
+        var paused = store.GetSnapshot().Stopwatch;
+        store.StartStopwatch();
+        clock.Advance(TimeSpan.FromSeconds(1.5));
+        var resumed = store.GetSnapshot().Stopwatch;
+        var reset = store.ResetStopwatch().Stopwatch;
+
+        if (!started.Stopwatch.IsRunning
+            || !running.IsRunning
+            || Math.Abs(running.ElapsedSeconds - 2.25) > 0.001
+            || paused.IsRunning
+            || Math.Abs(paused.ElapsedSeconds - 2.25) > 0.001
+            || !resumed.IsRunning
+            || Math.Abs(resumed.ElapsedSeconds - 3.75) > 0.001
+            || reset.IsRunning
+            || reset.ElapsedSeconds != 0)
+        {
+            _failures.Add("stopwatch: start, pause, resume, or reset did not preserve elapsed time");
         }
     }
 

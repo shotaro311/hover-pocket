@@ -30,6 +30,7 @@
 }
 
 .hp-timer-section.is-running,
+.hp-timer-section.is-stopwatch,
 .hp-timer-section.is-pinned {
   grid-column: 1 / -1;
 }
@@ -46,6 +47,10 @@
 
 .hp-timer-section.is-running::before {
   background: linear-gradient(90deg, #69a7ff, #63d6b5);
+}
+
+.hp-timer-section.is-stopwatch::before {
+  background: linear-gradient(90deg, #b98cff, #69a7ff);
 }
 
 .hp-timer-section.is-pinned::before {
@@ -83,7 +88,8 @@
 
 .hp-timer-running,
 .hp-timer-alert,
-.hp-timer-pinned {
+.hp-timer-pinned,
+.hp-stopwatch-row {
   display: grid;
   align-items: center;
   gap: 8px;
@@ -95,6 +101,44 @@
 .hp-timer-running {
   grid-template-columns: 34px 1fr 24px 24px 24px;
   padding: 8px;
+}
+
+.hp-stopwatch-row {
+  grid-template-columns: 26px minmax(0, 1fr) 30px 30px;
+  min-height: 42px;
+  padding: 6px 8px;
+  color: #b98cff;
+}
+
+.hp-stopwatch-icon {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: calc(16px * var(--hp-text-scale));
+  text-align: center;
+}
+
+.hp-stopwatch-row strong {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.9);
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: calc(17px * var(--hp-text-scale));
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hp-stopwatch-row button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.74);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.hp-stopwatch-row button:disabled {
+  opacity: 0.3;
 }
 
 .hp-timer-pinned,

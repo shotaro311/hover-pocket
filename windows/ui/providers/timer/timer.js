@@ -30,7 +30,7 @@ export function renderTimerProvider(context) {
     }
 
     window.clearInterval(tickHandle);
-    const sections = [runningSection(state)];
+    const sections = [runningSection(state), stopwatchSection(state)];
     if (state.pinnedPresets?.length) {
       sections.push(pinnedSection(state));
     }
@@ -40,8 +40,8 @@ export function renderTimerProvider(context) {
     );
     root.querySelector("[data-stack]").replaceChildren(...sections);
 
-    tickHandle = window.setInterval(() => updateRemaining(root), 1000);
-    updateRemaining(root);
+    tickHandle = window.setInterval(() => updateClocks(root), 50);
+    updateClocks(root);
   }
 
   /**
@@ -59,6 +59,31 @@ export function renderTimerProvider(context) {
         section.body.append(runningRow(timer));
       }
     }
+    return section.root;
+  }
+
+  /**
+   * @param {any} state
+   */
+  function stopwatchSection(state) {
+    const stopwatch = state.stopwatch ?? {};
+    const section = sectionShell(tx(context.state, "ストップウォッチ", "Stopwatch"), "stopwatch");
+    const row = document.createElement("div");
+    row.className = "hp-stopwatch-row";
+    row.dataset.stopwatch = "";
+    row.dataset.accumulated = String(stopwatch.accumulatedSeconds ?? 0);
+    row.dataset.startedAt = stopwatch.startedAtUtc ?? "";
+    const isRunning = Boolean(stopwatch.isRunning);
+    const elapsed = Number(stopwatch.elapsedSeconds) || 0;
+    row.innerHTML = `
+      <span class="hp-stopwatch-icon" aria-hidden="true">⏱</span>
+      <strong data-stopwatch-elapsed>${stopwatchTimeText(elapsed)}</strong>
+      <button type="button" data-stopwatch-toggle title="${isRunning ? tx(context.state, "一時停止", "Pause") : tx(context.state, "開始", "Start")}" aria-label="${isRunning ? tx(context.state, "一時停止", "Pause") : tx(context.state, "開始", "Start")}">${isRunning ? "Ⅱ" : "▶"}</button>
+      <button type="button" data-stopwatch-reset title="${tx(context.state, "リセット", "Reset")}" aria-label="${tx(context.state, "リセット", "Reset")}" ${!isRunning && elapsed <= 0 ? "disabled" : ""}>↺</button>
+    `;
+    row.querySelector("[data-stopwatch-toggle]").addEventListener("click", () => mutate(isRunning ? "timer.pauseStopwatch" : "timer.startStopwatch"));
+    row.querySelector("[data-stopwatch-reset]").addEventListener("click", () => mutate("timer.resetStopwatch"));
+    section.body.append(row);
     return section.root;
   }
 
@@ -215,7 +240,7 @@ export function renderTimerProvider(context) {
   };
 }
 
-function updateRemaining(root) {
+function updateClocks(root) {
   const now = Date.now();
   for (const row of root.querySelectorAll(".hp-timer-running")) {
     const pausedRaw = row.dataset.pausedRemaining ?? "";
@@ -226,6 +251,14 @@ function updateRemaining(root) {
     const progress = Math.max(0, Math.min(1, 1 - remaining / phaseDuration));
     row.style.setProperty("--timer-progress", `${progress * 360}deg`);
     row.querySelector("[data-progress]").textContent = `${Math.round(progress * 100)}%`;
+  }
+
+  const stopwatch = root.querySelector("[data-stopwatch]");
+  if (stopwatch) {
+    const accumulated = Math.max(0, Number(stopwatch.dataset.accumulated) || 0);
+    const startedAt = Date.parse(stopwatch.dataset.startedAt ?? "");
+    const elapsed = accumulated + (Number.isFinite(startedAt) ? Math.max(0, now - startedAt) / 1000 : 0);
+    stopwatch.querySelector("[data-stopwatch-elapsed]").textContent = stopwatchTimeText(elapsed);
   }
 }
 
@@ -337,6 +370,15 @@ function timeText(seconds) {
   const minutes = Math.floor((total % 3600) / 60);
   const secs = total % 60;
   return hours > 0 ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${pad(minutes)}:${pad(secs)}`;
+}
+
+function stopwatchTimeText(seconds) {
+  const totalHundredths = Math.max(0, Math.floor((Number(seconds) || 0) * 100));
+  const hours = Math.floor(totalHundredths / 360000);
+  const minutes = Math.floor((totalHundredths % 360000) / 6000);
+  const secs = Math.floor((totalHundredths % 6000) / 100);
+  const hundredths = totalHundredths % 100;
+  return `${pad(hours)}:${pad(minutes)}:${pad(secs)}.${pad(hundredths)}`;
 }
 
 function pad(value) {

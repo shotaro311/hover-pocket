@@ -69,6 +69,7 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.SnapshotChanged += OnControlsSnapshotChanged;
         _controlsBridgeController.PreviewStateChanged += OnControlsPreviewStateChanged;
         _controlsBridgeController.PreviewFrameArrived += OnControlsPreviewFrameArrived;
+        _controlsBridgeController.MediaSourceOpened += OnControlsMediaSourceOpened;
     }
 
     public event EventHandler<UserSettings>? SettingsChanged;
@@ -80,6 +81,8 @@ internal sealed class PanelBridgeController : IDisposable
     public event EventHandler<TimerAlert?>? TimerAlertChanged;
 
     public event EventHandler? ExternalDragStarted;
+
+    public event EventHandler? PanelCloseRequested;
 
     public UserSettings CurrentSettings { get; private set; }
 
@@ -143,6 +146,7 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.SnapshotChanged -= OnControlsSnapshotChanged;
         _controlsBridgeController.PreviewStateChanged -= OnControlsPreviewStateChanged;
         _controlsBridgeController.PreviewFrameArrived -= OnControlsPreviewFrameArrived;
+        _controlsBridgeController.MediaSourceOpened -= OnControlsMediaSourceOpened;
         _controlsBridgeController.Dispose();
     }
 
@@ -612,6 +616,13 @@ internal sealed class PanelBridgeController : IDisposable
     {
         _ = sender;
         _ = PostEventOnUiThreadAsync("controls.stateChanged", snapshot);
+    }
+
+    private void OnControlsMediaSourceOpened(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        PanelCloseRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnControlsPreviewStateChanged(object? sender, MediaPreviewState preview)

@@ -22,6 +22,8 @@ internal sealed class TimerStore : IDisposable
     private readonly ITimerAlertSound _alertSound;
     private readonly bool _enableScheduler;
     private System.Threading.Timer? _tickTimer;
+    private double _stopwatchAccumulatedSeconds;
+    private DateTimeOffset? _stopwatchStartedAtUtc;
     private bool _disposed;
 
     public TimerStore(
@@ -186,6 +188,40 @@ internal sealed class TimerStore : IDisposable
         lock (_gate)
         {
             StopAlertLocked();
+            return BuildSnapshotLocked(_clock.UtcNow);
+        }
+    }
+
+    public TimerSnapshot StartStopwatch()
+    {
+        lock (_gate)
+        {
+            _stopwatchStartedAtUtc ??= _clock.UtcNow;
+            return BuildSnapshotLocked(_clock.UtcNow);
+        }
+    }
+
+    public TimerSnapshot PauseStopwatch()
+    {
+        lock (_gate)
+        {
+            var now = _clock.UtcNow;
+            if (_stopwatchStartedAtUtc is { } startedAt)
+            {
+                _stopwatchAccumulatedSeconds += Math.Max(0, now.Subtract(startedAt).TotalSeconds);
+                _stopwatchStartedAtUtc = null;
+            }
+
+            return BuildSnapshotLocked(now);
+        }
+    }
+
+    public TimerSnapshot ResetStopwatch()
+    {
+        lock (_gate)
+        {
+            _stopwatchAccumulatedSeconds = 0;
+            _stopwatchStartedAtUtc = null;
             return BuildSnapshotLocked(_clock.UtcNow);
         }
     }
@@ -375,6 +411,12 @@ internal sealed class TimerStore : IDisposable
 
     private TimerSnapshot BuildSnapshotLocked(DateTimeOffset now)
     {
+        var stopwatchElapsed = _stopwatchAccumulatedSeconds;
+        if (_stopwatchStartedAtUtc is { } stopwatchStartedAt)
+        {
+            stopwatchElapsed += Math.Max(0, now.Subtract(stopwatchStartedAt).TotalSeconds);
+        }
+
         return new TimerSnapshot(
             DraftTimer,
             DraftPomodoro,
@@ -397,6 +439,11 @@ internal sealed class TimerStore : IDisposable
                 timer.RemainingSeconds(now),
                 timer.Progress(now))).ToArray(),
             ActiveAlert,
+            new StopwatchSnapshot(
+                _stopwatchAccumulatedSeconds,
+                _stopwatchStartedAtUtc,
+                _stopwatchStartedAtUtc is not null,
+                stopwatchElapsed),
             RunningTimers.Count < MaxConcurrentTimers,
             PinnedPresets.Count < MaxPinnedPresets,
             now);

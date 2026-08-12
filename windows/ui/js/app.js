@@ -382,6 +382,7 @@ window.__hoverPocketVerify = {
     let controlsFallbackLayerOk = false;
     let controlsStableRefreshOk = false;
     let controlsBrightnessResolvedOk = false;
+    let controlsMediaActionsOk = false;
     if (controlsProvider) {
       window.__hoverPocketVerifyStep = "select-controls";
       await request("provider.select", { id: controlsProvider.id });
@@ -410,6 +411,12 @@ window.__hoverPocketVerify = {
           const bounds = button.getBoundingClientRect();
           return bounds.width >= 32 && bounds.height >= 32;
         });
+        controlsMediaActionsOk = Boolean(
+          (controlsRoot.querySelector("[data-open-media-source]") || controlsRoot.querySelector(".hp-media.is-unavailable"))
+          && controlsRoot.querySelector("[data-rate-decrease]")
+          && controlsRoot.querySelector("[data-rate-increase]")
+          && controlsRoot.querySelector("[data-playback-rate]"),
+        );
         controlsFallbackLayerOk = Boolean(
           controlsRoot.querySelector(".hp-media-fallback")
           && controlsRoot.querySelector("canvas[data-live-preview]"),
@@ -490,6 +497,7 @@ window.__hoverPocketVerify = {
     const timerProvider = state.providers.find((provider) => provider.id === "timer");
     let timerLayoutOk = false;
     let timerInteractionStableOk = false;
+    let timerStopwatchOk = false;
     if (timerProvider) {
       window.__hoverPocketVerifyStep = "select-timer";
       render(await request("provider.select", { id: timerProvider.id }));
@@ -505,6 +513,12 @@ window.__hoverPocketVerify = {
       const durationRail = timerRoot?.querySelector("[data-duration-rail]");
       durationRail?.dispatchEvent(new Event("input", { bubbles: true }));
       timerInteractionStableOk = Boolean(durationRail?.isConnected && durationRail === timerRoot?.querySelector("[data-duration-rail]"));
+      const stopwatch = timerRoot?.querySelector(".hp-timer-section.is-stopwatch [data-stopwatch]");
+      timerStopwatchOk = Boolean(
+        stopwatch?.querySelector("[data-stopwatch-elapsed]")
+        && stopwatch.querySelector("[data-stopwatch-toggle]")
+        && stopwatch.querySelector("[data-stopwatch-reset]"),
+      );
     }
     const targetProvider = state.providers.find((provider) => provider.id !== originalProvider) ?? state.providers[0];
     window.__hoverPocketVerifyStep = "switch-provider";
@@ -524,6 +538,7 @@ window.__hoverPocketVerify = {
       controlsFallbackLayerOk,
       controlsStableRefreshOk,
       controlsBrightnessResolvedOk,
+      controlsMediaActionsOk,
       clipboardStableProviderOk,
       clipboardStableRefreshOk,
       clipboardSplitViewOk,
@@ -541,6 +556,7 @@ window.__hoverPocketVerify = {
       calendarEditorStableOk,
       timerLayoutOk,
       timerInteractionStableOk,
+      timerStopwatchOk,
       textSizeScaleReadyOk: getComputedStyle(document.documentElement).getPropertyValue("--hp-text-scale").trim() !== "",
       providerSwitchOk: switchedState.selectedProvider?.id === targetProvider.id,
       settingsWriteOk: resizedState.settings?.panelSize === probePanelSize,

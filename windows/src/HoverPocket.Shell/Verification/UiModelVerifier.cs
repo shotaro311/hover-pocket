@@ -144,9 +144,23 @@ internal sealed class UiModelVerifier
 
         var timerResponse = await dispatcher.ProcessRawMessageAsync(
             """{"id":"5","method":"timer.getState"}""");
-        if (!ResponseContains(timerResponse, "\"draftTimer\""))
+        if (!ResponseContains(timerResponse, "\"draftTimer\"") || !ResponseContains(timerResponse, "\"stopwatch\""))
         {
             _failures.Add("bridge dispatcher: timer.getState did not return timer state");
+        }
+
+        var stopwatchStartResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"5a","method":"timer.startStopwatch"}""");
+        if (!ResponseContains(stopwatchStartResponse, "\"isRunning\":true"))
+        {
+            _failures.Add("bridge dispatcher: timer.startStopwatch did not start the stopwatch");
+        }
+
+        var stopwatchResetResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"5b","method":"timer.resetStopwatch"}""");
+        if (!ResponseContains(stopwatchResetResponse, "\"isRunning\":false"))
+        {
+            _failures.Add("bridge dispatcher: timer.resetStopwatch did not reset the stopwatch");
         }
 
         var clipboardResponse = await dispatcher.ProcessRawMessageAsync(
