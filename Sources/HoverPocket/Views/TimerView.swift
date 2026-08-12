@@ -7,6 +7,7 @@ struct TimerLayoutMetrics {
     static let compactSectionVerticalPadding: CGFloat = 6
     static let runningCardHeight: CGFloat = 44
     static let runningCardSpacing: CGFloat = 5
+    static let stopwatchRowHeight: CGFloat = 34
 
     let availableWidth: CGFloat
 
@@ -37,6 +38,8 @@ struct TimerView: View {
         ScrollView {
             VStack(spacing: 8) {
                 runningSection
+
+                stopwatchSection
 
                 entrySections
 
@@ -119,6 +122,43 @@ struct TimerView: View {
             return alert.color.color
         }
         return store.runningTimers.first?.color.color ?? .cyan
+    }
+
+    private var stopwatchSection: some View {
+        TimerSection(title: text(.timerStopwatch)) {
+            HStack(spacing: 8) {
+                Image(systemName: "stopwatch.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.cyan.opacity(0.8))
+                    .frame(width: 20)
+
+                StopwatchElapsedText(state: store.stopwatch)
+                    .frame(minWidth: 84, alignment: .leading)
+
+                Spacer(minLength: 8)
+
+                TimerIconButton(
+                    symbolName: store.stopwatch.isRunning ? "pause.fill" : "play.fill",
+                    accent: .cyan.opacity(0.88),
+                    isActive: store.stopwatch.isRunning
+                ) {
+                    store.stopwatch.isRunning
+                        ? store.pauseStopwatch()
+                        : store.startStopwatch()
+                }
+                .help(store.stopwatch.isRunning ? text(.timerPause) : text(.timerStart))
+
+                TimerIconButton(
+                    symbolName: "arrow.counterclockwise",
+                    accent: .white.opacity(store.stopwatch.accumulated > 0 || store.stopwatch.isRunning ? 0.62 : 0.24)
+                ) {
+                    store.resetStopwatch()
+                }
+                .disabled(store.stopwatch.accumulated == 0 && !store.stopwatch.isRunning)
+                .help(text(.timerReset))
+            }
+            .frame(height: TimerLayoutMetrics.stopwatchRowHeight)
+        }
     }
 
     private func finishedAlertRow(_ alert: TimerAlert) -> some View {
@@ -368,8 +408,45 @@ struct TimerView: View {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
+    static func stopwatchTimeText(_ interval: TimeInterval) -> String {
+        let totalHundredths = max(0, Int((interval * 100).rounded(.down)))
+        let hours = totalHundredths / 360_000
+        let minutes = (totalHundredths / 6_000) % 60
+        let seconds = (totalHundredths / 100) % 60
+        let hundredths = totalHundredths % 100
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d.%02d", hours, minutes, seconds, hundredths)
+        }
+        return String(format: "%02d:%02d.%02d", minutes, seconds, hundredths)
+    }
+
     private func text(_ key: AppTextKey) -> String {
         settings.text(key)
+    }
+}
+
+private struct StopwatchElapsedText: View {
+    let state: StopwatchState
+
+    var body: some View {
+        Group {
+            if state.isRunning {
+                TimelineView(.periodic(from: .now, by: 0.05)) { context in
+                    elapsedText(at: context.date)
+                }
+            } else {
+                elapsedText(at: .now)
+            }
+        }
+    }
+
+    private func elapsedText(at date: Date) -> some View {
+        Text(TimerView.stopwatchTimeText(state.elapsed(at: date)))
+            .panelTextFont(size: 17, weight: .bold, design: .monospaced)
+            .foregroundStyle(.white.opacity(0.88))
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+            .monospacedDigit()
     }
 }
 

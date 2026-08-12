@@ -28,7 +28,8 @@ struct HoverPanelShell: View {
                     providerStore: store.providerStore,
                     settings: settings,
                     isPreviewActive: store.providerActive,
-                    onExternalDragStarted: onExternalDragStarted
+                    onExternalDragStarted: onExternalDragStarted,
+                    onClosePanel: onClosePanel
                 )
                 .frame(maxHeight: .infinity)
                 .environment(\.panelTextSize, settings.panelTextSize)

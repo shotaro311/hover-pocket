@@ -348,6 +348,14 @@ final class ControlsStore: ObservableObject {
         )
     }
 
+    func focusNowPlayingSource() async -> Bool {
+        guard nowPlaying.hasMedia else { return false }
+        return await mediaService.focusBrowserMedia(
+            mediaURLString: nowPlaying.mediaURLString,
+            preferredTitle: nowPlaying.title
+        )
+    }
+
     private func schedulePendingWatchdog(
         after seconds: TimeInterval,
         requestID: Int,
@@ -1215,14 +1223,35 @@ final class MediaRemoteService: @unchecked Sendable {
         preferredTitle: String = ""
     ) async -> Double? {
         let target = speed.clamped(to: 0.5...3.0)
-        let browserRate = await browserFallback.setPlaybackSpeed(
+        let rateBeforeCommand = await playbackRateReadback(
+            mediaURLString: mediaURLString,
+            preferredTitle: preferredTitle
+        )
+        let browserResult = await browserFallback.setPlaybackSpeed(
             target,
             delta: delta,
             mediaURLString: mediaURLString,
             preferredTitle: preferredTitle
         )
-        if let browserRate {
+        switch browserResult {
+        case .verified(let browserRate):
             return browserRate
+        case .shortcutDispatched:
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            guard let rateBeforeCommand,
+                  let rateAfterCommand = await playbackRateReadback(
+                    mediaURLString: mediaURLString,
+                    preferredTitle: preferredTitle
+                  )
+            else {
+                return nil
+            }
+            let changedInRequestedDirection = delta > 0
+                ? rateAfterCommand > rateBeforeCommand + 0.01
+                : rateAfterCommand < rateBeforeCommand - 0.01
+            return changedInRequestedDirection ? rateAfterCommand : nil
+        case nil:
+            break
         }
         if mediaURLString?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
             return nil
@@ -1239,6 +1268,42 @@ final class MediaRemoteService: @unchecked Sendable {
         preferredTitle: String = ""
     ) async -> Double? {
         await browserFallback.playbackRate(
+            mediaURLString: mediaURLString,
+            preferredTitle: preferredTitle
+        )
+    }
+
+    func playbackRateReadback(
+        mediaURLString: String?,
+        preferredTitle: String = ""
+    ) async -> Double? {
+        if let browserRate = await browserPlaybackRate(
+            mediaURLString: mediaURLString,
+            preferredTitle: preferredTitle
+        ) {
+            return browserRate
+        }
+        for attempt in 0..<3 {
+            let remoteState = await mediaRemoteNowPlaying()
+            if remoteState.hasMedia {
+                return remoteState.playbackRate
+            }
+            if attempt < 2 {
+                try? await Task.sleep(nanoseconds: 140_000_000)
+            }
+        }
+        let jxaState = await jxaFallback.nowPlaying()
+        if jxaState.hasMedia {
+            return jxaState.playbackRate
+        }
+        return nil
+    }
+
+    func focusBrowserMedia(
+        mediaURLString: String?,
+        preferredTitle: String = ""
+    ) async -> Bool {
+        await browserFallback.focusMedia(
             mediaURLString: mediaURLString,
             preferredTitle: preferredTitle
         )
@@ -1429,6 +1494,11 @@ private struct BrowserMediaContext: Sendable {
     let playbackRate: Double?
 }
 
+private enum BrowserPlaybackSpeedResult: Sendable {
+    case verified(Double)
+    case shortcutDispatched
+}
+
 private final class BrowserNowPlayingService: @unchecked Sendable {
     private struct BrowserTarget {
         let bundleIdentifier: String
@@ -1594,7 +1664,7 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         delta: Double,
         mediaURLString: String?,
         preferredTitle: String
-    ) async -> Double? {
+    ) async -> BrowserPlaybackSpeedResult? {
         let targetSpeed = speed.clamped(to: 0.5...3.0)
         let exactURLString = mediaURLString?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -1603,10 +1673,7 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
             else { continue }
             let tabURLString: String
             if !exactURLString.isEmpty {
-                guard await Self.readPlaybackRate(
-                    in: target,
-                    matchingURLString: exactURLString
-                ) != nil else {
+                guard await Self.tabInfo(in: target, matchingURLString: exactURLString) != nil else {
                     continue
                 }
                 tabURLString = exactURLString
@@ -1620,21 +1687,15 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
                 }
                 tabURLString = tab.url.absoluteString
             }
-            let initialRate = await Self.readPlaybackRate(
-                in: target,
-                matchingURLString: tabURLString
-            )
-            guard initialRate != nil else {
-                continue
-            }
             if let appliedRate = await Self.setHTMLPlaybackSpeed(
                 targetSpeed,
                 in: target,
                 matchingURLString: tabURLString
             ) {
-                return appliedRate
+                return .verified(appliedRate)
             }
             if delta != 0,
+               Self.supportsPlaybackRateShortcut(urlString: tabURLString),
                await Self.focusTab(in: target, matchingURLString: tabURLString) {
                 try? await Task.sleep(nanoseconds: UInt64((target.usesFocusCommand ? 0.24 : 0.12) * 1_000_000_000))
                 guard Self.postPlaybackRateShortcut(delta: delta, processIdentifier: application.processIdentifier) else {
@@ -1643,11 +1704,45 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
                 try? await Task.sleep(nanoseconds: UInt64((target.usesFocusCommand ? 0.32 : 0.25) * 1_000_000_000))
                 if let shortcutRate = await Self.readPlaybackRate(in: target, matchingURLString: tabURLString),
                    abs(shortcutRate - targetSpeed) < 0.05 {
-                    return shortcutRate
+                    return .verified(shortcutRate)
                 }
+                return .shortcutDispatched
             }
         }
         return nil
+    }
+
+    func focusMedia(
+        mediaURLString: String?,
+        preferredTitle: String
+    ) async -> Bool {
+        let exactURLString = mediaURLString?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        for target in targets {
+            guard Self.runningApplication(bundleIdentifier: target.bundleIdentifier) != nil else {
+                continue
+            }
+            let tabURLString: String
+            if !exactURLString.isEmpty {
+                guard await Self.tabInfo(in: target, matchingURLString: exactURLString) != nil else {
+                    continue
+                }
+                tabURLString = exactURLString
+            } else {
+                guard let tab = await Self.selectedMediaTab(
+                    in: target,
+                    preferredURLString: nil,
+                    preferredTitle: preferredTitle
+                ) else {
+                    continue
+                }
+                tabURLString = tab.url.absoluteString
+            }
+            if await Self.focusTab(in: target, matchingURLString: tabURLString) {
+                return true
+            }
+        }
+        return false
     }
 
     func playbackRate(
@@ -1944,6 +2039,11 @@ private final class BrowserNowPlayingService: @unchecked Sendable {
         """
         tabURL contains "youtube.com" or tabURL contains "youtu.be" or tabURL contains "music.youtube.com" or tabURL contains "netflix.com" or tabURL contains "twitch.tv" or tabURL contains "vimeo.com"
         """
+    }
+
+    private static func supportsPlaybackRateShortcut(urlString: String) -> Bool {
+        guard let host = URL(string: urlString)?.host?.lowercased() else { return false }
+        return host == "youtu.be" || host == "youtube.com" || host.hasSuffix(".youtube.com")
     }
 
     private static func tabURLPredicateAppleScript(matchingURLString: String?) -> String {

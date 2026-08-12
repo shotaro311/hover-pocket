@@ -95,6 +95,7 @@ enum AppTextKey: String, Sendable {
     case controlsNoMedia
     case controlsNowPlaying
     case controlsNextTrack
+    case controlsOpenMediaSource
     case controlsPause
     case controlsPlay
     case controlsPlaybackRate
@@ -235,12 +236,14 @@ enum AppTextKey: String, Sendable {
     case timerPinnedSection
     case timerPomodoroSection
     case timerResume
+    case timerReset
     case timerRunningSection
     case timerSlotsFull
     case timerSoundToggle
     case timerStart
     case timerStop
     case timerStopAlarm
+    case timerStopwatch
     case timerTitlePlaceholder
     case timerUnpin
     case timerWork
@@ -355,6 +358,7 @@ enum AppText {
         case .controlsNoMedia: return "再生中のメディアはありません"
         case .controlsNowPlaying: return "メディア"
         case .controlsNextTrack: return "次へ進む"
+        case .controlsOpenMediaSource: return "再生中の画面を前面に表示"
         case .controlsPause: return "一時停止"
         case .controlsPlay: return "再生"
         case .controlsPlaybackRate: return "再生速度"
@@ -495,12 +499,14 @@ enum AppText {
         case .timerPinnedSection: return "ピン留め"
         case .timerPomodoroSection: return "ポモドーロタイマー"
         case .timerResume: return "再開"
+        case .timerReset: return "リセット"
         case .timerRunningSection: return "実行中"
         case .timerSlotsFull: return "同時に実行できるタイマーは2つまでです"
         case .timerSoundToggle: return "タイマー音のオン / オフ"
         case .timerStart: return "開始"
         case .timerStop: return "停止"
         case .timerStopAlarm: return "アラームを停止"
+        case .timerStopwatch: return "ストップウォッチ"
         case .timerTitlePlaceholder: return "タイトル（任意）"
         case .timerUnpin: return "ピン留めを解除"
         case .timerWork: return "作業"
@@ -585,6 +591,7 @@ enum AppText {
         case .controlsNoMedia: return "No active media"
         case .controlsNowPlaying: return "Media"
         case .controlsNextTrack: return "Next"
+        case .controlsOpenMediaSource: return "Bring playing screen to front"
         case .controlsPause: return "Pause"
         case .controlsPlay: return "Play"
         case .controlsPlaybackRate: return "Playback speed"
@@ -725,12 +732,14 @@ enum AppText {
         case .timerPinnedSection: return "Pinned"
         case .timerPomodoroSection: return "Pomodoro timer"
         case .timerResume: return "Resume"
+        case .timerReset: return "Reset"
         case .timerRunningSection: return "Running"
         case .timerSlotsFull: return "Up to two timers can run at once"
         case .timerSoundToggle: return "Toggle timer sound"
         case .timerStart: return "Start"
         case .timerStop: return "Stop"
         case .timerStopAlarm: return "Stop alarm"
+        case .timerStopwatch: return "Stopwatch"
         case .timerTitlePlaceholder: return "Title (optional)"
         case .timerUnpin: return "Unpin"
         case .timerWork: return "Focus"

@@ -18,6 +18,12 @@ struct ControlsProvider: PocketProvider {
         state: ProviderState,
         actions: ProviderActions
     ) -> AnyView {
-        AnyView(ControlsView(settings: actions.settings, isActive: actions.isPreviewActive))
+        AnyView(
+            ControlsView(
+                settings: actions.settings,
+                isActive: actions.isPreviewActive,
+                onClosePanel: actions.closePanel
+            )
+        )
     }
 }

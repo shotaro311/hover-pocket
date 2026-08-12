@@ -5,6 +5,14 @@ updated_by: codex
 status: active
 ---
 
+## 2026-08-12 Mac Media Controls and Stopwatch
+
+- Controlsの再生速度がDia通常起動時に変わらない原因を、AppleScript経由のJavaScript拒否後、既存のYouTubeショートカットへ到達する前に処理を終了していた分岐と特定した。対象URL一致を確認したYouTubeタブだけへショートカットを送り、MediaRemoteの実速度が指定方向へ変化した場合だけ成功として反映するよう修正した。
+- メディアサムネイルをクリックすると、記録済みURLに一致するブラウザタブとウィンドウを前面へ出し、成功時にHoverPocketパネルを閉じる操作を追加した。
+- Timerへ100分の1秒表示のストップウォッチを追加した。開始、一時停止、再開、リセットに対応し、パネルを閉じたりproviderを切り替えたりしてもアプリ稼働中は計測を継続する。
+- 実YouTube / Diaで再生速度`1.0 → 1.25 → 1.0`と復元、前面化後のfrontmost app=`Dia`をreadbackした。`swift build`、署名済みapp生成、Timer、panel layout 112ケース、Media、Clipboard、Calculator、Weather verifier、`git diff --check`が成功した。Small / LargeのTimer画像で重なりと欠落がないことを目視確認した。詳細: `progress/2026-08/2026-08-12_hover-pocket-media-stopwatch.md`。
+- 公開release、appcast、Windows版は変更していない。
+
 ## 2026-08-12 Repository Sync and Development Audit
 
 - `git fetch origin`後、ローカル`main`が`origin/main`より2 commit遅れていることを確認し、履歴を分岐させない`git merge --ff-only origin/main`で`bb8f06a`へ更新した。

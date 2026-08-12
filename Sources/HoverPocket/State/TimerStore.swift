@@ -13,6 +13,7 @@ final class TimerStore: ObservableObject {
     @Published private(set) var pinnedPresets: [TimerPreset] = []
     @Published private(set) var runningTimers: [RunningTimer] = []
     @Published private(set) var activeAlert: TimerAlert?
+    @Published private(set) var stopwatch = StopwatchState()
     @Published private(set) var now = Date()
 
     private let fileManager: FileManager
@@ -131,6 +132,21 @@ final class TimerStore: ObservableObject {
         alertSound?.stop()
         alertSound = nil
         activeAlert = nil
+    }
+
+    func startStopwatch(at date: Date = Date()) {
+        guard !stopwatch.isRunning else { return }
+        stopwatch.startedAt = date
+    }
+
+    func pauseStopwatch(at date: Date = Date()) {
+        guard stopwatch.isRunning else { return }
+        stopwatch.accumulated = stopwatch.elapsed(at: date)
+        stopwatch.startedAt = nil
+    }
+
+    func resetStopwatch() {
+        stopwatch = StopwatchState()
     }
 
     // MARK: - Drafts and pinned presets
