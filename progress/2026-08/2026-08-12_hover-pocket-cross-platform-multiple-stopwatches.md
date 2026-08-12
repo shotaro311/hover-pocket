@@ -44,3 +44,4 @@ updated_by: codex
 - `/Applications/HoverPocket.app`を公開版`0.1.0 (168)`へ再インストールし、旧build 161は`~/.Trash/HoverPocket-before-build-168.app`へ退避した。インストール後の署名、公証staple、Gatekeeper、公開ZIP展開物との実行ファイルSHA-256一致、通常起動を確認した。
 - Windowsを専用release [`win-v0.2.7`](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.7)へ`latest=false`で公開した。release targetは`fefc4c6`、8 assetの公開URL再取得、GitHub digest、ローカル生成物のsize / SHA-256一致、`SHA256SUMS-win.txt`、manifest、`releases.win.json`を確認した。
 - Windows公開後もGitHub LatestはmacOS `v0.1.0-168`、macOS appcast SHA-256は`bcf3a215...986d72`のままで、Windows feedは0.2.7 full packageを返す。Windows 0.2.xは方針どおりAuthenticode未署名。
+- 配布サイトをCloudflare Worker version `1522796a-4b37-4740-b926-196dd07ce836`へ公開した。正規ドメインと旧aliasはHTTP 200でWindows 0.2.7 Setupリンクを返し、公開HTML SHA-256 `3df416a9...97dc9`はローカル`site/index.html`と一致した。GitHub Pages run [`31573675904`](https://github.com/shotaro311/hover-pocket/actions/runs/31573675904)も成功した。
