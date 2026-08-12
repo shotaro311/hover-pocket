@@ -5,6 +5,14 @@ updated_by: codex
 status: active
 ---
 
+## 2026-08-12 macOS Build 161 / Windows 0.2.6 Public Release
+
+- 共通source commit `f0172f2`から、macOS build 161とWindows 0.2.6をOS別releaseへ公開した。macOSはGitHub Latest `v0.1.0-161`と`macos-latest` appcast、Windowsは`latest=false`の`win-v0.2.6`と`releases.win.json`を使用した。
+- macOS build 161はDeveloper ID Application署名、hardened runtime、Apple公証`Accepted`、staple、Gatekeeper、公開ZIP展開後の再検証に合格した。公開ZIP SHA-256は`f4981150...b6b0801`、appcast SHA-256は`401e5a38...f04cab`で、build 161とversioned ZIP URLを返した。
+- Windows 0.2.6はRelease buildと`controls / ui-model / ui / timer / updater / settings / shell / display / release-config` verifierが成功した。8 assetはGitHub digest・ローカル生成物・公開URL再取得物でsize / SHA-256が一致し、manifestは`oauthMetadata=embedded-and-verified`、`updateChannel=win`、0.2.x方針どおり`authenticode=unsigned`。
+- Windows実機の既存0.2.5へ公開feedのfull packageを適用し、起動中processと`current` exeのProductVersionが`0.2.6+f0172f2...`、ARPが`DisplayVersion=0.2.6`、InstallLocationが既存rootと一致することをreadbackした。実ブラウザYouTube操作とアプリ内MessageBoxの手動クリック経路は誤操作回避のため未確認で、CLI verifierとVelopack適用readbackで代替した。
+- 公式Cloudflare Worker static assetsをversion `3132a282-07ca-426b-a127-04a1009c995c`へ配信した。正規ドメインと旧aliasはHTTP 200でWindows 0.2.6 Setupリンクを返し、公開HTML SHA-256はローカル`site/index.html`と一致した。詳細: `progress/2026-08/2026-08-12_hover-pocket-build-161-windows-0.2.6-release.md`。
+
 ## 2026-08-12 Mac Media Controls and Stopwatch
 
 - Controlsの再生速度がDia通常起動時に変わらない原因を、AppleScript経由のJavaScript拒否後、既存のYouTubeショートカットへ到達する前に処理を終了していた分岐と特定した。対象URL一致を確認したYouTubeタブだけへショートカットを送り、MediaRemoteの実速度が指定方向へ変化した場合だけ成功として反映するよう修正した。
