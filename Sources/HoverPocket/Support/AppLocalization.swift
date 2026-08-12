@@ -227,13 +227,16 @@ enum AppTextKey: String, Sendable {
     case stickyUndo
     case stickyYellow
     case timer
+    case timerAddSection
     case timerBreak
+    case timerColorPicker
     case timerFinished
     case timerNoRunning
     case timerPause
     case timerPin
     case timerPinLimit
     case timerPinnedSection
+    case timerPomodoroShort
     case timerPomodoroSection
     case timerResume
     case timerReset
@@ -490,24 +493,27 @@ enum AppText {
         case .stickyUndo: return "元に戻す"
         case .stickyYellow: return "イエロー"
         case .timer: return "タイマー"
+        case .timerAddSection: return "新しく追加"
         case .timerBreak: return "休憩"
+        case .timerColorPicker: return "色を変更"
         case .timerFinished: return "タイマー終了"
         case .timerNoRunning: return "実行中のタイマーはありません"
         case .timerPause: return "一時停止"
         case .timerPin: return "ピン留めして繰り返し使う"
         case .timerPinLimit: return "ピン留めは4つまでです"
         case .timerPinnedSection: return "ピン留め"
+        case .timerPomodoroShort: return "ポモドーロ"
         case .timerPomodoroSection: return "ポモドーロタイマー"
         case .timerResume: return "再開"
         case .timerReset: return "リセット"
         case .timerRunningSection: return "実行中"
-        case .timerSlotsFull: return "同時に実行できるタイマーは2つまでです"
+        case .timerSlotsFull: return "同時に実行できるタイマーは4つまでです"
         case .timerSoundToggle: return "タイマー音のオン / オフ"
         case .timerStart: return "開始"
         case .timerStop: return "停止"
         case .timerStopAlarm: return "アラームを停止"
         case .timerStopwatch: return "ストップウォッチ"
-        case .timerTitlePlaceholder: return "タイトル（任意）"
+        case .timerTitlePlaceholder: return "名前を設定（任意）"
         case .timerUnpin: return "ピン留めを解除"
         case .timerWork: return "作業"
         case .title: return "タイトル"
@@ -723,24 +729,27 @@ enum AppText {
         case .stickyUndo: return "Undo"
         case .stickyYellow: return "Yellow"
         case .timer: return "Timer"
+        case .timerAddSection: return "Add New"
         case .timerBreak: return "Break"
+        case .timerColorPicker: return "Change color"
         case .timerFinished: return "Time's up"
         case .timerNoRunning: return "No running timers"
         case .timerPause: return "Pause"
         case .timerPin: return "Pin to reuse"
         case .timerPinLimit: return "Up to four pinned timers"
         case .timerPinnedSection: return "Pinned"
+        case .timerPomodoroShort: return "Pomodoro"
         case .timerPomodoroSection: return "Pomodoro timer"
         case .timerResume: return "Resume"
         case .timerReset: return "Reset"
         case .timerRunningSection: return "Running"
-        case .timerSlotsFull: return "Up to two timers can run at once"
+        case .timerSlotsFull: return "Up to four timers can run at once"
         case .timerSoundToggle: return "Toggle timer sound"
         case .timerStart: return "Start"
         case .timerStop: return "Stop"
         case .timerStopAlarm: return "Stop alarm"
         case .timerStopwatch: return "Stopwatch"
-        case .timerTitlePlaceholder: return "Title (optional)"
+        case .timerTitlePlaceholder: return "Set name (optional)"
         case .timerUnpin: return "Unpin"
         case .timerWork: return "Focus"
         case .title: return "Title"

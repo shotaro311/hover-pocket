@@ -5,9 +5,10 @@ import Foundation
 @MainActor
 final class TimerStore: ObservableObject {
     static let shared = TimerStore()
-    static let maxConcurrentTimers = 2
+    static let maxConcurrentTimers = 4
     static let maxPinnedPresets = 4
 
+    @Published private(set) var draftStopwatch = StopwatchPreset.defaultDraft()
     @Published private(set) var draftTimer = TimerPreset.defaultTimerDraft()
     @Published private(set) var draftPomodoro = TimerPreset.defaultPomodoroDraft()
     @Published private(set) var pinnedPresets: [TimerPreset] = []
@@ -136,6 +137,10 @@ final class TimerStore: ObservableObject {
 
     func startStopwatch(at date: Date = Date()) {
         guard !stopwatch.isRunning else { return }
+        if !stopwatch.isActive {
+            stopwatch.title = draftStopwatch.title
+            stopwatch.color = draftStopwatch.color
+        }
         stopwatch.startedAt = date
     }
 
@@ -150,6 +155,12 @@ final class TimerStore: ObservableObject {
     }
 
     // MARK: - Drafts and pinned presets
+
+    func updateDraftStopwatch(_ preset: StopwatchPreset) {
+        guard draftStopwatch != preset else { return }
+        draftStopwatch = preset
+        persistDrafts()
+    }
 
     func updateDraftTimer(_ preset: TimerPreset) {
         guard draftTimer != preset else { return }
@@ -285,6 +296,7 @@ final class TimerStore: ObservableObject {
     // MARK: - Persistence
 
     private struct DraftsSnapshot: Codable, Sendable {
+        var stopwatch: StopwatchPreset?
         var timer: TimerPreset
         var pomodoro: TimerPreset
     }
@@ -293,6 +305,7 @@ final class TimerStore: ObservableObject {
         guard let data = try? Data(contentsOf: draftsURL),
               let decoded = try? JSONDecoder().decode(DraftsSnapshot.self, from: data)
         else { return }
+        draftStopwatch = decoded.stopwatch ?? .defaultDraft()
         draftTimer = decoded.timer
         draftPomodoro = decoded.pomodoro
     }
@@ -318,7 +331,14 @@ final class TimerStore: ObservableObject {
     }
 
     private func persistDrafts() {
-        persist(DraftsSnapshot(timer: draftTimer, pomodoro: draftPomodoro), to: draftsURL)
+        persist(
+            DraftsSnapshot(
+                stopwatch: draftStopwatch,
+                timer: draftTimer,
+                pomodoro: draftPomodoro
+            ),
+            to: draftsURL
+        )
     }
 
     private func persistPinnedPresets() {

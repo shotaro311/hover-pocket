@@ -2,19 +2,19 @@ import SwiftUI
 
 struct TimerLayoutMetrics {
     static let horizontalPadding: CGFloat = 16
-    static let entrySectionSpacing: CGFloat = 10
-    static let minimumEntryCardWidth: CGFloat = 220
+    static let entrySectionSpacing: CGFloat = 8
+    static let minimumEntryCardWidth: CGFloat = 150
     static let compactSectionVerticalPadding: CGFloat = 6
-    static let runningCardHeight: CGFloat = 44
-    static let runningCardSpacing: CGFloat = 5
-    static let stopwatchRowHeight: CGFloat = 34
+    static let runningCardHeight: CGFloat = 38
+    static let runningCardSpacing: CGFloat = 4
+    static let setupCardHeight: CGFloat = 174
 
     let availableWidth: CGFloat
 
     var entryCardWidth: CGFloat {
         max(
             0,
-            (availableWidth - (Self.horizontalPadding * 2) - Self.entrySectionSpacing) / 2
+            (availableWidth - (Self.horizontalPadding * 2) - (Self.entrySectionSpacing * 2)) / 3
         )
     }
 
@@ -24,6 +24,10 @@ struct TimerLayoutMetrics {
 }
 
 struct TimerView: View {
+    static let stopwatchSymbolName = "stopwatch.fill"
+    static let timerSymbolName = "hourglass"
+    static let pomodoroSymbolName = "target"
+
     @ObservedObject private var settings: AppSettings
     @ObservedObject private var store: TimerStore
     private let isActive: Bool
@@ -36,12 +40,9 @@ struct TimerView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 runningSection
-
-                stopwatchSection
-
-                entrySections
+                addSection
 
                 if !store.pinnedPresets.isEmpty {
                     pinnedSection
@@ -52,175 +53,181 @@ struct TimerView: View {
             .padding(.vertical, 10)
         }
         .scrollIndicators(.never)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(text(.timer))
     }
 
-    private var entrySections: some View {
-        HStack(alignment: .top, spacing: TimerLayoutMetrics.entrySectionSpacing) {
-            TimerSection(title: text(.timer)) {
-                TimerEntryCard(
-                    preset: draftTimerBinding,
-                    canStart: store.canStartTimer,
-                    settings: settings,
-                    onStart: { store.start(preset: $0) }
-                )
-            }
-            .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
-
-            TimerSection(title: text(.timerPomodoroSection)) {
-                TimerEntryCard(
-                    preset: draftPomodoroBinding,
-                    canStart: store.canStartTimer,
-                    settings: settings,
-                    onStart: { store.start(preset: $0) }
-                )
-            }
-            .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    // MARK: - Running timers
+    // MARK: - Running list
 
     private var runningSection: some View {
-        VStack(alignment: .leading, spacing: TimerLayoutMetrics.runningCardSpacing) {
-            Text(text(.timerRunningSection))
-                .panelTextFont(size: 10, weight: .bold, design: .monospaced)
-                .foregroundStyle(runningAccentColor.opacity(0.9))
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(runningItemCount > 0 ? Color.green : Color.white.opacity(0.24))
+                    .frame(width: 7, height: 7)
 
-            if store.runningTimers.isEmpty, store.activeAlert == nil {
-                TimerEmptyRow(message: text(.timerNoRunning))
-                    .padding(.horizontal, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(Color.white.opacity(0.025))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(Color.white.opacity(0.055), lineWidth: 1)
-                    )
-            } else {
-                if !store.canStartTimer {
-                    Text(text(.timerSlotsFull))
-                        .panelTextFont(size: 8.5, weight: .medium, design: .monospaced)
-                        .foregroundStyle(.yellow.opacity(0.72))
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                Text(text(.timerRunningSection))
+                    .panelTextFont(size: 10, weight: .bold, design: .monospaced)
+                    .foregroundStyle(runningItemCount > 0 ? Color.green.opacity(0.9) : Color.white.opacity(0.5))
+
+                if runningItemCount > 0 {
+                    Text("\(runningItemCount)")
+                        .panelTextFont(size: 8.5, weight: .bold, design: .monospaced)
+                        .foregroundStyle(.white.opacity(0.68))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.white.opacity(0.08)))
+                        .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1))
                 }
-                if let alert = store.activeAlert,
-                   !store.runningTimers.contains(where: { $0.id == alert.id }) {
-                    finishedAlertRow(alert)
-                }
-                ForEach(store.runningTimers) { timer in
-                    runningRow(timer)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var runningAccentColor: Color {
-        if let alert = store.activeAlert {
-            return alert.color.color
-        }
-        return store.runningTimers.first?.color.color ?? .cyan
-    }
-
-    private var stopwatchSection: some View {
-        TimerSection(title: text(.timerStopwatch)) {
-            HStack(spacing: 8) {
-                Image(systemName: "stopwatch.fill")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.cyan.opacity(0.8))
-                    .frame(width: 20)
-
-                StopwatchElapsedText(state: store.stopwatch)
-                    .frame(minWidth: 84, alignment: .leading)
 
                 Spacer(minLength: 8)
-
-                TimerIconButton(
-                    symbolName: store.stopwatch.isRunning ? "pause.fill" : "play.fill",
-                    accent: .cyan.opacity(0.88),
-                    isActive: store.stopwatch.isRunning
-                ) {
-                    store.stopwatch.isRunning
-                        ? store.pauseStopwatch()
-                        : store.startStopwatch()
-                }
-                .help(store.stopwatch.isRunning ? text(.timerPause) : text(.timerStart))
-
-                TimerIconButton(
-                    symbolName: "arrow.counterclockwise",
-                    accent: .white.opacity(store.stopwatch.accumulated > 0 || store.stopwatch.isRunning ? 0.62 : 0.24)
-                ) {
-                    store.resetStopwatch()
-                }
-                .disabled(store.stopwatch.accumulated == 0 && !store.stopwatch.isRunning)
-                .help(text(.timerReset))
             }
-            .frame(height: TimerLayoutMetrics.stopwatchRowHeight)
+
+            if runningItemCount == 0 {
+                TimerEmptyRow(message: text(.timerNoRunning))
+            } else {
+                VStack(spacing: TimerLayoutMetrics.runningCardSpacing) {
+                    if store.stopwatch.isActive {
+                        stopwatchRunningRow
+                    }
+
+                    if let alert = store.activeAlert,
+                       !store.runningTimers.contains(where: { $0.id == alert.id }) {
+                        finishedAlertRow(alert)
+                    }
+
+                    ForEach(store.runningTimers) { timer in
+                        runningRow(timer)
+                    }
+                }
+            }
         }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(0.026))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.white.opacity(0.07), lineWidth: 1)
+        )
+    }
+
+    private var runningItemCount: Int {
+        let stopwatchCount = store.stopwatch.isActive ? 1 : 0
+        let detachedAlertCount: Int
+        if let alert = store.activeAlert,
+           !store.runningTimers.contains(where: { $0.id == alert.id }) {
+            detachedAlertCount = 1
+        } else {
+            detachedAlertCount = 0
+        }
+        return stopwatchCount + store.runningTimers.count + detachedAlertCount
+    }
+
+    private var stopwatchRunningRow: some View {
+        HStack(spacing: 7) {
+            TimerRunningTypeIcon(
+                symbolName: Self.stopwatchSymbolName,
+                color: store.stopwatch.color
+            )
+
+            Text(text(.timerStopwatch))
+                .panelTextFont(size: 9.5, weight: .bold)
+                .foregroundStyle(.white.opacity(0.88))
+                .lineLimit(1)
+
+            TimerRowDivider()
+
+            Text(displayName(store.stopwatch.title))
+                .panelTextFont(size: 9, weight: .medium)
+                .foregroundStyle(.white.opacity(store.stopwatch.title.isEmpty ? 0.28 : 0.62))
+                .lineLimit(1)
+
+            Spacer(minLength: 6)
+
+            StopwatchElapsedText(
+                state: store.stopwatch,
+                color: store.stopwatch.color.color,
+                fontSize: 13
+            )
+            .frame(minWidth: 78, alignment: .trailing)
+
+            TimerIconButton(
+                symbolName: store.stopwatch.isRunning ? "pause.fill" : "play.fill",
+                accent: store.stopwatch.color.color,
+                isActive: store.stopwatch.isRunning
+            ) {
+                store.stopwatch.isRunning
+                    ? store.pauseStopwatch()
+                    : store.startStopwatch()
+            }
+            .help(store.stopwatch.isRunning ? text(.timerPause) : text(.timerResume))
+
+            TimerIconButton(symbolName: "stop.fill", accent: .red.opacity(0.78)) {
+                store.resetStopwatch()
+            }
+            .help(text(.timerStop))
+        }
+        .modifier(TimerRunningRowStyle(color: store.stopwatch.color.color))
     }
 
     private func finishedAlertRow(_ alert: TimerAlert) -> some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(alert.color.color)
-                .frame(width: 8, height: 8)
+        HStack(spacing: 7) {
+            TimerRunningTypeIcon(symbolName: "bell.badge.fill", color: alert.color)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(alert.title.isEmpty ? text(.timerFinished) : alert.title)
-                    .panelTextFont(size: 10.5, weight: .bold)
-                    .foregroundStyle(.white.opacity(0.9))
-                    .lineLimit(1)
-                Text(text(.timerFinished))
-                    .panelTextFont(size: 8.5, weight: .medium, design: .monospaced)
-                    .foregroundStyle(alert.color.color.opacity(0.9))
-            }
+            Text(text(.timerFinished))
+                .panelTextFont(size: 9.5, weight: .bold)
+                .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(1)
+
+            TimerRowDivider()
+
+            Text(displayName(alert.title))
+                .panelTextFont(size: 9, weight: .medium)
+                .foregroundStyle(.white.opacity(alert.title.isEmpty ? 0.3 : 0.68))
+                .lineLimit(1)
 
             Spacer(minLength: 8)
 
             stopAlarmButton(color: alert.color.color)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .frame(minHeight: TimerLayoutMetrics.runningCardHeight)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(alert.color.color.opacity(0.12))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(alert.color.color.opacity(0.5), lineWidth: 1)
-        )
+        .modifier(TimerRunningRowStyle(color: alert.color.color, isAlerting: true))
     }
 
     private func runningRow(_ timer: RunningTimer) -> some View {
         let isAlerting = store.activeAlert?.id == timer.id
-        return HStack(spacing: 8) {
-            progressRing(for: timer)
-                .frame(width: 30, height: 30)
+        return HStack(spacing: 7) {
+            runningIcon(for: timer)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(timer.title.isEmpty ? text(.timer) : timer.title)
-                    .panelTextFont(size: 10, weight: .bold)
-                    .foregroundStyle(.white.opacity(0.88))
+            Text(timer.isPomodoro ? text(.timerPomodoroShort) : text(.timer))
+                .panelTextFont(size: 9.5, weight: .bold)
+                .foregroundStyle(.white.opacity(0.88))
+                .lineLimit(1)
+
+            TimerRowDivider()
+
+            Text(displayName(timer.title))
+                .panelTextFont(size: 9, weight: .medium)
+                .foregroundStyle(.white.opacity(timer.title.isEmpty ? 0.28 : 0.62))
+                .lineLimit(1)
+
+            Spacer(minLength: 6)
+
+            if timer.isPomodoro {
+                Text(pomodoroPhaseText(for: timer))
+                    .panelTextFont(size: 8, weight: .bold, design: .monospaced)
+                    .foregroundStyle(.white.opacity(0.42))
                     .lineLimit(1)
-
-                HStack(spacing: 6) {
-                    Text(remainingText(for: timer))
-                        .panelTextFont(size: 14, weight: .bold, design: .monospaced)
-                        .foregroundStyle(timer.color.color)
-                        .minimumScaleFactor(0.75)
-
-                    if timer.isPomodoro {
-                        Text(pomodoroPhaseText(for: timer))
-                            .panelTextFont(size: 8.5, weight: .bold, design: .monospaced)
-                            .foregroundStyle(.white.opacity(0.5))
-                    }
-                }
             }
 
-            Spacer(minLength: 8)
+            Text(remainingText(for: timer))
+                .panelTextFont(size: 13, weight: .bold, design: .monospaced)
+                .foregroundStyle(timer.color.color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .monospacedDigit()
 
             pinButton(for: timer)
 
@@ -229,33 +236,45 @@ struct TimerView: View {
             } else {
                 TimerIconButton(
                     symbolName: timer.isPaused ? "play.fill" : "pause.fill",
-                    accent: .white.opacity(0.7)
+                    accent: timer.color.color,
+                    isActive: !timer.isPaused
                 ) {
                     timer.isPaused ? store.resume(id: timer.id) : store.pause(id: timer.id)
                 }
                 .help(timer.isPaused ? text(.timerResume) : text(.timerPause))
             }
 
-            TimerIconButton(symbolName: "stop.fill", accent: .white.opacity(0.55)) {
+            TimerIconButton(symbolName: "stop.fill", accent: .red.opacity(0.78)) {
                 store.stop(id: timer.id)
             }
             .help(text(.timerStop))
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .frame(minHeight: TimerLayoutMetrics.runningCardHeight)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isAlerting ? timer.color.color.opacity(0.12) : timer.color.color.opacity(0.045))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(isAlerting ? timer.color.color.opacity(0.5) : timer.color.color.opacity(0.22), lineWidth: 1)
+        .modifier(
+            TimerRunningRowStyle(
+                color: timer.color.color,
+                isAlerting: isAlerting
+            )
         )
     }
 
-    /// Inline pin toggle on a running timer: pinning stores the timer's
-    /// configuration for reuse, up to four pins.
+    private func runningIcon(for timer: RunningTimer) -> some View {
+        ZStack {
+            Circle()
+                .stroke(Color.white.opacity(0.1), lineWidth: 2.5)
+            Circle()
+                .trim(from: 0, to: timer.progress(at: store.now))
+                .stroke(
+                    timer.color.color,
+                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+            Image(systemName: timer.isPomodoro ? Self.pomodoroSymbolName : Self.timerSymbolName)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(timer.color.color)
+        }
+        .frame(width: 25, height: 25)
+    }
+
     private func pinButton(for timer: RunningTimer) -> some View {
         let isPinned = timer.pinnedPresetID != nil
         let isEnabled = isPinned || store.canPin
@@ -264,7 +283,7 @@ struct TimerView: View {
         } label: {
             Image(systemName: isPinned ? "pin.fill" : "pin")
                 .font(.system(size: 8.5, weight: .bold))
-                .foregroundStyle(isPinned ? timer.color.color : .white.opacity(isEnabled ? 0.5 : 0.22))
+                .foregroundStyle(isPinned ? timer.color.color : .white.opacity(isEnabled ? 0.46 : 0.2))
                 .frame(width: 16, height: 16)
                 .contentShape(Rectangle())
         }
@@ -276,30 +295,79 @@ struct TimerView: View {
     private func stopAlarmButton(color: Color) -> some View {
         Button(action: store.stopAlert) {
             Text(text(.timerStopAlarm))
-                .panelTextFont(size: 9.5, weight: .bold)
+                .panelTextFont(size: 8.5, weight: .bold)
                 .foregroundStyle(.black.opacity(0.85))
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
                 .background(Capsule().fill(color))
         }
         .buttonStyle(.plain)
         .help(text(.timerStopAlarm))
     }
 
-    private func progressRing(for timer: RunningTimer) -> some View {
-        ZStack {
-            Circle()
-                .stroke(Color.white.opacity(0.1), lineWidth: 3)
-            Circle()
-                .trim(from: 0, to: timer.progress(at: store.now))
-                .stroke(timer.color.color, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-            if timer.isPaused {
-                Image(systemName: "pause.fill")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.6))
+    // MARK: - New timer setup
+
+    private var addSection: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 7) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.cyan.opacity(0.9))
+
+                Text(text(.timerAddSection))
+                    .panelTextFont(size: 10, weight: .bold, design: .monospaced)
+                    .foregroundStyle(.cyan.opacity(0.9))
+
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.cyan.opacity(0.58),
+                                Color.white.opacity(0.12),
+                                Color.clear
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(height: 1)
+            }
+
+            HStack(alignment: .top, spacing: TimerLayoutMetrics.entrySectionSpacing) {
+                StopwatchEntryCard(
+                    preset: draftStopwatchBinding,
+                    stopwatch: store.stopwatch,
+                    settings: settings,
+                    onStart: { store.startStopwatch() },
+                    onReset: { store.resetStopwatch() }
+                )
+                .frame(minWidth: 0, maxWidth: .infinity)
+
+                TimerEntryCard(
+                    preset: draftTimerBinding,
+                    canStart: store.canStartTimer,
+                    settings: settings,
+                    onStart: { store.start(preset: $0) }
+                )
+                .frame(minWidth: 0, maxWidth: .infinity)
+
+                TimerEntryCard(
+                    preset: draftPomodoroBinding,
+                    canStart: store.canStartTimer,
+                    settings: settings,
+                    onStart: { store.start(preset: $0) }
+                )
+                .frame(minWidth: 0, maxWidth: .infinity)
             }
         }
+        .padding(.top, 1)
+        .padding(.horizontal, 1)
+        .padding(.bottom, 1)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(Color.white.opacity(0.012))
+                .padding(.top, 20)
+        )
     }
 
     // MARK: - Pinned presets
@@ -320,15 +388,15 @@ struct TimerView: View {
                 .font(.system(size: 8, weight: .bold))
                 .foregroundStyle(preset.color.color)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(pinnedTitle(preset))
-                    .panelTextFont(size: 10, weight: .bold)
-                    .foregroundStyle(.white.opacity(0.86))
-                    .lineLimit(1)
-                Text(pinnedDurationText(preset))
-                    .panelTextFont(size: 9, weight: .bold, design: .monospaced)
-                    .foregroundStyle(.white.opacity(0.48))
-            }
+            Text(pinnedTitle(preset))
+                .panelTextFont(size: 10, weight: .bold)
+                .foregroundStyle(.white.opacity(0.86))
+                .lineLimit(1)
+
+            Text(pinnedDurationText(preset))
+                .panelTextFont(size: 9, weight: .bold, design: .monospaced)
+                .foregroundStyle(.white.opacity(0.48))
+                .lineLimit(1)
 
             Spacer(minLength: 8)
 
@@ -374,6 +442,13 @@ struct TimerView: View {
 
     // MARK: - Bindings and helpers
 
+    private var draftStopwatchBinding: Binding<StopwatchPreset> {
+        Binding(
+            get: { store.draftStopwatch },
+            set: { store.updateDraftStopwatch($0) }
+        )
+    }
+
     private var draftTimerBinding: Binding<TimerPreset> {
         Binding(
             get: { store.draftTimer },
@@ -386,6 +461,10 @@ struct TimerView: View {
             get: { store.draftPomodoro },
             set: { store.updateDraftPomodoro($0) }
         )
+    }
+
+    private func displayName(_ title: String) -> String {
+        title.isEmpty ? "—" : title
     }
 
     private func remainingText(for timer: RunningTimer) -> String {
@@ -427,6 +506,8 @@ struct TimerView: View {
 
 private struct StopwatchElapsedText: View {
     let state: StopwatchState
+    let color: Color
+    let fontSize: CGFloat
 
     var body: some View {
         Group {
@@ -442,15 +523,81 @@ private struct StopwatchElapsedText: View {
 
     private func elapsedText(at date: Date) -> some View {
         Text(TimerView.stopwatchTimeText(state.elapsed(at: date)))
-            .panelTextFont(size: 17, weight: .bold, design: .monospaced)
-            .foregroundStyle(.white.opacity(0.88))
+            .panelTextFont(size: fontSize, weight: .bold, design: .monospaced)
+            .foregroundStyle(color)
             .lineLimit(1)
-            .minimumScaleFactor(0.72)
+            .minimumScaleFactor(0.7)
             .monospacedDigit()
     }
 }
 
-// MARK: - Entry card (normal or pomodoro, decided by the bound preset)
+private struct StopwatchEntryCard: View {
+    @Binding var preset: StopwatchPreset
+    let stopwatch: StopwatchState
+    @ObservedObject var settings: AppSettings
+    let onStart: () -> Void
+    let onReset: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            setupHeader
+
+            TimerNameField(
+                placeholder: text(.timerTitlePlaceholder),
+                text: $preset.title
+            )
+
+            Text("00:00.00")
+                .panelTextFont(size: 17, weight: .bold, design: .monospaced)
+                .foregroundStyle(.white.opacity(0.88))
+                .monospacedDigit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+
+            HStack(spacing: 6) {
+                TimerIconButton(
+                    symbolName: "arrow.counterclockwise",
+                    accent: .white.opacity(stopwatch.isActive ? 0.62 : 0.24)
+                ) {
+                    onReset()
+                }
+                .disabled(!stopwatch.isActive)
+                .help(text(.timerReset))
+
+                Spacer(minLength: 4)
+
+                TimerStartButton(
+                    title: text(.timerStart),
+                    color: preset.color.color,
+                    isEnabled: !stopwatch.isActive,
+                    action: onStart
+                )
+            }
+        }
+        .modifier(TimerSetupCardStyle())
+    }
+
+    private var setupHeader: some View {
+        HStack(spacing: 6) {
+            TimerColorMenu(
+                selection: $preset.color,
+                symbolName: TimerView.stopwatchSymbolName,
+                language: settings.appLanguage,
+                help: text(.timerColorPicker)
+            )
+
+            Text(text(.timerStopwatch))
+                .panelTextFont(size: 10, weight: .bold)
+                .foregroundStyle(.white.opacity(0.86))
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func text(_ key: AppTextKey) -> String {
+        settings.text(key)
+    }
+}
 
 private struct TimerEntryCard: View {
     @Binding var preset: TimerPreset
@@ -460,29 +607,66 @@ private struct TimerEntryCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                colorPicker
+            setupHeader
 
-                TextField(text(.timerTitlePlaceholder), text: $preset.title)
-                    .textFieldStyle(.plain)
-                    .panelTextFont(size: 10, weight: .bold)
-                    .foregroundStyle(.white.opacity(0.86))
-                    .frame(maxWidth: .infinity)
-
-                TimerIconButton(
-                    symbolName: preset.soundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill",
-                    accent: preset.soundEnabled ? .white.opacity(0.72) : .yellow.opacity(0.8),
-                    isActive: !preset.soundEnabled
-                ) {
-                    preset.soundEnabled.toggle()
-                }
-                .help(text(.timerSoundToggle))
-            }
+            TimerNameField(
+                placeholder: text(.timerTitlePlaceholder),
+                text: $preset.title
+            )
 
             durationEditor
+                .frame(maxHeight: .infinity, alignment: .center)
 
-            startButton
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            HStack(spacing: 6) {
+                TimerIconButton(
+                    symbolName: "arrow.counterclockwise",
+                    accent: .white.opacity(0.58)
+                ) {
+                    resetDuration()
+                }
+                .help(text(.timerReset))
+
+                Spacer(minLength: 4)
+
+                TimerStartButton(
+                    title: text(.timerStart),
+                    color: preset.color.color,
+                    isEnabled: isStartEnabled
+                ) {
+                    onStart(preset)
+                }
+            }
+        }
+        .modifier(TimerSetupCardStyle())
+    }
+
+    private var setupHeader: some View {
+        HStack(spacing: 6) {
+            TimerColorMenu(
+                selection: $preset.color,
+                symbolName: preset.isPomodoro
+                    ? TimerView.pomodoroSymbolName
+                    : TimerView.timerSymbolName,
+                language: settings.appLanguage,
+                help: text(.timerColorPicker)
+            )
+
+            Text(preset.isPomodoro ? text(.timerPomodoroSection) : text(.timer))
+                .panelTextFont(size: 10, weight: .bold)
+                .foregroundStyle(.white.opacity(0.86))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+
+            Spacer(minLength: 0)
+
+            TimerIconButton(
+                symbolName: preset.soundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                accent: preset.soundEnabled ? .white.opacity(0.72) : .yellow.opacity(0.8),
+                isActive: !preset.soundEnabled
+            ) {
+                preset.soundEnabled.toggle()
+            }
+            .help(text(.timerSoundToggle))
         }
     }
 
@@ -512,11 +696,11 @@ private struct TimerEntryCard: View {
         title: String,
         duration: Binding<TimeInterval>
     ) -> some View {
-        HStack(alignment: .top, spacing: 6) {
+        HStack(alignment: .top, spacing: 4) {
             Text(title)
-                .panelTextFont(size: 8, weight: .bold, design: .monospaced)
+                .panelTextFont(size: 7.5, weight: .bold, design: .monospaced)
                 .foregroundStyle(.white.opacity(0.42))
-                .frame(width: 28, height: 24, alignment: .leading)
+                .frame(width: 24, height: 24, alignment: .leading)
 
             TimerDurationInputView(
                 duration: duration,
@@ -527,46 +711,17 @@ private struct TimerEntryCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var colorPicker: some View {
-        HStack(spacing: 4) {
-            ForEach(TimerColor.allCases, id: \.self) { color in
-                Circle()
-                    .fill(color.color.opacity(preset.color == color ? 1 : 0.35))
-                    .frame(width: 9, height: 9)
-                    .overlay(
-                        Circle()
-                            .stroke(Color.white.opacity(preset.color == color ? 0.85 : 0), lineWidth: 1)
-                    )
-                    .contentShape(Circle())
-                    .onTapGesture {
-                        preset.color = color
-                    }
-            }
-        }
-    }
-
     private var isStartEnabled: Bool {
         canStart && (preset.isPomodoro ? preset.workDuration > 0 : preset.duration > 0)
     }
 
-    private var startButton: some View {
-        Button {
-            onStart(preset)
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "play.fill")
-                    .font(.system(size: 8, weight: .bold))
-                Text(text(.timerStart))
-                    .panelTextFont(size: 9.5, weight: .bold)
-            }
-            .foregroundStyle(.black.opacity(0.85))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(preset.color.color.opacity(isStartEnabled ? 1 : 0.3)))
+    private func resetDuration() {
+        if preset.isPomodoro {
+            preset.workDuration = 25 * 60
+            preset.breakDuration = 5 * 60
+        } else {
+            preset.duration = 10 * 60
         }
-        .buttonStyle(.plain)
-        .disabled(!isStartEnabled)
-        .help(text(.timerStart))
     }
 
     private func text(_ key: AppTextKey) -> String {
@@ -574,7 +729,169 @@ private struct TimerEntryCard: View {
     }
 }
 
-// MARK: - Shared pieces
+private struct TimerColorMenu: View {
+    @Binding var selection: TimerColor
+    let symbolName: String
+    let language: AppLanguage
+    let help: String
+
+    var body: some View {
+        ZStack {
+            HStack(spacing: 2) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(selection.color)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(selection.color.opacity(0.11)))
+                    .overlay(Circle().stroke(selection.color.opacity(0.72), lineWidth: 1.5))
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 6.5, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            .padding(.trailing, 3)
+
+            Menu {
+                ForEach(TimerColor.allCases, id: \.self) { color in
+                    Button {
+                        selection = color
+                    } label: {
+                        Label(
+                            colorTitle(color),
+                            systemImage: selection == color ? "checkmark.circle.fill" : "circle"
+                        )
+                    }
+                }
+            } label: {
+                Color.clear
+                    .frame(width: 32, height: 22)
+                    .contentShape(Capsule())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+        }
+        .frame(width: 32, height: 22)
+        .fixedSize()
+        .help(help)
+    }
+
+    private func colorTitle(_ color: TimerColor) -> String {
+        switch (language, color) {
+        case (.japanese, .blue): return "ブルー"
+        case (.japanese, .green): return "グリーン"
+        case (.japanese, .orange): return "オレンジ"
+        case (.japanese, .pink): return "ピンク"
+        case (.english, .blue): return "Blue"
+        case (.english, .green): return "Green"
+        case (.english, .orange): return "Orange"
+        case (.english, .pink): return "Pink"
+        }
+    }
+}
+
+private struct TimerNameField: View {
+    let placeholder: String
+    @Binding var text: String
+
+    var body: some View {
+        TextField(placeholder, text: $text)
+            .textFieldStyle(.plain)
+            .panelTextFont(size: 9, weight: .medium)
+            .foregroundStyle(.white.opacity(0.84))
+            .padding(.horizontal, 8)
+            .frame(height: 27)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.black.opacity(0.16))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(Color.white.opacity(0.095), lineWidth: 1)
+            )
+    }
+}
+
+private struct TimerStartButton: View {
+    let title: String
+    let color: Color
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 8, weight: .bold))
+                Text(title)
+                    .panelTextFont(size: 9, weight: .bold)
+            }
+            .foregroundStyle(.black.opacity(0.85))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(color.opacity(isEnabled ? 1 : 0.3)))
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .help(title)
+    }
+}
+
+private struct TimerRunningTypeIcon: View {
+    let symbolName: String
+    let color: TimerColor
+
+    var body: some View {
+        Image(systemName: symbolName)
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(color.color)
+            .frame(width: 25, height: 25)
+            .background(Circle().fill(color.color.opacity(0.1)))
+            .overlay(Circle().stroke(color.color.opacity(0.74), lineWidth: 1.5))
+    }
+}
+
+private struct TimerRowDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.12))
+            .frame(width: 1, height: 16)
+    }
+}
+
+private struct TimerRunningRowStyle: ViewModifier {
+    let color: Color
+    var isAlerting = false
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 8)
+            .frame(minHeight: TimerLayoutMetrics.runningCardHeight)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(color.opacity(isAlerting ? 0.12 : 0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(color.opacity(isAlerting ? 0.5 : 0.18), lineWidth: 1)
+            )
+    }
+}
+
+private struct TimerSetupCardStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(8)
+            .frame(maxWidth: .infinity, minHeight: TimerLayoutMetrics.setupCardHeight, maxHeight: TimerLayoutMetrics.setupCardHeight, alignment: .topLeading)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.white.opacity(0.034))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(Color.white.opacity(0.07), lineWidth: 1)
+            )
+    }
+}
 
 private struct TimerSection<Content: View>: View {
     let title: String
@@ -615,10 +932,19 @@ private struct TimerEmptyRow: View {
 
     var body: some View {
         Text(message)
-            .panelTextFont(size: 10, weight: .medium, design: .monospaced)
-            .foregroundStyle(.white.opacity(0.38))
+            .panelTextFont(size: 9.5, weight: .medium, design: .monospaced)
+            .foregroundStyle(.white.opacity(0.36))
+            .padding(.horizontal, 8)
             .frame(height: 30, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.black.opacity(0.12))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(Color.white.opacity(0.05), lineWidth: 1)
+            )
             .lineLimit(1)
             .minimumScaleFactor(0.7)
     }
@@ -633,9 +959,9 @@ private struct TimerIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbolName)
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: 9.5, weight: .bold))
                 .foregroundStyle(accent)
-                .frame(width: 24, height: 24)
+                .frame(width: 23, height: 23)
                 .background(
                     Circle()
                         .fill(Color.white.opacity(isActive ? 0.12 : 0.05))

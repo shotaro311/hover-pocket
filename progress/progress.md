@@ -5,6 +5,13 @@ updated_by: codex
 status: active
 ---
 
+## 2026-08-12 macOS Timer Organized List UI
+
+- macOS Timerを、上段の「実行中」1列リストと下段の「新しく追加」3カードへ再構成した。実行中はストップウォッチ1件とカウントダウン最大4件を、種類、設定名、時間、pause / resume、stopを揃えた高さ38ptの1行カードで表示する。
+- ストップウォッチ、Timer、Pomodoroの追加カードを同じ高さで横並びにし、3種類すべてへ「名前を設定（任意）」と左上アイコンから開く4色メニューを追加した。色ドット列は廃止し、アイコンを`stopwatch.fill` / `hourglass` / `target`へ分けた。
+- 旧drafts JSON互換、ストップウォッチの名前・色引き継ぎ、Timer 2件 + Pomodoro 2件の同時実行、3アイコン非重複、全4パネル幅、Small / Large / Extra Large描画、署名済み開発bundleの起動を検証した。詳細: `progress/2026-08/2026-08-12_hover-pocket-timer-organized-list-ui.md`。
+- 公開release、appcast、Windows版は変更していない。
+
 ## 2026-08-12 macOS Latest Reinstall Readback
 
 - `/Applications/HoverPocket.app`の旧`0.1.0 (155)`を終了し、アプリ本体だけをmacOSのゴミ箱へ退避して、GitHub Latest `v0.1.0-161`の公開手動インストールZIPから`0.1.0 (161)`を再インストールした。Application Support内の設定・保存データは削除していない。
