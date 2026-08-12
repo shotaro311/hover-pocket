@@ -14,6 +14,7 @@ internal sealed class TimerVerifier
         try
         {
             VerifyDefaults(root);
+            VerifyLegacyDraftMigration(root);
             VerifyStateTransitions(root);
             VerifyPersistenceAndRestore(root);
             VerifyExpiredDiscard(root);
@@ -46,6 +47,48 @@ internal sealed class TimerVerifier
         return 1;
     }
 
+    private void VerifyLegacyDraftMigration(string root)
+    {
+        var directory = Path.Combine(root, "legacy-drafts");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "drafts.json"), """
+            {
+              "timer": {
+                "id": "53e928c8-914c-42ba-af01-a9037fa1b57e",
+                "title": "legacy timer",
+                "isPomodoro": false,
+                "durationSeconds": 90,
+                "workDurationSeconds": 1500,
+                "restDurationSeconds": 300,
+                "color": "pink",
+                "soundEnabled": false
+              },
+              "pomodoro": {
+                "id": "037728a1-19af-45e2-a24d-233f92c612ae",
+                "title": "legacy pomodoro",
+                "isPomodoro": true,
+                "durationSeconds": 1500,
+                "workDurationSeconds": 1200,
+                "restDurationSeconds": 240,
+                "color": "orange",
+                "soundEnabled": true
+              }
+            }
+            """);
+
+        var clock = new ManualTimerClock(new DateTimeOffset(2026, 8, 12, 0, 0, 0, TimeSpan.Zero));
+        using var store = NewStore(directory, clock);
+        var snapshot = store.GetSnapshot();
+        if (snapshot.DraftStopwatch != StopwatchPreset.DefaultDraft()
+            || snapshot.DraftTimer.Title != "legacy timer"
+            || snapshot.DraftTimer.DurationSeconds != 90
+            || snapshot.DraftPomodoro.Title != "legacy pomodoro"
+            || snapshot.DraftPomodoro.WorkDurationSeconds != 1200)
+        {
+            _failures.Add("legacy drafts: adding the stopwatch draft discarded existing timer settings");
+        }
+    }
+
     private void VerifyDefaults(string root)
     {
         var clock = new ManualTimerClock(new DateTimeOffset(2026, 7, 5, 0, 0, 0, TimeSpan.Zero));
@@ -61,6 +104,11 @@ internal sealed class TimerVerifier
         {
             _failures.Add("defaults: pomodoro work/rest durations were not 25/5 minutes");
         }
+
+        if (snapshot.DraftStopwatch != StopwatchPreset.DefaultDraft())
+        {
+            _failures.Add("defaults: stopwatch draft was not empty and blue");
+        }
     }
 
     private void VerifyStateTransitions(string root)
@@ -69,13 +117,21 @@ internal sealed class TimerVerifier
         using var store = NewStore(root, "transitions", clock);
         var preset = TimerPreset.DefaultTimerDraft() with { DurationSeconds = 60, SoundEnabled = false };
 
-        store.Start(preset);
-        store.Start(preset);
-        store.Start(preset);
+        for (var index = 0; index < TimerStore.MaxConcurrentTimers; index++)
+        {
+            store.Start(preset with { Title = $"Timer {index + 1}" });
+        }
+
         var snapshot = store.GetSnapshot();
         if (snapshot.RunningTimers.Count != TimerStore.MaxConcurrentTimers || snapshot.CanStartTimer)
         {
-            _failures.Add("state transitions: max two running timers was not enforced");
+            _failures.Add("state transitions: max four running timers was not enforced");
+        }
+
+        store.Start(preset with { Title = "blocked" });
+        if (store.GetSnapshot().RunningTimers.Count != TimerStore.MaxConcurrentTimers)
+        {
+            _failures.Add("state transitions: fifth timer was not blocked");
         }
 
         var timerId = snapshot.RunningTimers[0].Id;
@@ -197,29 +253,45 @@ internal sealed class TimerVerifier
     {
         var clock = new ManualTimerClock(new DateTimeOffset(2026, 8, 12, 0, 0, 0, TimeSpan.Zero));
         using var store = NewStore(root, "stopwatch", clock);
-
-        var started = store.StartStopwatch();
+        var preset = new StopwatchPreset("Shoot", TimerColor.Pink);
+        store.UpdateDraftStopwatch(preset);
+        var started = store.StartStopwatch(preset);
+        var firstId = started.RunningStopwatches.Single().Id;
         clock.Advance(TimeSpan.FromSeconds(2.25));
-        var running = store.GetSnapshot().Stopwatch;
-        store.PauseStopwatch();
+        var running = store.GetSnapshot().RunningStopwatches.Single(stopwatch => stopwatch.Id == firstId);
+        store.PauseStopwatch(firstId);
         clock.Advance(TimeSpan.FromSeconds(10));
-        var paused = store.GetSnapshot().Stopwatch;
-        store.StartStopwatch();
+        var paused = store.GetSnapshot().RunningStopwatches.Single(stopwatch => stopwatch.Id == firstId);
+        store.ResumeStopwatch(firstId);
         clock.Advance(TimeSpan.FromSeconds(1.5));
-        var resumed = store.GetSnapshot().Stopwatch;
-        var reset = store.ResetStopwatch().Stopwatch;
+        var resumed = store.GetSnapshot().RunningStopwatches.Single(stopwatch => stopwatch.Id == firstId);
 
-        if (!started.Stopwatch.IsRunning
+        for (var index = 1; index < TimerStore.MaxConcurrentStopwatches; index++)
+        {
+            store.StartStopwatch(preset with { Title = $"Stopwatch {index + 1}" });
+        }
+
+        var full = store.GetSnapshot();
+        store.StartStopwatch(preset);
+        var fifthBlocked = store.GetSnapshot().RunningStopwatches.Count == TimerStore.MaxConcurrentStopwatches;
+        var stopped = store.StopStopwatch(firstId);
+
+        if (!started.RunningStopwatches[0].IsRunning
+            || started.RunningStopwatches[0].Title != preset.Title
+            || started.RunningStopwatches[0].Color != preset.Color
             || !running.IsRunning
             || Math.Abs(running.ElapsedSeconds - 2.25) > 0.001
             || paused.IsRunning
             || Math.Abs(paused.ElapsedSeconds - 2.25) > 0.001
             || !resumed.IsRunning
             || Math.Abs(resumed.ElapsedSeconds - 3.75) > 0.001
-            || reset.IsRunning
-            || reset.ElapsedSeconds != 0)
+            || full.RunningStopwatches.Count != TimerStore.MaxConcurrentStopwatches
+            || full.CanStartStopwatch
+            || full.RunningStopwatches.Select(stopwatch => stopwatch.Id).Distinct().Count() != TimerStore.MaxConcurrentStopwatches
+            || !fifthBlocked
+            || stopped.RunningStopwatches.Count != TimerStore.MaxConcurrentStopwatches - 1)
         {
-            _failures.Add("stopwatch: start, pause, resume, or reset did not preserve elapsed time");
+            _failures.Add("stopwatch: multiple start, pause, resume, stop, or limit did not preserve independent state");
         }
     }
 

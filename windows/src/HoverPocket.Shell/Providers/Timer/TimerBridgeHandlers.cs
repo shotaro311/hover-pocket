@@ -23,15 +23,17 @@ internal sealed class TimerBridgeHandlers : IDisposable
     {
         _dispatcher = dispatcher;
         dispatcher.Register("timer.getState", (_, _) => Task.FromResult<object?>(NotifyAlertState(_store.GetSnapshot())));
+        dispatcher.Register("timer.updateStopwatchDraft", UpdateStopwatchDraftAsync);
         dispatcher.Register("timer.updateDraft", UpdateDraftAsync);
         dispatcher.Register("timer.start", StartAsync);
         dispatcher.Register("timer.pause", (parameters, _) => Task.FromResult<object?>(NotifyAlertState(_store.Pause(ReadRequiredGuid(parameters, "id")))));
         dispatcher.Register("timer.resume", (parameters, _) => Task.FromResult<object?>(NotifyAlertState(_store.Resume(ReadRequiredGuid(parameters, "id")))));
         dispatcher.Register("timer.stop", (parameters, _) => Task.FromResult<object?>(NotifyAlertState(_store.Stop(ReadRequiredGuid(parameters, "id")))));
         dispatcher.Register("timer.stopAlert", (_, _) => Task.FromResult<object?>(NotifyAlertState(_store.StopAlert())));
-        dispatcher.Register("timer.startStopwatch", (_, _) => Task.FromResult<object?>(NotifyAlertState(_store.StartStopwatch())));
-        dispatcher.Register("timer.pauseStopwatch", (_, _) => Task.FromResult<object?>(NotifyAlertState(_store.PauseStopwatch())));
-        dispatcher.Register("timer.resetStopwatch", (_, _) => Task.FromResult<object?>(NotifyAlertState(_store.ResetStopwatch())));
+        dispatcher.Register("timer.startStopwatch", StartStopwatchAsync);
+        dispatcher.Register("timer.pauseStopwatch", (parameters, _) => Task.FromResult<object?>(NotifyAlertState(_store.PauseStopwatch(ReadRequiredGuid(parameters, "id")))));
+        dispatcher.Register("timer.resumeStopwatch", (parameters, _) => Task.FromResult<object?>(NotifyAlertState(_store.ResumeStopwatch(ReadRequiredGuid(parameters, "id")))));
+        dispatcher.Register("timer.stopStopwatch", (parameters, _) => Task.FromResult<object?>(NotifyAlertState(_store.StopStopwatch(ReadRequiredGuid(parameters, "id")))));
         dispatcher.Register("timer.pinPreset", PinPresetAsync);
         dispatcher.Register("timer.removePinnedPreset", (parameters, _) => Task.FromResult<object?>(NotifyAlertState(_store.RemovePinnedPreset(ReadRequiredGuid(parameters, "id")))));
         dispatcher.Register("timer.togglePin", (parameters, _) => Task.FromResult<object?>(NotifyAlertState(_store.TogglePin(ReadRequiredGuid(parameters, "id")))));
@@ -52,6 +54,20 @@ internal sealed class TimerBridgeHandlers : IDisposable
             ? _store.UpdateDraftPomodoro(preset)
             : _store.UpdateDraftTimer(preset);
         return Task.FromResult<object?>(NotifyAlertState(snapshot));
+    }
+
+    private Task<object?> UpdateStopwatchDraftAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var preset = ReadRequiredObject<StopwatchPreset>(parameters, "preset");
+        return Task.FromResult<object?>(NotifyAlertState(_store.UpdateDraftStopwatch(preset)));
+    }
+
+    private Task<object?> StartStopwatchAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var preset = ReadRequiredObject<StopwatchPreset>(parameters, "preset");
+        return Task.FromResult<object?>(NotifyAlertState(_store.StartStopwatch(preset)));
     }
 
     private Task<object?> StartAsync(JsonElement? parameters, CancellationToken cancellationToken)

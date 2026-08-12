@@ -255,21 +255,39 @@ enum TimerVerificationCommand {
         store.updateDraftStopwatch(stopwatchDraft)
 
         let stopwatchStart = Date(timeIntervalSinceReferenceDate: 20_000)
-        store.startStopwatch(at: stopwatchStart)
-        let stopwatchRunningValid = store.stopwatch.isRunning
-            && store.stopwatch.title == stopwatchDraft.title
-            && store.stopwatch.color == stopwatchDraft.color
-            && abs(store.stopwatch.elapsed(at: stopwatchStart.addingTimeInterval(2.25)) - 2.25) < 0.001
-        store.pauseStopwatch(at: stopwatchStart.addingTimeInterval(3.5))
-        let stopwatchPausedValid = !store.stopwatch.isRunning
-            && abs(store.stopwatch.elapsed(at: stopwatchStart.addingTimeInterval(100)) - 3.5) < 0.001
-        store.startStopwatch(at: stopwatchStart.addingTimeInterval(200))
+        store.startStopwatch(preset: stopwatchDraft, at: stopwatchStart)
+        guard let firstStopwatchID = store.runningStopwatches.first?.id else {
+            return (
+                false,
+                pinValid && unpinValid,
+                !FileManager.default.fileExists(atPath: storageDirectory.path),
+                false,
+                false
+            )
+        }
+        let stopwatchRunningValid = store.runningStopwatches[0].isRunning
+            && store.runningStopwatches[0].title == stopwatchDraft.title
+            && store.runningStopwatches[0].color == stopwatchDraft.color
+            && abs(store.runningStopwatches[0].elapsed(at: stopwatchStart.addingTimeInterval(2.25)) - 2.25) < 0.001
+        store.pauseStopwatch(id: firstStopwatchID, at: stopwatchStart.addingTimeInterval(3.5))
+        let stopwatchPausedValid = !store.runningStopwatches[0].isRunning
+            && abs(store.runningStopwatches[0].elapsed(at: stopwatchStart.addingTimeInterval(100)) - 3.5) < 0.001
+        store.resumeStopwatch(id: firstStopwatchID, at: stopwatchStart.addingTimeInterval(200))
         let stopwatchResumedValid = abs(
-            store.stopwatch.elapsed(at: stopwatchStart.addingTimeInterval(201.25)) - 4.75
+            store.runningStopwatches[0].elapsed(at: stopwatchStart.addingTimeInterval(201.25)) - 4.75
         ) < 0.001
-        store.resetStopwatch()
-        let stopwatchResetValid = !store.stopwatch.isRunning
-            && store.stopwatch.elapsed(at: stopwatchStart) == 0
+        for index in 1..<TimerStore.maxConcurrentStopwatches {
+            var nextDraft = stopwatchDraft
+            nextDraft.title = "Stopwatch \(index + 1)"
+            store.startStopwatch(preset: nextDraft, at: stopwatchStart.addingTimeInterval(Double(index)))
+        }
+        let multipleStopwatchesValid = store.runningStopwatches.count == TimerStore.maxConcurrentStopwatches
+            && !store.canStartStopwatch
+            && Set(store.runningStopwatches.map(\.id)).count == TimerStore.maxConcurrentStopwatches
+        store.startStopwatch(preset: stopwatchDraft, at: stopwatchStart)
+        let fifthStopwatchBlocked = store.runningStopwatches.count == TimerStore.maxConcurrentStopwatches
+        store.stopStopwatch(id: firstStopwatchID)
+        let independentStopValid = store.runningStopwatches.count == TimerStore.maxConcurrentStopwatches - 1
 
         var timerOne = TimerPreset.defaultTimerDraft()
         timerOne.title = "Timer 1"
@@ -295,8 +313,16 @@ enum TimerVerificationCommand {
             startValid && pauseValid && resumeValid && stopValid,
             pinValid && unpinValid,
             storageIsolationValid,
-            stopwatchRunningValid && stopwatchPausedValid && stopwatchResumedValid && stopwatchResetValid,
-            TimerStore.maxConcurrentTimers == 4 && fourTimersValid && fifthTimerBlocked
+            stopwatchRunningValid
+                && stopwatchPausedValid
+                && stopwatchResumedValid
+                && multipleStopwatchesValid
+                && fifthStopwatchBlocked
+                && independentStopValid,
+            TimerStore.maxConcurrentStopwatches == 4
+                && TimerStore.maxConcurrentTimers == 4
+                && fourTimersValid
+                && fifthTimerBlocked
         )
     }
 
@@ -316,8 +342,12 @@ enum TimerVerificationCommand {
         var stopwatch = StopwatchPreset.defaultDraft()
         stopwatch.title = "撮影"
         store.updateDraftStopwatch(stopwatch)
-        store.startStopwatch(at: Date().addingTimeInterval(-83.45))
+        store.startStopwatch(preset: stopwatch, at: Date().addingTimeInterval(-83.45))
+        stopwatch.title = "編集"
+        stopwatch.color = .pink
+        store.startStopwatch(preset: stopwatch, at: Date().addingTimeInterval(-24.2))
         stopwatch.title = ""
+        stopwatch.color = .blue
         store.updateDraftStopwatch(stopwatch)
 
         var timerOne = TimerPreset.defaultTimerDraft()

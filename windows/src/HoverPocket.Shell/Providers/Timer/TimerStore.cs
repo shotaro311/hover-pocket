@@ -7,7 +7,8 @@ namespace HoverPocket.Shell.Providers.Timer;
 
 internal sealed class TimerStore : IDisposable
 {
-    public const int MaxConcurrentTimers = 2;
+    public const int MaxConcurrentStopwatches = 4;
+    public const int MaxConcurrentTimers = 4;
     public const int MaxPinnedPresets = 4;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -22,8 +23,6 @@ internal sealed class TimerStore : IDisposable
     private readonly ITimerAlertSound _alertSound;
     private readonly bool _enableScheduler;
     private System.Threading.Timer? _tickTimer;
-    private double _stopwatchAccumulatedSeconds;
-    private DateTimeOffset? _stopwatchStartedAtUtc;
     private bool _disposed;
 
     public TimerStore(
@@ -37,12 +36,15 @@ internal sealed class TimerStore : IDisposable
         _alertSound = alertSound ?? new SystemTimerAlertSound();
         _enableScheduler = enableScheduler;
 
-        DraftTimer = LoadOrDefault(DraftsPath, DraftsSnapshot.Default()).Timer;
-        DraftPomodoro = LoadOrDefault(DraftsPath, DraftsSnapshot.Default()).Pomodoro;
+        var drafts = LoadOrDefault(DraftsPath, DraftsSnapshot.Default());
+        DraftStopwatch = drafts.Stopwatch ?? StopwatchPreset.DefaultDraft();
+        DraftTimer = drafts.Timer;
+        DraftPomodoro = drafts.Pomodoro;
         PinnedPresets = LoadOrDefault(PinnedPath, Array.Empty<TimerPreset>())
             .Take(MaxPinnedPresets)
             .ToList();
         RunningTimers = RestoreRunningTimers();
+        RunningStopwatches = [];
         SyncTickTimer();
     }
 
@@ -54,9 +56,13 @@ internal sealed class TimerStore : IDisposable
 
     public TimerPreset DraftPomodoro { get; private set; }
 
+    public StopwatchPreset DraftStopwatch { get; private set; }
+
     public List<TimerPreset> PinnedPresets { get; private set; }
 
     public List<RunningTimer> RunningTimers { get; private set; }
+
+    public List<RunningStopwatch> RunningStopwatches { get; private set; }
 
     public TimerAlert? ActiveAlert { get; private set; }
 
@@ -79,6 +85,16 @@ internal sealed class TimerStore : IDisposable
         lock (_gate)
         {
             DraftTimer = preset with { IsPomodoro = false };
+            PersistDraftsLocked();
+            return BuildSnapshotLocked(_clock.UtcNow);
+        }
+    }
+
+    public TimerSnapshot UpdateDraftStopwatch(StopwatchPreset preset)
+    {
+        lock (_gate)
+        {
+            DraftStopwatch = preset;
             PersistDraftsLocked();
             return BuildSnapshotLocked(_clock.UtcNow);
         }
@@ -192,36 +208,66 @@ internal sealed class TimerStore : IDisposable
         }
     }
 
-    public TimerSnapshot StartStopwatch()
-    {
-        lock (_gate)
-        {
-            _stopwatchStartedAtUtc ??= _clock.UtcNow;
-            return BuildSnapshotLocked(_clock.UtcNow);
-        }
-    }
-
-    public TimerSnapshot PauseStopwatch()
+    public TimerSnapshot StartStopwatch(StopwatchPreset? preset = null)
     {
         lock (_gate)
         {
             var now = _clock.UtcNow;
-            if (_stopwatchStartedAtUtc is { } startedAt)
+            if (RunningStopwatches.Count < MaxConcurrentStopwatches)
             {
-                _stopwatchAccumulatedSeconds += Math.Max(0, now.Subtract(startedAt).TotalSeconds);
-                _stopwatchStartedAtUtc = null;
+                var selected = preset ?? DraftStopwatch;
+                RunningStopwatches.Add(new RunningStopwatch(
+                    Guid.NewGuid(),
+                    selected.Title,
+                    selected.Color,
+                    AccumulatedSeconds: 0,
+                    StartedAtUtc: now));
             }
 
             return BuildSnapshotLocked(now);
         }
     }
 
-    public TimerSnapshot ResetStopwatch()
+    public TimerSnapshot PauseStopwatch(Guid id)
     {
         lock (_gate)
         {
-            _stopwatchAccumulatedSeconds = 0;
-            _stopwatchStartedAtUtc = null;
+            var now = _clock.UtcNow;
+            var index = RunningStopwatches.FindIndex(stopwatch => stopwatch.Id == id);
+            if (index >= 0 && RunningStopwatches[index].IsRunning)
+            {
+                var stopwatch = RunningStopwatches[index];
+                RunningStopwatches[index] = stopwatch with
+                {
+                    AccumulatedSeconds = stopwatch.ElapsedSeconds(now),
+                    StartedAtUtc = null
+                };
+            }
+
+            return BuildSnapshotLocked(now);
+        }
+    }
+
+    public TimerSnapshot ResumeStopwatch(Guid id)
+    {
+        lock (_gate)
+        {
+            var now = _clock.UtcNow;
+            var index = RunningStopwatches.FindIndex(stopwatch => stopwatch.Id == id);
+            if (index >= 0 && !RunningStopwatches[index].IsRunning)
+            {
+                RunningStopwatches[index] = RunningStopwatches[index] with { StartedAtUtc = now };
+            }
+
+            return BuildSnapshotLocked(now);
+        }
+    }
+
+    public TimerSnapshot StopStopwatch(Guid id)
+    {
+        lock (_gate)
+        {
+            RunningStopwatches.RemoveAll(stopwatch => stopwatch.Id == id);
             return BuildSnapshotLocked(_clock.UtcNow);
         }
     }
@@ -411,16 +457,19 @@ internal sealed class TimerStore : IDisposable
 
     private TimerSnapshot BuildSnapshotLocked(DateTimeOffset now)
     {
-        var stopwatchElapsed = _stopwatchAccumulatedSeconds;
-        if (_stopwatchStartedAtUtc is { } stopwatchStartedAt)
-        {
-            stopwatchElapsed += Math.Max(0, now.Subtract(stopwatchStartedAt).TotalSeconds);
-        }
-
         return new TimerSnapshot(
+            DraftStopwatch,
             DraftTimer,
             DraftPomodoro,
             PinnedPresets.ToArray(),
+            RunningStopwatches.Select(stopwatch => new RunningStopwatchSnapshot(
+                stopwatch.Id,
+                stopwatch.Title,
+                stopwatch.Color,
+                stopwatch.AccumulatedSeconds,
+                stopwatch.StartedAtUtc,
+                stopwatch.IsRunning,
+                stopwatch.ElapsedSeconds(now))).ToArray(),
             RunningTimers.Select(timer => new RunningTimerSnapshot(
                 timer.Id,
                 timer.Title,
@@ -439,11 +488,7 @@ internal sealed class TimerStore : IDisposable
                 timer.RemainingSeconds(now),
                 timer.Progress(now))).ToArray(),
             ActiveAlert,
-            new StopwatchSnapshot(
-                _stopwatchAccumulatedSeconds,
-                _stopwatchStartedAtUtc,
-                _stopwatchStartedAtUtc is not null,
-                stopwatchElapsed),
+            RunningStopwatches.Count < MaxConcurrentStopwatches,
             RunningTimers.Count < MaxConcurrentTimers,
             PinnedPresets.Count < MaxPinnedPresets,
             now);
@@ -451,7 +496,7 @@ internal sealed class TimerStore : IDisposable
 
     private void PersistDraftsLocked()
     {
-        Persist(DraftsPath, new DraftsSnapshot(DraftTimer, DraftPomodoro));
+        Persist(DraftsPath, new DraftsSnapshot(DraftStopwatch, DraftTimer, DraftPomodoro));
     }
 
     private void PersistPinnedLocked()
@@ -541,11 +586,17 @@ internal sealed class TimerStore : IDisposable
         return Path.Combine(appData, "HoverPocket", "timer");
     }
 
-    private sealed record DraftsSnapshot(TimerPreset Timer, TimerPreset Pomodoro)
+    private sealed record DraftsSnapshot(
+        StopwatchPreset? Stopwatch,
+        TimerPreset Timer,
+        TimerPreset Pomodoro)
     {
         public static DraftsSnapshot Default()
         {
-            return new DraftsSnapshot(TimerPreset.DefaultTimerDraft(), TimerPreset.DefaultPomodoroDraft());
+            return new DraftsSnapshot(
+                StopwatchPreset.DefaultDraft(),
+                TimerPreset.DefaultTimerDraft(),
+                TimerPreset.DefaultPomodoroDraft());
         }
     }
 }

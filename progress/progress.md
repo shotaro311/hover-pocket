@@ -5,6 +5,12 @@ updated_by: codex
 status: active
 ---
 
+## 2026-08-12 Cross-platform Multiple Stopwatches and Timer UI
+
+- macOSとWindowsのストップウォッチを、名前・色・独立したpause / resume / stopを持つ最大4件の同時実行へ拡張した。カウントダウンも両OSで最大4件とし、別枠で扱う。
+- Windows Timerを「実行中」の1列コンパクトリストと「新しく追加」のストップウォッチ / タイマー / ポモドーロ3カードへ再構成した。名前欄、左上アイコンの色メニュー、種類別アイコン、sound、時間編集、pinを維持している。
+- macOSのSwift / 112 layout / 署名済みbundleと、WindowsのRelease cross-build / JavaScript / 600x430・520x372ブラウザ描画を検証した。Windows runnerと両OSの公開配信は未実施。詳細: `progress/2026-08/2026-08-12_hover-pocket-cross-platform-multiple-stopwatches.md`。
+
 ## 2026-08-12 macOS Timer Organized List UI
 
 - macOS Timerを、上段の「実行中」1列リストと下段の「新しく追加」3カードへ再構成した。実行中はストップウォッチ1件とカウントダウン最大4件を、種類、設定名、時間、pause / resume、stopを揃えた高さ38ptの1行カードで表示する。

@@ -144,23 +144,32 @@ internal sealed class UiModelVerifier
 
         var timerResponse = await dispatcher.ProcessRawMessageAsync(
             """{"id":"5","method":"timer.getState"}""");
-        if (!ResponseContains(timerResponse, "\"draftTimer\"") || !ResponseContains(timerResponse, "\"stopwatch\""))
+        if (!ResponseContains(timerResponse, "\"draftStopwatch\"") || !ResponseContains(timerResponse, "\"runningStopwatches\""))
         {
             _failures.Add("bridge dispatcher: timer.getState did not return timer state");
         }
 
         var stopwatchStartResponse = await dispatcher.ProcessRawMessageAsync(
-            """{"id":"5a","method":"timer.startStopwatch"}""");
-        if (!ResponseContains(stopwatchStartResponse, "\"isRunning\":true"))
+            """{"id":"5a","method":"timer.startStopwatch","params":{"preset":{"title":"Verify","color":"pink"}}}""");
+        if (!ResponseContains(stopwatchStartResponse, "\"runningStopwatches\":[{")
+            || !ResponseContains(stopwatchStartResponse, "\"title\":\"Verify\""))
         {
             _failures.Add("bridge dispatcher: timer.startStopwatch did not start the stopwatch");
         }
 
-        var stopwatchResetResponse = await dispatcher.ProcessRawMessageAsync(
-            """{"id":"5b","method":"timer.resetStopwatch"}""");
-        if (!ResponseContains(stopwatchResetResponse, "\"isRunning\":false"))
+        using var stopwatchDocument = JsonDocument.Parse(stopwatchStartResponse!);
+        var stopwatchId = stopwatchDocument.RootElement
+            .GetProperty("result")
+            .GetProperty("runningStopwatches")[0]
+            .GetProperty("id")
+            .GetString();
+        var stopwatchStopResponse = await dispatcher.ProcessRawMessageAsync(
+            "{\"id\":\"5b\",\"method\":\"timer.stopStopwatch\",\"params\":{\"id\":\""
+                + stopwatchId
+                + "\"}}");
+        if (!ResponseContains(stopwatchStopResponse, "\"runningStopwatches\":[]"))
         {
-            _failures.Add("bridge dispatcher: timer.resetStopwatch did not reset the stopwatch");
+            _failures.Add("bridge dispatcher: timer.stopStopwatch did not stop the selected stopwatch");
         }
 
         var clipboardResponse = await dispatcher.ProcessRawMessageAsync(

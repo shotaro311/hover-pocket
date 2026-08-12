@@ -87,8 +87,8 @@ struct TimerView: View {
                 TimerEmptyRow(message: text(.timerNoRunning))
             } else {
                 VStack(spacing: TimerLayoutMetrics.runningCardSpacing) {
-                    if store.stopwatch.isActive {
-                        stopwatchRunningRow
+                    ForEach(store.runningStopwatches) { stopwatch in
+                        stopwatchRunningRow(stopwatch)
                     }
 
                     if let alert = store.activeAlert,
@@ -115,7 +115,6 @@ struct TimerView: View {
     }
 
     private var runningItemCount: Int {
-        let stopwatchCount = store.stopwatch.isActive ? 1 : 0
         let detachedAlertCount: Int
         if let alert = store.activeAlert,
            !store.runningTimers.contains(where: { $0.id == alert.id }) {
@@ -123,14 +122,14 @@ struct TimerView: View {
         } else {
             detachedAlertCount = 0
         }
-        return stopwatchCount + store.runningTimers.count + detachedAlertCount
+        return store.runningStopwatches.count + store.runningTimers.count + detachedAlertCount
     }
 
-    private var stopwatchRunningRow: some View {
+    private func stopwatchRunningRow(_ stopwatch: RunningStopwatch) -> some View {
         HStack(spacing: 7) {
             TimerRunningTypeIcon(
                 symbolName: Self.stopwatchSymbolName,
-                color: store.stopwatch.color
+                color: stopwatch.color
             )
 
             Text(text(.timerStopwatch))
@@ -140,37 +139,37 @@ struct TimerView: View {
 
             TimerRowDivider()
 
-            Text(displayName(store.stopwatch.title))
+            Text(displayName(stopwatch.title))
                 .panelTextFont(size: 9, weight: .medium)
-                .foregroundStyle(.white.opacity(store.stopwatch.title.isEmpty ? 0.28 : 0.62))
+                .foregroundStyle(.white.opacity(stopwatch.title.isEmpty ? 0.28 : 0.62))
                 .lineLimit(1)
 
             Spacer(minLength: 6)
 
             StopwatchElapsedText(
-                state: store.stopwatch,
-                color: store.stopwatch.color.color,
+                state: stopwatch,
+                color: stopwatch.color.color,
                 fontSize: 13
             )
             .frame(minWidth: 78, alignment: .trailing)
 
             TimerIconButton(
-                symbolName: store.stopwatch.isRunning ? "pause.fill" : "play.fill",
-                accent: store.stopwatch.color.color,
-                isActive: store.stopwatch.isRunning
+                symbolName: stopwatch.isRunning ? "pause.fill" : "play.fill",
+                accent: stopwatch.color.color,
+                isActive: stopwatch.isRunning
             ) {
-                store.stopwatch.isRunning
-                    ? store.pauseStopwatch()
-                    : store.startStopwatch()
+                stopwatch.isRunning
+                    ? store.pauseStopwatch(id: stopwatch.id)
+                    : store.resumeStopwatch(id: stopwatch.id)
             }
-            .help(store.stopwatch.isRunning ? text(.timerPause) : text(.timerResume))
+            .help(stopwatch.isRunning ? text(.timerPause) : text(.timerResume))
 
             TimerIconButton(symbolName: "stop.fill", accent: .red.opacity(0.78)) {
-                store.resetStopwatch()
+                store.stopStopwatch(id: stopwatch.id)
             }
             .help(text(.timerStop))
         }
-        .modifier(TimerRunningRowStyle(color: store.stopwatch.color.color))
+        .modifier(TimerRunningRowStyle(color: stopwatch.color.color))
     }
 
     private func finishedAlertRow(_ alert: TimerAlert) -> some View {
@@ -336,10 +335,10 @@ struct TimerView: View {
             HStack(alignment: .top, spacing: TimerLayoutMetrics.entrySectionSpacing) {
                 StopwatchEntryCard(
                     preset: draftStopwatchBinding,
-                    stopwatch: store.stopwatch,
+                    canStart: store.canStartStopwatch,
                     settings: settings,
-                    onStart: { store.startStopwatch() },
-                    onReset: { store.resetStopwatch() }
+                    onStart: { store.startStopwatch(preset: store.draftStopwatch) },
+                    onReset: { store.updateDraftStopwatch(.defaultDraft()) }
                 )
                 .frame(minWidth: 0, maxWidth: .infinity)
 
@@ -505,7 +504,7 @@ struct TimerView: View {
 }
 
 private struct StopwatchElapsedText: View {
-    let state: StopwatchState
+    let state: RunningStopwatch
     let color: Color
     let fontSize: CGFloat
 
@@ -533,7 +532,7 @@ private struct StopwatchElapsedText: View {
 
 private struct StopwatchEntryCard: View {
     @Binding var preset: StopwatchPreset
-    let stopwatch: StopwatchState
+    let canStart: Bool
     @ObservedObject var settings: AppSettings
     let onStart: () -> Void
     let onReset: () -> Void
@@ -556,11 +555,11 @@ private struct StopwatchEntryCard: View {
             HStack(spacing: 6) {
                 TimerIconButton(
                     symbolName: "arrow.counterclockwise",
-                    accent: .white.opacity(stopwatch.isActive ? 0.62 : 0.24)
+                    accent: .white.opacity(preset == .defaultDraft() ? 0.24 : 0.62)
                 ) {
                     onReset()
                 }
-                .disabled(!stopwatch.isActive)
+                .disabled(preset == .defaultDraft())
                 .help(text(.timerReset))
 
                 Spacer(minLength: 4)
@@ -568,7 +567,7 @@ private struct StopwatchEntryCard: View {
                 TimerStartButton(
                     title: text(.timerStart),
                     color: preset.color.color,
-                    isEnabled: !stopwatch.isActive,
+                    isEnabled: canStart,
                     action: onStart
                 )
             }

@@ -501,9 +501,9 @@ window.__hoverPocketVerify = {
     if (timerProvider) {
       window.__hoverPocketVerifyStep = "select-timer";
       render(await request("provider.select", { id: timerProvider.id }));
-      const pomodoroCard = await waitForElement(".hp-timer .hp-timer-section.is-pomodoro", 4500);
+      const pomodoroCard = await waitForElement(".hp-timer .hp-timer-entry.is-pomodoro", 4500);
       const timerRoot = pomodoroCard?.closest(".hp-timer");
-      const timerCard = timerRoot?.querySelector(".hp-timer-section.is-timer");
+      const timerCard = timerRoot?.querySelector(".hp-timer-entry.is-timer");
       const timerStack = timerRoot?.querySelector(".hp-timer-stack");
       const sections = [...(timerRoot?.querySelectorAll(".hp-timer-section") ?? [])];
       timerLayoutOk = Boolean(timerRoot && timerStack && timerCard && pomodoroCard)
@@ -513,11 +513,16 @@ window.__hoverPocketVerify = {
       const durationRail = timerRoot?.querySelector("[data-duration-rail]");
       durationRail?.dispatchEvent(new Event("input", { bubbles: true }));
       timerInteractionStableOk = Boolean(durationRail?.isConnected && durationRail === timerRoot?.querySelector("[data-duration-rail]"));
-      const stopwatch = timerRoot?.querySelector(".hp-timer-section.is-stopwatch [data-stopwatch]");
+      const stopwatchEntry = timerRoot?.querySelector(".hp-timer-section.is-add .hp-timer-entry.is-stopwatch");
+      const runningStopwatch = timerRoot?.querySelector(".hp-timer-section.is-running [data-stopwatch]");
       timerStopwatchOk = Boolean(
-        stopwatch?.querySelector("[data-stopwatch-elapsed]")
-        && stopwatch.querySelector("[data-stopwatch-toggle]")
-        && stopwatch.querySelector("[data-stopwatch-reset]"),
+        stopwatchEntry?.querySelector("[data-color-trigger]")
+        && stopwatchEntry.querySelector("[data-title]")
+        && stopwatchEntry.querySelector("[data-start]")
+        && (!runningStopwatch || (
+          runningStopwatch.querySelector("[data-stopwatch-elapsed]")
+          && runningStopwatch.querySelector("[data-stopwatch-toggle]")
+          && runningStopwatch.querySelector("[data-stopwatch-stop]"))),
       );
     }
     const targetProvider = state.providers.find((provider) => provider.id !== originalProvider) ?? state.providers[0];

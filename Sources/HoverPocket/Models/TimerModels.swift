@@ -123,18 +123,15 @@ struct TimerAlert: Equatable, Identifiable, Sendable {
     let soundEnabled: Bool
 }
 
-struct StopwatchState: Equatable, Sendable {
-    var title = ""
-    var color: TimerColor = .blue
+struct RunningStopwatch: Equatable, Identifiable, Sendable {
+    let id: UUID
+    var title: String
+    var color: TimerColor
     var accumulated: TimeInterval = 0
     var startedAt: Date?
 
     var isRunning: Bool {
         startedAt != nil
-    }
-
-    var isActive: Bool {
-        isRunning || accumulated > 0
     }
 
     func elapsed(at date: Date) -> TimeInterval {

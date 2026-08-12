@@ -5,6 +5,7 @@ import Foundation
 @MainActor
 final class TimerStore: ObservableObject {
     static let shared = TimerStore()
+    static let maxConcurrentStopwatches = 4
     static let maxConcurrentTimers = 4
     static let maxPinnedPresets = 4
 
@@ -12,9 +13,9 @@ final class TimerStore: ObservableObject {
     @Published private(set) var draftTimer = TimerPreset.defaultTimerDraft()
     @Published private(set) var draftPomodoro = TimerPreset.defaultPomodoroDraft()
     @Published private(set) var pinnedPresets: [TimerPreset] = []
+    @Published private(set) var runningStopwatches: [RunningStopwatch] = []
     @Published private(set) var runningTimers: [RunningTimer] = []
     @Published private(set) var activeAlert: TimerAlert?
-    @Published private(set) var stopwatch = StopwatchState()
     @Published private(set) var now = Date()
 
     private let fileManager: FileManager
@@ -67,6 +68,10 @@ final class TimerStore: ObservableObject {
 
     var canStartTimer: Bool {
         runningTimers.count < Self.maxConcurrentTimers
+    }
+
+    var canStartStopwatch: Bool {
+        runningStopwatches.count < Self.maxConcurrentStopwatches
     }
 
     var canPin: Bool {
@@ -135,23 +140,36 @@ final class TimerStore: ObservableObject {
         activeAlert = nil
     }
 
-    func startStopwatch(at date: Date = Date()) {
-        guard !stopwatch.isRunning else { return }
-        if !stopwatch.isActive {
-            stopwatch.title = draftStopwatch.title
-            stopwatch.color = draftStopwatch.color
-        }
-        stopwatch.startedAt = date
+    func startStopwatch(preset: StopwatchPreset? = nil, at date: Date = Date()) {
+        guard canStartStopwatch else { return }
+        let preset = preset ?? draftStopwatch
+        runningStopwatches.append(
+            RunningStopwatch(
+                id: UUID(),
+                title: preset.title,
+                color: preset.color,
+                startedAt: date
+            )
+        )
     }
 
-    func pauseStopwatch(at date: Date = Date()) {
-        guard stopwatch.isRunning else { return }
-        stopwatch.accumulated = stopwatch.elapsed(at: date)
-        stopwatch.startedAt = nil
+    func pauseStopwatch(id: UUID, at date: Date = Date()) {
+        guard let index = runningStopwatches.firstIndex(where: { $0.id == id }),
+              runningStopwatches[index].isRunning
+        else { return }
+        runningStopwatches[index].accumulated = runningStopwatches[index].elapsed(at: date)
+        runningStopwatches[index].startedAt = nil
     }
 
-    func resetStopwatch() {
-        stopwatch = StopwatchState()
+    func resumeStopwatch(id: UUID, at date: Date = Date()) {
+        guard let index = runningStopwatches.firstIndex(where: { $0.id == id }),
+              !runningStopwatches[index].isRunning
+        else { return }
+        runningStopwatches[index].startedAt = date
+    }
+
+    func stopStopwatch(id: UUID) {
+        runningStopwatches.removeAll { $0.id == id }
     }
 
     // MARK: - Drafts and pinned presets
