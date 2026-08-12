@@ -16,7 +16,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     env:
-      HOVERPOCKET_VERIFY_LOG: ${{ runner.temp }}/hoverpocket-verify.log
+      HOVERPOCKET_VERIFY_LOG: ${{ github.workspace }}/hoverpocket-verify.log
     steps:
       - name: Checkout
         uses: actions/checkout@v6
