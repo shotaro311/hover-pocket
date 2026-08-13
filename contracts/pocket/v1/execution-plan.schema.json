@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/execution-plan/v1",
+  "title": "HoverPocket canonical execution plan v1",
+  "type": "object",
+  "required": [
+    "$schema",
+    "planId",
+    "planVersion",
+    "createdAt",
+    "origin",
+    "principal",
+    "steps",
+    "approval",
+    "requiredPermissions",
+    "canonicalDigest"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "hoverpocket://schemas/execution-plan/v1"
+    },
+    "planId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "maxLength": 128
+    },
+    "planVersion": {
+      "const": 1
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "origin": {
+      "type": "string",
+      "enum": [
+        "native_ui",
+        "voice",
+        "text",
+        "pocket_surface",
+        "mcp",
+        "connector"
+      ]
+    },
+    "principal": {
+      "type": "object",
+      "required": [
+        "userId"
+      ],
+      "properties": {
+        "userId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "maxLength": 128
+        },
+        "pocketAppId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z0-9][a-z0-9-]*){2,}$",
+          "maxLength": 160
+        },
+        "agentSessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/step"
+      },
+      "minItems": 1,
+      "maxItems": 32
+    },
+    "approval": {
+      "type": "object",
+      "required": [
+        "mode",
+        "group",
+        "exactArgumentsRequired"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "none",
+            "before_writes",
+            "per_step"
+          ]
+        },
+        "group": {
+          "type": "string",
+          "enum": [
+            "none",
+            "all_writes",
+            "step"
+          ]
+        },
+        "exactArgumentsRequired": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "requiredPermissions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*)+$",
+        "maxLength": 128
+      },
+      "maxItems": 64,
+      "uniqueItems": true
+    },
+    "canonicalDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "anyJson": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/anyJson"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/anyJson"
+          }
+        }
+      ]
+    },
+    "step": {
+      "type": "object",
+      "required": [
+        "stepId",
+        "capabilityId",
+        "capabilityVersion",
+        "arguments",
+        "idempotencyKey",
+        "dependsOn"
+      ],
+      "properties": {
+        "stepId": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+        },
+        "capabilityId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*){2,}$",
+          "maxLength": 128
+        },
+        "capabilityVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "arguments": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/anyJson"
+          }
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "minLength": 16,
+          "maxLength": 128
+        },
+        "dependsOn": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+          },
+          "maxItems": 32,
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

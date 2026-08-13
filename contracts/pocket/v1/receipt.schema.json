@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/receipt/v1",
+  "title": "HoverPocket CapabilityReceipt v1",
+  "type": "object",
+  "required": [
+    "$schema",
+    "invocationId",
+    "status",
+    "capability",
+    "readback",
+    "auditEntryId",
+    "completedAt"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "hoverpocket://schemas/receipt/v1"
+    },
+    "invocationId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "maxLength": 128
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "succeeded",
+        "rejected",
+        "failed",
+        "partial",
+        "unknown"
+      ]
+    },
+    "capability": {
+      "type": "object",
+      "required": [
+        "id",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*){2,}$",
+          "maxLength": 128
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "output": {
+      "$ref": "#/$defs/anyJson"
+    },
+    "readback": {
+      "type": "object",
+      "required": [
+        "status",
+        "strategy"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "verified",
+            "mismatch",
+            "unavailable"
+          ]
+        },
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "none",
+            "entity_get_by_id",
+            "capability_query",
+            "same_store_snapshot",
+            "os_state",
+            "content_digest"
+          ]
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "evidenceDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "rollback": {
+      "type": "object",
+      "required": [
+        "available"
+      ],
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "not_requested",
+            "succeeded",
+            "failed"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "auditEntryId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "maxLength": 128
+    },
+    "safeError": {
+      "type": "object",
+      "required": [
+        "code",
+        "retryable",
+        "messageKey"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{2,95}$"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "messageKey": {
+          "type": "string",
+          "pattern": "^error\\.[a-z0-9_.]+$",
+          "maxLength": 160
+        }
+      },
+      "additionalProperties": false
+    },
+    "completedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "anyJson": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/anyJson"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/anyJson"
+          }
+        }
+      ]
+    }
+  }
+}

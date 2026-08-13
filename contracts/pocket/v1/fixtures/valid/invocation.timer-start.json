@@ -1,0 +1,20 @@
+{
+  "$schema": "hoverpocket://schemas/invocation/v1",
+  "invocationId": "invocation-timer-start-001",
+  "capabilityId": "timer.countdown.start",
+  "capabilityVersion": 1,
+  "origin": "voice",
+  "principal": {
+    "userId": "user-fixture",
+    "pocketAppId": "local.example.today-focus",
+    "agentSessionId": "session-root-a"
+  },
+  "arguments": {
+    "durationSeconds": 600,
+    "title": "Focus",
+    "sourceRef": "event-ref-fixture"
+  },
+  "idempotencyKey": "idem-timer-start-0001",
+  "traceId": "trace-today-focus-001",
+  "createdAt": "2026-08-13T12:00:00Z"
+}

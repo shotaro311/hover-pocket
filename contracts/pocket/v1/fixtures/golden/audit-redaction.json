@@ -1,0 +1,69 @@
+{
+  "policyVersion": 1,
+  "allowedTopLevelKeys": [
+    "approvalDecision",
+    "approvalPolicy",
+    "auditEntryId",
+    "capability",
+    "durationMs",
+    "idempotencyReplay",
+    "inputDigest",
+    "invocationId",
+    "origin",
+    "permissionDecision",
+    "pocketApp",
+    "principalPseudonym",
+    "readback",
+    "retryCount",
+    "safeErrorCode",
+    "status",
+    "timestamp",
+    "traceId"
+  ],
+  "forbiddenKeys": [
+    "arguments",
+    "authorization",
+    "calendarLocation",
+    "calendarNotes",
+    "calendarTitle",
+    "clipboardContent",
+    "filesystemPath",
+    "oauthToken",
+    "output",
+    "processCommandLine",
+    "rawException",
+    "rawTranscript",
+    "sourcePrompt",
+    "stickyBody"
+  ],
+  "entry": {
+    "approvalDecision": "approved",
+    "approvalPolicy": "broker_policy",
+    "auditEntryId": "audit-timer-start-001",
+    "capability": {
+      "id": "timer.countdown.start",
+      "version": 1,
+      "effect": "reversible_local_write"
+    },
+    "durationMs": 42,
+    "idempotencyReplay": false,
+    "inputDigest": "sha256:f8eac947b6117c62f315ca3d5c540a43aa95061bbdeeb42660befabdde587c52",
+    "invocationId": "invocation-timer-start-001",
+    "origin": "voice",
+    "permissionDecision": "granted",
+    "pocketApp": {
+      "id": "local.example.today-focus",
+      "version": "1.0.0"
+    },
+    "principalPseudonym": "user-sha256-fixture",
+    "readback": {
+      "status": "verified",
+      "evidenceDigest": "sha256:2fcd64001b1f4ca9eaf2979723523222b45a637455664cea62689676a0fe80c5"
+    },
+    "retryCount": 0,
+    "safeErrorCode": null,
+    "status": "succeeded",
+    "timestamp": "2026-08-13T12:00:02Z",
+    "traceId": "trace-today-focus-001"
+  }
+}

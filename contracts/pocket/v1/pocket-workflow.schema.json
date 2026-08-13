@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/pocket-workflow/v1",
+  "title": "HoverPocket finite Pocket workflow v1",
+  "type": "object",
+  "required": [
+    "$schema",
+    "workflowVersion",
+    "id",
+    "inputs",
+    "approval",
+    "steps",
+    "onPartialFailure",
+    "limits"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "hoverpocket://schemas/pocket-workflow/v1"
+    },
+    "workflowVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    },
+    "inputs": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+        "maxLength": 64
+      },
+      "additionalProperties": {
+        "type": "string",
+        "enum": [
+          "string",
+          "integer",
+          "number",
+          "boolean",
+          "date-time",
+          "entity-ref"
+        ]
+      }
+    },
+    "approval": {
+      "type": "object",
+      "required": [
+        "mode",
+        "group"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "none",
+            "before_writes",
+            "per_step"
+          ]
+        },
+        "group": {
+          "type": "string",
+          "enum": [
+            "none",
+            "all_writes",
+            "step"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/step"
+      },
+      "minItems": 1,
+      "maxItems": 32
+    },
+    "onPartialFailure": {
+      "type": "object",
+      "required": [
+        "mode",
+        "presentReceipt"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "stop",
+            "continue",
+            "compensate_if_available"
+          ]
+        },
+        "presentReceipt": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "limits": {
+      "type": "object",
+      "required": [
+        "maxSteps",
+        "maxDepth",
+        "timeoutSeconds"
+      ],
+      "properties": {
+        "maxSteps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "maxDepth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "anyJson": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/anyJson"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/anyJson"
+          }
+        }
+      ]
+    },
+    "step": {
+      "type": "object",
+      "required": [
+        "id",
+        "use",
+        "with",
+        "dependsOn"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+        },
+        "use": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*){2,}@[1-9][0-9]*$",
+          "maxLength": 160
+        },
+        "with": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/anyJson"
+          }
+        },
+        "dependsOn": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+          },
+          "maxItems": 32,
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

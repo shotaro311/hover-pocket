@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/agent-session-summary/v1",
+  "title": "HoverPocket root-scoped agent session summary v1",
+  "type": "object",
+  "required": [
+    "$schema",
+    "sessionId",
+    "rootSessionId",
+    "title",
+    "status",
+    "updatedAt",
+    "navigation"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "hoverpocket://schemas/agent-session-summary/v1"
+    },
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "maxLength": 128
+    },
+    "rootSessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "maxLength": 128
+    },
+    "parentSessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "maxLength": 128
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "waiting_for_user",
+        "succeeded",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "safeSummary": {
+      "type": "string",
+      "maxLength": 240
+    },
+    "progress": {
+      "type": "object",
+      "required": [
+        "completed",
+        "total"
+      ],
+      "properties": {
+        "completed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "navigation": {
+      "type": "string",
+      "enum": [
+        "lane_detail",
+        "unavailable"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,65 @@
+name: Verify Pocket Contracts
+
+on:
+  push:
+    paths:
+      - "contracts/pocket/v1/**"
+      - "docs/adr/**"
+      - "script/verify_pocket_contracts.py"
+      - ".github/workflows/pocket-contracts-verify.yml"
+  pull_request:
+    paths:
+      - "contracts/pocket/v1/**"
+      - "docs/adr/**"
+      - "script/verify_pocket_contracts.py"
+      - ".github/workflows/pocket-contracts-verify.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: ${{ matrix.name }} deterministic contract verifier
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu
+            os: ubuntu-latest
+          - name: macOS
+            os: macos-latest
+          - name: Windows
+            os: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Verify contracts twice (macOS and Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 script/verify_pocket_contracts.py --report-json pocket-contracts-report-1.json --quiet
+          python3 script/verify_pocket_contracts.py --report-json pocket-contracts-report-2.json --quiet
+          python3 - <<'PY'
+          from pathlib import Path
+
+          first = Path("pocket-contracts-report-1.json").read_bytes()
+          second = Path("pocket-contracts-report-2.json").read_bytes()
+          if first != second:
+              raise SystemExit("contract verifier report is not deterministic")
+          print(first.decode("utf-8"), end="")
+          PY
+
+      - name: Verify contracts twice (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          py -3 script/verify_pocket_contracts.py --report-json pocket-contracts-report-1.json --quiet
+          py -3 script/verify_pocket_contracts.py --report-json pocket-contracts-report-2.json --quiet
+          py -3 -c "from pathlib import Path; a=Path('pocket-contracts-report-1.json').read_bytes(); b=Path('pocket-contracts-report-2.json').read_bytes(); assert a == b, 'contract verifier report is not deterministic'; print(a.decode('utf-8'), end='')"

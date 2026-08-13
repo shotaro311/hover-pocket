@@ -1,0 +1,69 @@
+{
+  "$schema": "hoverpocket://schemas/pocket-app/v1",
+  "apiVersion": "hoverpocket.app/v1",
+  "id": "local.example.today-focus",
+  "name": "Today Focus Pocket",
+  "version": "1.0.0",
+  "minHostVersion": "1.0.0",
+  "intent": "../outside.md",
+  "state": {
+    "schema": "data.schema.json",
+    "store": "user-data://local.example.today-focus"
+  },
+  "surfaces": [
+    {
+      "id": "main",
+      "kind": "declarative",
+      "source": "surfaces/main.surface.json"
+    }
+  ],
+  "requestedCapabilities": [
+    {
+      "id": "calendar.events.list",
+      "version": 1,
+      "scope": {
+        "range": "today"
+      }
+    },
+    {
+      "id": "sticky.note.get",
+      "version": 1,
+      "scope": {
+        "namespace": "today-focus"
+      }
+    },
+    {
+      "id": "sticky.note.upsert",
+      "version": 1,
+      "scope": {
+        "namespace": "today-focus"
+      }
+    },
+    {
+      "id": "timer.countdown.get",
+      "version": 1
+    },
+    {
+      "id": "timer.countdown.start",
+      "version": 1
+    }
+  ],
+  "workflows": {
+    "startFocus": "workflows/start-focus.workflow.json"
+  },
+  "tests": [
+    "tests/calendar-read.json",
+    "tests/start-focus-approved.json",
+    "tests/start-focus-idempotent-replay.json",
+    "tests/start-focus-rejected.json"
+  ],
+  "workspace": {
+    "ownership": "user",
+    "definitionRoot": "app_definition",
+    "dataRoot": "separate_user_data",
+    "secrets": "credential_store_only",
+    "exportable": true,
+    "deletable": true,
+    "rollback": "versioned_snapshot"
+  }
+}

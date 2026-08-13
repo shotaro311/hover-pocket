@@ -1,0 +1,374 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/capability-descriptor/v1",
+  "title": "HoverPocket PocketCapability descriptor v1",
+  "type": "object",
+  "required": [
+    "$schema",
+    "id",
+    "version",
+    "titleKey",
+    "effect",
+    "permissions",
+    "approvalPolicy",
+    "idempotency",
+    "availability",
+    "limits",
+    "inputSchema",
+    "outputSchema",
+    "readback"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "hoverpocket://schemas/capability-descriptor/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*){2,}$",
+      "maxLength": 128
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "titleKey": {
+      "type": "string",
+      "pattern": "^capability\\.[a-z0-9_.]+$",
+      "maxLength": 160
+    },
+    "effect": {
+      "type": "string",
+      "enum": [
+        "pure",
+        "private_read",
+        "reversible_local_write",
+        "external_write",
+        "destructive_sensitive",
+        "native_authority"
+      ]
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*)+$",
+        "maxLength": 128
+      },
+      "maxItems": 32,
+      "uniqueItems": true
+    },
+    "approvalPolicy": {
+      "type": "string",
+      "enum": [
+        "none",
+        "permission_grant",
+        "broker_policy",
+        "per_call",
+        "strong_per_call",
+        "runtime_prohibited"
+      ]
+    },
+    "idempotency": {
+      "type": "string",
+      "enum": [
+        "not_applicable",
+        "optional",
+        "required"
+      ]
+    },
+    "availability": {
+      "type": "object",
+      "required": [
+        "macos",
+        "windows"
+      ],
+      "properties": {
+        "macos": {
+          "type": "string",
+          "enum": [
+            "available",
+            "unavailable",
+            "planned"
+          ]
+        },
+        "windows": {
+          "type": "string",
+          "enum": [
+            "available",
+            "unavailable",
+            "planned"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "limits": {
+      "type": "object",
+      "required": [
+        "timeoutMs",
+        "maxPayloadBytes",
+        "maxCallsPerMinute"
+      ],
+      "properties": {
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 120000
+        },
+        "maxPayloadBytes": {
+          "type": "integer",
+          "minimum": 256,
+          "maximum": 1048576
+        },
+        "maxCallsPerMinute": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 6000
+        }
+      },
+      "additionalProperties": false
+    },
+    "inputSchema": {
+      "$ref": "#/$defs/embeddedObjectSchema"
+    },
+    "outputSchema": {
+      "$ref": "#/$defs/embeddedObjectSchema"
+    },
+    "readback": {
+      "type": "object",
+      "required": [
+        "strategy",
+        "match"
+      ],
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "none",
+            "entity_get_by_id",
+            "capability_query",
+            "same_store_snapshot",
+            "os_state",
+            "content_digest"
+          ]
+        },
+        "capabilityId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*){2,}$",
+          "maxLength": 128
+        },
+        "capabilityVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "match": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "maxLength": 64
+          },
+          "maxItems": 32,
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "anyJson": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/anyJson"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/anyJson"
+          }
+        }
+      ]
+    },
+    "embeddedValueSchema": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "null",
+                "boolean",
+                "integer",
+                "number",
+                "string",
+                "array",
+                "object"
+              ]
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "null",
+                  "boolean",
+                  "integer",
+                  "number",
+                  "string",
+                  "array",
+                  "object"
+                ]
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            }
+          ]
+        },
+        "enum": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/anyJson"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "const": {
+          "$ref": "#/$defs/anyJson"
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "date",
+            "date-time",
+            "uuid"
+          ]
+        },
+        "pattern": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "minimum": {
+          "type": "number"
+        },
+        "maximum": {
+          "type": "number"
+        },
+        "minLength": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "minItems": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxItems": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uniqueItems": {
+          "type": "boolean"
+        },
+        "items": {
+          "$ref": "#/$defs/embeddedValueSchema"
+        },
+        "required": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "maxLength": 64
+          },
+          "uniqueItems": true
+        },
+        "properties": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "maxLength": 64
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/embeddedValueSchema"
+          }
+        },
+        "additionalProperties": {
+          "oneOf": [
+            {
+              "const": false
+            },
+            {
+              "$ref": "#/$defs/embeddedValueSchema"
+            }
+          ]
+        },
+        "default": {
+          "$ref": "#/$defs/anyJson"
+        }
+      },
+      "additionalProperties": false
+    },
+    "embeddedObjectSchema": {
+      "type": "object",
+      "required": [
+        "type",
+        "properties",
+        "additionalProperties"
+      ],
+      "properties": {
+        "type": {
+          "const": "object"
+        },
+        "required": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "maxLength": 64
+          },
+          "uniqueItems": true
+        },
+        "properties": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "maxLength": 64
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/embeddedValueSchema"
+          }
+        },
+        "additionalProperties": {
+          "const": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "$schema": "hoverpocket://schemas/capability-descriptor/v1",
+  "id": "timer.countdown.get",
+  "version": 1,
+  "titleKey": "capability.timer.countdown.get",
+  "effect": "private_read",
+  "permissions": [
+    "timer.read"
+  ],
+  "approvalPolicy": "permission_grant",
+  "idempotency": "optional",
+  "availability": {
+    "macos": "available",
+    "windows": "available"
+  },
+  "limits": {
+    "timeoutMs": 3000,
+    "maxPayloadBytes": 4096,
+    "maxCallsPerMinute": 120
+  },
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "timerId"
+    ],
+    "properties": {
+      "timerId": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "timerId",
+      "state",
+      "endAt"
+    ],
+    "properties": {
+      "timerId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "state": {
+        "type": "string",
+        "enum": [
+          "running",
+          "paused",
+          "stopped"
+        ]
+      },
+      "endAt": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "format": "date-time"
+      }
+    },
+    "additionalProperties": false
+  },
+  "readback": {
+    "strategy": "same_store_snapshot",
+    "match": [
+      "timerId",
+      "state",
+      "endAt"
+    ]
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "$schema": "hoverpocket://schemas/capability-descriptor/v1",
+  "id": "sticky.note.upsert",
+  "version": 1,
+  "titleKey": "capability.sticky.note.upsert",
+  "effect": "reversible_local_write",
+  "permissions": [
+    "sticky.write"
+  ],
+  "approvalPolicy": "broker_policy",
+  "idempotency": "required",
+  "availability": {
+    "macos": "available",
+    "windows": "available"
+  },
+  "limits": {
+    "timeoutMs": 3000,
+    "maxPayloadBytes": 4096,
+    "maxCallsPerMinute": 120
+  },
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "stableKey",
+      "title",
+      "body",
+      "color"
+    ],
+    "properties": {
+      "stableKey": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 160
+      },
+      "title": {
+        "type": "string",
+        "maxLength": 120
+      },
+      "body": {
+        "type": "string",
+        "maxLength": 10000
+      },
+      "color": {
+        "type": "string",
+        "enum": [
+          "yellow",
+          "blue",
+          "green",
+          "pink",
+          "gray"
+        ]
+      }
+    },
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "noteId",
+      "updatedAt"
+    ],
+    "properties": {
+      "noteId": {
+        "type": "string",
+        "maxLength": 128
+      },
+      "updatedAt": {
+        "type": "string",
+        "format": "date-time"
+      }
+    },
+    "additionalProperties": false
+  },
+  "readback": {
+    "strategy": "capability_query",
+    "capabilityId": "sticky.note.get",
+    "capabilityVersion": 1,
+    "match": [
+      "noteId",
+      "updatedAt"
+    ]
+  }
+}

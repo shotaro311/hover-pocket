@@ -1,0 +1,56 @@
+{
+  "canonicalization": "json-utf8-sort-keys-no-whitespace-v1",
+  "value": {
+    "planVersion": 1,
+    "steps": [
+      {
+        "stepId": "listCalendar",
+        "capabilityId": "calendar.events.list",
+        "capabilityVersion": 1,
+        "arguments": {
+          "range": "today",
+          "timezone": "Etc/UTC"
+        },
+        "dependsOn": []
+      },
+      {
+        "stepId": "startTimer",
+        "capabilityId": "timer.countdown.start",
+        "capabilityVersion": 1,
+        "arguments": {
+          "durationSeconds": 1500,
+          "title": "Focus",
+          "sourceRef": "event-ref-fixture"
+        },
+        "dependsOn": [
+          "listCalendar"
+        ]
+      },
+      {
+        "stepId": "savePurpose",
+        "capabilityId": "sticky.note.upsert",
+        "capabilityVersion": 1,
+        "arguments": {
+          "stableKey": "today-focus:fixture",
+          "title": "Focus purpose",
+          "body": "fixture-purpose",
+          "color": "yellow"
+        },
+        "dependsOn": [
+          "listCalendar"
+        ]
+      }
+    ],
+    "approval": {
+      "mode": "before_writes",
+      "group": "all_writes",
+      "exactArgumentsRequired": true
+    },
+    "requiredPermissions": [
+      "calendar.events.read",
+      "sticky.write",
+      "timer.write"
+    ]
+  },
+  "expectedDigest": "sha256:bfc55eba41c3d904b8677b36877630f4070daddf53f20b06fff0dfd0aab896ba"
+}

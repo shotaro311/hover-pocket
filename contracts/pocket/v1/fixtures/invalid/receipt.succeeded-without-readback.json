@@ -1,0 +1,24 @@
+{
+  "$schema": "hoverpocket://schemas/receipt/v1",
+  "invocationId": "invocation-timer-start-001",
+  "status": "succeeded",
+  "capability": {
+    "id": "timer.countdown.start",
+    "version": 1
+  },
+  "output": {
+    "timerId": "123e4567-e89b-12d3-a456-426614174000",
+    "state": "running",
+    "endAt": "2026-08-13T12:10:00Z"
+  },
+  "readback": {
+    "status": "unavailable",
+    "strategy": "capability_query"
+  },
+  "rollback": {
+    "available": true,
+    "status": "not_requested"
+  },
+  "auditEntryId": "audit-timer-start-001",
+  "completedAt": "2026-08-13T12:00:02Z"
+}

@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/voice-lane-state/v1",
+  "title": "HoverPocket Host-owned Voice Lane state v1",
+  "type": "object",
+  "required": [
+    "$schema",
+    "stateVersion",
+    "mode",
+    "connection",
+    "activity",
+    "muted",
+    "visibleSessionCount",
+    "sessions",
+    "ui"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "hoverpocket://schemas/voice-lane-state/v1"
+    },
+    "stateVersion": {
+      "const": 1
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "disabled",
+        "compact",
+        "expanded"
+      ]
+    },
+    "connection": {
+      "type": "string",
+      "enum": [
+        "disconnected",
+        "connecting",
+        "connected",
+        "recovering"
+      ]
+    },
+    "activity": {
+      "type": "string",
+      "enum": [
+        "idle",
+        "listening",
+        "thinking",
+        "speaking",
+        "waiting_for_approval",
+        "reconnecting",
+        "failed"
+      ]
+    },
+    "muted": {
+      "type": "boolean"
+    },
+    "transcriptPreview": {
+      "type": "string",
+      "maxLength": 240
+    },
+    "rootSessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "maxLength": 128
+    },
+    "visibleSessionCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 64
+    },
+    "sessions": {
+      "type": "array",
+      "items": {
+        "$ref": "hoverpocket://schemas/agent-session-summary/v1"
+      },
+      "maxItems": 64
+    },
+    "ui": {
+      "type": "object",
+      "required": [
+        "hostOwned",
+        "placement",
+        "providerOverlay",
+        "fullscreen",
+        "toggleControl",
+        "compactVisualTitle",
+        "accessibilityRegionLabelKey",
+        "conversationPriority"
+      ],
+      "properties": {
+        "hostOwned": {
+          "const": true
+        },
+        "placement": {
+          "const": "bottom_row"
+        },
+        "providerOverlay": {
+          "const": false
+        },
+        "fullscreen": {
+          "const": false
+        },
+        "toggleControl": {
+          "const": "explicit"
+        },
+        "compactVisualTitle": {
+          "const": false
+        },
+        "accessibilityRegionLabelKey": {
+          "const": "voice_lane.accessibility.region"
+        },
+        "conversationPriority": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

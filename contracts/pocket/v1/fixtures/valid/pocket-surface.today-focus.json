@@ -1,0 +1,52 @@
+{
+  "$schema": "hoverpocket://schemas/pocket-surface/v1",
+  "surfaceVersion": 1,
+  "id": "main",
+  "hostBoundary": {
+    "region": "provider_host",
+    "mayRenderHeader": false,
+    "mayRenderVoiceLane": false,
+    "mayRenderApproval": false,
+    "mayRenderReceipt": false
+  },
+  "root": {
+    "type": "stack",
+    "axis": "vertical",
+    "spacing": 12,
+    "children": [
+      {
+        "type": "text",
+        "style": "title",
+        "value": "Today Focus"
+      },
+      {
+        "type": "calendarEventPicker",
+        "items": {
+          "query": "calendar.events.list@1",
+          "arguments": {
+            "range": "today",
+            "timezone": "Etc/UTC"
+          }
+        },
+        "selection": "$state.selectedEventRef"
+      },
+      {
+        "type": "durationPicker",
+        "value": "$input.durationSeconds",
+        "min": 60,
+        "max": 14400
+      },
+      {
+        "type": "textField",
+        "label": "Purpose",
+        "value": "$input.purpose",
+        "maxLength": 1000
+      },
+      {
+        "type": "button",
+        "label": "Start focus",
+        "workflow": "startFocus"
+      }
+    ]
+  }
+}

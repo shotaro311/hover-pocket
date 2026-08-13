@@ -1,0 +1,48 @@
+{
+  "$schema": "hoverpocket://schemas/voice-lane-state/v1",
+  "stateVersion": 1,
+  "mode": "expanded",
+  "connection": "connected",
+  "activity": "thinking",
+  "muted": false,
+  "transcriptPreview": "fixture-preview",
+  "rootSessionId": "session-root-a",
+  "visibleSessionCount": 2,
+  "sessions": [
+    {
+      "$schema": "hoverpocket://schemas/agent-session-summary/v1",
+      "sessionId": "session-root-a",
+      "rootSessionId": "session-root-a",
+      "title": "Current task",
+      "status": "running",
+      "safeSummary": "fixture-summary",
+      "progress": {
+        "completed": 1,
+        "total": 3
+      },
+      "updatedAt": "2026-08-13T12:00:03Z",
+      "navigation": "lane_detail"
+    },
+    {
+      "$schema": "hoverpocket://schemas/agent-session-summary/v1",
+      "sessionId": "session-child-a1",
+      "rootSessionId": "session-root-a",
+      "parentSessionId": "session-root-a",
+      "title": "Child task",
+      "status": "queued",
+      "safeSummary": "fixture-child-summary",
+      "updatedAt": "2026-08-13T12:00:03Z",
+      "navigation": "lane_detail"
+    }
+  ],
+  "ui": {
+    "hostOwned": true,
+    "placement": "bottom_row",
+    "providerOverlay": false,
+    "fullscreen": false,
+    "toggleControl": "explicit",
+    "compactVisualTitle": false,
+    "accessibilityRegionLabelKey": "voice_lane.accessibility.region",
+    "conversationPriority": true
+  }
+}

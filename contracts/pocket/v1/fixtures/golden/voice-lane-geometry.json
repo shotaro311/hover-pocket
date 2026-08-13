@@ -1,0 +1,679 @@
+{
+  "geometryVersion": 1,
+  "coordinateSpace": "logical_points",
+  "shellAnchor": "top",
+  "expansionDirection": "down",
+  "headerHeight": 54,
+  "tokens": {
+    "compactHeight": 64,
+    "expandedHeightBySize": {
+      "small": 190,
+      "medium": 220,
+      "large": 250,
+      "extraLarge": 280
+    }
+  },
+  "platforms": [
+    {
+      "platform": "windows",
+      "sizes": [
+        {
+          "size": "small",
+          "baselinePanel": {
+            "width": 520,
+            "height": 372
+          },
+          "modes": [
+            {
+              "mode": "disabled",
+              "shellTop": 0,
+              "shellWidth": 520,
+              "shellTotalHeight": 372,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 520,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 520,
+                "height": 318
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 372,
+                "width": 520,
+                "height": 0
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            },
+            {
+              "mode": "compact",
+              "shellTop": 0,
+              "shellWidth": 520,
+              "shellTotalHeight": 436,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 520,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 520,
+                "height": 318
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 372,
+                "width": 520,
+                "height": 64
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            },
+            {
+              "mode": "expanded",
+              "shellTop": 0,
+              "shellWidth": 520,
+              "shellTotalHeight": 562,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 520,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 520,
+                "height": 318
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 372,
+                "width": 520,
+                "height": 190
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            }
+          ],
+          "shortDisplayFallback": {
+            "requestedMode": "expanded",
+            "availableHeight": 561,
+            "resolvedMode": "compact",
+            "reasonCode": "VOICE_LANE_INSUFFICIENT_HEIGHT"
+          }
+        },
+        {
+          "size": "medium",
+          "baselinePanel": {
+            "width": 600,
+            "height": 430
+          },
+          "modes": [
+            {
+              "mode": "disabled",
+              "shellTop": 0,
+              "shellWidth": 600,
+              "shellTotalHeight": 430,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 600,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 600,
+                "height": 376
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 430,
+                "width": 600,
+                "height": 0
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            },
+            {
+              "mode": "compact",
+              "shellTop": 0,
+              "shellWidth": 600,
+              "shellTotalHeight": 494,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 600,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 600,
+                "height": 376
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 430,
+                "width": 600,
+                "height": 64
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            },
+            {
+              "mode": "expanded",
+              "shellTop": 0,
+              "shellWidth": 600,
+              "shellTotalHeight": 650,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 600,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 600,
+                "height": 376
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 430,
+                "width": 600,
+                "height": 220
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            }
+          ],
+          "shortDisplayFallback": {
+            "requestedMode": "expanded",
+            "availableHeight": 649,
+            "resolvedMode": "compact",
+            "reasonCode": "VOICE_LANE_INSUFFICIENT_HEIGHT"
+          }
+        },
+        {
+          "size": "large",
+          "baselinePanel": {
+            "width": 680,
+            "height": 488
+          },
+          "modes": [
+            {
+              "mode": "disabled",
+              "shellTop": 0,
+              "shellWidth": 680,
+              "shellTotalHeight": 488,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 680,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 680,
+                "height": 434
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 488,
+                "width": 680,
+                "height": 0
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            },
+            {
+              "mode": "compact",
+              "shellTop": 0,
+              "shellWidth": 680,
+              "shellTotalHeight": 552,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 680,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 680,
+                "height": 434
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 488,
+                "width": 680,
+                "height": 64
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            },
+            {
+              "mode": "expanded",
+              "shellTop": 0,
+              "shellWidth": 680,
+              "shellTotalHeight": 738,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 680,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 680,
+                "height": 434
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 488,
+                "width": 680,
+                "height": 250
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            }
+          ],
+          "shortDisplayFallback": {
+            "requestedMode": "expanded",
+            "availableHeight": 737,
+            "resolvedMode": "compact",
+            "reasonCode": "VOICE_LANE_INSUFFICIENT_HEIGHT"
+          }
+        }
+      ]
+    },
+    {
+      "platform": "macos",
+      "sizes": [
+        {
+          "size": "small",
+          "baselinePanel": {
+            "width": 520,
+            "height": 372
+          },
+          "modes": [
+            {
+              "mode": "disabled",
+              "shellTop": 0,
+              "shellWidth": 520,
+              "shellTotalHeight": 372,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 520,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 520,
+                "height": 318
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 372,
+                "width": 520,
+                "height": 0
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            },
+            {
+              "mode": "compact",
+              "shellTop": 0,
+              "shellWidth": 520,
+              "shellTotalHeight": 436,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 520,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 520,
+                "height": 318
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 372,
+                "width": 520,
+                "height": 64
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            },
+            {
+              "mode": "expanded",
+              "shellTop": 0,
+              "shellWidth": 520,
+              "shellTotalHeight": 562,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 520,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 520,
+                "height": 318
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 372,
+                "width": 520,
+                "height": 190
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            }
+          ],
+          "shortDisplayFallback": {
+            "requestedMode": "expanded",
+            "availableHeight": 561,
+            "resolvedMode": "compact",
+            "reasonCode": "VOICE_LANE_INSUFFICIENT_HEIGHT"
+          }
+        },
+        {
+          "size": "medium",
+          "baselinePanel": {
+            "width": 600,
+            "height": 430
+          },
+          "modes": [
+            {
+              "mode": "disabled",
+              "shellTop": 0,
+              "shellWidth": 600,
+              "shellTotalHeight": 430,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 600,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 600,
+                "height": 376
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 430,
+                "width": 600,
+                "height": 0
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            },
+            {
+              "mode": "compact",
+              "shellTop": 0,
+              "shellWidth": 600,
+              "shellTotalHeight": 494,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 600,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 600,
+                "height": 376
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 430,
+                "width": 600,
+                "height": 64
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            },
+            {
+              "mode": "expanded",
+              "shellTop": 0,
+              "shellWidth": 600,
+              "shellTotalHeight": 650,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 600,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 600,
+                "height": 376
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 430,
+                "width": 600,
+                "height": 220
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            }
+          ],
+          "shortDisplayFallback": {
+            "requestedMode": "expanded",
+            "availableHeight": 649,
+            "resolvedMode": "compact",
+            "reasonCode": "VOICE_LANE_INSUFFICIENT_HEIGHT"
+          }
+        },
+        {
+          "size": "large",
+          "baselinePanel": {
+            "width": 680,
+            "height": 488
+          },
+          "modes": [
+            {
+              "mode": "disabled",
+              "shellTop": 0,
+              "shellWidth": 680,
+              "shellTotalHeight": 488,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 680,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 680,
+                "height": 434
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 488,
+                "width": 680,
+                "height": 0
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            },
+            {
+              "mode": "compact",
+              "shellTop": 0,
+              "shellWidth": 680,
+              "shellTotalHeight": 552,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 680,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 680,
+                "height": 434
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 488,
+                "width": 680,
+                "height": 64
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            },
+            {
+              "mode": "expanded",
+              "shellTop": 0,
+              "shellWidth": 680,
+              "shellTotalHeight": 738,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 680,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 680,
+                "height": 434
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 488,
+                "width": 680,
+                "height": 250
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            }
+          ],
+          "shortDisplayFallback": {
+            "requestedMode": "expanded",
+            "availableHeight": 737,
+            "resolvedMode": "compact",
+            "reasonCode": "VOICE_LANE_INSUFFICIENT_HEIGHT"
+          }
+        },
+        {
+          "size": "extraLarge",
+          "baselinePanel": {
+            "width": 760,
+            "height": 546
+          },
+          "modes": [
+            {
+              "mode": "disabled",
+              "shellTop": 0,
+              "shellWidth": 760,
+              "shellTotalHeight": 546,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 760,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 760,
+                "height": 492
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 546,
+                "width": 760,
+                "height": 0
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            },
+            {
+              "mode": "compact",
+              "shellTop": 0,
+              "shellWidth": 760,
+              "shellTotalHeight": 610,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 760,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 760,
+                "height": 492
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 546,
+                "width": 760,
+                "height": 64
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            },
+            {
+              "mode": "expanded",
+              "shellTop": 0,
+              "shellWidth": 760,
+              "shellTotalHeight": 826,
+              "headerRect": {
+                "x": 0,
+                "y": 0,
+                "width": 760,
+                "height": 54
+              },
+              "providerHostRect": {
+                "x": 0,
+                "y": 54,
+                "width": 760,
+                "height": 492
+              },
+              "voiceLaneRect": {
+                "x": 0,
+                "y": 546,
+                "width": 760,
+                "height": 280
+              },
+              "providerOverlay": false,
+              "fullscreen": false
+            }
+          ],
+          "shortDisplayFallback": {
+            "requestedMode": "expanded",
+            "availableHeight": 825,
+            "resolvedMode": "compact",
+            "reasonCode": "VOICE_LANE_INSUFFICIENT_HEIGHT"
+          }
+        }
+      ]
+    }
+  ]
+}

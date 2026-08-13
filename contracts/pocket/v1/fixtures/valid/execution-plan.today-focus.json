@@ -1,0 +1,65 @@
+{
+  "$schema": "hoverpocket://schemas/execution-plan/v1",
+  "planId": "plan-today-focus-001",
+  "planVersion": 1,
+  "createdAt": "2026-08-13T12:00:00Z",
+  "origin": "voice",
+  "principal": {
+    "userId": "user-fixture",
+    "pocketAppId": "local.example.today-focus",
+    "agentSessionId": "session-root-a"
+  },
+  "steps": [
+    {
+      "stepId": "listCalendar",
+      "capabilityId": "calendar.events.list",
+      "capabilityVersion": 1,
+      "arguments": {
+        "range": "today",
+        "timezone": "Etc/UTC"
+      },
+      "idempotencyKey": "idem-calendar-list-0001",
+      "dependsOn": []
+    },
+    {
+      "stepId": "startTimer",
+      "capabilityId": "timer.countdown.start",
+      "capabilityVersion": 1,
+      "arguments": {
+        "durationSeconds": 1500,
+        "title": "Focus",
+        "sourceRef": "event-ref-fixture"
+      },
+      "idempotencyKey": "idem-timer-start-0002",
+      "dependsOn": [
+        "listCalendar"
+      ]
+    },
+    {
+      "stepId": "savePurpose",
+      "capabilityId": "sticky.note.upsert",
+      "capabilityVersion": 1,
+      "arguments": {
+        "stableKey": "today-focus:fixture",
+        "title": "Focus purpose",
+        "body": "fixture-purpose",
+        "color": "yellow"
+      },
+      "idempotencyKey": "idem-sticky-upsert-01",
+      "dependsOn": [
+        "listCalendar"
+      ]
+    }
+  ],
+  "approval": {
+    "mode": "before_writes",
+    "group": "all_writes",
+    "exactArgumentsRequired": true
+  },
+  "requiredPermissions": [
+    "calendar.events.read",
+    "sticky.write",
+    "timer.write"
+  ],
+  "canonicalDigest": "sha256:bfc55eba41c3d904b8677b36877630f4070daddf53f20b06fff0dfd0aab896ba"
+}
