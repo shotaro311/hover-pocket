@@ -1,9 +1,19 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-08-12
+updated: 2026-08-13
 updated_by: codex
-status: completed
+status: plan-approved; implementation-not-started
 ---
+
+## 2026-08-13 AI-native Final Implementation Plan
+
+- 現行`main`、正本requirements、macOS / Windows双方のProvider・AI・Bridge・Store実装、Draft PR #6のVoice Lane branch、worktree、MulmoClaude 5資料、OpenAI公式資料を再監査し、ユーザー承認済みの最終実装プランを`docs/plan/20260813_PLAN1.md`へ確定した。
+- 最終構造は、表示を`PocketSurface`、操作を`PocketCapability`へ分離し、`CapabilityRegistry`を単一正本、`CapabilityBroker`を唯一の実行入口とする。Voice、Text、既存UI、生成Pocket App、MCPは同じBrokerを通す。
+- 最初の縦断候補はToday Focus Pocket。Calendar read、Timer start、Sticky upsert、write approval、実行後readbackを両OSで通し、別gateでCalendar createの実音声・承認・event ID readbackも確認する。
+- Voice Lane UIはHost所有の全Provider共通最下段とし、Compactは視覚タイトルなし・短い波形・会話優先、ExpandedはProvider領域を潰さずパネル外枠だけを下方向へ伸ばす。左に現在会話、右に同一rootのcurrent / child session cardsを表示し、fullscreenと全履歴browserは採用しない。
+- 承認済み画像を`docs/plan/assets/20260813-ai-native/voice-lane-compact.png`（1475×1067）と`voice-lane-expanded.png`（1254×1254）へ保存し、文章要件を正本、画像を視覚的受け入れ基準とした。
+- `docs/requirement/requirements.md`へLegacy AI command laneとCodex Voice Laneを分離した要件、Shell geometry、共通Capability、UI / E2E条件を同期した。
+- 現在は最終案・UI契約承認済み、実装未開始。source code、branch、worktree、PR、releaseは変更していない。詳細: `progress/2026-08/2026-08-13_hover-pocket-ai-native-final-plan.md`。
 
 ## 2026-08-12 Cross-platform Multiple Stopwatches and Timer UI
 
