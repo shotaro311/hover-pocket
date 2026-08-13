@@ -145,9 +145,9 @@ AN0は次をすべて満たした時だけ完了とする。
 3. 同じvalidatorを連続2回実行したJSON reportがbyte-for-byte一致する。
 4. Ubuntu、macOS、WindowsのCIで標準Pythonだけを使って同じfixture結果になる。
 5. `git diff --check`とbase SHAへの`git apply --check`が通る。
-6. 変更pathがADR、contracts、validator、専用CIだけである。
+6. AN0の機能差分がADR、contracts、validator、専用CIだけである。リポジトリ運用規則に従う実施結果の`progress/`更新は、別commitの記録差分として許可する。
 7. 既存macOS/Windows verifierはpatch適用先の実機・正式worktreeで回帰実行する。
-8. runtime source、Provider Registry、既存data format、requirements、PLAN1、progress、承認画像に変更がない。
+8. runtime source、Provider Registry、既存data format、requirements、PLAN1、承認画像に変更がない。`progress/`は実装状態と検証証拠だけを更新し、契約判断を上書きしない。
 
 標準実行:
 

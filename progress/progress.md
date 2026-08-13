@@ -2,8 +2,16 @@
 project_slug: hover-menu-preview
 updated: 2026-08-13
 updated_by: codex
-status: plan-approved; implementation-not-started
+status: an0-implemented; pr-open; ci-pass; review-pending
 ---
+
+## 2026-08-13 AI-native AN0 Contracts and Verification
+
+- 承認済み最終計画の最初の実装単位AN0として、`contracts/pocket/v1/`へ12個のversioned JSON Schema、31件のvalid / invalid / golden fixture、決定論的な標準Python verifierを追加した。macOS / Windowsのruntime source、Provider Registry、既存保存形式は変更していない。
+- `CapabilityRegistry / Broker`、approval、readback付きreceipt、Voice Lane、Pocket App / Surface / Workflow、最小監査データをADRへ固定した。Voice Lane geometryはCompact 64、Expanded S / M / L / XLを190 / 220 / 250 / 280としてgolden fixture化した。
+- ChatGPT Pro Orchestratorのbuilderへexact base `8b636cae...`を渡して`changes.patch`を生成させ、Codexがdownload版とrun取込版のSHA-256 `35369356...a174`一致、allowed path、`git apply --check`を確認して適用した。OracleのDevTools接続切断により自動回収表示が止まったが、同一会話から一度だけ手動harvestし、再送せずreceiptを復旧した。
+- ローカルでcontract 12 schema / 31 fixture、2回のJSON report byte一致、JSON全44件parse、`swift build`、Calculator / Clipboard / Timer / Panel layout 112ケース、`git diff --check`が成功した。GitHub ActionsもUbuntu / macOS / Windowsのpush・PR両経路で成功した。
+- Ready PR [#7](https://github.com/shotaro311/hover-pocket/pull/7)を作成した。Headは`6ef58f3732c91f0b44c21543b46cbc55619935f3`で、GitHub readbackはMERGEABLE。AN1以降のruntime handler実装は、この契約PRのreview / merge後に開始する。詳細: `progress/2026-08/2026-08-13_hover-pocket-ai-native-an0-contracts.md`。
 
 ## 2026-08-13 AI-native Final Implementation Plan
 
@@ -13,7 +21,7 @@ status: plan-approved; implementation-not-started
 - Voice Lane UIはHost所有の全Provider共通最下段とし、Compactは視覚タイトルなし・短い波形・会話優先、ExpandedはProvider領域を潰さずパネル外枠だけを下方向へ伸ばす。左に現在会話、右に同一rootのcurrent / child session cardsを表示し、fullscreenと全履歴browserは採用しない。
 - 承認済み画像を`docs/plan/assets/20260813-ai-native/voice-lane-compact.png`（1475×1067）と`voice-lane-expanded.png`（1254×1254）へ保存し、文章要件を正本、画像を視覚的受け入れ基準とした。
 - `docs/requirement/requirements.md`へLegacy AI command laneとCodex Voice Laneを分離した要件、Shell geometry、共通Capability、UI / E2E条件を同期した。
-- 現在は最終案・UI契約承認済み、実装未開始。source code、branch、worktree、PR、releaseは変更していない。詳細: `progress/2026-08/2026-08-13_hover-pocket-ai-native-final-plan.md`。
+- この項目は計画確定時点の記録。現在の実装状態は直上のAN0エントリを正とする。詳細: `progress/2026-08/2026-08-13_hover-pocket-ai-native-final-plan.md`。
 
 ## 2026-08-12 Cross-platform Multiple Stopwatches and Timer UI
 
