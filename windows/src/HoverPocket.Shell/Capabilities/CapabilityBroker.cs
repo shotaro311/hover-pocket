@@ -22,6 +22,12 @@ internal sealed class CapabilityBroker
     private static readonly Regex DigestPattern = new(
         "^sha256:[a-f0-9]{64}$",
         RegexOptions.CultureInvariant);
+    private static readonly Regex CapabilityPattern = new(
+        "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*){2,}$",
+        RegexOptions.CultureInvariant);
+    private static readonly Regex PermissionPattern = new(
+        "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*)+$",
+        RegexOptions.CultureInvariant);
 
     private readonly CapabilityRegistry _registry;
     private readonly CapabilityBrokerLedger _ledger;
@@ -47,20 +53,20 @@ internal sealed class CapabilityBroker
         CapabilityPermissionSet permissions,
         DateTimeOffset now)
     {
-        var digest = CapabilityCanonicalJson.PlanDigest(plan);
-        IReadOnlyList<PocketCapabilityDescriptor> descriptors;
+        var digest = "unavailable";
         try
         {
-            descriptors = Validate(plan, permissions);
+            var descriptors = Validate(plan, permissions);
+            digest = CapabilityCanonicalJson.PlanDigest(plan);
+            return new CapabilityBrokerPreparation(
+                digest,
+                _approvalStore.Request(plan, digest, descriptors, now));
         }
         catch (Exception ex)
         {
             AppendAuthorizationAudit(plan, digest, "denied", ex, now);
             throw;
         }
-        return new CapabilityBrokerPreparation(
-            digest,
-            _approvalStore.Request(plan, digest, descriptors, now));
     }
 
     public CapabilityApprovalGrant DecideApproval(
@@ -93,11 +99,12 @@ internal sealed class CapabilityBroker
         await _executionGate.WaitAsync(cancellationToken);
         try
         {
-            var digest = CapabilityCanonicalJson.PlanDigest(plan);
+            var digest = "unavailable";
             IReadOnlyList<PocketCapabilityDescriptor> descriptors;
             try
             {
                 descriptors = Validate(plan, permissions);
+                digest = CapabilityCanonicalJson.PlanDigest(plan);
             }
             catch (Exception ex)
             {
@@ -192,7 +199,7 @@ internal sealed class CapabilityBroker
                 }
                 if (rollbackCandidates.Count > 0)
                 {
-                    var rolledBack = await RollbackAsync(rollbackCandidates, receipts, plan, digest, now, cancellationToken);
+                    var rolledBack = await RollbackAsync(rollbackCandidates, receipts, plan, digest, now);
                     if (rolledBack && receipt.Status != CapabilityReceiptStatus.Unknown)
                     {
                         workflowStatus = CapabilityReceiptStatus.Failed;
@@ -226,6 +233,9 @@ internal sealed class CapabilityBroker
     {
         if (!IdentifierPattern.IsMatch(plan.Id)
             || plan.Steps.Count is < 1 or > 32
+            || plan.RequiredPermissions.Count > 64
+            || !plan.RequiredPermissions.All(permission => permission.Length <= 128 && PermissionPattern.IsMatch(permission))
+            || !Enum.IsDefined(typeof(CapabilityOrigin), plan.Origin)
             || permissions.Principal != plan.Principal
             || !IdentifierPattern.IsMatch(plan.Principal.UserId)
             || (plan.Principal.AgentSessionId is not null && !IdentifierPattern.IsMatch(plan.Principal.AgentSessionId)))
@@ -260,8 +270,13 @@ internal sealed class CapabilityBroker
         {
             if (!StepPattern.IsMatch(step.Id)
                 || !stepIds.Add(step.Id)
+                || step.Capability.Id.Length > 128
+                || !CapabilityPattern.IsMatch(step.Capability.Id)
+                || step.Capability.Version < 1
                 || !ValidIdempotencyKey(step.IdempotencyKey)
                 || !idempotencyKeys.Add(step.IdempotencyKey)
+                || step.Dependencies.Count > 32
+                || step.Dependencies.Distinct(StringComparer.Ordinal).Count() != step.Dependencies.Count
                 || !step.Dependencies.All(stepIds.Contains)
                 || step.Dependencies.Contains(step.Id, StringComparer.Ordinal))
             {
@@ -460,8 +475,7 @@ internal sealed class CapabilityBroker
         List<CapabilityReceipt> receipts,
         CapabilityExecutionPlan plan,
         string planDigest,
-        DateTimeOffset now,
-        CancellationToken cancellationToken)
+        DateTimeOffset now)
     {
         var allSucceeded = true;
         foreach (var item in successful.Reverse())
@@ -492,7 +506,7 @@ internal sealed class CapabilityBroker
                 planDigest,
                 true,
                 now,
-                cancellationToken);
+                CancellationToken.None);
             var succeeded = rollbackReceipt.Status == CapabilityReceiptStatus.Succeeded;
             receipts[item.ReceiptIndex] = receipts[item.ReceiptIndex] with
             {
@@ -600,13 +614,11 @@ internal sealed class CapabilityBroker
         _auditLog.AppendAuthorization(new CapabilityAuthorizationAuditEntry(
             decision,
             "authorization_decision",
-            plan.Origin.WireValue(),
-            planDigest,
-            plan.Id,
-            plan.AppContext is null
-                ? null
-                : new CapabilityAuditPocketApp(plan.AppContext.Id, plan.AppContext.Version, plan.AppContext.ManifestDigest),
-            CapabilityBrokerAuditLog.PrincipalPseudonym(plan.Principal),
+            Enum.IsDefined(typeof(CapabilityOrigin), plan.Origin) ? plan.Origin.WireValue() : "unknown",
+            DigestPattern.IsMatch(planDigest) ? planDigest : "unavailable",
+            IdentifierPattern.IsMatch(plan.Id) ? plan.Id : "invalid",
+            SafeAuditPocketApp(plan.AppContext),
+            CapabilityBrokerAuditLog.PrincipalPseudonym(SafeAuditPrincipal(plan.Principal)),
             error is null ? null : AuthorizationErrorCode(error),
             now));
     }
@@ -681,6 +693,28 @@ internal sealed class CapabilityBroker
 
     private static string InvocationId(string planDigest, string stepId) =>
         $"invocation:{DigestPrefix(planDigest, 32)}:{stepId}";
+
+    private static CapabilityPrincipal SafeAuditPrincipal(CapabilityPrincipal principal) =>
+        new(
+            TruncateForAudit(principal.UserId, 128),
+            principal.PocketAppId is null ? null : TruncateForAudit(principal.PocketAppId, 160),
+            principal.AgentSessionId is null ? null : TruncateForAudit(principal.AgentSessionId, 128));
+
+    private static CapabilityAuditPocketApp? SafeAuditPocketApp(CapabilityAppContext? app)
+    {
+        if (app is null
+            || app.Id.Length > 160
+            || !PocketAppPattern.IsMatch(app.Id)
+            || !VersionPattern.IsMatch(app.Version)
+            || !DigestPattern.IsMatch(app.ManifestDigest))
+        {
+            return null;
+        }
+        return new CapabilityAuditPocketApp(app.Id, app.Version, app.ManifestDigest);
+    }
+
+    private static string TruncateForAudit(string value, int maximum) =>
+        value.Length <= maximum ? value : value[..maximum];
 
     private static string DigestPrefix(string digest, int length)
     {

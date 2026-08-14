@@ -70,6 +70,7 @@ enum CapabilityBrokerVerificationCommand {
         try require(registry.availableHandlerKeys.count == 10, "registry_handler_count")
         try verifyGoldenDigest(now: now)
         try verifyCalendarCreateEventBody(now: now)
+        try verifyCalendarIdempotencyEquivalence(now: now)
         do {
             _ = try registry.resolve(PocketCapabilityKeys.nativeAuthority)
             throw BrokerVerificationFailure("native_authority_resolved")
@@ -147,6 +148,39 @@ enum CapabilityBrokerVerificationCommand {
             TodayFocusApprovalText.sanitize("会議\n承認済み\u{202E}偽装") == "会議 承認済み 偽装",
             "approval_text_sanitized"
         )
+        let canonicalDraft = try adapter.prepareFocus(
+            event: events[0],
+            durationSeconds: 1_500,
+            purpose: "会議\n承認済み\u{202E}偽装",
+            principal: principal,
+            permissions: allPermissions,
+            now: now
+        )
+        try require(canonicalDraft.approvalText == "会議 承認済み 偽装", "approval_text_draft")
+        try require(
+            canonicalDraft.plan.steps[0].arguments["title"] == .string(canonicalDraft.approvalText),
+            "approval_timer_exact"
+        )
+        try require(
+            canonicalDraft.plan.steps[1].arguments["body"] == .string(canonicalDraft.approvalText),
+            "approval_sticky_exact"
+        )
+
+        let invalidAuditMarker = "private-invalid-plan-marker"
+        let invalidAuditPlan = CapabilityExecutionPlan(
+            id: String(repeating: "x", count: 256) + invalidAuditMarker,
+            createdAt: now,
+            origin: .text,
+            principal: principal,
+            appContext: nil,
+            steps: localDateDraft.plan.steps,
+            requiredPermissions: localDateDraft.plan.requiredPermissions
+        )
+        do {
+            _ = try broker.prepare(invalidAuditPlan, permissions: allPermissions, now: now)
+            throw BrokerVerificationFailure("oversized_plan_accepted")
+        } catch CapabilityBrokerError.invalidPlan {
+        }
 
         do {
             let denied = CapabilityPermissionSet(principal: principal, permissions: ["timer.write"])
@@ -368,6 +402,9 @@ enum CapabilityBrokerVerificationCommand {
         try require(auditText.contains("\"idempotencyReplay\":true"), "audit_replay")
         try require(auditText.contains("\"eventType\":\"authorization_decision\""), "authorization_audit")
         try require(auditText.contains("CAPABILITY_APPROVAL_REJECTED"), "authorization_reject_audit")
+        try require(auditText.contains("\"planDigest\":\"unavailable\""), "invalid_plan_digest_audit")
+        try require(auditText.contains("\"planID\":\"invalid\"") || auditText.contains("\"planId\":\"invalid\""), "invalid_plan_id_audit")
+        try require(!auditText.contains(invalidAuditMarker), "invalid_plan_audit_redaction")
         let durableLedgerText = String(data: try Data(contentsOf: ledgerURL), encoding: .utf8) ?? ""
         for forbidden in ["secret-purpose-approved", "secret-purpose-concurrent", "Sensitive Calendar Title"] {
             try require(!durableLedgerText.contains(forbidden), "ledger_redaction_\(forbidden)")
@@ -403,6 +440,70 @@ enum CapabilityBrokerVerificationCommand {
         )
         let idempotent = try JSONSerialization.jsonObject(with: idempotentBody) as? [String: Any]
         try require(idempotent?["id"] as? String == deterministicID, "calendar_create_idempotent_id")
+    }
+
+    @MainActor
+    private static func verifyCalendarIdempotencyEquivalence(now: Date) throws {
+        let draft = GoogleCalendarEventDraft(
+            calendarID: "primary",
+            eventID: nil,
+            title: " Verify event ",
+            location: " Room A ",
+            notes: " Approved notes ",
+            start: now,
+            end: now.addingTimeInterval(3_600),
+            isAllDay: false
+        ).normalized()
+        let observed = GoogleCalendarEventOccurrence(
+            id: "primary:event",
+            googleEventID: "event",
+            calendarID: "primary",
+            calendarTitle: "Primary",
+            calendarColorHex: nil,
+            calendarCanWrite: true,
+            title: draft.normalizedTitle,
+            location: draft.normalizedLocation,
+            notes: draft.normalizedNotes,
+            start: draft.start,
+            end: draft.end,
+            isAllDay: draft.isAllDay,
+            htmlLink: nil,
+            allDayStartDate: nil,
+            allDayEndDate: nil
+        )
+        try require(GoogleCalendarStore.capabilityEventMatches(observed, draft: draft), "calendar_idempotency_match")
+        try require(
+            !GoogleCalendarStore.capabilityEventMatches(observedWith(observed, location: "Room B"), draft: draft),
+            "calendar_idempotency_location_mismatch"
+        )
+        try require(
+            !GoogleCalendarStore.capabilityEventMatches(observedWith(observed, notes: "Different notes"), draft: draft),
+            "calendar_idempotency_notes_mismatch"
+        )
+    }
+
+    private static func observedWith(
+        _ event: GoogleCalendarEventOccurrence,
+        location: String? = nil,
+        notes: String? = nil
+    ) -> GoogleCalendarEventOccurrence {
+        GoogleCalendarEventOccurrence(
+            id: event.id,
+            googleEventID: event.googleEventID,
+            calendarID: event.calendarID,
+            calendarTitle: event.calendarTitle,
+            calendarColorHex: event.calendarColorHex,
+            calendarCanWrite: event.calendarCanWrite,
+            title: event.title,
+            location: location ?? event.location,
+            notes: notes ?? event.notes,
+            start: event.start,
+            end: event.end,
+            isAllDay: event.isAllDay,
+            htmlLink: event.htmlLink,
+            allDayStartDate: event.allDayStartDate,
+            allDayEndDate: event.allDayEndDate
+        )
     }
 
     private static func verifyGoldenDigest(now: Date) throws {

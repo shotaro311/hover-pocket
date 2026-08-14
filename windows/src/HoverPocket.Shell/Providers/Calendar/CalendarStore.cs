@@ -296,7 +296,7 @@ internal sealed class CalendarStore
             request.Notes,
             request.Start,
             request.End,
-            request.IsAllDay);
+            request.IsAllDay).Normalized();
         CalendarEventOccurrence created;
         try
         {
@@ -311,16 +311,23 @@ internal sealed class CalendarStore
             created.GoogleEventId,
             source,
             cancellationToken);
-        if (observed.Title != draft.Title
-            || observed.Start != draft.Start
-            || observed.End != draft.End
-            || observed.IsAllDay != draft.IsAllDay)
+        if (!CapabilityEventMatches(observed, draft))
         {
             throw new CapabilityHandlerException("CAPABILITY_READBACK_MISMATCH", "calendar.idempotency");
         }
         await LoadMonthAsync(request.Start, cancellationToken);
         return observed;
     }
+
+    internal static bool CapabilityEventMatches(
+        CalendarEventOccurrence observed,
+        CalendarEventDraft draft) =>
+        observed.Title == draft.Title
+        && observed.Location == draft.Location
+        && observed.Notes == draft.Notes
+        && observed.Start == draft.Start
+        && observed.End == draft.End
+        && observed.IsAllDay == draft.IsAllDay;
 
     private static string CapabilityEventId(string idempotencyKey)
     {

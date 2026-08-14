@@ -27,21 +27,21 @@ final class CapabilityBroker {
         permissions: CapabilityPermissionSet,
         now: Date = Date()
     ) throws -> CapabilityBrokerPreparation {
-        let digest = (try? CapabilityCanonicalJSON.planDigest(plan)) ?? "unavailable"
-        let descriptors: [PocketCapabilityDescriptor]
+        var digest = "unavailable"
         do {
-            descriptors = try validate(plan, permissions: permissions)
+            let descriptors = try validate(plan, permissions: permissions)
+            digest = try CapabilityCanonicalJSON.planDigest(plan)
+            let request = try approvalStore.request(
+                for: plan,
+                digest: digest,
+                descriptors: descriptors,
+                now: now
+            )
+            return CapabilityBrokerPreparation(planDigest: digest, approvalRequest: request)
         } catch {
             try appendAuthorizationAudit(plan: plan, planDigest: digest, decision: "denied", error: error, now: now)
             throw error
         }
-        let request = try approvalStore.request(
-            for: plan,
-            digest: digest,
-            descriptors: descriptors,
-            now: now
-        )
-        return CapabilityBrokerPreparation(planDigest: digest, approvalRequest: request)
     }
 
     func decideApproval(
@@ -74,15 +74,15 @@ final class CapabilityBroker {
     ) async throws -> CapabilityWorkflowReceipt {
         await acquireExecutionSlot()
         defer { releaseExecutionSlot() }
+        var digest = "unavailable"
         let descriptors: [PocketCapabilityDescriptor]
         do {
             descriptors = try validate(plan, permissions: permissions)
+            digest = try CapabilityCanonicalJSON.planDigest(plan)
         } catch {
-            let digest = (try? CapabilityCanonicalJSON.planDigest(plan)) ?? "unavailable"
             try appendAuthorizationAudit(plan: plan, planDigest: digest, decision: "denied", error: error, now: now)
             throw error
         }
-        let digest = try CapabilityCanonicalJSON.planDigest(plan)
         let durableExecution = descriptors.contains { $0.effect.isWrite }
         if durableExecution {
             switch try ledger.lookupWorkflow(planID: plan.id, planDigest: digest) {
@@ -207,6 +207,8 @@ final class CapabilityBroker {
     ) throws -> [PocketCapabilityDescriptor] {
         guard Self.matches(plan.id, "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"),
               (1...32).contains(plan.steps.count),
+              plan.requiredPermissions.count <= 64,
+              plan.requiredPermissions.allSatisfy(Self.validPermission),
               permissions.principal == plan.principal,
               Self.validIdentifier(plan.principal.userID, maximum: 128),
               plan.principal.pocketAppID.map({ Self.matches($0, "^[a-z][a-z0-9]*(?:\\.[a-z0-9][a-z0-9-]*){2,}$") && $0.unicodeScalars.count <= 160 }) ?? true,
@@ -231,8 +233,13 @@ final class CapabilityBroker {
         for step in plan.steps {
             guard Self.matches(step.id, "^[A-Za-z][A-Za-z0-9_-]{0,63}$"),
                   seenStepIDs.insert(step.id).inserted,
+                  Self.matches(step.capability.id, "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*){2,}$"),
+                  step.capability.id.unicodeScalars.count <= 128,
+                  step.capability.version >= 1,
                   CapabilityHandlerContext(idempotencyKey: step.idempotencyKey).requiredIdempotencyKeyIfValid,
                   seenIdempotencyKeys.insert(step.idempotencyKey).inserted,
+                  step.dependencies.count <= 32,
+                  Set(step.dependencies).count == step.dependencies.count,
                   step.dependencies.allSatisfy(seenStepIDs.contains),
                   !step.dependencies.contains(step.id) else {
                 throw CapabilityBrokerError.invalidPlan("steps")
@@ -591,11 +598,11 @@ final class CapabilityBroker {
     ) throws {
         try auditLog.appendAuthorization(CapabilityAuthorizationAuditEntry(
             decision: decision,
-            origin: plan.origin.rawValue,
-            planDigest: planDigest,
-            planID: plan.id,
-            pocketApp: plan.appContext.map { .init(id: $0.id, version: $0.version, manifestDigest: $0.manifestDigest) },
-            principalPseudonym: CapabilityBrokerAuditLog.principalPseudonym(plan.principal),
+            origin: String(plan.origin.rawValue.prefix(32)),
+            planDigest: Self.safeAuditDigest(planDigest),
+            planID: Self.safeAuditPlanID(plan.id),
+            pocketApp: Self.safeAuditPocketApp(plan.appContext),
+            principalPseudonym: CapabilityBrokerAuditLog.principalPseudonym(Self.safeAuditPrincipal(plan.principal)),
             safeErrorCode: error.map(Self.authorizationErrorCode),
             timestamp: now
         ))
@@ -682,6 +689,38 @@ final class CapabilityBroker {
 
     private static func validIdentifier(_ value: String, maximum: Int) -> Bool {
         value.unicodeScalars.count <= maximum && matches(value, "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+    }
+
+    private static func validPermission(_ value: String) -> Bool {
+        value.unicodeScalars.count <= 128
+            && matches(value, "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*)+$")
+    }
+
+    private static func safeAuditDigest(_ value: String) -> String {
+        matches(value, "^sha256:[a-f0-9]{64}$") ? value : "unavailable"
+    }
+
+    private static func safeAuditPlanID(_ value: String) -> String {
+        matches(value, "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$") ? value : "invalid"
+    }
+
+    private static func safeAuditPrincipal(_ principal: CapabilityPrincipal) -> CapabilityPrincipal {
+        CapabilityPrincipal(
+            userID: String(principal.userID.prefix(128)),
+            pocketAppID: principal.pocketAppID.map { String($0.prefix(160)) },
+            agentSessionID: principal.agentSessionID.map { String($0.prefix(128)) }
+        )
+    }
+
+    private static func safeAuditPocketApp(_ app: CapabilityAppContext?) -> CapabilityAuditEntry.PocketAppSummary? {
+        guard let app,
+              app.id.unicodeScalars.count <= 160,
+              matches(app.id, "^[a-z][a-z0-9]*(?:\\.[a-z0-9][a-z0-9-]*){2,}$"),
+              matches(app.version, "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$"),
+              matches(app.manifestDigest, "^sha256:[a-f0-9]{64}$") else {
+            return nil
+        }
+        return .init(id: app.id, version: app.version, manifestDigest: app.manifestDigest)
     }
 
     private static func matches(_ value: String, _ pattern: String) -> Bool {

@@ -369,7 +369,7 @@ struct GoogleCalendarPreviewView: View {
     private func prepareTodayFocus(_ event: GoogleCalendarEventOccurrence) {
         do {
             pendingFocusDraft = try AINativeRuntime.shared.prepareTodayFocus(event: event)
-            pendingFocusTitle = TodayFocusApprovalText.sanitize(eventTitle(for: event))
+            pendingFocusTitle = pendingFocusDraft?.approvalText ?? ""
             focusConfirmationPresented = true
         } catch {
             pendingFocusDraft = nil

@@ -293,7 +293,7 @@ final class GoogleCalendarStore: ObservableObject {
             start: draftStart,
             end: draftEnd,
             isAllDay: request.isAllDay
-        )
+        ).normalized()
         let created: GoogleCalendarEventOccurrence
         do {
             created = try await apiClient.createEvent(draft, source: source, eventID: externalEventID)
@@ -309,10 +309,7 @@ final class GoogleCalendarStore: ObservableObject {
             eventID: created.googleEventID,
             source: source
         )
-        guard observed.title == draft.normalizedTitle,
-              observed.start == draft.start,
-              observed.end == draft.end,
-              observed.isAllDay == draft.isAllDay else {
+        guard Self.capabilityEventMatches(observed, draft: draft) else {
             throw CapabilityHandlerError.readbackMismatch("calendar.idempotency")
         }
         if let refreshed = try? await apiClient.fetchMonth(containing: draftStart) {
@@ -320,6 +317,18 @@ final class GoogleCalendarStore: ObservableObject {
             loadState = .loaded(refreshed)
         }
         return observed
+    }
+
+    static func capabilityEventMatches(
+        _ observed: GoogleCalendarEventOccurrence,
+        draft: GoogleCalendarEventDraft
+    ) -> Bool {
+        observed.title == draft.normalizedTitle
+            && observed.location == draft.normalizedLocation
+            && observed.notes == draft.normalizedNotes
+            && observed.start == draft.start
+            && observed.end == draft.end
+            && observed.isAllDay == draft.isAllDay
     }
 
     private static func capabilityEventID(_ idempotencyKey: String) -> String {

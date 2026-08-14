@@ -10,6 +10,7 @@ struct TodayFocusCalendarEvent: Equatable, Sendable {
 struct TodayFocusDraft: Equatable, Sendable {
     let plan: CapabilityExecutionPlan
     let preparation: CapabilityBrokerPreparation
+    let approvalText: String
 }
 
 enum TodayFocusApprovalText {
@@ -126,6 +127,7 @@ final class TodayFocusTextAdapter {
         }
         let nonce = UUID().uuidString.lowercased()
         let stableDate = Self.dateKey(now, timeZone: timeZone)
+        let approvalText = TodayFocusApprovalText.sanitize(purpose)
         let plan = CapabilityExecutionPlan(
             id: "today-focus-write:\(nonce)",
             createdAt: now,
@@ -138,7 +140,7 @@ final class TodayFocusTextAdapter {
                     capability: PocketCapabilityKeys.timerStart,
                     arguments: [
                         "durationSeconds": .integer(durationSeconds),
-                        "title": .string(event.safeTitle.prefixingUnicodeScalars(80)),
+                        "title": .string(approvalText.prefixingUnicodeScalars(80)),
                         "sourceRef": .string(event.eventRef)
                     ],
                     idempotencyKey: "today-focus-timer.\(nonce)",
@@ -150,7 +152,7 @@ final class TodayFocusTextAdapter {
                     arguments: [
                         "stableKey": .string("today-focus:\(stableDate)"),
                         "title": .string("今日の目的"),
-                        "body": .string(purpose),
+                        "body": .string(approvalText),
                         "color": .string("yellow")
                     ],
                     idempotencyKey: "today-focus-sticky.\(nonce)",
@@ -161,7 +163,8 @@ final class TodayFocusTextAdapter {
         )
         return TodayFocusDraft(
             plan: plan,
-            preparation: try broker.prepare(plan, permissions: permissions, now: now)
+            preparation: try broker.prepare(plan, permissions: permissions, now: now),
+            approvalText: approvalText
         )
     }
 

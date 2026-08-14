@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using HoverPocket.Shell.Configuration;
+using HoverPocket.Shell.Providers.Calendar;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
 
@@ -70,6 +71,7 @@ internal sealed class CapabilityBrokerVerifier
             Require(registry.AvailableHandlerKeys.Count == 10, "registry_handler_count");
             Require(!new UserSettings().AiNativeEnabled, "feature_default_off");
             VerifyGoldenDigest(now);
+            VerifyCalendarIdempotencyEquivalence(now);
 
             try
             {
@@ -108,6 +110,31 @@ internal sealed class CapabilityBrokerVerifier
             Require(
                 TodayFocusApprovalText.Sanitize("会議\n承認済み\u202E偽装") == "会議 承認済み 偽装",
                 "approval_text_sanitized");
+            var canonicalDraft = adapter.PrepareFocus(
+                events[0],
+                1_500,
+                "会議\n承認済み\u202E偽装",
+                principal,
+                allPermissions,
+                now);
+            Require(canonicalDraft.ApprovalText == "会議 承認済み 偽装", "approval_text_draft");
+            Require(
+                canonicalDraft.Plan.Steps[0].Arguments.GetProperty("title").GetString() == canonicalDraft.ApprovalText,
+                "approval_timer_exact");
+            Require(
+                canonicalDraft.Plan.Steps[1].Arguments.GetProperty("body").GetString() == canonicalDraft.ApprovalText,
+                "approval_sticky_exact");
+
+            const string invalidAuditMarker = "private-invalid-plan-marker";
+            var invalidAuditPlan = localDateDraft.Plan with { Id = new string('x', 256) + invalidAuditMarker };
+            try
+            {
+                _ = broker.Prepare(invalidAuditPlan, allPermissions, now);
+                _failures.Add("oversized_plan_accepted");
+            }
+            catch (CapabilityBrokerException ex) when (ex.Code == "CAPABILITY_PLAN_INVALID")
+            {
+            }
 
             try
             {
@@ -250,6 +277,9 @@ internal sealed class CapabilityBrokerVerifier
             Require(auditText.Contains("\"idempotencyReplay\":true", StringComparison.Ordinal), "audit_replay");
             Require(auditText.Contains("\"eventType\":\"authorization_decision\"", StringComparison.Ordinal), "authorization_audit");
             Require(auditText.Contains("CAPABILITY_APPROVAL_REJECTED", StringComparison.Ordinal), "authorization_reject_audit");
+            Require(auditText.Contains("\"planDigest\":\"unavailable\"", StringComparison.Ordinal), "invalid_plan_digest_audit");
+            Require(auditText.Contains("\"planId\":\"invalid\"", StringComparison.Ordinal), "invalid_plan_id_audit");
+            Require(!auditText.Contains(invalidAuditMarker, StringComparison.Ordinal), "invalid_plan_audit_redaction");
             var durableLedgerText = File.ReadAllText(ledgerPath);
             foreach (var forbidden in new[] { "secret-purpose-approved", "secret-purpose-concurrent", "Sensitive Calendar Title" })
             {
@@ -258,6 +288,7 @@ internal sealed class CapabilityBrokerVerifier
 
             await VerifyPartialRollbackAsync(root, now, principal);
             await VerifyCurrentStepRollbackAsync(root, now, principal);
+            await VerifyCancellationRollbackAsync(root, now, principal);
             await VerifyTimeoutAsync(root, now, principal);
         }
         finally
@@ -286,6 +317,40 @@ internal sealed class CapabilityBrokerVerifier
                 [])],
             new HashSet<string>(["timer.write"], StringComparer.Ordinal));
         Require(CapabilityCanonicalJson.PlanDigest(plan) == GoldenPlanDigest, "golden_plan_digest");
+    }
+
+    private void VerifyCalendarIdempotencyEquivalence(DateTimeOffset now)
+    {
+        var draft = new CalendarEventDraft(
+            "primary",
+            null,
+            " Verify event ",
+            " Room A ",
+            " Approved notes ",
+            now,
+            now.AddHours(1),
+            false).Normalized();
+        var observed = new CalendarEventOccurrence(
+            "primary:event",
+            "event",
+            "primary",
+            "Primary",
+            null,
+            true,
+            draft.Title,
+            draft.Location,
+            draft.Notes,
+            draft.Start,
+            draft.End,
+            draft.IsAllDay,
+            null);
+        Require(CalendarStore.CapabilityEventMatches(observed, draft), "calendar_idempotency_match");
+        Require(
+            !CalendarStore.CapabilityEventMatches(observed with { Location = "Room B" }, draft),
+            "calendar_idempotency_location_mismatch");
+        Require(
+            !CalendarStore.CapabilityEventMatches(observed with { Notes = "Different notes" }, draft),
+            "calendar_idempotency_notes_mismatch");
     }
 
     private async Task VerifyPartialRollbackAsync(string root, DateTimeOffset now, CapabilityPrincipal principal)
@@ -410,6 +475,53 @@ internal sealed class CapabilityBrokerVerifier
         Require(receipt.Status == CapabilityReceiptStatus.Failed, "current_step_status");
         Require(receipt.Steps.FirstOrDefault()?.RollbackStatus == "succeeded", "current_step_rollback");
         Require(timerStore.RunningTimers.Count == 0, "current_step_timer_removed");
+    }
+
+    private async Task VerifyCancellationRollbackAsync(
+        string root,
+        DateTimeOffset now,
+        CapabilityPrincipal principal)
+    {
+        using var timerStore = new TimerStore(
+            Path.Combine(root, "cancel-rollback-timer"),
+            new ManualTimerClock(now),
+            new NullTimerAlertSound(),
+            enableScheduler: false);
+        using var cancellation = new CancellationTokenSource();
+        var handlers = new PocketCapabilityHandlerSet([
+            new TimerCapabilityHandler(TimerCapabilityOperation.Start, timerStore),
+            new BrokerCancellingTimerReadHandler(timerStore, cancellation),
+            new TimerCapabilityHandler(TimerCapabilityOperation.Stop, timerStore)
+        ]);
+        var brokerRoot = Path.Combine(root, "cancel-rollback-broker");
+        var broker = new CapabilityBroker(
+            new CapabilityRegistry(handlers),
+            new CapabilityBrokerLedger(brokerRoot),
+            new CapabilityBrokerAuditLog(brokerRoot));
+        var plan = new CapabilityExecutionPlan(
+            "cancel-rollback-plan",
+            now,
+            CapabilityOrigin.Text,
+            principal,
+            null,
+            [new CapabilityPlanStep(
+                "startTimer",
+                CapabilityIds.TimerStart,
+                CapabilityJson.From(new { durationSeconds = 600, sourceRef = "event:cancel", title = "Cancel rollback" }),
+                "cancel-rollback-key-0001",
+                [])],
+            new HashSet<string>(["timer.write"], StringComparer.Ordinal));
+        var permissions = Permissions(principal, "timer.write");
+        var preparation = broker.Prepare(plan, permissions, now);
+        var grant = broker.DecideApproval(
+            preparation.ApprovalRequest!.Id,
+            preparation.PlanDigest,
+            CapabilityApprovalDecision.Approve,
+            now);
+        var receipt = await broker.ExecuteAsync(plan, permissions, grant, now, cancellation.Token);
+        Require(receipt.Status == CapabilityReceiptStatus.Unknown, "cancel_rollback_status");
+        Require(receipt.Steps.FirstOrDefault()?.RollbackStatus == "succeeded", "cancel_rollback_succeeded");
+        Require(timerStore.RunningTimers.Count == 0, "cancel_rollback_timer_removed");
     }
 
     private static CapabilityPermissionSet Permissions(CapabilityPrincipal principal, params string[] permissions) =>
@@ -543,6 +655,35 @@ internal sealed class CapabilityBrokerVerifier
                     timerId = rawId.ToLowerInvariant(),
                     state = "running",
                     endAt = CapabilityCanonicalJson.Date(context.Now.AddSeconds(999))
+                }));
+        }
+    }
+
+    private sealed class BrokerCancellingTimerReadHandler(
+        TimerStore store,
+        CancellationTokenSource callerCancellation) : IPocketCapabilityHandler
+    {
+        public PocketCapabilityKey Key => CapabilityIds.TimerGet;
+
+        public Task<JsonElement> HandleAsync(
+            JsonElement arguments,
+            CapabilityHandlerContext context,
+            CancellationToken cancellationToken = default)
+        {
+            callerCancellation.Cancel();
+            cancellationToken.ThrowIfCancellationRequested();
+            var rawId = CapabilityJson.RequiredString(arguments, "timerId", 36);
+            if (!Guid.TryParse(rawId, out var id))
+            {
+                throw new CapabilityHandlerException("CAPABILITY_ARGUMENT_INVALID", "timerId");
+            }
+            return Task.FromResult(timerStore.GetRunningTimer(id) is null
+                ? CapabilityJson.From(new { timerId = rawId.ToLowerInvariant(), state = "stopped", endAt = (string?)null })
+                : CapabilityJson.From(new
+                {
+                    timerId = rawId.ToLowerInvariant(),
+                    state = "running",
+                    endAt = CapabilityCanonicalJson.Date(context.Now.AddMinutes(10))
                 }));
         }
     }

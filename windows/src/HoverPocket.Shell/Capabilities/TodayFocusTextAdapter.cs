@@ -12,7 +12,8 @@ internal sealed record TodayFocusCalendarEvent(
 
 internal sealed record TodayFocusDraft(
     CapabilityExecutionPlan Plan,
-    CapabilityBrokerPreparation Preparation);
+    CapabilityBrokerPreparation Preparation,
+    string ApprovalText);
 
 internal static class TodayFocusApprovalText
 {
@@ -129,6 +130,7 @@ internal sealed class TodayFocusTextAdapter(CapabilityBroker broker)
             throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "today_focus_input");
         }
         var nonce = Guid.NewGuid().ToString("D");
+        var approvalText = TodayFocusApprovalText.Sanitize(purpose);
         var plan = new CapabilityExecutionPlan(
             $"today-focus-write:{nonce}",
             now,
@@ -142,7 +144,7 @@ internal sealed class TodayFocusTextAdapter(CapabilityBroker broker)
                     CapabilityJson.From(new
                     {
                         durationSeconds,
-                        title = CapabilityJson.TruncateString(selectedEvent.SafeTitle, 80),
+                        title = CapabilityJson.TruncateString(approvalText, 80),
                         sourceRef = selectedEvent.EventRef
                     }),
                     $"today-focus-timer.{nonce}",
@@ -154,14 +156,14 @@ internal sealed class TodayFocusTextAdapter(CapabilityBroker broker)
                     {
                         stableKey = $"today-focus:{TimeZoneInfo.ConvertTime(now, timeZone ?? TimeZoneInfo.Local):yyyy-MM-dd}",
                         title = "今日の目的",
-                        body = purpose,
+                        body = approvalText,
                         color = "yellow"
                     }),
                     $"today-focus-sticky.{nonce}",
                     ["startTimer"])
             ],
             new HashSet<string>(["sticky.write", "timer.write"], StringComparer.Ordinal));
-        return new TodayFocusDraft(plan, _broker.Prepare(plan, permissions, now));
+        return new TodayFocusDraft(plan, _broker.Prepare(plan, permissions, now), approvalText);
     }
 
     public async Task<CapabilityWorkflowReceipt> ApproveAndExecuteAsync(
