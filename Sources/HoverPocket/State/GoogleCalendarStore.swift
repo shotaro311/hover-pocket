@@ -259,7 +259,19 @@ final class GoogleCalendarStore: ObservableObject {
         idempotencyKey: String
     ) async throws -> GoogleCalendarEventOccurrence {
         _ = idempotencyKey
-        let snapshot = try await loadMonthForTool(containing: request.start)
+        var draftStart = request.start
+        var draftEnd = request.end
+        if request.isAllDay {
+            let calendar = Calendar.current
+            guard let start = request.allDayStart?.date(in: calendar),
+                  let end = request.allDayEnd?.date(in: calendar),
+                  end > start else {
+                throw CapabilityHandlerError.invalidArgument("start_end")
+            }
+            draftStart = start
+            draftEnd = end
+        }
+        let snapshot = try await loadMonthForTool(containing: draftStart)
         let source: GoogleCalendarSource
         if let requested = request.calendarID {
             guard let requestedSource = snapshot.sources.first(where: { $0.id == requested && $0.canWrite }) else {
@@ -278,8 +290,8 @@ final class GoogleCalendarStore: ObservableObject {
             title: request.title,
             location: request.location ?? "",
             notes: request.notes ?? "",
-            start: request.start,
-            end: request.end,
+            start: draftStart,
+            end: draftEnd,
             isAllDay: request.isAllDay
         )
         let created = try await apiClient.createEvent(draft, source: source)
@@ -288,8 +300,8 @@ final class GoogleCalendarStore: ObservableObject {
             eventID: created.googleEventID,
             source: source
         )
-        if let refreshed = try? await apiClient.fetchMonth(containing: request.start) {
-            lastLoadedMonth = Calendar.current.startOfMonth(for: request.start)
+        if let refreshed = try? await apiClient.fetchMonth(containing: draftStart) {
+            lastLoadedMonth = Calendar.current.startOfMonth(for: draftStart)
             loadState = .loaded(refreshed)
         }
         return observed

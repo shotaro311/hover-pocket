@@ -27,8 +27,59 @@ struct CalendarCapabilityCreateRequest: Equatable, Sendable {
     let start: Date
     let end: Date
     let isAllDay: Bool
+    let allDayStart: CalendarCivilDate?
+    let allDayEnd: CalendarCivilDate?
     let location: String?
     let notes: String?
+}
+
+struct CalendarCivilDate: Equatable, Sendable, Comparable {
+    let year: Int
+    let month: Int
+    let day: Int
+
+    init?(rfc3339 value: String) {
+        let components = value.prefix(10).split(separator: "-", omittingEmptySubsequences: false)
+        guard components.count == 3,
+              let year = Int(components[0]),
+              let month = Int(components[1]),
+              let day = Int(components[2]) else {
+            return nil
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let candidate = DateComponents(
+            calendar: calendar,
+            timeZone: calendar.timeZone,
+            year: year,
+            month: month,
+            day: day
+        )
+        guard let date = calendar.date(from: candidate),
+              calendar.dateComponents([.year, .month, .day], from: date)
+                == DateComponents(year: year, month: month, day: day) else {
+            return nil
+        }
+        self.year = year
+        self.month = month
+        self.day = day
+    }
+
+    func date(in calendar: Calendar) -> Date? {
+        calendar.date(from: DateComponents(
+            calendar: calendar,
+            timeZone: calendar.timeZone,
+            year: year,
+            month: month,
+            day: day
+        ))
+    }
+
+    static func < (lhs: CalendarCivilDate, rhs: CalendarCivilDate) -> Bool {
+        if lhs.year != rhs.year { return lhs.year < rhs.year }
+        if lhs.month != rhs.month { return lhs.month < rhs.month }
+        return lhs.day < rhs.day
+    }
 }
 
 @MainActor
@@ -150,10 +201,18 @@ final class CalendarCreateCapabilityHandler: PocketCapabilityHandler {
         let title = try arguments.requiredString("title", maxLength: 160)
         let startString = try arguments.requiredString("start", maxLength: 64)
         let endString = try arguments.requiredString("end", maxLength: 64)
+        let isAllDay = try arguments.requiredBool("isAllDay")
         guard let start = CapabilityDateCodec.date(from: startString),
-              let end = CapabilityDateCodec.date(from: endString),
-              end > start
-        else {
+              let end = CapabilityDateCodec.date(from: endString) else {
+            throw CapabilityHandlerError.invalidArgument("start_end")
+        }
+        let allDayStart = isAllDay ? CalendarCivilDate(rfc3339: startString) : nil
+        let allDayEnd = isAllDay ? CalendarCivilDate(rfc3339: endString) : nil
+        if isAllDay {
+            guard let allDayStart, let allDayEnd, allDayEnd > allDayStart else {
+                throw CapabilityHandlerError.invalidArgument("start_end")
+            }
+        } else if end <= start {
             throw CapabilityHandlerError.invalidArgument("start_end")
         }
         let request = CalendarCapabilityCreateRequest(
@@ -161,7 +220,9 @@ final class CalendarCreateCapabilityHandler: PocketCapabilityHandler {
             title: title,
             start: start,
             end: end,
-            isAllDay: try arguments.requiredBool("isAllDay"),
+            isAllDay: isAllDay,
+            allDayStart: allDayStart,
+            allDayEnd: allDayEnd,
             location: try arguments.optionalString("location", maxLength: 500),
             notes: try arguments.optionalString("notes", maxLength: 10_000)
         )

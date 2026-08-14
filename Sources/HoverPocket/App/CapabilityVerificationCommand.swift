@@ -278,6 +278,45 @@ enum CapabilityVerificationCommand {
         try require(dataSource.idempotencyKeys == ["calendar-verifier-key-01"], "calendar_idempotency_forward")
         try require(dataSource.createdRequests.last?.calendarID == "primary", "calendar_target_forward")
 
+        let allDayArguments: CapabilityObject = [
+            "calendarId": .string("primary"),
+            "title": .string("Offset all-day"),
+            "start": .string("2026-08-15T00:00:00+09:00"),
+            "end": .string("2026-08-18T00:00:00+09:00"),
+            "isAllDay": .bool(true),
+            "location": .null,
+            "notes": .null
+        ]
+        _ = try await handlers.invoke(
+            PocketCapabilityKey(id: "calendar.event.create", version: 1),
+            arguments: allDayArguments,
+            context: CapabilityHandlerContext(
+                idempotencyKey: "calendar-verifier-all-day-01",
+                now: now
+            )
+        )
+        guard let allDayRequest = dataSource.createdRequests.last,
+              let startCivil = allDayRequest.allDayStart,
+              let endCivil = allDayRequest.allDayEnd else {
+            throw VerificationFailure("calendar_all_day_civil_date_forward")
+        }
+        var losAngeles = Calendar(identifier: .gregorian)
+        losAngeles.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        guard let resolvedStart = startCivil.date(in: losAngeles),
+              let resolvedEnd = endCivil.date(in: losAngeles) else {
+            throw VerificationFailure("calendar_all_day_civil_date_resolution")
+        }
+        let resolvedStartParts = losAngeles.dateComponents([.year, .month, .day], from: resolvedStart)
+        let resolvedEndParts = losAngeles.dateComponents([.year, .month, .day], from: resolvedEnd)
+        try require(
+            resolvedStartParts.year == 2026 && resolvedStartParts.month == 8 && resolvedStartParts.day == 15,
+            "calendar_all_day_start_offset_preserved"
+        )
+        try require(
+            resolvedEndParts.year == 2026 && resolvedEndParts.month == 8 && resolvedEndParts.day == 18,
+            "calendar_all_day_end_offset_preserved"
+        )
+
         do {
             _ = try await handlers.invoke(
                 PocketCapabilityKey(id: "calendar.event.create", version: 1),
