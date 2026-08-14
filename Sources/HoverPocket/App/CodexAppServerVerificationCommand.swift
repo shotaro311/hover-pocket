@@ -17,6 +17,10 @@ enum CodexAppServerVerificationCommand {
                 print("codex_voice_runtime_view_model_binding=ok")
                 print("codex_voice_microphone_policy=ok")
                 print("codex_voice_webrtc_negotiation=ok")
+                print("codex_voice_webrtc_epoch=ok")
+                print("codex_voice_sdp_attempt_isolation=ok")
+                print("codex_voice_restart_cancellation=ok")
+                print("codex_voice_tool_dispatch=ok")
                 Darwin.exit(0)
             } catch {
                 fputs("codex_app_server_verify=failed\n", stderr)
@@ -99,11 +103,14 @@ enum CodexAppServerVerificationCommand {
         }
 
         try await verifyRuntimeHost()
+        try await verifyStaleSDPIsolation()
+        try await verifyRestartCancellation()
     }
 
     @MainActor
     private static func verifyRuntimeHost() async throws {
         let model = VoiceLaneViewModel()
+        let toolAdapter = CodexVoiceVerificationToolAdapter()
         let workspace = FileManager.default.temporaryDirectory
             .appendingPathComponent("HoverPocketVoiceRuntimeVerify-\(UUID().uuidString)")
         let host = CodexVoiceRuntimeHost(
@@ -119,7 +126,8 @@ enum CodexAppServerVerificationCommand {
                         experimentalAPI: true
                     )
                 )
-            }
+            },
+            toolAdapter: toolAdapter
         )
 
         try require(host.snapshot.availability == .disabled, "runtime_default_off")
@@ -187,6 +195,11 @@ enum CodexAppServerVerificationCommand {
         )
         try require(answer.rootThreadID == "root-thread", "runtime_root_thread")
         try require(answer.sdp == "v=0\r\ns=fake-answer\r\n", "runtime_sdp_answer")
+        try await waitUntil("runtime_tool_dispatch") {
+            await MainActor.run { toolAdapter.callCount == 1 }
+        }
+        try require(toolAdapter.lastContext?.rootThreadID == "root-thread", "runtime_tool_root")
+        try require((toolAdapter.lastContext?.clientGeneration ?? 0) > 0, "runtime_tool_generation")
         host.markTransportAttached()
         try require(host.snapshot.transportAttached, "runtime_transport_attached")
         try require(host.snapshot.sessionStatus == .connected, "runtime_connected")
@@ -203,6 +216,98 @@ enum CodexAppServerVerificationCommand {
         }
 
         await host.dispose()
+    }
+
+    @MainActor
+    private static func verifyStaleSDPIsolation() async throws {
+        try require(
+            CodexVoiceWebRTCEmbeddedContract.verifyOperationEpoch(),
+            "webrtc_operation_epoch_contract"
+        )
+        let coordinator = CodexVoiceCoordinator(
+            featureEnabled: true,
+            workspaceDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent("HoverPocketVoiceSDPVerify-\(UUID().uuidString)"),
+            restartDelaysNanoseconds: [],
+            sdpTimeoutNanoseconds: 40_000_000,
+            clientFactory: {
+                try await CodexAppServerClient.start(
+                    options: CodexAppServerClientOptions(
+                        executableURL: URL(fileURLWithPath: "/usr/bin/python3"),
+                        launchArguments: ["-u", "-c", staleSDPServerScript],
+                        requestTimeout: 2,
+                        clientVersion: "verify",
+                        experimentalAPI: true
+                    )
+                )
+            }
+        )
+        await coordinator.initialize()
+        try require(coordinator.snapshot.availability == .ready, "sdp_isolation_ready")
+
+        let oversizedOffer = "v=0\r\n" + String(repeating: "あ", count: 50_000)
+        do {
+            _ = try await coordinator.startWebRTC(sdpOffer: oversizedOffer)
+            throw CodexAppServerVerificationFailure("sdp_utf8_limit_not_enforced")
+        } catch CodexVoiceRuntimeError.compatibility(let code) {
+            try require(code == "webrtc_offer_invalid", "sdp_utf8_limit_code")
+        }
+
+        let firstAttempt = Task { @MainActor in
+            try await coordinator.startWebRTC(sdpOffer: "v=0\r\ns=first-offer\r\n")
+        }
+        try await waitUntil("sdp_first_attempt_pending") {
+            await MainActor.run { coordinator.snapshot.sessionStatus == .negotiating }
+        }
+        do {
+            _ = try await coordinator.startWebRTC(sdpOffer: "v=0\r\ns=overlap\r\n")
+            throw CodexAppServerVerificationFailure("sdp_overlap_not_rejected")
+        } catch CodexVoiceRuntimeError.compatibility(let code) {
+            try require(code == "webrtc_negotiation_in_progress", "sdp_overlap_code")
+        }
+        do {
+            _ = try await firstAttempt.value
+            throw CodexAppServerVerificationFailure("sdp_timeout_missing")
+        } catch CodexVoiceRuntimeError.sdpTimedOut {
+        }
+        try require(coordinator.snapshot.rootThreadID == nil, "sdp_failed_root_invalidated")
+
+        let answer = try await coordinator.startWebRTC(
+            sdpOffer: "v=0\r\ns=second-offer\r\n"
+        )
+        try require(answer.rootThreadID == "root-thread-2", "sdp_new_root")
+        try require(answer.sdp.contains("fresh-answer"), "sdp_stale_answer_rejected")
+        await coordinator.close()
+    }
+
+    @MainActor
+    private static func verifyRestartCancellation() async throws {
+        let recorder = CodexVoiceClientFactoryRecorder()
+        let coordinator = CodexVoiceCoordinator(
+            featureEnabled: true,
+            restartDelaysNanoseconds: [2_000_000_000],
+            clientFactory: {
+                await recorder.recordStart()
+                return try await CodexAppServerClient.start(
+                    options: CodexAppServerClientOptions(
+                        executableURL: URL(fileURLWithPath: "/usr/bin/python3"),
+                        launchArguments: ["-u", "-c", exitAfterInitializationServerScript],
+                        requestTimeout: 2,
+                        clientVersion: "verify",
+                        experimentalAPI: true
+                    )
+                )
+            }
+        )
+        await coordinator.initialize()
+        try await waitUntil("restart_backoff_started") {
+            await MainActor.run { coordinator.snapshot.restartAttempt == 1 }
+        }
+        await coordinator.close()
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let startCount = await recorder.startCount()
+        try require(startCount == 1, "restart_cancelled_before_spawn")
+        try require(coordinator.snapshot.availability == .disabled, "restart_close_disabled")
     }
 
     private static func waitUntil(
@@ -248,6 +353,10 @@ for raw in sys.stdin:
             continue
         print(json.dumps({"id": request_id, "result": {"voices": {"available": ["alloy"], "defaultV1": "alloy"}}}), flush=True)
     elif method == "thread/start":
+        params = message.get("params") or {}
+        if not params.get("dynamicTools"):
+            print(json.dumps({"id": request_id, "error": {"code": -32602, "message": "dynamic tools required"}}), flush=True)
+            continue
         print(json.dumps({"id": request_id, "result": {"thread": {"id": "root-thread"}}}), flush=True)
     elif method == "thread/realtime/start":
         params = message.get("params") or {}
@@ -258,6 +367,7 @@ for raw in sys.stdin:
         print(json.dumps({"id": request_id, "result": {}}), flush=True)
         print(json.dumps({"method": "thread/realtime/started", "params": {"threadId": "root-thread", "realtimeSessionId": "fake-realtime", "version": "v1"}}), flush=True)
         print(json.dumps({"method": "thread/realtime/sdp", "params": {"threadId": "root-thread", "sdp": "v=0\r\ns=fake-answer\r\n"}}), flush=True)
+        print(json.dumps({"id": "tool-1", "method": "item/tool/call", "params": {"threadId": "root-thread"}}), flush=True)
     elif method == "thread/realtime/stop":
         print(json.dumps({"id": request_id, "result": {}}), flush=True)
         print(json.dumps({"method": "thread/realtime/closed", "params": {"threadId": "root-thread", "reason": None}}), flush=True)
@@ -279,6 +389,72 @@ for raw in sys.stdin:
         continue
     elif method == "verify/exit":
         print(json.dumps({"id": request_id, "result": {}}), flush=True)
+        break
+    elif request_id == "tool-1":
+        continue
+    elif request_id is not None:
+        print(json.dumps({"id": request_id, "error": {"code": -32601, "message": "unsupported"}}), flush=True)
+"""#
+
+    private static let staleSDPServerScript = #"""
+import json
+import sys
+import time
+
+thread_count = 0
+start_count = 0
+for raw in sys.stdin:
+    try:
+        message = json.loads(raw)
+    except Exception:
+        continue
+    method = message.get("method")
+    request_id = message.get("id")
+    if method == "initialize":
+        print(json.dumps({"id": request_id, "result": {"server": "fake"}}), flush=True)
+    elif method == "initialized":
+        continue
+    elif method == "account/read":
+        print(json.dumps({"id": request_id, "result": {"requiresOpenaiAuth": False, "account": {}}}), flush=True)
+    elif method == "thread/realtime/listVoices":
+        print(json.dumps({"id": request_id, "result": {"voices": {"available": ["alloy"], "defaultV1": "alloy"}}}), flush=True)
+    elif method == "thread/start":
+        thread_count += 1
+        if thread_count == 1:
+            time.sleep(0.08)
+        print(json.dumps({"id": request_id, "result": {"thread": {"id": f"root-thread-{thread_count}"}}}), flush=True)
+    elif method == "thread/realtime/start":
+        start_count += 1
+        thread_id = (message.get("params") or {}).get("threadId")
+        print(json.dumps({"id": request_id, "result": {}}), flush=True)
+        if start_count == 2:
+            print(json.dumps({"method": "thread/realtime/sdp", "params": {"threadId": "root-thread-1", "sdp": "v=0\r\ns=stale-answer\r\n"}}), flush=True)
+            print(json.dumps({"method": "thread/realtime/sdp", "params": {"threadId": thread_id, "sdp": "v=0\r\ns=fresh-answer\r\n"}}), flush=True)
+    elif request_id is not None:
+        print(json.dumps({"id": request_id, "error": {"code": -32601, "message": "unsupported"}}), flush=True)
+"""#
+
+    private static let exitAfterInitializationServerScript = #"""
+import json
+import sys
+import time
+
+for raw in sys.stdin:
+    try:
+        message = json.loads(raw)
+    except Exception:
+        continue
+    method = message.get("method")
+    request_id = message.get("id")
+    if method == "initialize":
+        print(json.dumps({"id": request_id, "result": {"server": "fake"}}), flush=True)
+    elif method == "initialized":
+        continue
+    elif method == "account/read":
+        print(json.dumps({"id": request_id, "result": {"requiresOpenaiAuth": False, "account": {}}}), flush=True)
+    elif method == "thread/realtime/listVoices":
+        print(json.dumps({"id": request_id, "result": {"voices": {"available": ["alloy"], "defaultV1": "alloy"}}}), flush=True)
+        time.sleep(0.08)
         break
     elif request_id is not None:
         print(json.dumps({"id": request_id, "error": {"code": -32601, "message": "unsupported"}}), flush=True)
@@ -303,6 +479,51 @@ private actor CodexAppServerVerificationRecorder {
 
     func transportEndedCount() -> Int {
         transportEnds.count
+    }
+}
+
+private actor CodexVoiceClientFactoryRecorder {
+    private var count = 0
+
+    func recordStart() {
+        count += 1
+    }
+
+    func startCount() -> Int {
+        count
+    }
+}
+
+@MainActor
+private final class CodexVoiceVerificationToolAdapter: CodexVoiceCapabilityToolAdapterProtocol {
+    private(set) var callCount = 0
+    private(set) var lastContext: CodexVoiceToolRequestContext?
+
+    let dynamicTools: [CodexJSONValue] = [
+        .object([
+            "type": .string("function"),
+            "name": .string("hoverpocket_verify"),
+            "description": .string("Verification tool"),
+            "inputSchema": .object([
+                "type": .string("object"),
+                "properties": .object([:]),
+                "required": .array([]),
+                "additionalProperties": .bool(false)
+            ]),
+            "deferLoading": .bool(false)
+        ])
+    ]
+
+    func handle(
+        request: CodexAppServerRequest,
+        context: CodexVoiceToolRequestContext
+    ) async -> CodexAppServerReply {
+        guard request.method == "item/tool/call" else {
+            return .failure(code: -32601, message: "unsupported")
+        }
+        callCount += 1
+        lastContext = context
+        return .success(.object(["success": .bool(true)]))
     }
 }
 

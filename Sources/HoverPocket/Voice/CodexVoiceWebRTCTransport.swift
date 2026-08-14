@@ -10,6 +10,7 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
     private var pageReady = false
     private var sessionStarting = false
     private var transportGeneration: UInt64 = 0
+    private var activeOperationID: String?
 
     init(runtimeHost: CodexVoiceRuntimeHost) {
         self.runtimeHost = runtimeHost
@@ -28,6 +29,7 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
         isReady = false
         sessionStarting = false
         transportGeneration &+= 1
+        activeOperationID = nil
     }
 
     func startSession() {
@@ -38,10 +40,19 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
             runtimeHost?.markSessionFailure("microphone_request_not_armed")
             return
         }
+        transportGeneration &+= 1
+        let operationID = String(transportGeneration)
+        activeOperationID = operationID
         sessionStarting = true
-        evaluate("window.hoverPocketVoice.start()") { [weak self] error in
-            guard let self, error != nil else { return }
+        callAsync(
+            "return await window.hoverPocketVoice.start(operationId);",
+            arguments: ["operationId": operationID]
+        ) { [weak self] error in
+            guard let self,
+                  self.activeOperationID == operationID,
+                  error != nil else { return }
             self.sessionStarting = false
+            self.activeOperationID = nil
             self.runtimeHost?.markSessionFailure("webrtc_start_failed")
         }
     }
@@ -54,6 +65,7 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
     func stopSession() {
         transportGeneration &+= 1
         sessionStarting = false
+        activeOperationID = nil
         evaluate("window.hoverPocketVoice.cleanup(false)")
         guard let runtimeHost else { return }
         Task { @MainActor in
@@ -64,8 +76,13 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
     func detachForPanelClose() {
         transportGeneration &+= 1
         sessionStarting = false
+        activeOperationID = nil
         evaluate("window.hoverPocketVoice.cleanup(false)")
-        runtimeHost?.clearTransientUIState()
+        guard let runtimeHost else { return }
+        runtimeHost.clearTransientUIState()
+        Task { @MainActor in
+            await runtimeHost.stopRealtime()
+        }
     }
 
     func handleMessage(_ body: Any) {
@@ -80,23 +97,30 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
             pageReady = true
             isReady = true
         case "offer":
-            guard sessionStarting,
-                  let sdp = object["sdp"] as? String,
+            guard let operationID = object["operationId"] as? String,
+                  operationID == activeOperationID,
+                  sessionStarting else { return }
+            guard let sdp = object["sdp"] as? String,
                   !sdp.isEmpty,
                   sdp.utf8.count <= 131_072 else {
                 runtimeHost?.markSessionFailure("webrtc_offer_invalid")
                 return
             }
-            negotiate(sdpOffer: sdp)
+            negotiate(sdpOffer: sdp, operationID: operationID)
         case "attached":
+            guard object["operationId"] as? String == activeOperationID else { return }
             sessionStarting = false
             runtimeHost?.markTransportAttached()
         case "detached":
+            guard object["operationId"] as? String == activeOperationID else { return }
             sessionStarting = false
+            activeOperationID = nil
             let reconnectExpected = object["reconnectExpected"] as? Bool ?? true
             runtimeHost?.markTransportDetached(reconnectExpected: reconnectExpected)
         case "failure":
+            guard object["operationId"] as? String == activeOperationID else { return }
             sessionStarting = false
+            activeOperationID = nil
             runtimeHost?.markSessionFailure(
                 Self.safeErrorCode(object["code"] as? String)
             )
@@ -109,8 +133,7 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
         runtimeHost?.consumeMicrophonePermission() ?? false
     }
 
-    private func negotiate(sdpOffer: String) {
-        transportGeneration &+= 1
+    private func negotiate(sdpOffer: String, operationID: String) {
         let generation = transportGeneration
         guard let runtimeHost else { return }
         Task { @MainActor [weak self] in
@@ -118,18 +141,27 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
                 let answer = try await runtimeHost.startWebRTC(sdpOffer: sdpOffer)
                 guard let self,
                       self.sessionStarting,
-                      self.transportGeneration == generation else {
+                      self.transportGeneration == generation,
+                      self.activeOperationID == operationID else {
                     return
                 }
-                let encoded = try Self.javascriptString(answer.sdp)
-                self.evaluate("window.hoverPocketVoice.acceptAnswer(\(encoded))") { [weak self] error in
-                    guard let self, error != nil else { return }
+                self.callAsync(
+                    "return await window.hoverPocketVoice.acceptAnswer(operationId, answer);",
+                    arguments: ["operationId": operationID, "answer": answer.sdp]
+                ) { [weak self] error in
+                    guard let self,
+                          self.activeOperationID == operationID,
+                          error != nil else { return }
                     self.sessionStarting = false
+                    self.activeOperationID = nil
                     self.runtimeHost?.markSessionFailure("webrtc_answer_failed")
                 }
             } catch {
-                guard let self, self.transportGeneration == generation else { return }
+                guard let self,
+                      self.transportGeneration == generation,
+                      self.activeOperationID == operationID else { return }
                 self.sessionStarting = false
+                self.activeOperationID = nil
                 self.evaluate("window.hoverPocketVoice.cleanup(false)")
                 self.runtimeHost?.markSessionFailure("webrtc_negotiation_failed")
             }
@@ -149,13 +181,28 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
         }
     }
 
-    private static func javascriptString(_ value: String) throws -> String {
-        let data = try JSONSerialization.data(withJSONObject: [value])
-        guard let encoded = String(data: data, encoding: .utf8),
-              encoded.count >= 2 else {
-            throw CodexVoiceWebRTCTransportError.invalidJavaScriptValue
+    private func callAsync(
+        _ body: String,
+        arguments: [String: Any],
+        completion: @escaping (Error?) -> Void
+    ) {
+        guard let webView else {
+            completion(CodexVoiceWebRTCTransportError.webViewUnavailable)
+            return
         }
-        return String(encoded.dropFirst().dropLast())
+        webView.callAsyncJavaScript(
+            body,
+            arguments: arguments,
+            in: nil,
+            in: .page
+        ) { result in
+            switch result {
+            case .success:
+                completion(nil)
+            case .failure(let error):
+                completion(error)
+            }
+        }
     }
 
     private static func safeErrorCode(_ value: String?) -> String {
@@ -337,6 +384,8 @@ private enum CodexVoiceWebContent {
   let microphone = null;
   let remoteAudio = null;
   let attached = false;
+  let operationEpoch = 0;
+  let activeOperationId = null;
 
   function post(message) {
     bridge.postMessage(message);
@@ -359,8 +408,15 @@ private enum CodexVoiceWebContent {
     });
   }
 
+  function isCurrentOperation(epoch, operationId) {
+    return epoch === operationEpoch && operationId === activeOperationId;
+  }
+
   function cleanup(notify, reconnectExpected = true) {
     const wasAttached = attached;
+    const operationId = activeOperationId;
+    operationEpoch += 1;
+    activeOperationId = null;
     attached = false;
     if (peer) {
       peer.close();
@@ -375,54 +431,79 @@ private enum CodexVoiceWebContent {
       remoteAudio.srcObject = null;
       remoteAudio = null;
     }
-    if (notify && wasAttached) {
-      post({ type: "detached", reconnectExpected });
+    if (notify && wasAttached && operationId) {
+      post({ type: "detached", operationId, reconnectExpected });
     }
   }
 
-  async function start() {
-    if (peer || microphone) return;
+  async function start(operationId) {
+    if (typeof operationId !== "string" || !operationId) {
+      throw new Error("operation_invalid");
+    }
+    cleanup(false);
+    const epoch = operationEpoch;
+    activeOperationId = operationId;
+    let acquiredMicrophone = null;
     try {
-      microphone = await navigator.mediaDevices.getUserMedia({
+      acquiredMicrophone = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         video: false
       });
+      if (!isCurrentOperation(epoch, operationId)) {
+        acquiredMicrophone.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      microphone = acquiredMicrophone;
       const connection = new RTCPeerConnection();
       peer = connection;
       connection.createDataChannel("oai-events");
       microphone.getAudioTracks().forEach((track) => connection.addTrack(track, microphone));
       connection.addEventListener("track", (event) => {
+        if (!isCurrentOperation(epoch, operationId) || connection !== peer) return;
         remoteAudio ||= new Audio();
         remoteAudio.autoplay = true;
         remoteAudio.srcObject = event.streams[0] || new MediaStream([event.track]);
         remoteAudio.play().catch(() => {});
       });
       connection.addEventListener("connectionstatechange", () => {
-        if (connection !== peer) return;
+        if (!isCurrentOperation(epoch, operationId) || connection !== peer) return;
         if (["failed", "disconnected", "closed"].includes(connection.connectionState)) {
           cleanup(true, true);
         }
       });
       const offer = await connection.createOffer({ offerToReceiveAudio: true });
+      if (!isCurrentOperation(epoch, operationId) || connection !== peer) return;
       await connection.setLocalDescription(offer);
       await waitForIce(connection);
+      if (!isCurrentOperation(epoch, operationId) || connection !== peer) return;
       const sdp = connection.localDescription && connection.localDescription.sdp;
       if (!sdp) throw new Error("offer_missing");
-      post({ type: "offer", sdp });
+      post({ type: "offer", operationId, sdp });
     } catch (error) {
+      if (!isCurrentOperation(epoch, operationId)) {
+        if (acquiredMicrophone && acquiredMicrophone !== microphone) {
+          acquiredMicrophone.getTracks().forEach((track) => track.stop());
+        }
+        return;
+      }
       const code = error && error.name === "NotAllowedError"
         ? "microphone_denied"
         : "webrtc_failed";
       cleanup(false);
-      post({ type: "failure", code });
+      post({ type: "failure", operationId, code });
     }
   }
 
-  async function acceptAnswer(sdp) {
-    if (!peer || typeof sdp !== "string") throw new Error("answer_invalid");
-    await peer.setRemoteDescription({ type: "answer", sdp });
+  async function acceptAnswer(operationId, sdp) {
+    const epoch = operationEpoch;
+    const connection = peer;
+    if (!isCurrentOperation(epoch, operationId) || !connection || typeof sdp !== "string") {
+      throw new Error("answer_invalid");
+    }
+    await connection.setRemoteDescription({ type: "answer", sdp });
+    if (!isCurrentOperation(epoch, operationId) || connection !== peer) return;
     attached = true;
-    post({ type: "attached" });
+    post({ type: "attached", operationId });
   }
 
   function setMuted(muted) {
@@ -439,6 +520,21 @@ private enum CodexVoiceWebContent {
 </body>
 </html>
 """#
+}
+
+enum CodexVoiceWebRTCEmbeddedContract {
+    static func verifyOperationEpoch() -> Bool {
+        let requiredFragments = [
+            "let operationEpoch = 0;",
+            "let activeOperationId = null;",
+            "function isCurrentOperation(epoch, operationId)",
+            "acquiredMicrophone.getTracks().forEach((track) => track.stop());",
+            "post({ type: \"offer\", operationId, sdp });",
+            "async function acceptAnswer(operationId, sdp)",
+            "post({ type: \"attached\", operationId });"
+        ]
+        return requiredFragments.allSatisfy(CodexVoiceWebContent.html.contains)
+    }
 }
 
 @MainActor
@@ -465,6 +561,5 @@ fileprivate final class CodexVoiceWebContentSchemeHandler: NSObject, WKURLScheme
 
 private enum CodexVoiceWebRTCTransportError: Error {
     case webViewUnavailable
-    case invalidJavaScriptValue
     case untrustedURL
 }

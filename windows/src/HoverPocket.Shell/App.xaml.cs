@@ -231,45 +231,26 @@ public partial class App : System.Windows.Application
         }
 
         var verifier = new ShellVerifier(_shellController);
-        Environment.ExitCode = await verifier.RunAsync();
-        Shutdown();
+        await RunVerificationSafelyAsync(() => verifier.RunAsync());
     }
 
-    private async Task RunSettingsVerificationAsync()
-    {
-        Environment.ExitCode = await new SettingsVerifier().RunAsync();
-        Shutdown();
-    }
+    private Task RunSettingsVerificationAsync() =>
+        RunVerificationSafelyAsync(() => new SettingsVerifier().RunAsync());
 
-    private async Task RunUiModelVerificationAsync()
-    {
-        Environment.ExitCode = await new UiModelVerifier().RunAsync();
-        Shutdown();
-    }
+    private Task RunUiModelVerificationAsync() =>
+        RunVerificationSafelyAsync(() => new UiModelVerifier().RunAsync());
 
-    private async Task RunCodexAppServerVerificationAsync()
-    {
-        Environment.ExitCode = await new CodexAppServerVerifier().RunAsync();
-        Shutdown();
-    }
+    private Task RunCodexAppServerVerificationAsync() =>
+        RunVerificationSafelyAsync(() => new CodexAppServerVerifier().RunAsync());
 
-    private async Task RunCodexAppServerProtocolVerificationAsync()
-    {
-        Environment.ExitCode = await new CodexAppServerProtocolVerifier().RunAsync();
-        Shutdown();
-    }
+    private Task RunCodexAppServerProtocolVerificationAsync() =>
+        RunVerificationSafelyAsync(() => new CodexAppServerProtocolVerifier().RunAsync());
 
-    private async Task RunCodexVoiceCoordinatorVerificationAsync()
-    {
-        Environment.ExitCode = await new CodexVoiceCoordinatorVerifier().RunAsync();
-        Shutdown();
-    }
+    private Task RunCodexVoiceCoordinatorVerificationAsync() =>
+        RunVerificationSafelyAsync(() => new CodexVoiceCoordinatorVerifier().RunAsync());
 
-    private async Task RunCalendarLiveVerificationAsync()
-    {
-        Environment.ExitCode = await new CalendarLiveVerifier().RunAsync();
-        Shutdown();
-    }
+    private Task RunCalendarLiveVerificationAsync() =>
+        RunVerificationSafelyAsync(() => new CalendarLiveVerifier().RunAsync());
 
     private async Task RunDisplayVerificationAsync()
     {
@@ -281,8 +262,7 @@ public partial class App : System.Windows.Application
         }
 
         var verifier = new DisplayVerifier(_shellController);
-        Environment.ExitCode = await verifier.RunAsync();
-        Shutdown();
+        await RunVerificationSafelyAsync(() => verifier.RunAsync());
     }
 
     private async Task RunUiVerificationAsync()
@@ -295,7 +275,23 @@ public partial class App : System.Windows.Application
         }
 
         var verifier = new UiVerifier(_shellController);
-        Environment.ExitCode = await verifier.RunAsync();
-        Shutdown();
+        await RunVerificationSafelyAsync(() => verifier.RunAsync());
+    }
+
+    private async Task RunVerificationSafelyAsync(Func<Task<int>> verification)
+    {
+        try
+        {
+            Environment.ExitCode = await verification();
+        }
+        catch (Exception error)
+        {
+            VerifyConsole.WriteLine($"FAIL verifier exception: {error.GetType().Name}");
+            Environment.ExitCode = 1;
+        }
+        finally
+        {
+            Shutdown();
+        }
     }
 }

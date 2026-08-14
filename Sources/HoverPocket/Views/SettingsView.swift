@@ -266,6 +266,25 @@ struct SettingsView: View {
             )
             .disabled(!settings.codexVoiceEnabled)
 
+            Toggle(
+                localized(
+                    japanese: "今日の予定タイトルと時間をCodexと共有",
+                    english: "Share today's event titles and times with Codex"
+                ),
+                isOn: $settings.codexVoiceCalendarReadEnabled
+            )
+            .disabled(!settings.codexVoiceEnabled)
+
+            Text(
+                localized(
+                    japanese: "Calendarの読み取りはこの許可をオンにした場合だけ利用できます。いつでもオフにできます。",
+                    english: "Calendar reads are available only while this permission is enabled. You can revoke it at any time."
+                )
+            )
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
             Text(
                 localized(
                     japanese: "自動リスニングはVoice Laneとは別に明示設定し、音声は保存しません。",

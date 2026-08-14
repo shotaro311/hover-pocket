@@ -140,6 +140,15 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var codexVoiceCalendarReadEnabled: Bool {
+        didSet {
+            defaults.set(
+                codexVoiceCalendarReadEnabled,
+                forKey: Self.codexVoiceCalendarReadEnabledKey
+            )
+        }
+    }
+
     private let defaults: UserDefaults
     private static let appLanguageKey = "appLanguage"
     private static let displayPlacementModeKey = "displayPlacementMode"
@@ -164,6 +173,7 @@ final class AppSettings: ObservableObject {
     private static let codexVoiceEnabledKey = "codexVoiceEnabled"
     private static let codexVoiceLayoutModeKey = "codexVoiceLayoutMode"
     private static let codexVoiceAutoListenKey = "codexVoiceAutoListen"
+    private static let codexVoiceCalendarReadEnabledKey = "codexVoiceCalendarReadEnabled"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -240,6 +250,11 @@ final class AppSettings: ObservableObject {
         self.codexVoiceAutoListen = defaults.object(forKey: Self.codexVoiceAutoListenKey) == nil
             ? false
             : defaults.bool(forKey: Self.codexVoiceAutoListenKey)
+        self.codexVoiceCalendarReadEnabled = defaults.object(
+            forKey: Self.codexVoiceCalendarReadEnabledKey
+        ) == nil
+            ? false
+            : defaults.bool(forKey: Self.codexVoiceCalendarReadEnabledKey)
 
         if defaults.data(forKey: Self.weatherLocationKey) == nil,
            let weatherLocationData = try? JSONEncoder().encode(weatherLocation) {

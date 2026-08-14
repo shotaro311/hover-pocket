@@ -103,6 +103,26 @@ foreach ($target in $targets) {
     }
 }
 
+Invoke-Checked "Verifier exception exits instead of hanging" {
+    $logPath = Join-Path $env:TEMP ("hoverpocket-verify-ui-model-failure-" + [Guid]::NewGuid().ToString("N") + ".log")
+    $env:HOVERPOCKET_VERIFY_LOG = $logPath
+    $env:HOVERPOCKET_VERIFY_INJECT_FAILURE = "ui-model"
+    try {
+        dotnet run --project $project -c $Configuration --no-build -- --verify ui-model
+        $exitCode = $LASTEXITCODE
+        $logText = Test-Path $logPath ? (Get-Content -Path $logPath -Raw) : ""
+        if ($exitCode -ne 1 -or $logText -notmatch "FAIL verifier exception: InvalidOperationException") {
+            throw "Injected verifier failure did not exit cleanly with code 1."
+        }
+        $global:LASTEXITCODE = 0
+    }
+    finally {
+        Remove-Item Env:HOVERPOCKET_VERIFY_INJECT_FAILURE -ErrorAction SilentlyContinue
+        Remove-Item Env:HOVERPOCKET_VERIFY_LOG -ErrorAction SilentlyContinue
+        Remove-Item -Path $logPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 if ($RunCodexReadOnlyProbe) {
     Invoke-Checked "Codex CLI version" {
         codex --version

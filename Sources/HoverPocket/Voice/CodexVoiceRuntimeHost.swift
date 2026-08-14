@@ -5,6 +5,7 @@ final class CodexVoiceRuntimeHost {
     private weak var viewModel: VoiceLaneViewModel?
     private let workspaceDirectory: URL
     private let clientFactory: CodexVoiceCoordinator.ClientFactory?
+    private var toolAdapter: (any CodexVoiceCapabilityToolAdapterProtocol)?
     private var coordinator: CodexVoiceCoordinator?
     private var desiredEnabled = false
     private var lifecycleGeneration: UInt64 = 0
@@ -17,12 +18,19 @@ final class CodexVoiceRuntimeHost {
     init(
         viewModel: VoiceLaneViewModel,
         workspaceDirectory: URL? = nil,
-        clientFactory: CodexVoiceCoordinator.ClientFactory? = nil
+        clientFactory: CodexVoiceCoordinator.ClientFactory? = nil,
+        toolAdapter: (any CodexVoiceCapabilityToolAdapterProtocol)? = nil
     ) {
         self.viewModel = viewModel
         self.workspaceDirectory = workspaceDirectory ?? Self.defaultWorkspaceDirectory()
         self.clientFactory = clientFactory
+        self.toolAdapter = toolAdapter
         viewModel.applyVoiceSnapshot(Self.disabledSnapshot)
+    }
+
+    func setToolAdapter(_ adapter: (any CodexVoiceCapabilityToolAdapterProtocol)?) {
+        guard !desiredEnabled, coordinator == nil, !isDisposed else { return }
+        toolAdapter = adapter
     }
 
     func setEnabled(_ enabled: Bool) async {
@@ -48,7 +56,8 @@ final class CodexVoiceRuntimeHost {
         let candidate = CodexVoiceCoordinator(
             featureEnabled: true,
             workspaceDirectory: workspaceDirectory,
-            clientFactory: clientFactory
+            clientFactory: clientFactory,
+            toolAdapter: toolAdapter
         )
         candidate.snapshotHandler = { [weak self, weak candidate] snapshot in
             guard let self, let candidate, self.coordinator === candidate else { return }
@@ -70,6 +79,14 @@ final class CodexVoiceRuntimeHost {
             return
         }
         publish(candidate.snapshot)
+    }
+
+    func reloadForToolConfigurationChange() async {
+        guard desiredEnabled, !isDisposed else { return }
+        let expectedGeneration = lifecycleGeneration &+ 1
+        await setEnabled(false)
+        guard !isDisposed, lifecycleGeneration == expectedGeneration else { return }
+        await setEnabled(true)
     }
 
     func clearTransientUIState() {

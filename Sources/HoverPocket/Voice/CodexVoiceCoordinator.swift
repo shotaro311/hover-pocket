@@ -4,6 +4,7 @@ enum CodexVoiceRuntimeError: Error, Equatable, Sendable {
     case signedOut
     case compatibility(String)
     case sdpTimedOut
+    case negotiationCancelled
     case disposed
 }
 
@@ -12,15 +13,19 @@ final class CodexVoiceCoordinator {
     typealias ClientFactory = @Sendable () async throws -> CodexAppServerClient
 
     private struct PendingSDP {
+        let attemptID: UInt64
         let threadID: String
+        let clientGeneration: UInt64
         let result: CodexVoiceOneShot<String>
         let timeoutTask: Task<Void, Never>
     }
 
     private let featureEnabled: Bool
     private let clientFactory: ClientFactory
+    private let toolAdapter: (any CodexVoiceCapabilityToolAdapterProtocol)?
     private let workspaceDirectory: URL
     private let restartDelaysNanoseconds: [UInt64]
+    private let sdpTimeoutNanoseconds: UInt64
     private var client: CodexAppServerClient?
     private var restartTask: Task<Void, Never>?
     private var pendingSDP: PendingSDP?
@@ -35,6 +40,11 @@ final class CodexVoiceCoordinator {
     private var restartAttempt = 0
     private var voiceCount = 0
     private var defaultVoice: String?
+    private var nextClientGeneration: UInt64 = 0
+    private var clientGeneration: UInt64 = 0
+    private var rootThreadGeneration: UInt64 = 0
+    private var nextSDPAttempt: UInt64 = 0
+    private var activeNegotiationAttemptID: UInt64?
     private var isDisposed = false
 
     var snapshotHandler: ((CodexVoiceSnapshot) -> Void)?
@@ -45,7 +55,9 @@ final class CodexVoiceCoordinator {
         transcriptEntryLimit: Int = 120,
         transcriptCharacterLimit: Int = 32_000,
         restartDelaysNanoseconds: [UInt64] = [0, 450_000_000, 1_400_000_000],
-        clientFactory: ClientFactory? = nil
+        sdpTimeoutNanoseconds: UInt64 = 20_000_000_000,
+        clientFactory: ClientFactory? = nil,
+        toolAdapter: (any CodexVoiceCapabilityToolAdapterProtocol)? = nil
     ) {
         self.featureEnabled = featureEnabled
         self.availability = featureEnabled ? .unavailable : .disabled
@@ -58,6 +70,8 @@ final class CodexVoiceCoordinator {
             characterLimit: transcriptCharacterLimit
         )
         self.restartDelaysNanoseconds = restartDelaysNanoseconds
+        self.sdpTimeoutNanoseconds = sdpTimeoutNanoseconds
+        self.toolAdapter = toolAdapter
         self.clientFactory = clientFactory ?? {
             try await CodexAppServerClient.start(
                 options: CodexAppServerClientOptions(
@@ -99,6 +113,8 @@ final class CodexVoiceCoordinator {
         do {
             try await startClientAndValidate()
             update(availability: .ready, status: .idle, errorCode: nil)
+        } catch CodexVoiceRuntimeError.disposed {
+            return
         } catch CodexVoiceRuntimeError.signedOut {
             update(availability: .signedOut, status: .blockedFailure, errorCode: "signed_out")
         } catch CodexVoiceRuntimeError.compatibility(let code) {
@@ -119,19 +135,37 @@ final class CodexVoiceCoordinator {
 
     private func startClientAndValidate() async throws {
         let candidate = try await clientFactory()
+        nextClientGeneration &+= 1
+        let generation = nextClientGeneration
         await candidate.setNotificationHandler { [weak self, weak candidate] notification in
             Task { @MainActor in
-                guard let self, let candidate, self.client === candidate else { return }
+                guard let self,
+                      let candidate,
+                      self.client === candidate,
+                      self.clientGeneration == generation else { return }
                 await self.processNotification(notification)
             }
         }
         await candidate.setTransportEndedHandler { [weak self, weak candidate] reason in
             Task { @MainActor in
                 guard let self, let candidate else { return }
-                self.handleTransportEnd(client: candidate, reason: reason)
+                await self.handleTransportEnd(
+                    client: candidate,
+                    generation: generation,
+                    reason: reason
+                )
             }
         }
-        await candidate.setServerRequestHandler(nil)
+        await candidate.setServerRequestHandler { [weak self, weak candidate] request in
+            guard let self, let candidate else {
+                return .failure(code: -32600, message: "HoverPocket Voice session is unavailable.")
+            }
+            return await self.handleServerRequest(
+                client: candidate,
+                generation: generation,
+                request: request
+            )
+        }
 
         do {
             let account = try await candidate.sendRequest(
@@ -144,7 +178,11 @@ final class CodexVoiceCoordinator {
                 params: .object([:])
             )
             let voiceSnapshot = try parseVoices(voices)
+            guard !isDisposed, !Task.isCancelled else {
+                throw CodexVoiceRuntimeError.disposed
+            }
             client = candidate
+            clientGeneration = generation
             appServerProcessID = await candidate.processIdentifier
             voiceCount = voiceSnapshot.count
             defaultVoice = voiceSnapshot.defaultVoice
@@ -164,38 +202,68 @@ final class CodexVoiceCoordinator {
     func startWebRTC(sdpOffer: String) async throws -> CodexVoiceWebRTCAnswer {
         guard !isDisposed else { throw CodexVoiceRuntimeError.disposed }
         guard !sdpOffer.isEmpty,
-              sdpOffer.count <= 131_072,
+              sdpOffer.utf8.count <= 131_072,
               sdpOffer.hasPrefix("v=0") else {
             throw CodexVoiceRuntimeError.compatibility("webrtc_offer_invalid")
         }
-        guard availability == .ready, let client else {
+        guard availability == .ready,
+              let client,
+              clientGeneration > 0 else {
             throw CodexVoiceRuntimeError.compatibility("voice_not_ready")
         }
         guard let defaultVoice else {
             throw CodexVoiceRuntimeError.compatibility("realtime_voice_missing")
         }
+        guard pendingSDP == nil, activeNegotiationAttemptID == nil else {
+            throw CodexVoiceRuntimeError.compatibility("webrtc_negotiation_in_progress")
+        }
 
-        let threadID = try await ensureRootThread(client: client)
+        let generation = clientGeneration
+        nextSDPAttempt &+= 1
+        let attemptID = nextSDPAttempt
+        activeNegotiationAttemptID = attemptID
         sessionStatus = .negotiating
         lastErrorCode = nil
         publish()
-
-        let result = CodexVoiceOneShot<String>()
-        let timeoutTask = Task {
-            try? await Task.sleep(nanoseconds: 20_000_000_000)
-            guard !Task.isCancelled else { return }
-            await result.fail(.sdpTimedOut)
-        }
-        pendingSDP?.timeoutTask.cancel()
-        pendingSDP = PendingSDP(threadID: threadID, result: result, timeoutTask: timeoutTask)
         defer {
-            if pendingSDP?.threadID == threadID {
+            if pendingSDP?.attemptID == attemptID {
                 pendingSDP?.timeoutTask.cancel()
                 pendingSDP = nil
             }
+            if activeNegotiationAttemptID == attemptID {
+                activeNegotiationAttemptID = nil
+            }
         }
 
+        var attemptThreadID: String?
         do {
+            let threadID = try await ensureRootThread(
+                client: client,
+                generation: generation,
+                attemptID: attemptID
+            )
+            attemptThreadID = threadID
+            guard activeNegotiationAttemptID == attemptID else {
+                throw CodexVoiceRuntimeError.negotiationCancelled
+            }
+
+            let result = CodexVoiceOneShot<String>()
+            let timeoutNanoseconds = sdpTimeoutNanoseconds
+            let timeoutTask = Task {
+                do {
+                    try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                } catch {
+                    return
+                }
+                await result.fail(.sdpTimedOut)
+            }
+            pendingSDP = PendingSDP(
+                attemptID: attemptID,
+                threadID: threadID,
+                clientGeneration: generation,
+                result: result,
+                timeoutTask: timeoutTask
+            )
             _ = try await client.sendRequest(
                 "thread/realtime/start",
                 params: .object([
@@ -216,17 +284,37 @@ final class CodexVoiceCoordinator {
             let answer = try await result.wait()
             return CodexVoiceWebRTCAnswer(rootThreadID: threadID, sdp: answer)
         } catch {
-            update(
-                availability: .ready,
-                status: .recoverableFailure,
-                errorCode: "webrtc_negotiation_failed"
-            )
+            if let attemptThreadID,
+               rootThreadID == attemptThreadID,
+               rootThreadGeneration == generation {
+                rootThreadID = nil
+                rootThreadGeneration = 0
+            }
+            if !isDisposed {
+                update(
+                    availability: .ready,
+                    status: .recoverableFailure,
+                    errorCode: "webrtc_negotiation_failed"
+                )
+            }
             throw error
         }
     }
 
-    private func ensureRootThread(client: CodexAppServerClient) async throws -> String {
-        if let rootThreadID, !rootThreadID.isEmpty {
+    private func ensureRootThread(
+        client: CodexAppServerClient,
+        generation: UInt64,
+        attemptID: UInt64
+    ) async throws -> String {
+        guard self.client === client,
+              clientGeneration == generation,
+              availability == .ready,
+              activeNegotiationAttemptID == attemptID else {
+            throw CodexVoiceRuntimeError.compatibility("voice_client_stale")
+        }
+        if let rootThreadID,
+           !rootThreadID.isEmpty,
+           rootThreadGeneration == generation {
             return rootThreadID
         }
         try FileManager.default.createDirectory(
@@ -243,7 +331,7 @@ final class CodexVoiceCoordinator {
                 "ephemeral": .bool(false),
                 "runtimeWorkspaceRoots": .array([]),
                 "selectedCapabilityRoots": .array([]),
-                "dynamicTools": .array([]),
+                "dynamicTools": .array(toolAdapter?.dynamicTools ?? []),
                 "threadSource": .string("hoverpocket_voice"),
                 "sessionStartSource": .string("startup"),
                 "baseInstructions": .string(
@@ -258,7 +346,14 @@ final class CodexVoiceCoordinator {
               !id.isEmpty else {
             throw CodexVoiceRuntimeError.compatibility("thread_start_response_invalid")
         }
+        guard self.client === client,
+              clientGeneration == generation,
+              availability == .ready,
+              activeNegotiationAttemptID == attemptID else {
+            throw CodexVoiceRuntimeError.compatibility("voice_client_stale")
+        }
         rootThreadID = id
+        rootThreadGeneration = generation
         publish()
         return id
     }
@@ -294,6 +389,7 @@ final class CodexVoiceCoordinator {
 
     func stopRealtime() async {
         guard !isDisposed else { return }
+        await cancelPendingSDP(.negotiationCancelled)
         guard let client, let rootThreadID else {
             detachTransport(reconnectExpected: false)
             return
@@ -346,39 +442,44 @@ final class CodexVoiceCoordinator {
         let params = notification.params?.objectValue ?? [:]
         switch notification.method {
         case "thread/realtime/started":
-            rootThreadID = params["threadId"]?.stringValue ?? rootThreadID
+            guard isCurrentRoot(params["threadId"]?.stringValue) else { return }
             sessionStatus = transportAttached ? (isMuted ? .muted : .connected) : .connecting
             lastErrorCode = nil
         case "thread/realtime/transcript/delta":
+            guard isCurrentRoot(params["threadId"]?.stringValue) else { return }
             transcript.appendDelta(
-                threadID: params["threadId"]?.stringValue ?? rootThreadID ?? "",
+                threadID: rootThreadID ?? "",
                 role: params["role"]?.stringValue ?? "unknown",
                 delta: params["delta"]?.stringValue ?? "",
                 now: Date()
             )
         case "thread/realtime/transcript/done":
+            guard isCurrentRoot(params["threadId"]?.stringValue) else { return }
             transcript.complete(
-                threadID: params["threadId"]?.stringValue ?? rootThreadID ?? "",
+                threadID: rootThreadID ?? "",
                 role: params["role"]?.stringValue ?? "unknown",
                 text: params["text"]?.stringValue,
                 now: Date()
             )
         case "thread/realtime/sdp":
             guard let pendingSDP,
+                  pendingSDP.clientGeneration == clientGeneration,
                   params["threadId"]?.stringValue == pendingSDP.threadID,
                   let sdp = params["sdp"]?.stringValue,
                   !sdp.isEmpty,
-                  sdp.count <= 131_072,
+                  sdp.utf8.count <= 131_072,
                   sdp.hasPrefix("v=0") else { return }
             await pendingSDP.result.succeed(sdp)
             sessionStatus = .connecting
             lastErrorCode = nil
         case "thread/realtime/closed":
+            guard isCurrentRoot(params["threadId"]?.stringValue) else { return }
             transportAttached = false
             isMuted = true
             sessionStatus = .closed
             lastErrorCode = params["reason"]?.stringValue == nil ? nil : "realtime_closed"
         case "thread/realtime/error":
+            guard params["threadId"]?.stringValue.map(isCurrentRoot) ?? true else { return }
             transportAttached = false
             isMuted = true
             sessionStatus = .recoverableFailure
@@ -389,13 +490,61 @@ final class CodexVoiceCoordinator {
         publish()
     }
 
-    private func handleTransportEnd(client failedClient: CodexAppServerClient, reason: String) {
-        guard !isDisposed, client === failedClient else { return }
+    private func isCurrentRoot(_ threadID: String?) -> Bool {
+        clientGeneration > 0
+            && rootThreadGeneration == clientGeneration
+            && threadID == rootThreadID
+            && rootThreadID?.isEmpty == false
+    }
+
+    private func handleServerRequest(
+        client sourceClient: CodexAppServerClient,
+        generation: UInt64,
+        request: CodexAppServerRequest
+    ) async -> CodexAppServerReply {
+        guard let toolAdapter else {
+            return .failure(
+                code: -32601,
+                message: "HoverPocket has no handler for app-server request: \(request.method)"
+            )
+        }
+        guard !isDisposed,
+              client === sourceClient,
+              clientGeneration == generation,
+              availability == .ready,
+              rootThreadGeneration == generation,
+              let rootThreadID,
+              !rootThreadID.isEmpty else {
+            return .failure(
+                code: -32600,
+                message: "HoverPocket rejected a tool call from a stale or non-ready Codex session."
+            )
+        }
+        return await toolAdapter.handle(
+            request: request,
+            context: CodexVoiceToolRequestContext(
+                rootThreadID: rootThreadID,
+                clientGeneration: generation
+            )
+        )
+    }
+
+    private func handleTransportEnd(
+        client failedClient: CodexAppServerClient,
+        generation: UInt64,
+        reason: String
+    ) async {
+        guard !isDisposed,
+              client === failedClient,
+              clientGeneration == generation else { return }
+        await cancelPendingSDP(.disposed)
         availability = .faulted
         sessionStatus = .recoverableFailure
         transportAttached = false
         isMuted = true
         appServerProcessID = nil
+        rootThreadID = nil
+        rootThreadGeneration = 0
         lastErrorCode = "transport_\(reason)"
         publish()
         guard restartTask == nil else { return }
@@ -405,11 +554,12 @@ final class CodexVoiceCoordinator {
     }
 
     private func restart(after failedClient: CodexAppServerClient) async {
-        guard !isDisposed, client === failedClient else {
-            restartTask = nil
-            return
-        }
+        defer { restartTask = nil }
+        guard !isDisposed, client === failedClient else { return }
         client = nil
+        clientGeneration = 0
+        rootThreadID = nil
+        rootThreadGeneration = 0
         await failedClient.setNotificationHandler(nil)
         await failedClient.setTransportEndedHandler(nil)
         await failedClient.setServerRequestHandler(nil)
@@ -417,7 +567,6 @@ final class CodexVoiceCoordinator {
 
         for (index, delay) in restartDelaysNanoseconds.enumerated() {
             guard !Task.isCancelled, !isDisposed else {
-                restartTask = nil
                 return
             }
             restartAttempt = index + 1
@@ -426,23 +575,37 @@ final class CodexVoiceCoordinator {
             lastErrorCode = nil
             publish()
             if delay > 0 {
-                try? await Task.sleep(nanoseconds: delay)
+                do {
+                    try await Task.sleep(nanoseconds: delay)
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled, !isDisposed else {
+                return
             }
             do {
                 try await startClientAndValidate()
+                guard !Task.isCancelled, !isDisposed else {
+                    if let client {
+                        self.client = nil
+                        clientGeneration = 0
+                        await client.close()
+                    }
+                    return
+                }
                 availability = .ready
                 sessionStatus = rootThreadID == nil ? .idle : .reconnecting
                 lastErrorCode = nil
                 publish()
-                restartTask = nil
                 return
             } catch CodexVoiceRuntimeError.signedOut {
                 update(availability: .signedOut, status: .blockedFailure, errorCode: "signed_out")
-                restartTask = nil
                 return
             } catch CodexVoiceRuntimeError.compatibility(let code) {
                 update(availability: .incompatible, status: .blockedFailure, errorCode: code)
-                restartTask = nil
+                return
+            } catch CodexVoiceRuntimeError.disposed {
                 return
             } catch {
                 availability = .faulted
@@ -452,7 +615,14 @@ final class CodexVoiceCoordinator {
             }
         }
         update(availability: .blocked, status: .blockedFailure, errorCode: "restart_exhausted")
-        restartTask = nil
+    }
+
+    private func cancelPendingSDP(_ error: CodexVoiceRuntimeError) async {
+        activeNegotiationAttemptID = nil
+        guard let pendingSDP else { return }
+        self.pendingSDP = nil
+        pendingSDP.timeoutTask.cancel()
+        await pendingSDP.result.fail(error)
     }
 
     private func validateAccount(_ response: CodexJSONValue) throws {
@@ -504,14 +674,18 @@ final class CodexVoiceCoordinator {
     func close() async {
         guard !isDisposed else { return }
         isDisposed = true
-        restartTask?.cancel()
-        pendingSDP?.timeoutTask.cancel()
-        if let pendingSDP {
-            await pendingSDP.result.fail(.disposed)
+        let restarting = restartTask
+        restartTask = nil
+        restarting?.cancel()
+        if let restarting {
+            await restarting.value
         }
-        pendingSDP = nil
+        await cancelPendingSDP(.disposed)
         let connectedClient = client
         client = nil
+        clientGeneration = 0
+        rootThreadID = nil
+        rootThreadGeneration = 0
         if let connectedClient {
             await connectedClient.setNotificationHandler(nil)
             await connectedClient.setTransportEndedHandler(nil)

@@ -15,6 +15,14 @@ internal sealed class UiModelVerifier
 
     public async Task<int> RunAsync()
     {
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("HOVERPOCKET_VERIFY_INJECT_FAILURE"),
+                "ui-model",
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Injected UI model verifier failure.");
+        }
+
         var registry = ProviderRegistry.CreateDefault();
         var store = UserSettingsStore.CreateTemporary("UiModelVerify");
 

@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         configureAINativeRuntimeIfEnabled()
+        hoverWindowController.startVoiceRuntime()
         installMainMenu()
         registerURLSchemeCallbackHandler()
         statusBarMenuController = StatusBarMenuController(
@@ -78,9 +79,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
                 auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
             )
-            AINativeRuntime.shared.configure(adapter: TodayFocusTextAdapter(broker: broker))
+            let adapter = TodayFocusTextAdapter(broker: broker)
+            AINativeRuntime.shared.configure(adapter: adapter)
+            hoverWindowController.configureVoiceCapabilities(
+                broker: broker,
+                todayFocus: adapter
+            )
         } catch {
             AINativeRuntime.shared.configure(adapter: nil)
+            hoverWindowController.configureVoiceCapabilities(broker: nil, todayFocus: nil)
         }
     }
 

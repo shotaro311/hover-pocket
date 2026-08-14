@@ -39,6 +39,8 @@ final class HoverWindowController {
     private let voiceWebRTCDriver: CodexVoiceWebRTCDriver
     private let settingsWindowController: SettingsWindowController
     private var settingsCancellables = Set<AnyCancellable>()
+    private var voiceAuthorizationEpoch: UInt64 = 1
+    private var voiceToolSurfaceActive = false
 
     var appSettings: AppSettings {
         settings
@@ -75,6 +77,35 @@ final class HoverWindowController {
         configurePreviewWindow()
         observeSettings()
         observeTimerAlerts()
+    }
+
+    func configureVoiceCapabilities(
+        broker: CapabilityBroker?,
+        todayFocus: TodayFocusTextAdapter?
+    ) {
+        guard let broker, let todayFocus else {
+            voiceRuntimeHost.setToolAdapter(nil)
+            return
+        }
+        let adapter = CodexVoiceCapabilityToolAdapter(
+            broker: broker,
+            todayFocus: todayFocus,
+            requestApproval: { [weak self] approval in
+                self?.requestVoiceCapabilityApproval(approval) ?? false
+            },
+            authorization: { [weak self] in
+                self?.voiceToolAuthorization
+                    ?? CodexVoiceToolAuthorization(
+                        isAllowed: false,
+                        epoch: 0,
+                        grantedPermissions: []
+                    )
+            }
+        )
+        voiceRuntimeHost.setToolAdapter(adapter)
+    }
+
+    func startVoiceRuntime() {
         Task { @MainActor [weak self] in
             guard let self else { return }
             await self.voiceRuntimeHost.setEnabled(self.settings.codexVoiceEnabled)
@@ -134,6 +165,103 @@ final class HoverWindowController {
 
     func openSettingsFromMenu() {
         showSettings()
+    }
+
+    private var voiceToolAuthorization: CodexVoiceToolAuthorization {
+        CodexVoiceToolAuthorization(
+            isAllowed: CodexVoiceToolSurfacePolicy.isAllowed(
+                aiNativeEnabled: settings.aiNativeEnabled,
+                voiceEnabled: settings.codexVoiceEnabled,
+                surfaceActive: voiceToolSurfaceActive,
+                windowVisible: previewWindow?.isVisible == true,
+                runtimeReady: voiceRuntimeHost.snapshot.availability == .ready
+            ),
+            epoch: voiceAuthorizationEpoch,
+            grantedPermissions: settings.codexVoiceCalendarReadEnabled
+                ? ["calendar.events.read"]
+                : []
+        )
+    }
+
+    private func invalidateVoiceToolAuthorization() {
+        voiceAuthorizationEpoch &+= 1
+    }
+
+    private func requestVoiceCapabilityApproval(
+        _ approval: CodexVoiceCapabilityApproval
+    ) -> Bool {
+        let expected = voiceToolAuthorization
+        guard expected.isAllowed else { return false }
+
+        cancelClose()
+        stopHoverMonitor()
+        let isEnglish = settings.appLanguage == .english
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = switch approval.toolName {
+        case CodexVoiceCapabilityToolAdapter.timerStartTool:
+            isEnglish ? "Approve Timer" : "Timerを承認"
+        case CodexVoiceCapabilityToolAdapter.calendarCreateTool:
+            isEnglish ? "Approve Calendar event" : "カレンダー予定を承認"
+        case CodexVoiceCapabilityToolAdapter.todayFocusTool:
+            isEnglish ? "Approve Today Focus" : "Today Focusを承認"
+        default:
+            isEnglish ? "Approve HoverPocket action" : "HoverPocket操作を承認"
+        }
+        let fieldLines = approval.fields.map { field in
+            let label = Self.voiceApprovalLabel(field.key, isEnglish: isEnglish)
+            return "\(label): \(field.value)"
+        }
+        alert.informativeText = fieldLines.joined(separator: "\n")
+            + "\n\n"
+            + (isEnglish
+                ? "Allow Codex to perform this action through HoverPocket?"
+                : "CodexがHoverPocketでこの操作を実行することを許可しますか？")
+        CodexVoiceHostApprovalPolicy.configureButtons(
+            alert,
+            isEnglish: isEnglish
+        )
+        NSApp.activate(ignoringOtherApps: true)
+        let escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard CodexVoiceHostApprovalPolicy.isEscapeKeyCode(event.keyCode) else {
+                return event
+            }
+            NSApp.abortModal()
+            return nil
+        }
+        defer {
+            if let escapeMonitor {
+                NSEvent.removeMonitor(escapeMonitor)
+            }
+        }
+        let response = alert.runModal()
+        if previewWindow?.isVisible == true {
+            startHoverMonitor()
+        }
+        let current = voiceToolAuthorization
+        return CodexVoiceHostApprovalPolicy.isAffirmative(response)
+            && current.isAllowed
+            && current.epoch == expected.epoch
+    }
+
+    private static func voiceApprovalLabel(_ key: String, isEnglish: Bool) -> String {
+        switch (key, isEnglish) {
+        case ("title", true): "Title"
+        case ("title", false): "タイトル"
+        case ("durationSeconds", true): "Duration (seconds)"
+        case ("durationSeconds", false): "時間（秒）"
+        case ("start", true): "Start"
+        case ("start", false): "開始"
+        case ("end", true): "End"
+        case ("end", false): "終了"
+        case ("isAllDay", true): "All day"
+        case ("isAllDay", false): "終日"
+        case ("event", true): "Calendar event"
+        case ("event", false): "予定"
+        case ("purpose", true): "Purpose"
+        case ("purpose", false): "今日の目的"
+        default: key
+        }
     }
 
     private func panelFrames(on screen: NSScreen) -> PanelFrames {
@@ -280,6 +408,8 @@ final class HoverWindowController {
 
     private func hidePreviewForExternalDrag() {
         guard let previewWindow, previewWindow.isVisible else { return }
+        voiceToolSurfaceActive = false
+        invalidateVoiceToolAuthorization()
         resetTask?.cancel()
         resetTask = nil
         setProviderActive(false)
@@ -304,6 +434,8 @@ final class HoverWindowController {
         mouseEventsEnableTask = nil
 
         guard let screen = requestedScreen ?? targetScreen(), let previewWindow else { return }
+        voiceToolSurfaceActive = true
+        invalidateVoiceToolAuthorization()
         voiceRuntimeHost.setPanelVisible(true)
         activePreviewScreen = screen
         let frames = panelFrames(on: screen)
@@ -398,6 +530,8 @@ final class HoverWindowController {
     }
 
     private func closePreview() {
+        voiceToolSurfaceActive = false
+        invalidateVoiceToolAuthorization()
         guard let previewWindow, previewWindow.isVisible else {
             menuStore.providerStore.prepareForPanelClose()
             voiceWebRTCDriver.detachForPanelClose()
@@ -735,6 +869,8 @@ final class HoverWindowController {
             .sink { [weak self] enabled in
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
+                    self.voiceToolSurfaceActive = enabled && self.previewWindow?.isVisible == true
+                    self.invalidateVoiceToolAuthorization()
                     self.resizePreviewForPanelSizeChange()
                     if !enabled {
                         self.voiceWebRTCDriver.detachForPanelClose()
@@ -742,6 +878,28 @@ final class HoverWindowController {
                     Task { @MainActor [weak self] in
                         await self?.voiceRuntimeHost.setEnabled(enabled)
                     }
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        settings.$codexVoiceCalendarReadEnabled
+            .dropFirst()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.invalidateVoiceToolAuthorization()
+                    Task { @MainActor [weak self] in
+                        await self?.voiceRuntimeHost.reloadForToolConfigurationChange()
+                    }
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        settings.$aiNativeEnabled
+            .dropFirst()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.invalidateVoiceToolAuthorization()
                 }
             }
             .store(in: &settingsCancellables)
@@ -854,5 +1012,39 @@ final class HoverWindowController {
                 previewWindow.invalidateShadow()
             }
         }
+    }
+}
+
+enum CodexVoiceToolSurfacePolicy {
+    static func isAllowed(
+        aiNativeEnabled: Bool,
+        voiceEnabled: Bool,
+        surfaceActive: Bool,
+        windowVisible: Bool,
+        runtimeReady: Bool
+    ) -> Bool {
+        aiNativeEnabled
+            && voiceEnabled
+            && surfaceActive
+            && windowVisible
+            && runtimeReady
+    }
+}
+
+@MainActor
+enum CodexVoiceHostApprovalPolicy {
+    static func configureButtons(_ alert: NSAlert, isEnglish: Bool) {
+        alert.addButton(withTitle: isEnglish ? "Cancel" : "キャンセル")
+        alert.addButton(withTitle: isEnglish ? "Allow" : "許可")
+        alert.buttons.first?.keyEquivalent = "\r"
+        alert.buttons.last?.keyEquivalent = ""
+    }
+
+    static func isAffirmative(_ response: NSApplication.ModalResponse) -> Bool {
+        response == .alertSecondButtonReturn
+    }
+
+    static func isEscapeKeyCode(_ keyCode: UInt16) -> Bool {
+        keyCode == 53
     }
 }

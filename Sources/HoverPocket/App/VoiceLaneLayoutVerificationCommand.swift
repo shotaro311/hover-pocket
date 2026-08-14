@@ -119,6 +119,7 @@ enum VoiceLaneLayoutVerificationCommand {
         guard !initial.codexVoiceEnabled,
               initial.codexVoiceLayoutMode == .compact,
               !initial.codexVoiceAutoListen,
+              !initial.codexVoiceCalendarReadEnabled,
               initial.requestedVoiceLaneDisplayMode == .disabled else {
             return false
         }
@@ -126,11 +127,13 @@ enum VoiceLaneLayoutVerificationCommand {
         initial.codexVoiceEnabled = true
         initial.codexVoiceLayoutMode = .expanded
         initial.codexVoiceAutoListen = true
+        initial.codexVoiceCalendarReadEnabled = true
 
         let reloaded = AppSettings(defaults: defaults)
         return reloaded.codexVoiceEnabled
             && reloaded.codexVoiceLayoutMode == .expanded
             && reloaded.codexVoiceAutoListen
+            && reloaded.codexVoiceCalendarReadEnabled
             && reloaded.requestedVoiceLaneDisplayMode == .expanded
     }
 }

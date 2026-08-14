@@ -158,3 +158,17 @@ jobs:
               throw "Verifier failed: $target (exit $exitCode)"
             }
           }
+
+          $failureLog = Join-Path $env:RUNNER_TEMP "hoverpocket-verify-ui-model-failure.log"
+          Remove-Item -Path $failureLog -Force -ErrorAction SilentlyContinue
+          $env:HOVERPOCKET_VERIFY_LOG = $failureLog
+          $env:HOVERPOCKET_VERIFY_INJECT_FAILURE = "ui-model"
+          dotnet run --project $project -c Debug --no-build -- --verify ui-model
+          $failureExitCode = $LASTEXITCODE
+          Remove-Item Env:HOVERPOCKET_VERIFY_INJECT_FAILURE -ErrorAction SilentlyContinue
+          Remove-Item Env:HOVERPOCKET_VERIFY_LOG -ErrorAction SilentlyContinue
+          $failureText = Test-Path $failureLog ? (Get-Content -Path $failureLog -Raw) : ""
+          if ($failureExitCode -ne 1 -or $failureText -notmatch "FAIL verifier exception: InvalidOperationException") {
+            throw "Injected verifier failure did not exit cleanly with code 1."
+          }
+          $global:LASTEXITCODE = 0
