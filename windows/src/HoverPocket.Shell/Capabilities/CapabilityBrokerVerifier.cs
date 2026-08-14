@@ -16,7 +16,7 @@ internal sealed class CapabilityBrokerVerifier
     {
         try
         {
-            VerifyAsync().GetAwaiter().GetResult();
+            Task.Run(VerifyAsync).GetAwaiter().GetResult();
         }
         catch (Exception ex)
         {
