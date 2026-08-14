@@ -29,7 +29,7 @@ enum CodexAppServerVerificationCommand {
             options: CodexAppServerClientOptions(
                 executableURL: URL(fileURLWithPath: "/usr/bin/python3"),
                 launchArguments: ["-u", "-c", fakeServerScript],
-                requestTimeout: 0.25,
+                requestTimeout: 2,
                 clientVersion: "verify",
                 experimentalAPI: true
             )
