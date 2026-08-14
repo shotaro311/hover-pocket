@@ -310,13 +310,16 @@ internal static class FakeCodexAppServer
                 }
                 case "thread/read":
                 {
-                    var validParams = message.TryGetProperty("params", out var readParams)
+                    string? threadId = null;
+                    if (message.TryGetProperty("params", out var readParams)
                         && readParams.ValueKind == JsonValueKind.Object
                         && readParams.TryGetProperty("threadId", out var threadIdValue)
                         && threadIdValue.ValueKind == JsonValueKind.String
                         && readParams.TryGetProperty("includeTurns", out var includeTurns)
-                        && includeTurns.ValueKind == JsonValueKind.True;
-                    var threadId = validParams ? threadIdValue.GetString() : null;
+                        && includeTurns.ValueKind == JsonValueKind.True)
+                    {
+                        threadId = threadIdValue.GetString();
+                    }
                     if (threadId is not ("child-a" or "grandchild-a"))
                     {
                         Write(output, new

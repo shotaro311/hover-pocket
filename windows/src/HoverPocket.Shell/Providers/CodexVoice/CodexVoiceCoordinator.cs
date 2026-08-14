@@ -492,7 +492,6 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         long clientGeneration,
         CancellationToken cancellationToken)
     {
-        Dictionary<string, CodexVoiceThreadSummary> previousById;
         lock (_stateSync)
         {
             if (!ReferenceEquals(_client, client)
@@ -614,6 +613,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         string rootSessionId,
         CancellationToken cancellationToken)
     {
+        Dictionary<string, CodexVoiceThreadSummary> previousById;
         lock (_stateSync)
         {
             if (!IsSessionScopeCurrentLocked(
