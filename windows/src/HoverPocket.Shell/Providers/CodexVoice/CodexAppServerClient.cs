@@ -46,12 +46,14 @@ internal sealed record CodexAppServerReply(
 }
 
 internal sealed record CodexAppServerReplyError(
-    int Code,
-    string Message,
-    object? Data = null);
+    [property: JsonPropertyName("code")] int Code,
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("data")] object? Data = null);
 
 internal sealed class CodexAppServerClient : IAsyncDisposable
 {
+    private const int MaximumProtocolLineCharacters = 1_048_576;
+    private const int MaximumConcurrentServerRequests = 8;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
@@ -65,6 +67,9 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
     private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonElement>> _pendingRequests =
         new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _writeGate = new(1, 1);
+    private readonly SemaphoreSlim _serverRequestGate = new(
+        MaximumConcurrentServerRequests,
+        MaximumConcurrentServerRequests);
     private readonly object _stderrSync = new();
     private readonly Queue<string> _stderrTail = new();
     private readonly Task _stdoutReaderTask;
@@ -322,15 +327,66 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         Exception? terminalError = null;
         try
         {
+            var buffer = new char[4096];
+            var line = new StringBuilder();
+            var discardingOversizedLine = false;
             while (!cancellationToken.IsCancellationRequested)
             {
-                var line = await _process.StandardOutput.ReadLineAsync(cancellationToken);
-                if (line is null)
+                var count = await _process.StandardOutput.ReadAsync(
+                    buffer.AsMemory(),
+                    cancellationToken);
+                if (count == 0)
                 {
                     break;
                 }
 
-                HandleProtocolLine(line);
+                for (var index = 0; index < count; index++)
+                {
+                    var character = buffer[index];
+                    if (character == '\n')
+                    {
+                        if (discardingOversizedLine)
+                        {
+                            Interlocked.Increment(ref _malformedStdoutLineCount);
+                        }
+                        else
+                        {
+                            if (line.Length > 0 && line[^1] == '\r')
+                            {
+                                line.Length--;
+                            }
+                            if (line.Length > 0)
+                            {
+                                HandleProtocolLine(line.ToString());
+                            }
+                        }
+
+                        line.Clear();
+                        discardingOversizedLine = false;
+                        continue;
+                    }
+
+                    if (discardingOversizedLine)
+                    {
+                        continue;
+                    }
+                    if (line.Length >= MaximumProtocolLineCharacters)
+                    {
+                        line.Clear();
+                        discardingOversizedLine = true;
+                        continue;
+                    }
+                    line.Append(character);
+                }
+            }
+
+            if (discardingOversizedLine)
+            {
+                Interlocked.Increment(ref _malformedStdoutLineCount);
+            }
+            else if (line.Length > 0)
+            {
+                HandleProtocolLine(line.ToString());
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -423,9 +479,22 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
 
             if (TryReadIdElement(root, out var requestId))
             {
-                _ = HandleServerRequestAsync(
-                    new CodexAppServerRequest(requestId, method, parameters),
-                    _lifetimeCancellation.Token);
+                var request = new CodexAppServerRequest(requestId, method, parameters);
+                if (_serverRequestGate.Wait(0))
+                {
+                    _ = HandleBoundedServerRequestAsync(
+                        request,
+                        _lifetimeCancellation.Token);
+                }
+                else
+                {
+                    _ = WriteServerReplyAsync(
+                        request,
+                        CodexAppServerReply.Failure(
+                            -32001,
+                            "HoverPocket server request queue is full."),
+                        _lifetimeCancellation.Token);
+                }
                 return;
             }
 
@@ -487,6 +556,28 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             reply = CodexAppServerReply.Failure(-32603, "Client request handler failed.");
         }
 
+        await WriteServerReplyAsync(request, reply, cancellationToken);
+    }
+
+    private async Task HandleBoundedServerRequestAsync(
+        CodexAppServerRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await HandleServerRequestAsync(request, cancellationToken);
+        }
+        finally
+        {
+            _serverRequestGate.Release();
+        }
+    }
+
+    private async Task WriteServerReplyAsync(
+        CodexAppServerRequest request,
+        CodexAppServerReply reply,
+        CancellationToken cancellationToken)
+    {
         try
         {
             if (reply.Error is null)

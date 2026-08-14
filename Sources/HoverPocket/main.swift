@@ -31,6 +31,9 @@ if CommandLine.arguments.contains("--verify-panel-layout") {
 if CommandLine.arguments.contains("--verify-voice-lane-layout") {
     VoiceLaneLayoutVerificationCommand.run()
 }
+if CommandLine.arguments.contains("--verify-codex-app-server") {
+    CodexAppServerVerificationCommand.run()
+}
 if CommandLine.arguments.contains("--verify-weather") {
     WeatherVerificationCommand.run()
 }

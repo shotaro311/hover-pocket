@@ -43,6 +43,8 @@ internal sealed class PanelBridgeController : IDisposable
     private bool _previewPostScheduled;
     private bool _panelOpen;
     private bool _disposed;
+    private long _codexVoiceAuthorizationEpoch = 1;
+    private int _codexVoiceAuthorizationAllowed;
 
     public PanelBridgeController(
         ProviderRegistry providerRegistry,
@@ -93,7 +95,8 @@ internal sealed class PanelBridgeController : IDisposable
             ? new CodexVoiceCapabilityToolAdapter(
                 _capabilityBroker,
                 _todayFocusTextAdapter,
-                RequestCodexVoiceCapabilityApprovalAsync)
+                RequestCodexVoiceCapabilityApprovalAsync,
+                GetCodexVoiceToolAuthorization)
             : null;
         _codexVoiceRuntime = new CodexVoiceRuntimeHost(
             CurrentSettings.CodexVoiceEnabled,
@@ -197,6 +200,7 @@ internal sealed class PanelBridgeController : IDisposable
         }
 
         _disposed = true;
+        InvalidateCodexVoiceAuthorization(allowed: false);
         _timerBridgeHandlers.AlertFired -= OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged -= OnTimerAlertChanged;
         _timerBridgeHandlers.Dispose();
@@ -615,9 +619,8 @@ internal sealed class PanelBridgeController : IDisposable
 
         var operation = dispatcher.InvokeAsync(() =>
         {
-            if (!_panelOpen
-                || !CurrentSettings.CodexVoiceEnabled
-                || !CurrentSettings.AiNativeEnabled)
+            var expectedAuthorization = GetCodexVoiceToolAuthorization();
+            if (!expectedAuthorization.IsAllowed)
             {
                 return false;
             }
@@ -664,7 +667,10 @@ internal sealed class PanelBridgeController : IDisposable
                 System.Windows.MessageBoxButton.YesNo,
                 System.Windows.MessageBoxImage.Question,
                 System.Windows.MessageBoxResult.No);
-            return result == System.Windows.MessageBoxResult.Yes;
+            var currentAuthorization = GetCodexVoiceToolAuthorization();
+            return result == System.Windows.MessageBoxResult.Yes
+                && currentAuthorization.IsAllowed
+                && currentAuthorization.Epoch == expectedAuthorization.Epoch;
         });
         return await operation.Task.WaitAsync(cancellationToken);
     }
@@ -770,6 +776,7 @@ internal sealed class PanelBridgeController : IDisposable
         _ = parameters;
         _startupRegistration.SetRegistered(false);
         SaveSettings(UserSettingsStore.CreateDefault(_providerRegistry.ProviderIds));
+        await _codexVoiceRuntime.SetEnabledAsync(false, cancellationToken);
         return await PublishStateAsync(cancellationToken);
     }
 
@@ -942,6 +949,8 @@ internal sealed class PanelBridgeController : IDisposable
     public async Task NotifyPanelOpenedAsync()
     {
         _panelOpen = true;
+        InvalidateCodexVoiceAuthorization(
+            CurrentSettings.AiNativeEnabled && CurrentSettings.CodexVoiceEnabled);
         if (!CurrentSettings.RememberLastSelectedProvider)
         {
             _selectedProviderId = ResolvePreferredProviderId();
@@ -955,6 +964,7 @@ internal sealed class PanelBridgeController : IDisposable
     public async Task NotifyPanelClosedAsync()
     {
         _panelOpen = false;
+        InvalidateCodexVoiceAuthorization(allowed: false);
         _codexVoiceRuntime.ClearTransientUiState();
         await SynchronizeControlsLifecycleAsync();
         await PostEventAsync("panel.closed", new { closed = true });
@@ -989,11 +999,47 @@ internal sealed class PanelBridgeController : IDisposable
 
     private void SaveSettings(UserSettings settings)
     {
-        CurrentSettings = UserSettingsStore.Normalize(settings, _providerRegistry.ProviderIds);
+        var normalized = UserSettingsStore.Normalize(settings, _providerRegistry.ProviderIds);
+        var authorizationChanged = normalized.AiNativeEnabled != CurrentSettings.AiNativeEnabled
+            || normalized.CodexVoiceEnabled != CurrentSettings.CodexVoiceEnabled;
+        if (authorizationChanged)
+        {
+            Volatile.Write(ref _codexVoiceAuthorizationAllowed, 0);
+            Interlocked.Increment(ref _codexVoiceAuthorizationEpoch);
+        }
+
+        CurrentSettings = normalized;
+        if (authorizationChanged)
+        {
+            Volatile.Write(
+                ref _codexVoiceAuthorizationAllowed,
+                !_disposed
+                    && _panelOpen
+                    && CurrentSettings.AiNativeEnabled
+                    && CurrentSettings.CodexVoiceEnabled
+                    ? 1
+                    : 0);
+        }
         _resolvedVoiceLaneLayout = CurrentSettings.EffectiveVoiceLaneLayout;
         _clipboardBridgeController.ApplySettings(CurrentSettings, IsVisible("clipboard"));
         _settingsStore.Save(CurrentSettings);
         SettingsChanged?.Invoke(this, CurrentSettings);
+    }
+
+    private CodexVoiceToolAuthorization GetCodexVoiceToolAuthorization()
+    {
+        return new CodexVoiceToolAuthorization(
+            Volatile.Read(ref _codexVoiceAuthorizationAllowed) != 0,
+            Interlocked.Read(ref _codexVoiceAuthorizationEpoch));
+    }
+
+    private void InvalidateCodexVoiceAuthorization(bool allowed)
+    {
+        Volatile.Write(ref _codexVoiceAuthorizationAllowed, 0);
+        Interlocked.Increment(ref _codexVoiceAuthorizationEpoch);
+        Volatile.Write(
+            ref _codexVoiceAuthorizationAllowed,
+            allowed && !_disposed ? 1 : 0);
     }
 
     private async Task<object> PublishStateAsync(CancellationToken cancellationToken)

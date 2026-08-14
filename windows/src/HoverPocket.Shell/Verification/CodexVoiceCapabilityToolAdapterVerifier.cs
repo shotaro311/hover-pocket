@@ -44,14 +44,25 @@ internal sealed class CodexVoiceCapabilityToolAdapterVerifier
                 new CapabilityBrokerAuditLog(brokerRoot));
             var approvalDecisions = new Queue<bool>();
             var approvals = new List<CodexVoiceCapabilityApproval>();
+            var authorizationAllowed = true;
+            var authorizationEpoch = 1L;
+            var invalidateDuringApproval = false;
             var adapter = new CodexVoiceCapabilityToolAdapter(
                 broker,
                 new TodayFocusTextAdapter(broker),
                 (approval, _) =>
                 {
                     approvals.Add(approval);
+                    if (invalidateDuringApproval)
+                    {
+                        invalidateDuringApproval = false;
+                        authorizationAllowed = false;
+                        authorizationEpoch++;
+                    }
                     return Task.FromResult(approvalDecisions.Count == 0 || approvalDecisions.Dequeue());
-                });
+                },
+                () => new CodexVoiceToolAuthorization(authorizationAllowed, authorizationEpoch));
+            var context = new CodexVoiceToolRequestContext("root-thread", 1);
 
             VerifyToolSpecs(adapter);
             var unsupported = await adapter.HandleAsync(
@@ -59,7 +70,7 @@ internal sealed class CodexVoiceCapabilityToolAdapterVerifier
                     JsonSerializer.SerializeToElement(1),
                     "fake/approval",
                     JsonSerializer.SerializeToElement(new { })),
-                "root-thread",
+                context,
                 cancellationToken);
             Require(unsupported.Error?.Code == -32601, "voice_tool_unsupported_request_fail_closed");
 
@@ -69,7 +80,7 @@ internal sealed class CodexVoiceCapabilityToolAdapterVerifier
                     new { },
                     "wrong-thread",
                     "read-wrong"),
-                "root-thread",
+                context,
                 cancellationToken);
             _ = Payload(wrongThread, expectedSuccess: false, "voice_tool_cross_thread_denied");
 
@@ -79,7 +90,7 @@ internal sealed class CodexVoiceCapabilityToolAdapterVerifier
                     new { },
                     "root-thread",
                     "read-today"),
-                "root-thread",
+                context,
                 cancellationToken);
             var todayPayload = Payload(today, expectedSuccess: true, "voice_tool_calendar_today");
             Require(
@@ -96,7 +107,7 @@ internal sealed class CodexVoiceCapabilityToolAdapterVerifier
                     new { durationSeconds = 600, title = "拒否するTimer" },
                     "root-thread",
                     "timer-rejected"),
-                "root-thread",
+                context,
                 cancellationToken);
             _ = Payload(rejectedTimer, expectedSuccess: false, "voice_tool_timer_rejected");
             Require(timerStore.RunningTimers.Count == 0, "voice_tool_reject_no_timer_write");
@@ -108,7 +119,7 @@ internal sealed class CodexVoiceCapabilityToolAdapterVerifier
                 "timer-approved");
             var approvedTimer = await adapter.HandleAsync(
                 timerRequest,
-                "root-thread",
+                context,
                 cancellationToken);
             var timerPayload = Payload(approvedTimer, expectedSuccess: true, "voice_tool_timer_approved");
             Require(
@@ -128,7 +139,7 @@ internal sealed class CodexVoiceCapabilityToolAdapterVerifier
 
             var replayedTimer = await adapter.HandleAsync(
                 timerRequest,
-                "root-thread",
+                context,
                 cancellationToken);
             _ = Payload(replayedTimer, expectedSuccess: true, "voice_tool_timer_duplicate_reply");
             Require(timerStore.RunningTimers.Count == 1, "voice_tool_timer_duplicate_no_second_write");
@@ -138,7 +149,7 @@ internal sealed class CodexVoiceCapabilityToolAdapterVerifier
                     new { durationSeconds = 601, title = "会議 確認 偽装" },
                     "root-thread",
                     "timer-approved"),
-                "root-thread",
+                context,
                 cancellationToken);
             var changedPayload = Payload(
                 changedDuplicate,
@@ -162,7 +173,7 @@ internal sealed class CodexVoiceCapabilityToolAdapterVerifier
                     },
                     "root-thread",
                     "calendar-create"),
-                "root-thread",
+                context,
                 cancellationToken);
             var calendarPayload = Payload(
                 calendarCreate,
@@ -188,7 +199,7 @@ internal sealed class CodexVoiceCapabilityToolAdapterVerifier
                     },
                     "root-thread",
                     "today-focus"),
-                "root-thread",
+                context,
                 cancellationToken);
             var focusPayload = Payload(todayFocus, expectedSuccess: true, "voice_tool_today_focus");
             Require(
@@ -205,6 +216,164 @@ internal sealed class CodexVoiceCapabilityToolAdapterVerifier
                 focusApproval?.Fields.FirstOrDefault(field => field.Key == "purpose")?.Value
                     == "設計を完了 する",
                 "voice_tool_today_focus_approval_execution_binding");
+
+            var substitutionRead = Request(
+                CodexVoiceCapabilityToolAdapter.CalendarTodayTool,
+                new { },
+                "root-thread",
+                "tool-substitution");
+            _ = Payload(
+                await adapter.HandleAsync(substitutionRead, context, cancellationToken),
+                expectedSuccess: true,
+                "voice_tool_substitution_seed");
+            var timerCountBeforeSubstitution = timerStore.RunningTimers.Count;
+            var substitutionWrite = await adapter.HandleAsync(
+                Request(
+                    CodexVoiceCapabilityToolAdapter.TimerStartTool,
+                    new { durationSeconds = 60, title = "置換拒否" },
+                    "root-thread",
+                    "tool-substitution"),
+                context,
+                cancellationToken);
+            var substitutionPayload = Payload(
+                substitutionWrite,
+                expectedSuccess: false,
+                "voice_tool_substitution_rejected");
+            Require(
+                substitutionPayload is { } substitutionValue
+                && substitutionValue.GetProperty("code").GetString() == "CAPABILITY_IDEMPOTENCY_CONFLICT",
+                "voice_tool_substitution_conflict_code");
+            Require(
+                timerStore.RunningTimers.Count == timerCountBeforeSubstitution,
+                "voice_tool_substitution_no_write");
+
+            var timerCountBeforeStaleApproval = timerStore.RunningTimers.Count;
+            invalidateDuringApproval = true;
+            var staleApprovalReply = await adapter.HandleAsync(
+                Request(
+                    CodexVoiceCapabilityToolAdapter.TimerStartTool,
+                    new { durationSeconds = 60, title = "期限切れ承認" },
+                    "root-thread",
+                    "stale-approval"),
+                context,
+                cancellationToken);
+            var staleApprovalPayload = Payload(
+                staleApprovalReply,
+                expectedSuccess: false,
+                "voice_tool_stale_approval_rejected");
+            Require(
+                staleApprovalPayload is { } staleApprovalValue
+                && staleApprovalValue.GetProperty("code").GetString() == "CAPABILITY_APPROVAL_REJECTED",
+                "voice_tool_stale_approval_code");
+            Require(
+                timerStore.RunningTimers.Count == timerCountBeforeStaleApproval,
+                "voice_tool_stale_approval_no_write");
+
+            var listCountBeforeDisabledRequest = calendar.ListRequestCount;
+            var disabledRead = await adapter.HandleAsync(
+                Request(
+                    CodexVoiceCapabilityToolAdapter.CalendarTodayTool,
+                    new { },
+                    "root-thread",
+                    "read-today"),
+                context,
+                cancellationToken);
+            _ = Payload(disabledRead, expectedSuccess: false, "voice_tool_disabled_cache_denied");
+            Require(
+                calendar.ListRequestCount == listCountBeforeDisabledRequest,
+                "voice_tool_disabled_no_calendar_read");
+
+            authorizationAllowed = true;
+            authorizationEpoch++;
+            var reauthorizedRead = await adapter.HandleAsync(
+                Request(
+                    CodexVoiceCapabilityToolAdapter.CalendarTodayTool,
+                    new { },
+                    "root-thread",
+                    "read-today"),
+                context,
+                cancellationToken);
+            _ = Payload(reauthorizedRead, expectedSuccess: true, "voice_tool_reauthorized_read");
+            Require(
+                calendar.ListRequestCount == listCountBeforeDisabledRequest + 1,
+                "voice_tool_authorization_epoch_invalidates_cache");
+
+            var oversized = await adapter.HandleAsync(
+                Request(
+                    CodexVoiceCapabilityToolAdapter.TodayFocusTool,
+                    new
+                    {
+                        eventRef = "primary:focus-event",
+                        durationSeconds = 1_500,
+                        purpose = new string('x', 17_000)
+                    },
+                    "root-thread",
+                    "oversized"),
+                context,
+                cancellationToken);
+            var oversizedPayload = Payload(
+                oversized,
+                expectedSuccess: false,
+                "voice_tool_oversized_rejected");
+            Require(
+                oversizedPayload is { } oversizedValue
+                && oversizedValue.GetProperty("code").GetString() == "CAPABILITY_PAYLOAD_TOO_LARGE",
+                "voice_tool_oversized_code");
+
+            var pendingApproval = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var approvalEntered = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var boundedAdapter = new CodexVoiceCapabilityToolAdapter(
+                broker,
+                new TodayFocusTextAdapter(broker),
+                async (_, token) =>
+                {
+                    approvalEntered.TrySetResult(true);
+                    return await pendingApproval.Task.WaitAsync(token);
+                });
+            var pendingTasks = Enumerable.Range(0, 8)
+                .Select(index => boundedAdapter.HandleAsync(
+                    Request(
+                        CodexVoiceCapabilityToolAdapter.TimerStartTool,
+                        new { durationSeconds = 60, title = $"pending-{index}" },
+                        "root-thread",
+                        $"pending-{index}"),
+                    context,
+                    cancellationToken))
+                .ToArray();
+            _ = await approvalEntered.Task.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+            for (var attempt = 0;
+                attempt < 100 && boundedAdapter.PendingCallCountForVerify < 8;
+                attempt++)
+            {
+                await Task.Delay(5, cancellationToken);
+            }
+            if (boundedAdapter.PendingCallCountForVerify == 8)
+            {
+                var overloaded = await boundedAdapter.HandleAsync(
+                    Request(
+                        CodexVoiceCapabilityToolAdapter.TimerStartTool,
+                        new { durationSeconds = 60, title = "overloaded" },
+                        "root-thread",
+                        "pending-overloaded"),
+                    context,
+                    cancellationToken);
+                var overloadedPayload = Payload(
+                    overloaded,
+                    expectedSuccess: false,
+                    "voice_tool_pending_overload_rejected");
+                Require(
+                    overloadedPayload is { } overloadedValue
+                    && overloadedValue.GetProperty("code").GetString() == "CAPABILITY_OVERLOADED",
+                    "voice_tool_pending_overload_code");
+            }
+            else
+            {
+                _failures.Add("voice_tool_pending_bound_fixture");
+            }
+            pendingApproval.TrySetResult(false);
+            _ = await Task.WhenAll(pendingTasks);
         }
         finally
         {

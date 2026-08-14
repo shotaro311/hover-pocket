@@ -13,13 +13,21 @@ internal sealed record CodexVoiceCapabilityApproval(
     string ToolName,
     IReadOnlyList<CodexVoiceCapabilityApprovalField> Fields);
 
+internal readonly record struct CodexVoiceToolAuthorization(
+    bool IsAllowed,
+    long Epoch);
+
+internal readonly record struct CodexVoiceToolRequestContext(
+    string RootThreadId,
+    long ClientGeneration);
+
 internal interface ICodexVoiceCapabilityToolAdapter
 {
     IReadOnlyList<object> DynamicTools { get; }
 
     Task<CodexAppServerReply> HandleAsync(
         CodexAppServerRequest request,
-        string? expectedRootThreadId,
+        CodexVoiceToolRequestContext context,
         CancellationToken cancellationToken);
 }
 
@@ -29,6 +37,9 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
     internal const string TimerStartTool = "hoverpocket_timer_start";
     internal const string CalendarCreateTool = "hoverpocket_calendar_create";
     internal const string TodayFocusTool = "hoverpocket_today_focus";
+    private const int MaximumToolRequestBytes = 20 * 1024;
+    private const int MaximumToolArgumentBytes = 16 * 1024;
+    private const int MaximumPendingCalls = 8;
 
     private static readonly Regex IdentifierPattern = new(
         "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
@@ -42,25 +53,32 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
     private readonly CapabilityBroker _broker;
     private readonly TodayFocusTextAdapter _todayFocus;
     private readonly Func<CodexVoiceCapabilityApproval, CancellationToken, Task<bool>> _requestApproval;
+    private readonly Func<CodexVoiceToolAuthorization> _authorization;
     private readonly SemaphoreSlim _callGate = new(1, 1);
     private readonly Dictionary<string, CachedToolReply> _completedCalls = new(StringComparer.Ordinal);
     private readonly Queue<string> _completedCallOrder = new();
+    private int _pendingCalls;
 
     public CodexVoiceCapabilityToolAdapter(
         CapabilityBroker broker,
         TodayFocusTextAdapter todayFocus,
-        Func<CodexVoiceCapabilityApproval, CancellationToken, Task<bool>> requestApproval)
+        Func<CodexVoiceCapabilityApproval, CancellationToken, Task<bool>> requestApproval,
+        Func<CodexVoiceToolAuthorization>? authorization = null)
     {
         _broker = broker;
         _todayFocus = todayFocus;
         _requestApproval = requestApproval;
+        _authorization = authorization
+            ?? (() => new CodexVoiceToolAuthorization(true, 0));
     }
 
     public IReadOnlyList<object> DynamicTools => ToolSpecs;
 
+    internal int PendingCallCountForVerify => Volatile.Read(ref _pendingCalls);
+
     public async Task<CodexAppServerReply> HandleAsync(
         CodexAppServerRequest request,
-        string? expectedRootThreadId,
+        CodexVoiceToolRequestContext context,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -71,70 +89,109 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
                 $"HoverPocket has no handler for app-server request: {request.Method}");
         }
 
-        DynamicToolCall call;
-        try
+        var authorization = _authorization();
+        if (!authorization.IsAllowed
+            || authorization.Epoch < 0
+            || context.ClientGeneration <= 0)
         {
-            call = ParseCall(request.Params, expectedRootThreadId);
-        }
-        catch (CodexVoiceToolException exception)
-        {
-            return ToolReply(false, new { status = "rejected", code = exception.Code });
+            return ToolReply(false, new { status = "rejected", code = "CAPABILITY_REQUEST_DENIED" });
         }
 
-        await _callGate.WaitAsync(cancellationToken);
+        if (Interlocked.Increment(ref _pendingCalls) > MaximumPendingCalls)
+        {
+            Interlocked.Decrement(ref _pendingCalls);
+            return ToolReply(false, new { status = "rejected", code = "CAPABILITY_OVERLOADED" });
+        }
+
         try
         {
-            var callToken = CallToken(call);
-            var argumentDigest = CapabilityCanonicalJson.ArgumentsDigest(call.Arguments);
-            if (_completedCalls.TryGetValue(callToken, out var cached))
-            {
-                return string.Equals(cached.ArgumentDigest, argumentDigest, StringComparison.Ordinal)
-                    ? cached.Reply
-                    : ToolReply(false, new { status = "rejected", code = "CAPABILITY_IDEMPOTENCY_CONFLICT" });
-            }
-
-            CodexAppServerReply reply;
+            DynamicToolCall call;
             try
             {
-                reply = call.Tool switch
-                {
-                    CalendarTodayTool => await ListTodayAsync(call, cancellationToken),
-                    TimerStartTool => await StartTimerAsync(call, cancellationToken),
-                    CalendarCreateTool => await CreateCalendarEventAsync(call, cancellationToken),
-                    TodayFocusTool => await StartTodayFocusAsync(call, cancellationToken),
-                    _ => ToolReply(false, new { status = "rejected", code = "CAPABILITY_UNKNOWN" })
-                };
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
+                call = ParseCall(request.Params, context.RootThreadId);
             }
             catch (CodexVoiceToolException exception)
             {
-                reply = ToolReply(false, new { status = "rejected", code = exception.Code });
-            }
-            catch (CapabilityBrokerException exception)
-            {
-                reply = ToolReply(false, new { status = "failed", code = exception.Code });
-            }
-            catch (Exception)
-            {
-                reply = ToolReply(false, new { status = "failed", code = "CAPABILITY_FAILED" });
+                return ToolReply(false, new { status = "rejected", code = exception.Code });
             }
 
-            CacheReply(callToken, argumentDigest, reply);
-            return reply;
+            await _callGate.WaitAsync(cancellationToken);
+            try
+            {
+                if (!IsAuthorizationCurrent(authorization))
+                {
+                    return ToolReply(false, new { status = "rejected", code = "CAPABILITY_REQUEST_DENIED" });
+                }
+
+                var callToken = CallToken(call);
+                var cacheKey = $"{context.ClientGeneration}:{authorization.Epoch}:{callToken}";
+                var argumentDigest = CapabilityCanonicalJson.ArgumentsDigest(call.Arguments);
+                var callFingerprint = $"{call.Tool}:{argumentDigest}";
+                if (_completedCalls.TryGetValue(cacheKey, out var cached))
+                {
+                    return string.Equals(cached.CallFingerprint, callFingerprint, StringComparison.Ordinal)
+                        ? cached.Reply
+                        : ToolReply(false, new { status = "rejected", code = "CAPABILITY_IDEMPOTENCY_CONFLICT" });
+                }
+
+                CodexAppServerReply reply;
+                try
+                {
+                    reply = call.Tool switch
+                    {
+                        CalendarTodayTool => await ListTodayAsync(call, cancellationToken),
+                        TimerStartTool => await StartTimerAsync(call, authorization, cancellationToken),
+                        CalendarCreateTool => await CreateCalendarEventAsync(call, authorization, cancellationToken),
+                        TodayFocusTool => await StartTodayFocusAsync(call, authorization, cancellationToken),
+                        _ => ToolReply(false, new { status = "rejected", code = "CAPABILITY_UNKNOWN" })
+                    };
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (CodexVoiceToolException exception)
+                {
+                    reply = ToolReply(false, new { status = "rejected", code = exception.Code });
+                }
+                catch (CapabilityBrokerException exception)
+                {
+                    reply = ToolReply(false, new { status = "failed", code = exception.Code });
+                }
+                catch (Exception)
+                {
+                    reply = ToolReply(false, new { status = "failed", code = "CAPABILITY_FAILED" });
+                }
+
+                if (!IsAuthorizationCurrent(authorization))
+                {
+                    return ToolReply(false, new { status = "rejected", code = "CAPABILITY_REQUEST_DENIED" });
+                }
+
+                CacheReply(cacheKey, callFingerprint, reply);
+                return reply;
+            }
+            finally
+            {
+                _callGate.Release();
+            }
         }
         finally
         {
-            _callGate.Release();
+            Interlocked.Decrement(ref _pendingCalls);
         }
     }
 
-    private void CacheReply(string callToken, string argumentDigest, CodexAppServerReply reply)
+    private bool IsAuthorizationCurrent(CodexVoiceToolAuthorization expected)
     {
-        _completedCalls[callToken] = new CachedToolReply(argumentDigest, reply);
-        _completedCallOrder.Enqueue(callToken);
+        var current = _authorization();
+        return current.IsAllowed && current.Epoch == expected.Epoch;
+    }
+
+    private void CacheReply(string cacheKey, string callFingerprint, CodexAppServerReply reply)
+    {
+        _completedCalls[cacheKey] = new CachedToolReply(callFingerprint, reply);
+        _completedCallOrder.Enqueue(cacheKey);
         while (_completedCallOrder.Count > 128)
         {
             var expired = _completedCallOrder.Dequeue();
@@ -172,6 +229,7 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
 
     private async Task<CodexAppServerReply> StartTimerAsync(
         DynamicToolCall call,
+        CodexVoiceToolAuthorization authorization,
         CancellationToken cancellationToken)
     {
         RequireOnlyKeys(call.Arguments, ["durationSeconds", "title"]);
@@ -212,12 +270,14 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
                     new CodexVoiceCapabilityApprovalField("title", title),
                     new CodexVoiceCapabilityApprovalField("durationSeconds", duration.ToString(CultureInfo.InvariantCulture))
                 ]),
+            authorization,
             cancellationToken);
         return ReceiptReply(receipt);
     }
 
     private async Task<CodexAppServerReply> CreateCalendarEventAsync(
         DynamicToolCall call,
+        CodexVoiceToolAuthorization authorization,
         CancellationToken cancellationToken)
     {
         RequireOnlyKeys(call.Arguments, ["title", "start", "end", "isAllDay"]);
@@ -267,12 +327,14 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
                     new CodexVoiceCapabilityApprovalField("end", canonicalEnd),
                     new CodexVoiceCapabilityApprovalField("isAllDay", isAllDay ? "true" : "false")
                 ]),
+            authorization,
             cancellationToken);
         return ReceiptReply(receipt);
     }
 
     private async Task<CodexAppServerReply> StartTodayFocusAsync(
         DynamicToolCall call,
+        CodexVoiceToolAuthorization authorization,
         CancellationToken cancellationToken)
     {
         RequireOnlyKeys(call.Arguments, ["eventRef", "durationSeconds", "purpose"]);
@@ -317,6 +379,7 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
                     new CodexVoiceCapabilityApprovalField("purpose", draft.ApprovalText),
                     new CodexVoiceCapabilityApprovalField("durationSeconds", duration.ToString(CultureInfo.InvariantCulture))
                 ]),
+            authorization,
             cancellationToken,
             draft.Preparation);
         return ReceiptReply(receipt);
@@ -326,15 +389,21 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
         CapabilityExecutionPlan plan,
         CapabilityPermissionSet permissions,
         CodexVoiceCapabilityApproval approval,
+        CodexVoiceToolAuthorization authorization,
         CancellationToken cancellationToken,
         CapabilityBrokerPreparation? prepared = null)
     {
+        if (!IsAuthorizationCurrent(authorization))
+        {
+            throw new CodexVoiceToolException("CAPABILITY_REQUEST_DENIED");
+        }
+
         var preparation = prepared ?? _broker.Prepare(plan, permissions, DateTimeOffset.Now);
         var request = preparation.ApprovalRequest
             ?? throw new CodexVoiceToolException("CAPABILITY_APPROVAL_REQUIRED");
         var approved = await _requestApproval(approval, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
-        if (!approved)
+        if (!approved || !IsAuthorizationCurrent(authorization))
         {
             try
             {
@@ -355,6 +424,11 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
             preparation.PlanDigest,
             CapabilityApprovalDecision.Approve,
             DateTimeOffset.Now);
+        if (!IsAuthorizationCurrent(authorization))
+        {
+            throw new CodexVoiceToolException("CAPABILITY_REQUEST_DENIED");
+        }
+
         return await _broker.ExecuteAsync(
             plan,
             permissions,
@@ -405,6 +479,10 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
         {
             throw new CodexVoiceToolException("CAPABILITY_REQUEST_INVALID");
         }
+        if (Encoding.UTF8.GetByteCount(value.GetRawText()) > MaximumToolRequestBytes)
+        {
+            throw new CodexVoiceToolException("CAPABILITY_PAYLOAD_TOO_LARGE");
+        }
         RequireOnlyKeys(value, ["arguments", "callId", "namespace", "threadId", "tool", "turnId"]);
         var callId = Identifier(value, "callId");
         var threadId = Identifier(value, "threadId");
@@ -420,6 +498,10 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
             || arguments.ValueKind != JsonValueKind.Object)
         {
             throw new CodexVoiceToolException("CAPABILITY_ARGUMENT_INVALID");
+        }
+        if (Encoding.UTF8.GetByteCount(arguments.GetRawText()) > MaximumToolArgumentBytes)
+        {
+            throw new CodexVoiceToolException("CAPABILITY_PAYLOAD_TOO_LARGE");
         }
         return new DynamicToolCall(
             callId,
@@ -486,7 +568,7 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
 
     private static string CallToken(DynamicToolCall call)
     {
-        var bytes = Encoding.UTF8.GetBytes($"{call.ThreadId}\n{call.TurnId}\n{call.CallId}\n{call.Tool}");
+        var bytes = Encoding.UTF8.GetBytes($"{call.ThreadId}\n{call.TurnId}\n{call.CallId}");
         return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
     }
 
@@ -582,7 +664,7 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
         JsonElement Arguments);
 
     private sealed record CachedToolReply(
-        string ArgumentDigest,
+        string CallFingerprint,
         CodexAppServerReply Reply);
 
     private sealed class CodexVoiceToolException(string code) : Exception(code)

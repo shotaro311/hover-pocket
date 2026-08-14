@@ -38,6 +38,8 @@ internal static class FakeCodexAppServer
 
         var rateLimitAttempts = 0;
         var serverReplyReceived = false;
+        var serverErrorReplyReceived = false;
+        var serverOverloadReplyReceived = false;
         var signedOut = string.Equals(
             Environment.GetEnvironmentVariable(SignedOutEnvironmentVariable),
             "1",
@@ -75,6 +77,27 @@ internal static class FakeCodexAppServer
                 {
                     serverReplyReceived = true;
                 }
+                if (idElement.ToString() == "901"
+                    && message.TryGetProperty("error", out var serverError)
+                    && serverError.ValueKind == JsonValueKind.Object
+                    && serverError.TryGetProperty("code", out var errorCode)
+                    && errorCode.GetInt32() == -32601
+                    && serverError.TryGetProperty("message", out var errorMessage)
+                    && errorMessage.GetString() == "Verifier rejection."
+                    && !serverError.TryGetProperty("Code", out _)
+                    && !serverError.TryGetProperty("Message", out _)
+                    && !serverError.TryGetProperty("Data", out _))
+                {
+                    serverErrorReplyReceived = true;
+                }
+                if (idElement.ToString() == "1008"
+                    && message.TryGetProperty("error", out var overloadError)
+                    && overloadError.ValueKind == JsonValueKind.Object
+                    && overloadError.TryGetProperty("code", out var overloadCode)
+                    && overloadCode.GetInt32() == -32001)
+                {
+                    serverOverloadReplyReceived = true;
+                }
 
                 continue;
             }
@@ -103,6 +126,23 @@ internal static class FakeCodexAppServer
                 case "initialized":
                     break;
                 case "account/read":
+                    if (expectDynamicTools)
+                    {
+                        Write(output, new
+                        {
+                            id = 950,
+                            method = "item/tool/call",
+                            @params = new
+                            {
+                                arguments = new { },
+                                callId = "validation-call",
+                                @namespace = (string?)null,
+                                threadId = "root-thread",
+                                tool = "hoverpocket_verify",
+                                turnId = "validation-turn"
+                            }
+                        });
+                    }
                     Write(output, new
                     {
                         id = idElement.Clone(),
@@ -240,6 +280,49 @@ internal static class FakeCodexAppServer
                         result = new { received = serverReplyReceived }
                     });
                     break;
+                case "fake/emitErrorServerRequest":
+                    Write(output, new
+                    {
+                        id = 901,
+                        method = "fake/reject",
+                        @params = new { action = "reject" }
+                    });
+                    Write(output, new
+                    {
+                        id = idElement.Clone(),
+                        result = new { emitted = true }
+                    });
+                    break;
+                case "fake/checkServerErrorReply":
+                    Write(output, new
+                    {
+                        id = idElement.Clone(),
+                        result = new { received = serverErrorReplyReceived }
+                    });
+                    break;
+                case "fake/emitServerRequestBurst":
+                    for (var requestId = 1000; requestId <= 1008; requestId++)
+                    {
+                        Write(output, new
+                        {
+                            id = requestId,
+                            method = "fake/slow",
+                            @params = new { requestId }
+                        });
+                    }
+                    Write(output, new
+                    {
+                        id = idElement.Clone(),
+                        result = new { emitted = true }
+                    });
+                    break;
+                case "fake/checkServerOverloadReply":
+                    Write(output, new
+                    {
+                        id = idElement.Clone(),
+                        result = new { received = serverOverloadReplyReceived }
+                    });
+                    break;
                 case "account/rateLimits/read":
                     rateLimitAttempts++;
                     if (rateLimitAttempts == 1)
@@ -265,6 +348,14 @@ internal static class FakeCodexAppServer
                     break;
                 case "fake/emitMalformed":
                     output.WriteLine("not-json");
+                    Write(output, new
+                    {
+                        id = idElement.Clone(),
+                        result = new { emitted = true }
+                    });
+                    break;
+                case "fake/emitOversized":
+                    output.WriteLine(new string('x', 1_048_577));
                     Write(output, new
                     {
                         id = idElement.Clone(),

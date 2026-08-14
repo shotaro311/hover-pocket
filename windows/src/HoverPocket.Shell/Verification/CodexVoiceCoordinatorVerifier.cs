@@ -88,11 +88,12 @@ internal sealed class CodexVoiceCoordinatorVerifier
 
         var notifications = 0;
         int? appServerProcessId = null;
+        var toolAdapter = new StubDynamicToolAdapter();
         await using (var coordinator = new CodexVoiceCoordinator(
             featureEnabled: true,
             clientFactory: StartFakeServerClientAsync,
             restartDelays: [TimeSpan.Zero, TimeSpan.FromMilliseconds(20)],
-            toolAdapter: new StubDynamicToolAdapter()))
+            toolAdapter: toolAdapter))
         {
             coordinator.SnapshotChanged += (_, _) => notifications++;
             coordinator.SnapshotChanged += (_, _) =>
@@ -103,9 +104,10 @@ internal sealed class CodexVoiceCoordinatorVerifier
             appServerProcessId = initialized.AppServerProcessId;
             if (initialized.Availability != CodexVoiceAvailability.Ready
                 || appServerProcessId is null
-                || initialized.VoiceCount != 1)
+                || initialized.VoiceCount != 1
+                || toolAdapter.HandledCallCount != 0)
             {
-                _failures.Add("enabled coordinator did not pass account/voice gates or own a ready app-server process");
+                _failures.Add("enabled coordinator did not pass gates or rejected pre-ready tool calls");
                 return;
             }
 
@@ -119,6 +121,13 @@ internal sealed class CodexVoiceCoordinatorVerifier
                 _failures.Add("fake WebRTC offer/answer did not preserve the root thread or negotiating state");
             }
             coordinator.MarkTransportAttached();
+            coordinator.ProcessNotificationForVerify(
+                "thread/realtime/started",
+                new { threadId = "attacker-thread" });
+            if (coordinator.Snapshot.RootThreadId != "root-thread")
+            {
+                _failures.Add("mismatched realtime started notification replaced the root thread");
+            }
             coordinator.ProcessNotificationForVerify(
                 "thread/realtime/transcript/delta",
                 new { threadId = "root-thread", role = "user", delta = "hello " });
@@ -170,11 +179,11 @@ internal sealed class CodexVoiceCoordinatorVerifier
                 timeout.Token);
             if (restarted is null
                 || restarted.RestartAttempt != 1
-                || restarted.RootThreadId != "root-thread"
-                || restarted.SessionStatus != CodexVoiceSessionStatus.Reconnecting
+                || restarted.RootThreadId is not null
+                || restarted.SessionStatus != CodexVoiceSessionStatus.Idle
                 || restarted.VoiceCount != 1)
             {
-                _failures.Add("app-server crash did not recover with bounded restart while preserving root state");
+                _failures.Add("app-server crash did not recover with a new client generation and invalidated root");
             }
             else
             {
@@ -304,6 +313,8 @@ internal sealed class CodexVoiceCoordinatorVerifier
 
     private sealed class StubDynamicToolAdapter : ICodexVoiceCapabilityToolAdapter
     {
+        public int HandledCallCount { get; private set; }
+
         public IReadOnlyList<object> DynamicTools { get; } =
         [
             new
@@ -323,12 +334,13 @@ internal sealed class CodexVoiceCoordinatorVerifier
 
         public Task<CodexAppServerReply> HandleAsync(
             CodexAppServerRequest request,
-            string? expectedRootThreadId,
+            CodexVoiceToolRequestContext context,
             CancellationToken cancellationToken)
         {
             _ = request;
-            _ = expectedRootThreadId;
+            _ = context;
             cancellationToken.ThrowIfCancellationRequested();
+            HandledCallCount++;
             return Task.FromResult(CodexAppServerReply.Failure(-32601, "Verifier tool calls are disabled."));
         }
     }

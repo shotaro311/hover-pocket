@@ -20,8 +20,11 @@ internal sealed class CodexAppServerProtocolVerifier
             VerifyInitialize(client);
             await VerifyNotificationsAsync(client, timeout.Token);
             await VerifyServerRequestAsync(client, timeout.Token);
+            await VerifyServerErrorWireFormatAsync(client, timeout.Token);
+            await VerifyServerRequestBoundAsync(client, timeout.Token);
             await VerifyOverloadRetryAsync(client, timeout.Token);
             await VerifyMalformedLineIsolationAsync(client, timeout.Token);
+            await VerifyOversizedLineIsolationAsync(client, timeout.Token);
             VerifyProtocolCounters(client);
         }
         catch (Exception exception) when (exception is IOException
@@ -210,6 +213,77 @@ internal sealed class CodexAppServerProtocolVerifier
         }
     }
 
+    private async Task VerifyServerErrorWireFormatAsync(
+        CodexAppServerClient client,
+        CancellationToken cancellationToken)
+    {
+        client.ServerRequestHandler = (request, _) => Task.FromResult(
+            request.Method == "fake/reject"
+                ? CodexAppServerReply.Failure(-32601, "Verifier rejection.")
+                : CodexAppServerReply.Failure(-32601, $"Unexpected request: {request.Method}"));
+        _ = await client.SendRequestAsync(
+            "fake/emitErrorServerRequest",
+            cancellationToken: cancellationToken);
+
+        var received = false;
+        for (var attempt = 0; attempt < 20 && !received; attempt++)
+        {
+            var check = await client.SendRequestAsync(
+                "fake/checkServerErrorReply",
+                cancellationToken: cancellationToken);
+            received = check.TryGetProperty("received", out var value)
+                && value.ValueKind == JsonValueKind.True;
+            if (!received)
+            {
+                await Task.Delay(25, cancellationToken);
+            }
+        }
+
+        if (!received)
+        {
+            _failures.Add("server request error reply did not use lowercase JSON-RPC field names");
+        }
+    }
+
+    private async Task VerifyServerRequestBoundAsync(
+        CodexAppServerClient client,
+        CancellationToken cancellationToken)
+    {
+        var release = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        client.ServerRequestHandler = async (request, token) =>
+        {
+            if (request.Method != "fake/slow")
+            {
+                return CodexAppServerReply.Failure(-32601, $"Unexpected request: {request.Method}");
+            }
+            _ = await release.Task.WaitAsync(token);
+            return CodexAppServerReply.Success(new { accepted = true });
+        };
+
+        _ = await client.SendRequestAsync(
+            "fake/emitServerRequestBurst",
+            cancellationToken: cancellationToken);
+        var overloaded = false;
+        for (var attempt = 0; attempt < 40 && !overloaded; attempt++)
+        {
+            var check = await client.SendRequestAsync(
+                "fake/checkServerOverloadReply",
+                cancellationToken: cancellationToken);
+            overloaded = check.TryGetProperty("received", out var value)
+                && value.ValueKind == JsonValueKind.True;
+            if (!overloaded)
+            {
+                await Task.Delay(25, cancellationToken);
+            }
+        }
+        release.TrySetResult(true);
+        if (!overloaded)
+        {
+            _failures.Add("concurrent server request bound did not fail closed with overload");
+        }
+    }
+
     private async Task VerifyMalformedLineIsolationAsync(
         CodexAppServerClient client,
         CancellationToken cancellationToken)
@@ -221,6 +295,20 @@ internal sealed class CodexAppServerProtocolVerifier
         if (client.MalformedStdoutLineCount != before + 1)
         {
             _failures.Add("malformed stdout line was not isolated and counted");
+        }
+    }
+
+    private async Task VerifyOversizedLineIsolationAsync(
+        CodexAppServerClient client,
+        CancellationToken cancellationToken)
+    {
+        var before = client.MalformedStdoutLineCount;
+        _ = await client.SendRequestAsync(
+            "fake/emitOversized",
+            cancellationToken: cancellationToken);
+        if (client.MalformedStdoutLineCount != before + 1)
+        {
+            _failures.Add("oversized stdout line was not discarded and counted");
         }
     }
 

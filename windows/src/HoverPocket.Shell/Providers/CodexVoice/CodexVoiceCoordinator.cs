@@ -88,6 +88,9 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
     private string? _defaultVoice;
     private string? _pendingSdpThreadId;
     private TaskCompletionSource<string>? _pendingSdp;
+    private long _nextClientGeneration;
+    private long _clientGeneration;
+    private long _rootThreadGeneration;
     private int _disposeState;
 
     public CodexVoiceCoordinator(
@@ -209,11 +212,13 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
     private async Task StartClientAndValidateAsync(CancellationToken cancellationToken)
     {
         var client = await _clientFactory(cancellationToken);
+        var generation = Interlocked.Increment(ref _nextClientGeneration);
         try
         {
             client.NotificationReceived += OnAppServerNotification;
             client.TransportEnded += OnAppServerTransportEnded;
-            client.ServerRequestHandler = HandleServerRequestAsync;
+            client.ServerRequestHandler = (request, token) =>
+                HandleServerRequestAsync(client, generation, request, token);
 
             var account = await client.SendRequestAsync(
                 "account/read",
@@ -233,9 +238,10 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                 throw new CodexVoiceCompatibilityException("realtime_voices_unavailable");
             }
 
-            _client = client;
             lock (_stateSync)
             {
+                _client = client;
+                _clientGeneration = generation;
                 _appServerProcessId = client.ProcessId;
                 _voiceCount = voiceCount;
                 _defaultVoice = defaultVoice;
@@ -261,9 +267,10 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         ThrowIfDisposed();
         lock (_stateSync)
         {
-            if (!string.IsNullOrWhiteSpace(rootThreadId))
+            if (!string.IsNullOrWhiteSpace(rootThreadId)
+                && !string.Equals(rootThreadId, _rootThreadId, StringComparison.Ordinal))
             {
-                _rootThreadId = rootThreadId;
+                throw new InvalidOperationException("Realtime negotiation cannot replace the root thread.");
             }
 
             _sessionStatus = CodexVoiceSessionStatus.Negotiating;
@@ -325,6 +332,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         try
         {
             var client = _client;
+            long clientGeneration;
             string? voice;
             lock (_stateSync)
             {
@@ -334,6 +342,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                 }
 
                 voice = _defaultVoice;
+                clientGeneration = _clientGeneration;
             }
 
             if (string.IsNullOrWhiteSpace(voice))
@@ -341,7 +350,10 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                 throw new CodexVoiceCompatibilityException("realtime_voice_missing");
             }
 
-            var rootThreadId = await EnsureRootThreadAsync(client, cancellationToken);
+            var rootThreadId = await EnsureRootThreadAsync(
+                client,
+                clientGeneration,
+                cancellationToken);
             MarkSessionNegotiating(rootThreadId);
             var sdpCompletion = new TaskCompletionSource<string>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
@@ -441,12 +453,21 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
 
     private async Task<string> EnsureRootThreadAsync(
         CodexAppServerClient client,
+        long clientGeneration,
         CancellationToken cancellationToken)
     {
         lock (_stateSync)
         {
+            if (!ReferenceEquals(_client, client)
+                || _clientGeneration != clientGeneration
+                || _availability != CodexVoiceAvailability.Ready)
+            {
+                throw new InvalidOperationException("Codex Voice client generation is no longer current.");
+            }
+
             var existingThreadId = _rootThreadId;
-            if (!string.IsNullOrWhiteSpace(existingThreadId))
+            if (!string.IsNullOrWhiteSpace(existingThreadId)
+                && _rootThreadGeneration == clientGeneration)
             {
                 return existingThreadId;
             }
@@ -474,7 +495,15 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             ?? throw new CodexVoiceCompatibilityException("thread_start_response_invalid");
         lock (_stateSync)
         {
+            if (!ReferenceEquals(_client, client)
+                || _clientGeneration != clientGeneration
+                || _availability != CodexVoiceAvailability.Ready)
+            {
+                throw new InvalidOperationException("Codex Voice client generation changed during thread start.");
+            }
+
             _rootThreadId = threadId;
+            _rootThreadGeneration = clientGeneration;
         }
 
         PublishSnapshot();
@@ -486,9 +515,10 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         ThrowIfDisposed();
         lock (_stateSync)
         {
-            if (!string.IsNullOrWhiteSpace(rootThreadId))
+            if (!string.IsNullOrWhiteSpace(rootThreadId)
+                && !string.Equals(rootThreadId, _rootThreadId, StringComparison.Ordinal))
             {
-                _rootThreadId = rootThreadId;
+                throw new InvalidOperationException("Realtime connection cannot replace the root thread.");
             }
 
             _sessionStatus = CodexVoiceSessionStatus.Connecting;
@@ -588,7 +618,16 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         object? sender,
         CodexAppServerNotificationEventArgs eventArgs)
     {
-        _ = sender;
+        lock (_stateSync)
+        {
+            if (sender is not CodexAppServerClient source
+                || !ReferenceEquals(source, _client)
+                || _clientGeneration <= 0)
+            {
+                return;
+            }
+        }
+
         ProcessNotification(eventArgs.Method, eventArgs.Params);
     }
 
@@ -610,6 +649,12 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             _transportAttached = false;
             _isMuted = true;
             _appServerProcessId = null;
+            _rootThreadId = null;
+            _rootThreadGeneration = 0;
+            _pendingSdp?.TrySetException(
+                new IOException("Codex app-server transport ended during WebRTC negotiation."));
+            _pendingSdp = null;
+            _pendingSdpThreadId = null;
             _lastErrorCode = $"transport_{eventArgs.ErrorCode}";
             if (_restartTask is { IsCompleted: false })
             {
@@ -639,7 +684,11 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                     return;
                 }
 
-                _client = null;
+                lock (_stateSync)
+                {
+                    _client = null;
+                    _clientGeneration = 0;
+                }
                 failedClient.NotificationReceived -= OnAppServerNotification;
                 failedClient.TransportEnded -= OnAppServerTransportEnded;
                 failedClient.ServerRequestHandler = null;
@@ -670,9 +719,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                         lock (_stateSync)
                         {
                             _availability = CodexVoiceAvailability.Ready;
-                            _sessionStatus = string.IsNullOrWhiteSpace(_rootThreadId)
-                                ? CodexVoiceSessionStatus.Idle
-                                : CodexVoiceSessionStatus.Reconnecting;
+                            _sessionStatus = CodexVoiceSessionStatus.Idle;
                             _lastErrorCode = null;
                         }
                         PublishSnapshot();
@@ -753,7 +800,14 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             switch (method)
             {
                 case "thread/realtime/started":
-                    _rootThreadId = ReadString(parameters, "threadId") ?? _rootThreadId;
+                    if (_rootThreadGeneration != _clientGeneration
+                        || !string.Equals(
+                            ReadString(parameters, "threadId"),
+                            _rootThreadId,
+                            StringComparison.Ordinal))
+                    {
+                        break;
+                    }
                     _sessionStatus = _transportAttached
                         ? (_isMuted
                             ? CodexVoiceSessionStatus.Muted
@@ -763,20 +817,32 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                     changed = true;
                     break;
                 case "thread/realtime/transcript/delta":
+                    if (!IsCurrentRootNotificationLocked(parameters))
+                    {
+                        break;
+                    }
                     changed = _transcript.AppendDelta(
-                        ReadString(parameters, "threadId") ?? _rootThreadId ?? string.Empty,
+                        _rootThreadId!,
                         ReadString(parameters, "role") ?? "unknown",
                         ReadString(parameters, "delta") ?? string.Empty,
                         DateTimeOffset.UtcNow);
                     break;
                 case "thread/realtime/transcript/done":
+                    if (!IsCurrentRootNotificationLocked(parameters))
+                    {
+                        break;
+                    }
                     changed = _transcript.CompleteWithText(
-                        ReadString(parameters, "threadId") ?? _rootThreadId ?? string.Empty,
+                        _rootThreadId!,
                         ReadString(parameters, "role") ?? "unknown",
                         ReadString(parameters, "text"),
                         DateTimeOffset.UtcNow);
                     break;
                 case "thread/realtime/closed":
+                    if (!IsCurrentRootNotificationLocked(parameters))
+                    {
+                        break;
+                    }
                     _transportAttached = false;
                     _sessionStatus = CodexVoiceSessionStatus.Closed;
                     _lastErrorCode = ReadString(parameters, "reason") is { Length: > 0 }
@@ -818,19 +884,49 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         }
     }
 
+    private bool IsCurrentRootNotificationLocked(JsonElement? parameters)
+    {
+        return _rootThreadGeneration == _clientGeneration
+            && _rootThreadGeneration > 0
+            && !string.IsNullOrWhiteSpace(_rootThreadId)
+            && string.Equals(
+                ReadString(parameters, "threadId"),
+                _rootThreadId,
+                StringComparison.Ordinal);
+    }
+
     private Task<CodexAppServerReply> HandleServerRequestAsync(
+        CodexAppServerClient sourceClient,
+        long sourceGeneration,
         CodexAppServerRequest request,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (_toolAdapter is not null)
         {
-            string? rootThreadId;
+            CodexVoiceToolRequestContext? context = null;
             lock (_stateSync)
             {
-                rootThreadId = _rootThreadId;
+                if (ReferenceEquals(sourceClient, _client)
+                    && sourceGeneration == _clientGeneration
+                    && _availability == CodexVoiceAvailability.Ready
+                    && _rootThreadGeneration == sourceGeneration
+                    && !string.IsNullOrWhiteSpace(_rootThreadId))
+                {
+                    context = new CodexVoiceToolRequestContext(
+                        _rootThreadId,
+                        sourceGeneration);
+                }
             }
-            return _toolAdapter.HandleAsync(request, rootThreadId, cancellationToken);
+            if (context is { } currentContext)
+            {
+                return _toolAdapter.HandleAsync(request, currentContext, cancellationToken);
+            }
+
+            return Task.FromResult(
+                CodexAppServerReply.Failure(
+                    -32600,
+                    "HoverPocket rejected a tool call from a stale or non-ready Codex session."));
         }
 
         return Task.FromResult(
@@ -1028,7 +1124,13 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         try
         {
             var client = _client;
-            _client = null;
+            lock (_stateSync)
+            {
+                _client = null;
+                _clientGeneration = 0;
+                _rootThreadId = null;
+                _rootThreadGeneration = 0;
+            }
             if (client is not null)
             {
                 client.NotificationReceived -= OnAppServerNotification;

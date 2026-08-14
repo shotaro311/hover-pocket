@@ -79,3 +79,6 @@ jobs:
 
       - name: Verify host-owned Voice Lane layout
         run: .build/debug/HoverPocket --verify-voice-lane-layout
+
+      - name: Verify Codex app-server transport
+        run: .build/debug/HoverPocket --verify-codex-app-server
