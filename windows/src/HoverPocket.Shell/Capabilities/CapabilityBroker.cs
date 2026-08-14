@@ -73,25 +73,29 @@ internal sealed class CapabilityBroker
         {
             var descriptors = Validate(plan, permissions);
             var digest = CapabilityCanonicalJson.PlanDigest(plan);
-            var workflowState = _ledger.LookupWorkflow(plan.Id, digest);
-            if (workflowState.Kind == CapabilityLedgerStartKind.Replay && workflowState.Receipt is not null)
+            var durableExecution = descriptors.Any(descriptor => descriptor.Effect.IsWrite());
+            if (durableExecution)
             {
-                foreach (var item in plan.Steps.Zip(descriptors).Zip(workflowState.Receipt.Steps))
+                var workflowState = _ledger.LookupWorkflow(plan.Id, digest);
+                if (workflowState.Kind == CapabilityLedgerStartKind.Replay && workflowState.Receipt is not null)
                 {
-                    AppendAudit(
-                        item.Second,
-                        item.First.Second,
-                        plan,
-                        CapabilityCanonicalJson.ArgumentsDigest(item.First.First.Arguments),
-                        0,
-                        true,
-                        now);
+                    foreach (var item in plan.Steps.Zip(descriptors).Zip(workflowState.Receipt.Steps))
+                    {
+                        AppendAudit(
+                            item.Second,
+                            item.First.Second,
+                            plan,
+                            CapabilityCanonicalJson.ArgumentsDigest(item.First.First.Arguments),
+                            0,
+                            true,
+                            now);
+                    }
+                    return workflowState.Receipt;
                 }
-                return workflowState.Receipt;
-            }
-            if (workflowState.Kind == CapabilityLedgerStartKind.Unknown)
-            {
-                throw new CapabilityBrokerException("CAPABILITY_EXECUTION_UNKNOWN", plan.Id);
+                if (workflowState.Kind == CapabilityLedgerStartKind.Unknown)
+                {
+                    throw new CapabilityBrokerException("CAPABILITY_EXECUTION_UNKNOWN", plan.Id);
+                }
             }
 
             var approvalPermissions = descriptors
@@ -107,7 +111,10 @@ internal sealed class CapabilityBroker
                 _approvalStore.Consume(approvalGrant.Value, plan, digest, approvalPermissions, now);
             }
 
-            _ledger.StartWorkflow(plan.Id, digest);
+            if (durableExecution)
+            {
+                _ledger.StartWorkflow(plan.Id, digest);
+            }
             var receipts = new List<CapabilityReceipt>();
             var successful = new List<(CapabilityPlanStep Step, PocketCapabilityDescriptor Descriptor, int ReceiptIndex)>();
             var workflowStatus = CapabilityReceiptStatus.Succeeded;
@@ -118,6 +125,7 @@ internal sealed class CapabilityBroker
                     descriptors[index],
                     plan,
                     digest,
+                    durableExecution,
                     now,
                     cancellationToken);
                 receipts.Add(receipt);
@@ -150,7 +158,10 @@ internal sealed class CapabilityBroker
                 receipts,
                 now,
                 false);
-            _ledger.CompleteWorkflow(workflow);
+            if (durableExecution)
+            {
+                _ledger.CompleteWorkflow(workflow);
+            }
             return workflow;
         }
         finally
@@ -228,19 +239,23 @@ internal sealed class CapabilityBroker
         PocketCapabilityDescriptor descriptor,
         CapabilityExecutionPlan plan,
         string planDigest,
+        bool durableExecution,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
         var argumentDigest = CapabilityCanonicalJson.ArgumentsDigest(step.Arguments);
-        var invocationState = _ledger.BeginInvocation(step.IdempotencyKey, planDigest, argumentDigest, step.Capability);
-        if (invocationState.Kind == CapabilityLedgerStartKind.Replay && invocationState.Receipt is not null)
+        if (durableExecution)
         {
-            AppendAudit(invocationState.Receipt, descriptor, plan, argumentDigest, 0, true, now);
-            return invocationState.Receipt;
-        }
-        if (invocationState.Kind == CapabilityLedgerStartKind.Unknown)
-        {
-            throw new CapabilityBrokerException("CAPABILITY_EXECUTION_UNKNOWN", step.IdempotencyKey);
+            var invocationState = _ledger.BeginInvocation(step.IdempotencyKey, planDigest, argumentDigest, step.Capability);
+            if (invocationState.Kind == CapabilityLedgerStartKind.Replay && invocationState.Receipt is not null)
+            {
+                AppendAudit(invocationState.Receipt, descriptor, plan, argumentDigest, 0, true, now);
+                return invocationState.Receipt;
+            }
+            if (invocationState.Kind == CapabilityLedgerStartKind.Unknown)
+            {
+                throw new CapabilityBrokerException("CAPABILITY_EXECUTION_UNKNOWN", step.IdempotencyKey);
+            }
         }
 
         EnforceRateLimit(descriptor, plan.Principal, now);
@@ -307,7 +322,10 @@ internal sealed class CapabilityBroker
         }
         stopwatch.Stop();
         AppendAudit(receipt, descriptor, plan, argumentDigest, stopwatch.ElapsedMilliseconds, false, now);
-        _ledger.CompleteInvocation(step.IdempotencyKey, receipt);
+        if (durableExecution)
+        {
+            _ledger.CompleteInvocation(step.IdempotencyKey, receipt);
+        }
         return receipt;
     }
 
@@ -420,6 +438,7 @@ internal sealed class CapabilityBroker
                 _registry.Resolve(rollbackStep.Capability),
                 plan,
                 planDigest,
+                true,
                 now,
                 cancellationToken);
             var succeeded = rollbackReceipt.Status == CapabilityReceiptStatus.Succeeded;

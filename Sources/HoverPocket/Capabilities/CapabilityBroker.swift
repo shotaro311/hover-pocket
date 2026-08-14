@@ -62,24 +62,27 @@ final class CapabilityBroker {
         defer { releaseExecutionSlot() }
         let descriptors = try validate(plan, permissions: permissions)
         let digest = try CapabilityCanonicalJSON.planDigest(plan)
-        switch try ledger.lookupWorkflow(planID: plan.id, planDigest: digest) {
-        case .replay(let receipt):
-            for ((step, descriptor), stepReceipt) in zip(zip(plan.steps, descriptors), receipt.steps) {
-                try appendAudit(
-                    receipt: stepReceipt,
-                    descriptor: descriptor,
-                    plan: plan,
-                    argumentDigest: try CapabilityCanonicalJSON.digest(step.arguments),
-                    durationMilliseconds: 0,
-                    replayed: true,
-                    now: now
-                )
+        let durableExecution = descriptors.contains { $0.effect.isWrite }
+        if durableExecution {
+            switch try ledger.lookupWorkflow(planID: plan.id, planDigest: digest) {
+            case .replay(let receipt):
+                for ((step, descriptor), stepReceipt) in zip(zip(plan.steps, descriptors), receipt.steps) {
+                    try appendAudit(
+                        receipt: stepReceipt,
+                        descriptor: descriptor,
+                        plan: plan,
+                        argumentDigest: try CapabilityCanonicalJSON.digest(step.arguments),
+                        durationMilliseconds: 0,
+                        replayed: true,
+                        now: now
+                    )
+                }
+                return receipt
+            case .unknown:
+                throw CapabilityBrokerError.executionUnknown(plan.id)
+            case .execute:
+                break
             }
-            return receipt
-        case .unknown:
-            throw CapabilityBrokerError.executionUnknown(plan.id)
-        case .execute:
-            break
         }
 
         let approvalPermissions = Set(descriptors.filter(\.approvalPolicy.requiresExecutionApproval).flatMap(\.permissions))
@@ -96,7 +99,9 @@ final class CapabilityBroker {
             )
         }
 
-        try ledger.startWorkflow(planID: plan.id, planDigest: digest)
+        if durableExecution {
+            try ledger.startWorkflow(planID: plan.id, planDigest: digest)
+        }
         var receipts: [CapabilityReceipt] = []
         var successfulSteps: [(step: CapabilityPlanStep, descriptor: PocketCapabilityDescriptor, receiptIndex: Int)] = []
         var workflowStatus = CapabilityReceiptStatus.succeeded
@@ -108,6 +113,7 @@ final class CapabilityBroker {
                 descriptor: descriptor,
                 plan: plan,
                 planDigest: digest,
+                durableExecution: durableExecution,
                 now: now
             )
             receipts.append(receipt)
@@ -140,7 +146,9 @@ final class CapabilityBroker {
             completedAt: now,
             replayed: false
         )
-        try ledger.completeWorkflow(workflow)
+        if durableExecution {
+            try ledger.completeWorkflow(workflow)
+        }
         return workflow
     }
 
@@ -218,30 +226,33 @@ final class CapabilityBroker {
         descriptor: PocketCapabilityDescriptor,
         plan: CapabilityExecutionPlan,
         planDigest: String,
+        durableExecution: Bool,
         now: Date
     ) async throws -> CapabilityReceipt {
         let argumentDigest = try CapabilityCanonicalJSON.digest(step.arguments)
-        switch try ledger.beginInvocation(
-            idempotencyKey: step.idempotencyKey,
-            planDigest: planDigest,
-            argumentDigest: argumentDigest,
-            capability: step.capability
-        ) {
-        case .replay(let receipt):
-            try appendAudit(
-                receipt: receipt,
-                descriptor: descriptor,
-                plan: plan,
+        if durableExecution {
+            switch try ledger.beginInvocation(
+                idempotencyKey: step.idempotencyKey,
+                planDigest: planDigest,
                 argumentDigest: argumentDigest,
-                durationMilliseconds: 0,
-                replayed: true,
-                now: now
-            )
-            return receipt
-        case .unknown:
-            throw CapabilityBrokerError.executionUnknown(step.idempotencyKey)
-        case .execute:
-            break
+                capability: step.capability
+            ) {
+            case .replay(let receipt):
+                try appendAudit(
+                    receipt: receipt,
+                    descriptor: descriptor,
+                    plan: plan,
+                    argumentDigest: argumentDigest,
+                    durationMilliseconds: 0,
+                    replayed: true,
+                    now: now
+                )
+                return receipt
+            case .unknown:
+                throw CapabilityBrokerError.executionUnknown(step.idempotencyKey)
+            case .execute:
+                break
+            }
         }
 
         try enforceRateLimit(descriptor, principal: plan.principal, now: now)
@@ -328,7 +339,9 @@ final class CapabilityBroker {
             replayed: false,
             now: now
         )
-        try ledger.completeInvocation(idempotencyKey: step.idempotencyKey, receipt: receipt)
+        if durableExecution {
+            try ledger.completeInvocation(idempotencyKey: step.idempotencyKey, receipt: receipt)
+        }
         return receipt
     }
 
@@ -431,6 +444,7 @@ final class CapabilityBroker {
                 descriptor: rollbackDescriptor,
                 plan: plan,
                 planDigest: planDigest,
+                durableExecution: true,
                 now: now
             )
             let succeeded = rollbackReceipt.status == .succeeded

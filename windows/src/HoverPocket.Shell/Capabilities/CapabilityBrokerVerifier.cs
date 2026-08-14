@@ -86,6 +86,13 @@ internal sealed class CapabilityBrokerVerifier
             var events = await adapter.ListTodayAsync("UTC", principal, allPermissions, now);
             Require(events.Count == 1, "calendar_read");
             Require(events[0].EventRef == "primary:sensitive-event-ref", "calendar_event_ref");
+            var ledgerPath = Path.Combine(brokerRoot, "capability-broker-ledger.json");
+            if (File.Exists(ledgerPath))
+            {
+                var ledgerText = File.ReadAllText(ledgerPath);
+                Require(!ledgerText.Contains("Sensitive Calendar Title", StringComparison.Ordinal), "private_read_ledger_title");
+                Require(!ledgerText.Contains("sensitive-event-ref", StringComparison.Ordinal), "private_read_ledger_ref");
+            }
 
             try
             {

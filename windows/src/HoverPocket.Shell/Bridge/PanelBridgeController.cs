@@ -1,5 +1,6 @@
 using System.IO;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using HoverPocket.Shell.Capabilities;
 using HoverPocket.Shell.Configuration;
@@ -154,6 +155,7 @@ internal sealed class PanelBridgeController : IDisposable
         dispatcher.Register("ailane.submit", SubmitAiLaneAsync);
         dispatcher.Register("ailane.approve", ApproveAiLaneAsync);
         dispatcher.Register("ailane.reject", RejectAiLaneAsync);
+        dispatcher.Register("todayFocus.startFromCalendar", StartTodayFocusFromCalendarAsync);
         _calculatorBridgeHandlers.Register(dispatcher);
         _controlsBridgeController.Attach(dispatcher);
         _calendarBridgeController.Attach(dispatcher);
@@ -207,6 +209,7 @@ internal sealed class PanelBridgeController : IDisposable
                 startWithWindows = CurrentSettings.StartWithWindows,
                 startWithWindowsRegistered = IsStartupRegistered(),
                 autoCheckForUpdates = CurrentSettings.AutoCheckForUpdates,
+                aiNativeEnabled = CurrentSettings.AiNativeEnabled,
                 clipboardPrivateMode = CurrentSettings.ClipboardPrivateMode,
                 rememberLastSelectedProvider = CurrentSettings.RememberLastSelectedProvider,
                 preferredProviderId = CurrentSettings.PreferredProviderId,
@@ -585,6 +588,105 @@ internal sealed class PanelBridgeController : IDisposable
     {
         _aiLaneController.Reject(ReadRequiredString(parameters, "actionId"));
         return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> StartTodayFocusFromCalendarAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!CurrentSettings.AiNativeEnabled
+            || _capabilityBroker is null
+            || _todayFocusTextAdapter is null)
+        {
+            throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "today_focus");
+        }
+
+        var eventRef = ReadRequiredString(parameters, "eventRef");
+        if (string.IsNullOrEmpty(eventRef) || eventRef.EnumerateRunes().Count() > 256)
+        {
+            throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "event_ref");
+        }
+
+        var principal = new CapabilityPrincipal("local-user");
+        var permissions = new CapabilityPermissionSet(
+            principal,
+            new HashSet<string>(
+                ["calendar.events.read", "sticky.write", "timer.write"],
+                StringComparer.Ordinal));
+        var now = DateTimeOffset.Now;
+        var events = await _todayFocusTextAdapter.ListTodayAsync(
+            CapabilityTimeZoneId(),
+            principal,
+            permissions,
+            now,
+            cancellationToken);
+        var selected = events.FirstOrDefault(item => item.EventRef == eventRef)
+            ?? throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "calendar_event");
+        var purpose = string.IsNullOrEmpty(selected.SafeTitle) ? "今日の予定" : selected.SafeTitle;
+        var draft = _todayFocusTextAdapter.PrepareFocus(
+            selected,
+            1_500,
+            purpose,
+            principal,
+            permissions,
+            now);
+        var request = draft.Preparation.ApprovalRequest
+            ?? throw new CapabilityBrokerException("CAPABILITY_APPROVAL_REQUIRED", draft.Plan.Id);
+
+        var english = CurrentSettings.Language == AppLanguage.English;
+        var result = System.Windows.MessageBox.Show(
+            english
+                ? $"{purpose}\n\nStart a 25-minute Timer and save this purpose to Sticky Notes?"
+                : $"{purpose}\n\n25分Timerを開始し、この目的をSticky Notesへ保存します。",
+            english ? "Approve Today Focus" : "Today Focusを承認",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Question,
+            System.Windows.MessageBoxResult.No);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (result != System.Windows.MessageBoxResult.Yes)
+        {
+            try
+            {
+                _ = _capabilityBroker.DecideApproval(
+                    request.Id,
+                    draft.Preparation.PlanDigest,
+                    CapabilityApprovalDecision.Reject,
+                    now);
+            }
+            catch (CapabilityBrokerException ex) when (ex.Code == "CAPABILITY_APPROVAL_REJECTED")
+            {
+            }
+            return new { status = "rejected" };
+        }
+
+        var receipt = await _todayFocusTextAdapter.ApproveAndExecuteAsync(
+            draft,
+            permissions,
+            DateTimeOffset.Now,
+            cancellationToken);
+        return new
+        {
+            status = receipt.Status.WireValue(),
+            replayed = receipt.Replayed,
+            readbackVerified = receipt.Steps.All(step => step.Readback.Status == CapabilityReadbackStatus.Verified),
+            capabilities = receipt.Steps.Select(step => step.Capability.Id).ToArray()
+        };
+    }
+
+    private static string CapabilityTimeZoneId()
+    {
+        var identifier = TimeZoneInfo.Local.Id;
+        if (identifier == "UTC" || identifier.Contains('/'))
+        {
+            return identifier;
+        }
+        if (TimeZoneInfo.TryConvertWindowsIdToIanaId(identifier, out var converted)
+            && !string.IsNullOrEmpty(converted))
+        {
+            return converted;
+        }
+        throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "timezone");
     }
 
     public async Task NotifyPanelOpenedAsync()

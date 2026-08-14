@@ -124,6 +124,12 @@ enum CapabilityBrokerVerificationCommand {
         )
         try require(events.count == 1, "calendar_read")
         try require(events[0].eventRef == "primary:sensitive-event-ref", "calendar_event_ref")
+        let ledgerURL = brokerRoot.appendingPathComponent("capability-broker-ledger.json")
+        if FileManager.default.fileExists(atPath: ledgerURL.path) {
+            let ledgerText = String(data: try Data(contentsOf: ledgerURL), encoding: .utf8) ?? ""
+            try require(!ledgerText.contains("Sensitive Calendar Title"), "private_read_ledger_title")
+            try require(!ledgerText.contains("sensitive-event-ref"), "private_read_ledger_ref")
+        }
 
         do {
             let denied = CapabilityPermissionSet(principal: principal, permissions: ["timer.write"])

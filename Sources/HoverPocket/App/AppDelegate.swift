@@ -4,8 +4,6 @@ import Carbon
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hoverWindowController = HoverWindowController()
-    private var capabilityBroker: CapabilityBroker?
-    private var todayFocusTextAdapter: TodayFocusTextAdapter?
     private var statusBarMenuController: StatusBarMenuController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -80,11 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
                 auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
             )
-            capabilityBroker = broker
-            todayFocusTextAdapter = TodayFocusTextAdapter(broker: broker)
+            AINativeRuntime.shared.configure(adapter: TodayFocusTextAdapter(broker: broker))
         } catch {
-            capabilityBroker = nil
-            todayFocusTextAdapter = nil
+            AINativeRuntime.shared.configure(adapter: nil)
         }
     }
 

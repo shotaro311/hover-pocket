@@ -273,6 +273,28 @@
   display: none;
 }
 
+.hp-calendar-event-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 4px;
+}
+
+.hp-calendar-focus-action {
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.hp-calendar-focus-action:hover {
+  border-color: rgba(122, 185, 255, 0.32);
+  color: rgb(150, 205, 255);
+  background: rgba(88, 166, 255, 0.12);
+}
+
 .hp-calendar-event {
   display: grid;
   width: 100%;

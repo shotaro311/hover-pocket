@@ -157,6 +157,19 @@ final class TodayFocusTextAdapter {
         )
     }
 
+    func reject(
+        requestID: String,
+        planDigest: String,
+        now: Date
+    ) throws -> CapabilityApprovalGrant {
+        try broker.decideApproval(
+            requestID: requestID,
+            planDigest: planDigest,
+            decision: .reject,
+            now: now
+        )
+    }
+
     private static func dateKey(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
