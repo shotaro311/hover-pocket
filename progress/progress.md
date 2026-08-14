@@ -2,16 +2,17 @@
 project_slug: hover-menu-preview
 updated: 2026-08-14
 updated_by: codex
-status: an2-registry-broker; implementation-in-progress; pro-builder-running; baseline-pass
+status: an2-registry-broker; implementation-in-progress; codex-reimplementation; macos-runtime-pass; windows-ci-pending
 ---
 
 ## 2026-08-14 AI-native AN2 Registry / Broker / Text Today Focus
 
 - AN1 PR [#8](https://github.com/shotaro311/hover-pocket/pull/8)を全check成功、未解決review thread 0件、Ready、MERGEABLE / CLEANのreadback後にmergeした。`main` / `origin/main`はmerge commit `3dce5df07c2b3ed687feefd78b6e78b0753e9958`で一致する。
 - exact mainからworktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an2`、branch `codex/ai-native-an2-registry-broker`を作成し、remote trackingを設定した。
-- ChatGPT Pro Orchestratorの通常Chat GPT-5.6 Sol / Proへ、AN2のRegistry、Broker、Text Today Focus、両OSの決定論的verifierを`changes.patch`として実装するBuilder runを送信した。GitHubはread-only、外部操作なし、sourceはexact baseから64ファイルへ限定し、SHA-256 `14dfd763...d56e4dcd`、秘密値pattern 0件を確認した。Codexはartifact検査、適用、ローカル / CI検証、security review、Git操作を担当する。
+- ChatGPT Pro OrchestratorのBuilder runは40分でtimeoutし、回収receiptは`completion_status=blocked`、`response.md`は空、`changes.patch`なしだった。delivery ID / state hashをbridgeでclaimし、重複適用を防ぐ`mark-done`まで完了した。同じ依頼は再送せず、Skillのblocked例外に従いCodexがAN2を再実装している。
 - patch適用前baselineは`swift build`、Capability 10 handler、Timer、Clipboard、Calculator、Panel layout 112件、Pocket contract 12 schema / 52 fixtureが成功した。contract reportは2回byte一致、SHA-256 `b11c7a6f...d0b0`。worktree sourceはcleanである。
-- 未完了gateはPro artifact回収、base / hash / path検査、patch適用、Broker tamper / expiry / replay / permission / redaction / partial-failure検証、両OS build / regression、独立review、security scan、Ready PRとCI readbackである。詳細: `progress/2026-08/2026-08-14_hover-pocket-ai-native-an2-registry-broker.md`。
+- macOS / WindowsへRegistry 11 descriptor、Capability Broker、single-use approval、durable idempotency ledger、metadata-only audit、readback、Timer補償、Text Today Focus adapter、default-off compositionを実装した。macOSはSwift 6 build、Broker 10 negative case、10 handler、Timer、Clipboard、Calculator、Panel layout 112件、Media、Pocket contract 52 fixtureが成功した。Windowsは同等verifierと共通golden plan digestを追加し、Release compile / verifierをCIで確認する前の状態である。
+- 未完了gateはWindows CIでのcompile / Broker / 既存回帰、Timeout後の副作用なし確認、既存Calendar UIからのToday Focus入口、独立review、security scan、Ready PRとCI readbackである。詳細: `progress/2026-08/2026-08-14_hover-pocket-ai-native-an2-registry-broker.md`。
 
 ## 2026-08-14 AI-native AN1 Provider Capabilities
 

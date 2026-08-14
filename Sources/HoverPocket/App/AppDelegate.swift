@@ -4,13 +4,13 @@ import Carbon
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hoverWindowController = HoverWindowController()
-    private let capabilityHandlers = try? ProviderCapabilityCompositionRoot.live(
-        calendarDataSource: GoogleCalendarCapabilityDataSource()
-    )
+    private var capabilityBroker: CapabilityBroker?
+    private var todayFocusTextAdapter: TodayFocusTextAdapter?
     private var statusBarMenuController: StatusBarMenuController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        configureAINativeRuntimeIfEnabled()
         installMainMenu()
         registerURLSchemeCallbackHandler()
         statusBarMenuController = StatusBarMenuController(
@@ -57,6 +57,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSWorkspace.sessionDidBecomeActiveNotification,
             object: nil
         )
+    }
+
+    private func configureAINativeRuntimeIfEnabled() {
+        guard hoverWindowController.appSettings.aiNativeEnabled else { return }
+        do {
+            let handlers = try ProviderCapabilityCompositionRoot.live(
+                calendarDataSource: GoogleCalendarCapabilityDataSource()
+            )
+            let registry = try CapabilityRegistry(handlers: handlers)
+            let applicationSupport = try FileManager.default.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+            let brokerRoot = applicationSupport
+                .appendingPathComponent("HoverPocket", isDirectory: true)
+                .appendingPathComponent("CapabilityBroker", isDirectory: true)
+            let broker = CapabilityBroker(
+                registry: registry,
+                ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
+                auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+            )
+            capabilityBroker = broker
+            todayFocusTextAdapter = TodayFocusTextAdapter(broker: broker)
+        } catch {
+            capabilityBroker = nil
+            todayFocusTextAdapter = nil
+        }
     }
 
     @objc private func screenParametersChanged() {

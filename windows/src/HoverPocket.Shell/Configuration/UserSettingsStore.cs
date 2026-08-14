@@ -106,6 +106,7 @@ internal sealed class UserSettingsStore
             Language = AppLanguage.Japanese,
             StartWithWindows = false,
             AutoCheckForUpdates = true,
+            AiNativeEnabled = false,
             RememberLastSelectedProvider = true,
             PreferredProviderId = providerIds.FirstOrDefault(),
             HandleIconStyle = HandleIconStyle.B,

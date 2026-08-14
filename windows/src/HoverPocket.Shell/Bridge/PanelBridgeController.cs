@@ -30,6 +30,8 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly StickyBridgeController _stickyBridgeController;
     private readonly TimerBridgeHandlers _timerBridgeHandlers;
     private readonly PocketCapabilityHandlerSet _capabilityHandlers;
+    private readonly CapabilityBroker? _capabilityBroker;
+    private readonly TodayFocusTextAdapter? _todayFocusTextAdapter;
     private readonly List<BridgeDispatcher> _dispatchers = [];
     private readonly object _previewFrameSync = new();
     private string _selectedProviderId;
@@ -65,6 +67,23 @@ internal sealed class PanelBridgeController : IDisposable
         _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.Normalize(settings, providerRegistry.ProviderIds);
+        if (CurrentSettings.AiNativeEnabled)
+        {
+            try
+            {
+                var brokerRoot = Path.Combine(settingsStore.RootDirectory, "CapabilityBroker");
+                _capabilityBroker = new CapabilityBroker(
+                    new CapabilityRegistry(_capabilityHandlers),
+                    new CapabilityBrokerLedger(brokerRoot),
+                    new CapabilityBrokerAuditLog(brokerRoot));
+                _todayFocusTextAdapter = new TodayFocusTextAdapter(_capabilityBroker);
+            }
+            catch (CapabilityBrokerException)
+            {
+                _capabilityBroker = null;
+                _todayFocusTextAdapter = null;
+            }
+        }
         _clipboardBridgeController = new ClipboardBridgeController(
             new ClipboardHistoryStore(Path.Combine(settingsStore.RootDirectory, "clipboard")),
             new ClipboardNativeListener(System.Windows.Application.Current?.Dispatcher ?? System.Windows.Threading.Dispatcher.CurrentDispatcher),
@@ -97,6 +116,10 @@ internal sealed class PanelBridgeController : IDisposable
     public string SelectedProviderId => _selectedProviderId;
 
     public PocketCapabilityHandlerSet CapabilityHandlers => _capabilityHandlers;
+
+    public CapabilityBroker? CapabilityBroker => _capabilityBroker;
+
+    public TodayFocusTextAdapter? TodayFocusTextAdapter => _todayFocusTextAdapter;
 
     public IDisposable Attach(BridgeDispatcher dispatcher)
     {
