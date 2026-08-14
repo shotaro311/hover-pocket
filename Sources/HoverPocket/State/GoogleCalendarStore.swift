@@ -260,11 +260,16 @@ final class GoogleCalendarStore: ObservableObject {
     ) async throws -> GoogleCalendarEventOccurrence {
         _ = idempotencyKey
         let snapshot = try await loadMonthForTool(containing: request.start)
-        let source = request.calendarID.flatMap { requested in
-            snapshot.sources.first { $0.id == requested && $0.canWrite }
-        } ?? snapshot.sources.first(where: { $0.canWrite && $0.isPrimary })
-            ?? snapshot.sources.first(where: \.canWrite)
-        guard let source else {
+        let source: GoogleCalendarSource
+        if let requested = request.calendarID {
+            guard let requestedSource = snapshot.sources.first(where: { $0.id == requested && $0.canWrite }) else {
+                throw CapabilityHandlerError.unavailable("writable_calendar")
+            }
+            source = requestedSource
+        } else if let defaultSource = snapshot.sources.first(where: { $0.canWrite && $0.isPrimary })
+            ?? snapshot.sources.first(where: \.canWrite) {
+            source = defaultSource
+        } else {
             throw CapabilityHandlerError.unavailable("writable_calendar")
         }
         let draft = GoogleCalendarEventDraft(

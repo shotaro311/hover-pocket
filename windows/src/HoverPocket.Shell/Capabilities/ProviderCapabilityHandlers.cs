@@ -205,10 +205,7 @@ internal sealed class CalendarCreateCapabilityHandler : IPocketCapabilityHandler
         CapabilityHandlerContext context,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(context.IdempotencyKey) || context.IdempotencyKey.Length < 16)
-        {
-            throw CapabilityJson.Invalid("idempotencyKey");
-        }
+        var idempotencyKey = context.RequireIdempotencyKey();
         var title = CapabilityJson.RequiredString(arguments, "title", 160);
         var start = RequiredDate(arguments, "start");
         var end = RequiredDate(arguments, "end");
@@ -226,7 +223,7 @@ internal sealed class CalendarCreateCapabilityHandler : IPocketCapabilityHandler
             CapabilityJson.OptionalString(arguments, "notes", 10_000));
         var created = await _dataSource.CreateEventAsync(
             request,
-            context.IdempotencyKey,
+            idempotencyKey,
             cancellationToken);
         var observed = await _dataSource.GetEventAsync(created.EventRef, cancellationToken);
         if (observed != created)
@@ -290,6 +287,10 @@ internal sealed class TimerCapabilityHandler : IPocketCapabilityHandler
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (_operation != TimerCapabilityOperation.Get)
+        {
+            _ = context.RequireIdempotencyKey();
+        }
         return Task.FromResult(_operation switch
         {
             TimerCapabilityOperation.Start => Start(arguments),
@@ -403,8 +404,11 @@ internal sealed class StickyCapabilityHandler : IPocketCapabilityHandler
         CapabilityHandlerContext context,
         CancellationToken cancellationToken = default)
     {
-        _ = context;
         cancellationToken.ThrowIfCancellationRequested();
+        if (_operation == StickyCapabilityOperation.Upsert)
+        {
+            _ = context.RequireIdempotencyKey();
+        }
         return Task.FromResult(_operation == StickyCapabilityOperation.Upsert
             ? Upsert(arguments)
             : Get(arguments));

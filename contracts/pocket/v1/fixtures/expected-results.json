@@ -144,7 +144,7 @@
       "schema": "execution-plan.schema.json",
       "errorCode": "CAPABILITY_ARGUMENT_INVALID",
       "errorLocation": "$.steps[2].arguments",
-      "expectedDigest": "sha256:81132df292b79722249c65cf4deb22f2107cd0dfb9efcc9ba123fa2a8e73461e"
+      "expectedDigest": "sha256:b139dcd4113e94272d34a76d32f85a1620920cd72f92962a0c6bdd42399e0a93"
     },
     {
       "id": "invalid-geometry-provider-rect",
@@ -253,7 +253,7 @@
       "schema": "pocket-workflow.schema.json",
       "errorCode": "CAPABILITY_ARGUMENT_INVALID",
       "errorLocation": "$.steps[1].with",
-      "expectedDigest": "sha256:3dd5aeb25d613c8dcf95268e5793f4a00db1c5af5ff53f5ad320c44502cae2a4"
+      "expectedDigest": "sha256:01dd72f48edf52dd7870a8667bd0627873678d6d314cd8666ab70999bdf11dd7"
     },
     {
       "id": "invalid-pocket-workflow-scope-escape",

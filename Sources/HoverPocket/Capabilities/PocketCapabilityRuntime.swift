@@ -29,6 +29,28 @@ struct CapabilityHandlerContext: Sendable {
         self.idempotencyKey = idempotencyKey
         self.now = now
     }
+
+    func requiredIdempotencyKey() throws -> String {
+        guard let idempotencyKey,
+              (16...128).contains(idempotencyKey.count),
+              let first = idempotencyKey.unicodeScalars.first,
+              Self.isASCIIAlphaNumeric(first),
+              idempotencyKey.unicodeScalars.allSatisfy(Self.isAllowedIdempotencyScalar)
+        else {
+            throw CapabilityHandlerError.invalidArgument("idempotencyKey")
+        }
+        return idempotencyKey
+    }
+
+    private static func isASCIIAlphaNumeric(_ scalar: Unicode.Scalar) -> Bool {
+        (48...57).contains(scalar.value)
+            || (65...90).contains(scalar.value)
+            || (97...122).contains(scalar.value)
+    }
+
+    private static func isAllowedIdempotencyScalar(_ scalar: Unicode.Scalar) -> Bool {
+        isASCIIAlphaNumeric(scalar) || [45, 46, 58, 95].contains(scalar.value)
+    }
 }
 
 enum CapabilityHandlerError: Error, Equatable, Sendable {

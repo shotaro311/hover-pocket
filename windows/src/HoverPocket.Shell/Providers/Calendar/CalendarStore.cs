@@ -284,12 +284,17 @@ internal sealed class CalendarStore
             {
                 throw new GoogleCalendarApiException("calendar_unavailable", ResolveMessage());
             }
-            source = (request.CalendarId is { Length: > 0 } requested
-                    ? _snapshot.Sources.FirstOrDefault(item => item.Id == requested && item.CanWrite)
-                    : null)
-                ?? _snapshot.Sources.FirstOrDefault(item => item.CanWrite && item.IsPrimary)
-                ?? _snapshot.Sources.FirstOrDefault(item => item.CanWrite)
-                ?? throw new GoogleCalendarApiException("calendar_read_only", "No writable calendar is available.");
+            if (request.CalendarId is { Length: > 0 } requested)
+            {
+                source = _snapshot.Sources.FirstOrDefault(item => item.Id == requested && item.CanWrite)
+                    ?? throw new GoogleCalendarApiException("calendar_read_only", "The requested calendar is not writable.");
+            }
+            else
+            {
+                source = _snapshot.Sources.FirstOrDefault(item => item.CanWrite && item.IsPrimary)
+                    ?? _snapshot.Sources.FirstOrDefault(item => item.CanWrite)
+                    ?? throw new GoogleCalendarApiException("calendar_read_only", "No writable calendar is available.");
+            }
         }
 
         var draft = new CalendarEventDraft(

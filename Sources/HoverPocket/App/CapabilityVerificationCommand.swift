@@ -98,24 +98,43 @@ enum CapabilityVerificationCommand {
         )
         try require(read == started, "timer_readback")
 
+        do {
+            _ = try await handlers.invoke(
+                PocketCapabilityKey(id: "timer.countdown.pause", version: 1),
+                arguments: idArguments,
+                context: CapabilityHandlerContext(now: now)
+            )
+            throw VerificationFailure("timer_missing_idempotency_accepted")
+        } catch CapabilityHandlerError.invalidArgument(let field) where field == "idempotencyKey" {
+        }
+
         let paused = try await handlers.invoke(
             PocketCapabilityKey(id: "timer.countdown.pause", version: 1),
             arguments: idArguments,
-            context: CapabilityHandlerContext(now: now.addingTimeInterval(30))
+            context: CapabilityHandlerContext(
+                idempotencyKey: "timer-verifier-key-0002",
+                now: now.addingTimeInterval(30)
+            )
         )
         try require(paused["state"] == .string("paused"), "timer_pause")
 
         let resumed = try await handlers.invoke(
             PocketCapabilityKey(id: "timer.countdown.resume", version: 1),
             arguments: idArguments,
-            context: CapabilityHandlerContext(now: now.addingTimeInterval(60))
+            context: CapabilityHandlerContext(
+                idempotencyKey: "timer-verifier-key-0003",
+                now: now.addingTimeInterval(60)
+            )
         )
         try require(resumed["state"] == .string("running"), "timer_resume")
 
         let stopped = try await handlers.invoke(
             PocketCapabilityKey(id: "timer.countdown.stop", version: 1),
             arguments: idArguments,
-            context: CapabilityHandlerContext(now: now.addingTimeInterval(90))
+            context: CapabilityHandlerContext(
+                idempotencyKey: "timer-verifier-key-0004",
+                now: now.addingTimeInterval(90)
+            )
         )
         try require(stopped["state"] == .string("stopped") && stopped["endAt"] == .null, "timer_stop")
     }
@@ -211,6 +230,17 @@ enum CapabilityVerificationCommand {
         )
         try require(created["eventId"] == .string("created-1"), "calendar_create_id")
         try require(dataSource.idempotencyKeys == ["calendar-verifier-key-01"], "calendar_idempotency_forward")
+        try require(dataSource.createdRequests.last?.calendarID == "primary", "calendar_target_forward")
+
+        do {
+            _ = try await handlers.invoke(
+                PocketCapabilityKey(id: "calendar.event.create", version: 1),
+                arguments: createArguments,
+                context: CapabilityHandlerContext(now: now)
+            )
+            throw VerificationFailure("calendar_missing_idempotency_accepted")
+        } catch CapabilityHandlerError.invalidArgument(let field) where field == "idempotencyKey" {
+        }
 
         let read = try await handlers.invoke(
             PocketCapabilityKey(id: "calendar.event.get", version: 1),
@@ -265,6 +295,7 @@ private final class FakeCalendarCapabilityDataSource: CalendarCapabilityDataSour
     private var events: [String: CalendarCapabilityEvent] = [:]
     private var createCount = 0
     var idempotencyKeys: [String] = []
+    var createdRequests: [CalendarCapabilityCreateRequest] = []
     var mismatchNextReadback = false
     var failNextCreate = false
 
@@ -302,6 +333,7 @@ private final class FakeCalendarCapabilityDataSource: CalendarCapabilityDataSour
             throw CancellationError()
         }
         idempotencyKeys.append(idempotencyKey)
+        createdRequests.append(request)
         createCount += 1
         let eventID = "created-\(createCount)"
         let calendarID = request.calendarID ?? "primary"

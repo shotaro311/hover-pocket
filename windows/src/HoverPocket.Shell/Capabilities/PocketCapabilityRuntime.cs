@@ -17,6 +17,19 @@ internal sealed record CapabilityHandlerContext(string? IdempotencyKey, DateTime
     {
         return new CapabilityHandlerContext(idempotencyKey, DateTimeOffset.UtcNow);
     }
+
+    public string RequireIdempotencyKey()
+    {
+        if (string.IsNullOrEmpty(IdempotencyKey)
+            || IdempotencyKey.Length is < 16 or > 128
+            || !char.IsAsciiLetterOrDigit(IdempotencyKey[0])
+            || IdempotencyKey.Any(character => !char.IsAsciiLetterOrDigit(character)
+                && character is not ('-' or '.' or ':' or '_')))
+        {
+            throw CapabilityJson.Invalid("idempotencyKey");
+        }
+        return IdempotencyKey;
+    }
 }
 
 internal sealed class CapabilityHandlerException : Exception

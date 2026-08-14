@@ -146,9 +146,7 @@ final class CalendarCreateCapabilityHandler: PocketCapabilityHandler {
     }
 
     func handle(arguments: CapabilityObject, context: CapabilityHandlerContext) async throws -> CapabilityObject {
-        guard let idempotencyKey = context.idempotencyKey, idempotencyKey.count >= 16 else {
-            throw CapabilityHandlerError.invalidArgument("idempotencyKey")
-        }
+        let idempotencyKey = try context.requiredIdempotencyKey()
         let title = try arguments.requiredString("title", maxLength: 160)
         let startString = try arguments.requiredString("start", maxLength: 64)
         let endString = try arguments.requiredString("end", maxLength: 64)
@@ -214,6 +212,9 @@ final class TimerCapabilityHandler: PocketCapabilityHandler {
     }
 
     func handle(arguments: CapabilityObject, context: CapabilityHandlerContext) async throws -> CapabilityObject {
+        if operation != .get {
+            _ = try context.requiredIdempotencyKey()
+        }
         switch operation {
         case .start:
             return try start(arguments: arguments, context: context)
@@ -314,6 +315,7 @@ final class StickyCapabilityHandler: PocketCapabilityHandler {
     func handle(arguments: CapabilityObject, context: CapabilityHandlerContext) async throws -> CapabilityObject {
         switch operation {
         case .upsert:
+            _ = try context.requiredIdempotencyKey()
             let stableKey = try arguments.requiredString("stableKey", maxLength: 160)
             let title = try arguments.requiredString("title", maxLength: 120, allowEmpty: true)
             let body = try arguments.requiredString("body", maxLength: 10_000, allowEmpty: true)

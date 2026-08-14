@@ -108,15 +108,33 @@ internal sealed class CapabilityVerifier
         var read = await handlers.InvokeAsync(CapabilityIds.TimerGet, idArguments);
         Require(read.GetRawText() == started.GetRawText(), "timer_readback");
 
+        try
+        {
+            await handlers.InvokeAsync(CapabilityIds.TimerPause, idArguments);
+            _failures.Add("timer_missing_idempotency_accepted");
+        }
+        catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_ARGUMENT_INVALID" && ex.Field == "idempotencyKey")
+        {
+        }
+
         clock.Advance(TimeSpan.FromSeconds(30));
-        var paused = await handlers.InvokeAsync(CapabilityIds.TimerPause, idArguments);
+        var paused = await handlers.InvokeAsync(
+            CapabilityIds.TimerPause,
+            idArguments,
+            new CapabilityHandlerContext("timer-verifier-key-0002", clock.UtcNow));
         Require(paused.GetProperty("state").GetString() == "paused", "timer_pause");
 
         clock.Advance(TimeSpan.FromSeconds(30));
-        var resumed = await handlers.InvokeAsync(CapabilityIds.TimerResume, idArguments);
+        var resumed = await handlers.InvokeAsync(
+            CapabilityIds.TimerResume,
+            idArguments,
+            new CapabilityHandlerContext("timer-verifier-key-0003", clock.UtcNow));
         Require(resumed.GetProperty("state").GetString() == "running", "timer_resume");
 
-        var stopped = await handlers.InvokeAsync(CapabilityIds.TimerStop, idArguments);
+        var stopped = await handlers.InvokeAsync(
+            CapabilityIds.TimerStop,
+            idArguments,
+            new CapabilityHandlerContext("timer-verifier-key-0004", clock.UtcNow));
         Require(stopped.GetProperty("state").GetString() == "stopped", "timer_stop_state");
         Require(stopped.GetProperty("endAt").ValueKind == JsonValueKind.Null, "timer_stop_end");
     }
@@ -187,6 +205,16 @@ internal sealed class CapabilityVerifier
             new CapabilityHandlerContext("calendar-verifier-key-01", now));
         Require(created.GetProperty("eventId").GetString() == "created-1", "calendar_create_id");
         Require(calendar.IdempotencyKeys.SequenceEqual(["calendar-verifier-key-01"]), "calendar_idempotency_forward");
+        Require(calendar.CreatedRequests.LastOrDefault()?.CalendarId == "primary", "calendar_target_forward");
+
+        try
+        {
+            await handlers.InvokeAsync(CapabilityIds.CalendarCreate, createArguments);
+            _failures.Add("calendar_missing_idempotency_accepted");
+        }
+        catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_ARGUMENT_INVALID" && ex.Field == "idempotencyKey")
+        {
+        }
 
         var read = await handlers.InvokeAsync(
             CapabilityIds.CalendarGet,
@@ -241,6 +269,8 @@ internal sealed class FakeCalendarCapabilityDataSource : ICalendarCapabilityData
 
     public List<string> IdempotencyKeys { get; } = [];
 
+    public List<CalendarCapabilityCreateRequest> CreatedRequests { get; } = [];
+
     public bool MismatchNextReadback { get; set; }
 
     public bool FailNextCreate { get; set; }
@@ -289,6 +319,7 @@ internal sealed class FakeCalendarCapabilityDataSource : ICalendarCapabilityData
             throw new TaskCanceledException("fake calendar timeout");
         }
         IdempotencyKeys.Add(idempotencyKey);
+        CreatedRequests.Add(request);
         _createCount++;
         var eventId = $"created-{_createCount}";
         var calendarId = request.CalendarId ?? "primary";
