@@ -1,0 +1,105 @@
+name: Verify Pocket Contracts
+
+on:
+  push:
+    paths:
+      - "contracts/pocket/v1/**"
+      - "docs/adr/**"
+      - "docs/requirement/requirements.md"
+      - "docs/plan/20260813_PLAN1.md"
+      - "script/verify_pocket_contracts.py"
+      - ".github/workflows/pocket-contracts-verify.yml"
+  pull_request:
+    paths:
+      - "contracts/pocket/v1/**"
+      - "docs/adr/**"
+      - "docs/requirement/requirements.md"
+      - "docs/plan/20260813_PLAN1.md"
+      - "script/verify_pocket_contracts.py"
+      - ".github/workflows/pocket-contracts-verify.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: ${{ matrix.name }} deterministic contract verifier
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu
+            slug: ubuntu
+            os: ubuntu-24.04
+          - name: macOS
+            slug: macos
+            os: macos-14
+          - name: Windows
+            slug: windows
+            os: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13.7"
+          check-latest: false
+
+      - name: Verify contracts twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          python script/verify_pocket_contracts.py --report-json pocket-contracts-report-1.json
+          python script/verify_pocket_contracts.py --report-json pocket-contracts-report-2.json --quiet
+          python - <<'PY'
+          from pathlib import Path
+
+          first = Path("pocket-contracts-report-1.json").read_bytes()
+          second = Path("pocket-contracts-report-2.json").read_bytes()
+          if first != second:
+              raise SystemExit("contract verifier report is not deterministic")
+          print(first.decode("utf-8"), end="")
+          PY
+
+      - name: Upload deterministic report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pocket-contract-report-${{ matrix.slug }}
+          path: pocket-contracts-report-1.json
+          if-no-files-found: error
+          retention-days: 7
+
+  compare-reports:
+    name: Compare reports across all operating systems
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Download reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pocket-contract-report-*
+          path: reports
+
+      - name: Require byte-identical reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          paths = sorted(Path("reports").glob("*/pocket-contracts-report-1.json"))
+          if len(paths) != 3:
+              raise SystemExit(f"expected 3 OS reports, found {len(paths)}")
+          baseline = paths[0].read_bytes()
+          different = [str(path) for path in paths[1:] if path.read_bytes() != baseline]
+          if different:
+              raise SystemExit("cross-OS contract reports differ: " + ", ".join(different))
+          print("Cross-OS reports are byte-identical:", ", ".join(str(path) for path in paths))
+          PY

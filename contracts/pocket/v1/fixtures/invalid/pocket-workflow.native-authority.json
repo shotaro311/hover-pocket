@@ -1,0 +1,23 @@
+{
+  "base": "valid/pocket-workflow.today-focus.json",
+  "mutation": {
+    "setValues": [
+      {
+        "path": [
+          "steps",
+          0,
+          "use"
+        ],
+        "value": "system.native.authority@1"
+      },
+      {
+        "path": [
+          "steps",
+          0,
+          "with"
+        ],
+        "value": {}
+      }
+    ]
+  }
+}

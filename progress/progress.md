@@ -1,9 +1,35 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-08-12
+updated: 2026-08-14
 updated_by: codex
-status: completed
+status: an0-hardened; pr-open; local-pass; security-pass; ci-pass
 ---
+
+## 2026-08-14 AI-native AN0 Contract Hardening
+
+- PR #7の独立レビューで再現した12経路をfail closedへ修正した。`native_authority`実行、Pocket App版差し替え、self-claimed readback、unbound package source、scope escape、asset traversal、生成Surfaceのreceipt描画、audit raw ID、oversized plan / workflow payloadを拒否し、未知schema keyword / unresolved `$ref`もnegative fixtureへ固定した。
+- Pocket App ID / version / manifest digestをplan、invocation、approval、receipt、auditへbindingし、successful receiptはHost-owned typed observation、再計算evidence digest、descriptor match field一致を必須にした。manifest全pathはsource byte digestへbindingし、scopeとaudit値をHost validatorで強制する。
+- contract corpusは12 schema / 47 fixtureへ増え、全reject fixtureが本文digest、stable error code、exact error locationを持つ。監査ログも既知Invocation、descriptor、入力digest、Host-owned readback digestへbindingする。contract treeはLFへ固定する。CIは固定runner / Python / Node 24世代Action SHAを使い、Ubuntu / macOS / Windowsのreport artifactをbyte-for-byte比較する。
+- ローカルでは47 / 47 fixture、2回report byte一致、JSON 66件の重複key拒否parse、`swift build`、Panel layout 112件、Clipboard、Timer、Calculator、`git diff --check`が成功した。exact commit range `190ee90...5e9097c`の最終Codex Security scan `85f50deb-45e1-40d2-8457-867c749f729b`は6 surfaceを完全レビューし、coverage complete、reportable finding 0件でsealed completeとなった。
+- implementation head `5e9097c`のpush run [31759179183](https://github.com/shotaro311/hover-pocket/actions/runs/31759179183)とPR run [31759179663](https://github.com/shotaro311/hover-pocket/actions/runs/31759179663)で、Ubuntu / macOS / Windowsとcross-OS byte比較が成功した。以後は検証readbackの`progress/`記録だけを追加し、実装差分は変えていない。PR #7はReady、MERGEABLE。runtime source、Provider Registry、既存data format、requirements、PLAN1、承認画像は変更していない。詳細: `progress/2026-08/2026-08-14_hover-pocket-ai-native-an0-hardening.md`。
+
+## 2026-08-13 AI-native AN0 Contracts and Verification
+
+- 承認済み最終計画の最初の実装単位AN0として、`contracts/pocket/v1/`へ12個のversioned JSON Schema、31件のvalid / invalid / golden fixture、決定論的な標準Python verifierを追加した。macOS / Windowsのruntime source、Provider Registry、既存保存形式は変更していない。
+- `CapabilityRegistry / Broker`、approval、readback付きreceipt、Voice Lane、Pocket App / Surface / Workflow、最小監査データをADRへ固定した。Voice Lane geometryはCompact 64、Expanded S / M / L / XLを190 / 220 / 250 / 280としてgolden fixture化した。
+- ChatGPT Pro Orchestratorのbuilderへexact base `8b636cae...`を渡して`changes.patch`を生成させ、Codexがdownload版とrun取込版のSHA-256 `35369356...a174`一致、allowed path、`git apply --check`を確認して適用した。OracleのDevTools接続切断により自動回収表示が止まったが、同一会話から一度だけ手動harvestし、再送せずreceiptを復旧した。
+- ローカルでcontract 12 schema / 31 fixture、2回のJSON report byte一致、JSON全44件parse、`swift build`、Calculator / Clipboard / Timer / Panel layout 112ケース、`git diff --check`が成功した。GitHub ActionsもUbuntu / macOS / Windowsのpush・PR両経路で成功した。
+- Ready PR [#7](https://github.com/shotaro311/hover-pocket/pull/7)を作成した。Headは`6ef58f3732c91f0b44c21543b46cbc55619935f3`で、GitHub readbackはMERGEABLE。AN1以降のruntime handler実装は、この契約PRのreview / merge後に開始する。詳細: `progress/2026-08/2026-08-13_hover-pocket-ai-native-an0-contracts.md`。
+
+## 2026-08-13 AI-native Final Implementation Plan
+
+- 現行`main`、正本requirements、macOS / Windows双方のProvider・AI・Bridge・Store実装、Draft PR #6のVoice Lane branch、worktree、MulmoClaude 5資料、OpenAI公式資料を再監査し、ユーザー承認済みの最終実装プランを`docs/plan/20260813_PLAN1.md`へ確定した。
+- 最終構造は、表示を`PocketSurface`、操作を`PocketCapability`へ分離し、`CapabilityRegistry`を単一正本、`CapabilityBroker`を唯一の実行入口とする。Voice、Text、既存UI、生成Pocket App、MCPは同じBrokerを通す。
+- 最初の縦断候補はToday Focus Pocket。Calendar read、Timer start、Sticky upsert、write approval、実行後readbackを両OSで通し、別gateでCalendar createの実音声・承認・event ID readbackも確認する。
+- Voice Lane UIはHost所有の全Provider共通最下段とし、Compactは視覚タイトルなし・短い波形・会話優先、ExpandedはProvider領域を潰さずパネル外枠だけを下方向へ伸ばす。左に現在会話、右に同一rootのcurrent / child session cardsを表示し、fullscreenと全履歴browserは採用しない。
+- 承認済み画像を`docs/plan/assets/20260813-ai-native/voice-lane-compact.png`（1475×1067）と`voice-lane-expanded.png`（1254×1254）へ保存し、文章要件を正本、画像を視覚的受け入れ基準とした。
+- `docs/requirement/requirements.md`へLegacy AI command laneとCodex Voice Laneを分離した要件、Shell geometry、共通Capability、UI / E2E条件を同期した。
+- この項目は計画確定時点の記録。現在の実装状態は直上のAN0エントリを正とする。詳細: `progress/2026-08/2026-08-13_hover-pocket-ai-native-final-plan.md`。
 
 ## 2026-08-12 Cross-platform Multiple Stopwatches and Timer UI
 

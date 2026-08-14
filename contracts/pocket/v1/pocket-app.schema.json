@@ -1,0 +1,231 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/pocket-app/v1",
+  "title": "HoverPocket user-owned Pocket App manifest v1",
+  "type": "object",
+  "required": [
+    "$schema",
+    "apiVersion",
+    "id",
+    "name",
+    "version",
+    "minHostVersion",
+    "intent",
+    "state",
+    "surfaces",
+    "requestedCapabilities",
+    "workflows",
+    "tests",
+    "workspace"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "hoverpocket://schemas/pocket-app/v1"
+    },
+    "apiVersion": {
+      "const": "hoverpocket.app/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z0-9][a-z0-9-]*){2,}$",
+      "maxLength": 160
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$",
+      "maxLength": 64
+    },
+    "minHostVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$",
+      "maxLength": 64
+    },
+    "intent": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+      "maxLength": 240
+    },
+    "state": {
+      "type": "object",
+      "required": [
+        "schema",
+        "store"
+      ],
+      "properties": {
+        "schema": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+          "maxLength": 240
+        },
+        "store": {
+          "type": "string",
+          "pattern": "^user-data://[a-z0-9.-]+$",
+          "maxLength": 240
+        }
+      },
+      "additionalProperties": false
+    },
+    "surfaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "source"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+          },
+          "kind": {
+            "const": "declarative"
+          },
+          "source": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+            "maxLength": 240
+          }
+        },
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "maxItems": 16
+    },
+    "requestedCapabilities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/requestedCapability"
+      },
+      "maxItems": 64
+    },
+    "workflows": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+        "maxLength": 240
+      }
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+        "maxLength": 240
+      },
+      "maxItems": 128,
+      "uniqueItems": true
+    },
+    "workspace": {
+      "type": "object",
+      "required": [
+        "ownership",
+        "definitionRoot",
+        "dataRoot",
+        "secrets",
+        "exportable",
+        "deletable",
+        "rollback"
+      ],
+      "properties": {
+        "ownership": {
+          "const": "user"
+        },
+        "definitionRoot": {
+          "const": "app_definition"
+        },
+        "dataRoot": {
+          "const": "separate_user_data"
+        },
+        "secrets": {
+          "const": "credential_store_only"
+        },
+        "exportable": {
+          "const": true
+        },
+        "deletable": {
+          "const": true
+        },
+        "rollback": {
+          "const": "versioned_snapshot"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "anyJson": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/anyJson"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/anyJson"
+          }
+        }
+      ]
+    },
+    "requestedCapability": {
+      "type": "object",
+      "required": [
+        "id",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*){2,}$",
+          "maxLength": 128
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "scope": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/anyJson"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

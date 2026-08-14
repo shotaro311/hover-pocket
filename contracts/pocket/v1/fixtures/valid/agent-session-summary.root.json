@@ -1,0 +1,14 @@
+{
+  "$schema": "hoverpocket://schemas/agent-session-summary/v1",
+  "sessionId": "session-root-a",
+  "rootSessionId": "session-root-a",
+  "title": "Current task",
+  "status": "running",
+  "safeSummary": "fixture-summary",
+  "progress": {
+    "completed": 1,
+    "total": 3
+  },
+  "updatedAt": "2026-08-13T12:00:03Z",
+  "navigation": "lane_detail"
+}

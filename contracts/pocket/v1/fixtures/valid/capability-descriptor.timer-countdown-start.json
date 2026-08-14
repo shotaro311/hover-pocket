@@ -1,0 +1,86 @@
+{
+  "$schema": "hoverpocket://schemas/capability-descriptor/v1",
+  "id": "timer.countdown.start",
+  "version": 1,
+  "titleKey": "capability.timer.countdown.start",
+  "effect": "reversible_local_write",
+  "permissions": [
+    "timer.write"
+  ],
+  "approvalPolicy": "broker_policy",
+  "idempotency": "required",
+  "availability": {
+    "macos": "available",
+    "windows": "available"
+  },
+  "limits": {
+    "timeoutMs": 3000,
+    "maxPayloadBytes": 4096,
+    "maxCallsPerMinute": 120
+  },
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "durationSeconds",
+      "title",
+      "sourceRef"
+    ],
+    "properties": {
+      "durationSeconds": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 86400
+      },
+      "title": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 80,
+        "default": "Timer"
+      },
+      "sourceRef": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 256
+      }
+    },
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "timerId",
+      "state",
+      "endAt"
+    ],
+    "properties": {
+      "timerId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "state": {
+        "type": "string",
+        "enum": [
+          "running",
+          "paused"
+        ]
+      },
+      "endAt": {
+        "type": "string",
+        "format": "date-time"
+      }
+    },
+    "additionalProperties": false
+  },
+  "readback": {
+    "strategy": "capability_query",
+    "capabilityId": "timer.countdown.get",
+    "capabilityVersion": 1,
+    "match": [
+      "timerId",
+      "state",
+      "endAt"
+    ]
+  }
+}

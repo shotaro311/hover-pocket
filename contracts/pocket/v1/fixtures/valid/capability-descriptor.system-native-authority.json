@@ -1,0 +1,45 @@
+{
+  "$schema": "hoverpocket://schemas/capability-descriptor/v1",
+  "id": "system.native.authority",
+  "version": 1,
+  "titleKey": "capability.system.native.authority",
+  "effect": "native_authority",
+  "permissions": [
+    "system.native"
+  ],
+  "approvalPolicy": "runtime_prohibited",
+  "idempotency": "required",
+  "availability": {
+    "macos": "unavailable",
+    "windows": "unavailable"
+  },
+  "limits": {
+    "timeoutMs": 3000,
+    "maxPayloadBytes": 4096,
+    "maxCallsPerMinute": 1
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "status"
+    ],
+    "properties": {
+      "status": {
+        "type": "string",
+        "const": "unavailable"
+      }
+    },
+    "additionalProperties": false
+  },
+  "readback": {
+    "strategy": "os_state",
+    "match": [
+      "status"
+    ]
+  }
+}

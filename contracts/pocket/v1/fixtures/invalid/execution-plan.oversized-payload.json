@@ -1,0 +1,12 @@
+{
+  "base": "valid/execution-plan.today-focus.json",
+  "mutation": {
+    "setPath": [
+      "steps",
+      2,
+      "arguments",
+      "body"
+    ],
+    "value": "This fixture deliberately exceeds the descriptor payload budget. 0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  }
+}

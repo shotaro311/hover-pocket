@@ -1,0 +1,23 @@
+{
+  "base": "valid/execution-plan.today-focus.json",
+  "mutation": {
+    "setValues": [
+      {
+        "path": [
+          "steps",
+          0,
+          "capabilityId"
+        ],
+        "value": "system.native.authority"
+      },
+      {
+        "path": [
+          "steps",
+          0,
+          "arguments"
+        ],
+        "value": {}
+      }
+    ]
+  }
+}

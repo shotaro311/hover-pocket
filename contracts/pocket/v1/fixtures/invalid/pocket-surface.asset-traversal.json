@@ -1,0 +1,17 @@
+{
+  "$schema": "hoverpocket://schemas/pocket-surface/v1",
+  "surfaceVersion": 1,
+  "id": "main",
+  "hostBoundary": {
+    "region": "provider_host",
+    "mayRenderHeader": false,
+    "mayRenderVoiceLane": false,
+    "mayRenderApproval": false,
+    "mayRenderReceipt": false
+  },
+  "root": {
+    "type": "image",
+    "assetRef": "asset://../outside.png",
+    "alt": "unsafe fixture"
+  }
+}

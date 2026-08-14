@@ -1,0 +1,16 @@
+{
+  "$schema": "hoverpocket://schemas/error/v1",
+  "code": "CAPABILITY_VERSION_MISMATCH",
+  "category": "validation",
+  "retryable": false,
+  "messageKey": "error.capability.version_mismatch",
+  "details": {
+    "field": "capabilityVersion",
+    "expected": 1,
+    "actual": 2,
+    "capabilityId": "timer.countdown.start",
+    "capabilityVersion": 2,
+    "traceId": "trace-version-mismatch-001",
+    "reasonKey": "reason.contract.major_version_required"
+  }
+}

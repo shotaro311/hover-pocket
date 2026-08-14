@@ -1,0 +1,22 @@
+{
+  "base": "valid/receipt.timer-start.json",
+  "mutation": {
+    "setValues": [
+      {
+        "path": [
+          "readback",
+          "observed",
+          "state"
+        ],
+        "value": "paused"
+      },
+      {
+        "path": [
+          "readback",
+          "evidenceDigest"
+        ],
+        "value": "sha256:bd537928d5e8f70b39a6c06f25aa828c3cf92d78420551d9880272a4d49751bc"
+      }
+    ]
+  }
+}
