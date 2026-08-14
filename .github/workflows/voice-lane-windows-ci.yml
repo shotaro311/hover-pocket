@@ -167,7 +167,7 @@ jobs:
           $failureExitCode = $LASTEXITCODE
           Remove-Item Env:HOVERPOCKET_VERIFY_INJECT_FAILURE -ErrorAction SilentlyContinue
           Remove-Item Env:HOVERPOCKET_VERIFY_LOG -ErrorAction SilentlyContinue
-          $failureText = Test-Path $failureLog ? (Get-Content -Path $failureLog -Raw) : ""
+          $failureText = (Test-Path $failureLog) ? (Get-Content -Path $failureLog -Raw) : ""
           if ($failureExitCode -ne 1 -or $failureText -notmatch "FAIL verifier exception: InvalidOperationException") {
             throw "Injected verifier failure did not exit cleanly with code 1."
           }

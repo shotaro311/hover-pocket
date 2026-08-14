@@ -110,7 +110,7 @@ Invoke-Checked "Verifier exception exits instead of hanging" {
     try {
         dotnet run --project $project -c $Configuration --no-build -- --verify ui-model
         $exitCode = $LASTEXITCODE
-        $logText = Test-Path $logPath ? (Get-Content -Path $logPath -Raw) : ""
+        $logText = (Test-Path $logPath) ? (Get-Content -Path $logPath -Raw) : ""
         if ($exitCode -ne 1 -or $logText -notmatch "FAIL verifier exception: InvalidOperationException") {
             throw "Injected verifier failure did not exit cleanly with code 1."
         }
