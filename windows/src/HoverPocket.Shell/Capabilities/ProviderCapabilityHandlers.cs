@@ -137,8 +137,9 @@ internal sealed class CalendarListCapabilityHandler : IPocketCapabilityHandler
         }
 
         var localNow = TimeZoneInfo.ConvertTime(context.Now, timeZone);
-        var localStart = new DateTimeOffset(localNow.Year, localNow.Month, localNow.Day, 0, 0, 0, localNow.Offset);
-        var localEnd = localStart.AddDays(1);
+        var localDate = DateOnly.FromDateTime(localNow.DateTime);
+        var localStart = StartOfDay(localDate, timeZone);
+        var localEnd = StartOfDay(localDate.AddDays(1), timeZone);
         var events = await _dataSource.ListEventsAsync(localStart, localEnd, cancellationToken);
         return CapabilityJson.From(new
         {
@@ -155,6 +156,12 @@ internal sealed class CalendarListCapabilityHandler : IPocketCapabilityHandler
             end = item.End.ToString("O", CultureInfo.InvariantCulture),
             safeTitle = item.SafeTitle.Length <= 160 ? item.SafeTitle : item.SafeTitle[..160]
         };
+    }
+
+    private static DateTimeOffset StartOfDay(DateOnly date, TimeZoneInfo timeZone)
+    {
+        var local = DateTime.SpecifyKind(date.ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
+        return new DateTimeOffset(local, timeZone.GetUtcOffset(local));
     }
 }
 

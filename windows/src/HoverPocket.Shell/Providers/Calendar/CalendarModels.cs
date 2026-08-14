@@ -53,9 +53,12 @@ internal sealed record CalendarEventDraft(
         var end = End;
         if (IsAllDay)
         {
-            var localStart = Start.LocalDateTime.Date;
-            start = new DateTimeOffset(localStart);
-            end = new DateTimeOffset(localStart.AddDays(1));
+            var localStart = Start.Date;
+            var requestedEnd = End.Date;
+            start = new DateTimeOffset(localStart, Start.Offset);
+            end = requestedEnd > localStart
+                ? new DateTimeOffset(requestedEnd, End.Offset)
+                : new DateTimeOffset(localStart.AddDays(1), Start.Offset);
         }
         else if (end <= start)
         {

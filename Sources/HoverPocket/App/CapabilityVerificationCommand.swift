@@ -146,11 +146,12 @@ enum CapabilityVerificationCommand {
         root: URL
     ) async throws {
         let firstTime = Date(timeIntervalSince1970: 1_800_000_100)
+        let longTitle = String(repeating: "T", count: 80)
         let first = try await handlers.invoke(
             PocketCapabilityKey(id: "sticky.note.upsert", version: 1),
             arguments: [
                 "stableKey": .string("today-focus:purpose"),
-                "title": .string("Today"),
+                "title": .string(longTitle),
                 "body": .string("Write the note"),
                 "color": .string("green")
             ],
@@ -166,7 +167,7 @@ enum CapabilityVerificationCommand {
             PocketCapabilityKey(id: "sticky.note.upsert", version: 1),
             arguments: [
                 "stableKey": .string("today-focus:purpose"),
-                "title": .string("Today"),
+                "title": .string(longTitle),
                 "body": .string("Finish the note"),
                 "color": .string("blue")
             ],
@@ -182,9 +183,11 @@ enum CapabilityVerificationCommand {
             arguments: ["noteId": .string(noteID.uuidString)]
         )
         try require(read["body"] == .string("Finish the note"), "sticky_readback")
+        try require(read["title"] == .string(longTitle), "sticky_title_readback")
 
         let restored = StickyNotesStore(storageDirectory: root)
         try require(restored.note(id: noteID)?.stableKey == "today-focus:purpose", "sticky_persistence")
+        try require(restored.note(id: noteID)?.title == longTitle, "sticky_title_persistence")
     }
 
     @MainActor
@@ -193,6 +196,23 @@ enum CapabilityVerificationCommand {
         dataSource: FakeCalendarCapabilityDataSource
     ) async throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var utcCalendar = Calendar(identifier: .gregorian)
+        utcCalendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let allDayStart = Date(timeIntervalSince1970: 1_799_712_000)
+        let normalizedAllDay = GoogleCalendarEventDraft(
+            calendarID: "primary",
+            eventID: nil,
+            title: "Multi-day",
+            location: "",
+            notes: "",
+            start: allDayStart,
+            end: allDayStart.addingTimeInterval(3 * 86_400),
+            isAllDay: true
+        ).normalized(calendar: utcCalendar)
+        try require(
+            normalizedAllDay.end.timeIntervalSince(normalizedAllDay.start) == 3 * 86_400,
+            "calendar_all_day_range"
+        )
         dataSource.seed(
             CalendarCapabilityEvent(
                 eventRef: "primary:event-existing",

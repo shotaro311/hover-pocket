@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using HoverPocket.Shell.Providers.Calendar;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
 
@@ -141,12 +142,13 @@ internal sealed class CapabilityVerifier
 
     private async Task VerifyStickyAsync(PocketCapabilityHandlerSet handlers, string root)
     {
+        var longTitle = new string('T', 80);
         var first = await handlers.InvokeAsync(
             CapabilityIds.StickyUpsert,
             Json(new
             {
                 stableKey = "today-focus:purpose",
-                title = "Today",
+                title = longTitle,
                 body = "Write the note",
                 color = "green"
             }),
@@ -158,7 +160,7 @@ internal sealed class CapabilityVerifier
             Json(new
             {
                 stableKey = "today-focus:purpose",
-                title = "Today",
+                title = longTitle,
                 body = "Finish the note",
                 color = "blue"
             }),
@@ -167,9 +169,11 @@ internal sealed class CapabilityVerifier
 
         var read = await handlers.InvokeAsync(CapabilityIds.StickyGet, Json(new { noteId }));
         Require(read.GetProperty("body").GetString() == "Finish the note", "sticky_readback");
+        Require(read.GetProperty("title").GetString() == longTitle, "sticky_title_readback");
         var restored = new StickyNotesStore(root);
         Require(Guid.TryParse(noteId, out var parsed), "sticky_id");
         Require(restored.GetNote(parsed)?.StableKey == "today-focus:purpose", "sticky_persistence");
+        Require(restored.GetNote(parsed)?.Title == longTitle, "sticky_title_persistence");
     }
 
     private async Task VerifyCalendarAsync(
@@ -177,6 +181,18 @@ internal sealed class CapabilityVerifier
         FakeCalendarCapabilityDataSource calendar,
         DateTimeOffset now)
     {
+        var allDayStart = new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var normalizedAllDay = new CalendarEventDraft(
+            "primary",
+            null,
+            "Multi-day",
+            null,
+            null,
+            allDayStart,
+            allDayStart.AddDays(3),
+            IsAllDay: true).Normalized();
+        Require(normalizedAllDay.End - normalizedAllDay.Start == TimeSpan.FromDays(3), "calendar_all_day_range");
+
         calendar.Seed(new CalendarCapabilityEvent(
             "primary:event-existing",
             "event-existing",
@@ -188,6 +204,13 @@ internal sealed class CapabilityVerifier
             Json(new { range = "today", timezone = "UTC" }),
             new CapabilityHandlerContext(null, now));
         Require(list.GetProperty("events").GetArrayLength() == 1, "calendar_list");
+
+        var dstNow = new DateTimeOffset(2026, 3, 8, 12, 0, 0, TimeSpan.Zero);
+        await handlers.InvokeAsync(
+            CapabilityIds.CalendarList,
+            Json(new { range = "today", timezone = "America/New_York" }),
+            new CapabilityHandlerContext(null, dstNow));
+        Require(calendar.LastListEnd - calendar.LastListStart == TimeSpan.FromHours(23), "calendar_dst_day_range");
 
         var createArguments = Json(new
         {
@@ -275,6 +298,10 @@ internal sealed class FakeCalendarCapabilityDataSource : ICalendarCapabilityData
 
     public bool FailNextCreate { get; set; }
 
+    public DateTimeOffset LastListStart { get; private set; }
+
+    public DateTimeOffset LastListEnd { get; private set; }
+
     public void Seed(CalendarCapabilityEvent item)
     {
         _events[item.EventRef] = item;
@@ -286,6 +313,8 @@ internal sealed class FakeCalendarCapabilityDataSource : ICalendarCapabilityData
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        LastListStart = start;
+        LastListEnd = end;
         IReadOnlyList<CalendarCapabilityEvent> result = _events.Values
             .Where(item => item.Start < end && item.End > start)
             .OrderBy(item => item.Start)

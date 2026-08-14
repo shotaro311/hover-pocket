@@ -79,7 +79,7 @@ internal sealed class StickyNotesStore
             _notes.Add(note);
         }
 
-        note.Title = NormalizeTitle(title);
+        note.Title = title;
         note.Body = body;
         note.Color = color;
         note.UpdatedAt = now;
@@ -410,7 +410,9 @@ internal sealed class StickyNotesStore
     {
         foreach (var note in notes.Where(note => note.Id != Guid.Empty))
         {
-            note.Title = NormalizeTitle(note.Title);
+            note.Title = note.StableKey is null
+                ? NormalizeTitle(note.Title)
+                : NormalizeCapabilityTitle(note.Title);
             note.Body ??= string.Empty;
             yield return note;
         }
@@ -434,6 +436,11 @@ internal sealed class StickyNotesStore
         }
 
         return result.ToString();
+    }
+
+    private static string NormalizeCapabilityTitle(string? title)
+    {
+        return string.Concat((title ?? string.Empty).EnumerateRunes().Take(120).Select(rune => rune.ToString()));
     }
 
     private static StickyNotePreferences Normalize(StickyNotePreferences? preferences)

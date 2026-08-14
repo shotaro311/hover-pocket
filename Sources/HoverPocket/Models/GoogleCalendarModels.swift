@@ -67,7 +67,10 @@ struct GoogleCalendarEventDraft: Equatable, Sendable {
         if isAllDay {
             let dayStart = calendar.startOfDay(for: start)
             copy.start = dayStart
-            copy.end = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86_400)
+            let requestedEnd = calendar.startOfDay(for: end)
+            copy.end = requestedEnd > dayStart
+                ? requestedEnd
+                : calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86_400)
         } else if end <= start {
             copy.end = calendar.date(byAdding: .hour, value: 1, to: start) ?? start.addingTimeInterval(3_600)
         }
