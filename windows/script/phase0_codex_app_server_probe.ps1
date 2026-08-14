@@ -49,8 +49,25 @@ function Get-ArrayCountFromResult {
 
     foreach ($propertyName in @("voices", "data")) {
         $property = $result.PSObject.Properties[$propertyName]
-        if ($null -ne $property -and $property.Value -is [System.Array]) {
+        if ($null -eq $property) {
+            continue
+        }
+        if ($property.Value -is [System.Array]) {
             return $property.Value.Count
+        }
+        if ($propertyName -eq "voices" -and $null -ne $property.Value) {
+            $unique = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+            foreach ($voiceGroup in @("v1", "v2", "available")) {
+                $group = $property.Value.PSObject.Properties[$voiceGroup]
+                if ($null -ne $group -and $group.Value -is [System.Array]) {
+                    foreach ($voice in $group.Value) {
+                        if (-not [string]::IsNullOrWhiteSpace([string]$voice)) {
+                            [void]$unique.Add([string]$voice)
+                        }
+                    }
+                }
+            }
+            return $unique.Count
         }
     }
 
@@ -76,7 +93,7 @@ $summaryPath = Join-Path $OutputDirectory "summary.json"
 
 Write-Step "インストール済みCodexからJSON Schemaを生成"
 New-Item -ItemType Directory -Path $schemaDirectory -Force | Out-Null
-$schemaOutput = & $codexPath app-server generate-json-schema --out $schemaDirectory 2>&1
+$schemaOutput = & $codexPath app-server generate-json-schema --experimental --out $schemaDirectory 2>&1
 $schemaExitCode = $LASTEXITCODE
 $schemaGenerated = $schemaExitCode -eq 0
 if (-not $schemaGenerated) {
@@ -87,10 +104,25 @@ $schemaRealtimeStartPresent = $false
 $schemaRealtimeSdpPresent = $false
 $schemaListVoicesPresent = $false
 if ($schemaGenerated) {
-    $schemaFiles = Get-ChildItem -Path $schemaDirectory -Recurse -File
-    $schemaRealtimeStartPresent = $null -ne ($schemaFiles | Select-String -Pattern 'thread/realtime/start' -SimpleMatch | Select-Object -First 1)
-    $schemaRealtimeSdpPresent = $null -ne ($schemaFiles | Select-String -Pattern 'thread/realtime/sdp' -SimpleMatch | Select-Object -First 1)
-    $schemaListVoicesPresent = $null -ne ($schemaFiles | Select-String -Pattern 'thread/realtime/listVoices' -SimpleMatch | Select-Object -First 1)
+    $clientRequestPath = Join-Path $schemaDirectory "ClientRequest.json"
+    $serverNotificationPath = Join-Path $schemaDirectory "ServerNotification.json"
+    if ((Test-Path $clientRequestPath) -and (Test-Path $serverNotificationPath)) {
+        $clientRequestSchema = Get-Content -Path $clientRequestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $serverNotificationSchema = Get-Content -Path $serverNotificationPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $clientMethods = @(
+            $clientRequestSchema.oneOf |
+                ForEach-Object { $_.properties.method.enum } |
+                Where-Object { $null -ne $_ }
+        )
+        $serverNotificationMethods = @(
+            $serverNotificationSchema.oneOf |
+                ForEach-Object { $_.properties.method.enum } |
+                Where-Object { $null -ne $_ }
+        )
+        $schemaRealtimeStartPresent = $clientMethods -contains "thread/realtime/start"
+        $schemaListVoicesPresent = $clientMethods -contains "thread/realtime/listVoices"
+        $schemaRealtimeSdpPresent = $serverNotificationMethods -contains "thread/realtime/sdp"
+    }
 }
 
 Write-Step "stdio JSONL handshakeとread-only endpointを確認"
@@ -130,41 +162,71 @@ $messages = @(
     }
 )
 
-$payload = (($messages | ForEach-Object { $_ | ConvertTo-Json -Depth 20 -Compress }) -join "`n") + "`n"
-
-$job = Start-Job -ArgumentList $payload, $codexPath, $stdoutPath, $stderrPath -ScriptBlock {
-    param($Payload, $CodexPath, $StdoutPath, $StderrPath)
-
-    $outputLines = @($Payload | & $CodexPath app-server --stdio 2> $StderrPath)
-    $exitCode = $LASTEXITCODE
-    [System.IO.File]::WriteAllLines(
-        $StdoutPath,
-        [string[]]$outputLines,
-        [System.Text.UTF8Encoding]::new($false))
-
-    [pscustomobject]@{
-        ExitCode = $exitCode
-        OutputLineCount = $outputLines.Count
-    }
-}
-
-$completed = Wait-Job -Job $job -Timeout $TimeoutSeconds
-$timedOut = $null -eq $completed
-$jobResult = $null
-if ($timedOut) {
-    Stop-Job -Job $job -ErrorAction SilentlyContinue
-    Write-Warning "app-server probe timed out after $TimeoutSeconds seconds. The job was stopped."
-}
-else {
-    $jobResult = Receive-Job -Job $job
-}
-Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
-
 $responses = @{}
 $notifications = 0
 $nonJsonLines = 0
-if (Test-Path $stdoutPath) {
-    foreach ($line in Get-Content -Path $stdoutPath -Encoding UTF8) {
+$outputLines = [System.Collections.Generic.List[string]]::new()
+$timedOut = $false
+$appServerExitCode = $null
+$stderrText = ""
+$process = $null
+$processStarted = $false
+try {
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $extension = [System.IO.Path]::GetExtension($codexPath)
+    if ($extension -in @(".cmd", ".bat")) {
+        $startInfo.FileName = Join-Path ([Environment]::SystemDirectory) "cmd.exe"
+        $startInfo.Arguments = "/d /s /c `"`"$codexPath`" app-server --stdio`""
+    }
+    elseif ($extension -eq ".ps1") {
+        $powerShellPath = (Get-Process -Id $PID).Path
+        $startInfo.FileName = $powerShellPath
+        $startInfo.Arguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$codexPath`" app-server --stdio"
+    }
+    else {
+        $startInfo.FileName = $codexPath
+        $startInfo.Arguments = "app-server --stdio"
+    }
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.StandardInputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $startInfo.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $startInfo.StandardErrorEncoding = [System.Text.UTF8Encoding]::new($false)
+    $startInfo.EnvironmentVariables["LOG_FORMAT"] = "json"
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) {
+        throw "codex app-server did not start"
+    }
+    $processStarted = $true
+    $process.StandardInput.AutoFlush = $true
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    foreach ($request in $messages) {
+        $process.StandardInput.WriteLine(($request | ConvertTo-Json -Depth 20 -Compress))
+    }
+
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ($responses.Count -lt 4) {
+        $remaining = $deadline - [DateTimeOffset]::UtcNow
+        if ($remaining -le [TimeSpan]::Zero) {
+            $timedOut = $true
+            break
+        }
+
+        $readTask = $process.StandardOutput.ReadLineAsync()
+        if (-not $readTask.Wait([Math]::Max(1, [int]$remaining.TotalMilliseconds))) {
+            $timedOut = $true
+            break
+        }
+        $line = $readTask.Result
+        if ($null -eq $line) {
+            break
+        }
+        $outputLines.Add($line)
         if ([string]::IsNullOrWhiteSpace($line)) {
             continue
         }
@@ -176,7 +238,6 @@ if (Test-Path $stdoutPath) {
             $nonJsonLines++
             continue
         }
-
         $idProperty = $message.PSObject.Properties["id"]
         if ($null -ne $idProperty -and $null -ne $idProperty.Value) {
             $responses[[string]$idProperty.Value] = $message
@@ -185,13 +246,45 @@ if (Test-Path $stdoutPath) {
             $notifications++
         }
     }
+
+    $process.StandardInput.Close()
+    if (-not $process.WaitForExit(3000)) {
+        $process.Kill($true)
+        $process.WaitForExit()
+    }
+    $appServerExitCode = $process.ExitCode
+    $stderrText = $stderrTask.GetAwaiter().GetResult()
+}
+finally {
+    if ($null -ne $process) {
+        if ($processStarted -and -not $process.HasExited) {
+            $process.Kill($true)
+            $process.WaitForExit()
+        }
+        $process.Dispose()
+    }
+}
+
+if ($timedOut) {
+    Write-Warning "app-server probe timed out after $TimeoutSeconds seconds. The process was stopped."
+}
+
+if ($KeepRaw) {
+    [System.IO.File]::WriteAllLines(
+        $stdoutPath,
+        [string[]]$outputLines,
+        [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText(
+        $stderrPath,
+        $stderrText,
+        [System.Text.UTF8Encoding]::new($false))
 }
 
 $initializeResponse = $responses["1"]
 $accountResponse = $responses["2"]
 $rateLimitsResponse = $responses["3"]
 $voicesResponse = $responses["4"]
-$stderrLineCount = if (Test-Path $stderrPath) { @(Get-Content -Path $stderrPath).Count } else { 0 }
+$stderrLineCount = @($stderrText -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
 
 $summary = [ordered]@{
     checkedAt = (Get-Date).ToString("o")
@@ -199,11 +292,12 @@ $summary = [ordered]@{
     codexPath = $codexPath
     schemaGenerated = $schemaGenerated
     schemaExitCode = $schemaExitCode
+    schemaExperimental = $true
     schemaRealtimeStartPresent = $schemaRealtimeStartPresent
     schemaRealtimeSdpPresent = $schemaRealtimeSdpPresent
     schemaListVoicesPresent = $schemaListVoicesPresent
     appServerTimedOut = $timedOut
-    appServerExitCode = if ($null -ne $jobResult) { $jobResult.ExitCode } else { $null }
+    appServerExitCode = $appServerExitCode
     initializeStatus = Get-ResponseStatus $initializeResponse
     accountReadStatus = Get-ResponseStatus $accountResponse
     rateLimitsReadStatus = Get-ResponseStatus $rateLimitsResponse
@@ -227,8 +321,16 @@ $summary | ConvertTo-Json -Depth 10
 Write-Host "`nSummary: $summaryPath"
 Write-Host "Schema : $schemaDirectory"
 
-if ((Get-ResponseStatus $initializeResponse) -ne "ok") {
-    Write-Warning "initialize did not succeed. Open summary.json and rerun with -KeepRaw only when debugging locally. Do not share raw account output."
+if (-not $schemaGenerated
+    -or -not $schemaRealtimeStartPresent
+    -or -not $schemaRealtimeSdpPresent
+    -or -not $schemaListVoicesPresent
+    -or $timedOut
+    -or (Get-ResponseStatus $initializeResponse) -ne "ok"
+    -or (Get-ResponseStatus $accountResponse) -ne "ok"
+    -or (Get-ResponseStatus $rateLimitsResponse) -ne "ok"
+    -or (Get-ResponseStatus $voicesResponse) -ne "ok") {
+    Write-Warning "Phase 0 gate did not pass. Rerun with -KeepRaw only when debugging locally. Do not share raw account output."
     exit 2
 }
 
