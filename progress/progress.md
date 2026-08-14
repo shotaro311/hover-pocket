@@ -2,8 +2,16 @@
 project_slug: hover-menu-preview
 updated: 2026-08-14
 updated_by: codex
-status: an1-provider-capabilities; pr-ready; local-pass; security-pass; ci-pass
+status: an2-registry-broker; implementation-in-progress; pro-builder-running; baseline-pass
 ---
+
+## 2026-08-14 AI-native AN2 Registry / Broker / Text Today Focus
+
+- AN1 PR [#8](https://github.com/shotaro311/hover-pocket/pull/8)を全check成功、未解決review thread 0件、Ready、MERGEABLE / CLEANのreadback後にmergeした。`main` / `origin/main`はmerge commit `3dce5df07c2b3ed687feefd78b6e78b0753e9958`で一致する。
+- exact mainからworktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an2`、branch `codex/ai-native-an2-registry-broker`を作成し、remote trackingを設定した。
+- ChatGPT Pro Orchestratorの通常Chat GPT-5.6 Sol / Proへ、AN2のRegistry、Broker、Text Today Focus、両OSの決定論的verifierを`changes.patch`として実装するBuilder runを送信した。GitHubはread-only、外部操作なし、sourceはexact baseから64ファイルへ限定し、SHA-256 `14dfd763...d56e4dcd`、秘密値pattern 0件を確認した。Codexはartifact検査、適用、ローカル / CI検証、security review、Git操作を担当する。
+- patch適用前baselineは`swift build`、Capability 10 handler、Timer、Clipboard、Calculator、Panel layout 112件、Pocket contract 12 schema / 52 fixtureが成功した。contract reportは2回byte一致、SHA-256 `b11c7a6f...d0b0`。worktree sourceはcleanである。
+- 未完了gateはPro artifact回収、base / hash / path検査、patch適用、Broker tamper / expiry / replay / permission / redaction / partial-failure検証、両OS build / regression、独立review、security scan、Ready PRとCI readbackである。詳細: `progress/2026-08/2026-08-14_hover-pocket-ai-native-an2-registry-broker.md`。
 
 ## 2026-08-14 AI-native AN1 Provider Capabilities
 
