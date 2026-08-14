@@ -2,7 +2,7 @@
 
 ## 現在地
 
-Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し、Windows / macOSの両方でapplication-lifetime runtime、origin限定microphone permission、WebRTC SDP / remote audio、VoiceからBrokerへのdynamic tool dispatchまでproduction経路へ接続した。両OSのText / Voice / Native UIで共有するroute-independent canonical plan digestも実装済みである。これはAN3完了ではなく、対象実機のマイク・remote audio・音声1往復・実Calendar操作、root-scoped child cardsが残っている。
+Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し、Windows / macOSの両方でapplication-lifetime runtime、origin限定microphone permission、WebRTC SDP / remote audio、VoiceからBrokerへのdynamic tool dispatchまでproduction経路へ接続した。両OSのText / Voice / Native UIで共有するroute-independent canonical plan digestと、current root配下だけを表示するchild / descendant session cardsも実装済みである。これはAN3完了ではなく、対象実機のマイク・remote audio・音声1往復・実Calendar操作と、Windows実機のinstalled schema probeが残っている。
 
 ## Git / worktree
 
@@ -39,7 +39,7 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 - Compactは視覚タイトルを置かず、64ptの短い波形より会話欄へ幅を優先した。レーン背景では切り替えず、明示chevronだけでCompact / Expandedを変更し、fullscreen state / route / buttonは持たない。
 - Expandedは左transcript、右current root配下のchild session cardsという2列構成にした。両列は内部scrollを持ち、Provider領域を縮めない。
 - 設定へVoice Lane default-off、既定Compact、別opt-inの自動listenを追加した。短い画面でExpanded全体が収まらない場合はCompactへfail-safeし、上端とProvider領域を維持する。
-- このUI骨格の実装時点ではViewModelは実音声runtimeへ未接続だった。後述の追加統合でtranscriptはproduction runtimeへ接続済みで、root-scoped child session cardsだけが空状態のまま残る。未完成機能を配布しないため、AN3 release gateまではbranch内だけで保持する。
+- このUI骨格の実装時点ではViewModelは実音声runtimeへ未接続だった。後述の追加統合でtranscriptとroot-scoped child / descendant session cardsをproduction runtimeへ接続済みである。実音声E2Eが終わるまで、AN3 release gateは閉じない。
 
 ## Windows Host-owned Voice Lane UI骨格
 
@@ -47,7 +47,7 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 - `DisplayLayoutService`へVoice Lane設定を接続し、Expandedが収まらない画面ではCompactへ縮退する。`DisplaySurfaceLayout`が解決済みlayoutを保持し、表示先の切替時もWebView stateと物理window geometryを一致させる。
 - `HoverShellController`は設定・表示先変更時にPanel全体だけをresizeする。WebView内の`Header + ProviderHost`は既存baselineを保ち、その下へVoice Laneを通常rowとして追加した。
 - Compactは視覚タイトルなし、波形64px以下、会話欄優先、背景click無効、明示toggle、fullscreen affordanceなし。Expandedは左transcript / 右current root配下session cardsの2列と内部scrollを持つ。
-- Settingsへdefault-off toggleとCompact / Expanded pickerを追加した。現在のvoice stateは`notConnected`で、実音声runtimeへ未接続のためstart / mute / end操作は無効である。
+- Settingsへdefault-off toggleとCompact / Expanded pickerを追加した。後続統合でproduction Voice runtimeへ接続し、start / mute / endとcurrent root配下session cardをHost bridgeからtyped stateとして返す。
 - `--verify ui-model`へ設定round-tripとbridge dispatch、`--verify voice-lane-layout`へ短画面縮退、`--verify ui`へCompact / Expanded描画とProvider rect不変を追加した。
 
 ## Windows Voice runtime / WebRTC
@@ -103,6 +103,15 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 - canonical artifactは`critic-review.md` 23,646 byte、SHA-256 `7d4f589a415e321ac7a45a29229a2eb2f21c66543407c792e2a821fd44f6229a`。verdictはCHANGES REQUESTED、P1 5件 / P2 1件で、Promise bridge、restart cancellation、JavaScript operation epoch、SDP attempt identity、Windows async verifier exception、Swift UTF-8 byte境界を指摘した。
 - 6件をすべて修正し、`codex_voice_webrtc_epoch`、`codex_voice_sdp_attempt_isolation`、`codex_voice_restart_cancellation`とWindowsのinjected verifier failure gateを追加した。最終実装headでローカル検証receiptをPASSとして記録し、Pro runのrelease gateは`ready_for_publish=true`になった。
 
+## root-scoped session cardsとinstalled Codex live probe
+
+- macOS / WindowsのCoordinatorが`thread/list`をcurrent rootの`ancestorThreadId`、明示`sourceKinds`、同じVoice session IDで取得し、parent chainがcurrent rootへ到達するchild / descendantだけを採用する。別root、orphan、duplicate IDは破棄する。
+- `thread/read includeTurns=true`はnew / updated threadだけに限定し、返却されたthread ID、session ID、parent IDをlist結果と再照合してから、直近のbounded user / agent textだけをcard detailへ使う。cross-root readbackは表示せずlist previewへ安全にfallbackする。
+- current root + child + grandchild、別root、orphan、cross-root readbackのfixtureを両OSへ追加した。実装head `fdd6d86a09703c66e493a05099a4af3c3e796510`はWindows Voice CI 2本、通常Windows、macOS、PR Routerが全成功し、remote parity `0 / 0`である。
+- ChatGPT Pro Critic run `20260815-064708-hoverpocket-an3-root-scoped-session-cards`へexact diff `131467d8a266a29042180c93b240ee482e8ca233..fdd6d86a09703c66e493a05099a4af3c3e796510`をGitHub read-onlyで送信した。回収までは対象10ファイルを変更しない。
+- macOSへ`--verify-codex-app-server-live`を追加した。accountやrate limitの中身、voice名、token、stderr本文は出力せず、initialize / account readiness / rate limit availability / voice count / default voice / protocol counterだけをreadbackする。
+- Mac実機のCodex CLI `0.145.0`でlive probeはaccount ready、rate limits ready、voice 19件、default voice ready、malformed / unknown 0件でPASSした。`generate-json-schema --experimental`は347 files、bundle digest `19e2a84b...2311`で、Realtime / account methodと`ancestorThreadId` / `sourceKinds` / `useStateDbOnly` / `includeTurns`を確認した。
+
 ## ローカル検証
 
 ```text
@@ -120,6 +129,13 @@ swift build -Xswiftc -warnings-as-errors
   PASS / 4 panel sizes x Compact / Expanded = 8 rendered cases
   PASS / Compact 64 / Expanded 190, 220, 250, 280
   PASS / provider rect invariant / downward expansion / default-off / persistence
+
+.build/debug/HoverPocket --verify-codex-app-server-live
+  PASS / Codex CLI 0.145.0 / account ready / rate limits ready
+  PASS / voice count 19 / default voice ready / malformed 0 / unknown 0
+
+.build/debug/HoverPocket --verify-codex-app-server
+  PASS / fake transport / WebRTC / restart / tool dispatch / root-scoped sessions
 
 Timer / Clipboard / Calculator / Panel layout 112 / Media
   PASS
@@ -166,7 +182,6 @@ GitHub Actions / implementation head a822916
 ## 未完了gate
 
 1. AN2 PR #9は人間によるmerge待ちである。AN3は既に同じAN2 headを統合済みだが、AN2 merge後にmainとのparityを再確認する。
-2. installed Codex version / generated schema / account / voicesを対象Windows / macOS実機でreadbackする。
+2. installed Codex version / generated schema / account / voicesを対象Windows実機でreadbackする。macOS実機は完了した。
 3. origin限定microphone、WebRTC SDP / remote audio、1往復、safe closeを対象Windows / macOS実機で検証する。
 4. 対象Windows / macOS実機でVoice intentからCalendar read / create、Timer start、Today Focusを呼び、Host approval、実Provider状態、event / timer / note ID readbackを確認する。
-5. root-scoped child session cardsを実thread stateへ接続する。

@@ -2,11 +2,13 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: an2-pr-ready-ci-pass; an3-macos-production-voice-connected-ci-pass; real-device-voice-e2e-and-child-cards-pending
+status: an2-pr-ready-ci-pass; an3-cross-platform-voice-and-root-cards-ci-pass; real-device-audio-and-provider-e2e-pending
 ---
 
 ## 2026-08-15 AI-native AN3 Voice Foundation Integration
 
+- current rootと同じsession treeだけを表示するchild / descendant session cardsをmacOS / Windowsへ接続した。`thread/list`のancestor / source filter、parent chain、session ID、`thread/read`のidentityをHostで再検証し、別root、orphan、duplicate、cross-root readbackを排除する。current root + child + grandchildの決定的Verifierを両OSで通し、実装head `fdd6d86a09703c66e493a05099a4af3c3e796510`はremoteと一致して全5 CIが成功した。ChatGPT Proのexact diff Criticは自動回収待ちである。
+- macOS実機用の内容非表示live probeを追加し、Codex CLI `0.145.0`、initialize、ログイン済みaccount、rate limit API、19 voice、default voice、malformed / unknown protocol 0件をreadbackした。experimental schema 347 filesも生成し、Realtime / account method、ancestor / source / includeTurns filterを確認した。残るAN3 gateはWindows側の同じinstalled schema probe、両OSの実マイク / remote audio / 音声1往復 / safe close、Voice経由の実Calendar / Timer / Today Focus readbackである。
 - macOSのproduction Voice Laneをapplication-lifetime Codex app-server、WKWebView microphone / WebRTC transport、Capability Brokerへ接続した。Voiceから「今日の予定」「Timer開始」「Calendar予定作成」「Today Focus」を既存UIと同じCapability経由で扱い、Calendar readは既定OFFの明示許可、writeはHost承認、実行後readbackを必須にした。パネルclose開始時に権限を即時失効し、古いWebRTC / SDP / app-server generationを新しいsessionへ混ぜない。
 - ChatGPT Pro Critic run `20260815-045421-hoverpocket-an3exact-diff-3d319d4-ab50042macwkwebview-webrtcapp-server-lifecyclewindowscliverifier`の`critic-review.md`（23,646 byte、SHA-256 `7d4f589a...229a`）が指摘したP1 5件 / P2 1件をすべて修正した。Promise対応JS呼出し、operation epoch、negotiation single-flight、restart cancellation、Windows verifier例外終了、SDP UTF-8 byte上限を回帰fixtureへ固定した。Codex Security scan `47bd0464-3c05-44cc-9e9f-196393d8ee5e`のCalendar read grant、close中authorization、承認既定Allowの3件もHost-owned許可、surface-active state、Cancel既定へ修正した。
 - 最終実装head `a82291618ee7c8e9939b4f611f694c13ac9a9fa3`はremote branchと一致する。Voice Lane Windows CI [31841209115](https://github.com/shotaro311/hover-pocket/actions/runs/31841209115) / [31841213311](https://github.com/shotaro311/hover-pocket/actions/runs/31841213311)、通常Windows [31841213324](https://github.com/shotaro311/hover-pocket/actions/runs/31841213324)、macOS [31841213322](https://github.com/shotaro311/hover-pocket/actions/runs/31841213322)、PR Router [31841211479](https://github.com/shotaro311/hover-pocket/actions/runs/31841211479)が全成功し、Draft PR #6はMERGEABLE / CLEANである。残るAN3 gateは対象実機のマイク・remote audio・音声1往復・実Calendar mutationと、root-scoped child cardsである。

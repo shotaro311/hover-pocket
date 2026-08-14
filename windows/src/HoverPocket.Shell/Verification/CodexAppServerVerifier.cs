@@ -35,7 +35,7 @@ internal sealed class CodexAppServerVerifier
             var rateLimits = await ProbeAsync(
                 client,
                 "account/rateLimits/read",
-                new { },
+                null,
                 timeout.Token);
             var voices = await ProbeAsync(
                 client,
@@ -98,7 +98,7 @@ internal sealed class CodexAppServerVerifier
     private static async Task<ProbeResult> ProbeAsync(
         CodexAppServerClient client,
         string method,
-        object parameters,
+        object? parameters,
         CancellationToken cancellationToken)
     {
         try
