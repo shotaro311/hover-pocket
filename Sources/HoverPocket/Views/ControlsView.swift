@@ -5,15 +5,22 @@ struct ControlsView: View {
     @ObservedObject private var settings: AppSettings
     @ObservedObject private var store: ControlsStore
     private let isActive: Bool
+    private let onClosePanel: @MainActor () -> Void
     @State private var showsPlaybackPendingIndicator = false
     @State private var showsRatePendingIndicator = false
     @State private var playbackPendingIndicatorTask: Task<Void, Never>?
     @State private var ratePendingIndicatorTask: Task<Void, Never>?
 
-    init(settings: AppSettings, isActive: Bool, store: ControlsStore = .shared) {
+    init(
+        settings: AppSettings,
+        isActive: Bool,
+        store: ControlsStore = .shared,
+        onClosePanel: @escaping @MainActor () -> Void = {}
+    ) {
         self.settings = settings
         self.store = store
         self.isActive = isActive
+        self.onClosePanel = onClosePanel
     }
 
     var body: some View {
@@ -128,8 +135,14 @@ struct ControlsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 if store.nowPlaying.hasMedia {
                     HStack(spacing: 10) {
-                        ControlsVideoThumbnail(track: store.nowPlaying, fallbackSourceName: text(.controlsMedia))
-                            .frame(width: 98, height: 55)
+                        Button(action: focusNowPlayingSource) {
+                            ControlsVideoThumbnail(track: store.nowPlaying, fallbackSourceName: text(.controlsMedia))
+                                .frame(width: 98, height: 55)
+                                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(store.nowPlaying.mediaURLString == nil)
+                        .help(text(.controlsOpenMediaSource))
 
                         VStack(alignment: .leading, spacing: 4) {
                             Text(store.nowPlaying.title.isEmpty ? text(.controlsMedia) : store.nowPlaying.title)
@@ -312,6 +325,14 @@ struct ControlsView: View {
 
     private func adjustPlaybackRate(by delta: Double) {
         store.adjustPlaybackRate(by: delta)
+    }
+
+    private func focusNowPlayingSource() {
+        Task {
+            if await store.focusNowPlayingSource() {
+                onClosePanel()
+            }
+        }
     }
 
     private func percentText(_ value: Double) -> String {

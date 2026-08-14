@@ -1,0 +1,473 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/pocket-surface/v1",
+  "title": "HoverPocket finite declarative PocketSurface v1",
+  "type": "object",
+  "required": [
+    "$schema",
+    "surfaceVersion",
+    "id",
+    "hostBoundary",
+    "root"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "hoverpocket://schemas/pocket-surface/v1"
+    },
+    "surfaceVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    },
+    "hostBoundary": {
+      "type": "object",
+      "required": [
+        "region",
+        "mayRenderHeader",
+        "mayRenderVoiceLane",
+        "mayRenderApproval",
+        "mayRenderReceipt"
+      ],
+      "properties": {
+        "region": {
+          "const": "provider_host"
+        },
+        "mayRenderHeader": {
+          "const": false
+        },
+        "mayRenderVoiceLane": {
+          "const": false
+        },
+        "mayRenderApproval": {
+          "const": false
+        },
+        "mayRenderReceipt": {
+          "const": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "root": {
+      "$ref": "#/$defs/component"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "anyJson": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/anyJson"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/anyJson"
+          }
+        }
+      ]
+    },
+    "queryBinding": {
+      "type": "object",
+      "required": [
+        "query",
+        "arguments"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*){2,}@[1-9][0-9]*$",
+          "maxLength": 160
+        },
+        "arguments": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/anyJson"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "stack": {
+      "type": "object",
+      "required": [
+        "type",
+        "axis",
+        "children"
+      ],
+      "properties": {
+        "type": {
+          "const": "stack"
+        },
+        "axis": {
+          "type": "string",
+          "enum": [
+            "vertical",
+            "horizontal"
+          ]
+        },
+        "spacing": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/component"
+          },
+          "maxItems": 64
+        }
+      },
+      "additionalProperties": false
+    },
+    "grid": {
+      "type": "object",
+      "required": [
+        "type",
+        "columns",
+        "children"
+      ],
+      "properties": {
+        "type": {
+          "const": "grid"
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12
+        },
+        "gap": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/component"
+          },
+          "maxItems": 64
+        }
+      },
+      "additionalProperties": false
+    },
+    "text": {
+      "type": "object",
+      "required": [
+        "type",
+        "style",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "text"
+        },
+        "style": {
+          "type": "string",
+          "enum": [
+            "title",
+            "body",
+            "caption",
+            "monospace"
+          ]
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      },
+      "additionalProperties": false
+    },
+    "image": {
+      "type": "object",
+      "required": [
+        "type",
+        "assetRef",
+        "alt"
+      ],
+      "properties": {
+        "type": {
+          "const": "image"
+        },
+        "assetRef": {
+          "type": "string",
+          "pattern": "^asset://(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+          "maxLength": 240
+        },
+        "alt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        }
+      },
+      "additionalProperties": false
+    },
+    "button": {
+      "type": "object",
+      "required": [
+        "type",
+        "label",
+        "workflow"
+      ],
+      "properties": {
+        "type": {
+          "const": "button"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "workflow": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "textField": {
+      "type": "object",
+      "required": [
+        "type",
+        "label",
+        "value",
+        "maxLength"
+      ],
+      "properties": {
+        "type": {
+          "const": "textField"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^\\$(?:input|state)\\.[A-Za-z][A-Za-z0-9_]*$",
+          "maxLength": 128
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        }
+      },
+      "additionalProperties": false
+    },
+    "toggle": {
+      "type": "object",
+      "required": [
+        "type",
+        "label",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "toggle"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^\\$(?:input|state)\\.[A-Za-z][A-Za-z0-9_]*$",
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "picker": {
+      "type": "object",
+      "required": [
+        "type",
+        "label",
+        "options",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "picker"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "label",
+              "value"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "value": {
+                "type": "string",
+                "maxLength": 120
+              }
+            },
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^\\$(?:input|state)\\.[A-Za-z][A-Za-z0-9_]*$",
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "calendarEventPicker": {
+      "type": "object",
+      "required": [
+        "type",
+        "items",
+        "selection"
+      ],
+      "properties": {
+        "type": {
+          "const": "calendarEventPicker"
+        },
+        "items": {
+          "$ref": "#/$defs/queryBinding"
+        },
+        "selection": {
+          "type": "string",
+          "pattern": "^\\$state\\.[A-Za-z][A-Za-z0-9_]*$",
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "durationPicker": {
+      "type": "object",
+      "required": [
+        "type",
+        "value",
+        "min",
+        "max"
+      ],
+      "properties": {
+        "type": {
+          "const": "durationPicker"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^\\$input\\.[A-Za-z][A-Za-z0-9_]*$",
+          "maxLength": 128
+        },
+        "min": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        }
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "object",
+      "required": [
+        "type",
+        "value",
+        "tone"
+      ],
+      "properties": {
+        "type": {
+          "const": "status"
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "tone": {
+          "type": "string",
+          "enum": [
+            "neutral",
+            "success",
+            "warning",
+            "error"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "component": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/stack"
+        },
+        {
+          "$ref": "#/$defs/grid"
+        },
+        {
+          "$ref": "#/$defs/text"
+        },
+        {
+          "$ref": "#/$defs/image"
+        },
+        {
+          "$ref": "#/$defs/button"
+        },
+        {
+          "$ref": "#/$defs/textField"
+        },
+        {
+          "$ref": "#/$defs/toggle"
+        },
+        {
+          "$ref": "#/$defs/picker"
+        },
+        {
+          "$ref": "#/$defs/calendarEventPicker"
+        },
+        {
+          "$ref": "#/$defs/durationPicker"
+        },
+        {
+          "$ref": "#/$defs/status"
+        }
+      ]
+    }
+  }
+}

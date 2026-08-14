@@ -50,6 +50,8 @@ internal sealed class UiModelVerifier
         settings.HandleIconStyle = HandleIconStyle.C;
         settings.ShowTopHandleSideArea = false;
         settings.DisableTopEdgeInFullscreen = false;
+        settings.CodexVoiceEnabled = true;
+        settings.CodexVoiceLayoutMode = VoiceLaneLayoutMode.Expanded;
         settings.ProviderOrder = ["sticky", "calculator", "timer"];
         settings.ProviderVisibility["timer"] = false;
         store.Save(settings);
@@ -66,7 +68,9 @@ internal sealed class UiModelVerifier
             || reloaded.PreferredProviderId != "sticky"
             || reloaded.HandleIconStyle != HandleIconStyle.C
             || reloaded.ShowTopHandleSideArea
-            || reloaded.DisableTopEdgeInFullscreen)
+            || reloaded.DisableTopEdgeInFullscreen
+            || !reloaded.CodexVoiceEnabled
+            || reloaded.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Expanded)
         {
             _failures.Add("settings round-trip: scalar values were not preserved");
         }
@@ -90,7 +94,9 @@ internal sealed class UiModelVerifier
         if (settings.PanelSize != PanelSize.Medium
             || settings.ProviderOrder.Count != registry.ProviderIds.Count
             || settings.ProviderVisibility.Values.Any(visible => !visible)
-            || !settings.AutoCheckForUpdates)
+            || !settings.AutoCheckForUpdates
+            || settings.CodexVoiceEnabled
+            || settings.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Compact)
         {
             _failures.Add("settings corrupt fallback: defaults were not restored");
         }
@@ -135,6 +141,19 @@ internal sealed class UiModelVerifier
             _failures.Add("bridge dispatcher: settings.setPanelSize did not persist small size");
         }
 
+        var voiceEnabledResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"3a","method":"settings.setCodexVoiceEnabled","params":{"enabled":true}}""");
+        var voiceLayoutResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"3b","method":"settings.setCodexVoiceLayout","params":{"layout":"expanded"}}""");
+        var voiceReloaded = store.Load(registry.ProviderIds);
+        if (!voiceReloaded.CodexVoiceEnabled
+            || voiceReloaded.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Expanded
+            || !ResponseContains(voiceEnabledResponse, "\"codexVoiceEnabled\":true")
+            || !ResponseContains(voiceLayoutResponse, "\"codexVoiceLayoutMode\":\"expanded\""))
+        {
+            _failures.Add("bridge dispatcher: Voice Lane settings did not persist");
+        }
+
         var calculatorResponse = await dispatcher.ProcessRawMessageAsync(
             """{"id":"4","method":"calculator.press","params":{"input":"7"}}""");
         if (!ResponseContains(calculatorResponse, "\"display\":\"7\""))
@@ -144,9 +163,32 @@ internal sealed class UiModelVerifier
 
         var timerResponse = await dispatcher.ProcessRawMessageAsync(
             """{"id":"5","method":"timer.getState"}""");
-        if (!ResponseContains(timerResponse, "\"draftTimer\""))
+        if (!ResponseContains(timerResponse, "\"draftStopwatch\"") || !ResponseContains(timerResponse, "\"runningStopwatches\""))
         {
             _failures.Add("bridge dispatcher: timer.getState did not return timer state");
+        }
+
+        var stopwatchStartResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"5a","method":"timer.startStopwatch","params":{"preset":{"title":"Verify","color":"pink"}}}""");
+        if (!ResponseContains(stopwatchStartResponse, "\"runningStopwatches\":[{")
+            || !ResponseContains(stopwatchStartResponse, "\"title\":\"Verify\""))
+        {
+            _failures.Add("bridge dispatcher: timer.startStopwatch did not start the stopwatch");
+        }
+
+        using var stopwatchDocument = JsonDocument.Parse(stopwatchStartResponse!);
+        var stopwatchId = stopwatchDocument.RootElement
+            .GetProperty("result")
+            .GetProperty("runningStopwatches")[0]
+            .GetProperty("id")
+            .GetString();
+        var stopwatchStopResponse = await dispatcher.ProcessRawMessageAsync(
+            "{\"id\":\"5b\",\"method\":\"timer.stopStopwatch\",\"params\":{\"id\":\""
+                + stopwatchId
+                + "\"}}");
+        if (!ResponseContains(stopwatchStopResponse, "\"runningStopwatches\":[]"))
+        {
+            _failures.Add("bridge dispatcher: timer.stopStopwatch did not stop the selected stopwatch");
         }
 
         var clipboardResponse = await dispatcher.ProcessRawMessageAsync(

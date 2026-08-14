@@ -1,0 +1,491 @@
+{
+  "manifestVersion": 1,
+  "registryPath": "golden/capability-registry.json",
+  "referencePackage": {
+    "appFixture": "valid/pocket-app.today-focus.json",
+    "files": [
+      {
+        "path": "data.schema.json",
+        "source": "package/data.schema.json",
+        "digest": "sha256:a0a34a0daf019f4a761fa155b8481769fd425587ef8b8a92283f33edc3826917"
+      },
+      {
+        "path": "intent.md",
+        "source": "package/intent.md",
+        "digest": "sha256:1a752982eaebe68c51e458fe51087616c3da35834ac4a76ad62284353cddf83d"
+      },
+      {
+        "path": "surfaces/main.surface.json",
+        "source": "valid/pocket-surface.today-focus.json",
+        "digest": "sha256:903aa24068cebc47aefc9e5ef0a708331cc882b669050e1bf9fcb265686a7a20"
+      },
+      {
+        "path": "tests/calendar-read.json",
+        "source": "package/test.calendar-read.json",
+        "digest": "sha256:bbb15fee8c146d06f96550d4d946305ed9a0cddbc2a26af17ef4d7568f73ca9d"
+      },
+      {
+        "path": "tests/start-focus-approved.json",
+        "source": "package/test.start-focus-approved.json",
+        "digest": "sha256:d60c3e3bca36ff4beb508f0ecea2b235d3054da9fc7724b94a2b855ed103a438"
+      },
+      {
+        "path": "tests/start-focus-idempotent-replay.json",
+        "source": "package/test.start-focus-idempotent-replay.json",
+        "digest": "sha256:7b0a74bb394db4290affa6aa3914ca758b620a1e85ad609fa24e6c3370169b4e"
+      },
+      {
+        "path": "tests/start-focus-rejected.json",
+        "source": "package/test.start-focus-rejected.json",
+        "digest": "sha256:471de27fa436b1704a0004489e719b8a1f430d89ee7f2188ba9ab3a04f1eabb9"
+      },
+      {
+        "path": "workflows/start-focus.workflow.json",
+        "source": "valid/pocket-workflow.today-focus.json",
+        "digest": "sha256:cdb62a919bf4f05c1eaf85937cdaf6a58addcccad3ee69d569ebbfdc4034de09"
+      }
+    ]
+  },
+  "hostObservations": [
+    {
+      "invocationId": "invocation-timer-start-001",
+      "source": "support/readback.timer-start.observed.json",
+      "digest": "sha256:254067a5b8d17de8790b0be3e2b0660ac081bffe7113a6d1757e06dd5a87708e"
+    }
+  ],
+  "cases": [
+    {
+      "id": "golden-audit-redaction",
+      "path": "golden/audit-redaction.json",
+      "kind": "audit",
+      "expected": "pass",
+      "expectedDigest": "sha256:8615daca2c3eba7f4c81386032c78cf1e6f624668cd889793d9f5cfcc5b566f6"
+    },
+    {
+      "id": "golden-canonical-json",
+      "path": "golden/canonical-json.json",
+      "kind": "canonical-json",
+      "expected": "pass",
+      "expectedDigest": "sha256:6f99fd8964018d79d6a110701a060f607975513ff66211a84484337f37659d91"
+    },
+    {
+      "id": "golden-capability-registry",
+      "path": "golden/capability-registry.json",
+      "kind": "capability-registry",
+      "expected": "pass",
+      "expectedDigest": "sha256:c66e676c3c0b7cb6699a35984847c9057ea29f73459f000b3e555da224d2d40f"
+    },
+    {
+      "id": "golden-error-codes",
+      "path": "golden/error-codes.json",
+      "kind": "error-codes",
+      "expected": "pass",
+      "expectedDigest": "sha256:8c5348258632da95fcdade51781d84b37f0a56d38b0bb5c539e2fe2e695b04b9"
+    },
+    {
+      "id": "golden-voice-lane-geometry",
+      "path": "golden/voice-lane-geometry.json",
+      "kind": "geometry",
+      "expected": "pass",
+      "expectedDigest": "sha256:794f1647b7067faebfe550cc3b09d7dfd023a36db94171d558b7422deb217b3f"
+    },
+    {
+      "id": "invalid-approval-cross-version",
+      "path": "invalid/approval-request.cross-version.json",
+      "kind": "schema-mutation",
+      "expected": "reject",
+      "schema": "approval-request.schema.json",
+      "errorCode": "APPROVAL_PLAN_MISMATCH",
+      "errorLocation": "$",
+      "expectedDigest": "sha256:766206ab93bbb7eaaa70ac5e6cd9636e4e414d0d11638ffd1ffb420bc59acf88"
+    },
+    {
+      "id": "invalid-audit-forbidden-field",
+      "path": "invalid/audit-redaction.forbidden-field.json",
+      "kind": "audit-mutation",
+      "expected": "reject",
+      "errorCode": "AUDIT_FORBIDDEN_FIELD",
+      "errorLocation": "$.entry.rawTranscript",
+      "expectedDigest": "sha256:a81a6b5bdf8961a8d6de22ba08f32e0c54bf87aa31adee0751e3084504806cf4"
+    },
+    {
+      "id": "invalid-audit-input-digest-mismatch",
+      "path": "invalid/audit-redaction.input-digest-mismatch.json",
+      "kind": "audit-mutation",
+      "expected": "reject",
+      "errorCode": "AUDIT_BINDING_MISMATCH",
+      "errorLocation": "$.entry.inputDigest",
+      "expectedDigest": "sha256:34723a50849b31f0fafa0c4ec0d23f2dac6ad7f3d012e2a7c2dd83fc8555920c"
+    },
+    {
+      "id": "invalid-audit-raw-identifier",
+      "path": "invalid/audit-redaction.raw-identifier.json",
+      "kind": "audit-mutation",
+      "expected": "reject",
+      "errorCode": "AUDIT_VALUE_UNSAFE",
+      "errorLocation": "$.entry.principalPseudonym",
+      "expectedDigest": "sha256:acaa1da58dd0d4d68058cfbda995e117a9f491ed6dc89f70be15f64c37c9d790"
+    },
+    {
+      "id": "invalid-execution-plan-native-authority",
+      "path": "invalid/execution-plan.native-authority.json",
+      "kind": "schema-mutation",
+      "expected": "reject",
+      "schema": "execution-plan.schema.json",
+      "errorCode": "CAPABILITY_RUNTIME_PROHIBITED",
+      "errorLocation": "$.steps[0].capability",
+      "expectedDigest": "sha256:54b7eb0449cfd460a4bf40461db3519dd41473120acdaa45695b47e4d5e207a8"
+    },
+    {
+      "id": "invalid-execution-plan-oversized-payload",
+      "path": "invalid/execution-plan.oversized-payload.json",
+      "kind": "schema-mutation",
+      "expected": "reject",
+      "schema": "execution-plan.schema.json",
+      "errorCode": "CAPABILITY_ARGUMENT_INVALID",
+      "errorLocation": "$.steps[2].arguments",
+      "expectedDigest": "sha256:b139dcd4113e94272d34a76d32f85a1620920cd72f92962a0c6bdd42399e0a93"
+    },
+    {
+      "id": "invalid-geometry-provider-rect",
+      "path": "invalid/geometry.provider-rect-changed.json",
+      "kind": "geometry-mutation",
+      "expected": "reject",
+      "errorCode": "GEOMETRY_PROVIDER_RECT_INVARIANT",
+      "errorLocation": "$.platforms[0].sizes[0].modes[2].providerHostRect",
+      "expectedDigest": "sha256:4cd6bb947c911635ba73e8d4d53274afcf88be04adfd5fd033f185ae1eee0e92"
+    },
+    {
+      "id": "invalid-invocation-extra-property",
+      "path": "invalid/invocation.extra-property.json",
+      "kind": "schema",
+      "expected": "reject",
+      "schema": "invocation.schema.json",
+      "errorCode": "SCHEMA_ADDITIONAL_PROPERTY",
+      "errorLocation": "$.approved",
+      "expectedDigest": "sha256:346009d8c18e74d18279e0a4a7ec6228f8199774dfc07735a534a1f71e0de174"
+    },
+    {
+      "id": "invalid-invocation-native-authority",
+      "path": "invalid/invocation.native-authority.json",
+      "kind": "schema-mutation",
+      "expected": "reject",
+      "schema": "invocation.schema.json",
+      "errorCode": "CAPABILITY_RUNTIME_PROHIBITED",
+      "errorLocation": "$.capability",
+      "expectedDigest": "sha256:94d5ad0fc84748d10aa0575d4c2ea3196a61312693147470e781002e1e37b6df"
+    },
+    {
+      "id": "invalid-invocation-unknown-capability",
+      "path": "invalid/invocation.unknown-capability.json",
+      "kind": "schema",
+      "expected": "reject",
+      "schema": "invocation.schema.json",
+      "errorCode": "CAPABILITY_UNKNOWN",
+      "errorLocation": "$.capability",
+      "expectedDigest": "sha256:3ad7a8151773c399caa8ac65af889f2ad51bb3858ec286e81e5f76eb2140ebf3"
+    },
+    {
+      "id": "invalid-invocation-version-mismatch",
+      "path": "invalid/invocation.version-mismatch.json",
+      "kind": "schema",
+      "expected": "reject",
+      "schema": "invocation.schema.json",
+      "errorCode": "CAPABILITY_VERSION_MISMATCH",
+      "errorLocation": "$.capability",
+      "expectedDigest": "sha256:2e1feaef75b110f9a2f672b203fc95aa5ea4d84aae483cd276f012a19429b904"
+    },
+    {
+      "id": "invalid-pocket-app-path-traversal",
+      "path": "invalid/pocket-app.path-traversal.json",
+      "kind": "schema",
+      "expected": "reject",
+      "schema": "pocket-app.schema.json",
+      "errorCode": "SCHEMA_VALUE_INVALID",
+      "errorLocation": "$.intent",
+      "expectedDigest": "sha256:a44d1b61c93c2cc647bfefd351d4a8e4c4592e653f593573d6182b0c31236907"
+    },
+    {
+      "id": "invalid-pocket-app-unbound-manifest-source",
+      "path": "invalid/pocket-app.unbound-manifest-source.json",
+      "kind": "schema-mutation",
+      "expected": "reject",
+      "schema": "pocket-app.schema.json",
+      "errorCode": "APP_REFERENCE_INVALID",
+      "errorLocation": "$",
+      "expectedDigest": "sha256:6cc3b5a4d9d1374331c385e1dba06a1c1a3d453ee9f258b1b7f45401e3be89cc"
+    },
+    {
+      "id": "invalid-pocket-surface-asset-traversal",
+      "path": "invalid/pocket-surface.asset-traversal.json",
+      "kind": "schema",
+      "expected": "reject",
+      "schema": "pocket-surface.schema.json",
+      "errorCode": "APP_PATH_UNSAFE",
+      "errorLocation": "$.root.assetRef",
+      "expectedDigest": "sha256:58d8d380fe848144dcce1b4ed7c17e8fe10b6c71efbcdf90f61fc502e452b465"
+    },
+    {
+      "id": "invalid-pocket-surface-receipt-component",
+      "path": "invalid/pocket-surface.receipt-component.json",
+      "kind": "schema-mutation",
+      "expected": "reject",
+      "schema": "pocket-surface.schema.json",
+      "errorCode": "SCHEMA_ONE_OF_MISMATCH",
+      "errorLocation": "$.root",
+      "expectedDigest": "sha256:9e034e6f577d4fb32c3c4b1bd4f749e9584eed4592c19ab32b985562815cb185"
+    },
+    {
+      "id": "invalid-pocket-workflow-native-authority",
+      "path": "invalid/pocket-workflow.native-authority.json",
+      "kind": "schema-mutation",
+      "expected": "reject",
+      "schema": "pocket-workflow.schema.json",
+      "errorCode": "CAPABILITY_RUNTIME_PROHIBITED",
+      "errorLocation": "$.steps[0].use",
+      "expectedDigest": "sha256:9cf6e0c679e05499886be34f71f7e1ce6fe80cf85e82e992f407fb87b310384c"
+    },
+    {
+      "id": "invalid-pocket-workflow-oversized-payload",
+      "path": "invalid/pocket-workflow.oversized-payload.json",
+      "kind": "schema-mutation",
+      "expected": "reject",
+      "schema": "pocket-workflow.schema.json",
+      "errorCode": "CAPABILITY_ARGUMENT_INVALID",
+      "errorLocation": "$.steps[1].with",
+      "expectedDigest": "sha256:01dd72f48edf52dd7870a8667bd0627873678d6d314cd8666ab70999bdf11dd7"
+    },
+    {
+      "id": "invalid-pocket-workflow-scope-escape",
+      "path": "invalid/pocket-workflow.scope-escape.json",
+      "kind": "schema-mutation",
+      "expected": "reject",
+      "schema": "pocket-workflow.schema.json",
+      "errorCode": "APP_REFERENCE_INVALID",
+      "errorLocation": "$.steps[1].with.stableKey",
+      "expectedDigest": "sha256:5bd6737452b30628c336900e338ee7c5527afd08feb2ea796097abad8bc023e9"
+    },
+    {
+      "id": "invalid-pocket-workflow-unknown-capability",
+      "path": "invalid/pocket-workflow.unknown-capability.json",
+      "kind": "schema",
+      "expected": "reject",
+      "schema": "pocket-workflow.schema.json",
+      "errorCode": "WORKFLOW_REFERENCE_INVALID",
+      "errorLocation": "$.steps[0].use",
+      "expectedDigest": "sha256:539635adb3c0f0c3839e352b8333ae2ddcf0b05b71639927e6da9e3fba3eef34"
+    },
+    {
+      "id": "invalid-receipt-readback",
+      "path": "invalid/receipt.succeeded-without-readback.json",
+      "kind": "schema",
+      "expected": "reject",
+      "schema": "receipt.schema.json",
+      "errorCode": "RECEIPT_READBACK_REQUIRED",
+      "errorLocation": "$.readback.status",
+      "expectedDigest": "sha256:9af01e9bc765b88201d6751c38f9cc643379905e13f7c2a26b62ffce0ced3b99"
+    },
+    {
+      "id": "invalid-receipt-self-claimed-readback",
+      "path": "invalid/receipt.self-claimed-readback.json",
+      "kind": "schema-mutation",
+      "expected": "reject",
+      "schema": "receipt.schema.json",
+      "errorCode": "RECEIPT_READBACK_REQUIRED",
+      "errorLocation": "$.readback.observed",
+      "expectedDigest": "sha256:e050713e46865fcf61c30008e7afcb179abcb2645d608bc65f531b4d71be2940"
+    },
+    {
+      "id": "invalid-schema-policy-unknown-keyword",
+      "path": "invalid/schema-policy.unknown-keyword.json",
+      "kind": "schema-policy",
+      "expected": "reject",
+      "errorCode": "SCHEMA_POLICY_VIOLATION",
+      "errorLocation": "invalid/schema-policy.unknown-keyword.json:$",
+      "expectedDigest": "sha256:dacc39301dd4c8dfb381e0966e531717965aebd92247bec163e0d63b05c02f93"
+    },
+    {
+      "id": "invalid-schema-policy-unresolved-ref",
+      "path": "invalid/schema-policy.unresolved-ref.json",
+      "kind": "schema-policy",
+      "expected": "reject",
+      "errorCode": "SCHEMA_POLICY_VIOLATION",
+      "errorLocation": "invalid/schema-policy.unresolved-ref.json:$.properties.value",
+      "expectedDigest": "sha256:cdf51aefa27aac26e549c7eb9e41b0a6b9d4521847ddb4a79364134d99ec794d"
+    },
+    {
+      "id": "invalid-voice-cross-root",
+      "path": "invalid/voice-lane-state.cross-root-session.json",
+      "kind": "schema",
+      "expected": "reject",
+      "schema": "voice-lane-state.schema.json",
+      "errorCode": "VOICE_ROOT_SCOPE_VIOLATION",
+      "errorLocation": "$.sessions[2].rootSessionId",
+      "expectedDigest": "sha256:b1bb187e5d4b3f8e4900f908151e772992de26dc409695f51d2dbd7a43b3bda3"
+    },
+    {
+      "id": "invalid-voice-fullscreen",
+      "path": "invalid/voice-lane-state.fullscreen-enabled.json",
+      "kind": "schema",
+      "expected": "reject",
+      "schema": "voice-lane-state.schema.json",
+      "errorCode": "SCHEMA_CONST_MISMATCH",
+      "errorLocation": "$.ui.fullscreen",
+      "expectedDigest": "sha256:399bd1d2e6c193f48e947d0b300af2b622dabedcf62f90c8c7c47564f34a2f75"
+    },
+    {
+      "id": "valid-agent-session-summary-root",
+      "path": "valid/agent-session-summary.root.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "agent-session-summary.schema.json"
+    },
+    {
+      "id": "valid-approval-request-today-focus",
+      "path": "valid/approval-request.today-focus.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "approval-request.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.calendar-event-create",
+      "path": "valid/capability-descriptor.calendar-event-create.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.calendar-event-get",
+      "path": "valid/capability-descriptor.calendar-event-get.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.calendar-events-list",
+      "path": "valid/capability-descriptor.calendar-events-list.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.sticky-note-get",
+      "path": "valid/capability-descriptor.sticky-note-get.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.sticky-note-upsert",
+      "path": "valid/capability-descriptor.sticky-note-upsert.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.system-native-authority",
+      "path": "valid/capability-descriptor.system-native-authority.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.timer-countdown-get",
+      "path": "valid/capability-descriptor.timer-countdown-get.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.timer-countdown-pause",
+      "path": "valid/capability-descriptor.timer-countdown-pause.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.timer-countdown-resume",
+      "path": "valid/capability-descriptor.timer-countdown-resume.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.timer-countdown-start",
+      "path": "valid/capability-descriptor.timer-countdown-start.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.timer-countdown-stop",
+      "path": "valid/capability-descriptor.timer-countdown-stop.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-error-version-mismatch",
+      "path": "valid/error.capability-version-mismatch.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "error.schema.json"
+    },
+    {
+      "id": "valid-execution-plan-today-focus",
+      "path": "valid/execution-plan.today-focus.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "execution-plan.schema.json"
+    },
+    {
+      "id": "valid-invocation-timer-start",
+      "path": "valid/invocation.timer-start.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "invocation.schema.json"
+    },
+    {
+      "id": "valid-pocket-app-today-focus",
+      "path": "valid/pocket-app.today-focus.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "pocket-app.schema.json"
+    },
+    {
+      "id": "valid-pocket-surface-today-focus",
+      "path": "valid/pocket-surface.today-focus.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "pocket-surface.schema.json"
+    },
+    {
+      "id": "valid-pocket-workflow-today-focus",
+      "path": "valid/pocket-workflow.today-focus.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "pocket-workflow.schema.json"
+    },
+    {
+      "id": "valid-receipt-timer-start",
+      "path": "valid/receipt.timer-start.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "receipt.schema.json"
+    },
+    {
+      "id": "valid-voice-lane-expanded",
+      "path": "valid/voice-lane-state.expanded.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "voice-lane-state.schema.json"
+    },
+    {
+      "id": "valid-voice-transcript-final",
+      "path": "valid/voice-transcript-event.final.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "voice-transcript-event.schema.json"
+    }
+  ]
+}

@@ -14,6 +14,16 @@ internal enum PomodoroPhase
     Rest
 }
 
+internal sealed record StopwatchPreset(
+    string Title,
+    TimerColor Color)
+{
+    public static StopwatchPreset DefaultDraft()
+    {
+        return new StopwatchPreset(string.Empty, TimerColor.Blue);
+    }
+}
+
 internal sealed record TimerPreset(
     Guid Id,
     string Title,
@@ -91,6 +101,24 @@ internal sealed record TimerAlert(
     DateTimeOffset StartedAtUtc,
     bool SoundEnabled);
 
+internal sealed record RunningStopwatch(
+    Guid Id,
+    string Title,
+    TimerColor Color,
+    double AccumulatedSeconds,
+    DateTimeOffset? StartedAtUtc)
+{
+    public bool IsRunning => StartedAtUtc is not null;
+
+    public double ElapsedSeconds(DateTimeOffset nowUtc)
+    {
+        return Math.Max(
+            0,
+            AccumulatedSeconds
+                + (StartedAtUtc is { } startedAt ? nowUtc.Subtract(startedAt).TotalSeconds : 0));
+    }
+}
+
 internal sealed record RunningTimerSnapshot(
     Guid Id,
     string Title,
@@ -109,12 +137,24 @@ internal sealed record RunningTimerSnapshot(
     double RemainingSeconds,
     double Progress);
 
+internal sealed record RunningStopwatchSnapshot(
+    Guid Id,
+    string Title,
+    TimerColor Color,
+    double AccumulatedSeconds,
+    DateTimeOffset? StartedAtUtc,
+    bool IsRunning,
+    double ElapsedSeconds);
+
 internal sealed record TimerSnapshot(
+    StopwatchPreset DraftStopwatch,
     TimerPreset DraftTimer,
     TimerPreset DraftPomodoro,
     IReadOnlyList<TimerPreset> PinnedPresets,
+    IReadOnlyList<RunningStopwatchSnapshot> RunningStopwatches,
     IReadOnlyList<RunningTimerSnapshot> RunningTimers,
     TimerAlert? ActiveAlert,
+    bool CanStartStopwatch,
     bool CanStartTimer,
     bool CanPin,
     DateTimeOffset NowUtc);

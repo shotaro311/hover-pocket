@@ -78,6 +78,10 @@ button[aria-pressed="true"] {
   background: rgba(99, 214, 181, 0.16);
 }
 
+.segmented.is-disabled {
+  opacity: 0.55;
+}
+
 select {
   min-width: 180px;
   min-height: 32px;

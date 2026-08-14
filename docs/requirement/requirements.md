@@ -2,6 +2,7 @@
 project_slug: hover-pocket
 target: Windows version requirements
 created: 2026-07-05
+updated: 2026-08-13
 updated_by: codex
 status: draft-integrated
 source_app_release: v0.1.0-98
@@ -40,7 +41,7 @@ Windows 版の本質は、「画面上端へポインターを運ぶだけで、
 ### 1.3 この要件書でまだ固定しないこと
 
 - 最終技術スタック。
-- UI コンポーネント単位の詳細設計。
+- UI コンポーネント単位の色、余白、アイコンなどの詳細設計。ただし、Voice Laneの配置、表示モード、パネル寸法の不変条件は本要件で固定する。
 - 永続化ファイルの最終スキーマ。
 - Windows 1.0で使用する署名証明書と発行元の最終選択。
 
@@ -130,6 +131,19 @@ Must:
 - macOS 版ユーザーが、初回起動直後に同じアプリだと分かる。
 - Provider 内の操作は既存 README の説明と矛盾しない。
 
+### R-UX-005: 手操作、テキスト、音声は同じ機能を使う
+
+Must:
+
+- 手操作、テキスト、音声、生成Pocket Appは入力経路だけを分け、Calendar、Timer、Sticky Notes、Clipboard、Controlsなどの同じCapabilityを利用する。
+- AI専用のProvider操作経路を増やさず、権限確認、実行、実行後readback、監査はHostが一元管理する。
+- 生成Pocket AppはHeader、Voice Lane、承認UIを描画せず、Hostが提供するPocketSurface領域だけを描画する。
+
+受け入れ条件:
+
+- 同じ操作は入力経路にかかわらず、同じ実行計画、権限判断、結果receiptになる。
+- AIまたは生成UIがProvider StoreやOS操作を直接呼び出せない。
+
 ## 3. シェルとウィンドウ要件
 
 ### R-SHELL-001: 常駐とトレイ
@@ -165,19 +179,24 @@ Must:
 
 Must:
 
-- Provider 領域サイズは既存値を基準にする。
+- 以下の寸法はVoice無効時の既存`BaselinePanel`寸法として維持する。`BaselinePanelHeight = HeaderHeight + ProviderHostHeight`である。
 - `Small`: 幅 520、高さ 372。
 - `Medium`: 幅 600、高さ 430。
 - `Large`: 幅 680、高さ 488。
 - macOS版は追加で`Extra Large`: 幅 760、高さ 546を持つ。Windows版の現行3段階は変更しない。
 - Header は高さ 54 を基準にする。
 - Windows 版では上記を DIPs 基準で扱い、DPI scaling 後の物理ピクセルで崩れないようにする。
+- Voice Lane有効時は`ShellTotalHeight = BaselinePanelHeight + VoiceLaneHeight`とする。現行Windowsコードの`ProviderHeight`はlegacy名称であり、本要件の`BaselinePanelHeight`を指す。Header 54を別途二重加算しない。
+- Compact / Expanded切り替えではパネル上端と幅を維持し、増減した高さだけ下端を動かす。Voice LaneをProviderへ重ねたり、Providerを圧縮して収めたりしない。
+- Voice Laneの高さはOS別design tokenとしてAN0で固定する。Windows Voice branchの`Compact=64`、`Expanded Small/Medium/Large=190/220/250`は初期値として再検証し、macOS Extra Largeを含むgolden fixtureを作る。
 
 受け入れ条件:
 
 - サイズ切り替え時、上端基準位置を維持したまま滑らかにリサイズする。
 - Windows版はテキストサイズ`Small`、`Medium`、`Large`、macOS版は追加の`Extra Large`を含めて主要UIがはみ出さない。
 - Windows の DIPs と物理ピクセルの差を吸収し、見た目のサイズ感を保つ。
+- Voice Laneの`disabled / compact / expanded`を切り替えてもHeader矩形とProviderHost矩形は不変で、全体高さの差分はVoice Lane高さの差分と一致する。
+- 利用可能な画面高さがExpandedの最低寸法を満たさない場合、Providerを縮めずCompactを維持し、展開できない理由を表示する。
 
 ### R-SHELL-004: 閉じる条件
 
@@ -211,6 +230,31 @@ Must:
 - preview panel 表示中は TextBox、drag/drop、context menu、shortcut が provider に届く。
 - WPFのhover通知またはnative window状態が失われても、120ms pointer pollingとhealth checkで再び開ける。
 
+### R-SHELL-006: Voice Laneは全Provider共通の最下段に置く
+
+Must:
+
+- パネル構造は`Header + ProviderHost + VoiceLane`とする。Voice LaneはProvider内の要素や画面へのfixed overlayではなく、Hostが所有する通常layoutの最後のrowである。
+- Voice Laneは全Providerと生成Pocket Appで同じinstanceを共有し、Provider切り替えやSurface再生成で会話sessionを作り直さない。
+- Voice機能全体は既定オフとする。ユーザーが明示的に有効化した後の既定表示はCompactとし、自動listenは別の明示opt-inとする。
+- `disabled / compact / expanded`の3表示モードを持つ。レーン面全体のクリックでは切り替えず、accessible nameを持つ明示的なexpand / collapse controlだけで切り替える。
+- Compactには視覚的な固定タイトルを置かない。マイク、短く制限した波形、状態、直近会話1〜2行、現在root配下の表示session数、mute、expand、Voice session終了を置き、会話領域を波形より優先して伸縮させる。
+- Compactには視覚タイトルがなくても、screen reader向けのVoice Lane region labelを持たせる。
+- Expandedは左に現在会話のtranscript、右に現在のroot sessionと同じrootから派生したchild / descendant session cardを表示する。全過去会話の一覧、新規会話管理、削除UIは初回要件に含めない。
+- session cardは安全なtitle、状態、経過時間または更新時刻、進捗、直近の安全な要約だけを表示し、raw command、filesystem path、全文transcriptを渡さない。
+- Expandedはfullscreen、別Provider、Provider overlayにしない。長文と多数cardはVoice Lane内部で独立scrollし、Provider領域を縮めない。
+- 書き込み承認要求と実行後receiptはHost所有のVoice Laneへ表示し、Providerまたは生成UIが同じ見た目を偽装できないようにする。
+- muteは音声入出力だけを止め、child sessionをcancelしない。hoverによるパネルcloseはmuteとUI detachを行うが、明示的に終了していないroot / child taskを停止しない。Voice session終了ボタンはRealtime音声sessionだけを終了し、root / child taskは継続する。task cancelはsession card上の別操作とし、対象と影響を表示して別承認を求める。
+
+受け入れ条件:
+
+- すべての組み込みProviderと生成Pocket AppでVoice Laneが同じ最下段にあり、Provider切り替え後もroot session、transcript、child card状態が保持される。
+- Compactには`Codex Voice`などの視覚タイトルがなく、波形は会話領域より短い。
+- Expandedではパネル上端、幅、Header矩形、Provider矩形がCompact時と一致し、下端だけが下へ伸びる。
+- Expandedは左transcript / 右root-scoped session cardsの2列を維持し、Smallでもcard列を自動で隠さない。必要時は情報量を減らし、列内scrollする。
+- レーン背景のクリックでは表示モードが変わらず、明示controlだけが`aria-expanded`相当の状態を変更する。
+- fullscreenのstate、route、buttonが存在しない。
+
 ## 4. Provider 機能要件
 
 ### 4.1 Mirror
@@ -218,7 +262,8 @@ Must:
 Windows scope decision (2026-07-10):
 
 - ユーザー判断により、Mirror と Microphone row は Windows 版の対象外とする。
-- Windows 版はカメラ・マイク権限、録音、camera session を持たない。
+- WindowsのMirror Providerと旧Microphone rowはカメラ・マイク権限、録音、camera sessionを持たない。
+- Codex Voice Laneだけは別機能として、明示enable、専用permission、trusted origin、明示user gestureを満たす場合に限りマイクを利用できる。HoverPocketはraw音声を録音保存しない。
 - macOS 版の Mirror 実装と配布要件は変更しない。
 
 ### 4.2 Controls
@@ -231,6 +276,7 @@ Must:
 - 音量を取得し、調整、ミュート切り替えを実行できる。
 - 再生中メディアがある場合、タイトル、ソース、アートワークまたはプレビュー、再生位置、再生/一時停止、前/次のトラック、10 秒戻し、10 秒送り、倍速操作を表示する。
 - メディア操作の成功状態は、実際の状態を読み戻して表示する。
+- ブラウザメディアのサムネイルをクリックすると、記録済みURLと一致するタブおよびブラウザウィンドウを前面へ出し、HoverPocketパネルを閉じる。
 
 macOS 固有要件:
 
@@ -239,18 +285,22 @@ macOS 固有要件:
 - 画面収録権限が未許可の場合、対象ウィンドウを解決できない場合、ストリーム開始に失敗した場合、または初回フレームが2秒以内に届かない場合は、アートワークまたはプレースホルダーへ自動フォールバックする。
 - 受動的なプレビュー表示から `CGRequestScreenCaptureAccess()` を呼ばず、未許可時に権限ダイアログを繰り返し表示しない。
 - 描画待ちフレームは最新1枚へ集約し、UI負荷時に古いフレームが蓄積して遅延しないようにする。
+- ブラウザのDOM操作が通常起動条件で拒否される場合、対象URL一致を確認してからブラウザ固有の再生速度ショートカットへフォールバックし、MediaRemoteの実再生速度が指定方向へ変化した時だけ表示へ反映する。
 
 Windows 固有要件:
 
 - ディスプレイ輝度は Windows 標準 API と DDC/CI の両方を候補にし、失敗時は明確に unsupported として扱う。
-- メディア情報は Windows のメディアセッション情報、ブラウザタブ連携、フォールバックの順で設計する。
-- ブラウザ動画の倍速変更は、対象タブを誤認しないよう URL/title で照合する。
+- メディア情報と倍速変更は Windows のメディアセッションを正本とし、0.25倍刻みで変更後の実再生速度を読み戻してから表示する。
+- サムネイル操作は、再生セッションのsource/titleと一致する一意のトップレベルウィンドウだけを前面化し、成功後にHoverPocketパネルを閉じる。候補なし・複数候補・前面化失敗時は別ウィンドウを開かず、パネル内へ理由を表示する。
+- Windows Graphics CaptureによるプレビューはControls provider表示中だけ起動し、非表示時は停止する。取得不能時はアートワークへフォールバックする。
 
 受け入れ条件:
 
 - YouTube などブラウザ再生で title/source/progress が取れる。
 - macOS ではライブプレビュー検証時に完全な映像フレームを取得でき、取得不能条件ではフォールバック表示が維持される。
+- Windowsでは「− / ＋」操作後の倍速がメディアセッションの読み戻し値と一致する。
 - 倍速を押した直後に未確認の値を成功表示しない。
+- サムネイル操作で別のメディアタブを誤って前面化しない。
 - メディア情報取得やブラウザ操作が失敗しても UI が固まらない。
 
 ### 4.3 Calendar
@@ -371,15 +421,19 @@ Must:
 
 Must:
 
-- 「タイマー」と「ポモドーロタイマー」の 2 種類の入力カードを持つ。
-- macOS版は2つの入力カードをコンパクトな横並びにし、Small / Medium / Large / Extra Largeの各パネルへ収める。
-- 各カードに title、color、sound on/off を設定できる。
+- macOS版とWindows版は「ストップウォッチ」「タイマー」「ポモドーロタイマー」の3種類の追加カードを横並びで持つ。
+- タイマーパネル内のストップウォッチは開始、一時停止、再開、停止、リセットができる。
+- ストップウォッチは100分の1秒まで表示し、パネルを閉じたり別providerへ切り替えたりしてもアプリ稼働中は計測を継続する。
+- 両OSの3つの追加カードは同じ高さのコンパクトな横並びとし、各パネルサイズへ収める。必要な場合だけパネル全体を縦スクロールする。
+- 両OSは3カードすべてに「名前を設定（任意）」のtitle入力とcolor設定を持つ。colorは色ドット列ではなく左上の種類アイコンをクリックして変更する。Timer / Pomodoroはsound on/offも設定できる。
+- 種類アイコンはストップウォッチ、砂時計、ターゲットの別形状とし、色だけに頼らず見分けられるようにする。macOS版のSF Symbolsは順に`stopwatch.fill`、`hourglass`、`target`を使う。
 - 通常 Timer の既定値は 10 分、Pomodoro の既定値は work 25 分 / rest 5 分を基準にする。
 - 時間は直接入力とインライン調整バーで調整できる。
 - ポモドーロは work/rest を交互に切り替える。
 - Pomodoro は work cycle count を表示する。
-- 実行中タイマーは最大 2 つ。
-- macOS版の実行中タイマーはtimer colorで識別できる薄い横長カードとし、進捗リング、残り時間、操作ボタンを1行へまとめる。タイマーを追加するとカードが縦に並ぶ。
+- 両OSの実行中カウントダウンは最大4つとし、複数ストップウォッチも別枠で最大4つまで同時に扱える。
+- 両OSの「実行中」は1列のリストとし、ストップウォッチ、Timer、Pomodoroをtimer colorで識別できる薄い横長カードで縦に並べる。各カードは種類、設定名、残り時間または経過時間、pause / resume、stopを1行へまとめる。
+- 両OSは「実行中」リストを独立したsurfaceで囲み、細いaccent lineと「新しく追加」見出しで下段の設定カードと明確に分ける。
 - ピン留め preset は最大 4 つ。
 - 実行中タイマーは pause、resume、stop できる。
 - 残り時間は絶対終了時刻ベースで計算し、スリープ復帰後も大きく狂わない。
@@ -392,6 +446,7 @@ Must:
 - アプリ再起動後、未期限切れの実行中タイマーと pinned preset が復元される。
 - 期限切れの過去タイマーは、遅れて鳴らさず破棄する。
 - Reduce Motion 有効時は通知アニメーションを静的表示にする。
+- ストップウォッチ4件とカウントダウン4件を表示しても、各パネルサイズで1行カードと入力カードの内容が横にはみ出さず、必要な場合だけ縦スクロールできる。
 
 ### 4.7 Calculator
 
@@ -411,13 +466,12 @@ Must:
 - 大きいパネルでもキーが横に伸びすぎない。
 - 代表計算ケースを CLI またはユニットテストで検証できる。
 
-### 4.8 AI command lane
+### 4.8 Legacy AI command lane（Text）
 
 Deferred:
 
-- AI command lane は計画・開発途中のため、現行アプリ UI からは一旦外す。
-- 後続で戻す場合も、Provider 領域を侵食しない高さ設計にする。
-- Phase 1 の対象 action 候補は Calendar read day と Calendar create event とする。
+- 旧AI command laneは計画・開発途中のため、現行アプリ UI からは一旦外す。4.9のCodex Voice Laneとは別機能として扱う。
+- 旧Windows baseline roadmapのW1で検討した対象action候補はCalendar read dayとCalendar create eventであった。AI-native実装では4.9と最終実装プランのAN phaseを正本とする。
 - 自然文例候補: `今日の予定`、`明日14時 打ち合わせ`、`金曜 デザイン納期`。
 - Calendar write は必ず承認 UI を通す。
 - 実行結果、失敗、承認/却下は audit log に記録する。
@@ -425,7 +479,7 @@ Deferred:
 Windows 代替要件:
 
 - Apple Foundation Models は Windows では使えないため、AI provider は差し替え可能にする。
-- 初期 Windows MVP では deterministic fallback だけでもよいが、AI lane の UI は現行アプリからは一旦外す。
+- 初期 Windows MVP では deterministic fallback だけでもよいが、旧AI command laneのUIは現行アプリからは一旦外す。
 - 将来の local LLM または cloud LLM 接続は、カレンダー書き込みの承認原則を変えない。
 
 受け入れ条件:
@@ -433,6 +487,31 @@ Windows 代替要件:
 - Calendar read は承認なしで実行できる。
 - Calendar create は承認しない限り実行されない。
 - 失敗時に token や個人情報をログへ出さない。
+
+### 4.9 Codex Voice Laneと共通Capability
+
+Planned Must:
+
+- Codex Voice Laneは4.8の旧テキストAI command laneを再表示するものではなく、R-SHELL-006に従う全Provider共通の入力・会話面とする。
+- Calendar、Timer、Sticky Notes、Clipboard、Controls、Calculatorを`PocketCapability`として登録し、既存UI、Voice、Text、生成Pocket App、MCP Adapterが同じRegistryとBrokerを使う。
+- Capability Registryを操作契約の単一正本とし、MCPは外部公開Adapterとして扱う。
+- Capability Brokerを唯一の実行入口とし、schema検証、権限、承認、idempotency、実行、readback、監査、rollbackを一元管理する。
+- 最初の縦断はToday Focus Pocketとする。今日のCalendar予定を読み、選択した予定に合わせてTimerを開始し、Sticky Notesへ今日の目的を保存する。
+- Today FocusのCalendar readは承認不要、TimerとStickyへの書き込みは正確な引数を提示して承認し、IDで実行後readbackする。
+- `calendar.event.create`は毎回書き込み前承認を求め、作成後にevent IDを取得してGETまたは同等queryでreadbackする。
+- Voice、Text、生成Surface、macOS SwiftUIとWindows Calendar WebView双方の「選択予定から集中を開始」は同じcanonical workflow planをBrokerへ送る。
+- current rootとそのchild / descendant session cardだけを表示する。全履歴browser、new / delete / archive管理は初回対象外とする。
+- Pocket Appはmanifest、data schema、layout、workflow、permissions、testsをユーザーが確認・変更・削除・rollbackできるファイルとして保持する。
+- 生成UIはauthoritative data、secret、重要処理を所有せず、削除・再生成してもユーザーの意図とデータが残る。
+- AI生成した任意native codeの即時hot installは本番要件にしない。native権限追加はworktree、review、署名、通常releaseを必須にする。
+
+受け入れ条件:
+
+- Voice、Text、既存UI、PocketSurfaceの同一要求が同じCapability ID、canonical plan digest、effect、承認判断、readback semanticsになる。receipt固有のID、時刻、originは入力ごとに異なってよい。
+- 書き込み前は副作用がなく、成功表示は実行後readback一致を根拠にする。
+- Codex、MCP、生成UIからProvider StoreまたはBridgeDispatcherへ直接到達できない。
+- raw transcript、Calendar / Sticky本文、Clipboard本文、token、filesystem pathを監査ログへ残さない。
+- Voice機能を無効にした場合、Codex process、microphone、WebRTC、追加レイアウトが起動せず、既存パネル寸法とProvider体験が変わらない。
 
 ## 5. Settings 要件
 
@@ -453,6 +532,9 @@ Must:
 - Sticky Notes grid size: S / M / L。
 - Calendar weather location: Current Location / worldwide city or postal code / Japanese prefecture。
 - Calendar weather temperature unit: Auto / Celsius / Fahrenheit。
+- Codex Voice Lane: OFF / ON。既定はOFF。
+- Codex Voice Lane layout: Compact / Expanded。機能を有効にした直後の既定はCompact。
+- Auto listen: OFF / ON。既定はOFFとし、Voice Lane有効化とは別に承認する。
 - Check for Updates。
 
 Windows 追加 Must:
@@ -576,9 +658,11 @@ Should:
 - 要件定義段階では、技術選定より先に「Windows native shell 能力」と「provider UI/logic の分離」を固定する。
 - 最初の実装検証では、top-edge overlay、tray、多画面 DPI、Clipboard履歴保存・個別削除、Controls API の 5 点を spike する。
 
-## 9. MVP と段階的リリース
+## 9. Windows基盤のMVPと段階的リリース
 
-### Phase 0: 技術検証
+この章の`W0〜W4`は既存Windows基盤を構築した履歴上のroadmapである。AI-native最終計画の`AN0〜AN8`とは別namespaceとし、今後のAI-native実装順は`docs/plan/20260813_PLAN1.md`を正本とする。
+
+### W0: 技術検証
 
 Must:
 
@@ -595,7 +679,7 @@ Must:
 - Main/Sub/All の最小挙動が動く。
 - フルスクリーン抑制の可否が判断できる。
 
-### Phase 1: 低 OS 依存 provider
+### W1: 低 OS 依存 provider
 
 Must:
 
@@ -609,7 +693,7 @@ Must:
 - HoverPocket の日常利用感を早く確認できる。
 - OS 依存が比較的少なく、UI シェルの品質検証に向く。
 
-### Phase 2: Clipboard と Calendar
+### W2: Clipboard と Calendar
 
 Must:
 
@@ -622,7 +706,7 @@ Must:
 
 - 実用性が高いが、プライバシーと認証の設計が必要。
 
-### Phase 3: Controls
+### W3: Controls
 
 Must:
 
@@ -635,7 +719,7 @@ Must:
 
 - OS 依存が強く、個別の Windows API 検証が必要。
 
-### Phase 4: 配布と更新
+### W4: 配布と更新
 
 Must:
 
@@ -657,6 +741,11 @@ Must:
 - Click/Hover provider switching が設定どおり動く。
 - provider 並び替えと非表示が再起動後に保持される。
 - Main/Sub/All が mixed DPI で動く。
+- Voice OFFでは現在のパネル寸法、起動process、microphone requestが変わらない。
+- Voice ONでは全Provider共通のCompactが最下段へ表示され、Provider切り替え後も会話sessionが保持される。
+- Compactから明示controlでExpandedへ切り替えると、Provider矩形を変えずパネル下端だけが下へ伸びる。
+- macOSのSmall / Medium / Large / Extra LargeとWindowsのSmall / Medium / Largeで、off / compact / expandedのgeometry fixtureが通る。
+- `OS × size × built-in Provider / generated PocketSurface fixture × off/compact/expanded`の直積でShell contractを検査する。
 
 ### 10.2 Provider E2E
 
@@ -669,9 +758,10 @@ Must:
 - Clipboard: テキスト/画像を履歴化し、全体プレビュー、コピー、お気に入り、個別削除ができる。
 - Clipboard: 通常/お気に入りタブと、中央で等分したテキスト/画像 split view が崩れない。
 - Sticky Notes: 作成、編集、色変更、並び替え、archive/delete、undo が動く。
-- Timer: 2 件まで同時実行でき、pause/resume/stop と終了アラートが動く。
+- Timer: 両OSでカウントダウン4件 + ストップウォッチ4件まで同時実行でき、各項目のpause/resume/stopと終了アラートが動く。
 - Calculator: 代表計算、キーボード入力、Error、copy が動く。
-- AI lane は後続検討へ戻し、現行アプリの初期体験からは外す。
+- Legacy AI command laneは後続検討へ戻し、現行アプリの初期体験からは外す。
+- Codex Voice Laneは既定OFFとし、AI-native releaseでR-SHELL-006と4.9の受け入れ条件を満たした場合だけ明示enable可能にする。
 
 ### 10.3 非機能テスト
 
@@ -682,6 +772,9 @@ Must:
 - ネットワークなしで Calendar/Update が失敗表示になり、他 provider は使える。
 - 権限拒否時にクラッシュせず、Settings 導線を出す。
 - app data 破損時にクラッシュせず既定状態へ復帰する。
+- Voice Expandedの長文、0 / 1 / many child cards、mixed DPI、短い画面でもProviderを圧縮・被覆しない。
+- Voice mute、hover close、Voice session終了がそれぞれ定義どおり動き、hover closeだけでchild taskをcancelしない。
+- Reduce Motion、keyboard、screen reader、日本語 / 英語でCompact / Expandedを操作できる。
 
 ### 10.4 性能目標
 
@@ -721,7 +814,7 @@ Must:
 
 - Windows 署名済み installer/package で初回起動、更新、アンインストール、再インストールが通る。
 - macOS 版 verify 相当の Windows CLI 検証がある: Calendar、Controls/Media、Calculator。
-- 追加で hover/panel、Clipboard、Sticky Notes、Timer、AI lane の smoke verify がある。
+- 追加でhover/panel、Clipboard、Sticky Notes、Timer、Codex Voice Laneのsmoke verifyと、Legacy AI command laneが非表示・default-offのままmountされないことを確認するnegative regression verifierがある。
 - Windows 11、通常ユーザー、混在 DPI 複数モニター、外部ディスプレイ、Chrome/Edge 再生で手動 E2E が通る。
 - 権限拒否、ネットワーク断、破損 JSON、sleep/wake、update 失敗の復旧シナリオが通る。
 - token、OAuth secret、個人情報、clipboard 本文、audit log の扱いがレビュー済みで、不要な外部送信がない。
@@ -735,7 +828,9 @@ Must:
 - Windows 10 対応を必須にするか、Windows 11 専用でよいか。
 - Clipboard private mode を Windows 初回 MVP の Must に含めるか。
 - Controls の display brightness をどこまで保証するか。DDC/CI は機種差が大きい。
-- AI command lane を再投入する時期と、Windows 版 model provider を deterministic fallback のみで開始するか local LLM も初期から入れるか。
+- Codex Voice Laneの標準runtime providerをCodex app-serverのpower-user mode、OpenAI Realtime / BYOK、別providerのどれにするか。Capability契約はruntimeから独立させる。
+- session cardから別アプリへ移動する方式。対応APIを実測できるまでLane内詳細を既定にし、必要時の`codex resume <threadId>`は明示承認付き代替候補とする。
+- user-owned Pocket App workspaceの既定場所。初回に可視folderを選択できる方針を第一候補にする。
 - 配布方式を MSIX、winget、installer、portable のどれにするか。
 - 自動更新を Sparkle 相当の独自 updater にするか、installer/Store/winget に任せるか。
 - Google の現行 macOS 実装は iOS OAuth client + custom scheme 優先だが、Windows desktop は loopback redirect + PKCE を第一候補にする。

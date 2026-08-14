@@ -23,6 +23,7 @@ enum PanelLayout {
     static let miniBarTriggerHeight: CGFloat = miniBarExpandedTopOffset + miniBarExpandedHeight
     static let previewGap: CGFloat = 0
     static let collapsedPreviewSize = NSSize(width: 72, height: 12)
+    static let compactVoiceLaneHeight: CGFloat = 64
 
     static var defaultPillWidth: CGFloat {
         notchHandleWidth
@@ -41,8 +42,48 @@ enum PanelLayout {
         }
     }
 
-    static func panelTotalSize(for panelSize: PanelSizeOption) -> NSSize {
-        previewSize(for: panelSize)
+    static func voiceLaneHeight(
+        for panelSize: PanelSizeOption,
+        mode: VoiceLaneDisplayMode
+    ) -> CGFloat {
+        switch mode {
+        case .disabled:
+            return 0
+        case .compact:
+            return compactVoiceLaneHeight
+        case .expanded:
+            switch panelSize {
+            case .small:
+                return 190
+            case .medium:
+                return 220
+            case .large:
+                return 250
+            case .extraLarge:
+                return 280
+            }
+        }
+    }
+
+    static func resolvedVoiceLaneMode(
+        requested: VoiceLaneDisplayMode,
+        panelSize: PanelSizeOption,
+        availableHeight: CGFloat
+    ) -> VoiceLaneDisplayMode {
+        guard requested == .expanded else { return requested }
+        let expandedHeight = panelTotalSize(for: panelSize, voiceLaneMode: .expanded).height
+        return expandedHeight <= availableHeight ? .expanded : .compact
+    }
+
+    static func panelTotalSize(
+        for panelSize: PanelSizeOption,
+        voiceLaneMode: VoiceLaneDisplayMode = .disabled
+    ) -> NSSize {
+        let baseline = previewSize(for: panelSize)
+        return NSSize(
+            width: baseline.width,
+            height: baseline.height + voiceLaneHeight(for: panelSize, mode: voiceLaneMode)
+        )
     }
 }
 
@@ -76,12 +117,14 @@ struct PanelFrames {
     let preview: NSRect
     let collapsedPreview: NSRect
     let accessStyle: PanelAccessStyle
+    let voiceLaneMode: VoiceLaneDisplayMode
 }
 
 enum PanelGeometry {
     static func frames(
         on screen: NSScreen,
         panelSize: PanelSizeOption,
+        requestedVoiceLaneMode: VoiceLaneDisplayMode = .disabled,
         showsNotchSideHandleArea: Bool = true
     ) -> PanelFrames {
         let notchProfile = notchProfile(on: screen)
@@ -90,7 +133,16 @@ enum PanelGeometry {
             notchProfile: notchProfile,
             showsNotchSideHandleArea: showsNotchSideHandleArea
         )
-        let previewSize = PanelLayout.panelTotalSize(for: panelSize)
+        let availableHeight = max(0, access.previewTopY - screen.visibleFrame.minY)
+        let resolvedVoiceLaneMode = PanelLayout.resolvedVoiceLaneMode(
+            requested: requestedVoiceLaneMode,
+            panelSize: panelSize,
+            availableHeight: availableHeight
+        )
+        let previewSize = PanelLayout.panelTotalSize(
+            for: panelSize,
+            voiceLaneMode: resolvedVoiceLaneMode
+        )
         let accessFrame = NSRect(
             x: access.minX,
             y: screen.frame.maxY - access.height,
@@ -118,7 +170,8 @@ enum PanelGeometry {
             access: accessFrame,
             preview: previewFrame,
             collapsedPreview: collapsedFrame,
-            accessStyle: access.style
+            accessStyle: access.style,
+            voiceLaneMode: resolvedVoiceLaneMode
         )
     }
 

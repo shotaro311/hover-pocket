@@ -6,6 +6,7 @@ import { renderClipboardProvider, runClipboardUiVerify } from "../providers/clip
 import { renderControlsProvider } from "../providers/controls/controls.js";
 import { renderStickyProvider } from "../providers/sticky/sticky.js";
 import { renderTimerProvider } from "../providers/timer/timer.js";
+import { renderVoiceLane } from "../voice/voice-lane.js";
 
 const providerRenderers = {
   controls: renderControlsProvider,
@@ -22,6 +23,7 @@ const providerIconsEl = document.querySelector("[data-provider-icons]");
 const sizeSwitchEl = document.querySelector("[data-size-switch]");
 const refreshButtonEl = document.querySelector("[data-refresh]");
 const settingsButtonEl = document.querySelector("[data-settings]");
+const voiceLaneEl = document.querySelector("[data-voice-lane]");
 
 /** @type {any} */
 let currentState = null;
@@ -59,6 +61,7 @@ function render(state, options = {}) {
   currentState = state;
   document.documentElement.style.setProperty("--hp-header-height", `${state.panel.headerHeight}px`);
   document.documentElement.style.setProperty("--hp-ai-height", `${state.panel.aiLaneHeight}px`);
+  document.documentElement.style.setProperty("--hp-voice-height", `${state.panel.voiceLaneHeight ?? 0}px`);
   document.documentElement.dataset.textSize = state.settings.textSize;
   document.documentElement.dataset.panelSize = state.settings.panelSize;
   setLanguage(state.settings.language);
@@ -67,6 +70,7 @@ function render(state, options = {}) {
   renderSizeSwitch(state);
   renderProviderIcons(state);
   renderProvider(state, options);
+  renderVoiceLane({ container: voiceLaneEl, state, request });
   renderCommands();
 }
 
@@ -382,6 +386,7 @@ window.__hoverPocketVerify = {
     let controlsFallbackLayerOk = false;
     let controlsStableRefreshOk = false;
     let controlsBrightnessResolvedOk = false;
+    let controlsMediaActionsOk = false;
     if (controlsProvider) {
       window.__hoverPocketVerifyStep = "select-controls";
       await request("provider.select", { id: controlsProvider.id });
@@ -410,6 +415,12 @@ window.__hoverPocketVerify = {
           const bounds = button.getBoundingClientRect();
           return bounds.width >= 32 && bounds.height >= 32;
         });
+        controlsMediaActionsOk = Boolean(
+          (controlsRoot.querySelector("[data-open-media-source]") || controlsRoot.querySelector(".hp-media.is-unavailable"))
+          && controlsRoot.querySelector("[data-rate-decrease]")
+          && controlsRoot.querySelector("[data-rate-increase]")
+          && controlsRoot.querySelector("[data-playback-rate]"),
+        );
         controlsFallbackLayerOk = Boolean(
           controlsRoot.querySelector(".hp-media-fallback")
           && controlsRoot.querySelector("canvas[data-live-preview]"),
@@ -490,12 +501,13 @@ window.__hoverPocketVerify = {
     const timerProvider = state.providers.find((provider) => provider.id === "timer");
     let timerLayoutOk = false;
     let timerInteractionStableOk = false;
+    let timerStopwatchOk = false;
     if (timerProvider) {
       window.__hoverPocketVerifyStep = "select-timer";
       render(await request("provider.select", { id: timerProvider.id }));
-      const pomodoroCard = await waitForElement(".hp-timer .hp-timer-section.is-pomodoro", 4500);
+      const pomodoroCard = await waitForElement(".hp-timer .hp-timer-entry.is-pomodoro", 4500);
       const timerRoot = pomodoroCard?.closest(".hp-timer");
-      const timerCard = timerRoot?.querySelector(".hp-timer-section.is-timer");
+      const timerCard = timerRoot?.querySelector(".hp-timer-entry.is-timer");
       const timerStack = timerRoot?.querySelector(".hp-timer-stack");
       const sections = [...(timerRoot?.querySelectorAll(".hp-timer-section") ?? [])];
       timerLayoutOk = Boolean(timerRoot && timerStack && timerCard && pomodoroCard)
@@ -505,6 +517,67 @@ window.__hoverPocketVerify = {
       const durationRail = timerRoot?.querySelector("[data-duration-rail]");
       durationRail?.dispatchEvent(new Event("input", { bubbles: true }));
       timerInteractionStableOk = Boolean(durationRail?.isConnected && durationRail === timerRoot?.querySelector("[data-duration-rail]"));
+      const stopwatchEntry = timerRoot?.querySelector(".hp-timer-section.is-add .hp-timer-entry.is-stopwatch");
+      const runningStopwatch = timerRoot?.querySelector(".hp-timer-section.is-running [data-stopwatch]");
+      timerStopwatchOk = Boolean(
+        stopwatchEntry?.querySelector("[data-color-trigger]")
+        && stopwatchEntry.querySelector("[data-title]")
+        && stopwatchEntry.querySelector("[data-start]")
+        && (!runningStopwatch || (
+          runningStopwatch.querySelector("[data-stopwatch-elapsed]")
+          && runningStopwatch.querySelector("[data-stopwatch-toggle]")
+          && runningStopwatch.querySelector("[data-stopwatch-stop]"))),
+      );
+    }
+    const originalVoiceEnabled = Boolean(state.settings.codexVoiceEnabled);
+    const originalVoiceLayout = state.settings.codexVoiceLayoutMode ?? "compact";
+    let voiceCompactOk = false;
+    let voiceExpandedOk = false;
+    let voiceProviderInvariantOk = false;
+    let voiceExplicitToggleOnlyOk = false;
+    let voiceNoFullscreenOk = false;
+    try {
+      window.__hoverPocketVerifyStep = "voice-enable-compact";
+      if (!originalVoiceEnabled) {
+        render(await request("settings.setCodexVoiceEnabled", { enabled: true }));
+      }
+      render(await request("settings.setCodexVoiceLayout", { layout: "compact" }));
+      await waitForVisualSettle();
+      const compactLane = document.querySelector("[data-voice-lane][data-layout=compact]");
+      const compactProviderBounds = providerContainerEl.getBoundingClientRect();
+      const waveformBounds = compactLane?.querySelector(".hp-voice-waveform")?.getBoundingClientRect();
+      const conversationBounds = compactLane?.querySelector(".hp-voice-conversation")?.getBoundingClientRect();
+      voiceCompactOk = Boolean(
+        compactLane
+        && !compactLane.hidden
+        && compactLane.querySelector("[data-voice-toggle][aria-expanded=false]")
+        && !compactLane.querySelector("h1, h2, [data-voice-title]")
+        && waveformBounds?.width <= 64.5
+        && conversationBounds?.width > waveformBounds.width,
+      );
+
+      window.__hoverPocketVerifyStep = "voice-expand";
+      render(await request("settings.setCodexVoiceLayout", { layout: "expanded" }));
+      await waitForVisualSettle();
+      const expandedLane = document.querySelector("[data-voice-lane][data-layout=expanded]");
+      const expandedProviderBounds = providerContainerEl.getBoundingClientRect();
+      voiceExpandedOk = Boolean(
+        expandedLane?.querySelector(".hp-voice-expanded")
+        && expandedLane.querySelectorAll(":scope .hp-voice-expanded > .hp-voice-column").length === 2
+        && expandedLane.querySelector("[data-voice-toggle][aria-expanded=true]"),
+      );
+      voiceProviderInvariantOk = Math.abs(compactProviderBounds.width - expandedProviderBounds.width) <= 1
+        && Math.abs(compactProviderBounds.height - expandedProviderBounds.height) <= 1;
+      expandedLane?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      voiceExplicitToggleOnlyOk = expandedLane?.dataset.layout === "expanded";
+      voiceNoFullscreenOk = !expandedLane?.querySelector("[data-fullscreen], [aria-label*=full-screen], [aria-label*=全画面]");
+    } finally {
+      window.__hoverPocketVerifyStep = "voice-restore";
+      render(await request("settings.setCodexVoiceLayout", { layout: originalVoiceLayout }));
+      if (!originalVoiceEnabled) {
+        render(await request("settings.setCodexVoiceEnabled", { enabled: false }));
+      }
+      await waitForVisualSettle();
     }
     const targetProvider = state.providers.find((provider) => provider.id !== originalProvider) ?? state.providers[0];
     window.__hoverPocketVerifyStep = "switch-provider";
@@ -524,6 +597,7 @@ window.__hoverPocketVerify = {
       controlsFallbackLayerOk,
       controlsStableRefreshOk,
       controlsBrightnessResolvedOk,
+      controlsMediaActionsOk,
       clipboardStableProviderOk,
       clipboardStableRefreshOk,
       clipboardSplitViewOk,
@@ -541,6 +615,12 @@ window.__hoverPocketVerify = {
       calendarEditorStableOk,
       timerLayoutOk,
       timerInteractionStableOk,
+      timerStopwatchOk,
+      voiceCompactOk,
+      voiceExpandedOk,
+      voiceProviderInvariantOk,
+      voiceExplicitToggleOnlyOk,
+      voiceNoFullscreenOk,
       textSizeScaleReadyOk: getComputedStyle(document.documentElement).getPropertyValue("--hp-text-scale").trim() !== "",
       providerSwitchOk: switchedState.selectedProvider?.id === targetProvider.id,
       settingsWriteOk: resizedState.settings?.panelSize === probePanelSize,
@@ -551,6 +631,10 @@ window.__hoverPocketVerify = {
     };
   },
 };
+
+function waitForVisualSettle() {
+  return new Promise((resolve) => window.setTimeout(resolve, 280));
+}
 
 function waitForElement(selector, timeoutMs) {
   return new Promise((resolve) => {

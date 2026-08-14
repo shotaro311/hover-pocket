@@ -67,6 +67,11 @@ internal sealed class UiVerifier
                     _failures.Add("controls: background brightness detection remained in its temporary state");
                 }
 
+                if (!result.ControlsMediaActionsOk)
+                {
+                    _failures.Add("controls: media source activation or playback rate actions did not render");
+                }
+
                 if (!result.ClipboardStableProviderOk)
                 {
                     _failures.Add("clipboard: selecting the active provider remounted the view");
@@ -147,6 +152,36 @@ internal sealed class UiVerifier
                     _failures.Add("timer: duration adjustment replaced the active input DOM");
                 }
 
+                if (!result.TimerStopwatchOk)
+                {
+                    _failures.Add("timer: stopwatch controls did not render");
+                }
+
+                if (!result.VoiceCompactOk)
+                {
+                    _failures.Add("voice lane: Compact layout, title absence, or conversation priority failed");
+                }
+
+                if (!result.VoiceExpandedOk)
+                {
+                    _failures.Add("voice lane: Expanded transcript/session columns did not render");
+                }
+
+                if (!result.VoiceProviderInvariantOk)
+                {
+                    _failures.Add("voice lane: expanding changed the existing provider rect");
+                }
+
+                if (!result.VoiceExplicitToggleOnlyOk)
+                {
+                    _failures.Add("voice lane: background click changed the layout");
+                }
+
+                if (!result.VoiceNoFullscreenOk)
+                {
+                    _failures.Add("voice lane: forbidden fullscreen affordance rendered");
+                }
+
                 if (!result.TextSizeScaleReadyOk)
                 {
                     _failures.Add("text size: global small/medium/large scaling was not active");
@@ -176,7 +211,7 @@ internal sealed class UiVerifier
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
-                "PASS ui verify: stable Controls refresh, responsive Timer cards/input, media fallback, tabbed centered Clipboard split/full preview/trash actions, Calculator history sidebar, draggable stable icons, text scaling/input activation, stable Mac-style calendar editor, bridge/provider/settings round-trip");
+                "PASS ui verify: stable Controls refresh, source activation and rate actions, responsive Timer cards/input/stopwatch, media fallback, tabbed centered Clipboard split/full preview/trash actions, Calculator history sidebar, draggable stable icons, text scaling/input activation, stable Mac-style calendar editor, Host-owned Compact/Expanded Voice Lane contract, bridge/provider/settings round-trip");
             return 0;
         }
 

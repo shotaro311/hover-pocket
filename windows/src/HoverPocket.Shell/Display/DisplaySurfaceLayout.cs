@@ -1,7 +1,10 @@
+using HoverPocket.Shell.Configuration;
+
 namespace HoverPocket.Shell.Display;
 
 internal sealed record DisplaySurfaceLayout(
     DisplayMonitor Monitor,
     WindowPlacement AccessSurface,
     WindowPlacement PanelTarget,
-    WindowPlacement PanelCollapsed);
+    WindowPlacement PanelCollapsed,
+    VoiceLaneLayoutState VoiceLaneLayout);

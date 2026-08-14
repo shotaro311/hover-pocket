@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/error/v1",
+  "title": "HoverPocket stable safe error v1",
+  "type": "object",
+  "required": [
+    "$schema",
+    "code",
+    "category",
+    "retryable",
+    "messageKey",
+    "details"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "hoverpocket://schemas/error/v1"
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{2,95}$"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "validation",
+        "permission",
+        "approval",
+        "availability",
+        "execution",
+        "readback",
+        "idempotency",
+        "internal"
+      ]
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "messageKey": {
+      "type": "string",
+      "pattern": "^error\\.[a-z0-9_.]+$",
+      "maxLength": 160
+    },
+    "details": {
+      "type": "object",
+      "properties": {
+        "field": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+        },
+        "expected": {
+          "type": [
+            "string",
+            "integer",
+            "boolean",
+            "null"
+          ],
+          "maxLength": 160
+        },
+        "actual": {
+          "type": [
+            "string",
+            "integer",
+            "boolean",
+            "null"
+          ],
+          "maxLength": 160
+        },
+        "capabilityId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*){2,}$",
+          "maxLength": 128
+        },
+        "capabilityVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "traceId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "maxLength": 128
+        },
+        "reasonKey": {
+          "type": "string",
+          "pattern": "^reason\\.[a-z0-9_.]+$",
+          "maxLength": 160
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

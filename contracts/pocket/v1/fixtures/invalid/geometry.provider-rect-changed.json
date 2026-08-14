@@ -1,0 +1,21 @@
+{
+  "base": "golden/voice-lane-geometry.json",
+  "mutation": {
+    "platform": "windows",
+    "size": "small",
+    "mode": "expanded",
+    "providerHostRect": {
+      "x": 0,
+      "y": 54,
+      "width": 520,
+      "height": 254
+    },
+    "voiceLaneRect": {
+      "x": 0,
+      "y": 308,
+      "width": 520,
+      "height": 254
+    },
+    "shellTotalHeight": 562
+  }
+}

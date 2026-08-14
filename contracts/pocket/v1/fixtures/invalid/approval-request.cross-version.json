@@ -1,0 +1,10 @@
+{
+  "base": "valid/approval-request.today-focus.json",
+  "mutation": {
+    "setPath": [
+      "appContext",
+      "version"
+    ],
+    "value": "1.0.1"
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "registryVersion": 1,
+  "capabilities": [
+    {
+      "id": "calendar.event.create",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.calendar-event-create.json"
+    },
+    {
+      "id": "calendar.event.get",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.calendar-event-get.json"
+    },
+    {
+      "id": "calendar.events.list",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.calendar-events-list.json"
+    },
+    {
+      "id": "sticky.note.get",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.sticky-note-get.json"
+    },
+    {
+      "id": "sticky.note.upsert",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.sticky-note-upsert.json"
+    },
+    {
+      "id": "system.native.authority",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.system-native-authority.json"
+    },
+    {
+      "id": "timer.countdown.get",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.timer-countdown-get.json"
+    },
+    {
+      "id": "timer.countdown.pause",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.timer-countdown-pause.json"
+    },
+    {
+      "id": "timer.countdown.resume",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.timer-countdown-resume.json"
+    },
+    {
+      "id": "timer.countdown.start",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.timer-countdown-start.json"
+    },
+    {
+      "id": "timer.countdown.stop",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.timer-countdown-stop.json"
+    }
+  ]
+}

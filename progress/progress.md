@@ -1,9 +1,108 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-08-02
+updated: 2026-08-15
 updated_by: codex
-status: active
+status: an2-final-review-running; an3-macos-voice-shell-implemented; local-macos-pass; windows-runtime-and-ci-pending
 ---
+
+## 2026-08-15 AI-native AN3 Voice Foundation Integration
+
+- 既存Draft PR #6の`feature/codex-voice-lane`を隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an3`へ復元し、AN2実装head `5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`を`--no-commit --no-ff`で統合した。テキスト競合はなく、マージは検証待ちのため未commit・未pushである。
+- macOSではSwift warnings-as-errors build、Broker、Capability、Timer、Clipboard、Calculator、Panel layout 112件、Media、Pocket contract 12 schema / 52 fixture、diff checkが成功した。
+- Windows Voice基盤はexperimental app-server capabilityを既定無効へ変更し、明示的に有効化するVerifierだけを許可した。専用CIはShell / Display / rendered UI、全built-in Provider、AN2 Registry / Broker、Voice layout / protocol / coordinatorを同じWindows runnerで検証する構成へ更新した。
+- macOSへHost-owned Voice LaneのUI骨格を実装した。全Provider共通の最下段をdefault-offで保持し、Compact 64pt、Expanded S / M / L / XL 190 / 220 / 250 / 280pt、既存Provider領域不変、下方向拡張、短い波形、会話優先、明示toggle、左transcript / 右root-scoped session cards、fullscreenなしを固定した。短い画面ではExpandedをCompactへ安全に縮退する。
+- macOS Voice Lane layout verifierは4サイズ×Compact / Expandedの8描画、既定値・永続化・短画面縮退・既存Panel 112件を含め成功し、macOS CIへ追加した。ローカルMacには.NET / PowerShell runtimeがないため、Windows compileとdeterministic verifierはmerge commitのpush後にGitHub Actionsで確認する。microphone / WebRTC、実音声、Broker tool dispatch、両OSVoice runtimeは未実装である。
+- WindowsにもHost-owned最下段のVoice Lane UI骨格を接続した。Bridge stateと設定、display geometry、Panel最大高、Compact / Expanded renderer、短画面Compact縮退、既存Provider rect不変、明示toggle、2列表示、fullscreen禁止を実装し、UI / UI model / layout verifierを拡張した。JavaScript全ファイルのsyntaxとworkflow YAML、diff checkは成功したが、Windows compile / WebView2実描画はGitHub Actions待ちである。
+- AN2の独立ChatGPT Pro Criticは別runで継続中であり、返却前にAN2/AN3のcommitやPR更新は行わない。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-an3-voice-foundation.md`。
+
+## 2026-08-14 AI-native AN2 Registry / Broker / Text Today Focus
+
+- AN1 PR [#8](https://github.com/shotaro311/hover-pocket/pull/8)を全check成功、未解決review thread 0件、Ready、MERGEABLE / CLEANのreadback後にmergeした。`main` / `origin/main`はmerge commit `3dce5df07c2b3ed687feefd78b6e78b0753e9958`で一致する。
+- exact mainからworktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an2`、branch `codex/ai-native-an2-registry-broker`を作成し、remote trackingを設定した。
+- ChatGPT Pro OrchestratorのBuilder runは40分でtimeoutし、回収receiptは`completion_status=blocked`、`response.md`は空、`changes.patch`なしだった。delivery ID / state hashをbridgeでclaimし、重複適用を防ぐ`mark-done`まで完了した。同じ依頼は再送せず、Skillのblocked例外に従いCodexがAN2を再実装している。
+- patch適用前baselineは`swift build`、Capability 10 handler、Timer、Clipboard、Calculator、Panel layout 112件、Pocket contract 12 schema / 52 fixtureが成功した。contract reportは2回byte一致、SHA-256 `b11c7a6f...d0b0`。worktree sourceはcleanである。
+- macOS / WindowsへRegistry 11 descriptor、Capability Broker、single-use approval、durable idempotency ledger、metadata-only audit、readback、Timer補償、Text Today Focus adapter、default-off compositionを実装した。macOSはSwift 6 build、Broker 10 negative case、10 handler、Timer、Clipboard、Calculator、Panel layout 112件、Media、Pocket contract 52 fixtureが成功した。Windowsは同等verifierと共通golden plan digestを追加し、Release compile / verifierをCIで確認する前の状態である。
+- 未完了gateはWindows CIでのcompile / Broker / 既存回帰、Timeout後の副作用なし確認、既存Calendar UIからのToday Focus入口、独立review、security scan、Ready PRとCI readbackである。詳細: `progress/2026-08/2026-08-14_hover-pocket-ai-native-an2-registry-broker.md`。
+
+## 2026-08-14 AI-native AN1 Provider Capabilities
+
+- AN0 PR [#7](https://github.com/shotaro311/hover-pocket/pull/7)を全必須check成功、Ready、MERGEABLEのreadback後にmergeし、`main`のmerge commit `6e248c8`から隔離worktree `hover-menu-preview-ai-native-an1`とbranch `codex/ai-native-an1-provider-capabilities`を作成した。
+- macOS / Windowsへ共通ID・version・typed argumentsを持つProvider Capability handlerを追加した。実行可能な10 handlerはCalendar list / get / create、Timer start / get / pause / resume / stop、Sticky upsert / get。既存UIと同じStore instanceへ接続する一方、Voice / WebView / MCP / Pocket Appからの外部呼出し口はまだ接続していない。
+- Calendar createはnull以外の明示calendarをfail closedで選択し、作成応答のevent IDとGET readbackを返す。終日予定はGoogleのdate-only値を保持し、requested timezoneのcivil dayでlist対象を選ぶ。DST、異なるoffset、multi-day、確認済みwrite後のUI cache refreshを補正した。Timer / Stickyはatomic persistence失敗時にmemory stateをrollbackし、Windows Timer stopは期限切れ後も一致するalertとsoundを停止する。全write handlerはidempotency keyを必須にしたが、durable replay ledgerはAN2のBroker責務として未接続である。
+- 最終実装head `c3917ef`で`swift build`、`--verify-capabilities`（10 handlers）、Timer、Clipboard、Calculator、Panel layout 112件、Media、`git diff --check`が成功した。Pocket contractは12 schema / 52 fixtureが2回成功し、reportはbyte一致、SHA-256 `b11c7a6f...d0b0`。`--verify-google-calendar`はこのworktreeにOAuth client IDがなく未実行で、外部予定は作成・変更していない。
+- GitHub Actions run [31795599989](https://github.com/shotaro311/hover-pocket/actions/runs/31795599989)でUbuntu / macOS / Windows contract verifierとcross-OS byte比較、run [31795600008](https://github.com/shotaro311/hover-pocket/actions/runs/31795600008)でWindows Release build / Capabilityを含む既存回帰、run [31795599988](https://github.com/shotaro311/hover-pocket/actions/runs/31795599988)でmacOS Swift 6 build / Capability / Timerが成功した。
+- exact source range `6e248c8...c3917ef`のCodex Security scan `hoverpocket_an1_c3917ef_20260814T112020Z`は24 source fileとsupporting contracts / CIを完全レビューし、coverage complete、reportable finding 0件でsealed complete。approval binding、durable replay、sanitized receipt、audit enforcementはAN2の必須gateであり、それ以前は外部経路へ公開しない。
+- Ready PR [#8](https://github.com/shotaro311/hover-pocket/pull/8)へ実装と検証を集約した。詳細: `progress/2026-08/2026-08-14_hover-pocket-ai-native-an1-provider-capabilities.md`。
+
+## 2026-08-14 AI-native AN0 Contract Hardening
+
+- PR #7の独立レビューで再現した12経路をfail closedへ修正した。`native_authority`実行、Pocket App版差し替え、self-claimed readback、unbound package source、scope escape、asset traversal、生成Surfaceのreceipt描画、audit raw ID、oversized plan / workflow payloadを拒否し、未知schema keyword / unresolved `$ref`もnegative fixtureへ固定した。
+- Pocket App ID / version / manifest digestをplan、invocation、approval、receipt、auditへbindingし、successful receiptはHost-owned typed observation、再計算evidence digest、descriptor match field一致を必須にした。manifest全pathはsource byte digestへbindingし、scopeとaudit値をHost validatorで強制する。
+- contract corpusは12 schema / 47 fixtureへ増え、全reject fixtureが本文digest、stable error code、exact error locationを持つ。監査ログも既知Invocation、descriptor、入力digest、Host-owned readback digestへbindingする。contract treeはLFへ固定する。CIは固定runner / Python / Node 24世代Action SHAを使い、Ubuntu / macOS / Windowsのreport artifactをbyte-for-byte比較する。
+- ローカルでは47 / 47 fixture、2回report byte一致、JSON 66件の重複key拒否parse、`swift build`、Panel layout 112件、Clipboard、Timer、Calculator、`git diff --check`が成功した。exact commit range `190ee90...5e9097c`の最終Codex Security scan `85f50deb-45e1-40d2-8457-867c749f729b`は6 surfaceを完全レビューし、coverage complete、reportable finding 0件でsealed completeとなった。
+- implementation head `5e9097c`のpush run [31759179183](https://github.com/shotaro311/hover-pocket/actions/runs/31759179183)とPR run [31759179663](https://github.com/shotaro311/hover-pocket/actions/runs/31759179663)で、Ubuntu / macOS / Windowsとcross-OS byte比較が成功した。以後は検証readbackの`progress/`記録だけを追加し、実装差分は変えていない。PR #7はReady、MERGEABLE。runtime source、Provider Registry、既存data format、requirements、PLAN1、承認画像は変更していない。詳細: `progress/2026-08/2026-08-14_hover-pocket-ai-native-an0-hardening.md`。
+
+## 2026-08-13 AI-native AN0 Contracts and Verification
+
+- 承認済み最終計画の最初の実装単位AN0として、`contracts/pocket/v1/`へ12個のversioned JSON Schema、31件のvalid / invalid / golden fixture、決定論的な標準Python verifierを追加した。macOS / Windowsのruntime source、Provider Registry、既存保存形式は変更していない。
+- `CapabilityRegistry / Broker`、approval、readback付きreceipt、Voice Lane、Pocket App / Surface / Workflow、最小監査データをADRへ固定した。Voice Lane geometryはCompact 64、Expanded S / M / L / XLを190 / 220 / 250 / 280としてgolden fixture化した。
+- ChatGPT Pro Orchestratorのbuilderへexact base `8b636cae...`を渡して`changes.patch`を生成させ、Codexがdownload版とrun取込版のSHA-256 `35369356...a174`一致、allowed path、`git apply --check`を確認して適用した。OracleのDevTools接続切断により自動回収表示が止まったが、同一会話から一度だけ手動harvestし、再送せずreceiptを復旧した。
+- ローカルでcontract 12 schema / 31 fixture、2回のJSON report byte一致、JSON全44件parse、`swift build`、Calculator / Clipboard / Timer / Panel layout 112ケース、`git diff --check`が成功した。GitHub ActionsもUbuntu / macOS / Windowsのpush・PR両経路で成功した。
+- Ready PR [#7](https://github.com/shotaro311/hover-pocket/pull/7)を作成した。Headは`6ef58f3732c91f0b44c21543b46cbc55619935f3`で、GitHub readbackはMERGEABLE。AN1以降のruntime handler実装は、この契約PRのreview / merge後に開始する。詳細: `progress/2026-08/2026-08-13_hover-pocket-ai-native-an0-contracts.md`。
+
+## 2026-08-13 AI-native Final Implementation Plan
+
+- 現行`main`、正本requirements、macOS / Windows双方のProvider・AI・Bridge・Store実装、Draft PR #6のVoice Lane branch、worktree、MulmoClaude 5資料、OpenAI公式資料を再監査し、ユーザー承認済みの最終実装プランを`docs/plan/20260813_PLAN1.md`へ確定した。
+- 最終構造は、表示を`PocketSurface`、操作を`PocketCapability`へ分離し、`CapabilityRegistry`を単一正本、`CapabilityBroker`を唯一の実行入口とする。Voice、Text、既存UI、生成Pocket App、MCPは同じBrokerを通す。
+- 最初の縦断候補はToday Focus Pocket。Calendar read、Timer start、Sticky upsert、write approval、実行後readbackを両OSで通し、別gateでCalendar createの実音声・承認・event ID readbackも確認する。
+- Voice Lane UIはHost所有の全Provider共通最下段とし、Compactは視覚タイトルなし・短い波形・会話優先、ExpandedはProvider領域を潰さずパネル外枠だけを下方向へ伸ばす。左に現在会話、右に同一rootのcurrent / child session cardsを表示し、fullscreenと全履歴browserは採用しない。
+- 承認済み画像を`docs/plan/assets/20260813-ai-native/voice-lane-compact.png`（1475×1067）と`voice-lane-expanded.png`（1254×1254）へ保存し、文章要件を正本、画像を視覚的受け入れ基準とした。
+- `docs/requirement/requirements.md`へLegacy AI command laneとCodex Voice Laneを分離した要件、Shell geometry、共通Capability、UI / E2E条件を同期した。
+- この項目は計画確定時点の記録。現在の実装状態は直上のAN0エントリを正とする。詳細: `progress/2026-08/2026-08-13_hover-pocket-ai-native-final-plan.md`。
+
+## 2026-08-12 Cross-platform Multiple Stopwatches and Timer UI
+
+- macOSとWindowsのストップウォッチを、名前・色・独立したpause / resume / stopを持つ最大4件の同時実行へ拡張した。カウントダウンも両OSで最大4件とし、別枠で扱う。
+- Windows Timerを「実行中」の1列コンパクトリストと「新しく追加」のストップウォッチ / タイマー / ポモドーロ3カードへ再構成した。名前欄、左上アイコンの色メニュー、種類別アイコン、sound、時間編集、pinを維持している。
+- macOSのSwift / 112 layout / 署名済みbundleと、WindowsのRelease cross-build / JavaScript / 600x430・520x372ブラウザ描画を検証した。GitHub ActionsのWindows runnerもRelease build、timer / ui-model / updater / WebView UIを含めて成功した。
+- 共通source `fefc4c6`から、macOS Latest [`v0.1.0-168`](https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-168)とWindows専用 [`win-v0.2.7`](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.7)を公開した。macOSはApple公証、署名、staple、Gatekeeper、appcast、公開ZIP、ローカル再インストールを確認し、Windowsは8 asset、checksum、manifest、専用feedを公開URLから再取得して一致を確認した。Windows公開後もGitHub LatestとmacOS appcastはmacOS build 168のまま維持した。詳細: `progress/2026-08/2026-08-12_hover-pocket-cross-platform-multiple-stopwatches.md`。
+- 配布サイトをCloudflare Worker version `1522796a-4b37-4740-b926-196dd07ce836`へ更新した。2つの公開ドメインはWindows 0.2.7 Setupリンクを返し、HTML SHA-256がローカルと一致した。GitHub Pagesの同一更新runも成功した。
+
+## 2026-08-12 macOS Timer Organized List UI
+
+- macOS Timerを、上段の「実行中」1列リストと下段の「新しく追加」3カードへ再構成した。実行中はストップウォッチ1件とカウントダウン最大4件を、種類、設定名、時間、pause / resume、stopを揃えた高さ38ptの1行カードで表示する。
+- ストップウォッチ、Timer、Pomodoroの追加カードを同じ高さで横並びにし、3種類すべてへ「名前を設定（任意）」と左上アイコンから開く4色メニューを追加した。色ドット列は廃止し、アイコンを`stopwatch.fill` / `hourglass` / `target`へ分けた。
+- 旧drafts JSON互換、ストップウォッチの名前・色引き継ぎ、Timer 2件 + Pomodoro 2件の同時実行、3アイコン非重複、全4パネル幅、Small / Large / Extra Large描画、署名済み開発bundleの起動を検証した。詳細: `progress/2026-08/2026-08-12_hover-pocket-timer-organized-list-ui.md`。
+- 公開release、appcast、Windows版は変更していない。
+
+## 2026-08-12 macOS Latest Reinstall Readback
+
+- `/Applications/HoverPocket.app`の旧`0.1.0 (155)`を終了し、アプリ本体だけをmacOSのゴミ箱へ退避して、GitHub Latest `v0.1.0-161`の公開手動インストールZIPから`0.1.0 (161)`を再インストールした。Application Support内の設定・保存データは削除していない。
+- 公開ZIP SHA-256 `f4981150...b6b0801`のGitHub digest一致、展開後appとインストール先の実行ファイルSHA-256一致、Developer ID Application署名、公証staple、Gatekeeper `Notarized Developer ID`をreadbackした。
+- 再インストール後に`/Applications/HoverPocket.app/Contents/MacOS/HoverPocket`の起動を確認した。詳細: `progress/2026-08/2026-08-12_hover-pocket-build-161-windows-0.2.6-release.md`。
+
+## 2026-08-12 macOS Build 161 / Windows 0.2.6 Public Release
+
+- 共通source commit `f0172f2`から、macOS build 161とWindows 0.2.6をOS別releaseへ公開した。macOSはGitHub Latest `v0.1.0-161`と`macos-latest` appcast、Windowsは`latest=false`の`win-v0.2.6`と`releases.win.json`を使用した。
+- macOS build 161はDeveloper ID Application署名、hardened runtime、Apple公証`Accepted`、staple、Gatekeeper、公開ZIP展開後の再検証に合格した。公開ZIP SHA-256は`f4981150...b6b0801`、appcast SHA-256は`401e5a38...f04cab`で、build 161とversioned ZIP URLを返した。
+- Windows 0.2.6はRelease buildと`controls / ui-model / ui / timer / updater / settings / shell / display / release-config` verifierが成功した。8 assetはGitHub digest・ローカル生成物・公開URL再取得物でsize / SHA-256が一致し、manifestは`oauthMetadata=embedded-and-verified`、`updateChannel=win`、0.2.x方針どおり`authenticode=unsigned`。
+- Windows実機の既存0.2.5へ公開feedのfull packageを適用し、起動中processと`current` exeのProductVersionが`0.2.6+f0172f2...`、ARPが`DisplayVersion=0.2.6`、InstallLocationが既存rootと一致することをreadbackした。実ブラウザYouTube操作とアプリ内MessageBoxの手動クリック経路は誤操作回避のため未確認で、CLI verifierとVelopack適用readbackで代替した。
+- 公式Cloudflare Worker static assetsをversion `3132a282-07ca-426b-a127-04a1009c995c`へ配信した。正規ドメインと旧aliasはHTTP 200でWindows 0.2.6 Setupリンクを返し、公開HTML SHA-256はローカル`site/index.html`と一致した。詳細: `progress/2026-08/2026-08-12_hover-pocket-build-161-windows-0.2.6-release.md`。
+
+## 2026-08-12 Mac Media Controls and Stopwatch
+
+- Controlsの再生速度がDia通常起動時に変わらない原因を、AppleScript経由のJavaScript拒否後、既存のYouTubeショートカットへ到達する前に処理を終了していた分岐と特定した。対象URL一致を確認したYouTubeタブだけへショートカットを送り、MediaRemoteの実速度が指定方向へ変化した場合だけ成功として反映するよう修正した。
+- メディアサムネイルをクリックすると、記録済みURLに一致するブラウザタブとウィンドウを前面へ出し、成功時にHoverPocketパネルを閉じる操作を追加した。
+- Timerへ100分の1秒表示のストップウォッチを追加した。開始、一時停止、再開、リセットに対応し、パネルを閉じたりproviderを切り替えたりしてもアプリ稼働中は計測を継続する。
+- 実YouTube / Diaで再生速度`1.0 → 1.25 → 1.0`と復元、前面化後のfrontmost app=`Dia`をreadbackした。`swift build`、署名済みapp生成、Timer、panel layout 112ケース、Media、Clipboard、Calculator、Weather verifier、`git diff --check`が成功した。Small / LargeのTimer画像で重なりと欠落がないことを目視確認した。詳細: `progress/2026-08/2026-08-12_hover-pocket-media-stopwatch.md`。
+- 公開release、appcast、Windows版は変更していない。
+
+## 2026-08-12 Repository Sync and Development Audit
+
+- `git fetch origin`後、ローカル`main`が`origin/main`より2 commit遅れていることを確認し、履歴を分岐させない`git merge --ff-only origin/main`で`bb8f06a`へ更新した。
+- macOS最新公開版はGitHub Latest `v0.1.0-155`、appcastはbuild 155のZIPを参照している。Windows最新公開版は専用release `win-v0.2.5`で、feedは0.2.5のfull packageを返した。
+- `feature/codex-voice-lane`は監査開始時の`main` `bb8f06a`を含む40 commit先行のDraft PR #6。最新CIは成功しているが、production UI接続、microphone / WebRTC、実音声E2Eなどが未完了のため未マージを維持した。今回の監査ログcommitはmainだけに追加する。
+- 最新`main`で`swift build`、panel layout 112ケース、Clipboard、Timer、Calculator verifier、`git diff --check`が成功した。監査ログcommitのpush後にlocal / origin SHA一致、ahead / behind `0 / 0`、未コミット・未追跡なしをreadbackする。詳細: `progress/2026-08/2026-08-12_hover-pocket-repository-audit.md`。
 
 ## 2026-08-02 Windows 0.2.5 Public Beta Release
 

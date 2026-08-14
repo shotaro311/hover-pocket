@@ -1,4 +1,7 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using HoverPocket.Shell.Capabilities;
 using HoverPocket.Shell.Services;
 
 namespace HoverPocket.Shell.Providers.Calendar;
@@ -219,6 +222,140 @@ internal sealed class CalendarStore
             SetFailure(ex);
             return BuildState();
         }
+    }
+
+    public async Task<IReadOnlyList<CalendarEventOccurrence>> ListEventsForCapabilityAsync(
+        DateTimeOffset start,
+        DateTimeOffset end,
+        CancellationToken cancellationToken = default)
+    {
+        await LoadMonthAsync(start, cancellationToken);
+        lock (_lock)
+        {
+            if (_snapshot is null || _loadStatus != "loaded")
+            {
+                throw new GoogleCalendarApiException("calendar_unavailable", ResolveMessage());
+            }
+            return _snapshot.Events
+                .OrderBy(item => item.Start)
+                .ToArray();
+        }
+    }
+
+    public async Task<CalendarEventOccurrence?> GetEventForCapabilityAsync(
+        string eventRef,
+        CancellationToken cancellationToken = default)
+    {
+        CalendarSource? source;
+        lock (_lock)
+        {
+            var cached = _snapshot?.Events.FirstOrDefault(item => item.Id == eventRef);
+            if (cached is not null)
+            {
+                return cached;
+            }
+            var separator = eventRef.LastIndexOf(':');
+            if (separator <= 0 || separator >= eventRef.Length - 1)
+            {
+                return null;
+            }
+            var calendarId = eventRef[..separator];
+            source = _snapshot?.Sources.FirstOrDefault(item => item.Id == calendarId);
+        }
+
+        var split = eventRef.LastIndexOf(':');
+        return await _apiClient.FetchEventAsync(
+            eventRef[..split],
+            eventRef[(split + 1)..],
+            source,
+            cancellationToken);
+    }
+
+    public async Task<CalendarEventOccurrence> CreateEventForCapabilityAsync(
+        CalendarCapabilityCreateRequest request,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default)
+    {
+        var externalEventId = CapabilityEventId(idempotencyKey);
+        await LoadMonthAsync(request.Start, cancellationToken);
+        CalendarSource source;
+        lock (_lock)
+        {
+            if (_snapshot is null || _loadStatus != "loaded")
+            {
+                throw new GoogleCalendarApiException("calendar_unavailable", ResolveMessage());
+            }
+            source = SelectWritableSourceForCapability(_snapshot.Sources, request.CalendarId);
+        }
+
+        var draft = new CalendarEventDraft(
+            source.Id,
+            null,
+            request.Title,
+            request.Location,
+            request.Notes,
+            request.Start,
+            request.End,
+            request.IsAllDay).Normalized();
+        CalendarEventOccurrence created;
+        try
+        {
+            created = await _apiClient.CreateEventAsync(draft, cancellationToken, source, externalEventId);
+        }
+        catch (GoogleCalendarApiException ex) when (ex.Code == "conflict")
+        {
+            created = await _apiClient.FetchEventAsync(source.Id, externalEventId, source, cancellationToken);
+        }
+        var observed = await _apiClient.FetchEventAsync(
+            source.Id,
+            created.GoogleEventId,
+            source,
+            cancellationToken);
+        if (!CapabilityEventMatches(observed, draft))
+        {
+            throw new CapabilityHandlerException("CAPABILITY_READBACK_MISMATCH", "calendar.idempotency");
+        }
+        await LoadMonthAsync(request.Start, cancellationToken);
+        return observed;
+    }
+
+    internal static bool CapabilityEventMatches(
+        CalendarEventOccurrence observed,
+        CalendarEventDraft draft)
+    {
+        var timeMatches = draft.IsAllDay
+            ? observed.IsAllDay
+                && observed.AllDayStart == DateOnly.FromDateTime(draft.Start.Date)
+                && observed.AllDayEnd == DateOnly.FromDateTime(draft.End.Date)
+            : !observed.IsAllDay
+                && observed.Start.ToUnixTimeSeconds() == draft.Start.ToUnixTimeSeconds()
+                && observed.End.ToUnixTimeSeconds() == draft.End.ToUnixTimeSeconds();
+        return observed.Title == draft.Title
+            && observed.Location == draft.Location
+            && observed.Notes == draft.Notes
+            && timeMatches;
+    }
+
+    private static string CapabilityEventId(string idempotencyKey)
+    {
+        var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(idempotencyKey)))
+            .ToLowerInvariant();
+        return $"hp{digest}";
+    }
+
+    internal static CalendarSource SelectWritableSourceForCapability(
+        IReadOnlyList<CalendarSource> sources,
+        string? requestedCalendarId)
+    {
+        if (requestedCalendarId is not null)
+        {
+            return sources.FirstOrDefault(item => item.Id == requestedCalendarId && item.CanWrite)
+                ?? throw new GoogleCalendarApiException("calendar_read_only", "The requested calendar is not writable.");
+        }
+
+        return sources.FirstOrDefault(item => item.CanWrite && item.IsPrimary)
+            ?? sources.FirstOrDefault(item => item.CanWrite)
+            ?? throw new GoogleCalendarApiException("calendar_read_only", "No writable calendar is available.");
     }
 
     public async Task<CalendarProviderState> UpdateEventAsync(

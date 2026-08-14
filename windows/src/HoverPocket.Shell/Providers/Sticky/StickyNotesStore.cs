@@ -54,6 +54,54 @@ internal sealed class StickyNotesStore
         .ThenByDescending(note => note.UpdatedAt)
         .ToArray();
 
+    public StickyNoteItem? GetNote(Guid id)
+    {
+        return FindNote(id)?.Clone();
+    }
+
+    public StickyNoteItem UpsertNote(
+        string stableKey,
+        string title,
+        string body,
+        StickyNoteColor color)
+    {
+        var previousNotes = _notes.Select(item => item.Clone()).ToArray();
+        var previousLastAction = LastAction;
+        try
+        {
+            var note = _notes.FirstOrDefault(item => string.Equals(item.StableKey, stableKey, StringComparison.Ordinal));
+            var now = DateTimeOffset.UtcNow;
+            if (note is null)
+            {
+                note = new StickyNoteItem
+                {
+                    Id = Guid.NewGuid(),
+                    StableKey = stableKey,
+                    CreatedAt = now,
+                    SortIndex = NextSortIndexForNewNote()
+                };
+                _notes.Add(note);
+            }
+
+            note.Title = title;
+            note.Body = body;
+            note.Color = color;
+            note.UpdatedAt = now;
+            note.ArchivedAt = null;
+            LastAction = null;
+            SaveNotesAtomically();
+            return note.Clone();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _notes.Clear();
+            _notes.AddRange(previousNotes);
+            LastAction = previousLastAction;
+            LastErrorMessage = "Sticky notes could not be saved.";
+            throw;
+        }
+    }
+
     public StickyNoteItem CreateNote(StickyNoteColor color = StickyNoteColor.Yellow)
     {
         var now = DateTimeOffset.UtcNow;
@@ -321,6 +369,25 @@ internal sealed class StickyNotesStore
         LastErrorMessage = null;
     }
 
+    private void SaveNotesAtomically()
+    {
+        EnsureDirectory();
+        var temporaryPath = $"{NotesPath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(_notes, JsonOptions));
+            File.Move(temporaryPath, NotesPath, overwrite: true);
+            LastErrorMessage = null;
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
     private void SavePreferences()
     {
         EnsureDirectory();
@@ -375,7 +442,9 @@ internal sealed class StickyNotesStore
     {
         foreach (var note in notes.Where(note => note.Id != Guid.Empty))
         {
-            note.Title = NormalizeTitle(note.Title);
+            note.Title = note.StableKey is null
+                ? NormalizeTitle(note.Title)
+                : NormalizeCapabilityTitle(note.Title);
             note.Body ??= string.Empty;
             yield return note;
         }
@@ -399,6 +468,11 @@ internal sealed class StickyNotesStore
         }
 
         return result.ToString();
+    }
+
+    private static string NormalizeCapabilityTitle(string? title)
+    {
+        return string.Concat((title ?? string.Empty).EnumerateRunes().Take(120).Select(rune => rune.ToString()));
     }
 
     private static StickyNotePreferences Normalize(StickyNotePreferences? preferences)

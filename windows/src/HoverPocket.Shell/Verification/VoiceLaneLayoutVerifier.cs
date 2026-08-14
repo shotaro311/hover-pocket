@@ -11,6 +11,7 @@ internal sealed class VoiceLaneLayoutVerifier
     {
         VerifyCatalogMetrics();
         VerifyDisplayLayoutGeometry();
+        VerifyExpandedFallbackKeepsProviderHeight();
         VerifySmallDisplayClamp();
         VerifySettingsDefaultOff();
 
@@ -92,6 +93,10 @@ internal sealed class VoiceLaneLayoutVerifier
                 layout.PanelTarget.PhysicalRect.Top,
                 layout.PanelCollapsed.PhysicalRect.Top,
                 $"{state.Mode} collapsed top");
+            if (layout.VoiceLaneLayout != state)
+            {
+                _failures.Add($"{state.Mode} unexpectedly resolved as {layout.VoiceLaneLayout.Mode}");
+            }
         }
 
         var disabled = service.CreateLayout(
@@ -116,6 +121,27 @@ internal sealed class VoiceLaneLayoutVerifier
             "expanded height delta");
     }
 
+    private void VerifyExpandedFallbackKeepsProviderHeight()
+    {
+        var monitor = CreateMonitor(new PhysicalRect(0, 0, 1280, 720), dpiX: 96, dpiY: 96);
+        var service = new DisplayLayoutService();
+        var layout = service.CreateLayout(
+            monitor,
+            PanelSize.Large,
+            voiceLaneLayout: VoiceLaneLayoutState.Expanded);
+        var compactMetrics = PanelSizeCatalog.Get(PanelSize.Large, VoiceLaneLayoutState.Compact);
+
+        if (layout.VoiceLaneLayout != VoiceLaneLayoutState.Compact)
+        {
+            _failures.Add("expanded layout did not fall back to Compact on a short display");
+        }
+
+        CheckEqual(
+            (int)compactMetrics.TotalHeight,
+            layout.PanelTarget.PhysicalRect.Height,
+            "short display compact fallback height");
+    }
+
     private void VerifySmallDisplayClamp()
     {
         var monitor = CreateMonitor(new PhysicalRect(0, 0, 640, 480), dpiX: 144, dpiY: 144);
@@ -124,6 +150,11 @@ internal sealed class VoiceLaneLayoutVerifier
             monitor,
             PanelSize.Large,
             voiceLaneLayout: VoiceLaneLayoutState.Expanded);
+
+        if (layout.VoiceLaneLayout != VoiceLaneLayoutState.Compact)
+        {
+            _failures.Add("small high-DPI display did not resolve Expanded to Compact");
+        }
 
         if (!monitor.Bounds.Contains(
                 layout.PanelTarget.PhysicalRect.Left,

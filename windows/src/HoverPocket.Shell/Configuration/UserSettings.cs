@@ -16,6 +16,8 @@ internal sealed class UserSettings
 
     public bool AutoCheckForUpdates { get; set; } = true;
 
+    public bool AiNativeEnabled { get; set; }
+
     public bool ClipboardPrivateMode { get; set; }
 
     public bool RememberLastSelectedProvider { get; set; } = true;
@@ -60,6 +62,7 @@ internal sealed class UserSettings
             Language = Language,
             StartWithWindows = StartWithWindows,
             AutoCheckForUpdates = AutoCheckForUpdates,
+            AiNativeEnabled = AiNativeEnabled,
             ClipboardPrivateMode = ClipboardPrivateMode,
             RememberLastSelectedProvider = RememberLastSelectedProvider,
             PreferredProviderId = PreferredProviderId,

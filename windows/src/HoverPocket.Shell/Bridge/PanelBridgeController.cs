@@ -1,6 +1,8 @@
 using System.IO;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
+using HoverPocket.Shell.Capabilities;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Providers;
 using HoverPocket.Shell.Providers.AiLane;
@@ -28,9 +30,13 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly ControlsBridgeController _controlsBridgeController = new();
     private readonly StickyBridgeController _stickyBridgeController;
     private readonly TimerBridgeHandlers _timerBridgeHandlers;
+    private readonly PocketCapabilityHandlerSet _capabilityHandlers;
+    private readonly CapabilityBroker? _capabilityBroker;
+    private readonly TodayFocusTextAdapter? _todayFocusTextAdapter;
     private readonly List<BridgeDispatcher> _dispatchers = [];
     private readonly object _previewFrameSync = new();
     private string _selectedProviderId;
+    private VoiceLaneLayoutState _resolvedVoiceLaneLayout;
     private MediaPreviewFrame? _pendingPreviewFrame;
     private bool _previewPostScheduled;
     private bool _panelOpen;
@@ -52,11 +58,35 @@ internal sealed class PanelBridgeController : IDisposable
         _aiLaneController = aiLaneController ?? new AiLaneController(
             new AiLaneAuditLog(settingsStore.RootDirectory),
             new CalendarAiLaneConnector(_calendarBridgeController.Store));
-        _stickyBridgeController = new StickyBridgeController(new StickyNotesStore(Path.Combine(settingsStore.RootDirectory, "sticky")));
-        _timerBridgeHandlers = new TimerBridgeHandlers(new TimerStore(Path.Combine(settingsStore.RootDirectory, "timer")));
+        var stickyStore = new StickyNotesStore(Path.Combine(settingsStore.RootDirectory, "sticky"));
+        var timerStore = new TimerStore(Path.Combine(settingsStore.RootDirectory, "timer"));
+        _stickyBridgeController = new StickyBridgeController(stickyStore);
+        _timerBridgeHandlers = new TimerBridgeHandlers(timerStore);
+        _capabilityHandlers = ProviderCapabilityCompositionRoot.Create(
+            new GoogleCalendarCapabilityDataSource(_calendarBridgeController.Store),
+            timerStore,
+            stickyStore);
         _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.Normalize(settings, providerRegistry.ProviderIds);
+        _resolvedVoiceLaneLayout = CurrentSettings.EffectiveVoiceLaneLayout;
+        if (CurrentSettings.AiNativeEnabled)
+        {
+            try
+            {
+                var brokerRoot = Path.Combine(settingsStore.RootDirectory, "CapabilityBroker");
+                _capabilityBroker = new CapabilityBroker(
+                    new CapabilityRegistry(_capabilityHandlers),
+                    new CapabilityBrokerLedger(brokerRoot),
+                    new CapabilityBrokerAuditLog(brokerRoot));
+                _todayFocusTextAdapter = new TodayFocusTextAdapter(_capabilityBroker);
+            }
+            catch (CapabilityBrokerException)
+            {
+                _capabilityBroker = null;
+                _todayFocusTextAdapter = null;
+            }
+        }
         _clipboardBridgeController = new ClipboardBridgeController(
             new ClipboardHistoryStore(Path.Combine(settingsStore.RootDirectory, "clipboard")),
             new ClipboardNativeListener(System.Windows.Application.Current?.Dispatcher ?? System.Windows.Threading.Dispatcher.CurrentDispatcher),
@@ -69,6 +99,7 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.SnapshotChanged += OnControlsSnapshotChanged;
         _controlsBridgeController.PreviewStateChanged += OnControlsPreviewStateChanged;
         _controlsBridgeController.PreviewFrameArrived += OnControlsPreviewFrameArrived;
+        _controlsBridgeController.MediaSourceOpened += OnControlsMediaSourceOpened;
     }
 
     public event EventHandler<UserSettings>? SettingsChanged;
@@ -81,9 +112,17 @@ internal sealed class PanelBridgeController : IDisposable
 
     public event EventHandler? ExternalDragStarted;
 
+    public event EventHandler? PanelCloseRequested;
+
     public UserSettings CurrentSettings { get; private set; }
 
     public string SelectedProviderId => _selectedProviderId;
+
+    public PocketCapabilityHandlerSet CapabilityHandlers => _capabilityHandlers;
+
+    public CapabilityBroker? CapabilityBroker => _capabilityBroker;
+
+    public TodayFocusTextAdapter? TodayFocusTextAdapter => _todayFocusTextAdapter;
 
     public IDisposable Attach(BridgeDispatcher dispatcher)
     {
@@ -109,6 +148,8 @@ internal sealed class PanelBridgeController : IDisposable
         dispatcher.Register("settings.setStartWithWindows", SetStartWithWindowsAsync);
         dispatcher.Register("settings.setAutoCheckForUpdates", SetAutoCheckForUpdatesAsync);
         dispatcher.Register("settings.setClipboardPrivateMode", SetClipboardPrivateModeAsync);
+        dispatcher.Register("settings.setCodexVoiceEnabled", SetCodexVoiceEnabledAsync);
+        dispatcher.Register("settings.setCodexVoiceLayout", SetCodexVoiceLayoutAsync);
         dispatcher.Register("settings.resetDefaults", ResetDefaultsAsync);
         dispatcher.Register("settings.resetPanelBinding", ResetPanelBindingAsync);
         dispatcher.Register("settings.openDataFolder", OpenDataFolderAsync);
@@ -118,6 +159,7 @@ internal sealed class PanelBridgeController : IDisposable
         dispatcher.Register("ailane.submit", SubmitAiLaneAsync);
         dispatcher.Register("ailane.approve", ApproveAiLaneAsync);
         dispatcher.Register("ailane.reject", RejectAiLaneAsync);
+        dispatcher.Register("todayFocus.startFromCalendar", StartTodayFocusFromCalendarAsync);
         _calculatorBridgeHandlers.Register(dispatcher);
         _controlsBridgeController.Attach(dispatcher);
         _calendarBridgeController.Attach(dispatcher);
@@ -143,6 +185,7 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.SnapshotChanged -= OnControlsSnapshotChanged;
         _controlsBridgeController.PreviewStateChanged -= OnControlsPreviewStateChanged;
         _controlsBridgeController.PreviewFrameArrived -= OnControlsPreviewFrameArrived;
+        _controlsBridgeController.MediaSourceOpened -= OnControlsMediaSourceOpened;
         _controlsBridgeController.Dispose();
     }
 
@@ -157,7 +200,9 @@ internal sealed class PanelBridgeController : IDisposable
             _selectedProviderId = selected.Id;
         }
 
-        var metrics = PanelSizeCatalog.Get(CurrentSettings.PanelSize);
+        var metrics = PanelSizeCatalog.Get(
+            CurrentSettings.PanelSize,
+            _resolvedVoiceLaneLayout);
         return new
         {
             settings = new
@@ -170,6 +215,7 @@ internal sealed class PanelBridgeController : IDisposable
                 startWithWindows = CurrentSettings.StartWithWindows,
                 startWithWindowsRegistered = IsStartupRegistered(),
                 autoCheckForUpdates = CurrentSettings.AutoCheckForUpdates,
+                aiNativeEnabled = CurrentSettings.AiNativeEnabled,
                 clipboardPrivateMode = CurrentSettings.ClipboardPrivateMode,
                 rememberLastSelectedProvider = CurrentSettings.RememberLastSelectedProvider,
                 preferredProviderId = CurrentSettings.PreferredProviderId,
@@ -177,6 +223,8 @@ internal sealed class PanelBridgeController : IDisposable
                 handleIcon = ToWireValue(CurrentSettings.HandleIconStyle),
                 showTopHandleSideArea = CurrentSettings.ShowTopHandleSideArea,
                 disableTopEdgeInFullscreen = CurrentSettings.DisableTopEdgeInFullscreen,
+                codexVoiceEnabled = CurrentSettings.CodexVoiceEnabled,
+                codexVoiceLayoutMode = ToWireValue(CurrentSettings.CodexVoiceLayoutMode),
                 providerOrder = CurrentSettings.ProviderOrder,
                 providerVisibility = CurrentSettings.ProviderVisibility
             },
@@ -185,10 +233,12 @@ internal sealed class PanelBridgeController : IDisposable
             {
                 headerHeight = PanelSizeCatalog.HeaderHeight,
                 aiLaneHeight = PanelSizeCatalog.AiLaneHeight,
+                voiceLaneHeight = metrics.AiLaneHeight,
+                voiceLaneLayout = ToWireValue(_resolvedVoiceLaneLayout),
                 width = metrics.Width,
                 providerHeight = metrics.ProviderHeight,
                 totalHeight = metrics.TotalHeight,
-                sizes = PanelSizeCatalog.All.Select(size => new
+                sizes = PanelSizeCatalog.GetAll(_resolvedVoiceLaneLayout).Select(size => new
                 {
                     id = size.Id,
                     label = size.Label,
@@ -225,7 +275,19 @@ internal sealed class PanelBridgeController : IDisposable
                     body = ProviderText(selected, ProviderTextKind.Body)
                 }
             ,
-            aiLane = _aiLaneController.CurrentState
+            aiLane = _aiLaneController.CurrentState,
+            voiceLane = new
+            {
+                layout = ToWireValue(_resolvedVoiceLaneLayout),
+                expansionBlocked = CurrentSettings.EffectiveVoiceLaneLayout.IsExpanded
+                    && !_resolvedVoiceLaneLayout.IsExpanded,
+                status = CurrentSettings.CodexVoiceEnabled ? "notConnected" : "disabled",
+                isSessionActive = false,
+                isMuted = true,
+                rootThreadId = (string?)null,
+                transcript = Array.Empty<object>(),
+                sessions = Array.Empty<object>()
+            }
         };
     }
 
@@ -488,6 +550,36 @@ internal sealed class PanelBridgeController : IDisposable
         return await PublishStateAsync(cancellationToken);
     }
 
+    private async Task<object?> SetCodexVoiceEnabledAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        var enabled = ReadRequiredBool(parameters, "enabled");
+        if (CurrentSettings.CodexVoiceEnabled != enabled)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.CodexVoiceEnabled = enabled;
+            SaveSettings(updated);
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetCodexVoiceLayoutAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        var layout = ParseVoiceLaneLayoutMode(ReadRequiredString(parameters, "layout"));
+        if (CurrentSettings.CodexVoiceLayoutMode != layout)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.CodexVoiceLayoutMode = layout;
+            SaveSettings(updated);
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
     private async Task<object?> ResetDefaultsAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         _ = parameters;
@@ -550,6 +642,105 @@ internal sealed class PanelBridgeController : IDisposable
         return await PublishStateAsync(cancellationToken);
     }
 
+    private async Task<object?> StartTodayFocusFromCalendarAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!CurrentSettings.AiNativeEnabled
+            || _capabilityBroker is null
+            || _todayFocusTextAdapter is null)
+        {
+            throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "today_focus");
+        }
+
+        var eventRef = ReadRequiredString(parameters, "eventRef");
+        if (string.IsNullOrEmpty(eventRef) || eventRef.EnumerateRunes().Count() > 256)
+        {
+            throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "event_ref");
+        }
+
+        var principal = new CapabilityPrincipal("local-user");
+        var permissions = new CapabilityPermissionSet(
+            principal,
+            new HashSet<string>(
+                ["calendar.events.read", "sticky.write", "timer.write"],
+                StringComparer.Ordinal));
+        var now = DateTimeOffset.Now;
+        var events = await _todayFocusTextAdapter.ListTodayAsync(
+            CapabilityTimeZoneId(),
+            principal,
+            permissions,
+            now,
+            cancellationToken);
+        var selected = events.FirstOrDefault(item => item.EventRef == eventRef)
+            ?? throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "calendar_event");
+        var purpose = string.IsNullOrEmpty(selected.SafeTitle) ? "今日の予定" : selected.SafeTitle;
+        var draft = _todayFocusTextAdapter.PrepareFocus(
+            selected,
+            1_500,
+            purpose,
+            principal,
+            permissions,
+            now);
+        var request = draft.Preparation.ApprovalRequest
+            ?? throw new CapabilityBrokerException("CAPABILITY_APPROVAL_REQUIRED", draft.Plan.Id);
+
+        var english = CurrentSettings.Language == AppLanguage.English;
+        var result = System.Windows.MessageBox.Show(
+            english
+                ? $"{draft.ApprovalText}\n\nStart a 25-minute Timer and save this purpose to Sticky Notes?"
+                : $"{draft.ApprovalText}\n\n25分Timerを開始し、この目的をSticky Notesへ保存します。",
+            english ? "Approve Today Focus" : "Today Focusを承認",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Question,
+            System.Windows.MessageBoxResult.No);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (result != System.Windows.MessageBoxResult.Yes)
+        {
+            try
+            {
+                _ = _capabilityBroker.DecideApproval(
+                    request.Id,
+                    draft.Preparation.PlanDigest,
+                    CapabilityApprovalDecision.Reject,
+                    now);
+            }
+            catch (CapabilityBrokerException ex) when (ex.Code == "CAPABILITY_APPROVAL_REJECTED")
+            {
+            }
+            return new { status = "rejected" };
+        }
+
+        var receipt = await _todayFocusTextAdapter.ApproveAndExecuteAsync(
+            draft,
+            permissions,
+            DateTimeOffset.Now,
+            cancellationToken);
+        return new
+        {
+            status = receipt.Status.WireValue(),
+            replayed = receipt.Replayed,
+            readbackVerified = receipt.Steps.All(step => step.Readback.Status == CapabilityReadbackStatus.Verified),
+            capabilities = receipt.Steps.Select(step => step.Capability.Id).ToArray()
+        };
+    }
+
+    private static string CapabilityTimeZoneId()
+    {
+        var identifier = TimeZoneInfo.Local.Id;
+        if (identifier == "UTC" || identifier.Contains('/'))
+        {
+            return identifier;
+        }
+        if (TimeZoneInfo.TryConvertWindowsIdToIanaId(identifier, out var converted)
+            && !string.IsNullOrEmpty(converted))
+        {
+            return converted;
+        }
+        throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "timezone");
+    }
+
     public async Task NotifyPanelOpenedAsync()
     {
         _panelOpen = true;
@@ -583,9 +774,24 @@ internal sealed class PanelBridgeController : IDisposable
         await PublishStateAsync(cancellationToken);
     }
 
+    public async Task ApplyResolvedVoiceLaneLayoutAsync(
+        VoiceLaneLayoutState layout,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_resolvedVoiceLaneLayout == layout)
+        {
+            return;
+        }
+
+        _resolvedVoiceLaneLayout = layout;
+        await PostEventAsync("state.changed", BuildState());
+    }
+
     private void SaveSettings(UserSettings settings)
     {
         CurrentSettings = UserSettingsStore.Normalize(settings, _providerRegistry.ProviderIds);
+        _resolvedVoiceLaneLayout = CurrentSettings.EffectiveVoiceLaneLayout;
         _clipboardBridgeController.ApplySettings(CurrentSettings, IsVisible("clipboard"));
         _settingsStore.Save(CurrentSettings);
         SettingsChanged?.Invoke(this, CurrentSettings);
@@ -612,6 +818,13 @@ internal sealed class PanelBridgeController : IDisposable
     {
         _ = sender;
         _ = PostEventOnUiThreadAsync("controls.stateChanged", snapshot);
+    }
+
+    private void OnControlsMediaSourceOpened(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        PanelCloseRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnControlsPreviewStateChanged(object? sender, MediaPreviewState preview)
@@ -810,6 +1023,13 @@ internal sealed class PanelBridgeController : IDisposable
         };
     }
 
+    private static VoiceLaneLayoutMode ParseVoiceLaneLayoutMode(string value)
+    {
+        return value.Equals("expanded", StringComparison.OrdinalIgnoreCase)
+            ? VoiceLaneLayoutMode.Expanded
+            : VoiceLaneLayoutMode.Compact;
+    }
+
     private static DisplayPlacement ParseDisplayPlacement(string value)
     {
         return value.ToLowerInvariant() switch
@@ -937,6 +1157,21 @@ internal sealed class PanelBridgeController : IDisposable
     private static string ToWireValue(AppLanguage language)
     {
         return language == AppLanguage.English ? "en" : "ja";
+    }
+
+    private static string ToWireValue(VoiceLaneLayoutMode layout)
+    {
+        return layout switch
+        {
+            VoiceLaneLayoutMode.Expanded => "expanded",
+            VoiceLaneLayoutMode.Compact => "compact",
+            _ => "disabled"
+        };
+    }
+
+    private static string ToWireValue(VoiceLaneLayoutState layout)
+    {
+        return ToWireValue(layout.Mode);
     }
 
     private string ProviderText(ProviderDescriptor provider, ProviderTextKind kind)

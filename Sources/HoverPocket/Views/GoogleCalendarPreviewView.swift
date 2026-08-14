@@ -11,6 +11,9 @@ struct GoogleCalendarPreviewView: View {
     @State private var hoveredDate: Date?
     @State private var draft: GoogleCalendarEventDraft?
     @State private var deleteTarget: GoogleCalendarEventOccurrence?
+    @State private var pendingFocusDraft: TodayFocusDraft?
+    @State private var pendingFocusTitle = ""
+    @State private var focusConfirmationPresented = false
 
     var body: some View {
         Group {
@@ -46,6 +49,20 @@ struct GoogleCalendarPreviewView: View {
             }
         } message: { event in
             Text(event.title)
+        }
+        .confirmationDialog(
+            "この予定に集中しますか？",
+            isPresented: $focusConfirmationPresented,
+            titleVisibility: .visible
+        ) {
+            Button("25分Timerを開始し、Sticky Notesへ目的を保存") {
+                approveTodayFocus()
+            }
+            Button(settings.text(.cancel), role: .cancel) {
+                rejectTodayFocus()
+            }
+        } message: {
+            Text("\(pendingFocusTitle)\n\n実行前にTimerとSticky Notesへの書き込みを承認します。")
         }
     }
 
@@ -318,6 +335,16 @@ struct GoogleCalendarPreviewView: View {
             Spacer(minLength: 4)
 
             HStack(spacing: 4) {
+                if settings.aiNativeEnabled && AINativeRuntime.shared.isAvailable {
+                    Button {
+                        prepareTodayFocus(event)
+                    } label: {
+                        Image(systemName: "target")
+                    }
+                    .buttonStyle(IconButtonStyle(selected: false))
+                    .help("この予定で25分集中")
+                }
+
                 Button {
                     beginEditing(event)
                 } label: {
@@ -337,6 +364,30 @@ struct GoogleCalendarPreviewView: View {
                 .help(settings.text(.delete))
             }
         }
+    }
+
+    private func prepareTodayFocus(_ event: GoogleCalendarEventOccurrence) {
+        do {
+            pendingFocusDraft = try AINativeRuntime.shared.prepareTodayFocus(event: event)
+            pendingFocusTitle = pendingFocusDraft?.approvalText ?? ""
+            focusConfirmationPresented = true
+        } catch {
+            pendingFocusDraft = nil
+        }
+    }
+
+    private func approveTodayFocus() {
+        guard let draft = pendingFocusDraft else { return }
+        pendingFocusDraft = nil
+        Task { @MainActor in
+            _ = try? await AINativeRuntime.shared.approveAndExecute(draft)
+        }
+    }
+
+    private func rejectTodayFocus() {
+        guard let draft = pendingFocusDraft else { return }
+        pendingFocusDraft = nil
+        AINativeRuntime.shared.reject(draft)
     }
 
     private var reconnectNotice: some View {

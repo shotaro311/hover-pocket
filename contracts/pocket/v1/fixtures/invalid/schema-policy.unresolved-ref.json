@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://fixtures/schema-policy/unresolved-ref",
+  "type": "object",
+  "properties": {
+    "value": {
+      "$ref": "hoverpocket://schemas/missing/v1"
+    }
+  },
+  "additionalProperties": false
+}

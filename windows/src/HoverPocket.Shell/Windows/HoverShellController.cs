@@ -86,6 +86,7 @@ internal sealed class HoverShellController : IDisposable
         _panelBridgeController.TimerAlertFired += OnTimerAlertFired;
         _panelBridgeController.TimerAlertChanged += OnTimerAlertChanged;
         _panelBridgeController.ExternalDragStarted += OnExternalDragStarted;
+        _panelBridgeController.PanelCloseRequested += OnPanelCloseRequested;
         _panel = CreatePanelWindow();
 
         _pollingTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
@@ -256,6 +257,7 @@ internal sealed class HoverShellController : IDisposable
         _panelBridgeController.TimerAlertFired -= OnTimerAlertFired;
         _panelBridgeController.TimerAlertChanged -= OnTimerAlertChanged;
         _panelBridgeController.ExternalDragStarted -= OnExternalDragStarted;
+        _panelBridgeController.PanelCloseRequested -= OnPanelCloseRequested;
         _panel.ReleaseBridgeAttachment();
         _panelBridgeController.Dispose();
         if (_settingsWindow is not null)
@@ -294,6 +296,7 @@ internal sealed class HoverShellController : IDisposable
         }
 
         _panelExpectedVisible = true;
+        await _panelBridgeController.ApplyResolvedVoiceLaneLayoutAsync(layout.VoiceLaneLayout);
 
         if (_closingTask is { IsCompleted: false })
         {
@@ -490,7 +493,8 @@ internal sealed class HoverShellController : IDisposable
         _layouts = _displayLayoutService.CreateLayouts(
             userSettings.DisplayPlacement,
             userSettings.PanelSize,
-            accessWidth);
+            accessWidth,
+            userSettings.EffectiveVoiceLaneLayout);
         EnsureAccessSurfaceCount(_layouts.Count);
         _surfaceLayouts.Clear();
 
@@ -508,6 +512,8 @@ internal sealed class HoverShellController : IDisposable
             _activeLayout = ResolveLayoutForPointer() ?? _layouts.FirstOrDefault();
             if (_activeLayout is not null)
             {
+                _ = _panelBridgeController.ApplyResolvedVoiceLaneLayoutAsync(
+                    _activeLayout.VoiceLaneLayout);
                 _panel.PrepareCollapsedState();
                 _panel.ApplyPlacement(_activeLayout.PanelCollapsed, show: false);
             }
@@ -519,6 +525,8 @@ internal sealed class HoverShellController : IDisposable
         _activeLayout = ResolveLayoutMatching(previousActiveLayout) ?? _layouts.FirstOrDefault();
         if (_activeLayout is not null)
         {
+            _ = _panelBridgeController.ApplyResolvedVoiceLaneLayoutAsync(
+                _activeLayout.VoiceLaneLayout);
             if (animateVisiblePanel)
             {
                 _ = _panel.ResizeAsync(_activeLayout.PanelTarget);
@@ -1036,6 +1044,20 @@ internal sealed class HoverShellController : IDisposable
         _ = HidePanelAsync();
     }
 
+    private void OnPanelCloseRequested(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_dispatcher.CheckAccess())
+        {
+            _dispatcher.BeginInvoke(() => OnPanelCloseRequested(sender, e));
+            return;
+        }
+
+        _closeDelayTimer.Stop();
+        _ = HidePanelAsync();
+    }
+
     private void OnTimerAlertFired(object? sender, TimerAlert alert)
     {
         _ = sender;
@@ -1117,8 +1139,10 @@ internal sealed class HoverShellController : IDisposable
 
         var panelSizeChanged = _lastAppliedSettings.PanelSize != settings.PanelSize;
         var placementChanged = _lastAppliedSettings.DisplayPlacement != settings.DisplayPlacement;
+        var voiceLaneChanged = _lastAppliedSettings.EffectiveVoiceLaneLayout != settings.EffectiveVoiceLaneLayout;
         _lastAppliedSettings = settings.Clone();
-        ResyncDisplayLayout(animateVisiblePanel: panelSizeChanged && !placementChanged);
+        ResyncDisplayLayout(
+            animateVisiblePanel: (panelSizeChanged || voiceLaneChanged) && !placementChanged);
     }
 
     private bool IsTopEdgeSuppressed()

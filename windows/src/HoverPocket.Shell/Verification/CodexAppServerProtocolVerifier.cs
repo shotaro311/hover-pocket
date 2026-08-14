@@ -10,6 +10,7 @@ internal sealed class CodexAppServerProtocolVerifier
 
     public async Task<int> RunAsync(CancellationToken cancellationToken = default)
     {
+        VerifyOptionsFailClosed();
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -46,6 +47,14 @@ internal sealed class CodexAppServerProtocolVerifier
         }
 
         return 1;
+    }
+
+    private void VerifyOptionsFailClosed()
+    {
+        if (new CodexAppServerClientOptions().ExperimentalApi)
+        {
+            _failures.Add("experimental app-server capability was enabled by default");
+        }
     }
 
     private static async Task<CodexAppServerClient> StartFakeServerClientAsync(

@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/voice-transcript-event/v1",
+  "title": "HoverPocket bounded memory-only transcript event v1",
+  "type": "object",
+  "required": [
+    "$schema",
+    "eventVersion",
+    "rootSessionId",
+    "sessionId",
+    "sequence",
+    "phase",
+    "speaker",
+    "text",
+    "capturedAt",
+    "retention",
+    "persisted"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "hoverpocket://schemas/voice-transcript-event/v1"
+    },
+    "eventVersion": {
+      "const": 1
+    },
+    "rootSessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "maxLength": 128
+    },
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "maxLength": 128
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "phase": {
+      "type": "string",
+      "enum": [
+        "partial",
+        "final"
+      ]
+    },
+    "speaker": {
+      "type": "string",
+      "enum": [
+        "user",
+        "assistant",
+        "tool"
+      ]
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "capturedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "retention": {
+      "const": "memory_only"
+    },
+    "persisted": {
+      "const": false
+    }
+  },
+  "additionalProperties": false
+}

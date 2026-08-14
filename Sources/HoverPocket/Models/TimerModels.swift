@@ -68,6 +68,15 @@ struct TimerPreset: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+struct StopwatchPreset: Codable, Equatable, Sendable {
+    var title: String
+    var color: TimerColor
+
+    static func defaultDraft() -> StopwatchPreset {
+        StopwatchPreset(title: "", color: .blue)
+    }
+}
+
 struct RunningTimer: Codable, Equatable, Identifiable, Sendable {
     let id: UUID
     var title: String
@@ -112,4 +121,21 @@ struct TimerAlert: Equatable, Identifiable, Sendable {
     /// both animations stay in phase.
     let startedAt: Date
     let soundEnabled: Bool
+}
+
+struct RunningStopwatch: Equatable, Identifiable, Sendable {
+    let id: UUID
+    var title: String
+    var color: TimerColor
+    var accumulated: TimeInterval = 0
+    var startedAt: Date?
+
+    var isRunning: Bool {
+        startedAt != nil
+    }
+
+    func elapsed(at date: Date) -> TimeInterval {
+        guard let startedAt else { return max(0, accumulated) }
+        return max(0, accumulated + date.timeIntervalSince(startedAt))
+    }
 }

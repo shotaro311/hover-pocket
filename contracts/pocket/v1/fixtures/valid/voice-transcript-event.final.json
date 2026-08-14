@@ -1,0 +1,13 @@
+{
+  "$schema": "hoverpocket://schemas/voice-transcript-event/v1",
+  "eventVersion": 1,
+  "rootSessionId": "session-root-a",
+  "sessionId": "session-root-a",
+  "sequence": 4,
+  "phase": "final",
+  "speaker": "user",
+  "text": "fixture-event",
+  "capturedAt": "2026-08-13T12:00:04Z",
+  "retention": "memory_only",
+  "persisted": false
+}

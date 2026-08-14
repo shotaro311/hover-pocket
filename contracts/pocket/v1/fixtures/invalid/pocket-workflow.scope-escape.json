@@ -1,0 +1,12 @@
+{
+  "base": "valid/pocket-workflow.today-focus.json",
+  "mutation": {
+    "setPath": [
+      "steps",
+      1,
+      "with",
+      "stableKey"
+    ],
+    "value": "other-app:fixture"
+  }
+}

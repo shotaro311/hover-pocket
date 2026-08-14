@@ -24,9 +24,9 @@
 
 ### Windows公開ベータ
 
-[HoverPocket Windows 0.2.5 Setup.exeをダウンロード](https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.5/HoverPocketWin-win-Setup.exe)
+[HoverPocket Windows 0.2.7 Setup.exeをダウンロード](https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.7/HoverPocketWin-win-Setup.exe)
 
-インストールせずに試す場合は、[Portable ZIP](https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.5/HoverPocketWin-win-Portable.zip)を利用できます。Windows版0.2.5はWindows 11 x64向けの公開ベータです。現時点ではAuthenticode未署名のため、初回起動時にMicrosoft Defender SmartScreenの警告が表示される場合があります。1.0正式版ではタイムスタンプ付きAuthenticode署名を必須にします。
+インストールせずに試す場合は、[Portable ZIP](https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.7/HoverPocketWin-win-Portable.zip)を利用できます。Windows版0.2.7はWindows 11 x64向けの公開ベータです。現時点ではAuthenticode未署名のため、初回起動時にMicrosoft Defender SmartScreenの警告が表示される場合があります。1.0正式版ではタイムスタンプ付きAuthenticode署名を必須にします。
 
 GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は開発者向けのソースコード一式です。アプリ本体ではないため、通常のインストールでは使いません。
 
@@ -96,11 +96,13 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 - 音量は CoreAudio 経由で取得、調整できます。
 - 音量バー右側のアイコンでミュートを切り替えられます。
 - 再生中メディアがある場合は、対象ブラウザウィンドウを ScreenCaptureKit の `SCStream` で30fps表示します。画面収録権限がない場合、対象ウィンドウを取得できない場合、ストリーム開始や初回フレーム取得に失敗した場合は、アートワークまたはプレースホルダーへ自動フォールバックします。
+- メディアのサムネイルをクリックすると、再生中URLと一致するブラウザタブを前面へ表示し、HoverPocketパネルを閉じます。
 - ライブプレビューは Controls パネル表示中だけ動作し、パネルを閉じると停止します。受動表示から画面収録権限を自動要求しません。
 - 再生位置バー、前/次のトラック、10秒戻し、再生/一時停止、10秒送り、倍速調整を操作できます。
 - Now Playing の取得と再生/停止・シーク操作は、同梱の mediaremote-adapter（Apple 署名の perl 経由で MediaRemote を中継するヘルパー）で行います。macOS 15.4 以降ではこの経路がないとメディア操作コマンドが OS に遮断されるためです。
 - パネル表示中は Now Playing の変更通知を購読し、イベント駆動で表示を更新します。adapter が使えない環境では従来のポーリング読み取りへフォールバックします。
-- 倍速調整はブラウザ（Chrome/Safari 等）の HTML5 動画を直接制御します。Chrome/Safari では「Apple Events からの JavaScript を許可」（開発メニュー）が有効な場合に最も確実に動作します。
+- 倍速調整はブラウザ（Chrome/Safari 等）の HTML5 動画を直接制御します。DiaでJavaScript操作が許可されていない通常起動時のYouTubeは、対象タブを確認してからYouTubeのショートカットを使い、実際の再生速度が指定方向へ変わった場合だけ成功として表示します。Chrome/Safari では「Apple Events からの JavaScript を許可」（開発メニュー）が有効な場合に最も確実に動作します。
+- Windows版は、再生セッションから一意に特定できた画面だけをサムネイルクリックで前面に表示します。倍速は「− / ＋」で0.25倍刻みに変更し、Windowsメディアセッションから読み戻せた実値だけを表示します。
 
 ### 電卓
 
@@ -117,10 +119,12 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 
 ### Timer
 
-- 「タイマー」と「ポモドーロタイマー」の2つのコンパクトな入力カードを横並びで表示します。各カードにタイトル（任意）、色（4色）、音あり/なしを設定できます。
+- タイマーパネル内で、100分の1秒表示のストップウォッチを開始、一時停止、再開、停止、リセットできます。パネルを閉じたり別の機能へ切り替えたりしても、アプリを終了するまでは計測を続けます。
+- macOS版とWindows版は「ストップウォッチ」「タイマー」「ポモドーロタイマー」の3つのコンパクトな追加カードを横並びで表示します。3種類すべてに「名前を設定（任意）」と4色の設定があり、左上の種類アイコンから色を変更できます。Timer / Pomodoroは音あり/なしも設定できます。
+- 種類アイコンは、ストップウォッチ、砂時計、ターゲットの3形状に分け、色だけに頼らず見分けられます。
 - 時間は直接入力に加えて、Calendar 編集と同じインラインの調整バー（ドラッグ/スクロール）で微調整できます。
 - ポモドーロタイマーは作業時間と休憩時間を設定でき、フェーズが自動で交互に切り替わります。
-- 開始したタイマーは上部の「実行中」に薄い横長カードとして表示され、追加されたタイマーは縦に並びます。カード内にカウントダウンと進捗リングを表示し、2つまで同時に実行できます。
+- 開始したストップウォッチ、Timer、Pomodoroは上部の「実行中」に薄い横長の1行カードとして表示され、設定名、時間、操作を揃えて縦に並びます。「実行中」と「新しく追加」はsurfaceとaccent lineで分離しています。macOS版とWindows版は、カウントダウン4つとストップウォッチ4つを別枠で同時に扱えます。
 - 実行中タイマーのピン留めマークを押すと、その設定をピン留めとして固定し、繰り返し使えます。ピン留めは4つまでストックできます。
 - 実行中タイマーは一時停止、再開、停止ができます。残り時間は終了時刻ベースで計算するため、スリープ復帰後も狂いません。
 - タイマーが終了すると、ノッチ横のバーが上端から下へぴょこぴょこ顔を出すようにバウンスして通知します。

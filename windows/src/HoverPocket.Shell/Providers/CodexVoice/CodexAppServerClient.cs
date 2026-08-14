@@ -19,7 +19,7 @@ internal sealed record CodexAppServerClientOptions
 
     public string ClientVersion { get; init; } = "0.0.0";
 
-    public bool ExperimentalApi { get; init; } = true;
+    public bool ExperimentalApi { get; init; }
 }
 
 internal sealed record CodexAppServerRequest(

@@ -56,13 +56,17 @@ internal sealed class PanelWindow : NoActivateWindow
         _enableWebView = enableWebView;
         _enableDevTools = enableDevTools;
 
-        var metrics = PanelSizeCatalog.Get(_bridgeController.CurrentSettings.PanelSize);
+        var metrics = PanelSizeCatalog.Get(
+            _bridgeController.CurrentSettings.PanelSize,
+            _bridgeController.CurrentSettings.EffectiveVoiceLaneLayout);
         Width = metrics.Width;
         Height = metrics.TotalHeight;
         MinWidth = PanelSizeCatalog.Get(PanelSize.Small).Width;
         MinHeight = PanelSizeCatalog.Get(PanelSize.Small).TotalHeight;
         MaxWidth = PanelSizeCatalog.Get(PanelSize.Large).Width;
-        MaxHeight = PanelSizeCatalog.Get(PanelSize.Large).TotalHeight;
+        MaxHeight = PanelSizeCatalog.Get(
+            PanelSize.Large,
+            VoiceLaneLayoutState.Expanded).TotalHeight;
         Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(4, 4, 6));
 
         _fallbackVisual = new Border
@@ -204,7 +208,9 @@ internal sealed class PanelWindow : NoActivateWindow
 
     public void ApplyPanelSize(PanelSize panelSize)
     {
-        var metrics = PanelSizeCatalog.Get(panelSize);
+        var metrics = PanelSizeCatalog.Get(
+            panelSize,
+            _bridgeController.CurrentSettings.EffectiveVoiceLaneLayout);
         Width = metrics.Width;
         Height = metrics.TotalHeight;
         ApplyRoundedRegion();
@@ -761,6 +767,7 @@ internal sealed record UiWebVerifyResult(
     bool ControlsFallbackLayerOk,
     bool ControlsStableRefreshOk,
     bool ControlsBrightnessResolvedOk,
+    bool ControlsMediaActionsOk,
     bool ClipboardStableProviderOk,
     bool ClipboardStableRefreshOk,
     bool ClipboardSplitViewOk,
@@ -778,6 +785,12 @@ internal sealed record UiWebVerifyResult(
     bool CalendarEditorStableOk,
     bool TimerLayoutOk,
     bool TimerInteractionStableOk,
+    bool TimerStopwatchOk,
+    bool VoiceCompactOk,
+    bool VoiceExpandedOk,
+    bool VoiceProviderInvariantOk,
+    bool VoiceExplicitToggleOnlyOk,
+    bool VoiceNoFullscreenOk,
     bool TextSizeScaleReadyOk,
     bool ProviderSwitchOk,
     bool SettingsWriteOk,

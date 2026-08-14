@@ -7,7 +7,8 @@ namespace HoverPocket.Shell.Providers.Timer;
 
 internal sealed class TimerStore : IDisposable
 {
-    public const int MaxConcurrentTimers = 2;
+    public const int MaxConcurrentStopwatches = 4;
+    public const int MaxConcurrentTimers = 4;
     public const int MaxPinnedPresets = 4;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -35,12 +36,15 @@ internal sealed class TimerStore : IDisposable
         _alertSound = alertSound ?? new SystemTimerAlertSound();
         _enableScheduler = enableScheduler;
 
-        DraftTimer = LoadOrDefault(DraftsPath, DraftsSnapshot.Default()).Timer;
-        DraftPomodoro = LoadOrDefault(DraftsPath, DraftsSnapshot.Default()).Pomodoro;
+        var drafts = LoadOrDefault(DraftsPath, DraftsSnapshot.Default());
+        DraftStopwatch = drafts.Stopwatch ?? StopwatchPreset.DefaultDraft();
+        DraftTimer = drafts.Timer;
+        DraftPomodoro = drafts.Pomodoro;
         PinnedPresets = LoadOrDefault(PinnedPath, Array.Empty<TimerPreset>())
             .Take(MaxPinnedPresets)
             .ToList();
         RunningTimers = RestoreRunningTimers();
+        RunningStopwatches = [];
         SyncTickTimer();
     }
 
@@ -52,9 +56,13 @@ internal sealed class TimerStore : IDisposable
 
     public TimerPreset DraftPomodoro { get; private set; }
 
+    public StopwatchPreset DraftStopwatch { get; private set; }
+
     public List<TimerPreset> PinnedPresets { get; private set; }
 
     public List<RunningTimer> RunningTimers { get; private set; }
+
+    public List<RunningStopwatch> RunningStopwatches { get; private set; }
 
     public TimerAlert? ActiveAlert { get; private set; }
 
@@ -72,11 +80,29 @@ internal sealed class TimerStore : IDisposable
         }
     }
 
+    public RunningTimer? GetRunningTimer(Guid id)
+    {
+        lock (_gate)
+        {
+            return RunningTimers.FirstOrDefault(timer => timer.Id == id);
+        }
+    }
+
     public TimerSnapshot UpdateDraftTimer(TimerPreset preset)
     {
         lock (_gate)
         {
             DraftTimer = preset with { IsPomodoro = false };
+            PersistDraftsLocked();
+            return BuildSnapshotLocked(_clock.UtcNow);
+        }
+    }
+
+    public TimerSnapshot UpdateDraftStopwatch(StopwatchPreset preset)
+    {
+        lock (_gate)
+        {
+            DraftStopwatch = preset;
             PersistDraftsLocked();
             return BuildSnapshotLocked(_clock.UtcNow);
         }
@@ -108,7 +134,7 @@ internal sealed class TimerStore : IDisposable
             }
 
             var now = _clock.UtcNow;
-            RunningTimers.Add(new RunningTimer(
+            var created = new RunningTimer(
                 Guid.NewGuid(),
                 preset.Title,
                 preset.Color,
@@ -121,8 +147,17 @@ internal sealed class TimerStore : IDisposable
                 PausedRemainingSeconds: null,
                 WorkDurationSeconds: ClampDuration(preset.WorkDurationSeconds),
                 RestDurationSeconds: ClampDuration(preset.RestDurationSeconds),
-                pinnedPresetId));
-            PersistRunningLocked();
+                pinnedPresetId);
+            RunningTimers.Add(created);
+            try
+            {
+                PersistRunningLocked();
+            }
+            catch
+            {
+                RunningTimers.RemoveAll(timer => timer.Id == created.Id);
+                throw;
+            }
             SyncTickTimerLocked();
             return BuildSnapshotLocked(now);
         }
@@ -137,7 +172,15 @@ internal sealed class TimerStore : IDisposable
             {
                 var timer = RunningTimers[index];
                 RunningTimers[index] = timer with { PausedRemainingSeconds = timer.RemainingSeconds(_clock.UtcNow) };
-                PersistRunningLocked();
+                try
+                {
+                    PersistRunningLocked();
+                }
+                catch
+                {
+                    RunningTimers[index] = timer;
+                    throw;
+                }
                 SyncTickTimerLocked();
             }
 
@@ -152,12 +195,21 @@ internal sealed class TimerStore : IDisposable
             var index = RunningTimers.FindIndex(timer => timer.Id == id);
             if (index >= 0 && RunningTimers[index].PausedRemainingSeconds is { } remaining)
             {
-                RunningTimers[index] = RunningTimers[index] with
+                var timer = RunningTimers[index];
+                RunningTimers[index] = timer with
                 {
                     PausedRemainingSeconds = null,
                     EndAtUtc = _clock.UtcNow.AddSeconds(remaining)
                 };
-                PersistRunningLocked();
+                try
+                {
+                    PersistRunningLocked();
+                }
+                catch
+                {
+                    RunningTimers[index] = timer;
+                    throw;
+                }
                 SyncTickTimerLocked();
             }
 
@@ -169,13 +221,30 @@ internal sealed class TimerStore : IDisposable
     {
         lock (_gate)
         {
-            RunningTimers.RemoveAll(timer => timer.Id == id);
+            var index = RunningTimers.FindIndex(timer => timer.Id == id);
+            if (index < 0)
+            {
+                if (ActiveAlert?.Id == id)
+                {
+                    StopAlertLocked();
+                }
+                return BuildSnapshotLocked(_clock.UtcNow);
+            }
+            var timer = RunningTimers[index];
+            RunningTimers.RemoveAt(index);
+            try
+            {
+                PersistRunningLocked();
+            }
+            catch
+            {
+                RunningTimers.Insert(index, timer);
+                throw;
+            }
             if (ActiveAlert?.Id == id)
             {
                 StopAlertLocked();
             }
-
-            PersistRunningLocked();
             SyncTickTimerLocked();
             return BuildSnapshotLocked(_clock.UtcNow);
         }
@@ -186,6 +255,70 @@ internal sealed class TimerStore : IDisposable
         lock (_gate)
         {
             StopAlertLocked();
+            return BuildSnapshotLocked(_clock.UtcNow);
+        }
+    }
+
+    public TimerSnapshot StartStopwatch(StopwatchPreset? preset = null)
+    {
+        lock (_gate)
+        {
+            var now = _clock.UtcNow;
+            if (RunningStopwatches.Count < MaxConcurrentStopwatches)
+            {
+                var selected = preset ?? DraftStopwatch;
+                RunningStopwatches.Add(new RunningStopwatch(
+                    Guid.NewGuid(),
+                    selected.Title,
+                    selected.Color,
+                    AccumulatedSeconds: 0,
+                    StartedAtUtc: now));
+            }
+
+            return BuildSnapshotLocked(now);
+        }
+    }
+
+    public TimerSnapshot PauseStopwatch(Guid id)
+    {
+        lock (_gate)
+        {
+            var now = _clock.UtcNow;
+            var index = RunningStopwatches.FindIndex(stopwatch => stopwatch.Id == id);
+            if (index >= 0 && RunningStopwatches[index].IsRunning)
+            {
+                var stopwatch = RunningStopwatches[index];
+                RunningStopwatches[index] = stopwatch with
+                {
+                    AccumulatedSeconds = stopwatch.ElapsedSeconds(now),
+                    StartedAtUtc = null
+                };
+            }
+
+            return BuildSnapshotLocked(now);
+        }
+    }
+
+    public TimerSnapshot ResumeStopwatch(Guid id)
+    {
+        lock (_gate)
+        {
+            var now = _clock.UtcNow;
+            var index = RunningStopwatches.FindIndex(stopwatch => stopwatch.Id == id);
+            if (index >= 0 && !RunningStopwatches[index].IsRunning)
+            {
+                RunningStopwatches[index] = RunningStopwatches[index] with { StartedAtUtc = now };
+            }
+
+            return BuildSnapshotLocked(now);
+        }
+    }
+
+    public TimerSnapshot StopStopwatch(Guid id)
+    {
+        lock (_gate)
+        {
+            RunningStopwatches.RemoveAll(stopwatch => stopwatch.Id == id);
             return BuildSnapshotLocked(_clock.UtcNow);
         }
     }
@@ -376,9 +509,18 @@ internal sealed class TimerStore : IDisposable
     private TimerSnapshot BuildSnapshotLocked(DateTimeOffset now)
     {
         return new TimerSnapshot(
+            DraftStopwatch,
             DraftTimer,
             DraftPomodoro,
             PinnedPresets.ToArray(),
+            RunningStopwatches.Select(stopwatch => new RunningStopwatchSnapshot(
+                stopwatch.Id,
+                stopwatch.Title,
+                stopwatch.Color,
+                stopwatch.AccumulatedSeconds,
+                stopwatch.StartedAtUtc,
+                stopwatch.IsRunning,
+                stopwatch.ElapsedSeconds(now))).ToArray(),
             RunningTimers.Select(timer => new RunningTimerSnapshot(
                 timer.Id,
                 timer.Title,
@@ -397,6 +539,7 @@ internal sealed class TimerStore : IDisposable
                 timer.RemainingSeconds(now),
                 timer.Progress(now))).ToArray(),
             ActiveAlert,
+            RunningStopwatches.Count < MaxConcurrentStopwatches,
             RunningTimers.Count < MaxConcurrentTimers,
             PinnedPresets.Count < MaxPinnedPresets,
             now);
@@ -404,7 +547,7 @@ internal sealed class TimerStore : IDisposable
 
     private void PersistDraftsLocked()
     {
-        Persist(DraftsPath, new DraftsSnapshot(DraftTimer, DraftPomodoro));
+        Persist(DraftsPath, new DraftsSnapshot(DraftStopwatch, DraftTimer, DraftPomodoro));
     }
 
     private void PersistPinnedLocked()
@@ -414,7 +557,7 @@ internal sealed class TimerStore : IDisposable
 
     private void PersistRunningLocked()
     {
-        Persist(RunningPath, RunningTimers);
+        PersistAtomically(RunningPath, RunningTimers);
     }
 
     private void Persist<T>(string path, T value)
@@ -422,6 +565,24 @@ internal sealed class TimerStore : IDisposable
         Directory.CreateDirectory(StorageDirectory);
         var json = JsonSerializer.Serialize(value, JsonOptions);
         File.WriteAllText(path, json);
+    }
+
+    private void PersistAtomically<T>(string path, T value)
+    {
+        Directory.CreateDirectory(StorageDirectory);
+        var temporaryPath = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(value, JsonOptions));
+            File.Move(temporaryPath, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
     }
 
     private T LoadOrDefault<T>(string path, T fallback)
@@ -485,7 +646,7 @@ internal sealed class TimerStore : IDisposable
             return 0;
         }
 
-        return Math.Clamp(seconds, 0, 24 * 60 * 60 - 1);
+        return Math.Clamp(seconds, 0, 24 * 60 * 60);
     }
 
     private static string DefaultStorageDirectory()
@@ -494,11 +655,17 @@ internal sealed class TimerStore : IDisposable
         return Path.Combine(appData, "HoverPocket", "timer");
     }
 
-    private sealed record DraftsSnapshot(TimerPreset Timer, TimerPreset Pomodoro)
+    private sealed record DraftsSnapshot(
+        StopwatchPreset? Stopwatch,
+        TimerPreset Timer,
+        TimerPreset Pomodoro)
     {
         public static DraftsSnapshot Default()
         {
-            return new DraftsSnapshot(TimerPreset.DefaultTimerDraft(), TimerPreset.DefaultPomodoroDraft());
+            return new DraftsSnapshot(
+                StopwatchPreset.DefaultDraft(),
+                TimerPreset.DefaultTimerDraft(),
+                TimerPreset.DefaultPomodoroDraft());
         }
     }
 }
@@ -565,6 +732,8 @@ internal sealed class NullTimerAlertSound : ITimerAlertSound
 {
     public int StartCount { get; private set; }
 
+    public int StopCount { get; private set; }
+
     public void StartLoop()
     {
         StartCount++;
@@ -572,6 +741,7 @@ internal sealed class NullTimerAlertSound : ITimerAlertSound
 
     public void Stop()
     {
+        StopCount++;
     }
 
     public void Dispose()

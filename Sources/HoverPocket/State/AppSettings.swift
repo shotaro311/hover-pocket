@@ -116,6 +116,30 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var aiNativeEnabled: Bool {
+        didSet {
+            defaults.set(aiNativeEnabled, forKey: Self.aiNativeEnabledKey)
+        }
+    }
+
+    @Published var codexVoiceEnabled: Bool {
+        didSet {
+            defaults.set(codexVoiceEnabled, forKey: Self.codexVoiceEnabledKey)
+        }
+    }
+
+    @Published var codexVoiceLayoutMode: VoiceLaneLayoutMode {
+        didSet {
+            defaults.set(codexVoiceLayoutMode.rawValue, forKey: Self.codexVoiceLayoutModeKey)
+        }
+    }
+
+    @Published var codexVoiceAutoListen: Bool {
+        didSet {
+            defaults.set(codexVoiceAutoListen, forKey: Self.codexVoiceAutoListenKey)
+        }
+    }
+
     private let defaults: UserDefaults
     private static let appLanguageKey = "appLanguage"
     private static let displayPlacementModeKey = "displayPlacementMode"
@@ -136,6 +160,10 @@ final class AppSettings: ObservableObject {
     private static let showMirrorOnSecondaryDisplaysKey = "showMirrorOnSecondaryDisplays"
     private static let showStickyNoteUndoToastKey = "showStickyNoteUndoToast"
     private static let stickyNoteGridSizeKey = "stickyNoteGridSize"
+    private static let aiNativeEnabledKey = "aiNativeEnabled"
+    private static let codexVoiceEnabledKey = "codexVoiceEnabled"
+    private static let codexVoiceLayoutModeKey = "codexVoiceLayoutMode"
+    private static let codexVoiceAutoListenKey = "codexVoiceAutoListen"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -200,11 +228,28 @@ final class AppSettings: ObservableObject {
         }
         let stickyNoteGridSizeRawValue = defaults.string(forKey: Self.stickyNoteGridSizeKey)
         self.stickyNoteGridSize = stickyNoteGridSizeRawValue.flatMap(StickyNoteGridSize.init(rawValue:)) ?? .medium
+        self.aiNativeEnabled = defaults.object(forKey: Self.aiNativeEnabledKey) == nil
+            ? false
+            : defaults.bool(forKey: Self.aiNativeEnabledKey)
+        self.codexVoiceEnabled = defaults.object(forKey: Self.codexVoiceEnabledKey) == nil
+            ? false
+            : defaults.bool(forKey: Self.codexVoiceEnabledKey)
+        let voiceLayoutRawValue = defaults.string(forKey: Self.codexVoiceLayoutModeKey)
+        self.codexVoiceLayoutMode = voiceLayoutRawValue.flatMap(VoiceLaneLayoutMode.init(rawValue:))
+            ?? .compact
+        self.codexVoiceAutoListen = defaults.object(forKey: Self.codexVoiceAutoListenKey) == nil
+            ? false
+            : defaults.bool(forKey: Self.codexVoiceAutoListenKey)
 
         if defaults.data(forKey: Self.weatherLocationKey) == nil,
            let weatherLocationData = try? JSONEncoder().encode(weatherLocation) {
             defaults.set(weatherLocationData, forKey: Self.weatherLocationKey)
         }
+    }
+
+    var requestedVoiceLaneDisplayMode: VoiceLaneDisplayMode {
+        guard codexVoiceEnabled else { return .disabled }
+        return codexVoiceLayoutMode == .expanded ? .expanded : .compact
     }
 
     func orderedManifests(_ manifests: [PluginManifest]) -> [PluginManifest] {

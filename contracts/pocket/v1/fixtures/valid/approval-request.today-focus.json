@@ -1,0 +1,47 @@
+{
+  "$schema": "hoverpocket://schemas/approval-request/v1",
+  "approvalRequestId": "approval-today-focus-001",
+  "planId": "plan-today-focus-001",
+  "planDigest": "sha256:d2a5cd999acb704d699d3fd989fd6022371f39bbb877c551aacff6c42d48482f",
+  "principal": {
+    "userId": "user-fixture",
+    "pocketAppId": "local.example.today-focus",
+    "agentSessionId": "session-root-a"
+  },
+  "appContext": {
+    "id": "local.example.today-focus",
+    "version": "1.0.0",
+    "manifestDigest": "sha256:af7b3c36dd21cc9e5ef8dab0342cb3912e9da62cc3d4873268099d8432cf0ea5"
+  },
+  "createdAt": "2026-08-13T12:00:01Z",
+  "expiresAt": "2026-08-13T12:05:01Z",
+  "nonce": "nonce-approval-000001",
+  "effects": [
+    {
+      "stepId": "startTimer",
+      "capabilityId": "timer.countdown.start",
+      "capabilityVersion": 1,
+      "effect": "reversible_local_write",
+      "argumentDigest": "sha256:e2f672643dcb1427b325214d5973c731d68f3db909be4ae1bb156974c0e70892",
+      "summaryKey": "approval.timer.countdown.start",
+      "rollbackAvailable": true
+    },
+    {
+      "stepId": "savePurpose",
+      "capabilityId": "sticky.note.upsert",
+      "capabilityVersion": 1,
+      "effect": "reversible_local_write",
+      "argumentDigest": "sha256:811cc9eb19f1d0c2426be6a77ac9a6b601a5d8f199a0876227b4b682907ab3c2",
+      "summaryKey": "approval.sticky.note.upsert",
+      "rollbackAvailable": true
+    }
+  ],
+  "requiredPermissions": [
+    "sticky.write",
+    "timer.write"
+  ],
+  "decisionOptions": [
+    "approve",
+    "reject"
+  ]
+}

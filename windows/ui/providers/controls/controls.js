@@ -1,7 +1,6 @@
 import { on } from "../../js/bridge.js";
 
 const styleHref = "./providers/controls/controls.css";
-const playbackRates = [1, 1.25, 1.5, 1.75, 2];
 const brightnessUpdateDelayMs = 110;
 
 export function renderControlsProvider(context) {
@@ -448,6 +447,22 @@ function mediaSection(media, preview, appState, update) {
   const artwork = document.createElement("div");
   artwork.className = `hp-media-artwork ${preview.live ? "is-live" : "is-fallback"}`;
   artwork.dataset.mode = preview.mode || "inactive";
+  if (media.available) {
+    artwork.classList.add("is-openable");
+    artwork.dataset.openMediaSource = "true";
+    artwork.tabIndex = 0;
+    artwork.setAttribute("role", "button");
+    artwork.setAttribute("aria-label", text(appState, "再生中の画面を前面に表示", "Bring playing screen to front"));
+    artwork.title = text(appState, "再生中の画面を前面に表示", "Bring playing screen to front");
+    const openSource = () => update("controls.openMediaSource");
+    artwork.addEventListener("click", openSource);
+    artwork.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openSource();
+      }
+    });
+  }
   const fallback = document.createElement("div");
   fallback.className = "hp-media-fallback";
   if (media.artworkDataUrl) {
@@ -498,6 +513,13 @@ function mediaSection(media, preview, appState, update) {
 
   const commands = document.createElement("div");
   commands.className = "hp-media-commands";
+  const rateDown = iconButton("−", text(appState, "再生速度を下げる", "Decrease playback rate"));
+  rateDown.dataset.rateDecrease = "true";
+  rateDown.disabled = !media.available || !media.canChangeRate || Number(media.playbackRate) <= 0.5;
+  rateDown.addEventListener("click", () => update("controls.mediaCommand", {
+    command: "rate",
+    value: adjustedRate(media.playbackRate, -0.25),
+  }));
   const previous = iconButton("|◀", text(appState, "前のトラック", "Previous track"));
   previous.disabled = !media.available || !media.canSkipPrevious;
   previous.addEventListener("click", () => update("controls.mediaCommand", { command: "previous" }));
@@ -517,13 +539,19 @@ function mediaSection(media, preview, appState, update) {
   const next = iconButton("▶|", text(appState, "次のトラック", "Next track"));
   next.disabled = !media.available || !media.canSkipNext;
   next.addEventListener("click", () => update("controls.mediaCommand", { command: "next" }));
-  const rate = iconButton(`${formatRate(media.playbackRate)}×`, text(appState, "再生速度", "Playback rate"));
-  rate.disabled = !media.available || !media.canChangeRate;
-  rate.addEventListener("click", () => update("controls.mediaCommand", {
+  const rateUp = iconButton("+", text(appState, "再生速度を上げる", "Increase playback rate"));
+  rateUp.dataset.rateIncrease = "true";
+  rateUp.disabled = !media.available || !media.canChangeRate || Number(media.playbackRate) >= 3;
+  rateUp.addEventListener("click", () => update("controls.mediaCommand", {
     command: "rate",
-    value: nextRate(media.playbackRate),
+    value: adjustedRate(media.playbackRate, 0.25),
   }));
-  commands.append(previous, back, play, forward, next, rate);
+  const rateValue = document.createElement("span");
+  rateValue.className = "hp-media-rate";
+  rateValue.dataset.playbackRate = "true";
+  rateValue.textContent = `${formatRate(media.playbackRate)}×`;
+  rateValue.title = text(appState, "現在の再生速度", "Current playback rate");
+  commands.append(rateDown, previous, back, play, forward, next, rateUp, rateValue);
 
   body.append(artwork, meta, timeline, commands);
   if (media.error) {
@@ -639,9 +667,9 @@ function fallbackLabel(mode, state) {
   return text(state, "アートワーク", "Artwork");
 }
 
-function nextRate(current) {
+function adjustedRate(current, delta) {
   const normalized = Number(current) || 1;
-  return playbackRates.find((rate) => rate > normalized + 0.01) ?? playbackRates[0];
+  return Math.max(0.5, Math.min(3, Math.round((normalized + delta) * 4) / 4));
 }
 
 function formatRate(value) {
@@ -676,6 +704,7 @@ function localizeError(message, state) {
     ["Volume command timed out.", "音量の変更が時間切れになりました。"],
     ["Mute command timed out.", "ミュート操作が時間切れになりました。"],
     ["Media command timed out.", "メディア操作が時間切れになりました。"],
+    ["The playing window could not be brought to the front.", "再生中の画面を特定できなかったため、前面に表示しませんでした。"],
   ]);
   if (exact.has(message)) {
     return exact.get(message);

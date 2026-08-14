@@ -5,6 +5,7 @@ struct PluginHostView: View {
     @ObservedObject var settings: AppSettings
     let isPreviewActive: Bool
     let onExternalDragStarted: () -> Void
+    let onClosePanel: () -> Void
 
     var body: some View {
         Group {
@@ -21,6 +22,9 @@ struct PluginHostView: View {
                         },
                         beginExternalDrag: {
                             onExternalDragStarted()
+                        },
+                        closePanel: {
+                            onClosePanel()
                         }
                     )
                 )

@@ -11,6 +11,7 @@ enum MediaVerificationCommand {
         let shouldTogglePlayback = CommandLine.arguments.contains("--toggle-playback")
         let shouldVerifyLivePreview = CommandLine.arguments.contains("--verify-live-preview")
         let shouldVerifyLivePreviewFallback = CommandLine.arguments.contains("--verify-live-preview-fallback")
+        let shouldFocusMediaSource = CommandLine.arguments.contains("--focus-media-source")
 
         Task<Void, Never> {
             let service = MediaRemoteService()
@@ -45,6 +46,16 @@ enum MediaVerificationCommand {
             if usesCommandStream {
                 service.stopNowPlayingStream()
             }
+            var focusVerified: Bool?
+            if shouldFocusMediaSource, initialState.hasMedia {
+                let focused = await service.focusBrowserMedia(
+                    mediaURLString: verificationMediaURLString,
+                    preferredTitle: verificationTitle
+                )
+                focusVerified = focused
+            } else if shouldFocusMediaSource {
+                focusVerified = false
+            }
             let state = await service.nowPlaying()
             let livePreviewResult = shouldVerifyLivePreview || shouldVerifyLivePreviewFallback
                 ? await ControlsMediaPreviewVerifier.verify(
@@ -57,11 +68,12 @@ enum MediaVerificationCommand {
                 && rateVerification.changeVerified
                 && rateVerification.restoreVerified
                 && (toggleVerified ?? true)
+                && (focusVerified ?? true)
                 && livePreviewResult.verified
             let displayedRate = rateVerification.readback ?? state.playbackRate
             let readbackSource = requestedRate == nil
                 ? "not_requested"
-                : (rateVerification.readback == nil ? "unavailable" : "browser_dom")
+                : (rateVerification.readback == nil ? "unavailable" : "browser_dom_or_media_remote")
             let restoredRateText = rateVerification.restored.map { String($0) } ?? ""
             let restoreVerifiedText = requestedRate == nil
                 ? "skipped"
@@ -82,6 +94,7 @@ enum MediaVerificationCommand {
                 "media_playback_rate_restore_verified=\(restoreVerifiedText)",
                 "media_toggle_verified=\(toggleVerified.map(String.init) ?? "skipped")",
                 "media_toggle_transport=\(usesCommandStream ? "adapter_stream" : "one_shot")",
+                "media_focus_verified=\(focusVerified.map(String.init) ?? "skipped")",
                 "media_has_artwork=\(state.artworkData != nil)",
                 "media_url=\(state.mediaURLString ?? "")",
                 "media_preview_window_id=\(state.previewWindowID.map(String.init) ?? "")",
@@ -165,7 +178,7 @@ enum MediaVerificationCommand {
         guard let requestedRate else {
             return .skipped
         }
-        guard let before = await service.browserPlaybackRate(
+        guard let before = await service.playbackRateReadback(
             mediaURLString: mediaURLString,
             preferredTitle: preferredTitle
         ) else {
@@ -179,7 +192,7 @@ enum MediaVerificationCommand {
             preferredTitle: preferredTitle
         )
         try? await Task.sleep(nanoseconds: 650_000_000)
-        let readback = await service.browserPlaybackRate(
+        let readback = await service.playbackRateReadback(
             mediaURLString: mediaURLString,
             preferredTitle: preferredTitle
         )
@@ -195,7 +208,7 @@ enum MediaVerificationCommand {
             preferredTitle: preferredTitle
         )
         try? await Task.sleep(nanoseconds: 650_000_000)
-        let restored = await service.browserPlaybackRate(
+        let restored = await service.playbackRateReadback(
             mediaURLString: mediaURLString,
             preferredTitle: preferredTitle
         )

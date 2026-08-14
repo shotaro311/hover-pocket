@@ -71,7 +71,15 @@ internal sealed class ControlsVerifier
         var volume = new FakeVolumeService();
         var brightness = new FakeBrightnessService();
         var media = new FakeMediaService();
-        using var controller = new ControlsBridgeController(volume, brightness, media, new FakePreviewService());
+        var sourceActivator = new FakeMediaSourceActivator();
+        using var controller = new ControlsBridgeController(
+            volume,
+            brightness,
+            media,
+            new FakePreviewService(),
+            sourceActivator);
+        var sourceOpened = false;
+        controller.MediaSourceOpened += (_, _) => sourceOpened = true;
 
         var initial = await controller.GetSnapshotAsync(CancellationToken.None);
         if (!initial.Volume.Available || initial.Volume.Value != 40 || initial.Displays.Count != 1 || !initial.Media.Available)
@@ -129,6 +137,12 @@ internal sealed class ControlsVerifier
             || !next.Media.Available)
         {
             _failures.Add("deterministic media commands did not return confirmed state");
+        }
+
+        _ = await controller.OpenMediaSourceAsync(CancellationToken.None);
+        if (!sourceOpened || sourceActivator.ActivationCount != 1 || sourceActivator.LastWindowHandle != new IntPtr(1234))
+        {
+            _failures.Add("deterministic media source activation did not target the resolved playing window");
         }
 
         await controller.SetActiveAsync(true);
@@ -475,7 +489,21 @@ internal sealed class ControlsVerifier
             true,
             true,
             "Browser",
-            null);
+            new IntPtr(1234));
+
+    private sealed class FakeMediaSourceActivator : IMediaSourceActivator
+    {
+        public int ActivationCount { get; private set; }
+
+        public nint? LastWindowHandle { get; private set; }
+
+        public bool TryActivate(nint? windowHandle)
+        {
+            ActivationCount++;
+            LastWindowHandle = windowHandle;
+            return windowHandle is not null;
+        }
+    }
 
     private sealed class FakeVolumeService : IVolumeEndpointService
     {

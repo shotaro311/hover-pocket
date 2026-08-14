@@ -1,0 +1,14 @@
+{
+  "base": "valid/pocket-surface.today-focus.json",
+  "mutation": {
+    "setPath": [
+      "root",
+      "children",
+      0
+    ],
+    "value": {
+      "type": "receipt",
+      "binding": "$receipt.status"
+    }
+  }
+}

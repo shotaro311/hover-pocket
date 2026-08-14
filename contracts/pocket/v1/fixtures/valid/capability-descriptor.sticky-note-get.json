@@ -1,0 +1,69 @@
+{
+  "$schema": "hoverpocket://schemas/capability-descriptor/v1",
+  "id": "sticky.note.get",
+  "version": 1,
+  "titleKey": "capability.sticky.note.get",
+  "effect": "private_read",
+  "permissions": [
+    "sticky.read"
+  ],
+  "approvalPolicy": "permission_grant",
+  "idempotency": "optional",
+  "availability": {
+    "macos": "available",
+    "windows": "available"
+  },
+  "limits": {
+    "timeoutMs": 3000,
+    "maxPayloadBytes": 4096,
+    "maxCallsPerMinute": 120
+  },
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "noteId"
+    ],
+    "properties": {
+      "noteId": {
+        "type": "string",
+        "maxLength": 128
+      }
+    },
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "noteId",
+      "title",
+      "body",
+      "updatedAt"
+    ],
+    "properties": {
+      "noteId": {
+        "type": "string",
+        "maxLength": 128
+      },
+      "title": {
+        "type": "string",
+        "maxLength": 120
+      },
+      "body": {
+        "type": "string",
+        "maxLength": 10000
+      },
+      "updatedAt": {
+        "type": "string",
+        "format": "date-time"
+      }
+    },
+    "additionalProperties": false
+  },
+  "readback": {
+    "strategy": "same_store_snapshot",
+    "match": [
+      "noteId",
+      "updatedAt"
+    ]
+  }
+}

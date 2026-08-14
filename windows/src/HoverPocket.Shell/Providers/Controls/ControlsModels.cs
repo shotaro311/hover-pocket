@@ -127,6 +127,11 @@ internal interface IMediaSessionService
         CancellationToken cancellationToken);
 }
 
+internal interface IMediaSourceActivator
+{
+    bool TryActivate(nint? windowHandle);
+}
+
 internal interface IMediaPreviewService
 {
     event EventHandler<MediaPreviewState>? StateChanged;

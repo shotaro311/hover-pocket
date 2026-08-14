@@ -1,0 +1,8 @@
+{
+  "base": "golden/audit-redaction.json",
+  "mutation": {
+    "addTopLevel": {
+      "rawTranscript": "[forbidden-fixture]"
+    }
+  }
+}

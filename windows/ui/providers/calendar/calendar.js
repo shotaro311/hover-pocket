@@ -43,6 +43,7 @@ export function renderCalendarProvider(context) {
   const connectionMessageEl = root.querySelector("[data-connection-message]");
   const authButton = root.querySelector("[data-auth]");
   const setupEl = root.querySelector("[data-setup]");
+  let initialLoadPromise = Promise.resolve();
   setDetailMode("browse");
 
   root.querySelector("[data-prev]").addEventListener("click", () => shiftMonth(-1));
@@ -65,6 +66,7 @@ export function renderCalendarProvider(context) {
   });
 
   root.__verifyEditorStability = async () => {
+    await initialLoadPromise;
     const base = cachedState ?? emptyState();
     const start = new Date(base.selectedDate ?? new Date());
     start.setHours(10, 0, 0, 0);
@@ -89,7 +91,7 @@ export function renderCalendarProvider(context) {
   };
 
   draw(cachedState ?? emptyState());
-  context.request("calendar.getState")
+  initialLoadPromise = context.request("calendar.getState")
     .then((state) => {
       if (disposed) {
         return;
@@ -314,7 +316,27 @@ export function renderCalendarProvider(context) {
     `;
     row.disabled = !event.calendarCanWrite;
     row.addEventListener("click", () => openEditor(event));
-    return row;
+    if (context.state.settings?.aiNativeEnabled !== true) {
+      return row;
+    }
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "hp-calendar-event-row";
+    const focus = iconButton("◎", localize(context.state, "この予定で25分集中", "Focus on this event for 25 minutes"));
+    focus.classList.add("hp-calendar-focus-action");
+    focus.disabled = !event.id;
+    focus.addEventListener("click", () => {
+      focus.disabled = true;
+      context.request("todayFocus.startFromCalendar", { eventRef: event.id })
+        .then((result) => {
+          focus.textContent = result?.status === "succeeded" ? "✓" : "◎";
+        })
+        .finally(() => {
+          focus.disabled = !event.id;
+        });
+    });
+    wrapper.append(row, focus);
+    return wrapper;
   }
 
   function openNewEditor(date) {

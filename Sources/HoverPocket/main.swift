@@ -19,8 +19,17 @@ if CommandLine.arguments.contains("--verify-clipboard") {
 if CommandLine.arguments.contains("--verify-timer") {
     TimerVerificationCommand.run()
 }
+if CommandLine.arguments.contains("--verify-capabilities") {
+    CapabilityVerificationCommand.run()
+}
+if CommandLine.arguments.contains("--verify-broker") {
+    CapabilityBrokerVerificationCommand.run()
+}
 if CommandLine.arguments.contains("--verify-panel-layout") {
     PanelLayoutVerificationCommand.run()
+}
+if CommandLine.arguments.contains("--verify-voice-lane-layout") {
+    VoiceLaneLayoutVerificationCommand.run()
 }
 if CommandLine.arguments.contains("--verify-weather") {
     WeatherVerificationCommand.run()

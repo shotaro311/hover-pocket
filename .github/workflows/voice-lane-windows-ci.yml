@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "windows/**"
+      - "contracts/pocket/v1/**"
       - ".github/workflows/voice-lane-windows-ci.yml"
       - "AGENTS.md"
       - "docs/plan/20260806-codex-voice-lane-plan.md"
@@ -28,16 +29,16 @@ jobs:
   windows-build-and-deterministic-verifiers:
     name: Windows build and deterministic verifiers
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "10.0.x"
 
@@ -117,13 +118,20 @@ jobs:
         run: |
           $project = ".\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj"
           $targets = @(
+            "shell",
+            "display",
+            "ui",
             "ui-model",
             "sticky",
+            "clipboard",
+            "controls",
             "calc",
             "timer",
             "calendar",
             "settings",
             "ailane",
+            "capabilities",
+            "broker",
             "voice-lane-layout",
             "codex-app-server-protocol",
             "codex-voice-coordinator",

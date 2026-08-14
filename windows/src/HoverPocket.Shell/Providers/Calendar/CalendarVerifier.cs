@@ -283,6 +283,11 @@ internal sealed class CalendarVerifier
             new DateTimeOffset(2026, 7, 6, 10, 0, 0, TimeSpan.Zero),
             IsAllDay: false).Normalized();
         using var create = GoogleCalendarApiClient.BuildCreateEventRequest(accessToken, draft);
+        const string deterministicEventId = "hp0123456789abcdef";
+        using var idempotentCreate = GoogleCalendarApiClient.BuildCreateEventRequest(
+            accessToken,
+            draft,
+            deterministicEventId);
         using var update = GoogleCalendarApiClient.BuildUpdateEventRequest(accessToken, draft with { EventId = "event-1" });
         using var delete = GoogleCalendarApiClient.BuildDeleteEventRequest(accessToken, "primary", "event-1");
 
@@ -344,6 +349,21 @@ internal sealed class CalendarVerifier
             || !start.TryGetProperty("dateTime", out _))
         {
             _failures.Add("request: event write body omitted expected fields");
+        }
+
+        if (document.RootElement.TryGetProperty("id", out _))
+        {
+            _failures.Add("request: ordinary event create unexpectedly included a custom id");
+        }
+
+        var idempotentCreateBody = idempotentCreate.Content is null
+            ? string.Empty
+            : await idempotentCreate.Content.ReadAsStringAsync().ConfigureAwait(false);
+        using var idempotentDocument = JsonDocument.Parse(idempotentCreateBody);
+        if (!idempotentDocument.RootElement.TryGetProperty("id", out var eventId)
+            || eventId.GetString() != deterministicEventId)
+        {
+            _failures.Add("request: idempotent event create omitted the deterministic id");
         }
 
         if (start.ValueKind == JsonValueKind.Object)

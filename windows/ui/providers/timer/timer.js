@@ -30,18 +30,14 @@ export function renderTimerProvider(context) {
     }
 
     window.clearInterval(tickHandle);
-    const sections = [runningSection(state)];
+    const sections = [runningSection(state), addSection(state)];
     if (state.pinnedPresets?.length) {
       sections.push(pinnedSection(state));
     }
-    sections.push(
-      entryCard("timer", state.draftTimer, state.canStartTimer),
-      entryCard("pomodoro", state.draftPomodoro, state.canStartTimer),
-    );
     root.querySelector("[data-stack]").replaceChildren(...sections);
 
-    tickHandle = window.setInterval(() => updateRemaining(root), 1000);
-    updateRemaining(root);
+    tickHandle = window.setInterval(() => updateClocks(root), 50);
+    updateClocks(root);
   }
 
   /**
@@ -52,13 +48,57 @@ export function renderTimerProvider(context) {
     if (state.activeAlert) {
       section.body.append(alertRow(state.activeAlert));
     }
-    if (!state.runningTimers?.length && !state.activeAlert) {
+    for (const stopwatch of state.runningStopwatches ?? []) {
+      section.body.append(stopwatchRow(stopwatch));
+    }
+    if (!state.runningTimers?.length && !state.runningStopwatches?.length && !state.activeAlert) {
       section.body.append(emptyRow(tx(context.state, "実行中のタイマーはありません", "No running timers")));
     } else {
       for (const timer of state.runningTimers ?? []) {
         section.body.append(runningRow(timer));
       }
     }
+    return section.root;
+  }
+
+  /**
+   * @param {any} state
+   */
+  function stopwatchRow(stopwatch) {
+    const row = document.createElement("div");
+    row.className = `hp-stopwatch-row is-${stopwatch.color}`;
+    row.dataset.stopwatch = "";
+    row.dataset.accumulated = String(stopwatch.accumulatedSeconds ?? 0);
+    row.dataset.startedAt = stopwatch.startedAtUtc ?? "";
+    const isRunning = Boolean(stopwatch.isRunning);
+    const elapsed = Number(stopwatch.elapsedSeconds) || 0;
+    row.innerHTML = `
+      ${typeIcon("stopwatch")}
+      <strong class="hp-timer-kind">${tx(context.state, "ストップウォッチ", "Stopwatch")}</strong>
+      <span class="hp-timer-divider" aria-hidden="true"></span>
+      <span class="hp-timer-name">${escapeHtml(stopwatch.title || tx(context.state, "名前なし", "Untitled"))}</span>
+      <b class="hp-stopwatch-time" data-stopwatch-elapsed>${stopwatchTimeText(elapsed)}</b>
+      <button type="button" data-stopwatch-toggle title="${isRunning ? tx(context.state, "一時停止", "Pause") : tx(context.state, "再開", "Resume")}" aria-label="${isRunning ? tx(context.state, "一時停止", "Pause") : tx(context.state, "再開", "Resume")}">${isRunning ? "Ⅱ" : "▶"}</button>
+      <button type="button" data-stopwatch-stop title="${tx(context.state, "停止", "Stop")}" aria-label="${tx(context.state, "停止", "Stop")}">■</button>
+    `;
+    row.querySelector("[data-stopwatch-toggle]").addEventListener("click", () => mutate(isRunning ? "timer.pauseStopwatch" : "timer.resumeStopwatch", { id: stopwatch.id }));
+    row.querySelector("[data-stopwatch-stop]").addEventListener("click", () => mutate("timer.stopStopwatch", { id: stopwatch.id }));
+    return row;
+  }
+
+  /**
+   * @param {any} state
+   */
+  function addSection(state) {
+    const section = sectionShell(tx(context.state, "新しく追加", "Add new"), "add");
+    const grid = document.createElement("div");
+    grid.className = "hp-timer-add-grid";
+    grid.append(
+      stopwatchEntryCard(state.draftStopwatch, state.canStartStopwatch),
+      entryCard("timer", state.draftTimer, state.canStartTimer),
+      entryCard("pomodoro", state.draftPomodoro, state.canStartTimer),
+    );
+    section.body.append(grid);
     return section.root;
   }
 
@@ -105,11 +145,12 @@ export function renderTimerProvider(context) {
     row.dataset.pausedRemaining = timer.pausedRemainingSeconds ?? "";
     row.dataset.phaseDuration = timer.phaseDurationSeconds;
     row.innerHTML = `
-      <div class="hp-timer-ring"><span data-progress></span></div>
-      <div class="hp-timer-main">
-        <strong>${escapeHtml(timer.title || (timer.isPomodoro ? tx(context.state, "ポモドーロ", "Pomodoro") : tx(context.state, "タイマー", "Timer")))}</strong>
-        <span><b data-remaining>${timeText(timer.remainingSeconds)}</b>${timer.isPomodoro ? ` · ${phaseText(timer, context.state)}` : ""}</span>
-      </div>
+      ${typeIcon(timer.isPomodoro ? "pomodoro" : "timer")}
+      <strong class="hp-timer-kind">${timer.isPomodoro ? tx(context.state, "ポモドーロ", "Pomodoro") : tx(context.state, "タイマー", "Timer")}</strong>
+      <span class="hp-timer-divider" aria-hidden="true"></span>
+      <span class="hp-timer-name">${escapeHtml(timer.title || tx(context.state, "名前なし", "Untitled"))}</span>
+      ${timer.isPomodoro ? `<span class="hp-timer-phase">${phaseText(timer, context.state)}</span>` : ""}
+      <b class="hp-timer-time" data-remaining>${timeText(timer.remainingSeconds)}</b>
       <button type="button" data-pause title="${timer.isPaused ? tx(context.state, "再開", "Resume") : tx(context.state, "一時停止", "Pause")}">${timer.isPaused ? "▶" : "Ⅱ"}</button>
       <button type="button" data-stop title="${tx(context.state, "停止", "Stop")}">■</button>
       <button type="button" data-pin title="${tx(context.state, "プリセットに保存", "Pin preset")}">${timer.pinnedPresetId ? "◆" : "◇"}</button>
@@ -118,6 +159,44 @@ export function renderTimerProvider(context) {
     row.querySelector("[data-stop]").addEventListener("click", () => mutate("timer.stop", { id: timer.id }));
     row.querySelector("[data-pin]").addEventListener("click", () => mutate("timer.togglePin", { id: timer.id }));
     return row;
+  }
+
+  /**
+   * @param {any} preset
+   * @param {boolean} canStart
+   */
+  function stopwatchEntryCard(preset, canStart) {
+    const form = document.createElement("div");
+    form.className = `hp-timer-entry is-stopwatch is-${preset.color}`;
+    form.innerHTML = `
+      <div class="hp-timer-entry-head">
+        ${colorMenu("stopwatch", preset.color)}
+        <strong>${tx(context.state, "ストップウォッチ", "Stopwatch")}</strong>
+      </div>
+      <input data-title type="text" maxlength="40" value="${escapeAttribute(preset.title ?? "")}" placeholder="${tx(context.state, "名前を設定（任意）", "Set a name (optional)")}">
+      <div class="hp-stopwatch-preview">00:00.00</div>
+      <div class="hp-timer-entry-actions">
+        <button class="hp-timer-reset" type="button" data-reset title="${tx(context.state, "リセット", "Reset")}">↺</button>
+        <button class="hp-timer-start" type="button" data-start title="${tx(context.state, "開始", "Start")}" ${canStart ? "" : "disabled"}><span aria-hidden="true">▶</span>${tx(context.state, "開始", "Start")}</button>
+      </div>
+    `;
+    bindColorMenu(form, (color) => updatePreset({ color }));
+    form.querySelector("[data-title]").addEventListener("input", (event) => {
+      preset.title = event.target.value;
+    });
+    form.querySelector("[data-title]").addEventListener("change", (event) => updatePreset({ title: event.target.value }));
+    form.querySelector("[data-reset]").addEventListener("click", () => mutate("timer.updateStopwatchDraft", { preset: { title: "", color: "blue" } }));
+    form.querySelector("[data-start]").addEventListener("click", () => mutate("timer.startStopwatch", {
+      preset: {
+        ...preset,
+        title: form.querySelector("[data-title]").value,
+      },
+    }));
+    return form;
+
+    function updatePreset(patch) {
+      mutate("timer.updateStopwatchDraft", { preset: { ...preset, ...patch } });
+    }
   }
 
   /**
@@ -143,22 +222,19 @@ export function renderTimerProvider(context) {
    * @param {boolean} canStart
    */
   function entryCard(kind, preset, canStart) {
-    const card = sectionShell(
-      kind === "pomodoro" ? tx(context.state, "ポモドーロ", "Pomodoro") : tx(context.state, "タイマー", "Timer"),
-      kind,
-    );
     const form = document.createElement("div");
-    form.className = `hp-timer-entry is-${preset.color}${kind === "pomodoro" ? " is-pomodoro" : ""}`;
+    form.className = `hp-timer-entry is-${kind} is-${preset.color}`;
     const hasDuration = kind === "pomodoro"
       ? Number(preset.workDurationSeconds) > 0
       : Number(preset.durationSeconds) > 0;
     const canStartPreset = canStart && hasDuration;
     form.innerHTML = `
       <div class="hp-timer-entry-head">
-        <div class="hp-timer-colors">${colors.map((color) => `<button class="is-${color}" type="button" data-color="${color}" aria-label="${colorName(color, context.state)}"></button>`).join("")}</div>
-        <input data-title type="text" maxlength="40" value="${escapeAttribute(preset.title ?? "")}" placeholder="${tx(context.state, "タイトル", "Title")}">
+        ${colorMenu(kind, preset.color)}
+        <strong>${kind === "pomodoro" ? tx(context.state, "ポモドーロ", "Pomodoro") : tx(context.state, "タイマー", "Timer")}</strong>
         <button type="button" data-sound title="${tx(context.state, "通知音", "Alert sound")}">${preset.soundEnabled ? "♪" : "×"}</button>
       </div>
+      <input data-title type="text" maxlength="40" value="${escapeAttribute(preset.title ?? "")}" placeholder="${tx(context.state, "名前を設定（任意）", "Set a name (optional)")}">
       <div class="hp-timer-entry-body">
         <div class="hp-timer-duration-grid">
           ${kind === "pomodoro"
@@ -171,14 +247,18 @@ export function renderTimerProvider(context) {
         </div>
       </div>
     `;
-    for (const colorButton of form.querySelectorAll("[data-color]")) {
-      colorButton.toggleAttribute("aria-pressed", colorButton.dataset.color === preset.color);
-      colorButton.addEventListener("click", () => updatePreset({ color: colorButton.dataset.color }));
-    }
+    bindColorMenu(form, (color) => updatePreset({ color }));
+    form.querySelector("[data-title]").addEventListener("input", (event) => {
+      preset.title = event.target.value;
+    });
     form.querySelector("[data-title]").addEventListener("change", (event) => updatePreset({ title: event.target.value }));
     form.querySelector("[data-sound]").addEventListener("click", () => updatePreset({ soundEnabled: !preset.soundEnabled }));
-    form.querySelector("[data-start]").addEventListener("click", () => mutate("timer.start", { preset }));
-    form.querySelector("[data-pin]").addEventListener("click", () => mutate("timer.pinPreset", { preset }));
+    form.querySelector("[data-start]").addEventListener("click", () => mutate("timer.start", {
+      preset: livePreset(),
+    }));
+    form.querySelector("[data-pin]").addEventListener("click", () => mutate("timer.pinPreset", {
+      preset: livePreset(),
+    }));
     for (const input of form.querySelectorAll("[data-duration-field]")) {
       input.addEventListener("change", () => updatePreset(readDurationPatch(form, kind)));
     }
@@ -186,8 +266,7 @@ export function renderTimerProvider(context) {
       rail.addEventListener("input", () => syncDurationFieldsFromRail(rail.closest("[data-duration]")));
       rail.addEventListener("change", () => updatePreset(readDurationPatch(form, kind)));
     }
-    card.body.append(form);
-    return card.root;
+    return form;
 
     /**
      * @param {Partial<any>} patch
@@ -195,6 +274,14 @@ export function renderTimerProvider(context) {
     function updatePreset(patch) {
       const next = { ...preset, ...patch };
       mutate("timer.updateDraft", { kind, preset: next });
+    }
+
+    function livePreset() {
+      return {
+        ...preset,
+        title: form.querySelector("[data-title]").value,
+        ...readDurationPatch(form, kind),
+      };
     }
   }
 
@@ -215,18 +302,53 @@ export function renderTimerProvider(context) {
   };
 }
 
-function updateRemaining(root) {
+function updateClocks(root) {
   const now = Date.now();
   for (const row of root.querySelectorAll(".hp-timer-running")) {
     const pausedRaw = row.dataset.pausedRemaining ?? "";
-    const phaseDuration = Number(row.dataset.phaseDuration) || 1;
     const end = Date.parse(row.dataset.endAt ?? "");
     const remaining = pausedRaw !== "" ? Number(pausedRaw) : Math.max(0, (end - now) / 1000);
     row.querySelector("[data-remaining]").textContent = timeText(remaining);
-    const progress = Math.max(0, Math.min(1, 1 - remaining / phaseDuration));
-    row.style.setProperty("--timer-progress", `${progress * 360}deg`);
-    row.querySelector("[data-progress]").textContent = `${Math.round(progress * 100)}%`;
   }
+
+  for (const stopwatch of root.querySelectorAll("[data-stopwatch]")) {
+    const accumulated = Math.max(0, Number(stopwatch.dataset.accumulated) || 0);
+    const startedAt = Date.parse(stopwatch.dataset.startedAt ?? "");
+    const elapsed = accumulated + (Number.isFinite(startedAt) ? Math.max(0, now - startedAt) / 1000 : 0);
+    stopwatch.querySelector("[data-stopwatch-elapsed]").textContent = stopwatchTimeText(elapsed);
+  }
+}
+
+function colorMenu(kind, selectedColor) {
+  return `
+    <div class="hp-timer-color-menu">
+      <button class="hp-timer-color-trigger" type="button" data-color-trigger aria-label="${colorName(selectedColor, null)}">
+        ${typeIcon(kind)}<span aria-hidden="true">⌄</span>
+      </button>
+      <div class="hp-timer-color-popover" data-color-popover hidden>
+        ${colors.map((color) => `<button class="is-${color}" type="button" data-color="${color}" aria-label="${colorName(color, null)}" ${color === selectedColor ? "aria-pressed=\"true\"" : ""}></button>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function bindColorMenu(root, onSelect) {
+  const popover = root.querySelector("[data-color-popover]");
+  root.querySelector("[data-color-trigger]")?.addEventListener("click", () => {
+    popover.hidden = !popover.hidden;
+  });
+  for (const button of root.querySelectorAll("[data-color]")) {
+    button.addEventListener("click", () => onSelect(button.dataset.color));
+  }
+}
+
+function typeIcon(kind) {
+  const symbols = {
+    stopwatch: "⏱",
+    timer: "⌛",
+    pomodoro: "◎",
+  };
+  return `<span class="hp-timer-type-icon is-${kind}" aria-hidden="true">${symbols[kind] ?? "◷"}</span>`;
 }
 
 function sectionShell(title, tone = "") {
@@ -337,6 +459,15 @@ function timeText(seconds) {
   const minutes = Math.floor((total % 3600) / 60);
   const secs = total % 60;
   return hours > 0 ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${pad(minutes)}:${pad(secs)}`;
+}
+
+function stopwatchTimeText(seconds) {
+  const totalHundredths = Math.max(0, Math.floor((Number(seconds) || 0) * 100));
+  const hours = Math.floor(totalHundredths / 360000);
+  const minutes = Math.floor((totalHundredths % 360000) / 6000);
+  const secs = Math.floor((totalHundredths % 6000) / 100);
+  const hundredths = totalHundredths % 100;
+  return `${pad(hours)}:${pad(minutes)}:${pad(secs)}.${pad(hundredths)}`;
 }
 
 function pad(value) {

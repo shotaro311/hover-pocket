@@ -34,6 +34,7 @@ final class HoverWindowController {
     private let logger = Logger(subsystem: "com.hoverpocket.app", category: "HoverWindowRecovery")
     private let settings: AppSettings
     private let menuStore: HoverMenuStore
+    private let voiceLaneModel: VoiceLaneViewModel
     private let settingsWindowController: SettingsWindowController
     private var settingsCancellables = Set<AnyCancellable>()
 
@@ -44,8 +45,10 @@ final class HoverWindowController {
     init() {
         let settings = AppSettings()
         let menuStore = HoverMenuStore(settings: settings)
+        let voiceLaneModel = VoiceLaneViewModel()
         self.settings = settings
         self.menuStore = menuStore
+        self.voiceLaneModel = voiceLaneModel
         self.settingsWindowController = SettingsWindowController(
             settings: settings,
             providerStore: menuStore.providerStore
@@ -87,6 +90,7 @@ final class HoverWindowController {
         guard let screen = activePreviewScreen ?? targetScreen() else { return }
 
         let frames = panelFrames(on: screen)
+        applyVoiceLaneLayout(frames)
 
         if previewWindow?.isVisible == true {
             previewWindow?.setFrame(frames.preview, display: true)
@@ -115,6 +119,7 @@ final class HoverWindowController {
         PanelGeometry.frames(
             on: screen,
             panelSize: settings.panelSize,
+            requestedVoiceLaneMode: settings.requestedVoiceLaneDisplayMode,
             showsNotchSideHandleArea: showsVisibleNotchSideHandle
         )
     }
@@ -165,13 +170,28 @@ final class HoverWindowController {
             onExit: { [weak self] in self?.scheduleClose() }
         )
 
-        let panel = makePanel(size: PanelLayout.previewSize(for: settings.panelSize), acceptsKeyboardFocus: true)
+        let initialFrames = targetScreen().map { panelFrames(on: $0) }
+        if let initialFrames {
+            applyVoiceLaneLayout(initialFrames)
+        } else {
+            voiceLaneModel.applyLayout(
+                requested: settings.requestedVoiceLaneDisplayMode,
+                resolved: settings.requestedVoiceLaneDisplayMode
+            )
+        }
+        let initialSize = initialFrames?.preview.size
+            ?? PanelLayout.panelTotalSize(
+                for: settings.panelSize,
+                voiceLaneMode: settings.requestedVoiceLaneDisplayMode
+            )
+        let panel = makePanel(size: initialSize, acceptsKeyboardFocus: true)
         panel.hasShadow = true
         let hostingController = NSHostingController(
             rootView: HoverPanelShell(
                 hoverState: hoverState,
                 store: menuStore,
                 settings: settings,
+                voiceLaneModel: voiceLaneModel,
                 onOpenSettings: { [weak self] in self?.showSettings() },
                 onClosePanel: { [weak self] in self?.closePreview() },
                 onExternalDragStarted: { [weak self] in self?.prepareForExternalDrag() }
@@ -263,6 +283,7 @@ final class HoverWindowController {
         guard let screen = requestedScreen ?? targetScreen(), let previewWindow else { return }
         activePreviewScreen = screen
         let frames = panelFrames(on: screen)
+        applyVoiceLaneLayout(frames)
         menuStore.providerStore.prepareForPanelOpen(isSecondaryDisplay: isSecondaryDisplay(screen))
         setProviderActive(true)
         menuStore.providerStore.refreshSelected(reason: .panelOpened)
@@ -682,6 +703,24 @@ final class HoverWindowController {
             }
             .store(in: &settingsCancellables)
 
+        settings.$codexVoiceEnabled
+            .dropFirst()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.resizePreviewForPanelSizeChange()
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        settings.$codexVoiceLayoutMode
+            .dropFirst()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.resizePreviewForPanelSizeChange()
+                }
+            }
+            .store(in: &settingsCancellables)
+
         settings.$showNotchSideHandleArea
             .dropFirst()
             .sink { [weak self] _ in
@@ -721,6 +760,7 @@ final class HoverWindowController {
         syncAccessWindows(orderFront: false)
         guard let screen = activePreviewScreen ?? previewWindow?.screen ?? targetScreen() else { return }
         let frames = panelFrames(on: screen)
+        applyVoiceLaneLayout(frames)
 
         guard let previewWindow else { return }
         guard previewWindow.isVisible else {
@@ -746,6 +786,13 @@ final class HoverWindowController {
             from: previewWindow.frame,
             to: frames.preview,
             token: token
+        )
+    }
+
+    private func applyVoiceLaneLayout(_ frames: PanelFrames) {
+        voiceLaneModel.applyLayout(
+            requested: settings.requestedVoiceLaneDisplayMode,
+            resolved: frames.voiceLaneMode
         )
     }
 
