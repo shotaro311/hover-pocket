@@ -58,7 +58,7 @@ internal sealed class CapabilityVerifier
             Require(handlers.Keys.Count == 10, "handler_count");
 
             await VerifyTimerAsync(handlers, clock, root);
-            await VerifyStickyAsync(handlers, stickyRoot);
+            await VerifyStickyAsync(handlers, stickyStore, stickyRoot);
             await VerifyCalendarAsync(handlers, calendar, now);
 
             try
@@ -172,7 +172,10 @@ internal sealed class CapabilityVerifier
         Require(blockedStore.RunningTimers.Count == 0, "timer_persistence_failure_rollback");
     }
 
-    private async Task VerifyStickyAsync(PocketCapabilityHandlerSet handlers, string root)
+    private async Task VerifyStickyAsync(
+        PocketCapabilityHandlerSet handlers,
+        StickyNotesStore stickyStore,
+        string root)
     {
         var longTitle = string.Concat(Enumerable.Repeat("🧑🏽‍💻", 20));
         Require(longTitle.EnumerateRunes().Count() == 80, "sticky_unicode_scalar_fixture");
