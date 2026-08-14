@@ -152,12 +152,15 @@ final class CalendarListCapabilityHandler: PocketCapabilityHandler {
         }
         let events = try await dataSource.listEvents(from: start, to: end)
             .prefix(128)
-            .map(Self.output)
+            .map { try Self.output($0) }
         return ["events": .array(events.map(CapabilityValue.object))]
     }
 
-    fileprivate static func output(_ event: CalendarCapabilityEvent) -> CapabilityObject {
-        [
+    fileprivate static func output(_ event: CalendarCapabilityEvent) throws -> CapabilityObject {
+        guard !event.eventRef.isEmpty, event.eventRef.unicodeScalars.count <= 256 else {
+            throw CapabilityHandlerError.readbackMismatch("calendar.eventRef")
+        }
+        return [
             "eventRef": .string(event.eventRef),
             "start": .string(CapabilityDateCodec.string(from: event.start)),
             "end": .string(CapabilityDateCodec.string(from: event.end)),
@@ -181,7 +184,10 @@ final class CalendarGetCapabilityHandler: PocketCapabilityHandler {
         guard let event = try await dataSource.getEvent(eventRef: eventRef) else {
             throw CapabilityHandlerError.unavailable("calendar_event")
         }
-        var output = CalendarListCapabilityHandler.output(event)
+        guard !event.eventID.isEmpty, event.eventID.unicodeScalars.count <= 256 else {
+            throw CapabilityHandlerError.readbackMismatch("calendar.eventId")
+        }
+        var output = try CalendarListCapabilityHandler.output(event)
         output["eventId"] = .string(event.eventID)
         return output
     }
@@ -230,11 +236,14 @@ final class CalendarCreateCapabilityHandler: PocketCapabilityHandler {
         guard let observed = try await dataSource.getEvent(eventRef: created.eventRef), observed == created else {
             throw CapabilityHandlerError.readbackMismatch("calendar.event.create")
         }
-        return Self.output(observed)
+        return try Self.output(observed)
     }
 
-    private static func output(_ event: CalendarCapabilityEvent) -> CapabilityObject {
-        var output = CalendarListCapabilityHandler.output(event)
+    private static func output(_ event: CalendarCapabilityEvent) throws -> CapabilityObject {
+        guard !event.eventID.isEmpty, event.eventID.unicodeScalars.count <= 256 else {
+            throw CapabilityHandlerError.readbackMismatch("calendar.eventId")
+        }
+        var output = try CalendarListCapabilityHandler.output(event)
         output["eventId"] = .string(event.eventID)
         return output
     }
@@ -412,13 +421,13 @@ final class StickyCapabilityHandler: PocketCapabilityHandler {
             } catch {
                 throw CapabilityHandlerError.unavailable("sticky_storage")
             }
-            return Self.readOutput(note)
+            return try Self.readOutput(note)
         case .get:
             let rawID = try arguments.requiredString("noteId", maxLength: 128)
             guard let id = UUID(uuidString: rawID), let note = store.note(id: id) else {
                 throw CapabilityHandlerError.unavailable("sticky_note")
             }
-            return Self.readOutput(note)
+            return try Self.readOutput(note)
         }
     }
 
@@ -440,7 +449,11 @@ final class StickyCapabilityHandler: PocketCapabilityHandler {
         ]
     }
 
-    private static func readOutput(_ note: StickyNoteItem) -> CapabilityObject {
+    private static func readOutput(_ note: StickyNoteItem) throws -> CapabilityObject {
+        guard note.title.unicodeScalars.count <= 120,
+              note.body.unicodeScalars.count <= 10_000 else {
+            throw CapabilityHandlerError.readbackMismatch("sticky.note")
+        }
         var output = mutationOutput(note)
         output["title"] = .string(note.title)
         output["body"] = .string(note.body)

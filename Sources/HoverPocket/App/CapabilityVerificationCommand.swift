@@ -236,6 +236,23 @@ enum CapabilityVerificationCommand {
         } catch CapabilityHandlerError.unavailable(let field) where field == "sticky_storage" {
         }
         try require(blockedStore.notes.isEmpty, "sticky_persistence_failure_rollback")
+
+        let oversized = restored.createNote()
+        _ = restored.updateNote(
+            id: oversized.id,
+            title: String(repeating: "T", count: 121),
+            body: String(repeating: "B", count: 10_001),
+            color: .yellow
+        )
+        let oversizedHandler = StickyCapabilityHandler(operation: .get, store: restored)
+        do {
+            _ = try await oversizedHandler.handle(
+                arguments: ["noteId": .string(oversized.id.uuidString)],
+                context: CapabilityHandlerContext()
+            )
+            throw VerificationFailure("sticky_oversized_readback_accepted")
+        } catch CapabilityHandlerError.readbackMismatch(let field) where field == "sticky.note" {
+        }
     }
 
     @MainActor
@@ -385,6 +402,39 @@ enum CapabilityVerificationCommand {
             )
             throw VerificationFailure("calendar_timeout_accepted")
         } catch is CancellationError {
+        }
+
+        dataSource.seed(CalendarCapabilityEvent(
+            eventRef: String(repeating: "r", count: 257),
+            eventID: "short",
+            safeTitle: "Oversized ref",
+            start: now.addingTimeInterval(2_000),
+            end: now.addingTimeInterval(2_100)
+        ))
+        do {
+            _ = try await handlers.invoke(
+                PocketCapabilityKey(id: "calendar.events.list", version: 1),
+                arguments: ["range": .string("today"), "timezone": .string("UTC")],
+                context: CapabilityHandlerContext(now: now)
+            )
+            throw VerificationFailure("calendar_oversized_event_ref_accepted")
+        } catch CapabilityHandlerError.readbackMismatch(let field) where field == "calendar.eventRef" {
+        }
+
+        dataSource.seed(CalendarCapabilityEvent(
+            eventRef: "primary:oversized-event-id",
+            eventID: String(repeating: "e", count: 257),
+            safeTitle: "Oversized ID",
+            start: now.addingTimeInterval(2_200),
+            end: now.addingTimeInterval(2_300)
+        ))
+        do {
+            _ = try await handlers.invoke(
+                PocketCapabilityKey(id: "calendar.event.get", version: 1),
+                arguments: ["eventRef": .string("primary:oversized-event-id")]
+            )
+            throw VerificationFailure("calendar_oversized_event_id_accepted")
+        } catch CapabilityHandlerError.readbackMismatch(let field) where field == "calendar.eventId" {
         }
     }
 

@@ -231,6 +231,21 @@ internal sealed class CapabilityVerifier
         {
         }
         Require(blockedStore.Notes.Count == 0, "sticky_persistence_failure_rollback");
+
+        var oversized = stickyStore.CreateNote();
+        stickyStore.UpdateNote(
+            oversized.Id,
+            "Oversized",
+            new string('B', 10_001),
+            StickyNoteColor.Yellow);
+        try
+        {
+            await handlers.InvokeAsync(CapabilityIds.StickyGet, Json(new { noteId = oversized.Id }));
+            _failures.Add("sticky_oversized_readback_accepted");
+        }
+        catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_READBACK_MISMATCH" && ex.Field == "sticky.body")
+        {
+        }
     }
 
     private async Task VerifyCalendarAsync(
@@ -331,6 +346,41 @@ internal sealed class CapabilityVerifier
             _failures.Add("calendar_timeout_accepted");
         }
         catch (TaskCanceledException)
+        {
+        }
+
+        calendar.Seed(new CalendarCapabilityEvent(
+            new string('r', 257),
+            "short",
+            "Oversized ref",
+            now.AddMinutes(40),
+            now.AddMinutes(41)));
+        try
+        {
+            await handlers.InvokeAsync(
+                CapabilityIds.CalendarList,
+                Json(new { range = "today", timezone = "UTC" }),
+                new CapabilityHandlerContext(null, now));
+            _failures.Add("calendar_oversized_event_ref_accepted");
+        }
+        catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_READBACK_MISMATCH" && ex.Field == "calendar.eventRef")
+        {
+        }
+
+        calendar.Seed(new CalendarCapabilityEvent(
+            "primary:oversized-event-id",
+            new string('e', 257),
+            "Oversized ID",
+            now.AddMinutes(42),
+            now.AddMinutes(43)));
+        try
+        {
+            await handlers.InvokeAsync(
+                CapabilityIds.CalendarGet,
+                Json(new { eventRef = "primary:oversized-event-id" }));
+            _failures.Add("calendar_oversized_event_id_accepted");
+        }
+        catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_READBACK_MISMATCH" && ex.Field == "calendar.eventId")
         {
         }
     }

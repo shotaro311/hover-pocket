@@ -151,7 +151,7 @@ internal sealed class CalendarListCapabilityHandler : IPocketCapabilityHandler
     {
         return new
         {
-            item.EventRef,
+            EventRef = CapabilityJson.OutputString(item.EventRef, 256, "calendar.eventRef"),
             start = item.Start.ToString("O", CultureInfo.InvariantCulture),
             end = item.End.ToString("O", CultureInfo.InvariantCulture),
             safeTitle = CapabilityJson.TruncateString(item.SafeTitle, 160)
@@ -187,8 +187,8 @@ internal sealed class CalendarGetCapabilityHandler : IPocketCapabilityHandler
             ?? throw new CapabilityHandlerException("CAPABILITY_UNAVAILABLE", "calendar_event");
         return CapabilityJson.From(new
         {
-            item.EventRef,
-            item.EventId,
+            EventRef = CapabilityJson.OutputString(item.EventRef, 256, "calendar.eventRef"),
+            EventId = CapabilityJson.OutputString(item.EventId, 256, "calendar.eventId"),
             start = item.Start.ToString("O", CultureInfo.InvariantCulture),
             end = item.End.ToString("O", CultureInfo.InvariantCulture),
             safeTitle = CapabilityJson.TruncateString(item.SafeTitle, 160)
@@ -239,8 +239,8 @@ internal sealed class CalendarCreateCapabilityHandler : IPocketCapabilityHandler
         }
         return CapabilityJson.From(new
         {
-            created.EventRef,
-            created.EventId,
+            EventRef = CapabilityJson.OutputString(created.EventRef, 256, "calendar.eventRef"),
+            EventId = CapabilityJson.OutputString(created.EventId, 256, "calendar.eventId"),
             start = created.Start.ToString("O", CultureInfo.InvariantCulture),
             end = created.End.ToString("O", CultureInfo.InvariantCulture),
             safeTitle = CapabilityJson.TruncateString(created.SafeTitle, 160)
@@ -456,8 +456,8 @@ internal sealed class StickyCapabilityHandler : IPocketCapabilityHandler
         return CapabilityJson.From(new
         {
             noteId = note.Id.ToString("D").ToLowerInvariant(),
-            note.Title,
-            note.Body,
+            Title = CapabilityJson.OutputString(note.Title, 120, "sticky.title", allowEmpty: true),
+            Body = CapabilityJson.OutputString(note.Body, 10_000, "sticky.body", allowEmpty: true),
             updatedAt = note.UpdatedAt.ToString("O", CultureInfo.InvariantCulture)
         });
     }
@@ -467,8 +467,8 @@ internal sealed class StickyCapabilityHandler : IPocketCapabilityHandler
         return CapabilityJson.From(new
         {
             noteId = note.Id.ToString("D").ToLowerInvariant(),
-            note.Title,
-            note.Body,
+            Title = CapabilityJson.OutputString(note.Title, 120, "sticky.title", allowEmpty: true),
+            Body = CapabilityJson.OutputString(note.Body, 10_000, "sticky.body", allowEmpty: true),
             updatedAt = note.UpdatedAt.ToString("O", CultureInfo.InvariantCulture)
         });
     }

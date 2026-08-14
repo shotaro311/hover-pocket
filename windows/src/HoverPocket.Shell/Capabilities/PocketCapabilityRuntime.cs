@@ -178,6 +178,19 @@ internal static class CapabilityJson
         return builder.ToString();
     }
 
+    public static string OutputString(
+        string value,
+        int maxLength,
+        string field,
+        bool allowEmpty = false)
+    {
+        if (ExceedsMaxLength(value, maxLength) || (!allowEmpty && value.Length == 0))
+        {
+            throw new CapabilityHandlerException("CAPABILITY_READBACK_MISMATCH", field);
+        }
+        return value;
+    }
+
     public static int RequiredInt(JsonElement arguments, string name, int minimum, int maximum)
     {
         if (arguments.ValueKind != JsonValueKind.Object
