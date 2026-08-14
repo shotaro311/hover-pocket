@@ -178,6 +178,7 @@ internal sealed class VoiceLaneLayoutVerifier
         var defaults = store.Load(providerIds);
         if (defaults.CodexVoiceEnabled
             || defaults.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Compact
+            || defaults.CodexVoiceAutoListen
             || defaults.EffectiveVoiceLaneLayout != VoiceLaneLayoutState.Disabled)
         {
             _failures.Add("new or upgraded settings did not keep Codex Voice disabled");
@@ -186,10 +187,12 @@ internal sealed class VoiceLaneLayoutVerifier
         var enabled = defaults.Clone();
         enabled.CodexVoiceEnabled = true;
         enabled.CodexVoiceLayoutMode = VoiceLaneLayoutMode.Expanded;
+        enabled.CodexVoiceAutoListen = true;
         store.Save(enabled);
         var reloaded = store.ReloadOrDefault(providerIds);
         if (!reloaded.CodexVoiceEnabled
             || reloaded.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Expanded
+            || !reloaded.CodexVoiceAutoListen
             || reloaded.EffectiveVoiceLaneLayout != VoiceLaneLayoutState.Expanded)
         {
             _failures.Add("Codex Voice settings did not round-trip when explicitly enabled");

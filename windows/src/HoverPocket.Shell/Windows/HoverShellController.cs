@@ -144,6 +144,7 @@ internal sealed class HoverShellController : IDisposable
     {
         AttachPanelWindow(_panel);
         ResyncDisplayLayout();
+        _ = _panelBridgeController.StartVoiceRuntimeAsync();
         _pollingTimer.Start();
         _healthTimer.Start();
     }

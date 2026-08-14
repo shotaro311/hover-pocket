@@ -52,6 +52,7 @@ internal sealed class UiModelVerifier
         settings.DisableTopEdgeInFullscreen = false;
         settings.CodexVoiceEnabled = true;
         settings.CodexVoiceLayoutMode = VoiceLaneLayoutMode.Expanded;
+        settings.CodexVoiceAutoListen = true;
         settings.ProviderOrder = ["sticky", "calculator", "timer"];
         settings.ProviderVisibility["timer"] = false;
         store.Save(settings);
@@ -70,7 +71,8 @@ internal sealed class UiModelVerifier
             || reloaded.ShowTopHandleSideArea
             || reloaded.DisableTopEdgeInFullscreen
             || !reloaded.CodexVoiceEnabled
-            || reloaded.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Expanded)
+            || reloaded.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Expanded
+            || !reloaded.CodexVoiceAutoListen)
         {
             _failures.Add("settings round-trip: scalar values were not preserved");
         }
@@ -96,7 +98,8 @@ internal sealed class UiModelVerifier
             || settings.ProviderVisibility.Values.Any(visible => !visible)
             || !settings.AutoCheckForUpdates
             || settings.CodexVoiceEnabled
-            || settings.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Compact)
+            || settings.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Compact
+            || settings.CodexVoiceAutoListen)
         {
             _failures.Add("settings corrupt fallback: defaults were not restored");
         }
@@ -145,11 +148,15 @@ internal sealed class UiModelVerifier
             """{"id":"3a","method":"settings.setCodexVoiceEnabled","params":{"enabled":true}}""");
         var voiceLayoutResponse = await dispatcher.ProcessRawMessageAsync(
             """{"id":"3b","method":"settings.setCodexVoiceLayout","params":{"layout":"expanded"}}""");
+        var voiceAutoListenResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"3c","method":"settings.setCodexVoiceAutoListen","params":{"enabled":true}}""");
         var voiceReloaded = store.Load(registry.ProviderIds);
         if (!voiceReloaded.CodexVoiceEnabled
             || voiceReloaded.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Expanded
+            || !voiceReloaded.CodexVoiceAutoListen
             || !ResponseContains(voiceEnabledResponse, "\"codexVoiceEnabled\":true")
-            || !ResponseContains(voiceLayoutResponse, "\"codexVoiceLayoutMode\":\"expanded\""))
+            || !ResponseContains(voiceLayoutResponse, "\"codexVoiceLayoutMode\":\"expanded\"")
+            || !ResponseContains(voiceAutoListenResponse, "\"codexVoiceAutoListen\":true"))
         {
             _failures.Add("bridge dispatcher: Voice Lane settings did not persist");
         }

@@ -10,6 +10,7 @@ using HoverPocket.Shell.Providers.Calculator;
 using HoverPocket.Shell.Providers.Calendar;
 using HoverPocket.Shell.Providers.Clipboard;
 using HoverPocket.Shell.Providers.Controls;
+using HoverPocket.Shell.Providers.CodexVoice;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
 using HoverPocket.Shell.Services;
@@ -33,6 +34,7 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly PocketCapabilityHandlerSet _capabilityHandlers;
     private readonly CapabilityBroker? _capabilityBroker;
     private readonly TodayFocusTextAdapter? _todayFocusTextAdapter;
+    private readonly CodexVoiceRuntimeHost _codexVoiceRuntime;
     private readonly List<BridgeDispatcher> _dispatchers = [];
     private readonly object _previewFrameSync = new();
     private string _selectedProviderId;
@@ -70,6 +72,8 @@ internal sealed class PanelBridgeController : IDisposable
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.Normalize(settings, providerRegistry.ProviderIds);
         _resolvedVoiceLaneLayout = CurrentSettings.EffectiveVoiceLaneLayout;
+        _codexVoiceRuntime = new CodexVoiceRuntimeHost(CurrentSettings.CodexVoiceEnabled);
+        _codexVoiceRuntime.SnapshotChanged += OnCodexVoiceSnapshotChanged;
         if (CurrentSettings.AiNativeEnabled)
         {
             try
@@ -150,6 +154,8 @@ internal sealed class PanelBridgeController : IDisposable
         dispatcher.Register("settings.setClipboardPrivateMode", SetClipboardPrivateModeAsync);
         dispatcher.Register("settings.setCodexVoiceEnabled", SetCodexVoiceEnabledAsync);
         dispatcher.Register("settings.setCodexVoiceLayout", SetCodexVoiceLayoutAsync);
+        dispatcher.Register("settings.setCodexVoiceAutoListen", SetCodexVoiceAutoListenAsync);
+        dispatcher.Register("codexVoice.setMuted", SetCodexVoiceMutedAsync);
         dispatcher.Register("settings.resetDefaults", ResetDefaultsAsync);
         dispatcher.Register("settings.resetPanelBinding", ResetPanelBindingAsync);
         dispatcher.Register("settings.openDataFolder", OpenDataFolderAsync);
@@ -187,6 +193,8 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.PreviewFrameArrived -= OnControlsPreviewFrameArrived;
         _controlsBridgeController.MediaSourceOpened -= OnControlsMediaSourceOpened;
         _controlsBridgeController.Dispose();
+        _codexVoiceRuntime.SnapshotChanged -= OnCodexVoiceSnapshotChanged;
+        _codexVoiceRuntime.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     public object BuildState()
@@ -203,6 +211,7 @@ internal sealed class PanelBridgeController : IDisposable
         var metrics = PanelSizeCatalog.Get(
             CurrentSettings.PanelSize,
             _resolvedVoiceLaneLayout);
+        var voiceSnapshot = _codexVoiceRuntime.Snapshot;
         return new
         {
             settings = new
@@ -225,6 +234,7 @@ internal sealed class PanelBridgeController : IDisposable
                 disableTopEdgeInFullscreen = CurrentSettings.DisableTopEdgeInFullscreen,
                 codexVoiceEnabled = CurrentSettings.CodexVoiceEnabled,
                 codexVoiceLayoutMode = ToWireValue(CurrentSettings.CodexVoiceLayoutMode),
+                codexVoiceAutoListen = CurrentSettings.CodexVoiceAutoListen,
                 providerOrder = CurrentSettings.ProviderOrder,
                 providerVisibility = CurrentSettings.ProviderVisibility
             },
@@ -281,12 +291,24 @@ internal sealed class PanelBridgeController : IDisposable
                 layout = ToWireValue(_resolvedVoiceLaneLayout),
                 expansionBlocked = CurrentSettings.EffectiveVoiceLaneLayout.IsExpanded
                     && !_resolvedVoiceLaneLayout.IsExpanded,
-                status = CurrentSettings.CodexVoiceEnabled ? "notConnected" : "disabled",
-                isSessionActive = false,
-                isMuted = true,
-                rootThreadId = (string?)null,
-                transcript = Array.Empty<object>(),
-                sessions = Array.Empty<object>()
+                status = ToWireValue(voiceSnapshot.Availability, voiceSnapshot.SessionStatus),
+                availability = ToWireValue(voiceSnapshot.Availability),
+                sessionStatus = ToWireValue(voiceSnapshot.SessionStatus),
+                isSessionActive = IsSessionActive(voiceSnapshot.SessionStatus),
+                isMuted = voiceSnapshot.IsMuted,
+                rootThreadId = voiceSnapshot.RootThreadId,
+                transcript = voiceSnapshot.Transcript.Select(entry => new
+                {
+                    threadId = entry.ThreadId,
+                    role = entry.Role,
+                    text = entry.Text,
+                    isComplete = entry.IsComplete,
+                    updatedAt = entry.UpdatedAt
+                }).ToArray(),
+                sessions = Array.Empty<object>(),
+                lastErrorCode = voiceSnapshot.LastErrorCode,
+                restartAttempt = voiceSnapshot.RestartAttempt,
+                availableVoiceCount = voiceSnapshot.VoiceCount
             }
         };
     }
@@ -562,6 +584,8 @@ internal sealed class PanelBridgeController : IDisposable
             SaveSettings(updated);
         }
 
+        await _codexVoiceRuntime.SetEnabledAsync(enabled, cancellationToken);
+
         return await PublishStateAsync(cancellationToken);
     }
 
@@ -577,6 +601,30 @@ internal sealed class PanelBridgeController : IDisposable
             SaveSettings(updated);
         }
 
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetCodexVoiceAutoListenAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        var enabled = ReadRequiredBool(parameters, "enabled");
+        if (CurrentSettings.CodexVoiceAutoListen != enabled)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.CodexVoiceAutoListen = enabled;
+            SaveSettings(updated);
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetCodexVoiceMutedAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        var muted = ReadRequiredBool(parameters, "muted");
+        _codexVoiceRuntime.SetMuted(muted);
         return await PublishStateAsync(cancellationToken);
     }
 
@@ -741,6 +789,11 @@ internal sealed class PanelBridgeController : IDisposable
         throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "timezone");
     }
 
+    public Task StartVoiceRuntimeAsync(CancellationToken cancellationToken = default)
+    {
+        return _codexVoiceRuntime.StartAsync(cancellationToken);
+    }
+
     public async Task NotifyPanelOpenedAsync()
     {
         _panelOpen = true;
@@ -757,6 +810,7 @@ internal sealed class PanelBridgeController : IDisposable
     public async Task NotifyPanelClosedAsync()
     {
         _panelOpen = false;
+        _codexVoiceRuntime.ClearTransientUiState();
         await SynchronizeControlsLifecycleAsync();
         await PostEventAsync("panel.closed", new { closed = true });
     }
@@ -818,6 +872,13 @@ internal sealed class PanelBridgeController : IDisposable
     {
         _ = sender;
         _ = PostEventOnUiThreadAsync("controls.stateChanged", snapshot);
+    }
+
+    private void OnCodexVoiceSnapshotChanged(object? sender, CodexVoiceSnapshot snapshot)
+    {
+        _ = sender;
+        _ = snapshot;
+        _ = PostEventOnUiThreadAsync("state.changed", BuildState());
     }
 
     private void OnControlsMediaSourceOpened(object? sender, EventArgs e)
@@ -1172,6 +1233,62 @@ internal sealed class PanelBridgeController : IDisposable
     private static string ToWireValue(VoiceLaneLayoutState layout)
     {
         return ToWireValue(layout.Mode);
+    }
+
+    private static string ToWireValue(CodexVoiceAvailability availability)
+    {
+        return availability switch
+        {
+            CodexVoiceAvailability.Disabled => "disabled",
+            CodexVoiceAvailability.Starting => "starting",
+            CodexVoiceAvailability.Ready => "ready",
+            CodexVoiceAvailability.SignedOut => "signedOut",
+            CodexVoiceAvailability.Unavailable => "unavailable",
+            CodexVoiceAvailability.Incompatible => "incompatible",
+            CodexVoiceAvailability.Blocked => "blocked",
+            _ => "faulted"
+        };
+    }
+
+    private static string ToWireValue(CodexVoiceSessionStatus status)
+    {
+        return status switch
+        {
+            CodexVoiceSessionStatus.RequestingPermission => "requestingPermission",
+            CodexVoiceSessionStatus.Negotiating => "negotiating",
+            CodexVoiceSessionStatus.Connecting => "connecting",
+            CodexVoiceSessionStatus.Connected => "connected",
+            CodexVoiceSessionStatus.Muted => "muted",
+            CodexVoiceSessionStatus.Reconnecting => "reconnecting",
+            CodexVoiceSessionStatus.Stopping => "stopping",
+            CodexVoiceSessionStatus.Closed => "closed",
+            CodexVoiceSessionStatus.RecoverableFailure => "recoverableFailure",
+            CodexVoiceSessionStatus.BlockedFailure => "blockedFailure",
+            _ => "idle"
+        };
+    }
+
+    private static string ToWireValue(
+        CodexVoiceAvailability availability,
+        CodexVoiceSessionStatus status)
+    {
+        if (availability != CodexVoiceAvailability.Ready)
+        {
+            return ToWireValue(availability);
+        }
+
+        return ToWireValue(status);
+    }
+
+    private static bool IsSessionActive(CodexVoiceSessionStatus status)
+    {
+        return status is CodexVoiceSessionStatus.RequestingPermission
+            or CodexVoiceSessionStatus.Negotiating
+            or CodexVoiceSessionStatus.Connecting
+            or CodexVoiceSessionStatus.Connected
+            or CodexVoiceSessionStatus.Muted
+            or CodexVoiceSessionStatus.Reconnecting
+            or CodexVoiceSessionStatus.Stopping;
     }
 
     private string ProviderText(ProviderDescriptor provider, ProviderTextKind kind)

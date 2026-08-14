@@ -39,6 +39,8 @@ internal sealed class UserSettings
 
     public VoiceLaneLayoutMode CodexVoiceLayoutMode { get; set; } = VoiceLaneLayoutMode.Compact;
 
+    public bool CodexVoiceAutoListen { get; set; }
+
     public List<string> ProviderOrder { get; set; } = [];
 
     public Dictionary<string, bool> ProviderVisibility { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -72,6 +74,7 @@ internal sealed class UserSettings
             DisableTopEdgeInFullscreen = DisableTopEdgeInFullscreen,
             CodexVoiceEnabled = CodexVoiceEnabled,
             CodexVoiceLayoutMode = CodexVoiceLayoutMode,
+            CodexVoiceAutoListen = CodexVoiceAutoListen,
             ProviderOrder = [.. ProviderOrder],
             ProviderVisibility = new Dictionary<string, bool>(ProviderVisibility, StringComparer.OrdinalIgnoreCase)
         };

@@ -91,6 +91,8 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
 
     public event EventHandler<CodexAppServerNotificationEventArgs>? NotificationReceived;
 
+    public event EventHandler<CodexAppServerTransportEndedEventArgs>? TransportEnded;
+
     public Func<CodexAppServerRequest, CancellationToken, Task<CodexAppServerReply>>? ServerRequestHandler { get; set; }
 
     public string ExecutablePath { get; }
@@ -352,9 +354,14 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             {
             }
 
-            FailPendingRequests(
-                terminalError
-                ?? new IOException($"codex app-server transport ended: {exitDescription}."));
+            var transportError = terminalError
+                ?? new IOException($"codex app-server transport ended: {exitDescription}.");
+            FailPendingRequests(transportError);
+            if (!cancellationToken.IsCancellationRequested
+                && Volatile.Read(ref _disposeState) == 0)
+            {
+                RaiseTransportEndedSafely(transportError.GetType().Name);
+            }
         }
     }
 
@@ -533,6 +540,28 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         }
     }
 
+    private void RaiseTransportEndedSafely(string errorCode)
+    {
+        var handlers = TransportEnded;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        var eventArgs = new CodexAppServerTransportEndedEventArgs(errorCode);
+        foreach (EventHandler<CodexAppServerTransportEndedEventArgs> handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler(this, eventArgs);
+            }
+            catch (Exception)
+            {
+                // Transport observers must never take down the protocol reader.
+            }
+        }
+    }
+
     private static bool TryReadMethod(JsonElement root, out string method)
     {
         method = string.Empty;
@@ -659,6 +688,11 @@ internal sealed class CodexAppServerNotificationEventArgs(
     public string Method { get; } = method;
 
     public JsonElement? Params { get; } = parameters;
+}
+
+internal sealed class CodexAppServerTransportEndedEventArgs(string errorCode) : EventArgs
+{
+    public string ErrorCode { get; } = errorCode;
 }
 
 internal sealed class CodexAppServerRpcException(

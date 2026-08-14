@@ -8,6 +8,7 @@ const textSizeEl = document.querySelector("[data-text-size]");
 const switchingEl = document.querySelector("[data-switching]");
 const voiceEnabledEl = document.querySelector("[data-voice-enabled]");
 const voiceLayoutEl = document.querySelector("[data-voice-layout]");
+const voiceAutoListenEl = document.querySelector("[data-voice-auto-listen]");
 const providerListEl = document.querySelector("[data-provider-list]");
 const providerSelectionEl = document.querySelector("[data-provider-selection]");
 const preferredProviderEl = document.querySelector("[data-preferred-provider]");
@@ -89,6 +90,8 @@ function render(state) {
   voiceLayoutEl.querySelectorAll("button").forEach((button) => {
     button.disabled = !state.settings.codexVoiceEnabled;
   });
+  voiceAutoListenEl.checked = Boolean(state.settings.codexVoiceAutoListen);
+  voiceAutoListenEl.disabled = !state.settings.codexVoiceEnabled;
 
   renderProviders(state);
   renderProviderSelection(state);
@@ -206,6 +209,10 @@ clipboardPrivateEl.addEventListener("change", () => {
 
 voiceEnabledEl.addEventListener("change", () => {
   update("settings.setCodexVoiceEnabled", { enabled: voiceEnabledEl.checked });
+});
+
+voiceAutoListenEl.addEventListener("change", () => {
+  update("settings.setCodexVoiceAutoListen", { enabled: voiceAutoListenEl.checked });
 });
 
 preferredProviderEl.addEventListener("change", () => {

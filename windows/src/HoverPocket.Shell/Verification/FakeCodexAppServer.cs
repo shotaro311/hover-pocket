@@ -6,6 +6,7 @@ namespace HoverPocket.Shell.Verification;
 internal static class FakeCodexAppServer
 {
     private const string EnableEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_APP_SERVER";
+    private const string SignedOutEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_SIGNED_OUT";
 
     public static bool ShouldRun(IReadOnlyList<string> args)
     {
@@ -36,6 +37,10 @@ internal static class FakeCodexAppServer
 
         var rateLimitAttempts = 0;
         var serverReplyReceived = false;
+        var signedOut = string.Equals(
+            Environment.GetEnvironmentVariable(SignedOutEnvironmentVariable),
+            "1",
+            StringComparison.Ordinal);
         string? line;
         while ((line = input.ReadLine()) is not null)
         {
@@ -91,6 +96,40 @@ internal static class FakeCodexAppServer
                     });
                     break;
                 case "initialized":
+                    break;
+                case "account/read":
+                    Write(output, new
+                    {
+                        id = idElement.Clone(),
+                        result = new
+                        {
+                            account = signedOut
+                                ? null
+                                : (object)new
+                                {
+                                    type = "chatgpt",
+                                    email = (string?)null,
+                                    planType = "pro"
+                                },
+                            requiresOpenaiAuth = true
+                        }
+                    });
+                    break;
+                case "thread/realtime/listVoices":
+                    Write(output, new
+                    {
+                        id = idElement.Clone(),
+                        result = new
+                        {
+                            voices = new
+                            {
+                                defaultV1 = "verse",
+                                defaultV2 = "verse",
+                                v1 = new[] { "verse" },
+                                v2 = new[] { "verse" }
+                            }
+                        }
+                    });
                     break;
                 case "fake/emitNotification":
                     Write(output, new
@@ -155,6 +194,13 @@ internal static class FakeCodexAppServer
                         result = new { emitted = true }
                     });
                     break;
+                case "fake/exit":
+                    Write(output, new
+                    {
+                        id = idElement.Clone(),
+                        result = new { exiting = true }
+                    });
+                    return 0;
                 default:
                     if (hasId)
                     {

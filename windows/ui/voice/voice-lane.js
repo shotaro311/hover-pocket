@@ -42,6 +42,9 @@ export function renderVoiceLane({ container, state, request }) {
   );
   const mute = iconButton(voice.isMuted ? "◉" : "◎", "hp-voice-icon-button", t("voiceMute"));
   mute.disabled = !voice.isSessionActive;
+  mute.addEventListener("click", () => {
+    request("codexVoice.setMuted", { muted: !voice.isMuted });
+  });
   const toggle = iconButton(layout === "expanded" ? "⌄" : "⌃", "hp-voice-icon-button", layout === "expanded"
     ? t("voiceCollapse")
     : t("voiceExpand"));
@@ -115,6 +118,24 @@ function statusText(voice) {
   }
   if (voice.status === "listening") {
     return t("voiceListening");
+  }
+  if (voice.availability === "starting") {
+    return t("voiceStarting");
+  }
+  if (voice.availability === "ready") {
+    return t("voiceReady");
+  }
+  if (voice.availability === "signedOut") {
+    return t("voiceSignedOut");
+  }
+  if (voice.availability === "unavailable") {
+    return t("voiceUnavailable");
+  }
+  if (voice.availability === "incompatible" || voice.availability === "blocked") {
+    return t("voiceIncompatible");
+  }
+  if (voice.sessionStatus === "reconnecting" || voice.availability === "faulted") {
+    return t("voiceReconnecting");
   }
   return t("voiceNotConnected");
 }

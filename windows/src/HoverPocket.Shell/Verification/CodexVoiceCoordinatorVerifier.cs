@@ -6,18 +6,20 @@ namespace HoverPocket.Shell.Verification;
 internal sealed class CodexVoiceCoordinatorVerifier
 {
     private const string FakeServerEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_APP_SERVER";
+    private const string FakeSignedOutEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_SIGNED_OUT";
     private readonly List<string> _failures = [];
 
     public async Task<int> RunAsync(CancellationToken cancellationToken = default)
     {
         await VerifyFeatureDisabledDoesNotStartCodexAsync(cancellationToken);
+        await VerifySignedOutFailsClosedAsync(cancellationToken);
         await VerifyCoordinatorOutlivesTransientUiAsync(cancellationToken);
         VerifyTranscriptBounds();
 
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
-                "PASS codex-voice-coordinator verify: disabled no-start, app-server ownership, transcript continuity, UI detach/reconnect, bounded memory");
+                "PASS codex-voice-coordinator verify: disabled no-start, account/capability gate, app-server ownership, transcript continuity, UI detach/reconnect, bounded crash restart, bounded memory");
             return 0;
         }
 
@@ -28,6 +30,25 @@ internal sealed class CodexVoiceCoordinatorVerifier
         }
 
         return 1;
+    }
+
+    private async Task VerifySignedOutFailsClosedAsync(CancellationToken cancellationToken)
+    {
+        await using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: StartFakeSignedOutServerClientAsync,
+            restartDelays: [TimeSpan.Zero]);
+
+        await coordinator.InitializeAsync(cancellationToken);
+        var snapshot = coordinator.Snapshot;
+        if (snapshot.Availability != CodexVoiceAvailability.SignedOut
+            || snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure
+            || snapshot.LastErrorCode != "signed_out"
+            || snapshot.AppServerProcessId is not null
+            || snapshot.VoiceCount != 0)
+        {
+            _failures.Add("signed-out account did not fail closed before realtime became ready");
+        }
     }
 
     private async Task VerifyFeatureDisabledDoesNotStartCodexAsync(
@@ -67,7 +88,8 @@ internal sealed class CodexVoiceCoordinatorVerifier
         int? appServerProcessId = null;
         await using (var coordinator = new CodexVoiceCoordinator(
             featureEnabled: true,
-            clientFactory: StartFakeServerClientAsync))
+            clientFactory: StartFakeServerClientAsync,
+            restartDelays: [TimeSpan.Zero, TimeSpan.FromMilliseconds(20)]))
         {
             coordinator.SnapshotChanged += (_, _) => notifications++;
             coordinator.SnapshotChanged += (_, _) =>
@@ -77,9 +99,10 @@ internal sealed class CodexVoiceCoordinatorVerifier
             var initialized = coordinator.Snapshot;
             appServerProcessId = initialized.AppServerProcessId;
             if (initialized.Availability != CodexVoiceAvailability.Ready
-                || appServerProcessId is null)
+                || appServerProcessId is null
+                || initialized.VoiceCount != 1)
             {
-                _failures.Add("enabled coordinator did not own a ready app-server process");
+                _failures.Add("enabled coordinator did not pass account/voice gates or own a ready app-server process");
                 return;
             }
 
@@ -131,6 +154,26 @@ internal sealed class CodexVoiceCoordinatorVerifier
                 _failures.Add("transport reattachment did not restore the logical session");
             }
 
+            await coordinator.TriggerTransportExitForVerifyAsync(timeout.Token);
+            var restarted = await WaitForSnapshotAsync(
+                coordinator,
+                snapshot => snapshot.Availability == CodexVoiceAvailability.Ready
+                    && snapshot.AppServerProcessId is { } restartedProcessId
+                    && restartedProcessId != appServerProcessId,
+                timeout.Token);
+            if (restarted is null
+                || restarted.RestartAttempt != 1
+                || restarted.RootThreadId != "root-thread"
+                || restarted.SessionStatus != CodexVoiceSessionStatus.Reconnecting
+                || restarted.VoiceCount != 1)
+            {
+                _failures.Add("app-server crash did not recover with bounded restart while preserving root state");
+            }
+            else
+            {
+                appServerProcessId = restarted.AppServerProcessId;
+            }
+
             if (notifications == 0)
             {
                 _failures.Add("snapshot changes were not published");
@@ -141,6 +184,26 @@ internal sealed class CodexVoiceCoordinatorVerifier
         {
             _failures.Add("coordinator disposal left the app-server process running");
         }
+    }
+
+    private static async Task<CodexVoiceSnapshot?> WaitForSnapshotAsync(
+        CodexVoiceCoordinator coordinator,
+        Func<CodexVoiceSnapshot, bool> predicate,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var snapshot = coordinator.Snapshot;
+            if (predicate(snapshot))
+            {
+                return snapshot;
+            }
+
+            await Task.Delay(25, cancellationToken);
+        }
+
+        return null;
     }
 
     private void VerifyTranscriptBounds()
@@ -193,6 +256,21 @@ internal sealed class CodexVoiceCoordinatorVerifier
         finally
         {
             Environment.SetEnvironmentVariable(FakeServerEnvironmentVariable, previousValue);
+        }
+    }
+
+    private static async Task<CodexAppServerClient> StartFakeSignedOutServerClientAsync(
+        CancellationToken cancellationToken)
+    {
+        var previousValue = Environment.GetEnvironmentVariable(FakeSignedOutEnvironmentVariable);
+        Environment.SetEnvironmentVariable(FakeSignedOutEnvironmentVariable, "1");
+        try
+        {
+            return await StartFakeServerClientAsync(cancellationToken);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(FakeSignedOutEnvironmentVariable, previousValue);
         }
     }
 

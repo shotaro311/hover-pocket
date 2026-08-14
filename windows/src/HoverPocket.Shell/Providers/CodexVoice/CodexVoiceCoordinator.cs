@@ -7,20 +7,26 @@ internal enum CodexVoiceAvailability
     Disabled,
     Starting,
     Ready,
+    SignedOut,
     Unavailable,
     Incompatible,
-    Faulted
+    Faulted,
+    Blocked
 }
 
 internal enum CodexVoiceSessionStatus
 {
     Idle,
+    RequestingPermission,
+    Negotiating,
     Connecting,
     Connected,
     Muted,
     Reconnecting,
+    Stopping,
     Closed,
-    Failed
+    RecoverableFailure,
+    BlockedFailure
 }
 
 internal sealed record CodexVoiceTranscriptEntry(
@@ -39,19 +45,30 @@ internal sealed record CodexVoiceSnapshot(
     bool IsMuted,
     IReadOnlyList<CodexVoiceTranscriptEntry> Transcript,
     string? LastErrorCode,
-    int? AppServerProcessId);
+    int? AppServerProcessId,
+    int RestartAttempt,
+    int VoiceCount);
 
 internal sealed class CodexVoiceCoordinator : IAsyncDisposable
 {
     private const int DefaultTranscriptEntryLimit = 120;
     private const int DefaultTranscriptCharacterLimit = 32_000;
+    private static readonly IReadOnlyList<TimeSpan> DefaultRestartDelays =
+    [
+        TimeSpan.Zero,
+        TimeSpan.FromMilliseconds(450),
+        TimeSpan.FromMilliseconds(1400)
+    ];
 
     private readonly bool _featureEnabled;
     private readonly Func<CancellationToken, Task<CodexAppServerClient>> _clientFactory;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private readonly object _stateSync = new();
     private readonly CodexVoiceTranscriptBuffer _transcript;
+    private readonly IReadOnlyList<TimeSpan> _restartDelays;
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
     private CodexAppServerClient? _client;
+    private Task? _restartTask;
     private CodexVoiceAvailability _availability;
     private CodexVoiceSessionStatus _sessionStatus = CodexVoiceSessionStatus.Idle;
     private string? _rootThreadId;
@@ -59,13 +76,16 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
     private bool _isMuted = true;
     private string? _lastErrorCode;
     private int? _appServerProcessId;
+    private int _restartAttempt;
+    private int _voiceCount;
     private int _disposeState;
 
     public CodexVoiceCoordinator(
         bool featureEnabled,
         Func<CancellationToken, Task<CodexAppServerClient>>? clientFactory = null,
         int transcriptEntryLimit = DefaultTranscriptEntryLimit,
-        int transcriptCharacterLimit = DefaultTranscriptCharacterLimit)
+        int transcriptCharacterLimit = DefaultTranscriptCharacterLimit,
+        IReadOnlyList<TimeSpan>? restartDelays = null)
     {
         _featureEnabled = featureEnabled;
         _availability = featureEnabled
@@ -76,6 +96,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         _transcript = new CodexVoiceTranscriptBuffer(
             transcriptEntryLimit,
             transcriptCharacterLimit);
+        _restartDelays = restartDelays ?? DefaultRestartDelays;
     }
 
     public event EventHandler<CodexVoiceSnapshot>? SnapshotChanged;
@@ -115,32 +136,38 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                 lastErrorCode: null);
             try
             {
-                var client = await _clientFactory(cancellationToken);
-                client.NotificationReceived += OnAppServerNotification;
-                client.ServerRequestHandler = HandleServerRequestAsync;
-                _client = client;
-                lock (_stateSync)
-                {
-                    _appServerProcessId = client.ProcessId;
-                }
-
+                await StartClientAndValidateAsync(cancellationToken);
                 UpdateState(
                     availability: CodexVoiceAvailability.Ready,
                     sessionStatus: CodexVoiceSessionStatus.Idle,
                     lastErrorCode: null);
             }
+            catch (CodexVoiceSignedOutException)
+            {
+                UpdateState(
+                    availability: CodexVoiceAvailability.SignedOut,
+                    sessionStatus: CodexVoiceSessionStatus.BlockedFailure,
+                    lastErrorCode: "signed_out");
+            }
+            catch (CodexVoiceCompatibilityException exception)
+            {
+                UpdateState(
+                    availability: CodexVoiceAvailability.Incompatible,
+                    sessionStatus: CodexVoiceSessionStatus.BlockedFailure,
+                    lastErrorCode: exception.ErrorCode);
+            }
             catch (FileNotFoundException)
             {
                 UpdateState(
                     availability: CodexVoiceAvailability.Unavailable,
-                    sessionStatus: CodexVoiceSessionStatus.Failed,
+                    sessionStatus: CodexVoiceSessionStatus.BlockedFailure,
                     lastErrorCode: "codex_not_found");
             }
             catch (CodexAppServerRpcException exception)
             {
                 UpdateState(
                     availability: CodexVoiceAvailability.Incompatible,
-                    sessionStatus: CodexVoiceSessionStatus.Failed,
+                    sessionStatus: CodexVoiceSessionStatus.BlockedFailure,
                     lastErrorCode: $"rpc_{exception.Code}");
             }
             catch (Exception exception) when (exception is IOException
@@ -150,7 +177,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             {
                 UpdateState(
                     availability: CodexVoiceAvailability.Faulted,
-                    sessionStatus: CodexVoiceSessionStatus.Failed,
+                    sessionStatus: CodexVoiceSessionStatus.RecoverableFailure,
                     lastErrorCode: exception.GetType().Name);
             }
         }
@@ -158,6 +185,88 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         {
             _lifecycleGate.Release();
         }
+    }
+
+    private async Task StartClientAndValidateAsync(CancellationToken cancellationToken)
+    {
+        var client = await _clientFactory(cancellationToken);
+        try
+        {
+            client.NotificationReceived += OnAppServerNotification;
+            client.TransportEnded += OnAppServerTransportEnded;
+            client.ServerRequestHandler = HandleServerRequestAsync;
+
+            var account = await client.SendRequestAsync(
+                "account/read",
+                cancellationToken: cancellationToken);
+            if (RequiresOpenAiLogin(account) && !HasAccount(account))
+            {
+                throw new CodexVoiceSignedOutException();
+            }
+
+            var voices = await client.SendRequestAsync(
+                "thread/realtime/listVoices",
+                cancellationToken: cancellationToken);
+            var voiceCount = CountVoices(voices);
+            if (voiceCount < 1)
+            {
+                throw new CodexVoiceCompatibilityException("realtime_voices_unavailable");
+            }
+
+            _client = client;
+            lock (_stateSync)
+            {
+                _appServerProcessId = client.ProcessId;
+                _voiceCount = voiceCount;
+            }
+        }
+        catch
+        {
+            client.NotificationReceived -= OnAppServerNotification;
+            client.TransportEnded -= OnAppServerTransportEnded;
+            client.ServerRequestHandler = null;
+            await client.DisposeAsync();
+            throw;
+        }
+    }
+
+    public void MarkSessionRequestingPermission()
+    {
+        SetSessionStatus(CodexVoiceSessionStatus.RequestingPermission);
+    }
+
+    public void MarkSessionNegotiating(string? rootThreadId = null)
+    {
+        ThrowIfDisposed();
+        lock (_stateSync)
+        {
+            if (!string.IsNullOrWhiteSpace(rootThreadId))
+            {
+                _rootThreadId = rootThreadId;
+            }
+
+            _sessionStatus = CodexVoiceSessionStatus.Negotiating;
+            _lastErrorCode = null;
+        }
+
+        PublishSnapshot();
+    }
+
+    public void MarkSessionStopping()
+    {
+        SetSessionStatus(CodexVoiceSessionStatus.Stopping);
+    }
+
+    private void SetSessionStatus(CodexVoiceSessionStatus status)
+    {
+        ThrowIfDisposed();
+        lock (_stateSync)
+        {
+            _sessionStatus = status;
+            _lastErrorCode = null;
+        }
+
+        PublishSnapshot();
     }
 
     public void MarkSessionConnecting(string? rootThreadId = null)
@@ -231,7 +340,9 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             _isMuted = true;
             if (_sessionStatus is CodexVoiceSessionStatus.Connected
                 or CodexVoiceSessionStatus.Muted
-                or CodexVoiceSessionStatus.Connecting)
+                or CodexVoiceSessionStatus.Connecting
+                or CodexVoiceSessionStatus.Negotiating
+                or CodexVoiceSessionStatus.RequestingPermission)
             {
                 _sessionStatus = CodexVoiceSessionStatus.Reconnecting;
             }
@@ -250,12 +361,171 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         ProcessNotification(method, element);
     }
 
+    internal async Task TriggerTransportExitForVerifyAsync(
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        var client = _client
+            ?? throw new InvalidOperationException("Codex app-server is not connected.");
+        _ = await client.SendRequestAsync(
+            "fake/exit",
+            cancellationToken: cancellationToken);
+    }
+
     private void OnAppServerNotification(
         object? sender,
         CodexAppServerNotificationEventArgs eventArgs)
     {
         _ = sender;
         ProcessNotification(eventArgs.Method, eventArgs.Params);
+    }
+
+    private void OnAppServerTransportEnded(
+        object? sender,
+        CodexAppServerTransportEndedEventArgs eventArgs)
+    {
+        if (Volatile.Read(ref _disposeState) != 0
+            || sender is not CodexAppServerClient failedClient
+            || !ReferenceEquals(failedClient, _client))
+        {
+            return;
+        }
+
+        lock (_stateSync)
+        {
+            _availability = CodexVoiceAvailability.Faulted;
+            _sessionStatus = CodexVoiceSessionStatus.RecoverableFailure;
+            _transportAttached = false;
+            _isMuted = true;
+            _appServerProcessId = null;
+            _lastErrorCode = $"transport_{eventArgs.ErrorCode}";
+            if (_restartTask is { IsCompleted: false })
+            {
+                return;
+            }
+
+            _restartTask = Task.Run(
+                () => RestartAfterTransportEndedAsync(
+                    failedClient,
+                    _lifetimeCancellation.Token));
+        }
+
+        PublishSnapshot();
+    }
+
+    private async Task RestartAfterTransportEndedAsync(
+        CodexAppServerClient failedClient,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _lifecycleGate.WaitAsync(cancellationToken);
+            try
+            {
+                if (!ReferenceEquals(_client, failedClient))
+                {
+                    return;
+                }
+
+                _client = null;
+                failedClient.NotificationReceived -= OnAppServerNotification;
+                failedClient.TransportEnded -= OnAppServerTransportEnded;
+                failedClient.ServerRequestHandler = null;
+                await failedClient.DisposeAsync();
+
+                for (var index = 0; index < _restartDelays.Count; index++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var attempt = index + 1;
+                    lock (_stateSync)
+                    {
+                        _restartAttempt = attempt;
+                        _availability = CodexVoiceAvailability.Starting;
+                        _sessionStatus = CodexVoiceSessionStatus.Reconnecting;
+                        _lastErrorCode = null;
+                    }
+                    PublishSnapshot();
+
+                    var delay = _restartDelays[index];
+                    if (delay > TimeSpan.Zero)
+                    {
+                        await Task.Delay(delay, cancellationToken);
+                    }
+
+                    try
+                    {
+                        await StartClientAndValidateAsync(cancellationToken);
+                        lock (_stateSync)
+                        {
+                            _availability = CodexVoiceAvailability.Ready;
+                            _sessionStatus = string.IsNullOrWhiteSpace(_rootThreadId)
+                                ? CodexVoiceSessionStatus.Idle
+                                : CodexVoiceSessionStatus.Reconnecting;
+                            _lastErrorCode = null;
+                        }
+                        PublishSnapshot();
+                        return;
+                    }
+                    catch (CodexVoiceSignedOutException)
+                    {
+                        UpdateState(
+                            CodexVoiceAvailability.SignedOut,
+                            CodexVoiceSessionStatus.BlockedFailure,
+                            "signed_out");
+                        return;
+                    }
+                    catch (CodexVoiceCompatibilityException exception)
+                    {
+                        UpdateState(
+                            CodexVoiceAvailability.Incompatible,
+                            CodexVoiceSessionStatus.BlockedFailure,
+                            exception.ErrorCode);
+                        return;
+                    }
+                    catch (CodexAppServerRpcException exception)
+                    {
+                        UpdateState(
+                            CodexVoiceAvailability.Incompatible,
+                            CodexVoiceSessionStatus.BlockedFailure,
+                            $"rpc_{exception.Code}");
+                        return;
+                    }
+                    catch (FileNotFoundException)
+                    {
+                        UpdateState(
+                            CodexVoiceAvailability.Unavailable,
+                            CodexVoiceSessionStatus.BlockedFailure,
+                            "codex_not_found");
+                        return;
+                    }
+                    catch (Exception exception) when (exception is IOException
+                        or InvalidOperationException
+                        or TimeoutException
+                        or System.ComponentModel.Win32Exception)
+                    {
+                        lock (_stateSync)
+                        {
+                            _availability = CodexVoiceAvailability.Faulted;
+                            _sessionStatus = CodexVoiceSessionStatus.RecoverableFailure;
+                            _lastErrorCode = exception.GetType().Name;
+                        }
+                        PublishSnapshot();
+                    }
+                }
+
+                UpdateState(
+                    CodexVoiceAvailability.Blocked,
+                    CodexVoiceSessionStatus.BlockedFailure,
+                    "restart_exhausted");
+            }
+            finally
+            {
+                _lifecycleGate.Release();
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
     }
 
     private void ProcessNotification(string method, JsonElement? parameters)
@@ -286,9 +556,10 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                         DateTimeOffset.UtcNow);
                     break;
                 case "thread/realtime/transcript/done":
-                    changed = _transcript.MarkComplete(
+                    changed = _transcript.CompleteWithText(
                         ReadString(parameters, "threadId") ?? _rootThreadId ?? string.Empty,
                         ReadString(parameters, "role") ?? "unknown",
+                        ReadString(parameters, "text"),
                         DateTimeOffset.UtcNow);
                     break;
                 case "thread/realtime/closed":
@@ -300,7 +571,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                     changed = true;
                     break;
                 case "thread/realtime/error":
-                    _sessionStatus = CodexVoiceSessionStatus.Failed;
+                    _sessionStatus = CodexVoiceSessionStatus.RecoverableFailure;
                     _lastErrorCode = "realtime_error";
                     changed = true;
                     break;
@@ -376,7 +647,58 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             _isMuted,
             _transcript.Snapshot(),
             _lastErrorCode,
-            _appServerProcessId);
+            _appServerProcessId,
+            _restartAttempt,
+            _voiceCount);
+    }
+
+    private static bool RequiresOpenAiLogin(JsonElement account)
+    {
+        if (account.ValueKind != JsonValueKind.Object
+            || !account.TryGetProperty("requiresOpenaiAuth", out var requires)
+            || requires.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            throw new CodexVoiceCompatibilityException("account_response_invalid");
+        }
+
+        return requires.GetBoolean();
+    }
+
+    private static bool HasAccount(JsonElement account)
+    {
+        return account.ValueKind == JsonValueKind.Object
+            && account.TryGetProperty("account", out var accountValue)
+            && accountValue.ValueKind == JsonValueKind.Object;
+    }
+
+    private static int CountVoices(JsonElement response)
+    {
+        if (response.ValueKind != JsonValueKind.Object
+            || !response.TryGetProperty("voices", out var voices)
+            || voices.ValueKind != JsonValueKind.Object)
+        {
+            return 0;
+        }
+
+        var unique = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var property in voices.EnumerateObject())
+        {
+            if (property.Value.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var item in property.Value.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String
+                    && item.GetString() is { Length: > 0 } value)
+                {
+                    unique.Add(value);
+                }
+            }
+        }
+
+        return unique.Count;
     }
 
     private static string? ReadString(JsonElement? parameters, string propertyName)
@@ -404,6 +726,18 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             return;
         }
 
+        _lifetimeCancellation.Cancel();
+        if (_restartTask is { } restartTask)
+        {
+            try
+            {
+                await restartTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
         await _lifecycleGate.WaitAsync();
         try
         {
@@ -412,6 +746,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             if (client is not null)
             {
                 client.NotificationReceived -= OnAppServerNotification;
+                client.TransportEnded -= OnAppServerTransportEnded;
                 client.ServerRequestHandler = null;
                 await client.DisposeAsync();
             }
@@ -422,14 +757,25 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                 _transportAttached = false;
                 _isMuted = true;
                 _sessionStatus = CodexVoiceSessionStatus.Closed;
+                _voiceCount = 0;
             }
         }
         finally
         {
             _lifecycleGate.Release();
             _lifecycleGate.Dispose();
+            _lifetimeCancellation.Dispose();
         }
     }
+}
+
+internal sealed class CodexVoiceSignedOutException : Exception
+{
+}
+
+internal sealed class CodexVoiceCompatibilityException(string errorCode) : Exception(errorCode)
+{
+    public string ErrorCode { get; } = errorCode;
 }
 
 internal sealed class CodexVoiceTranscriptBuffer
@@ -518,6 +864,48 @@ internal sealed class CodexVoiceTranscriptBuffer
         }
 
         return false;
+    }
+
+    public bool CompleteWithText(
+        string threadId,
+        string role,
+        string? finalText,
+        DateTimeOffset updatedAt)
+    {
+        for (var index = _entries.Count - 1; index >= 0; index--)
+        {
+            var entry = _entries[index];
+            if (!entry.IsComplete
+                && entry.ThreadId == threadId
+                && entry.Role == role)
+            {
+                var text = string.IsNullOrEmpty(finalText) ? entry.Text : finalText;
+                _characterCount += text.Length - entry.Text.Length;
+                _entries[index] = entry with
+                {
+                    Text = text,
+                    IsComplete = true,
+                    UpdatedAt = updatedAt
+                };
+                Trim();
+                return true;
+            }
+        }
+
+        if (string.IsNullOrEmpty(finalText))
+        {
+            return false;
+        }
+
+        _entries.Add(new CodexVoiceTranscriptEntry(
+            threadId,
+            role,
+            finalText,
+            true,
+            updatedAt));
+        _characterCount += finalText.Length;
+        Trim();
+        return true;
     }
 
     public IReadOnlyList<CodexVoiceTranscriptEntry> Snapshot()

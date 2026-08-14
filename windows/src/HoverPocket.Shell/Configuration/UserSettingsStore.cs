@@ -114,6 +114,7 @@ internal sealed class UserSettingsStore
             DisableTopEdgeInFullscreen = true,
             CodexVoiceEnabled = false,
             CodexVoiceLayoutMode = VoiceLaneLayoutMode.Compact,
+            CodexVoiceAutoListen = false,
             ProviderOrder = [.. providerIds],
             ProviderVisibility = providerIds.ToDictionary(id => id, _ => true, StringComparer.OrdinalIgnoreCase)
         };
