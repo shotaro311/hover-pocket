@@ -284,17 +284,7 @@ internal sealed class CalendarStore
             {
                 throw new GoogleCalendarApiException("calendar_unavailable", ResolveMessage());
             }
-            if (request.CalendarId is { Length: > 0 } requested)
-            {
-                source = _snapshot.Sources.FirstOrDefault(item => item.Id == requested && item.CanWrite)
-                    ?? throw new GoogleCalendarApiException("calendar_read_only", "The requested calendar is not writable.");
-            }
-            else
-            {
-                source = _snapshot.Sources.FirstOrDefault(item => item.CanWrite && item.IsPrimary)
-                    ?? _snapshot.Sources.FirstOrDefault(item => item.CanWrite)
-                    ?? throw new GoogleCalendarApiException("calendar_read_only", "No writable calendar is available.");
-            }
+            source = SelectWritableSourceForCapability(_snapshot.Sources, request.CalendarId);
         }
 
         var draft = new CalendarEventDraft(
@@ -314,6 +304,21 @@ internal sealed class CalendarStore
             cancellationToken);
         await LoadMonthAsync(request.Start, cancellationToken);
         return observed;
+    }
+
+    internal static CalendarSource SelectWritableSourceForCapability(
+        IReadOnlyList<CalendarSource> sources,
+        string? requestedCalendarId)
+    {
+        if (requestedCalendarId is not null)
+        {
+            return sources.FirstOrDefault(item => item.Id == requestedCalendarId && item.CanWrite)
+                ?? throw new GoogleCalendarApiException("calendar_read_only", "The requested calendar is not writable.");
+        }
+
+        return sources.FirstOrDefault(item => item.CanWrite && item.IsPrimary)
+            ?? sources.FirstOrDefault(item => item.CanWrite)
+            ?? throw new GoogleCalendarApiException("calendar_read_only", "No writable calendar is available.");
     }
 
     public async Task<CalendarProviderState> UpdateEventAsync(

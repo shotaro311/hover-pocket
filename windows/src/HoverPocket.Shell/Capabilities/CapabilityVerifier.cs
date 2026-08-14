@@ -271,6 +271,21 @@ internal sealed class CapabilityVerifier
         Require(
             GoogleCalendarApiClient.AllDayString(offsetAllDay) == "2026-08-15",
             "calendar_all_day_offset_preserved");
+        var writableSources = new[]
+        {
+            new CalendarSource("primary", "Primary", null, "UTC", IsPrimary: true, AccessRole: "owner")
+        };
+        Require(
+            CalendarStore.SelectWritableSourceForCapability(writableSources, null).Id == "primary",
+            "calendar_implicit_target_fallback");
+        try
+        {
+            CalendarStore.SelectWritableSourceForCapability(writableSources, string.Empty);
+            _failures.Add("calendar_empty_explicit_target_accepted");
+        }
+        catch (GoogleCalendarApiException ex) when (ex.Code == "calendar_read_only")
+        {
+        }
 
         var longCalendarTitle = string.Concat(Enumerable.Repeat("👨‍👩‍👧‍👦", 40));
         calendar.Seed(new CalendarCapabilityEvent(
@@ -311,6 +326,27 @@ internal sealed class CapabilityVerifier
         Require(created.GetProperty("eventId").GetString() == "created-1", "calendar_create_id");
         Require(calendar.IdempotencyKeys.SequenceEqual(["calendar-verifier-key-01"]), "calendar_idempotency_forward");
         Require(calendar.CreatedRequests.LastOrDefault()?.CalendarId == "primary", "calendar_target_forward");
+
+        var crossOffsetAllDay = await handlers.InvokeAsync(
+            CapabilityIds.CalendarCreate,
+            Json(new
+            {
+                calendarId = "primary",
+                title = "Civil date range",
+                start = "2026-08-15T00:00:00-12:00",
+                end = "2026-08-16T00:00:00+14:00",
+                isAllDay = true,
+                location = (string?)null,
+                notes = (string?)null
+            }),
+            new CapabilityHandlerContext("calendar-verifier-key-civil-date", now));
+        Require(
+            crossOffsetAllDay.GetProperty("eventId").GetString() == "created-2",
+            "calendar_all_day_civil_range");
+        Require(
+            calendar.CreatedRequests.Last().Start.Date == new DateTime(2026, 8, 15)
+                && calendar.CreatedRequests.Last().End.Date == new DateTime(2026, 8, 16),
+            "calendar_all_day_civil_dates_preserved");
 
         try
         {

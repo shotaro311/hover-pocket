@@ -216,7 +216,17 @@ internal sealed class CalendarCreateCapabilityHandler : IPocketCapabilityHandler
         var title = CapabilityJson.RequiredString(arguments, "title", 160);
         var start = RequiredDate(arguments, "start");
         var end = RequiredDate(arguments, "end");
-        if (end <= start)
+        var isAllDay = CapabilityJson.RequiredBool(arguments, "isAllDay");
+        if (isAllDay)
+        {
+            var startDate = DateOnly.FromDateTime(start.Date);
+            var endDate = DateOnly.FromDateTime(end.Date);
+            if (endDate <= startDate)
+            {
+                throw CapabilityJson.Invalid("start_end");
+            }
+        }
+        else if (end <= start)
         {
             throw CapabilityJson.Invalid("start_end");
         }
@@ -225,7 +235,7 @@ internal sealed class CalendarCreateCapabilityHandler : IPocketCapabilityHandler
             title,
             start,
             end,
-            CapabilityJson.RequiredBool(arguments, "isAllDay"),
+            isAllDay,
             CapabilityJson.OptionalString(arguments, "location", 500),
             CapabilityJson.OptionalString(arguments, "notes", 10_000));
         var created = await _dataSource.CreateEventAsync(
