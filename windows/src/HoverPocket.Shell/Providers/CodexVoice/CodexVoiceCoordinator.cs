@@ -49,6 +49,10 @@ internal sealed record CodexVoiceSnapshot(
     int RestartAttempt,
     int VoiceCount);
 
+internal sealed record CodexVoiceWebRtcAnswer(
+    string RootThreadId,
+    string Sdp);
+
 internal sealed class CodexVoiceCoordinator : IAsyncDisposable
 {
     private const int DefaultTranscriptEntryLimit = 120;
@@ -63,10 +67,12 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
     private readonly bool _featureEnabled;
     private readonly Func<CancellationToken, Task<CodexAppServerClient>> _clientFactory;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
+    private readonly SemaphoreSlim _sessionGate = new(1, 1);
     private readonly object _stateSync = new();
     private readonly CodexVoiceTranscriptBuffer _transcript;
     private readonly IReadOnlyList<TimeSpan> _restartDelays;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private readonly string _workspaceDirectory;
     private CodexAppServerClient? _client;
     private Task? _restartTask;
     private CodexVoiceAvailability _availability;
@@ -78,6 +84,9 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
     private int? _appServerProcessId;
     private int _restartAttempt;
     private int _voiceCount;
+    private string? _defaultVoice;
+    private string? _pendingSdpThreadId;
+    private TaskCompletionSource<string>? _pendingSdp;
     private int _disposeState;
 
     public CodexVoiceCoordinator(
@@ -85,7 +94,8 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         Func<CancellationToken, Task<CodexAppServerClient>>? clientFactory = null,
         int transcriptEntryLimit = DefaultTranscriptEntryLimit,
         int transcriptCharacterLimit = DefaultTranscriptCharacterLimit,
-        IReadOnlyList<TimeSpan>? restartDelays = null)
+        IReadOnlyList<TimeSpan>? restartDelays = null,
+        string? workspaceDirectory = null)
     {
         _featureEnabled = featureEnabled;
         _availability = featureEnabled
@@ -97,6 +107,12 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             transcriptEntryLimit,
             transcriptCharacterLimit);
         _restartDelays = restartDelays ?? DefaultRestartDelays;
+        _workspaceDirectory = Path.GetFullPath(
+            workspaceDirectory
+                ?? Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "HoverPocket",
+                    "VoiceWorkspace"));
     }
 
     public event EventHandler<CodexVoiceSnapshot>? SnapshotChanged;
@@ -208,7 +224,8 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                 "thread/realtime/listVoices",
                 cancellationToken: cancellationToken);
             var voiceCount = CountVoices(voices);
-            if (voiceCount < 1)
+            var defaultVoice = ReadDefaultVoice(voices);
+            if (voiceCount < 1 || string.IsNullOrWhiteSpace(defaultVoice))
             {
                 throw new CodexVoiceCompatibilityException("realtime_voices_unavailable");
             }
@@ -218,6 +235,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             {
                 _appServerProcessId = client.ProcessId;
                 _voiceCount = voiceCount;
+                _defaultVoice = defaultVoice;
             }
         }
         catch
@@ -257,6 +275,25 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         SetSessionStatus(CodexVoiceSessionStatus.Stopping);
     }
 
+    public void MarkSessionFailure(string errorCode)
+    {
+        ThrowIfDisposed();
+        if (errorCode is not ("microphone_denied" or "webrtc_failed"))
+        {
+            errorCode = "voice_start_failed";
+        }
+
+        lock (_stateSync)
+        {
+            _transportAttached = false;
+            _isMuted = true;
+            _sessionStatus = CodexVoiceSessionStatus.RecoverableFailure;
+            _lastErrorCode = errorCode;
+        }
+
+        PublishSnapshot();
+    }
+
     private void SetSessionStatus(CodexVoiceSessionStatus status)
     {
         ThrowIfDisposed();
@@ -267,6 +304,178 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         }
 
         PublishSnapshot();
+    }
+
+    public async Task<CodexVoiceWebRtcAnswer> StartWebRtcAsync(
+        string sdpOffer,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        if (string.IsNullOrWhiteSpace(sdpOffer)
+            || sdpOffer.Length > 131_072
+            || !sdpOffer.StartsWith("v=0", StringComparison.Ordinal))
+        {
+            throw new CodexVoiceCompatibilityException("webrtc_offer_invalid");
+        }
+
+        await _sessionGate.WaitAsync(cancellationToken);
+        try
+        {
+            var client = _client;
+            string? voice;
+            lock (_stateSync)
+            {
+                if (_availability != CodexVoiceAvailability.Ready || client is null)
+                {
+                    throw new InvalidOperationException("Codex Voice is not ready.");
+                }
+
+                voice = _defaultVoice;
+            }
+
+            if (string.IsNullOrWhiteSpace(voice))
+            {
+                throw new CodexVoiceCompatibilityException("realtime_voice_missing");
+            }
+
+            var rootThreadId = await EnsureRootThreadAsync(client, cancellationToken);
+            MarkSessionNegotiating(rootThreadId);
+            var sdpCompletion = new TaskCompletionSource<string>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_stateSync)
+            {
+                _pendingSdpThreadId = rootThreadId;
+                _pendingSdp = sdpCompletion;
+            }
+
+            try
+            {
+                _ = await client.SendRequestAsync(
+                    "thread/realtime/start",
+                    new
+                    {
+                        threadId = rootThreadId,
+                        outputModality = "audio",
+                        version = "v1",
+                        voice,
+                        prompt = "Respond concisely for a compact desktop voice interface. Use only HoverPocket capabilities when they are available.",
+                        transport = new
+                        {
+                            type = "webrtc",
+                            sdp = sdpOffer
+                        }
+                    },
+                    cancellationToken);
+
+                var answer = await sdpCompletion.Task.WaitAsync(
+                    TimeSpan.FromSeconds(20),
+                    cancellationToken);
+                return new CodexVoiceWebRtcAnswer(rootThreadId, answer);
+            }
+            catch
+            {
+                UpdateState(
+                    CodexVoiceAvailability.Ready,
+                    CodexVoiceSessionStatus.RecoverableFailure,
+                    "webrtc_negotiation_failed");
+                throw;
+            }
+            finally
+            {
+                lock (_stateSync)
+                {
+                    if (ReferenceEquals(_pendingSdp, sdpCompletion))
+                    {
+                        _pendingSdp = null;
+                        _pendingSdpThreadId = null;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            _sessionGate.Release();
+        }
+    }
+
+    public void MarkTransportAttached()
+    {
+        AttachTransport();
+        SetMuted(false);
+    }
+
+    public async Task StopRealtimeAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        await _sessionGate.WaitAsync(cancellationToken);
+        try
+        {
+            var client = _client;
+            string? rootThreadId;
+            lock (_stateSync)
+            {
+                rootThreadId = _rootThreadId;
+            }
+
+            if (client is null || string.IsNullOrWhiteSpace(rootThreadId))
+            {
+                DetachTransport(reconnectExpected: false);
+                return;
+            }
+
+            MarkSessionStopping();
+            _ = await client.SendRequestAsync(
+                "thread/realtime/stop",
+                new { threadId = rootThreadId },
+                cancellationToken);
+            DetachTransport(reconnectExpected: false);
+        }
+        finally
+        {
+            _sessionGate.Release();
+        }
+    }
+
+    private async Task<string> EnsureRootThreadAsync(
+        CodexAppServerClient client,
+        CancellationToken cancellationToken)
+    {
+        lock (_stateSync)
+        {
+            var existingThreadId = _rootThreadId;
+            if (!string.IsNullOrWhiteSpace(existingThreadId))
+            {
+                return existingThreadId;
+            }
+        }
+
+        Directory.CreateDirectory(_workspaceDirectory);
+        var response = await client.SendRequestAsync(
+            "thread/start",
+            new
+            {
+                cwd = _workspaceDirectory,
+                sandbox = "read-only",
+                approvalPolicy = "never",
+                approvalsReviewer = "user",
+                ephemeral = false,
+                runtimeWorkspaceRoots = Array.Empty<string>(),
+                selectedCapabilityRoots = Array.Empty<object>(),
+                dynamicTools = Array.Empty<object>(),
+                threadSource = "hoverpocket_voice",
+                sessionStartSource = "startup",
+                baseInstructions = "You are the HoverPocket Voice Lane. Do not use shell, filesystem, network, or arbitrary code tools. Only invoke explicitly provided HoverPocket capabilities. Keep spoken replies concise."
+            },
+            cancellationToken);
+        var threadId = ReadNestedString(response, "thread", "id")
+            ?? throw new CodexVoiceCompatibilityException("thread_start_response_invalid");
+        lock (_stateSync)
+        {
+            _rootThreadId = threadId;
+        }
+
+        PublishSnapshot();
+        return threadId;
     }
 
     public void MarkSessionConnecting(string? rootThreadId = null)
@@ -542,9 +751,11 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             {
                 case "thread/realtime/started":
                     _rootThreadId = ReadString(parameters, "threadId") ?? _rootThreadId;
-                    _sessionStatus = _isMuted
-                        ? CodexVoiceSessionStatus.Muted
-                        : CodexVoiceSessionStatus.Connected;
+                    _sessionStatus = _transportAttached
+                        ? (_isMuted
+                            ? CodexVoiceSessionStatus.Muted
+                            : CodexVoiceSessionStatus.Connected)
+                        : CodexVoiceSessionStatus.Connecting;
                     _lastErrorCode = null;
                     changed = true;
                     break;
@@ -570,6 +781,26 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                         : null;
                     changed = true;
                     break;
+                case "thread/realtime/sdp":
+                {
+                    var sdpThreadId = ReadString(parameters, "threadId");
+                    var sdp = ReadString(parameters, "sdp");
+                    if (_pendingSdp is { } pendingSdp
+                        && string.Equals(
+                            sdpThreadId,
+                            _pendingSdpThreadId,
+                            StringComparison.Ordinal)
+                        && !string.IsNullOrWhiteSpace(sdp)
+                        && sdp.Length <= 131_072
+                        && sdp.StartsWith("v=0", StringComparison.Ordinal))
+                    {
+                        pendingSdp.TrySetResult(sdp);
+                        _sessionStatus = CodexVoiceSessionStatus.Connecting;
+                        _lastErrorCode = null;
+                        changed = true;
+                    }
+                    break;
+                }
                 case "thread/realtime/error":
                     _sessionStatus = CodexVoiceSessionStatus.RecoverableFailure;
                     _lastErrorCode = "realtime_error";
@@ -701,6 +932,45 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         return unique.Count;
     }
 
+    private static string? ReadDefaultVoice(JsonElement response)
+    {
+        if (response.ValueKind != JsonValueKind.Object
+            || !response.TryGetProperty("voices", out var voices)
+            || voices.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (var propertyName in new[] { "defaultV1", "defaultV2" })
+        {
+            if (voices.TryGetProperty(propertyName, out var value)
+                && value.ValueKind == JsonValueKind.String
+                && value.GetString() is { Length: > 0 } voice)
+            {
+                return voice;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ReadNestedString(
+        JsonElement root,
+        string objectPropertyName,
+        string stringPropertyName)
+    {
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty(objectPropertyName, out var nested)
+            || nested.ValueKind != JsonValueKind.Object
+            || !nested.TryGetProperty(stringPropertyName, out var value)
+            || value.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return value.GetString();
+    }
+
     private static string? ReadString(JsonElement? parameters, string propertyName)
     {
         if (parameters is not { } element
@@ -727,6 +997,12 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         }
 
         _lifetimeCancellation.Cancel();
+        lock (_stateSync)
+        {
+            _pendingSdp?.TrySetCanceled();
+            _pendingSdp = null;
+            _pendingSdpThreadId = null;
+        }
         if (_restartTask is { } restartTask)
         {
             try
@@ -738,6 +1014,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             }
         }
 
+        await _sessionGate.WaitAsync();
         await _lifecycleGate.WaitAsync();
         try
         {
@@ -758,12 +1035,15 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                 _isMuted = true;
                 _sessionStatus = CodexVoiceSessionStatus.Closed;
                 _voiceCount = 0;
+                _defaultVoice = null;
             }
         }
         finally
         {
             _lifecycleGate.Release();
             _lifecycleGate.Dispose();
+            _sessionGate.Release();
+            _sessionGate.Dispose();
             _lifetimeCancellation.Dispose();
         }
     }

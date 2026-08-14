@@ -5,6 +5,7 @@ internal sealed class CodexVoiceRuntimeHost : IAsyncDisposable
     private readonly Func<CancellationToken, Task<CodexAppServerClient>> _clientFactory;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _snapshotSync = new();
+    private readonly string _workspaceDirectory;
     private CodexVoiceCoordinator? _coordinator;
     private CodexVoiceSnapshot _snapshot = DisabledSnapshot();
     private bool _desiredEnabled;
@@ -12,9 +13,11 @@ internal sealed class CodexVoiceRuntimeHost : IAsyncDisposable
 
     public CodexVoiceRuntimeHost(
         bool initiallyEnabled,
+        string workspaceDirectory,
         Func<CancellationToken, Task<CodexAppServerClient>>? clientFactory = null)
     {
         _desiredEnabled = initiallyEnabled;
+        _workspaceDirectory = Path.GetFullPath(workspaceDirectory);
         _clientFactory = clientFactory ?? StartProductionClientAsync;
     }
 
@@ -67,7 +70,8 @@ internal sealed class CodexVoiceRuntimeHost : IAsyncDisposable
 
             var coordinator = new CodexVoiceCoordinator(
                 featureEnabled: true,
-                clientFactory: _clientFactory);
+                clientFactory: _clientFactory,
+                workspaceDirectory: _workspaceDirectory);
             coordinator.SnapshotChanged += OnCoordinatorSnapshotChanged;
             _coordinator = coordinator;
             SetSnapshot(coordinator.Snapshot);
@@ -88,6 +92,43 @@ internal sealed class CodexVoiceRuntimeHost : IAsyncDisposable
     public void SetMuted(bool muted)
     {
         _coordinator?.SetMuted(muted);
+    }
+
+    public void MarkSessionRequestingPermission()
+    {
+        _coordinator?.MarkSessionRequestingPermission();
+    }
+
+    public Task<CodexVoiceWebRtcAnswer> StartWebRtcAsync(
+        string sdpOffer,
+        CancellationToken cancellationToken = default)
+    {
+        var coordinator = _coordinator
+            ?? throw new InvalidOperationException("Codex Voice is not enabled.");
+        return coordinator.StartWebRtcAsync(sdpOffer, cancellationToken);
+    }
+
+    public void MarkTransportAttached()
+    {
+        _coordinator?.MarkTransportAttached();
+    }
+
+    public void MarkTransportDetached(bool reconnectExpected)
+    {
+        _coordinator?.DetachTransport(reconnectExpected);
+    }
+
+    public void MarkSessionFailure(string errorCode)
+    {
+        _coordinator?.MarkSessionFailure(errorCode);
+    }
+
+    public Task StopRealtimeAsync(CancellationToken cancellationToken = default)
+    {
+        var coordinator = _coordinator;
+        return coordinator is null
+            ? Task.CompletedTask
+            : coordinator.StopRealtimeAsync(cancellationToken);
     }
 
     private void OnCoordinatorSnapshotChanged(object? sender, CodexVoiceSnapshot snapshot)

@@ -72,7 +72,9 @@ internal sealed class PanelBridgeController : IDisposable
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.Normalize(settings, providerRegistry.ProviderIds);
         _resolvedVoiceLaneLayout = CurrentSettings.EffectiveVoiceLaneLayout;
-        _codexVoiceRuntime = new CodexVoiceRuntimeHost(CurrentSettings.CodexVoiceEnabled);
+        _codexVoiceRuntime = new CodexVoiceRuntimeHost(
+            CurrentSettings.CodexVoiceEnabled,
+            Path.Combine(settingsStore.RootDirectory, "VoiceWorkspace"));
         _codexVoiceRuntime.SnapshotChanged += OnCodexVoiceSnapshotChanged;
         if (CurrentSettings.AiNativeEnabled)
         {
@@ -156,6 +158,11 @@ internal sealed class PanelBridgeController : IDisposable
         dispatcher.Register("settings.setCodexVoiceLayout", SetCodexVoiceLayoutAsync);
         dispatcher.Register("settings.setCodexVoiceAutoListen", SetCodexVoiceAutoListenAsync);
         dispatcher.Register("codexVoice.setMuted", SetCodexVoiceMutedAsync);
+        dispatcher.Register("codexVoice.startWebRtc", StartCodexVoiceWebRtcAsync);
+        dispatcher.Register("codexVoice.transportAttached", AttachCodexVoiceTransportAsync);
+        dispatcher.Register("codexVoice.transportDetached", DetachCodexVoiceTransportAsync);
+        dispatcher.Register("codexVoice.startFailed", FailCodexVoiceStartAsync);
+        dispatcher.Register("codexVoice.stop", StopCodexVoiceAsync);
         dispatcher.Register("settings.resetDefaults", ResetDefaultsAsync);
         dispatcher.Register("settings.resetPanelBinding", ResetPanelBindingAsync);
         dispatcher.Register("settings.openDataFolder", OpenDataFolderAsync);
@@ -628,6 +635,63 @@ internal sealed class PanelBridgeController : IDisposable
         return await PublishStateAsync(cancellationToken);
     }
 
+    private async Task<object?> StartCodexVoiceWebRtcAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        if (!CurrentSettings.CodexVoiceEnabled)
+        {
+            throw new InvalidOperationException("Codex Voice is disabled.");
+        }
+
+        var answer = await _codexVoiceRuntime.StartWebRtcAsync(
+            ReadRequiredString(parameters, "sdp"),
+            cancellationToken);
+        return new
+        {
+            rootThreadId = answer.RootThreadId,
+            sdp = answer.Sdp
+        };
+    }
+
+    private async Task<object?> AttachCodexVoiceTransportAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        cancellationToken.ThrowIfCancellationRequested();
+        _codexVoiceRuntime.MarkTransportAttached();
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> DetachCodexVoiceTransportAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        var reconnectExpected = ReadRequiredBool(parameters, "reconnectExpected");
+        _codexVoiceRuntime.MarkTransportDetached(reconnectExpected);
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> StopCodexVoiceAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        await _codexVoiceRuntime.StopRealtimeAsync(cancellationToken);
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> FailCodexVoiceStartAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _codexVoiceRuntime.MarkSessionFailure(
+            ReadRequiredString(parameters, "errorCode"));
+        return await PublishStateAsync(cancellationToken);
+    }
+
     private async Task<object?> ResetDefaultsAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         _ = parameters;
@@ -792,6 +856,14 @@ internal sealed class PanelBridgeController : IDisposable
     public Task StartVoiceRuntimeAsync(CancellationToken cancellationToken = default)
     {
         return _codexVoiceRuntime.StartAsync(cancellationToken);
+    }
+
+    public void MarkVoiceMicrophoneRequestStarted()
+    {
+        if (CurrentSettings.CodexVoiceEnabled)
+        {
+            _codexVoiceRuntime.MarkSessionRequestingPermission();
+        }
     }
 
     public async Task NotifyPanelOpenedAsync()

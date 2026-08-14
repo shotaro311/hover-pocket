@@ -3,6 +3,8 @@ using System.Text.Json;
 using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Providers;
+using HoverPocket.Shell.Windows;
+using Microsoft.Web.WebView2.Core;
 
 namespace HoverPocket.Shell.Verification;
 
@@ -17,6 +19,7 @@ internal sealed class UiModelVerifier
 
         VerifySettingsRoundTrip(registry, store);
         VerifyCorruptSettingsFallback(registry, store);
+        VerifyMicrophonePermissionPolicy();
         VerifyBridgeDispatch(registry, store).GetAwaiter().GetResult();
 
         if (_failures.Count == 0)
@@ -33,6 +36,79 @@ internal sealed class UiModelVerifier
         }
 
         return 1;
+    }
+
+    private void VerifyMicrophonePermissionPolicy()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var deadline = now + TimeSpan.FromSeconds(5);
+        if (!WebViewSecurityPolicy.ShouldAllowMicrophone(
+                "https://app.hoverpocket.local/",
+                CoreWebView2PermissionKind.Microphone,
+                isUserInitiated: true,
+                featureEnabled: true,
+                panelVisible: true,
+                deadline,
+                now))
+        {
+            _failures.Add("microphone policy rejected the exact armed Host origin");
+        }
+
+        var rejected = new[]
+        {
+            WebViewSecurityPolicy.ShouldAllowMicrophone(
+                "https://evil.example/",
+                CoreWebView2PermissionKind.Microphone,
+                true,
+                true,
+                true,
+                deadline,
+                now),
+            WebViewSecurityPolicy.ShouldAllowMicrophone(
+                "https://app.hoverpocket.local/",
+                CoreWebView2PermissionKind.Camera,
+                true,
+                true,
+                true,
+                deadline,
+                now),
+            WebViewSecurityPolicy.ShouldAllowMicrophone(
+                "https://app.hoverpocket.local/",
+                CoreWebView2PermissionKind.Microphone,
+                false,
+                true,
+                true,
+                deadline,
+                now),
+            WebViewSecurityPolicy.ShouldAllowMicrophone(
+                "https://app.hoverpocket.local/",
+                CoreWebView2PermissionKind.Microphone,
+                true,
+                false,
+                true,
+                deadline,
+                now),
+            WebViewSecurityPolicy.ShouldAllowMicrophone(
+                "https://app.hoverpocket.local/",
+                CoreWebView2PermissionKind.Microphone,
+                true,
+                true,
+                false,
+                deadline,
+                now),
+            WebViewSecurityPolicy.ShouldAllowMicrophone(
+                "https://app.hoverpocket.local/",
+                CoreWebView2PermissionKind.Microphone,
+                true,
+                true,
+                true,
+                now - TimeSpan.FromMilliseconds(1),
+                now)
+        };
+        if (rejected.Any(value => value))
+        {
+            _failures.Add("microphone policy allowed an untrusted, unarmed, or non-user-initiated request");
+        }
     }
 
     private void VerifySettingsRoundTrip(ProviderRegistry registry, UserSettingsStore store)

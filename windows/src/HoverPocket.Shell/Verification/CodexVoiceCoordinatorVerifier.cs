@@ -19,7 +19,7 @@ internal sealed class CodexVoiceCoordinatorVerifier
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
-                "PASS codex-voice-coordinator verify: disabled no-start, account/capability gate, app-server ownership, transcript continuity, UI detach/reconnect, bounded crash restart, bounded memory");
+                "PASS codex-voice-coordinator verify: disabled no-start, account/capability gate, app-server ownership, fake WebRTC SDP/stop, transcript continuity, UI detach/reconnect, bounded crash restart, bounded memory");
             return 0;
         }
 
@@ -106,12 +106,16 @@ internal sealed class CodexVoiceCoordinatorVerifier
                 return;
             }
 
-            coordinator.MarkSessionConnecting("root-thread");
-            coordinator.ProcessNotificationForVerify(
-                "thread/realtime/started",
-                new { threadId = "root-thread" });
-            coordinator.AttachTransport();
-            coordinator.SetMuted(false);
+            var answer = await coordinator.StartWebRtcAsync(
+                "v=0\r\ns=fake-offer\r\n",
+                timeout.Token);
+            if (answer.RootThreadId != "root-thread"
+                || answer.Sdp != "v=0\r\ns=fake-answer\r\n"
+                || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.Connecting)
+            {
+                _failures.Add("fake WebRTC offer/answer did not preserve the root thread or negotiating state");
+            }
+            coordinator.MarkTransportAttached();
             coordinator.ProcessNotificationForVerify(
                 "thread/realtime/transcript/delta",
                 new { threadId = "root-thread", role = "user", delta = "hello " });
@@ -172,6 +176,11 @@ internal sealed class CodexVoiceCoordinatorVerifier
             else
             {
                 appServerProcessId = restarted.AppServerProcessId;
+                await coordinator.StopRealtimeAsync(timeout.Token);
+                if (coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.Closed)
+                {
+                    _failures.Add("realtime stop did not close only the audio session");
+                }
             }
 
             if (notifications == 0)

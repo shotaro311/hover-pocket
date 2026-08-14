@@ -131,6 +131,58 @@ internal static class FakeCodexAppServer
                         }
                     });
                     break;
+                case "thread/start":
+                    Write(output, new
+                    {
+                        id = idElement.Clone(),
+                        result = new
+                        {
+                            thread = new { id = "root-thread" }
+                        }
+                    });
+                    break;
+                case "thread/realtime/start":
+                    Write(output, new
+                    {
+                        id = idElement.Clone(),
+                        result = new { }
+                    });
+                    Write(output, new
+                    {
+                        method = "thread/realtime/started",
+                        @params = new
+                        {
+                            threadId = "root-thread",
+                            realtimeSessionId = "fake-realtime",
+                            version = "v1"
+                        }
+                    });
+                    Write(output, new
+                    {
+                        method = "thread/realtime/sdp",
+                        @params = new
+                        {
+                            threadId = "root-thread",
+                            sdp = "v=0\r\ns=fake-answer\r\n"
+                        }
+                    });
+                    break;
+                case "thread/realtime/stop":
+                    Write(output, new
+                    {
+                        id = idElement.Clone(),
+                        result = new { }
+                    });
+                    Write(output, new
+                    {
+                        method = "thread/realtime/closed",
+                        @params = new
+                        {
+                            threadId = "root-thread",
+                            reason = (string?)null
+                        }
+                    });
+                    break;
                 case "fake/emitNotification":
                     Write(output, new
                     {

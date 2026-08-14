@@ -6,7 +6,7 @@ import { renderClipboardProvider, runClipboardUiVerify } from "../providers/clip
 import { renderControlsProvider } from "../providers/controls/controls.js";
 import { renderStickyProvider } from "../providers/sticky/sticky.js";
 import { renderTimerProvider } from "../providers/timer/timer.js";
-import { renderVoiceLane } from "../voice/voice-lane.js";
+import { handleVoicePanelClosed, renderVoiceLane } from "../voice/voice-lane.js";
 
 const providerRenderers = {
   controls: renderControlsProvider,
@@ -42,6 +42,10 @@ on("state.changed", (state) => {
 
 on("panel.opened", (state) => {
   render(state, { refreshProvider: true });
+});
+
+on("panel.closed", () => {
+  handleVoicePanelClosed(request);
 });
 
 bootstrap();
