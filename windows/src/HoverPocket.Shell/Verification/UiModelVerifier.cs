@@ -3,6 +3,7 @@ using System.Text.Json;
 using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Providers;
+using HoverPocket.Shell.Providers.CodexVoice;
 using HoverPocket.Shell.Windows;
 using Microsoft.Web.WebView2.Core;
 
