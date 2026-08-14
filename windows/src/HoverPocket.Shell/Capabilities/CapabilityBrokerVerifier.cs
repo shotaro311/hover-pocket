@@ -37,6 +37,7 @@ internal sealed class CapabilityBrokerVerifier
         Console.WriteLine("broker_registry_descriptors=11");
         Console.WriteLine("broker_available_handlers=10");
         Console.WriteLine("broker_today_focus=ok");
+        Console.WriteLine("broker_concurrent_duplicate=ok");
         Console.WriteLine("broker_negative_cases=10");
         Console.WriteLine($"broker_golden_plan_digest={GoldenPlanDigest}");
         return 0;
@@ -191,6 +192,25 @@ internal sealed class CapabilityBrokerVerifier
             {
             }
 
+            var timerCountBeforeConcurrent = timerStore.RunningTimers.Count;
+            var concurrent = adapter.PrepareFocus(
+                events[0],
+                300,
+                "secret-purpose-concurrent",
+                principal,
+                allPermissions,
+                now.AddSeconds(3));
+            var concurrentGrant = broker.DecideApproval(
+                concurrent.Preparation.ApprovalRequest!.Id,
+                concurrent.Preparation.PlanDigest,
+                CapabilityApprovalDecision.Approve,
+                now.AddSeconds(3));
+            var concurrentReceipts = await Task.WhenAll(
+                broker.ExecuteAsync(concurrent.Plan, allPermissions, concurrentGrant, now.AddSeconds(3)),
+                broker.ExecuteAsync(concurrent.Plan, allPermissions, concurrentGrant, now.AddSeconds(3)));
+            Require(concurrentReceipts.Count(item => item.Replayed) == 1, "concurrent_replay_count");
+            Require(timerStore.RunningTimers.Count == timerCountBeforeConcurrent + 1, "concurrent_single_timer_effect");
+
             var auditText = Encoding.UTF8.GetString(audit.CombinedData());
             foreach (var forbidden in new[]
             {
@@ -198,6 +218,7 @@ internal sealed class CapabilityBrokerVerifier
                 "sensitive-event-ref",
                 "secret-purpose-approved",
                 "secret-purpose-rejected",
+                "secret-purpose-concurrent",
                 principal.UserId
             })
             {

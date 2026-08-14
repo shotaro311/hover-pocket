@@ -7,6 +7,8 @@ final class CapabilityBroker {
     private let approvalStore: CapabilityApprovalStore
     private let auditLog: CapabilityBrokerAuditLog
     private var callHistory: [String: [Date]] = [:]
+    private var executionActive = false
+    private var executionWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(
         registry: CapabilityRegistry,
@@ -56,6 +58,8 @@ final class CapabilityBroker {
         approvalGrant: CapabilityApprovalGrant?,
         now: Date = Date()
     ) async throws -> CapabilityWorkflowReceipt {
+        await acquireExecutionSlot()
+        defer { releaseExecutionSlot() }
         let descriptors = try validate(plan, permissions: permissions)
         let digest = try CapabilityCanonicalJSON.planDigest(plan)
         switch try ledger.lookupWorkflow(planID: plan.id, planDigest: digest) {
@@ -138,6 +142,24 @@ final class CapabilityBroker {
         )
         try ledger.completeWorkflow(workflow)
         return workflow
+    }
+
+    private func acquireExecutionSlot() async {
+        if !executionActive {
+            executionActive = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            executionWaiters.append(continuation)
+        }
+    }
+
+    private func releaseExecutionSlot() {
+        guard !executionWaiters.isEmpty else {
+            executionActive = false
+            return
+        }
+        executionWaiters.removeFirst().resume()
     }
 
     private func validate(

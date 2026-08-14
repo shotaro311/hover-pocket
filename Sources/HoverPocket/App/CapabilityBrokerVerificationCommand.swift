@@ -13,6 +13,7 @@ enum CapabilityBrokerVerificationCommand {
                 print("broker_registry_descriptors=11")
                 print("broker_available_handlers=10")
                 print("broker_today_focus=ok")
+                print("broker_concurrent_duplicate=ok")
                 print("broker_negative_cases=10")
                 print("broker_golden_plan_digest=\(goldenPlanDigest)")
                 Darwin.exit(0)
@@ -291,12 +292,50 @@ enum CapabilityBrokerVerificationCommand {
         } catch CapabilityBrokerError.approvalReplayed {
         }
 
+        let timerCountBeforeConcurrent = timerStore.runningTimers.count
+        let concurrent = try adapter.prepareFocus(
+            event: events[0],
+            durationSeconds: 300,
+            purpose: "secret-purpose-concurrent",
+            principal: principal,
+            permissions: allPermissions,
+            now: now.addingTimeInterval(3)
+        )
+        guard let concurrentRequest = concurrent.preparation.approvalRequest else {
+            throw BrokerVerificationFailure("concurrent_approval_request")
+        }
+        let concurrentGrant = try broker.decideApproval(
+            requestID: concurrentRequest.id,
+            planDigest: concurrent.preparation.planDigest,
+            decision: .approve,
+            now: now.addingTimeInterval(3)
+        )
+        async let firstConcurrent = broker.execute(
+            concurrent.plan,
+            permissions: allPermissions,
+            approvalGrant: concurrentGrant,
+            now: now.addingTimeInterval(3)
+        )
+        async let secondConcurrent = broker.execute(
+            concurrent.plan,
+            permissions: allPermissions,
+            approvalGrant: concurrentGrant,
+            now: now.addingTimeInterval(3)
+        )
+        let concurrentReceipts = try await [firstConcurrent, secondConcurrent]
+        try require(concurrentReceipts.filter(\.replayed).count == 1, "concurrent_replay_count")
+        try require(
+            timerStore.runningTimers.count == timerCountBeforeConcurrent + 1,
+            "concurrent_single_timer_effect"
+        )
+
         let auditText = String(data: try audit.combinedData(), encoding: .utf8) ?? ""
         for forbidden in [
             "Sensitive Calendar Title",
             "sensitive-event-ref",
             "secret-purpose-approved",
             "secret-purpose-rejected",
+            "secret-purpose-concurrent",
             principal.userID
         ] {
             try require(!auditText.contains(forbidden), "audit_redaction_\(forbidden)")
