@@ -62,6 +62,15 @@ internal sealed class CapabilityVerifier
 
             try
             {
+                await handlers.InvokeAsync(CapabilityIds.TimerGet, Json(new[] { 1 }));
+                _failures.Add("non_object_arguments_accepted");
+            }
+            catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_ARGUMENT_INVALID")
+            {
+            }
+
+            try
+            {
                 await handlers.InvokeAsync(
                     new PocketCapabilityKey("timer.countdown.missing", 1),
                     Json(new { }));

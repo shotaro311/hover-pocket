@@ -114,6 +114,10 @@ internal static class CapabilityJson
 
     public static string? OptionalString(JsonElement arguments, string name, int maxLength)
     {
+        if (arguments.ValueKind != JsonValueKind.Object)
+        {
+            throw Invalid(name);
+        }
         if (!arguments.TryGetProperty(name, out var property) || property.ValueKind == JsonValueKind.Null)
         {
             return null;
@@ -132,7 +136,8 @@ internal static class CapabilityJson
 
     public static int RequiredInt(JsonElement arguments, string name, int minimum, int maximum)
     {
-        if (!arguments.TryGetProperty(name, out var property)
+        if (arguments.ValueKind != JsonValueKind.Object
+            || !arguments.TryGetProperty(name, out var property)
             || property.ValueKind != JsonValueKind.Number
             || !property.TryGetInt32(out var value)
             || value < minimum
@@ -145,7 +150,8 @@ internal static class CapabilityJson
 
     public static bool RequiredBool(JsonElement arguments, string name)
     {
-        if (!arguments.TryGetProperty(name, out var property)
+        if (arguments.ValueKind != JsonValueKind.Object
+            || !arguments.TryGetProperty(name, out var property)
             || property.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
         {
             throw Invalid(name);
