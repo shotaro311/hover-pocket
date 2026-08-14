@@ -2,27 +2,31 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: an2-final-review-running; an3-macos-voice-shell-implemented; local-macos-pass; windows-runtime-and-ci-pending
+status: an2-pr-ready-ci-pass; an3-voice-shell-integrated; local-macos-pass; windows-ci-and-voice-runtime-pending
 ---
 
 ## 2026-08-15 AI-native AN3 Voice Foundation Integration
 
-- 既存Draft PR #6の`feature/codex-voice-lane`を隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an3`へ復元し、AN2実装head `5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`を`--no-commit --no-ff`で統合した。テキスト競合はなく、マージは検証待ちのため未commit・未pushである。
+- 既存Draft PR #6の`feature/codex-voice-lane`を隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an3`へ復元し、AN2実装head `5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`を非破壊で統合した。テキスト競合はなく、Voice Lane表示基盤を含むmerge commit `52bf00c`を作成した。
 - macOSではSwift warnings-as-errors build、Broker、Capability、Timer、Clipboard、Calculator、Panel layout 112件、Media、Pocket contract 12 schema / 52 fixture、diff checkが成功した。
 - Windows Voice基盤はexperimental app-server capabilityを既定無効へ変更し、明示的に有効化するVerifierだけを許可した。専用CIはShell / Display / rendered UI、全built-in Provider、AN2 Registry / Broker、Voice layout / protocol / coordinatorを同じWindows runnerで検証する構成へ更新した。
 - macOSへHost-owned Voice LaneのUI骨格を実装した。全Provider共通の最下段をdefault-offで保持し、Compact 64pt、Expanded S / M / L / XL 190 / 220 / 250 / 280pt、既存Provider領域不変、下方向拡張、短い波形、会話優先、明示toggle、左transcript / 右root-scoped session cards、fullscreenなしを固定した。短い画面ではExpandedをCompactへ安全に縮退する。
 - macOS Voice Lane layout verifierは4サイズ×Compact / Expandedの8描画、既定値・永続化・短画面縮退・既存Panel 112件を含め成功し、macOS CIへ追加した。ローカルMacには.NET / PowerShell runtimeがないため、Windows compileとdeterministic verifierはmerge commitのpush後にGitHub Actionsで確認する。microphone / WebRTC、実音声、Broker tool dispatch、両OSVoice runtimeは未実装である。
 - WindowsにもHost-owned最下段のVoice Lane UI骨格を接続した。Bridge stateと設定、display geometry、Panel最大高、Compact / Expanded renderer、短画面Compact縮退、既存Provider rect不変、明示toggle、2列表示、fullscreen禁止を実装し、UI / UI model / layout verifierを拡張した。JavaScript全ファイルのsyntaxとworkflow YAML、diff checkは成功したが、Windows compile / WebView2実描画はGitHub Actions待ちである。
-- AN2の独立ChatGPT Pro Criticは別runで継続中であり、返却前にAN2/AN3のcommitやPR更新は行わない。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-an3-voice-foundation.md`。
+- AN2のReady PR [#9](https://github.com/shotaro311/hover-pocket/pull/9)はWindows / macOS / PR Routerが全成功し、MERGEABLE / CLEANである。ChatGPT Pro Criticは指定Project内のchat作成証拠を確定できず成果物なしの`blocked`となり、delivery claim、空成果物のreadback、`mark-done`まで完了した。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-an3-voice-foundation.md`。
 
-## 2026-08-14 AI-native AN2 Registry / Broker / Text Today Focus
+## 2026-08-15 AI-native AN2 Registry / Broker / Text Today Focus
 
 - AN1 PR [#8](https://github.com/shotaro311/hover-pocket/pull/8)を全check成功、未解決review thread 0件、Ready、MERGEABLE / CLEANのreadback後にmergeした。`main` / `origin/main`はmerge commit `3dce5df07c2b3ed687feefd78b6e78b0753e9958`で一致する。
 - exact mainからworktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an2`、branch `codex/ai-native-an2-registry-broker`を作成し、remote trackingを設定した。
-- ChatGPT Pro OrchestratorのBuilder runは40分でtimeoutし、回収receiptは`completion_status=blocked`、`response.md`は空、`changes.patch`なしだった。delivery ID / state hashをbridgeでclaimし、重複適用を防ぐ`mark-done`まで完了した。同じ依頼は再送せず、Skillのblocked例外に従いCodexがAN2を再実装している。
-- patch適用前baselineは`swift build`、Capability 10 handler、Timer、Clipboard、Calculator、Panel layout 112件、Pocket contract 12 schema / 52 fixtureが成功した。contract reportは2回byte一致、SHA-256 `b11c7a6f...d0b0`。worktree sourceはcleanである。
-- macOS / WindowsへRegistry 11 descriptor、Capability Broker、single-use approval、durable idempotency ledger、metadata-only audit、readback、Timer補償、Text Today Focus adapter、default-off compositionを実装した。macOSはSwift 6 build、Broker 10 negative case、10 handler、Timer、Clipboard、Calculator、Panel layout 112件、Media、Pocket contract 52 fixtureが成功した。Windowsは同等verifierと共通golden plan digestを追加し、Release compile / verifierをCIで確認する前の状態である。
-- 未完了gateはWindows CIでのcompile / Broker / 既存回帰、Timeout後の副作用なし確認、既存Calendar UIからのToday Focus入口、独立review、security scan、Ready PRとCI readbackである。詳細: `progress/2026-08/2026-08-14_hover-pocket-ai-native-an2-registry-broker.md`。
+- ChatGPT Pro OrchestratorのBuilder runは40分でtimeoutし、回収receiptは`completion_status=blocked`、`response.md`は空、`changes.patch`なしだった。delivery ID / state hashをbridgeでclaimし、重複適用を防ぐ`mark-done`まで完了した。同じ依頼は再送せず、Skillのblocked例外に従いCodexがAN2を再実装した。
+- macOS / WindowsへRegistry 11 descriptor、Capability Broker、single-use approval、durable idempotency ledger、metadata-only audit、独立readback、Timer補償、Text Today Focus、既存Calendar UIのHost-owned承認入口、default-off compositionを実装した。最終実装headは`5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`で、remote branchと一致し、worktreeは進捗文書更新前までcleanだった。
+- ローカルではSwift warnings-as-errors build、Broker、Capability 10 handler、Timer、Clipboard、Calculator、Panel layout 112件、Media、Pocket contract 12 schema / 52 fixture、`git diff --check`が成功した。Broker verifierは並行duplicate、timeout完了待ち、cancellation、rollback、ledger / audit persistence failure、approval binding、redactionを含む。
+- exact headのGitHub ActionsはWindows [31819648677](https://github.com/shotaro311/hover-pocket/actions/runs/31819648677)、macOS [31819652540](https://github.com/shotaro311/hover-pocket/actions/runs/31819652540)、共通契約 [31819655023](https://github.com/shotaro311/hover-pocket/actions/runs/31819655023)がすべて成功した。
+- remediation range `7c05e54...5d7cbe1`のCodex Security scan `d596e8a5-1d07-4f13-b9c9-2672f51fc36f`は8 / 8 fileを完全レビューし、coverage complete、finding 0件でsealed completeとなった。外部Google Calendar実mutationと、未接続のVoice / MCP / Connector / generated PocketSurface ingressは後続gateである。
+- ChatGPT Pro Orchestratorの独立Critic run `20260815-013805-hoverpocket-an2headready-pr`は、通常Chat / GPT-5.6 Sol / Pro、GitHub read-only、外部操作なしで開始したが、Oracleが指定Project内のchat作成証拠を確定できず`blocked`となった。delivery ID / state hashのclaimは成功し、`response.md`は1 byte、`critic-review.md`とartifact manifestは存在しないことをreadbackして`mark-done`した。Pro verdictは得られていない。
+- Pro blocked後、ローカル独立レビューの長文承認境界をexact headで再確認した。両OSとも承認表示、Timer title、Sticky bodyは同じ80 Unicode scalar以下のcanonical値を使い、100文字fixtureでexact equalityを検証済みなので追加修正は不要だった。
+- 未完了gateは進捗文書の最終commit、Ready PR作成とPR headの全check / mergeability readbackである。詳細: `progress/2026-08/2026-08-14_hover-pocket-ai-native-an2-registry-broker.md`。
 
 ## 2026-08-14 AI-native AN1 Provider Capabilities
 

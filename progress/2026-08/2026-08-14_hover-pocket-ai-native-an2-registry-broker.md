@@ -2,7 +2,7 @@
 
 ## 現在地
 
-AN1のProvider Capability 10件をmainへ統合し、AN2の隔離worktreeとremote branchを作成した。ChatGPT Pro OrchestratorのBuilderはtimeoutで成果物を返せなかったため、Skillのblocked例外に従い、CodexがRegistry / Broker / Text Today Focusを両OSへ再実装している。macOSのruntimeと決定論的検証は成功し、WindowsはCI compile前である。
+AN1のProvider Capability 10件をmainへ統合し、AN2の隔離worktreeとremote branchを作成した。ChatGPT Pro OrchestratorのBuilderはtimeoutで成果物を返せなかったため、Skillのblocked例外に従い、CodexがRegistry / Broker / Text Today Focusを両OSへ再実装した。最終実装head `5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`はローカル回帰、Windows / macOS / 共通契約CI、最終security scanを通過した。独立Pro CriticはProject証拠不足で成果物なしの`blocked`となったため、Pro verdictは受入根拠に含めない。
 
 ## Git / branch
 
@@ -11,6 +11,7 @@ AN1のProvider Capability 10件をmainへ統合し、AN2の隔離worktreeとremo
 - AN2 branch: `codex/ai-native-an2-registry-broker`
 - AN2 worktree: `/Users/shotaro/code/share/hover-menu-preview-ai-native-an2`
 - branchは同名remoteをtrackingしている。
+- 最終実装head / remote head: `5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`
 
 ## Pro Builder run
 
@@ -60,6 +61,8 @@ Codex-owned（blocked後の再実装を含む）:
 - Text Today Focus adapterは今日のCalendarを読み、選択予定からTimer startとSticky purpose upsertの2 step planを作る。writeは1枚のapproval requestにまとめる。
 - feature flagはmacOS / Windowsとも既定オフ。off時はBroker ledger / audit、Codex process、Voice、microphoneを起動しない。Windowsは既存UIと同じ`PanelBridgeController.CapabilityHandlers`を使い、macOSは既存Singleton Storeを使う。
 - 共通golden plan digestは`sha256:d098ea1b5f9f70e91486fd53229e7ddb68f73a9952ab94f17eed27cdeeb6413f`へ固定した。
+- 既存Calendar UIの「選択予定から集中を開始」は、両OSで同じText Today Focus adapterとBrokerへ入り、Host-owned approvalの後にだけTimer / Stickyを書き込む。
+- timeoutはunknown receiptを先に返さず、cancelled handlerの完了を待ってから呼出元を再開する。これによりtimeout後のlate side effectとVerifierのraceを除去した。
 
 ## 実装後のローカル検証
 
@@ -95,7 +98,31 @@ git diff --check
   PASS
 ```
 
-Broker verifierはnative authority拒否、extra argument拒否、permission不足、approval reject / expiry / plan tamper / token replay、restart replayと副作用1回、workflow conflict、audit本文非保存、partial failure時Timer rollback、timeoutのunknown receipt、default-off、共通digestを検査する。
+Broker verifierはnative authority拒否、extra argument拒否、permission不足、approval reject / expiry / plan tamper / token replay、restart replayと副作用1回、workflow conflict、audit本文非保存、partial failure時Timer rollback、timeout完了待ち、cancellation、ledger / audit persistence failure、並行duplicate、default-off、共通digestを検査する。最終headでは同Verifierを20回連続実行して成功し、2026-08-15の再実行でも全ローカル回帰が成功した。
+
+## GitHub Actions / Security readback
+
+- Windows Release / Broker / 既存回帰: [31819648677](https://github.com/shotaro311/hover-pocket/actions/runs/31819648677) `SUCCESS`
+- macOS Swift 6 / Broker / 既存回帰: [31819652540](https://github.com/shotaro311/hover-pocket/actions/runs/31819652540) `SUCCESS`
+- Ubuntu / macOS / Windows Pocket contract parity: [31819655023](https://github.com/shotaro311/hover-pocket/actions/runs/31819655023) `SUCCESS`
+- 3 runともhead SHAは`5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`で一致する。
+- Codex Security scan `d596e8a5-1d07-4f13-b9c9-2672f51fc36f`はremediation range `7c05e5416494a54fe400302809ecccb396fbe93d...5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`の8 / 8 fileをレビューし、coverage `complete`、finding 0、sealed `completed`である。
+- security scanの明示的な未検証範囲は、外部Google Calendar実mutationと、AN2で未接続のVoice / MCP / Connector / generated PocketSurface ingressである。
+
+## Pro Critic run
+
+- Run ID: `20260815-013805-hoverpocket-an2headready-pr`
+- Route / role: normal ChatGPT Pro / independent Critic
+- Model / mode: `GPT-5.6 Sol` / `Pro`
+- GitHub access / external actions: read-only / none
+- exact base / head: `3dce5df07c2b3ed687feefd78b6e78b0753e9958...5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`
+- required artifact: `critic-review.md`
+- return mode: required。使い捨てbridgeのdelivery ID `return-137465ac8cfbb28ac1365a184a26dfb2`を1回だけclaimする。
+- 2026-08-15 02:19 JSTにcompletion `blocked`を受信した。理由は`Oracle completion does not prove that the chat was created in the configured ChatGPT Project`。
+- delivery ID `return-137465ac8cfbb28ac1365a184a26dfb2`とstate SHA-256 `30d4925a...6b2`の`claim-synthesis`は成功した。
+- `response.md`は1 byte、SHA-256 `01ba4719...46b`、`critic-review.md` / `pro-receipt.json` / `artifact-manifest.json`は存在しない。よってartifact適用、Pro findings、Pro verdictはなし。
+- `mark-done`後の`delivery.synthesis_completed_at`は`2026-08-15T02:20:23+09:00`。同じ通知を再適用しない。
+- blocked例外に従い、Codexが既存の独立security reviewとexact headを再照合した。長文目的の表示・実行ずれ候補は、両OSで`TodayFocusApprovalText`が80 Unicode scalarへcanonicalizeし、その同一値をapproval display、Timer title、Sticky bodyへ使う現行実装と100文字fixtureで既に解消済みだった。追加コード変更は不要である。
 
 ## Patch適用前baseline
 
@@ -147,8 +174,5 @@ git diff --check
 
 ## 未完了
 
-- Windows GitHub ActionsでのRelease compile、`--verify broker`、既存verifier readback。
-- timeout / cancellationのlate side effectなし、並行duplicate、ledger / audit persistence failureの追加hardening。
-- 既存Calendar UIから同じToday Focus planを開始するHost-owned approval入口。
-- 独立Critic reviewとsecurity scan。
-- progress最終更新、commit / push、Ready PR、全check / review readback。
+- 進捗文書だけをcommit / pushする。
+- Ready PR作成後、docs-only head差分、全check、未解決review thread、mergeabilityをreadbackする。
