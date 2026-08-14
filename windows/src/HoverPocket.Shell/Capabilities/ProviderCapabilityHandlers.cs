@@ -452,6 +452,8 @@ internal sealed class StickyCapabilityHandler : IPocketCapabilityHandler
         return CapabilityJson.From(new
         {
             noteId = note.Id.ToString("D").ToLowerInvariant(),
+            note.Title,
+            note.Body,
             updatedAt = note.UpdatedAt.ToString("O", CultureInfo.InvariantCulture)
         });
     }

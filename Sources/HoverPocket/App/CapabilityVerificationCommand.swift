@@ -177,6 +177,8 @@ enum CapabilityVerificationCommand {
             )
         )
         try require(second["noteId"] == first["noteId"], "sticky_atomic_upsert")
+        try require(second["title"] == .string(longTitle), "sticky_upsert_title_readback")
+        try require(second["body"] == .string("Finish the note"), "sticky_upsert_body_readback")
 
         let read = try await handlers.invoke(
             PocketCapabilityKey(id: "sticky.note.get", version: 1),

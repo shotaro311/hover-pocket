@@ -328,7 +328,7 @@ final class StickyCapabilityHandler: PocketCapabilityHandler {
                 id: idGenerator(),
                 at: context.now
             )
-            return Self.mutationOutput(note)
+            return Self.readOutput(note)
         case .get:
             let rawID = try arguments.requiredString("noteId", maxLength: 128)
             guard let id = UUID(uuidString: rawID), let note = store.note(id: id) else {

@@ -57,12 +57,22 @@
     "type": "object",
     "required": [
       "noteId",
+      "title",
+      "body",
       "updatedAt"
     ],
     "properties": {
       "noteId": {
         "type": "string",
         "maxLength": 128
+      },
+      "title": {
+        "type": "string",
+        "maxLength": 120
+      },
+      "body": {
+        "type": "string",
+        "maxLength": 10000
       },
       "updatedAt": {
         "type": "string",
@@ -77,6 +87,8 @@
     "capabilityVersion": 1,
     "match": [
       "noteId",
+      "title",
+      "body",
       "updatedAt"
     ]
   }

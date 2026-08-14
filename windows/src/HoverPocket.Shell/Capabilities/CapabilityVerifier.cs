@@ -166,6 +166,8 @@ internal sealed class CapabilityVerifier
             }),
             new CapabilityHandlerContext("sticky-verifier-key-002", DateTimeOffset.UtcNow));
         Require(second.GetProperty("noteId").GetString() == noteId, "sticky_atomic_upsert");
+        Require(second.GetProperty("title").GetString() == longTitle, "sticky_upsert_title_readback");
+        Require(second.GetProperty("body").GetString() == "Finish the note", "sticky_upsert_body_readback");
 
         var read = await handlers.InvokeAsync(CapabilityIds.StickyGet, Json(new { noteId }));
         Require(read.GetProperty("body").GetString() == "Finish the note", "sticky_readback");
