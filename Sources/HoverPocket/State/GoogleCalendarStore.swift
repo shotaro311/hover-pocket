@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 enum GoogleCalendarToolError: LocalizedError {
@@ -257,7 +258,7 @@ final class GoogleCalendarStore: ObservableObject {
         _ request: CalendarCapabilityCreateRequest,
         idempotencyKey: String
     ) async throws -> GoogleCalendarEventOccurrence {
-        _ = idempotencyKey
+        let externalEventID = Self.capabilityEventID(idempotencyKey)
         var draftStart = request.start
         var draftEnd = request.end
         if request.isAllDay {
@@ -293,17 +294,39 @@ final class GoogleCalendarStore: ObservableObject {
             end: draftEnd,
             isAllDay: request.isAllDay
         )
-        let created = try await apiClient.createEvent(draft, source: source)
+        let created: GoogleCalendarEventOccurrence
+        do {
+            created = try await apiClient.createEvent(draft, source: source, eventID: externalEventID)
+        } catch GoogleCalendarAPIError.conflict {
+            created = try await apiClient.fetchEvent(
+                calendarID: source.id,
+                eventID: externalEventID,
+                source: source
+            )
+        }
         let observed = try await apiClient.fetchEvent(
             calendarID: source.id,
             eventID: created.googleEventID,
             source: source
         )
+        guard observed.title == draft.normalizedTitle,
+              observed.start == draft.start,
+              observed.end == draft.end,
+              observed.isAllDay == draft.isAllDay else {
+            throw CapabilityHandlerError.readbackMismatch("calendar.idempotency")
+        }
         if let refreshed = try? await apiClient.fetchMonth(containing: draftStart) {
             lastLoadedMonth = Calendar.current.startOfMonth(for: draftStart)
             loadState = .loaded(refreshed)
         }
         return observed
+    }
+
+    private static func capabilityEventID(_ idempotencyKey: String) -> String {
+        let digest = SHA256.hash(data: Data(idempotencyKey.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return "hp\(digest)"
     }
 
     private func emptyMonthDays(for monthStart: Date, calendar: Calendar) -> [CalendarDayCell] {

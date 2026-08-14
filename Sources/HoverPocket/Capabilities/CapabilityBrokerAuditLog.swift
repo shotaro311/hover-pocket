@@ -60,6 +60,18 @@ struct CapabilityAuditEntry: Codable, Sendable {
     }
 }
 
+struct CapabilityAuthorizationAuditEntry: Codable, Sendable {
+    let decision: String
+    var eventType = "authorization_decision"
+    let origin: String
+    let planDigest: String
+    let planID: String
+    let pocketApp: CapabilityAuditEntry.PocketAppSummary?
+    let principalPseudonym: String
+    let safeErrorCode: String?
+    let timestamp: Date
+}
+
 final class CapabilityBrokerAuditLog {
     private let directory: URL
     private let encoder: JSONEncoder
@@ -86,7 +98,15 @@ final class CapabilityBrokerAuditLog {
     }
 
     func append(_ entry: CapabilityAuditEntry) throws {
-        let fileURL = fileURL(for: entry.timestamp)
+        try appendEncoded(entry, timestamp: entry.timestamp)
+    }
+
+    func appendAuthorization(_ entry: CapabilityAuthorizationAuditEntry) throws {
+        try appendEncoded(entry, timestamp: entry.timestamp)
+    }
+
+    private func appendEncoded<T: Encodable>(_ entry: T, timestamp: Date) throws {
+        let fileURL = fileURL(for: timestamp)
         do {
             var data = try encoder.encode(entry)
             data.append(0x0A)

@@ -2,6 +2,7 @@ import Foundation
 
 enum GoogleCalendarAPIError: LocalizedError {
     case requestFailed(String)
+    case conflict
     case invalidResponse
     case authorizationExpired
     case authorizationNeedsReconnect
@@ -10,6 +11,8 @@ enum GoogleCalendarAPIError: LocalizedError {
         switch self {
         case .requestFailed(let message):
             return message
+        case .conflict:
+            return "Google Calendar event already exists."
         case .invalidResponse:
             return "Google Calendar response could not be read."
         case .authorizationExpired:
@@ -23,7 +26,7 @@ enum GoogleCalendarAPIError: LocalizedError {
         switch self {
         case .authorizationExpired, .authorizationNeedsReconnect:
             return true
-        case .requestFailed, .invalidResponse:
+        case .requestFailed, .invalidResponse, .conflict:
             return false
         }
     }
@@ -69,10 +72,11 @@ final class GoogleCalendarAPIClient: @unchecked Sendable {
     func createEvent(
         _ draft: GoogleCalendarEventDraft,
         source: GoogleCalendarSource? = nil,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        eventID: String? = nil
     ) async throws -> GoogleCalendarEventOccurrence {
         let normalized = draft.normalized(calendar: calendar)
-        let body = try JSONEncoder().encode(Self.writeResource(from: normalized, calendar: calendar))
+        let body = try Self.createEventBody(from: normalized, calendar: calendar, eventID: eventID)
         return try await withAuthorizedRetry { accessToken in
             var request = URLRequest(url: Self.eventsURL(calendarID: normalized.calendarID))
             request.httpMethod = "POST"
@@ -252,6 +256,9 @@ final class GoogleCalendarAPIClient: @unchecked Sendable {
             if http.statusCode == 403, apiError?.isInsufficientPermissions == true {
                 throw GoogleCalendarAPIError.authorizationNeedsReconnect
             }
+            if http.statusCode == 409 {
+                throw GoogleCalendarAPIError.conflict
+            }
             let message = apiError?.safeDescription
             throw GoogleCalendarAPIError.requestFailed(message ?? "Google Calendar request failed.")
         }
@@ -352,11 +359,13 @@ final class GoogleCalendarAPIClient: @unchecked Sendable {
 
     private static func writeResource(
         from draft: GoogleCalendarEventDraft,
-        calendar: Calendar
+        calendar: Calendar,
+        eventID: String? = nil
     ) -> GoogleCalendarEventWriteResource {
         let timeZone = calendar.timeZone.identifier
         if draft.isAllDay {
             return GoogleCalendarEventWriteResource(
+                id: eventID,
                 summary: draft.normalizedTitle,
                 location: draft.normalizedLocation,
                 description: draft.normalizedNotes,
@@ -374,6 +383,7 @@ final class GoogleCalendarAPIClient: @unchecked Sendable {
         }
 
         return GoogleCalendarEventWriteResource(
+            id: eventID,
             summary: draft.normalizedTitle,
             location: draft.normalizedLocation,
             description: draft.normalizedNotes,
@@ -388,6 +398,14 @@ final class GoogleCalendarAPIClient: @unchecked Sendable {
                 timeZone: timeZone
             )
         )
+    }
+
+    static func createEventBody(
+        from draft: GoogleCalendarEventDraft,
+        calendar: Calendar,
+        eventID: String? = nil
+    ) throws -> Data {
+        try JSONEncoder().encode(writeResource(from: draft, calendar: calendar, eventID: eventID))
     }
 
     private static func eventsURL(calendarID: String) -> URL {
@@ -451,11 +469,26 @@ private struct GoogleCalendarEventDateTime: Decodable {
 }
 
 private struct GoogleCalendarEventWriteResource: Encodable {
+    let id: String?
     let summary: String
     let location: String?
     let description: String?
     let start: GoogleCalendarEventDateTimeWrite
     let end: GoogleCalendarEventDateTimeWrite
+
+    private enum CodingKeys: String, CodingKey {
+        case id, summary, location, description, start, end
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encode(summary, forKey: .summary)
+        try container.encodeIfPresent(location, forKey: .location)
+        try container.encodeIfPresent(description, forKey: .description)
+        try container.encode(start, forKey: .start)
+        try container.encode(end, forKey: .end)
+    }
 }
 
 private struct GoogleCalendarEventDateTimeWrite: Encodable {

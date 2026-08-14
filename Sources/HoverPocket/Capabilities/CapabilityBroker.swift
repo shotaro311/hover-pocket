@@ -27,8 +27,14 @@ final class CapabilityBroker {
         permissions: CapabilityPermissionSet,
         now: Date = Date()
     ) throws -> CapabilityBrokerPreparation {
-        let descriptors = try validate(plan, permissions: permissions)
-        let digest = try CapabilityCanonicalJSON.planDigest(plan)
+        let digest = (try? CapabilityCanonicalJSON.planDigest(plan)) ?? "unavailable"
+        let descriptors: [PocketCapabilityDescriptor]
+        do {
+            descriptors = try validate(plan, permissions: permissions)
+        } catch {
+            try appendAuthorizationAudit(plan: plan, planDigest: digest, decision: "denied", error: error, now: now)
+            throw error
+        }
         let request = try approvalStore.request(
             for: plan,
             digest: digest,
@@ -44,12 +50,20 @@ final class CapabilityBroker {
         decision: CapabilityApprovalStore.Decision,
         now: Date = Date()
     ) throws -> CapabilityApprovalGrant {
-        try approvalStore.decide(
-            requestID: requestID,
-            presentedPlanDigest: planDigest,
-            decision: decision,
-            now: now
-        )
+        let request = approvalStore.pendingRequest(requestID: requestID)
+        do {
+            let grant = try approvalStore.decide(
+                requestID: requestID,
+                presentedPlanDigest: planDigest,
+                decision: decision,
+                now: now
+            )
+            try appendApprovalDecisionAudit(request: request, planDigest: planDigest, decision: "approved", error: nil, now: now)
+            return grant
+        } catch {
+            try appendApprovalDecisionAudit(request: request, planDigest: planDigest, decision: "denied", error: error, now: now)
+            throw error
+        }
     }
 
     func execute(
@@ -60,7 +74,14 @@ final class CapabilityBroker {
     ) async throws -> CapabilityWorkflowReceipt {
         await acquireExecutionSlot()
         defer { releaseExecutionSlot() }
-        let descriptors = try validate(plan, permissions: permissions)
+        let descriptors: [PocketCapabilityDescriptor]
+        do {
+            descriptors = try validate(plan, permissions: permissions)
+        } catch {
+            let digest = (try? CapabilityCanonicalJSON.planDigest(plan)) ?? "unavailable"
+            try appendAuthorizationAudit(plan: plan, planDigest: digest, decision: "denied", error: error, now: now)
+            throw error
+        }
         let digest = try CapabilityCanonicalJSON.planDigest(plan)
         let durableExecution = descriptors.contains { $0.effect.isWrite }
         if durableExecution {
@@ -88,15 +109,21 @@ final class CapabilityBroker {
         let approvalPermissions = Set(descriptors.filter(\.approvalPolicy.requiresExecutionApproval).flatMap(\.permissions))
         if !approvalPermissions.isEmpty {
             guard let approvalGrant else {
+                try appendAuthorizationAudit(plan: plan, planDigest: digest, decision: "denied", error: CapabilityBrokerError.approvalRequired, now: now)
                 throw CapabilityBrokerError.approvalRequired
             }
-            try approvalStore.consume(
-                approvalGrant,
-                plan: plan,
-                digest: digest,
-                requiredPermissions: approvalPermissions,
-                now: now
-            )
+            do {
+                try approvalStore.consume(
+                    approvalGrant,
+                    plan: plan,
+                    digest: digest,
+                    requiredPermissions: approvalPermissions,
+                    now: now
+                )
+            } catch {
+                try appendAuthorizationAudit(plan: plan, planDigest: digest, decision: "denied", error: error, now: now)
+                throw error
+            }
         }
 
         if durableExecution {
@@ -123,9 +150,13 @@ final class CapabilityBroker {
             }
 
             workflowStatus = receipt.status == .unknown ? .unknown : (successfulSteps.isEmpty ? .failed : .partial)
-            if !successfulSteps.isEmpty {
+            var rollbackCandidates = successfulSteps
+            if descriptor.rollbackAvailable, receipt.output != nil {
+                rollbackCandidates.append((step, descriptor, receipts.count - 1))
+            }
+            if !rollbackCandidates.isEmpty {
                 let rollbackSucceeded = try await rollback(
-                    successfulSteps: successfulSteps,
+                    successfulSteps: rollbackCandidates,
                     receipts: &receipts,
                     plan: plan,
                     planDigest: digest,
@@ -284,6 +315,7 @@ final class CapabilityBroker {
         try auditLog.append(started)
 
         let receipt: CapabilityReceipt
+        var possibleOutput: CapabilityObject?
         do {
             let output = try await invokeWithTimeout(
                 descriptor.key,
@@ -291,6 +323,7 @@ final class CapabilityBroker {
                 context: CapabilityHandlerContext(idempotencyKey: step.idempotencyKey, now: now),
                 timeoutMilliseconds: descriptor.limits.timeoutMilliseconds
             )
+            possibleOutput = output
             try descriptor.validateOutput(output)
             let readback = try await readback(
                 descriptor: descriptor,
@@ -323,6 +356,7 @@ final class CapabilityBroker {
                 descriptor: descriptor,
                 plan: plan,
                 planDigest: planDigest,
+                possibleOutput: possibleOutput,
                 now: now
             )
         }
@@ -462,14 +496,15 @@ final class CapabilityBroker {
     ) async throws -> CapabilityObject {
         try await withCheckedThrowingContinuation { continuation in
             let gate = CapabilityInvocationContinuationGate(continuation)
-            Task { @MainActor [registry] in
+            let operation = Task { @MainActor [registry] in
                 do {
+                    try Task.checkCancellation()
                     gate.resolve(.success(try await registry.invoke(key, arguments: arguments, context: context)))
                 } catch {
                     gate.resolve(.failure(error))
                 }
             }
-            Task { @MainActor in
+            let timeout = Task { @MainActor in
                 do {
                     try await Task.sleep(for: .milliseconds(timeoutMilliseconds))
                     gate.resolve(.failure(CapabilityBrokerError.timedOut(key)))
@@ -477,6 +512,7 @@ final class CapabilityBroker {
                     gate.resolve(.failure(error))
                 }
             }
+            gate.install(tasks: [operation, timeout])
         }
     }
 
@@ -502,6 +538,7 @@ final class CapabilityBroker {
         descriptor: PocketCapabilityDescriptor,
         plan: CapabilityExecutionPlan,
         planDigest: String,
+        possibleOutput: CapabilityObject?,
         now: Date
     ) -> CapabilityReceipt {
         let safe = Self.safeError(error)
@@ -515,7 +552,7 @@ final class CapabilityBroker {
             planDigest: planDigest,
             capability: descriptor.key,
             status: status,
-            output: nil,
+            output: possibleOutput,
             readback: CapabilityReadbackReceipt(status: .unavailable, strategy: descriptor.readback.strategy, observedAt: nil, observed: nil, evidenceDigest: nil),
             rollbackAvailable: descriptor.rollbackAvailable,
             rollbackStatus: descriptor.rollbackAvailable ? "not_requested" : nil,
@@ -524,6 +561,44 @@ final class CapabilityBroker {
             completedAt: now,
             replayed: false
         )
+    }
+
+    private func appendApprovalDecisionAudit(
+        request: CapabilityApprovalRequest?,
+        planDigest: String,
+        decision: String,
+        error: Error?,
+        now: Date
+    ) throws {
+        try auditLog.appendAuthorization(CapabilityAuthorizationAuditEntry(
+            decision: decision,
+            origin: "approval",
+            planDigest: planDigest,
+            planID: request?.planID ?? "unknown",
+            pocketApp: request?.appContext.map { .init(id: $0.id, version: $0.version, manifestDigest: $0.manifestDigest) },
+            principalPseudonym: request.map { CapabilityBrokerAuditLog.principalPseudonym($0.principal) } ?? "principal:unknown",
+            safeErrorCode: error.map(Self.authorizationErrorCode),
+            timestamp: now
+        ))
+    }
+
+    private func appendAuthorizationAudit(
+        plan: CapabilityExecutionPlan,
+        planDigest: String,
+        decision: String,
+        error: Error?,
+        now: Date
+    ) throws {
+        try auditLog.appendAuthorization(CapabilityAuthorizationAuditEntry(
+            decision: decision,
+            origin: plan.origin.rawValue,
+            planDigest: planDigest,
+            planID: plan.id,
+            pocketApp: plan.appContext.map { .init(id: $0.id, version: $0.version, manifestDigest: $0.manifestDigest) },
+            principalPseudonym: CapabilityBrokerAuditLog.principalPseudonym(plan.principal),
+            safeErrorCode: error.map(Self.authorizationErrorCode),
+            timestamp: now
+        ))
     }
 
     private func appendAudit(
@@ -577,6 +652,30 @@ final class CapabilityBroker {
         return CapabilitySafeError(code: "CAPABILITY_EXECUTION_FAILED", retryable: false, messageKey: "error.capability.execution_failed")
     }
 
+    private static func authorizationErrorCode(_ error: Error) -> String {
+        guard let broker = error as? CapabilityBrokerError else {
+            return safeError(error).code
+        }
+        return switch broker {
+        case .invalidPlan: "CAPABILITY_PLAN_INVALID"
+        case .unknownCapability: "CAPABILITY_UNKNOWN"
+        case .unavailable: "CAPABILITY_UNAVAILABLE"
+        case .runtimeProhibited: "CAPABILITY_RUNTIME_PROHIBITED"
+        case .invalidArguments: "CAPABILITY_ARGUMENT_INVALID"
+        case .permissionDenied: "CAPABILITY_PERMISSION_DENIED"
+        case .approvalRequired: "CAPABILITY_APPROVAL_REQUIRED"
+        case .approvalRejected: "CAPABILITY_APPROVAL_REJECTED"
+        case .approvalExpired: "CAPABILITY_APPROVAL_EXPIRED"
+        case .approvalInvalid: "CAPABILITY_APPROVAL_INVALID"
+        case .approvalReplayed: "CAPABILITY_APPROVAL_REPLAYED"
+        case .idempotencyConflict: "CAPABILITY_IDEMPOTENCY_CONFLICT"
+        case .executionUnknown: "CAPABILITY_EXECUTION_UNKNOWN"
+        case .rateLimited: "CAPABILITY_RATE_LIMITED"
+        case .timedOut: "CAPABILITY_TIMEOUT"
+        case .ledgerUnavailable: "CAPABILITY_LEDGER_UNAVAILABLE"
+        }
+    }
+
     private static func invocationID(planDigest: String, stepID: String) -> String {
         "invocation:\(planDigest.dropFirst("sha256:".count).prefix(32)):\(stepID)"
     }
@@ -599,14 +698,25 @@ private extension CapabilityHandlerContext {
 @MainActor
 private final class CapabilityInvocationContinuationGate {
     private var continuation: CheckedContinuation<CapabilityObject, Error>?
+    private var tasks: [Task<Void, Never>] = []
 
     init(_ continuation: CheckedContinuation<CapabilityObject, Error>) {
         self.continuation = continuation
     }
 
+    func install(tasks: [Task<Void, Never>]) {
+        guard continuation != nil else {
+            tasks.forEach { $0.cancel() }
+            return
+        }
+        self.tasks = tasks
+    }
+
     func resolve(_ result: Result<CapabilityObject, Error>) {
         guard let continuation else { return }
         self.continuation = nil
+        tasks.forEach { $0.cancel() }
+        tasks.removeAll(keepingCapacity: false)
         continuation.resume(with: result)
     }
 }

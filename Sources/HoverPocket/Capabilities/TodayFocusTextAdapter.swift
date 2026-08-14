@@ -12,6 +12,35 @@ struct TodayFocusDraft: Equatable, Sendable {
     let preparation: CapabilityBrokerPreparation
 }
 
+enum TodayFocusApprovalText {
+    private static let bidirectionalControls: Set<UInt32> = [
+        0x061C, 0x200E, 0x200F,
+        0x202A, 0x202B, 0x202C, 0x202D, 0x202E,
+        0x2066, 0x2067, 0x2068, 0x2069
+    ]
+
+    static func sanitize(_ value: String) -> String {
+        var result = ""
+        var pendingSpace = false
+        for scalar in value.unicodeScalars {
+            let disallowed = CharacterSet.controlCharacters.contains(scalar)
+                || CharacterSet.newlines.contains(scalar)
+                || bidirectionalControls.contains(scalar.value)
+            if disallowed || CharacterSet.whitespaces.contains(scalar) {
+                pendingSpace = !result.isEmpty
+                continue
+            }
+            if pendingSpace {
+                result.append(" ")
+                pendingSpace = false
+            }
+            result.append(String(scalar))
+        }
+        let normalized = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? "予定名なし" : normalized.prefixingUnicodeScalars(120)
+    }
+}
+
 @MainActor
 final class TodayFocusTextAdapter {
     private let broker: CapabilityBroker
@@ -87,7 +116,8 @@ final class TodayFocusTextAdapter {
         purpose: String,
         principal: CapabilityPrincipal,
         permissions: CapabilityPermissionSet,
-        now: Date = Date()
+        now: Date = Date(),
+        timeZone: TimeZone = .current
     ) throws -> TodayFocusDraft {
         guard (1...86_400).contains(durationSeconds),
               !purpose.isEmpty,
@@ -95,7 +125,7 @@ final class TodayFocusTextAdapter {
             throw CapabilityBrokerError.invalidPlan("today_focus_input")
         }
         let nonce = UUID().uuidString.lowercased()
-        let stableDate = Self.dateKey(now)
+        let stableDate = Self.dateKey(now, timeZone: timeZone)
         let plan = CapabilityExecutionPlan(
             id: "today-focus-write:\(nonce)",
             createdAt: now,
@@ -170,11 +200,11 @@ final class TodayFocusTextAdapter {
         )
     }
 
-    private static func dateKey(_ date: Date) -> String {
+    private static func dateKey(_ date: Date, timeZone: TimeZone) -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
     }

@@ -254,6 +254,30 @@ struct CapabilityReceipt: Codable, Equatable, Sendable {
         )
     }
 
+    func durableCopy() -> CapabilityReceipt {
+        CapabilityReceipt(
+            invocationID: invocationID,
+            planID: planID,
+            planDigest: planDigest,
+            capability: capability,
+            status: status,
+            output: nil,
+            readback: CapabilityReadbackReceipt(
+                status: readback.status,
+                strategy: readback.strategy,
+                observedAt: readback.observedAt,
+                observed: nil,
+                evidenceDigest: readback.evidenceDigest
+            ),
+            rollbackAvailable: rollbackAvailable,
+            rollbackStatus: rollbackStatus,
+            auditEntryID: auditEntryID,
+            safeError: safeError,
+            completedAt: completedAt,
+            replayed: replayed
+        )
+    }
+
     func withRollbackStatus(_ status: String) -> CapabilityReceipt {
         CapabilityReceipt(
             invocationID: invocationID,
@@ -289,6 +313,17 @@ struct CapabilityWorkflowReceipt: Codable, Equatable, Sendable {
             steps: steps.map { $0.replayCopy() },
             completedAt: completedAt,
             replayed: true
+        )
+    }
+
+    func durableCopy() -> CapabilityWorkflowReceipt {
+        CapabilityWorkflowReceipt(
+            planID: planID,
+            planDigest: planDigest,
+            status: status,
+            steps: steps.map { $0.durableCopy() },
+            completedAt: completedAt,
+            replayed: replayed
         )
     }
 }

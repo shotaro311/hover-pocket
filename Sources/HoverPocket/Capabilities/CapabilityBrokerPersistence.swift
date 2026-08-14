@@ -103,7 +103,7 @@ final class CapabilityBrokerLedger {
             throw CapabilityBrokerError.ledgerUnavailable
         }
         record.state = .completed
-        record.receipt = receipt
+        record.receipt = receipt.durableCopy()
         state.invocations[idempotencyKey] = record
         try persist()
     }
@@ -136,7 +136,7 @@ final class CapabilityBrokerLedger {
             throw CapabilityBrokerError.ledgerUnavailable
         }
         record.state = .completed
-        record.receipt = receipt
+        record.receipt = receipt.durableCopy()
         state.workflows[receipt.planID] = record
         try persist()
     }
@@ -179,6 +179,10 @@ final class CapabilityApprovalStore {
 
     init(timeToLive: TimeInterval = 300) {
         self.timeToLive = timeToLive
+    }
+
+    func pendingRequest(requestID: String) -> CapabilityApprovalRequest? {
+        pending[requestID]?.request
     }
 
     func request(

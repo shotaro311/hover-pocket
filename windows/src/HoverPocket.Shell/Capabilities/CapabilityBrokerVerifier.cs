@@ -93,6 +93,21 @@ internal sealed class CapabilityBrokerVerifier
                 Require(!ledgerText.Contains("Sensitive Calendar Title", StringComparison.Ordinal), "private_read_ledger_title");
                 Require(!ledgerText.Contains("sensitive-event-ref", StringComparison.Ordinal), "private_read_ledger_ref");
             }
+            var tokyo = TimeZoneInfo.CreateCustomTimeZone("JST-verify", TimeSpan.FromHours(9), "JST", "JST");
+            var localDateDraft = adapter.PrepareFocus(
+                events[0],
+                1_500,
+                "local-date-purpose",
+                principal,
+                allPermissions,
+                new DateTimeOffset(2026, 8, 14, 16, 0, 0, TimeSpan.Zero),
+                tokyo);
+            Require(
+                localDateDraft.Plan.Steps[1].Arguments.GetProperty("stableKey").GetString() == "today-focus:2026-08-15",
+                "today_focus_local_date_key");
+            Require(
+                TodayFocusApprovalText.Sanitize("会議\n承認済み\u202E偽装") == "会議 承認済み 偽装",
+                "approval_text_sanitized");
 
             try
             {
@@ -233,8 +248,16 @@ internal sealed class CapabilityBrokerVerifier
             }
             Require(auditText.Contains("principal:sha256:", StringComparison.Ordinal), "audit_principal_digest");
             Require(auditText.Contains("\"idempotencyReplay\":true", StringComparison.Ordinal), "audit_replay");
+            Require(auditText.Contains("\"eventType\":\"authorization_decision\"", StringComparison.Ordinal), "authorization_audit");
+            Require(auditText.Contains("CAPABILITY_APPROVAL_REJECTED", StringComparison.Ordinal), "authorization_reject_audit");
+            var durableLedgerText = File.ReadAllText(ledgerPath);
+            foreach (var forbidden in new[] { "secret-purpose-approved", "secret-purpose-concurrent", "Sensitive Calendar Title" })
+            {
+                Require(!durableLedgerText.Contains(forbidden, StringComparison.Ordinal), $"ledger_redaction_{forbidden}");
+            }
 
             await VerifyPartialRollbackAsync(root, now, principal);
+            await VerifyCurrentStepRollbackAsync(root, now, principal);
             await VerifyTimeoutAsync(root, now, principal);
         }
         finally
@@ -322,7 +345,8 @@ internal sealed class CapabilityBrokerVerifier
                 CapabilitySchemaValidation.ExactKeys(value, ["value"]);
                 _ = CapabilitySchemaValidation.String(value, "value", 0, 16);
             });
-        var handlers = new PocketCapabilityHandlerSet([new BrokerSlowReadHandler(key)]);
+        var slowHandler = new BrokerSlowReadHandler(key);
+        var handlers = new PocketCapabilityHandlerSet([slowHandler]);
         var brokerRoot = Path.Combine(root, "timeout-broker");
         var broker = new CapabilityBroker(
             new CapabilityRegistry(handlers, [descriptor]),
@@ -339,6 +363,53 @@ internal sealed class CapabilityBrokerVerifier
         var receipt = await broker.ExecuteAsync(plan, Permissions(principal, "verify.read"), null, now);
         Require(receipt.Status == CapabilityReceiptStatus.Unknown, "timeout_status");
         Require(receipt.Steps.FirstOrDefault()?.SafeError?.Code == "CAPABILITY_TIMEOUT", "timeout_safe_error");
+        Require(slowHandler.WasCancelled, "timeout_handler_cancelled");
+    }
+
+    private async Task VerifyCurrentStepRollbackAsync(
+        string root,
+        DateTimeOffset now,
+        CapabilityPrincipal principal)
+    {
+        using var timerStore = new TimerStore(
+            Path.Combine(root, "current-step-timer"),
+            new ManualTimerClock(now),
+            new NullTimerAlertSound(),
+            enableScheduler: false);
+        var handlers = new PocketCapabilityHandlerSet([
+            new TimerCapabilityHandler(TimerCapabilityOperation.Start, timerStore),
+            new BrokerMismatchedTimerReadHandler(timerStore),
+            new TimerCapabilityHandler(TimerCapabilityOperation.Stop, timerStore)
+        ]);
+        var brokerRoot = Path.Combine(root, "current-step-broker");
+        var broker = new CapabilityBroker(
+            new CapabilityRegistry(handlers),
+            new CapabilityBrokerLedger(brokerRoot),
+            new CapabilityBrokerAuditLog(brokerRoot));
+        var plan = new CapabilityExecutionPlan(
+            "current-step-rollback-plan",
+            now,
+            CapabilityOrigin.Text,
+            principal,
+            null,
+            [new CapabilityPlanStep(
+                "startTimer",
+                CapabilityIds.TimerStart,
+                CapabilityJson.From(new { durationSeconds = 600, sourceRef = "event:current-step", title = "Current step" }),
+                "current-step-timer-key-0001",
+                [])],
+            new HashSet<string>(["timer.write"], StringComparer.Ordinal));
+        var permissions = Permissions(principal, "timer.write");
+        var preparation = broker.Prepare(plan, permissions, now);
+        var grant = broker.DecideApproval(
+            preparation.ApprovalRequest!.Id,
+            preparation.PlanDigest,
+            CapabilityApprovalDecision.Approve,
+            now);
+        var receipt = await broker.ExecuteAsync(plan, permissions, grant, now);
+        Require(receipt.Status == CapabilityReceiptStatus.Failed, "current_step_status");
+        Require(receipt.Steps.FirstOrDefault()?.RollbackStatus == "succeeded", "current_step_rollback");
+        Require(timerStore.RunningTimers.Count == 0, "current_step_timer_removed");
     }
 
     private static CapabilityPermissionSet Permissions(CapabilityPrincipal principal, params string[] permissions) =>
@@ -424,7 +495,11 @@ internal sealed class CapabilityBrokerVerifier
 
     private sealed class BrokerSlowReadHandler(PocketCapabilityKey key) : IPocketCapabilityHandler
     {
+        private int _wasCancelled;
+
         public PocketCapabilityKey Key { get; } = key;
+
+        public bool WasCancelled => Volatile.Read(ref _wasCancelled) == 1;
 
         public async Task<JsonElement> HandleAsync(
             JsonElement arguments,
@@ -433,8 +508,42 @@ internal sealed class CapabilityBrokerVerifier
         {
             _ = arguments;
             _ = context;
-            await Task.Delay(100, cancellationToken);
+            try
+            {
+                await Task.Delay(100, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                Volatile.Write(ref _wasCancelled, 1);
+                throw;
+            }
             return CapabilityJson.From(new { value = "late" });
+        }
+    }
+
+    private sealed class BrokerMismatchedTimerReadHandler(TimerStore store) : IPocketCapabilityHandler
+    {
+        public PocketCapabilityKey Key => CapabilityIds.TimerGet;
+
+        public Task<JsonElement> HandleAsync(
+            JsonElement arguments,
+            CapabilityHandlerContext context,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var rawId = CapabilityJson.RequiredString(arguments, "timerId", 36);
+            if (!Guid.TryParse(rawId, out var id))
+            {
+                throw new CapabilityHandlerException("CAPABILITY_ARGUMENT_INVALID", "timerId");
+            }
+            return Task.FromResult(store.GetRunningTimer(id) is null
+                ? CapabilityJson.From(new { timerId = rawId.ToLowerInvariant(), state = "stopped", endAt = (string?)null })
+                : CapabilityJson.From(new
+                {
+                    timerId = rawId.ToLowerInvariant(),
+                    state = "running",
+                    endAt = CapabilityCanonicalJson.Date(context.Now.AddSeconds(999))
+                }));
         }
     }
 }

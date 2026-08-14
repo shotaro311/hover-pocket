@@ -236,6 +236,12 @@ internal sealed record CapabilityReceipt(
     bool Replayed)
 {
     public CapabilityReceipt ReplayCopy() => this with { Replayed = true };
+
+    public CapabilityReceipt DurableCopy() => this with
+    {
+        Output = null,
+        Readback = Readback with { Observed = null }
+    };
 }
 
 internal sealed record CapabilityWorkflowReceipt(
@@ -250,6 +256,11 @@ internal sealed record CapabilityWorkflowReceipt(
     {
         Steps = Steps.Select(receipt => receipt.ReplayCopy()).ToArray(),
         Replayed = true
+    };
+
+    public CapabilityWorkflowReceipt DurableCopy() => this with
+    {
+        Steps = Steps.Select(receipt => receipt.DurableCopy()).ToArray()
     };
 }
 

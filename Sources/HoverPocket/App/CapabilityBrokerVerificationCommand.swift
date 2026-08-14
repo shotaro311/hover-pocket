@@ -41,7 +41,6 @@ enum CapabilityBrokerVerificationCommand {
         defaults.removePersistentDomain(forName: defaultsSuite)
         defer { defaults.removePersistentDomain(forName: defaultsSuite) }
         try require(!AppSettings(defaults: defaults).aiNativeEnabled, "feature_default_off")
-        let timerID = UUID(uuidString: "33333333-3333-4333-8333-333333333333")!
         let noteID = UUID(uuidString: "44444444-4444-4444-8444-444444444444")!
         let timerStore = TimerStore(
             storageDirectory: root.appendingPathComponent("timer", isDirectory: true),
@@ -56,7 +55,6 @@ enum CapabilityBrokerVerificationCommand {
             calendar: calendar,
             timerStore: timerStore,
             stickyStore: stickyStore,
-            timerID: timerID,
             noteID: noteID
         )
         let brokerRoot = root.appendingPathComponent("broker", isDirectory: true)
@@ -71,6 +69,7 @@ enum CapabilityBrokerVerificationCommand {
         try require(registry.descriptorKeys.count == 11, "registry_descriptor_count")
         try require(registry.availableHandlerKeys.count == 10, "registry_handler_count")
         try verifyGoldenDigest(now: now)
+        try verifyCalendarCreateEventBody(now: now)
         do {
             _ = try registry.resolve(PocketCapabilityKeys.nativeAuthority)
             throw BrokerVerificationFailure("native_authority_resolved")
@@ -130,6 +129,24 @@ enum CapabilityBrokerVerificationCommand {
             try require(!ledgerText.contains("Sensitive Calendar Title"), "private_read_ledger_title")
             try require(!ledgerText.contains("sensitive-event-ref"), "private_read_ledger_ref")
         }
+        let tokyoBoundary = ISO8601DateFormatter().date(from: "2026-08-14T16:00:00Z")!
+        let localDateDraft = try adapter.prepareFocus(
+            event: events[0],
+            durationSeconds: 1_500,
+            purpose: "local-date-purpose",
+            principal: principal,
+            permissions: allPermissions,
+            now: tokyoBoundary,
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!
+        )
+        try require(
+            localDateDraft.plan.steps[1].arguments["stableKey"] == .string("today-focus:2026-08-15"),
+            "today_focus_local_date_key"
+        )
+        try require(
+            TodayFocusApprovalText.sanitize("会議\n承認済み\u{202E}偽装") == "会議 承認済み 偽装",
+            "approval_text_sanitized"
+        )
 
         do {
             let denied = CapabilityPermissionSet(principal: principal, permissions: ["timer.write"])
@@ -330,6 +347,7 @@ enum CapabilityBrokerVerificationCommand {
         )
         let concurrentReceipts = try await [firstConcurrent, secondConcurrent]
         try require(concurrentReceipts.filter(\.replayed).count == 1, "concurrent_replay_count")
+        try require(concurrentReceipts.allSatisfy { $0.status == .succeeded }, "concurrent_receipt_status")
         try require(
             timerStore.runningTimers.count == timerCountBeforeConcurrent + 1,
             "concurrent_single_timer_effect"
@@ -348,9 +366,43 @@ enum CapabilityBrokerVerificationCommand {
         }
         try require(auditText.contains("principal:sha256:"), "audit_principal_digest")
         try require(auditText.contains("\"idempotencyReplay\":true"), "audit_replay")
+        try require(auditText.contains("\"eventType\":\"authorization_decision\""), "authorization_audit")
+        try require(auditText.contains("CAPABILITY_APPROVAL_REJECTED"), "authorization_reject_audit")
+        let durableLedgerText = String(data: try Data(contentsOf: ledgerURL), encoding: .utf8) ?? ""
+        for forbidden in ["secret-purpose-approved", "secret-purpose-concurrent", "Sensitive Calendar Title"] {
+            try require(!durableLedgerText.contains(forbidden), "ledger_redaction_\(forbidden)")
+        }
 
         try await verifyPartialRollback(root: root, now: now, principal: principal)
+        try await verifyCurrentStepRollback(root: root, now: now, principal: principal)
         try await verifyTimeout(root: root, now: now, principal: principal)
+    }
+
+    private static func verifyCalendarCreateEventBody(now: Date) throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let draft = GoogleCalendarEventDraft(
+            calendarID: "primary",
+            eventID: nil,
+            title: "Verify event",
+            location: "",
+            notes: "",
+            start: now,
+            end: now.addingTimeInterval(3_600),
+            isAllDay: false
+        )
+        let ordinaryBody = try GoogleCalendarAPIClient.createEventBody(from: draft, calendar: calendar)
+        let ordinary = try JSONSerialization.jsonObject(with: ordinaryBody) as? [String: Any]
+        try require(ordinary?["id"] == nil, "calendar_create_ordinary_id_omitted")
+
+        let deterministicID = "hp0123456789abcdef"
+        let idempotentBody = try GoogleCalendarAPIClient.createEventBody(
+            from: draft,
+            calendar: calendar,
+            eventID: deterministicID
+        )
+        let idempotent = try JSONSerialization.jsonObject(with: idempotentBody) as? [String: Any]
+        try require(idempotent?["id"] as? String == deterministicID, "calendar_create_idempotent_id")
     }
 
     private static func verifyGoldenDigest(now: Date) throws {
@@ -470,7 +522,8 @@ enum CapabilityBrokerVerificationCommand {
                 _ = try CapabilitySchemaValidation.string(output, "value", maximum: 16)
             }
         )
-        let handlers = try PocketCapabilityHandlerSet(handlers: [BrokerSlowReadHandler(key: key)])
+        let slowHandler = BrokerSlowReadHandler(key: key)
+        let handlers = try PocketCapabilityHandlerSet(handlers: [slowHandler])
         let brokerRoot = root.appendingPathComponent("timeout-broker", isDirectory: true)
         let broker = CapabilityBroker(
             registry: try CapabilityRegistry(descriptors: [descriptor], handlers: handlers),
@@ -500,6 +553,63 @@ enum CapabilityBrokerVerificationCommand {
         )
         try require(receipt.status == .unknown, "timeout_status")
         try require(receipt.steps.first?.safeError?.code == "CAPABILITY_TIMEOUT", "timeout_safe_error")
+        try require(slowHandler.wasCancelled, "timeout_handler_cancelled")
+    }
+
+    @MainActor
+    private static func verifyCurrentStepRollback(
+        root: URL,
+        now: Date,
+        principal: CapabilityPrincipal
+    ) async throws {
+        let timerID = UUID(uuidString: "66666666-6666-4666-8666-666666666666")!
+        let timerStore = TimerStore(
+            storageDirectory: root.appendingPathComponent("current-step-timer", isDirectory: true),
+            observesWake: false,
+            persistenceEnabled: true
+        )
+        let handlers = try PocketCapabilityHandlerSet(handlers: [
+            TimerCapabilityHandler(operation: .start, store: timerStore, idGenerator: { timerID }),
+            BrokerMismatchedTimerReadHandler(store: timerStore),
+            TimerCapabilityHandler(operation: .stop, store: timerStore)
+        ])
+        let brokerRoot = root.appendingPathComponent("current-step-broker", isDirectory: true)
+        let broker = CapabilityBroker(
+            registry: try CapabilityRegistry(handlers: handlers),
+            ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
+            auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+        )
+        let plan = CapabilityExecutionPlan(
+            id: "current-step-rollback-plan",
+            createdAt: now,
+            origin: .text,
+            principal: principal,
+            appContext: nil,
+            steps: [CapabilityPlanStep(
+                id: "startTimer",
+                capability: PocketCapabilityKeys.timerStart,
+                arguments: [
+                    "durationSeconds": .integer(600),
+                    "sourceRef": .string("event:current-step"),
+                    "title": .string("Current step")
+                ],
+                idempotencyKey: "current-step-timer-key-0001",
+                dependencies: []
+            )],
+            requiredPermissions: ["timer.write"]
+        )
+        let permissions = CapabilityPermissionSet(principal: principal, permissions: ["timer.write"])
+        let preparation = try broker.prepare(plan, permissions: permissions, now: now)
+        let grant = try broker.decideApproval(
+            requestID: preparation.approvalRequest!.id,
+            planDigest: preparation.planDigest,
+            decision: .approve,
+            now: now
+        )
+        let receipt = try await broker.execute(plan, permissions: permissions, approvalGrant: grant, now: now)
+        try require(receipt.status == .failed, "current_step_status")
+        try require(receipt.steps.first?.rollbackStatus == "succeeded", "current_step_rollback")
+        try require(timerStore.runningTimers.isEmpty, "current_step_timer_removed")
     }
 
     @MainActor
@@ -507,14 +617,13 @@ enum CapabilityBrokerVerificationCommand {
         calendar: BrokerFakeCalendarDataSource,
         timerStore: TimerStore,
         stickyStore: StickyNotesStore,
-        timerID: UUID,
         noteID: UUID
     ) throws -> PocketCapabilityHandlerSet {
         try PocketCapabilityHandlerSet(handlers: [
             CalendarListCapabilityHandler(dataSource: calendar),
             CalendarGetCapabilityHandler(dataSource: calendar),
             CalendarCreateCapabilityHandler(dataSource: calendar),
-            TimerCapabilityHandler(operation: .start, store: timerStore, idGenerator: { timerID }),
+            TimerCapabilityHandler(operation: .start, store: timerStore),
             TimerCapabilityHandler(operation: .get, store: timerStore),
             TimerCapabilityHandler(operation: .pause, store: timerStore),
             TimerCapabilityHandler(operation: .resume, store: timerStore),
@@ -612,6 +721,7 @@ private final class BrokerFailingStickyHandler: PocketCapabilityHandler {
 @MainActor
 private final class BrokerSlowReadHandler: PocketCapabilityHandler {
     let key: PocketCapabilityKey
+    private(set) var wasCancelled = false
 
     init(key: PocketCapabilityKey) {
         self.key = key
@@ -620,7 +730,36 @@ private final class BrokerSlowReadHandler: PocketCapabilityHandler {
     func handle(arguments: CapabilityObject, context: CapabilityHandlerContext) async throws -> CapabilityObject {
         _ = arguments
         _ = context
-        try await Task.sleep(for: .milliseconds(100))
+        do {
+            try await Task.sleep(for: .milliseconds(100))
+        } catch is CancellationError {
+            wasCancelled = true
+            throw CancellationError()
+        }
         return ["value": .string("late")]
+    }
+}
+
+@MainActor
+private final class BrokerMismatchedTimerReadHandler: PocketCapabilityHandler {
+    let key = PocketCapabilityKeys.timerGet
+    private let store: TimerStore
+
+    init(store: TimerStore) {
+        self.store = store
+    }
+
+    func handle(arguments: CapabilityObject, context: CapabilityHandlerContext) async throws -> CapabilityObject {
+        guard case .string(let rawID)? = arguments["timerId"], let id = UUID(uuidString: rawID) else {
+            throw CapabilityHandlerError.invalidArgument("timerId")
+        }
+        guard store.runningTimer(id: id) != nil else {
+            return ["timerId": .string(rawID.lowercased()), "state": .string("stopped"), "endAt": .null]
+        }
+        return [
+            "timerId": .string(rawID.lowercased()),
+            "state": .string("running"),
+            "endAt": .string(CapabilityDateCodec.string(from: context.now.addingTimeInterval(999)))
+        ]
     }
 }

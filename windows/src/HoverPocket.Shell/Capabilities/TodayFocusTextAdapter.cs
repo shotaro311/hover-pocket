@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Globalization;
 
 namespace HoverPocket.Shell.Capabilities;
 
@@ -12,6 +13,46 @@ internal sealed record TodayFocusCalendarEvent(
 internal sealed record TodayFocusDraft(
     CapabilityExecutionPlan Plan,
     CapabilityBrokerPreparation Preparation);
+
+internal static class TodayFocusApprovalText
+{
+    private static readonly HashSet<int> BidirectionalControls =
+    [
+        0x061C, 0x200E, 0x200F,
+        0x202A, 0x202B, 0x202C, 0x202D, 0x202E,
+        0x2066, 0x2067, 0x2068, 0x2069
+    ];
+
+    public static string Sanitize(string value)
+    {
+        var builder = new StringBuilder();
+        var pendingSpace = false;
+        foreach (var rune in value.EnumerateRunes())
+        {
+            var category = Rune.GetUnicodeCategory(rune);
+            var disallowed = category is UnicodeCategory.Control
+                or UnicodeCategory.Format
+                or UnicodeCategory.LineSeparator
+                or UnicodeCategory.ParagraphSeparator
+                || BidirectionalControls.Contains(rune.Value);
+            if (disallowed || Rune.IsWhiteSpace(rune))
+            {
+                pendingSpace = builder.Length > 0;
+                continue;
+            }
+            if (pendingSpace)
+            {
+                builder.Append(' ');
+                pendingSpace = false;
+            }
+            builder.Append(rune.ToString());
+        }
+        var normalized = builder.ToString().Trim();
+        return string.IsNullOrEmpty(normalized)
+            ? "予定名なし"
+            : CapabilityJson.TruncateString(normalized, 120);
+    }
+}
 
 internal sealed class TodayFocusTextAdapter(CapabilityBroker broker)
 {
@@ -78,7 +119,8 @@ internal sealed class TodayFocusTextAdapter(CapabilityBroker broker)
         string purpose,
         CapabilityPrincipal principal,
         CapabilityPermissionSet permissions,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        TimeZoneInfo? timeZone = null)
     {
         if (durationSeconds is < 1 or > 86_400
             || string.IsNullOrEmpty(purpose)
@@ -110,7 +152,7 @@ internal sealed class TodayFocusTextAdapter(CapabilityBroker broker)
                     CapabilityIds.StickyUpsert,
                     CapabilityJson.From(new
                     {
-                        stableKey = $"today-focus:{now.UtcDateTime:yyyy-MM-dd}",
+                        stableKey = $"today-focus:{TimeZoneInfo.ConvertTime(now, timeZone ?? TimeZoneInfo.Local):yyyy-MM-dd}",
                         title = "今日の目的",
                         body = purpose,
                         color = "yellow"

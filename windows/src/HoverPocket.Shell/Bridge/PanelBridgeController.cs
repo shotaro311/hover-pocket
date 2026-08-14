@@ -624,6 +624,7 @@ internal sealed class PanelBridgeController : IDisposable
         var selected = events.FirstOrDefault(item => item.EventRef == eventRef)
             ?? throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "calendar_event");
         var purpose = string.IsNullOrEmpty(selected.SafeTitle) ? "今日の予定" : selected.SafeTitle;
+        var approvalTitle = TodayFocusApprovalText.Sanitize(purpose);
         var draft = _todayFocusTextAdapter.PrepareFocus(
             selected,
             1_500,
@@ -637,8 +638,8 @@ internal sealed class PanelBridgeController : IDisposable
         var english = CurrentSettings.Language == AppLanguage.English;
         var result = System.Windows.MessageBox.Show(
             english
-                ? $"{purpose}\n\nStart a 25-minute Timer and save this purpose to Sticky Notes?"
-                : $"{purpose}\n\n25分Timerを開始し、この目的をSticky Notesへ保存します。",
+                ? $"{approvalTitle}\n\nStart a 25-minute Timer and save this purpose to Sticky Notes?"
+                : $"{approvalTitle}\n\n25分Timerを開始し、この目的をSticky Notesへ保存します。",
             english ? "Approve Today Focus" : "Today Focusを承認",
             System.Windows.MessageBoxButton.YesNo,
             System.Windows.MessageBoxImage.Question,

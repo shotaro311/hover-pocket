@@ -47,8 +47,17 @@ internal sealed class CapabilityBroker
         CapabilityPermissionSet permissions,
         DateTimeOffset now)
     {
-        var descriptors = Validate(plan, permissions);
         var digest = CapabilityCanonicalJson.PlanDigest(plan);
+        IReadOnlyList<PocketCapabilityDescriptor> descriptors;
+        try
+        {
+            descriptors = Validate(plan, permissions);
+        }
+        catch (Exception ex)
+        {
+            AppendAuthorizationAudit(plan, digest, "denied", ex, now);
+            throw;
+        }
         return new CapabilityBrokerPreparation(
             digest,
             _approvalStore.Request(plan, digest, descriptors, now));
@@ -58,8 +67,21 @@ internal sealed class CapabilityBroker
         string requestId,
         string planDigest,
         CapabilityApprovalDecision decision,
-        DateTimeOffset now) =>
-        _approvalStore.Decide(requestId, planDigest, decision, now);
+        DateTimeOffset now)
+    {
+        var request = _approvalStore.PendingRequest(requestId);
+        try
+        {
+            var grant = _approvalStore.Decide(requestId, planDigest, decision, now);
+            AppendApprovalDecisionAudit(request, planDigest, "approved", null, now);
+            return grant;
+        }
+        catch (Exception ex)
+        {
+            AppendApprovalDecisionAudit(request, planDigest, "denied", ex, now);
+            throw;
+        }
+    }
 
     public async Task<CapabilityWorkflowReceipt> ExecuteAsync(
         CapabilityExecutionPlan plan,
@@ -71,8 +93,17 @@ internal sealed class CapabilityBroker
         await _executionGate.WaitAsync(cancellationToken);
         try
         {
-            var descriptors = Validate(plan, permissions);
             var digest = CapabilityCanonicalJson.PlanDigest(plan);
+            IReadOnlyList<PocketCapabilityDescriptor> descriptors;
+            try
+            {
+                descriptors = Validate(plan, permissions);
+            }
+            catch (Exception ex)
+            {
+                AppendAuthorizationAudit(plan, digest, "denied", ex, now);
+                throw;
+            }
             var durableExecution = descriptors.Any(descriptor => descriptor.Effect.IsWrite());
             if (durableExecution)
             {
@@ -106,9 +137,23 @@ internal sealed class CapabilityBroker
             {
                 if (approvalGrant is null)
                 {
+                    AppendAuthorizationAudit(
+                        plan,
+                        digest,
+                        "denied",
+                        new CapabilityBrokerException("CAPABILITY_APPROVAL_REQUIRED", plan.Id),
+                        now);
                     throw new CapabilityBrokerException("CAPABILITY_APPROVAL_REQUIRED", plan.Id);
                 }
-                _approvalStore.Consume(approvalGrant.Value, plan, digest, approvalPermissions, now);
+                try
+                {
+                    _approvalStore.Consume(approvalGrant.Value, plan, digest, approvalPermissions, now);
+                }
+                catch (Exception ex)
+                {
+                    AppendAuthorizationAudit(plan, digest, "denied", ex, now);
+                    throw;
+                }
             }
 
             if (durableExecution)
@@ -140,9 +185,14 @@ internal sealed class CapabilityBroker
                     : successful.Count == 0
                         ? CapabilityReceiptStatus.Failed
                         : CapabilityReceiptStatus.Partial;
-                if (successful.Count > 0)
+                var rollbackCandidates = successful.ToList();
+                if (descriptors[index].RollbackAvailable && receipt.Output is not null)
                 {
-                    var rolledBack = await RollbackAsync(successful, receipts, plan, digest, now, cancellationToken);
+                    rollbackCandidates.Add((plan.Steps[index], descriptors[index], receipts.Count - 1));
+                }
+                if (rollbackCandidates.Count > 0)
+                {
+                    var rolledBack = await RollbackAsync(rollbackCandidates, receipts, plan, digest, now, cancellationToken);
                     if (rolledBack && receipt.Status != CapabilityReceiptStatus.Unknown)
                     {
                         workflowStatus = CapabilityReceiptStatus.Failed;
@@ -284,6 +334,7 @@ internal sealed class CapabilityBroker
 
         var stopwatch = Stopwatch.StartNew();
         CapabilityReceipt receipt;
+        JsonElement? possibleOutput = null;
         try
         {
             var output = await InvokeWithTimeoutAsync(
@@ -292,6 +343,7 @@ internal sealed class CapabilityBroker
                 new CapabilityHandlerContext(step.IdempotencyKey, now),
                 descriptor.Limits.TimeoutMilliseconds,
                 cancellationToken);
+            possibleOutput = output.Clone();
             descriptor.ValidateOutput(output);
             var readback = await ReadbackAsync(descriptor, output, now, cancellationToken);
             var status = readback.Status == CapabilityReadbackStatus.Verified
@@ -318,7 +370,7 @@ internal sealed class CapabilityBroker
         }
         catch (Exception ex)
         {
-            receipt = FailureReceipt(ex, invocationId, auditEntryId, descriptor, plan, planDigest, now);
+            receipt = FailureReceipt(ex, invocationId, auditEntryId, descriptor, plan, planDigest, possibleOutput, now);
         }
         stopwatch.Stop();
         AppendAudit(receipt, descriptor, plan, argumentDigest, stopwatch.ElapsedMilliseconds, false, now);
@@ -495,6 +547,7 @@ internal sealed class CapabilityBroker
         PocketCapabilityDescriptor descriptor,
         CapabilityExecutionPlan plan,
         string planDigest,
+        JsonElement? possibleOutput,
         DateTimeOffset now)
     {
         var safe = SafeError(error);
@@ -506,7 +559,7 @@ internal sealed class CapabilityBroker
             planDigest,
             descriptor.Key,
             unknown ? CapabilityReceiptStatus.Unknown : descriptor.Effect.IsWrite() ? CapabilityReceiptStatus.Partial : CapabilityReceiptStatus.Failed,
-            null,
+            possibleOutput,
             new CapabilityReadbackReceipt(CapabilityReadbackStatus.Unavailable, descriptor.Readback.Strategy, null, null, null),
             descriptor.RollbackAvailable,
             descriptor.RollbackAvailable ? "not_requested" : null,
@@ -514,6 +567,48 @@ internal sealed class CapabilityBroker
             safe,
             now,
             false);
+    }
+
+    private void AppendApprovalDecisionAudit(
+        CapabilityApprovalRequest? request,
+        string planDigest,
+        string decision,
+        Exception? error,
+        DateTimeOffset now)
+    {
+        _auditLog.AppendAuthorization(new CapabilityAuthorizationAuditEntry(
+            decision,
+            "authorization_decision",
+            "approval",
+            planDigest,
+            request?.PlanId ?? "unknown",
+            request?.AppContext is null
+                ? null
+                : new CapabilityAuditPocketApp(request.AppContext.Id, request.AppContext.Version, request.AppContext.ManifestDigest),
+            request is null ? "principal:unknown" : CapabilityBrokerAuditLog.PrincipalPseudonym(request.Principal),
+            error is null ? null : AuthorizationErrorCode(error),
+            now));
+    }
+
+    private void AppendAuthorizationAudit(
+        CapabilityExecutionPlan plan,
+        string planDigest,
+        string decision,
+        Exception? error,
+        DateTimeOffset now)
+    {
+        _auditLog.AppendAuthorization(new CapabilityAuthorizationAuditEntry(
+            decision,
+            "authorization_decision",
+            plan.Origin.WireValue(),
+            planDigest,
+            plan.Id,
+            plan.AppContext is null
+                ? null
+                : new CapabilityAuditPocketApp(plan.AppContext.Id, plan.AppContext.Version, plan.AppContext.ManifestDigest),
+            CapabilityBrokerAuditLog.PrincipalPseudonym(plan.Principal),
+            error is null ? null : AuthorizationErrorCode(error),
+            now));
     }
 
     private void AppendAudit(
@@ -567,6 +662,9 @@ internal sealed class CapabilityBroker
         }
         return new CapabilitySafeError("CAPABILITY_EXECUTION_FAILED", false, "error.capability.execution_failed");
     }
+
+    private static string AuthorizationErrorCode(Exception error) =>
+        error is CapabilityBrokerException broker ? broker.Code : SafeError(error).Code;
 
     private static bool ValidIdempotencyKey(string value)
     {

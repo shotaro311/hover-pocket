@@ -49,6 +49,7 @@ internal sealed class CapabilityBrokerLedger
 
     private readonly string _filePath;
     private readonly object _sync = new();
+
     private LedgerState _state;
 
     public CapabilityBrokerLedger(string rootDirectory)
@@ -120,7 +121,7 @@ internal sealed class CapabilityBrokerLedger
             _state.Invocations[idempotencyKey] = existing with
             {
                 State = RecordState.Completed,
-                Receipt = receipt
+                Receipt = receipt.DurableCopy()
             };
             Persist();
         }
@@ -168,7 +169,7 @@ internal sealed class CapabilityBrokerLedger
             _state.Workflows[receipt.PlanId] = existing with
             {
                 State = RecordState.Completed,
-                Receipt = receipt
+                Receipt = receipt.DurableCopy()
             };
             Persist();
         }
@@ -214,6 +215,14 @@ internal sealed class CapabilityApprovalStore(TimeSpan? timeToLive = null)
     private readonly Dictionary<string, IssuedGrant> _grants = new(StringComparer.Ordinal);
     private readonly HashSet<string> _consumedTokens = new(StringComparer.Ordinal);
     private readonly object _sync = new();
+
+    public CapabilityApprovalRequest? PendingRequest(string requestId)
+    {
+        lock (_sync)
+        {
+            return _pending.GetValueOrDefault(requestId);
+        }
+    }
 
     public CapabilityApprovalRequest? Request(
         CapabilityExecutionPlan plan,
@@ -353,6 +362,17 @@ internal sealed record CapabilityAuditCapability(string Id, int Version, string 
 internal sealed record CapabilityAuditPocketApp(string Id, string Version, string ManifestDigest);
 internal sealed record CapabilityAuditReadback(string Status, string? EvidenceDigest);
 
+internal sealed record CapabilityAuthorizationAuditEntry(
+    [property: JsonPropertyName("decision")] string Decision,
+    [property: JsonPropertyName("eventType")] string EventType,
+    [property: JsonPropertyName("origin")] string Origin,
+    [property: JsonPropertyName("planDigest")] string PlanDigest,
+    [property: JsonPropertyName("planId")] string PlanId,
+    [property: JsonPropertyName("pocketApp")] CapabilityAuditPocketApp? PocketApp,
+    [property: JsonPropertyName("principalPseudonym")] string PrincipalPseudonym,
+    [property: JsonPropertyName("safeErrorCode")] string? SafeErrorCode,
+    [property: JsonPropertyName("timestamp")] DateTimeOffset Timestamp);
+
 internal sealed class CapabilityBrokerAuditLog
 {
     private static readonly JsonSerializerOptions Options = new()
@@ -379,11 +399,21 @@ internal sealed class CapabilityBrokerAuditLog
 
     public void Append(CapabilityAuditEntry entry)
     {
+        AppendEntry(entry, entry.Timestamp);
+    }
+
+    public void AppendAuthorization(CapabilityAuthorizationAuditEntry entry)
+    {
+        AppendEntry(entry, entry.Timestamp);
+    }
+
+    private void AppendEntry<T>(T entry, DateTimeOffset timestamp)
+    {
         lock (_sync)
         {
             try
             {
-                var path = Path.Combine(_directory, $"capability-{entry.Timestamp.UtcDateTime:yyyyMMdd}.jsonl");
+                var path = Path.Combine(_directory, $"capability-{timestamp.UtcDateTime:yyyyMMdd}.jsonl");
                 var data = JsonSerializer.SerializeToUtf8Bytes(entry, Options);
                 using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
                 stream.Write(data);
