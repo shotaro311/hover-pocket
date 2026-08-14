@@ -49,7 +49,10 @@ final class StickyNotesStore: ObservableObject {
         color: StickyNoteColor,
         id: UUID = UUID(),
         at date: Date = Date()
-    ) -> StickyNoteItem {
+    ) throws -> StickyNoteItem {
+        let previousNotes = notes
+        let previousLastAction = lastAction
+        let note: StickyNoteItem
         if let index = notes.firstIndex(where: { $0.stableKey == stableKey }) {
             notes[index].title = title
             notes[index].body = body
@@ -57,25 +60,32 @@ final class StickyNotesStore: ObservableObject {
             notes[index].updatedAt = date
             notes[index].archivedAt = nil
             lastAction = nil
-            save()
-            return notes[index]
+            note = notes[index]
+        } else {
+            note = StickyNoteItem(
+                id: id,
+                stableKey: stableKey,
+                title: title,
+                body: body,
+                color: color,
+                createdAt: date,
+                updatedAt: date,
+                archivedAt: nil,
+                sortIndex: nextSortIndexForNewNote()
+            )
+            notes.append(note)
+            lastAction = nil
         }
 
-        let note = StickyNoteItem(
-            id: id,
-            stableKey: stableKey,
-            title: title,
-            body: body,
-            color: color,
-            createdAt: date,
-            updatedAt: date,
-            archivedAt: nil,
-            sortIndex: nextSortIndexForNewNote()
-        )
-        notes.append(note)
-        lastAction = nil
-        save()
-        return note
+        do {
+            try saveOrThrow()
+            return note
+        } catch {
+            notes = previousNotes
+            lastAction = previousLastAction
+            lastErrorMessage = "Sticky notes could not be saved."
+            throw error
+        }
     }
 
     @discardableResult
@@ -210,15 +220,19 @@ final class StickyNotesStore: ObservableObject {
 
     private func save() {
         do {
-            try ensureStorageDirectory()
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(notes)
-            try data.write(to: notesURL, options: .atomic)
-            lastErrorMessage = nil
+            try saveOrThrow()
         } catch {
             lastErrorMessage = "Sticky notes could not be saved."
         }
+    }
+
+    private func saveOrThrow() throws {
+        try ensureStorageDirectory()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(notes)
+        try data.write(to: notesURL, options: .atomic)
+        lastErrorMessage = nil
     }
 
     private func ensureStorageDirectory() throws {

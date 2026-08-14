@@ -191,6 +191,25 @@ enum CapabilityVerificationCommand {
         let restored = StickyNotesStore(storageDirectory: root)
         try require(restored.note(id: noteID)?.stableKey == "today-focus:purpose", "sticky_persistence")
         try require(restored.note(id: noteID)?.title == longTitle, "sticky_title_persistence")
+
+        let blockedRoot = root.appendingPathComponent("blocked-store", isDirectory: false)
+        try Data("blocked".utf8).write(to: blockedRoot)
+        let blockedStore = StickyNotesStore(storageDirectory: blockedRoot)
+        let blockedHandler = StickyCapabilityHandler(operation: .upsert, store: blockedStore)
+        do {
+            _ = try await blockedHandler.handle(
+                arguments: [
+                    "stableKey": .string("blocked"),
+                    "title": .string("Blocked"),
+                    "body": .string("Must not remain in memory"),
+                    "color": .string("yellow")
+                ],
+                context: CapabilityHandlerContext(idempotencyKey: "sticky-verifier-key-003")
+            )
+            throw VerificationFailure("sticky_persistence_failure_accepted")
+        } catch CapabilityHandlerError.unavailable(let field) where field == "sticky_storage" {
+        }
+        try require(blockedStore.notes.isEmpty, "sticky_persistence_failure_rollback")
     }
 
     @MainActor
@@ -216,11 +235,12 @@ enum CapabilityVerificationCommand {
             normalizedAllDay.end.timeIntervalSince(normalizedAllDay.start) == 3 * 86_400,
             "calendar_all_day_range"
         )
+        let longCalendarTitle = String(repeating: "👨‍👩‍👧‍👦", count: 40)
         dataSource.seed(
             CalendarCapabilityEvent(
                 eventRef: "primary:event-existing",
                 eventID: "event-existing",
-                safeTitle: "Existing",
+                safeTitle: longCalendarTitle,
                 start: now.addingTimeInterval(300),
                 end: now.addingTimeInterval(900)
             )
@@ -230,9 +250,12 @@ enum CapabilityVerificationCommand {
             arguments: ["range": .string("today"), "timezone": .string("UTC")],
             context: CapabilityHandlerContext(now: now)
         )
-        guard case .array(let events)? = list["events"], events.count == 1 else {
+        guard case .array(let events)? = list["events"], events.count == 1,
+              case .object(let firstEvent) = events[0],
+              case .string(let safeTitle)? = firstEvent["safeTitle"] else {
             throw VerificationFailure("calendar_list")
         }
+        try require(safeTitle.unicodeScalars.count == 160, "calendar_title_scalar_limit")
 
         let createArguments: CapabilityObject = [
             "calendarId": .string("primary"),

@@ -110,7 +110,7 @@ final class CalendarListCapabilityHandler: PocketCapabilityHandler {
             "eventRef": .string(event.eventRef),
             "start": .string(CapabilityDateCodec.string(from: event.start)),
             "end": .string(CapabilityDateCodec.string(from: event.end)),
-            "safeTitle": .string(String(event.safeTitle.prefix(160)))
+            "safeTitle": .string(event.safeTitle.prefixingUnicodeScalars(160))
         ]
     }
 }
@@ -320,14 +320,19 @@ final class StickyCapabilityHandler: PocketCapabilityHandler {
             let title = try arguments.requiredString("title", maxLength: 120, allowEmpty: true)
             let body = try arguments.requiredString("body", maxLength: 10_000, allowEmpty: true)
             let color = try Self.color(try arguments.requiredString("color", maxLength: 16))
-            let note = store.upsertNote(
-                stableKey: stableKey,
-                title: title,
-                body: body,
-                color: color,
-                id: idGenerator(),
-                at: context.now
-            )
+            let note: StickyNoteItem
+            do {
+                note = try store.upsertNote(
+                    stableKey: stableKey,
+                    title: title,
+                    body: body,
+                    color: color,
+                    id: idGenerator(),
+                    at: context.now
+                )
+            } catch {
+                throw CapabilityHandlerError.unavailable("sticky_storage")
+            }
             return Self.readOutput(note)
         case .get:
             let rawID = try arguments.requiredString("noteId", maxLength: 128)

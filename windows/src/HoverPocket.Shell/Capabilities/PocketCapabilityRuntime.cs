@@ -162,6 +162,22 @@ internal static class CapabilityJson
         return false;
     }
 
+    public static string TruncateString(string value, int maxLength)
+    {
+        var builder = new StringBuilder();
+        var count = 0;
+        foreach (var rune in value.EnumerateRunes())
+        {
+            if (count == maxLength)
+            {
+                break;
+            }
+            builder.Append(rune.ToString());
+            count += 1;
+        }
+        return builder.ToString();
+    }
+
     public static int RequiredInt(JsonElement arguments, string name, int minimum, int maximum)
     {
         if (arguments.ValueKind != JsonValueKind.Object

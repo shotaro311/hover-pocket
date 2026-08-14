@@ -177,6 +177,28 @@ internal sealed class CapabilityVerifier
         Require(Guid.TryParse(noteId, out var parsed), "sticky_id");
         Require(restored.GetNote(parsed)?.StableKey == "today-focus:purpose", "sticky_persistence");
         Require(restored.GetNote(parsed)?.Title == longTitle, "sticky_title_persistence");
+
+        var blockedRoot = Path.Combine(root, "blocked-store");
+        File.WriteAllText(blockedRoot, "blocked");
+        var blockedStore = new StickyNotesStore(blockedRoot);
+        var blockedHandler = new StickyCapabilityHandler(StickyCapabilityOperation.Upsert, blockedStore);
+        try
+        {
+            await blockedHandler.HandleAsync(
+                Json(new
+                {
+                    stableKey = "blocked",
+                    title = "Blocked",
+                    body = "Must not remain in memory",
+                    color = "yellow"
+                }),
+                new CapabilityHandlerContext("sticky-verifier-key-003", DateTimeOffset.UtcNow));
+            _failures.Add("sticky_persistence_failure_accepted");
+        }
+        catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_UNAVAILABLE" && ex.Field == "sticky_storage")
+        {
+        }
+        Require(blockedStore.Notes.Count == 0, "sticky_persistence_failure_rollback");
     }
 
     private async Task VerifyCalendarAsync(
@@ -196,10 +218,11 @@ internal sealed class CapabilityVerifier
             IsAllDay: true).Normalized();
         Require(normalizedAllDay.End - normalizedAllDay.Start == TimeSpan.FromDays(3), "calendar_all_day_range");
 
+        var longCalendarTitle = string.Concat(Enumerable.Repeat("👨‍👩‍👧‍👦", 40));
         calendar.Seed(new CalendarCapabilityEvent(
             "primary:event-existing",
             "event-existing",
-            "Existing",
+            longCalendarTitle,
             now.AddMinutes(5),
             now.AddMinutes(15)));
         var list = await handlers.InvokeAsync(
@@ -207,6 +230,8 @@ internal sealed class CapabilityVerifier
             Json(new { range = "today", timezone = "UTC" }),
             new CapabilityHandlerContext(null, now));
         Require(list.GetProperty("events").GetArrayLength() == 1, "calendar_list");
+        var safeTitle = list.GetProperty("events")[0].GetProperty("safeTitle").GetString() ?? string.Empty;
+        Require(safeTitle.EnumerateRunes().Count() == 160, "calendar_title_scalar_limit");
 
         var dstNow = new DateTimeOffset(2026, 3, 8, 12, 0, 0, TimeSpan.Zero);
         await handlers.InvokeAsync(

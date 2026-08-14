@@ -154,7 +154,7 @@ internal sealed class CalendarListCapabilityHandler : IPocketCapabilityHandler
             item.EventRef,
             start = item.Start.ToString("O", CultureInfo.InvariantCulture),
             end = item.End.ToString("O", CultureInfo.InvariantCulture),
-            safeTitle = item.SafeTitle.Length <= 160 ? item.SafeTitle : item.SafeTitle[..160]
+            safeTitle = CapabilityJson.TruncateString(item.SafeTitle, 160)
         };
     }
 
@@ -191,7 +191,7 @@ internal sealed class CalendarGetCapabilityHandler : IPocketCapabilityHandler
             item.EventId,
             start = item.Start.ToString("O", CultureInfo.InvariantCulture),
             end = item.End.ToString("O", CultureInfo.InvariantCulture),
-            item.SafeTitle
+            safeTitle = CapabilityJson.TruncateString(item.SafeTitle, 160)
         });
     }
 }
@@ -243,7 +243,7 @@ internal sealed class CalendarCreateCapabilityHandler : IPocketCapabilityHandler
             created.EventId,
             start = created.Start.ToString("O", CultureInfo.InvariantCulture),
             end = created.End.ToString("O", CultureInfo.InvariantCulture),
-            created.SafeTitle
+            safeTitle = CapabilityJson.TruncateString(created.SafeTitle, 160)
         });
     }
 
@@ -423,11 +423,19 @@ internal sealed class StickyCapabilityHandler : IPocketCapabilityHandler
 
     private JsonElement Upsert(JsonElement arguments)
     {
-        var note = _store.UpsertNote(
-            CapabilityJson.RequiredString(arguments, "stableKey", 160),
-            CapabilityJson.RequiredString(arguments, "title", 120, allowEmpty: true),
-            CapabilityJson.RequiredString(arguments, "body", 10_000, allowEmpty: true),
-            Color(CapabilityJson.RequiredString(arguments, "color", 16)));
+        StickyNoteItem note;
+        try
+        {
+            note = _store.UpsertNote(
+                CapabilityJson.RequiredString(arguments, "stableKey", 160),
+                CapabilityJson.RequiredString(arguments, "title", 120, allowEmpty: true),
+                CapabilityJson.RequiredString(arguments, "body", 10_000, allowEmpty: true),
+                Color(CapabilityJson.RequiredString(arguments, "color", 16)));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new CapabilityHandlerException("CAPABILITY_UNAVAILABLE", "sticky_storage");
+        }
         return MutationOutput(note);
     }
 

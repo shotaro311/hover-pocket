@@ -169,3 +169,9 @@ enum CapabilityDateCodec {
         return formatter.date(from: value)
     }
 }
+
+extension String {
+    func prefixingUnicodeScalars(_ maximumCount: Int) -> String {
+        String(unicodeScalars.prefix(maximumCount))
+    }
+}
