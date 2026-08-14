@@ -193,3 +193,43 @@ GitHub Actions / implementation head 0ca7834
 
 1. origin限定microphone、WebRTC SDP / remote audio、1往復、safe closeを対象Windows / macOS実機で検証する。
 2. 対象Windows / macOS実機でVoice intentからCalendar read / create、Timer start、Today Focusを呼び、Host approval、実Provider状態、event / timer / note ID readbackを確認する。
+
+## macOS隔離Voice E2E受入基盤
+
+- 製品版HoverPocketを停止・上書きせず、毎回freshな0700 temp rootへ`HoverPocketVoiceE2E.app`と専用data rootを作る`--voice-e2e-build-only` / `--voice-e2e-run`を追加した。bundle ID、実行名、Keychain namespaceを分離し、Google OAuth、Sparkle feed、installer launcherを無効化した。
+- DEBUG時だけ`HOVERPOCKET_ISOLATED_E2E=1`とsystem temp配下の`HOVERPOCKET_TEST_DATA_ROOT`を受け入れ、Audit、Clipboard、Sticky、Timer、Broker、Voice workspaceを隔離data rootへ向ける。Releaseは同じ環境変数を無視し、通常のApplication Supportを使う。
+- 検証用署名は`HoverPocketVoiceE2E.entitlements`へ分離し、microphone entitlementだけを持たせた。製品用のcamera / Apple Events entitlementは検証bundleへ含めない。
+- `voice-e2e-receipt.json`はavailability、session、root / transport、transcriptのrole別件数、app-server / voice数、microphone / remote audioの取得・現在状態だけを保存する。生transcript、音声、SDP、token、file path、Provider dataは保存しない。
+- 隔離bundleの署名、bundle ID、実行名、LSEnvironment、OAuth / Sparkle key不在、installer launcher false、0700 temp rootをreadbackした。起動後はCodex app-server ready、voice 19件、feature enabled、microphone未取得、remote audio未取得で待機し、既存製品processは継続稼働した。
+- Macの画面がlock中のため、明示mic click、TCC許可、音声1往復、remote audio playback、safe closeは未実施である。auto-listenはOFFのため、ユーザー操作前にマイク権限要求や音声取得は発生していない。
+
+## 追加検証
+
+```text
+swift build -Xswiftc -warnings-as-errors
+  PASS
+
+swift build -c release -Xswiftc -warnings-as-errors
+  PASS
+
+.build/debug/HoverPocket --verify-codex-app-server
+  PASS / microphone policy / WebRTC / epoch / restart / tool dispatch / root-scoped sessions
+
+.build/debug/HoverPocket --verify-broker
+  PASS / 11 descriptors / 10 handlers / Today Focus / Voice tools / negative cases
+
+.build/debug/HoverPocket --verify-capabilities
+  PASS / 10 handlers / Timer / Sticky / Calendar readback
+
+.build/debug/HoverPocket --verify-voice-lane-layout
+  PASS / 8 render cases / Compact 64 / downward expansion / Provider rect invariant / default-off
+
+DEBUG --verify-application-data with isolated env
+  PASS / isolation requested=true / effective=true
+
+RELEASE --verify-application-data with isolated env
+  PASS / isolation requested=true / effective=false / release override disabled=true
+
+Codex Security scan 04214399-d7ba-4a97-8007-63ab89259da1
+  PASS / 11 of 11 changed files / coverage complete / finding 0 / sealed
+```

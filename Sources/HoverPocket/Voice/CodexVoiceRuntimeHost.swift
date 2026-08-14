@@ -174,6 +174,7 @@ final class CodexVoiceRuntimeHost {
     private func publish(_ snapshot: CodexVoiceSnapshot) {
         self.snapshot = snapshot
         viewModel?.applyVoiceSnapshot(snapshot)
+        CodexVoiceE2EReceipt.record(snapshot: snapshot)
     }
 
     private static let disabledSnapshot = CodexVoiceSnapshot(
@@ -192,18 +193,6 @@ final class CodexVoiceRuntimeHost {
     )
 
     private static func defaultWorkspaceDirectory() -> URL {
-        if let applicationSupport = try? FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        ) {
-            return applicationSupport
-                .appendingPathComponent("HoverPocket", isDirectory: true)
-                .appendingPathComponent("VoiceWorkspace", isDirectory: true)
-        }
-        return FileManager.default.temporaryDirectory
-            .appendingPathComponent("HoverPocket", isDirectory: true)
-            .appendingPathComponent("VoiceWorkspace", isDirectory: true)
+        HoverPocketApplicationData.directory("VoiceWorkspace")
     }
 }

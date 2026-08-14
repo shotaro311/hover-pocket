@@ -26,11 +26,10 @@ final class AuditLog {
     private let fileURL: URL
 
     init(fileManager: FileManager = .default) {
-        let baseURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? fileManager.homeDirectoryForCurrentUser
-        let directory = baseURL
-            .appendingPathComponent("HoverPocket", isDirectory: true)
-            .appendingPathComponent("AuditLog", isDirectory: true)
+        let directory = HoverPocketApplicationData.directory(
+            "AuditLog",
+            fileManager: fileManager
+        )
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         fileURL = directory.appendingPathComponent("audit-log.jsonl")
     }

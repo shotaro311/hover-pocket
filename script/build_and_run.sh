@@ -2,15 +2,36 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+MODE="${1:-run}"
+ISOLATED_VOICE_E2E=0
+if [[ "$MODE" == "--voice-e2e-build-only" || "$MODE" == "--voice-e2e-run" ]]; then
+  ISOLATED_VOICE_E2E=1
+fi
+
 APP_NAME="HoverPocket"
 DISPLAY_NAME="ホバーポケット"
 PRODUCT_NAME="HoverPocket"
 LEGACY_PROCESS_NAMES=("NotchPocket" "NotchPokke" "HoverMenuPreview")
-BUNDLE_DIR="$ROOT_DIR/dist/$APP_NAME.app"
+ISOLATED_E2E_ROOT=""
+ISOLATED_E2E_DATA_ROOT=""
+if [[ "$ISOLATED_VOICE_E2E" == "1" ]]; then
+  APP_NAME="HoverPocketVoiceE2E"
+  DISPLAY_NAME="HoverPocket Voice E2E"
+  ISOLATED_E2E_BASE="${TMPDIR:-/tmp}"
+  ISOLATED_E2E_ROOT="$(mktemp -d "${ISOLATED_E2E_BASE%/}/hoverpocket-voice-e2e.XXXXXX")"
+  ISOLATED_E2E_DATA_ROOT="$ISOLATED_E2E_ROOT/data"
+  BUNDLE_DIR="$ISOLATED_E2E_ROOT/$APP_NAME.app"
+else
+  BUNDLE_DIR="$ROOT_DIR/dist/$APP_NAME.app"
+fi
 EXECUTABLE_PATH="$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
 APP_ICON_NAME="AppIcon"
 APP_ICON_SOURCE="$ROOT_DIR/Resources/$APP_ICON_NAME.png"
-ENTITLEMENTS_PATH="${ENTITLEMENTS_PATH:-$ROOT_DIR/Resources/HoverPocket.entitlements}"
+if [[ "$ISOLATED_VOICE_E2E" == "1" ]]; then
+  ENTITLEMENTS_PATH="$ROOT_DIR/Resources/HoverPocketVoiceE2E.entitlements"
+else
+  ENTITLEMENTS_PATH="${ENTITLEMENTS_PATH:-$ROOT_DIR/Resources/HoverPocket.entitlements}"
+fi
 APP_VERSION="${APP_VERSION:-0.1.0}"
 APP_BUILD="${APP_BUILD:-$(git -C "$ROOT_DIR" rev-list --count HEAD 2>/dev/null || date +%Y%m%d%H%M)}"
 DEFAULT_SPARKLE_FEED_URL="${DEFAULT_SPARKLE_FEED_URL:-}"
@@ -65,6 +86,17 @@ SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-$(read_env_key SPARKLE_FEED_URL)}"
 SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-$(read_env_key SPARKLE_PUBLIC_ED_KEY)}"
 SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-$DEFAULT_SPARKLE_FEED_URL}"
 SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-$DEFAULT_SPARKLE_PUBLIC_ED_KEY}"
+if [[ "$ISOLATED_VOICE_E2E" == "1" ]]; then
+  BUNDLE_IDENTIFIER="local.codex.hover-pocket.voice-e2e"
+  GOOGLE_SIGN_IN_CLIENT_ID=""
+  GOOGLE_SIGN_IN_REVERSED_CLIENT_ID=""
+  GOOGLE_CLIENT_ID=""
+  GOOGLE_CLIENT_SECRET=""
+  GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK=""
+  HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX="voice-e2e"
+  SPARKLE_FEED_URL=""
+  SPARKLE_PUBLIC_ED_KEY=""
+fi
 if [[ -z "$HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX" ]]; then
   if [[ "$CODESIGN_IDENTITY" == Developer\ ID\ Application:* ]]; then
     HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX="release"
@@ -75,6 +107,10 @@ fi
 GOOGLE_OAUTH_PLIST=""
 GOOGLE_SIGN_IN_PLIST=""
 SPARKLE_PLIST=""
+ISOLATED_E2E_PLIST=""
+INSTALLER_LAUNCHER_PLIST="  <key>SUEnableInstallerLauncherService</key>
+  <true/>
+"
 if [[ -n "$GOOGLE_SIGN_IN_CLIENT_ID" && -z "$GOOGLE_SIGN_IN_REVERSED_CLIENT_ID" ]]; then
   GOOGLE_SIGN_IN_REVERSED_CLIENT_ID="$(awk -F. '{ for (i=NF; i>=1; i--) printf "%s%s", $i, (i == 1 ? "" : ".") }' <<< "$GOOGLE_SIGN_IN_CLIENT_ID")"
 fi
@@ -115,6 +151,19 @@ if [[ -n "$SPARKLE_PUBLIC_ED_KEY" ]]; then
   <string>$(xml_escape "$SPARKLE_PUBLIC_ED_KEY")</string>
 "
 fi
+if [[ "$ISOLATED_VOICE_E2E" == "1" ]]; then
+  ISOLATED_E2E_PLIST+="  <key>LSEnvironment</key>
+  <dict>
+    <key>HOVERPOCKET_ISOLATED_E2E</key>
+    <string>1</string>
+    <key>HOVERPOCKET_TEST_DATA_ROOT</key>
+    <string>$(xml_escape "$ISOLATED_E2E_DATA_ROOT")</string>
+  </dict>
+"
+  INSTALLER_LAUNCHER_PLIST="  <key>SUEnableInstallerLauncherService</key>
+  <false/>
+"
+fi
 
 default_codesign_identity() {
   security find-identity -p codesigning -v 2>/dev/null \
@@ -144,12 +193,14 @@ install_app_icon() {
   rm -rf "$(dirname "$iconset_dir")"
 }
 
-for process_name in "$APP_NAME" "${LEGACY_PROCESS_NAMES[@]}"; do
-  if pgrep -x "$process_name" >/dev/null 2>&1; then
-    pkill -x "$process_name" || true
-    sleep 0.2
-  fi
-done
+if [[ "$ISOLATED_VOICE_E2E" != "1" ]]; then
+  for process_name in "$APP_NAME" "${LEGACY_PROCESS_NAMES[@]}"; do
+    if pgrep -x "$process_name" >/dev/null 2>&1; then
+      pkill -x "$process_name" || true
+      sleep 0.2
+    fi
+  done
+fi
 
 swift build
 
@@ -213,9 +264,7 @@ ${GOOGLE_SIGN_IN_PLIST}${GOOGLE_OAUTH_PLIST}  <key>NSAppTransportSecurity</key>
     <key>NSAllowsLocalNetworking</key>
     <true/>
   </dict>
-${SPARKLE_PLIST}  <key>SUEnableInstallerLauncherService</key>
-  <true/>
-  <key>NSCameraUsageDescription</key>
+${SPARKLE_PLIST}${ISOLATED_E2E_PLIST}${INSTALLER_LAUNCHER_PLIST}  <key>NSCameraUsageDescription</key>
   <string>ホバーポケット uses the Mac camera to show a mirror preview while the hover panel is open.</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>ホバーポケット uses the microphone only when you start a Voice Lane conversation or the mirror microphone check.</string>
@@ -249,13 +298,28 @@ else
   echo "No codesigning identity found; using SwiftPM ad-hoc signature"
 fi
 
-if [[ "${1:-}" == "--verify" ]]; then
+if [[ "$MODE" == "--verify" ]]; then
   /usr/bin/open -n "$BUNDLE_DIR"
   sleep 1
   pgrep -x "$APP_NAME" >/dev/null
   echo "$APP_NAME launched"
-elif [[ "${1:-}" == "--build-only" ]]; then
+elif [[ "$MODE" == "--build-only" ]]; then
   printf '%s\n' "$BUNDLE_DIR"
+elif [[ "$MODE" == "--voice-e2e-build-only" ]]; then
+  printf 'bundle=%s\n' "$BUNDLE_DIR"
+  printf 'data_root=%s\n' "$ISOLATED_E2E_DATA_ROOT"
+elif [[ "$MODE" == "--voice-e2e-run" ]]; then
+  /usr/bin/open -n "$BUNDLE_DIR" --args \
+    -aiNativeEnabled YES \
+    -codexVoiceEnabled YES \
+    -codexVoiceLayoutMode compact \
+    -codexVoiceAutoListen NO \
+    -codexVoiceCalendarReadEnabled NO
+  sleep 1
+  pgrep -x "$APP_NAME" >/dev/null
+  printf 'bundle=%s\n' "$BUNDLE_DIR"
+  printf 'data_root=%s\n' "$ISOLATED_E2E_DATA_ROOT"
+  echo "$APP_NAME launched"
 else
   /usr/bin/open -n "$BUNDLE_DIR"
 fi

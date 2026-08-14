@@ -31,6 +31,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = AppUpdater.shared
         hoverWindowController.positionWindows()
         hoverWindowController.showPill()
+        if HoverPocketApplicationData.usesIsolatedE2ERoot() {
+            hoverWindowController.openPanelFromMenu()
+        }
 
         NotificationCenter.default.addObserver(
             self,
@@ -65,15 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 calendarDataSource: GoogleCalendarCapabilityDataSource()
             )
             let registry = try CapabilityRegistry(handlers: handlers)
-            let applicationSupport = try FileManager.default.url(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask,
-                appropriateFor: nil,
-                create: true
-            )
-            let brokerRoot = applicationSupport
-                .appendingPathComponent("HoverPocket", isDirectory: true)
-                .appendingPathComponent("CapabilityBroker", isDirectory: true)
+            let brokerRoot = HoverPocketApplicationData.directory("CapabilityBroker")
             let broker = CapabilityBroker(
                 registry: registry,
                 ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),

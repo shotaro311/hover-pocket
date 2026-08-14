@@ -29,11 +29,8 @@ final class StickyNotesStore: ObservableObject {
 
     init(storageDirectory: URL? = nil, fileManager: FileManager = .default) {
         self.fileManager = fileManager
-        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        self.storageDirectory = storageDirectory ?? base
-            .appendingPathComponent("HoverPocket", isDirectory: true)
-            .appendingPathComponent("StickyNotes", isDirectory: true)
+        self.storageDirectory = storageDirectory
+            ?? HoverPocketApplicationData.directory("StickyNotes", fileManager: fileManager)
         load()
     }
 

@@ -44,6 +44,7 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
         let operationID = String(transportGeneration)
         activeOperationID = operationID
         sessionStarting = true
+        CodexVoiceE2EReceipt.startSession()
         callAsync(
             "return await window.hoverPocketVoice.start(operationId);",
             arguments: ["operationId": operationID]
@@ -66,6 +67,7 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
         transportGeneration &+= 1
         sessionStarting = false
         activeOperationID = nil
+        CodexVoiceE2EReceipt.transportClosed(event: "session_stopped")
         evaluate("window.hoverPocketVoice.cleanup(false)")
         guard let runtimeHost else { return }
         Task { @MainActor in
@@ -77,6 +79,7 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
         transportGeneration &+= 1
         sessionStarting = false
         activeOperationID = nil
+        CodexVoiceE2EReceipt.transportClosed(event: "panel_detached")
         evaluate("window.hoverPocketVoice.cleanup(false)")
         guard let runtimeHost else { return }
         runtimeHost.clearTransientUIState()
@@ -107,6 +110,18 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
                 return
             }
             negotiate(sdpOffer: sdp, operationID: operationID)
+        case "microphone_acquired":
+            guard object["operationId"] as? String == activeOperationID else { return }
+            CodexVoiceE2EReceipt.microphoneAcquired()
+        case "remote_audio_track":
+            guard object["operationId"] as? String == activeOperationID else { return }
+            CodexVoiceE2EReceipt.remoteAudioTrackReceived()
+        case "remote_audio_playing":
+            guard object["operationId"] as? String == activeOperationID else { return }
+            CodexVoiceE2EReceipt.remoteAudioPlaybackStarted()
+        case "remote_audio_playback_failed":
+            guard object["operationId"] as? String == activeOperationID else { return }
+            CodexVoiceE2EReceipt.transportEvent("remote_audio_playback_failed")
         case "attached":
             guard object["operationId"] as? String == activeOperationID else { return }
             sessionStarting = false
@@ -115,12 +130,14 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
             guard object["operationId"] as? String == activeOperationID else { return }
             sessionStarting = false
             activeOperationID = nil
+            CodexVoiceE2EReceipt.transportClosed(event: "transport_detached")
             let reconnectExpected = object["reconnectExpected"] as? Bool ?? true
             runtimeHost?.markTransportDetached(reconnectExpected: reconnectExpected)
         case "failure":
             guard object["operationId"] as? String == activeOperationID else { return }
             sessionStarting = false
             activeOperationID = nil
+            CodexVoiceE2EReceipt.transportClosed(event: "transport_failure")
             runtimeHost?.markSessionFailure(
                 Self.safeErrorCode(object["code"] as? String)
             )
@@ -454,16 +471,20 @@ private enum CodexVoiceWebContent {
         return;
       }
       microphone = acquiredMicrophone;
+      post({ type: "microphone_acquired", operationId });
       const connection = new RTCPeerConnection();
       peer = connection;
       connection.createDataChannel("oai-events");
       microphone.getAudioTracks().forEach((track) => connection.addTrack(track, microphone));
       connection.addEventListener("track", (event) => {
         if (!isCurrentOperation(epoch, operationId) || connection !== peer) return;
+        post({ type: "remote_audio_track", operationId });
         remoteAudio ||= new Audio();
         remoteAudio.autoplay = true;
         remoteAudio.srcObject = event.streams[0] || new MediaStream([event.track]);
-        remoteAudio.play().catch(() => {});
+        remoteAudio.play()
+          .then(() => post({ type: "remote_audio_playing", operationId }))
+          .catch(() => post({ type: "remote_audio_playback_failed", operationId }));
       });
       connection.addEventListener("connectionstatechange", () => {
         if (!isCurrentOperation(epoch, operationId) || connection !== peer) return;
@@ -529,8 +550,11 @@ enum CodexVoiceWebRTCEmbeddedContract {
             "let activeOperationId = null;",
             "function isCurrentOperation(epoch, operationId)",
             "acquiredMicrophone.getTracks().forEach((track) => track.stop());",
+            "post({ type: \"microphone_acquired\", operationId });",
             "post({ type: \"offer\", operationId, sdp });",
             "async function acceptAnswer(operationId, sdp)",
+            "post({ type: \"remote_audio_track\", operationId });",
+            "post({ type: \"remote_audio_playing\", operationId })",
             "post({ type: \"attached\", operationId });"
         ]
         return requiredFragments.allSatisfy(CodexVoiceWebContent.html.contains)

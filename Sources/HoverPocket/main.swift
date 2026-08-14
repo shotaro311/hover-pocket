@@ -40,6 +40,9 @@ if CommandLine.arguments.contains("--verify-codex-app-server-live") {
 if CommandLine.arguments.contains("--verify-weather") {
     WeatherVerificationCommand.run()
 }
+if CommandLine.arguments.contains("--verify-application-data") {
+    ApplicationDataVerificationCommand.run()
+}
 
 let app = NSApplication.shared
 let delegate = AppDelegate()
