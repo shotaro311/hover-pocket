@@ -21,7 +21,7 @@ internal sealed class CodexVoiceCoordinatorVerifier
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
-                "PASS codex-voice-coordinator verify: disabled no-start, account/capability gate, app-server ownership, fake WebRTC SDP/stop, Broker-routed Voice tools with approval/readback/idempotency, transcript continuity, UI detach/reconnect, bounded crash restart, bounded memory");
+                "PASS codex-voice-coordinator verify: disabled no-start, account/capability gate, app-server ownership, fake WebRTC SDP/stop, root-scoped current/child/descendant cards, Broker-routed Voice tools with approval/readback/idempotency, transcript continuity, UI detach/reconnect, bounded crash restart, bounded memory");
             return 0;
         }
 
@@ -119,6 +119,26 @@ internal sealed class CodexVoiceCoordinatorVerifier
                 || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.Connecting)
             {
                 _failures.Add("fake WebRTC offer/answer did not preserve the root thread or negotiating state");
+            }
+            var withSessions = await WaitForSnapshotAsync(
+                coordinator,
+                snapshot => snapshot.Sessions.Count == 3,
+                timeout.Token);
+            if (withSessions is null
+                || !withSessions.Sessions.Select(session => session.ThreadId).SequenceEqual(
+                    ["root-thread", "grandchild-a", "child-a"],
+                    StringComparer.Ordinal)
+                || withSessions.Sessions.Any(session => session.ThreadId is "foreign-child" or "orphan")
+                || withSessions.Sessions.Single(session => session.ThreadId == "child-a").Detail
+                    != "実装を進めています"
+                || withSessions.Sessions.Single(session => session.ThreadId == "grandchild-a").Detail
+                    != "検証中"
+                || withSessions.Sessions.Single(session => session.ThreadId == "child-a").State
+                    != CodexVoiceThreadState.Running
+                || withSessions.Sessions.Single(session => session.ThreadId == "grandchild-a").State
+                    != CodexVoiceThreadState.Completed)
+            {
+                _failures.Add("root-scoped session cards leaked another tree or lost status/latest-message data");
             }
             coordinator.MarkTransportAttached();
             coordinator.ProcessNotificationForVerify(

@@ -74,18 +74,25 @@ final class VoiceLaneViewModel: ObservableObject {
                 timestamp: entry.updatedAt
             )
         }
-        if snapshot.rootThreadID == nil {
-            sessions = []
-        } else {
-            sessions = [
-                VoiceLaneSessionCard(
-                    id: "current-root",
-                    title: "current",
-                    detail: snapshot.sessionStatus.rawValue,
-                    state: Self.sessionCardState(snapshot.sessionStatus),
-                    elapsedSeconds: 0
-                )
-            ]
+        let now = Date()
+        sessions = snapshot.sessions.map { session in
+            let end = session.state == .running ? now : session.updatedAt
+            let interval = end.timeIntervalSince(session.createdAt)
+            let elapsed: Int
+            if !interval.isFinite || interval <= 0 {
+                elapsed = 0
+            } else if interval >= Double(Int.max) {
+                elapsed = Int.max
+            } else {
+                elapsed = Int(interval)
+            }
+            return VoiceLaneSessionCard(
+                id: session.isCurrentRoot ? "current-root" : session.threadID,
+                title: session.title,
+                detail: session.detail,
+                state: Self.sessionCardState(session.state),
+                elapsedSeconds: elapsed
+            )
         }
     }
 
@@ -115,14 +122,14 @@ final class VoiceLaneViewModel: ObservableObject {
     }
 
     private static func sessionCardState(
-        _ status: CodexVoiceSessionStatus
+        _ state: CodexVoiceThreadState
     ) -> VoiceLaneSessionState {
-        switch status {
-        case .closed:
+        switch state {
+        case .completed:
             return .completed
-        case .recoverableFailure, .blockedFailure:
+        case .failed:
             return .failed
-        default:
+        case .running:
             return .running
         }
     }

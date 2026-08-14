@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 
 namespace HoverPocket.Shell.Providers.CodexVoice;
@@ -36,6 +37,22 @@ internal sealed record CodexVoiceTranscriptEntry(
     bool IsComplete,
     DateTimeOffset UpdatedAt);
 
+internal enum CodexVoiceThreadState
+{
+    Running,
+    Completed,
+    Failed
+}
+
+internal sealed record CodexVoiceThreadSummary(
+    string ThreadId,
+    bool IsCurrentRoot,
+    string Title,
+    string Detail,
+    CodexVoiceThreadState State,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
 internal sealed record CodexVoiceSnapshot(
     bool FeatureEnabled,
     CodexVoiceAvailability Availability,
@@ -44,6 +61,7 @@ internal sealed record CodexVoiceSnapshot(
     bool TransportAttached,
     bool IsMuted,
     IReadOnlyList<CodexVoiceTranscriptEntry> Transcript,
+    IReadOnlyList<CodexVoiceThreadSummary> Sessions,
     string? LastErrorCode,
     int? AppServerProcessId,
     int RestartAttempt,
@@ -64,6 +82,16 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         TimeSpan.FromMilliseconds(1400)
     ];
 
+    private sealed record ListedThread(
+        string ThreadId,
+        string SessionId,
+        string ParentThreadId,
+        string Title,
+        string Preview,
+        string Status,
+        DateTimeOffset CreatedAt,
+        DateTimeOffset UpdatedAt);
+
     private readonly bool _featureEnabled;
     private readonly Func<CancellationToken, Task<CodexAppServerClient>> _clientFactory;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
@@ -79,6 +107,12 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
     private CodexVoiceAvailability _availability;
     private CodexVoiceSessionStatus _sessionStatus = CodexVoiceSessionStatus.Idle;
     private string? _rootThreadId;
+    private string? _rootSessionId;
+    private DateTimeOffset? _rootCreatedAt;
+    private IReadOnlyList<CodexVoiceThreadSummary> _childSessions =
+        Array.Empty<CodexVoiceThreadSummary>();
+    private CancellationTokenSource? _sessionRefreshCancellation;
+    private Task? _sessionRefreshTask;
     private bool _transportAttached;
     private bool _isMuted = true;
     private string? _lastErrorCode;
@@ -458,6 +492,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         long clientGeneration,
         CancellationToken cancellationToken)
     {
+        Dictionary<string, CodexVoiceThreadSummary> previousById;
         lock (_stateSync)
         {
             if (!ReferenceEquals(_client, client)
@@ -493,8 +528,14 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                 baseInstructions = "You are the HoverPocket Voice Lane. Do not use shell, filesystem, network, or arbitrary code tools. Only invoke explicitly provided HoverPocket capabilities. Keep spoken replies concise."
             },
             cancellationToken);
-        var threadId = ReadNestedString(response, "thread", "id")
-            ?? throw new CodexVoiceCompatibilityException("thread_start_response_invalid");
+        if (!TryReadStartedThread(
+                response,
+                out var threadId,
+                out var sessionId,
+                out var createdAt))
+        {
+            throw new CodexVoiceCompatibilityException("thread_start_response_invalid");
+        }
         lock (_stateSync)
         {
             if (!ReferenceEquals(_client, client)
@@ -505,11 +546,533 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             }
 
             _rootThreadId = threadId;
+            _rootSessionId = sessionId;
+            _rootCreatedAt = createdAt;
             _rootThreadGeneration = clientGeneration;
+            _childSessions = Array.Empty<CodexVoiceThreadSummary>();
         }
+
+        StartSessionRefreshLoop(client, clientGeneration, threadId, sessionId);
 
         PublishSnapshot();
         return threadId;
+    }
+
+    private void StartSessionRefreshLoop(
+        CodexAppServerClient client,
+        long generation,
+        string rootThreadId,
+        string rootSessionId)
+    {
+        CancellationTokenSource cancellation;
+        lock (_stateSync)
+        {
+            _sessionRefreshCancellation?.Cancel();
+            cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                _lifetimeCancellation.Token);
+            _sessionRefreshCancellation = cancellation;
+            _sessionRefreshTask = Task.Run(
+                () => RunSessionRefreshLoopAsync(
+                    client,
+                    generation,
+                    rootThreadId,
+                    rootSessionId,
+                    cancellation.Token),
+                cancellation.Token);
+        }
+    }
+
+    private async Task RunSessionRefreshLoopAsync(
+        CodexAppServerClient client,
+        long generation,
+        string rootThreadId,
+        string rootSessionId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await RefreshChildSessionsAsync(
+                    client,
+                    generation,
+                    rootThreadId,
+                    rootSessionId,
+                    cancellationToken);
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task RefreshChildSessionsAsync(
+        CodexAppServerClient client,
+        long generation,
+        string rootThreadId,
+        string rootSessionId,
+        CancellationToken cancellationToken)
+    {
+        lock (_stateSync)
+        {
+            if (!IsSessionScopeCurrentLocked(
+                    client,
+                    generation,
+                    rootThreadId,
+                    rootSessionId))
+            {
+                return;
+            }
+
+            previousById = _childSessions
+                .GroupBy(session => session.ThreadId, StringComparer.Ordinal)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.First(),
+                    StringComparer.Ordinal);
+        }
+
+        JsonElement response;
+        try
+        {
+            response = await client.SendRequestAsync(
+                "thread/list",
+                new
+                {
+                    ancestorThreadId = rootThreadId,
+                    archived = false,
+                    limit = 64,
+                    sourceKinds = new[]
+                    {
+                        "appServer",
+                        "subAgent",
+                        "subAgentReview",
+                        "subAgentCompact",
+                        "subAgentThreadSpawn",
+                        "subAgentOther"
+                    },
+                    sortDirection = "asc",
+                    sortKey = "created_at",
+                    useStateDbOnly = true
+                },
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is CodexAppServerRpcException
+            or IOException
+            or InvalidOperationException
+            or TimeoutException)
+        {
+            return;
+        }
+
+        var listed = ParseListedThreads(response);
+        var acceptedIds = new HashSet<string>(StringComparer.Ordinal)
+        {
+            rootThreadId
+        };
+        var accepted = new List<ListedThread>();
+        var remaining = listed
+            .Where(thread => !string.Equals(
+                    thread.ThreadId,
+                    rootThreadId,
+                    StringComparison.Ordinal)
+                && string.Equals(
+                    thread.SessionId,
+                    rootSessionId,
+                    StringComparison.Ordinal))
+            .ToList();
+        while (remaining.Count > 0)
+        {
+            var madeProgress = false;
+            for (var index = remaining.Count - 1; index >= 0; index--)
+            {
+                var thread = remaining[index];
+                if (!acceptedIds.Contains(thread.ParentThreadId))
+                {
+                    continue;
+                }
+
+                if (acceptedIds.Contains(thread.ThreadId))
+                {
+                    remaining.RemoveAt(index);
+                    madeProgress = true;
+                    continue;
+                }
+
+                acceptedIds.Add(thread.ThreadId);
+                accepted.Add(thread);
+                remaining.RemoveAt(index);
+                madeProgress = true;
+            }
+
+            if (!madeProgress)
+            {
+                break;
+            }
+        }
+
+        var visible = accepted
+            .OrderByDescending(thread => thread.UpdatedAt)
+            .ThenBy(thread => thread.ThreadId, StringComparer.Ordinal)
+            .Take(16)
+            .ToArray();
+        var recentMessages = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var thread in visible)
+        {
+            if (previousById.GetValueOrDefault(thread.ThreadId) is { } previous
+                && previous.UpdatedAt == thread.UpdatedAt
+                && !string.IsNullOrWhiteSpace(previous.Detail))
+            {
+                recentMessages[thread.ThreadId] = previous.Detail;
+            }
+        }
+        var readTasks = visible
+            .Where(thread => !recentMessages.ContainsKey(thread.ThreadId))
+            .Select(async thread =>
+        {
+            try
+            {
+                var read = await client.SendRequestAsync(
+                    "thread/read",
+                    new
+                    {
+                        threadId = thread.ThreadId,
+                        includeTurns = true
+                    },
+                    cancellationToken);
+                return (
+                    ThreadId: thread.ThreadId,
+                    Message: LatestMessage(
+                        read,
+                        thread.ThreadId,
+                        thread.SessionId,
+                        thread.ParentThreadId));
+            }
+            catch (Exception exception) when (exception is CodexAppServerRpcException
+                or IOException
+                or InvalidOperationException
+                or TimeoutException)
+            {
+                return (ThreadId: thread.ThreadId, Message: (string?)null);
+            }
+        });
+        var readResults = await Task.WhenAll(readTasks);
+        foreach (var result in readResults)
+        {
+            if (!string.IsNullOrWhiteSpace(result.Message))
+            {
+                recentMessages[result.ThreadId] = result.Message;
+            }
+        }
+        var summaries = visible.Select(thread => new CodexVoiceThreadSummary(
+                thread.ThreadId,
+                IsCurrentRoot: false,
+                thread.Title,
+                recentMessages.GetValueOrDefault(thread.ThreadId) ?? thread.Preview,
+                thread.Status switch
+                {
+                    "active" => CodexVoiceThreadState.Running,
+                    "systemError" => CodexVoiceThreadState.Failed,
+                    _ => CodexVoiceThreadState.Completed
+                },
+                thread.CreatedAt,
+                thread.UpdatedAt))
+            .ToArray();
+        lock (_stateSync)
+        {
+            if (!IsSessionScopeCurrentLocked(
+                    client,
+                    generation,
+                    rootThreadId,
+                    rootSessionId))
+            {
+                return;
+            }
+
+            _childSessions = summaries;
+        }
+
+        PublishSnapshot();
+    }
+
+    private bool IsSessionScopeCurrentLocked(
+        CodexAppServerClient client,
+        long generation,
+        string rootThreadId,
+        string rootSessionId)
+    {
+        return Volatile.Read(ref _disposeState) == 0
+            && ReferenceEquals(_client, client)
+            && _clientGeneration == generation
+            && _rootThreadGeneration == generation
+            && string.Equals(_rootThreadId, rootThreadId, StringComparison.Ordinal)
+            && string.Equals(_rootSessionId, rootSessionId, StringComparison.Ordinal);
+    }
+
+    private void ClearRootThreadStateLocked()
+    {
+        _sessionRefreshCancellation?.Cancel();
+        _sessionRefreshCancellation = null;
+        _sessionRefreshTask = null;
+        _rootThreadId = null;
+        _rootSessionId = null;
+        _rootCreatedAt = null;
+        _rootThreadGeneration = 0;
+        _childSessions = Array.Empty<CodexVoiceThreadSummary>();
+    }
+
+    private static IReadOnlyList<ListedThread> ParseListedThreads(JsonElement response)
+    {
+        if (response.ValueKind != JsonValueKind.Object
+            || !response.TryGetProperty("data", out var data)
+            || data.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<ListedThread>();
+        }
+
+        var threads = new List<ListedThread>();
+        foreach (var value in data.EnumerateArray().Take(64))
+        {
+            if (TryParseListedThread(value, out var thread))
+            {
+                threads.Add(thread);
+            }
+        }
+
+        return threads;
+    }
+
+    private static bool TryParseListedThread(
+        JsonElement value,
+        out ListedThread thread)
+    {
+        thread = null!;
+        if (value.ValueKind != JsonValueKind.Object
+            || !TryReadBoundedIdentifier(value, "id", out var threadId)
+            || !TryReadBoundedIdentifier(value, "sessionId", out var sessionId)
+            || !TryReadBoundedIdentifier(value, "parentThreadId", out var parentThreadId)
+            || !value.TryGetProperty("status", out var statusObject)
+            || statusObject.ValueKind != JsonValueKind.Object
+            || !statusObject.TryGetProperty("type", out var statusValue)
+            || statusValue.ValueKind != JsonValueKind.String
+            || statusValue.GetString() is not { } status
+            || status is not ("active" or "idle" or "notLoaded" or "systemError")
+            || !TryReadUnixTimestamp(value, "createdAt", out var createdAt)
+            || !TryReadUnixTimestamp(value, "updatedAt", out var updatedAt)
+            || updatedAt < createdAt)
+        {
+            return false;
+        }
+
+        var title = ReadOptionalString(value, "name")
+            ?? ReadOptionalString(value, "agentNickname")
+            ?? "Codex";
+        title = SafeCardText(title, 72);
+        thread = new ListedThread(
+            threadId,
+            sessionId,
+            parentThreadId,
+            string.IsNullOrEmpty(title) ? "Codex" : title,
+            SafeCardText(ReadOptionalString(value, "preview") ?? string.Empty, 160),
+            status,
+            createdAt,
+            updatedAt);
+        return true;
+    }
+
+    private static string? LatestMessage(
+        JsonElement response,
+        string expectedThreadId,
+        string expectedSessionId,
+        string expectedParentThreadId)
+    {
+        if (response.ValueKind != JsonValueKind.Object
+            || !response.TryGetProperty("thread", out var thread)
+            || thread.ValueKind != JsonValueKind.Object
+            || !string.Equals(
+                ReadOptionalString(thread, "id"),
+                expectedThreadId,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                ReadOptionalString(thread, "sessionId"),
+                expectedSessionId,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                ReadOptionalString(thread, "parentThreadId"),
+                expectedParentThreadId,
+                StringComparison.Ordinal)
+            || !thread.TryGetProperty("turns", out var turns)
+            || turns.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        for (var turnIndex = turns.GetArrayLength() - 1; turnIndex >= 0; turnIndex--)
+        {
+            var turn = turns[turnIndex];
+            if (turn.ValueKind != JsonValueKind.Object
+                || !turn.TryGetProperty("items", out var items)
+                || items.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            for (var itemIndex = items.GetArrayLength() - 1; itemIndex >= 0; itemIndex--)
+            {
+                var item = items[itemIndex];
+                var type = ReadOptionalString(item, "type");
+                if (string.Equals(type, "agentMessage", StringComparison.Ordinal))
+                {
+                    var message = SafeCardText(
+                        ReadOptionalString(item, "text") ?? string.Empty,
+                        160);
+                    if (!string.IsNullOrEmpty(message))
+                    {
+                        return message;
+                    }
+                }
+
+                if (!string.Equals(type, "userMessage", StringComparison.Ordinal)
+                    || !item.TryGetProperty("content", out var content)
+                    || content.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                for (var inputIndex = content.GetArrayLength() - 1; inputIndex >= 0; inputIndex--)
+                {
+                    var input = content[inputIndex];
+                    if (!string.Equals(
+                            ReadOptionalString(input, "type"),
+                            "text",
+                            StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    var message = SafeCardText(
+                        ReadOptionalString(input, "text") ?? string.Empty,
+                        160);
+                    if (!string.IsNullOrEmpty(message))
+                    {
+                        return message;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string SafeCardText(string value, int maximumScalars)
+    {
+        var output = new StringBuilder();
+        var scalarCount = 0;
+        var previousWasSpace = false;
+        foreach (var rune in value.EnumerateRunes())
+        {
+            if (Rune.IsWhiteSpace(rune))
+            {
+                if (!previousWasSpace && output.Length > 0)
+                {
+                    output.Append(' ');
+                    previousWasSpace = true;
+                }
+                continue;
+            }
+
+            var codePoint = rune.Value;
+            if (codePoint < 0x20
+                || codePoint is >= 0x7F and <= 0x9F
+                || codePoint is >= 0x202A and <= 0x202E
+                || codePoint is >= 0x2066 and <= 0x2069)
+            {
+                continue;
+            }
+
+            output.Append(rune.ToString());
+            scalarCount++;
+            previousWasSpace = false;
+            if (scalarCount >= maximumScalars)
+            {
+                break;
+            }
+        }
+
+        return output.ToString().Trim();
+    }
+
+    private static bool TryReadStartedThread(
+        JsonElement response,
+        out string threadId,
+        out string sessionId,
+        out DateTimeOffset createdAt)
+    {
+        threadId = string.Empty;
+        sessionId = string.Empty;
+        createdAt = default;
+        return response.ValueKind == JsonValueKind.Object
+            && response.TryGetProperty("thread", out var thread)
+            && thread.ValueKind == JsonValueKind.Object
+            && TryReadBoundedIdentifier(thread, "id", out threadId)
+            && TryReadBoundedIdentifier(thread, "sessionId", out sessionId)
+            && TryReadUnixTimestamp(thread, "createdAt", out createdAt);
+    }
+
+    private static bool TryReadBoundedIdentifier(
+        JsonElement value,
+        string propertyName,
+        out string identifier)
+    {
+        identifier = string.Empty;
+        if (value.ValueKind != JsonValueKind.Object
+            || !value.TryGetProperty(propertyName, out var property)
+            || property.ValueKind != JsonValueKind.String
+            || property.GetString() is not { Length: > 0 } candidate
+            || Encoding.UTF8.GetByteCount(candidate) > 128
+            || candidate.Any(character => !(char.IsAsciiLetterOrDigit(character)
+                || character is '-' or '.' or '_' or ':')))
+        {
+            return false;
+        }
+
+        identifier = candidate;
+        return true;
+    }
+
+    private static bool TryReadUnixTimestamp(
+        JsonElement value,
+        string propertyName,
+        out DateTimeOffset timestamp)
+    {
+        timestamp = default;
+        if (value.ValueKind != JsonValueKind.Object
+            || !value.TryGetProperty(propertyName, out var property)
+            || property.ValueKind != JsonValueKind.Number
+            || !property.TryGetInt64(out var seconds))
+        {
+            return false;
+        }
+
+        try
+        {
+            timestamp = DateTimeOffset.FromUnixTimeSeconds(seconds);
+            return true;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return false;
+        }
+    }
+
+    private static string? ReadOptionalString(JsonElement value, string propertyName)
+    {
+        return value.ValueKind == JsonValueKind.Object
+            && value.TryGetProperty(propertyName, out var property)
+            && property.ValueKind == JsonValueKind.String
+                ? property.GetString()
+                : null;
     }
 
     public void MarkSessionConnecting(string? rootThreadId = null)
@@ -651,8 +1214,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             _transportAttached = false;
             _isMuted = true;
             _appServerProcessId = null;
-            _rootThreadId = null;
-            _rootThreadGeneration = 0;
+            ClearRootThreadStateLocked();
             _pendingSdp?.TrySetException(
                 new IOException("Codex app-server transport ended during WebRTC negotiation."));
             _pendingSdp = null;
@@ -976,6 +1538,23 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
 
     private CodexVoiceSnapshot BuildSnapshotLocked()
     {
+        var sessions = new List<CodexVoiceThreadSummary>();
+        if (!string.IsNullOrWhiteSpace(_rootThreadId)
+            && _rootCreatedAt is { } rootCreatedAt)
+        {
+            sessions.Add(new CodexVoiceThreadSummary(
+                _rootThreadId,
+                IsCurrentRoot: true,
+                Title: "current",
+                Detail: _sessionStatus.ToString(),
+                State: _sessionStatus is CodexVoiceSessionStatus.RecoverableFailure
+                    or CodexVoiceSessionStatus.BlockedFailure
+                        ? CodexVoiceThreadState.Failed
+                        : CodexVoiceThreadState.Running,
+                CreatedAt: rootCreatedAt,
+                UpdatedAt: DateTimeOffset.UtcNow));
+        }
+        sessions.AddRange(_childSessions);
         return new CodexVoiceSnapshot(
             _featureEnabled,
             _availability,
@@ -984,6 +1563,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             _transportAttached,
             _isMuted,
             _transcript.Snapshot(),
+            sessions,
             _lastErrorCode,
             _appServerProcessId,
             _restartAttempt,
@@ -1061,23 +1641,6 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         return null;
     }
 
-    private static string? ReadNestedString(
-        JsonElement root,
-        string objectPropertyName,
-        string stringPropertyName)
-    {
-        if (root.ValueKind != JsonValueKind.Object
-            || !root.TryGetProperty(objectPropertyName, out var nested)
-            || nested.ValueKind != JsonValueKind.Object
-            || !nested.TryGetProperty(stringPropertyName, out var value)
-            || value.ValueKind != JsonValueKind.String)
-        {
-            return null;
-        }
-
-        return value.GetString();
-    }
-
     private static string? ReadString(JsonElement? parameters, string propertyName)
     {
         if (parameters is not { } element
@@ -1104,11 +1667,24 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         }
 
         _lifetimeCancellation.Cancel();
+        Task? sessionRefreshTask;
         lock (_stateSync)
         {
+            sessionRefreshTask = _sessionRefreshTask;
+            ClearRootThreadStateLocked();
             _pendingSdp?.TrySetCanceled();
             _pendingSdp = null;
             _pendingSdpThreadId = null;
+        }
+        if (sessionRefreshTask is not null)
+        {
+            try
+            {
+                await sessionRefreshTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
         }
         if (_restartTask is { } restartTask)
         {
@@ -1130,8 +1706,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             {
                 _client = null;
                 _clientGeneration = 0;
-                _rootThreadId = null;
-                _rootThreadGeneration = 0;
+                ClearRootThreadStateLocked();
             }
             if (client is not null)
             {

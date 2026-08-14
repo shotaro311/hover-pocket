@@ -184,6 +184,7 @@ final class CodexVoiceRuntimeHost {
         transportAttached: false,
         isMuted: true,
         transcript: [],
+        sessions: [],
         lastErrorCode: nil,
         appServerProcessID: nil,
         restartAttempt: 0,

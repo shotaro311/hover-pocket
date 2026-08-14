@@ -197,6 +197,7 @@ internal sealed class CodexVoiceRuntimeHost : IAsyncDisposable
             TransportAttached: false,
             IsMuted: true,
             Transcript: Array.Empty<CodexVoiceTranscriptEntry>(),
+            Sessions: Array.Empty<CodexVoiceThreadSummary>(),
             LastErrorCode: null,
             AppServerProcessId: null,
             RestartAttempt: 0,

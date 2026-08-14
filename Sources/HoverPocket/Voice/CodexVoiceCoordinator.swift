@@ -20,6 +20,17 @@ final class CodexVoiceCoordinator {
         let timeoutTask: Task<Void, Never>
     }
 
+    private struct ListedThread: Sendable {
+        let threadID: String
+        let sessionID: String
+        let parentThreadID: String
+        let title: String
+        let preview: String
+        let status: String
+        let createdAt: Date
+        let updatedAt: Date
+    }
+
     private let featureEnabled: Bool
     private let clientFactory: ClientFactory
     private let toolAdapter: (any CodexVoiceCapabilityToolAdapterProtocol)?
@@ -33,6 +44,10 @@ final class CodexVoiceCoordinator {
     private var availability: CodexVoiceAvailability
     private var sessionStatus: CodexVoiceSessionStatus = .idle
     private var rootThreadID: String?
+    private var rootSessionID: String?
+    private var rootCreatedAt: Date?
+    private var childSessions: [CodexVoiceThreadSummary] = []
+    private var sessionRefreshTask: Task<Void, Never>?
     private var transportAttached = false
     private var isMuted = true
     private var lastErrorCode: String?
@@ -94,11 +109,34 @@ final class CodexVoiceCoordinator {
             transportAttached: transportAttached,
             isMuted: isMuted,
             transcript: transcript.snapshot,
+            sessions: sessionSummaries,
             lastErrorCode: lastErrorCode,
             appServerProcessID: appServerProcessID,
             restartAttempt: restartAttempt,
             voiceCount: voiceCount
         )
+    }
+
+    private var sessionSummaries: [CodexVoiceThreadSummary] {
+        guard let rootThreadID, let rootCreatedAt else { return [] }
+        let rootState: CodexVoiceThreadState
+        switch sessionStatus {
+        case .recoverableFailure, .blockedFailure:
+            rootState = .failed
+        default:
+            rootState = .running
+        }
+        return [
+            CodexVoiceThreadSummary(
+                threadID: rootThreadID,
+                isCurrentRoot: true,
+                title: "current",
+                detail: sessionStatus.rawValue,
+                state: rootState,
+                createdAt: rootCreatedAt,
+                updatedAt: Date()
+            )
+        ] + childSessions
     }
 
     func initialize() async {
@@ -287,8 +325,7 @@ final class CodexVoiceCoordinator {
             if let attemptThreadID,
                rootThreadID == attemptThreadID,
                rootThreadGeneration == generation {
-                rootThreadID = nil
-                rootThreadGeneration = 0
+                clearRootThreadState()
             }
             if !isDisposed {
                 update(
@@ -343,7 +380,12 @@ final class CodexVoiceCoordinator {
         )
         guard let thread = response.objectValue?["thread"]?.objectValue,
               let id = thread["id"]?.stringValue,
-              !id.isEmpty else {
+              Self.validThreadIdentifier(id),
+              let sessionID = thread["sessionId"]?.stringValue,
+              Self.validThreadIdentifier(sessionID),
+              let createdAtSeconds = thread["createdAt"]?.integerValue,
+              createdAtSeconds > 0,
+              createdAtSeconds <= 253_402_300_799 else {
             throw CodexVoiceRuntimeError.compatibility("thread_start_response_invalid")
         }
         guard self.client === client,
@@ -353,9 +395,305 @@ final class CodexVoiceCoordinator {
             throw CodexVoiceRuntimeError.compatibility("voice_client_stale")
         }
         rootThreadID = id
+        rootSessionID = sessionID
+        rootCreatedAt = Date(timeIntervalSince1970: TimeInterval(createdAtSeconds))
         rootThreadGeneration = generation
+        childSessions = []
+        startSessionRefreshLoop(
+            client: client,
+            generation: generation,
+            rootThreadID: id,
+            rootSessionID: sessionID
+        )
         publish()
         return id
+    }
+
+    private func startSessionRefreshLoop(
+        client: CodexAppServerClient,
+        generation: UInt64,
+        rootThreadID: String,
+        rootSessionID: String
+    ) {
+        sessionRefreshTask?.cancel()
+        sessionRefreshTask = Task { @MainActor [weak self, weak client] in
+            guard let self, let client else { return }
+            while !Task.isCancelled,
+                  !self.isDisposed,
+                  self.client === client,
+                  self.clientGeneration == generation,
+                  self.rootThreadID == rootThreadID,
+                  self.rootSessionID == rootSessionID {
+                await self.refreshChildSessions(
+                    client: client,
+                    generation: generation,
+                    rootThreadID: rootThreadID,
+                    rootSessionID: rootSessionID
+                )
+                do {
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func refreshChildSessions(
+        client: CodexAppServerClient,
+        generation: UInt64,
+        rootThreadID: String,
+        rootSessionID: String
+    ) async {
+        guard !isDisposed,
+              self.client === client,
+              clientGeneration == generation,
+              self.rootThreadID == rootThreadID,
+              self.rootSessionID == rootSessionID else { return }
+        let response: CodexJSONValue
+        do {
+            response = try await client.sendRequest(
+                "thread/list",
+                params: .object([
+                    "ancestorThreadId": .string(rootThreadID),
+                    "archived": .bool(false),
+                    "limit": .integer(64),
+                    "sourceKinds": .array([
+                        .string("appServer"),
+                        .string("subAgent"),
+                        .string("subAgentReview"),
+                        .string("subAgentCompact"),
+                        .string("subAgentThreadSpawn"),
+                        .string("subAgentOther")
+                    ]),
+                    "sortDirection": .string("asc"),
+                    "sortKey": .string("created_at"),
+                    "useStateDbOnly": .bool(true)
+                ])
+            )
+        } catch {
+            return
+        }
+        guard let data = response.objectValue?["data"]?.arrayValue else { return }
+        let listed = data.prefix(64).compactMap(Self.parseListedThread)
+        var acceptedIDs: Set<String> = [rootThreadID]
+        var accepted: [ListedThread] = []
+        var remaining = listed.filter {
+            $0.threadID != rootThreadID && $0.sessionID == rootSessionID
+        }
+        for _ in 0...listed.count {
+            var progress = false
+            remaining.removeAll { thread in
+                if acceptedIDs.contains(thread.threadID) { return true }
+                guard acceptedIDs.contains(thread.parentThreadID) else { return false }
+                acceptedIDs.insert(thread.threadID)
+                accepted.append(thread)
+                progress = true
+                return true
+            }
+            if !progress { break }
+        }
+        let visible = accepted
+            .sorted { lhs, rhs in
+                if lhs.updatedAt == rhs.updatedAt {
+                    return lhs.threadID < rhs.threadID
+                }
+                return lhs.updatedAt > rhs.updatedAt
+            }
+            .prefix(16)
+
+        let previousByID = Dictionary(
+            childSessions.map { ($0.threadID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var recentMessages: [String: String] = [:]
+        for thread in visible {
+            if let previous = previousByID[thread.threadID],
+               previous.updatedAt == thread.updatedAt,
+               !previous.detail.isEmpty {
+                recentMessages[thread.threadID] = previous.detail
+            }
+        }
+        await withTaskGroup(of: (String, String?).self) { group in
+            for thread in visible where recentMessages[thread.threadID] == nil {
+                group.addTask {
+                    do {
+                        let read = try await client.sendRequest(
+                            "thread/read",
+                            params: .object([
+                                "threadId": .string(thread.threadID),
+                                "includeTurns": .bool(true)
+                            ])
+                        )
+                        return (
+                            thread.threadID,
+                            Self.latestMessage(
+                                from: read,
+                                expectedThreadID: thread.threadID,
+                                expectedSessionID: thread.sessionID,
+                                expectedParentThreadID: thread.parentThreadID
+                            )
+                        )
+                    } catch {
+                        return (thread.threadID, nil)
+                    }
+                }
+            }
+            for await (threadID, message) in group {
+                if let message, !message.isEmpty {
+                    recentMessages[threadID] = message
+                }
+            }
+        }
+        guard !isDisposed,
+              self.client === client,
+              clientGeneration == generation,
+              self.rootThreadID == rootThreadID,
+              self.rootSessionID == rootSessionID else { return }
+        childSessions = visible.map { thread in
+            let state: CodexVoiceThreadState
+            switch thread.status {
+            case "active": state = .running
+            case "systemError": state = .failed
+            default: state = .completed
+            }
+            return CodexVoiceThreadSummary(
+                threadID: thread.threadID,
+                isCurrentRoot: false,
+                title: thread.title,
+                detail: recentMessages[thread.threadID] ?? thread.preview,
+                state: state,
+                createdAt: thread.createdAt,
+                updatedAt: thread.updatedAt
+            )
+        }
+        publish()
+    }
+
+    nonisolated private static func parseListedThread(
+        _ value: CodexJSONValue
+    ) -> ListedThread? {
+        guard let thread = value.objectValue,
+              let threadID = thread["id"]?.stringValue,
+              validThreadIdentifier(threadID),
+              let sessionID = thread["sessionId"]?.stringValue,
+              validThreadIdentifier(sessionID),
+              let parentThreadID = thread["parentThreadId"]?.stringValue,
+              validThreadIdentifier(parentThreadID),
+              let status = thread["status"]?.objectValue?["type"]?.stringValue,
+              ["active", "idle", "notLoaded", "systemError"].contains(status),
+              let createdAt = thread["createdAt"]?.integerValue,
+              let updatedAt = thread["updatedAt"]?.integerValue,
+              createdAt > 0,
+              createdAt <= 253_402_300_799,
+              updatedAt >= createdAt,
+              updatedAt <= 253_402_300_799 else { return nil }
+        let name = safeCardText(
+            thread["name"]?.stringValue
+                ?? thread["agentNickname"]?.stringValue
+                ?? "Codex",
+            maximumScalars: 72
+        )
+        let preview = safeCardText(
+            thread["preview"]?.stringValue ?? "",
+            maximumScalars: 160
+        )
+        return ListedThread(
+            threadID: threadID,
+            sessionID: sessionID,
+            parentThreadID: parentThreadID,
+            title: name.isEmpty ? "Codex" : name,
+            preview: preview,
+            status: status,
+            createdAt: Date(timeIntervalSince1970: TimeInterval(createdAt)),
+            updatedAt: Date(timeIntervalSince1970: TimeInterval(updatedAt))
+        )
+    }
+
+    nonisolated private static func latestMessage(
+        from response: CodexJSONValue,
+        expectedThreadID: String,
+        expectedSessionID: String,
+        expectedParentThreadID: String
+    ) -> String? {
+        guard let thread = response.objectValue?["thread"]?.objectValue,
+              thread["id"]?.stringValue == expectedThreadID,
+              thread["sessionId"]?.stringValue == expectedSessionID,
+              thread["parentThreadId"]?.stringValue == expectedParentThreadID,
+              let turns = thread["turns"]?.arrayValue else {
+            return nil
+        }
+        for turn in turns.reversed() {
+            guard let items = turn.objectValue?["items"]?.arrayValue else { continue }
+            for item in items.reversed() {
+                guard let object = item.objectValue,
+                      let type = object["type"]?.stringValue else { continue }
+                if type == "agentMessage",
+                   let text = object["text"]?.stringValue {
+                    let safe = safeCardText(text, maximumScalars: 160)
+                    if !safe.isEmpty { return safe }
+                }
+                if type == "userMessage",
+                   let content = object["content"]?.arrayValue {
+                    for input in content.reversed() {
+                        guard let inputObject = input.objectValue,
+                              inputObject["type"]?.stringValue == "text",
+                              let text = inputObject["text"]?.stringValue else { continue }
+                        let safe = safeCardText(text, maximumScalars: 160)
+                        if !safe.isEmpty { return safe }
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    nonisolated private static func safeCardText(
+        _ value: String,
+        maximumScalars: Int
+    ) -> String {
+        var output = String.UnicodeScalarView()
+        var previousWasSpace = false
+        for scalar in value.unicodeScalars {
+            let codePoint = scalar.value
+            if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                if !previousWasSpace, !output.isEmpty {
+                    output.append(" ")
+                    previousWasSpace = true
+                }
+                continue
+            }
+            guard codePoint >= 0x20,
+                  !(0x7F...0x9F).contains(codePoint),
+                  !(0x202A...0x202E).contains(codePoint),
+                  !(0x2066...0x2069).contains(codePoint) else { continue }
+            output.append(scalar)
+            previousWasSpace = false
+            if output.count >= maximumScalars { break }
+        }
+        return String(output).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    nonisolated private static func validThreadIdentifier(_ value: String) -> Bool {
+        guard !value.isEmpty, value.utf8.count <= 128 else { return false }
+        return value.unicodeScalars.allSatisfy { scalar in
+            switch scalar.value {
+            case 45...46, 48...58, 65...90, 95, 97...122:
+                true
+            default:
+                false
+            }
+        }
+    }
+
+    private func clearRootThreadState() {
+        sessionRefreshTask?.cancel()
+        sessionRefreshTask = nil
+        rootThreadID = nil
+        rootSessionID = nil
+        rootCreatedAt = nil
+        rootThreadGeneration = 0
+        childSessions = []
     }
 
     func markTransportAttached() {
@@ -543,8 +881,7 @@ final class CodexVoiceCoordinator {
         transportAttached = false
         isMuted = true
         appServerProcessID = nil
-        rootThreadID = nil
-        rootThreadGeneration = 0
+        clearRootThreadState()
         lastErrorCode = "transport_\(reason)"
         publish()
         guard restartTask == nil else { return }
@@ -558,8 +895,7 @@ final class CodexVoiceCoordinator {
         guard !isDisposed, client === failedClient else { return }
         client = nil
         clientGeneration = 0
-        rootThreadID = nil
-        rootThreadGeneration = 0
+        clearRootThreadState()
         await failedClient.setNotificationHandler(nil)
         await failedClient.setTransportEndedHandler(nil)
         await failedClient.setServerRequestHandler(nil)
@@ -684,8 +1020,7 @@ final class CodexVoiceCoordinator {
         let connectedClient = client
         client = nil
         clientGeneration = 0
-        rootThreadID = nil
-        rootThreadGeneration = 0
+        clearRootThreadState()
         if let connectedClient {
             await connectedClient.setNotificationHandler(nil)
             await connectedClient.setTransportEndedHandler(nil)

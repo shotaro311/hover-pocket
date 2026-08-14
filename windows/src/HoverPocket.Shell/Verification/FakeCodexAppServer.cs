@@ -219,7 +219,159 @@ internal static class FakeCodexAppServer
                         id = idElement.Clone(),
                         result = new
                         {
-                            thread = new { id = "root-thread" }
+                            thread = new
+                            {
+                                id = "root-thread",
+                                sessionId = "session-a",
+                                createdAt = 1_700_000_000L
+                            }
+                        }
+                    });
+                    break;
+                }
+                case "thread/list":
+                {
+                    var validParams = message.TryGetProperty("params", out var listParams)
+                        && listParams.ValueKind == JsonValueKind.Object
+                        && listParams.TryGetProperty("ancestorThreadId", out var ancestor)
+                        && ancestor.GetString() == "root-thread"
+                        && listParams.TryGetProperty("archived", out var archived)
+                        && archived.ValueKind == JsonValueKind.False
+                        && listParams.TryGetProperty("sourceKinds", out var sourceKinds)
+                        && sourceKinds.ValueKind == JsonValueKind.Array
+                        && sourceKinds.EnumerateArray().Any(value => value.GetString() == "subAgent")
+                        && listParams.TryGetProperty("useStateDbOnly", out var stateDbOnly)
+                        && stateDbOnly.ValueKind == JsonValueKind.True;
+                    if (!validParams)
+                    {
+                        Write(output, new
+                        {
+                            id = idElement.Clone(),
+                            error = new { code = -32602, message = "Expected root-scoped thread list." }
+                        });
+                        break;
+                    }
+                    Write(output, new
+                    {
+                        id = idElement.Clone(),
+                        result = new
+                        {
+                            data = new object[]
+                            {
+                                new
+                                {
+                                    id = "child-a",
+                                    sessionId = "session-a",
+                                    parentThreadId = "root-thread",
+                                    name = "Today Focusを作成",
+                                    preview = "古い要約",
+                                    status = new { type = "active", activeFlags = Array.Empty<string>() },
+                                    createdAt = 1_700_000_010L,
+                                    updatedAt = 1_700_000_030L
+                                },
+                                new
+                                {
+                                    id = "grandchild-a",
+                                    sessionId = "session-a",
+                                    parentThreadId = "child-a",
+                                    name = "予定を整理",
+                                    preview = "検証中",
+                                    status = new { type = "idle" },
+                                    createdAt = 1_700_000_020L,
+                                    updatedAt = 1_700_000_040L
+                                },
+                                new
+                                {
+                                    id = "foreign-child",
+                                    sessionId = "session-b",
+                                    parentThreadId = "root-thread",
+                                    name = "別root",
+                                    preview = "表示禁止",
+                                    status = new { type = "active", activeFlags = Array.Empty<string>() },
+                                    createdAt = 1_700_000_020L,
+                                    updatedAt = 1_700_000_050L
+                                },
+                                new
+                                {
+                                    id = "orphan",
+                                    sessionId = "session-a",
+                                    parentThreadId = "other-root",
+                                    name = "孤立",
+                                    preview = "表示禁止",
+                                    status = new { type = "active", activeFlags = Array.Empty<string>() },
+                                    createdAt = 1_700_000_020L,
+                                    updatedAt = 1_700_000_060L
+                                }
+                            },
+                            nextCursor = (string?)null
+                        }
+                    });
+                    break;
+                }
+                case "thread/read":
+                {
+                    var validParams = message.TryGetProperty("params", out var readParams)
+                        && readParams.ValueKind == JsonValueKind.Object
+                        && readParams.TryGetProperty("threadId", out var threadIdValue)
+                        && threadIdValue.ValueKind == JsonValueKind.String
+                        && readParams.TryGetProperty("includeTurns", out var includeTurns)
+                        && includeTurns.ValueKind == JsonValueKind.True;
+                    var threadId = validParams ? threadIdValue.GetString() : null;
+                    if (threadId is not ("child-a" or "grandchild-a"))
+                    {
+                        Write(output, new
+                        {
+                            id = idElement.Clone(),
+                            error = new { code = -32602, message = "Expected known child thread." }
+                        });
+                        break;
+                    }
+                    var items = threadId == "child-a"
+                        ? new object[]
+                        {
+                            new
+                            {
+                                id = "message-1",
+                                type = "agentMessage",
+                                text = "実装を進めています"
+                            }
+                        }
+                        : new object[]
+                        {
+                            new
+                            {
+                                id = "message-2",
+                                type = "userMessage",
+                                content = new[]
+                                {
+                                    new { type = "text", text = "検証が完了しました" }
+                                }
+                            }
+                        };
+                    Write(output, new
+                    {
+                        id = idElement.Clone(),
+                        result = new
+                        {
+                            thread = new
+                            {
+                                id = threadId,
+                                sessionId = threadId == "child-a"
+                                    ? "session-a"
+                                    : "session-b",
+                                parentThreadId = threadId == "child-a"
+                                    ? "root-thread"
+                                    : "child-a",
+                                turns = new[]
+                                {
+                                    new
+                                    {
+                                        id = "turn-1",
+                                        status = "completed",
+                                        items
+                                    }
+                                }
+                            }
                         }
                     });
                     break;

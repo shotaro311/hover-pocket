@@ -85,6 +85,22 @@ struct CodexVoiceTranscriptEntry: Equatable, Sendable {
     let updatedAt: Date
 }
 
+enum CodexVoiceThreadState: String, Equatable, Sendable {
+    case running
+    case completed
+    case failed
+}
+
+struct CodexVoiceThreadSummary: Equatable, Sendable {
+    let threadID: String
+    let isCurrentRoot: Bool
+    let title: String
+    let detail: String
+    let state: CodexVoiceThreadState
+    let createdAt: Date
+    let updatedAt: Date
+}
+
 struct CodexVoiceSnapshot: Equatable, Sendable {
     let featureEnabled: Bool
     let availability: CodexVoiceAvailability
@@ -93,6 +109,7 @@ struct CodexVoiceSnapshot: Equatable, Sendable {
     let transportAttached: Bool
     let isMuted: Bool
     let transcript: [CodexVoiceTranscriptEntry]
+    let sessions: [CodexVoiceThreadSummary]
     let lastErrorCode: String?
     let appServerProcessID: Int32?
     let restartAttempt: Int

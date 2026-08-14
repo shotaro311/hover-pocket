@@ -21,6 +21,7 @@ enum CodexAppServerVerificationCommand {
                 print("codex_voice_sdp_attempt_isolation=ok")
                 print("codex_voice_restart_cancellation=ok")
                 print("codex_voice_tool_dispatch=ok")
+                print("codex_voice_root_scoped_sessions=ok")
                 Darwin.exit(0)
             } catch {
                 fputs("codex_app_server_verify=failed\n", stderr)
@@ -195,6 +196,30 @@ enum CodexAppServerVerificationCommand {
         )
         try require(answer.rootThreadID == "root-thread", "runtime_root_thread")
         try require(answer.sdp == "v=0\r\ns=fake-answer\r\n", "runtime_sdp_answer")
+        try await waitUntil("runtime_root_scoped_sessions") {
+            await MainActor.run { model.sessions.count == 3 }
+        }
+        try require(
+            model.sessions.map(\.id) == ["current-root", "grandchild-a", "child-a"],
+            "runtime_session_scope"
+        )
+        try require(
+            !model.sessions.contains(where: { $0.id == "foreign-child" || $0.id == "orphan" }),
+            "runtime_cross_root_session_rejected"
+        )
+        try require(
+            model.sessions.first(where: { $0.id == "child-a" })?.detail == "実装を進めています",
+            "runtime_session_recent_message"
+        )
+        try require(
+            model.sessions.first(where: { $0.id == "grandchild-a" })?.detail == "検証中",
+            "runtime_cross_root_readback_rejected"
+        )
+        try require(
+            model.sessions.first(where: { $0.id == "child-a" })?.state == .running
+                && model.sessions.first(where: { $0.id == "grandchild-a" })?.state == .completed,
+            "runtime_session_state"
+        )
         try await waitUntil("runtime_tool_dispatch") {
             await MainActor.run { toolAdapter.callCount == 1 }
         }
@@ -357,7 +382,31 @@ for raw in sys.stdin:
         if not params.get("dynamicTools"):
             print(json.dumps({"id": request_id, "error": {"code": -32602, "message": "dynamic tools required"}}), flush=True)
             continue
-        print(json.dumps({"id": request_id, "result": {"thread": {"id": "root-thread"}}}), flush=True)
+        print(json.dumps({"id": request_id, "result": {"thread": {"id": "root-thread", "sessionId": "session-a", "createdAt": 1700000000}}}), flush=True)
+    elif method == "thread/list":
+        params = message.get("params") or {}
+        if params.get("ancestorThreadId") != "root-thread" or params.get("archived") is not False or params.get("useStateDbOnly") is not True or "subAgent" not in params.get("sourceKinds", []):
+            print(json.dumps({"id": request_id, "error": {"code": -32602, "message": "invalid thread list params"}}), flush=True)
+            continue
+        print(json.dumps({"id": request_id, "result": {"data": [
+            {"id": "child-a", "sessionId": "session-a", "parentThreadId": "root-thread", "name": "Today Focusを作成", "preview": "古い要約", "status": {"type": "active", "activeFlags": []}, "createdAt": 1700000010, "updatedAt": 1700000030},
+            {"id": "grandchild-a", "sessionId": "session-a", "parentThreadId": "child-a", "name": "予定を整理", "preview": "検証中", "status": {"type": "idle"}, "createdAt": 1700000020, "updatedAt": 1700000040},
+            {"id": "foreign-child", "sessionId": "session-b", "parentThreadId": "root-thread", "name": "別root", "preview": "表示禁止", "status": {"type": "active", "activeFlags": []}, "createdAt": 1700000020, "updatedAt": 1700000050},
+            {"id": "orphan", "sessionId": "session-a", "parentThreadId": "other-root", "name": "孤立", "preview": "表示禁止", "status": {"type": "active", "activeFlags": []}, "createdAt": 1700000020, "updatedAt": 1700000060}
+        ], "nextCursor": None}}), flush=True)
+    elif method == "thread/read":
+        params = message.get("params") or {}
+        thread_id = params.get("threadId")
+        if params.get("includeTurns") is not True or thread_id not in ("child-a", "grandchild-a"):
+            print(json.dumps({"id": request_id, "error": {"code": -32602, "message": "invalid thread read params"}}), flush=True)
+            continue
+        if thread_id == "child-a":
+            items = [{"id": "message-1", "type": "agentMessage", "text": "実装を進めています"}]
+        else:
+            items = [{"id": "message-2", "type": "userMessage", "content": [{"type": "text", "text": "検証が完了しました"}]}]
+        parent_id = "root-thread" if thread_id == "child-a" else "child-a"
+        read_session_id = "session-a" if thread_id == "child-a" else "session-b"
+        print(json.dumps({"id": request_id, "result": {"thread": {"id": thread_id, "sessionId": read_session_id, "parentThreadId": parent_id, "turns": [{"id": "turn-1", "status": "completed", "items": items}]}}}), flush=True)
     elif method == "thread/realtime/start":
         params = message.get("params") or {}
         transport = params.get("transport") or {}
@@ -422,7 +471,7 @@ for raw in sys.stdin:
         thread_count += 1
         if thread_count == 1:
             time.sleep(0.08)
-        print(json.dumps({"id": request_id, "result": {"thread": {"id": f"root-thread-{thread_count}"}}}), flush=True)
+        print(json.dumps({"id": request_id, "result": {"thread": {"id": f"root-thread-{thread_count}", "sessionId": f"session-{thread_count}", "createdAt": 1700000000 + thread_count}}}), flush=True)
     elif method == "thread/realtime/start":
         start_count += 1
         thread_id = (message.get("params") or {}).get("threadId")

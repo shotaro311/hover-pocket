@@ -325,7 +325,30 @@ internal sealed class PanelBridgeController : IDisposable
                     isComplete = entry.IsComplete,
                     updatedAt = entry.UpdatedAt
                 }).ToArray(),
-                sessions = Array.Empty<object>(),
+                sessions = voiceSnapshot.Sessions.Select(session =>
+                {
+                    var end = session.State == CodexVoiceThreadState.Running
+                        ? DateTimeOffset.UtcNow
+                        : session.UpdatedAt;
+                    var elapsed = Math.Clamp(
+                        (long)Math.Floor((end - session.CreatedAt).TotalSeconds),
+                        0,
+                        int.MaxValue);
+                    return new
+                    {
+                        id = session.IsCurrentRoot ? "current-root" : session.ThreadId,
+                        title = session.IsCurrentRoot
+                            ? (CurrentSettings.Language == AppLanguage.Japanese
+                                ? "この会話"
+                                : "This conversation")
+                            : session.Title,
+                        detail = session.IsCurrentRoot
+                            ? ToWireValue(voiceSnapshot.SessionStatus)
+                            : session.Detail,
+                        state = ToWireValue(session.State),
+                        elapsedSeconds = (int)elapsed
+                    };
+                }).ToArray(),
                 lastErrorCode = voiceSnapshot.LastErrorCode,
                 restartAttempt = voiceSnapshot.RestartAttempt,
                 availableVoiceCount = voiceSnapshot.VoiceCount
@@ -1458,6 +1481,16 @@ internal sealed class PanelBridgeController : IDisposable
             CodexVoiceSessionStatus.RecoverableFailure => "recoverableFailure",
             CodexVoiceSessionStatus.BlockedFailure => "blockedFailure",
             _ => "idle"
+        };
+    }
+
+    private static string ToWireValue(CodexVoiceThreadState state)
+    {
+        return state switch
+        {
+            CodexVoiceThreadState.Completed => "completed",
+            CodexVoiceThreadState.Failed => "failed",
+            _ => "running"
         };
     }
 
