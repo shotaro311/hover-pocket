@@ -25,7 +25,10 @@ internal sealed record CalendarCapabilityEvent(
     string EventId,
     string SafeTitle,
     DateTimeOffset Start,
-    DateTimeOffset End);
+    DateTimeOffset End,
+    bool IsAllDay = false,
+    DateOnly? AllDayStart = null,
+    DateOnly? AllDayEnd = null);
 
 internal sealed record CalendarCapabilityCreateRequest(
     string? CalendarId,
@@ -97,7 +100,10 @@ internal sealed class GoogleCalendarCapabilityDataSource : ICalendarCapabilityDa
             item.GoogleEventId,
             item.Title,
             item.Start,
-            item.End);
+            item.End,
+            item.IsAllDay,
+            item.AllDayStart,
+            item.AllDayEnd);
     }
 }
 
@@ -140,10 +146,29 @@ internal sealed class CalendarListCapabilityHandler : IPocketCapabilityHandler
         var localDate = DateOnly.FromDateTime(localNow.DateTime);
         var localStart = StartOfDay(localDate, timeZone);
         var localEnd = StartOfDay(localDate.AddDays(1), timeZone);
-        var events = await _dataSource.ListEventsAsync(localStart, localEnd, cancellationToken);
+        var candidates = await _dataSource.ListEventsAsync(localStart, localEnd, cancellationToken);
+        var events = new List<CalendarCapabilityEvent>();
+        foreach (var item in candidates)
+        {
+            if (item.IsAllDay)
+            {
+                if (item.AllDayStart is not { } eventStart || item.AllDayEnd is not { } eventEnd)
+                {
+                    throw new CapabilityHandlerException("CAPABILITY_READBACK_MISMATCH", "calendar.allDayDate");
+                }
+                if (eventStart < localDate.AddDays(1) && localDate < eventEnd)
+                {
+                    events.Add(item);
+                }
+            }
+            else if (item.Start < localEnd && item.End > localStart)
+            {
+                events.Add(item);
+            }
+        }
         return CapabilityJson.From(new
         {
-            events = events.Take(128).Select(Output).ToArray()
+            events = events.OrderBy(item => item.Start).Take(128).Select(Output).ToArray()
         });
     }
 

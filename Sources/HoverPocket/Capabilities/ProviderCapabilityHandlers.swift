@@ -19,6 +19,29 @@ struct CalendarCapabilityEvent: Equatable, Sendable {
     let safeTitle: String
     let start: Date
     let end: Date
+    let isAllDay: Bool
+    let allDayStart: CalendarCivilDate?
+    let allDayEnd: CalendarCivilDate?
+
+    init(
+        eventRef: String,
+        eventID: String,
+        safeTitle: String,
+        start: Date,
+        end: Date,
+        isAllDay: Bool = false,
+        allDayStart: CalendarCivilDate? = nil,
+        allDayEnd: CalendarCivilDate? = nil
+    ) {
+        self.eventRef = eventRef
+        self.eventID = eventID
+        self.safeTitle = safeTitle
+        self.start = start
+        self.end = end
+        self.isAllDay = isAllDay
+        self.allDayStart = allDayStart
+        self.allDayEnd = allDayEnd
+    }
 }
 
 struct CalendarCapabilityCreateRequest: Equatable, Sendable {
@@ -63,6 +86,13 @@ struct CalendarCivilDate: Equatable, Sendable, Comparable {
         self.year = year
         self.month = month
         self.day = day
+    }
+
+    init(date: Date, calendar: Calendar) {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        self.year = components.year!
+        self.month = components.month!
+        self.day = components.day!
     }
 
     func date(in calendar: Calendar) -> Date? {
@@ -121,7 +151,10 @@ final class GoogleCalendarCapabilityDataSource: CalendarCapabilityDataSource {
             eventID: event.googleEventID,
             safeTitle: event.title,
             start: event.start,
-            end: event.end
+            end: event.end,
+            isAllDay: event.isAllDay,
+            allDayStart: event.allDayStartDate.flatMap(CalendarCivilDate.init(rfc3339:)),
+            allDayEnd: event.allDayEndDate.flatMap(CalendarCivilDate.init(rfc3339:))
         )
     }
 }
@@ -150,7 +183,25 @@ final class CalendarListCapabilityHandler: PocketCapabilityHandler {
         guard let end = calendar.date(byAdding: .day, value: 1, to: start) else {
             throw CapabilityHandlerError.unavailable("calendar_range")
         }
-        let events = try await dataSource.listEvents(from: start, to: end)
+        let startCivil = CalendarCivilDate(date: start, calendar: calendar)
+        let endCivil = CalendarCivilDate(date: end, calendar: calendar)
+        let candidates = try await dataSource.listEvents(from: start, to: end)
+        var selected: [CalendarCapabilityEvent] = []
+        for event in candidates {
+            if event.isAllDay {
+                guard let eventStart = event.allDayStart,
+                      let eventEnd = event.allDayEnd else {
+                    throw CapabilityHandlerError.readbackMismatch("calendar.allDayDate")
+                }
+                if eventStart < endCivil && startCivil < eventEnd {
+                    selected.append(event)
+                }
+            } else if event.start < end && event.end > start {
+                selected.append(event)
+            }
+        }
+        let events = try selected
+            .sorted { $0.start < $1.start }
             .prefix(128)
             .map { try Self.output($0) }
         return ["events": .array(events.map(CapabilityValue.object))]

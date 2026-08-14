@@ -27,6 +27,8 @@ struct GoogleCalendarEventOccurrence: Equatable, Codable, Sendable, Identifiable
     let end: Date
     let isAllDay: Bool
     let htmlLink: URL?
+    let allDayStartDate: String?
+    let allDayEndDate: String?
 
     func intersects(dayStart: Date, dayEnd: Date) -> Bool {
         start < dayEnd && end > dayStart

@@ -46,10 +46,11 @@ internal sealed class CapabilityVerifier
         {
             var now = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
             var clock = new ManualTimerClock(now);
+            var alertSound = new NullTimerAlertSound();
             using var timerStore = new TimerStore(
                 Path.Combine(root, "timer"),
                 clock,
-                new NullTimerAlertSound(),
+                alertSound,
                 enableScheduler: false);
             var stickyRoot = Path.Combine(root, "sticky");
             var stickyStore = new StickyNotesStore(stickyRoot);
@@ -57,7 +58,7 @@ internal sealed class CapabilityVerifier
             var handlers = ProviderCapabilityCompositionRoot.Create(calendar, timerStore, stickyStore);
             Require(handlers.Keys.Count == 10, "handler_count");
 
-            await VerifyTimerAsync(handlers, clock, root);
+            await VerifyTimerAsync(handlers, timerStore, alertSound, clock, root);
             await VerifyStickyAsync(handlers, stickyStore, stickyRoot);
             await VerifyCalendarAsync(handlers, calendar, now);
 
@@ -92,6 +93,8 @@ internal sealed class CapabilityVerifier
 
     private async Task VerifyTimerAsync(
         PocketCapabilityHandlerSet handlers,
+        TimerStore timerStore,
+        NullTimerAlertSound alertSound,
         ManualTimerClock clock,
         string root)
     {
@@ -146,6 +149,28 @@ internal sealed class CapabilityVerifier
         Require(stopped.GetProperty("state").GetString() == "stopped", "timer_stop_state");
         Require(stopped.GetProperty("endAt").ValueKind == JsonValueKind.Null, "timer_stop_end");
 
+        var expiring = await handlers.InvokeAsync(
+            CapabilityIds.TimerStart,
+            Json(new
+            {
+                durationSeconds = 1,
+                title = "Expiring",
+                sourceRef = (string?)null
+            }),
+            new CapabilityHandlerContext("timer-verifier-key-0005", clock.UtcNow));
+        var expiringId = Guid.Parse(expiring.GetProperty("timerId").GetString()!);
+        clock.Advance(TimeSpan.FromSeconds(2));
+        timerStore.CheckExpired();
+        Require(timerStore.GetSnapshot().ActiveAlert?.Id == expiringId, "timer_expired_alert_fixture");
+        var stopCountBefore = alertSound.StopCount;
+        var expiredStopped = await handlers.InvokeAsync(
+            CapabilityIds.TimerStop,
+            Json(new { timerId = expiringId }),
+            new CapabilityHandlerContext("timer-verifier-key-0006", clock.UtcNow));
+        Require(expiredStopped.GetProperty("state").GetString() == "stopped", "timer_expired_stop_state");
+        Require(timerStore.GetSnapshot().ActiveAlert is null, "timer_expired_alert_cleared");
+        Require(alertSound.StopCount == stopCountBefore + 1, "timer_expired_sound_stopped");
+
         var blockedRoot = Path.Combine(root, "blocked-timer");
         File.WriteAllText(blockedRoot, "blocked");
         using var blockedStore = new TimerStore(
@@ -163,7 +188,7 @@ internal sealed class CapabilityVerifier
                     title = "Blocked",
                     sourceRef = (string?)null
                 }),
-                new CapabilityHandlerContext("timer-verifier-key-0005", clock.UtcNow));
+                new CapabilityHandlerContext("timer-verifier-key-0007", clock.UtcNow));
             _failures.Add("timer_persistence_failure_accepted");
         }
         catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_UNAVAILABLE" && ex.Field == "timer_storage")
@@ -301,6 +326,36 @@ internal sealed class CapabilityVerifier
         Require(list.GetProperty("events").GetArrayLength() == 1, "calendar_list");
         var safeTitle = list.GetProperty("events")[0].GetProperty("safeTitle").GetString() ?? string.Empty;
         Require(safeTitle.EnumerateRunes().Count() == 160, "calendar_title_scalar_limit");
+
+        calendar.Seed(new CalendarCapabilityEvent(
+            "primary:all-day-aug14",
+            "all-day-aug14",
+            "August 14",
+            new DateTimeOffset(2026, 8, 14, 7, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 8, 15, 7, 0, 0, TimeSpan.Zero),
+            IsAllDay: true,
+            AllDayStart: new DateOnly(2026, 8, 14),
+            AllDayEnd: new DateOnly(2026, 8, 15)));
+        calendar.Seed(new CalendarCapabilityEvent(
+            "primary:all-day-aug15",
+            "all-day-aug15",
+            "August 15",
+            new DateTimeOffset(2026, 8, 15, 7, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 8, 16, 7, 0, 0, TimeSpan.Zero),
+            IsAllDay: true,
+            AllDayStart: new DateOnly(2026, 8, 15),
+            AllDayEnd: new DateOnly(2026, 8, 16)));
+        var civilList = await handlers.InvokeAsync(
+            CapabilityIds.CalendarList,
+            Json(new { range = "today", timezone = "Asia/Tokyo" }),
+            new CapabilityHandlerContext(
+                null,
+                new DateTimeOffset(2026, 8, 15, 3, 0, 0, TimeSpan.Zero)));
+        var civilRefs = civilList.GetProperty("events")
+            .EnumerateArray()
+            .Select(item => item.GetProperty("eventRef").GetString())
+            .ToArray();
+        Require(civilRefs.SequenceEqual(["primary:all-day-aug15"]), "calendar_all_day_civil_filter");
 
         var dstNow = new DateTimeOffset(2026, 3, 8, 12, 0, 0, TimeSpan.Zero);
         await handlers.InvokeAsync(
@@ -469,7 +524,6 @@ internal sealed class FakeCalendarCapabilityDataSource : ICalendarCapabilityData
         LastListStart = start;
         LastListEnd = end;
         IReadOnlyList<CalendarCapabilityEvent> result = _events.Values
-            .Where(item => item.Start < end && item.End > start)
             .OrderBy(item => item.Start)
             .ToArray();
         return Task.FromResult(result);
@@ -510,7 +564,10 @@ internal sealed class FakeCalendarCapabilityDataSource : ICalendarCapabilityData
             eventId,
             request.Title,
             request.Start,
-            request.End);
+            request.End,
+            request.IsAllDay,
+            request.IsAllDay ? DateOnly.FromDateTime(request.Start.Date) : null,
+            request.IsAllDay ? DateOnly.FromDateTime(request.End.Date) : null);
         _events[item.EventRef] = item;
         return Task.FromResult(item);
     }

@@ -235,7 +235,6 @@ internal sealed class CalendarStore
                 throw new GoogleCalendarApiException("calendar_unavailable", ResolveMessage());
             }
             return _snapshot.Events
-                .Where(item => item.Start < end && item.End > start)
                 .OrderBy(item => item.Start)
                 .ToArray();
         }

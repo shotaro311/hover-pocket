@@ -300,6 +300,53 @@ enum CapabilityVerificationCommand {
         }
         try require(safeTitle.unicodeScalars.count == 160, "calendar_title_scalar_limit")
 
+        guard let filterNow = CapabilityDateCodec.date(from: "2026-08-15T03:00:00Z"),
+              let august14Start = CapabilityDateCodec.date(from: "2026-08-14T07:00:00Z"),
+              let august14End = CapabilityDateCodec.date(from: "2026-08-15T07:00:00Z"),
+              let august15Start = CapabilityDateCodec.date(from: "2026-08-15T07:00:00Z"),
+              let august15End = CapabilityDateCodec.date(from: "2026-08-16T07:00:00Z"),
+              let august14Civil = CalendarCivilDate(rfc3339: "2026-08-14"),
+              let august15Civil = CalendarCivilDate(rfc3339: "2026-08-15"),
+              let august16Civil = CalendarCivilDate(rfc3339: "2026-08-16") else {
+            throw VerificationFailure("calendar_all_day_filter_fixture")
+        }
+        dataSource.seed(CalendarCapabilityEvent(
+            eventRef: "primary:all-day-aug14",
+            eventID: "all-day-aug14",
+            safeTitle: "August 14",
+            start: august14Start,
+            end: august14End,
+            isAllDay: true,
+            allDayStart: august14Civil,
+            allDayEnd: august15Civil
+        ))
+        dataSource.seed(CalendarCapabilityEvent(
+            eventRef: "primary:all-day-aug15",
+            eventID: "all-day-aug15",
+            safeTitle: "August 15",
+            start: august15Start,
+            end: august15End,
+            isAllDay: true,
+            allDayStart: august15Civil,
+            allDayEnd: august16Civil
+        ))
+        let civilList = try await handlers.invoke(
+            PocketCapabilityKey(id: "calendar.events.list", version: 1),
+            arguments: ["range": .string("today"), "timezone": .string("Asia/Tokyo")],
+            context: CapabilityHandlerContext(now: filterNow)
+        )
+        guard case .array(let civilEvents)? = civilList["events"] else {
+            throw VerificationFailure("calendar_all_day_civil_filter")
+        }
+        let civilRefs = civilEvents.compactMap { value -> String? in
+            guard case .object(let event) = value,
+                  case .string(let eventRef)? = event["eventRef"] else {
+                return nil
+            }
+            return eventRef
+        }
+        try require(civilRefs == ["primary:all-day-aug15"], "calendar_all_day_civil_filter")
+
         let createArguments: CapabilityObject = [
             "calendarId": .string("primary"),
             "title": .string("Created"),
@@ -465,8 +512,9 @@ private final class FakeCalendarCapabilityDataSource: CalendarCapabilityDataSour
     }
 
     func listEvents(from start: Date, to end: Date) async throws -> [CalendarCapabilityEvent] {
-        events.values
-            .filter { $0.start < end && $0.end > start }
+        _ = start
+        _ = end
+        return events.values
             .sorted { $0.start < $1.start }
     }
 
@@ -479,7 +527,10 @@ private final class FakeCalendarCapabilityDataSource: CalendarCapabilityDataSour
                 eventID: event.eventID,
                 safeTitle: event.safeTitle + " mismatch",
                 start: event.start,
-                end: event.end
+                end: event.end,
+                isAllDay: event.isAllDay,
+                allDayStart: event.allDayStart,
+                allDayEnd: event.allDayEnd
             )
         }
         return event
@@ -503,7 +554,10 @@ private final class FakeCalendarCapabilityDataSource: CalendarCapabilityDataSour
             eventID: eventID,
             safeTitle: request.title,
             start: request.start,
-            end: request.end
+            end: request.end,
+            isAllDay: request.isAllDay,
+            allDayStart: request.allDayStart,
+            allDayEnd: request.allDayEnd
         )
         events[event.eventRef] = event
         return event

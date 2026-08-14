@@ -26,7 +26,9 @@ internal sealed record CalendarEventOccurrence(
     DateTimeOffset Start,
     DateTimeOffset End,
     bool IsAllDay,
-    string? HtmlLink)
+    string? HtmlLink,
+    DateOnly? AllDayStart = null,
+    DateOnly? AllDayEnd = null)
 {
     public bool Intersects(DateTimeOffset dayStart, DateTimeOffset dayEnd)
     {

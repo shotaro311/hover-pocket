@@ -228,7 +228,6 @@ final class GoogleCalendarStore: ObservableObject {
     func listEventsForCapability(from start: Date, to end: Date) async throws -> [GoogleCalendarEventOccurrence] {
         let snapshot = try await loadMonthForTool(containing: start)
         return snapshot.events
-            .filter { $0.start < end && $0.end > start }
             .sorted { $0.start < $1.start }
     }
 

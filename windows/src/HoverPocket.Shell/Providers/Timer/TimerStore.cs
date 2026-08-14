@@ -224,6 +224,10 @@ internal sealed class TimerStore : IDisposable
             var index = RunningTimers.FindIndex(timer => timer.Id == id);
             if (index < 0)
             {
+                if (ActiveAlert?.Id == id)
+                {
+                    StopAlertLocked();
+                }
                 return BuildSnapshotLocked(_clock.UtcNow);
             }
             var timer = RunningTimers[index];
@@ -728,6 +732,8 @@ internal sealed class NullTimerAlertSound : ITimerAlertSound
 {
     public int StartCount { get; private set; }
 
+    public int StopCount { get; private set; }
+
     public void StartLoop()
     {
         StartCount++;
@@ -735,6 +741,7 @@ internal sealed class NullTimerAlertSound : ITimerAlertSound
 
     public void Stop()
     {
+        StopCount++;
     }
 
     public void Dispose()

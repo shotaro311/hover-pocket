@@ -357,10 +357,13 @@ internal sealed class GoogleCalendarApiClient
             start.Value.Date,
             end.Value.Date,
             start.Value.IsAllDay,
-            item.HtmlLink);
+            item.HtmlLink,
+            start.Value.AllDayDate,
+            end.Value.AllDayDate);
     }
 
-    private static (DateTimeOffset Date, bool IsAllDay)? ParseDateTime(CalendarEventDateTime? value)
+    private static (DateTimeOffset Date, bool IsAllDay, DateOnly? AllDayDate)? ParseDateTime(
+        CalendarEventDateTime? value)
     {
         if (value is null)
         {
@@ -370,13 +373,16 @@ internal sealed class GoogleCalendarApiClient
         if (!string.IsNullOrWhiteSpace(value.DateTime)
             && DateTimeOffset.TryParse(value.DateTime, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var dateTime))
         {
-            return (dateTime, false);
+            return (dateTime, false, null);
         }
 
         if (!string.IsNullOrWhiteSpace(value.Date)
             && DateTime.TryParseExact(value.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var allDay))
         {
-            return (new DateTimeOffset(DateTime.SpecifyKind(allDay, DateTimeKind.Local)), true);
+            return (
+                new DateTimeOffset(DateTime.SpecifyKind(allDay, DateTimeKind.Local)),
+                true,
+                DateOnly.FromDateTime(allDay));
         }
 
         return null;

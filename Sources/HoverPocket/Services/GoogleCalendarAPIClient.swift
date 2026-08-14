@@ -296,17 +296,21 @@ final class GoogleCalendarAPIClient: @unchecked Sendable {
             start: start.date,
             end: end.date,
             isAllDay: start.isAllDay,
-            htmlLink: event.htmlLink.flatMap(URL.init(string:))
+            htmlLink: event.htmlLink.flatMap(URL.init(string:)),
+            allDayStartDate: start.allDayDate,
+            allDayEndDate: end.allDayDate
         )
     }
 
-    private static func parseDateTime(_ value: GoogleCalendarEventDateTime?) -> (date: Date, isAllDay: Bool)? {
+    private static func parseDateTime(
+        _ value: GoogleCalendarEventDateTime?
+    ) -> (date: Date, isAllDay: Bool, allDayDate: String?)? {
         guard let value else { return nil }
         if let dateTime = value.dateTime, let date = parseInternetDate(dateTime) {
-            return (date, false)
+            return (date, false, nil)
         }
         if let allDay = value.date, let date = parseAllDayDate(allDay) {
-            return (date, true)
+            return (date, true, allDay)
         }
         return nil
     }
