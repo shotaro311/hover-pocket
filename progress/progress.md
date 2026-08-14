@@ -2,7 +2,7 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: an2-pr-ready-ci-pass; an3-windows-voice-broker-ci-pass; real-device-and-macos-voice-e2e-pending
+status: an2-pr-ready-ci-pass; an3-voice-foundation-security-remediated-ci-pass; real-device-and-macos-production-voice-e2e-pending
 ---
 
 ## 2026-08-15 AI-native AN3 Voice Foundation Integration
@@ -17,6 +17,9 @@ status: an2-pr-ready-ci-pass; an3-windows-voice-broker-ci-pass; real-device-and-
 - Codex app-serverのdynamic toolをHost-owned `CodexVoiceCapabilityToolAdapter`へ接続し、「今日の予定」「Timer開始」「Calendar予定作成」「Today Focus」をすべて既存Capability Broker経由で実行するようにした。exact root thread、allowlist、closed schema、bounded引数、Host承認、readback済みreceipt、同一callの二重実行防止を固定し、Store / BridgeDispatcherへのVoice直結は追加していない。実装head `b8f830b`のPR #6はWindows Voice CI 2系統、Windows通常verify、macOS verify、PR Routerが全成功し、MERGEABLE / CLEANである。対象Windows実機のマイク・実音声・実Calendar操作とmacOS Voice runtimeが次のgateである。
 - 両OSのcanonical plan digestをAN0契約どおりroute-independentへ修正した。Capability、正規化済み引数、依存、承認方式、必要権限、Pocket App contextだけを意味的digestへ含め、plan ID、時刻、origin、principal、idempotency keyは除外した。実行ごとのreceipt ID、trace、rollback keyはplan IDの不可逆digestも使って衝突を防ぐ。Text / Voiceの同一Today Focusが同じdigestになるfixtureを追加し、head `e53e14a`のPR #6は全5チェック成功、MERGEABLE / CLEANである。
 - AN2のReady PR [#9](https://github.com/shotaro311/hover-pocket/pull/9)はWindows / macOS / PR Routerが全成功し、MERGEABLE / CLEANである。ChatGPT Pro Criticは指定Project内のchat作成証拠を確定できず成果物なしの`blocked`となり、delivery claim、空成果物のreadback、`mark-done`まで完了した。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-an3-voice-foundation.md`。
+- macOSへ専用Codex app-server JSONL clientとVoice Coordinator基盤を追加し、initialize、account / voice gate、thread / realtime start、WebRTC SDP、bounded transcript、restart / cleanupをSwift 6 warnings-as-errorsでビルドした。fake app-server verifierはinitialize、malformed隔離、未対応server request拒否、timeout回復、process cleanupを確認した。まだHost UI、microphone、Broker tool adapterへは本番接続していない。
+- ChatGPT Pro Criticのexact diffレビューで指摘された6件をWindows側へ反映した。client generation / Ready / root binding、設定resetとpanel close時のauthorization epoch無効化、call IDに対するtool+args fingerprint、承認後の再確認、protocol / tool payloadと同時実行上限、JSON-RPC error fieldのlowercase wire形式を固定した。Critic artifact SHA-256は`68f0715f...d095`で、deliveryはclaim / ingest /受入 / `mark-done`済みである。
+- 最終head `33d45ade1646ef16dfa12d3766fa0812c537d54d`のDraft PR [#6](https://github.com/shotaro311/hover-pocket/pull/6)は、Windows Voice CI 2本、Windows通常verify、macOS Capability verify、PR Routerの全5チェックが成功し、MERGEABLE / CLEANである。対象Windows実機のマイク・実音声・実Calendar mutationと、macOSのproduction Voice接続が次のgateである。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-an3-voice-foundation.md`。
 
 ## 2026-08-15 AI-native AN2 Registry / Broker / Text Today Focus
 
