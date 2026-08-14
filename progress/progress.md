@@ -2,7 +2,7 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: an2-pr-ready-ci-pass; an3-windows-webrtc-foundation-ci-pass; real-device-and-broker-voice-e2e-pending
+status: an2-pr-ready-ci-pass; an3-windows-voice-broker-ci-pass; real-device-and-macos-voice-e2e-pending
 ---
 
 ## 2026-08-15 AI-native AN3 Voice Foundation Integration
@@ -14,6 +14,7 @@ status: an2-pr-ready-ci-pass; an3-windows-webrtc-foundation-ci-pass; real-device
 - macOS Voice Lane layout verifierは4サイズ×Compact / Expandedの8描画、既定値・永続化・短画面縮退・既存Panel 112件を含め成功し、macOS CIへ追加した。ローカルMacには.NET / PowerShell runtimeがないため、Windows compileとdeterministic verifierはmerge commitのpush後にGitHub Actionsで確認する。microphone / WebRTC、実音声、Broker tool dispatch、両OSVoice runtimeは未実装である。
 - WindowsにもHost-owned最下段のVoice Lane UI骨格を接続した。Bridge stateと設定、display geometry、Panel最大高、Compact / Expanded renderer、短画面Compact縮退、既存Provider rect不変、明示toggle、2列表示、fullscreen禁止を実装し、UI / UI model / layout verifierを拡張した。JavaScript全ファイルのsyntaxとworkflow YAML、diff checkは成功したが、Windows compile / WebView2実描画はGitHub Actions待ちである。
 - Windowsのapplication-lifetime Voice runtimeへaccount / voice capability gate、詳細状態機械、bounded restart / backoff、single-use microphone permission、WebRTC SDP交換、remote audio、mute / stop / safe closeを接続した。`thread/realtime/start`は現行Codex schemaに合わせてWebRTC対応の`v1`を明示し、root threadはread-only sandbox / approval never / isolated workspaceで開始する。実装head `91aa8d3`のPR #6はWindows Voice CI 2系統、Windows通常verify、macOS verify、PR Routerがすべて成功した。対象Windows実機のマイク・実音声1往復と、VoiceからBrokerへのtool dispatchは次のgateである。
+- Codex app-serverのdynamic toolをHost-owned `CodexVoiceCapabilityToolAdapter`へ接続し、「今日の予定」「Timer開始」「Calendar予定作成」「Today Focus」をすべて既存Capability Broker経由で実行するようにした。exact root thread、allowlist、closed schema、bounded引数、Host承認、readback済みreceipt、同一callの二重実行防止を固定し、Store / BridgeDispatcherへのVoice直結は追加していない。実装head `b8f830b`のPR #6はWindows Voice CI 2系統、Windows通常verify、macOS verify、PR Routerが全成功し、MERGEABLE / CLEANである。対象Windows実機のマイク・実音声・実Calendar操作とmacOS Voice runtimeが次のgateである。
 - AN2のReady PR [#9](https://github.com/shotaro311/hover-pocket/pull/9)はWindows / macOS / PR Routerが全成功し、MERGEABLE / CLEANである。ChatGPT Pro Criticは指定Project内のchat作成証拠を確定できず成果物なしの`blocked`となり、delivery claim、空成果物のreadback、`mark-done`まで完了した。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-an3-voice-foundation.md`。
 
 ## 2026-08-15 AI-native AN2 Registry / Broker / Text Today Focus

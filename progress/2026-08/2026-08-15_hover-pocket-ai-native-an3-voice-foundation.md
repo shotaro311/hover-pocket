@@ -2,7 +2,7 @@
 
 ## 現在地
 
-Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し、Windowsではapplication-lifetime runtime、origin限定microphone permission、WebRTC SDP / remote audioまで実装した。これはAN3完了ではなく、対象Windows実機の実音声1往復、VoiceからBrokerへのtool dispatch、macOS Voice runtime、両OSE2Eが残っている。
+Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し、Windowsではapplication-lifetime runtime、origin限定microphone permission、WebRTC SDP / remote audio、VoiceからBrokerへのdynamic tool dispatchまで実装した。これはAN3完了ではなく、対象Windows実機の実音声・実Calendar操作、root-scoped child cards、macOS Voice runtime、両OSE2Eが残っている。
 
 ## Git / worktree
 
@@ -11,7 +11,7 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 - branch開始head: `374aa6a39b5860ebfb6cd944a62f08106c72cff4`
 - 統合対象AN2 head: `5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`
 - AN2実装と両OSのVoice Lane表示基盤をmerge commit `52bf00c`で統合し、AN2最終進捗commit `15e44f0`もmerge commit `cdc5a8f`で取り込んだ。
-- AN2 Ready PR [#9](https://github.com/shotaro311/hover-pocket/pull/9)はWindows / macOS / PR Routerが全成功し、MERGEABLE / CLEANである。AN3の実装head `91aa8d3`はDraft PR #6へpush済みで、remote parity `0 / 0`、PRの全5チェックが成功している。
+- AN2 Ready PR [#9](https://github.com/shotaro311/hover-pocket/pull/9)はWindows / macOS / PR Routerが全成功し、MERGEABLE / CLEANである。AN3の実装head `b8f830b`はDraft PR #6へpush済みで、remote parity `0 / 0`、PRの全5チェックが成功し、GitHub readbackはMERGEABLE / CLEANである。
 
 ## 再利用したVoice基盤
 
@@ -57,6 +57,15 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 - `thread/realtime/start`はisolated workspace、read-only sandbox、approval `never`、永続root thread、WebRTC対応の`v1`で開始する。SDP offer / answer、remote audio、mute、transport detach、stop / closedをtyped Bridgeで接続し、audioとfull transcriptはHoverPocketへ保存しない。
 - fake app-server verifierへthread開始、WebRTC SDP、transport接続、transcript、detach、crash / restart、stopを追加した。実装head `91aa8d3`のGitHub ActionsはWindows Voice 2系統、Windows通常verify、macOS verify、PR Routerがすべて成功した。
 
+## Windows Voice → Capability Broker
+
+- app-server `item/tool/call`を受けるHost-owned Adapterを追加し、root thread一致、function allowlist、closed input schema、bounded identifier / payloadを検証してからだけBroker planを作る。未知request、別root、namespace付きcall、余分な引数はfail closedとする。
+- 初期toolは`hoverpocket_calendar_today`、`hoverpocket_timer_start`、`hoverpocket_calendar_create`、`hoverpocket_today_focus`の4件である。VoiceからProvider Storeや既存WebView Bridgeへ直接到達する経路は作らず、AN2 Registry / Broker、approval、ledger、audit、readbackをそのまま使う。
+- Calendar readは許可済みprivate readとして実行する。Timer開始、Calendar作成、Today FocusはHostのWPF確認画面でcanonical title / duration / start / end / purposeを表示し、Panel表示中、Voice有効、AI-native有効のときだけ承認できる。拒否時は書き込みゼロで、承認後はreadback一致を成功条件にする。
+- tool call IDと引数digestをbindingしたbounded memory cacheで同一callの再送を1回の結果へ集約し、同じcall IDで引数が変わった場合はidempotency conflictとして拒否する。Calendar / TimerのBroker plan IDとToday Focus operation tokenもcallへbindingし、cache消失後の再送は二重実行せずledger conflictでfail closedする。
+- verifierは4 tool schema、別root拒否、readの承認不要、Timer拒否時の書き込みゼロ、承認表示と実行title一致、readback、同一call再送、改変再送拒否、Calendar create event readback、Today FocusのTimer / Sticky readbackを検査する。fake app-serverは`thread/start.dynamicTools`が空なら失敗するfixtureを持つ。
+- 実装head `b8f830b`のGitHub Actions run `31827122722`はDebug / Release warnings-as-errorsを0 warning / 0 errorで通過し、`codex-voice-coordinator` verifierが`Broker-routed Voice tools with approval/readback/idempotency`をPASSした。PR #6のWindows Voice CI 2系統、Windows通常verify、macOS verify、PR Routerはすべて成功した。
+
 ## ローカル検証
 
 ```text
@@ -88,6 +97,11 @@ macOS capability workflow YAML parse
 
 GitHub Actions / implementation head 91aa8d3
   PASS / Windows Voice CI x 2 / Windows verify / macOS verify / PR Router
+
+GitHub Actions / implementation head b8f830b
+  PASS / Windows Debug + Release warnings-as-errors / 0 warning / 0 error
+  PASS / Voice dynamic tools / Host approval / Broker execution / readback / idempotency verifier
+  PASS / Windows Voice CI x 2 / Windows verify / macOS verify / PR Router
 ```
 
 ## 未完了gate
@@ -95,6 +109,6 @@ GitHub Actions / implementation head 91aa8d3
 1. AN2 PR #9は人間によるmerge待ちである。AN3は既に同じAN2 headを統合済みだが、AN2 merge後にmainとのparityを再確認する。
 2. installed Codex version / generated schema / account / voicesを対象Windows実機でreadbackする。
 3. origin限定microphone、WebRTC SDP / remote audio、1往復、safe closeを対象Windows実機で検証する。
-4. Voice intentをAN2 Capability Brokerへ接続し、Calendar read / create、Timer start、Today Focusのapprovalとreadbackを確認する。
+4. 対象Windows実機でVoice intentからCalendar read / create、Timer start、Today Focusを呼び、Host approval、実Provider状態、event / timer / note ID readbackを確認する。
 5. root-scoped child session cardsを実thread stateへ接続する。
 6. macOS Voice runtimeと共通semantic contractを実装して両OS gateを通す。
