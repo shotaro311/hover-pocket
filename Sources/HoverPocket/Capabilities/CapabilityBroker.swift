@@ -30,7 +30,7 @@ final class CapabilityBroker {
         var digest = "unavailable"
         do {
             let descriptors = try validate(plan, permissions: permissions)
-            digest = try CapabilityCanonicalJSON.planDigest(plan)
+            digest = try CapabilityCanonicalJSON.planDigest(plan, descriptors: descriptors)
             let request = try approvalStore.request(
                 for: plan,
                 digest: digest,
@@ -78,7 +78,7 @@ final class CapabilityBroker {
         let descriptors: [PocketCapabilityDescriptor]
         do {
             descriptors = try validate(plan, permissions: permissions)
-            digest = try CapabilityCanonicalJSON.planDigest(plan)
+            digest = try CapabilityCanonicalJSON.planDigest(plan, descriptors: descriptors)
         } catch {
             try appendAuthorizationAudit(plan: plan, planDigest: digest, decision: "denied", error: error, now: now)
             throw error
@@ -295,9 +295,13 @@ final class CapabilityBroker {
         }
 
         try enforceRateLimit(descriptor, principal: plan.principal, now: now)
-        let invocationID = Self.invocationID(planDigest: planDigest, stepID: step.id)
+        let invocationID = try Self.invocationID(
+            planDigest: planDigest,
+            planID: plan.id,
+            stepID: step.id
+        )
         let auditEntryID = "audit:\(UUID().uuidString.lowercased())"
-        let traceID = "trace:\(planDigest.dropFirst("sha256:".count).prefix(32))"
+        let traceID = try Self.traceID(planDigest: planDigest, planID: plan.id)
         let start = ContinuousClock.now
 
         let started = CapabilityAuditEntry(
@@ -473,11 +477,12 @@ final class CapabilityBroker {
                 allSucceeded = false
                 continue
             }
+            let planIdentityDigest = try CapabilityCanonicalJSON.digest(["planId": .string(plan.id)])
             let rollbackStep = CapabilityPlanStep(
                 id: "rollback_\(item.step.id)",
                 capability: PocketCapabilityKeys.timerStop,
                 arguments: ["timerId": timerID],
-                idempotencyKey: "rollback.\(planDigest.dropFirst("sha256:".count).prefix(24)).\(item.step.id)",
+                idempotencyKey: "rollback.\(planDigest.dropFirst("sha256:".count).prefix(12)).\(planIdentityDigest.dropFirst("sha256:".count).prefix(12)).\(item.step.id)",
                 dependencies: []
             )
             let rollbackDescriptor = try registry.resolve(rollbackStep.capability)
@@ -636,7 +641,7 @@ final class CapabilityBroker {
             safeErrorCode: receipt.safeError?.code,
             status: receipt.status.rawValue,
             timestamp: now,
-            traceID: "trace:\(receipt.planDigest.dropFirst("sha256:".count).prefix(32))"
+            traceID: try Self.traceID(planDigest: receipt.planDigest, planID: plan.id)
         ))
     }
 
@@ -684,8 +689,18 @@ final class CapabilityBroker {
         }
     }
 
-    private static func invocationID(planDigest: String, stepID: String) -> String {
-        "invocation:\(planDigest.dropFirst("sha256:".count).prefix(32)):\(stepID)"
+    private static func invocationID(
+        planDigest: String,
+        planID: String,
+        stepID: String
+    ) throws -> String {
+        let planIdentityDigest = try CapabilityCanonicalJSON.digest(["planId": .string(planID)])
+        return "invocation:\(planDigest.dropFirst("sha256:".count).prefix(24)):\(planIdentityDigest.dropFirst("sha256:".count).prefix(16)):\(stepID)"
+    }
+
+    private static func traceID(planDigest: String, planID: String) throws -> String {
+        let planIdentityDigest = try CapabilityCanonicalJSON.digest(["planId": .string(planID)])
+        return "trace:\(planDigest.dropFirst("sha256:".count).prefix(16)):\(planIdentityDigest.dropFirst("sha256:".count).prefix(16))"
     }
 
     private static func validIdentifier(_ value: String, maximum: Int) -> Bool {

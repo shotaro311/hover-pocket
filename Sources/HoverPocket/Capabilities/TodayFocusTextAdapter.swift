@@ -54,13 +54,14 @@ final class TodayFocusTextAdapter {
         timezone: TimeZone,
         principal: CapabilityPrincipal,
         permissions: CapabilityPermissionSet,
-        now: Date = Date()
+        now: Date = Date(),
+        origin: CapabilityOrigin = .text
     ) async throws -> [TodayFocusCalendarEvent] {
         let nonce = UUID().uuidString.lowercased()
         let plan = CapabilityExecutionPlan(
             id: "today-focus-read:\(nonce)",
             createdAt: now,
-            origin: .text,
+            origin: origin,
             principal: principal,
             appContext: nil,
             steps: [
@@ -118,20 +119,28 @@ final class TodayFocusTextAdapter {
         principal: CapabilityPrincipal,
         permissions: CapabilityPermissionSet,
         now: Date = Date(),
-        timeZone: TimeZone = .current
+        timeZone: TimeZone = .current,
+        origin: CapabilityOrigin = .text,
+        operationToken: String? = nil
     ) throws -> TodayFocusDraft {
         guard (1...86_400).contains(durationSeconds),
               !purpose.isEmpty,
               purpose.unicodeScalars.count <= 10_000 else {
             throw CapabilityBrokerError.invalidPlan("today_focus_input")
         }
-        let nonce = UUID().uuidString.lowercased()
+        if let operationToken {
+            guard (16...64).contains(operationToken.unicodeScalars.count),
+                  operationToken.unicodeScalars.allSatisfy(Self.isASCIIAlphaNumeric) else {
+                throw CapabilityBrokerError.invalidPlan("operation_token")
+            }
+        }
+        let nonce = operationToken ?? UUID().uuidString.lowercased()
         let stableDate = Self.dateKey(now, timeZone: timeZone)
         let approvalText = TodayFocusApprovalText.sanitize(purpose)
         let plan = CapabilityExecutionPlan(
             id: "today-focus-write:\(nonce)",
             createdAt: now,
-            origin: .text,
+            origin: origin,
             principal: principal,
             appContext: nil,
             steps: [
@@ -210,5 +219,14 @@ final class TodayFocusTextAdapter {
         formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
+    }
+
+    private static func isASCIIAlphaNumeric(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 48...57, 65...90, 97...122:
+            true
+        default:
+            false
+        }
     }
 }

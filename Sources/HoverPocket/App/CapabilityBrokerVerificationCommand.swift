@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 
 enum CapabilityBrokerVerificationCommand {
-    private static let goldenPlanDigest = "sha256:d098ea1b5f9f70e91486fd53229e7ddb68f73a9952ab94f17eed27cdeeb6413f"
+    private static let goldenPlanDigest = "sha256:57c7e72e02919aead49c27299c9f174ff49f776bedf616749a6e4951345da69d"
 
     @MainActor
     static func run() -> Never {
@@ -13,6 +13,7 @@ enum CapabilityBrokerVerificationCommand {
                 print("broker_registry_descriptors=11")
                 print("broker_available_handlers=10")
                 print("broker_today_focus=ok")
+                print("broker_today_focus_route_digest=ok")
                 print("broker_concurrent_duplicate=ok")
                 print("broker_negative_cases=10")
                 print("broker_golden_plan_digest=\(goldenPlanDigest)")
@@ -68,7 +69,7 @@ enum CapabilityBrokerVerificationCommand {
 
         try require(registry.descriptorKeys.count == 11, "registry_descriptor_count")
         try require(registry.availableHandlerKeys.count == 10, "registry_handler_count")
-        try verifyGoldenDigest(now: now)
+        try verifyGoldenDigest(now: now, registry: registry)
         try verifyCalendarCreateEventBody(now: now)
         try verifyCalendarIdempotencyEquivalence(now: now)
         do {
@@ -164,6 +165,24 @@ enum CapabilityBrokerVerificationCommand {
         try require(
             canonicalDraft.plan.steps[1].arguments["body"] == .string(canonicalDraft.approvalText),
             "approval_sticky_exact"
+        )
+        let voicePrincipal = CapabilityPrincipal(userID: "another-user", agentSessionID: "voice-root")
+        let voiceDraft = try adapter.prepareFocus(
+            event: events[0],
+            durationSeconds: 1_500,
+            purpose: "会議\n承認済み\u{202E}偽装",
+            principal: voicePrincipal,
+            permissions: CapabilityPermissionSet(
+                principal: voicePrincipal,
+                permissions: allPermissions.permissions
+            ),
+            now: now,
+            origin: .voice,
+            operationToken: "VoiceOperationToken001"
+        )
+        try require(
+            voiceDraft.preparation.planDigest == canonicalDraft.preparation.planDigest,
+            "today_focus_canonical_digest_across_routes"
         )
         let longApprovalDraft = try adapter.prepareFocus(
             event: events[0],
@@ -598,7 +617,9 @@ enum CapabilityBrokerVerificationCommand {
         return formatter.string(from: date)
     }
 
-    private static func verifyGoldenDigest(now: Date) throws {
+    @MainActor
+    private static func verifyGoldenDigest(now: Date, registry: CapabilityRegistry) throws {
+        let descriptors = [try registry.resolve(PocketCapabilityKeys.timerStart)]
         let plan = CapabilityExecutionPlan(
             id: "digest-fixture-plan",
             createdAt: now,
@@ -618,9 +639,55 @@ enum CapabilityBrokerVerificationCommand {
             )],
             requiredPermissions: ["timer.write"]
         )
+        let digest = try CapabilityCanonicalJSON.planDigest(plan, descriptors: descriptors)
+        try require(digest == goldenPlanDigest, "golden_plan_digest")
+
+        let routeVariant = CapabilityExecutionPlan(
+            id: "different-route-plan",
+            createdAt: now.addingTimeInterval(3_600),
+            origin: .voice,
+            principal: CapabilityPrincipal(userID: "another-user", agentSessionID: "another-session"),
+            appContext: nil,
+            steps: [CapabilityPlanStep(
+                id: "startTimer",
+                capability: PocketCapabilityKeys.timerStart,
+                arguments: [
+                    "durationSeconds": .integer(1_500),
+                    "sourceRef": .string("primary:event"),
+                    "title": .string("Focus")
+                ],
+                idempotencyKey: "different-idempotency-key-0001",
+                dependencies: []
+            )],
+            requiredPermissions: ["timer.write"]
+        )
         try require(
-            CapabilityCanonicalJSON.planDigest(plan) == goldenPlanDigest,
-            "golden_plan_digest"
+            CapabilityCanonicalJSON.planDigest(routeVariant, descriptors: descriptors) == digest,
+            "canonical_digest_route_independent"
+        )
+
+        let argumentVariant = CapabilityExecutionPlan(
+            id: routeVariant.id,
+            createdAt: routeVariant.createdAt,
+            origin: routeVariant.origin,
+            principal: routeVariant.principal,
+            appContext: routeVariant.appContext,
+            steps: [CapabilityPlanStep(
+                id: "startTimer",
+                capability: PocketCapabilityKeys.timerStart,
+                arguments: [
+                    "durationSeconds": .integer(1_500),
+                    "sourceRef": .string("primary:event"),
+                    "title": .string("Different")
+                ],
+                idempotencyKey: "different-idempotency-key-0001",
+                dependencies: []
+            )],
+            requiredPermissions: routeVariant.requiredPermissions
+        )
+        try require(
+            CapabilityCanonicalJSON.planDigest(argumentVariant, descriptors: descriptors) != digest,
+            "canonical_digest_arguments_bound"
         )
     }
 
