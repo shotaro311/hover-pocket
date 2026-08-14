@@ -232,4 +232,11 @@ RELEASE --verify-application-data with isolated env
 
 Codex Security scan 04214399-d7ba-4a97-8007-63ab89259da1
   PASS / 11 of 11 changed files / coverage complete / finding 0 / sealed
+
+GitHub Actions / isolated E2E implementation head d916c1d
+  PASS / Voice Lane Windows CI runs 31851023897 and 31851024054
+  PASS / Windows verify run 31851024094
+  PASS / macOS verify run 31851024055
+  PASS / PR Router run 31851022775
+  PASS / Draft PR #6 MERGEABLE / CLEAN / remote parity 0 / 0
 ```
