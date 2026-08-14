@@ -22,6 +22,9 @@ if CommandLine.arguments.contains("--verify-timer") {
 if CommandLine.arguments.contains("--verify-capabilities") {
     CapabilityVerificationCommand.run()
 }
+if CommandLine.arguments.contains("--verify-broker") {
+    CapabilityBrokerVerificationCommand.run()
+}
 if CommandLine.arguments.contains("--verify-panel-layout") {
     PanelLayoutVerificationCommand.run()
 }

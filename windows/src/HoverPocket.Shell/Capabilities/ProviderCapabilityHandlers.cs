@@ -18,6 +18,7 @@ internal static class CapabilityIds
     public static readonly PocketCapabilityKey TimerStop = new("timer.countdown.stop", 1);
     public static readonly PocketCapabilityKey StickyUpsert = new("sticky.note.upsert", 1);
     public static readonly PocketCapabilityKey StickyGet = new("sticky.note.get", 1);
+    public static readonly PocketCapabilityKey NativeAuthority = new("system.native.authority", 1);
 }
 
 internal sealed record CalendarCapabilityEvent(
