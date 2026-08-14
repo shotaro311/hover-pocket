@@ -336,7 +336,9 @@ internal sealed class PanelBridgeController : IDisposable
                         int.MaxValue);
                     return new
                     {
-                        id = session.IsCurrentRoot ? "current-root" : session.ThreadId,
+                        id = session.IsCurrentRoot
+                            ? $"root:{session.ThreadId}"
+                            : $"thread:{session.ThreadId}",
                         title = session.IsCurrentRoot
                             ? (CurrentSettings.Language == AppLanguage.Japanese
                                 ? "この会話"

@@ -153,7 +153,6 @@ $messages = @(
     [ordered]@{
         method = "account/rateLimits/read"
         id = 3
-        params = [ordered]@{}
     },
     [ordered]@{
         method = "thread/realtime/listVoices"

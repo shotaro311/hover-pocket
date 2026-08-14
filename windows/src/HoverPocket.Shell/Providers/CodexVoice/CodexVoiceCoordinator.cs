@@ -75,6 +75,9 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
 {
     private const int DefaultTranscriptEntryLimit = 120;
     private const int DefaultTranscriptCharacterLimit = 32_000;
+    private const int ThreadListPageLimit = 64;
+    private const int MaximumThreadListPages = 8;
+    private const int MaximumThreadListRecords = ThreadListPageLimit * MaximumThreadListPages;
     private static readonly IReadOnlyList<TimeSpan> DefaultRestartDelays =
     [
         TimeSpan.Zero,
@@ -91,6 +94,19 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         string Status,
         DateTimeOffset CreatedAt,
         DateTimeOffset UpdatedAt);
+
+    private sealed record ThreadReadCacheKey(
+        string ThreadId,
+        string SessionId,
+        string ParentThreadId,
+        DateTimeOffset UpdatedAt);
+
+    private sealed record ThreadReadCacheValue(string? Message);
+
+    private sealed record ThreadReadResult(
+        ThreadReadCacheKey Key,
+        bool IdentityValidated,
+        string? Message);
 
     private readonly bool _featureEnabled;
     private readonly Func<CancellationToken, Task<CodexAppServerClient>> _clientFactory;
@@ -111,6 +127,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
     private DateTimeOffset? _rootCreatedAt;
     private IReadOnlyList<CodexVoiceThreadSummary> _childSessions =
         Array.Empty<CodexVoiceThreadSummary>();
+    private readonly Dictionary<ThreadReadCacheKey, ThreadReadCacheValue> _threadReadCache = [];
     private CancellationTokenSource? _sessionRefreshCancellation;
     private Task? _sessionRefreshTask;
     private bool _transportAttached;
@@ -425,10 +442,26 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             }
             catch
             {
-                UpdateState(
-                    CodexVoiceAvailability.Ready,
-                    CodexVoiceSessionStatus.RecoverableFailure,
-                    "webrtc_negotiation_failed");
+                var invalidatedAttempt = false;
+                lock (_stateSync)
+                {
+                    if (Volatile.Read(ref _disposeState) == 0
+                        && ReferenceEquals(_client, client)
+                        && _clientGeneration == clientGeneration
+                        && _rootThreadGeneration == clientGeneration
+                        && string.Equals(_rootThreadId, rootThreadId, StringComparison.Ordinal))
+                    {
+                        ClearRootThreadStateLocked();
+                        _availability = CodexVoiceAvailability.Ready;
+                        _sessionStatus = CodexVoiceSessionStatus.RecoverableFailure;
+                        _lastErrorCode = "webrtc_negotiation_failed";
+                        invalidatedAttempt = true;
+                    }
+                }
+                if (invalidatedAttempt)
+                {
+                    PublishSnapshot();
+                }
                 throw;
             }
             finally
@@ -549,6 +582,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             _rootCreatedAt = createdAt;
             _rootThreadGeneration = clientGeneration;
             _childSessions = Array.Empty<CodexVoiceThreadSummary>();
+            _threadReadCache.Clear();
         }
 
         StartSessionRefreshLoop(client, clientGeneration, threadId, sessionId);
@@ -613,7 +647,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         string rootSessionId,
         CancellationToken cancellationToken)
     {
-        Dictionary<string, CodexVoiceThreadSummary> previousById;
+        Dictionary<ThreadReadCacheKey, ThreadReadCacheValue> previousReadCache;
         lock (_stateSync)
         {
             if (!IsSessionScopeCurrentLocked(
@@ -625,48 +659,25 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                 return;
             }
 
-            previousById = _childSessions
-                .GroupBy(session => session.ThreadId, StringComparer.Ordinal)
-                .ToDictionary(
-                    group => group.Key,
-                    group => group.First(),
-                    StringComparer.Ordinal);
+            previousReadCache = new Dictionary<ThreadReadCacheKey, ThreadReadCacheValue>(
+                _threadReadCache);
         }
 
-        JsonElement response;
-        try
-        {
-            response = await client.SendRequestAsync(
-                "thread/list",
-                new
-                {
-                    ancestorThreadId = rootThreadId,
-                    archived = false,
-                    limit = 64,
-                    sourceKinds = new[]
-                    {
-                        "appServer",
-                        "subAgent",
-                        "subAgentReview",
-                        "subAgentCompact",
-                        "subAgentThreadSpawn",
-                        "subAgentOther"
-                    },
-                    sortDirection = "asc",
-                    sortKey = "created_at",
-                    useStateDbOnly = true
-                },
-                cancellationToken);
-        }
-        catch (Exception exception) when (exception is CodexAppServerRpcException
-            or IOException
-            or InvalidOperationException
-            or TimeoutException)
+        var listed = await FetchListedThreadsAsync(
+            client,
+            generation,
+            rootThreadId,
+            rootSessionId,
+            cancellationToken);
+        if (listed is null)
         {
             return;
         }
-
-        var listed = ParseListedThreads(response);
+        var duplicateIds = listed
+            .GroupBy(thread => thread.ThreadId, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.Ordinal);
         var acceptedIds = new HashSet<string>(StringComparer.Ordinal)
         {
             rootThreadId
@@ -680,7 +691,8 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                 && string.Equals(
                     thread.SessionId,
                     rootSessionId,
-                    StringComparison.Ordinal))
+                    StringComparison.Ordinal)
+                && !duplicateIds.Contains(thread.ThreadId))
             .ToList();
         while (remaining.Count > 0)
         {
@@ -718,19 +730,24 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             .Take(16)
             .ToArray();
         var recentMessages = new Dictionary<string, string>(StringComparer.Ordinal);
+        var nextReadCache = new Dictionary<ThreadReadCacheKey, ThreadReadCacheValue>();
         foreach (var thread in visible)
         {
-            if (previousById.GetValueOrDefault(thread.ThreadId) is { } previous
-                && previous.UpdatedAt == thread.UpdatedAt
-                && !string.IsNullOrWhiteSpace(previous.Detail))
+            var key = ThreadReadCacheKeyFor(thread);
+            if (previousReadCache.GetValueOrDefault(key) is { } cached)
             {
-                recentMessages[thread.ThreadId] = previous.Detail;
+                nextReadCache[key] = cached;
+                if (!string.IsNullOrWhiteSpace(cached.Message))
+                {
+                    recentMessages[thread.ThreadId] = cached.Message;
+                }
             }
         }
         var readTasks = visible
-            .Where(thread => !recentMessages.ContainsKey(thread.ThreadId))
+            .Where(thread => !nextReadCache.ContainsKey(ThreadReadCacheKeyFor(thread)))
             .Select(async thread =>
         {
+            var key = ThreadReadCacheKeyFor(thread);
             try
             {
                 var read = await client.SendRequestAsync(
@@ -741,28 +758,34 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                         includeTurns = true
                     },
                     cancellationToken);
-                return (
-                    ThreadId: thread.ThreadId,
-                    Message: LatestMessage(
-                        read,
-                        thread.ThreadId,
-                        thread.SessionId,
-                        thread.ParentThreadId));
+                var identityValidated = TryLatestMessage(
+                    read,
+                    thread.ThreadId,
+                    thread.SessionId,
+                    thread.ParentThreadId,
+                    out var message);
+                return new ThreadReadResult(key, identityValidated, message);
             }
             catch (Exception exception) when (exception is CodexAppServerRpcException
                 or IOException
                 or InvalidOperationException
                 or TimeoutException)
             {
-                return (ThreadId: thread.ThreadId, Message: (string?)null);
+                return new ThreadReadResult(key, IdentityValidated: false, Message: null);
             }
         });
         var readResults = await Task.WhenAll(readTasks);
         foreach (var result in readResults)
         {
+            if (!result.IdentityValidated)
+            {
+                continue;
+            }
+
+            nextReadCache[result.Key] = new ThreadReadCacheValue(result.Message);
             if (!string.IsNullOrWhiteSpace(result.Message))
             {
-                recentMessages[result.ThreadId] = result.Message;
+                recentMessages[result.Key.ThreadId] = result.Message;
             }
         }
         var summaries = visible.Select(thread => new CodexVoiceThreadSummary(
@@ -791,9 +814,101 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             }
 
             _childSessions = summaries;
+            _threadReadCache.Clear();
+            foreach (var entry in nextReadCache)
+            {
+                _threadReadCache[entry.Key] = entry.Value;
+            }
         }
 
         PublishSnapshot();
+    }
+
+    private async Task<IReadOnlyList<ListedThread>?> FetchListedThreadsAsync(
+        CodexAppServerClient client,
+        long generation,
+        string rootThreadId,
+        string rootSessionId,
+        CancellationToken cancellationToken)
+    {
+        string? cursor = null;
+        var seenCursors = new HashSet<string>(StringComparer.Ordinal);
+        var listed = new List<ListedThread>();
+        for (var pageIndex = 0; pageIndex < MaximumThreadListPages; pageIndex++)
+        {
+            lock (_stateSync)
+            {
+                if (!IsSessionScopeCurrentLocked(
+                        client,
+                        generation,
+                        rootThreadId,
+                        rootSessionId))
+                {
+                    return null;
+                }
+            }
+
+            var request = new Dictionary<string, object?>
+            {
+                ["ancestorThreadId"] = rootThreadId,
+                ["archived"] = false,
+                ["limit"] = ThreadListPageLimit,
+                ["sourceKinds"] = new[]
+                {
+                    "appServer",
+                    "subAgent",
+                    "subAgentReview",
+                    "subAgentCompact",
+                    "subAgentThreadSpawn",
+                    "subAgentOther"
+                },
+                ["sortDirection"] = "asc",
+                ["sortKey"] = "created_at",
+                ["useStateDbOnly"] = true
+            };
+            if (cursor is not null)
+            {
+                request["cursor"] = cursor;
+            }
+
+            JsonElement response;
+            try
+            {
+                response = await client.SendRequestAsync(
+                    "thread/list",
+                    request,
+                    cancellationToken);
+            }
+            catch (Exception exception) when (exception is CodexAppServerRpcException
+                or IOException
+                or InvalidOperationException
+                or TimeoutException)
+            {
+                return null;
+            }
+
+            if (!TryParseThreadListPage(response, out var page, out var nextCursor))
+            {
+                return null;
+            }
+            listed.AddRange(page);
+            if (listed.Count > MaximumThreadListRecords)
+            {
+                return null;
+            }
+            if (nextCursor is null)
+            {
+                return listed;
+            }
+            if (pageIndex >= MaximumThreadListPages - 1
+                || !seenCursors.Add(nextCursor))
+            {
+                return null;
+            }
+            cursor = nextCursor;
+        }
+
+        return null;
     }
 
     private bool IsSessionScopeCurrentLocked(
@@ -820,27 +935,47 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         _rootCreatedAt = null;
         _rootThreadGeneration = 0;
         _childSessions = Array.Empty<CodexVoiceThreadSummary>();
+        _threadReadCache.Clear();
     }
 
-    private static IReadOnlyList<ListedThread> ParseListedThreads(JsonElement response)
+    private static bool TryParseThreadListPage(
+        JsonElement response,
+        out IReadOnlyList<ListedThread> threads,
+        out string? nextCursor)
     {
+        threads = Array.Empty<ListedThread>();
+        nextCursor = null;
         if (response.ValueKind != JsonValueKind.Object
             || !response.TryGetProperty("data", out var data)
-            || data.ValueKind != JsonValueKind.Array)
+            || data.ValueKind != JsonValueKind.Array
+            || data.GetArrayLength() > ThreadListPageLimit)
         {
-            return Array.Empty<ListedThread>();
+            return false;
         }
 
-        var threads = new List<ListedThread>();
-        foreach (var value in data.EnumerateArray().Take(64))
+        var parsed = new List<ListedThread>();
+        foreach (var value in data.EnumerateArray())
         {
             if (TryParseListedThread(value, out var thread))
             {
-                threads.Add(thread);
+                parsed.Add(thread);
             }
         }
 
-        return threads;
+        if (response.TryGetProperty("nextCursor", out var cursorValue)
+            && cursorValue.ValueKind != JsonValueKind.Null)
+        {
+            if (cursorValue.ValueKind != JsonValueKind.String
+                || cursorValue.GetString() is not { } candidate
+                || !ValidCursor(candidate))
+            {
+                return false;
+            }
+            nextCursor = candidate;
+        }
+
+        threads = parsed;
+        return true;
     }
 
     private static bool TryParseListedThread(
@@ -881,12 +1016,14 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         return true;
     }
 
-    private static string? LatestMessage(
+    private static bool TryLatestMessage(
         JsonElement response,
         string expectedThreadId,
         string expectedSessionId,
-        string expectedParentThreadId)
+        string expectedParentThreadId,
+        out string? message)
     {
+        message = null;
         if (response.ValueKind != JsonValueKind.Object
             || !response.TryGetProperty("thread", out var thread)
             || thread.ValueKind != JsonValueKind.Object
@@ -905,7 +1042,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             || !thread.TryGetProperty("turns", out var turns)
             || turns.ValueKind != JsonValueKind.Array)
         {
-            return null;
+            return false;
         }
 
         for (var turnIndex = turns.GetArrayLength() - 1; turnIndex >= 0; turnIndex--)
@@ -924,12 +1061,13 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                 var type = ReadOptionalString(item, "type");
                 if (string.Equals(type, "agentMessage", StringComparison.Ordinal))
                 {
-                    var message = SafeCardText(
+                    var candidate = SafeCardText(
                         ReadOptionalString(item, "text") ?? string.Empty,
                         160);
-                    if (!string.IsNullOrEmpty(message))
+                    if (!string.IsNullOrEmpty(candidate))
                     {
-                        return message;
+                        message = candidate;
+                        return true;
                     }
                 }
 
@@ -951,18 +1089,50 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                         continue;
                     }
 
-                    var message = SafeCardText(
+                    var candidate = SafeCardText(
                         ReadOptionalString(input, "text") ?? string.Empty,
                         160);
-                    if (!string.IsNullOrEmpty(message))
+                    if (!string.IsNullOrEmpty(candidate))
                     {
-                        return message;
+                        message = candidate;
+                        return true;
                     }
                 }
             }
         }
 
-        return null;
+        return true;
+    }
+
+    private static ThreadReadCacheKey ThreadReadCacheKeyFor(ListedThread thread)
+    {
+        return new ThreadReadCacheKey(
+            thread.ThreadId,
+            thread.SessionId,
+            thread.ParentThreadId,
+            thread.UpdatedAt);
+    }
+
+    private static bool ValidCursor(string value)
+    {
+        if (string.IsNullOrEmpty(value) || Encoding.UTF8.GetByteCount(value) > 512)
+        {
+            return false;
+        }
+
+        foreach (var rune in value.EnumerateRunes())
+        {
+            var codePoint = rune.Value;
+            if (codePoint < 0x20
+                || codePoint == 0x7F
+                || codePoint is >= 0x202A and <= 0x202E
+                || codePoint is >= 0x2066 and <= 0x2069)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static string SafeCardText(string value, int maximumScalars)
@@ -1050,7 +1220,8 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         if (value.ValueKind != JsonValueKind.Object
             || !value.TryGetProperty(propertyName, out var property)
             || property.ValueKind != JsonValueKind.Number
-            || !property.TryGetInt64(out var seconds))
+            || !property.TryGetInt64(out var seconds)
+            || seconds <= 0)
         {
             return false;
         }

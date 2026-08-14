@@ -8,6 +8,7 @@ internal static class FakeCodexAppServer
     private const string EnableEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_APP_SERVER";
     private const string SignedOutEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_SIGNED_OUT";
     private const string ExpectDynamicToolsEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_EXPECT_DYNAMIC_TOOLS";
+    private const string WebRtcFailureEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_WEBRTC_FAILURE";
 
     public static bool ShouldRun(IReadOnlyList<string> args)
     {
@@ -40,12 +41,19 @@ internal static class FakeCodexAppServer
         var serverReplyReceived = false;
         var serverErrorReplyReceived = false;
         var serverOverloadReplyReceived = false;
+        var childReadAttempts = 0;
+        var threadStartAttempts = 0;
+        var realtimeStartAttempts = 0;
         var signedOut = string.Equals(
             Environment.GetEnvironmentVariable(SignedOutEnvironmentVariable),
             "1",
             StringComparison.Ordinal);
         var expectDynamicTools = string.Equals(
             Environment.GetEnvironmentVariable(ExpectDynamicToolsEnvironmentVariable),
+            "1",
+            StringComparison.Ordinal);
+        var failFirstWebRtc = string.Equals(
+            Environment.GetEnvironmentVariable(WebRtcFailureEnvironmentVariable),
             "1",
             StringComparison.Ordinal);
         string? line;
@@ -196,6 +204,7 @@ internal static class FakeCodexAppServer
                     break;
                 case "thread/start":
                 {
+                    threadStartAttempts++;
                     var hasDynamicTools = message.TryGetProperty("params", out var threadStartParams)
                         && threadStartParams.ValueKind == JsonValueKind.Object
                         && threadStartParams.TryGetProperty("dynamicTools", out var dynamicTools)
@@ -221,8 +230,12 @@ internal static class FakeCodexAppServer
                         {
                             thread = new
                             {
-                                id = "root-thread",
-                                sessionId = "session-a",
+                                id = failFirstWebRtc
+                                    ? $"root-thread-{threadStartAttempts}"
+                                    : "root-thread",
+                                sessionId = failFirstWebRtc
+                                    ? $"session-{threadStartAttempts}"
+                                    : "session-a",
                                 createdAt = 1_700_000_000L
                             }
                         }
@@ -231,17 +244,44 @@ internal static class FakeCodexAppServer
                 }
                 case "thread/list":
                 {
+                    var expectedSources = new[]
+                    {
+                        "appServer",
+                        "subAgent",
+                        "subAgentReview",
+                        "subAgentCompact",
+                        "subAgentThreadSpawn",
+                        "subAgentOther"
+                    };
                     var validParams = message.TryGetProperty("params", out var listParams)
                         && listParams.ValueKind == JsonValueKind.Object
                         && listParams.TryGetProperty("ancestorThreadId", out var ancestor)
-                        && ancestor.GetString() == "root-thread"
+                        && (ancestor.GetString() == "root-thread"
+                            || (failFirstWebRtc
+                                && ancestor.GetString() is "root-thread-1" or "root-thread-2"))
                         && listParams.TryGetProperty("archived", out var archived)
                         && archived.ValueKind == JsonValueKind.False
                         && listParams.TryGetProperty("sourceKinds", out var sourceKinds)
                         && sourceKinds.ValueKind == JsonValueKind.Array
-                        && sourceKinds.EnumerateArray().Any(value => value.GetString() == "subAgent")
+                        && sourceKinds.EnumerateArray()
+                            .Select(value => value.GetString() ?? string.Empty)
+                            .SequenceEqual(expectedSources, StringComparer.Ordinal)
+                        && listParams.TryGetProperty("limit", out var limit)
+                        && limit.TryGetInt32(out var limitValue)
+                        && limitValue == 64
+                        && listParams.TryGetProperty("sortDirection", out var sortDirection)
+                        && sortDirection.GetString() == "asc"
+                        && listParams.TryGetProperty("sortKey", out var sortKey)
+                        && sortKey.GetString() == "created_at"
                         && listParams.TryGetProperty("useStateDbOnly", out var stateDbOnly)
                         && stateDbOnly.ValueKind == JsonValueKind.True;
+                    var hasCursor = listParams.TryGetProperty("cursor", out var cursorValue);
+                    var cursor = hasCursor && cursorValue.ValueKind == JsonValueKind.String
+                        ? cursorValue.GetString()
+                        : null;
+                    validParams = validParams
+                        && (!hasCursor || cursorValue.ValueKind == JsonValueKind.String)
+                        && (cursor is null or "page-2");
                     if (!validParams)
                     {
                         Write(output, new
@@ -251,59 +291,133 @@ internal static class FakeCodexAppServer
                         });
                         break;
                     }
+                    object[] data;
+                    string? nextCursor;
+                    if (failFirstWebRtc)
+                    {
+                        data = [];
+                        nextCursor = null;
+                    }
+                    else if (cursor is null)
+                    {
+                        data =
+                        [
+                            new
+                            {
+                                id = "child-a",
+                                sessionId = "session-a",
+                                parentThreadId = "root-thread",
+                                name = "Today Focusを作成",
+                                preview = "古い要約",
+                                status = new { type = "active", activeFlags = Array.Empty<string>() },
+                                createdAt = 1_700_000_010L,
+                                updatedAt = 1_700_000_030L
+                            },
+                            new
+                            {
+                                id = "grandchild-a",
+                                sessionId = "session-a",
+                                parentThreadId = "child-a",
+                                name = "予定を整理",
+                                preview = "検証中",
+                                status = new { type = "idle" },
+                                createdAt = 1_700_000_020L,
+                                updatedAt = 1_700_000_040L
+                            },
+                            new
+                            {
+                                id = "foreign-child",
+                                sessionId = "session-b",
+                                parentThreadId = "root-thread",
+                                name = "別root",
+                                preview = "表示禁止",
+                                status = new { type = "active", activeFlags = Array.Empty<string>() },
+                                createdAt = 1_700_000_020L,
+                                updatedAt = 1_700_000_050L
+                            },
+                            new
+                            {
+                                id = "orphan",
+                                sessionId = "session-a",
+                                parentThreadId = "other-root",
+                                name = "孤立",
+                                preview = "表示禁止",
+                                status = new { type = "active", activeFlags = Array.Empty<string>() },
+                                createdAt = 1_700_000_020L,
+                                updatedAt = 1_700_000_060L
+                            }
+                        ];
+                        nextCursor = "page-2";
+                    }
+                    else
+                    {
+                        data =
+                        [
+                            new
+                            {
+                                id = "current-root",
+                                sessionId = "session-a",
+                                parentThreadId = "root-thread",
+                                name = "予約語に似た子",
+                                preview = "衝突なし",
+                                status = new { type = "idle" },
+                                createdAt = 1_700_000_050L,
+                                updatedAt = 1_700_000_070L
+                            },
+                            new
+                            {
+                                id = "paged-child",
+                                sessionId = "session-a",
+                                parentThreadId = "root-thread",
+                                name = "2ページ目",
+                                preview = "取得中",
+                                status = new { type = "active", activeFlags = Array.Empty<string>() },
+                                createdAt = 1_700_000_060L,
+                                updatedAt = 1_700_000_080L
+                            },
+                            new
+                            {
+                                id = "duplicate",
+                                sessionId = "session-a",
+                                parentThreadId = "root-thread",
+                                name = "重複1",
+                                preview = "表示禁止",
+                                status = new { type = "active", activeFlags = Array.Empty<string>() },
+                                createdAt = 1_700_000_060L,
+                                updatedAt = 1_700_000_090L
+                            },
+                            new
+                            {
+                                id = "duplicate",
+                                sessionId = "session-a",
+                                parentThreadId = "root-thread",
+                                name = "重複2",
+                                preview = "表示禁止",
+                                status = new { type = "systemError" },
+                                createdAt = 1_700_000_060L,
+                                updatedAt = 1_700_000_100L
+                            },
+                            new
+                            {
+                                id = "duplicate-child",
+                                sessionId = "session-a",
+                                parentThreadId = "duplicate",
+                                name = "重複配下",
+                                preview = "表示禁止",
+                                status = new { type = "idle" },
+                                createdAt = 1_700_000_070L,
+                                updatedAt = 1_700_000_110L
+                            }
+                        ];
+                        nextCursor = null;
+                    }
                     Write(output, new
                     {
                         id = idElement.Clone(),
                         result = new
                         {
-                            data = new object[]
-                            {
-                                new
-                                {
-                                    id = "child-a",
-                                    sessionId = "session-a",
-                                    parentThreadId = "root-thread",
-                                    name = "Today Focusを作成",
-                                    preview = "古い要約",
-                                    status = new { type = "active", activeFlags = Array.Empty<string>() },
-                                    createdAt = 1_700_000_010L,
-                                    updatedAt = 1_700_000_030L
-                                },
-                                new
-                                {
-                                    id = "grandchild-a",
-                                    sessionId = "session-a",
-                                    parentThreadId = "child-a",
-                                    name = "予定を整理",
-                                    preview = "検証中",
-                                    status = new { type = "idle" },
-                                    createdAt = 1_700_000_020L,
-                                    updatedAt = 1_700_000_040L
-                                },
-                                new
-                                {
-                                    id = "foreign-child",
-                                    sessionId = "session-b",
-                                    parentThreadId = "root-thread",
-                                    name = "別root",
-                                    preview = "表示禁止",
-                                    status = new { type = "active", activeFlags = Array.Empty<string>() },
-                                    createdAt = 1_700_000_020L,
-                                    updatedAt = 1_700_000_050L
-                                },
-                                new
-                                {
-                                    id = "orphan",
-                                    sessionId = "session-a",
-                                    parentThreadId = "other-root",
-                                    name = "孤立",
-                                    preview = "表示禁止",
-                                    status = new { type = "active", activeFlags = Array.Empty<string>() },
-                                    createdAt = 1_700_000_020L,
-                                    updatedAt = 1_700_000_060L
-                                }
-                            },
-                            nextCursor = (string?)null
+                            data,
+                            nextCursor
                         }
                     });
                     break;
@@ -320,7 +434,7 @@ internal static class FakeCodexAppServer
                     {
                         threadId = threadIdValue.GetString();
                     }
-                    if (threadId is not ("child-a" or "grandchild-a"))
+                    if (threadId is not ("child-a" or "grandchild-a" or "current-root" or "paged-child"))
                     {
                         Write(output, new
                         {
@@ -329,18 +443,38 @@ internal static class FakeCodexAppServer
                         });
                         break;
                     }
-                    var items = threadId == "child-a"
-                        ? new object[]
+                    if (threadId == "child-a" && ++childReadAttempts == 1)
+                    {
+                        Write(output, new
                         {
+                            id = idElement.Clone(),
+                            error = new { code = -32000, message = "Retry child read." }
+                        });
+                        break;
+                    }
+                    object[] items = threadId switch
+                    {
+                        "child-a" =>
+                        [
                             new
                             {
                                 id = "message-1",
                                 type = "agentMessage",
                                 text = "実装を進めています"
                             }
-                        }
-                        : new object[]
-                        {
+                        ],
+                        "paged-child" =>
+                        [
+                            new
+                            {
+                                id = "message-page",
+                                type = "agentMessage",
+                                text = "2ページ目を取得しました"
+                            }
+                        ],
+                        "current-root" => [],
+                        _ =>
+                        [
                             new
                             {
                                 id = "message-2",
@@ -350,7 +484,8 @@ internal static class FakeCodexAppServer
                                     new { type = "text", text = "検証が完了しました" }
                                 }
                             }
-                        };
+                        ]
+                    };
                     Write(output, new
                     {
                         id = idElement.Clone(),
@@ -359,12 +494,12 @@ internal static class FakeCodexAppServer
                             thread = new
                             {
                                 id = threadId,
-                                sessionId = threadId == "child-a"
-                                    ? "session-a"
-                                    : "session-b",
-                                parentThreadId = threadId == "child-a"
-                                    ? "root-thread"
-                                    : "child-a",
+                                sessionId = threadId == "grandchild-a"
+                                    ? "session-b"
+                                    : "session-a",
+                                parentThreadId = threadId == "grandchild-a"
+                                    ? "child-a"
+                                    : "root-thread",
                                 turns = new[]
                                 {
                                     new
@@ -380,6 +515,16 @@ internal static class FakeCodexAppServer
                     break;
                 }
                 case "thread/realtime/start":
+                    realtimeStartAttempts++;
+                    if (failFirstWebRtc && realtimeStartAttempts == 1)
+                    {
+                        Write(output, new
+                        {
+                            id = idElement.Clone(),
+                            error = new { code = -32000, message = "Injected WebRTC failure." }
+                        });
+                        break;
+                    }
                     Write(output, new
                     {
                         id = idElement.Clone(),
@@ -390,7 +535,9 @@ internal static class FakeCodexAppServer
                         method = "thread/realtime/started",
                         @params = new
                         {
-                            threadId = "root-thread",
+                            threadId = failFirstWebRtc
+                                ? $"root-thread-{threadStartAttempts}"
+                                : "root-thread",
                             realtimeSessionId = "fake-realtime",
                             version = "v1"
                         }
@@ -400,7 +547,9 @@ internal static class FakeCodexAppServer
                         method = "thread/realtime/sdp",
                         @params = new
                         {
-                            threadId = "root-thread",
+                            threadId = failFirstWebRtc
+                                ? $"root-thread-{threadStartAttempts}"
+                                : "root-thread",
                             sdp = "v=0\r\ns=fake-answer\r\n"
                         }
                     });

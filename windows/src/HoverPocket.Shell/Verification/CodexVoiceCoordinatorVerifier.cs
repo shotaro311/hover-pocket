@@ -8,12 +8,14 @@ internal sealed class CodexVoiceCoordinatorVerifier
     private const string FakeServerEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_APP_SERVER";
     private const string FakeSignedOutEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_SIGNED_OUT";
     private const string FakeExpectDynamicToolsEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_EXPECT_DYNAMIC_TOOLS";
+    private const string FakeWebRtcFailureEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_WEBRTC_FAILURE";
     private readonly List<string> _failures = [];
 
     public async Task<int> RunAsync(CancellationToken cancellationToken = default)
     {
         await VerifyFeatureDisabledDoesNotStartCodexAsync(cancellationToken);
         await VerifySignedOutFailsClosedAsync(cancellationToken);
+        await VerifyNegotiationFailureInvalidatesRootAsync(cancellationToken);
         await VerifyCoordinatorOutlivesTransientUiAsync(cancellationToken);
         await new CodexVoiceCapabilityToolAdapterVerifier(_failures).VerifyAsync(cancellationToken);
         VerifyTranscriptBounds();
@@ -80,6 +82,48 @@ internal sealed class CodexVoiceCoordinatorVerifier
         }
     }
 
+    private async Task VerifyNegotiationFailureInvalidatesRootAsync(
+        CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        var toolAdapter = new StubDynamicToolAdapter();
+        await using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: StartFakeWebRtcFailureServerClientAsync,
+            restartDelays: [TimeSpan.Zero],
+            toolAdapter: toolAdapter);
+
+        await coordinator.InitializeAsync(timeout.Token);
+        try
+        {
+            _ = await coordinator.StartWebRtcAsync("v=0\r\ns=failed-offer\r\n", timeout.Token);
+            _failures.Add("injected WebRTC failure unexpectedly succeeded");
+        }
+        catch (CodexAppServerRpcException)
+        {
+        }
+
+        var failed = coordinator.Snapshot;
+        if (failed.RootThreadId is not null
+            || failed.Sessions.Count != 0
+            || failed.SessionStatus != CodexVoiceSessionStatus.RecoverableFailure
+            || toolAdapter.HandledCallCount != 0)
+        {
+            _failures.Add("WebRTC failure retained root scope, cards, or tool authority");
+            return;
+        }
+
+        var recovered = await coordinator.StartWebRtcAsync(
+            "v=0\r\ns=recovered-offer\r\n",
+            timeout.Token);
+        if (recovered.RootThreadId != "root-thread-2"
+            || recovered.Sdp != "v=0\r\ns=fake-answer\r\n")
+        {
+            _failures.Add("WebRTC retry reused the failed root instead of creating a new root");
+        }
+    }
+
     private async Task VerifyCoordinatorOutlivesTransientUiAsync(
         CancellationToken cancellationToken)
     {
@@ -122,15 +166,22 @@ internal sealed class CodexVoiceCoordinatorVerifier
             }
             var withSessions = await WaitForSnapshotAsync(
                 coordinator,
-                snapshot => snapshot.Sessions.Count == 3,
+                snapshot => snapshot.Sessions.Count == 5
+                    && snapshot.Sessions.FirstOrDefault(session => session.ThreadId == "child-a")
+                        ?.Detail == "実装を進めています",
                 timeout.Token);
             if (withSessions is null
                 || !withSessions.Sessions.Select(session => session.ThreadId).SequenceEqual(
-                    ["root-thread", "grandchild-a", "child-a"],
+                    ["root-thread", "paged-child", "current-root", "grandchild-a", "child-a"],
                     StringComparer.Ordinal)
-                || withSessions.Sessions.Any(session => session.ThreadId is "foreign-child" or "orphan")
+                || withSessions.Sessions.Any(session => session.ThreadId is
+                    "foreign-child" or "orphan" or "duplicate" or "duplicate-child")
+                || withSessions.Sessions.Select(session => session.ThreadId)
+                    .Distinct(StringComparer.Ordinal).Count() != withSessions.Sessions.Count
                 || withSessions.Sessions.Single(session => session.ThreadId == "child-a").Detail
                     != "実装を進めています"
+                || withSessions.Sessions.Single(session => session.ThreadId == "paged-child").Detail
+                    != "2ページ目を取得しました"
                 || withSessions.Sessions.Single(session => session.ThreadId == "grandchild-a").Detail
                     != "検証中"
                 || withSessions.Sessions.Single(session => session.ThreadId == "child-a").State
@@ -315,6 +366,21 @@ internal sealed class CodexVoiceCoordinatorVerifier
         finally
         {
             Environment.SetEnvironmentVariable(FakeSignedOutEnvironmentVariable, previousValue);
+        }
+    }
+
+    private static async Task<CodexAppServerClient> StartFakeWebRtcFailureServerClientAsync(
+        CancellationToken cancellationToken)
+    {
+        var previousValue = Environment.GetEnvironmentVariable(FakeWebRtcFailureEnvironmentVariable);
+        Environment.SetEnvironmentVariable(FakeWebRtcFailureEnvironmentVariable, "1");
+        try
+        {
+            return await StartFakeServerClientAsync(cancellationToken);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(FakeWebRtcFailureEnvironmentVariable, previousValue);
         }
     }
 

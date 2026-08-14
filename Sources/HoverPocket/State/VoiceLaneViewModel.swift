@@ -87,7 +87,9 @@ final class VoiceLaneViewModel: ObservableObject {
                 elapsed = Int(interval)
             }
             return VoiceLaneSessionCard(
-                id: session.isCurrentRoot ? "current-root" : session.threadID,
+                id: session.isCurrentRoot
+                    ? "root:\(session.threadID)"
+                    : "thread:\(session.threadID)",
                 title: session.title,
                 detail: session.detail,
                 state: Self.sessionCardState(session.state),

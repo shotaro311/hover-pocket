@@ -31,6 +31,23 @@ final class CodexVoiceCoordinator {
         let updatedAt: Date
     }
 
+    private struct ThreadReadCacheKey: Hashable, Sendable {
+        let threadID: String
+        let sessionID: String
+        let parentThreadID: String
+        let updatedAt: Date
+    }
+
+    private enum ThreadReadCacheValue: Sendable {
+        case message(String)
+        case noMessage
+    }
+
+    private enum ThreadReadValidation: Sendable {
+        case invalidIdentity
+        case validated(String?)
+    }
+
     private let featureEnabled: Bool
     private let clientFactory: ClientFactory
     private let toolAdapter: (any CodexVoiceCapabilityToolAdapterProtocol)?
@@ -47,6 +64,7 @@ final class CodexVoiceCoordinator {
     private var rootSessionID: String?
     private var rootCreatedAt: Date?
     private var childSessions: [CodexVoiceThreadSummary] = []
+    private var threadReadCache: [ThreadReadCacheKey: ThreadReadCacheValue] = [:]
     private var sessionRefreshTask: Task<Void, Never>?
     private var transportAttached = false
     private var isMuted = true
@@ -399,6 +417,7 @@ final class CodexVoiceCoordinator {
         rootCreatedAt = Date(timeIntervalSince1970: TimeInterval(createdAtSeconds))
         rootThreadGeneration = generation
         childSessions = []
+        threadReadCache = [:]
         startSessionRefreshLoop(
             client: client,
             generation: generation,
@@ -450,36 +469,23 @@ final class CodexVoiceCoordinator {
               clientGeneration == generation,
               self.rootThreadID == rootThreadID,
               self.rootSessionID == rootSessionID else { return }
-        let response: CodexJSONValue
-        do {
-            response = try await client.sendRequest(
-                "thread/list",
-                params: .object([
-                    "ancestorThreadId": .string(rootThreadID),
-                    "archived": .bool(false),
-                    "limit": .integer(64),
-                    "sourceKinds": .array([
-                        .string("appServer"),
-                        .string("subAgent"),
-                        .string("subAgentReview"),
-                        .string("subAgentCompact"),
-                        .string("subAgentThreadSpawn"),
-                        .string("subAgentOther")
-                    ]),
-                    "sortDirection": .string("asc"),
-                    "sortKey": .string("created_at"),
-                    "useStateDbOnly": .bool(true)
-                ])
-            )
-        } catch {
-            return
-        }
-        guard let data = response.objectValue?["data"]?.arrayValue else { return }
-        let listed = data.prefix(64).compactMap(Self.parseListedThread)
+        guard let listed = await fetchListedThreads(
+            client: client,
+            generation: generation,
+            rootThreadID: rootThreadID,
+            rootSessionID: rootSessionID
+        ) else { return }
+        let duplicateIDs = Set(
+            Dictionary(grouping: listed, by: \.threadID)
+                .filter { $0.value.count > 1 }
+                .map(\.key)
+        )
         var acceptedIDs: Set<String> = [rootThreadID]
         var accepted: [ListedThread] = []
         var remaining = listed.filter {
-            $0.threadID != rootThreadID && $0.sessionID == rootSessionID
+            $0.threadID != rootThreadID
+                && $0.sessionID == rootSessionID
+                && !duplicateIDs.contains($0.threadID)
         }
         for _ in 0...listed.count {
             var progress = false
@@ -502,21 +508,23 @@ final class CodexVoiceCoordinator {
             }
             .prefix(16)
 
-        let previousByID = Dictionary(
-            childSessions.map { ($0.threadID, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
         var recentMessages: [String: String] = [:]
+        var nextReadCache: [ThreadReadCacheKey: ThreadReadCacheValue] = [:]
         for thread in visible {
-            if let previous = previousByID[thread.threadID],
-               previous.updatedAt == thread.updatedAt,
-               !previous.detail.isEmpty {
-                recentMessages[thread.threadID] = previous.detail
+            let key = Self.threadReadCacheKey(thread)
+            if let cached = threadReadCache[key] {
+                nextReadCache[key] = cached
+                if case .message(let message) = cached {
+                    recentMessages[thread.threadID] = message
+                }
             }
         }
-        await withTaskGroup(of: (String, String?).self) { group in
-            for thread in visible where recentMessages[thread.threadID] == nil {
+        await withTaskGroup(
+            of: (ThreadReadCacheKey, ThreadReadValidation?).self
+        ) { group in
+            for thread in visible where nextReadCache[Self.threadReadCacheKey(thread)] == nil {
                 group.addTask {
+                    let key = Self.threadReadCacheKey(thread)
                     do {
                         let read = try await client.sendRequest(
                             "thread/read",
@@ -526,8 +534,8 @@ final class CodexVoiceCoordinator {
                             ])
                         )
                         return (
-                            thread.threadID,
-                            Self.latestMessage(
+                            key,
+                            Self.validateLatestMessage(
                                 from: read,
                                 expectedThreadID: thread.threadID,
                                 expectedSessionID: thread.sessionID,
@@ -535,13 +543,21 @@ final class CodexVoiceCoordinator {
                             )
                         )
                     } catch {
-                        return (thread.threadID, nil)
+                        return (key, nil)
                     }
                 }
             }
-            for await (threadID, message) in group {
-                if let message, !message.isEmpty {
-                    recentMessages[threadID] = message
+            for await (key, validation) in group {
+                switch validation {
+                case .validated(let message):
+                    if let message, !message.isEmpty {
+                        nextReadCache[key] = .message(message)
+                        recentMessages[key.threadID] = message
+                    } else {
+                        nextReadCache[key] = .noMessage
+                    }
+                case .invalidIdentity, nil:
+                    break
                 }
             }
         }
@@ -550,6 +566,7 @@ final class CodexVoiceCoordinator {
               clientGeneration == generation,
               self.rootThreadID == rootThreadID,
               self.rootSessionID == rootSessionID else { return }
+        threadReadCache = nextReadCache
         childSessions = visible.map { thread in
             let state: CodexVoiceThreadState
             switch thread.status {
@@ -568,6 +585,73 @@ final class CodexVoiceCoordinator {
             )
         }
         publish()
+    }
+
+    private func fetchListedThreads(
+        client: CodexAppServerClient,
+        generation: UInt64,
+        rootThreadID: String,
+        rootSessionID: String
+    ) async -> [ListedThread]? {
+        var cursor: String?
+        var seenCursors: Set<String> = []
+        var listed: [ListedThread] = []
+        for pageIndex in 0..<8 {
+            guard !isDisposed,
+                  self.client === client,
+                  clientGeneration == generation,
+                  self.rootThreadID == rootThreadID,
+                  self.rootSessionID == rootSessionID else { return nil }
+            var params: [String: CodexJSONValue] = [
+                "ancestorThreadId": .string(rootThreadID),
+                "archived": .bool(false),
+                "limit": .integer(64),
+                "sourceKinds": .array([
+                    .string("appServer"),
+                    .string("subAgent"),
+                    .string("subAgentReview"),
+                    .string("subAgentCompact"),
+                    .string("subAgentThreadSpawn"),
+                    .string("subAgentOther")
+                ]),
+                "sortDirection": .string("asc"),
+                "sortKey": .string("created_at"),
+                "useStateDbOnly": .bool(true)
+            ]
+            if let cursor {
+                params["cursor"] = .string(cursor)
+            }
+            let response: CodexJSONValue
+            do {
+                response = try await client.sendRequest(
+                    "thread/list",
+                    params: .object(params)
+                )
+            } catch {
+                return nil
+            }
+            guard let object = response.objectValue,
+                  let data = object["data"]?.arrayValue,
+                  data.count <= 64 else { return nil }
+            listed.append(contentsOf: data.compactMap(Self.parseListedThread))
+            guard listed.count <= 512 else { return nil }
+            let nextCursor: String?
+            switch object["nextCursor"] {
+            case nil, .some(.null):
+                nextCursor = nil
+            case .some(.string(let candidate))
+                where Self.validCursor(candidate):
+                nextCursor = candidate
+            default:
+                return nil
+            }
+            guard let nextCursor else { return listed }
+            guard pageIndex < 7, seenCursors.insert(nextCursor).inserted else {
+                return nil
+            }
+            cursor = nextCursor
+        }
+        return nil
     }
 
     nonisolated private static func parseListedThread(
@@ -610,18 +694,18 @@ final class CodexVoiceCoordinator {
         )
     }
 
-    nonisolated private static func latestMessage(
+    nonisolated private static func validateLatestMessage(
         from response: CodexJSONValue,
         expectedThreadID: String,
         expectedSessionID: String,
         expectedParentThreadID: String
-    ) -> String? {
+    ) -> ThreadReadValidation {
         guard let thread = response.objectValue?["thread"]?.objectValue,
               thread["id"]?.stringValue == expectedThreadID,
               thread["sessionId"]?.stringValue == expectedSessionID,
               thread["parentThreadId"]?.stringValue == expectedParentThreadID,
               let turns = thread["turns"]?.arrayValue else {
-            return nil
+            return .invalidIdentity
         }
         for turn in turns.reversed() {
             guard let items = turn.objectValue?["items"]?.arrayValue else { continue }
@@ -631,7 +715,7 @@ final class CodexVoiceCoordinator {
                 if type == "agentMessage",
                    let text = object["text"]?.stringValue {
                     let safe = safeCardText(text, maximumScalars: 160)
-                    if !safe.isEmpty { return safe }
+                    if !safe.isEmpty { return .validated(safe) }
                 }
                 if type == "userMessage",
                    let content = object["content"]?.arrayValue {
@@ -640,12 +724,33 @@ final class CodexVoiceCoordinator {
                               inputObject["type"]?.stringValue == "text",
                               let text = inputObject["text"]?.stringValue else { continue }
                         let safe = safeCardText(text, maximumScalars: 160)
-                        if !safe.isEmpty { return safe }
+                        if !safe.isEmpty { return .validated(safe) }
                     }
                 }
             }
         }
-        return nil
+        return .validated(nil)
+    }
+
+    nonisolated private static func threadReadCacheKey(
+        _ thread: ListedThread
+    ) -> ThreadReadCacheKey {
+        ThreadReadCacheKey(
+            threadID: thread.threadID,
+            sessionID: thread.sessionID,
+            parentThreadID: thread.parentThreadID,
+            updatedAt: thread.updatedAt
+        )
+    }
+
+    nonisolated private static func validCursor(_ value: String) -> Bool {
+        guard !value.isEmpty, value.utf8.count <= 512 else { return false }
+        return value.unicodeScalars.allSatisfy { scalar in
+            scalar.value >= 0x20
+                && scalar.value != 0x7F
+                && !(0x202A...0x202E).contains(scalar.value)
+                && !(0x2066...0x2069).contains(scalar.value)
+        }
     }
 
     nonisolated private static func safeCardText(
@@ -694,6 +799,7 @@ final class CodexVoiceCoordinator {
         rootCreatedAt = nil
         rootThreadGeneration = 0
         childSessions = []
+        threadReadCache = [:]
     }
 
     func markTransportAttached() {

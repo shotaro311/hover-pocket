@@ -197,27 +197,55 @@ enum CodexAppServerVerificationCommand {
         try require(answer.rootThreadID == "root-thread", "runtime_root_thread")
         try require(answer.sdp == "v=0\r\ns=fake-answer\r\n", "runtime_sdp_answer")
         try await waitUntil("runtime_root_scoped_sessions") {
-            await MainActor.run { model.sessions.count == 3 }
+            await MainActor.run {
+                model.sessions.count == 5
+                    && model.sessions.first(where: { $0.id == "thread:child-a" })?.detail
+                        == "実装を進めています"
+            }
         }
         try require(
-            model.sessions.map(\.id) == ["current-root", "grandchild-a", "child-a"],
+            model.sessions.map(\.id) == [
+                "root:root-thread",
+                "thread:paged-child",
+                "thread:current-root",
+                "thread:grandchild-a",
+                "thread:child-a"
+            ],
             "runtime_session_scope"
         )
         try require(
-            !model.sessions.contains(where: { $0.id == "foreign-child" || $0.id == "orphan" }),
+            !model.sessions.contains(where: {
+                [
+                    "thread:foreign-child",
+                    "thread:orphan",
+                    "thread:duplicate",
+                    "thread:duplicate-child"
+                ].contains($0.id)
+            }),
             "runtime_cross_root_session_rejected"
         )
         try require(
-            model.sessions.first(where: { $0.id == "child-a" })?.detail == "実装を進めています",
+            Set(model.sessions.map(\.id)).count == model.sessions.count,
+            "runtime_session_ids_unique"
+        )
+        try require(
+            model.sessions.first(where: { $0.id == "thread:child-a" })?.detail
+                == "実装を進めています",
             "runtime_session_recent_message"
         )
         try require(
-            model.sessions.first(where: { $0.id == "grandchild-a" })?.detail == "検証中",
+            model.sessions.first(where: { $0.id == "thread:paged-child" })?.detail
+                == "2ページ目を取得しました",
+            "runtime_session_pagination"
+        )
+        try require(
+            model.sessions.first(where: { $0.id == "thread:grandchild-a" })?.detail == "検証中",
             "runtime_cross_root_readback_rejected"
         )
         try require(
-            model.sessions.first(where: { $0.id == "child-a" })?.state == .running
-                && model.sessions.first(where: { $0.id == "grandchild-a" })?.state == .completed,
+            model.sessions.first(where: { $0.id == "thread:child-a" })?.state == .running
+                && model.sessions.first(where: { $0.id == "thread:grandchild-a" })?.state
+                    == .completed,
             "runtime_session_state"
         )
         try await waitUntil("runtime_tool_dispatch") {
@@ -355,6 +383,7 @@ import json
 import sys
 
 pending_server_request = None
+child_read_attempts = 0
 for raw in sys.stdin:
     try:
         message = json.loads(raw)
@@ -385,27 +414,49 @@ for raw in sys.stdin:
         print(json.dumps({"id": request_id, "result": {"thread": {"id": "root-thread", "sessionId": "session-a", "createdAt": 1700000000}}}), flush=True)
     elif method == "thread/list":
         params = message.get("params") or {}
-        if params.get("ancestorThreadId") != "root-thread" or params.get("archived") is not False or params.get("useStateDbOnly") is not True or "subAgent" not in params.get("sourceKinds", []):
+        expected_sources = ["appServer", "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther"]
+        cursor = params.get("cursor")
+        if params.get("ancestorThreadId") != "root-thread" or params.get("archived") is not False or params.get("limit") != 64 or params.get("sourceKinds") != expected_sources or params.get("sortDirection") != "asc" or params.get("sortKey") != "created_at" or params.get("useStateDbOnly") is not True or cursor not in (None, "page-2"):
             print(json.dumps({"id": request_id, "error": {"code": -32602, "message": "invalid thread list params"}}), flush=True)
             continue
-        print(json.dumps({"id": request_id, "result": {"data": [
-            {"id": "child-a", "sessionId": "session-a", "parentThreadId": "root-thread", "name": "Today Focusを作成", "preview": "古い要約", "status": {"type": "active", "activeFlags": []}, "createdAt": 1700000010, "updatedAt": 1700000030},
-            {"id": "grandchild-a", "sessionId": "session-a", "parentThreadId": "child-a", "name": "予定を整理", "preview": "検証中", "status": {"type": "idle"}, "createdAt": 1700000020, "updatedAt": 1700000040},
-            {"id": "foreign-child", "sessionId": "session-b", "parentThreadId": "root-thread", "name": "別root", "preview": "表示禁止", "status": {"type": "active", "activeFlags": []}, "createdAt": 1700000020, "updatedAt": 1700000050},
-            {"id": "orphan", "sessionId": "session-a", "parentThreadId": "other-root", "name": "孤立", "preview": "表示禁止", "status": {"type": "active", "activeFlags": []}, "createdAt": 1700000020, "updatedAt": 1700000060}
-        ], "nextCursor": None}}), flush=True)
+        if cursor is None:
+            data = [
+                {"id": "child-a", "sessionId": "session-a", "parentThreadId": "root-thread", "name": "Today Focusを作成", "preview": "古い要約", "status": {"type": "active", "activeFlags": []}, "createdAt": 1700000010, "updatedAt": 1700000030},
+                {"id": "grandchild-a", "sessionId": "session-a", "parentThreadId": "child-a", "name": "予定を整理", "preview": "検証中", "status": {"type": "idle"}, "createdAt": 1700000020, "updatedAt": 1700000040},
+                {"id": "foreign-child", "sessionId": "session-b", "parentThreadId": "root-thread", "name": "別root", "preview": "表示禁止", "status": {"type": "active", "activeFlags": []}, "createdAt": 1700000020, "updatedAt": 1700000050},
+                {"id": "orphan", "sessionId": "session-a", "parentThreadId": "other-root", "name": "孤立", "preview": "表示禁止", "status": {"type": "active", "activeFlags": []}, "createdAt": 1700000020, "updatedAt": 1700000060}
+            ]
+            next_cursor = "page-2"
+        else:
+            data = [
+                {"id": "current-root", "sessionId": "session-a", "parentThreadId": "root-thread", "name": "予約語に似た子", "preview": "衝突なし", "status": {"type": "idle"}, "createdAt": 1700000050, "updatedAt": 1700000070},
+                {"id": "paged-child", "sessionId": "session-a", "parentThreadId": "root-thread", "name": "2ページ目", "preview": "取得中", "status": {"type": "active", "activeFlags": []}, "createdAt": 1700000060, "updatedAt": 1700000080},
+                {"id": "duplicate", "sessionId": "session-a", "parentThreadId": "root-thread", "name": "重複1", "preview": "表示禁止", "status": {"type": "active", "activeFlags": []}, "createdAt": 1700000060, "updatedAt": 1700000090},
+                {"id": "duplicate", "sessionId": "session-a", "parentThreadId": "root-thread", "name": "重複2", "preview": "表示禁止", "status": {"type": "systemError"}, "createdAt": 1700000060, "updatedAt": 1700000100},
+                {"id": "duplicate-child", "sessionId": "session-a", "parentThreadId": "duplicate", "name": "重複配下", "preview": "表示禁止", "status": {"type": "idle"}, "createdAt": 1700000070, "updatedAt": 1700000110}
+            ]
+            next_cursor = None
+        print(json.dumps({"id": request_id, "result": {"data": data, "nextCursor": next_cursor}}), flush=True)
     elif method == "thread/read":
         params = message.get("params") or {}
         thread_id = params.get("threadId")
-        if params.get("includeTurns") is not True or thread_id not in ("child-a", "grandchild-a"):
+        if params.get("includeTurns") is not True or thread_id not in ("child-a", "grandchild-a", "current-root", "paged-child"):
             print(json.dumps({"id": request_id, "error": {"code": -32602, "message": "invalid thread read params"}}), flush=True)
             continue
         if thread_id == "child-a":
+            child_read_attempts += 1
+            if child_read_attempts == 1:
+                print(json.dumps({"id": request_id, "error": {"code": -32000, "message": "retry child read"}}), flush=True)
+                continue
             items = [{"id": "message-1", "type": "agentMessage", "text": "実装を進めています"}]
+        elif thread_id == "paged-child":
+            items = [{"id": "message-page", "type": "agentMessage", "text": "2ページ目を取得しました"}]
+        elif thread_id == "current-root":
+            items = []
         else:
             items = [{"id": "message-2", "type": "userMessage", "content": [{"type": "text", "text": "検証が完了しました"}]}]
-        parent_id = "root-thread" if thread_id == "child-a" else "child-a"
-        read_session_id = "session-a" if thread_id == "child-a" else "session-b"
+        parent_id = "child-a" if thread_id == "grandchild-a" else "root-thread"
+        read_session_id = "session-b" if thread_id == "grandchild-a" else "session-a"
         print(json.dumps({"id": request_id, "result": {"thread": {"id": thread_id, "sessionId": read_session_id, "parentThreadId": parent_id, "turns": [{"id": "turn-1", "status": "completed", "items": items}]}}}), flush=True)
     elif method == "thread/realtime/start":
         params = message.get("params") or {}

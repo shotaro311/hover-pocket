@@ -358,12 +358,12 @@ private struct VoiceLaneSessionCardView: View {
     }
 
     private var title: String {
-        guard session.id == "current-root" else { return session.title }
+        guard session.id.hasPrefix("root:") else { return session.title }
         return language == .japanese ? "この会話" : "This conversation"
     }
 
     private var detail: String {
-        guard session.id == "current-root" else { return session.detail }
+        guard session.id.hasPrefix("root:") else { return session.detail }
         switch CodexVoiceSessionStatus(rawValue: session.detail) {
         case .requestingPermission:
             return language == .japanese ? "マイク確認中" : "Requesting microphone"
