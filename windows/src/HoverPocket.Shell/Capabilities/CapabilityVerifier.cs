@@ -142,7 +142,8 @@ internal sealed class CapabilityVerifier
 
     private async Task VerifyStickyAsync(PocketCapabilityHandlerSet handlers, string root)
     {
-        var longTitle = new string('T', 80);
+        var longTitle = string.Concat(Enumerable.Repeat("🧑🏽‍💻", 20));
+        Require(longTitle.EnumerateRunes().Count() == 80, "sticky_unicode_scalar_fixture");
         var first = await handlers.InvokeAsync(
             CapabilityIds.StickyUpsert,
             Json(new

@@ -288,9 +288,10 @@ final class GoogleCalendarStore: ObservableObject {
             eventID: created.googleEventID,
             source: source
         )
-        let refreshed = try await apiClient.fetchMonth(containing: request.start)
-        lastLoadedMonth = Calendar.current.startOfMonth(for: request.start)
-        loadState = .loaded(refreshed)
+        if let refreshed = try? await apiClient.fetchMonth(containing: request.start) {
+            lastLoadedMonth = Calendar.current.startOfMonth(for: request.start)
+            loadState = .loaded(refreshed)
+        }
         return observed
     }
 

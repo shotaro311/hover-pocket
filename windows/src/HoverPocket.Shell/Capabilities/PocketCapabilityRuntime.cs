@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 
 namespace HoverPocket.Shell.Capabilities;
@@ -118,7 +119,7 @@ internal static class CapabilityJson
         }
 
         var value = property.GetString() ?? string.Empty;
-        if (value.Length > maxLength || (!allowEmpty && value.Length == 0))
+        if (ExceedsMaxLength(value, maxLength) || (!allowEmpty && value.Length == 0))
         {
             throw Invalid(name);
         }
@@ -140,11 +141,25 @@ internal static class CapabilityJson
             throw Invalid(name);
         }
         var value = property.GetString() ?? string.Empty;
-        if (value.Length > maxLength)
+        if (ExceedsMaxLength(value, maxLength))
         {
             throw Invalid(name);
         }
         return value;
+    }
+
+    private static bool ExceedsMaxLength(string value, int maxLength)
+    {
+        var count = 0;
+        foreach (var _ in value.EnumerateRunes())
+        {
+            count += 1;
+            if (count > maxLength)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static int RequiredInt(JsonElement arguments, string name, int minimum, int maximum)

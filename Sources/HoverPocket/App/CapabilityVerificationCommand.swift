@@ -146,7 +146,8 @@ enum CapabilityVerificationCommand {
         root: URL
     ) async throws {
         let firstTime = Date(timeIntervalSince1970: 1_800_000_100)
-        let longTitle = String(repeating: "T", count: 80)
+        let longTitle = String(repeating: "🧑🏽‍💻", count: 20)
+        try require(longTitle.unicodeScalars.count == 80, "sticky_unicode_scalar_fixture")
         let first = try await handlers.invoke(
             PocketCapabilityKey(id: "sticky.note.upsert", version: 1),
             arguments: [

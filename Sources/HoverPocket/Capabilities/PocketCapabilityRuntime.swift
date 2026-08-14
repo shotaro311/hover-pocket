@@ -118,7 +118,7 @@ final class PocketCapabilityHandlerSet {
 extension Dictionary where Key == String, Value == CapabilityValue {
     func requiredString(_ key: String, maxLength: Int, allowEmpty: Bool = false) throws -> String {
         guard case .string(let value)? = self[key],
-              value.count <= maxLength,
+              value.unicodeScalars.count <= maxLength,
               allowEmpty || !value.isEmpty
         else {
             throw CapabilityHandlerError.invalidArgument(key)
@@ -130,7 +130,7 @@ extension Dictionary where Key == String, Value == CapabilityValue {
         switch self[key] {
         case .none, .some(.null):
             return nil
-        case .some(.string(let value)) where value.count <= maxLength:
+        case .some(.string(let value)) where value.unicodeScalars.count <= maxLength:
             return value
         default:
             throw CapabilityHandlerError.invalidArgument(key)
