@@ -11,7 +11,7 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 - branch開始head: `374aa6a39b5860ebfb6cd944a62f08106c72cff4`
 - 統合対象AN2 head: `5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`
 - AN2実装と両OSのVoice Lane表示基盤をmerge commit `52bf00c`で統合し、AN2最終進捗commit `15e44f0`もmerge commit `cdc5a8f`で取り込んだ。
-- AN2 Ready PR [#9](https://github.com/shotaro311/hover-pocket/pull/9)はWindows / macOS / PR Routerが全成功し、MERGEABLE / CLEANである。AN3の最新実装head `a82291618ee7c8e9939b4f611f694c13ac9a9fa3`はDraft PR #6へpush済みで、remote parity `0 / 0`、PRの全5チェックが成功し、GitHub readbackはMERGEABLE / CLEANである。
+- AN2 Ready PR [#9](https://github.com/shotaro311/hover-pocket/pull/9)はWindows / macOS / PR Routerが全成功、MERGEABLE / CLEANのreadback後にmergeした。`origin/main`は`014032d412ab488c5e526f1ed2e7d23218c38a87`、AN3は通常merge commit `90bd31fd9a772387027add6c93414d7882b3eed5`で同期した。Draft PR #6は未マージのまま維持する。
 
 ## 再利用したVoice基盤
 
@@ -181,7 +181,6 @@ GitHub Actions / implementation head a822916
 
 ## 未完了gate
 
-1. AN2 PR #9は人間によるmerge待ちである。AN3は既に同じAN2 headを統合済みだが、AN2 merge後にmainとのparityを再確認する。
-2. installed Codex version / generated schema / account / voicesを対象Windows実機でreadbackする。macOS実機は完了した。
-3. origin限定microphone、WebRTC SDP / remote audio、1往復、safe closeを対象Windows / macOS実機で検証する。
-4. 対象Windows / macOS実機でVoice intentからCalendar read / create、Timer start、Today Focusを呼び、Host approval、実Provider状態、event / timer / note ID readbackを確認する。
+1. installed Codex version / generated schema / account / voicesを対象Windows実機でreadbackする。macOS実機は完了した。
+2. origin限定microphone、WebRTC SDP / remote audio、1往復、safe closeを対象Windows / macOS実機で検証する。
+3. 対象Windows / macOS実機でVoice intentからCalendar read / create、Timer start、Today Focusを呼び、Host approval、実Provider状態、event / timer / note ID readbackを確認する。
