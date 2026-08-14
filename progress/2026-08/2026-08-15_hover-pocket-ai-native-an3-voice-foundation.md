@@ -10,8 +10,8 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 - branch: `feature/codex-voice-lane`
 - branch開始head: `374aa6a39b5860ebfb6cd944a62f08106c72cff4`
 - 統合対象AN2 head: `5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`
-- `git merge --no-commit --no-ff 5d7cbe1...`はテキスト競合なしで停止中。
-- AN2の独立Pro Criticと最終PR gate前なので、merge commit、push、Draft PR #6更新はまだ行わない。
+- AN2実装と両OSのVoice Lane表示基盤をmerge commit `52bf00c`で統合し、AN2最終進捗commit `15e44f0`もmerge commit `cdc5a8f`で取り込んだ。
+- AN2 Ready PR [#9](https://github.com/shotaro311/hover-pocket/pull/9)はWindows / macOS / PR Routerが全成功し、MERGEABLE / CLEANである。AN3はローカル統合済みで、Draft PR #6の更新とCI readbackが次のgateである。
 
 ## 再利用したVoice基盤
 
@@ -82,11 +82,11 @@ macOS capability workflow YAML parse
 
 ## 未完了gate
 
-1. AN2 Critic返却をclaimし、指摘があればAN2 headへ反映して再統合する。
-2. merge commitを作り、Windows Debug / Release warnings-as-errorsと全VerifierをGitHub Actionsで確認する。
+1. Draft PR #6へ統合headをpushし、Windows Debug / Release warnings-as-errors、macOS、共通契約と全VerifierをGitHub Actionsで確認する。
+2. AN2 PR #9は人間によるmerge待ちである。AN3は既に同じAN2 headを統合済みだが、AN2 merge後にmainとのparityを再確認する。
 3. installed Codex version / generated schema / account / voicesを対象Windows実機でreadbackする。
 4. application-lifetime coordinatorのproduction ownership、restart / backoff、詳細state machineを接続する。
-5. WindowsへHost-owned bottom Voice Lane UIを実装し、macOSのUI骨格を実runtime state / transcript / root-scoped child cardsへ接続する。
+5. 両OSのUI骨格を実runtime state / transcript / root-scoped child cardsへ接続する。
 6. origin限定microphone、WebRTC SDP / remote audio、1往復、safe closeを実機検証する。
 7. Voice intentをAN2 Capability Brokerへ接続し、Calendar read / create、Timer start、Today Focusのapprovalとreadbackを確認する。
 8. macOS Voice runtimeと共通semantic contractを実装して両OS gateを通す。
