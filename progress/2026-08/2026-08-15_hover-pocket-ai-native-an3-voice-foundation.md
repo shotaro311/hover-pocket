@@ -2,7 +2,7 @@
 
 ## 現在地
 
-Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し、Windowsではapplication-lifetime runtime、origin限定microphone permission、WebRTC SDP / remote audio、VoiceからBrokerへのdynamic tool dispatchまで実装した。これはAN3完了ではなく、対象Windows実機の実音声・実Calendar操作、root-scoped child cards、macOS Voice runtime、両OSE2Eが残っている。
+Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し、Windowsではapplication-lifetime runtime、origin限定microphone permission、WebRTC SDP / remote audio、VoiceからBrokerへのdynamic tool dispatchまで実装した。両OSのText / Voice / Native UIで共有するroute-independent canonical plan digestも実装済みである。これはAN3完了ではなく、対象Windows実機の実音声・実Calendar操作、root-scoped child cards、macOS Voice runtime、両OSE2Eが残っている。
 
 ## Git / worktree
 
@@ -11,7 +11,7 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 - branch開始head: `374aa6a39b5860ebfb6cd944a62f08106c72cff4`
 - 統合対象AN2 head: `5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`
 - AN2実装と両OSのVoice Lane表示基盤をmerge commit `52bf00c`で統合し、AN2最終進捗commit `15e44f0`もmerge commit `cdc5a8f`で取り込んだ。
-- AN2 Ready PR [#9](https://github.com/shotaro311/hover-pocket/pull/9)はWindows / macOS / PR Routerが全成功し、MERGEABLE / CLEANである。AN3の実装head `b8f830b`はDraft PR #6へpush済みで、remote parity `0 / 0`、PRの全5チェックが成功し、GitHub readbackはMERGEABLE / CLEANである。
+- AN2 Ready PR [#9](https://github.com/shotaro311/hover-pocket/pull/9)はWindows / macOS / PR Routerが全成功し、MERGEABLE / CLEANである。AN3の最新実装head `e53e14a8f329efb06e66438b2661a6fe2a61ac5f`はDraft PR #6へpush済みで、remote parity `0 / 0`、PRの全5チェックが成功し、GitHub readbackはMERGEABLE / CLEANである。
 
 ## 再利用したVoice基盤
 
@@ -66,6 +66,14 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 - verifierは4 tool schema、別root拒否、readの承認不要、Timer拒否時の書き込みゼロ、承認表示と実行title一致、readback、同一call再送、改変再送拒否、Calendar create event readback、Today FocusのTimer / Sticky readbackを検査する。fake app-serverは`thread/start.dynamicTools`が空なら失敗するfixtureを持つ。
 - 実装head `b8f830b`のGitHub Actions run `31827122722`はDebug / Release warnings-as-errorsを0 warning / 0 errorで通過し、`codex-voice-coordinator` verifierが`Broker-routed Voice tools with approval/readback/idempotency`をPASSした。PR #6のWindows Voice CI 2系統、Windows通常verify、macOS verify、PR Routerはすべて成功した。
 
+## 入力経路をまたぐcanonical plan digest
+
+- AN0の正本契約は、同じ操作のcanonical plan digestからroute固有のplan ID、時刻、origin、principal、idempotency keyを除外し、Pocket App context、Capability ID / version、正規化済み引数、依存、承認方式、必要権限だけを含める。従来のSwift / C# Brokerはroute固有値まで含めていたため、TextとVoiceで同じToday Focusを作ってもdigestが一致しなかった。
+- 両OSのBrokerがRegistry検証済みdescriptorから`none`または`before_writes / all_writes`のapproval projectionを作り、route-independent projectionをSHA-256へ正規化するよう修正した。共通golden digestは`sha256:57c7e72e02919aead49c27299c9f174ff49f776bedf616749a6e4951345da69d`である。
+- plan ID等を意味的digestから外しても実行単位が衝突しないよう、receipt invocation ID、audit trace、rollback idempotency keyはcanonical plan digestとplan IDの不可逆digestを併用する。approval grantは従来どおりplan ID、principal、App context、期限、single-use tokenへbindingし、step ledgerはidempotency key、plan digest、argument digest、Capabilityを検証する。
+- macOS `TodayFocusTextAdapter`へWindowsと同じ`origin`とbounded operation tokenを追加し、異なるplan ID、時刻、origin、principal、idempotency keyでも同じToday Focusが同じdigestになり、引数変更ではdigestが変わる両OSfixtureを追加した。
+- 実装head `e53e14a`のGitHub Actions run `31828804099` / `31828809462`はWindows Debug / Release warnings-as-errorsを0 warning / 0 errorで通し、Brokerと全Voice verifierを成功させた。Windows通常verify `31828809754`、macOS verify `31828809468`、PR Router `31828806287`も成功した。PR #6はDraftのままMERGEABLE / CLEANである。
+
 ## ローカル検証
 
 ```text
@@ -73,7 +81,8 @@ swift build -Xswiftc -warnings-as-errors
   PASS
 
 .build/debug/HoverPocket --verify-broker
-  PASS / registry 11 descriptors / 10 handlers / Today Focus / 10 negative cases
+  PASS / registry 11 descriptors / 10 handlers / Today Focus / Text-Voice route digest / 10 negative cases
+  PASS / golden plan digest sha256:57c7e72e...a69d
 
 .build/debug/HoverPocket --verify-capabilities
   PASS / 10 handlers
@@ -102,6 +111,11 @@ GitHub Actions / implementation head b8f830b
   PASS / Windows Debug + Release warnings-as-errors / 0 warning / 0 error
   PASS / Voice dynamic tools / Host approval / Broker execution / readback / idempotency verifier
   PASS / Windows Voice CI x 2 / Windows verify / macOS verify / PR Router
+
+GitHub Actions / implementation head e53e14a
+  PASS / Windows Debug + Release warnings-as-errors / 0 warning / 0 error
+  PASS / Broker route-independent digest / route-specific execution identity / existing rollback and idempotency regression
+  PASS / Windows Voice CI x 2 / Windows verify / macOS verify / PR Router
 ```
 
 ## 未完了gate
@@ -111,4 +125,4 @@ GitHub Actions / implementation head b8f830b
 3. origin限定microphone、WebRTC SDP / remote audio、1往復、safe closeを対象Windows実機で検証する。
 4. 対象Windows実機でVoice intentからCalendar read / create、Timer start、Today Focusを呼び、Host approval、実Provider状態、event / timer / note ID readbackを確認する。
 5. root-scoped child session cardsを実thread stateへ接続する。
-6. macOS Voice runtimeと共通semantic contractを実装して両OS gateを通す。
+6. macOS Voice runtimeを共通semantic contractへ接続し、両OS実音声gateを通す。
