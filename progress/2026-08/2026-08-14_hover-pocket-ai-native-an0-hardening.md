@@ -27,10 +27,11 @@ PR #7のAN0共通契約に対する独立レビューで、schemaを満たして
 - corpusを31件から47件へ拡張した。
 - 全reject fixtureにcanonical fixture digest、stable error code、exact error locationを固定した。
 - unknown schema keywordとunresolved `$ref`のexplicit negative fixtureを追加した。
-- GitHub Actionsは`ubuntu-24.04`、`macos-14`、`windows-2022`、Python `3.13.7`、Actionのexact commit SHAへ固定した。
+- GitHub Actionsは`ubuntu-24.04`、`macos-14`、`windows-2022`、Python `3.13.7`、Node 24世代Actionのexact commit SHAへ固定した。
 - 各OSのdeterministic reportをartifactとして保存し、集約jobで3件のbyte一致を必須にした。
 - `requirements.md`と`PLAN1.md`の変更でもcontract CIが起動するpath filterを追加した。
 - Windows runnerがGit既定設定でpackage sourceをCRLFへ変換し、source byte digestを不一致にした。`contracts/pocket/v1/**`を`.gitattributes`でLF固定し、package byte列そのものを3OSで一致させた。CIの先頭実行はquietを外し、fail-closed理由をログへ残す。
+- LF修正後の3OS検証で旧ActionのNode 20 deprecation警告をreadbackした。公式repositoryのtag SHAと`action.yml`の`using: node24`を確認し、checkout v7.0.1、setup-python v7.0.0、upload-artifact v7.0.1、download-artifact v8.0.1へexact SHAで更新した。
 
 ## 検証
 
