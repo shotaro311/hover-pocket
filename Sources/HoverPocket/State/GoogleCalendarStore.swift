@@ -323,12 +323,33 @@ final class GoogleCalendarStore: ObservableObject {
         _ observed: GoogleCalendarEventOccurrence,
         draft: GoogleCalendarEventDraft
     ) -> Bool {
-        observed.title == draft.normalizedTitle
+        let timeMatches: Bool
+        if draft.isAllDay {
+            timeMatches = observed.isAllDay
+                && observed.allDayStartDate == capabilityAllDayString(draft.start)
+                && observed.allDayEndDate == capabilityAllDayString(draft.end)
+        } else {
+            timeMatches = !observed.isAllDay
+                && capabilityWholeSecond(observed.start) == capabilityWholeSecond(draft.start)
+                && capabilityWholeSecond(observed.end) == capabilityWholeSecond(draft.end)
+        }
+        return observed.title == draft.normalizedTitle
             && observed.location == draft.normalizedLocation
             && observed.notes == draft.normalizedNotes
-            && observed.start == draft.start
-            && observed.end == draft.end
-            && observed.isAllDay == draft.isAllDay
+            && timeMatches
+    }
+
+    private static func capabilityWholeSecond(_ date: Date) -> Int64 {
+        Int64(floor(date.timeIntervalSince1970))
+    }
+
+    private static func capabilityAllDayString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = Calendar.current.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 
     private static func capabilityEventID(_ idempotencyKey: String) -> String {

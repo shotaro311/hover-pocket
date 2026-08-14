@@ -51,7 +51,7 @@ internal static class TodayFocusApprovalText
         var normalized = builder.ToString().Trim();
         return string.IsNullOrEmpty(normalized)
             ? "予定名なし"
-            : CapabilityJson.TruncateString(normalized, 120);
+            : CapabilityJson.TruncateString(normalized, 80);
     }
 }
 
@@ -144,7 +144,7 @@ internal sealed class TodayFocusTextAdapter(CapabilityBroker broker)
                     CapabilityJson.From(new
                     {
                         durationSeconds,
-                        title = CapabilityJson.TruncateString(approvalText, 80),
+                        title = approvalText,
                         sourceRef = selectedEvent.EventRef
                     }),
                     $"today-focus-timer.{nonce}",

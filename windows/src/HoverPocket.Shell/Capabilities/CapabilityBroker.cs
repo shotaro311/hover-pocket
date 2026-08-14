@@ -231,10 +231,18 @@ internal sealed class CapabilityBroker
         CapabilityExecutionPlan plan,
         CapabilityPermissionSet permissions)
     {
-        if (!IdentifierPattern.IsMatch(plan.Id)
+        if (plan.Id is null
+            || plan.Principal is null
+            || plan.Principal.UserId is null
+            || plan.Steps is null
+            || plan.RequiredPermissions is null
+            || permissions is null
+            || permissions.Principal is null
+            || permissions.Permissions is null
+            || !IdentifierPattern.IsMatch(plan.Id)
             || plan.Steps.Count is < 1 or > 32
             || plan.RequiredPermissions.Count > 64
-            || !plan.RequiredPermissions.All(permission => permission.Length <= 128 && PermissionPattern.IsMatch(permission))
+            || !plan.RequiredPermissions.All(permission => permission is not null && permission.Length <= 128 && PermissionPattern.IsMatch(permission))
             || !Enum.IsDefined(typeof(CapabilityOrigin), plan.Origin)
             || permissions.Principal != plan.Principal
             || !IdentifierPattern.IsMatch(plan.Principal.UserId)
@@ -249,7 +257,11 @@ internal sealed class CapabilityBroker
         }
         if (plan.AppContext is not null)
         {
-            if (!PocketAppPattern.IsMatch(plan.AppContext.Id)
+            if (plan.AppContext.Id is null
+                || plan.AppContext.Version is null
+                || plan.AppContext.ManifestDigest is null
+                || !PocketAppPattern.IsMatch(plan.AppContext.Id)
+                || plan.AppContext.Version.EnumerateRunes().Count() > 64
                 || !VersionPattern.IsMatch(plan.AppContext.Version)
                 || !DigestPattern.IsMatch(plan.AppContext.ManifestDigest)
                 || plan.AppContext.Id != plan.Principal.PocketAppId)
@@ -268,7 +280,12 @@ internal sealed class CapabilityBroker
         var requiredPermissions = new HashSet<string>(StringComparer.Ordinal);
         foreach (var step in plan.Steps)
         {
-            if (!StepPattern.IsMatch(step.Id)
+            if (step is null
+                || step.Id is null
+                || step.Capability.Id is null
+                || step.IdempotencyKey is null
+                || step.Dependencies is null
+                || !StepPattern.IsMatch(step.Id)
                 || !stepIds.Add(step.Id)
                 || step.Capability.Id.Length > 128
                 || !CapabilityPattern.IsMatch(step.Capability.Id)
@@ -616,7 +633,7 @@ internal sealed class CapabilityBroker
             "authorization_decision",
             Enum.IsDefined(typeof(CapabilityOrigin), plan.Origin) ? plan.Origin.WireValue() : "unknown",
             DigestPattern.IsMatch(planDigest) ? planDigest : "unavailable",
-            IdentifierPattern.IsMatch(plan.Id) ? plan.Id : "invalid",
+            plan.Id is not null && IdentifierPattern.IsMatch(plan.Id) ? plan.Id : "invalid",
             SafeAuditPocketApp(plan.AppContext),
             CapabilityBrokerAuditLog.PrincipalPseudonym(SafeAuditPrincipal(plan.Principal)),
             error is null ? null : AuthorizationErrorCode(error),
@@ -694,7 +711,10 @@ internal sealed class CapabilityBroker
     private static string InvocationId(string planDigest, string stepId) =>
         $"invocation:{DigestPrefix(planDigest, 32)}:{stepId}";
 
-    private static CapabilityPrincipal SafeAuditPrincipal(CapabilityPrincipal principal) =>
+    private static CapabilityPrincipal SafeAuditPrincipal(CapabilityPrincipal? principal) =>
+        principal is null
+            ? new CapabilityPrincipal("invalid")
+            :
         new(
             TruncateForAudit(principal.UserId, 128),
             principal.PocketAppId is null ? null : TruncateForAudit(principal.PocketAppId, 160),
@@ -703,7 +723,11 @@ internal sealed class CapabilityBroker
     private static CapabilityAuditPocketApp? SafeAuditPocketApp(CapabilityAppContext? app)
     {
         if (app is null
+            || app.Id is null
+            || app.Version is null
+            || app.ManifestDigest is null
             || app.Id.Length > 160
+            || app.Version.EnumerateRunes().Count() > 64
             || !PocketAppPattern.IsMatch(app.Id)
             || !VersionPattern.IsMatch(app.Version)
             || !DigestPattern.IsMatch(app.ManifestDigest))
@@ -713,8 +737,8 @@ internal sealed class CapabilityBroker
         return new CapabilityAuditPocketApp(app.Id, app.Version, app.ManifestDigest);
     }
 
-    private static string TruncateForAudit(string value, int maximum) =>
-        value.Length <= maximum ? value : value[..maximum];
+    private static string TruncateForAudit(string? value, int maximum) =>
+        value is null ? "invalid" : value.Length <= maximum ? value : value[..maximum];
 
     private static string DigestPrefix(string digest, int length)
     {

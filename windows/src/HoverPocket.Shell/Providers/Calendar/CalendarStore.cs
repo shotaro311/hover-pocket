@@ -321,13 +321,20 @@ internal sealed class CalendarStore
 
     internal static bool CapabilityEventMatches(
         CalendarEventOccurrence observed,
-        CalendarEventDraft draft) =>
-        observed.Title == draft.Title
-        && observed.Location == draft.Location
-        && observed.Notes == draft.Notes
-        && observed.Start == draft.Start
-        && observed.End == draft.End
-        && observed.IsAllDay == draft.IsAllDay;
+        CalendarEventDraft draft)
+    {
+        var timeMatches = draft.IsAllDay
+            ? observed.IsAllDay
+                && observed.AllDayStart == DateOnly.FromDateTime(draft.Start.Date)
+                && observed.AllDayEnd == DateOnly.FromDateTime(draft.End.Date)
+            : !observed.IsAllDay
+                && observed.Start.ToUnixTimeSeconds() == draft.Start.ToUnixTimeSeconds()
+                && observed.End.ToUnixTimeSeconds() == draft.End.ToUnixTimeSeconds();
+        return observed.Title == draft.Title
+            && observed.Location == draft.Location
+            && observed.Notes == draft.Notes
+            && timeMatches;
+    }
 
     private static string CapabilityEventId(string idempotencyKey)
     {

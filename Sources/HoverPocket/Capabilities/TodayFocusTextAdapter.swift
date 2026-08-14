@@ -38,7 +38,7 @@ enum TodayFocusApprovalText {
             result.append(String(scalar))
         }
         let normalized = result.trimmingCharacters(in: .whitespacesAndNewlines)
-        return normalized.isEmpty ? "予定名なし" : normalized.prefixingUnicodeScalars(120)
+        return normalized.isEmpty ? "予定名なし" : normalized.prefixingUnicodeScalars(80)
     }
 }
 
@@ -140,7 +140,7 @@ final class TodayFocusTextAdapter {
                     capability: PocketCapabilityKeys.timerStart,
                     arguments: [
                         "durationSeconds": .integer(durationSeconds),
-                        "title": .string(approvalText.prefixingUnicodeScalars(80)),
+                        "title": .string(approvalText),
                         "sourceRef": .string(event.eventRef)
                     ],
                     idempotencyKey: "today-focus-timer.\(nonce)",

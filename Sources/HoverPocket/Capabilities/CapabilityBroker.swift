@@ -217,6 +217,7 @@ final class CapabilityBroker {
         }
         if let app = plan.appContext {
             guard Self.matches(app.id, "^[a-z][a-z0-9]*(?:\\.[a-z0-9][a-z0-9-]*){2,}$"),
+                  app.version.unicodeScalars.count <= 64,
                   Self.matches(app.version, "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$"),
                   Self.matches(app.manifestDigest, "^sha256:[a-f0-9]{64}$"),
                   app.id == plan.principal.pocketAppID else {
@@ -715,6 +716,7 @@ final class CapabilityBroker {
     private static func safeAuditPocketApp(_ app: CapabilityAppContext?) -> CapabilityAuditEntry.PocketAppSummary? {
         guard let app,
               app.id.unicodeScalars.count <= 160,
+              app.version.unicodeScalars.count <= 64,
               matches(app.id, "^[a-z][a-z0-9]*(?:\\.[a-z0-9][a-z0-9-]*){2,}$"),
               matches(app.version, "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$"),
               matches(app.manifestDigest, "^sha256:[a-f0-9]{64}$") else {

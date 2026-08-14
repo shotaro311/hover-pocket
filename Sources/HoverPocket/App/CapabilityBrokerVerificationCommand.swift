@@ -165,6 +165,23 @@ enum CapabilityBrokerVerificationCommand {
             canonicalDraft.plan.steps[1].arguments["body"] == .string(canonicalDraft.approvalText),
             "approval_sticky_exact"
         )
+        let longApprovalDraft = try adapter.prepareFocus(
+            event: events[0],
+            durationSeconds: 1_500,
+            purpose: String(repeating: "長", count: 100),
+            principal: principal,
+            permissions: allPermissions,
+            now: now
+        )
+        try require(longApprovalDraft.approvalText.unicodeScalars.count == 80, "approval_text_bounded")
+        try require(
+            longApprovalDraft.plan.steps[0].arguments["title"] == .string(longApprovalDraft.approvalText),
+            "approval_timer_long_exact"
+        )
+        try require(
+            longApprovalDraft.plan.steps[1].arguments["body"] == .string(longApprovalDraft.approvalText),
+            "approval_sticky_long_exact"
+        )
 
         let invalidAuditMarker = "private-invalid-plan-marker"
         let invalidAuditPlan = CapabilityExecutionPlan(
@@ -179,6 +196,31 @@ enum CapabilityBrokerVerificationCommand {
         do {
             _ = try broker.prepare(invalidAuditPlan, permissions: allPermissions, now: now)
             throw BrokerVerificationFailure("oversized_plan_accepted")
+        } catch CapabilityBrokerError.invalidPlan {
+        }
+        let invalidVersionMarker = "private-version-marker"
+        let appID = "com.hoverpocket.fixture"
+        let appPrincipal = CapabilityPrincipal(userID: principal.userID, pocketAppID: appID)
+        let invalidVersionPlan = CapabilityExecutionPlan(
+            id: "invalid-version-plan",
+            createdAt: now,
+            origin: .pocketSurface,
+            principal: appPrincipal,
+            appContext: CapabilityAppContext(
+                id: appID,
+                version: "1.0.0-" + String(repeating: "a", count: 80) + invalidVersionMarker,
+                manifestDigest: "sha256:" + String(repeating: "a", count: 64)
+            ),
+            steps: localDateDraft.plan.steps,
+            requiredPermissions: localDateDraft.plan.requiredPermissions
+        )
+        do {
+            _ = try broker.prepare(
+                invalidVersionPlan,
+                permissions: CapabilityPermissionSet(principal: appPrincipal, permissions: allPermissions.permissions),
+                now: now
+            )
+            throw BrokerVerificationFailure("oversized_app_version_accepted")
         } catch CapabilityBrokerError.invalidPlan {
         }
 
@@ -405,6 +447,7 @@ enum CapabilityBrokerVerificationCommand {
         try require(auditText.contains("\"planDigest\":\"unavailable\""), "invalid_plan_digest_audit")
         try require(auditText.contains("\"planID\":\"invalid\"") || auditText.contains("\"planId\":\"invalid\""), "invalid_plan_id_audit")
         try require(!auditText.contains(invalidAuditMarker), "invalid_plan_audit_redaction")
+        try require(!auditText.contains(invalidVersionMarker), "invalid_version_audit_redaction")
         let durableLedgerText = String(data: try Data(contentsOf: ledgerURL), encoding: .utf8) ?? ""
         for forbidden in ["secret-purpose-approved", "secret-purpose-concurrent", "Sensitive Calendar Title"] {
             try require(!durableLedgerText.contains(forbidden), "ledger_redaction_\(forbidden)")
@@ -424,8 +467,8 @@ enum CapabilityBrokerVerificationCommand {
             title: "Verify event",
             location: "",
             notes: "",
-            start: now,
-            end: now.addingTimeInterval(3_600),
+            start: now.addingTimeInterval(0.987),
+            end: now.addingTimeInterval(3_600.987),
             isAllDay: false
         )
         let ordinaryBody = try GoogleCalendarAPIClient.createEventBody(from: draft, calendar: calendar)
@@ -464,8 +507,8 @@ enum CapabilityBrokerVerificationCommand {
             title: draft.normalizedTitle,
             location: draft.normalizedLocation,
             notes: draft.normalizedNotes,
-            start: draft.start,
-            end: draft.end,
+            start: Date(timeIntervalSince1970: floor(draft.start.timeIntervalSince1970)),
+            end: Date(timeIntervalSince1970: floor(draft.end.timeIntervalSince1970)),
             isAllDay: draft.isAllDay,
             htmlLink: nil,
             allDayStartDate: nil,
@@ -480,12 +523,52 @@ enum CapabilityBrokerVerificationCommand {
             !GoogleCalendarStore.capabilityEventMatches(observedWith(observed, notes: "Different notes"), draft: draft),
             "calendar_idempotency_notes_mismatch"
         )
+        try require(
+            !GoogleCalendarStore.capabilityEventMatches(
+                observedWith(observed, start: observed.start.addingTimeInterval(1)),
+                draft: draft
+            ),
+            "calendar_idempotency_second_mismatch"
+        )
+
+        let allDayDraft = GoogleCalendarEventDraft(
+            calendarID: "primary",
+            eventID: nil,
+            title: "All day",
+            location: "",
+            notes: "",
+            start: now,
+            end: now.addingTimeInterval(86_400),
+            isAllDay: true
+        ).normalized()
+        let allDayObserved = GoogleCalendarEventOccurrence(
+            id: "primary:all-day",
+            googleEventID: "all-day",
+            calendarID: "primary",
+            calendarTitle: "Primary",
+            calendarColorHex: nil,
+            calendarCanWrite: true,
+            title: allDayDraft.normalizedTitle,
+            location: allDayDraft.normalizedLocation,
+            notes: allDayDraft.normalizedNotes,
+            start: allDayDraft.start,
+            end: allDayDraft.end,
+            isAllDay: true,
+            htmlLink: nil,
+            allDayStartDate: calendarDateString(allDayDraft.start),
+            allDayEndDate: calendarDateString(allDayDraft.end)
+        )
+        try require(
+            GoogleCalendarStore.capabilityEventMatches(allDayObserved, draft: allDayDraft),
+            "calendar_idempotency_all_day_match"
+        )
     }
 
     private static func observedWith(
         _ event: GoogleCalendarEventOccurrence,
         location: String? = nil,
-        notes: String? = nil
+        notes: String? = nil,
+        start: Date? = nil
     ) -> GoogleCalendarEventOccurrence {
         GoogleCalendarEventOccurrence(
             id: event.id,
@@ -497,13 +580,22 @@ enum CapabilityBrokerVerificationCommand {
             title: event.title,
             location: location ?? event.location,
             notes: notes ?? event.notes,
-            start: event.start,
+            start: start ?? event.start,
             end: event.end,
             isAllDay: event.isAllDay,
             htmlLink: event.htmlLink,
             allDayStartDate: event.allDayStartDate,
             allDayEndDate: event.allDayEndDate
         )
+    }
+
+    private static func calendarDateString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = Calendar.current.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 
     private static func verifyGoldenDigest(now: Date) throws {

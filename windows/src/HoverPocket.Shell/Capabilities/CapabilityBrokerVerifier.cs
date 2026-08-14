@@ -124,6 +124,20 @@ internal sealed class CapabilityBrokerVerifier
             Require(
                 canonicalDraft.Plan.Steps[1].Arguments.GetProperty("body").GetString() == canonicalDraft.ApprovalText,
                 "approval_sticky_exact");
+            var longApprovalDraft = adapter.PrepareFocus(
+                events[0],
+                1_500,
+                new string('長', 100),
+                principal,
+                allPermissions,
+                now);
+            Require(longApprovalDraft.ApprovalText.EnumerateRunes().Count() == 80, "approval_text_bounded");
+            Require(
+                longApprovalDraft.Plan.Steps[0].Arguments.GetProperty("title").GetString() == longApprovalDraft.ApprovalText,
+                "approval_timer_long_exact");
+            Require(
+                longApprovalDraft.Plan.Steps[1].Arguments.GetProperty("body").GetString() == longApprovalDraft.ApprovalText,
+                "approval_sticky_long_exact");
 
             const string invalidAuditMarker = "private-invalid-plan-marker";
             var invalidAuditPlan = localDateDraft.Plan with { Id = new string('x', 256) + invalidAuditMarker };
@@ -131,6 +145,47 @@ internal sealed class CapabilityBrokerVerifier
             {
                 _ = broker.Prepare(invalidAuditPlan, allPermissions, now);
                 _failures.Add("oversized_plan_accepted");
+            }
+            catch (CapabilityBrokerException ex) when (ex.Code == "CAPABILITY_PLAN_INVALID")
+            {
+            }
+            const string invalidVersionMarker = "private-version-marker";
+            const string appId = "com.hoverpocket.fixture";
+            var appPrincipal = new CapabilityPrincipal(principal.UserId, appId);
+            var invalidVersionPlan = localDateDraft.Plan with
+            {
+                Id = "invalid-version-plan",
+                Origin = CapabilityOrigin.PocketSurface,
+                Principal = appPrincipal,
+                AppContext = new CapabilityAppContext(
+                    appId,
+                    $"1.0.0-{new string('a', 80)}{invalidVersionMarker}",
+                    $"sha256:{new string('a', 64)}")
+            };
+            try
+            {
+                _ = broker.Prepare(
+                    invalidVersionPlan,
+                    new CapabilityPermissionSet(appPrincipal, allPermissions.Permissions),
+                    now);
+                _failures.Add("oversized_app_version_accepted");
+            }
+            catch (CapabilityBrokerException ex) when (ex.Code == "CAPABILITY_PLAN_INVALID")
+            {
+            }
+            var nullIdentityPlan = invalidVersionPlan with
+            {
+                Id = "invalid-null-identity-plan",
+                Principal = new CapabilityPrincipal(null!, appId),
+                AppContext = new CapabilityAppContext(null!, null!, null!)
+            };
+            try
+            {
+                _ = broker.Prepare(
+                    nullIdentityPlan,
+                    new CapabilityPermissionSet(nullIdentityPlan.Principal, allPermissions.Permissions),
+                    now);
+                _failures.Add("null_identity_accepted");
             }
             catch (CapabilityBrokerException ex) when (ex.Code == "CAPABILITY_PLAN_INVALID")
             {
@@ -280,6 +335,7 @@ internal sealed class CapabilityBrokerVerifier
             Require(auditText.Contains("\"planDigest\":\"unavailable\"", StringComparison.Ordinal), "invalid_plan_digest_audit");
             Require(auditText.Contains("\"planId\":\"invalid\"", StringComparison.Ordinal), "invalid_plan_id_audit");
             Require(!auditText.Contains(invalidAuditMarker, StringComparison.Ordinal), "invalid_plan_audit_redaction");
+            Require(!auditText.Contains(invalidVersionMarker, StringComparison.Ordinal), "invalid_version_audit_redaction");
             var durableLedgerText = File.ReadAllText(ledgerPath);
             foreach (var forbidden in new[] { "secret-purpose-approved", "secret-purpose-concurrent", "Sensitive Calendar Title" })
             {
@@ -321,14 +377,15 @@ internal sealed class CapabilityBrokerVerifier
 
     private void VerifyCalendarIdempotencyEquivalence(DateTimeOffset now)
     {
+        var fractionalStart = now.AddTicks(9_876_543);
         var draft = new CalendarEventDraft(
             "primary",
             null,
             " Verify event ",
             " Room A ",
             " Approved notes ",
-            now,
-            now.AddHours(1),
+            fractionalStart,
+            fractionalStart.AddHours(1),
             false).Normalized();
         var observed = new CalendarEventOccurrence(
             "primary:event",
@@ -340,8 +397,8 @@ internal sealed class CapabilityBrokerVerifier
             draft.Title,
             draft.Location,
             draft.Notes,
-            draft.Start,
-            draft.End,
+            DateTimeOffset.FromUnixTimeSeconds(draft.Start.ToUnixTimeSeconds()),
+            DateTimeOffset.FromUnixTimeSeconds(draft.End.ToUnixTimeSeconds()),
             draft.IsAllDay,
             null);
         Require(CalendarStore.CapabilityEventMatches(observed, draft), "calendar_idempotency_match");
@@ -351,6 +408,38 @@ internal sealed class CapabilityBrokerVerifier
         Require(
             !CalendarStore.CapabilityEventMatches(observed with { Notes = "Different notes" }, draft),
             "calendar_idempotency_notes_mismatch");
+        Require(
+            !CalendarStore.CapabilityEventMatches(observed with { Start = observed.Start.AddSeconds(1) }, draft),
+            "calendar_idempotency_second_mismatch");
+
+        var allDayDraft = new CalendarEventDraft(
+            "primary",
+            null,
+            "All day",
+            null,
+            null,
+            new DateTimeOffset(2026, 8, 15, 0, 0, 0, TimeSpan.FromHours(9)),
+            new DateTimeOffset(2026, 8, 16, 0, 0, 0, TimeSpan.FromHours(9)),
+            true).Normalized();
+        var allDayObserved = new CalendarEventOccurrence(
+            "primary:all-day",
+            "all-day",
+            "primary",
+            "Primary",
+            null,
+            true,
+            allDayDraft.Title,
+            allDayDraft.Location,
+            allDayDraft.Notes,
+            new DateTimeOffset(2026, 8, 15, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 8, 16, 0, 0, 0, TimeSpan.Zero),
+            true,
+            null,
+            new DateOnly(2026, 8, 15),
+            new DateOnly(2026, 8, 16));
+        Require(
+            CalendarStore.CapabilityEventMatches(allDayObserved, allDayDraft),
+            "calendar_idempotency_all_day_match");
     }
 
     private async Task VerifyPartialRollbackAsync(string root, DateTimeOffset now, CapabilityPrincipal principal)
@@ -677,7 +766,7 @@ internal sealed class CapabilityBrokerVerifier
             {
                 throw new CapabilityHandlerException("CAPABILITY_ARGUMENT_INVALID", "timerId");
             }
-            return Task.FromResult(timerStore.GetRunningTimer(id) is null
+            return Task.FromResult(store.GetRunningTimer(id) is null
                 ? CapabilityJson.From(new { timerId = rawId.ToLowerInvariant(), state = "stopped", endAt = (string?)null })
                 : CapabilityJson.From(new
                 {
