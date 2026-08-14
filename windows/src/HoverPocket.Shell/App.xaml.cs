@@ -9,6 +9,7 @@ using HoverPocket.Shell.Providers.Clipboard;
 using HoverPocket.Shell.Providers.Controls;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
+using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Services;
 using HoverPocket.Shell.Settings;
 using HoverPocket.Shell.Verification;
@@ -103,6 +104,14 @@ public partial class App : System.Windows.Application
         {
             VerifyConsole.AttachParent();
             Environment.ExitCode = new CapabilityVerifier().Run();
+            Shutdown();
+            return;
+        }
+
+        if (options.VerifyPocketSurface)
+        {
+            VerifyConsole.AttachParent();
+            Environment.ExitCode = new PocketSurfaceVerifier().Run();
             Shutdown();
             return;
         }
