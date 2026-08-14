@@ -1,0 +1,19 @@
+{
+  "base": "valid/invocation.timer-start.json",
+  "mutation": {
+    "setValues": [
+      {
+        "path": [
+          "capabilityId"
+        ],
+        "value": "system.native.authority"
+      },
+      {
+        "path": [
+          "arguments"
+        ],
+        "value": {}
+      }
+    ]
+  }
+}

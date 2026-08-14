@@ -9,7 +9,7 @@
 
 HoverPocketの既存UI、Voice、Text、生成Pocket App、MCP Adapterが別々の実行経路を持つと、権限、承認、idempotency、readback、監査、OS差分が入力面ごとに分岐する。macOSのSwift実装とWindowsのC#実装はOS固有資産を維持しつつ、同じ契約と期待結果を共有する必要がある。
 
-AN0はruntime behaviorを変更せず、後続AN1以降が依存する境界だけを固定する。既存Provider Registry、保存形式、UI、requirements、PLAN1、progress、承認画像は変更しない。
+AN0はruntime behaviorを変更せず、後続AN1以降が依存する境界だけを固定する。既存Provider Registry、保存形式、UI、requirements、PLAN1、承認画像は変更しない。`progress/`は実装状態と検証証拠だけを更新する。
 
 ## Decision
 
@@ -46,14 +46,15 @@ Schema validation後、次を決定論的に検証する。
 
 - RegistryにないCapabilityと未対応major versionを区別して拒否する。
 - Capability引数とreceipt outputをdescriptor内schemaで再検証する。
-- planをtopological orderで固定し、dependency、permission union、write approval、canonical digestを検証する。canonical digestは入力経路ごとに変わるplan ID、時刻、origin、principal、idempotency keyを除外し、Capability、引数、依存、approval、permissionだけを正規化する。approvalはprincipalへ別途bindingする。
-- approvalをplan、principal、write effect、argument digest、10分以内の期限へbindingする。
-- side effectの成功はdescriptorどおりのverified readbackがある場合だけ許可する。
-- Pocket Appのpath traversal、権限参照、workspace ownership、secret境界を検証し、reference app、Surface、Workflow、requested Capabilityのfixture相互参照を同じpackage contextとして照合する。
+- planをtopological orderで固定し、dependency、permission union、write approval、canonical digestを検証する。canonical digestは入力経路ごとに変わるplan ID、時刻、origin、principal、idempotency keyを除外し、Pocket App ID / version / manifest digest、Capability、引数、依存、approval、permissionを正規化する。
+- approvalをplan、principal、Pocket App ID / version / manifest digest、write effect、argument digest、10分以内の期限へbindingする。invocationとreceiptも同じplan / app contextへbindingする。
+- `native_authority` / `runtime_prohibited`はRegistry記述用であり、Invocation、ExecutionPlan、PocketWorkflowの共通gateで実行を拒否する。`maxPayloadBytes`とApp scopeも3経路で同じ規則を強制する。
+- side effectの成功はdescriptorどおりのHost-owned typed observationがある場合だけ許可する。receiptのevidence digestは観測値から再計算し、outputとmatch fieldを照合する。
+- Pocket Appのpath traversal、権限参照、scope、workspace ownership、secret境界を検証し、manifest全pathをsource byte digestへbindingする。reference app、Surface、Workflow、requested Capabilityのfixture相互参照を同じpackage contextとして照合する。
 - PocketSurfaceのcomponent数・深さ・query/workflow参照を有限化する。
 - PocketWorkflowのCapability参照、topological dependency、input type、approval、limitを検証する。v1の動的bindingはtop-levelの`$input.<name>`と、Today FocusでHostが型を保証する`$context.today` / `$context.selectedEvent.title`だけを許可し、未知・nested bindingを拒否する。
 - Voice session cardを現在rootとそのchild/descendantへ限定する。
-- auditをmetadata/digestだけに限定し、禁止fieldを再帰的に拒否する。
+- auditを既知Invocation、descriptor、App context、入力digest、Host-owned readback digestへbindingし、固定shapeのmetadata / digest / opaque ID / 不可逆principal pseudonymだけに限定する。禁止fieldを再帰的に拒否し、値に含まれるpath、URL、email、credential様文字列も拒否する。
 - geometryのShell top、Header、ProviderHost、下方向拡張、非overlap、fullscreen禁止を数値fixtureで検証する。
 
 検証器自身が理解できない項目はfail closedとする。ネットワーク、package manager、外部library、secret、環境依存値は使用しない。出力reportには時刻や絶対pathを入れず、同じ入力から同じbyte列を生成する。
@@ -106,7 +107,7 @@ Legacy AI command laneとCodex Voice Laneは別namespace、別要件、別migrat
 
 ## Fixtures and deterministic result contract
 
-`fixtures/expected-results.json`をfixture正本とする。manifestは全valid/invalid/golden JSONを重複なく列挙し、goldenはcanonical JSON digestを固定する。invalid fixtureは期待するstable rejection codeまで固定する。
+`fixtures/expected-results.json`をfixture正本とする。manifestは全valid/invalid/golden JSONを重複なく列挙し、goldenはcanonical JSON digestを固定する。invalid fixtureはfixture digest、stable rejection code、exact error locationまで固定する。Reference packageとHost observationは別support corpusとしてsource digestへbindingする。
 
 必須negative caseには次を含める。
 
@@ -120,6 +121,14 @@ Legacy AI command laneとCodex Voice Laneは別namespace、別要件、別migrat
 - workflow unknown capability
 - ProviderHost geometry mutation
 - forbidden audit field
+- native-authority invocation / plan / workflow
+- cross-version approval
+- receipt self-claimed readback
+- unbound manifest source / scope escape / asset traversal / generated receipt
+- oversized plan / workflow payload
+- unknown schema keyword / unresolved `$ref`
+- raw identifier / PII-like audit value
+- invocation input / Host readbackと一致しないaudit digest
 
 ## Consequences
 
@@ -143,7 +152,7 @@ AN0は次をすべて満たした時だけ完了とする。
 1. 12 schemaがDraft 2020-12、安定ID、strict object policyを満たす。
 2. manifestの全fixtureが期待どおりpass/rejectし、reject codeも一致する。
 3. 同じvalidatorを連続2回実行したJSON reportがbyte-for-byte一致する。
-4. Ubuntu、macOS、WindowsのCIで標準Pythonだけを使って同じfixture結果になる。
+4. 固定したUbuntu、macOS、Windows runnerとPythonで同じfixture結果になり、3つのreport artifactがbyte-for-byte一致する。
 5. `git diff --check`とbase SHAへの`git apply --check`が通る。
 6. AN0の機能差分がADR、contracts、validator、専用CIだけである。リポジトリ運用規則に従う実施結果の`progress/`更新は、別commitの記録差分として許可する。
 7. 既存macOS/Windows verifierはpatch適用先の実機・正式worktreeで回帰実行する。

@@ -9,6 +9,13 @@
     "pocketAppId": "local.example.today-focus",
     "agentSessionId": "session-root-a"
   },
+  "appContext": {
+    "id": "local.example.today-focus",
+    "version": "1.0.0",
+    "manifestDigest": "sha256:af7b3c36dd21cc9e5ef8dab0342cb3912e9da62cc3d4873268099d8432cf0ea5"
+  },
+  "planId": "plan-today-focus-001",
+  "planDigest": "sha256:d2a5cd999acb704d699d3fd989fd6022371f39bbb877c551aacff6c42d48482f",
   "arguments": {
     "durationSeconds": 600,
     "title": "Focus",

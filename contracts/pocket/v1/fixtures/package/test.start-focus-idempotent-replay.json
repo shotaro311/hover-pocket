@@ -1,0 +1,4 @@
+{
+  "case": "start-focus-idempotent-replay",
+  "expected": "pass"
+}

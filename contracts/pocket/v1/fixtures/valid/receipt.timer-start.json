@@ -1,6 +1,13 @@
 {
   "$schema": "hoverpocket://schemas/receipt/v1",
   "invocationId": "invocation-timer-start-001",
+  "planId": "plan-today-focus-001",
+  "planDigest": "sha256:d2a5cd999acb704d699d3fd989fd6022371f39bbb877c551aacff6c42d48482f",
+  "appContext": {
+    "id": "local.example.today-focus",
+    "version": "1.0.0",
+    "manifestDigest": "sha256:af7b3c36dd21cc9e5ef8dab0342cb3912e9da62cc3d4873268099d8432cf0ea5"
+  },
   "status": "succeeded",
   "capability": {
     "id": "timer.countdown.start",
@@ -9,13 +16,18 @@
   "output": {
     "timerId": "123e4567-e89b-12d3-a456-426614174000",
     "state": "running",
-    "endAt": "2026-08-13T12:10:00Z"
+    "endAt": "2026-08-13T12:25:00Z"
   },
   "readback": {
     "status": "verified",
     "strategy": "capability_query",
     "observedAt": "2026-08-13T12:00:02Z",
-    "evidenceDigest": "sha256:2fcd64001b1f4ca9eaf2979723523222b45a637455664cea62689676a0fe80c5"
+    "observed": {
+      "timerId": "123e4567-e89b-12d3-a456-426614174000",
+      "state": "running",
+      "endAt": "2026-08-13T12:25:00Z"
+    },
+    "evidenceDigest": "sha256:254067a5b8d17de8790b0be3e2b0660ac081bffe7113a6d1757e06dd5a87708e"
   },
   "rollback": {
     "available": true,

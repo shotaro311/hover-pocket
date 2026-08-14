@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "required": [
+    "selectedEventRef"
+  ],
+  "properties": {
+    "selectedEventRef": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

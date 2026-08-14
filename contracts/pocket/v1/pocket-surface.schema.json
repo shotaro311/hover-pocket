@@ -216,7 +216,7 @@
         },
         "assetRef": {
           "type": "string",
-          "pattern": "^asset://[A-Za-z0-9._/-]+$",
+          "pattern": "^asset://(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
           "maxLength": 240
         },
         "alt": {
@@ -432,24 +432,6 @@
       },
       "additionalProperties": false
     },
-    "receipt": {
-      "type": "object",
-      "required": [
-        "type",
-        "binding"
-      ],
-      "properties": {
-        "type": {
-          "const": "receipt"
-        },
-        "binding": {
-          "type": "string",
-          "pattern": "^\\$receipt\\.[A-Za-z][A-Za-z0-9_.]*$",
-          "maxLength": 128
-        }
-      },
-      "additionalProperties": false
-    },
     "component": {
       "oneOf": [
         {
@@ -484,9 +466,6 @@
         },
         {
           "$ref": "#/$defs/status"
-        },
-        {
-          "$ref": "#/$defs/receipt"
         }
       ]
     }

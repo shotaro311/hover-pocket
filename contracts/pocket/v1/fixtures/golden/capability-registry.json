@@ -17,6 +17,11 @@
       "descriptor": "valid/capability-descriptor.sticky-note-upsert.json"
     },
     {
+      "id": "system.native.authority",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.system-native-authority.json"
+    },
+    {
       "id": "timer.countdown.get",
       "version": 1,
       "descriptor": "valid/capability-descriptor.timer-countdown-get.json"

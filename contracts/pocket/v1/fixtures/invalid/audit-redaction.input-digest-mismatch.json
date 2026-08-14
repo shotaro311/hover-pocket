@@ -1,0 +1,10 @@
+{
+  "base": "golden/audit-redaction.json",
+  "mutation": {
+    "setPath": [
+      "entry",
+      "inputDigest"
+    ],
+    "value": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

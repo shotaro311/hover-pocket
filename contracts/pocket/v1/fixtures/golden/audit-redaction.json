@@ -47,18 +47,19 @@
     },
     "durationMs": 42,
     "idempotencyReplay": false,
-    "inputDigest": "sha256:f8eac947b6117c62f315ca3d5c540a43aa95061bbdeeb42660befabdde587c52",
+    "inputDigest": "sha256:e2f672643dcb1427b325214d5973c731d68f3db909be4ae1bb156974c0e70892",
     "invocationId": "invocation-timer-start-001",
     "origin": "voice",
     "permissionDecision": "granted",
     "pocketApp": {
       "id": "local.example.today-focus",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "manifestDigest": "sha256:af7b3c36dd21cc9e5ef8dab0342cb3912e9da62cc3d4873268099d8432cf0ea5"
     },
-    "principalPseudonym": "user-sha256-fixture",
+    "principalPseudonym": "principal:sha256:0da1c60ba76cd56274a1b72aa9b515662faf372283f33308468b56245e366704",
     "readback": {
       "status": "verified",
-      "evidenceDigest": "sha256:2fcd64001b1f4ca9eaf2979723523222b45a637455664cea62689676a0fe80c5"
+      "evidenceDigest": "sha256:254067a5b8d17de8790b0be3e2b0660ac081bffe7113a6d1757e06dd5a87708e"
     },
     "retryCount": 0,
     "safeErrorCode": null,

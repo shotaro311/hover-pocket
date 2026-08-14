@@ -1,0 +1,11 @@
+{
+  "base": "valid/pocket-app.today-focus.json",
+  "mutation": {
+    "setPath": [
+      "surfaces",
+      0,
+      "source"
+    ],
+    "value": "surfaces/unbound.surface.json"
+  }
+}

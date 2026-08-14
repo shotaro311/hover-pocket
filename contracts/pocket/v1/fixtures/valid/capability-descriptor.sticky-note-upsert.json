@@ -15,7 +15,7 @@
   },
   "limits": {
     "timeoutMs": 3000,
-    "maxPayloadBytes": 4096,
+    "maxPayloadBytes": 256,
     "maxCallsPerMinute": 120
   },
   "inputSchema": {

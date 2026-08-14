@@ -70,15 +70,19 @@ SUPPORTED_SCHEMA_KEYWORDS = frozenset(
 )
 
 STABLE_ERROR_CODES = (
+    "APP_CONTEXT_MISMATCH",
     "APP_PATH_UNSAFE",
     "APP_REFERENCE_INVALID",
     "APP_WORKSPACE_POLICY",
     "APPROVAL_EXPIRED",
     "APPROVAL_PLAN_MISMATCH",
+    "AUDIT_BINDING_MISMATCH",
     "AUDIT_FORBIDDEN_FIELD",
     "AUDIT_KEYSET_MISMATCH",
+    "AUDIT_VALUE_UNSAFE",
     "CAPABILITY_ARGUMENT_INVALID",
     "CAPABILITY_DESCRIPTOR_POLICY",
+    "CAPABILITY_RUNTIME_PROHIBITED",
     "CAPABILITY_UNKNOWN",
     "CAPABILITY_VERSION_MISMATCH",
     "FIXTURE_DIGEST_MISMATCH",
@@ -93,6 +97,7 @@ STABLE_ERROR_CODES = (
     "PLAN_DEPENDENCY_INVALID",
     "PLAN_DIGEST_MISMATCH",
     "PLAN_PERMISSION_MISMATCH",
+    "RECEIPT_BINDING_MISMATCH",
     "RECEIPT_OUTPUT_INVALID",
     "RECEIPT_READBACK_REQUIRED",
     "SCHEMA_ADDITIONAL_PROPERTY",
@@ -177,6 +182,15 @@ V1_CONTEXT_BINDINGS = {
     "selectedEvent.title": "string",
 }
 
+V1_CAPABILITY_SCOPES: Mapping[str, tuple[str, ...]] = {
+    "calendar.events.list": ("range",),
+    "sticky.note.get": ("namespace",),
+    "sticky.note.upsert": ("namespace",),
+    "system.native.authority": (),
+    "timer.countdown.get": (),
+    "timer.countdown.start": (),
+}
+
 WRITE_EFFECTS = frozenset(
     {
         "reversible_local_write",
@@ -213,6 +227,16 @@ SAFE_RUNTIME_ERROR_FIELDS = frozenset(
         "capabilityVersion",
         "traceId",
         "reasonKey",
+    }
+)
+
+SAFE_RECEIPT_ERROR_CODES = frozenset(
+    {
+        "APPROVAL_REJECTED",
+        "CAPABILITY_RUNTIME_PROHIBITED",
+        "EXECUTION_FAILED",
+        "PERMISSION_DENIED",
+        "READBACK_MISMATCH",
     }
 )
 
@@ -258,13 +282,18 @@ class FixtureContext:
     schemas_by_id: Mapping[str, Mapping[str, Any]]
     registry: CapabilityRegistry
     plans_by_id: Mapping[str, Mapping[str, Any]]
+    invocations_by_id: Mapping[str, Mapping[str, Any]]
     app_workflow_ids: frozenset[str]
-    app_requested_capabilities: frozenset[tuple[str, int]]
+    app_requested_capabilities: Mapping[tuple[str, int], Mapping[str, Any]]
+    reference_app: Mapping[str, Any] | None
+    app_package_files: frozenset[str]
+    host_observations: Mapping[str, Mapping[str, Any]]
 
 
 @dataclass(frozen=True)
 class FixtureSupport:
     plans_by_id: Mapping[str, Mapping[str, Any]]
+    invocations_by_id: Mapping[str, Mapping[str, Any]]
     reference_app: Mapping[str, Any]
     workflows_by_id: Mapping[str, Mapping[str, Any]]
     surfaces_by_id: Mapping[str, Mapping[str, Any]]
@@ -277,6 +306,7 @@ class CaseResult:
     observed: str
     matched: bool
     error_code: str | None
+    error_location: str | None
 
     def to_json(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -287,6 +317,8 @@ class CaseResult:
         }
         if self.error_code is not None:
             result["errorCode"] = self.error_code
+        if self.error_location is not None:
+            result["errorLocation"] = self.error_location
         return result
 
 
@@ -863,9 +895,13 @@ def contains_unsafe_text(value: str) -> bool:
         "sk-",
         "oauth_token",
         "raw transcript",
+        "https://",
+        "http://",
     )
     lowered = value.lower()
-    return any(probe.lower() in lowered for probe in probes)
+    return any(probe.lower() in lowered for probe in probes) or re.search(
+        r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", value
+    ) is not None
 
 
 def descriptor_properties(descriptor: Mapping[str, Any], field: str) -> Mapping[str, Any]:
@@ -1043,12 +1079,95 @@ def validate_capability_payload(
         fail(error_code, exc.location, f"{field} rejected: {exc.code}")
 
 
+def ensure_capability_executable(descriptor: Mapping[str, Any], location: str) -> None:
+    if descriptor["approvalPolicy"] == "runtime_prohibited" or descriptor["effect"] == "native_authority":
+        fail(
+            "CAPABILITY_RUNTIME_PROHIBITED",
+            location,
+            "native-authority capability cannot execute through the AN0 runtime",
+        )
+
+
+def validate_payload_size(payload: Any, descriptor: Mapping[str, Any], location: str) -> None:
+    if len(canonical_bytes(payload)) > descriptor["limits"]["maxPayloadBytes"]:
+        fail("CAPABILITY_ARGUMENT_INVALID", location, "canonical payload exceeds descriptor maxPayloadBytes")
+
+
+def expected_app_context(context: FixtureContext) -> dict[str, Any]:
+    app = context.reference_app
+    if app is None:
+        fail("APP_CONTEXT_MISMATCH", "$.appContext", "reference Pocket App context is unavailable")
+    return {
+        "id": app["id"],
+        "version": app["version"],
+        "manifestDigest": digest(app),
+    }
+
+
+def validate_app_context(
+    value: Mapping[str, Any] | None,
+    principal: Mapping[str, Any],
+    context: FixtureContext,
+    location: str,
+) -> None:
+    pocket_app_id = principal.get("pocketAppId")
+    if pocket_app_id is None:
+        if value is not None:
+            fail("APP_CONTEXT_MISMATCH", location, "Host-native principal cannot claim a Pocket App context")
+        return
+    if value != expected_app_context(context) or value["id"] != pocket_app_id:
+        fail("APP_CONTEXT_MISMATCH", location, "Pocket App id, version, or manifest digest changed")
+
+
+def validate_capability_scope(
+    arguments: Mapping[str, Any],
+    scope: Mapping[str, Any],
+    location: str,
+) -> None:
+    if "range" in scope and arguments.get("range") != scope["range"]:
+        fail("APP_REFERENCE_INVALID", safe_location(location, "range"), "argument escapes the granted range scope")
+    if "namespace" in scope:
+        stable_key = arguments.get("stableKey")
+        prefix = scope["namespace"] + ":"
+        if not isinstance(stable_key, str) or not stable_key.startswith(prefix):
+            fail(
+                "APP_REFERENCE_INVALID",
+                safe_location(location, "stableKey"),
+                "stable key escapes the granted namespace scope",
+            )
+
+
+def requested_scope(context: FixtureContext, capability_id: str, version: int, location: str) -> Mapping[str, Any]:
+    request = context.app_requested_capabilities.get((capability_id, version))
+    if request is None:
+        fail("APP_REFERENCE_INVALID", location, "capability was not requested by its Pocket App")
+    scope = request.get("scope", {})
+    return scope if isinstance(scope, dict) else {}
+
+
 def validate_invocation(document: Mapping[str, Any], context: FixtureContext) -> None:
     descriptor = context.registry.resolve(
         document["capabilityId"],
         document["capabilityVersion"],
         "$.capability",
     )
+    ensure_capability_executable(descriptor, "$.capability")
+    validate_app_context(document.get("appContext"), document["principal"], context, "$.appContext")
+    plan = context.plans_by_id.get(document["planId"])
+    if plan is None or document["planDigest"] != plan["canonicalDigest"]:
+        fail("APP_CONTEXT_MISMATCH", "$.planDigest", "invocation is not bound to a known canonical plan")
+    if document["principal"] != plan["principal"] or document.get("appContext") != plan.get("appContext"):
+        fail("APP_CONTEXT_MISMATCH", "$", "invocation principal or app context differs from the plan")
+    matching_steps = [
+        step
+        for step in plan["steps"]
+        if step["capabilityId"] == document["capabilityId"]
+        and step["capabilityVersion"] == document["capabilityVersion"]
+        and step["arguments"] == document["arguments"]
+        and step["idempotencyKey"] == document["idempotencyKey"]
+    ]
+    if len(matching_steps) != 1:
+        fail("APP_CONTEXT_MISMATCH", "$.arguments", "invocation does not match exactly one approved plan step")
     validate_capability_payload(
         document["arguments"],
         descriptor,
@@ -1057,13 +1176,17 @@ def validate_invocation(document: Mapping[str, Any], context: FixtureContext) ->
         context.schemas_by_id,
         "CAPABILITY_ARGUMENT_INVALID",
     )
-    payload_size = len(canonical_bytes(document["arguments"]))
-    if payload_size > descriptor["limits"]["maxPayloadBytes"]:
-        fail("CAPABILITY_ARGUMENT_INVALID", "$.arguments", "canonical payload exceeds descriptor maxPayloadBytes")
+    validate_payload_size(document["arguments"], descriptor, "$.arguments")
+    validate_capability_scope(
+        document["arguments"],
+        requested_scope(context, document["capabilityId"], document["capabilityVersion"], "$.capability"),
+        "$.arguments",
+    )
 
 
 def plan_projection(plan: Mapping[str, Any]) -> dict[str, Any]:
     return {
+        "appContext": plan.get("appContext"),
         "planVersion": plan["planVersion"],
         "steps": [
             {
@@ -1104,6 +1227,7 @@ def validate_dependency_order(
 
 
 def validate_execution_plan(document: Mapping[str, Any], context: FixtureContext) -> None:
+    validate_app_context(document.get("appContext"), document["principal"], context, "$.appContext")
     validate_dependency_order(
         document["steps"],
         id_field="stepId",
@@ -1120,6 +1244,7 @@ def validate_execution_plan(document: Mapping[str, Any], context: FixtureContext
             step["capabilityVersion"],
             f"$.steps[{index}].capability",
         )
+        ensure_capability_executable(descriptor, f"$.steps[{index}].capability")
         validate_capability_payload(
             step["arguments"],
             descriptor,
@@ -1127,6 +1252,12 @@ def validate_execution_plan(document: Mapping[str, Any], context: FixtureContext
             f"$.steps[{index}].arguments",
             context.schemas_by_id,
             "CAPABILITY_ARGUMENT_INVALID",
+        )
+        validate_payload_size(step["arguments"], descriptor, f"$.steps[{index}].arguments")
+        validate_capability_scope(
+            step["arguments"],
+            requested_scope(context, step["capabilityId"], step["capabilityVersion"], f"$.steps[{index}].capability"),
+            f"$.steps[{index}].arguments",
         )
         required_permissions.update(descriptor["permissions"])
         has_writes = has_writes or descriptor["effect"] in WRITE_EFFECTS
@@ -1150,8 +1281,13 @@ def validate_approval_request(document: Mapping[str, Any], context: FixtureConte
     plan = context.plans_by_id.get(document["planId"])
     if plan is None:
         fail("APPROVAL_PLAN_MISMATCH", "$.planId", "approval references an unknown fixture plan")
-    if document["planDigest"] != plan["canonicalDigest"] or document["principal"] != plan["principal"]:
-        fail("APPROVAL_PLAN_MISMATCH", "$", "approval is not bound to the plan digest and principal")
+    if (
+        document["planDigest"] != plan["canonicalDigest"]
+        or document["principal"] != plan["principal"]
+        or document.get("appContext") != plan.get("appContext")
+    ):
+        fail("APPROVAL_PLAN_MISMATCH", "$", "approval is not bound to the plan digest, principal, and app version")
+    validate_app_context(document.get("appContext"), document["principal"], context, "$.appContext")
     created = parse_rfc3339(document["createdAt"], "$.createdAt")
     expires = parse_rfc3339(document["expiresAt"], "$.expiresAt")
     lifetime = (expires - created).total_seconds()
@@ -1188,6 +1324,22 @@ def validate_receipt(document: Mapping[str, Any], context: FixtureContext) -> No
         document["capability"]["version"],
         "$.capability",
     )
+    invocation = context.invocations_by_id.get(document["invocationId"])
+    if invocation is None:
+        fail("RECEIPT_BINDING_MISMATCH", "$.invocationId", "receipt references an unknown invocation")
+    if (
+        document["planId"] != invocation["planId"]
+        or document["planDigest"] != invocation["planDigest"]
+        or document.get("appContext") != invocation.get("appContext")
+        or document["capability"]
+        != {"id": invocation["capabilityId"], "version": invocation["capabilityVersion"]}
+    ):
+        fail(
+            "RECEIPT_BINDING_MISMATCH",
+            "$",
+            "receipt plan, app version, or capability differs from the invocation",
+        )
+    validate_app_context(document.get("appContext"), invocation["principal"], context, "$.appContext")
     status = document["status"]
     if status == "succeeded" and "output" not in document:
         fail("RECEIPT_OUTPUT_INVALID", "$.output", "successful receipt must include output")
@@ -1208,18 +1360,60 @@ def validate_receipt(document: Mapping[str, Any], context: FixtureContext) -> No
         if not pure_without_readback and readback["status"] != "verified":
             fail("RECEIPT_READBACK_REQUIRED", "$.readback.status", "success requires verified readback")
         if readback["status"] == "verified" and (
-            "observedAt" not in readback or "evidenceDigest" not in readback
+            "observedAt" not in readback
+            or "evidenceDigest" not in readback
+            or "observed" not in readback
         ):
-            fail("RECEIPT_READBACK_REQUIRED", "$.readback", "verified readback requires timestamp and evidence digest")
+            fail(
+                "RECEIPT_READBACK_REQUIRED",
+                "$.readback",
+                "verified readback requires timestamp, typed observation, and evidence digest",
+            )
         if "safeError" in document:
             fail("RECEIPT_OUTPUT_INVALID", "$.safeError", "successful receipt cannot carry a safe error")
     else:
         if "safeError" not in document:
             fail("RECEIPT_OUTPUT_INVALID", "$.safeError", "non-success receipt must carry a stable safe error")
+        if document["safeError"]["code"] not in SAFE_RECEIPT_ERROR_CODES:
+            fail("RECEIPT_OUTPUT_INVALID", "$.safeError.code", "safe error code is not in the v1 allowlist")
     if readback["status"] == "mismatch" and status == "succeeded":
         fail("RECEIPT_READBACK_REQUIRED", "$.status", "readback mismatch cannot be success")
     if readback["status"] == "unavailable" and descriptor["effect"] in WRITE_EFFECTS and status == "succeeded":
         fail("RECEIPT_READBACK_REQUIRED", "$.status", "unknown side effect cannot be success")
+    if readback["status"] == "verified":
+        observed = readback["observed"]
+        host_observed = context.host_observations.get(document["invocationId"])
+        if host_observed is None or observed != host_observed:
+            fail(
+                "RECEIPT_READBACK_REQUIRED",
+                "$.readback.observed",
+                "receipt observation differs from the Host-owned readback source",
+            )
+        if readback["evidenceDigest"] != digest(observed):
+            fail("RECEIPT_READBACK_REQUIRED", "$.readback.evidenceDigest", "evidence digest was not computed from observed state")
+        readback_descriptor = descriptor
+        if readback["strategy"] == "capability_query":
+            readback_descriptor = context.registry.resolve(
+                descriptor["readback"]["capabilityId"],
+                descriptor["readback"]["capabilityVersion"],
+                "$.readback.observed",
+            )
+        validate_capability_payload(
+            observed,
+            readback_descriptor,
+            "outputSchema",
+            "$.readback.observed",
+            context.schemas_by_id,
+            "RECEIPT_READBACK_REQUIRED",
+        )
+        if "output" in document:
+            for field in descriptor["readback"]["match"]:
+                if field not in observed or not json_equal(observed[field], document["output"].get(field)):
+                    fail(
+                        "RECEIPT_READBACK_REQUIRED",
+                        safe_location("$.readback.observed", field),
+                        "observed field differs from execution output",
+                    )
 
 
 def validate_runtime_error(document: Mapping[str, Any]) -> None:
@@ -1329,6 +1523,9 @@ def validate_pocket_app(document: Mapping[str, Any], context: FixtureContext) ->
         if canonical in normalized:
             fail("APP_REFERENCE_INVALID", location, "duplicate workspace path")
         normalized.add(canonical)
+    if context.reference_app is not None and document["id"] == context.reference_app["id"]:
+        if normalized != set(context.app_package_files):
+            fail("APP_REFERENCE_INVALID", "$", "manifest paths do not equal the verified package file set")
     if document["state"]["store"] != "user-data://" + document["id"]:
         fail("APP_WORKSPACE_POLICY", "$.state.store", "user-data URI must be scoped to the Pocket App id")
     workspace = document["workspace"]
@@ -1349,6 +1546,21 @@ def validate_pocket_app(document: Mapping[str, Any], context: FixtureContext) ->
         if key in requested:
             fail("APP_REFERENCE_INVALID", f"$.requestedCapabilities[{index}]", "duplicate capability request")
         context.registry.resolve(item["id"], item["version"], f"$.requestedCapabilities[{index}]")
+        scope = item.get("scope", {})
+        allowed_scope = V1_CAPABILITY_SCOPES.get(item["id"])
+        if allowed_scope is None or set(scope) != set(allowed_scope):
+            fail(
+                "APP_REFERENCE_INVALID",
+                f"$.requestedCapabilities[{index}].scope",
+                "scope must exactly match the Host-supported v1 keys",
+            )
+        if "range" in scope and scope["range"] != "today":
+            fail("APP_REFERENCE_INVALID", f"$.requestedCapabilities[{index}].scope.range", "v1 range scope must be today")
+        if "namespace" in scope and (
+            not isinstance(scope["namespace"], str)
+            or re.fullmatch(r"[a-z][a-z0-9-]{0,63}", scope["namespace"]) is None
+        ):
+            fail("APP_REFERENCE_INVALID", f"$.requestedCapabilities[{index}].scope.namespace", "namespace scope is invalid")
         requested.add(key)
     surface_ids = [item["id"] for item in document["surfaces"]]
     if len(surface_ids) != len(set(surface_ids)):
@@ -1384,8 +1596,7 @@ def validate_pocket_surface(document: Mapping[str, Any], context: FixtureContext
                 "APP_REFERENCE_INVALID",
             )
             descriptor = context.registry.resolve(capability_id, version, f"{location}.items.query")
-            if (capability_id, version) not in context.app_requested_capabilities:
-                fail("APP_REFERENCE_INVALID", f"{location}.items.query", "surface query was not requested by its Pocket App")
+            scope = requested_scope(context, capability_id, version, f"{location}.items.query")
             if descriptor["effect"] not in {"pure", "private_read"}:
                 fail("APP_REFERENCE_INVALID", f"{location}.items.query", "surface query must be read-only")
             validate_capability_payload(
@@ -1396,8 +1607,15 @@ def validate_pocket_surface(document: Mapping[str, Any], context: FixtureContext
                 context.schemas_by_id,
                 "CAPABILITY_ARGUMENT_INVALID",
             )
+            validate_capability_scope(node["items"]["arguments"], scope, f"{location}.items.arguments")
         elif component_type == "button" and node["workflow"] not in workflow_ids:
             fail("APP_REFERENCE_INVALID", f"{location}.workflow", "button references an unknown manifest workflow")
+        elif component_type == "image":
+            asset_path = normalize_relative_path(node["assetRef"][len("asset://"):], f"{location}.assetRef")
+            if asset_path not in context.app_package_files:
+                fail("APP_REFERENCE_INVALID", f"{location}.assetRef", "asset is not present in the bound Pocket App package")
+        elif component_type == "receipt" and document["hostBoundary"]["mayRenderReceipt"] is not True:
+            fail("APP_REFERENCE_INVALID", location, "PocketSurface cannot render a Host-owned execution receipt")
 
     walk(document["root"], "$.root", 1)
 
@@ -1451,8 +1669,8 @@ def validate_pocket_workflow(document: Mapping[str, Any], context: FixtureContex
             if exc.code in {"CAPABILITY_UNKNOWN", "CAPABILITY_VERSION_MISMATCH"}:
                 fail("WORKFLOW_REFERENCE_INVALID", exc.location, exc.detail)
             raise
-        if (capability_id, version) not in context.app_requested_capabilities:
-            fail("WORKFLOW_REFERENCE_INVALID", f"$.steps[{index}].use", "workflow capability was not requested by its Pocket App")
+        ensure_capability_executable(descriptor, f"$.steps[{index}].use")
+        scope = requested_scope(context, capability_id, version, f"$.steps[{index}].use")
         has_writes = has_writes or descriptor["effect"] in WRITE_EFFECTS
         total_timeout_seconds += descriptor["limits"]["timeoutMs"] / 1000.0
         input_properties = descriptor_properties(descriptor, "inputSchema")
@@ -1525,6 +1743,8 @@ def validate_pocket_workflow(document: Mapping[str, Any], context: FixtureContex
                     context.schemas_by_id,
                     "WORKFLOW_INPUT_TYPE_MISMATCH",
                 )
+        validate_payload_size(step["with"], descriptor, f"$.steps[{index}].with")
+        validate_capability_scope(step["with"], scope, f"$.steps[{index}].with")
     approval = document["approval"]
     if has_writes and (approval["mode"] != "before_writes" or approval["group"] == "none"):
         fail("WORKFLOW_APPROVAL_REQUIRED", "$.approval", "write workflow requires grouped pre-write approval")
@@ -1702,7 +1922,7 @@ def recursively_find_forbidden_keys(value: Any, forbidden: frozenset[str], locat
     return None
 
 
-def validate_audit(document: Mapping[str, Any]) -> None:
+def validate_audit(document: Mapping[str, Any], context: FixtureContext) -> None:
     if set(document) != {"policyVersion", "allowedTopLevelKeys", "forbiddenKeys", "entry"}:
         fail("AUDIT_KEYSET_MISMATCH", "$", "audit policy has unexpected fields")
     if document["policyVersion"] != 1:
@@ -1720,6 +1940,42 @@ def validate_audit(document: Mapping[str, Any]) -> None:
         fail("AUDIT_FORBIDDEN_FIELD", found[0], f"forbidden audit field {found[1]!r}")
     if set(entry) != set(AUDIT_ALLOWED_KEYS):
         fail("AUDIT_KEYSET_MISMATCH", "$.entry", "audit entry must contain the exact metadata-only keyset")
+    if re.fullmatch(r"principal:sha256:[a-f0-9]{64}", entry["principalPseudonym"]) is None:
+        fail("AUDIT_VALUE_UNSAFE", "$.entry.principalPseudonym", "principal must be an irreversible pseudonym")
+    for key in ("auditEntryId", "invocationId", "traceId"):
+        if not isinstance(entry[key], str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", entry[key]) is None:
+            fail("AUDIT_VALUE_UNSAFE", safe_location("$.entry", key), "audit identifier is not a safe opaque id")
+    if contains_unsafe_audit_value(entry):
+        fail("AUDIT_VALUE_UNSAFE", "$.entry", "audit value contains a path, URL, email, credential, or raw content")
+    if not isinstance(entry["capability"], dict) or set(entry["capability"]) != {"id", "version", "effect"}:
+        fail("AUDIT_KEYSET_MISMATCH", "$.entry.capability", "capability audit shape changed")
+    if not isinstance(entry["pocketApp"], dict) or set(entry["pocketApp"]) != {"id", "version", "manifestDigest"}:
+        fail("AUDIT_KEYSET_MISMATCH", "$.entry.pocketApp", "Pocket App audit shape changed")
+    if entry["pocketApp"] != expected_app_context(context):
+        fail("APP_CONTEXT_MISMATCH", "$.entry.pocketApp", "audit Pocket App context differs from the verified manifest")
+    if entry["approvalDecision"] not in {"approved", "rejected", "not_required"}:
+        fail("AUDIT_VALUE_UNSAFE", "$.entry.approvalDecision", "approval decision is not an allowed enum")
+    if entry["approvalPolicy"] not in set(EXPECTED_APPROVAL_POLICY.values()):
+        fail("AUDIT_VALUE_UNSAFE", "$.entry.approvalPolicy", "approval policy is not an allowed enum")
+    if entry["origin"] not in {"native_ui", "voice", "text", "pocket_surface", "mcp", "connector"}:
+        fail("AUDIT_VALUE_UNSAFE", "$.entry.origin", "origin is not an allowed enum")
+    if entry["permissionDecision"] not in {"granted", "denied", "not_required"}:
+        fail("AUDIT_VALUE_UNSAFE", "$.entry.permissionDecision", "permission decision is not an allowed enum")
+    if entry["status"] not in {"succeeded", "rejected", "failed", "partial", "unknown"}:
+        fail("AUDIT_VALUE_UNSAFE", "$.entry.status", "status is not an allowed enum")
+    if entry["safeErrorCode"] is not None and entry["safeErrorCode"] not in SAFE_RECEIPT_ERROR_CODES:
+        fail("AUDIT_VALUE_UNSAFE", "$.entry.safeErrorCode", "safe error code is not allowlisted")
+    if not isinstance(entry["durationMs"], int) or isinstance(entry["durationMs"], bool) or entry["durationMs"] < 0:
+        fail("AUDIT_VALUE_UNSAFE", "$.entry.durationMs", "duration must be a non-negative integer")
+    if not isinstance(entry["retryCount"], int) or isinstance(entry["retryCount"], bool) or not 0 <= entry["retryCount"] <= 16:
+        fail("AUDIT_VALUE_UNSAFE", "$.entry.retryCount", "retry count is outside the bounded v1 range")
+    if not isinstance(entry["idempotencyReplay"], bool):
+        fail("AUDIT_VALUE_UNSAFE", "$.entry.idempotencyReplay", "idempotency replay must be boolean")
+    parse_rfc3339(entry["timestamp"], "$.entry.timestamp")
+    capability = entry["capability"]
+    descriptor = context.registry.resolve(capability["id"], capability["version"], "$.entry.capability")
+    if capability["effect"] not in EXPECTED_APPROVAL_POLICY:
+        fail("AUDIT_VALUE_UNSAFE", "$.entry.capability.effect", "effect is not an allowed enum")
     for digest_key in ("inputDigest",):
         if not isinstance(entry[digest_key], str) or re.fullmatch(r"sha256:[a-f0-9]{64}", entry[digest_key]) is None:
             fail("AUDIT_KEYSET_MISMATCH", safe_location("$.entry", digest_key), "audit payload must use a digest")
@@ -1728,6 +1984,44 @@ def validate_audit(document: Mapping[str, Any]) -> None:
         fail("AUDIT_KEYSET_MISMATCH", "$.entry.readback", "readback audit shape changed")
     if re.fullmatch(r"sha256:[a-f0-9]{64}", readback["evidenceDigest"]) is None:
         fail("AUDIT_KEYSET_MISMATCH", "$.entry.readback.evidenceDigest", "readback evidence must be a digest")
+    invocation = context.invocations_by_id.get(entry["invocationId"])
+    if invocation is None:
+        fail("AUDIT_BINDING_MISMATCH", "$.entry.invocationId", "audit references an unknown invocation")
+    if capability != {
+        "id": invocation["capabilityId"],
+        "version": invocation["capabilityVersion"],
+        "effect": descriptor["effect"],
+    }:
+        fail("AUDIT_BINDING_MISMATCH", "$.entry.capability", "audit capability differs from the invocation or descriptor")
+    if entry["approvalPolicy"] != descriptor["approvalPolicy"]:
+        fail("AUDIT_BINDING_MISMATCH", "$.entry.approvalPolicy", "audit approval policy differs from the descriptor")
+    if entry["origin"] != invocation["origin"]:
+        fail("AUDIT_BINDING_MISMATCH", "$.entry.origin", "audit origin differs from the invocation")
+    if entry["traceId"] != invocation["traceId"]:
+        fail("AUDIT_BINDING_MISMATCH", "$.entry.traceId", "audit trace differs from the invocation")
+    if entry["pocketApp"] != invocation.get("appContext"):
+        fail("AUDIT_BINDING_MISMATCH", "$.entry.pocketApp", "audit Pocket App differs from the invocation")
+    if entry["inputDigest"] != digest(invocation["arguments"]):
+        fail("AUDIT_BINDING_MISMATCH", "$.entry.inputDigest", "audit input digest was not computed from invocation arguments")
+    host_observed = context.host_observations.get(entry["invocationId"])
+    if readback["status"] == "verified" and (
+        host_observed is None or readback["evidenceDigest"] != digest(host_observed)
+    ):
+        fail(
+            "AUDIT_BINDING_MISMATCH",
+            "$.entry.readback.evidenceDigest",
+            "audit readback digest differs from the Host-owned observation",
+        )
+
+
+def contains_unsafe_audit_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return contains_unsafe_text(value)
+    if isinstance(value, list):
+        return any(contains_unsafe_audit_value(item) for item in value)
+    if isinstance(value, dict):
+        return any(contains_unsafe_audit_value(item) for item in value.values())
+    return False
 
 
 def apply_audit_mutation(document: Mapping[str, Any], fixture_dir: Path) -> Mapping[str, Any]:
@@ -1737,9 +2031,51 @@ def apply_audit_mutation(document: Mapping[str, Any], fixture_dir: Path) -> Mapp
     base = load_json(fixture_dir / base_relative, location=base_relative)
     mutated = copy.deepcopy(base)
     mutation = document["mutation"]
-    if set(mutation) != {"addTopLevel"} or not isinstance(mutation["addTopLevel"], dict):
+    if set(mutation) == {"addTopLevel"} and isinstance(mutation["addTopLevel"], dict):
+        mutated["entry"].update(mutation["addTopLevel"])
+    elif set(mutation) == {"setPath", "value"} and isinstance(mutation["setPath"], list):
+        set_document_path(mutated, mutation["setPath"], mutation["value"], "$.mutation.setPath")
+    else:
         fail("FIXTURE_MANIFEST_MISMATCH", "$.mutation", "audit mutation operation is invalid")
-    mutated["entry"].update(mutation["addTopLevel"])
+    return mutated
+
+
+def set_document_path(document: Any, path: Sequence[str | int], value: Any, location: str) -> None:
+    if not path:
+        fail("FIXTURE_MANIFEST_MISMATCH", location, "mutation path must not be empty")
+    target = document
+    for token in path[:-1]:
+        if isinstance(token, int) and isinstance(target, list) and 0 <= token < len(target):
+            target = target[token]
+        elif isinstance(token, str) and isinstance(target, dict) and token in target:
+            target = target[token]
+        else:
+            fail("FIXTURE_MANIFEST_MISMATCH", location, "mutation path does not exist")
+    final = path[-1]
+    if isinstance(final, int) and isinstance(target, list) and 0 <= final < len(target):
+        target[final] = value
+    elif isinstance(final, str) and isinstance(target, dict):
+        target[final] = value
+    else:
+        fail("FIXTURE_MANIFEST_MISMATCH", location, "mutation destination is invalid")
+
+
+def apply_schema_mutation(document: Mapping[str, Any], fixture_dir: Path) -> Mapping[str, Any]:
+    if set(document) != {"base", "mutation"}:
+        fail("FIXTURE_MANIFEST_MISMATCH", "$", "schema mutation fixture shape is invalid")
+    base_relative = normalize_relative_path(document["base"], "$.base")
+    base = load_json(fixture_dir / base_relative, location=base_relative)
+    mutated = copy.deepcopy(base)
+    mutation = document["mutation"]
+    if isinstance(mutation, dict) and set(mutation) == {"setPath", "value"}:
+        set_document_path(mutated, mutation["setPath"], mutation["value"], "$.mutation.setPath")
+    elif isinstance(mutation, dict) and set(mutation) == {"setValues"} and isinstance(mutation["setValues"], list):
+        for index, operation in enumerate(mutation["setValues"]):
+            if not isinstance(operation, dict) or set(operation) != {"path", "value"}:
+                fail("FIXTURE_MANIFEST_MISMATCH", f"$.mutation.setValues[{index}]", "mutation operation is invalid")
+            set_document_path(mutated, operation["path"], operation["value"], f"$.mutation.setValues[{index}].path")
+    else:
+        fail("FIXTURE_MANIFEST_MISMATCH", "$.mutation", "schema mutation operation is invalid")
     return mutated
 
 
@@ -1762,11 +2098,13 @@ def load_fixture_support(context: FixtureContext, manifest: Mapping[str, Any]) -
     engine = SchemaEngine(context.schemas_by_id)
     support_schemas = {
         "execution-plan.schema.json": context.schemas_by_filename["execution-plan.schema.json"],
+        "invocation.schema.json": context.schemas_by_filename["invocation.schema.json"],
         "pocket-app.schema.json": context.schemas_by_filename["pocket-app.schema.json"],
         "pocket-workflow.schema.json": context.schemas_by_filename["pocket-workflow.schema.json"],
         "pocket-surface.schema.json": context.schemas_by_filename["pocket-surface.schema.json"],
     }
     plans: dict[str, Mapping[str, Any]] = {}
+    invocations: dict[str, Mapping[str, Any]] = {}
     apps: list[Mapping[str, Any]] = []
     workflows: dict[str, Mapping[str, Any]] = {}
     surfaces: dict[str, Mapping[str, Any]] = {}
@@ -1786,6 +2124,11 @@ def load_fixture_support(context: FixtureContext, manifest: Mapping[str, Any]) -
             if plan_id in plans:
                 fail("FIXTURE_MANIFEST_MISMATCH", relative, "duplicate fixture plan id")
             plans[plan_id] = document
+        elif schema_name == "invocation.schema.json":
+            invocation_id = document["invocationId"]
+            if invocation_id in invocations:
+                fail("FIXTURE_MANIFEST_MISMATCH", relative, "duplicate fixture invocation id")
+            invocations[invocation_id] = document
         elif schema_name == "pocket-app.schema.json":
             apps.append(document)
         elif schema_name == "pocket-workflow.schema.json":
@@ -1819,16 +2162,81 @@ def load_fixture_support(context: FixtureContext, manifest: Mapping[str, Any]) -
             "reference-app.surfaces",
             "manifest surface ids and surface fixture ids differ",
         )
+    bindings = {
+        item["path"]: item["source"]
+        for item in manifest["referencePackage"]["files"]
+    }
+    for item in reference_app["surfaces"]:
+        source = bindings.get(item["source"])
+        if source is None or load_json(context.fixture_dir / source, location=source) != surfaces[item["id"]]:
+            fail("APP_REFERENCE_INVALID", item["source"], "manifest surface is not bound to its validated fixture")
+    for workflow_id, package_path in reference_app["workflows"].items():
+        source = bindings.get(package_path)
+        if source is None or load_json(context.fixture_dir / source, location=source) != workflows[workflow_id]:
+            fail("APP_REFERENCE_INVALID", package_path, "manifest workflow is not bound to its validated fixture")
     return FixtureSupport(
         plans_by_id=plans,
+        invocations_by_id=invocations,
         reference_app=reference_app,
         workflows_by_id=workflows,
         surfaces_by_id=surfaces,
     )
 
 
+def load_reference_package(manifest: Mapping[str, Any], fixture_dir: Path) -> frozenset[str]:
+    package = manifest["referencePackage"]
+    if not isinstance(package, dict) or set(package) != {"appFixture", "files"}:
+        fail("FIXTURE_MANIFEST_MISMATCH", "$.referencePackage", "reference package shape changed")
+    app_fixture = normalize_relative_path(package["appFixture"], "$.referencePackage.appFixture")
+    if app_fixture != "valid/pocket-app.today-focus.json":
+        fail("FIXTURE_MANIFEST_MISMATCH", "$.referencePackage.appFixture", "unexpected reference app fixture")
+    app = load_json(fixture_dir / app_fixture, location=app_fixture)
+    expected_paths = {
+        app["intent"],
+        app["state"]["schema"],
+        *(item["source"] for item in app["surfaces"]),
+        *app["workflows"].values(),
+        *app["tests"],
+    }
+    observed_paths: set[str] = set()
+    for index, item in enumerate(package["files"]):
+        location = f"$.referencePackage.files[{index}]"
+        if not isinstance(item, dict) or set(item) != {"path", "source", "digest"}:
+            fail("FIXTURE_MANIFEST_MISMATCH", location, "package file binding shape changed")
+        path = normalize_relative_path(item["path"], f"{location}.path")
+        source = normalize_relative_path(item["source"], f"{location}.source")
+        if path in observed_paths:
+            fail("FIXTURE_MANIFEST_MISMATCH", f"{location}.path", "duplicate package path")
+        source_path = fixture_dir / source
+        if not source_path.is_file():
+            fail("FIXTURE_MANIFEST_MISMATCH", f"{location}.source", "package source fixture is missing")
+        actual_digest = "sha256:" + hashlib.sha256(source_path.read_bytes()).hexdigest()
+        if item["digest"] != actual_digest:
+            fail("FIXTURE_DIGEST_MISMATCH", f"{location}.digest", "package source bytes changed")
+        observed_paths.add(path)
+    if observed_paths != expected_paths:
+        fail("APP_REFERENCE_INVALID", "$.referencePackage.files", "package bindings do not cover every manifest path")
+    return frozenset(observed_paths)
+
+
+def load_host_observations(manifest: Mapping[str, Any], fixture_dir: Path) -> Mapping[str, Mapping[str, Any]]:
+    observations: dict[str, Mapping[str, Any]] = {}
+    for index, item in enumerate(manifest["hostObservations"]):
+        location = f"$.hostObservations[{index}]"
+        if not isinstance(item, dict) or set(item) != {"invocationId", "source", "digest"}:
+            fail("FIXTURE_MANIFEST_MISMATCH", location, "host observation binding shape changed")
+        source = normalize_relative_path(item["source"], f"{location}.source")
+        document = load_json(fixture_dir / source, location=source)
+        if item["digest"] != digest(document):
+            fail("FIXTURE_DIGEST_MISMATCH", f"{location}.digest", "host observation changed")
+        if item["invocationId"] in observations:
+            fail("FIXTURE_MANIFEST_MISMATCH", f"{location}.invocationId", "duplicate host observation")
+        observations[item["invocationId"]] = document
+    return observations
+
+
 def validate_manifest_shape(manifest: Mapping[str, Any], fixture_dir: Path) -> None:
-    if set(manifest) != {"manifestVersion", "registryPath", "cases"}:
+    if set(manifest) != {"manifestVersion", "registryPath", "referencePackage", "hostObservations", "cases"}:
         fail("FIXTURE_MANIFEST_MISMATCH", "expected-results.json", "manifest fields changed")
     if manifest["manifestVersion"] != 1:
         fail("FIXTURE_MANIFEST_MISMATCH", "expected-results.json", "manifest version must be 1")
@@ -1846,7 +2254,7 @@ def validate_manifest_shape(manifest: Mapping[str, Any], fixture_dir: Path) -> N
         required = {"id", "path", "kind", "expected"}
         if not required.issubset(case):
             fail("FIXTURE_MANIFEST_MISMATCH", location, "case is missing required metadata")
-        allowed = required | {"schema", "errorCode", "expectedDigest"}
+        allowed = required | {"schema", "errorCode", "errorLocation", "expectedDigest"}
         if set(case) - allowed:
             fail("FIXTURE_MANIFEST_MISMATCH", location, "case has unexpected metadata")
         if not isinstance(case["id"], str) or not case["id"]:
@@ -1865,6 +2273,8 @@ def validate_manifest_shape(manifest: Mapping[str, Any], fixture_dir: Path) -> N
             fail("FIXTURE_MANIFEST_MISMATCH", f"{location}.path", "fixture file does not exist")
         if not isinstance(case["kind"], str) or case["kind"] not in {
             "schema",
+            "schema-mutation",
+            "schema-policy",
             "geometry",
             "geometry-mutation",
             "audit",
@@ -1884,13 +2294,16 @@ def validate_manifest_shape(manifest: Mapping[str, Any], fixture_dir: Path) -> N
         if case["expected"] == "reject":
             if case.get("errorCode") not in STABLE_ERROR_CODES:
                 fail("FIXTURE_MANIFEST_MISMATCH", f"{location}.errorCode", "reject case needs a stable error code")
-            if "expectedDigest" in case:
-                fail("FIXTURE_MANIFEST_MISMATCH", location, "reject case cannot pin a golden digest")
+            if not isinstance(case.get("errorLocation"), str) or not case["errorLocation"]:
+                fail("FIXTURE_MANIFEST_MISMATCH", f"{location}.errorLocation", "reject case needs an exact error location")
+            expected_digest = case.get("expectedDigest")
+            if not isinstance(expected_digest, str) or re.fullmatch(r"sha256:[a-f0-9]{64}", expected_digest) is None:
+                fail("FIXTURE_MANIFEST_MISMATCH", location, "reject case must pin its exact fixture digest")
         elif case["kind"] in {"audit", "canonical-json", "capability-registry", "error-codes", "geometry"}:
             expected_digest = case.get("expectedDigest")
             if not isinstance(expected_digest, str) or re.fullmatch(r"sha256:[a-f0-9]{64}", expected_digest) is None:
                 fail("FIXTURE_MANIFEST_MISMATCH", location, "golden pass case needs a canonical SHA-256 digest")
-        if case["kind"] == "schema":
+        if case["kind"] in {"schema", "schema-mutation"}:
             if case.get("schema") not in EXPECTED_SCHEMAS:
                 fail("FIXTURE_MANIFEST_MISMATCH", f"{location}.schema", "schema case names an unknown schema")
         elif "schema" in case:
@@ -1954,18 +2367,32 @@ def validate_schema_case(
 def execute_case(case: Mapping[str, Any], context: FixtureContext) -> None:
     relative = case["path"]
     document = load_json(context.fixture_dir / relative, location=relative)
+    if "expectedDigest" in case and digest(document) != case["expectedDigest"]:
+        fail("FIXTURE_DIGEST_MISMATCH", relative, "canonical fixture digest changed")
     if case["kind"] == "schema":
         if not isinstance(document, dict):
             fail("SCHEMA_TYPE_MISMATCH", "$", "contract fixture must be an object")
         validate_schema_case(document, case["schema"], context)
+    elif case["kind"] == "schema-mutation":
+        mutated = apply_schema_mutation(document, context.fixture_dir)
+        if not isinstance(mutated, dict):
+            fail("SCHEMA_TYPE_MISMATCH", "$", "mutated contract fixture must be an object")
+        validate_schema_case(mutated, case["schema"], context)
+    elif case["kind"] == "schema-policy":
+        enforce_schema_policy(
+            document,
+            label=relative,
+            schemas_by_id=context.schemas_by_id,
+            require_document_header=True,
+        )
     elif case["kind"] == "geometry":
         validate_geometry(document)
     elif case["kind"] == "geometry-mutation":
         validate_geometry(apply_geometry_mutation(document, context.fixture_dir))
     elif case["kind"] == "audit":
-        validate_audit(document)
+        validate_audit(document, context)
     elif case["kind"] == "audit-mutation":
-        validate_audit(apply_audit_mutation(document, context.fixture_dir))
+        validate_audit(apply_audit_mutation(document, context.fixture_dir), context)
     elif case["kind"] == "canonical-json":
         validate_canonical_json(document)
     elif case["kind"] == "error-codes":
@@ -1977,10 +2404,6 @@ def execute_case(case: Mapping[str, Any], context: FixtureContext) -> None:
     else:
         fail("FIXTURE_MANIFEST_MISMATCH", relative, f"unknown fixture kind {case['kind']!r}")
 
-    if "expectedDigest" in case and digest(document) != case["expectedDigest"]:
-        fail("FIXTURE_DIGEST_MISMATCH", relative, "canonical fixture digest changed")
-
-
 def build_context(repo_root: Path) -> tuple[FixtureContext, Mapping[str, Any]]:
     contract_dir = repo_root / "contracts" / "pocket" / "v1"
     fixture_dir = contract_dir / "fixtures"
@@ -1991,6 +2414,8 @@ def build_context(repo_root: Path) -> tuple[FixtureContext, Mapping[str, Any]]:
     if not isinstance(manifest, dict):
         fail("FIXTURE_MANIFEST_MISMATCH", "expected-results.json", "manifest must be an object")
     validate_manifest_shape(manifest, fixture_dir)
+    package_files = load_reference_package(manifest, fixture_dir)
+    host_observations = load_host_observations(manifest, fixture_dir)
     registry = load_registry(
         fixture_dir,
         manifest["registryPath"],
@@ -2004,14 +2429,18 @@ def build_context(repo_root: Path) -> tuple[FixtureContext, Mapping[str, Any]]:
         schemas_by_id=schemas_by_id,
         registry=registry,
         plans_by_id={},
+        invocations_by_id={},
         app_workflow_ids=frozenset(),
-        app_requested_capabilities=frozenset(),
+        app_requested_capabilities={},
+        reference_app=None,
+        app_package_files=package_files,
+        host_observations=host_observations,
     )
     support = load_fixture_support(provisional, manifest)
-    requested_capabilities = frozenset(
-        (item["id"], item["version"])
+    requested_capabilities = {
+        (item["id"], item["version"]): item
         for item in support.reference_app["requestedCapabilities"]
-    )
+    }
     context = FixtureContext(
         contract_dir=contract_dir,
         fixture_dir=fixture_dir,
@@ -2019,12 +2448,18 @@ def build_context(repo_root: Path) -> tuple[FixtureContext, Mapping[str, Any]]:
         schemas_by_id=schemas_by_id,
         registry=registry,
         plans_by_id=support.plans_by_id,
+        invocations_by_id=support.invocations_by_id,
         app_workflow_ids=frozenset(support.workflows_by_id),
         app_requested_capabilities=requested_capabilities,
+        reference_app=support.reference_app,
+        app_package_files=package_files,
+        host_observations=host_observations,
     )
     validate_pocket_app(support.reference_app, context)
     for plan in context.plans_by_id.values():
         validate_execution_plan(plan, context)
+    for invocation in context.invocations_by_id.values():
+        validate_invocation(invocation, context)
     for workflow in support.workflows_by_id.values():
         validate_pocket_workflow(workflow, context)
     for surface in support.surfaces_by_id.values():
@@ -2038,15 +2473,19 @@ def run(repo_root: Path) -> dict[str, Any]:
     for case in manifest["cases"]:
         observed = "pass"
         error_code: str | None = None
+        error_location: str | None = None
         try:
             execute_case(case, context)
         except VerifyError as exc:
             observed = "reject"
             error_code = exc.code
+            error_location = exc.location
         expected = case["expected"]
         expected_code = case.get("errorCode")
+        expected_location = case.get("errorLocation")
         matched = observed == expected and (
-            expected != "reject" or error_code == expected_code
+            expected != "reject"
+            or (error_code == expected_code and error_location == expected_location)
         )
         results.append(
             CaseResult(
@@ -2055,6 +2494,7 @@ def run(repo_root: Path) -> dict[str, Any]:
                 observed=observed,
                 matched=matched,
                 error_code=error_code,
+                error_location=error_location,
             )
         )
     matched_count = sum(1 for item in results if item.matched)
@@ -2114,7 +2554,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             write_report(args.report_json, report)
         if not args.quiet:
             if isinstance(exc, VerifyError):
-                print(f"FAIL {CONTRACT_NAME}: {exc.code} at {exc.location}")
+                print(f"FAIL {CONTRACT_NAME}: {exc.code} at {exc.location}: {exc.detail}")
             else:
                 print(f"FAIL {CONTRACT_NAME}: verifier-internal-error ({exc.__class__.__name__})")
         return 1

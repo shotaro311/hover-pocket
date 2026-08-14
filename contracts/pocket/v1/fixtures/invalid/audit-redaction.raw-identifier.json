@@ -1,0 +1,10 @@
+{
+  "base": "golden/audit-redaction.json",
+  "mutation": {
+    "setPath": [
+      "entry",
+      "principalPseudonym"
+    ],
+    "value": "user@example.com"
+  }
+}

@@ -1,9 +1,17 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-08-13
+updated: 2026-08-14
 updated_by: codex
-status: an0-implemented; pr-open; ci-pass; review-pending
+status: an0-hardened; pr-open; local-pass; security-pass; ci-pending
 ---
+
+## 2026-08-14 AI-native AN0 Contract Hardening
+
+- PR #7の独立レビューで再現した12経路をfail closedへ修正した。`native_authority`実行、Pocket App版差し替え、self-claimed readback、unbound package source、scope escape、asset traversal、生成Surfaceのreceipt描画、audit raw ID、oversized plan / workflow payloadを拒否し、未知schema keyword / unresolved `$ref`もnegative fixtureへ固定した。
+- Pocket App ID / version / manifest digestをplan、invocation、approval、receipt、auditへbindingし、successful receiptはHost-owned typed observation、再計算evidence digest、descriptor match field一致を必須にした。manifest全pathはsource byte digestへbindingし、scopeとaudit値をHost validatorで強制する。
+- contract corpusは12 schema / 47 fixtureへ増え、全reject fixtureが本文digest、stable error code、exact error locationを持つ。監査ログも既知Invocation、descriptor、入力digest、Host-owned readback digestへbindingする。CIは固定runner / Python / Action SHAを使い、Ubuntu / macOS / Windowsのreport artifactをbyte-for-byte比較する。
+- ローカルでは47 / 47 fixture、2回report byte一致、JSON 66件の重複key拒否parse、`swift build`、Panel layout 112件、Clipboard、Timer、Calculator、`git diff --check`が成功した。security-relevant source確定時のCodex Security scan `0fc69191-40ee-4467-9d0d-e7089a13c172`は6 surfaceを完全レビューし、coverage complete、reportable finding 0件でsealed completeとなった。
+- runtime source、Provider Registry、既存data format、requirements、PLAN1、承認画像は変更していない。GitHub CIのreadback完了後にPR headと状態を追記する。詳細: `progress/2026-08/2026-08-14_hover-pocket-ai-native-an0-hardening.md`。
 
 ## 2026-08-13 AI-native AN0 Contracts and Verification
 
