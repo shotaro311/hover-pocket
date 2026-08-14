@@ -2,7 +2,7 @@
 
 ## 現在地
 
-Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し、Windowsではapplication-lifetime runtime、origin限定microphone permission、WebRTC SDP / remote audio、VoiceからBrokerへのdynamic tool dispatchまで実装した。macOSにも専用app-server clientとVoice Coordinator基盤を追加した。両OSのText / Voice / Native UIで共有するroute-independent canonical plan digestも実装済みである。これはAN3完了ではなく、対象Windows実機の実音声・実Calendar操作、root-scoped child cards、macOSのHost / microphone / Broker接続、両OSE2Eが残っている。
+Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し、Windows / macOSの両方でapplication-lifetime runtime、origin限定microphone permission、WebRTC SDP / remote audio、VoiceからBrokerへのdynamic tool dispatchまでproduction経路へ接続した。両OSのText / Voice / Native UIで共有するroute-independent canonical plan digestも実装済みである。これはAN3完了ではなく、対象実機のマイク・remote audio・音声1往復・実Calendar操作、root-scoped child cardsが残っている。
 
 ## Git / worktree
 
@@ -11,7 +11,7 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 - branch開始head: `374aa6a39b5860ebfb6cd944a62f08106c72cff4`
 - 統合対象AN2 head: `5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`
 - AN2実装と両OSのVoice Lane表示基盤をmerge commit `52bf00c`で統合し、AN2最終進捗commit `15e44f0`もmerge commit `cdc5a8f`で取り込んだ。
-- AN2 Ready PR [#9](https://github.com/shotaro311/hover-pocket/pull/9)はWindows / macOS / PR Routerが全成功し、MERGEABLE / CLEANである。AN3の最新実装head `33d45ade1646ef16dfa12d3766fa0812c537d54d`はDraft PR #6へpush済みで、remote parity `0 / 0`、PRの全5チェックが成功し、GitHub readbackはMERGEABLE / CLEANである。
+- AN2 Ready PR [#9](https://github.com/shotaro311/hover-pocket/pull/9)はWindows / macOS / PR Routerが全成功し、MERGEABLE / CLEANである。AN3の最新実装head `a82291618ee7c8e9939b4f611f694c13ac9a9fa3`はDraft PR #6へpush済みで、remote parity `0 / 0`、PRの全5チェックが成功し、GitHub readbackはMERGEABLE / CLEANである。
 
 ## 再利用したVoice基盤
 
@@ -39,7 +39,7 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 - Compactは視覚タイトルを置かず、64ptの短い波形より会話欄へ幅を優先した。レーン背景では切り替えず、明示chevronだけでCompact / Expandedを変更し、fullscreen state / route / buttonは持たない。
 - Expandedは左transcript、右current root配下のchild session cardsという2列構成にした。両列は内部scrollを持ち、Provider領域を縮めない。
 - 設定へVoice Lane default-off、既定Compact、別opt-inの自動listenを追加した。短い画面でExpanded全体が収まらない場合はCompactへfail-safeし、上端とProvider領域を維持する。
-- 現段階のViewModelは実音声runtimeへ未接続で、transcript / session cardsは空状態を表示する。未完成機能を配布しないため、AN3 release gateまではbranch内だけで保持する。
+- このUI骨格の実装時点ではViewModelは実音声runtimeへ未接続だった。後述の追加統合でtranscriptはproduction runtimeへ接続済みで、root-scoped child session cardsだけが空状態のまま残る。未完成機能を配布しないため、AN3 release gateまではbranch内だけで保持する。
 
 ## Windows Host-owned Voice Lane UI骨格
 
@@ -77,7 +77,7 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 ## macOS Codex app-server / Voice Coordinator基盤
 
 - Swift actorとして専用`CodexAppServerClient`を追加し、JSONL request相関、initialize、timeout / cancellation、malformed / unknown response隔離、bounded stdout / stderr、server request fail-closed、process cleanupを実装した。既定のexperimental APIは無効で、Voice featureが明示有効なCoordinatorだけが有効化する。
-- `CodexVoiceCoordinator`はaccount / voice gate、persistent root thread、read-only isolated workspace、WebRTC `thread/realtime/start` / SDP、memory-only bounded transcript、mute / stop、bounded restartを持つ。現時点ではdynamic toolは空で、Host UI / microphone / Capability Brokerへ本番接続していない。
+- `CodexVoiceCoordinator`はaccount / voice gate、persistent root thread、read-only isolated workspace、WebRTC `thread/realtime/start` / SDP、memory-only bounded transcript、mute / stop、bounded restartを持つ。この基盤実装時点ではdynamic toolは空だったが、後述の追加統合でHost UI / microphone / Capability Brokerへ接続した。
 - fake Python app-serverを使う`--verify-codex-app-server`をmacOS CIへ追加した。初期化、malformed isolation、未対応server request拒否、timeout後の回復、transport終了、child process cleanupを検査する。ローカルと最終CIで成功した。
 
 ## ChatGPT Pro Criticと安全性remediation
@@ -88,6 +88,20 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 - call identityをthread / turn / call IDへ固定し、tool+argsをfingerprintとして比較する。同じcall IDでtoolまたは引数を変えた再送はidempotency conflictとして拒否する。
 - app-server stdout lineを1 Mi character、tool requestを20 KiB、argumentsを16 KiB、同時server request / pending tool callを各8件へ制限し、超過はfail closedにした。JSON-RPC error replyは`code / message / data`のlowercase wire形式を固定した。
 - negative verifierはpre-ready tool call、mismatched root、transport generation切替、reset / authorization epoch、stale modal approval、tool substitution、oversized payload、pending overload、oversized protocol line、error wire casingを検査する。Critic delivery `return-d93b67beedc6244189005b6d854d25b5`は受入後に`processed` / `synthesis_completed_at=2026-08-15T04:12:37+09:00`へmark-doneした。
+
+## macOS production Voice / WebRTC / Broker追加統合
+
+- `AppDelegate`がAI-native Brokerと`TodayFocusTextAdapter`を1回だけ構成し、`HoverWindowController`のapplication-lifetime Voice runtimeへ渡す。Voice有効化時だけCodex app-serverを起動し、全Provider共通のVoice Laneへsnapshot / transcriptを反映する。
+- 非永続WKWebViewをRender / WebRTC transportだけに限定した。exact custom origin、main frame、microphone-only、表示中、明示開始から5秒以内のsingle-use armをすべて満たす場合だけ許可し、音声は保存しない。Promiseを返す`start` / `acceptAnswer`は`callAsyncJavaScript`で待ち、JavaScript / Swift双方のoperation IDとepochでclose後のマイク・接続復活を拒否する。
+- Coordinatorはthread生成前からnegotiation attemptを予約するsingle-flightへ変更した。client generation、root generation、attempt ID、UTF-8 131,072 byte上限をSDPへbindingし、timeout / stop / close / transport crash時はpending waiterを必ず完了させる。restart backoffのキャンセルを握りつぶさず、disable / dispose後に新しいCodex processを起動しない。
+- Voice toolはCalendar today / create、Timer start、Today Focusの4件で、現在rootとauthorization epochへbindingする。Calendar read toolはHost設定の`calendar.events.read`が明示ONのときだけdynamic toolへ登録し、grant変更時はruntimeを安全に再構成する。write承認はCancelをReturn既定、Escapeをreject、Allowを明示2番目操作にし、表示したcanonical引数とBroker planを一致させる。
+- Codex Security scan `47bd0464-3c05-44cc-9e9f-196393d8ee5e`のmedium 1件 / low 2件をreadbackした。Calendar read自己grantをHost-owned persisted grantへ移し、close animation開始前にsurface-activeをfalseへし、approval既定Allowを廃止した。実Calendar mutationと実マイク / remote audioはscanの制限どおり未検証である。
+
+## ChatGPT Pro Critic追加回収と修正
+
+- run `20260815-045421-hoverpocket-an3exact-diff-3d319d4-ab50042macwkwebview-webrtcapp-server-lifecyclewindowscliverifier`は通常Chat route、Oracle model `gpt-5.6-sol`、Pro thinking、critic、GitHub read-only、外部操作なしで実行した。Project targetは検証済みだが、会話URLとUI model-selection checkpointは未確認である。
+- canonical artifactは`critic-review.md` 23,646 byte、SHA-256 `7d4f589a415e321ac7a45a29229a2eb2f21c66543407c792e2a821fd44f6229a`。verdictはCHANGES REQUESTED、P1 5件 / P2 1件で、Promise bridge、restart cancellation、JavaScript operation epoch、SDP attempt identity、Windows async verifier exception、Swift UTF-8 byte境界を指摘した。
+- 6件をすべて修正し、`codex_voice_webrtc_epoch`、`codex_voice_sdp_attempt_isolation`、`codex_voice_restart_cancellation`とWindowsのinjected verifier failure gateを追加した。最終実装headでローカル検証receiptをPASSとして記録し、Pro runのrelease gateは`ready_for_publish=true`になった。
 
 ## ローカル検証
 
@@ -139,13 +153,20 @@ GitHub Actions / implementation head 33d45ad
   PASS / macOS Capability / Broker / Timer / Voice Lane / app-server run 31832027042
   PASS / PR Router run 31832023369
   PASS / PR #6 MERGEABLE / CLEAN / remote parity 0 / 0
+
+GitHub Actions / implementation head a822916
+  PASS / Voice Lane Windows CI runs 31841209115 and 31841213311
+  PASS / Windows verify run 31841213324
+  PASS / macOS verify run 31841213322
+  PASS / PR Router run 31841211479
+  PASS / injected UiModel exception exits with code 1 instead of hanging
+  PASS / PR #6 MERGEABLE / CLEAN / remote parity 0 / 0
 ```
 
 ## 未完了gate
 
 1. AN2 PR #9は人間によるmerge待ちである。AN3は既に同じAN2 headを統合済みだが、AN2 merge後にmainとのparityを再確認する。
-2. installed Codex version / generated schema / account / voicesを対象Windows実機でreadbackする。
-3. origin限定microphone、WebRTC SDP / remote audio、1往復、safe closeを対象Windows実機で検証する。
-4. 対象Windows実機でVoice intentからCalendar read / create、Timer start、Today Focusを呼び、Host approval、実Provider状態、event / timer / note ID readbackを確認する。
+2. installed Codex version / generated schema / account / voicesを対象Windows / macOS実機でreadbackする。
+3. origin限定microphone、WebRTC SDP / remote audio、1往復、safe closeを対象Windows / macOS実機で検証する。
+4. 対象Windows / macOS実機でVoice intentからCalendar read / create、Timer start、Today Focusを呼び、Host approval、実Provider状態、event / timer / note ID readbackを確認する。
 5. root-scoped child session cardsを実thread stateへ接続する。
-6. macOS Voice Coordinatorをapplication-lifetime Host、Voice Lane、origin限定microphone / WebRTC transport、Capability Brokerへ接続し、両OS実音声gateを通す。

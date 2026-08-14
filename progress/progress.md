@@ -2,11 +2,14 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: an2-pr-ready-ci-pass; an3-voice-foundation-security-remediated-ci-pass; real-device-and-macos-production-voice-e2e-pending
+status: an2-pr-ready-ci-pass; an3-macos-production-voice-connected-ci-pass; real-device-voice-e2e-and-child-cards-pending
 ---
 
 ## 2026-08-15 AI-native AN3 Voice Foundation Integration
 
+- macOSのproduction Voice Laneをapplication-lifetime Codex app-server、WKWebView microphone / WebRTC transport、Capability Brokerへ接続した。Voiceから「今日の予定」「Timer開始」「Calendar予定作成」「Today Focus」を既存UIと同じCapability経由で扱い、Calendar readは既定OFFの明示許可、writeはHost承認、実行後readbackを必須にした。パネルclose開始時に権限を即時失効し、古いWebRTC / SDP / app-server generationを新しいsessionへ混ぜない。
+- ChatGPT Pro Critic run `20260815-045421-hoverpocket-an3exact-diff-3d319d4-ab50042macwkwebview-webrtcapp-server-lifecyclewindowscliverifier`の`critic-review.md`（23,646 byte、SHA-256 `7d4f589a...229a`）が指摘したP1 5件 / P2 1件をすべて修正した。Promise対応JS呼出し、operation epoch、negotiation single-flight、restart cancellation、Windows verifier例外終了、SDP UTF-8 byte上限を回帰fixtureへ固定した。Codex Security scan `47bd0464-3c05-44cc-9e9f-196393d8ee5e`のCalendar read grant、close中authorization、承認既定Allowの3件もHost-owned許可、surface-active state、Cancel既定へ修正した。
+- 最終実装head `a82291618ee7c8e9939b4f611f694c13ac9a9fa3`はremote branchと一致する。Voice Lane Windows CI [31841209115](https://github.com/shotaro311/hover-pocket/actions/runs/31841209115) / [31841213311](https://github.com/shotaro311/hover-pocket/actions/runs/31841213311)、通常Windows [31841213324](https://github.com/shotaro311/hover-pocket/actions/runs/31841213324)、macOS [31841213322](https://github.com/shotaro311/hover-pocket/actions/runs/31841213322)、PR Router [31841211479](https://github.com/shotaro311/hover-pocket/actions/runs/31841211479)が全成功し、Draft PR #6はMERGEABLE / CLEANである。残るAN3 gateは対象実機のマイク・remote audio・音声1往復・実Calendar mutationと、root-scoped child cardsである。
 - 既存Draft PR #6の`feature/codex-voice-lane`を隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an3`へ復元し、AN2実装head `5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`を非破壊で統合した。テキスト競合はなく、Voice Lane表示基盤を含むmerge commit `52bf00c`を作成した。
 - macOSではSwift warnings-as-errors build、Broker、Capability、Timer、Clipboard、Calculator、Panel layout 112件、Media、Pocket contract 12 schema / 52 fixture、diff checkが成功した。
 - Windows Voice基盤はexperimental app-server capabilityを既定無効へ変更し、明示的に有効化するVerifierだけを許可した。専用CIはShell / Display / rendered UI、全built-in Provider、AN2 Registry / Broker、Voice layout / protocol / coordinatorを同じWindows runnerで検証する構成へ更新した。
