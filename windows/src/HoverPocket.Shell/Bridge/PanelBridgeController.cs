@@ -1,6 +1,7 @@
 using System.IO;
 using System.Diagnostics;
 using System.Text.Json;
+using HoverPocket.Shell.Capabilities;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Providers;
 using HoverPocket.Shell.Providers.AiLane;
@@ -28,6 +29,7 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly ControlsBridgeController _controlsBridgeController = new();
     private readonly StickyBridgeController _stickyBridgeController;
     private readonly TimerBridgeHandlers _timerBridgeHandlers;
+    private readonly PocketCapabilityHandlerSet _capabilityHandlers;
     private readonly List<BridgeDispatcher> _dispatchers = [];
     private readonly object _previewFrameSync = new();
     private string _selectedProviderId;
@@ -52,8 +54,14 @@ internal sealed class PanelBridgeController : IDisposable
         _aiLaneController = aiLaneController ?? new AiLaneController(
             new AiLaneAuditLog(settingsStore.RootDirectory),
             new CalendarAiLaneConnector(_calendarBridgeController.Store));
-        _stickyBridgeController = new StickyBridgeController(new StickyNotesStore(Path.Combine(settingsStore.RootDirectory, "sticky")));
-        _timerBridgeHandlers = new TimerBridgeHandlers(new TimerStore(Path.Combine(settingsStore.RootDirectory, "timer")));
+        var stickyStore = new StickyNotesStore(Path.Combine(settingsStore.RootDirectory, "sticky"));
+        var timerStore = new TimerStore(Path.Combine(settingsStore.RootDirectory, "timer"));
+        _stickyBridgeController = new StickyBridgeController(stickyStore);
+        _timerBridgeHandlers = new TimerBridgeHandlers(timerStore);
+        _capabilityHandlers = ProviderCapabilityCompositionRoot.Create(
+            new GoogleCalendarCapabilityDataSource(_calendarBridgeController.Store),
+            timerStore,
+            stickyStore);
         _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.Normalize(settings, providerRegistry.ProviderIds);
@@ -87,6 +95,8 @@ internal sealed class PanelBridgeController : IDisposable
     public UserSettings CurrentSettings { get; private set; }
 
     public string SelectedProviderId => _selectedProviderId;
+
+    public PocketCapabilityHandlerSet CapabilityHandlers => _capabilityHandlers;
 
     public IDisposable Attach(BridgeDispatcher dispatcher)
     {

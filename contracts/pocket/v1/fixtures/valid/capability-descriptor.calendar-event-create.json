@@ -1,0 +1,118 @@
+{
+  "$schema": "hoverpocket://schemas/capability-descriptor/v1",
+  "id": "calendar.event.create",
+  "version": 1,
+  "titleKey": "capability.calendar.event.create",
+  "effect": "external_write",
+  "permissions": [
+    "calendar.events.write"
+  ],
+  "approvalPolicy": "per_call",
+  "idempotency": "required",
+  "availability": {
+    "macos": "available",
+    "windows": "available"
+  },
+  "limits": {
+    "timeoutMs": 10000,
+    "maxPayloadBytes": 16384,
+    "maxCallsPerMinute": 30
+  },
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "calendarId",
+      "title",
+      "start",
+      "end",
+      "isAllDay",
+      "location",
+      "notes"
+    ],
+    "properties": {
+      "calendarId": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 256
+      },
+      "title": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 160
+      },
+      "start": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "end": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "isAllDay": {
+        "type": "boolean"
+      },
+      "location": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 500
+      },
+      "notes": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 10000
+      }
+    },
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "eventRef",
+      "eventId",
+      "start",
+      "end",
+      "safeTitle"
+    ],
+    "properties": {
+      "eventRef": {
+        "type": "string",
+        "maxLength": 256
+      },
+      "eventId": {
+        "type": "string",
+        "maxLength": 256
+      },
+      "start": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "end": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "safeTitle": {
+        "type": "string",
+        "maxLength": 160
+      }
+    },
+    "additionalProperties": false
+  },
+  "readback": {
+    "strategy": "capability_query",
+    "capabilityId": "calendar.event.get",
+    "capabilityVersion": 1,
+    "match": [
+      "eventRef",
+      "eventId",
+      "start",
+      "end",
+      "safeTitle"
+    ]
+  }
+}

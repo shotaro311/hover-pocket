@@ -1,4 +1,5 @@
 using System.Windows;
+using HoverPocket.Shell.Capabilities;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Providers;
 using HoverPocket.Shell.Providers.AiLane;
@@ -95,6 +96,14 @@ public partial class App : System.Windows.Application
         {
             VerifyConsole.AttachParent();
             _ = RunCalendarLiveVerificationAsync();
+            return;
+        }
+
+        if (options.VerifyCapabilities)
+        {
+            VerifyConsole.AttachParent();
+            Environment.ExitCode = new CapabilityVerifier().Run();
+            Shutdown();
             return;
         }
 

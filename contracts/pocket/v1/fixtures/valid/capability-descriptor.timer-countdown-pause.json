@@ -1,11 +1,11 @@
 {
   "$schema": "hoverpocket://schemas/capability-descriptor/v1",
-  "id": "sticky.note.upsert",
+  "id": "timer.countdown.pause",
   "version": 1,
-  "titleKey": "capability.sticky.note.upsert",
+  "titleKey": "capability.timer.countdown.pause",
   "effect": "reversible_local_write",
   "permissions": [
-    "sticky.write"
+    "timer.write"
   ],
   "approvalPolicy": "broker_policy",
   "idempotency": "required",
@@ -21,34 +21,12 @@
   "inputSchema": {
     "type": "object",
     "required": [
-      "stableKey",
-      "title",
-      "body",
-      "color"
+      "timerId"
     ],
     "properties": {
-      "stableKey": {
+      "timerId": {
         "type": "string",
-        "minLength": 1,
-        "maxLength": 160
-      },
-      "title": {
-        "type": "string",
-        "maxLength": 120
-      },
-      "body": {
-        "type": "string",
-        "maxLength": 10000
-      },
-      "color": {
-        "type": "string",
-        "enum": [
-          "yellow",
-          "blue",
-          "green",
-          "pink",
-          "gray"
-        ]
+        "format": "uuid"
       }
     },
     "additionalProperties": false
@@ -56,25 +34,23 @@
   "outputSchema": {
     "type": "object",
     "required": [
-      "noteId",
-      "title",
-      "body",
-      "updatedAt"
+      "timerId",
+      "state",
+      "endAt"
     ],
     "properties": {
-      "noteId": {
+      "timerId": {
         "type": "string",
-        "maxLength": 128
+        "format": "uuid"
       },
-      "title": {
+      "state": {
         "type": "string",
-        "maxLength": 120
+        "enum": [
+          "running",
+          "paused"
+        ]
       },
-      "body": {
-        "type": "string",
-        "maxLength": 10000
-      },
-      "updatedAt": {
+      "endAt": {
         "type": "string",
         "format": "date-time"
       }
@@ -83,13 +59,12 @@
   },
   "readback": {
     "strategy": "capability_query",
-    "capabilityId": "sticky.note.get",
+    "capabilityId": "timer.countdown.get",
     "capabilityVersion": 1,
     "match": [
-      "noteId",
-      "title",
-      "body",
-      "updatedAt"
+      "timerId",
+      "state",
+      "endAt"
     ]
   }
 }

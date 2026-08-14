@@ -80,19 +80,25 @@ final class TimerStore: ObservableObject {
 
     // MARK: - Timer lifecycle
 
-    func start(preset: TimerPreset, pinnedPresetID: UUID? = nil) {
-        guard canStartTimer else { return }
+    @discardableResult
+    func start(
+        preset: TimerPreset,
+        pinnedPresetID: UUID? = nil,
+        id: UUID = UUID(),
+        at date: Date = Date()
+    ) -> RunningTimer? {
+        guard canStartTimer else { return nil }
         let phaseDuration = preset.isPomodoro ? preset.workDuration : preset.duration
-        guard phaseDuration > 0 else { return }
+        guard phaseDuration > 0 else { return nil }
         let timer = RunningTimer(
-            id: UUID(),
+            id: id,
             title: preset.title,
             color: preset.color,
             soundEnabled: preset.soundEnabled,
             isPomodoro: preset.isPomodoro,
             phase: .work,
             completedWorkCycles: 0,
-            endDate: Date().addingTimeInterval(phaseDuration),
+            endDate: date.addingTimeInterval(phaseDuration),
             phaseDuration: phaseDuration,
             pausedRemaining: nil,
             workDuration: preset.workDuration,
@@ -100,27 +106,126 @@ final class TimerStore: ObservableObject {
             pinnedPresetID: pinnedPresetID
         )
         runningTimers.append(timer)
-        now = Date()
+        now = date
         syncTickTimer()
         persistRunningTimers()
+        return timer
     }
 
-    func pause(id: UUID) {
+    func runningTimer(id: UUID) -> RunningTimer? {
+        runningTimers.first { $0.id == id }
+    }
+
+    @discardableResult
+    func startForCapability(
+        preset: TimerPreset,
+        id: UUID,
+        at date: Date
+    ) async throws -> RunningTimer? {
+        await pendingWriteTask?.value
+        guard canStartTimer else { return nil }
+        let phaseDuration = preset.isPomodoro ? preset.workDuration : preset.duration
+        guard phaseDuration > 0 else { return nil }
+        let previousTimers = runningTimers
+        let previousNow = now
+        let timer = RunningTimer(
+            id: id,
+            title: preset.title,
+            color: preset.color,
+            soundEnabled: preset.soundEnabled,
+            isPomodoro: preset.isPomodoro,
+            phase: .work,
+            completedWorkCycles: 0,
+            endDate: date.addingTimeInterval(phaseDuration),
+            phaseDuration: phaseDuration,
+            pausedRemaining: nil,
+            workDuration: preset.workDuration,
+            breakDuration: preset.breakDuration,
+            pinnedPresetID: nil
+        )
+        runningTimers.append(timer)
+        now = date
+        do {
+            try persistRunningTimersImmediately()
+            syncTickTimer()
+            return timer
+        } catch {
+            runningTimers = previousTimers
+            now = previousNow
+            syncTickTimer()
+            throw error
+        }
+    }
+
+    func pauseForCapability(id: UUID, at date: Date) async throws {
+        await pendingWriteTask?.value
+        guard let index = runningTimers.firstIndex(where: { $0.id == id }),
+              !runningTimers[index].isPaused else { return }
+        let previousTimers = runningTimers
+        runningTimers[index].pausedRemaining = runningTimers[index].remaining(at: date)
+        do {
+            try persistRunningTimersImmediately()
+            syncTickTimer()
+        } catch {
+            runningTimers = previousTimers
+            syncTickTimer()
+            throw error
+        }
+    }
+
+    func resumeForCapability(id: UUID, at date: Date) async throws {
+        await pendingWriteTask?.value
+        guard let index = runningTimers.firstIndex(where: { $0.id == id }),
+              let remaining = runningTimers[index].pausedRemaining else { return }
+        let previousTimers = runningTimers
+        let previousNow = now
+        runningTimers[index].pausedRemaining = nil
+        runningTimers[index].endDate = date.addingTimeInterval(remaining)
+        now = date
+        do {
+            try persistRunningTimersImmediately()
+            syncTickTimer()
+        } catch {
+            runningTimers = previousTimers
+            now = previousNow
+            syncTickTimer()
+            throw error
+        }
+    }
+
+    func stopForCapability(id: UUID) async throws {
+        await pendingWriteTask?.value
+        let previousTimers = runningTimers
+        runningTimers.removeAll { $0.id == id }
+        do {
+            try persistRunningTimersImmediately()
+            if activeAlert?.id == id {
+                stopAlert()
+            }
+            syncTickTimer()
+        } catch {
+            runningTimers = previousTimers
+            syncTickTimer()
+            throw error
+        }
+    }
+
+    func pause(id: UUID, at date: Date = Date()) {
         guard let index = runningTimers.firstIndex(where: { $0.id == id }),
               !runningTimers[index].isPaused
         else { return }
-        runningTimers[index].pausedRemaining = runningTimers[index].remaining(at: Date())
+        runningTimers[index].pausedRemaining = runningTimers[index].remaining(at: date)
         syncTickTimer()
         persistRunningTimers()
     }
 
-    func resume(id: UUID) {
+    func resume(id: UUID, at date: Date = Date()) {
         guard let index = runningTimers.firstIndex(where: { $0.id == id }),
               let remaining = runningTimers[index].pausedRemaining
         else { return }
         runningTimers[index].pausedRemaining = nil
-        runningTimers[index].endDate = Date().addingTimeInterval(remaining)
-        now = Date()
+        runningTimers[index].endDate = date.addingTimeInterval(remaining)
+        now = date
         syncTickTimer()
         persistRunningTimers()
     }
@@ -365,6 +470,15 @@ final class TimerStore: ObservableObject {
 
     private func persistRunningTimers() {
         persist(runningTimers, to: runningURL)
+    }
+
+    private func persistRunningTimersImmediately() throws {
+        guard persistenceEnabled else { return }
+        try fileManager.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(runningTimers)
+        try data.write(to: runningURL, options: .atomic)
     }
 
     private func persist<Value: Encodable & Sendable>(_ value: Value, to url: URL) {

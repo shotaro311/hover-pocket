@@ -193,7 +193,7 @@ final class GoogleCalendarStore: ObservableObject {
         lastErrorMessage = nil
         do {
             if draft.isNew {
-                try await apiClient.createEvent(draft)
+                _ = try await apiClient.createEvent(draft)
             } else {
                 try await apiClient.updateEvent(draft)
             }
@@ -223,6 +223,87 @@ final class GoogleCalendarStore: ObservableObject {
             handleMutationFailure(error)
             return false
         }
+    }
+
+    func listEventsForCapability(from start: Date, to end: Date) async throws -> [GoogleCalendarEventOccurrence] {
+        let snapshot = try await loadMonthForTool(containing: start)
+        return snapshot.events
+            .sorted { $0.start < $1.start }
+    }
+
+    func eventForCapability(eventRef: String) async throws -> GoogleCalendarEventOccurrence? {
+        if let cached = loadState.snapshot?.events.first(where: { $0.id == eventRef }) {
+            return cached
+        }
+        guard let separator = eventRef.lastIndex(of: ":") else {
+            return nil
+        }
+        let calendarID = String(eventRef[..<separator])
+        let eventID = String(eventRef[eventRef.index(after: separator)...])
+        guard !calendarID.isEmpty, !eventID.isEmpty else { return nil }
+        restoreConnectionIfNeeded()
+        guard connectionState == .signedIn else {
+            throw GoogleCalendarToolError.notConnected
+        }
+        let source = loadState.snapshot?.sources.first { $0.id == calendarID }
+        return try await apiClient.fetchEvent(
+            calendarID: calendarID,
+            eventID: eventID,
+            source: source
+        )
+    }
+
+    func createEventForCapability(
+        _ request: CalendarCapabilityCreateRequest,
+        idempotencyKey: String
+    ) async throws -> GoogleCalendarEventOccurrence {
+        _ = idempotencyKey
+        var draftStart = request.start
+        var draftEnd = request.end
+        if request.isAllDay {
+            let calendar = Calendar.current
+            guard let start = request.allDayStart?.date(in: calendar),
+                  let end = request.allDayEnd?.date(in: calendar),
+                  end > start else {
+                throw CapabilityHandlerError.invalidArgument("start_end")
+            }
+            draftStart = start
+            draftEnd = end
+        }
+        let snapshot = try await loadMonthForTool(containing: draftStart)
+        let source: GoogleCalendarSource
+        if let requested = request.calendarID {
+            guard let requestedSource = snapshot.sources.first(where: { $0.id == requested && $0.canWrite }) else {
+                throw CapabilityHandlerError.unavailable("writable_calendar")
+            }
+            source = requestedSource
+        } else if let defaultSource = snapshot.sources.first(where: { $0.canWrite && $0.isPrimary })
+            ?? snapshot.sources.first(where: \.canWrite) {
+            source = defaultSource
+        } else {
+            throw CapabilityHandlerError.unavailable("writable_calendar")
+        }
+        let draft = GoogleCalendarEventDraft(
+            calendarID: source.id,
+            eventID: nil,
+            title: request.title,
+            location: request.location ?? "",
+            notes: request.notes ?? "",
+            start: draftStart,
+            end: draftEnd,
+            isAllDay: request.isAllDay
+        )
+        let created = try await apiClient.createEvent(draft, source: source)
+        let observed = try await apiClient.fetchEvent(
+            calendarID: source.id,
+            eventID: created.googleEventID,
+            source: source
+        )
+        if let refreshed = try? await apiClient.fetchMonth(containing: draftStart) {
+            lastLoadedMonth = Calendar.current.startOfMonth(for: draftStart)
+            loadState = .loaded(refreshed)
+        }
+        return observed
     }
 
     private func emptyMonthDays(for monthStart: Date, calendar: Calendar) -> [CalendarDayCell] {

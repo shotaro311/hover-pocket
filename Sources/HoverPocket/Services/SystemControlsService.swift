@@ -282,22 +282,20 @@ final class ControlsStore: ObservableObject {
         }
 
         isPlaybackCommandPending = true
-        playbackCommandTask = Task.detached(priority: .userInitiated) { [weak self] in
+        playbackCommandTask = Task(priority: .userInitiated) { [weak self] in
             await service.togglePlayPause()
             let readback = await Self.readNowPlayingAfterPlaybackToggle(
                 service: service,
                 expectedIsPlaying: expectedIsPlaying
             )
-            await MainActor.run {
-                guard let self, self.playbackCommandRequestID == requestID else { return }
-                if let readback {
-                    self.nowPlaying = readback
-                } else {
-                    self.nowPlaying.isPlaying = expectedIsPlaying
-                }
-                self.isPlaybackCommandPending = false
-                self.pendingPlaybackTarget = nil
+            guard let self, self.playbackCommandRequestID == requestID else { return }
+            if let readback {
+                self.nowPlaying = readback
+            } else {
+                self.nowPlaying.isPlaying = expectedIsPlaying
             }
+            self.isPlaybackCommandPending = false
+            self.pendingPlaybackTarget = nil
         }
         schedulePendingWatchdog(
             after: 2.5,
@@ -320,24 +318,22 @@ final class ControlsStore: ObservableObject {
 
         nowPlayingRefreshTask?.cancel()
         playbackRateCommandTask?.cancel()
-        playbackRateCommandTask = Task.detached(priority: .userInitiated) { [weak self] in
+        playbackRateCommandTask = Task(priority: .userInitiated) { [weak self] in
             let appliedRate = await service.setPlaybackSpeed(
                 target,
                 delta: delta,
                 mediaURLString: mediaURLString,
                 preferredTitle: preferredTitle
             )
-            await MainActor.run {
-                guard let self, self.playbackRateRequestID == requestID else { return }
-                if let appliedRate {
-                    self.nowPlaying.playbackRate = appliedRate
-                } else {
-                    self.nowPlaying.playbackRate = initialRate
-                }
-                self.isPlaybackRateCommandPending = false
-                if appliedRate != nil {
-                    self.refreshNowPlaying()
-                }
+            guard let self, self.playbackRateRequestID == requestID else { return }
+            if let appliedRate {
+                self.nowPlaying.playbackRate = appliedRate
+            } else {
+                self.nowPlaying.playbackRate = initialRate
+            }
+            self.isPlaybackRateCommandPending = false
+            if appliedRate != nil {
+                self.refreshNowPlaying()
             }
         }
         schedulePendingWatchdog(

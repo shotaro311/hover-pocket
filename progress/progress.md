@@ -2,8 +2,18 @@
 project_slug: hover-menu-preview
 updated: 2026-08-14
 updated_by: codex
-status: an0-hardened; pr-open; local-pass; security-pass; ci-pass
+status: an1-provider-capabilities; pr-ready; local-pass; security-pass; ci-pass
 ---
+
+## 2026-08-14 AI-native AN1 Provider Capabilities
+
+- AN0 PR [#7](https://github.com/shotaro311/hover-pocket/pull/7)を全必須check成功、Ready、MERGEABLEのreadback後にmergeし、`main`のmerge commit `6e248c8`から隔離worktree `hover-menu-preview-ai-native-an1`とbranch `codex/ai-native-an1-provider-capabilities`を作成した。
+- macOS / Windowsへ共通ID・version・typed argumentsを持つProvider Capability handlerを追加した。実行可能な10 handlerはCalendar list / get / create、Timer start / get / pause / resume / stop、Sticky upsert / get。既存UIと同じStore instanceへ接続する一方、Voice / WebView / MCP / Pocket Appからの外部呼出し口はまだ接続していない。
+- Calendar createはnull以外の明示calendarをfail closedで選択し、作成応答のevent IDとGET readbackを返す。終日予定はGoogleのdate-only値を保持し、requested timezoneのcivil dayでlist対象を選ぶ。DST、異なるoffset、multi-day、確認済みwrite後のUI cache refreshを補正した。Timer / Stickyはatomic persistence失敗時にmemory stateをrollbackし、Windows Timer stopは期限切れ後も一致するalertとsoundを停止する。全write handlerはidempotency keyを必須にしたが、durable replay ledgerはAN2のBroker責務として未接続である。
+- 最終実装head `c3917ef`で`swift build`、`--verify-capabilities`（10 handlers）、Timer、Clipboard、Calculator、Panel layout 112件、Media、`git diff --check`が成功した。Pocket contractは12 schema / 52 fixtureが2回成功し、reportはbyte一致、SHA-256 `b11c7a6f...d0b0`。`--verify-google-calendar`はこのworktreeにOAuth client IDがなく未実行で、外部予定は作成・変更していない。
+- GitHub Actions run [31795599989](https://github.com/shotaro311/hover-pocket/actions/runs/31795599989)でUbuntu / macOS / Windows contract verifierとcross-OS byte比較、run [31795600008](https://github.com/shotaro311/hover-pocket/actions/runs/31795600008)でWindows Release build / Capabilityを含む既存回帰、run [31795599988](https://github.com/shotaro311/hover-pocket/actions/runs/31795599988)でmacOS Swift 6 build / Capability / Timerが成功した。
+- exact source range `6e248c8...c3917ef`のCodex Security scan `hoverpocket_an1_c3917ef_20260814T112020Z`は24 source fileとsupporting contracts / CIを完全レビューし、coverage complete、reportable finding 0件でsealed complete。approval binding、durable replay、sanitized receipt、audit enforcementはAN2の必須gateであり、それ以前は外部経路へ公開しない。
+- Ready PR [#8](https://github.com/shotaro311/hover-pocket/pull/8)へ実装と検証を集約した。詳細: `progress/2026-08/2026-08-14_hover-pocket-ai-native-an1-provider-capabilities.md`。
 
 ## 2026-08-14 AI-native AN0 Contract Hardening
 

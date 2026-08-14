@@ -80,6 +80,14 @@ internal sealed class TimerStore : IDisposable
         }
     }
 
+    public RunningTimer? GetRunningTimer(Guid id)
+    {
+        lock (_gate)
+        {
+            return RunningTimers.FirstOrDefault(timer => timer.Id == id);
+        }
+    }
+
     public TimerSnapshot UpdateDraftTimer(TimerPreset preset)
     {
         lock (_gate)
@@ -126,7 +134,7 @@ internal sealed class TimerStore : IDisposable
             }
 
             var now = _clock.UtcNow;
-            RunningTimers.Add(new RunningTimer(
+            var created = new RunningTimer(
                 Guid.NewGuid(),
                 preset.Title,
                 preset.Color,
@@ -139,8 +147,17 @@ internal sealed class TimerStore : IDisposable
                 PausedRemainingSeconds: null,
                 WorkDurationSeconds: ClampDuration(preset.WorkDurationSeconds),
                 RestDurationSeconds: ClampDuration(preset.RestDurationSeconds),
-                pinnedPresetId));
-            PersistRunningLocked();
+                pinnedPresetId);
+            RunningTimers.Add(created);
+            try
+            {
+                PersistRunningLocked();
+            }
+            catch
+            {
+                RunningTimers.RemoveAll(timer => timer.Id == created.Id);
+                throw;
+            }
             SyncTickTimerLocked();
             return BuildSnapshotLocked(now);
         }
@@ -155,7 +172,15 @@ internal sealed class TimerStore : IDisposable
             {
                 var timer = RunningTimers[index];
                 RunningTimers[index] = timer with { PausedRemainingSeconds = timer.RemainingSeconds(_clock.UtcNow) };
-                PersistRunningLocked();
+                try
+                {
+                    PersistRunningLocked();
+                }
+                catch
+                {
+                    RunningTimers[index] = timer;
+                    throw;
+                }
                 SyncTickTimerLocked();
             }
 
@@ -170,12 +195,21 @@ internal sealed class TimerStore : IDisposable
             var index = RunningTimers.FindIndex(timer => timer.Id == id);
             if (index >= 0 && RunningTimers[index].PausedRemainingSeconds is { } remaining)
             {
-                RunningTimers[index] = RunningTimers[index] with
+                var timer = RunningTimers[index];
+                RunningTimers[index] = timer with
                 {
                     PausedRemainingSeconds = null,
                     EndAtUtc = _clock.UtcNow.AddSeconds(remaining)
                 };
-                PersistRunningLocked();
+                try
+                {
+                    PersistRunningLocked();
+                }
+                catch
+                {
+                    RunningTimers[index] = timer;
+                    throw;
+                }
                 SyncTickTimerLocked();
             }
 
@@ -187,13 +221,30 @@ internal sealed class TimerStore : IDisposable
     {
         lock (_gate)
         {
-            RunningTimers.RemoveAll(timer => timer.Id == id);
+            var index = RunningTimers.FindIndex(timer => timer.Id == id);
+            if (index < 0)
+            {
+                if (ActiveAlert?.Id == id)
+                {
+                    StopAlertLocked();
+                }
+                return BuildSnapshotLocked(_clock.UtcNow);
+            }
+            var timer = RunningTimers[index];
+            RunningTimers.RemoveAt(index);
+            try
+            {
+                PersistRunningLocked();
+            }
+            catch
+            {
+                RunningTimers.Insert(index, timer);
+                throw;
+            }
             if (ActiveAlert?.Id == id)
             {
                 StopAlertLocked();
             }
-
-            PersistRunningLocked();
             SyncTickTimerLocked();
             return BuildSnapshotLocked(_clock.UtcNow);
         }
@@ -506,7 +557,7 @@ internal sealed class TimerStore : IDisposable
 
     private void PersistRunningLocked()
     {
-        Persist(RunningPath, RunningTimers);
+        PersistAtomically(RunningPath, RunningTimers);
     }
 
     private void Persist<T>(string path, T value)
@@ -514,6 +565,24 @@ internal sealed class TimerStore : IDisposable
         Directory.CreateDirectory(StorageDirectory);
         var json = JsonSerializer.Serialize(value, JsonOptions);
         File.WriteAllText(path, json);
+    }
+
+    private void PersistAtomically<T>(string path, T value)
+    {
+        Directory.CreateDirectory(StorageDirectory);
+        var temporaryPath = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(value, JsonOptions));
+            File.Move(temporaryPath, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
     }
 
     private T LoadOrDefault<T>(string path, T fallback)
@@ -577,7 +646,7 @@ internal sealed class TimerStore : IDisposable
             return 0;
         }
 
-        return Math.Clamp(seconds, 0, 24 * 60 * 60 - 1);
+        return Math.Clamp(seconds, 0, 24 * 60 * 60);
     }
 
     private static string DefaultStorageDirectory()
@@ -663,6 +732,8 @@ internal sealed class NullTimerAlertSound : ITimerAlertSound
 {
     public int StartCount { get; private set; }
 
+    public int StopCount { get; private set; }
+
     public void StartLoop()
     {
         StartCount++;
@@ -670,6 +741,7 @@ internal sealed class NullTimerAlertSound : ITimerAlertSound
 
     public void Stop()
     {
+        StopCount++;
     }
 
     public void Dispose()

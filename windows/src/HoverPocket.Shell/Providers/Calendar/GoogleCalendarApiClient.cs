@@ -65,14 +65,47 @@ internal sealed class GoogleCalendarApiClient
         }, cancellationToken);
     }
 
-    public async Task CreateEventAsync(CalendarEventDraft draft, CancellationToken cancellationToken = default)
+    public async Task<CalendarEventOccurrence> CreateEventAsync(
+        CalendarEventDraft draft,
+        CancellationToken cancellationToken = default,
+        CalendarSource? source = null)
     {
         var normalized = draft.Normalized();
-        await WithAuthorizedRetryAsync(async accessToken =>
+        return await WithAuthorizedRetryAsync(async accessToken =>
         {
             using var request = BuildCreateEventRequest(accessToken, normalized);
-            await SendAsync(request, cancellationToken);
-            return true;
+            var resource = await SendJsonAsync<CalendarEventResource>(request, cancellationToken);
+            var resolvedSource = source ?? new CalendarSource(
+                normalized.CalendarId,
+                normalized.CalendarId,
+                null,
+                IanaTimeZoneId(TimeZoneInfo.Local),
+                IsPrimary: false,
+                AccessRole: "writer");
+            return Normalize(resource, resolvedSource)
+                ?? throw new GoogleCalendarApiException("invalid_response", "Google Calendar response could not be read.");
+        }, cancellationToken);
+    }
+
+    public async Task<CalendarEventOccurrence> FetchEventAsync(
+        string calendarId,
+        string eventId,
+        CalendarSource? source = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await WithAuthorizedRetryAsync(async accessToken =>
+        {
+            using var request = AuthorizedRequest(HttpMethod.Get, EventUrl(calendarId, eventId), accessToken);
+            var resource = await SendJsonAsync<CalendarEventResource>(request, cancellationToken);
+            var resolvedSource = source ?? new CalendarSource(
+                calendarId,
+                calendarId,
+                null,
+                IanaTimeZoneId(TimeZoneInfo.Local),
+                IsPrimary: false,
+                AccessRole: "writer");
+            return Normalize(resource, resolvedSource)
+                ?? throw new GoogleCalendarApiException("invalid_response", "Google Calendar response could not be read.");
         }, cancellationToken);
     }
 
@@ -324,10 +357,13 @@ internal sealed class GoogleCalendarApiClient
             start.Value.Date,
             end.Value.Date,
             start.Value.IsAllDay,
-            item.HtmlLink);
+            item.HtmlLink,
+            start.Value.AllDayDate,
+            end.Value.AllDayDate);
     }
 
-    private static (DateTimeOffset Date, bool IsAllDay)? ParseDateTime(CalendarEventDateTime? value)
+    private static (DateTimeOffset Date, bool IsAllDay, DateOnly? AllDayDate)? ParseDateTime(
+        CalendarEventDateTime? value)
     {
         if (value is null)
         {
@@ -337,13 +373,16 @@ internal sealed class GoogleCalendarApiClient
         if (!string.IsNullOrWhiteSpace(value.DateTime)
             && DateTimeOffset.TryParse(value.DateTime, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var dateTime))
         {
-            return (dateTime, false);
+            return (dateTime, false, null);
         }
 
         if (!string.IsNullOrWhiteSpace(value.Date)
             && DateTime.TryParseExact(value.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var allDay))
         {
-            return (new DateTimeOffset(DateTime.SpecifyKind(allDay, DateTimeKind.Local)), true);
+            return (
+                new DateTimeOffset(DateTime.SpecifyKind(allDay, DateTimeKind.Local)),
+                true,
+                DateOnly.FromDateTime(allDay));
         }
 
         return null;
@@ -401,9 +440,9 @@ internal sealed class GoogleCalendarApiClient
         return value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
     }
 
-    private static string AllDayString(DateTimeOffset value)
+    internal static string AllDayString(DateTimeOffset value)
     {
-        return value.LocalDateTime.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        return value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     }
 
     private static string PercentEncodedForm(Dictionary<string, string> values)
