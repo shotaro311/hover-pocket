@@ -55,7 +55,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python script/verify_pocket_contracts.py --report-json pocket-contracts-report-1.json --quiet
+          python script/verify_pocket_contracts.py --report-json pocket-contracts-report-1.json
           python script/verify_pocket_contracts.py --report-json pocket-contracts-report-2.json --quiet
           python - <<'PY'
           from pathlib import Path

@@ -51,6 +51,7 @@ Schema validation後、次を決定論的に検証する。
 - `native_authority` / `runtime_prohibited`はRegistry記述用であり、Invocation、ExecutionPlan、PocketWorkflowの共通gateで実行を拒否する。`maxPayloadBytes`とApp scopeも3経路で同じ規則を強制する。
 - side effectの成功はdescriptorどおりのHost-owned typed observationがある場合だけ許可する。receiptのevidence digestは観測値から再計算し、outputとmatch fieldを照合する。
 - Pocket Appのpath traversal、権限参照、scope、workspace ownership、secret境界を検証し、manifest全pathをsource byte digestへbindingする。reference app、Surface、Workflow、requested Capabilityのfixture相互参照を同じpackage contextとして照合する。
+- source byte digestをOS間で同一にするため、contract treeは`.gitattributes`でLFへ固定する。validator側の曖昧な改行正規化は行わない。
 - PocketSurfaceのcomponent数・深さ・query/workflow参照を有限化する。
 - PocketWorkflowのCapability参照、topological dependency、input type、approval、limitを検証する。v1の動的bindingはtop-levelの`$input.<name>`と、Today FocusでHostが型を保証する`$context.today` / `$context.selectedEvent.title`だけを許可し、未知・nested bindingを拒否する。
 - Voice session cardを現在rootとそのchild/descendantへ限定する。

@@ -30,6 +30,8 @@ AN0のmacOS / Windows共通machine contractである。runtime実装ではなく
 
 AN0のreference corpusは1つのPocket App package contextとして検査する。manifestが列挙する全ファイルはsource byte digestへbindingし、Surface / Workflowの実fixture、requested Capability、scope、Surface query、Workflow stepが一致しなければ拒否する。`asset://`は正規化済みpackage内pathだけを許し、生成SurfaceはHost-owned receiptを描画できない。
 
+source byte digestをOS間で同一に保つため、`.gitattributes`で`contracts/pocket/v1/**`をLFへ固定する。改行を正規化してdigestを緩めるのではなく、checkout後のpackage byte列自体を共通契約とする。
+
 Golden digestはUTF-8、key sort、空白なしのcanonical JSONに対するSHA-256である。file改行やOS path separatorには依存しない。reject fixtureもfixture本文のdigest、stable error code、exact error locationを固定する。execution planはtopological orderを正本とし、route固有のID、時刻、origin、principal、idempotency keyをcanonical plan digestへ含めない。Pocket App ID / version / manifest digestはplan digestへ含め、invocation、approval、receiptまで同じcontextへbindingする。
 
 `native_authority` / `runtime_prohibited` CapabilityはRegistryへ記述できても、Invocation、ExecutionPlan、PocketWorkflowの全実行経路で共通fail-closed gateが拒否する。descriptorの`maxPayloadBytes`とPocket App scopeも同じ3経路で強制する。

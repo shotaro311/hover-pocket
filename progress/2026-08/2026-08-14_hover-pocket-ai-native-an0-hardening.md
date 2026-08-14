@@ -30,6 +30,7 @@ PR #7のAN0共通契約に対する独立レビューで、schemaを満たして
 - GitHub Actionsは`ubuntu-24.04`、`macos-14`、`windows-2022`、Python `3.13.7`、Actionのexact commit SHAへ固定した。
 - 各OSのdeterministic reportをartifactとして保存し、集約jobで3件のbyte一致を必須にした。
 - `requirements.md`と`PLAN1.md`の変更でもcontract CIが起動するpath filterを追加した。
+- Windows runnerがGit既定設定でpackage sourceをCRLFへ変換し、source byte digestを不一致にした。`contracts/pocket/v1/**`を`.gitattributes`でLF固定し、package byte列そのものを3OSで一致させた。CIの先頭実行はquietを外し、fail-closed理由をログへ残す。
 
 ## 検証
 
