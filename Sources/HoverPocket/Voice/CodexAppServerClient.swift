@@ -321,10 +321,16 @@ actor CodexAppServerClient {
     private func installReaders() {
         outputHandle.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+            }
             Task { await self?.consumeOutput(data) }
         }
         errorHandle.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+            }
             Task { await self?.consumeError(data) }
         }
         process.terminationHandler = { [weak self] process in

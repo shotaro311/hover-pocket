@@ -176,7 +176,7 @@ try {
     $extension = [System.IO.Path]::GetExtension($codexPath)
     if ($extension -in @(".cmd", ".bat")) {
         $startInfo.FileName = Join-Path ([Environment]::SystemDirectory) "cmd.exe"
-        $startInfo.Arguments = "/d /s /c `"`"$codexPath`" app-server --stdio`""
+        $startInfo.Arguments = '/d /s /c ""{0}" app-server --stdio"' -f $codexPath
     }
     elseif ($extension -eq ".ps1") {
         $powerShellPath = (Get-Process -Id $PID).Path
