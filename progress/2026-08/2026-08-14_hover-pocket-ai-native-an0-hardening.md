@@ -1,7 +1,7 @@
 ---
 project_slug: hover-menu-preview
 date: 2026-08-14
-status: an0-hardened; local-pass; security-pass; ci-pending
+status: an0-hardened; local-pass; security-pass; ci-pass
 ---
 
 # AI-native AN0 Contract Hardening
@@ -44,7 +44,10 @@ PR #7のAN0共通契約に対する独立レビューで、schemaを満たして
 - `.build/debug/HoverPocket --verify-timer`: 成功。
 - `.build/debug/HoverPocket --verify-calculator`: 成功。
 - `git diff --check`: 成功。
-- security-relevant source確定時のCodex Security diff scan `0fc69191-40ee-4467-9d0d-e7089a13c172`: snapshot `codex-security-snapshot/v1:sha256:185523...8841`、coverage complete、6 / 6 surface review、reportable finding 0、sealed complete。
+- exact commit range `190ee90cd498d03f0ef78df7e17c4f851efd5203...5e9097cfc56b91a1bf41438ee7cfac50cc4a7f72`の最終Codex Security diff scan `85f50deb-45e1-40d2-8457-867c749f729b`: coverage complete、6 / 6 surface review、reportable finding 0、`2026-08-14T01:02:40.752846Z`にsealed complete。
+- GitHub Actions push run [31759179183](https://github.com/shotaro311/hover-pocket/actions/runs/31759179183): Ubuntu / macOS / Windows / cross-OS byte比較が全て成功。
+- GitHub Actions PR run [31759179663](https://github.com/shotaro311/hover-pocket/actions/runs/31759179663): Ubuntu / macOS / Windows / cross-OS byte比較が全て成功。
+- GitHub readback: PR #7 head `5e9097cfc56b91a1bf41438ee7cfac50cc4a7f72`、Ready、MERGEABLE、push / PR checks success。
 
 ## Orchestrator
 
@@ -62,6 +65,5 @@ PR #7のAN0共通契約に対する独立レビューで、schemaを満たして
 
 ## 次のgate
 
-1. 変更をcommit / pushし、PR #7のUbuntu / macOS / Windows / cross-OS report比較をreadbackする。
-2. PR #7をreviewしてmergeする。
-3. merge後にAN1のProvider handler化を別worktree / branchで開始する。
+1. PR #7をreviewしてmergeする。
+2. merge後にAN1のProvider handler化を別worktree / branchで開始する。
