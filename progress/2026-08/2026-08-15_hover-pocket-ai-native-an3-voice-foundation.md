@@ -105,12 +105,15 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 
 ## root-scoped session cardsとinstalled Codex live probe
 
-- macOS / WindowsのCoordinatorが`thread/list`をcurrent rootの`ancestorThreadId`、明示`sourceKinds`、同じVoice session IDで取得し、parent chainがcurrent rootへ到達するchild / descendantだけを採用する。別root、orphan、duplicate IDは破棄する。
-- `thread/read includeTurns=true`はnew / updated threadだけに限定し、返却されたthread ID、session ID、parent IDをlist結果と再照合してから、直近のbounded user / agent textだけをcard detailへ使う。cross-root readbackは表示せずlist previewへ安全にfallbackする。
-- current root + child + grandchild、別root、orphan、cross-root readbackのfixtureを両OSへ追加した。実装head `fdd6d86a09703c66e493a05099a4af3c3e796510`はWindows Voice CI 2本、通常Windows、macOS、PR Routerが全成功し、remote parity `0 / 0`である。
-- ChatGPT Pro Critic run `20260815-064708-hoverpocket-an3-root-scoped-session-cards`へexact diff `131467d8a266a29042180c93b240ee482e8ca233..fdd6d86a09703c66e493a05099a4af3c3e796510`をGitHub read-onlyで送信した。回収までは対象10ファイルを変更しない。
+- macOS / WindowsのCoordinatorが`thread/list`をcurrent rootの`ancestorThreadId`、明示`sourceKinds`、同じVoice session IDで取得し、parent chainがcurrent rootへ到達するchild / descendantだけを採用する。opaque cursorは1ページ64件、最大8ページ / 512件まで追跡し、cursor cycle、過大page、malformed continuationでは既存snapshotを維持してfail closedとする。
+- 同一thread IDが複数recordへ現れた場合は全recordを破棄し、そのIDをparentにするdescendantも到達不能として除外する。UI IDは`root:<server-id>` / `thread:<server-id>`へ名前空間化し、serverの`current-root`等と衝突しない。
+- `thread/read includeTurns=true`はthread / session / parent / updatedAtをkeyに、identity検証済みmessageまたは検証済みno-messageだけをcacheする。RPC失敗、timeout、identity mismatch時のpreview fallbackはcacheせず、同じupdatedAtでも次pollで再readして回復する。
+- WindowsのWebRTC negotiation失敗はmacOSと同じくfailed attemptのroot、child cards、poll、read cache、tool routing contextをatomicに破棄する。再試行は新しい`thread/start`を使う。Unix timestampは両OSとも`0 < seconds <= 253402300799`へ統一した。
+- ChatGPT Pro Critic run `20260815-064708-hoverpocket-an3-root-scoped-session-cards`は通常Chat route、Oracle model `gpt-5.6-sol`、Pro thinking、critic、GitHub read-only、外部書き込みなしでexact diff `131467d8...fdd6d86`をレビューした。本文内artifactはP1 2件 / P2 3件 / P3 2件、response SHA-256 `d4f5b9844213886599bef4ce2b64ab30188bf47b4c83a21b5aa52ddf64f618ae`で完全回収した。自動artifact parserが`critic-review.md`を別ファイルへ抽出できずreceiptは`blocked`のため、この警告は消さずにCodexの実コード再確認とローカル検証を受入根拠にした。
+- 両OSfixtureは2ページ取得、read初回失敗からの回復、conflicting duplicateと配下除外、UI sentinel衝突、cross-root readback、Windows negotiation失敗後のroot破棄 / 新root作成、exact list requestを検査する。実装head `0ca7834b07795a8b546ea125ac8928b730f67800`のWindows Voice CI 2本、通常Windows、macOS、PR Routerは全成功した。
 - macOSへ`--verify-codex-app-server-live`を追加した。accountやrate limitの中身、voice名、token、stderr本文は出力せず、initialize / account readiness / rate limit availability / voice count / default voice / protocol counterだけをreadbackする。
 - Mac実機のCodex CLI `0.145.0`でlive probeはaccount ready、rate limits ready、voice 19件、default voice ready、malformed / unknown 0件でPASSした。`generate-json-schema --experimental`は347 files、bundle digest `19e2a84b...2311`で、Realtime / account methodと`ancestorThreadId` / `sourceKinds` / `useStateDbOnly` / `includeTurns`を確認した。
+- Windows実機のCodex CLI `0.147.0`では、隔離clone / detached / cleanのhead `0ca7834`でexperimental schema、phase0 KeepRawなし、initialize / account / rateLimits / listVoices、voice 19件がPASSした。`account/rateLimits/read`はrequest keyが`method,id`だけでwire上の`params`が省略され、schemaと一致した。Debug / Releaseは0 warning / 0 error、workflow相当18 / 18 VerifierとJavaScript 13 / 13、task-scoped process残存0、remote parity一致をreadbackした。
 
 ## ローカル検証
 
@@ -177,10 +180,16 @@ GitHub Actions / implementation head a822916
   PASS / PR Router run 31841211479
   PASS / injected UiModel exception exits with code 1 instead of hanging
   PASS / PR #6 MERGEABLE / CLEAN / remote parity 0 / 0
+
+GitHub Actions / implementation head 0ca7834
+  PASS / Voice Lane Windows CI runs 31845753392 and 31845756516
+  PASS / Windows verify run 31845756521
+  PASS / macOS verify run 31845756517
+  PASS / PR Router run 31845754575
+  PASS / Windows real-device read-only gate / Codex 0.147.0 / phase0 / 18 verifiers / process residue 0
 ```
 
 ## 未完了gate
 
-1. installed Codex version / generated schema / account / voicesを対象Windows実機でreadbackする。macOS実機は完了した。
-2. origin限定microphone、WebRTC SDP / remote audio、1往復、safe closeを対象Windows / macOS実機で検証する。
-3. 対象Windows / macOS実機でVoice intentからCalendar read / create、Timer start、Today Focusを呼び、Host approval、実Provider状態、event / timer / note ID readbackを確認する。
+1. origin限定microphone、WebRTC SDP / remote audio、1往復、safe closeを対象Windows / macOS実機で検証する。
+2. 対象Windows / macOS実機でVoice intentからCalendar read / create、Timer start、Today Focusを呼び、Host approval、実Provider状態、event / timer / note ID readbackを確認する。
