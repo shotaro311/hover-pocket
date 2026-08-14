@@ -12,7 +12,7 @@ AN0のversioned contractを、macOS / Windows双方で既存Provider Storeへ接
 - AN0 merge commit: `6e248c8fbefbd3c27fb56896aca25f9724291647`
 - AN1 branch: `codex/ai-native-an1-provider-capabilities`
 - AN1 worktree: `/Users/shotaro/code/share/hover-menu-preview-ai-native-an1`
-- AN1 implementation head: `63be1549055922c3536dd051e8338909c879dbad`
+- AN1 implementation head: `16fea7774b991712d06b8d64ca2578c37298c86f`
 - AN1 PR: [#8](https://github.com/shotaro311/hover-pocket/pull/8)（Ready）
 
 ## 実装した共通Capability
@@ -36,10 +36,11 @@ AN0のversioned contractを、macOS / Windows双方で既存Provider Storeへ接
 - unknown capability、duplicate registration、型不一致、非object引数、range / length違反をfail closedにする。
 - JSON Schema `maxLength`に合わせ、SwiftはUnicode scalar、C#は`Rune`単位で数える。UTF-16 code unit差でWindowsだけ拒否しない。
 - 全write handlerは16〜128文字、先頭英数字、残りASCII英数字と`-._:`だけのidempotency keyを必須にする。
-- Calendarの明示calendar IDが存在しない、またはread-onlyなら別calendarへfallbackしない。未指定時だけprimary / writableへ解決する。
-- Calendar all-dayはrequested day spanを維持する。Windowsのtoday境界は対象timezoneの各midnightから作り、DST日を固定24時間にしない。
+- Calendarのnull以外の明示calendar IDは空文字も含めてexplicit targetとして扱い、存在しない、またはread-onlyなら別calendarへfallbackしない。nullのときだけprimary / writableへ解決する。
+- Calendar all-dayはRFC 3339 offset内のcivil dateとrequested day spanを維持し、異なるoffset同士でもcivil dateで範囲を検証する。Windowsのtoday境界は対象timezoneの各midnightから作り、DST日を固定24時間にしない。
 - Calendar createはPOST成功だけで完了せず、IDを使ったGET readbackを必須にする。readback完了後の月表示cache refresh失敗は作成失敗へ変換しない。
-- Sticky生成noteはstableKeyでatomic upsertし、既存のstableKeyなしnoteと衝突させない。title / bodyを含むreadbackでsilent truncationやcontent lossを検出する。
+- Calendarのopaque eventRef / eventIdとStickyの既存title / bodyがoutput schemaを超える場合は、切り詰めずreadback mismatchとしてfail closedにする。
+- Timer / StickyのCapability mutationはatomic persistence完了後だけ成功を返し、保存失敗時はmemory stateをrollbackしてsanitized errorを返す。Sticky生成noteはstableKeyでatomic upsertし、既存のstableKeyなしnoteと衝突させない。title / bodyを含むreadbackでsilent truncationやcontent lossを検出する。
 
 ## Reviewで修正した事項
 
@@ -52,10 +53,16 @@ AN0のversioned contractを、macOS / Windows双方で既存Provider Storeへ接
 7. 文字数をSwift grapheme / C# UTF-16ではなく共通のUnicode code point意味論へ統一。
 8. Calendarの作成とGET確認後、UI cache refresh失敗をfalse failureとして返して重複retryを誘発する経路を補正。
 9. Swift 6で検出された`SystemControlsService`のActor境界をactor-inheriting Taskへ補正。
+10. Sticky / Timerの保存失敗を成功扱いしていた経路をatomic persistence、rollback、sanitized errorへ変更。
+11. Windows Timerがadvertised maximum 86,400秒を86,399秒へ短縮していた境界を補正。
+12. 終日予定のRFC 3339 offset内civil dateを両OSで保持し、異なるoffsetのstart / endをUTC instantではなくcivil dateで検証。
+13. Calendarのopaque identifierとSticky既存contentがoutput schemaを超える場合をfail closed化。
+14. Windowsの空文字calendar IDを未指定扱いして別calendarへfallbackしていた経路を拒否。
+15. Windows Capability verifierの境界fixtureへ実Store instanceを明示注入し、Release buildで実行可能に補正。
 
 ## ローカル検証
 
-実装head `63be1549055922c3536dd051e8338909c879dbad`で確認した。
+最終実装head `16fea7774b991712d06b8d64ca2578c37298c86f`で確認した。
 
 ```text
 swift build
@@ -97,15 +104,15 @@ git diff --check
 
 ## GitHub Actions readback
 
-- [Verify Pocket Contracts run 31790106852](https://github.com/shotaro311/hover-pocket/actions/runs/31790106852): Ubuntu / macOS / Windows verifierとreport byte比較が全成功。
-- [Verify Windows run 31790106903](https://github.com/shotaro311/hover-pocket/actions/runs/31790106903): Release build、Capability、既存Windows回帰が成功。
-- [Verify macOS Capabilities run 31790106993](https://github.com/shotaro311/hover-pocket/actions/runs/31790106993): Swift 6 build、Capability、Timerが成功。
+- [Verify Pocket Contracts run 31794588564](https://github.com/shotaro311/hover-pocket/actions/runs/31794588564): Ubuntu / macOS / Windows verifierとreport byte比較が全成功。
+- [Verify Windows run 31794588585](https://github.com/shotaro311/hover-pocket/actions/runs/31794588585): Release build、Capability、既存Windows回帰が成功。
+- [Verify macOS Capabilities run 31794588571](https://github.com/shotaro311/hover-pocket/actions/runs/31794588571): Swift 6 build、Capability、Timerが成功。
 
 ## Security readback
 
-- Scan ID: `hoverpocket_an1_63be154_20260814T103252Z`
-- Exact source range: `6e248c8fbefbd3c27fb56896aca25f9724291647...63be1549055922c3536dd051e8338909c879dbad`
-- Snapshot SHA-256: `d6da39ec4464d5c400d431747f118ecb03ab087f16205d9a5d3503b80a9a7674`
+- Scan ID: `hoverpocket_an1_16fea77_20260814T110620Z`
+- Exact source range: `6e248c8fbefbd3c27fb56896aca25f9724291647...16fea7774b991712d06b8d64ca2578c37298c86f`
+- Snapshot SHA-256: `2342bada2c83d034b5c63ea73dd95e3a6ef740fe77bb9d6cc72a1e945130c84d`
 - Inventory: 24 source files + supporting contracts / CI
 - Coverage: complete
 - Reportable findings: 0

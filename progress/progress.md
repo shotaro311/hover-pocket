@@ -2,17 +2,17 @@
 project_slug: hover-menu-preview
 updated: 2026-08-14
 updated_by: codex
-status: an1-provider-capabilities; pr-open; local-pass; security-pass; ci-pass
+status: an1-provider-capabilities; pr-ready; local-pass; security-pass; ci-pass
 ---
 
 ## 2026-08-14 AI-native AN1 Provider Capabilities
 
 - AN0 PR [#7](https://github.com/shotaro311/hover-pocket/pull/7)を全必須check成功、Ready、MERGEABLEのreadback後にmergeし、`main`のmerge commit `6e248c8`から隔離worktree `hover-menu-preview-ai-native-an1`とbranch `codex/ai-native-an1-provider-capabilities`を作成した。
 - macOS / Windowsへ共通ID・version・typed argumentsを持つProvider Capability handlerを追加した。実行可能な10 handlerはCalendar list / get / create、Timer start / get / pause / resume / stop、Sticky upsert / get。既存UIと同じStore instanceへ接続する一方、Voice / WebView / MCP / Pocket Appからの外部呼出し口はまだ接続していない。
-- Calendar createは明示calendarをfail closedで選択し、作成応答のevent IDとGET readbackを返す。DSTの23 / 25時間日、multi-day all-day、確認済みwrite後のUI cache refresh失敗をfalse failureにしない条件を補正した。Timer / Stickyもstable IDで実行後readbackし、Stickyはcontract-valid Unicode titleと本文まで一致確認する。全write handlerは16〜128文字のASCII idempotency keyを必須にしたが、durable replay ledgerはAN2のBroker責務として未接続である。
-- 実装head `63be154`で`swift build`、`--verify-capabilities`（10 handlers）、Timer、Clipboard、Calculator、Panel layout 112件、Media、`git diff --check`が成功した。Pocket contractは12 schema / 52 fixtureが2回成功し、reportはbyte一致、SHA-256 `b11c7a6f...d0b0`。`--verify-google-calendar`はこのworktreeにOAuth client IDがなく未実行で、外部予定は作成・変更していない。
-- GitHub Actions run [31790106852](https://github.com/shotaro311/hover-pocket/actions/runs/31790106852)でUbuntu / macOS / Windows contract verifierとcross-OS byte比較、run [31790106903](https://github.com/shotaro311/hover-pocket/actions/runs/31790106903)でWindows build / capabilityを含む既存回帰、run [31790106993](https://github.com/shotaro311/hover-pocket/actions/runs/31790106993)でmacOS Swift 6 build / Capability / Timerが成功した。
-- exact source range `6e248c8...63be154`のCodex Security scan `hoverpocket_an1_63be154_20260814T103252Z`は24 source fileとsupporting contracts / CIを完全レビューし、coverage complete、reportable finding 0件でsealed complete。approval binding、durable replay、sanitized receipt、audit enforcementはAN2の必須gateであり、それ以前は外部経路へ公開しない。
+- Calendar createはnull以外の明示calendarをfail closedで選択し、作成応答のevent IDとGET readbackを返す。DSTの23 / 25時間日、異なるoffsetを持つ終日予定のcivil date、multi-day all-day、確認済みwrite後のUI cache refresh失敗をfalse failureにしない条件を補正した。Timer / Stickyはstable IDで実行後readbackし、atomic persistence失敗時はmemory stateをrollbackする。全write handlerは16〜128文字のASCII idempotency keyを必須にしたが、durable replay ledgerはAN2のBroker責務として未接続である。
+- 最終実装head `16fea77`で`swift build`、`--verify-capabilities`（10 handlers）、Timer、Clipboard、Calculator、Panel layout 112件、Media、`git diff --check`が成功した。Pocket contractは12 schema / 52 fixtureが2回成功し、reportはbyte一致、SHA-256 `b11c7a6f...d0b0`。`--verify-google-calendar`はこのworktreeにOAuth client IDがなく未実行で、外部予定は作成・変更していない。
+- GitHub Actions run [31794588564](https://github.com/shotaro311/hover-pocket/actions/runs/31794588564)でUbuntu / macOS / Windows contract verifierとcross-OS byte比較、run [31794588585](https://github.com/shotaro311/hover-pocket/actions/runs/31794588585)でWindows Release build / Capabilityを含む既存回帰、run [31794588571](https://github.com/shotaro311/hover-pocket/actions/runs/31794588571)でmacOS Swift 6 build / Capability / Timerが成功した。
+- exact source range `6e248c8...16fea77`のCodex Security scan `hoverpocket_an1_16fea77_20260814T110620Z`は24 source fileとsupporting contracts / CIを完全レビューし、coverage complete、reportable finding 0件でsealed complete。approval binding、durable replay、sanitized receipt、audit enforcementはAN2の必須gateであり、それ以前は外部経路へ公開しない。
 - Ready PR [#8](https://github.com/shotaro311/hover-pocket/pull/8)へ実装と検証を集約した。詳細: `progress/2026-08/2026-08-14_hover-pocket-ai-native-an1-provider-capabilities.md`。
 
 ## 2026-08-14 AI-native AN0 Contract Hardening
