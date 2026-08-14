@@ -263,7 +263,7 @@ internal sealed class CodexVoiceCapabilityToolAdapterVerifier
                 "voice_tool_stale_approval_rejected");
             Require(
                 staleApprovalPayload is { } staleApprovalValue
-                && staleApprovalValue.GetProperty("code").GetString() == "CAPABILITY_APPROVAL_REJECTED",
+                && staleApprovalValue.GetProperty("code").GetString() == "CAPABILITY_REQUEST_DENIED",
                 "voice_tool_stale_approval_code");
             Require(
                 timerStore.RunningTimers.Count == timerCountBeforeStaleApproval,
