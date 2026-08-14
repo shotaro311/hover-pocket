@@ -116,6 +116,12 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var aiNativeEnabled: Bool {
+        didSet {
+            defaults.set(aiNativeEnabled, forKey: Self.aiNativeEnabledKey)
+        }
+    }
+
     private let defaults: UserDefaults
     private static let appLanguageKey = "appLanguage"
     private static let displayPlacementModeKey = "displayPlacementMode"
@@ -136,6 +142,7 @@ final class AppSettings: ObservableObject {
     private static let showMirrorOnSecondaryDisplaysKey = "showMirrorOnSecondaryDisplays"
     private static let showStickyNoteUndoToastKey = "showStickyNoteUndoToast"
     private static let stickyNoteGridSizeKey = "stickyNoteGridSize"
+    private static let aiNativeEnabledKey = "aiNativeEnabled"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -200,6 +207,9 @@ final class AppSettings: ObservableObject {
         }
         let stickyNoteGridSizeRawValue = defaults.string(forKey: Self.stickyNoteGridSizeKey)
         self.stickyNoteGridSize = stickyNoteGridSizeRawValue.flatMap(StickyNoteGridSize.init(rawValue:)) ?? .medium
+        self.aiNativeEnabled = defaults.object(forKey: Self.aiNativeEnabledKey) == nil
+            ? false
+            : defaults.bool(forKey: Self.aiNativeEnabledKey)
 
         if defaults.data(forKey: Self.weatherLocationKey) == nil,
            let weatherLocationData = try? JSONEncoder().encode(weatherLocation) {

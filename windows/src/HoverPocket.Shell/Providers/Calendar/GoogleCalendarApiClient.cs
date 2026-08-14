@@ -68,12 +68,13 @@ internal sealed class GoogleCalendarApiClient
     public async Task<CalendarEventOccurrence> CreateEventAsync(
         CalendarEventDraft draft,
         CancellationToken cancellationToken = default,
-        CalendarSource? source = null)
+        CalendarSource? source = null,
+        string? eventId = null)
     {
         var normalized = draft.Normalized();
         return await WithAuthorizedRetryAsync(async accessToken =>
         {
-            using var request = BuildCreateEventRequest(accessToken, normalized);
+            using var request = BuildCreateEventRequest(accessToken, normalized, eventId);
             var resource = await SendJsonAsync<CalendarEventResource>(request, cancellationToken);
             var resolvedSource = source ?? new CalendarSource(
                 normalized.CalendarId,
@@ -180,10 +181,13 @@ internal sealed class GoogleCalendarApiClient
             : null;
     }
 
-    internal static HttpRequestMessage BuildCreateEventRequest(string accessToken, CalendarEventDraft draft)
+    internal static HttpRequestMessage BuildCreateEventRequest(
+        string accessToken,
+        CalendarEventDraft draft,
+        string? eventId = null)
     {
         var request = AuthorizedRequest(HttpMethod.Post, EventsUrl(draft.CalendarId), accessToken);
-        request.Content = JsonContent(WriteResource(draft));
+        request.Content = JsonContent(WriteResource(draft, eventId));
         return request;
     }
 
@@ -303,6 +307,11 @@ internal sealed class GoogleCalendarApiClient
             throw new GoogleCalendarApiException("authorization_needs_reconnect", "Reconnect Google Calendar to allow event editing.", requiresReconnect: true);
         }
 
+        if (response.StatusCode == HttpStatusCode.Conflict)
+        {
+            throw new GoogleCalendarApiException("conflict", "Google Calendar event already exists.");
+        }
+
         throw new GoogleCalendarApiException("request_failed", error?.SafeDescription ?? "Google Calendar request failed.");
     }
 
@@ -388,11 +397,12 @@ internal sealed class GoogleCalendarApiClient
         return null;
     }
 
-    private static GoogleCalendarEventWriteResource WriteResource(CalendarEventDraft draft)
+    private static GoogleCalendarEventWriteResource WriteResource(CalendarEventDraft draft, string? eventId = null)
     {
         if (draft.IsAllDay)
         {
             return new GoogleCalendarEventWriteResource(
+                eventId,
                 draft.Title,
                 draft.Location,
                 draft.Notes,
@@ -401,6 +411,7 @@ internal sealed class GoogleCalendarApiClient
         }
 
         return new GoogleCalendarEventWriteResource(
+            eventId,
             draft.Title,
             draft.Location,
             draft.Notes,
@@ -485,6 +496,7 @@ internal sealed class GoogleCalendarApiClient
         [property: JsonPropertyName("dateTime")] string? DateTime);
 
     private sealed record GoogleCalendarEventWriteResource(
+        [property: JsonPropertyName("id")] string? Id,
         [property: JsonPropertyName("summary")] string Summary,
         [property: JsonPropertyName("location")] string? Location,
         [property: JsonPropertyName("description")] string? Description,

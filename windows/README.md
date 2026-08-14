@@ -46,6 +46,8 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify ui
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify settings
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify pocket-surface
+dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify capabilities
+dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify broker
 ```
 
 `--verify shell` は access surface と panel の `WS_EX_NOACTIVATE`、`WS_EX_TOOLWINDOW`、`WS_EX_TOPMOST`、2 回目起動、120ms pollingだけによるopen、hidden / 位置ずれ / style欠落の自己修復、window再生成、3段階recovery、ポインター移動、open/close 25回、描画フレーム数と最大フレーム間隔を検査します。
@@ -63,6 +65,8 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 `--verify release-config` は、配布成果物がRelease構成・期待バージョン・Windows更新channel・Google OAuth AssemblyMetadataを持ち、ビルド時の設定と一致することを値を表示せず確認します。
 
 `--verify calendar-live` は、既存のWindows Credential Manager資格情報を使って当月のCalendarを読み取り、予定内容を表示せずcalendar数とevent数だけを出力します。予定の作成・更新・削除は行いません。
+
+`--verify capabilities` はCalendar / Timer / Sticky NotesのProvider Capability handlerを検証します。`--verify broker` はRegistry、権限、承認の改変・期限切れ・再利用拒否、永続idempotency、実行後readback、監査ログの本文非保存、Today Focus、部分失敗時のTimer補償、timeout、macOSと共通のplan digestを検証します。
 
 ## Windows updates and release packaging
 

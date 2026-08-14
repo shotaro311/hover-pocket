@@ -37,6 +37,7 @@ jobs:
       - name: Verify timer model and bridge
         run: |
           dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify capabilities
+          dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify broker
           dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify timer
           dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify ui-model
           dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify updater

@@ -6,6 +6,9 @@ on:
     paths:
       - "Sources/HoverPocket/Capabilities/**"
       - "Sources/HoverPocket/App/CapabilityVerificationCommand.swift"
+      - "Sources/HoverPocket/App/CapabilityBrokerVerificationCommand.swift"
+      - "Sources/HoverPocket/App/AppDelegate.swift"
+      - "Sources/HoverPocket/State/AppSettings.swift"
       - "Sources/HoverPocket/Models/GoogleCalendarModels.swift"
       - "Sources/HoverPocket/Models/StickyNoteModels.swift"
       - "Sources/HoverPocket/Services/GoogleCalendarAPIClient.swift"
@@ -21,6 +24,9 @@ on:
     paths:
       - "Sources/HoverPocket/Capabilities/**"
       - "Sources/HoverPocket/App/CapabilityVerificationCommand.swift"
+      - "Sources/HoverPocket/App/CapabilityBrokerVerificationCommand.swift"
+      - "Sources/HoverPocket/App/AppDelegate.swift"
+      - "Sources/HoverPocket/State/AppSettings.swift"
       - "Sources/HoverPocket/Models/GoogleCalendarModels.swift"
       - "Sources/HoverPocket/Models/StickyNoteModels.swift"
       - "Sources/HoverPocket/Services/GoogleCalendarAPIClient.swift"
@@ -50,6 +56,9 @@ jobs:
 
       - name: Verify capability handlers
         run: .build/debug/HoverPocket --verify-capabilities
+
+      - name: Verify capability broker and text Today Focus
+        run: .build/debug/HoverPocket --verify-broker
 
       - name: Verify existing Timer behavior
         run: .build/debug/HoverPocket --verify-timer

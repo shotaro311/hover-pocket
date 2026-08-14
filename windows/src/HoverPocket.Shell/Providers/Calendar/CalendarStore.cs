@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using HoverPocket.Shell.Capabilities;
 using HoverPocket.Shell.Services;
 
@@ -274,7 +276,7 @@ internal sealed class CalendarStore
         string idempotencyKey,
         CancellationToken cancellationToken = default)
     {
-        _ = idempotencyKey;
+        var externalEventId = CapabilityEventId(idempotencyKey);
         await LoadMonthAsync(request.Start, cancellationToken);
         CalendarSource source;
         lock (_lock)
@@ -294,15 +296,51 @@ internal sealed class CalendarStore
             request.Notes,
             request.Start,
             request.End,
-            request.IsAllDay);
-        var created = await _apiClient.CreateEventAsync(draft, cancellationToken, source);
+            request.IsAllDay).Normalized();
+        CalendarEventOccurrence created;
+        try
+        {
+            created = await _apiClient.CreateEventAsync(draft, cancellationToken, source, externalEventId);
+        }
+        catch (GoogleCalendarApiException ex) when (ex.Code == "conflict")
+        {
+            created = await _apiClient.FetchEventAsync(source.Id, externalEventId, source, cancellationToken);
+        }
         var observed = await _apiClient.FetchEventAsync(
             source.Id,
             created.GoogleEventId,
             source,
             cancellationToken);
+        if (!CapabilityEventMatches(observed, draft))
+        {
+            throw new CapabilityHandlerException("CAPABILITY_READBACK_MISMATCH", "calendar.idempotency");
+        }
         await LoadMonthAsync(request.Start, cancellationToken);
         return observed;
+    }
+
+    internal static bool CapabilityEventMatches(
+        CalendarEventOccurrence observed,
+        CalendarEventDraft draft)
+    {
+        var timeMatches = draft.IsAllDay
+            ? observed.IsAllDay
+                && observed.AllDayStart == DateOnly.FromDateTime(draft.Start.Date)
+                && observed.AllDayEnd == DateOnly.FromDateTime(draft.End.Date)
+            : !observed.IsAllDay
+                && observed.Start.ToUnixTimeSeconds() == draft.Start.ToUnixTimeSeconds()
+                && observed.End.ToUnixTimeSeconds() == draft.End.ToUnixTimeSeconds();
+        return observed.Title == draft.Title
+            && observed.Location == draft.Location
+            && observed.Notes == draft.Notes
+            && timeMatches;
+    }
+
+    private static string CapabilityEventId(string idempotencyKey)
+    {
+        var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(idempotencyKey)))
+            .ToLowerInvariant();
+        return $"hp{digest}";
     }
 
     internal static CalendarSource SelectWritableSourceForCapability(

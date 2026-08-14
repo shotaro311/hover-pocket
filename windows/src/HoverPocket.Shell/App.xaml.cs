@@ -116,6 +116,14 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (options.VerifyBroker)
+        {
+            VerifyConsole.AttachParent();
+            Environment.ExitCode = new CapabilityBrokerVerifier().Run();
+            Shutdown();
+            return;
+        }
+
         if (options.VerifyUpdater)
         {
             VerifyConsole.AttachParent();
