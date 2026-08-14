@@ -278,7 +278,7 @@ final class TimerCapabilityHandler: PocketCapabilityHandler {
         }
         switch operation {
         case .start:
-            return try start(arguments: arguments, context: context)
+            return try await start(arguments: arguments, context: context)
         case .get:
             return try output(timerID: timerID(arguments), now: context.now)
         case .pause:
@@ -286,30 +286,48 @@ final class TimerCapabilityHandler: PocketCapabilityHandler {
             guard store.runningTimer(id: id) != nil else {
                 throw CapabilityHandlerError.unavailable("timer")
             }
-            store.pause(id: id, at: context.now)
+            do {
+                try await store.pauseForCapability(id: id, at: context.now)
+            } catch {
+                throw CapabilityHandlerError.unavailable("timer_storage")
+            }
             return try output(timerID: id, now: context.now)
         case .resume:
             let id = try timerID(arguments)
             guard store.runningTimer(id: id) != nil else {
                 throw CapabilityHandlerError.unavailable("timer")
             }
-            store.resume(id: id, at: context.now)
+            do {
+                try await store.resumeForCapability(id: id, at: context.now)
+            } catch {
+                throw CapabilityHandlerError.unavailable("timer_storage")
+            }
             return try output(timerID: id, now: context.now)
         case .stop:
             let id = try timerID(arguments)
-            store.stop(id: id)
+            do {
+                try await store.stopForCapability(id: id)
+            } catch {
+                throw CapabilityHandlerError.unavailable("timer_storage")
+            }
             return Self.stoppedOutput(id)
         }
     }
 
-    private func start(arguments: CapabilityObject, context: CapabilityHandlerContext) throws -> CapabilityObject {
+    private func start(arguments: CapabilityObject, context: CapabilityHandlerContext) async throws -> CapabilityObject {
         let duration = try arguments.requiredInteger("durationSeconds", range: 1...86_400)
         let title = try arguments.requiredString("title", maxLength: 80)
         _ = try arguments.optionalString("sourceRef", maxLength: 256)
         var preset = TimerPreset.defaultTimerDraft()
         preset.title = title
         preset.duration = TimeInterval(duration)
-        guard let timer = store.start(preset: preset, id: idGenerator(), at: context.now) else {
+        let timer: RunningTimer?
+        do {
+            timer = try await store.startForCapability(preset: preset, id: idGenerator(), at: context.now)
+        } catch {
+            throw CapabilityHandlerError.unavailable("timer_storage")
+        }
+        guard let timer else {
             throw CapabilityHandlerError.unavailable("timer_capacity")
         }
         return Self.output(timer, now: context.now)

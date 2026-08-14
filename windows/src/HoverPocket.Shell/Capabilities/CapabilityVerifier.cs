@@ -57,7 +57,7 @@ internal sealed class CapabilityVerifier
             var handlers = ProviderCapabilityCompositionRoot.Create(calendar, timerStore, stickyStore);
             Require(handlers.Keys.Count == 10, "handler_count");
 
-            await VerifyTimerAsync(handlers, clock);
+            await VerifyTimerAsync(handlers, clock, root);
             await VerifyStickyAsync(handlers, stickyRoot);
             await VerifyCalendarAsync(handlers, calendar, now);
 
@@ -90,13 +90,16 @@ internal sealed class CapabilityVerifier
         }
     }
 
-    private async Task VerifyTimerAsync(PocketCapabilityHandlerSet handlers, ManualTimerClock clock)
+    private async Task VerifyTimerAsync(
+        PocketCapabilityHandlerSet handlers,
+        ManualTimerClock clock,
+        string root)
     {
         var started = await handlers.InvokeAsync(
             CapabilityIds.TimerStart,
             Json(new
             {
-                durationSeconds = 600,
+                durationSeconds = 86_400,
                 title = "Focus",
                 sourceRef = "calendar:test"
             }),
@@ -104,6 +107,10 @@ internal sealed class CapabilityVerifier
         var timerId = started.GetProperty("timerId").GetString() ?? string.Empty;
         Require(Guid.TryParse(timerId, out _), "timer_id");
         Require(started.GetProperty("state").GetString() == "running", "timer_start");
+        Require(
+            DateTimeOffset.Parse(started.GetProperty("endAt").GetString()!, CultureInfo.InvariantCulture)
+                - clock.UtcNow == TimeSpan.FromHours(24),
+            "timer_max_duration");
 
         var idArguments = Json(new { timerId });
         var read = await handlers.InvokeAsync(CapabilityIds.TimerGet, idArguments);
@@ -138,6 +145,31 @@ internal sealed class CapabilityVerifier
             new CapabilityHandlerContext("timer-verifier-key-0004", clock.UtcNow));
         Require(stopped.GetProperty("state").GetString() == "stopped", "timer_stop_state");
         Require(stopped.GetProperty("endAt").ValueKind == JsonValueKind.Null, "timer_stop_end");
+
+        var blockedRoot = Path.Combine(root, "blocked-timer");
+        File.WriteAllText(blockedRoot, "blocked");
+        using var blockedStore = new TimerStore(
+            blockedRoot,
+            clock,
+            new NullTimerAlertSound(),
+            enableScheduler: false);
+        var blockedHandler = new TimerCapabilityHandler(TimerCapabilityOperation.Start, blockedStore);
+        try
+        {
+            await blockedHandler.HandleAsync(
+                Json(new
+                {
+                    durationSeconds = 60,
+                    title = "Blocked",
+                    sourceRef = (string?)null
+                }),
+                new CapabilityHandlerContext("timer-verifier-key-0005", clock.UtcNow));
+            _failures.Add("timer_persistence_failure_accepted");
+        }
+        catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_UNAVAILABLE" && ex.Field == "timer_storage")
+        {
+        }
+        Require(blockedStore.RunningTimers.Count == 0, "timer_persistence_failure_rollback");
     }
 
     private async Task VerifyStickyAsync(PocketCapabilityHandlerSet handlers, string root)
@@ -217,6 +249,10 @@ internal sealed class CapabilityVerifier
             allDayStart.AddDays(3),
             IsAllDay: true).Normalized();
         Require(normalizedAllDay.End - normalizedAllDay.Start == TimeSpan.FromDays(3), "calendar_all_day_range");
+        var offsetAllDay = new DateTimeOffset(2026, 8, 15, 0, 0, 0, TimeSpan.FromHours(9));
+        Require(
+            GoogleCalendarApiClient.AllDayString(offsetAllDay) == "2026-08-15",
+            "calendar_all_day_offset_preserved");
 
         var longCalendarTitle = string.Concat(Enumerable.Repeat("👨‍👩‍👧‍👦", 40));
         calendar.Seed(new CalendarCapabilityEvent(

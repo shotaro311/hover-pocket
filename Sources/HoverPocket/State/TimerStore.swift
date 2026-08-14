@@ -116,6 +116,100 @@ final class TimerStore: ObservableObject {
         runningTimers.first { $0.id == id }
     }
 
+    @discardableResult
+    func startForCapability(
+        preset: TimerPreset,
+        id: UUID,
+        at date: Date
+    ) async throws -> RunningTimer? {
+        await pendingWriteTask?.value
+        guard canStartTimer else { return nil }
+        let phaseDuration = preset.isPomodoro ? preset.workDuration : preset.duration
+        guard phaseDuration > 0 else { return nil }
+        let previousTimers = runningTimers
+        let previousNow = now
+        let timer = RunningTimer(
+            id: id,
+            title: preset.title,
+            color: preset.color,
+            soundEnabled: preset.soundEnabled,
+            isPomodoro: preset.isPomodoro,
+            phase: .work,
+            completedWorkCycles: 0,
+            endDate: date.addingTimeInterval(phaseDuration),
+            phaseDuration: phaseDuration,
+            pausedRemaining: nil,
+            workDuration: preset.workDuration,
+            breakDuration: preset.breakDuration,
+            pinnedPresetID: nil
+        )
+        runningTimers.append(timer)
+        now = date
+        do {
+            try persistRunningTimersImmediately()
+            syncTickTimer()
+            return timer
+        } catch {
+            runningTimers = previousTimers
+            now = previousNow
+            syncTickTimer()
+            throw error
+        }
+    }
+
+    func pauseForCapability(id: UUID, at date: Date) async throws {
+        await pendingWriteTask?.value
+        guard let index = runningTimers.firstIndex(where: { $0.id == id }),
+              !runningTimers[index].isPaused else { return }
+        let previousTimers = runningTimers
+        runningTimers[index].pausedRemaining = runningTimers[index].remaining(at: date)
+        do {
+            try persistRunningTimersImmediately()
+            syncTickTimer()
+        } catch {
+            runningTimers = previousTimers
+            syncTickTimer()
+            throw error
+        }
+    }
+
+    func resumeForCapability(id: UUID, at date: Date) async throws {
+        await pendingWriteTask?.value
+        guard let index = runningTimers.firstIndex(where: { $0.id == id }),
+              let remaining = runningTimers[index].pausedRemaining else { return }
+        let previousTimers = runningTimers
+        let previousNow = now
+        runningTimers[index].pausedRemaining = nil
+        runningTimers[index].endDate = date.addingTimeInterval(remaining)
+        now = date
+        do {
+            try persistRunningTimersImmediately()
+            syncTickTimer()
+        } catch {
+            runningTimers = previousTimers
+            now = previousNow
+            syncTickTimer()
+            throw error
+        }
+    }
+
+    func stopForCapability(id: UUID) async throws {
+        await pendingWriteTask?.value
+        let previousTimers = runningTimers
+        runningTimers.removeAll { $0.id == id }
+        do {
+            try persistRunningTimersImmediately()
+            if activeAlert?.id == id {
+                stopAlert()
+            }
+            syncTickTimer()
+        } catch {
+            runningTimers = previousTimers
+            syncTickTimer()
+            throw error
+        }
+    }
+
     func pause(id: UUID, at date: Date = Date()) {
         guard let index = runningTimers.firstIndex(where: { $0.id == id }),
               !runningTimers[index].isPaused
@@ -376,6 +470,15 @@ final class TimerStore: ObservableObject {
 
     private func persistRunningTimers() {
         persist(runningTimers, to: runningURL)
+    }
+
+    private func persistRunningTimersImmediately() throws {
+        guard persistenceEnabled else { return }
+        try fileManager.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(runningTimers)
+        try data.write(to: runningURL, options: .atomic)
     }
 
     private func persist<Value: Encodable & Sendable>(_ value: Value, to url: URL) {

@@ -434,9 +434,9 @@ internal sealed class GoogleCalendarApiClient
         return value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
     }
 
-    private static string AllDayString(DateTimeOffset value)
+    internal static string AllDayString(DateTimeOffset value)
     {
-        return value.LocalDateTime.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        return value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     }
 
     private static string PercentEncodedForm(Dictionary<string, string> values)

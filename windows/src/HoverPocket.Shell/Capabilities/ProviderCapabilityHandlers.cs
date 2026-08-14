@@ -298,15 +298,22 @@ internal sealed class TimerCapabilityHandler : IPocketCapabilityHandler
         {
             _ = context.RequireIdempotencyKey();
         }
-        return Task.FromResult(_operation switch
+        try
         {
-            TimerCapabilityOperation.Start => Start(arguments),
-            TimerCapabilityOperation.Get => Output(TimerId(arguments)),
-            TimerCapabilityOperation.Pause => Pause(TimerId(arguments)),
-            TimerCapabilityOperation.Resume => Resume(TimerId(arguments)),
-            TimerCapabilityOperation.Stop => Stop(TimerId(arguments)),
-            _ => throw new ArgumentOutOfRangeException()
-        });
+            return Task.FromResult(_operation switch
+            {
+                TimerCapabilityOperation.Start => Start(arguments),
+                TimerCapabilityOperation.Get => Output(TimerId(arguments)),
+                TimerCapabilityOperation.Pause => Pause(TimerId(arguments)),
+                TimerCapabilityOperation.Resume => Resume(TimerId(arguments)),
+                TimerCapabilityOperation.Stop => Stop(TimerId(arguments)),
+                _ => throw new ArgumentOutOfRangeException()
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new CapabilityHandlerException("CAPABILITY_UNAVAILABLE", "timer_storage");
+        }
     }
 
     private JsonElement Start(JsonElement arguments)

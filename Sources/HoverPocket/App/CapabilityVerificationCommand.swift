@@ -32,7 +32,7 @@ enum CapabilityVerificationCommand {
         let timerStore = TimerStore(
             storageDirectory: root.appendingPathComponent("timer", isDirectory: true),
             observesWake: false,
-            persistenceEnabled: false
+            persistenceEnabled: true
         )
         let stickyRoot = root.appendingPathComponent("sticky", isDirectory: true)
         let stickyStore = StickyNotesStore(storageDirectory: stickyRoot)
@@ -56,6 +56,7 @@ enum CapabilityVerificationCommand {
             throw VerificationFailure("handler_count")
         }
         try await verifyTimer(handlers: handlers, timerID: timerID)
+        try await verifyTimerPersistenceFailure(root: root)
         try await verifySticky(handlers: handlers, noteID: noteID, root: stickyRoot)
         try await verifyCalendar(handlers: handlers, dataSource: calendar)
 
@@ -78,7 +79,7 @@ enum CapabilityVerificationCommand {
         let started = try await handlers.invoke(
             PocketCapabilityKey(id: "timer.countdown.start", version: 1),
             arguments: [
-                "durationSeconds": .integer(600),
+                "durationSeconds": .integer(86_400),
                 "title": .string("Focus"),
                 "sourceRef": .string("calendar:test")
             ],
@@ -89,6 +90,10 @@ enum CapabilityVerificationCommand {
         )
         try require(started["timerId"] == .string(timerID.uuidString.lowercased()), "timer_id")
         try require(started["state"] == .string("running"), "timer_started")
+        try require(
+            started["endAt"] == .string(CapabilityDateCodec.string(from: now.addingTimeInterval(86_400))),
+            "timer_max_duration"
+        )
 
         let idArguments: CapabilityObject = ["timerId": .string(timerID.uuidString)]
         let read = try await handlers.invoke(
@@ -137,6 +142,27 @@ enum CapabilityVerificationCommand {
             )
         )
         try require(stopped["state"] == .string("stopped") && stopped["endAt"] == .null, "timer_stop")
+    }
+
+    @MainActor
+    private static func verifyTimerPersistenceFailure(root: URL) async throws {
+        let blockedRoot = root.appendingPathComponent("blocked-timer", isDirectory: false)
+        try Data("blocked".utf8).write(to: blockedRoot)
+        let store = TimerStore(storageDirectory: blockedRoot, observesWake: false)
+        let handler = TimerCapabilityHandler(operation: .start, store: store)
+        do {
+            _ = try await handler.handle(
+                arguments: [
+                    "durationSeconds": .integer(60),
+                    "title": .string("Blocked"),
+                    "sourceRef": .null
+                ],
+                context: CapabilityHandlerContext(idempotencyKey: "timer-verifier-key-0005")
+            )
+            throw VerificationFailure("timer_persistence_failure_accepted")
+        } catch CapabilityHandlerError.unavailable(let field) where field == "timer_storage" {
+        }
+        try require(store.runningTimers.isEmpty, "timer_persistence_failure_rollback")
     }
 
     @MainActor
