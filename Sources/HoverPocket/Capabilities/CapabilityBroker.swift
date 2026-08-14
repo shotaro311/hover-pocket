@@ -503,7 +503,7 @@ final class CapabilityBroker {
         timeoutMilliseconds: Int
     ) async throws -> CapabilityObject {
         try await withCheckedThrowingContinuation { continuation in
-            let gate = CapabilityInvocationContinuationGate(continuation)
+            let gate = CapabilityInvocationContinuationGate(continuation, expectedTaskCount: 2)
             let operation = Task { @MainActor [registry] in
                 do {
                     try Task.checkCancellation()
@@ -740,24 +740,46 @@ private extension CapabilityHandlerContext {
 private final class CapabilityInvocationContinuationGate {
     private var continuation: CheckedContinuation<CapabilityObject, Error>?
     private var tasks: [Task<Void, Never>] = []
+    private var winningResult: Result<CapabilityObject, Error>?
+    private var remainingTaskCount: Int
+    private var installed = false
 
-    init(_ continuation: CheckedContinuation<CapabilityObject, Error>) {
+    init(
+        _ continuation: CheckedContinuation<CapabilityObject, Error>,
+        expectedTaskCount: Int
+    ) {
         self.continuation = continuation
+        remainingTaskCount = expectedTaskCount
     }
 
     func install(tasks: [Task<Void, Never>]) {
-        guard continuation != nil else {
-            tasks.forEach { $0.cancel() }
-            return
-        }
         self.tasks = tasks
+        installed = true
+        if winningResult != nil {
+            tasks.forEach { $0.cancel() }
+        }
+        finishIfReady()
     }
 
     func resolve(_ result: Result<CapabilityObject, Error>) {
-        guard let continuation else { return }
+        guard remainingTaskCount > 0 else { return }
+        remainingTaskCount -= 1
+        if winningResult == nil {
+            winningResult = result
+            if installed {
+                tasks.forEach { $0.cancel() }
+            }
+        }
+        finishIfReady()
+    }
+
+    private func finishIfReady() {
+        guard installed,
+              remainingTaskCount == 0,
+              let continuation,
+              let winningResult else { return }
         self.continuation = nil
-        tasks.forEach { $0.cancel() }
         tasks.removeAll(keepingCapacity: false)
-        continuation.resume(with: result)
+        continuation.resume(with: winningResult)
     }
 }
