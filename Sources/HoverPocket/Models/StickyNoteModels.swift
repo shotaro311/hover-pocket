@@ -3,6 +3,7 @@ import SwiftUI
 
 struct StickyNoteItem: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
+    var stableKey: String? = nil
     var title: String
     var body: String
     var color: StickyNoteColor

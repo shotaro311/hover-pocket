@@ -73,7 +73,7 @@
       "path": "golden/capability-registry.json",
       "kind": "capability-registry",
       "expected": "pass",
-      "expectedDigest": "sha256:76c54a3faede606bb613558d0de82ed1a823da1365ce0875bb0f9aff177c492a"
+      "expectedDigest": "sha256:c66e676c3c0b7cb6699a35984847c9057ea29f73459f000b3e555da224d2d40f"
     },
     {
       "id": "golden-error-codes",
@@ -348,6 +348,20 @@
       "schema": "approval-request.schema.json"
     },
     {
+      "id": "valid-capability-descriptor.calendar-event-create",
+      "path": "valid/capability-descriptor.calendar-event-create.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.calendar-event-get",
+      "path": "valid/capability-descriptor.calendar-event-get.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
       "id": "valid-capability-descriptor.calendar-events-list",
       "path": "valid/capability-descriptor.calendar-events-list.json",
       "kind": "schema",
@@ -383,8 +397,29 @@
       "schema": "capability-descriptor.schema.json"
     },
     {
+      "id": "valid-capability-descriptor.timer-countdown-pause",
+      "path": "valid/capability-descriptor.timer-countdown-pause.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.timer-countdown-resume",
+      "path": "valid/capability-descriptor.timer-countdown-resume.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
       "id": "valid-capability-descriptor.timer-countdown-start",
       "path": "valid/capability-descriptor.timer-countdown-start.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.timer-countdown-stop",
+      "path": "valid/capability-descriptor.timer-countdown-stop.json",
       "kind": "schema",
       "expected": "pass",
       "schema": "capability-descriptor.schema.json"

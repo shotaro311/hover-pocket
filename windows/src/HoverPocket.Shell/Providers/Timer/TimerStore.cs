@@ -80,6 +80,14 @@ internal sealed class TimerStore : IDisposable
         }
     }
 
+    public RunningTimer? GetRunningTimer(Guid id)
+    {
+        lock (_gate)
+        {
+            return RunningTimers.FirstOrDefault(timer => timer.Id == id);
+        }
+    }
+
     public TimerSnapshot UpdateDraftTimer(TimerPreset preset)
     {
         lock (_gate)

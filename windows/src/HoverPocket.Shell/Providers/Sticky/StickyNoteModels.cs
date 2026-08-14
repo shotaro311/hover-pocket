@@ -28,6 +28,8 @@ internal sealed class StickyNoteItem
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
+    public string? StableKey { get; set; }
+
     public string Title { get; set; } = string.Empty;
 
     public string Body { get; set; } = string.Empty;
@@ -50,6 +52,7 @@ internal sealed class StickyNoteItem
         return new StickyNoteItem
         {
             Id = Id,
+            StableKey = StableKey,
             Title = Title,
             Body = Body,
             Color = Color,

@@ -1,6 +1,6 @@
 # HoverPocket Pocket Contracts v1
 
-AN0のmacOS / Windows共通machine contractである。runtime実装ではなく、後続のSwift / C#実装が共有する受理・拒否境界を定義する。
+AN0で固定したmacOS / Windows共通machine contractである。AN1以降のSwift / C# runtime実装が共有する受理・拒否境界を定義する。
 
 ## Contract documents
 
@@ -61,3 +61,5 @@ python3 script/verify_pocket_contracts.py --report-json pocket-contracts-report.
 ```
 
 Validatorは外部library、package manager、network、secret、環境値を使用しない。未知schema keyword、未解決`$ref`、重複JSON key、非有限数、unknown capability、version mismatch、semantic invariant違反を成功扱いにしない。CIは固定OS / Python / Action revisionで3OS reportを生成し、最後にbyte-for-byte一致を確認する。
+
+AN1の初期handler inventoryはCalendar list/get/create、Timer start/get/pause/resume/stop、Sticky upsert/getである。macOSとWindowsのruntime handlerは同じID/versionを登録し、各OSのCLI verifierがStore mutation後のID readbackとCalendar create後のGET一致を検証する。承認、重複抑止ledger、監査receiptはAN2のBroker責務であり、handlerからProvider Viewは参照しない。

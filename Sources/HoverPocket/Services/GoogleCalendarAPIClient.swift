@@ -66,16 +66,69 @@ final class GoogleCalendarAPIClient: @unchecked Sendable {
         }
     }
 
-    func createEvent(_ draft: GoogleCalendarEventDraft, calendar: Calendar = .current) async throws {
+    func createEvent(
+        _ draft: GoogleCalendarEventDraft,
+        source: GoogleCalendarSource? = nil,
+        calendar: Calendar = .current
+    ) async throws -> GoogleCalendarEventOccurrence {
         let normalized = draft.normalized(calendar: calendar)
         let body = try JSONEncoder().encode(Self.writeResource(from: normalized, calendar: calendar))
-        try await withAuthorizedRetry { accessToken in
+        return try await withAuthorizedRetry { accessToken in
             var request = URLRequest(url: Self.eventsURL(calendarID: normalized.calendarID))
             request.httpMethod = "POST"
             request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = body
-            _ = try await send(request)
+            let data = try await send(request)
+            let resource: GoogleCalendarEventResource
+            do {
+                resource = try decoder.decode(GoogleCalendarEventResource.self, from: data)
+            } catch {
+                throw GoogleCalendarAPIError.invalidResponse
+            }
+            let resolvedSource = source ?? GoogleCalendarSource(
+                id: normalized.calendarID,
+                title: normalized.calendarID,
+                colorHex: nil,
+                timeZone: calendar.timeZone.identifier,
+                isPrimary: false,
+                accessRole: "writer"
+            )
+            guard let event = Self.normalize(event: resource, source: resolvedSource) else {
+                throw GoogleCalendarAPIError.invalidResponse
+            }
+            return event
+        }
+    }
+
+    func fetchEvent(
+        calendarID: String,
+        eventID: String,
+        source: GoogleCalendarSource? = nil,
+        calendar: Calendar = .current
+    ) async throws -> GoogleCalendarEventOccurrence {
+        try await withAuthorizedRetry { accessToken in
+            var request = URLRequest(url: Self.eventURL(calendarID: calendarID, eventID: eventID))
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            let data = try await send(request)
+            let resource: GoogleCalendarEventResource
+            do {
+                resource = try decoder.decode(GoogleCalendarEventResource.self, from: data)
+            } catch {
+                throw GoogleCalendarAPIError.invalidResponse
+            }
+            let resolvedSource = source ?? GoogleCalendarSource(
+                id: calendarID,
+                title: calendarID,
+                colorHex: nil,
+                timeZone: calendar.timeZone.identifier,
+                isPrimary: false,
+                accessRole: "writer"
+            )
+            guard let event = Self.normalize(event: resource, source: resolvedSource) else {
+                throw GoogleCalendarAPIError.invalidResponse
+            }
+            return event
         }
     }
 

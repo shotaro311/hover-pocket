@@ -54,6 +54,41 @@ internal sealed class StickyNotesStore
         .ThenByDescending(note => note.UpdatedAt)
         .ToArray();
 
+    public StickyNoteItem? GetNote(Guid id)
+    {
+        return FindNote(id)?.Clone();
+    }
+
+    public StickyNoteItem UpsertNote(
+        string stableKey,
+        string title,
+        string body,
+        StickyNoteColor color)
+    {
+        var note = _notes.FirstOrDefault(item => string.Equals(item.StableKey, stableKey, StringComparison.Ordinal));
+        var now = DateTimeOffset.UtcNow;
+        if (note is null)
+        {
+            note = new StickyNoteItem
+            {
+                Id = Guid.NewGuid(),
+                StableKey = stableKey,
+                CreatedAt = now,
+                SortIndex = NextSortIndexForNewNote()
+            };
+            _notes.Add(note);
+        }
+
+        note.Title = NormalizeTitle(title);
+        note.Body = body;
+        note.Color = color;
+        note.UpdatedAt = now;
+        note.ArchivedAt = null;
+        LastAction = null;
+        SaveNotes();
+        return note.Clone();
+    }
+
     public StickyNoteItem CreateNote(StickyNoteColor color = StickyNoteColor.Yellow)
     {
         var now = DateTimeOffset.UtcNow;

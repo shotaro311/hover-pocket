@@ -4,6 +4,9 @@ import Carbon
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hoverWindowController = HoverWindowController()
+    private let capabilityHandlers = try? ProviderCapabilityCompositionRoot.live(
+        calendarDataSource: GoogleCalendarCapabilityDataSource()
+    )
     private var statusBarMenuController: StatusBarMenuController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {

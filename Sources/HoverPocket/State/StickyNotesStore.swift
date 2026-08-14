@@ -10,14 +10,7 @@ final class StickyNotesStore: ObservableObject {
     @Published private(set) var lastErrorMessage: String?
 
     private let fileManager: FileManager
-
-    private lazy var storageDirectory: URL = {
-        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        return base
-            .appendingPathComponent("HoverPocket", isDirectory: true)
-            .appendingPathComponent("StickyNotes", isDirectory: true)
-    }()
+    private let storageDirectory: URL
 
     private var notesURL: URL {
         storageDirectory.appendingPathComponent("notes.json", isDirectory: false)
@@ -34,9 +27,55 @@ final class StickyNotesStore: ObservableObject {
             }
     }
 
-    init(fileManager: FileManager = .default) {
+    init(storageDirectory: URL? = nil, fileManager: FileManager = .default) {
         self.fileManager = fileManager
+        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        self.storageDirectory = storageDirectory ?? base
+            .appendingPathComponent("HoverPocket", isDirectory: true)
+            .appendingPathComponent("StickyNotes", isDirectory: true)
         load()
+    }
+
+    func note(id: UUID) -> StickyNoteItem? {
+        notes.first { $0.id == id }
+    }
+
+    @discardableResult
+    func upsertNote(
+        stableKey: String,
+        title: String,
+        body: String,
+        color: StickyNoteColor,
+        id: UUID = UUID(),
+        at date: Date = Date()
+    ) -> StickyNoteItem {
+        if let index = notes.firstIndex(where: { $0.stableKey == stableKey }) {
+            notes[index].title = title
+            notes[index].body = body
+            notes[index].color = color
+            notes[index].updatedAt = date
+            notes[index].archivedAt = nil
+            lastAction = nil
+            save()
+            return notes[index]
+        }
+
+        let note = StickyNoteItem(
+            id: id,
+            stableKey: stableKey,
+            title: title,
+            body: body,
+            color: color,
+            createdAt: date,
+            updatedAt: date,
+            archivedAt: nil,
+            sortIndex: nextSortIndexForNewNote()
+        )
+        notes.append(note)
+        lastAction = nil
+        save()
+        return note
     }
 
     @discardableResult

@@ -80,19 +80,25 @@ final class TimerStore: ObservableObject {
 
     // MARK: - Timer lifecycle
 
-    func start(preset: TimerPreset, pinnedPresetID: UUID? = nil) {
-        guard canStartTimer else { return }
+    @discardableResult
+    func start(
+        preset: TimerPreset,
+        pinnedPresetID: UUID? = nil,
+        id: UUID = UUID(),
+        at date: Date = Date()
+    ) -> RunningTimer? {
+        guard canStartTimer else { return nil }
         let phaseDuration = preset.isPomodoro ? preset.workDuration : preset.duration
-        guard phaseDuration > 0 else { return }
+        guard phaseDuration > 0 else { return nil }
         let timer = RunningTimer(
-            id: UUID(),
+            id: id,
             title: preset.title,
             color: preset.color,
             soundEnabled: preset.soundEnabled,
             isPomodoro: preset.isPomodoro,
             phase: .work,
             completedWorkCycles: 0,
-            endDate: Date().addingTimeInterval(phaseDuration),
+            endDate: date.addingTimeInterval(phaseDuration),
             phaseDuration: phaseDuration,
             pausedRemaining: nil,
             workDuration: preset.workDuration,
@@ -100,27 +106,32 @@ final class TimerStore: ObservableObject {
             pinnedPresetID: pinnedPresetID
         )
         runningTimers.append(timer)
-        now = Date()
+        now = date
         syncTickTimer()
         persistRunningTimers()
+        return timer
     }
 
-    func pause(id: UUID) {
+    func runningTimer(id: UUID) -> RunningTimer? {
+        runningTimers.first { $0.id == id }
+    }
+
+    func pause(id: UUID, at date: Date = Date()) {
         guard let index = runningTimers.firstIndex(where: { $0.id == id }),
               !runningTimers[index].isPaused
         else { return }
-        runningTimers[index].pausedRemaining = runningTimers[index].remaining(at: Date())
+        runningTimers[index].pausedRemaining = runningTimers[index].remaining(at: date)
         syncTickTimer()
         persistRunningTimers()
     }
 
-    func resume(id: UUID) {
+    func resume(id: UUID, at date: Date = Date()) {
         guard let index = runningTimers.firstIndex(where: { $0.id == id }),
               let remaining = runningTimers[index].pausedRemaining
         else { return }
         runningTimers[index].pausedRemaining = nil
-        runningTimers[index].endDate = Date().addingTimeInterval(remaining)
-        now = Date()
+        runningTimers[index].endDate = date.addingTimeInterval(remaining)
+        now = date
         syncTickTimer()
         persistRunningTimers()
     }
