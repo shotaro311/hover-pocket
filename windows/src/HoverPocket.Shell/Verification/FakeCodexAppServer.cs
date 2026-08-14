@@ -126,6 +126,15 @@ internal static class FakeCodexAppServer
                 case "initialized":
                     break;
                 case "account/read":
+                    if (!HasRefreshTokenFalse(message))
+                    {
+                        Write(output, new
+                        {
+                            id = idElement.Clone(),
+                            error = new { code = -32602, message = "Expected refreshToken=false." }
+                        });
+                        break;
+                    }
                     if (expectDynamicTools)
                     {
                         Write(output, new
@@ -161,6 +170,15 @@ internal static class FakeCodexAppServer
                     });
                     break;
                 case "thread/realtime/listVoices":
+                    if (!HasEmptyObjectParams(message))
+                    {
+                        Write(output, new
+                        {
+                            id = idElement.Clone(),
+                            error = new { code = -32602, message = "Expected empty params." }
+                        });
+                        break;
+                    }
                     Write(output, new
                     {
                         id = idElement.Clone(),
@@ -387,6 +405,22 @@ internal static class FakeCodexAppServer
         }
 
         return 0;
+    }
+
+    private static bool HasEmptyObjectParams(JsonElement message)
+    {
+        return message.TryGetProperty("params", out var parameters)
+            && parameters.ValueKind == JsonValueKind.Object
+            && !parameters.EnumerateObject().Any();
+    }
+
+    private static bool HasRefreshTokenFalse(JsonElement message)
+    {
+        return message.TryGetProperty("params", out var parameters)
+            && parameters.ValueKind == JsonValueKind.Object
+            && parameters.TryGetProperty("refreshToken", out var refreshToken)
+            && refreshToken.ValueKind == JsonValueKind.False
+            && parameters.EnumerateObject().Count() == 1;
     }
 
     private static void Write(StreamWriter output, object value)

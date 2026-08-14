@@ -3,6 +3,7 @@ import SwiftUI
 struct VoiceLaneView: View {
     @ObservedObject var model: VoiceLaneViewModel
     @ObservedObject var settings: AppSettings
+    @ObservedObject var webRTCDriver: CodexVoiceWebRTCDriver
 
     var body: some View {
         Group {
@@ -32,14 +33,23 @@ struct VoiceLaneView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized(japanese: "音声会話", english: "Voice conversation"))
+        .overlay(alignment: .topLeading) {
+            if model.effectiveDisplayMode != .disabled {
+                CodexVoiceWebRTCTransportView(driver: webRTCDriver)
+                    .frame(width: 1, height: 1)
+                    .opacity(0.01)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
     }
 
     private var compactBar: some View {
         HStack(spacing: 10) {
             Button {
-                model.setMuted(!model.isMuted)
+                model.startSession()
             } label: {
-                Image(systemName: model.isMuted ? "mic.fill" : "waveform")
+                Image(systemName: "mic.fill")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(model.isSessionActive ? Color.white : Color.secondary)
                     .frame(width: 38, height: 38)
@@ -53,11 +63,13 @@ struct VoiceLaneView: View {
                     )
             }
             .buttonStyle(.plain)
-            .disabled(!model.isSessionActive)
+            .disabled(
+                model.availability != .ready
+                    || model.isSessionActive
+                    || !webRTCDriver.isReady
+            )
             .accessibilityLabel(
-                model.isMuted
-                    ? localized(japanese: "マイクを有効にする", english: "Enable microphone")
-                    : localized(japanese: "マイクをミュート", english: "Mute microphone")
+                localized(japanese: "音声セッションを開始", english: "Start voice session")
             )
 
             VoiceWaveformView(isActive: model.isSessionActive && !model.isMuted)
@@ -194,7 +206,10 @@ struct VoiceLaneView: View {
                 ScrollView {
                     LazyVStack(spacing: 8) {
                         ForEach(model.sessions) { session in
-                            VoiceLaneSessionCardView(session: session)
+                            VoiceLaneSessionCardView(
+                                session: session,
+                                language: settings.appLanguage
+                            )
                         }
                     }
                 }
@@ -211,10 +226,49 @@ struct VoiceLaneView: View {
                 english: "Compact view is used because screen height is limited"
             )
         }
-        if let statusText = model.statusText {
-            return statusText
+        if let statusCode = model.statusText {
+            return localizedStatus(statusCode)
         }
         return localized(japanese: "音声セッションを開始", english: "Start a voice session")
+    }
+
+    private func localizedStatus(_ code: String) -> String {
+        if code.hasPrefix("error:") {
+            return localized(
+                japanese: "音声機能で問題が発生しました",
+                english: "Voice encountered a problem"
+            )
+        }
+        switch code {
+        case "starting":
+            return localized(japanese: "Codexに接続しています", english: "Connecting to Codex")
+        case "ready":
+            return localized(japanese: "音声セッションを開始", english: "Start a voice session")
+        case "signed_out":
+            return localized(japanese: "Codexへのログインが必要です", english: "Sign in to Codex")
+        case "unavailable":
+            return localized(japanese: "Codexが見つかりません", english: "Codex is unavailable")
+        case "incompatible":
+            return localized(japanese: "このCodexは音声に対応していません", english: "This Codex version is incompatible")
+        case "requesting_permission":
+            return localized(japanese: "マイクの許可を確認しています", english: "Requesting microphone permission")
+        case "negotiating", "connecting":
+            return localized(japanese: "音声を接続しています", english: "Connecting voice")
+        case "connected":
+            return localized(japanese: "聞いています…", english: "Listening…")
+        case "muted":
+            return localized(japanese: "ミュート中", english: "Muted")
+        case "reconnecting":
+            return localized(japanese: "再接続しています", english: "Reconnecting")
+        case "stopping":
+            return localized(japanese: "音声を終了しています", english: "Stopping voice")
+        case "closed":
+            return localized(japanese: "音声セッションは終了しました", english: "Voice session ended")
+        case "recoverable_failure":
+            return localized(japanese: "音声を再接続できます", english: "Voice can be reconnected")
+        default:
+            return localized(japanese: "音声機能を利用できません", english: "Voice is unavailable")
+        }
     }
 
     private var lastConversationText: String {
@@ -256,6 +310,7 @@ private struct VoiceWaveformView: View {
 
 private struct VoiceLaneSessionCardView: View {
     let session: VoiceLaneSessionCard
+    let language: AppLanguage
 
     var body: some View {
         HStack(spacing: 8) {
@@ -264,10 +319,10 @@ private struct VoiceLaneSessionCardView: View {
                 .frame(width: 7, height: 7)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.title)
+                Text(title)
                     .font(.system(size: 11, weight: .semibold))
                     .lineLimit(1)
-                Text(session.detail)
+                Text(detail)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -299,6 +354,35 @@ private struct VoiceLaneSessionCardView: View {
             return .green
         case .failed:
             return .red
+        }
+    }
+
+    private var title: String {
+        guard session.id == "current-root" else { return session.title }
+        return language == .japanese ? "この会話" : "This conversation"
+    }
+
+    private var detail: String {
+        guard session.id == "current-root" else { return session.detail }
+        switch CodexVoiceSessionStatus(rawValue: session.detail) {
+        case .requestingPermission:
+            return language == .japanese ? "マイク確認中" : "Requesting microphone"
+        case .negotiating, .connecting:
+            return language == .japanese ? "接続中" : "Connecting"
+        case .connected:
+            return language == .japanese ? "会話中" : "Connected"
+        case .muted:
+            return language == .japanese ? "ミュート中" : "Muted"
+        case .reconnecting:
+            return language == .japanese ? "再接続中" : "Reconnecting"
+        case .stopping:
+            return language == .japanese ? "終了中" : "Stopping"
+        case .closed:
+            return language == .japanese ? "終了" : "Closed"
+        case .recoverableFailure, .blockedFailure:
+            return language == .japanese ? "要確認" : "Needs attention"
+        case .idle, .none:
+            return language == .japanese ? "待機中" : "Idle"
         }
     }
 

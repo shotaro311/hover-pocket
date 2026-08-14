@@ -52,7 +52,8 @@ internal sealed class PanelBridgeController : IDisposable
         UserSettings settings,
         IStartupRegistrationService? startupRegistration = null,
         AiLaneController? aiLaneController = null,
-        UpdaterService? updaterService = null)
+        UpdaterService? updaterService = null,
+        Func<CancellationToken, Task<CodexAppServerClient>>? codexVoiceClientFactory = null)
     {
         _providerRegistry = providerRegistry;
         _settingsStore = settingsStore;
@@ -101,6 +102,7 @@ internal sealed class PanelBridgeController : IDisposable
         _codexVoiceRuntime = new CodexVoiceRuntimeHost(
             CurrentSettings.CodexVoiceEnabled,
             Path.Combine(settingsStore.RootDirectory, "VoiceWorkspace"),
+            clientFactory: codexVoiceClientFactory,
             toolAdapter: voiceToolAdapter);
         _codexVoiceRuntime.SnapshotChanged += OnCodexVoiceSnapshotChanged;
         _clipboardBridgeController = new ClipboardBridgeController(

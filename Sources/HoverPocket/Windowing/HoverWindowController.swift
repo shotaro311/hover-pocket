@@ -35,6 +35,8 @@ final class HoverWindowController {
     private let settings: AppSettings
     private let menuStore: HoverMenuStore
     private let voiceLaneModel: VoiceLaneViewModel
+    private let voiceRuntimeHost: CodexVoiceRuntimeHost
+    private let voiceWebRTCDriver: CodexVoiceWebRTCDriver
     private let settingsWindowController: SettingsWindowController
     private var settingsCancellables = Set<AnyCancellable>()
 
@@ -46,9 +48,24 @@ final class HoverWindowController {
         let settings = AppSettings()
         let menuStore = HoverMenuStore(settings: settings)
         let voiceLaneModel = VoiceLaneViewModel()
+        let voiceRuntimeHost = CodexVoiceRuntimeHost(viewModel: voiceLaneModel)
+        let voiceWebRTCDriver = CodexVoiceWebRTCDriver(runtimeHost: voiceRuntimeHost)
+        voiceLaneModel.bindRuntimeActions(
+            startSession: { [weak voiceWebRTCDriver] in
+                voiceWebRTCDriver?.startSession()
+            },
+            setMuted: { [weak voiceWebRTCDriver] muted in
+                voiceWebRTCDriver?.setMuted(muted)
+            },
+            endSession: { [weak voiceWebRTCDriver] in
+                voiceWebRTCDriver?.stopSession()
+            }
+        )
         self.settings = settings
         self.menuStore = menuStore
         self.voiceLaneModel = voiceLaneModel
+        self.voiceRuntimeHost = voiceRuntimeHost
+        self.voiceWebRTCDriver = voiceWebRTCDriver
         self.settingsWindowController = SettingsWindowController(
             settings: settings,
             providerStore: menuStore.providerStore
@@ -58,6 +75,10 @@ final class HoverWindowController {
         configurePreviewWindow()
         observeSettings()
         observeTimerAlerts()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.voiceRuntimeHost.setEnabled(self.settings.codexVoiceEnabled)
+        }
     }
 
     func showPill() {
@@ -192,6 +213,7 @@ final class HoverWindowController {
                 store: menuStore,
                 settings: settings,
                 voiceLaneModel: voiceLaneModel,
+                voiceWebRTCDriver: voiceWebRTCDriver,
                 onOpenSettings: { [weak self] in self?.showSettings() },
                 onClosePanel: { [weak self] in self?.closePreview() },
                 onExternalDragStarted: { [weak self] in self?.prepareForExternalDrag() }
@@ -271,6 +293,7 @@ final class HoverWindowController {
         }
         previewWindow.orderOut(nil)
         menuStore.providerStore.prepareForPanelClose()
+        voiceWebRTCDriver.detachForPanelClose()
     }
 
     private func showPreview(on requestedScreen: NSScreen?) {
@@ -281,6 +304,7 @@ final class HoverWindowController {
         mouseEventsEnableTask = nil
 
         guard let screen = requestedScreen ?? targetScreen(), let previewWindow else { return }
+        voiceRuntimeHost.setPanelVisible(true)
         activePreviewScreen = screen
         let frames = panelFrames(on: screen)
         applyVoiceLaneLayout(frames)
@@ -376,8 +400,11 @@ final class HoverWindowController {
     private func closePreview() {
         guard let previewWindow, previewWindow.isVisible else {
             menuStore.providerStore.prepareForPanelClose()
+            voiceWebRTCDriver.detachForPanelClose()
             return
         }
+
+        voiceWebRTCDriver.detachForPanelClose()
 
         stopHoverMonitor()
         mouseEventsEnableTask?.cancel()
@@ -705,9 +732,16 @@ final class HoverWindowController {
 
         settings.$codexVoiceEnabled
             .dropFirst()
-            .sink { [weak self] _ in
+            .sink { [weak self] enabled in
                 DispatchQueue.main.async { [weak self] in
-                    self?.resizePreviewForPanelSizeChange()
+                    guard let self else { return }
+                    self.resizePreviewForPanelSizeChange()
+                    if !enabled {
+                        self.voiceWebRTCDriver.detachForPanelClose()
+                    }
+                    Task { @MainActor [weak self] in
+                        await self?.voiceRuntimeHost.setEnabled(enabled)
+                    }
                 }
             }
             .store(in: &settingsCancellables)

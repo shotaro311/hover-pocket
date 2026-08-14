@@ -52,9 +52,15 @@ enum VoiceLaneLayoutVerificationCommand {
                 renderCases += 1
                 let configuration = makeSettings(panelSize: panelSize, mode: mode)
                 let model = VoiceLaneViewModel()
+                let runtimeHost = CodexVoiceRuntimeHost(viewModel: model)
+                let webRTCDriver = CodexVoiceWebRTCDriver(runtimeHost: runtimeHost)
                 model.applyLayout(requested: mode, resolved: mode)
                 let laneHeight = PanelLayout.voiceLaneHeight(for: panelSize, mode: mode)
-                let view = VoiceLaneView(model: model, settings: configuration.settings)
+                let view = VoiceLaneView(
+                    model: model,
+                    settings: configuration.settings,
+                    webRTCDriver: webRTCDriver
+                )
                     .frame(width: baseline.width, height: laneHeight)
                 let host = NSHostingView(rootView: view)
                 host.frame = CGRect(x: 0, y: 0, width: baseline.width, height: laneHeight)

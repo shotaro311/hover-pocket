@@ -116,14 +116,17 @@ $messages = @(
     [ordered]@{
         method = "account/read"
         id = 2
+        params = [ordered]@{ refreshToken = $false }
     },
     [ordered]@{
         method = "account/rateLimits/read"
         id = 3
+        params = [ordered]@{}
     },
     [ordered]@{
         method = "thread/realtime/listVoices"
         id = 4
+        params = [ordered]@{}
     }
 )
 

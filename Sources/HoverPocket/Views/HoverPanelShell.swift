@@ -5,6 +5,7 @@ struct HoverPanelShell: View {
     @ObservedObject var store: HoverMenuStore
     @ObservedObject var settings: AppSettings
     @ObservedObject var voiceLaneModel: VoiceLaneViewModel
+    @ObservedObject var voiceWebRTCDriver: CodexVoiceWebRTCDriver
     let onOpenSettings: () -> Void
     let onClosePanel: () -> Void
     let onExternalDragStarted: () -> Void
@@ -20,7 +21,8 @@ struct HoverPanelShell: View {
                 if voiceLaneModel.effectiveDisplayMode != .disabled {
                     VoiceLaneView(
                         model: voiceLaneModel,
-                        settings: settings
+                        settings: settings,
+                        webRTCDriver: voiceWebRTCDriver
                     )
                     .frame(
                         height: PanelLayout.voiceLaneHeight(

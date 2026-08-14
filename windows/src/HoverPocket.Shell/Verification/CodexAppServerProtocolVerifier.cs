@@ -11,6 +11,7 @@ internal sealed class CodexAppServerProtocolVerifier
     public async Task<int> RunAsync(CancellationToken cancellationToken = default)
     {
         VerifyOptionsFailClosed();
+        VerifyCommandWrapperStartInfo();
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -57,6 +58,23 @@ internal sealed class CodexAppServerProtocolVerifier
         if (new CodexAppServerClientOptions().ExperimentalApi)
         {
             _failures.Add("experimental app-server capability was enabled by default");
+        }
+    }
+
+    private void VerifyCommandWrapperStartInfo()
+    {
+        const string commandPath = @"C:\Program Files\Codex\codex.cmd";
+        var startInfo = CodexExecutableResolver.CreateAppServerStartInfo(commandPath);
+        var expectedProcessor = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+        if (!string.Equals(startInfo.FileName, expectedProcessor, StringComparison.OrdinalIgnoreCase))
+        {
+            _failures.Add("command wrapper did not use the Windows system command processor");
+        }
+
+        if (startInfo.ArgumentList.Count != 0
+            || startInfo.Arguments != $"/d /s /c \"\"{commandPath}\" app-server --stdio\"")
+        {
+            _failures.Add("command wrapper quoting did not preserve the Codex path and JSONL pipes");
         }
     }
 
@@ -203,6 +221,7 @@ internal sealed class CodexAppServerProtocolVerifier
     {
         var result = await client.SendIdempotentRequestWithRetryAsync(
             "account/rateLimits/read",
+            new { },
             maxAttempts: 3,
             cancellationToken: cancellationToken);
         if (!result.TryGetProperty("attempt", out var attempt)

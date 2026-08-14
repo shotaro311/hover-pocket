@@ -8,6 +8,7 @@ on:
       - "Sources/HoverPocket/App/CapabilityVerificationCommand.swift"
       - "Sources/HoverPocket/App/CapabilityBrokerVerificationCommand.swift"
       - "Sources/HoverPocket/App/VoiceLaneLayoutVerificationCommand.swift"
+      - "Sources/HoverPocket/App/CodexAppServerVerificationCommand.swift"
       - "Sources/HoverPocket/App/AppDelegate.swift"
       - "Sources/HoverPocket/Models/VoiceLaneModels.swift"
       - "Sources/HoverPocket/State/AppSettings.swift"
@@ -20,11 +21,13 @@ on:
       - "Sources/HoverPocket/State/TimerStore.swift"
       - "Sources/HoverPocket/Views/HoverPanelShell.swift"
       - "Sources/HoverPocket/Views/VoiceLaneView.swift"
+      - "Sources/HoverPocket/Voice/**"
       - "Sources/HoverPocket/Windowing/HoverWindowController.swift"
       - "Sources/HoverPocket/Windowing/PanelGeometry.swift"
       - "Sources/HoverPocket/main.swift"
       - "Package.swift"
       - "Package.resolved"
+      - "script/build_and_run.sh"
       - "contracts/pocket/v1/**"
       - ".github/workflows/macos-capabilities-verify.yml"
   pull_request:
@@ -33,6 +36,7 @@ on:
       - "Sources/HoverPocket/App/CapabilityVerificationCommand.swift"
       - "Sources/HoverPocket/App/CapabilityBrokerVerificationCommand.swift"
       - "Sources/HoverPocket/App/VoiceLaneLayoutVerificationCommand.swift"
+      - "Sources/HoverPocket/App/CodexAppServerVerificationCommand.swift"
       - "Sources/HoverPocket/App/AppDelegate.swift"
       - "Sources/HoverPocket/Models/VoiceLaneModels.swift"
       - "Sources/HoverPocket/State/AppSettings.swift"
@@ -45,11 +49,13 @@ on:
       - "Sources/HoverPocket/State/TimerStore.swift"
       - "Sources/HoverPocket/Views/HoverPanelShell.swift"
       - "Sources/HoverPocket/Views/VoiceLaneView.swift"
+      - "Sources/HoverPocket/Voice/**"
       - "Sources/HoverPocket/Windowing/HoverWindowController.swift"
       - "Sources/HoverPocket/Windowing/PanelGeometry.swift"
       - "Sources/HoverPocket/main.swift"
       - "Package.swift"
       - "Package.resolved"
+      - "script/build_and_run.sh"
       - "contracts/pocket/v1/**"
       - ".github/workflows/macos-capabilities-verify.yml"
   workflow_dispatch:
@@ -66,7 +72,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Build
-        run: swift build
+        run: swift build -Xswiftc -warnings-as-errors
 
       - name: Verify capability handlers
         run: .build/debug/HoverPocket --verify-capabilities

@@ -855,11 +855,8 @@ internal static class CodexExecutableResolver
             || extension.Equals(".bat", StringComparison.OrdinalIgnoreCase))
         {
             startInfo = CreateBaseStartInfo(
-                Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe");
-            startInfo.ArgumentList.Add("/d");
-            startInfo.ArgumentList.Add("/s");
-            startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add($"\"\"{executablePath}\" app-server --stdio\"");
+                Path.Combine(Environment.SystemDirectory, "cmd.exe"));
+            startInfo.Arguments = $"/d /s /c \"\"{executablePath}\" app-server --stdio\"";
         }
         else if (extension.Equals(".ps1", StringComparison.OrdinalIgnoreCase))
         {

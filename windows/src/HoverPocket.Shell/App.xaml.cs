@@ -39,8 +39,7 @@ public partial class App : System.Windows.Application
         if (options.VerifyUiModel)
         {
             VerifyConsole.AttachParent();
-            Environment.ExitCode = new UiModelVerifier().Run();
-            Shutdown();
+            _ = RunUiModelVerificationAsync();
             return;
         }
 
@@ -239,6 +238,12 @@ public partial class App : System.Windows.Application
     private async Task RunSettingsVerificationAsync()
     {
         Environment.ExitCode = await new SettingsVerifier().RunAsync();
+        Shutdown();
+    }
+
+    private async Task RunUiModelVerificationAsync()
+    {
+        Environment.ExitCode = await new UiModelVerifier().RunAsync();
         Shutdown();
     }
 

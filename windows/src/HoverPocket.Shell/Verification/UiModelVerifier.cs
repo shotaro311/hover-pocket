@@ -12,7 +12,7 @@ internal sealed class UiModelVerifier
 {
     private readonly List<string> _failures = [];
 
-    public int Run()
+    public async Task<int> RunAsync()
     {
         var registry = ProviderRegistry.CreateDefault();
         var store = UserSettingsStore.CreateTemporary("UiModelVerify");
@@ -20,7 +20,7 @@ internal sealed class UiModelVerifier
         VerifySettingsRoundTrip(registry, store);
         VerifyCorruptSettingsFallback(registry, store);
         VerifyMicrophonePermissionPolicy();
-        VerifyBridgeDispatch(registry, store).GetAwaiter().GetResult();
+        await VerifyBridgeDispatch(registry, store);
 
         if (_failures.Count == 0)
         {
@@ -184,7 +184,12 @@ internal sealed class UiModelVerifier
     private async Task VerifyBridgeDispatch(ProviderRegistry registry, UserSettingsStore store)
     {
         var settings = store.Load(registry.ProviderIds);
-        using var controller = new PanelBridgeController(registry, store, settings);
+        using var controller = new PanelBridgeController(
+            registry,
+            store,
+            settings,
+            codexVoiceClientFactory: _ => Task.FromException<CodexAppServerClient>(
+                new FileNotFoundException("Deterministic verifier does not start Codex.")));
         var postedEvents = new List<string>();
         var dispatcher = new BridgeDispatcher(json =>
         {

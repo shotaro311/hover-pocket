@@ -134,9 +134,15 @@ final class CodexVoiceCoordinator {
         await candidate.setServerRequestHandler(nil)
 
         do {
-            let account = try await candidate.sendRequest("account/read")
+            let account = try await candidate.sendRequest(
+                "account/read",
+                params: .object(["refreshToken": .bool(false)])
+            )
             try validateAccount(account)
-            let voices = try await candidate.sendRequest("thread/realtime/listVoices")
+            let voices = try await candidate.sendRequest(
+                "thread/realtime/listVoices",
+                params: .object([:])
+            )
             let voiceSnapshot = try parseVoices(voices)
             client = candidate
             appServerProcessID = await candidate.processIdentifier
@@ -311,6 +317,28 @@ final class CodexVoiceCoordinator {
         isMuted = true
         sessionStatus = reconnectExpected ? .reconnecting : .closed
         publish()
+    }
+
+    func markSessionFailure(_ errorCode: String) {
+        guard !isDisposed else { return }
+        transportAttached = false
+        isMuted = true
+        sessionStatus = .recoverableFailure
+        lastErrorCode = Self.safeErrorCode(errorCode)
+        publish()
+    }
+
+    private static func safeErrorCode(_ value: String) -> String {
+        let allowed = value.unicodeScalars.filter { scalar in
+            switch scalar.value {
+            case 48...57, 65...90, 97...122, 95:
+                true
+            default:
+                false
+            }
+        }
+        let bounded = String(String.UnicodeScalarView(allowed.prefix(64)))
+        return bounded.isEmpty ? "voice_failed" : bounded
     }
 
     private func processNotification(_ notification: CodexAppServerNotification) async {

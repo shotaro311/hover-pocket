@@ -1,0 +1,470 @@
+import SwiftUI
+import WebKit
+
+@MainActor
+final class CodexVoiceWebRTCDriver: ObservableObject {
+    @Published private(set) var isReady = false
+
+    private weak var runtimeHost: CodexVoiceRuntimeHost?
+    private weak var webView: WKWebView?
+    private var pageReady = false
+    private var sessionStarting = false
+    private var transportGeneration: UInt64 = 0
+
+    init(runtimeHost: CodexVoiceRuntimeHost) {
+        self.runtimeHost = runtimeHost
+    }
+
+    func attach(webView: WKWebView) {
+        self.webView = webView
+        pageReady = false
+        isReady = false
+    }
+
+    func detach(webView: WKWebView) {
+        guard self.webView === webView else { return }
+        self.webView = nil
+        pageReady = false
+        isReady = false
+        sessionStarting = false
+        transportGeneration &+= 1
+    }
+
+    func startSession() {
+        guard pageReady,
+              !sessionStarting,
+              let runtimeHost,
+              runtimeHost.beginMicrophoneRequest() else {
+            runtimeHost?.markSessionFailure("microphone_request_not_armed")
+            return
+        }
+        sessionStarting = true
+        evaluate("window.hoverPocketVoice.start()") { [weak self] error in
+            guard let self, error != nil else { return }
+            self.sessionStarting = false
+            self.runtimeHost?.markSessionFailure("webrtc_start_failed")
+        }
+    }
+
+    func setMuted(_ muted: Bool) {
+        evaluate("window.hoverPocketVoice.setMuted(\(muted ? "true" : "false"))")
+        runtimeHost?.setMuted(muted)
+    }
+
+    func stopSession() {
+        transportGeneration &+= 1
+        sessionStarting = false
+        evaluate("window.hoverPocketVoice.cleanup(false)")
+        guard let runtimeHost else { return }
+        Task { @MainActor in
+            await runtimeHost.stopRealtime()
+        }
+    }
+
+    func detachForPanelClose() {
+        transportGeneration &+= 1
+        sessionStarting = false
+        evaluate("window.hoverPocketVoice.cleanup(false)")
+        runtimeHost?.clearTransientUIState()
+    }
+
+    func handleMessage(_ body: Any) {
+        guard let object = body as? [String: Any],
+              let type = object["type"] as? String else {
+            runtimeHost?.markSessionFailure("webrtc_message_invalid")
+            return
+        }
+
+        switch type {
+        case "ready":
+            pageReady = true
+            isReady = true
+        case "offer":
+            guard sessionStarting,
+                  let sdp = object["sdp"] as? String,
+                  !sdp.isEmpty,
+                  sdp.utf8.count <= 131_072 else {
+                runtimeHost?.markSessionFailure("webrtc_offer_invalid")
+                return
+            }
+            negotiate(sdpOffer: sdp)
+        case "attached":
+            sessionStarting = false
+            runtimeHost?.markTransportAttached()
+        case "detached":
+            sessionStarting = false
+            let reconnectExpected = object["reconnectExpected"] as? Bool ?? true
+            runtimeHost?.markTransportDetached(reconnectExpected: reconnectExpected)
+        case "failure":
+            sessionStarting = false
+            runtimeHost?.markSessionFailure(
+                Self.safeErrorCode(object["code"] as? String)
+            )
+        default:
+            runtimeHost?.markSessionFailure("webrtc_message_unknown")
+        }
+    }
+
+    func consumeMicrophonePermission() -> Bool {
+        runtimeHost?.consumeMicrophonePermission() ?? false
+    }
+
+    private func negotiate(sdpOffer: String) {
+        transportGeneration &+= 1
+        let generation = transportGeneration
+        guard let runtimeHost else { return }
+        Task { @MainActor [weak self] in
+            do {
+                let answer = try await runtimeHost.startWebRTC(sdpOffer: sdpOffer)
+                guard let self,
+                      self.sessionStarting,
+                      self.transportGeneration == generation else {
+                    return
+                }
+                let encoded = try Self.javascriptString(answer.sdp)
+                self.evaluate("window.hoverPocketVoice.acceptAnswer(\(encoded))") { [weak self] error in
+                    guard let self, error != nil else { return }
+                    self.sessionStarting = false
+                    self.runtimeHost?.markSessionFailure("webrtc_answer_failed")
+                }
+            } catch {
+                guard let self, self.transportGeneration == generation else { return }
+                self.sessionStarting = false
+                self.evaluate("window.hoverPocketVoice.cleanup(false)")
+                self.runtimeHost?.markSessionFailure("webrtc_negotiation_failed")
+            }
+        }
+    }
+
+    private func evaluate(
+        _ source: String,
+        completion: ((Error?) -> Void)? = nil
+    ) {
+        guard let webView else {
+            completion?(CodexVoiceWebRTCTransportError.webViewUnavailable)
+            return
+        }
+        webView.evaluateJavaScript(source) { _, error in
+            completion?(error)
+        }
+    }
+
+    private static func javascriptString(_ value: String) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: [value])
+        guard let encoded = String(data: data, encoding: .utf8),
+              encoded.count >= 2 else {
+            throw CodexVoiceWebRTCTransportError.invalidJavaScriptValue
+        }
+        return String(encoded.dropFirst().dropLast())
+    }
+
+    private static func safeErrorCode(_ value: String?) -> String {
+        guard let value else { return "webrtc_failed" }
+        let allowed = value.unicodeScalars.filter { scalar in
+            switch scalar.value {
+            case 48...57, 65...90, 97...122, 95:
+                true
+            default:
+                false
+            }
+        }
+        let bounded = String(String.UnicodeScalarView(allowed.prefix(64)))
+        return bounded.isEmpty ? "webrtc_failed" : bounded
+    }
+}
+
+struct CodexVoiceWebRTCTransportView: NSViewRepresentable {
+    @ObservedObject var driver: CodexVoiceWebRTCDriver
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(driver: driver)
+    }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+        configuration.allowsAirPlayForMediaPlayback = false
+        configuration.userContentController.add(
+            context.coordinator,
+            name: Coordinator.messageHandlerName
+        )
+        configuration.setURLSchemeHandler(
+            context.coordinator.schemeHandler,
+            forURLScheme: CodexVoiceWebContent.scheme
+        )
+
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
+        webView.isHidden = false
+        driver.attach(webView: webView)
+        webView.load(URLRequest(url: CodexVoiceWebContent.pageURL))
+        return webView
+    }
+
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        if webView.url == nil && !webView.isLoading {
+            webView.load(URLRequest(url: CodexVoiceWebContent.pageURL))
+        }
+    }
+
+    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.stopLoading()
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: Coordinator.messageHandlerName
+        )
+        coordinator.driver?.detach(webView: webView)
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
+        static let messageHandlerName = "hoverPocketVoice"
+
+        weak var driver: CodexVoiceWebRTCDriver?
+        fileprivate let schemeHandler = CodexVoiceWebContentSchemeHandler()
+
+        init(driver: CodexVoiceWebRTCDriver) {
+            self.driver = driver
+        }
+
+        func userContentController(
+            _ userContentController: WKUserContentController,
+            didReceive message: WKScriptMessage
+        ) {
+            guard message.name == Self.messageHandlerName,
+                  message.frameInfo.isMainFrame,
+                  CodexVoiceWebContent.isTrusted(message.frameInfo.request.url) else {
+                return
+            }
+            driver?.handleMessage(message.body)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+        ) {
+            decisionHandler(
+                CodexVoiceWebContent.isTrusted(navigationAction.request.url)
+                    ? .allow
+                    : .cancel
+            )
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            createWebViewWith configuration: WKWebViewConfiguration,
+            for navigationAction: WKNavigationAction,
+            windowFeatures: WKWindowFeatures
+        ) -> WKWebView? {
+            nil
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+            initiatedByFrame frame: WKFrameInfo,
+            type: WKMediaCaptureType,
+            decisionHandler: @escaping @MainActor @Sendable (WKPermissionDecision) -> Void
+        ) {
+            let structurallyAllowed = CodexVoiceMediaPermissionPolicy.shouldAllow(
+                scheme: origin.protocol,
+                host: origin.host,
+                port: origin.port,
+                frameURL: frame.request.url,
+                isMainFrame: frame.isMainFrame,
+                microphoneOnly: type == .microphone,
+                armed: true
+            )
+            let armed = structurallyAllowed && (driver?.consumeMicrophonePermission() ?? false)
+            decisionHandler(armed ? .grant : .deny)
+        }
+    }
+}
+
+enum CodexVoiceMediaPermissionPolicy {
+    static func shouldAllow(
+        scheme: String,
+        host: String,
+        port: Int,
+        frameURL: URL?,
+        isMainFrame: Bool,
+        microphoneOnly: Bool,
+        armed: Bool
+    ) -> Bool {
+        armed
+            && isMainFrame
+            && microphoneOnly
+            && scheme == CodexVoiceWebContent.scheme
+            && host == CodexVoiceWebContent.host
+            && port == 0
+            && CodexVoiceWebContent.isTrusted(frameURL)
+    }
+}
+
+private enum CodexVoiceWebContent {
+    static let scheme = "hoverpocket-voice"
+    static let host = "local"
+    static let pageURL = URL(string: "\(scheme)://\(host)/index.html")!
+
+    static func isTrusted(_ url: URL?) -> Bool {
+        guard let url else { return false }
+        return url.scheme == scheme
+            && url.host == host
+            && url.port == nil
+            && url.path == "/index.html"
+            && url.query == nil
+            && url.fragment == nil
+    }
+
+    static let html = #"""
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; media-src blob:; connect-src 'none'; webrtc 'allow'; img-src 'none'; font-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <style>html,body{width:1px;height:1px;margin:0;overflow:hidden;background:transparent}</style>
+</head>
+<body>
+<script>
+(() => {
+  "use strict";
+  const bridge = window.webkit.messageHandlers.hoverPocketVoice;
+  let peer = null;
+  let microphone = null;
+  let remoteAudio = null;
+  let attached = false;
+
+  function post(message) {
+    bridge.postMessage(message);
+  }
+
+  function waitForIce(connection) {
+    if (connection.iceGatheringState === "complete") return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        connection.removeEventListener("icegatheringstatechange", onChange);
+        reject(new Error("ice_timeout"));
+      }, 8000);
+      const onChange = () => {
+        if (connection.iceGatheringState !== "complete") return;
+        window.clearTimeout(timeout);
+        connection.removeEventListener("icegatheringstatechange", onChange);
+        resolve();
+      };
+      connection.addEventListener("icegatheringstatechange", onChange);
+    });
+  }
+
+  function cleanup(notify, reconnectExpected = true) {
+    const wasAttached = attached;
+    attached = false;
+    if (peer) {
+      peer.close();
+      peer = null;
+    }
+    if (microphone) {
+      microphone.getTracks().forEach((track) => track.stop());
+      microphone = null;
+    }
+    if (remoteAudio) {
+      remoteAudio.pause();
+      remoteAudio.srcObject = null;
+      remoteAudio = null;
+    }
+    if (notify && wasAttached) {
+      post({ type: "detached", reconnectExpected });
+    }
+  }
+
+  async function start() {
+    if (peer || microphone) return;
+    try {
+      microphone = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: false
+      });
+      const connection = new RTCPeerConnection();
+      peer = connection;
+      connection.createDataChannel("oai-events");
+      microphone.getAudioTracks().forEach((track) => connection.addTrack(track, microphone));
+      connection.addEventListener("track", (event) => {
+        remoteAudio ||= new Audio();
+        remoteAudio.autoplay = true;
+        remoteAudio.srcObject = event.streams[0] || new MediaStream([event.track]);
+        remoteAudio.play().catch(() => {});
+      });
+      connection.addEventListener("connectionstatechange", () => {
+        if (connection !== peer) return;
+        if (["failed", "disconnected", "closed"].includes(connection.connectionState)) {
+          cleanup(true, true);
+        }
+      });
+      const offer = await connection.createOffer({ offerToReceiveAudio: true });
+      await connection.setLocalDescription(offer);
+      await waitForIce(connection);
+      const sdp = connection.localDescription && connection.localDescription.sdp;
+      if (!sdp) throw new Error("offer_missing");
+      post({ type: "offer", sdp });
+    } catch (error) {
+      const code = error && error.name === "NotAllowedError"
+        ? "microphone_denied"
+        : "webrtc_failed";
+      cleanup(false);
+      post({ type: "failure", code });
+    }
+  }
+
+  async function acceptAnswer(sdp) {
+    if (!peer || typeof sdp !== "string") throw new Error("answer_invalid");
+    await peer.setRemoteDescription({ type: "answer", sdp });
+    attached = true;
+    post({ type: "attached" });
+  }
+
+  function setMuted(muted) {
+    if (!microphone) return;
+    microphone.getAudioTracks().forEach((track) => {
+      track.enabled = !muted;
+    });
+  }
+
+  window.hoverPocketVoice = { start, acceptAnswer, setMuted, cleanup };
+  post({ type: "ready" });
+})();
+</script>
+</body>
+</html>
+"""#
+}
+
+@MainActor
+fileprivate final class CodexVoiceWebContentSchemeHandler: NSObject, WKURLSchemeHandler {
+    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
+        guard CodexVoiceWebContent.isTrusted(urlSchemeTask.request.url) else {
+            urlSchemeTask.didFailWithError(CodexVoiceWebRTCTransportError.untrustedURL)
+            return
+        }
+        let data = Data(CodexVoiceWebContent.html.utf8)
+        let response = URLResponse(
+            url: CodexVoiceWebContent.pageURL,
+            mimeType: "text/html",
+            expectedContentLength: data.count,
+            textEncodingName: "utf-8"
+        )
+        urlSchemeTask.didReceive(response)
+        urlSchemeTask.didReceive(data)
+        urlSchemeTask.didFinish()
+    }
+
+    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
+}
+
+private enum CodexVoiceWebRTCTransportError: Error {
+    case webViewUnavailable
+    case invalidJavaScriptValue
+    case untrustedURL
+}

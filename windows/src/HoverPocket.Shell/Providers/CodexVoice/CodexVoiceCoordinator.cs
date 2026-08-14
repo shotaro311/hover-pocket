@@ -222,6 +222,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
 
             var account = await client.SendRequestAsync(
                 "account/read",
+                new { refreshToken = false },
                 cancellationToken: cancellationToken);
             if (RequiresOpenAiLogin(account) && !HasAccount(account))
             {
@@ -230,6 +231,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
 
             var voices = await client.SendRequestAsync(
                 "thread/realtime/listVoices",
+                new { },
                 cancellationToken: cancellationToken);
             var voiceCount = CountVoices(voices);
             var defaultVoice = ReadDefaultVoice(voices);

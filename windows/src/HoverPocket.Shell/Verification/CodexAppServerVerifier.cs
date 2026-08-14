@@ -27,9 +27,21 @@ internal sealed class CodexAppServerVerifier
             VerifyConsole.WriteLine($"codex_executable={client.ExecutablePath}");
             VerifyConsole.WriteLine($"codex_process_id={client.ProcessId}");
 
-            var account = await ProbeAsync(client, "account/read", timeout.Token);
-            var rateLimits = await ProbeAsync(client, "account/rateLimits/read", timeout.Token);
-            var voices = await ProbeAsync(client, "thread/realtime/listVoices", timeout.Token);
+            var account = await ProbeAsync(
+                client,
+                "account/read",
+                new { refreshToken = false },
+                timeout.Token);
+            var rateLimits = await ProbeAsync(
+                client,
+                "account/rateLimits/read",
+                new { },
+                timeout.Token);
+            var voices = await ProbeAsync(
+                client,
+                "thread/realtime/listVoices",
+                new { },
+                timeout.Token);
 
             VerifyConsole.WriteLine($"account_read={account.Status}");
             VerifyConsole.WriteLine($"rate_limits_read={rateLimits.Status}");
@@ -86,11 +98,12 @@ internal sealed class CodexAppServerVerifier
     private static async Task<ProbeResult> ProbeAsync(
         CodexAppServerClient client,
         string method,
+        object parameters,
         CancellationToken cancellationToken)
     {
         try
         {
-            var result = await client.SendRequestAsync(method, cancellationToken: cancellationToken);
+            var result = await client.SendRequestAsync(method, parameters, cancellationToken);
             return new ProbeResult("ok", true, result);
         }
         catch (CodexAppServerRpcException exception)
