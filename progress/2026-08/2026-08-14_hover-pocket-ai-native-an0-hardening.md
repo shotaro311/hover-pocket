@@ -47,7 +47,7 @@ PR #7のAN0共通契約に対する独立レビューで、schemaを満たして
 - exact commit range `190ee90cd498d03f0ef78df7e17c4f851efd5203...5e9097cfc56b91a1bf41438ee7cfac50cc4a7f72`の最終Codex Security diff scan `85f50deb-45e1-40d2-8457-867c749f729b`: coverage complete、6 / 6 surface review、reportable finding 0、`2026-08-14T01:02:40.752846Z`にsealed complete。
 - GitHub Actions push run [31759179183](https://github.com/shotaro311/hover-pocket/actions/runs/31759179183): Ubuntu / macOS / Windows / cross-OS byte比較が全て成功。
 - GitHub Actions PR run [31759179663](https://github.com/shotaro311/hover-pocket/actions/runs/31759179663): Ubuntu / macOS / Windows / cross-OS byte比較が全て成功。
-- GitHub readback: PR #7 head `5e9097cfc56b91a1bf41438ee7cfac50cc4a7f72`、Ready、MERGEABLE、push / PR checks success。
+- GitHub readback: implementation head `5e9097cfc56b91a1bf41438ee7cfac50cc4a7f72`はpush / PR checks success。以後のcommitはこの検証結果を記録する`progress/`だけで、PR #7はReady、MERGEABLEを維持した。
 
 ## Orchestrator
 
