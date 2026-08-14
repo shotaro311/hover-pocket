@@ -6,6 +6,7 @@ internal sealed class CodexVoiceRuntimeHost : IAsyncDisposable
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _snapshotSync = new();
     private readonly string _workspaceDirectory;
+    private readonly ICodexVoiceCapabilityToolAdapter? _toolAdapter;
     private CodexVoiceCoordinator? _coordinator;
     private CodexVoiceSnapshot _snapshot = DisabledSnapshot();
     private bool _desiredEnabled;
@@ -14,11 +15,13 @@ internal sealed class CodexVoiceRuntimeHost : IAsyncDisposable
     public CodexVoiceRuntimeHost(
         bool initiallyEnabled,
         string workspaceDirectory,
-        Func<CancellationToken, Task<CodexAppServerClient>>? clientFactory = null)
+        Func<CancellationToken, Task<CodexAppServerClient>>? clientFactory = null,
+        ICodexVoiceCapabilityToolAdapter? toolAdapter = null)
     {
         _desiredEnabled = initiallyEnabled;
         _workspaceDirectory = Path.GetFullPath(workspaceDirectory);
         _clientFactory = clientFactory ?? StartProductionClientAsync;
+        _toolAdapter = toolAdapter;
     }
 
     public event EventHandler<CodexVoiceSnapshot>? SnapshotChanged;
@@ -71,7 +74,8 @@ internal sealed class CodexVoiceRuntimeHost : IAsyncDisposable
             var coordinator = new CodexVoiceCoordinator(
                 featureEnabled: true,
                 clientFactory: _clientFactory,
-                workspaceDirectory: _workspaceDirectory);
+                workspaceDirectory: _workspaceDirectory,
+                toolAdapter: _toolAdapter);
             coordinator.SnapshotChanged += OnCoordinatorSnapshotChanged;
             _coordinator = coordinator;
             SetSnapshot(coordinator.Snapshot);

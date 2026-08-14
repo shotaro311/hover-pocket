@@ -7,6 +7,7 @@ internal sealed class CodexVoiceCoordinatorVerifier
 {
     private const string FakeServerEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_APP_SERVER";
     private const string FakeSignedOutEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_SIGNED_OUT";
+    private const string FakeExpectDynamicToolsEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_EXPECT_DYNAMIC_TOOLS";
     private readonly List<string> _failures = [];
 
     public async Task<int> RunAsync(CancellationToken cancellationToken = default)
@@ -14,12 +15,13 @@ internal sealed class CodexVoiceCoordinatorVerifier
         await VerifyFeatureDisabledDoesNotStartCodexAsync(cancellationToken);
         await VerifySignedOutFailsClosedAsync(cancellationToken);
         await VerifyCoordinatorOutlivesTransientUiAsync(cancellationToken);
+        await new CodexVoiceCapabilityToolAdapterVerifier(_failures).VerifyAsync(cancellationToken);
         VerifyTranscriptBounds();
 
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
-                "PASS codex-voice-coordinator verify: disabled no-start, account/capability gate, app-server ownership, fake WebRTC SDP/stop, transcript continuity, UI detach/reconnect, bounded crash restart, bounded memory");
+                "PASS codex-voice-coordinator verify: disabled no-start, account/capability gate, app-server ownership, fake WebRTC SDP/stop, Broker-routed Voice tools with approval/readback/idempotency, transcript continuity, UI detach/reconnect, bounded crash restart, bounded memory");
             return 0;
         }
 
@@ -89,7 +91,8 @@ internal sealed class CodexVoiceCoordinatorVerifier
         await using (var coordinator = new CodexVoiceCoordinator(
             featureEnabled: true,
             clientFactory: StartFakeServerClientAsync,
-            restartDelays: [TimeSpan.Zero, TimeSpan.FromMilliseconds(20)]))
+            restartDelays: [TimeSpan.Zero, TimeSpan.FromMilliseconds(20)],
+            toolAdapter: new StubDynamicToolAdapter()))
         {
             coordinator.SnapshotChanged += (_, _) => notifications++;
             coordinator.SnapshotChanged += (_, _) =>
@@ -247,7 +250,9 @@ internal sealed class CodexVoiceCoordinatorVerifier
         var executablePath = Environment.ProcessPath
             ?? throw new InvalidOperationException("Current executable path is unavailable.");
         var previousValue = Environment.GetEnvironmentVariable(FakeServerEnvironmentVariable);
+        var previousToolExpectation = Environment.GetEnvironmentVariable(FakeExpectDynamicToolsEnvironmentVariable);
         Environment.SetEnvironmentVariable(FakeServerEnvironmentVariable, "1");
+        Environment.SetEnvironmentVariable(FakeExpectDynamicToolsEnvironmentVariable, "1");
         try
         {
             return await CodexAppServerClient.StartAsync(
@@ -265,6 +270,7 @@ internal sealed class CodexVoiceCoordinatorVerifier
         finally
         {
             Environment.SetEnvironmentVariable(FakeServerEnvironmentVariable, previousValue);
+            Environment.SetEnvironmentVariable(FakeExpectDynamicToolsEnvironmentVariable, previousToolExpectation);
         }
     }
 
@@ -293,6 +299,37 @@ internal sealed class CodexVoiceCoordinatorVerifier
         catch (ArgumentException)
         {
             return false;
+        }
+    }
+
+    private sealed class StubDynamicToolAdapter : ICodexVoiceCapabilityToolAdapter
+    {
+        public IReadOnlyList<object> DynamicTools { get; } =
+        [
+            new
+            {
+                type = "function",
+                name = "hoverpocket_verify",
+                description = "Verifier-only dynamic tool.",
+                inputSchema = new
+                {
+                    type = "object",
+                    properties = new { },
+                    required = Array.Empty<string>(),
+                    additionalProperties = false
+                }
+            }
+        ];
+
+        public Task<CodexAppServerReply> HandleAsync(
+            CodexAppServerRequest request,
+            string? expectedRootThreadId,
+            CancellationToken cancellationToken)
+        {
+            _ = request;
+            _ = expectedRootThreadId;
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(CodexAppServerReply.Failure(-32601, "Verifier tool calls are disabled."));
         }
     }
 }

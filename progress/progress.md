@@ -2,7 +2,7 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: an2-pr-ready-ci-pass; an3-voice-shell-integrated; local-macos-pass; windows-ci-and-voice-runtime-pending
+status: an2-pr-ready-ci-pass; an3-windows-webrtc-foundation-ci-pass; real-device-and-broker-voice-e2e-pending
 ---
 
 ## 2026-08-15 AI-native AN3 Voice Foundation Integration
@@ -13,6 +13,7 @@ status: an2-pr-ready-ci-pass; an3-voice-shell-integrated; local-macos-pass; wind
 - macOSへHost-owned Voice LaneのUI骨格を実装した。全Provider共通の最下段をdefault-offで保持し、Compact 64pt、Expanded S / M / L / XL 190 / 220 / 250 / 280pt、既存Provider領域不変、下方向拡張、短い波形、会話優先、明示toggle、左transcript / 右root-scoped session cards、fullscreenなしを固定した。短い画面ではExpandedをCompactへ安全に縮退する。
 - macOS Voice Lane layout verifierは4サイズ×Compact / Expandedの8描画、既定値・永続化・短画面縮退・既存Panel 112件を含め成功し、macOS CIへ追加した。ローカルMacには.NET / PowerShell runtimeがないため、Windows compileとdeterministic verifierはmerge commitのpush後にGitHub Actionsで確認する。microphone / WebRTC、実音声、Broker tool dispatch、両OSVoice runtimeは未実装である。
 - WindowsにもHost-owned最下段のVoice Lane UI骨格を接続した。Bridge stateと設定、display geometry、Panel最大高、Compact / Expanded renderer、短画面Compact縮退、既存Provider rect不変、明示toggle、2列表示、fullscreen禁止を実装し、UI / UI model / layout verifierを拡張した。JavaScript全ファイルのsyntaxとworkflow YAML、diff checkは成功したが、Windows compile / WebView2実描画はGitHub Actions待ちである。
+- Windowsのapplication-lifetime Voice runtimeへaccount / voice capability gate、詳細状態機械、bounded restart / backoff、single-use microphone permission、WebRTC SDP交換、remote audio、mute / stop / safe closeを接続した。`thread/realtime/start`は現行Codex schemaに合わせてWebRTC対応の`v1`を明示し、root threadはread-only sandbox / approval never / isolated workspaceで開始する。実装head `91aa8d3`のPR #6はWindows Voice CI 2系統、Windows通常verify、macOS verify、PR Routerがすべて成功した。対象Windows実機のマイク・実音声1往復と、VoiceからBrokerへのtool dispatchは次のgateである。
 - AN2のReady PR [#9](https://github.com/shotaro311/hover-pocket/pull/9)はWindows / macOS / PR Routerが全成功し、MERGEABLE / CLEANである。ChatGPT Pro Criticは指定Project内のchat作成証拠を確定できず成果物なしの`blocked`となり、delivery claim、空成果物のreadback、`mark-done`まで完了した。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-an3-voice-foundation.md`。
 
 ## 2026-08-15 AI-native AN2 Registry / Broker / Text Today Focus

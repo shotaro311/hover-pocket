@@ -64,13 +64,14 @@ internal sealed class TodayFocusTextAdapter(CapabilityBroker broker)
         CapabilityPrincipal principal,
         CapabilityPermissionSet permissions,
         DateTimeOffset now,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        CapabilityOrigin origin = CapabilityOrigin.Text)
     {
         var nonce = Guid.NewGuid().ToString("D");
         var plan = new CapabilityExecutionPlan(
             $"today-focus-read:{nonce}",
             now,
-            CapabilityOrigin.Text,
+            origin,
             principal,
             null,
             [
@@ -121,7 +122,9 @@ internal sealed class TodayFocusTextAdapter(CapabilityBroker broker)
         CapabilityPrincipal principal,
         CapabilityPermissionSet permissions,
         DateTimeOffset now,
-        TimeZoneInfo? timeZone = null)
+        TimeZoneInfo? timeZone = null,
+        CapabilityOrigin origin = CapabilityOrigin.Text,
+        string? operationToken = null)
     {
         if (durationSeconds is < 1 or > 86_400
             || string.IsNullOrEmpty(purpose)
@@ -129,12 +132,18 @@ internal sealed class TodayFocusTextAdapter(CapabilityBroker broker)
         {
             throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "today_focus_input");
         }
-        var nonce = Guid.NewGuid().ToString("D");
+        if (operationToken is not null
+            && (operationToken.Length is < 16 or > 64
+                || operationToken.Any(character => !char.IsAsciiLetterOrDigit(character))))
+        {
+            throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "operation_token");
+        }
+        var nonce = operationToken ?? Guid.NewGuid().ToString("D");
         var approvalText = TodayFocusApprovalText.Sanitize(purpose);
         var plan = new CapabilityExecutionPlan(
             $"today-focus-write:{nonce}",
             now,
-            CapabilityOrigin.Text,
+            origin,
             principal,
             null,
             [

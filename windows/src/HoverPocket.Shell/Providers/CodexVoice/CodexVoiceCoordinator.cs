@@ -73,6 +73,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
     private readonly IReadOnlyList<TimeSpan> _restartDelays;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly string _workspaceDirectory;
+    private readonly ICodexVoiceCapabilityToolAdapter? _toolAdapter;
     private CodexAppServerClient? _client;
     private Task? _restartTask;
     private CodexVoiceAvailability _availability;
@@ -95,7 +96,8 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         int transcriptEntryLimit = DefaultTranscriptEntryLimit,
         int transcriptCharacterLimit = DefaultTranscriptCharacterLimit,
         IReadOnlyList<TimeSpan>? restartDelays = null,
-        string? workspaceDirectory = null)
+        string? workspaceDirectory = null,
+        ICodexVoiceCapabilityToolAdapter? toolAdapter = null)
     {
         _featureEnabled = featureEnabled;
         _availability = featureEnabled
@@ -107,6 +109,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
             transcriptEntryLimit,
             transcriptCharacterLimit);
         _restartDelays = restartDelays ?? DefaultRestartDelays;
+        _toolAdapter = toolAdapter;
         _workspaceDirectory = Path.GetFullPath(
             workspaceDirectory
                 ?? Path.Combine(
@@ -461,7 +464,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                 ephemeral = false,
                 runtimeWorkspaceRoots = Array.Empty<string>(),
                 selectedCapabilityRoots = Array.Empty<object>(),
-                dynamicTools = Array.Empty<object>(),
+                dynamicTools = _toolAdapter?.DynamicTools ?? Array.Empty<object>(),
                 threadSource = "hoverpocket_voice",
                 sessionStartSource = "startup",
                 baseInstructions = "You are the HoverPocket Voice Lane. Do not use shell, filesystem, network, or arbitrary code tools. Only invoke explicitly provided HoverPocket capabilities. Keep spoken replies concise."
@@ -815,15 +818,21 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         }
     }
 
-    private static Task<CodexAppServerReply> HandleServerRequestAsync(
+    private Task<CodexAppServerReply> HandleServerRequestAsync(
         CodexAppServerRequest request,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (_toolAdapter is not null)
+        {
+            string? rootThreadId;
+            lock (_stateSync)
+            {
+                rootThreadId = _rootThreadId;
+            }
+            return _toolAdapter.HandleAsync(request, rootThreadId, cancellationToken);
+        }
 
-        // Approval and user-input requests must be surfaced through a dedicated,
-        // structured UI path. Until that path is implemented, fail closed instead
-        // of accepting or synthesizing a response.
         return Task.FromResult(
             CodexAppServerReply.Failure(
                 -32601,

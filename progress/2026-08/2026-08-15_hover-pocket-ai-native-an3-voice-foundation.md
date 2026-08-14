@@ -2,7 +2,7 @@
 
 ## 現在地
 
-Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合している。これはAN3完了ではなく、旧branchを現行契約へ載せ替えるための隔離準備である。両OSのHost-owned Voice Lane UI骨格までは実装したが、microphone、WebRTC、音声E2E、Broker tool dispatch、両OSVoice runtimeは未実装である。
+Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し、Windowsではapplication-lifetime runtime、origin限定microphone permission、WebRTC SDP / remote audioまで実装した。これはAN3完了ではなく、対象Windows実機の実音声1往復、VoiceからBrokerへのtool dispatch、macOS Voice runtime、両OSE2Eが残っている。
 
 ## Git / worktree
 
@@ -11,7 +11,7 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 - branch開始head: `374aa6a39b5860ebfb6cd944a62f08106c72cff4`
 - 統合対象AN2 head: `5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`
 - AN2実装と両OSのVoice Lane表示基盤をmerge commit `52bf00c`で統合し、AN2最終進捗commit `15e44f0`もmerge commit `cdc5a8f`で取り込んだ。
-- AN2 Ready PR [#9](https://github.com/shotaro311/hover-pocket/pull/9)はWindows / macOS / PR Routerが全成功し、MERGEABLE / CLEANである。AN3はローカル統合済みで、Draft PR #6の更新とCI readbackが次のgateである。
+- AN2 Ready PR [#9](https://github.com/shotaro311/hover-pocket/pull/9)はWindows / macOS / PR Routerが全成功し、MERGEABLE / CLEANである。AN3の実装head `91aa8d3`はDraft PR #6へpush済みで、remote parity `0 / 0`、PRの全5チェックが成功している。
 
 ## 再利用したVoice基盤
 
@@ -50,6 +50,13 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 - Settingsへdefault-off toggleとCompact / Expanded pickerを追加した。現在のvoice stateは`notConnected`で、実音声runtimeへ未接続のためstart / mute / end操作は無効である。
 - `--verify ui-model`へ設定round-tripとbridge dispatch、`--verify voice-lane-layout`へ短画面縮退、`--verify ui`へCompact / Expanded描画とProvider rect不変を追加した。
 
+## Windows Voice runtime / WebRTC
+
+- `CodexVoiceRuntimeHost`がapp lifetimeでCoordinatorを所有し、設定の有効化時だけexperimental app-serverを起動する。`initialize`後にaccountとvoice capabilityを確認し、signed-out / incompatibleはfail closed、process crashはbounded backoffで再起動する。
+- Panel WebViewのマイク許可は、exact origin `https://app.hoverpocket.local`、ユーザー操作、Voice有効、Panel表示中、8秒以内のsingle-use armをすべて満たす場合だけ許可する。許可はprofileへ保存せず、その他のpermissionは拒否する。
+- `thread/realtime/start`はisolated workspace、read-only sandbox、approval `never`、永続root thread、WebRTC対応の`v1`で開始する。SDP offer / answer、remote audio、mute、transport detach、stop / closedをtyped Bridgeで接続し、audioとfull transcriptはHoverPocketへ保存しない。
+- fake app-server verifierへthread開始、WebRTC SDP、transport接続、transcript、detach、crash / restart、stopを追加した。実装head `91aa8d3`のGitHub ActionsはWindows Voice 2系統、Windows通常verify、macOS verify、PR Routerがすべて成功した。
+
 ## ローカル検証
 
 ```text
@@ -78,15 +85,16 @@ Windows UI JavaScript syntax / workflow YAML parse / git diff --check
 
 macOS capability workflow YAML parse
   PASS / Voice Lane source paths and verifier step included
+
+GitHub Actions / implementation head 91aa8d3
+  PASS / Windows Voice CI x 2 / Windows verify / macOS verify / PR Router
 ```
 
 ## 未完了gate
 
-1. Draft PR #6へ統合headをpushし、Windows Debug / Release warnings-as-errors、macOS、共通契約と全VerifierをGitHub Actionsで確認する。
-2. AN2 PR #9は人間によるmerge待ちである。AN3は既に同じAN2 headを統合済みだが、AN2 merge後にmainとのparityを再確認する。
-3. installed Codex version / generated schema / account / voicesを対象Windows実機でreadbackする。
-4. application-lifetime coordinatorのproduction ownership、restart / backoff、詳細state machineを接続する。
-5. 両OSのUI骨格を実runtime state / transcript / root-scoped child cardsへ接続する。
-6. origin限定microphone、WebRTC SDP / remote audio、1往復、safe closeを実機検証する。
-7. Voice intentをAN2 Capability Brokerへ接続し、Calendar read / create、Timer start、Today Focusのapprovalとreadbackを確認する。
-8. macOS Voice runtimeと共通semantic contractを実装して両OS gateを通す。
+1. AN2 PR #9は人間によるmerge待ちである。AN3は既に同じAN2 headを統合済みだが、AN2 merge後にmainとのparityを再確認する。
+2. installed Codex version / generated schema / account / voicesを対象Windows実機でreadbackする。
+3. origin限定microphone、WebRTC SDP / remote audio、1往復、safe closeを対象Windows実機で検証する。
+4. Voice intentをAN2 Capability Brokerへ接続し、Calendar read / create、Timer start、Today Focusのapprovalとreadbackを確認する。
+5. root-scoped child session cardsを実thread stateへ接続する。
+6. macOS Voice runtimeと共通semantic contractを実装して両OS gateを通す。

@@ -7,6 +7,7 @@ internal static class FakeCodexAppServer
 {
     private const string EnableEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_APP_SERVER";
     private const string SignedOutEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_SIGNED_OUT";
+    private const string ExpectDynamicToolsEnvironmentVariable = "HOVERPOCKET_FAKE_CODEX_EXPECT_DYNAMIC_TOOLS";
 
     public static bool ShouldRun(IReadOnlyList<string> args)
     {
@@ -39,6 +40,10 @@ internal static class FakeCodexAppServer
         var serverReplyReceived = false;
         var signedOut = string.Equals(
             Environment.GetEnvironmentVariable(SignedOutEnvironmentVariable),
+            "1",
+            StringComparison.Ordinal);
+        var expectDynamicTools = string.Equals(
+            Environment.GetEnvironmentVariable(ExpectDynamicToolsEnvironmentVariable),
             "1",
             StringComparison.Ordinal);
         string? line;
@@ -132,6 +137,25 @@ internal static class FakeCodexAppServer
                     });
                     break;
                 case "thread/start":
+                {
+                    var hasDynamicTools = message.TryGetProperty("params", out var threadStartParams)
+                        && threadStartParams.ValueKind == JsonValueKind.Object
+                        && threadStartParams.TryGetProperty("dynamicTools", out var dynamicTools)
+                        && dynamicTools.ValueKind == JsonValueKind.Array
+                        && dynamicTools.GetArrayLength() > 0;
+                    if (expectDynamicTools && !hasDynamicTools)
+                    {
+                        Write(output, new
+                        {
+                            id = idElement.Clone(),
+                            error = new
+                            {
+                                code = -32602,
+                                message = "Expected allowlisted dynamic tools."
+                            }
+                        });
+                        break;
+                    }
                     Write(output, new
                     {
                         id = idElement.Clone(),
@@ -141,6 +165,7 @@ internal static class FakeCodexAppServer
                         }
                     });
                     break;
+                }
                 case "thread/realtime/start":
                     Write(output, new
                     {

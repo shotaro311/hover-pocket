@@ -72,10 +72,6 @@ internal sealed class PanelBridgeController : IDisposable
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.Normalize(settings, providerRegistry.ProviderIds);
         _resolvedVoiceLaneLayout = CurrentSettings.EffectiveVoiceLaneLayout;
-        _codexVoiceRuntime = new CodexVoiceRuntimeHost(
-            CurrentSettings.CodexVoiceEnabled,
-            Path.Combine(settingsStore.RootDirectory, "VoiceWorkspace"));
-        _codexVoiceRuntime.SnapshotChanged += OnCodexVoiceSnapshotChanged;
         if (CurrentSettings.AiNativeEnabled)
         {
             try
@@ -93,6 +89,17 @@ internal sealed class PanelBridgeController : IDisposable
                 _todayFocusTextAdapter = null;
             }
         }
+        var voiceToolAdapter = _capabilityBroker is not null && _todayFocusTextAdapter is not null
+            ? new CodexVoiceCapabilityToolAdapter(
+                _capabilityBroker,
+                _todayFocusTextAdapter,
+                RequestCodexVoiceCapabilityApprovalAsync)
+            : null;
+        _codexVoiceRuntime = new CodexVoiceRuntimeHost(
+            CurrentSettings.CodexVoiceEnabled,
+            Path.Combine(settingsStore.RootDirectory, "VoiceWorkspace"),
+            toolAdapter: voiceToolAdapter);
+        _codexVoiceRuntime.SnapshotChanged += OnCodexVoiceSnapshotChanged;
         _clipboardBridgeController = new ClipboardBridgeController(
             new ClipboardHistoryStore(Path.Combine(settingsStore.RootDirectory, "clipboard")),
             new ClipboardNativeListener(System.Windows.Application.Current?.Dispatcher ?? System.Windows.Threading.Dispatcher.CurrentDispatcher),
@@ -594,6 +601,72 @@ internal sealed class PanelBridgeController : IDisposable
         await _codexVoiceRuntime.SetEnabledAsync(enabled, cancellationToken);
 
         return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<bool> RequestCodexVoiceCapabilityApprovalAsync(
+        CodexVoiceCapabilityApproval approval,
+        CancellationToken cancellationToken)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null)
+        {
+            return false;
+        }
+
+        var operation = dispatcher.InvokeAsync(() =>
+        {
+            if (!_panelOpen
+                || !CurrentSettings.CodexVoiceEnabled
+                || !CurrentSettings.AiNativeEnabled)
+            {
+                return false;
+            }
+
+            var english = CurrentSettings.Language == AppLanguage.English;
+            var title = approval.ToolName switch
+            {
+                CodexVoiceCapabilityToolAdapter.TimerStartTool => english ? "Approve Timer" : "Timerを承認",
+                CodexVoiceCapabilityToolAdapter.CalendarCreateTool => english ? "Approve Calendar event" : "カレンダー予定を承認",
+                CodexVoiceCapabilityToolAdapter.TodayFocusTool => english ? "Approve Today Focus" : "Today Focusを承認",
+                _ => english ? "Approve HoverPocket action" : "HoverPocket操作を承認"
+            };
+            var fieldLines = approval.Fields.Select(field =>
+            {
+                var label = (field.Key, english) switch
+                {
+                    ("title", true) => "Title",
+                    ("title", false) => "タイトル",
+                    ("durationSeconds", true) => "Duration (seconds)",
+                    ("durationSeconds", false) => "時間（秒）",
+                    ("start", true) => "Start",
+                    ("start", false) => "開始",
+                    ("end", true) => "End",
+                    ("end", false) => "終了",
+                    ("isAllDay", true) => "All day",
+                    ("isAllDay", false) => "終日",
+                    ("event", true) => "Calendar event",
+                    ("event", false) => "予定",
+                    ("purpose", true) => "Purpose",
+                    ("purpose", false) => "今日の目的",
+                    _ => field.Key
+                };
+                return $"{label}: {field.Value}";
+            });
+            var message = string.Join(Environment.NewLine, fieldLines)
+                + Environment.NewLine
+                + Environment.NewLine
+                + (english
+                    ? "Allow Codex to perform this action through HoverPocket?"
+                    : "CodexがHoverPocketでこの操作を実行することを許可しますか？");
+            var result = System.Windows.MessageBox.Show(
+                message,
+                title,
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Question,
+                System.Windows.MessageBoxResult.No);
+            return result == System.Windows.MessageBoxResult.Yes;
+        });
+        return await operation.Task.WaitAsync(cancellationToken);
     }
 
     private async Task<object?> SetCodexVoiceLayoutAsync(
