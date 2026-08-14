@@ -321,15 +321,19 @@ $summary | ConvertTo-Json -Depth 10
 Write-Host "`nSummary: $summaryPath"
 Write-Host "Schema : $schemaDirectory"
 
-if (-not $schemaGenerated
-    -or -not $schemaRealtimeStartPresent
-    -or -not $schemaRealtimeSdpPresent
-    -or -not $schemaListVoicesPresent
-    -or $timedOut
-    -or (Get-ResponseStatus $initializeResponse) -ne "ok"
-    -or (Get-ResponseStatus $accountResponse) -ne "ok"
-    -or (Get-ResponseStatus $rateLimitsResponse) -ne "ok"
-    -or (Get-ResponseStatus $voicesResponse) -ne "ok") {
+$gatePassed = @(
+    [bool]$schemaGenerated
+    [bool]$schemaRealtimeStartPresent
+    [bool]$schemaRealtimeSdpPresent
+    [bool]$schemaListVoicesPresent
+    -not $timedOut
+    (Get-ResponseStatus $initializeResponse) -eq "ok"
+    (Get-ResponseStatus $accountResponse) -eq "ok"
+    (Get-ResponseStatus $rateLimitsResponse) -eq "ok"
+    (Get-ResponseStatus $voicesResponse) -eq "ok"
+) -notcontains $false
+
+if (-not $gatePassed) {
     Write-Warning "Phase 0 gate did not pass. Rerun with -KeepRaw only when debugging locally. Do not share raw account output."
     exit 2
 }
