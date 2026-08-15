@@ -533,6 +533,15 @@ enum PocketAppPackageVerificationCommand {
                     "lifecycle_startup_remove_recovery_rehardened",
                     failures: &failures
                 )
+                makeTreeMutable(recoveryVersions)
+                _ = try PocketAppLifecycleManager(rootDirectory: root, userDataRoot: dataRoot)
+                let repeatedRecoveryAttributes = try FileManager.default.attributesOfItem(atPath: recoveredIntent.path)
+                let repeatedRecoveryPermissions = (repeatedRecoveryAttributes[.posixPermissions] as? NSNumber)?.intValue
+                require(
+                    repeatedRecoveryPermissions.map { $0 & 0o222 == 0 } == true,
+                    "lifecycle_startup_existing_versions_rehardened",
+                    failures: &failures
+                )
                 try mutateJSON(draftRoot.appendingPathComponent("manifest.json")) { manifest in
                     manifest["version"] = "1.0.0"
                     return true

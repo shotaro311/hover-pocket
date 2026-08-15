@@ -960,10 +960,14 @@ final class PocketAppLifecycleManager {
             let versions = appDirectory.appendingPathComponent("Versions", isDirectory: true)
             guard fileManager.fileExists(atPath: versions.path) else { continue }
             for versionDirectory in try safeChildDirectories(of: versions) {
-                for candidate in try safeChildDirectories(of: versionDirectory)
-                    where candidate.lastPathComponent.hasPrefix(".installing-") {
-                    try makeMutable(directory: candidate)
-                    try fileManager.removeItem(at: candidate)
+                for candidate in try safeChildDirectories(of: versionDirectory) {
+                    if candidate.lastPathComponent.hasPrefix(".installing-") {
+                        try makeMutable(directory: candidate)
+                        try fileManager.removeItem(at: candidate)
+                    } else {
+                        try makeImmutable(directory: candidate)
+                        try verifyImmutable(directory: candidate)
+                    }
                 }
             }
         }

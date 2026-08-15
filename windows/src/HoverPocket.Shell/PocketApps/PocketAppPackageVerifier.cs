@@ -473,6 +473,11 @@ internal sealed class PocketAppPackageVerifier
                 Require(
                     File.GetAttributes(recoveredIntent).HasFlag(FileAttributes.ReadOnly),
                     "lifecycle_startup_remove_recovery_rehardened");
+                PocketAppVerifierFileSystem.MakeTreeMutable(recoveryVersions);
+                _ = new PocketAppLifecycleManager(root, dataRoot);
+                Require(
+                    File.GetAttributes(recoveredIntent).HasFlag(FileAttributes.ReadOnly),
+                    "lifecycle_startup_existing_versions_rehardened");
                 MutateJson(Path.Combine(draftRoot, "manifest.json"), manifest => manifest["version"] = "1.0.0");
                 MutateJson(Path.Combine(draftRoot, "data.schema.json"), schema =>
                 {

@@ -1086,9 +1086,16 @@ internal sealed class PocketAppLifecycleManager
                 foreach (var candidate in Directory.EnumerateDirectories(versionDirectory).ToArray())
                 {
                     EnsureDirectoryNotReparsePoint(candidate);
-                    if (!Path.GetFileName(candidate).StartsWith(".installing-", StringComparison.Ordinal)) { continue; }
-                    MakeMutable(candidate);
-                    Directory.Delete(candidate, true);
+                    if (Path.GetFileName(candidate).StartsWith(".installing-", StringComparison.Ordinal))
+                    {
+                        MakeMutable(candidate);
+                        Directory.Delete(candidate, true);
+                    }
+                    else
+                    {
+                        MakeImmutable(candidate);
+                        VerifyImmutable(candidate);
+                    }
                 }
             }
         }
