@@ -607,6 +607,7 @@ internal sealed class PocketAppLifecycleManager
 
         var temporaryRoot = Path.Combine(versionRoot, $".installing-{Guid.NewGuid():N}");
         var temporaryPackage = Path.Combine(temporaryRoot, "package");
+        var movedToFinal = false;
         try
         {
             if (_failureInjection?.Invoke("snapshot_write") == true) { throw Failure("LIFECYCLE_STORAGE_FAILED"); }
@@ -619,8 +620,9 @@ internal sealed class PocketAppLifecycleManager
             {
                 throw Failure("LIFECYCLE_PACKAGE_CHANGED");
             }
-            MakeImmutable(temporaryRoot);
             Directory.Move(temporaryRoot, finalRoot);
+            movedToFinal = true;
+            MakeImmutable(finalRoot);
             if (VerifiedInstalledPackage(finalPackage).ManifestDigest != package.ManifestDigest)
             {
                 throw Failure("LIFECYCLE_READBACK_FAILED");
@@ -631,10 +633,11 @@ internal sealed class PocketAppLifecycleManager
         {
             try
             {
-                if (Directory.Exists(temporaryRoot))
+                var cleanupRoot = movedToFinal ? finalRoot : temporaryRoot;
+                if (Directory.Exists(cleanupRoot))
                 {
-                    MakeMutable(temporaryRoot);
-                    Directory.Delete(temporaryRoot, true);
+                    MakeMutable(cleanupRoot);
+                    Directory.Delete(cleanupRoot, true);
                 }
             }
             catch { }

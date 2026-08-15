@@ -591,6 +591,7 @@ final class PocketAppLifecycleManager {
 
         let temporaryRoot = versionRoot.appendingPathComponent(".installing-\(UUID().uuidString.lowercased())", isDirectory: true)
         let temporaryPackage = temporaryRoot.appendingPathComponent("package", isDirectory: true)
+        var movedToFinal = false
         do {
             if failureInjection?("snapshot_write") == true { throw PocketAppLifecycleError.storageFailure }
             try snapshot.materialize(at: temporaryPackage)
@@ -601,16 +602,18 @@ final class PocketAppLifecycleManager {
                   installed.manifestDigest == package.manifestDigest else {
                 throw PocketAppLifecycleError.packageChanged
             }
-            try makeImmutable(directory: temporaryRoot)
             try FileManager.default.moveItem(at: temporaryRoot, to: finalRoot)
+            movedToFinal = true
+            try makeImmutable(directory: finalRoot)
             let readback = try verifiedInstalledPackage(at: finalPackage)
             guard readback.manifestDigest == package.manifestDigest else {
                 throw PocketAppLifecycleError.readbackFailed
             }
             return finalPackage
         } catch {
-            try? makeMutable(directory: temporaryRoot)
-            try? FileManager.default.removeItem(at: temporaryRoot)
+            let cleanupRoot = movedToFinal ? finalRoot : temporaryRoot
+            try? makeMutable(directory: cleanupRoot)
+            try? FileManager.default.removeItem(at: cleanupRoot)
             throw error
         }
     }
