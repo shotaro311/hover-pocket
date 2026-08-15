@@ -2,8 +2,15 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pro-pending; capability-expansion-calculator-merged
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pro-pending; capability-expansion-sticky-lifecycle-pr-pending
 ---
+
+## 2026-08-15 AI-native Sticky Notes Lifecycle Capability
+
+- Calculator統合後のexact `main` `8d7127f`から隔離branch `codex/ai-native-sticky-lifecycle`を作成し、Sticky Notesの状態確認、archive、deleteをmacOS / Windowsの共通Capabilityへ追加した。既存UIのStoreと同じ保存先を使い、Provider Viewや生成UIからStoreへ直接アクセスさせない。
+- `sticky.note.status@1`は`sticky.read`、`sticky.note.archive@1`は`sticky.write`とBroker承認、`sticky.note.delete@1`は独立した`sticky.delete`と`strong_per_call`承認を要求する。archive/deleteはidempotency key、atomic save、保存失敗時memory rollback、状態再照会によるreadbackを必須にした。
+- 共有Golden Registryへ未反映だったCalculator descriptorと今回の3 descriptorを追加し、runtimeは15 descriptor / 14 handler、共通契約は12 schema / 56 fixtureへ揃えた。macOSでwarnings-as-errors build、Capability、Broker、Timer、Clipboard、2回の決定論的contract report、`git diff --check`が成功した。Windowsはローカルに.NET SDKがないためPR CIを必須gateとする。
+- exact source range `8d7127f...dd91448`のSecurity diff scan `9f03efcd-fbd3-4799-a5fd-c591a9ee1219`は変更source 12 / 12をレビューし、reportable finding 0、sealed complete。将来のVoice / Pocket App / MCPからdeleteを公開する前に、Host-ownedの対象メモ表示と`strong_per_call`固有制約を追加する項目はdeferredとして固定した。現時点のproduction経路はToday Focusのみでdeleteを公開も権限付与もしていない。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-sticky-lifecycle.md`。
 
 ## 2026-08-15 AI-native Built-in Capability Expansion
 
