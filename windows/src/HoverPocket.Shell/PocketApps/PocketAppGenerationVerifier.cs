@@ -12,6 +12,7 @@ internal sealed class PocketAppGenerationVerifier
         VerifyE2E();
         VerifySettingsApprovalBoundary().GetAwaiter().GetResult();
         VerifyPreviewOnlyBoundary().GetAwaiter().GetResult();
+        VerifyCommittedReceiptSurvivesManagedRefreshFailure().GetAwaiter().GetResult();
         VerifyApprovalTextSanitization();
         return _failures;
     }
@@ -133,6 +134,47 @@ internal sealed class PocketAppGenerationVerifier
                     restoredDisabled?.State == PocketAppLifecycleState.Disabled
                         && failingEnableLifecycle.ActivePackage(request.AppId) is null,
                     "generation_enable_readback_failure_restored_disabled");
+            }
+            var installedIntent = Path.Combine(
+                root,
+                "Apps",
+                request.AppId,
+                "Versions",
+                VersionStorageKey(disabledAgain.Version!),
+                disabledAgain.PackageDigest!["sha256:".Length..],
+                "package",
+                "intent.md");
+            var originalIntent = File.ReadAllBytes(installedIntent);
+            var packageRaceApplied = false;
+            using (var packageRaceLifecycle = new PocketAppLifecycleManager(
+                root,
+                dataRoot,
+                failureInjection: point =>
+                {
+                    if (point != "enable_package_readback" || packageRaceApplied) { return false; }
+                    File.SetAttributes(installedIntent, File.GetAttributes(installedIntent) & ~FileAttributes.ReadOnly);
+                    File.WriteAllText(installedIntent, "corrupt-during-enable-readback");
+                    packageRaceApplied = true;
+                    return false;
+                }))
+            {
+                try
+                {
+                    _ = packageRaceLifecycle.Enable(request.AppId);
+                    _failures.Add("generation_enable_package_race_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_CORRUPT_VERSION")
+                {
+                }
+                File.WriteAllBytes(installedIntent, originalIntent);
+                File.SetAttributes(installedIntent, File.GetAttributes(installedIntent) | FileAttributes.ReadOnly);
+                var restoredDisabled = packageRaceLifecycle.ManagedPackages()
+                    .FirstOrDefault(item => item.PackageId == request.AppId);
+                Require(
+                    packageRaceApplied
+                        && restoredDisabled?.State == PocketAppLifecycleState.Disabled
+                        && packageRaceLifecycle.ActivePackage(request.AppId) is null,
+                    "generation_enable_package_race_restored_disabled");
             }
             var packageDataRoot = Path.Combine(dataRoot, request.AppId);
             Directory.CreateDirectory(packageDataRoot);
@@ -473,6 +515,90 @@ internal sealed class PocketAppGenerationVerifier
         }
     }
 
+    private async Task VerifyCommittedReceiptSurvivesManagedRefreshFailure()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-refresh-host-{Guid.NewGuid():N}");
+        var dataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-refresh-data-{Guid.NewGuid():N}");
+        var draftRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-refresh-draft-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(draftRoot);
+            var adapter = new FixturePocketAppGenerationAdapter(FixtureRoot());
+            var materializer = new PocketAppGenerationMaterializer(draftRoot);
+            using var lifecycle = new PocketAppLifecycleManager(root, dataRoot);
+            var selected = MakeRequest(
+                "generation-refresh-selected",
+                "Create the selected focus app.",
+                "local.example.selected",
+                "1.0.0",
+                "today-focus");
+            var unrelated = MakeRequest(
+                "generation-refresh-unrelated",
+                "Create an unrelated focus app.",
+                "local.example.unrelated",
+                "1.0.0",
+                "today-focus");
+            _ = InstallFixture(selected, adapter, materializer, lifecycle);
+            var unrelatedReceipt = InstallFixture(unrelated, adapter, materializer, lifecycle);
+            if (unrelatedReceipt.Version is null || unrelatedReceipt.PackageDigest is null)
+            {
+                throw new InvalidOperationException("Fixture install did not produce a versioned receipt.");
+            }
+            var digestRoot = Path.Combine(
+                root,
+                "Apps",
+                unrelated.AppId,
+                "Versions",
+                VersionStorageKey(unrelatedReceipt.Version),
+                unrelatedReceipt.PackageDigest["sha256:".Length..]);
+            var intent = Path.Combine(digestRoot, "package", "intent.md");
+            var corruptionApplied = false;
+            using var controller = new PocketAppGenerationController(
+                root,
+                dataRoot,
+                draftRoot,
+                null,
+                postCommitHook: () =>
+                {
+                    if (corruptionApplied) { return; }
+                    PocketAppVerifierFileSystem.MakeTreeMutable(digestRoot);
+                    File.WriteAllText(intent, "corrupt-after-commit");
+                    corruptionApplied = true;
+                });
+            var settings = new HoverPocket.Shell.Bridge.BridgeDispatcher();
+            controller.AttachSettings(settings, approvalDecision: _ => true);
+            var response = await settings.ProcessRawMessageAsync(
+                """{"id":"disable-refresh","method":"pocketApps.disable","params":{"appId":"local.example.selected"}}""");
+            Require(corruptionApplied, "generation_post_commit_corruption_fixture");
+            Require(
+                response is not null
+                    && response.Contains("\"phase\":\"disabled\"", StringComparison.Ordinal)
+                    && response.Contains("\"errorCode\":null", StringComparison.Ordinal)
+                    && response.Contains("\"action\":\"disable\"", StringComparison.Ordinal)
+                    && response.Contains("\"readbackVerified\":true", StringComparison.Ordinal)
+                    && response.Contains("\"appId\":\"local.example.selected\",\"state\":\"disabled\"", StringComparison.Ordinal),
+                "generation_committed_receipt_survives_unrelated_refresh_failure");
+        }
+        catch (Exception ex)
+        {
+            _failures.Add($"generation_committed_receipt:{ex.GetType().Name}:{ex.Message}");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    PocketAppVerifierFileSystem.MakeTreeMutable(root);
+                    Directory.Delete(root, true);
+                }
+            }
+            catch { }
+            try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
+            try { if (Directory.Exists(draftRoot)) { Directory.Delete(draftRoot, true); } } catch { }
+        }
+    }
+
     private void VerifyApprovalTextSanitization()
     {
         var now = DateTimeOffset.UtcNow;
@@ -535,6 +661,29 @@ internal sealed class PocketAppGenerationVerifier
         request.Validate();
         return request;
     }
+
+    private static PocketAppLifecycleReceipt InstallFixture(
+        PocketAppGenerationRequest request,
+        FixturePocketAppGenerationAdapter adapter,
+        PocketAppGenerationMaterializer materializer,
+        PocketAppLifecycleManager lifecycle)
+    {
+        var envelope = adapter.GenerateAsync(request, CancellationToken.None).GetAwaiter().GetResult();
+        var materialized = materializer.Materialize(envelope, request);
+        try
+        {
+            var proposal = lifecycle.Stage(materialized.Directory);
+            var grant = lifecycle.Approve(proposal.RequestId, proposal.BindingDigest);
+            return lifecycle.Install(proposal, grant);
+        }
+        finally
+        {
+            TryDeleteDraft(materialized.Directory);
+        }
+    }
+
+    private static string VersionStorageKey(string version) =>
+        "v-" + Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes(version)).ToLowerInvariant();
 
     private static JsonElement FixtureDocument()
     {

@@ -189,6 +189,7 @@ enum PocketAppGenerationVerification {
             try verifyProcessTreeCleanup(failures: &failures)
             try verifyRootPin(failures: &failures)
             try verifyGenerationStartupDoesNotRecover(failures: &failures)
+            try verifyCommittedReceiptSurvivesManagedRefreshFailure(failures: &failures)
         } catch {
             failures.append("generation_e2e:\(error)")
         }
@@ -463,6 +464,109 @@ enum PocketAppGenerationVerification {
             failures: &failures
         )
         withExtendedLifetime(controller) {}
+    }
+
+    private static func verifyCommittedReceiptSurvivesManagedRefreshFailure(
+        failures: inout [String]
+    ) throws {
+        let temporaryRoot = URL(
+            fileURLWithPath: FileManager.default.currentDirectoryPath,
+            isDirectory: true
+        ).appendingPathComponent(".build", isDirectory: true)
+        let root = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-refresh-host-\(UUID().uuidString)", isDirectory: true)
+        let dataRoot = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-refresh-data-\(UUID().uuidString)", isDirectory: true)
+        let draftRoot = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-refresh-draft-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            makeTreeMutable(root)
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: dataRoot)
+            try? FileManager.default.removeItem(at: draftRoot)
+        }
+        try FileManager.default.createDirectory(at: draftRoot, withIntermediateDirectories: true)
+        let adapter = FixturePocketAppGenerationAdapter(fixtureRoot: fixtureURL("."))
+        let materializer = PocketAppGenerationMaterializer(rootDirectory: draftRoot)
+        let lifecycle = try PocketAppLifecycleManager(rootDirectory: root, userDataRoot: dataRoot)
+        let selected = try makeRequest(
+            requestID: "generation-refresh-selected",
+            userRequest: "Create the selected focus app.",
+            appID: "local.example.selected",
+            version: "1.0.0",
+            namespace: "today-focus"
+        )
+        let unrelated = try makeRequest(
+            requestID: "generation-refresh-unrelated",
+            userRequest: "Create an unrelated focus app.",
+            appID: "local.example.unrelated",
+            version: "1.0.0",
+            namespace: "today-focus"
+        )
+        _ = try installFixture(
+            selected,
+            adapter: adapter,
+            materializer: materializer,
+            lifecycle: lifecycle
+        )
+        let unrelatedReceipt = try installFixture(
+            unrelated,
+            adapter: adapter,
+            materializer: materializer,
+            lifecycle: lifecycle
+        )
+        guard let unrelatedDigest = unrelatedReceipt.packageDigest,
+              let unrelatedVersion = unrelatedReceipt.version else {
+            throw PocketAppGenerationError.packageInvalid
+        }
+        let versionStorageKey = "v-" + unrelatedVersion.utf8
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let digestRoot = root
+            .appendingPathComponent("Apps/\(unrelated.appID)/Versions/\(versionStorageKey)", isDirectory: true)
+            .appendingPathComponent(String(unrelatedDigest.dropFirst("sha256:".count)), isDirectory: true)
+        let intent = digestRoot.appendingPathComponent("package/intent.md", isDirectory: false)
+        var corruptionApplied = false
+        let controller = try PocketAppGenerationController(
+            rootDirectory: root,
+            userDataRoot: dataRoot,
+            generationRoot: draftRoot,
+            generator: nil,
+            postCommitHook: {
+                guard !corruptionApplied else { return }
+                makeTreeMutable(digestRoot)
+                do {
+                    try Data("corrupt-after-commit".utf8).write(to: intent)
+                    corruptionApplied = true
+                } catch {}
+            }
+        )
+        controller.disable(packageID: selected.appID)
+        let observed = controller.managedPackages.first { $0.packageID == selected.appID }
+        require(corruptionApplied, "generation_post_commit_corruption_fixture", failures: &failures)
+        require(
+            controller.phase == .disabled
+                && controller.errorCode == nil
+                && controller.lastReceipt?.readbackVerified == true
+                && controller.lastReceipt?.action == "disable"
+                && observed?.state == .disabled,
+            "generation_committed_receipt_survives_unrelated_refresh_failure",
+            failures: &failures
+        )
+    }
+
+    private static func installFixture(
+        _ request: PocketAppGenerationRequest,
+        adapter: FixturePocketAppGenerationAdapter,
+        materializer: PocketAppGenerationMaterializer,
+        lifecycle: PocketAppLifecycleManager
+    ) throws -> PocketAppLifecycleReceipt {
+        let envelope = try adapter.generate(request, cancellation: PocketAppGenerationCancellation())
+        let materialized = try materializer.materialize(envelope: envelope, request: request)
+        defer { try? FileManager.default.removeItem(at: materialized.directory) }
+        let proposal = try lifecycle.stage(draftDirectory: materialized.directory)
+        let grant = try lifecycle.approve(requestID: proposal.requestID, bindingDigest: proposal.bindingDigest)
+        return try lifecycle.install(proposal, approvalGrant: grant)
     }
 
     private static func fixtureDocument() throws -> [String: Any] {

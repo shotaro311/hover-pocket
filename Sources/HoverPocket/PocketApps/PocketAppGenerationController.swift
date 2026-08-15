@@ -15,19 +15,22 @@ final class PocketAppGenerationController: ObservableObject {
     private let lifecycle: PocketAppLifecycleManager
     private let materializer: PocketAppGenerationMaterializer
     private let pins: [PocketAppPinnedDirectory]
+    private let postCommitHook: (() -> Void)?
     private var generationCancellation: PocketAppGenerationCancellation?
 
     init(
         rootDirectory: URL,
         userDataRoot: URL,
         generationRoot: URL,
-        generator: (any PocketAppGenerationAdapter)?
+        generator: (any PocketAppGenerationAdapter)?,
+        postCommitHook: (() -> Void)? = nil
     ) throws {
         let definitionPin = try PocketAppPinnedDirectory(url: rootDirectory)
         let userDataPin = try PocketAppPinnedDirectory(url: userDataRoot)
         let generationPin = try PocketAppPinnedDirectory(url: generationRoot)
         self.pins = [definitionPin, userDataPin, generationPin]
         self.generator = generator
+        self.postCommitHook = postCommitHook
         self.lifecycle = try PocketAppLifecycleManager(
             rootDirectory: definitionPin.url,
             userDataRoot: userDataPin.url,
@@ -115,6 +118,7 @@ final class PocketAppGenerationController: ObservableObject {
         }
         do {
             try validatePins()
+            try refreshManagedPackages()
             phase = .installing
             let grant = try lifecycle.approve(
                 requestID: proposal.requestID,
@@ -132,13 +136,9 @@ final class PocketAppGenerationController: ObservableObject {
                   receipt.packageDigest == proposal.packageDigest else {
                 throw PocketAppGenerationError.packageInvalid
             }
-            pendingProposal = nil
-            pendingAllowsActivation = false
-            lastReceipt = receipt
-            errorCode = nil
-            phase = .installed
-            try refreshManagedPackages()
-            try validatePins()
+            recordCommittedReceipt(receipt, phase: .installed)
+            postCommitHook?()
+            try refreshManagedPackagesAfterCommit(receipt)
         } catch let error as PocketAppGenerationError {
             discardPendingAfterFailedActivation(proposal)
             fail(error)
@@ -164,15 +164,14 @@ final class PocketAppGenerationController: ObservableObject {
     func disable(packageID: String) {
         do {
             try validatePins()
+            try refreshManagedPackages()
             let receipt = try lifecycle.disable(packageID: packageID)
             guard receipt.readbackVerified, receipt.state == .disabled else {
                 throw PocketAppGenerationError.packageInvalid
             }
-            lastReceipt = receipt
-            phase = .disabled
-            errorCode = nil
-            try refreshManagedPackages()
-            try validatePins()
+            recordCommittedReceipt(receipt, phase: .disabled)
+            postCommitHook?()
+            try refreshManagedPackagesAfterCommit(receipt)
         } catch {
             fail(.packageInvalid)
         }
@@ -181,15 +180,14 @@ final class PocketAppGenerationController: ObservableObject {
     func enable(packageID: String) {
         do {
             try validatePins()
+            try refreshManagedPackages()
             let receipt = try lifecycle.enable(packageID: packageID)
             guard receipt.readbackVerified, receipt.state == .enabled else {
                 throw PocketAppGenerationError.packageInvalid
             }
-            lastReceipt = receipt
-            phase = .installed
-            errorCode = nil
-            try refreshManagedPackages()
-            try validatePins()
+            recordCommittedReceipt(receipt, phase: .installed)
+            postCommitHook?()
+            try refreshManagedPackagesAfterCommit(receipt)
         } catch {
             fail(.packageInvalid)
         }
@@ -198,6 +196,7 @@ final class PocketAppGenerationController: ObservableObject {
     func removePreservingData(packageID: String) {
         do {
             try validatePins()
+            try refreshManagedPackages()
             try rejectPendingProposalIfNeeded(for: packageID)
             let receipt = try lifecycle.remove(packageID: packageID, dataDisposition: .preserve)
             guard receipt.readbackVerified,
@@ -205,11 +204,12 @@ final class PocketAppGenerationController: ObservableObject {
                   receipt.dataDisposition == .preserve else {
                 throw PocketAppGenerationError.packageInvalid
             }
-            lastReceipt = receipt
-            phase = pendingProposal == nil ? .removed : .awaitingApproval
-            errorCode = nil
-            try refreshManagedPackages()
-            try validatePins()
+            recordCommittedReceipt(
+                receipt,
+                phase: pendingProposal == nil ? .removed : .awaitingApproval
+            )
+            postCommitHook?()
+            try refreshManagedPackagesAfterCommit(receipt)
         } catch {
             fail(.packageInvalid)
         }
@@ -360,6 +360,53 @@ final class PocketAppGenerationController: ObservableObject {
         try lifecycle.reject(requestID: proposal.requestID, bindingDigest: proposal.bindingDigest)
         pendingProposal = nil
         pendingAllowsActivation = false
+    }
+
+    private func recordCommittedReceipt(
+        _ receipt: PocketAppLifecycleReceipt,
+        phase committedPhase: PocketAppGenerationPhase
+    ) {
+        pendingProposal = nil
+        pendingAllowsActivation = false
+        lastReceipt = receipt
+        errorCode = nil
+        phase = committedPhase
+        if receipt.state == .removed {
+            managedPackages.removeAll { $0.packageID == receipt.packageID }
+            return
+        }
+        guard let version = receipt.version, let digest = receipt.packageDigest else { return }
+        let existing = managedPackages.first { $0.packageID == receipt.packageID }
+        let versions = Set((existing?.installedVersions ?? []) + [version]).sorted {
+            PocketAppLifecycleManager.compareSemanticVersions($0, $1) == .orderedAscending
+        }
+        let observed = PocketAppManagedPackage(
+            packageID: receipt.packageID,
+            state: receipt.state,
+            version: version,
+            packageDigest: digest,
+            installedVersions: versions
+        )
+        managedPackages.removeAll { $0.packageID == receipt.packageID }
+        managedPackages.append(observed)
+        managedPackages.sort { $0.packageID < $1.packageID }
+    }
+
+    private func refreshManagedPackagesAfterCommit(_ receipt: PocketAppLifecycleReceipt) throws {
+        try validatePins()
+        do {
+            managedPackages = try lifecycle.managedPackages().filter { $0.state != .removed }
+        } catch {
+            guard let target = try lifecycle.managedPackage(packageID: receipt.packageID),
+                  target.state == receipt.state,
+                  target.version == receipt.version,
+                  target.packageDigest == receipt.packageDigest else {
+                throw PocketAppGenerationError.packageInvalid
+            }
+            // The target still matches its verified receipt. Keep that result if an
+            // unrelated package prevents a complete list refresh.
+        }
+        try validatePins()
     }
 
     static func shouldRejectPendingProposal(

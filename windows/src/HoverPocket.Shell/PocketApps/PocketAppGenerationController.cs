@@ -11,6 +11,7 @@ internal sealed class PocketAppGenerationController : IDisposable
     private readonly PocketAppLifecycleManager _lifecycle;
     private readonly PocketAppGenerationMaterializer _materializer;
     private readonly PocketAppPinnedDirectory[] _pins;
+    private readonly Action? _postCommitHook;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateSync = new();
     private PocketAppGenerationPhase _phase = PocketAppGenerationPhase.Idle;
@@ -27,13 +28,15 @@ internal sealed class PocketAppGenerationController : IDisposable
         string rootDirectory,
         string userDataRoot,
         string generationRoot,
-        IPocketAppGenerationAdapter? generator)
+        IPocketAppGenerationAdapter? generator,
+        Action? postCommitHook = null)
     {
         var definitionPin = new PocketAppPinnedDirectory(rootDirectory);
         var userDataPin = new PocketAppPinnedDirectory(userDataRoot);
         var generationPin = new PocketAppPinnedDirectory(generationRoot);
         _pins = [definitionPin, userDataPin, generationPin];
         _generator = generator;
+        _postCommitHook = postCommitHook;
         _lifecycle = new PocketAppLifecycleManager(
             definitionPin.FullPath,
             userDataPin.FullPath,
@@ -291,6 +294,7 @@ internal sealed class PocketAppGenerationController : IDisposable
                 _errorCode = null;
             }
             ValidatePins();
+            RefreshManagedPackages();
             var grant = _lifecycle.Approve(proposal.RequestId, proposal.BindingDigest);
             var receipt = proposal.Action == PocketAppLifecycleAction.Rollback
                 ? _lifecycle.Rollback(proposal, grant)
@@ -302,16 +306,9 @@ internal sealed class PocketAppGenerationController : IDisposable
             {
                 throw Failure("GENERATION_PACKAGE_INVALID");
             }
-            lock (_stateSync)
-            {
-                _pendingProposal = null;
-                _pendingAllowsActivation = false;
-                _lastReceipt = receipt;
-                _phase = PocketAppGenerationPhase.Installed;
-                _errorCode = null;
-            }
-            RefreshManagedPackages();
-            ValidatePins();
+            RecordCommittedReceipt(receipt, PocketAppGenerationPhase.Installed);
+            _postCommitHook?.Invoke();
+            RefreshManagedPackagesAfterCommit(receipt);
             return BuildState();
         }
         catch (PocketAppGenerationException ex)
@@ -377,19 +374,15 @@ internal sealed class PocketAppGenerationController : IDisposable
         {
             lock (_stateSync) { if (!_enabled) { return FailLocked("GENERATION_DISABLED"); } }
             ValidatePins();
+            RefreshManagedPackages();
             var receipt = _lifecycle.Disable(packageId);
             if (!receipt.ReadbackVerified || receipt.State != PocketAppLifecycleState.Disabled)
             {
                 throw Failure("GENERATION_PACKAGE_INVALID");
             }
-            lock (_stateSync)
-            {
-                _lastReceipt = receipt;
-                _phase = PocketAppGenerationPhase.Disabled;
-                _errorCode = null;
-            }
-            RefreshManagedPackages();
-            ValidatePins();
+            RecordCommittedReceipt(receipt, PocketAppGenerationPhase.Disabled);
+            _postCommitHook?.Invoke();
+            RefreshManagedPackagesAfterCommit(receipt);
             return BuildState();
         }
         catch (Exception ex) when (ex is PocketAppGenerationException or PocketAppLifecycleException)
@@ -410,19 +403,15 @@ internal sealed class PocketAppGenerationController : IDisposable
         {
             lock (_stateSync) { if (!_enabled) { return FailLocked("GENERATION_DISABLED"); } }
             ValidatePins();
+            RefreshManagedPackages();
             var receipt = _lifecycle.Enable(packageId);
             if (!receipt.ReadbackVerified || receipt.State != PocketAppLifecycleState.Enabled)
             {
                 throw Failure("GENERATION_PACKAGE_INVALID");
             }
-            lock (_stateSync)
-            {
-                _lastReceipt = receipt;
-                _phase = PocketAppGenerationPhase.Installed;
-                _errorCode = null;
-            }
-            RefreshManagedPackages();
-            ValidatePins();
+            RecordCommittedReceipt(receipt, PocketAppGenerationPhase.Installed);
+            _postCommitHook?.Invoke();
+            RefreshManagedPackagesAfterCommit(receipt);
             return BuildState();
         }
         catch (Exception ex) when (ex is PocketAppGenerationException or PocketAppLifecycleException)
@@ -443,6 +432,7 @@ internal sealed class PocketAppGenerationController : IDisposable
         {
             lock (_stateSync) { if (!_enabled) { return FailLocked("GENERATION_DISABLED"); } }
             ValidatePins();
+            RefreshManagedPackages();
             RejectPendingProposalIfNeeded(packageId);
             var receipt = _lifecycle.Remove(packageId, PocketAppDataDisposition.Preserve);
             if (!receipt.ReadbackVerified
@@ -451,16 +441,16 @@ internal sealed class PocketAppGenerationController : IDisposable
             {
                 throw Failure("GENERATION_PACKAGE_INVALID");
             }
+            PocketAppGenerationPhase committedPhase;
             lock (_stateSync)
             {
-                _lastReceipt = receipt;
-                _phase = _pendingProposal is null
+                committedPhase = _pendingProposal is null
                     ? PocketAppGenerationPhase.Removed
                     : PocketAppGenerationPhase.AwaitingApproval;
-                _errorCode = null;
             }
-            RefreshManagedPackages();
-            ValidatePins();
+            RecordCommittedReceipt(receipt, committedPhase);
+            _postCommitHook?.Invoke();
+            RefreshManagedPackagesAfterCommit(receipt);
             return BuildState();
         }
         catch (Exception ex) when (ex is PocketAppGenerationException or PocketAppLifecycleException)
@@ -603,6 +593,67 @@ internal sealed class PocketAppGenerationController : IDisposable
             .Where(item => item.State != PocketAppLifecycleState.Removed)
             .ToArray();
         lock (_stateSync) { _managedPackages = observed; }
+        ValidatePins();
+    }
+
+    private void RecordCommittedReceipt(
+        PocketAppLifecycleReceipt receipt,
+        PocketAppGenerationPhase committedPhase)
+    {
+        lock (_stateSync)
+        {
+            _pendingProposal = null;
+            _pendingAllowsActivation = false;
+            _lastReceipt = receipt;
+            _phase = committedPhase;
+            _errorCode = null;
+            var packages = _managedPackages
+                .Where(item => item.PackageId != receipt.PackageId)
+                .ToList();
+            if (receipt.State != PocketAppLifecycleState.Removed
+                && receipt.Version is not null
+                && receipt.PackageDigest is not null)
+            {
+                var existing = _managedPackages.FirstOrDefault(item => item.PackageId == receipt.PackageId);
+                var versions = (existing?.InstalledVersions ?? Array.Empty<string>())
+                    .Append(receipt.Version)
+                    .Distinct(StringComparer.Ordinal)
+                    .Order(Comparer<string>.Create(PocketAppLifecycleManager.CompareSemanticVersions))
+                    .ToArray();
+                packages.Add(new PocketAppManagedPackage(
+                    receipt.PackageId,
+                    receipt.State,
+                    receipt.Version,
+                    receipt.PackageDigest,
+                    versions));
+            }
+            _managedPackages = packages.OrderBy(item => item.PackageId, StringComparer.Ordinal).ToArray();
+        }
+    }
+
+    private void RefreshManagedPackagesAfterCommit(PocketAppLifecycleReceipt receipt)
+    {
+        ValidatePins();
+        try
+        {
+            var observed = _lifecycle.ManagedPackages()
+                .Where(item => item.State != PocketAppLifecycleState.Removed)
+                .ToArray();
+            lock (_stateSync) { _managedPackages = observed; }
+        }
+        catch (PocketAppLifecycleException)
+        {
+            var target = _lifecycle.ManagedPackage(receipt.PackageId);
+            if (target is null
+                || target.State != receipt.State
+                || target.Version != receipt.Version
+                || target.PackageDigest != receipt.PackageDigest)
+            {
+                throw Failure("GENERATION_PACKAGE_INVALID");
+            }
+            // The target still matches its verified receipt. Preserve it when an
+            // unrelated package blocks a complete list refresh.
+        }
         ValidatePins();
     }
 

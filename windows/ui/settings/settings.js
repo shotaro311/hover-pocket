@@ -1,5 +1,6 @@
 import { on, request } from "../js/bridge.js";
 import { labelForSize, setLanguage, t } from "../js/i18n.js";
+import { createGenerationTargetState } from "./generation-target-state.mjs";
 
 const languageEl = document.querySelector("[data-language]");
 const displayPlacementEl = document.querySelector("[data-display-placement]");
@@ -16,6 +17,9 @@ const aiNativeNoteEl = document.querySelector("[data-ai-native-note]");
 const pocketGenerationEl = document.querySelector("[data-pocket-generation]");
 const pocketGenerationNoteEl = document.querySelector("[data-pocket-generation-note]");
 const pocketGenerationRequestEl = document.querySelector("[data-pocket-generation-request]");
+const pocketGenerationUpdateSelectionEl = document.querySelector("[data-pocket-generation-update-selection]");
+const pocketGenerationUpdateTargetEl = document.querySelector("[data-pocket-generation-update-target]");
+const pocketGenerationClearTargetEl = document.querySelector("[data-pocket-generation-clear-target]");
 const pocketGenerateEl = document.querySelector("[data-pocket-generate]");
 const pocketCancelEl = document.querySelector("[data-pocket-cancel]");
 const pocketGenerationStatusEl = document.querySelector("[data-pocket-generation-status]");
@@ -40,7 +44,7 @@ const openDataFolderEl = document.querySelector("[data-open-data-folder]");
 let currentState = null;
 let stickyState = null;
 let generationState = null;
-let generationUpdateTarget = null;
+const generationTarget = createGenerationTargetState();
 
 on("state.changed", (state) => render(state));
 
@@ -156,6 +160,7 @@ function renderPocketGeneration(generation, language) {
   pocketGenerationEl.hidden = !enabled;
   if (!enabled) {
     generationState = null;
+    generationTarget.clear();
     return;
   }
 
@@ -171,10 +176,14 @@ function renderPocketGeneration(generation, language) {
     || Boolean(generation.proposal)
     || generation.generatorAvailable === false;
 
-  const targetLabel = generationUpdateTarget
-    ? (language === "en" ? `Update target: ${generationUpdateTarget}` : `更新対象: ${generationUpdateTarget}`)
-    : "";
-  const statusParts = [generation.phase, targetLabel, generation.errorCode].filter(Boolean);
+  const updateTarget = generationTarget.value;
+  pocketGenerationUpdateSelectionEl.hidden = updateTarget === null;
+  pocketGenerationUpdateTargetEl.textContent = updateTarget === null
+    ? ""
+    : (language === "en" ? `Update target: ${updateTarget}` : `更新対象: ${updateTarget}`);
+  pocketGenerationClearTargetEl.textContent = language === "en" ? "Create new app instead" : "新規Appとして作成";
+
+  const statusParts = [generation.phase, generation.errorCode].filter(Boolean);
   if (generation.receipt?.readbackVerified) {
     statusParts.push(language === "en"
       ? `readback verified: ${generation.receipt.action} ${generation.receipt.appId} ${generation.receipt.version ?? "-"}`
@@ -256,7 +265,7 @@ function renderPocketGeneration(generation, language) {
     updateButton.type = "button";
     updateButton.textContent = language === "en" ? "Update" : "更新";
     updateButton.addEventListener("click", () => {
-      generationUpdateTarget = app.appId;
+      generationTarget.select(app.appId);
       renderPocketGeneration(generationState, language);
       pocketGenerationRequestEl.focus();
     });
@@ -304,7 +313,7 @@ async function runGenerationAction(method, params = undefined) {
     pocketGenerationStatusEl.textContent = "";
     generationState = await request(method, params);
     if (generationState.receipt?.readbackVerified) {
-      generationUpdateTarget = null;
+      generationTarget.clear();
     }
     renderPocketGeneration(generationState, currentState.settings.language);
   } catch (error) {
@@ -461,11 +470,18 @@ pocketGenerateEl.addEventListener("click", async () => {
   if (!text) return;
   await runGenerationAction("pocketApps.generate", {
     request: text,
-    updatingAppId: generationUpdateTarget,
+    updatingAppId: generationTarget.value,
   });
   if (generationState?.phase === "awaiting_approval") {
-    generationUpdateTarget = null;
+    generationTarget.clear();
+    renderPocketGeneration(generationState, currentState.settings.language);
   }
+});
+
+pocketGenerationClearTargetEl.addEventListener("click", () => {
+  generationTarget.clear();
+  renderPocketGeneration(generationState, currentState.settings.language);
+  pocketGenerationRequestEl.focus();
 });
 
 pocketCancelEl.addEventListener("click", () => {

@@ -233,6 +233,24 @@ select {
   font: inherit;
 }
 
+.pocket-generation-update-target {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pocket-generation-update-target[hidden] {
+  display: none;
+}
+
+.pocket-generation-update-target span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .pocket-generation pre {
   max-height: 220px;
   overflow: auto;
