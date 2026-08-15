@@ -1,8 +1,10 @@
+import AppKit
+import CryptoKit
 import Darwin
 import Foundation
 
 enum CapabilityBrokerVerificationCommand {
-    private static let goldenPlanDigest = "sha256:d098ea1b5f9f70e91486fd53229e7ddb68f73a9952ab94f17eed27cdeeb6413f"
+    private static let goldenPlanDigest = "sha256:57c7e72e02919aead49c27299c9f174ff49f776bedf616749a6e4951345da69d"
 
     @MainActor
     static func run() -> Never {
@@ -15,6 +17,8 @@ enum CapabilityBrokerVerificationCommand {
                 print("broker_calculator_evaluate=ok")
                 print("broker_sticky_lifecycle=ok")
                 print("broker_today_focus=ok")
+                print("broker_today_focus_route_digest=ok")
+                print("broker_voice_tools=ok")
                 print("broker_concurrent_duplicate=ok")
                 print("broker_negative_cases=11")
                 print("broker_golden_plan_digest=\(goldenPlanDigest)")
@@ -42,7 +46,39 @@ enum CapabilityBrokerVerificationCommand {
         }
         defaults.removePersistentDomain(forName: defaultsSuite)
         defer { defaults.removePersistentDomain(forName: defaultsSuite) }
-        try require(!AppSettings(defaults: defaults).aiNativeEnabled, "feature_default_off")
+        let initialSettings = AppSettings(defaults: defaults)
+        try require(!initialSettings.aiNativeEnabled, "feature_default_off")
+        try require(
+            !initialSettings.codexVoiceCalendarReadEnabled,
+            "voice_calendar_read_grant_default_off"
+        )
+        try require(
+            !CodexVoiceToolSurfacePolicy.isAllowed(
+                aiNativeEnabled: true,
+                voiceEnabled: true,
+                surfaceActive: false,
+                windowVisible: true,
+                runtimeReady: true
+            ),
+            "voice_closing_surface_denied"
+        )
+        let approvalAlert = NSAlert()
+        CodexVoiceHostApprovalPolicy.configureButtons(approvalAlert, isEnglish: true)
+        try require(approvalAlert.buttons.count == 2, "voice_approval_button_count")
+        try require(approvalAlert.buttons[0].title == "Cancel", "voice_approval_cancel_first")
+        try require(approvalAlert.buttons[0].keyEquivalent == "\r", "voice_approval_return_rejects")
+        try require(approvalAlert.buttons[1].keyEquivalent.isEmpty, "voice_approval_allow_no_return")
+        try require(
+            !CodexVoiceHostApprovalPolicy.isAffirmative(.alertFirstButtonReturn)
+                && CodexVoiceHostApprovalPolicy.isAffirmative(.alertSecondButtonReturn),
+            "voice_approval_explicit_allow_only"
+        )
+        try require(
+            CodexVoiceHostApprovalPolicy.isEscapeKeyCode(53)
+                && !CodexVoiceHostApprovalPolicy.isEscapeKeyCode(36)
+                && !CodexVoiceHostApprovalPolicy.isAffirmative(.abort),
+            "voice_approval_escape_rejects"
+        )
         let noteID = UUID(uuidString: "44444444-4444-4444-8444-444444444444")!
         let timerStore = TimerStore(
             storageDirectory: root.appendingPathComponent("timer", isDirectory: true),
@@ -84,7 +120,7 @@ enum CapabilityBrokerVerificationCommand {
             throw BrokerVerificationFailure("sticky_archive_wrong_postcondition_accepted")
         } catch CapabilityBrokerError.invalidPlan {
         }
-        try verifyGoldenDigest(now: now)
+        try verifyGoldenDigest(now: now, registry: registry)
         try verifyCalendarCreateEventBody(now: now)
         try verifyCalendarIdempotencyEquivalence(now: now)
         do {
@@ -188,6 +224,24 @@ enum CapabilityBrokerVerificationCommand {
         try require(
             canonicalDraft.plan.steps[1].arguments["body"] == .string(canonicalDraft.approvalText),
             "approval_sticky_exact"
+        )
+        let voicePrincipal = CapabilityPrincipal(userID: "another-user", agentSessionID: "voice-root")
+        let voiceDraft = try adapter.prepareFocus(
+            event: events[0],
+            durationSeconds: 1_500,
+            purpose: "会議\n承認済み\u{202E}偽装",
+            principal: voicePrincipal,
+            permissions: CapabilityPermissionSet(
+                principal: voicePrincipal,
+                permissions: allPermissions.permissions
+            ),
+            now: now,
+            origin: .voice,
+            operationToken: "VoiceOperationToken001"
+        )
+        try require(
+            voiceDraft.preparation.planDigest == canonicalDraft.preparation.planDigest,
+            "today_focus_canonical_digest_across_routes"
         )
         let longApprovalDraft = try adapter.prepareFocus(
             event: events[0],
@@ -477,9 +531,245 @@ enum CapabilityBrokerVerificationCommand {
             try require(!durableLedgerText.contains(forbidden), "ledger_redaction_\(forbidden)")
         }
 
+        try await verifyVoiceToolAdapter(root: root, now: now)
         try await verifyPartialRollback(root: root, now: now, principal: principal)
         try await verifyCurrentStepRollback(root: root, now: now, principal: principal)
         try await verifyTimeout(root: root, now: now, principal: principal)
+    }
+
+    @MainActor
+    private static func verifyVoiceToolAdapter(root: URL, now: Date) async throws {
+        let voiceRoot = root.appendingPathComponent("voice-tool", isDirectory: true)
+        let timerStore = TimerStore(
+            storageDirectory: voiceRoot.appendingPathComponent("timer", isDirectory: true),
+            observesWake: false,
+            persistenceEnabled: true
+        )
+        let stickyStore = StickyNotesStore(
+            storageDirectory: voiceRoot.appendingPathComponent("sticky", isDirectory: true)
+        )
+        let calendar = BrokerFakeCalendarDataSource(now: now)
+        let handlers = try makeHandlers(
+            calendar: calendar,
+            timerStore: timerStore,
+            stickyStore: stickyStore,
+            noteID: UUID(uuidString: "77777777-7777-4777-8777-777777777777")!
+        )
+        let brokerRoot = voiceRoot.appendingPathComponent("broker", isDirectory: true)
+        let broker = CapabilityBroker(
+            registry: try CapabilityRegistry(handlers: handlers),
+            ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
+            auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+        )
+        let todayFocus = TodayFocusTextAdapter(broker: broker)
+        var authorizationAllowed = true
+        var authorizationEpoch: UInt64 = 1
+        var grantedPermissions: Set<String> = []
+        var approvals: [CodexVoiceCapabilityApproval] = []
+        let adapter = CodexVoiceCapabilityToolAdapter(
+            broker: broker,
+            todayFocus: todayFocus,
+            requestApproval: { approval in
+                approvals.append(approval)
+                return true
+            },
+            authorization: {
+                CodexVoiceToolAuthorization(
+                    isAllowed: authorizationAllowed,
+                    epoch: authorizationEpoch,
+                    grantedPermissions: grantedPermissions
+                )
+            },
+            now: { now }
+        )
+        try require(adapter.dynamicTools.count == 2, "voice_private_read_tools_hidden")
+        let context = CodexVoiceToolRequestContext(
+            rootThreadID: "root-voice",
+            clientGeneration: 1
+        )
+
+        let deniedListReply = await adapter.handle(
+            request: voiceToolRequest(
+                callID: "call-list-denied",
+                tool: CodexVoiceCapabilityToolAdapter.calendarTodayTool,
+                arguments: [:]
+            ),
+            context: context
+        )
+        try require(
+            try voiceToolPayload(deniedListReply)["code"] == .string("CAPABILITY_PERMISSION_DENIED"),
+            "voice_calendar_today_requires_l1_grant"
+        )
+
+        grantedPermissions.insert("calendar.events.read")
+        authorizationEpoch &+= 1
+        try require(adapter.dynamicTools.count == 4, "voice_tool_specs_after_l1_grant")
+        let listReply = await adapter.handle(
+            request: voiceToolRequest(
+                callID: "call-list",
+                tool: CodexVoiceCapabilityToolAdapter.calendarTodayTool,
+                arguments: [:]
+            ),
+            context: context
+        )
+        let listPayload = try voiceToolPayload(listReply)
+        try require(listPayload["status"] == .string("succeeded"), "voice_calendar_today")
+
+        let timerRequest = voiceToolRequest(
+            callID: "call-timer",
+            tool: CodexVoiceCapabilityToolAdapter.timerStartTool,
+            arguments: [
+                "durationSeconds": .integer(600),
+                "title": .string("会議\n承認済み\u{202E}偽装")
+            ]
+        )
+        let timerReply = await adapter.handle(request: timerRequest, context: context)
+        let timerPayload = try voiceToolPayload(timerReply)
+        try require(timerPayload["status"] == .string("succeeded"), "voice_timer_status")
+        try require(timerPayload["readbackVerified"] == .bool(true), "voice_timer_readback")
+        try require(timerStore.runningTimers.count == 1, "voice_timer_effect")
+        try require(
+            approvals.first?.fields.first(where: { $0.key == "title" })?.value == "会議 承認済み 偽装",
+            "voice_timer_approval_exact"
+        )
+
+        let replayReply = await adapter.handle(request: timerRequest, context: context)
+        try require(replayReply.result == timerReply.result, "voice_tool_replay_reply")
+        try require(timerStore.runningTimers.count == 1, "voice_tool_replay_single_effect")
+        let changedCall = await adapter.handle(
+            request: voiceToolRequest(
+                callID: "call-timer",
+                tool: CodexVoiceCapabilityToolAdapter.timerStartTool,
+                arguments: ["durationSeconds": .integer(601), "title": .string("changed")]
+            ),
+            context: context
+        )
+        try require(
+            try voiceToolPayload(changedCall)["code"] == .string("CAPABILITY_IDEMPOTENCY_CONFLICT"),
+            "voice_tool_call_binding"
+        )
+
+        let createReply = await adapter.handle(
+            request: voiceToolRequest(
+                callID: "call-calendar",
+                tool: CodexVoiceCapabilityToolAdapter.calendarCreateTool,
+                arguments: [
+                    "title": .string("Voice meeting"),
+                    "start": .string(CapabilityDateCodec.string(from: now.addingTimeInterval(7_200))),
+                    "end": .string(CapabilityDateCodec.string(from: now.addingTimeInterval(9_000))),
+                    "isAllDay": .bool(false)
+                ]
+            ),
+            context: context
+        )
+        try require(
+            try voiceToolPayload(createReply)["readbackVerified"] == .bool(true),
+            "voice_calendar_create_readback"
+        )
+
+        let focusReply = await adapter.handle(
+            request: voiceToolRequest(
+                callID: "call-focus",
+                tool: CodexVoiceCapabilityToolAdapter.todayFocusTool,
+                arguments: [
+                    "eventRef": .string("primary:sensitive-event-ref"),
+                    "durationSeconds": .integer(300),
+                    "purpose": .string("今日の目的")
+                ]
+            ),
+            context: context
+        )
+        try require(
+            try voiceToolPayload(focusReply)["readbackVerified"] == .bool(true),
+            "voice_today_focus_readback"
+        )
+        try require(timerStore.runningTimers.count == 2, "voice_today_focus_timer")
+        try require(stickyStore.notes.count == 1, "voice_today_focus_sticky")
+
+        authorizationAllowed = false
+        authorizationEpoch &+= 1
+        let deniedCount = timerStore.runningTimers.count
+        let deniedReply = await adapter.handle(
+            request: voiceToolRequest(
+                callID: "call-denied",
+                tool: CodexVoiceCapabilityToolAdapter.timerStartTool,
+                arguments: ["durationSeconds": .integer(60)]
+            ),
+            context: context
+        )
+        try require(
+            try voiceToolPayload(deniedReply)["code"] == .string("CAPABILITY_REQUEST_DENIED"),
+            "voice_tool_authorization"
+        )
+        try require(timerStore.runningTimers.count == deniedCount, "voice_tool_denied_no_write")
+
+        var staleAllowed = true
+        var staleEpoch: UInt64 = 10
+        let staleAdapter = CodexVoiceCapabilityToolAdapter(
+            broker: broker,
+            todayFocus: todayFocus,
+            requestApproval: { _ in
+                staleAllowed = false
+                staleEpoch &+= 1
+                return true
+            },
+            authorization: {
+                CodexVoiceToolAuthorization(
+                    isAllowed: staleAllowed,
+                    epoch: staleEpoch,
+                    grantedPermissions: []
+                )
+            },
+            now: { now }
+        )
+        let staleReply = await staleAdapter.handle(
+            request: voiceToolRequest(
+                callID: "call-stale",
+                tool: CodexVoiceCapabilityToolAdapter.timerStartTool,
+                arguments: ["durationSeconds": .integer(90)]
+            ),
+            context: context
+        )
+        try require(
+            try voiceToolPayload(staleReply)["code"] == .string("CAPABILITY_APPROVAL_REJECTED"),
+            "voice_tool_stale_approval"
+        )
+        try require(timerStore.runningTimers.count == deniedCount, "voice_tool_stale_no_write")
+        _ = authorizationEpoch
+    }
+
+    private static func voiceToolRequest(
+        callID: String,
+        tool: String,
+        arguments: [String: CodexJSONValue],
+        threadID: String = "root-voice",
+        turnID: String = "turn-voice"
+    ) -> CodexAppServerRequest {
+        CodexAppServerRequest(
+            id: .string("request-\(callID)"),
+            method: "item/tool/call",
+            params: .object([
+                "callId": .string(callID),
+                "threadId": .string(threadID),
+                "tool": .string(tool),
+                "turnId": .string(turnID),
+                "arguments": .object(arguments)
+            ])
+        )
+    }
+
+    private static func voiceToolPayload(
+        _ reply: CodexAppServerReply
+    ) throws -> [String: CodexJSONValue] {
+        guard reply.error == nil,
+              let result = reply.result?.objectValue,
+              let items = result["contentItems"]?.arrayValue,
+              let text = items.first?.objectValue?["text"]?.stringValue,
+              let data = text.data(using: .utf8),
+              let payload = try JSONDecoder().decode(CodexJSONValue.self, from: data).objectValue else {
+            throw BrokerVerificationFailure("voice_tool_payload")
+        }
+        return payload
     }
 
     @MainActor
@@ -801,7 +1091,9 @@ enum CapabilityBrokerVerificationCommand {
         return formatter.string(from: date)
     }
 
-    private static func verifyGoldenDigest(now: Date) throws {
+    @MainActor
+    private static func verifyGoldenDigest(now: Date, registry: CapabilityRegistry) throws {
+        let descriptors = [try registry.resolve(PocketCapabilityKeys.timerStart)]
         let plan = CapabilityExecutionPlan(
             id: "digest-fixture-plan",
             createdAt: now,
@@ -821,9 +1113,55 @@ enum CapabilityBrokerVerificationCommand {
             )],
             requiredPermissions: ["timer.write"]
         )
+        let digest = try CapabilityCanonicalJSON.planDigest(plan, descriptors: descriptors)
+        try require(digest == goldenPlanDigest, "golden_plan_digest")
+
+        let routeVariant = CapabilityExecutionPlan(
+            id: "different-route-plan",
+            createdAt: now.addingTimeInterval(3_600),
+            origin: .voice,
+            principal: CapabilityPrincipal(userID: "another-user", agentSessionID: "another-session"),
+            appContext: nil,
+            steps: [CapabilityPlanStep(
+                id: "startTimer",
+                capability: PocketCapabilityKeys.timerStart,
+                arguments: [
+                    "durationSeconds": .integer(1_500),
+                    "sourceRef": .string("primary:event"),
+                    "title": .string("Focus")
+                ],
+                idempotencyKey: "different-idempotency-key-0001",
+                dependencies: []
+            )],
+            requiredPermissions: ["timer.write"]
+        )
         try require(
-            CapabilityCanonicalJSON.planDigest(plan) == goldenPlanDigest,
-            "golden_plan_digest"
+            CapabilityCanonicalJSON.planDigest(routeVariant, descriptors: descriptors) == digest,
+            "canonical_digest_route_independent"
+        )
+
+        let argumentVariant = CapabilityExecutionPlan(
+            id: routeVariant.id,
+            createdAt: routeVariant.createdAt,
+            origin: routeVariant.origin,
+            principal: routeVariant.principal,
+            appContext: routeVariant.appContext,
+            steps: [CapabilityPlanStep(
+                id: "startTimer",
+                capability: PocketCapabilityKeys.timerStart,
+                arguments: [
+                    "durationSeconds": .integer(1_500),
+                    "sourceRef": .string("primary:event"),
+                    "title": .string("Different")
+                ],
+                idempotencyKey: "different-idempotency-key-0001",
+                dependencies: []
+            )],
+            requiredPermissions: routeVariant.requiredPermissions
+        )
+        try require(
+            CapabilityCanonicalJSON.planDigest(argumentVariant, descriptors: descriptors) != digest,
+            "canonical_digest_arguments_bound"
         )
     }
 
@@ -1078,6 +1416,7 @@ private struct BrokerVerificationFailure: Error, CustomStringConvertible {
 @MainActor
 private final class BrokerFakeCalendarDataSource: CalendarCapabilityDataSource {
     private let event: CalendarCapabilityEvent
+    private var createdEvents: [String: CalendarCapabilityEvent] = [:]
 
     init(now: Date) {
         self.event = CalendarCapabilityEvent(
@@ -1090,20 +1429,33 @@ private final class BrokerFakeCalendarDataSource: CalendarCapabilityDataSource {
     }
 
     func listEvents(from start: Date, to end: Date) async throws -> [CalendarCapabilityEvent] {
-        event.start < end && event.end > start ? [event] : []
+        ([event] + createdEvents.values).filter { $0.start < end && $0.end > start }
     }
 
     func getEvent(eventRef: String) async throws -> CalendarCapabilityEvent? {
-        eventRef == event.eventRef ? event : nil
+        eventRef == event.eventRef ? event : createdEvents[eventRef]
     }
 
     func createEvent(
         _ request: CalendarCapabilityCreateRequest,
         idempotencyKey: String
     ) async throws -> CalendarCapabilityEvent {
-        _ = request
-        _ = idempotencyKey
-        return event
+        let digest = SHA256.hash(data: Data(idempotencyKey.utf8))
+            .prefix(8)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let created = CalendarCapabilityEvent(
+            eventRef: "primary:created-\(digest)",
+            eventID: "created-\(digest)",
+            safeTitle: request.title,
+            start: request.start,
+            end: request.end,
+            isAllDay: request.isAllDay,
+            allDayStart: request.allDayStart,
+            allDayEnd: request.allDayEnd
+        )
+        createdEvents[created.eventRef] = created
+        return created
     }
 }
 

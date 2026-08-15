@@ -20,11 +20,13 @@ internal sealed class PanelWindow : NoActivateWindow
     public const double CollapsedHeight = AccessSurfaceWindow.SurfaceHeight;
     public static readonly TimeSpan AnimationDuration = TimeSpan.FromMilliseconds(220);
     public static readonly TimeSpan ResizeAnimationDuration = TimeSpan.FromMilliseconds(180);
+    private static readonly TimeSpan MicrophonePermissionArmDuration = TimeSpan.FromSeconds(8);
     private const string UiHostName = "app.hoverpocket.local";
     private const string UiBaseUrl = "https://app.hoverpocket.local/index.html";
     private const double CornerRadiusDips = 18;
 
     private readonly PanelBridgeController _bridgeController;
+    private readonly HoverPocketApplicationData _applicationData;
     private readonly bool _enableWebView;
     private readonly bool _enableDevTools;
     private readonly Grid _root = new();
@@ -45,24 +47,39 @@ internal sealed class PanelWindow : NoActivateWindow
     private WebView2? _webView;
     private Task? _initializationTask;
     private IDisposable? _bridgeAttachment;
+    private DateTimeOffset? _microphonePermissionArmedUntil;
     private bool _closed;
 
     public AnimationDiagnostics LastAnimationDiagnostics { get; private set; } = AnimationDiagnostics.Empty;
 
-    public PanelWindow(PanelBridgeController bridgeController, bool enableWebView, bool enableDevTools)
+    public PanelWindow(
+        PanelBridgeController bridgeController,
+        HoverPocketApplicationData applicationData,
+        bool enableWebView,
+        bool enableDevTools)
         : base(allowsTransparency: false)
     {
         _bridgeController = bridgeController;
+        _applicationData = applicationData;
         _enableWebView = enableWebView;
         _enableDevTools = enableDevTools;
+        if (ShouldExposeToAutomation(applicationData))
+        {
+            Title = "HoverPocket Voice E2E";
+            ShowInTaskbar = true;
+        }
 
-        var metrics = PanelSizeCatalog.Get(_bridgeController.CurrentSettings.PanelSize);
+        var metrics = PanelSizeCatalog.Get(
+            _bridgeController.CurrentSettings.PanelSize,
+            _bridgeController.CurrentSettings.EffectiveVoiceLaneLayout);
         Width = metrics.Width;
         Height = metrics.TotalHeight;
         MinWidth = PanelSizeCatalog.Get(PanelSize.Small).Width;
         MinHeight = PanelSizeCatalog.Get(PanelSize.Small).TotalHeight;
         MaxWidth = PanelSizeCatalog.Get(PanelSize.Large).Width;
-        MaxHeight = PanelSizeCatalog.Get(PanelSize.Large).TotalHeight;
+        MaxHeight = PanelSizeCatalog.Get(
+            PanelSize.Large,
+            VoiceLaneLayoutState.Expanded).TotalHeight;
         Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(4, 4, 6));
 
         _fallbackVisual = new Border
@@ -102,9 +119,17 @@ internal sealed class PanelWindow : NoActivateWindow
 
     public bool KeyboardInteractionEnabled => ActivationEnabled;
 
+    public bool ExposesToAutomation => ShouldExposeToAutomation(_applicationData);
+
     protected override bool ActivatesOnMouseInteraction => true;
 
     public WebView2? WebView => _webView;
+
+    internal static bool ShouldExposeToAutomation(
+        HoverPocketApplicationData applicationData)
+    {
+        return applicationData.IsIsolatedVoiceE2E;
+    }
 
     public void ReleaseBridgeAttachment()
     {
@@ -178,7 +203,7 @@ internal sealed class PanelWindow : NoActivateWindow
             """;
 
         _ = await _webView.ExecuteScriptAsync(startScript);
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(18);
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
         while (DateTimeOffset.UtcNow < deadline)
         {
             var errorJson = await _webView.ExecuteScriptAsync("window.__hoverPocketVerifyError");
@@ -204,7 +229,9 @@ internal sealed class PanelWindow : NoActivateWindow
 
     public void ApplyPanelSize(PanelSize panelSize)
     {
-        var metrics = PanelSizeCatalog.Get(panelSize);
+        var metrics = PanelSizeCatalog.Get(
+            panelSize,
+            _bridgeController.CurrentSettings.EffectiveVoiceLaneLayout);
         Width = metrics.Width;
         Height = metrics.TotalHeight;
         ApplyRoundedRegion();
@@ -252,6 +279,7 @@ internal sealed class PanelWindow : NoActivateWindow
     public Task CloseAsync(DisplaySurfaceLayout layout)
     {
         EndKeyboardInteraction();
+        _microphonePermissionArmedUntil = null;
         if (!IsVisible)
         {
             return Task.CompletedTask;
@@ -560,6 +588,10 @@ internal sealed class PanelWindow : NoActivateWindow
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
+        if (ExposesToAutomation)
+        {
+            NativeMethods.SetToolWindowStyle(Hwnd, enabled: false);
+        }
         ApplyRoundedRegion();
     }
 
@@ -576,10 +608,7 @@ internal sealed class PanelWindow : NoActivateWindow
             CreationProperties = new CoreWebView2CreationProperties
             {
                 AdditionalBrowserArguments = DisableGpuRequested() ? "--disable-gpu" : string.Empty,
-                UserDataFolder = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "HoverPocket",
-                    "WebView2")
+                UserDataFolder = _applicationData.PanelWebViewDataDirectory
             },
             DefaultBackgroundColor = System.Drawing.Color.Transparent
         };
@@ -617,6 +646,28 @@ internal sealed class PanelWindow : NoActivateWindow
             args.Handled = true;
             WebViewSecurityPolicy.TryOpenExternalBrowser(args.Uri, UiHostName);
         };
+        webView.CoreWebView2.PermissionRequested += (_, args) =>
+        {
+            args.Handled = true;
+            args.SavesInProfile = false;
+            var now = DateTimeOffset.UtcNow;
+            var allowed = WebViewSecurityPolicy.ShouldAllowMicrophone(
+                args.Uri,
+                args.PermissionKind,
+                args.IsUserInitiated,
+                _bridgeController.CurrentSettings.CodexVoiceEnabled,
+                IsVisible,
+                _microphonePermissionArmedUntil,
+                now);
+            if (args.PermissionKind == CoreWebView2PermissionKind.Microphone)
+            {
+                _microphonePermissionArmedUntil = null;
+            }
+
+            args.State = allowed
+                ? CoreWebView2PermissionState.Allow
+                : CoreWebView2PermissionState.Deny;
+        };
         webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
             UiHostName,
             uiFolder,
@@ -633,6 +684,8 @@ internal sealed class PanelWindow : NoActivateWindow
             Task.FromResult<object?>(BeginKeyboardInteraction()));
         dispatcher.Register("panel.endTextInput", (_, _) =>
             Task.FromResult<object?>(EndKeyboardInteraction()));
+        dispatcher.Register("codexVoice.beginMicrophoneRequest", (_, _) =>
+            Task.FromResult<object?>(BeginMicrophoneRequest()));
         webView.CoreWebView2.WebMessageReceived += async (_, args) =>
         {
             await dispatcher.HandleRawMessageAsync(args.TryGetWebMessageAsString());
@@ -646,6 +699,28 @@ internal sealed class PanelWindow : NoActivateWindow
         var activated = SetActivationEnabled(true);
         _ = _webView?.Focus();
         return KeyboardInteractionState(activated);
+    }
+
+    private object BeginMicrophoneRequest()
+    {
+        var armed = !_closed
+            && IsVisible
+            && _bridgeController.CurrentSettings.CodexVoiceEnabled;
+        _microphonePermissionArmedUntil = armed
+            ? DateTimeOffset.UtcNow + MicrophonePermissionArmDuration
+            : null;
+        if (armed)
+        {
+            _bridgeController.MarkVoiceMicrophoneRequestStarted();
+        }
+
+        return new
+        {
+            armed,
+            expiresInMilliseconds = armed
+                ? (int)MicrophonePermissionArmDuration.TotalMilliseconds
+                : 0
+        };
     }
 
     private object EndKeyboardInteraction()
@@ -668,6 +743,7 @@ internal sealed class PanelWindow : NoActivateWindow
     protected override void OnClosed(EventArgs e)
     {
         _closed = true;
+        _microphonePermissionArmedUntil = null;
         EndKeyboardInteraction();
         ReleaseBridgeAttachment();
         _webView?.Dispose();
@@ -780,6 +856,15 @@ internal sealed record UiWebVerifyResult(
     bool TimerLayoutOk,
     bool TimerInteractionStableOk,
     bool TimerStopwatchOk,
+    bool VoiceCompactOk,
+    bool VoiceExpandedOk,
+    bool VoiceProviderInvariantOk,
+    double VoiceCompactProviderWidth,
+    double VoiceCompactProviderHeight,
+    double VoiceExpandedProviderWidth,
+    double VoiceExpandedProviderHeight,
+    bool VoiceExplicitToggleOnlyOk,
+    bool VoiceNoFullscreenOk,
     bool TextSizeScaleReadyOk,
     bool ProviderSwitchOk,
     bool SettingsWriteOk,
@@ -822,6 +907,28 @@ internal static class WebViewSecurityPolicy
         return Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
             && parsed.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
             && parsed.Host.Equals(hostName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool ShouldAllowMicrophone(
+        string? uri,
+        CoreWebView2PermissionKind permissionKind,
+        bool isUserInitiated,
+        bool featureEnabled,
+        bool panelVisible,
+        DateTimeOffset? armedUntil,
+        DateTimeOffset now)
+    {
+        return permissionKind == CoreWebView2PermissionKind.Microphone
+            && isUserInitiated
+            && featureEnabled
+            && panelVisible
+            && armedUntil is { } deadline
+            && deadline >= now
+            && Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
+            && parsed.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            && parsed.Host.Equals(PanelHostName, StringComparison.OrdinalIgnoreCase)
+            && parsed.IsDefaultPort
+            && string.IsNullOrEmpty(parsed.UserInfo);
     }
 
     public static bool ShouldOpenExternalBrowser(string? uri, string hostName)

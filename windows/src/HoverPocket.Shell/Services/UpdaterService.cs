@@ -12,14 +12,31 @@ internal sealed class UpdaterService
     public const string GitHubRepositoryUrl = "https://github.com/shotaro311/hover-pocket";
 
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly bool _enabled;
     private UpdaterStatusSnapshot _snapshot = UpdaterStatusSnapshot.Idle();
+
+    public UpdaterService(bool enabled = true)
+    {
+        _enabled = enabled;
+        if (!enabled)
+        {
+            _snapshot = new UpdaterStatusSnapshot("disabled", "Updater disabled for isolated execution.");
+        }
+    }
 
     public event EventHandler<UpdaterCheckResult>? StartupUpdateAvailable;
 
     public UpdaterStatusSnapshot Snapshot => _snapshot;
 
+    public bool IsEnabled => _enabled;
+
     public async Task<UpdaterCheckResult> CheckWithPromptsAsync(Window? owner = null, CancellationToken cancellationToken = default)
     {
+        if (!_enabled)
+        {
+            return UpdaterCheckResult.Disabled();
+        }
+
         if (!await _gate.WaitAsync(0, cancellationToken))
         {
             var busy = UpdaterCheckResult.Busy();
@@ -97,6 +114,11 @@ internal sealed class UpdaterService
 
     public async Task CheckOnStartupAsync(CancellationToken cancellationToken = default)
     {
+        if (!_enabled)
+        {
+            return;
+        }
+
         if (!await _gate.WaitAsync(0, cancellationToken))
         {
             return;
@@ -141,6 +163,11 @@ internal sealed class UpdaterService
         Velopack.Locators.IVelopackLocator locator,
         CancellationToken cancellationToken = default)
     {
+        if (!_enabled)
+        {
+            return UpdaterCheckResult.Disabled();
+        }
+
         var manager = new UpdateManager(source, options: CreateWindowsUpdateOptions(), locator: locator);
         if (!manager.IsInstalled)
         {
@@ -214,6 +241,9 @@ internal sealed record UpdaterCheckResult(
 {
     public static UpdaterCheckResult Busy() =>
         new("busy", false, null, "Update Check", "An update check is already running.");
+
+    public static UpdaterCheckResult Disabled() =>
+        new("disabled", false, null, "Updater Disabled", "Updater is disabled for isolated execution.");
 
     public static UpdaterCheckResult NotInstalled() =>
         new(

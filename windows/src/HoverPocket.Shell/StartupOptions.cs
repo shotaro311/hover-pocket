@@ -18,9 +18,16 @@ internal sealed record StartupOptions(
     bool VerifyCalendarLive,
     bool VerifySettings,
     bool VerifyAiLane,
+    bool VerifyVoiceLaneLayout,
+    bool VerifyCodexAppServer,
+    bool VerifyCodexAppServerProtocol,
+    bool VerifyCodexVoiceCoordinator,
+    bool VerifyVoiceE2EIsolation,
     bool VerifyUpdater,
     bool VerifyReleaseConfig,
     bool SecondInstanceProbe,
+    bool VoiceE2ERequested,
+    string? VoiceE2ERoot,
     bool EnableDevTools,
     bool ChangeBrightnessForVerify,
     bool TogglePlaybackForVerify,
@@ -44,8 +51,14 @@ internal sealed record StartupOptions(
         || VerifyCalendarLive
         || VerifySettings
         || VerifyAiLane
+        || VerifyVoiceLaneLayout
+        || VerifyCodexAppServer
+        || VerifyCodexAppServerProtocol
+        || VerifyCodexVoiceCoordinator
+        || VerifyVoiceE2EIsolation
         || VerifyUpdater
-        || VerifyReleaseConfig;
+        || VerifyReleaseConfig
+        || SecondInstanceProbe;
 
     public static StartupOptions Parse(string[] args)
     {
@@ -64,9 +77,16 @@ internal sealed record StartupOptions(
         var verifyCalendarLive = false;
         var verifySettings = false;
         var verifyAiLane = false;
+        var verifyVoiceLaneLayout = false;
+        var verifyCodexAppServer = false;
+        var verifyCodexAppServerProtocol = false;
+        var verifyCodexVoiceCoordinator = false;
+        var verifyVoiceE2EIsolation = false;
         var verifyUpdater = false;
         var verifyReleaseConfig = false;
         var secondInstanceProbe = false;
+        var voiceE2ERequested = false;
+        string? voiceE2ERoot = null;
         var enableDevTools = false;
         var changeBrightnessForVerify = false;
         var togglePlaybackForVerify = false;
@@ -95,6 +115,23 @@ internal sealed record StartupOptions(
                 verifyCalendarLive = string.Equals(verifyTarget, "calendar-live", StringComparison.OrdinalIgnoreCase);
                 verifySettings = string.Equals(verifyTarget, "settings", StringComparison.OrdinalIgnoreCase);
                 verifyAiLane = string.Equals(verifyTarget, "ailane", StringComparison.OrdinalIgnoreCase);
+                verifyVoiceLaneLayout = string.Equals(
+                    verifyTarget,
+                    "voice-lane-layout",
+                    StringComparison.OrdinalIgnoreCase);
+                verifyCodexAppServer = string.Equals(verifyTarget, "codex-app-server", StringComparison.OrdinalIgnoreCase);
+                verifyCodexAppServerProtocol = string.Equals(
+                    verifyTarget,
+                    "codex-app-server-protocol",
+                    StringComparison.OrdinalIgnoreCase);
+                verifyCodexVoiceCoordinator = string.Equals(
+                    verifyTarget,
+                    "codex-voice-coordinator",
+                    StringComparison.OrdinalIgnoreCase);
+                verifyVoiceE2EIsolation = string.Equals(
+                    verifyTarget,
+                    "voice-e2e-isolation",
+                    StringComparison.OrdinalIgnoreCase);
                 verifyUpdater = string.Equals(verifyTarget, "updater", StringComparison.OrdinalIgnoreCase);
                 verifyReleaseConfig = string.Equals(verifyTarget, "release-config", StringComparison.OrdinalIgnoreCase);
                 continue;
@@ -103,6 +140,20 @@ internal sealed record StartupOptions(
             if (string.Equals(args[index], "--second-instance-probe", StringComparison.OrdinalIgnoreCase))
             {
                 secondInstanceProbe = true;
+                continue;
+            }
+
+            if (string.Equals(args[index], HoverPocketApplicationData.VoiceE2EFlag, StringComparison.OrdinalIgnoreCase))
+            {
+                voiceE2ERequested = true;
+                continue;
+            }
+
+            if (string.Equals(args[index], HoverPocketApplicationData.VoiceE2ERootFlag, StringComparison.OrdinalIgnoreCase))
+            {
+                voiceE2ERoot = index + 1 < args.Length
+                    ? args[++index]
+                    : string.Empty;
                 continue;
             }
 
@@ -160,9 +211,16 @@ internal sealed record StartupOptions(
             verifyCalendarLive,
             verifySettings,
             verifyAiLane,
+            verifyVoiceLaneLayout,
+            verifyCodexAppServer,
+            verifyCodexAppServerProtocol,
+            verifyCodexVoiceCoordinator,
+            verifyVoiceE2EIsolation,
             verifyUpdater,
             verifyReleaseConfig,
             secondInstanceProbe,
+            voiceE2ERequested,
+            voiceE2ERoot,
             enableDevTools,
             changeBrightnessForVerify,
             togglePlaybackForVerify,

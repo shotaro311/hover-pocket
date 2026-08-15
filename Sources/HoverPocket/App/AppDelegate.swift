@@ -5,10 +5,13 @@ import Carbon
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hoverWindowController = HoverWindowController()
     private var statusBarMenuController: StatusBarMenuController?
+    private var terminationCleanupStarted = false
+    private var terminationCleanupFinished = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         configureAINativeRuntimeIfEnabled()
+        hoverWindowController.startVoiceRuntime()
         installMainMenu()
         registerURLSchemeCallbackHandler()
         statusBarMenuController = StatusBarMenuController(
@@ -30,6 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = AppUpdater.shared
         hoverWindowController.positionWindows()
         hoverWindowController.showPill()
+        if HoverPocketApplicationData.usesIsolatedE2ERoot() {
+            hoverWindowController.openPanelFromMenu()
+        }
 
         NotificationCenter.default.addObserver(
             self,
@@ -57,6 +63,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    func applicationShouldTerminate(
+        _ sender: NSApplication
+    ) -> NSApplication.TerminateReply {
+        guard !terminationCleanupFinished else { return .terminateNow }
+        guard !terminationCleanupStarted else { return .terminateLater }
+        terminationCleanupStarted = true
+        Task { @MainActor [weak self] in
+            guard let self else {
+                sender.reply(toApplicationShouldTerminate: true)
+                return
+            }
+            await hoverWindowController.shutdownForApplicationTermination()
+            terminationCleanupFinished = true
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     private func configureAINativeRuntimeIfEnabled() {
         guard hoverWindowController.appSettings.aiNativeEnabled else { return }
         do {
@@ -64,23 +88,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 calendarDataSource: GoogleCalendarCapabilityDataSource()
             )
             let registry = try CapabilityRegistry(handlers: handlers)
-            let applicationSupport = try FileManager.default.url(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask,
-                appropriateFor: nil,
-                create: true
-            )
-            let brokerRoot = applicationSupport
-                .appendingPathComponent("HoverPocket", isDirectory: true)
-                .appendingPathComponent("CapabilityBroker", isDirectory: true)
+            let brokerRoot = HoverPocketApplicationData.directory("CapabilityBroker")
             let broker = CapabilityBroker(
                 registry: registry,
                 ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
                 auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
             )
-            AINativeRuntime.shared.configure(adapter: TodayFocusTextAdapter(broker: broker))
+            let adapter = TodayFocusTextAdapter(broker: broker)
+            AINativeRuntime.shared.configure(adapter: adapter)
+            hoverWindowController.configureVoiceCapabilities(
+                broker: broker,
+                todayFocus: adapter
+            )
         } catch {
             AINativeRuntime.shared.configure(adapter: nil)
+            hoverWindowController.configureVoiceCapabilities(broker: nil, todayFocus: nil)
         }
     }
 

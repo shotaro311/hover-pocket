@@ -6,6 +6,10 @@ const displayPlacementEl = document.querySelector("[data-display-placement]");
 const panelSizeEl = document.querySelector("[data-panel-size]");
 const textSizeEl = document.querySelector("[data-text-size]");
 const switchingEl = document.querySelector("[data-switching]");
+const voiceEnabledEl = document.querySelector("[data-voice-enabled]");
+const voiceLayoutEl = document.querySelector("[data-voice-layout]");
+const voiceAutoListenEl = document.querySelector("[data-voice-auto-listen]");
+const voiceCalendarReadEl = document.querySelector("[data-voice-calendar-read]");
 const providerListEl = document.querySelector("[data-provider-list]");
 const providerSelectionEl = document.querySelector("[data-provider-selection]");
 const preferredProviderEl = document.querySelector("[data-preferred-provider]");
@@ -73,6 +77,24 @@ function render(state) {
     { id: "click", label: t("click") },
     { id: "hover", label: t("hover") },
   ], state.settings.switchingMode, (switchingMode) => update("settings.setSwitchingMode", { switchingMode }));
+
+  voiceEnabledEl.checked = Boolean(state.settings.codexVoiceEnabled);
+  voiceLayoutEl.classList.toggle("is-disabled", !state.settings.codexVoiceEnabled);
+  renderSegment(voiceLayoutEl, [
+    { id: "compact", label: t("voiceCompact") },
+    { id: "expanded", label: t("voiceExpanded") },
+  ], state.settings.codexVoiceLayoutMode ?? "compact", (layout) => {
+    if (state.settings.codexVoiceEnabled) {
+      update("settings.setCodexVoiceLayout", { layout });
+    }
+  });
+  voiceLayoutEl.querySelectorAll("button").forEach((button) => {
+    button.disabled = !state.settings.codexVoiceEnabled;
+  });
+  voiceAutoListenEl.checked = Boolean(state.settings.codexVoiceAutoListen);
+  voiceAutoListenEl.disabled = !state.settings.codexVoiceEnabled;
+  voiceCalendarReadEl.checked = Boolean(state.settings.codexVoiceCalendarReadEnabled);
+  voiceCalendarReadEl.disabled = !state.settings.codexVoiceEnabled;
 
   renderProviders(state);
   renderProviderSelection(state);
@@ -186,6 +208,18 @@ autoUpdatesEl.addEventListener("change", () => {
 
 clipboardPrivateEl.addEventListener("change", () => {
   update("settings.setClipboardPrivateMode", { enabled: clipboardPrivateEl.checked });
+});
+
+voiceEnabledEl.addEventListener("change", () => {
+  update("settings.setCodexVoiceEnabled", { enabled: voiceEnabledEl.checked });
+});
+
+voiceAutoListenEl.addEventListener("change", () => {
+  update("settings.setCodexVoiceAutoListen", { enabled: voiceAutoListenEl.checked });
+});
+
+voiceCalendarReadEl.addEventListener("change", () => {
+  update("settings.setCodexVoiceCalendarReadEnabled", { enabled: voiceCalendarReadEl.checked });
 });
 
 preferredProviderEl.addEventListener("change", () => {

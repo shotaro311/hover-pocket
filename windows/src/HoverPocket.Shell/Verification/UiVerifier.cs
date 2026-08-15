@@ -157,6 +157,34 @@ internal sealed class UiVerifier
                     _failures.Add("timer: stopwatch controls did not render");
                 }
 
+                if (!result.VoiceCompactOk)
+                {
+                    _failures.Add("voice lane: Compact layout, title absence, or conversation priority failed");
+                }
+
+                if (!result.VoiceExpandedOk)
+                {
+                    _failures.Add("voice lane: Expanded transcript/session columns did not render");
+                }
+
+                if (!result.VoiceProviderInvariantOk)
+                {
+                    _failures.Add(
+                        "voice lane: expanding changed the existing provider rect "
+                        + $"({result.VoiceCompactProviderWidth:0.##}x{result.VoiceCompactProviderHeight:0.##} -> "
+                        + $"{result.VoiceExpandedProviderWidth:0.##}x{result.VoiceExpandedProviderHeight:0.##})");
+                }
+
+                if (!result.VoiceExplicitToggleOnlyOk)
+                {
+                    _failures.Add("voice lane: background click changed the layout");
+                }
+
+                if (!result.VoiceNoFullscreenOk)
+                {
+                    _failures.Add("voice lane: forbidden fullscreen affordance rendered");
+                }
+
                 if (!result.TextSizeScaleReadyOk)
                 {
                     _failures.Add("text size: global small/medium/large scaling was not active");
@@ -186,7 +214,7 @@ internal sealed class UiVerifier
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
-                "PASS ui verify: stable Controls refresh, source activation and rate actions, responsive Timer cards/input/stopwatch, media fallback, tabbed centered Clipboard split/full preview/trash actions, Calculator history sidebar, draggable stable icons, text scaling/input activation, stable Mac-style calendar editor, bridge/provider/settings round-trip");
+                "PASS ui verify: stable Controls refresh, source activation and rate actions, responsive Timer cards/input/stopwatch, media fallback, tabbed centered Clipboard split/full preview/trash actions, Calculator history sidebar, draggable stable icons, text scaling/input activation, stable Mac-style calendar editor, Host-owned Compact/Expanded Voice Lane contract, bridge/provider/settings round-trip");
             return 0;
         }
 

@@ -10,6 +10,7 @@ using HoverPocket.Shell.Providers.Calculator;
 using HoverPocket.Shell.Providers.Calendar;
 using HoverPocket.Shell.Providers.Clipboard;
 using HoverPocket.Shell.Providers.Controls;
+using HoverPocket.Shell.Providers.CodexVoice;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
 using HoverPocket.Shell.Services;
@@ -20,6 +21,7 @@ namespace HoverPocket.Shell.Bridge;
 internal sealed class PanelBridgeController : IDisposable
 {
     private readonly ProviderRegistry _providerRegistry;
+    private readonly HoverPocketApplicationData _applicationData;
     private readonly UserSettingsStore _settingsStore;
     private readonly IStartupRegistrationService _startupRegistration;
     private readonly UpdaterService _updaterService;
@@ -33,13 +35,20 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly PocketCapabilityHandlerSet _capabilityHandlers;
     private readonly CapabilityBroker? _capabilityBroker;
     private readonly TodayFocusTextAdapter? _todayFocusTextAdapter;
+    private readonly CodexVoiceRuntimeHost _codexVoiceRuntime;
+    private readonly CodexVoiceE2EReceiptStore? _voiceE2EReceipt;
     private readonly List<BridgeDispatcher> _dispatchers = [];
     private readonly object _previewFrameSync = new();
+    private readonly object _voiceShutdownSync = new();
     private string _selectedProviderId;
+    private VoiceLaneLayoutState _resolvedVoiceLaneLayout;
     private MediaPreviewFrame? _pendingPreviewFrame;
     private bool _previewPostScheduled;
     private bool _panelOpen;
     private bool _disposed;
+    private Task? _voiceShutdownTask;
+    private long _codexVoiceAuthorizationEpoch = 1;
+    private int _codexVoiceAuthorizationAllowed;
 
     public PanelBridgeController(
         ProviderRegistry providerRegistry,
@@ -47,18 +56,30 @@ internal sealed class PanelBridgeController : IDisposable
         UserSettings settings,
         IStartupRegistrationService? startupRegistration = null,
         AiLaneController? aiLaneController = null,
-        UpdaterService? updaterService = null)
+        UpdaterService? updaterService = null,
+        Func<CancellationToken, Task<CodexAppServerClient>>? codexVoiceClientFactory = null,
+        HoverPocketApplicationData? applicationData = null,
+        CodexVoiceE2EReceiptStore? voiceE2EReceipt = null)
     {
         _providerRegistry = providerRegistry;
+        _applicationData = applicationData
+            ?? HoverPocketApplicationData.ForRoot(settingsStore.RootDirectory);
         _settingsStore = settingsStore;
-        _startupRegistration = startupRegistration ?? new RunKeyStartupRegistrationService();
-        _updaterService = updaterService ?? new UpdaterService();
-        _calendarBridgeController = new CalendarBridgeController();
+        _startupRegistration = startupRegistration
+            ?? (_applicationData.ExternalIntegrationsEnabled
+                ? new RunKeyStartupRegistrationService()
+                : new InMemoryStartupRegistrationService());
+        _updaterService = updaterService
+            ?? new UpdaterService(_applicationData.ExternalIntegrationsEnabled);
+        _calendarBridgeController = new CalendarBridgeController(
+            new CalendarStore(
+                new GoogleOAuthService(enabled: _applicationData.ExternalIntegrationsEnabled)));
+        CurrentSettings = UserSettingsStore.Normalize(settings, providerRegistry.ProviderIds);
         _aiLaneController = aiLaneController ?? new AiLaneController(
-            new AiLaneAuditLog(settingsStore.RootDirectory),
+            new AiLaneAuditLog(_applicationData.AiLaneRootDirectory),
             new CalendarAiLaneConnector(_calendarBridgeController.Store));
-        var stickyStore = new StickyNotesStore(Path.Combine(settingsStore.RootDirectory, "sticky"));
-        var timerStore = new TimerStore(Path.Combine(settingsStore.RootDirectory, "timer"));
+        var stickyStore = new StickyNotesStore(_applicationData.StickyDirectory);
+        var timerStore = new TimerStore(_applicationData.TimerDirectory);
         _stickyBridgeController = new StickyBridgeController(stickyStore);
         _timerBridgeHandlers = new TimerBridgeHandlers(timerStore);
         _capabilityHandlers = ProviderCapabilityCompositionRoot.Create(
@@ -67,12 +88,12 @@ internal sealed class PanelBridgeController : IDisposable
             stickyStore);
         _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
-        CurrentSettings = UserSettingsStore.Normalize(settings, providerRegistry.ProviderIds);
+        _resolvedVoiceLaneLayout = CurrentSettings.EffectiveVoiceLaneLayout;
         if (CurrentSettings.AiNativeEnabled)
         {
             try
             {
-                var brokerRoot = Path.Combine(settingsStore.RootDirectory, "CapabilityBroker");
+                var brokerRoot = _applicationData.CapabilityBrokerDirectory;
                 _capabilityBroker = new CapabilityBroker(
                     new CapabilityRegistry(_capabilityHandlers),
                     new CapabilityBrokerLedger(brokerRoot),
@@ -85,8 +106,24 @@ internal sealed class PanelBridgeController : IDisposable
                 _todayFocusTextAdapter = null;
             }
         }
+        var voiceToolAdapter = _capabilityBroker is not null && _todayFocusTextAdapter is not null
+            ? new CodexVoiceCapabilityToolAdapter(
+                _capabilityBroker,
+                _todayFocusTextAdapter,
+                RequestCodexVoiceCapabilityApprovalAsync,
+                GetCodexVoiceToolAuthorization,
+                () => CurrentSettings.CodexVoiceCalendarReadEnabled
+                    && _applicationData.ExternalIntegrationsEnabled)
+            : null;
+        _voiceE2EReceipt = voiceE2EReceipt;
+        _codexVoiceRuntime = new CodexVoiceRuntimeHost(
+            CurrentSettings.CodexVoiceEnabled,
+            _applicationData.VoiceWorkspaceDirectory,
+            clientFactory: codexVoiceClientFactory,
+            toolAdapter: voiceToolAdapter);
+        _codexVoiceRuntime.SnapshotChanged += OnCodexVoiceSnapshotChanged;
         _clipboardBridgeController = new ClipboardBridgeController(
-            new ClipboardHistoryStore(Path.Combine(settingsStore.RootDirectory, "clipboard")),
+            new ClipboardHistoryStore(_applicationData.ClipboardDirectory),
             new ClipboardNativeListener(System.Windows.Application.Current?.Dispatcher ?? System.Windows.Threading.Dispatcher.CurrentDispatcher),
             () => CurrentSettings,
             SetClipboardPrivateModeAsync,
@@ -146,6 +183,17 @@ internal sealed class PanelBridgeController : IDisposable
         dispatcher.Register("settings.setStartWithWindows", SetStartWithWindowsAsync);
         dispatcher.Register("settings.setAutoCheckForUpdates", SetAutoCheckForUpdatesAsync);
         dispatcher.Register("settings.setClipboardPrivateMode", SetClipboardPrivateModeAsync);
+        dispatcher.Register("settings.setCodexVoiceEnabled", SetCodexVoiceEnabledAsync);
+        dispatcher.Register("settings.setCodexVoiceLayout", SetCodexVoiceLayoutAsync);
+        dispatcher.Register("settings.setCodexVoiceAutoListen", SetCodexVoiceAutoListenAsync);
+        dispatcher.Register("settings.setCodexVoiceCalendarReadEnabled", SetCodexVoiceCalendarReadEnabledAsync);
+        dispatcher.Register("codexVoice.mediaEvent", RecordCodexVoiceMediaEventAsync);
+        dispatcher.Register("codexVoice.setMuted", SetCodexVoiceMutedAsync);
+        dispatcher.Register("codexVoice.startWebRtc", StartCodexVoiceWebRtcAsync);
+        dispatcher.Register("codexVoice.transportAttached", AttachCodexVoiceTransportAsync);
+        dispatcher.Register("codexVoice.transportDetached", DetachCodexVoiceTransportAsync);
+        dispatcher.Register("codexVoice.startFailed", FailCodexVoiceStartAsync);
+        dispatcher.Register("codexVoice.stop", StopCodexVoiceAsync);
         dispatcher.Register("settings.resetDefaults", ResetDefaultsAsync);
         dispatcher.Register("settings.resetPanelBinding", ResetPanelBindingAsync);
         dispatcher.Register("settings.openDataFolder", OpenDataFolderAsync);
@@ -165,6 +213,23 @@ internal sealed class PanelBridgeController : IDisposable
         return new BridgeAttachment(() => _dispatchers.Remove(dispatcher));
     }
 
+    public Task PrepareForApplicationShutdownAsync()
+    {
+        lock (_voiceShutdownSync)
+        {
+            return _voiceShutdownTask ??= ShutdownVoiceRuntimeAsync();
+        }
+    }
+
+    private async Task ShutdownVoiceRuntimeAsync()
+    {
+        InvalidateCodexVoiceAuthorization(allowed: false);
+        _codexVoiceRuntime.SnapshotChanged -= OnCodexVoiceSnapshotChanged;
+        _voiceE2EReceipt?.RecordMediaEvent(CodexVoiceMediaEventKind.SafeClose);
+        await _codexVoiceRuntime.DisposeAsync();
+        _voiceE2EReceipt?.RecordSnapshot(_codexVoiceRuntime.Snapshot);
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -173,6 +238,7 @@ internal sealed class PanelBridgeController : IDisposable
         }
 
         _disposed = true;
+        InvalidateCodexVoiceAuthorization(allowed: false);
         _timerBridgeHandlers.AlertFired -= OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged -= OnTimerAlertChanged;
         _timerBridgeHandlers.Dispose();
@@ -183,6 +249,7 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.PreviewFrameArrived -= OnControlsPreviewFrameArrived;
         _controlsBridgeController.MediaSourceOpened -= OnControlsMediaSourceOpened;
         _controlsBridgeController.Dispose();
+        PrepareForApplicationShutdownAsync().GetAwaiter().GetResult();
     }
 
     public object BuildState()
@@ -196,7 +263,10 @@ internal sealed class PanelBridgeController : IDisposable
             _selectedProviderId = selected.Id;
         }
 
-        var metrics = PanelSizeCatalog.Get(CurrentSettings.PanelSize);
+        var metrics = PanelSizeCatalog.Get(
+            CurrentSettings.PanelSize,
+            _resolvedVoiceLaneLayout);
+        var voiceSnapshot = _codexVoiceRuntime.Snapshot;
         return new
         {
             settings = new
@@ -217,6 +287,10 @@ internal sealed class PanelBridgeController : IDisposable
                 handleIcon = ToWireValue(CurrentSettings.HandleIconStyle),
                 showTopHandleSideArea = CurrentSettings.ShowTopHandleSideArea,
                 disableTopEdgeInFullscreen = CurrentSettings.DisableTopEdgeInFullscreen,
+                codexVoiceEnabled = CurrentSettings.CodexVoiceEnabled,
+                codexVoiceLayoutMode = ToWireValue(CurrentSettings.CodexVoiceLayoutMode),
+                codexVoiceAutoListen = CurrentSettings.CodexVoiceAutoListen,
+                codexVoiceCalendarReadEnabled = CurrentSettings.CodexVoiceCalendarReadEnabled,
                 providerOrder = CurrentSettings.ProviderOrder,
                 providerVisibility = CurrentSettings.ProviderVisibility
             },
@@ -225,10 +299,12 @@ internal sealed class PanelBridgeController : IDisposable
             {
                 headerHeight = PanelSizeCatalog.HeaderHeight,
                 aiLaneHeight = PanelSizeCatalog.AiLaneHeight,
+                voiceLaneHeight = metrics.AiLaneHeight,
+                voiceLaneLayout = ToWireValue(_resolvedVoiceLaneLayout),
                 width = metrics.Width,
                 providerHeight = metrics.ProviderHeight,
                 totalHeight = metrics.TotalHeight,
-                sizes = PanelSizeCatalog.All.Select(size => new
+                sizes = PanelSizeCatalog.GetAll(_resolvedVoiceLaneLayout).Select(size => new
                 {
                     id = size.Id,
                     label = size.Label,
@@ -265,7 +341,56 @@ internal sealed class PanelBridgeController : IDisposable
                     body = ProviderText(selected, ProviderTextKind.Body)
                 }
             ,
-            aiLane = _aiLaneController.CurrentState
+            aiLane = _aiLaneController.CurrentState,
+            voiceLane = new
+            {
+                layout = ToWireValue(_resolvedVoiceLaneLayout),
+                expansionBlocked = CurrentSettings.EffectiveVoiceLaneLayout.IsExpanded
+                    && !_resolvedVoiceLaneLayout.IsExpanded,
+                status = ToWireValue(voiceSnapshot.Availability, voiceSnapshot.SessionStatus),
+                availability = ToWireValue(voiceSnapshot.Availability),
+                sessionStatus = ToWireValue(voiceSnapshot.SessionStatus),
+                isSessionActive = IsSessionActive(voiceSnapshot.SessionStatus),
+                isMuted = voiceSnapshot.IsMuted,
+                rootThreadId = voiceSnapshot.RootThreadId,
+                transcript = voiceSnapshot.Transcript.Select(entry => new
+                {
+                    threadId = entry.ThreadId,
+                    role = entry.Role,
+                    text = entry.Text,
+                    isComplete = entry.IsComplete,
+                    updatedAt = entry.UpdatedAt
+                }).ToArray(),
+                sessions = voiceSnapshot.Sessions.Select(session =>
+                {
+                    var end = session.State == CodexVoiceThreadState.Running
+                        ? DateTimeOffset.UtcNow
+                        : session.UpdatedAt;
+                    var elapsed = Math.Clamp(
+                        (long)Math.Floor((end - session.CreatedAt).TotalSeconds),
+                        0,
+                        int.MaxValue);
+                    return new
+                    {
+                        id = session.IsCurrentRoot
+                            ? $"root:{session.ThreadId}"
+                            : $"thread:{session.ThreadId}",
+                        title = session.IsCurrentRoot
+                            ? (CurrentSettings.Language == AppLanguage.Japanese
+                                ? "この会話"
+                                : "This conversation")
+                            : session.Title,
+                        detail = session.IsCurrentRoot
+                            ? ToWireValue(voiceSnapshot.SessionStatus)
+                            : session.Detail,
+                        state = ToWireValue(session.State),
+                        elapsedSeconds = (int)elapsed
+                    };
+                }).ToArray(),
+                lastErrorCode = voiceSnapshot.LastErrorCode,
+                restartAttempt = voiceSnapshot.RestartAttempt,
+                availableVoiceCount = voiceSnapshot.VoiceCount
+            }
         };
     }
 
@@ -528,11 +653,258 @@ internal sealed class PanelBridgeController : IDisposable
         return await PublishStateAsync(cancellationToken);
     }
 
+    private async Task<object?> SetCodexVoiceEnabledAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        var enabled = ReadRequiredBool(parameters, "enabled");
+        if (CurrentSettings.CodexVoiceEnabled != enabled)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.CodexVoiceEnabled = enabled;
+            SaveSettings(updated);
+        }
+
+        if (!enabled)
+        {
+            _voiceE2EReceipt?.RecordMediaEvent(CodexVoiceMediaEventKind.SafeClose);
+        }
+
+        await _codexVoiceRuntime.SetEnabledAsync(enabled, cancellationToken);
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<bool> RequestCodexVoiceCapabilityApprovalAsync(
+        CodexVoiceCapabilityApproval approval,
+        CancellationToken cancellationToken)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null)
+        {
+            return false;
+        }
+
+        var operation = dispatcher.InvokeAsync(() =>
+        {
+            var expectedAuthorization = GetCodexVoiceToolAuthorization();
+            if (!expectedAuthorization.IsAllowed)
+            {
+                return false;
+            }
+
+            var english = CurrentSettings.Language == AppLanguage.English;
+            var title = approval.ToolName switch
+            {
+                CodexVoiceCapabilityToolAdapter.TimerStartTool => english ? "Approve Timer" : "Timerを承認",
+                CodexVoiceCapabilityToolAdapter.CalendarCreateTool => english ? "Approve Calendar event" : "カレンダー予定を承認",
+                CodexVoiceCapabilityToolAdapter.TodayFocusTool => english ? "Approve Today Focus" : "Today Focusを承認",
+                _ => english ? "Approve HoverPocket action" : "HoverPocket操作を承認"
+            };
+            var fieldLines = approval.Fields.Select(field =>
+            {
+                var label = (field.Key, english) switch
+                {
+                    ("title", true) => "Title",
+                    ("title", false) => "タイトル",
+                    ("durationSeconds", true) => "Duration (seconds)",
+                    ("durationSeconds", false) => "時間（秒）",
+                    ("start", true) => "Start",
+                    ("start", false) => "開始",
+                    ("end", true) => "End",
+                    ("end", false) => "終了",
+                    ("isAllDay", true) => "All day",
+                    ("isAllDay", false) => "終日",
+                    ("event", true) => "Calendar event",
+                    ("event", false) => "予定",
+                    ("purpose", true) => "Purpose",
+                    ("purpose", false) => "今日の目的",
+                    _ => field.Key
+                };
+                return $"{label}: {field.Value}";
+            });
+            var message = string.Join(Environment.NewLine, fieldLines)
+                + Environment.NewLine
+                + Environment.NewLine
+                + (english
+                    ? "Allow Codex to perform this action through HoverPocket?"
+                    : "CodexがHoverPocketでこの操作を実行することを許可しますか？");
+            var result = System.Windows.MessageBox.Show(
+                message,
+                title,
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Question,
+                System.Windows.MessageBoxResult.No);
+            var currentAuthorization = GetCodexVoiceToolAuthorization();
+            return result == System.Windows.MessageBoxResult.Yes
+                && currentAuthorization.IsAllowed
+                && currentAuthorization.Epoch == expectedAuthorization.Epoch;
+        });
+        return await operation.Task.WaitAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetCodexVoiceLayoutAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        var layout = ParseVoiceLaneLayoutMode(ReadRequiredString(parameters, "layout"));
+        if (CurrentSettings.CodexVoiceLayoutMode != layout)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.CodexVoiceLayoutMode = layout;
+            SaveSettings(updated);
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetCodexVoiceAutoListenAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        var enabled = ReadRequiredBool(parameters, "enabled");
+        if (CurrentSettings.CodexVoiceAutoListen != enabled)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.CodexVoiceAutoListen = enabled;
+            SaveSettings(updated);
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetCodexVoiceCalendarReadEnabledAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        var enabled = ReadRequiredBool(parameters, "enabled");
+        if (CurrentSettings.CodexVoiceCalendarReadEnabled != enabled)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var voiceRuntimeEnabled = CurrentSettings.CodexVoiceEnabled;
+            var updated = CurrentSettings.Clone();
+            updated.CodexVoiceCalendarReadEnabled = enabled;
+            SaveSettings(updated, restoreVoiceAuthorization: !voiceRuntimeEnabled);
+
+            if (voiceRuntimeEnabled)
+            {
+                var refreshed = false;
+                try
+                {
+                    await PostEventAsync(
+                        "codexVoice.runtimeReset",
+                        new { reason = "calendarReadPermissionChanged" });
+                    _voiceE2EReceipt?.RecordMediaEvent(CodexVoiceMediaEventKind.SafeClose);
+                    await _codexVoiceRuntime.SetEnabledAsync(false, CancellationToken.None);
+                    await _codexVoiceRuntime.SetEnabledAsync(true, CancellationToken.None);
+                    refreshed = true;
+                }
+                finally
+                {
+                    InvalidateCodexVoiceAuthorization(
+                        refreshed
+                        && _panelOpen
+                        && CurrentSettings.AiNativeEnabled
+                        && CurrentSettings.CodexVoiceEnabled);
+                }
+            }
+        }
+
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private Task<object?> RecordCodexVoiceMediaEventAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!CodexVoiceE2EReceiptStore.TryParseMediaEvent(
+                ReadRequiredString(parameters, "kind"),
+                out var eventKind))
+        {
+            throw new InvalidOperationException("Unknown Codex Voice media event.");
+        }
+
+        _voiceE2EReceipt?.RecordMediaEvent(eventKind);
+        return Task.FromResult<object?>(new { recorded = _voiceE2EReceipt is not null });
+    }
+
+    private async Task<object?> SetCodexVoiceMutedAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        var muted = ReadRequiredBool(parameters, "muted");
+        _codexVoiceRuntime.SetMuted(muted);
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> StartCodexVoiceWebRtcAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        if (!CurrentSettings.CodexVoiceEnabled)
+        {
+            throw new InvalidOperationException("Codex Voice is disabled.");
+        }
+
+        var answer = await _codexVoiceRuntime.StartWebRtcAsync(
+            ReadRequiredString(parameters, "sdp"),
+            cancellationToken);
+        return new
+        {
+            rootThreadId = answer.RootThreadId,
+            sdp = answer.Sdp
+        };
+    }
+
+    private async Task<object?> AttachCodexVoiceTransportAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        cancellationToken.ThrowIfCancellationRequested();
+        _codexVoiceRuntime.MarkTransportAttached();
+        _voiceE2EReceipt?.RecordMediaEvent(CodexVoiceMediaEventKind.TransportAttached);
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> DetachCodexVoiceTransportAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        var reconnectExpected = ReadRequiredBool(parameters, "reconnectExpected");
+        _codexVoiceRuntime.MarkTransportDetached(reconnectExpected);
+        _voiceE2EReceipt?.RecordMediaEvent(CodexVoiceMediaEventKind.TransportDetached);
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> StopCodexVoiceAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        await _codexVoiceRuntime.StopRealtimeAsync(cancellationToken);
+        _voiceE2EReceipt?.RecordMediaEvent(CodexVoiceMediaEventKind.SafeClose);
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> FailCodexVoiceStartAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _codexVoiceRuntime.MarkSessionFailure(
+            ReadRequiredString(parameters, "errorCode"));
+        return await PublishStateAsync(cancellationToken);
+    }
+
     private async Task<object?> ResetDefaultsAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         _ = parameters;
         _startupRegistration.SetRegistered(false);
-        SaveSettings(UserSettingsStore.CreateDefault(_providerRegistry.ProviderIds));
+        var defaults = _settingsStore.CreateDefaultForContext(_providerRegistry.ProviderIds);
+        SaveSettings(defaults);
+        await _codexVoiceRuntime.SetEnabledAsync(defaults.CodexVoiceEnabled, cancellationToken);
         return await PublishStateAsync(cancellationToken);
     }
 
@@ -689,9 +1061,24 @@ internal sealed class PanelBridgeController : IDisposable
         throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "timezone");
     }
 
+    public Task StartVoiceRuntimeAsync(CancellationToken cancellationToken = default)
+    {
+        return _codexVoiceRuntime.StartAsync(cancellationToken);
+    }
+
+    public void MarkVoiceMicrophoneRequestStarted()
+    {
+        if (CurrentSettings.CodexVoiceEnabled)
+        {
+            _codexVoiceRuntime.MarkSessionRequestingPermission();
+        }
+    }
+
     public async Task NotifyPanelOpenedAsync()
     {
         _panelOpen = true;
+        InvalidateCodexVoiceAuthorization(
+            CurrentSettings.AiNativeEnabled && CurrentSettings.CodexVoiceEnabled);
         if (!CurrentSettings.RememberLastSelectedProvider)
         {
             _selectedProviderId = ResolvePreferredProviderId();
@@ -705,6 +1092,9 @@ internal sealed class PanelBridgeController : IDisposable
     public async Task NotifyPanelClosedAsync()
     {
         _panelOpen = false;
+        InvalidateCodexVoiceAuthorization(allowed: false);
+        _codexVoiceRuntime.ClearTransientUiState();
+        _voiceE2EReceipt?.RecordMediaEvent(CodexVoiceMediaEventKind.SafeClose);
         await SynchronizeControlsLifecycleAsync();
         await PostEventAsync("panel.closed", new { closed = true });
     }
@@ -722,12 +1112,67 @@ internal sealed class PanelBridgeController : IDisposable
         await PublishStateAsync(cancellationToken);
     }
 
-    private void SaveSettings(UserSettings settings)
+    public async Task ApplyResolvedVoiceLaneLayoutAsync(
+        VoiceLaneLayoutState layout,
+        CancellationToken cancellationToken = default)
     {
-        CurrentSettings = UserSettingsStore.Normalize(settings, _providerRegistry.ProviderIds);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_resolvedVoiceLaneLayout == layout)
+        {
+            return;
+        }
+
+        _resolvedVoiceLaneLayout = layout;
+        await PostEventAsync("state.changed", BuildState());
+    }
+
+    private void SaveSettings(
+        UserSettings settings,
+        bool restoreVoiceAuthorization = true)
+    {
+        var normalized = UserSettingsStore.Normalize(settings, _providerRegistry.ProviderIds);
+        var authorizationChanged = normalized.AiNativeEnabled != CurrentSettings.AiNativeEnabled
+            || normalized.CodexVoiceEnabled != CurrentSettings.CodexVoiceEnabled
+            || normalized.CodexVoiceCalendarReadEnabled != CurrentSettings.CodexVoiceCalendarReadEnabled;
+        if (authorizationChanged)
+        {
+            Volatile.Write(ref _codexVoiceAuthorizationAllowed, 0);
+            Interlocked.Increment(ref _codexVoiceAuthorizationEpoch);
+        }
+
+        CurrentSettings = normalized;
+        if (authorizationChanged)
+        {
+            Volatile.Write(
+                ref _codexVoiceAuthorizationAllowed,
+                restoreVoiceAuthorization
+                    && !_disposed
+                    && _panelOpen
+                    && CurrentSettings.AiNativeEnabled
+                    && CurrentSettings.CodexVoiceEnabled
+                    ? 1
+                    : 0);
+        }
+        _resolvedVoiceLaneLayout = CurrentSettings.EffectiveVoiceLaneLayout;
         _clipboardBridgeController.ApplySettings(CurrentSettings, IsVisible("clipboard"));
         _settingsStore.Save(CurrentSettings);
         SettingsChanged?.Invoke(this, CurrentSettings);
+    }
+
+    private CodexVoiceToolAuthorization GetCodexVoiceToolAuthorization()
+    {
+        return new CodexVoiceToolAuthorization(
+            Volatile.Read(ref _codexVoiceAuthorizationAllowed) != 0,
+            Interlocked.Read(ref _codexVoiceAuthorizationEpoch));
+    }
+
+    private void InvalidateCodexVoiceAuthorization(bool allowed)
+    {
+        Volatile.Write(ref _codexVoiceAuthorizationAllowed, 0);
+        Interlocked.Increment(ref _codexVoiceAuthorizationEpoch);
+        Volatile.Write(
+            ref _codexVoiceAuthorizationAllowed,
+            allowed && !_disposed ? 1 : 0);
     }
 
     private async Task<object> PublishStateAsync(CancellationToken cancellationToken)
@@ -751,6 +1196,13 @@ internal sealed class PanelBridgeController : IDisposable
     {
         _ = sender;
         _ = PostEventOnUiThreadAsync("controls.stateChanged", snapshot);
+    }
+
+    private void OnCodexVoiceSnapshotChanged(object? sender, CodexVoiceSnapshot snapshot)
+    {
+        _ = sender;
+        _voiceE2EReceipt?.RecordSnapshot(snapshot);
+        _ = PostEventOnUiThreadAsync("state.changed", BuildState());
     }
 
     private void OnControlsMediaSourceOpened(object? sender, EventArgs e)
@@ -956,6 +1408,13 @@ internal sealed class PanelBridgeController : IDisposable
         };
     }
 
+    private static VoiceLaneLayoutMode ParseVoiceLaneLayoutMode(string value)
+    {
+        return value.Equals("expanded", StringComparison.OrdinalIgnoreCase)
+            ? VoiceLaneLayoutMode.Expanded
+            : VoiceLaneLayoutMode.Compact;
+    }
+
     private static DisplayPlacement ParseDisplayPlacement(string value)
     {
         return value.ToLowerInvariant() switch
@@ -1083,6 +1542,87 @@ internal sealed class PanelBridgeController : IDisposable
     private static string ToWireValue(AppLanguage language)
     {
         return language == AppLanguage.English ? "en" : "ja";
+    }
+
+    private static string ToWireValue(VoiceLaneLayoutMode layout)
+    {
+        return layout switch
+        {
+            VoiceLaneLayoutMode.Expanded => "expanded",
+            VoiceLaneLayoutMode.Compact => "compact",
+            _ => "disabled"
+        };
+    }
+
+    private static string ToWireValue(VoiceLaneLayoutState layout)
+    {
+        return ToWireValue(layout.Mode);
+    }
+
+    private static string ToWireValue(CodexVoiceAvailability availability)
+    {
+        return availability switch
+        {
+            CodexVoiceAvailability.Disabled => "disabled",
+            CodexVoiceAvailability.Starting => "starting",
+            CodexVoiceAvailability.Ready => "ready",
+            CodexVoiceAvailability.SignedOut => "signedOut",
+            CodexVoiceAvailability.Unavailable => "unavailable",
+            CodexVoiceAvailability.Incompatible => "incompatible",
+            CodexVoiceAvailability.Blocked => "blocked",
+            _ => "faulted"
+        };
+    }
+
+    private static string ToWireValue(CodexVoiceSessionStatus status)
+    {
+        return status switch
+        {
+            CodexVoiceSessionStatus.RequestingPermission => "requestingPermission",
+            CodexVoiceSessionStatus.Negotiating => "negotiating",
+            CodexVoiceSessionStatus.Connecting => "connecting",
+            CodexVoiceSessionStatus.Connected => "connected",
+            CodexVoiceSessionStatus.Muted => "muted",
+            CodexVoiceSessionStatus.Reconnecting => "reconnecting",
+            CodexVoiceSessionStatus.Stopping => "stopping",
+            CodexVoiceSessionStatus.Closed => "closed",
+            CodexVoiceSessionStatus.RecoverableFailure => "recoverableFailure",
+            CodexVoiceSessionStatus.BlockedFailure => "blockedFailure",
+            _ => "idle"
+        };
+    }
+
+    private static string ToWireValue(CodexVoiceThreadState state)
+    {
+        return state switch
+        {
+            CodexVoiceThreadState.Completed => "completed",
+            CodexVoiceThreadState.Failed => "failed",
+            _ => "running"
+        };
+    }
+
+    private static string ToWireValue(
+        CodexVoiceAvailability availability,
+        CodexVoiceSessionStatus status)
+    {
+        if (availability != CodexVoiceAvailability.Ready)
+        {
+            return ToWireValue(availability);
+        }
+
+        return ToWireValue(status);
+    }
+
+    private static bool IsSessionActive(CodexVoiceSessionStatus status)
+    {
+        return status is CodexVoiceSessionStatus.RequestingPermission
+            or CodexVoiceSessionStatus.Negotiating
+            or CodexVoiceSessionStatus.Connecting
+            or CodexVoiceSessionStatus.Connected
+            or CodexVoiceSessionStatus.Muted
+            or CodexVoiceSessionStatus.Reconnecting
+            or CodexVoiceSessionStatus.Stopping;
     }
 
     private string ProviderText(ProviderDescriptor provider, ProviderTextKind kind)

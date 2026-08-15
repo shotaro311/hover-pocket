@@ -361,26 +361,31 @@ enum CapabilityCanonicalJSON {
         try JSONSerialization.data(withJSONObject: foundation(value), options: [.sortedKeys, .withoutEscapingSlashes])
     }
 
-    static func planDigest(_ plan: CapabilityExecutionPlan) throws -> String {
+    static func planDigest(
+        _ plan: CapabilityExecutionPlan,
+        descriptors: [PocketCapabilityDescriptor]
+    ) throws -> String {
+        guard descriptors.count == plan.steps.count else {
+            throw CapabilityBrokerError.invalidPlan("descriptors")
+        }
+        let approvalRequired = descriptors.contains { $0.approvalPolicy.requiresExecutionApproval }
         let steps = plan.steps.map { step in
             CapabilityValue.object([
                 "arguments": .object(step.arguments),
                 "capabilityId": .string(step.capability.id),
                 "capabilityVersion": .integer(step.capability.version),
                 "dependsOn": .array(step.dependencies.sorted().map(CapabilityValue.string)),
-                "idempotencyKey": .string(step.idempotencyKey),
                 "stepId": .string(step.id)
             ])
         }
-        var principal: CapabilityObject = ["userId": .string(plan.principal.userID)]
-        if let value = plan.principal.pocketAppID { principal["pocketAppId"] = .string(value) }
-        if let value = plan.principal.agentSessionID { principal["agentSessionId"] = .string(value) }
         var root: CapabilityObject = [
-            "createdAt": .string(CapabilityDateCodec.string(from: plan.createdAt)),
-            "origin": .string(plan.origin.rawValue),
-            "planId": .string(plan.id),
+            "appContext": .null,
+            "approval": .object([
+                "exactArgumentsRequired": .bool(true),
+                "group": .string(approvalRequired ? "all_writes" : "none"),
+                "mode": .string(approvalRequired ? "before_writes" : "none")
+            ]),
             "planVersion": .integer(1),
-            "principal": .object(principal),
             "requiredPermissions": .array(plan.requiredPermissions.sorted().map(CapabilityValue.string)),
             "steps": .array(steps)
         ]

@@ -34,7 +34,9 @@ final class StatusBarMenuController: NSObject {
         guard let button = statusItem.button else { return }
         button.image = Self.menuBarImage()
         button.imagePosition = .imageOnly
-        button.toolTip = "HoverPocket"
+        button.toolTip = HoverPocketApplicationData.usesIsolatedE2ERoot()
+            ? "HoverPocket Voice E2E"
+            : "HoverPocket"
     }
 
     private func configureMenu() {

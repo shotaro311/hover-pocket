@@ -28,8 +28,20 @@ if CommandLine.arguments.contains("--verify-broker") {
 if CommandLine.arguments.contains("--verify-panel-layout") {
     PanelLayoutVerificationCommand.run()
 }
+if CommandLine.arguments.contains("--verify-voice-lane-layout") {
+    VoiceLaneLayoutVerificationCommand.run()
+}
+if CommandLine.arguments.contains("--verify-codex-app-server") {
+    CodexAppServerVerificationCommand.run()
+}
+if CommandLine.arguments.contains("--verify-codex-app-server-live") {
+    CodexAppServerLiveVerificationCommand.run()
+}
 if CommandLine.arguments.contains("--verify-weather") {
     WeatherVerificationCommand.run()
+}
+if CommandLine.arguments.contains("--verify-application-data") {
+    ApplicationDataVerificationCommand.run()
 }
 
 let app = NSApplication.shared

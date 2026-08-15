@@ -45,17 +45,26 @@ internal sealed class DisplayLayoutService
 
     public IReadOnlyList<DisplaySurfaceLayout> CreateLayouts(DisplayPlacement placement)
     {
-        return CreateLayouts(placement, PanelSize.Medium, AccessSurfaceWindow.ExpandedWidth);
+        return CreateLayouts(
+            placement,
+            PanelSize.Medium,
+            AccessSurfaceWindow.ExpandedWidth,
+            VoiceLaneLayoutState.Disabled);
     }
 
     public IReadOnlyList<DisplaySurfaceLayout> CreateLayouts(
         DisplayPlacement placement,
         PanelSize panelSize,
-        double accessWidthDips = AccessSurfaceWindow.ExpandedWidth)
+        double accessWidthDips = AccessSurfaceWindow.ExpandedWidth,
+        VoiceLaneLayoutState voiceLaneLayout = default)
     {
         var monitors = EnumerateMonitors();
         return ResolveTargets(monitors, placement)
-            .Select(monitor => CreateLayout(monitor, panelSize, accessWidthDips))
+            .Select(monitor => CreateLayout(
+                monitor,
+                panelSize,
+                accessWidthDips,
+                voiceLaneLayout))
             .ToArray();
     }
 
@@ -77,17 +86,27 @@ internal sealed class DisplayLayoutService
 
     public DisplaySurfaceLayout CreateLayout(DisplayMonitor monitor)
     {
-        return CreateLayout(monitor, PanelSize.Medium, AccessSurfaceWindow.ExpandedWidth);
+        return CreateLayout(
+            monitor,
+            PanelSize.Medium,
+            AccessSurfaceWindow.ExpandedWidth,
+            VoiceLaneLayoutState.Disabled);
     }
 
     public DisplaySurfaceLayout CreateLayout(
         DisplayMonitor monitor,
         PanelSize panelSize,
-        double accessWidthDips = AccessSurfaceWindow.ExpandedWidth)
+        double accessWidthDips = AccessSurfaceWindow.ExpandedWidth,
+        VoiceLaneLayoutState voiceLaneLayout = default)
     {
-        var panelMetrics = PanelSizeCatalog.Get(panelSize);
         var accessWidth = DipToPhysical(accessWidthDips, monitor.ScaleX);
         var accessHeight = DipToPhysical(AccessSurfaceWindow.SurfaceHeight, monitor.ScaleY);
+        var resolvedVoiceLaneLayout = ResolveVoiceLaneLayout(
+            monitor,
+            panelSize,
+            voiceLaneLayout,
+            accessHeight);
+        var panelMetrics = PanelSizeCatalog.Get(panelSize, resolvedVoiceLaneLayout);
         var panelWidth = Math.Min(DipToPhysical(panelMetrics.Width, monitor.ScaleX), monitor.Bounds.Width);
         var panelHeight = Math.Min(
             DipToPhysical(panelMetrics.TotalHeight, monitor.ScaleY),
@@ -115,7 +134,27 @@ internal sealed class DisplayLayoutService
             monitor,
             ToPlacement(access, monitor),
             ToPlacement(panelTarget, monitor),
-            ToPlacement(collapsed, monitor));
+            ToPlacement(collapsed, monitor),
+            resolvedVoiceLaneLayout);
+    }
+
+    private static VoiceLaneLayoutState ResolveVoiceLaneLayout(
+        DisplayMonitor monitor,
+        PanelSize panelSize,
+        VoiceLaneLayoutState requested,
+        int accessHeight)
+    {
+        if (!requested.IsExpanded)
+        {
+            return requested;
+        }
+
+        var expanded = PanelSizeCatalog.Get(panelSize, VoiceLaneLayoutState.Expanded);
+        var expandedPhysicalHeight = DipToPhysical(expanded.TotalHeight, monitor.ScaleY);
+        var availableHeight = Math.Max(1, monitor.Bounds.Height - accessHeight);
+        return expandedPhysicalHeight <= availableHeight
+            ? VoiceLaneLayoutState.Expanded
+            : VoiceLaneLayoutState.Compact;
     }
 
     public PhysicalRect DipToPhysical(Rect dipRect, DisplayMonitor monitor)

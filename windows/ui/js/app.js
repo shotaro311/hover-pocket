@@ -6,6 +6,11 @@ import { renderClipboardProvider, runClipboardUiVerify } from "../providers/clip
 import { renderControlsProvider } from "../providers/controls/controls.js";
 import { renderStickyProvider } from "../providers/sticky/sticky.js";
 import { renderTimerProvider } from "../providers/timer/timer.js";
+import {
+  handleVoicePanelClosed,
+  handleVoiceRuntimeReset,
+  renderVoiceLane,
+} from "../voice/voice-lane.js";
 
 const providerRenderers = {
   controls: renderControlsProvider,
@@ -22,6 +27,7 @@ const providerIconsEl = document.querySelector("[data-provider-icons]");
 const sizeSwitchEl = document.querySelector("[data-size-switch]");
 const refreshButtonEl = document.querySelector("[data-refresh]");
 const settingsButtonEl = document.querySelector("[data-settings]");
+const voiceLaneEl = document.querySelector("[data-voice-lane]");
 
 /** @type {any} */
 let currentState = null;
@@ -42,6 +48,14 @@ on("panel.opened", (state) => {
   render(state, { refreshProvider: true });
 });
 
+on("panel.closed", () => {
+  handleVoicePanelClosed(request);
+});
+
+on("codexVoice.runtimeReset", () => {
+  handleVoiceRuntimeReset(request);
+});
+
 bootstrap();
 
 async function bootstrap() {
@@ -59,6 +73,7 @@ function render(state, options = {}) {
   currentState = state;
   document.documentElement.style.setProperty("--hp-header-height", `${state.panel.headerHeight}px`);
   document.documentElement.style.setProperty("--hp-ai-height", `${state.panel.aiLaneHeight}px`);
+  document.documentElement.style.setProperty("--hp-voice-height", `${state.panel.voiceLaneHeight ?? 0}px`);
   document.documentElement.dataset.textSize = state.settings.textSize;
   document.documentElement.dataset.panelSize = state.settings.panelSize;
   setLanguage(state.settings.language);
@@ -67,6 +82,7 @@ function render(state, options = {}) {
   renderSizeSwitch(state);
   renderProviderIcons(state);
   renderProvider(state, options);
+  renderVoiceLane({ container: voiceLaneEl, state, request });
   renderCommands();
 }
 
@@ -440,6 +456,7 @@ window.__hoverPocketVerify = {
       await request("provider.select", { id: clipboardProvider.id });
       window.__hoverPocketVerifyStep = "render-clipboard";
       const clipboardRoot = await waitForElement(".clipboard-root", 4500);
+      await waitForVisualSettle();
       window.__hoverPocketVerifyStep = "verify-clipboard-refresh";
       const clipboardVerify = await runClipboardUiVerify(request);
       window.__hoverPocketVerifyStep = "render-same-clipboard";
@@ -465,6 +482,7 @@ window.__hoverPocketVerify = {
       window.__hoverPocketVerifyStep = "select-calculator";
       await request("provider.select", { id: calculatorProvider.id });
       await waitForElement(".hp-calc", 4500);
+      await waitForVisualSettle();
       window.__hoverPocketVerifyStep = "verify-calculator-history-sidebar";
       calculatorHistorySidebarOk = await runCalculatorUiVerify();
     }
@@ -525,6 +543,64 @@ window.__hoverPocketVerify = {
           && runningStopwatch.querySelector("[data-stopwatch-stop]"))),
       );
     }
+    const originalVoiceEnabled = Boolean(state.settings.codexVoiceEnabled);
+    const originalVoiceLayout = state.settings.codexVoiceLayoutMode ?? "compact";
+    let voiceCompactOk = false;
+    let voiceExpandedOk = false;
+    let voiceProviderInvariantOk = false;
+    let voiceCompactProviderWidth = 0;
+    let voiceCompactProviderHeight = 0;
+    let voiceExpandedProviderWidth = 0;
+    let voiceExpandedProviderHeight = 0;
+    let voiceExplicitToggleOnlyOk = false;
+    let voiceNoFullscreenOk = false;
+    try {
+      window.__hoverPocketVerifyStep = "voice-enable-compact";
+      if (!originalVoiceEnabled) {
+        render(await request("settings.setCodexVoiceEnabled", { enabled: true }));
+      }
+      render(await request("settings.setCodexVoiceLayout", { layout: "compact" }));
+      await waitForVisualSettle();
+      const compactLane = document.querySelector("[data-voice-lane][data-layout=compact]");
+      const compactProviderBounds = providerContainerEl.getBoundingClientRect();
+      voiceCompactProviderWidth = compactProviderBounds.width;
+      voiceCompactProviderHeight = compactProviderBounds.height;
+      const waveformBounds = compactLane?.querySelector(".hp-voice-waveform")?.getBoundingClientRect();
+      const conversationBounds = compactLane?.querySelector(".hp-voice-conversation")?.getBoundingClientRect();
+      voiceCompactOk = Boolean(
+        compactLane
+        && !compactLane.hidden
+        && compactLane.querySelector("[data-voice-toggle][aria-expanded=false]")
+        && !compactLane.querySelector("h1, h2, [data-voice-title]")
+        && waveformBounds?.width <= 64.5
+        && conversationBounds?.width > waveformBounds.width,
+      );
+
+      window.__hoverPocketVerifyStep = "voice-expand";
+      render(await request("settings.setCodexVoiceLayout", { layout: "expanded" }));
+      await waitForVisualSettle();
+      const expandedLane = document.querySelector("[data-voice-lane][data-layout=expanded]");
+      const expandedProviderBounds = providerContainerEl.getBoundingClientRect();
+      voiceExpandedProviderWidth = expandedProviderBounds.width;
+      voiceExpandedProviderHeight = expandedProviderBounds.height;
+      voiceExpandedOk = Boolean(
+        expandedLane?.querySelector(".hp-voice-expanded")
+        && expandedLane.querySelectorAll(":scope .hp-voice-expanded > .hp-voice-column").length === 2
+        && expandedLane.querySelector("[data-voice-toggle][aria-expanded=true]"),
+      );
+      voiceProviderInvariantOk = Math.abs(compactProviderBounds.width - expandedProviderBounds.width) <= 1
+        && Math.abs(compactProviderBounds.height - expandedProviderBounds.height) <= 1;
+      expandedLane?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      voiceExplicitToggleOnlyOk = expandedLane?.dataset.layout === "expanded";
+      voiceNoFullscreenOk = !expandedLane?.querySelector("[data-fullscreen], [aria-label*=full-screen], [aria-label*=全画面]");
+    } finally {
+      window.__hoverPocketVerifyStep = "voice-restore";
+      render(await request("settings.setCodexVoiceLayout", { layout: originalVoiceLayout }));
+      if (!originalVoiceEnabled) {
+        render(await request("settings.setCodexVoiceEnabled", { enabled: false }));
+      }
+      await waitForVisualSettle();
+    }
     const targetProvider = state.providers.find((provider) => provider.id !== originalProvider) ?? state.providers[0];
     window.__hoverPocketVerifyStep = "switch-provider";
     const switchedState = await request("provider.select", { id: targetProvider.id });
@@ -532,6 +608,7 @@ window.__hoverPocketVerify = {
     const probePanelSize = originalPanelSize === "small" ? "medium" : "small";
     window.__hoverPocketVerifyStep = "resize-probe";
     const resizedState = await request("settings.setPanelSize", { panelSize: probePanelSize });
+    window.__hoverPocketVerifyStep = "resize-restore";
     await request("settings.setPanelSize", { panelSize: originalPanelSize });
     window.__hoverPocketVerifyStep = "complete";
 
@@ -562,6 +639,15 @@ window.__hoverPocketVerify = {
       timerLayoutOk,
       timerInteractionStableOk,
       timerStopwatchOk,
+      voiceCompactOk,
+      voiceExpandedOk,
+      voiceProviderInvariantOk,
+      voiceCompactProviderWidth,
+      voiceCompactProviderHeight,
+      voiceExpandedProviderWidth,
+      voiceExpandedProviderHeight,
+      voiceExplicitToggleOnlyOk,
+      voiceNoFullscreenOk,
       textSizeScaleReadyOk: getComputedStyle(document.documentElement).getPropertyValue("--hp-text-scale").trim() !== "",
       providerSwitchOk: switchedState.selectedProvider?.id === targetProvider.id,
       settingsWriteOk: resizedState.settings?.panelSize === probePanelSize,
@@ -572,6 +658,10 @@ window.__hoverPocketVerify = {
     };
   },
 };
+
+function waitForVisualSettle() {
+  return new Promise((resolve) => window.setTimeout(resolve, 280));
+}
 
 function waitForElement(selector, timeoutMs) {
   return new Promise((resolve) => {

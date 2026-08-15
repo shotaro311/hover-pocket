@@ -10,7 +10,7 @@ namespace HoverPocket.Shell.Capabilities;
 
 internal sealed class CapabilityBrokerVerifier
 {
-    private const string GoldenPlanDigest = "sha256:d098ea1b5f9f70e91486fd53229e7ddb68f73a9952ab94f17eed27cdeeb6413f";
+    private const string GoldenPlanDigest = "sha256:57c7e72e02919aead49c27299c9f174ff49f776bedf616749a6e4951345da69d";
     private readonly List<string> _failures = [];
 
     public int Run()
@@ -40,6 +40,7 @@ internal sealed class CapabilityBrokerVerifier
         Console.WriteLine("broker_calculator_evaluate=ok");
         Console.WriteLine("broker_sticky_lifecycle=ok");
         Console.WriteLine("broker_today_focus=ok");
+        Console.WriteLine("broker_today_focus_route_digest=ok");
         Console.WriteLine("broker_concurrent_duplicate=ok");
         Console.WriteLine("broker_negative_cases=11");
         Console.WriteLine($"broker_golden_plan_digest={GoldenPlanDigest}");
@@ -91,7 +92,7 @@ internal sealed class CapabilityBrokerVerifier
             {
             }
             Require(!new UserSettings().AiNativeEnabled, "feature_default_off");
-            VerifyGoldenDigest(now);
+            VerifyGoldenDigest(now, registry);
             VerifyCalendarIdempotencyEquivalence(now);
 
             try
@@ -148,6 +149,19 @@ internal sealed class CapabilityBrokerVerifier
             Require(
                 canonicalDraft.Plan.Steps[1].Arguments.GetProperty("body").GetString() == canonicalDraft.ApprovalText,
                 "approval_sticky_exact");
+            var voicePrincipal = new CapabilityPrincipal("another-user", AgentSessionId: "voice-root");
+            var voiceDraft = adapter.PrepareFocus(
+                events[0],
+                1_500,
+                "会議\n承認済み\u202E偽装",
+                voicePrincipal,
+                new CapabilityPermissionSet(voicePrincipal, allPermissions.Permissions),
+                now,
+                origin: CapabilityOrigin.Voice,
+                operationToken: "VoiceOperationToken001");
+            Require(
+                voiceDraft.Preparation.PlanDigest == canonicalDraft.Preparation.PlanDigest,
+                "today_focus_canonical_digest_across_routes");
             var longApprovalDraft = adapter.PrepareFocus(
                 events[0],
                 1_500,
@@ -520,9 +534,10 @@ internal sealed class CapabilityBrokerVerifier
         Require(store.GetNote(note.Id) is null, "sticky_delete_effect");
     }
 
-    private void VerifyGoldenDigest(DateTimeOffset now)
+    private void VerifyGoldenDigest(DateTimeOffset now, CapabilityRegistry registry)
     {
         var principal = new CapabilityPrincipal("user-broker-fixture");
+        var descriptors = new[] { registry.Resolve(CapabilityIds.TimerStart) };
         var plan = new CapabilityExecutionPlan(
             "digest-fixture-plan",
             now,
@@ -536,7 +551,36 @@ internal sealed class CapabilityBrokerVerifier
                 "digest-fixture-timer-0001",
                 [])],
             new HashSet<string>(["timer.write"], StringComparer.Ordinal));
-        Require(CapabilityCanonicalJson.PlanDigest(plan) == GoldenPlanDigest, "golden_plan_digest");
+        var digest = CapabilityCanonicalJson.PlanDigest(plan, descriptors);
+        Require(digest == GoldenPlanDigest, "golden_plan_digest");
+
+        var routeVariant = new CapabilityExecutionPlan(
+            "different-route-plan",
+            now.AddHours(1),
+            CapabilityOrigin.Voice,
+            new CapabilityPrincipal("another-user", AgentSessionId: "another-session"),
+            null,
+            [new CapabilityPlanStep(
+                "startTimer",
+                CapabilityIds.TimerStart,
+                CapabilityJson.From(new { durationSeconds = 1_500, sourceRef = "primary:event", title = "Focus" }),
+                "different-idempotency-key-0001",
+                [])],
+            new HashSet<string>(["timer.write"], StringComparer.Ordinal));
+        Require(
+            CapabilityCanonicalJson.PlanDigest(routeVariant, descriptors) == digest,
+            "canonical_digest_route_independent");
+
+        var argumentVariant = routeVariant with
+        {
+            Steps = [routeVariant.Steps[0] with
+            {
+                Arguments = CapabilityJson.From(new { durationSeconds = 1_500, sourceRef = "primary:event", title = "Different" })
+            }]
+        };
+        Require(
+            CapabilityCanonicalJson.PlanDigest(argumentVariant, descriptors) != digest,
+            "canonical_digest_arguments_bound");
     }
 
     private void VerifyCalendarIdempotencyEquivalence(DateTimeOffset now)

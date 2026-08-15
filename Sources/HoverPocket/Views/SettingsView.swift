@@ -26,6 +26,10 @@ struct SettingsView: View {
 
                 Divider()
 
+                voiceLaneSection
+
+                Divider()
+
                 providersSection
 
                 Divider()
@@ -216,6 +220,80 @@ struct SettingsView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var voiceLaneSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Codex Voice Lane")
+                .font(.system(size: 13, weight: .bold))
+
+            Toggle(
+                localized(
+                    japanese: "音声会話レーンを表示",
+                    english: "Show the voice conversation lane"
+                ),
+                isOn: $settings.codexVoiceEnabled
+            )
+
+            Text(
+                localized(
+                    japanese: "すべてのパネルの最下段に同じ会話を表示します。既定ではオフです。",
+                    english: "Shows the same conversation below every panel. It is off by default."
+                )
+            )
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            Picker(
+                localized(japanese: "表示", english: "Layout"),
+                selection: $settings.codexVoiceLayoutMode
+            ) {
+                ForEach(VoiceLaneLayoutMode.allCases) { mode in
+                    Text(mode.title(language: language)).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(!settings.codexVoiceEnabled)
+
+            Toggle(
+                localized(
+                    japanese: "開いたときに自動で聞き始める",
+                    english: "Start listening when opened"
+                ),
+                isOn: $settings.codexVoiceAutoListen
+            )
+            .disabled(!settings.codexVoiceEnabled)
+
+            Toggle(
+                localized(
+                    japanese: "今日の予定タイトルと時間をCodexと共有",
+                    english: "Share today's event titles and times with Codex"
+                ),
+                isOn: $settings.codexVoiceCalendarReadEnabled
+            )
+            .disabled(!settings.codexVoiceEnabled)
+
+            Text(
+                localized(
+                    japanese: "Calendarの読み取りはこの許可をオンにした場合だけ利用できます。いつでもオフにできます。",
+                    english: "Calendar reads are available only while this permission is enabled. You can revoke it at any time."
+                )
+            )
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            Text(
+                localized(
+                    japanese: "自動リスニングはVoice Laneとは別に明示設定し、音声は保存しません。",
+                    english: "Auto listen is a separate opt-in. Audio is not stored."
+                )
+            )
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 

@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using HoverPocket.Shell.Configuration;
 
 namespace HoverPocket.Shell.Services;
 
@@ -12,7 +13,7 @@ internal sealed record GoogleOAuthConfiguration(
     string? ClientSecret)
 {
     public static string AppDataRoot =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "HoverPocket");
+        HoverPocketApplicationData.ProductionDefault().RootDirectory;
 
     public static string ConfigurationPath => Path.Combine(AppDataRoot, "oauth.json");
 
@@ -157,15 +158,21 @@ internal sealed class GoogleOAuthService
     };
 
     private readonly GoogleOAuthCredentialStore _credentialStore;
+    private readonly bool _enabled;
     private readonly object _tokenLock = new();
     private GoogleOAuthToken? _currentToken;
 
-    public GoogleOAuthService(GoogleOAuthCredentialStore? credentialStore = null)
+    public GoogleOAuthService(
+        GoogleOAuthCredentialStore? credentialStore = null,
+        bool enabled = true)
     {
         _credentialStore = credentialStore ?? new GoogleOAuthCredentialStore();
+        _enabled = enabled;
     }
 
-    public bool IsConfigured => GoogleOAuthConfiguration.Load() is not null;
+    public bool IsConfigured => _enabled && GoogleOAuthConfiguration.Load() is not null;
+
+    internal bool IsEnabled => _enabled;
 
     public bool HasStoredCredential() => StoredCredentialStatus() != GoogleOAuthStoredCredentialStatus.Missing;
 
@@ -173,6 +180,11 @@ internal sealed class GoogleOAuthService
 
     public GoogleOAuthStoredCredentialStatus StoredCredentialStatus()
     {
+        if (!_enabled)
+        {
+            return GoogleOAuthStoredCredentialStatus.Missing;
+        }
+
         GoogleOAuthStoredCredential? credential;
         try
         {
@@ -195,6 +207,7 @@ internal sealed class GoogleOAuthService
 
     public async Task SignInAsync(CancellationToken cancellationToken = default)
     {
+        EnsureEnabled();
         var configuration = GoogleOAuthConfiguration.Load()
             ?? throw new GoogleOAuthException("missing_configuration", "Google OAuth client is not configured.");
 
@@ -260,11 +273,17 @@ internal sealed class GoogleOAuthService
     public void SignOut()
     {
         SetCurrentToken(null);
+        if (!_enabled)
+        {
+            return;
+        }
+
         _credentialStore.Delete();
     }
 
     public async Task<string> AccessTokenAsync(bool forceRefresh = false, CancellationToken cancellationToken = default)
     {
+        EnsureEnabled();
         _ = GoogleOAuthConfiguration.Load()
             ?? throw new GoogleOAuthException("missing_configuration", "Google OAuth client is not configured.");
 
@@ -335,6 +354,16 @@ internal sealed class GoogleOAuthService
             verifier,
             challenge,
             redirectUri);
+    }
+
+    private void EnsureEnabled()
+    {
+        if (!_enabled)
+        {
+            throw new GoogleOAuthException(
+                "oauth_disabled",
+                "Google OAuth is disabled for isolated execution.");
+        }
     }
 
     internal static bool HasRequiredCalendarScopes(IEnumerable<string> scopes)

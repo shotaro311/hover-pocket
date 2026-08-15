@@ -1,6 +1,7 @@
 :root {
   --hp-header-height: 54px;
   --hp-ai-height: 0px;
+  --hp-voice-height: 0px;
   --hp-radius: 18px;
   --hp-bg: #050507;
   --hp-surface: #0b0d10;
@@ -175,6 +176,202 @@ input {
   background: var(--hp-surface);
 }
 
+.hp-voice-lane {
+  display: flex;
+  height: var(--hp-voice-height);
+  min-height: var(--hp-voice-height);
+  flex-direction: column;
+  overflow: hidden;
+  border-top: 1px solid var(--hp-line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)),
+    #090b0e;
+}
+
+.hp-voice-lane[hidden] {
+  display: none;
+}
+
+.hp-voice-compact {
+  display: grid;
+  height: 64px;
+  min-height: 64px;
+  grid-template-columns: 40px 64px minmax(110px, 1fr) auto 28px 28px 28px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.hp-voice-round-button,
+.hp-voice-icon-button {
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  color: var(--hp-muted);
+  background: transparent;
+}
+
+.hp-voice-round-button {
+  width: 38px;
+  height: 38px;
+  border: 2px solid rgba(105, 167, 255, 0.78);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.hp-voice-icon-button {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+
+.hp-voice-icon-button:hover:not(:disabled) {
+  color: var(--hp-text);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.hp-voice-round-button:disabled,
+.hp-voice-icon-button:disabled {
+  opacity: 0.48;
+}
+
+.hp-voice-waveform {
+  display: flex;
+  width: 64px;
+  max-width: 64px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.hp-voice-waveform i {
+  width: 3px;
+  border-radius: 999px;
+  background: rgba(89, 196, 255, 0.62);
+}
+
+.hp-voice-waveform.is-active i:nth-child(odd) {
+  animation: hp-voice-pulse 720ms ease-in-out infinite alternate;
+}
+
+.hp-voice-conversation {
+  display: grid;
+  min-width: 110px;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.hp-voice-status,
+.hp-voice-last-line,
+.hp-voice-session-count {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hp-voice-status {
+  color: #67c7f2;
+  font-size: calc(11px * var(--hp-text-scale));
+  font-weight: 700;
+}
+
+.hp-voice-last-line {
+  color: var(--hp-text);
+  font-size: calc(12px * var(--hp-text-scale));
+  font-weight: 600;
+}
+
+.hp-voice-session-count {
+  color: var(--hp-muted);
+  font-size: calc(10px * var(--hp-text-scale));
+}
+
+.hp-voice-expanded {
+  display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+  border-top: 1px solid var(--hp-line);
+}
+
+.hp-voice-column {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.hp-voice-column + .hp-voice-column {
+  border-left: 1px solid var(--hp-line);
+}
+
+.hp-voice-column h2 {
+  margin: 0;
+  font-size: calc(11px * var(--hp-text-scale));
+}
+
+.hp-voice-scroll {
+  display: grid;
+  min-height: 0;
+  gap: 8px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.hp-voice-empty,
+.hp-voice-transcript-text,
+.hp-voice-session-detail,
+.hp-voice-session-time {
+  color: var(--hp-muted);
+  font-size: calc(10px * var(--hp-text-scale));
+  line-height: 1.4;
+}
+
+.hp-voice-transcript-entry,
+.hp-voice-session-card {
+  display: grid;
+  gap: 3px;
+  padding: 8px 9px;
+  border: 1px solid var(--hp-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.hp-voice-transcript-role,
+.hp-voice-session-title {
+  font-size: calc(10px * var(--hp-text-scale));
+  font-weight: 700;
+}
+
+.hp-voice-session-card {
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.hp-voice-session-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f4cc46;
+}
+
+.hp-voice-session-dot.is-completed {
+  background: #59c878;
+}
+
+.hp-voice-session-dot.is-failed {
+  background: #ff7171;
+}
+
+@keyframes hp-voice-pulse {
+  from { transform: scaleY(0.55); }
+  to { transform: scaleY(1); }
+}
+
 .hp-provider {
   will-change: transform, opacity;
 }
@@ -202,6 +399,10 @@ input {
   .hp-size-button,
   .hp-icon-button {
     transition: none;
+  }
+
+  .hp-voice-waveform.is-active i {
+    animation: none;
   }
 }
 

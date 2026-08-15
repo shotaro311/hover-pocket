@@ -34,8 +34,13 @@ final class HoverWindowController {
     private let logger = Logger(subsystem: "com.hoverpocket.app", category: "HoverWindowRecovery")
     private let settings: AppSettings
     private let menuStore: HoverMenuStore
+    private let voiceLaneModel: VoiceLaneViewModel
+    private let voiceRuntimeHost: CodexVoiceRuntimeHost
+    private let voiceWebRTCDriver: CodexVoiceWebRTCDriver
     private let settingsWindowController: SettingsWindowController
     private var settingsCancellables = Set<AnyCancellable>()
+    private var voiceAuthorizationEpoch: UInt64 = 1
+    private var voiceToolSurfaceActive = false
 
     var appSettings: AppSettings {
         settings
@@ -44,8 +49,25 @@ final class HoverWindowController {
     init() {
         let settings = AppSettings()
         let menuStore = HoverMenuStore(settings: settings)
+        let voiceLaneModel = VoiceLaneViewModel()
+        let voiceRuntimeHost = CodexVoiceRuntimeHost(viewModel: voiceLaneModel)
+        let voiceWebRTCDriver = CodexVoiceWebRTCDriver(runtimeHost: voiceRuntimeHost)
+        voiceLaneModel.bindRuntimeActions(
+            startSession: { [weak voiceWebRTCDriver] in
+                voiceWebRTCDriver?.startSession()
+            },
+            setMuted: { [weak voiceWebRTCDriver] muted in
+                voiceWebRTCDriver?.setMuted(muted)
+            },
+            endSession: { [weak voiceWebRTCDriver] in
+                voiceWebRTCDriver?.stopSession()
+            }
+        )
         self.settings = settings
         self.menuStore = menuStore
+        self.voiceLaneModel = voiceLaneModel
+        self.voiceRuntimeHost = voiceRuntimeHost
+        self.voiceWebRTCDriver = voiceWebRTCDriver
         self.settingsWindowController = SettingsWindowController(
             settings: settings,
             providerStore: menuStore.providerStore
@@ -55,6 +77,47 @@ final class HoverWindowController {
         configurePreviewWindow()
         observeSettings()
         observeTimerAlerts()
+    }
+
+    func configureVoiceCapabilities(
+        broker: CapabilityBroker?,
+        todayFocus: TodayFocusTextAdapter?
+    ) {
+        guard let broker, let todayFocus else {
+            voiceRuntimeHost.setToolAdapter(nil)
+            return
+        }
+        let adapter = CodexVoiceCapabilityToolAdapter(
+            broker: broker,
+            todayFocus: todayFocus,
+            requestApproval: { [weak self] approval in
+                self?.requestVoiceCapabilityApproval(approval) ?? false
+            },
+            authorization: { [weak self] in
+                self?.voiceToolAuthorization
+                    ?? CodexVoiceToolAuthorization(
+                        isAllowed: false,
+                        epoch: 0,
+                        grantedPermissions: []
+                    )
+            }
+        )
+        voiceRuntimeHost.setToolAdapter(adapter)
+    }
+
+    func startVoiceRuntime() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.voiceRuntimeHost.setEnabled(self.settings.codexVoiceEnabled)
+        }
+    }
+
+    func shutdownForApplicationTermination() async {
+        voiceToolSurfaceActive = false
+        invalidateVoiceToolAuthorization()
+        voiceWebRTCDriver.prepareForApplicationTermination()
+        await voiceRuntimeHost.dispose()
+        CodexVoiceE2EReceipt.transportClosed(event: "application_terminated")
     }
 
     func showPill() {
@@ -87,6 +150,7 @@ final class HoverWindowController {
         guard let screen = activePreviewScreen ?? targetScreen() else { return }
 
         let frames = panelFrames(on: screen)
+        applyVoiceLaneLayout(frames)
 
         if previewWindow?.isVisible == true {
             previewWindow?.setFrame(frames.preview, display: true)
@@ -111,10 +175,108 @@ final class HoverWindowController {
         showSettings()
     }
 
+    private var voiceToolAuthorization: CodexVoiceToolAuthorization {
+        CodexVoiceToolAuthorization(
+            isAllowed: CodexVoiceToolSurfacePolicy.isAllowed(
+                aiNativeEnabled: settings.aiNativeEnabled,
+                voiceEnabled: settings.codexVoiceEnabled,
+                surfaceActive: voiceToolSurfaceActive,
+                windowVisible: previewWindow?.isVisible == true,
+                runtimeReady: voiceRuntimeHost.snapshot.availability == .ready
+            ),
+            epoch: voiceAuthorizationEpoch,
+            grantedPermissions: settings.codexVoiceCalendarReadEnabled
+                ? ["calendar.events.read"]
+                : []
+        )
+    }
+
+    private func invalidateVoiceToolAuthorization() {
+        voiceAuthorizationEpoch &+= 1
+    }
+
+    private func requestVoiceCapabilityApproval(
+        _ approval: CodexVoiceCapabilityApproval
+    ) -> Bool {
+        let expected = voiceToolAuthorization
+        guard expected.isAllowed else { return false }
+
+        cancelClose()
+        stopHoverMonitor()
+        let isEnglish = settings.appLanguage == .english
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = switch approval.toolName {
+        case CodexVoiceCapabilityToolAdapter.timerStartTool:
+            isEnglish ? "Approve Timer" : "Timerを承認"
+        case CodexVoiceCapabilityToolAdapter.calendarCreateTool:
+            isEnglish ? "Approve Calendar event" : "カレンダー予定を承認"
+        case CodexVoiceCapabilityToolAdapter.todayFocusTool:
+            isEnglish ? "Approve Today Focus" : "Today Focusを承認"
+        default:
+            isEnglish ? "Approve HoverPocket action" : "HoverPocket操作を承認"
+        }
+        let fieldLines = approval.fields.map { field in
+            let label = Self.voiceApprovalLabel(field.key, isEnglish: isEnglish)
+            return "\(label): \(field.value)"
+        }
+        alert.informativeText = fieldLines.joined(separator: "\n")
+            + "\n\n"
+            + (isEnglish
+                ? "Allow Codex to perform this action through HoverPocket?"
+                : "CodexがHoverPocketでこの操作を実行することを許可しますか？")
+        CodexVoiceHostApprovalPolicy.configureButtons(
+            alert,
+            isEnglish: isEnglish
+        )
+        NSApp.activate(ignoringOtherApps: true)
+        let escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard CodexVoiceHostApprovalPolicy.isEscapeKeyCode(event.keyCode) else {
+                return event
+            }
+            NSApp.abortModal()
+            return nil
+        }
+        defer {
+            if let escapeMonitor {
+                NSEvent.removeMonitor(escapeMonitor)
+            }
+        }
+        let response = alert.runModal()
+        if previewWindow?.isVisible == true {
+            startHoverMonitor()
+        }
+        let current = voiceToolAuthorization
+        return CodexVoiceHostApprovalPolicy.isAffirmative(response)
+            && current.isAllowed
+            && current.epoch == expected.epoch
+    }
+
+    private static func voiceApprovalLabel(_ key: String, isEnglish: Bool) -> String {
+        switch (key, isEnglish) {
+        case ("title", true): "Title"
+        case ("title", false): "タイトル"
+        case ("durationSeconds", true): "Duration (seconds)"
+        case ("durationSeconds", false): "時間（秒）"
+        case ("start", true): "Start"
+        case ("start", false): "開始"
+        case ("end", true): "End"
+        case ("end", false): "終了"
+        case ("isAllDay", true): "All day"
+        case ("isAllDay", false): "終日"
+        case ("event", true): "Calendar event"
+        case ("event", false): "予定"
+        case ("purpose", true): "Purpose"
+        case ("purpose", false): "今日の目的"
+        default: key
+        }
+    }
+
     private func panelFrames(on screen: NSScreen) -> PanelFrames {
         PanelGeometry.frames(
             on: screen,
             panelSize: settings.panelSize,
+            requestedVoiceLaneMode: settings.requestedVoiceLaneDisplayMode,
             showsNotchSideHandleArea: showsVisibleNotchSideHandle
         )
     }
@@ -165,13 +327,29 @@ final class HoverWindowController {
             onExit: { [weak self] in self?.scheduleClose() }
         )
 
-        let panel = makePanel(size: PanelLayout.previewSize(for: settings.panelSize), acceptsKeyboardFocus: true)
+        let initialFrames = targetScreen().map { panelFrames(on: $0) }
+        if let initialFrames {
+            applyVoiceLaneLayout(initialFrames)
+        } else {
+            voiceLaneModel.applyLayout(
+                requested: settings.requestedVoiceLaneDisplayMode,
+                resolved: settings.requestedVoiceLaneDisplayMode
+            )
+        }
+        let initialSize = initialFrames?.preview.size
+            ?? PanelLayout.panelTotalSize(
+                for: settings.panelSize,
+                voiceLaneMode: settings.requestedVoiceLaneDisplayMode
+            )
+        let panel = makePanel(size: initialSize, acceptsKeyboardFocus: true)
         panel.hasShadow = true
         let hostingController = NSHostingController(
             rootView: HoverPanelShell(
                 hoverState: hoverState,
                 store: menuStore,
                 settings: settings,
+                voiceLaneModel: voiceLaneModel,
+                voiceWebRTCDriver: voiceWebRTCDriver,
                 onOpenSettings: { [weak self] in self?.showSettings() },
                 onClosePanel: { [weak self] in self?.closePreview() },
                 onExternalDragStarted: { [weak self] in self?.prepareForExternalDrag() }
@@ -238,6 +416,8 @@ final class HoverWindowController {
 
     private func hidePreviewForExternalDrag() {
         guard let previewWindow, previewWindow.isVisible else { return }
+        voiceToolSurfaceActive = false
+        invalidateVoiceToolAuthorization()
         resetTask?.cancel()
         resetTask = nil
         setProviderActive(false)
@@ -251,6 +431,7 @@ final class HoverWindowController {
         }
         previewWindow.orderOut(nil)
         menuStore.providerStore.prepareForPanelClose()
+        voiceWebRTCDriver.detachForPanelClose()
     }
 
     private func showPreview(on requestedScreen: NSScreen?) {
@@ -261,8 +442,12 @@ final class HoverWindowController {
         mouseEventsEnableTask = nil
 
         guard let screen = requestedScreen ?? targetScreen(), let previewWindow else { return }
+        voiceToolSurfaceActive = true
+        invalidateVoiceToolAuthorization()
+        voiceRuntimeHost.setPanelVisible(true)
         activePreviewScreen = screen
         let frames = panelFrames(on: screen)
+        applyVoiceLaneLayout(frames)
         menuStore.providerStore.prepareForPanelOpen(isSecondaryDisplay: isSecondaryDisplay(screen))
         setProviderActive(true)
         menuStore.providerStore.refreshSelected(reason: .panelOpened)
@@ -333,6 +518,12 @@ final class HoverWindowController {
     }
 
     private func scheduleClose() {
+        // The isolated DEBUG Voice E2E harness is driven through accessibility.
+        // That interaction does not keep the physical pointer inside the hover
+        // region, so an automatic close would invalidate the explicit mic arm
+        // before WebKit requests permission. Explicit close/quit paths remain
+        // available, and Release builds cannot enable the isolated data root.
+        guard !HoverPocketApplicationData.usesIsolatedE2ERoot() else { return }
         closeTask?.cancel()
         let task = DispatchWorkItem { [weak self] in
             guard let self else { return }
@@ -353,10 +544,15 @@ final class HoverWindowController {
     }
 
     private func closePreview() {
+        voiceToolSurfaceActive = false
+        invalidateVoiceToolAuthorization()
         guard let previewWindow, previewWindow.isVisible else {
             menuStore.providerStore.prepareForPanelClose()
+            voiceWebRTCDriver.detachForPanelClose()
             return
         }
+
+        voiceWebRTCDriver.detachForPanelClose()
 
         stopHoverMonitor()
         mouseEventsEnableTask?.cancel()
@@ -682,6 +878,55 @@ final class HoverWindowController {
             }
             .store(in: &settingsCancellables)
 
+        settings.$codexVoiceEnabled
+            .dropFirst()
+            .sink { [weak self] enabled in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.voiceToolSurfaceActive = enabled && self.previewWindow?.isVisible == true
+                    self.invalidateVoiceToolAuthorization()
+                    self.resizePreviewForPanelSizeChange()
+                    if !enabled {
+                        self.voiceWebRTCDriver.detachForPanelClose()
+                    }
+                    Task { @MainActor [weak self] in
+                        await self?.voiceRuntimeHost.setEnabled(enabled)
+                    }
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        settings.$codexVoiceCalendarReadEnabled
+            .dropFirst()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.invalidateVoiceToolAuthorization()
+                    Task { @MainActor [weak self] in
+                        await self?.voiceRuntimeHost.reloadForToolConfigurationChange()
+                    }
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        settings.$aiNativeEnabled
+            .dropFirst()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.invalidateVoiceToolAuthorization()
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        settings.$codexVoiceLayoutMode
+            .dropFirst()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.resizePreviewForPanelSizeChange()
+                }
+            }
+            .store(in: &settingsCancellables)
+
         settings.$showNotchSideHandleArea
             .dropFirst()
             .sink { [weak self] _ in
@@ -721,6 +966,7 @@ final class HoverWindowController {
         syncAccessWindows(orderFront: false)
         guard let screen = activePreviewScreen ?? previewWindow?.screen ?? targetScreen() else { return }
         let frames = panelFrames(on: screen)
+        applyVoiceLaneLayout(frames)
 
         guard let previewWindow else { return }
         guard previewWindow.isVisible else {
@@ -749,6 +995,13 @@ final class HoverWindowController {
         )
     }
 
+    private func applyVoiceLaneLayout(_ frames: PanelFrames) {
+        voiceLaneModel.applyLayout(
+            requested: settings.requestedVoiceLaneDisplayMode,
+            resolved: frames.voiceLaneMode
+        )
+    }
+
     private func animatePreviewResize(
         _ previewWindow: NSPanel,
         from _: NSRect,
@@ -773,5 +1026,39 @@ final class HoverWindowController {
                 previewWindow.invalidateShadow()
             }
         }
+    }
+}
+
+enum CodexVoiceToolSurfacePolicy {
+    static func isAllowed(
+        aiNativeEnabled: Bool,
+        voiceEnabled: Bool,
+        surfaceActive: Bool,
+        windowVisible: Bool,
+        runtimeReady: Bool
+    ) -> Bool {
+        aiNativeEnabled
+            && voiceEnabled
+            && surfaceActive
+            && windowVisible
+            && runtimeReady
+    }
+}
+
+@MainActor
+enum CodexVoiceHostApprovalPolicy {
+    static func configureButtons(_ alert: NSAlert, isEnglish: Bool) {
+        alert.addButton(withTitle: isEnglish ? "Cancel" : "キャンセル")
+        alert.addButton(withTitle: isEnglish ? "Allow" : "許可")
+        alert.buttons.first?.keyEquivalent = "\r"
+        alert.buttons.last?.keyEquivalent = ""
+    }
+
+    static func isAffirmative(_ response: NSApplication.ModalResponse) -> Bool {
+        response == .alertSecondButtonReturn
+    }
+
+    static func isEscapeKeyCode(_ keyCode: UInt16) -> Bool {
+        keyCode == 53
     }
 }

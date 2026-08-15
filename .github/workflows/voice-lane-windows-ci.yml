@@ -1,0 +1,185 @@
+name: Voice Lane Windows CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "windows/**"
+      - "contracts/pocket/v1/**"
+      - ".github/workflows/voice-lane-windows-ci.yml"
+      - "AGENTS.md"
+      - "docs/plan/20260806-codex-voice-lane-plan.md"
+      - "docs/report/20260806-codex-voice-lane-architecture-review.md"
+      - "docs/report/20260806-codex-app-server-upstream-verification.md"
+      - "progress/2026-08/2026-08-06_hover-pocket-codex-voice-lane-review.md"
+  push:
+    branches:
+      - feature/codex-voice-lane
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voice-lane-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-build-and-deterministic-verifiers:
+    name: Windows build and deterministic verifiers
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check patch whitespace
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "pull_request") {
+            $base = "origin/${{ github.base_ref }}"
+          } else {
+            $base = "origin/main"
+          }
+
+          git diff --check "$base...HEAD"
+          if ($LASTEXITCODE -ne 0) {
+            throw "git diff --check failed."
+          }
+
+      - name: Parse Voice Lane PowerShell scripts
+        shell: pwsh
+        run: |
+          $scripts = @(
+            ".\windows\script\phase0_codex_app_server_probe.ps1",
+            ".\windows\script\verify_voice_lane_foundation.ps1",
+            ".\windows\script\voice_e2e_windows.ps1",
+            ".\windows\script\cleanup_merged_remote_branches.ps1"
+          )
+
+          foreach ($script in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script),
+              [ref]$tokens,
+              [ref]$errors)
+
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error ("${script}: " + $_.Message) }
+              throw "PowerShell syntax validation failed: $script"
+            }
+          }
+
+      - name: Restore Windows solution
+        shell: pwsh
+        run: dotnet restore .\windows\HoverPocket.Windows.sln
+
+      - name: Build Debug with warnings as errors
+        shell: pwsh
+        run: dotnet build .\windows\HoverPocket.Windows.sln -c Debug --no-restore -p:TreatWarningsAsErrors=true
+
+      - name: Build Release with warnings as errors
+        shell: pwsh
+        run: dotnet build .\windows\HoverPocket.Windows.sln -c Release --no-restore -p:TreatWarningsAsErrors=true
+
+      - name: Check Windows UI JavaScript syntax
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Path .\windows\ui -Recurse -File -Filter *.js
+          if ($files.Count -eq 0) {
+            throw "No JavaScript files were found under windows/ui."
+          }
+
+          foreach ($file in $files) {
+            node --check $file.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "JavaScript syntax check failed: $($file.FullName)"
+            }
+          }
+
+          Write-Host "Checked $($files.Count) JavaScript files."
+
+      - name: Run deterministic Windows verifiers
+        shell: pwsh
+        run: |
+          $project = ".\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj"
+          $targets = @(
+            "shell",
+            "display",
+            "ui",
+            "ui-model",
+            "sticky",
+            "clipboard",
+            "controls",
+            "calc",
+            "timer",
+            "calendar",
+            "settings",
+            "ailane",
+            "capabilities",
+            "broker",
+            "voice-lane-layout",
+            "codex-app-server-protocol",
+            "codex-voice-coordinator",
+            "voice-e2e-isolation",
+            "updater"
+          )
+
+          foreach ($target in $targets) {
+            Write-Host "Running verifier: $target"
+            $logPath = Join-Path $env:RUNNER_TEMP ("hoverpocket-verify-" + $target + ".log")
+            Remove-Item -Path $logPath -Force -ErrorAction SilentlyContinue
+            $env:HOVERPOCKET_VERIFY_LOG = $logPath
+
+            dotnet run --project $project -c Debug --no-build -- --verify $target
+            $exitCode = $LASTEXITCODE
+
+            if (Test-Path $logPath) {
+              Get-Content -Path $logPath
+            } else {
+              Write-Warning "Verifier did not create a log: $target"
+            }
+
+            Remove-Item Env:HOVERPOCKET_VERIFY_LOG -ErrorAction SilentlyContinue
+            if ($exitCode -ne 0) {
+              throw "Verifier failed: $target (exit $exitCode)"
+            }
+          }
+
+          $failureLog = Join-Path $env:RUNNER_TEMP "hoverpocket-verify-ui-model-failure.log"
+          Remove-Item -Path $failureLog -Force -ErrorAction SilentlyContinue
+          $env:HOVERPOCKET_VERIFY_LOG = $failureLog
+          $env:HOVERPOCKET_VERIFY_INJECT_FAILURE = "ui-model"
+          dotnet run --project $project -c Debug --no-build -- --verify ui-model
+          $failureExitCode = $LASTEXITCODE
+          Remove-Item Env:HOVERPOCKET_VERIFY_INJECT_FAILURE -ErrorAction SilentlyContinue
+          Remove-Item Env:HOVERPOCKET_VERIFY_LOG -ErrorAction SilentlyContinue
+          $failureText = (Test-Path $failureLog) ? (Get-Content -Path $failureLog -Raw) : ""
+          if ($failureExitCode -ne 1 -or $failureText -notmatch "FAIL verifier exception: InvalidOperationException") {
+            throw "Injected verifier failure did not exit cleanly with code 1."
+          }
+          $global:LASTEXITCODE = 0
+
+      - name: Verify Release rejects Voice E2E flags
+        shell: pwsh
+        run: |
+          $project = ".\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj"
+          dotnet run --project $project -c Release --no-build -- --verify voice-e2e-isolation
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release Voice E2E isolation verifier failed."
+          }

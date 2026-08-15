@@ -9,6 +9,7 @@ using HoverPocket.Shell.Providers.Clipboard;
 using HoverPocket.Shell.Providers.Controls;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
+using HoverPocket.Shell.Providers.CodexVoice;
 using HoverPocket.Shell.Services;
 using HoverPocket.Shell.Settings;
 using HoverPocket.Shell.Verification;
@@ -22,18 +23,36 @@ public partial class App : System.Windows.Application
     private HoverShellController? _shellController;
     private TrayIconService? _trayIconService;
     private UpdaterService? _updaterService;
+    private StartupOptions? _startupOptions;
+    private HoverPocketApplicationData? _applicationData;
+    private int _voiceE2EShutdownState;
+
+    internal void ConfigureStartup(
+        StartupOptions options,
+        HoverPocketApplicationData applicationData)
+    {
+        _startupOptions = options;
+        _applicationData = applicationData;
+    }
 
     protected override void OnStartup(StartupEventArgs e)
     {
-        var options = StartupOptions.Parse(e.Args);
+        var options = _startupOptions ?? StartupOptions.Parse(e.Args);
+        var applicationData = _applicationData ?? HoverPocketApplicationData.Resolve(options);
         base.OnStartup(e);
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        if (FakeCodexAppServer.ShouldRun(e.Args))
+        {
+            Environment.ExitCode = FakeCodexAppServer.Run();
+            Shutdown();
+            return;
+        }
+
         if (options.VerifyUiModel)
         {
             VerifyConsole.AttachParent();
-            Environment.ExitCode = new UiModelVerifier().Run();
-            Shutdown();
+            _ = RunUiModelVerificationAsync();
             return;
         }
 
@@ -48,6 +67,43 @@ public partial class App : System.Windows.Application
         {
             VerifyConsole.AttachParent();
             Environment.ExitCode = new AiLaneVerifier().Run();
+            Shutdown();
+            return;
+        }
+
+        if (options.VerifyVoiceLaneLayout)
+        {
+            VerifyConsole.AttachParent();
+            Environment.ExitCode = new VoiceLaneLayoutVerifier().Run();
+            Shutdown();
+            return;
+        }
+
+        if (options.VerifyCodexAppServer)
+        {
+            VerifyConsole.AttachParent();
+            _ = RunCodexAppServerVerificationAsync();
+            return;
+        }
+
+        if (options.VerifyCodexAppServerProtocol)
+        {
+            VerifyConsole.AttachParent();
+            _ = RunCodexAppServerProtocolVerificationAsync();
+            return;
+        }
+
+        if (options.VerifyCodexVoiceCoordinator)
+        {
+            VerifyConsole.AttachParent();
+            _ = RunCodexVoiceCoordinatorVerificationAsync();
+            return;
+        }
+
+        if (options.VerifyVoiceE2EIsolation)
+        {
+            VerifyConsole.AttachParent();
+            Environment.ExitCode = new VoiceE2EIsolationVerifier().Run();
             Shutdown();
             return;
         }
@@ -131,7 +187,12 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        if (!SingleInstanceGate.TryAcquire(out var singleInstanceGate))
+        var singleInstanceNames = applicationData.IsIsolatedVoiceE2E
+            ? SingleInstanceNames.VoiceE2E
+            : options.IsVerify
+                ? SingleInstanceNames.Verification
+                : SingleInstanceNames.Production;
+        if (!SingleInstanceGate.TryAcquire(singleInstanceNames, out var singleInstanceGate))
         {
             Environment.ExitCode = 0;
             Shutdown();
@@ -141,23 +202,31 @@ public partial class App : System.Windows.Application
         ArgumentNullException.ThrowIfNull(singleInstanceGate);
         _singleInstanceGate = singleInstanceGate;
         var providerRegistry = ProviderRegistry.CreateDefault();
-        var settingsStore = options.VerifyShell || options.VerifyDisplay || options.VerifyUi
-            ? UserSettingsStore.CreateTemporary("Verify")
-            : new UserSettingsStore();
-        var updaterService = new UpdaterService();
+        var effectiveApplicationData = options.VerifyShell || options.VerifyDisplay || options.VerifyUi
+            ? HoverPocketApplicationData.CreateTemporaryVerifier("Shell")
+            : applicationData;
+        var settingsStore = new UserSettingsStore(effectiveApplicationData);
+        var updaterService = new UpdaterService(
+            effectiveApplicationData.ExternalIntegrationsEnabled && !options.IsVerify);
         _updaterService = updaterService;
+        var voiceE2EReceipt = CodexVoiceE2EReceiptStore.Create(effectiveApplicationData);
         var enablePanelWebView = !options.VerifyShell && !options.VerifyDisplay;
         var shellController = new HoverShellController(
             Dispatcher,
             options.Settings,
             providerRegistry,
+            effectiveApplicationData,
             settingsStore,
             enablePanelWebView,
             options.EnableDevTools,
-            updaterService);
+            options.IsVerify,
+            updaterService,
+            voiceE2EReceipt);
         _shellController = shellController;
         singleInstanceGate.ShowPanelRequested += (_, _) =>
             Dispatcher.BeginInvoke(shellController.ShowPanelFromUser);
+        singleInstanceGate.StopRequested += (_, _) =>
+            Dispatcher.BeginInvoke(BeginVoiceE2EShutdown);
         shellController.Start();
 
         if (options.VerifyShell || options.VerifyDisplay || options.VerifyUi)
@@ -172,7 +241,8 @@ public partial class App : System.Windows.Application
         }
 
         _trayIconService = new TrayIconService(shellController, updaterService);
-        if (shellController.PanelBridgeController.CurrentSettings.AutoCheckForUpdates)
+        if (updaterService.IsEnabled
+            && shellController.PanelBridgeController.CurrentSettings.AutoCheckForUpdates)
         {
             _ = updaterService.CheckOnStartupAsync();
         }
@@ -186,6 +256,35 @@ public partial class App : System.Windows.Application
         base.OnExit(e);
     }
 
+    private void BeginVoiceE2EShutdown()
+    {
+        if (Interlocked.Exchange(ref _voiceE2EShutdownState, 1) != 0)
+        {
+            return;
+        }
+
+        _ = CompleteVoiceE2EShutdownAsync();
+    }
+
+    private async Task CompleteVoiceE2EShutdownAsync()
+    {
+        try
+        {
+            if (_shellController is not null)
+            {
+                await _shellController.PrepareForApplicationShutdownAsync();
+            }
+        }
+        catch (Exception)
+        {
+            Environment.ExitCode = 1;
+        }
+        finally
+        {
+            Shutdown();
+        }
+    }
+
     private async Task RunShellVerificationAsync()
     {
         if (_shellController is null)
@@ -196,21 +295,26 @@ public partial class App : System.Windows.Application
         }
 
         var verifier = new ShellVerifier(_shellController);
-        Environment.ExitCode = await verifier.RunAsync();
-        Shutdown();
+        await RunVerificationSafelyAsync(() => verifier.RunAsync());
     }
 
-    private async Task RunSettingsVerificationAsync()
-    {
-        Environment.ExitCode = await new SettingsVerifier().RunAsync();
-        Shutdown();
-    }
+    private Task RunSettingsVerificationAsync() =>
+        RunVerificationSafelyAsync(() => new SettingsVerifier().RunAsync());
 
-    private async Task RunCalendarLiveVerificationAsync()
-    {
-        Environment.ExitCode = await new CalendarLiveVerifier().RunAsync();
-        Shutdown();
-    }
+    private Task RunUiModelVerificationAsync() =>
+        RunVerificationSafelyAsync(() => new UiModelVerifier().RunAsync());
+
+    private Task RunCodexAppServerVerificationAsync() =>
+        RunVerificationSafelyAsync(() => new CodexAppServerVerifier().RunAsync());
+
+    private Task RunCodexAppServerProtocolVerificationAsync() =>
+        RunVerificationSafelyAsync(() => new CodexAppServerProtocolVerifier().RunAsync());
+
+    private Task RunCodexVoiceCoordinatorVerificationAsync() =>
+        RunVerificationSafelyAsync(() => new CodexVoiceCoordinatorVerifier().RunAsync());
+
+    private Task RunCalendarLiveVerificationAsync() =>
+        RunVerificationSafelyAsync(() => new CalendarLiveVerifier().RunAsync());
 
     private async Task RunDisplayVerificationAsync()
     {
@@ -222,8 +326,7 @@ public partial class App : System.Windows.Application
         }
 
         var verifier = new DisplayVerifier(_shellController);
-        Environment.ExitCode = await verifier.RunAsync();
-        Shutdown();
+        await RunVerificationSafelyAsync(() => verifier.RunAsync());
     }
 
     private async Task RunUiVerificationAsync()
@@ -236,7 +339,23 @@ public partial class App : System.Windows.Application
         }
 
         var verifier = new UiVerifier(_shellController);
-        Environment.ExitCode = await verifier.RunAsync();
-        Shutdown();
+        await RunVerificationSafelyAsync(() => verifier.RunAsync());
+    }
+
+    private async Task RunVerificationSafelyAsync(Func<Task<int>> verification)
+    {
+        try
+        {
+            Environment.ExitCode = await verification();
+        }
+        catch (Exception error)
+        {
+            VerifyConsole.WriteLine($"FAIL verifier exception: {error.GetType().Name}");
+            Environment.ExitCode = 1;
+        }
+        finally
+        {
+            Shutdown();
+        }
     }
 }

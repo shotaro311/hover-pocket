@@ -4,6 +4,8 @@ struct HoverPanelShell: View {
     let hoverState: HoverState
     @ObservedObject var store: HoverMenuStore
     @ObservedObject var settings: AppSettings
+    @ObservedObject var voiceLaneModel: VoiceLaneViewModel
+    @ObservedObject var voiceWebRTCDriver: CodexVoiceWebRTCDriver
     let onOpenSettings: () -> Void
     let onClosePanel: () -> Void
     let onExternalDragStarted: () -> Void
@@ -14,33 +16,35 @@ struct HoverPanelShell: View {
                 .fill(Color(red: 0.02, green: 0.02, blue: 0.025))
 
             VStack(spacing: 0) {
-                ProviderHeaderView(
-                    providerStore: store.providerStore,
-                    settings: settings,
-                    onOpenSettings: onOpenSettings,
-                    onClosePanel: onClosePanel
-                )
+                baselinePanel
 
-                Divider()
-                    .overlay(Color.white.opacity(0.08))
-
-                PluginHostView(
-                    providerStore: store.providerStore,
-                    settings: settings,
-                    isPreviewActive: store.providerActive,
-                    onExternalDragStarted: onExternalDragStarted,
-                    onClosePanel: onClosePanel
-                )
-                .frame(maxHeight: .infinity)
-                .environment(\.panelTextSize, settings.panelTextSize)
+                if voiceLaneModel.effectiveDisplayMode != .disabled {
+                    VoiceLaneView(
+                        model: voiceLaneModel,
+                        settings: settings,
+                        webRTCDriver: voiceWebRTCDriver
+                    )
+                    .frame(
+                        height: PanelLayout.voiceLaneHeight(
+                            for: settings.panelSize,
+                            mode: voiceLaneModel.effectiveDisplayMode
+                        )
+                    )
+                }
             }
             .opacity(store.contentVisible ? 1 : 0)
             .scaleEffect(store.contentVisible ? 1 : 0.92, anchor: .top)
             .offset(y: store.contentVisible ? 0 : -14)
         }
         .frame(
-            width: PanelLayout.panelTotalSize(for: settings.panelSize).width,
-            height: PanelLayout.panelTotalSize(for: settings.panelSize).height
+            width: PanelLayout.panelTotalSize(
+                for: settings.panelSize,
+                voiceLaneMode: voiceLaneModel.effectiveDisplayMode
+            ).width,
+            height: PanelLayout.panelTotalSize(
+                for: settings.panelSize,
+                voiceLaneMode: voiceLaneModel.effectiveDisplayMode
+            ).height
         )
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
@@ -50,6 +54,34 @@ struct HoverPanelShell: View {
         .onHover { inside in
             inside ? hoverState.onEnter() : hoverState.onExit()
         }
+    }
+
+    private var baselinePanel: some View {
+        VStack(spacing: 0) {
+            ProviderHeaderView(
+                providerStore: store.providerStore,
+                settings: settings,
+                onOpenSettings: onOpenSettings,
+                onClosePanel: onClosePanel
+            )
+
+            Divider()
+                .overlay(Color.white.opacity(0.08))
+
+            PluginHostView(
+                providerStore: store.providerStore,
+                settings: settings,
+                isPreviewActive: store.providerActive,
+                onExternalDragStarted: onExternalDragStarted,
+                onClosePanel: onClosePanel
+            )
+            .frame(maxHeight: .infinity)
+            .environment(\.panelTextSize, settings.panelTextSize)
+        }
+        .frame(
+            width: PanelLayout.previewSize(for: settings.panelSize).width,
+            height: PanelLayout.previewSize(for: settings.panelSize).height
+        )
     }
 
 }

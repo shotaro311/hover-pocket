@@ -274,23 +274,35 @@ internal static class CapabilityCanonicalJson
 {
     public static string ArgumentsDigest(JsonElement arguments) => Digest(CanonicalBytes(arguments));
 
-    public static string PlanDigest(CapabilityExecutionPlan plan)
+    public static string PlanDigest(
+        CapabilityExecutionPlan plan,
+        IReadOnlyList<PocketCapabilityDescriptor> descriptors)
     {
+        if (descriptors.Count != plan.Steps.Count)
+        {
+            throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "descriptors");
+        }
+        var approvalRequired = descriptors.Any(descriptor => descriptor.ApprovalPolicy.RequiresExecutionApproval());
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
+            writer.WritePropertyName("appContext");
             if (plan.AppContext is not null)
             {
-                writer.WritePropertyName("appContext");
                 WriteAppContext(writer, plan.AppContext);
             }
-            writer.WriteString("createdAt", Date(plan.CreatedAt));
-            writer.WriteString("origin", plan.Origin.WireValue());
-            writer.WriteString("planId", plan.Id);
+            else
+            {
+                writer.WriteNullValue();
+            }
+            writer.WritePropertyName("approval");
+            writer.WriteStartObject();
+            writer.WriteBoolean("exactArgumentsRequired", true);
+            writer.WriteString("group", approvalRequired ? "all_writes" : "none");
+            writer.WriteString("mode", approvalRequired ? "before_writes" : "none");
+            writer.WriteEndObject();
             writer.WriteNumber("planVersion", 1);
-            writer.WritePropertyName("principal");
-            WritePrincipal(writer, plan.Principal);
             writer.WritePropertyName("requiredPermissions");
             writer.WriteStartArray();
             foreach (var permission in plan.RequiredPermissions.Order(StringComparer.Ordinal))
@@ -314,7 +326,6 @@ internal static class CapabilityCanonicalJson
                     writer.WriteStringValue(dependency);
                 }
                 writer.WriteEndArray();
-                writer.WriteString("idempotencyKey", step.IdempotencyKey);
                 writer.WriteString("stepId", step.Id);
                 writer.WriteEndObject();
             }

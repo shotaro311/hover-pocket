@@ -7,17 +7,28 @@ on:
       - "Sources/HoverPocket/Capabilities/**"
       - "Sources/HoverPocket/App/CapabilityVerificationCommand.swift"
       - "Sources/HoverPocket/App/CapabilityBrokerVerificationCommand.swift"
+      - "Sources/HoverPocket/App/VoiceLaneLayoutVerificationCommand.swift"
+      - "Sources/HoverPocket/App/CodexAppServerVerificationCommand.swift"
+      - "Sources/HoverPocket/App/CodexAppServerLiveVerificationCommand.swift"
       - "Sources/HoverPocket/App/AppDelegate.swift"
+      - "Sources/HoverPocket/Models/VoiceLaneModels.swift"
       - "Sources/HoverPocket/State/AppSettings.swift"
+      - "Sources/HoverPocket/State/VoiceLaneViewModel.swift"
       - "Sources/HoverPocket/Models/GoogleCalendarModels.swift"
       - "Sources/HoverPocket/Models/StickyNoteModels.swift"
       - "Sources/HoverPocket/Services/GoogleCalendarAPIClient.swift"
       - "Sources/HoverPocket/State/GoogleCalendarStore.swift"
       - "Sources/HoverPocket/State/StickyNotesStore.swift"
       - "Sources/HoverPocket/State/TimerStore.swift"
+      - "Sources/HoverPocket/Views/HoverPanelShell.swift"
+      - "Sources/HoverPocket/Views/VoiceLaneView.swift"
+      - "Sources/HoverPocket/Voice/**"
+      - "Sources/HoverPocket/Windowing/HoverWindowController.swift"
+      - "Sources/HoverPocket/Windowing/PanelGeometry.swift"
       - "Sources/HoverPocket/main.swift"
       - "Package.swift"
       - "Package.resolved"
+      - "script/build_and_run.sh"
       - "contracts/pocket/v1/**"
       - ".github/workflows/macos-capabilities-verify.yml"
   pull_request:
@@ -25,17 +36,28 @@ on:
       - "Sources/HoverPocket/Capabilities/**"
       - "Sources/HoverPocket/App/CapabilityVerificationCommand.swift"
       - "Sources/HoverPocket/App/CapabilityBrokerVerificationCommand.swift"
+      - "Sources/HoverPocket/App/VoiceLaneLayoutVerificationCommand.swift"
+      - "Sources/HoverPocket/App/CodexAppServerVerificationCommand.swift"
+      - "Sources/HoverPocket/App/CodexAppServerLiveVerificationCommand.swift"
       - "Sources/HoverPocket/App/AppDelegate.swift"
+      - "Sources/HoverPocket/Models/VoiceLaneModels.swift"
       - "Sources/HoverPocket/State/AppSettings.swift"
+      - "Sources/HoverPocket/State/VoiceLaneViewModel.swift"
       - "Sources/HoverPocket/Models/GoogleCalendarModels.swift"
       - "Sources/HoverPocket/Models/StickyNoteModels.swift"
       - "Sources/HoverPocket/Services/GoogleCalendarAPIClient.swift"
       - "Sources/HoverPocket/State/GoogleCalendarStore.swift"
       - "Sources/HoverPocket/State/StickyNotesStore.swift"
       - "Sources/HoverPocket/State/TimerStore.swift"
+      - "Sources/HoverPocket/Views/HoverPanelShell.swift"
+      - "Sources/HoverPocket/Views/VoiceLaneView.swift"
+      - "Sources/HoverPocket/Voice/**"
+      - "Sources/HoverPocket/Windowing/HoverWindowController.swift"
+      - "Sources/HoverPocket/Windowing/PanelGeometry.swift"
       - "Sources/HoverPocket/main.swift"
       - "Package.swift"
       - "Package.resolved"
+      - "script/build_and_run.sh"
       - "contracts/pocket/v1/**"
       - ".github/workflows/macos-capabilities-verify.yml"
   workflow_dispatch:
@@ -52,7 +74,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Build
-        run: swift build
+        run: swift build -Xswiftc -warnings-as-errors
 
       - name: Verify capability handlers
         run: .build/debug/HoverPocket --verify-capabilities
@@ -62,3 +84,9 @@ jobs:
 
       - name: Verify existing Timer behavior
         run: .build/debug/HoverPocket --verify-timer
+
+      - name: Verify host-owned Voice Lane layout
+        run: .build/debug/HoverPocket --verify-voice-lane-layout
+
+      - name: Verify Codex app-server transport
+        run: .build/debug/HoverPocket --verify-codex-app-server

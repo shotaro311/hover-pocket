@@ -57,7 +57,7 @@ internal sealed class CapabilityBroker
         try
         {
             var descriptors = Validate(plan, permissions);
-            digest = CapabilityCanonicalJson.PlanDigest(plan);
+            digest = CapabilityCanonicalJson.PlanDigest(plan, descriptors);
             return new CapabilityBrokerPreparation(
                 digest,
                 _approvalStore.Request(plan, digest, descriptors, now));
@@ -104,7 +104,7 @@ internal sealed class CapabilityBroker
             try
             {
                 descriptors = Validate(plan, permissions);
-                digest = CapabilityCanonicalJson.PlanDigest(plan);
+                digest = CapabilityCanonicalJson.PlanDigest(plan, descriptors);
             }
             catch (Exception ex)
             {
@@ -346,9 +346,9 @@ internal sealed class CapabilityBroker
         }
 
         EnforceRateLimit(descriptor, plan.Principal, now);
-        var invocationId = InvocationId(planDigest, step.Id);
+        var invocationId = InvocationId(planDigest, plan.Id, step.Id);
         var auditEntryId = $"audit:{Guid.NewGuid():D}";
-        var traceId = $"trace:{DigestPrefix(planDigest, 32)}";
+        var traceId = TraceId(planDigest, plan.Id);
         _auditLog.Append(new CapabilityAuditEntry(
             descriptor.ApprovalPolicy.RequiresExecutionApproval() ? "approved" : "not_required",
             descriptor.ApprovalPolicy.WireValue(),
@@ -515,11 +515,12 @@ internal sealed class CapabilityBroker
                 allSucceeded = false;
                 continue;
             }
+            var planIdentityDigest = CapabilityCanonicalJson.ArgumentsDigest(CapabilityJson.From(new { planId = plan.Id }));
             var rollbackStep = new CapabilityPlanStep(
                 $"rollback_{item.Step.Id}",
                 CapabilityIds.TimerStop,
                 CapabilityJson.From(new { timerId = timerId.GetString() }),
-                $"rollback.{DigestPrefix(planDigest, 24)}.{item.Step.Id}",
+                $"rollback.{DigestPrefix(planDigest, 12)}.{DigestPrefix(planIdentityDigest, 12)}.{item.Step.Id}",
                 []);
             var rollbackReceipt = await ExecuteStepAsync(
                 rollbackStep,
@@ -672,7 +673,7 @@ internal sealed class CapabilityBroker
             receipt.SafeError?.Code,
             receipt.Status.WireValue(),
             now,
-            $"trace:{DigestPrefix(receipt.PlanDigest, 32)}"));
+            TraceId(receipt.PlanDigest, plan.Id)));
     }
 
     private static CapabilitySafeError SafeError(Exception error)
@@ -713,8 +714,17 @@ internal sealed class CapabilityBroker
         }
     }
 
-    private static string InvocationId(string planDigest, string stepId) =>
-        $"invocation:{DigestPrefix(planDigest, 32)}:{stepId}";
+    private static string InvocationId(string planDigest, string planId, string stepId)
+    {
+        var planIdentityDigest = CapabilityCanonicalJson.ArgumentsDigest(CapabilityJson.From(new { planId }));
+        return $"invocation:{DigestPrefix(planDigest, 24)}:{DigestPrefix(planIdentityDigest, 16)}:{stepId}";
+    }
+
+    private static string TraceId(string planDigest, string planId)
+    {
+        var planIdentityDigest = CapabilityCanonicalJson.ArgumentsDigest(CapabilityJson.From(new { planId }));
+        return $"trace:{DigestPrefix(planDigest, 16)}:{DigestPrefix(planIdentityDigest, 16)}";
+    }
 
     private static CapabilityPrincipal SafeAuditPrincipal(CapabilityPrincipal? principal) =>
         principal is null

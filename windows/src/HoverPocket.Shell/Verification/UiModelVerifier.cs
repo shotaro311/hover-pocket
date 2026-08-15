@@ -3,6 +3,9 @@ using System.Text.Json;
 using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Providers;
+using HoverPocket.Shell.Providers.CodexVoice;
+using HoverPocket.Shell.Windows;
+using Microsoft.Web.WebView2.Core;
 
 namespace HoverPocket.Shell.Verification;
 
@@ -10,14 +13,23 @@ internal sealed class UiModelVerifier
 {
     private readonly List<string> _failures = [];
 
-    public int Run()
+    public async Task<int> RunAsync()
     {
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("HOVERPOCKET_VERIFY_INJECT_FAILURE"),
+                "ui-model",
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Injected UI model verifier failure.");
+        }
+
         var registry = ProviderRegistry.CreateDefault();
         var store = UserSettingsStore.CreateTemporary("UiModelVerify");
 
         VerifySettingsRoundTrip(registry, store);
         VerifyCorruptSettingsFallback(registry, store);
-        VerifyBridgeDispatch(registry, store).GetAwaiter().GetResult();
+        VerifyMicrophonePermissionPolicy();
+        await VerifyBridgeDispatch(registry, store);
 
         if (_failures.Count == 0)
         {
@@ -35,6 +47,79 @@ internal sealed class UiModelVerifier
         return 1;
     }
 
+    private void VerifyMicrophonePermissionPolicy()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var deadline = now + TimeSpan.FromSeconds(5);
+        if (!WebViewSecurityPolicy.ShouldAllowMicrophone(
+                "https://app.hoverpocket.local/",
+                CoreWebView2PermissionKind.Microphone,
+                isUserInitiated: true,
+                featureEnabled: true,
+                panelVisible: true,
+                deadline,
+                now))
+        {
+            _failures.Add("microphone policy rejected the exact armed Host origin");
+        }
+
+        var rejected = new[]
+        {
+            WebViewSecurityPolicy.ShouldAllowMicrophone(
+                "https://evil.example/",
+                CoreWebView2PermissionKind.Microphone,
+                true,
+                true,
+                true,
+                deadline,
+                now),
+            WebViewSecurityPolicy.ShouldAllowMicrophone(
+                "https://app.hoverpocket.local/",
+                CoreWebView2PermissionKind.Camera,
+                true,
+                true,
+                true,
+                deadline,
+                now),
+            WebViewSecurityPolicy.ShouldAllowMicrophone(
+                "https://app.hoverpocket.local/",
+                CoreWebView2PermissionKind.Microphone,
+                false,
+                true,
+                true,
+                deadline,
+                now),
+            WebViewSecurityPolicy.ShouldAllowMicrophone(
+                "https://app.hoverpocket.local/",
+                CoreWebView2PermissionKind.Microphone,
+                true,
+                false,
+                true,
+                deadline,
+                now),
+            WebViewSecurityPolicy.ShouldAllowMicrophone(
+                "https://app.hoverpocket.local/",
+                CoreWebView2PermissionKind.Microphone,
+                true,
+                true,
+                false,
+                deadline,
+                now),
+            WebViewSecurityPolicy.ShouldAllowMicrophone(
+                "https://app.hoverpocket.local/",
+                CoreWebView2PermissionKind.Microphone,
+                true,
+                true,
+                true,
+                now - TimeSpan.FromMilliseconds(1),
+                now)
+        };
+        if (rejected.Any(value => value))
+        {
+            _failures.Add("microphone policy allowed an untrusted, unarmed, or non-user-initiated request");
+        }
+    }
+
     private void VerifySettingsRoundTrip(ProviderRegistry registry, UserSettingsStore store)
     {
         var settings = store.Load(registry.ProviderIds);
@@ -50,6 +135,10 @@ internal sealed class UiModelVerifier
         settings.HandleIconStyle = HandleIconStyle.C;
         settings.ShowTopHandleSideArea = false;
         settings.DisableTopEdgeInFullscreen = false;
+        settings.CodexVoiceEnabled = true;
+        settings.CodexVoiceLayoutMode = VoiceLaneLayoutMode.Expanded;
+        settings.CodexVoiceAutoListen = true;
+        settings.CodexVoiceCalendarReadEnabled = true;
         settings.ProviderOrder = ["sticky", "calculator", "timer"];
         settings.ProviderVisibility["timer"] = false;
         store.Save(settings);
@@ -66,7 +155,11 @@ internal sealed class UiModelVerifier
             || reloaded.PreferredProviderId != "sticky"
             || reloaded.HandleIconStyle != HandleIconStyle.C
             || reloaded.ShowTopHandleSideArea
-            || reloaded.DisableTopEdgeInFullscreen)
+            || reloaded.DisableTopEdgeInFullscreen
+            || !reloaded.CodexVoiceEnabled
+            || reloaded.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Expanded
+            || !reloaded.CodexVoiceAutoListen
+            || !reloaded.CodexVoiceCalendarReadEnabled)
         {
             _failures.Add("settings round-trip: scalar values were not preserved");
         }
@@ -90,7 +183,11 @@ internal sealed class UiModelVerifier
         if (settings.PanelSize != PanelSize.Medium
             || settings.ProviderOrder.Count != registry.ProviderIds.Count
             || settings.ProviderVisibility.Values.Any(visible => !visible)
-            || !settings.AutoCheckForUpdates)
+            || !settings.AutoCheckForUpdates
+            || settings.CodexVoiceEnabled
+            || settings.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Compact
+            || settings.CodexVoiceAutoListen
+            || settings.CodexVoiceCalendarReadEnabled)
         {
             _failures.Add("settings corrupt fallback: defaults were not restored");
         }
@@ -99,7 +196,17 @@ internal sealed class UiModelVerifier
     private async Task VerifyBridgeDispatch(ProviderRegistry registry, UserSettingsStore store)
     {
         var settings = store.Load(registry.ProviderIds);
-        using var controller = new PanelBridgeController(registry, store, settings);
+        var voiceClientFactoryCalls = 0;
+        using var controller = new PanelBridgeController(
+            registry,
+            store,
+            settings,
+            codexVoiceClientFactory: _ =>
+            {
+                Interlocked.Increment(ref voiceClientFactoryCalls);
+                return Task.FromException<CodexAppServerClient>(
+                    new FileNotFoundException("Deterministic verifier does not start Codex."));
+            });
         var postedEvents = new List<string>();
         var dispatcher = new BridgeDispatcher(json =>
         {
@@ -133,6 +240,41 @@ internal sealed class UiModelVerifier
         if (reloaded.PanelSize != PanelSize.Small || !ResponseContains(sizeResponse, "\"panelSize\":\"small\""))
         {
             _failures.Add("bridge dispatcher: settings.setPanelSize did not persist small size");
+        }
+
+        var voiceEnabledResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"3a","method":"settings.setCodexVoiceEnabled","params":{"enabled":true}}""");
+        var voiceLayoutResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"3b","method":"settings.setCodexVoiceLayout","params":{"layout":"expanded"}}""");
+        var voiceAutoListenResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"3c","method":"settings.setCodexVoiceAutoListen","params":{"enabled":true}}""");
+        var calendarReadEnabledResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"3d","method":"settings.setCodexVoiceCalendarReadEnabled","params":{"enabled":true}}""");
+        var factoryCallsAfterCalendarEnable = Volatile.Read(ref voiceClientFactoryCalls);
+        var calendarReadDisabledResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"3e","method":"settings.setCodexVoiceCalendarReadEnabled","params":{"enabled":false}}""");
+        var voiceReloaded = store.Load(registry.ProviderIds);
+        if (!voiceReloaded.CodexVoiceEnabled
+            || voiceReloaded.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Expanded
+            || !voiceReloaded.CodexVoiceAutoListen
+            || voiceReloaded.CodexVoiceCalendarReadEnabled
+            || !ResponseContains(voiceEnabledResponse, "\"codexVoiceEnabled\":true")
+            || !ResponseContains(voiceLayoutResponse, "\"codexVoiceLayoutMode\":\"expanded\"")
+            || !ResponseContains(voiceAutoListenResponse, "\"codexVoiceAutoListen\":true")
+            || !ResponseContains(
+                calendarReadEnabledResponse,
+                "\"codexVoiceCalendarReadEnabled\":true")
+            || !ResponseContains(
+                calendarReadDisabledResponse,
+                "\"codexVoiceCalendarReadEnabled\":false"))
+        {
+            _failures.Add("bridge dispatcher: Voice Lane settings did not persist");
+        }
+
+        if (factoryCallsAfterCalendarEnable != 2
+            || Volatile.Read(ref voiceClientFactoryCalls) != 3)
+        {
+            _failures.Add("bridge dispatcher: Calendar read changes did not restart the Voice runtime");
         }
 
         var calculatorResponse = await dispatcher.ProcessRawMessageAsync(

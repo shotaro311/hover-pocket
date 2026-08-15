@@ -7,6 +7,7 @@ using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Display;
 using HoverPocket.Shell.Interop;
 using HoverPocket.Shell.Providers;
+using HoverPocket.Shell.Providers.CodexVoice;
 using HoverPocket.Shell.Providers.Timer;
 using HoverPocket.Shell.Settings;
 using Microsoft.Win32;
@@ -30,13 +31,16 @@ internal sealed class HoverShellController : IDisposable
     public const double HoverToleranceDips = 4;
 
     private readonly Dispatcher _dispatcher;
+    private readonly HoverPocketApplicationData _applicationData;
     private readonly bool _enablePanelWebView;
     private readonly bool _enableDevTools;
+    private readonly bool _deterministicVerification;
+    private readonly bool _keepPanelOpenForVoiceE2E;
     private readonly PanelBridgeController _panelBridgeController;
     private readonly DisplayLayoutService _displayLayoutService = new();
     private readonly List<AccessSurfaceWindow> _accessSurfaces = [];
     private readonly Dictionary<AccessSurfaceWindow, DisplaySurfaceLayout> _surfaceLayouts = [];
-    private readonly string? _hoverTracePath = NormalizeTracePath();
+    private readonly string? _hoverTracePath;
     private PanelWindow _panel;
     private readonly DispatcherTimer _pollingTimer;
     private readonly DispatcherTimer _closeDelayTimer;
@@ -61,14 +65,22 @@ internal sealed class HoverShellController : IDisposable
         Dispatcher dispatcher,
         ShellSettings settings,
         ProviderRegistry providerRegistry,
+        HoverPocketApplicationData applicationData,
         UserSettingsStore userSettingsStore,
         bool enablePanelWebView,
         bool enableDevTools,
-        Services.UpdaterService? updaterService = null)
+        bool deterministicVerification,
+        Services.UpdaterService? updaterService = null,
+        CodexVoiceE2EReceiptStore? voiceE2EReceipt = null)
     {
         _dispatcher = dispatcher;
+        _applicationData = applicationData;
         _enablePanelWebView = enablePanelWebView;
         _enableDevTools = enableDevTools;
+        _deterministicVerification = deterministicVerification;
+        _keepPanelOpenForVoiceE2E = ShouldKeepPanelOpenForVoiceE2E(applicationData);
+        _hoverTracePath = applicationData.ResolveHoverTracePath(
+            Environment.GetEnvironmentVariable("HOVERPOCKET_HOVER_TRACE"));
         var userSettings = userSettingsStore.Load(providerRegistry.ProviderIds);
         if (settings.DisplayPlacementOverride is { } displayPlacementOverride)
         {
@@ -80,7 +92,9 @@ internal sealed class HoverShellController : IDisposable
             providerRegistry,
             userSettingsStore,
             userSettings,
-            updaterService: updaterService);
+            updaterService: updaterService,
+            applicationData: applicationData,
+            voiceE2EReceipt: voiceE2EReceipt);
         _panelBridgeController.SettingsChanged += OnPanelSettingsChanged;
         _panelBridgeController.SettingsOpenRequested += OnSettingsOpenRequested;
         _panelBridgeController.TimerAlertFired += OnTimerAlertFired;
@@ -105,7 +119,7 @@ internal sealed class HoverShellController : IDisposable
             var pointer = GetPointerPosition();
             var inside = IsPointerInHoverRegion(pointer, out var hoveredLayout);
             TraceHover("close-delay", pointer, inside, hoveredLayout, inside ? "keep-open" : "close");
-            if (!_timerAlertActive && !inside)
+            if (!_keepPanelOpenForVoiceE2E && !_timerAlertActive && !inside)
             {
                 _ = HidePanelAsync();
             }
@@ -140,12 +154,28 @@ internal sealed class HoverShellController : IDisposable
 
     public bool PanelExpectedVisibleForVerify => _panelExpectedVisible;
 
+    internal static bool ShouldKeepPanelOpenForVoiceE2E(
+        HoverPocketApplicationData applicationData)
+    {
+        return applicationData.IsIsolatedVoiceE2E;
+    }
+
+    internal static bool ShouldRunHealthTimer(
+        HoverPocketApplicationData applicationData)
+    {
+        return !applicationData.IsIsolatedVoiceE2E;
+    }
+
     public void Start()
     {
         AttachPanelWindow(_panel);
         ResyncDisplayLayout();
+        _ = _panelBridgeController.StartVoiceRuntimeAsync();
         _pollingTimer.Start();
-        _healthTimer.Start();
+        if (ShouldRunHealthTimer(_applicationData))
+        {
+            _healthTimer.Start();
+        }
     }
 
     public void ShowPanelFromUser()
@@ -166,7 +196,13 @@ internal sealed class HoverShellController : IDisposable
     public async Task ShowPanelForUiVerifyAsync()
     {
         await _panel.EnsureWebViewInitializedAsync();
-        await RunWithPollingPausedForVerifyAsync(() => ShowPanelAsync(ResolveLayoutForPointer(), bypassFullscreenSuppression: true));
+        var deterministicLayout = _layouts.FirstOrDefault(layout => layout.Monitor.IsPrimary)
+            ?? _layouts.FirstOrDefault();
+        await RunWithPollingPausedForVerifyAsync(() => ShowPanelAsync(
+            deterministicLayout,
+            bypassFullscreenSuppression: true));
+        _closeDelayTimer.Stop();
+        _pollingTimer.Stop();
     }
 
     public async Task HidePanelForVerifyAsync()
@@ -189,6 +225,14 @@ internal sealed class HoverShellController : IDisposable
     public void ClearPointerSimulationForVerify()
     {
         _pointerOverrideForVerify = null;
+    }
+
+    public Task PrepareForApplicationShutdownAsync()
+    {
+        _pollingTimer.Stop();
+        _closeDelayTimer.Stop();
+        _healthTimer.Stop();
+        return _panelBridgeController.PrepareForApplicationShutdownAsync();
     }
 
     public Task<ShellHealthReport> RunHealthCheckForVerifyAsync()
@@ -296,6 +340,7 @@ internal sealed class HoverShellController : IDisposable
         }
 
         _panelExpectedVisible = true;
+        await _panelBridgeController.ApplyResolvedVoiceLaneLayoutAsync(layout.VoiceLaneLayout);
 
         if (_closingTask is { IsCompleted: false })
         {
@@ -384,7 +429,10 @@ internal sealed class HoverShellController : IDisposable
             return;
         }
 
-        _settingsWindow = new SettingsWindow(_panelBridgeController, _enableDevTools);
+        _settingsWindow = new SettingsWindow(
+            _panelBridgeController,
+            _applicationData,
+            _enableDevTools);
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         _settingsWindow.Show();
         _settingsWindow.Activate();
@@ -416,6 +464,7 @@ internal sealed class HoverShellController : IDisposable
         if (_panel.IsVisible
             && _closingTask is not { IsCompleted: false }
             && !_closeDelayTimer.IsEnabled
+            && !_keepPanelOpenForVoiceE2E
             && !_timerAlertActive)
         {
             TraceHover("poll", pointer, false, _activeLayout, "start-close-delay");
@@ -492,7 +541,8 @@ internal sealed class HoverShellController : IDisposable
         _layouts = _displayLayoutService.CreateLayouts(
             userSettings.DisplayPlacement,
             userSettings.PanelSize,
-            accessWidth);
+            accessWidth,
+            userSettings.EffectiveVoiceLaneLayout);
         EnsureAccessSurfaceCount(_layouts.Count);
         _surfaceLayouts.Clear();
 
@@ -510,6 +560,8 @@ internal sealed class HoverShellController : IDisposable
             _activeLayout = ResolveLayoutForPointer() ?? _layouts.FirstOrDefault();
             if (_activeLayout is not null)
             {
+                _ = _panelBridgeController.ApplyResolvedVoiceLaneLayoutAsync(
+                    _activeLayout.VoiceLaneLayout);
                 _panel.PrepareCollapsedState();
                 _panel.ApplyPlacement(_activeLayout.PanelCollapsed, show: false);
             }
@@ -521,6 +573,8 @@ internal sealed class HoverShellController : IDisposable
         _activeLayout = ResolveLayoutMatching(previousActiveLayout) ?? _layouts.FirstOrDefault();
         if (_activeLayout is not null)
         {
+            _ = _panelBridgeController.ApplyResolvedVoiceLaneLayoutAsync(
+                _activeLayout.VoiceLaneLayout);
             if (animateVisiblePanel)
             {
                 _ = _panel.ResizeAsync(_activeLayout.PanelTarget);
@@ -579,7 +633,11 @@ internal sealed class HoverShellController : IDisposable
 
     private PanelWindow CreatePanelWindow()
     {
-        return new PanelWindow(_panelBridgeController, _enablePanelWebView, _enableDevTools);
+        return new PanelWindow(
+            _panelBridgeController,
+            _applicationData,
+            _enablePanelWebView,
+            _enableDevTools);
     }
 
     private void AttachPanelWindow(PanelWindow panel)
@@ -656,9 +714,13 @@ internal sealed class HoverShellController : IDisposable
                     expectedVisible: true,
                     layout.AccessSurface.PhysicalRect,
                     checkFrame: true,
-                    requireNoActivate: true))
+                    requireNoActivate: true,
+                    requireToolWindow: true))
             {
-                RepairStyles(accessSurface.Hwnd, requireNoActivate: true);
+                RepairStyles(
+                    accessSurface.Hwnd,
+                    requireNoActivate: true,
+                    requireToolWindow: true);
                 accessSurface.UpdateAppearance(_panelBridgeController.CurrentSettings);
                 accessSurface.ApplyPlacement(layout.AccessSurface, show: true);
                 accessSurface.ShowNoActivate();
@@ -685,9 +747,13 @@ internal sealed class HoverShellController : IDisposable
                     _panelExpectedVisible,
                     expectedPlacement.PhysicalRect,
                     checkFrame: true,
-                    requireNoActivate: !_panel.KeyboardInteractionEnabled))
+                    requireNoActivate: !_panel.KeyboardInteractionEnabled,
+                    requireToolWindow: !_panel.ExposesToAutomation))
             {
-                RepairStyles(_panel.Hwnd, requireNoActivate: !_panel.KeyboardInteractionEnabled);
+                RepairStyles(
+                    _panel.Hwnd,
+                    requireNoActivate: !_panel.KeyboardInteractionEnabled,
+                    requireToolWindow: !_panel.ExposesToAutomation);
                 if (_panelExpectedVisible)
                 {
                     _panel.ApplyPlacement(expectedPlacement, show: true);
@@ -772,16 +838,22 @@ internal sealed class HoverShellController : IDisposable
         bool expectedVisible,
         PhysicalRect expectedFrame,
         bool checkFrame,
-        bool requireNoActivate)
+        bool requireNoActivate,
+        bool requireToolWindow)
     {
         var styles = NativeMethods.GetExtendedStyles(hwnd);
-        var requiredStyles = NativeMethods.WsExToolWindow | NativeMethods.WsExTopmost;
+        var requiredStyles = NativeMethods.WsExTopmost;
+        if (requireToolWindow)
+        {
+            requiredStyles |= NativeMethods.WsExToolWindow;
+        }
         if (requireNoActivate)
         {
             requiredStyles |= NativeMethods.WsExNoActivate;
         }
 
         var styleHealthy = (styles & requiredStyles) == requiredStyles
+            && (requireToolWindow || (styles & NativeMethods.WsExToolWindow) == 0)
             && (requireNoActivate || (styles & NativeMethods.WsExNoActivate) == 0);
         var visibilityHealthy = wpfVisible == expectedVisible
             && NativeMethods.IsWindowShown(hwnd) == expectedVisible;
@@ -791,11 +863,12 @@ internal sealed class HoverShellController : IDisposable
         return !styleHealthy || !visibilityHealthy || !frameHealthy;
     }
 
-    private static void RepairStyles(IntPtr hwnd, bool requireNoActivate)
+    private static void RepairStyles(
+        IntPtr hwnd,
+        bool requireNoActivate,
+        bool requireToolWindow)
     {
-        NativeMethods.AddExtendedStyles(
-            hwnd,
-            NativeMethods.WsExToolWindow | (requireNoActivate ? NativeMethods.WsExNoActivate : 0));
+        NativeMethods.SetToolWindowStyle(hwnd, requireToolWindow);
         NativeMethods.SetNoActivateStyle(hwnd, requireNoActivate);
         NativeMethods.SetTopmostNoActivate(hwnd);
     }
@@ -904,12 +977,6 @@ internal sealed class HoverShellController : IDisposable
         catch (ArgumentException)
         {
         }
-    }
-
-    private static string? NormalizeTracePath()
-    {
-        var path = Environment.GetEnvironmentVariable("HOVERPOCKET_HOVER_TRACE");
-        return string.IsNullOrWhiteSpace(path) ? null : path;
     }
 
     private static string FormatTraceRect(PhysicalRect? rect)
@@ -1133,8 +1200,12 @@ internal sealed class HoverShellController : IDisposable
 
         var panelSizeChanged = _lastAppliedSettings.PanelSize != settings.PanelSize;
         var placementChanged = _lastAppliedSettings.DisplayPlacement != settings.DisplayPlacement;
+        var voiceLaneChanged = _lastAppliedSettings.EffectiveVoiceLaneLayout != settings.EffectiveVoiceLaneLayout;
         _lastAppliedSettings = settings.Clone();
-        ResyncDisplayLayout(animateVisiblePanel: panelSizeChanged && !placementChanged);
+        ResyncDisplayLayout(
+            animateVisiblePanel: (panelSizeChanged || voiceLaneChanged)
+                && !placementChanged
+                && !_deterministicVerification);
     }
 
     private bool IsTopEdgeSuppressed()

@@ -32,9 +32,28 @@ internal sealed class UserSettings
 
     public bool DisableTopEdgeInFullscreen { get; set; } = true;
 
+    // Voice Lane stays completely inert until an explicit future UI or controlled
+    // test path enables it. Merely upgrading an existing settings file never starts
+    // Codex, requests microphone permission, registers a hotkey, or changes geometry.
+    public bool CodexVoiceEnabled { get; set; }
+
+    public VoiceLaneLayoutMode CodexVoiceLayoutMode { get; set; } = VoiceLaneLayoutMode.Compact;
+
+    public bool CodexVoiceAutoListen { get; set; }
+
+    public bool CodexVoiceCalendarReadEnabled { get; set; }
+
     public List<string> ProviderOrder { get; set; } = [];
 
     public Dictionary<string, bool> ProviderVisibility { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public VoiceLaneLayoutState EffectiveVoiceLaneLayout => CodexVoiceEnabled
+        ? CodexVoiceLayoutMode switch
+        {
+            VoiceLaneLayoutMode.Expanded => VoiceLaneLayoutState.Expanded,
+            _ => VoiceLaneLayoutState.Compact
+        }
+        : VoiceLaneLayoutState.Disabled;
 
     public UserSettings Clone()
     {
@@ -55,6 +74,10 @@ internal sealed class UserSettings
             HandleIconStyle = HandleIconStyle,
             ShowTopHandleSideArea = ShowTopHandleSideArea,
             DisableTopEdgeInFullscreen = DisableTopEdgeInFullscreen,
+            CodexVoiceEnabled = CodexVoiceEnabled,
+            CodexVoiceLayoutMode = CodexVoiceLayoutMode,
+            CodexVoiceAutoListen = CodexVoiceAutoListen,
+            CodexVoiceCalendarReadEnabled = CodexVoiceCalendarReadEnabled,
             ProviderOrder = [.. ProviderOrder],
             ProviderVisibility = new Dictionary<string, bool>(ProviderVisibility, StringComparer.OrdinalIgnoreCase)
         };

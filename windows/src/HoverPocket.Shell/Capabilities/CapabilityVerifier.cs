@@ -615,6 +615,8 @@ internal sealed class FakeCalendarCapabilityDataSource : ICalendarCapabilityData
 
     public DateTimeOffset LastListEnd { get; private set; }
 
+    public int ListRequestCount { get; private set; }
+
     public void Seed(CalendarCapabilityEvent item)
     {
         _events[item.EventRef] = item;
@@ -626,6 +628,7 @@ internal sealed class FakeCalendarCapabilityDataSource : ICalendarCapabilityData
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        ListRequestCount++;
         LastListStart = start;
         LastListEnd = end;
         IReadOnlyList<CalendarCapabilityEvent> result = _events.Values
