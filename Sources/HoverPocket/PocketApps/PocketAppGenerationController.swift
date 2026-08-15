@@ -178,9 +178,27 @@ final class PocketAppGenerationController: ObservableObject {
         }
     }
 
+    func enable(packageID: String) {
+        do {
+            try validatePins()
+            let receipt = try lifecycle.enable(packageID: packageID)
+            guard receipt.readbackVerified, receipt.state == .enabled else {
+                throw PocketAppGenerationError.packageInvalid
+            }
+            lastReceipt = receipt
+            phase = .installed
+            errorCode = nil
+            try refreshManagedPackages()
+            try validatePins()
+        } catch {
+            fail(.packageInvalid)
+        }
+    }
+
     func removePreservingData(packageID: String) {
         do {
             try validatePins()
+            try rejectPendingProposalIfNeeded()
             let receipt = try lifecycle.remove(packageID: packageID, dataDisposition: .preserve)
             guard receipt.readbackVerified,
                   receipt.state == .removed,
@@ -331,6 +349,13 @@ final class PocketAppGenerationController: ObservableObject {
 
     private func discardPendingAfterFailedActivation(_ proposal: PocketAppLifecycleProposal) {
         try? lifecycle.reject(requestID: proposal.requestID, bindingDigest: proposal.bindingDigest)
+        pendingProposal = nil
+        pendingAllowsActivation = false
+    }
+
+    private func rejectPendingProposalIfNeeded() throws {
+        guard let proposal = pendingProposal else { return }
+        try lifecycle.reject(requestID: proposal.requestID, bindingDigest: proposal.bindingDigest)
         pendingProposal = nil
         pendingAllowsActivation = false
     }

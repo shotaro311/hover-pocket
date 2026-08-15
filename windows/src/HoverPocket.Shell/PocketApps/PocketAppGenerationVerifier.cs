@@ -98,6 +98,16 @@ internal sealed class PocketAppGenerationVerifier
 
             var disabled = lifecycle.Disable(request.AppId);
             Require(disabled.ReadbackVerified && disabled.State == PocketAppLifecycleState.Disabled, "generation_disable");
+            var enabled = lifecycle.Enable(request.AppId);
+            Require(
+                enabled.ReadbackVerified
+                    && enabled.State == PocketAppLifecycleState.Enabled
+                    && lifecycle.ActivePackage(request.AppId)?.ManifestDigest == enabled.PackageDigest,
+                "generation_enable_readback");
+            var disabledAgain = lifecycle.Disable(request.AppId);
+            Require(
+                disabledAgain.ReadbackVerified && disabledAgain.State == PocketAppLifecycleState.Disabled,
+                "generation_disable_after_enable");
             var packageDataRoot = Path.Combine(dataRoot, request.AppId);
             Directory.CreateDirectory(packageDataRoot);
             var sentinel = Path.Combine(packageDataRoot, "sentinel.txt");

@@ -451,6 +451,51 @@ internal sealed class PocketAppLifecycleManager : IDisposable
             null);
     }
 
+    public PocketAppLifecycleReceipt Enable(string packageId, DateTimeOffset? now = null) =>
+        WithLifecycleLock(() => EnableCore(packageId, now));
+
+    private PocketAppLifecycleReceipt EnableCore(string packageId, DateTimeOffset? now)
+    {
+        var current = ReadActiveRecord(packageId);
+        if (current is null
+            || current.State != PocketAppLifecycleState.Disabled
+            || current.Version is null
+            || current.PackageDigest is null)
+        {
+            throw Failure("LIFECYCLE_PACKAGE_INVALID");
+        }
+        var package = VerifiedInstalledPackage(
+            InstalledPackageDirectory(packageId, current.Version, current.PackageDigest));
+        if (package.Manifest.Id != packageId
+            || package.Manifest.Version != current.Version
+            || package.ManifestDigest != current.PackageDigest
+            || !current.Permissions.SequenceEqual(Permissions(package).Order(StringComparer.Ordinal), StringComparer.Ordinal)
+            || current.StateSchemaDigest != package.StateSchemaDigest
+            || !current.StatePropertyNames.SequenceEqual(package.StatePropertyNames.Order(StringComparer.Ordinal), StringComparer.Ordinal))
+        {
+            throw Failure("LIFECYCLE_CORRUPT_VERSION");
+        }
+        ValidateHostCompatibility(package);
+        var enabled = current with { State = PocketAppLifecycleState.Enabled, UpdatedAt = now ?? DateTimeOffset.UtcNow };
+        WriteAndVerify(enabled);
+        var observed = ReadActiveRecord(packageId);
+        if (observed is null
+            || observed.State != PocketAppLifecycleState.Enabled
+            || observed.Version != enabled.Version
+            || observed.PackageDigest != enabled.PackageDigest)
+        {
+            throw Failure("LIFECYCLE_READBACK_FAILED");
+        }
+        return new PocketAppLifecycleReceipt(
+            "enable",
+            packageId,
+            enabled.Version,
+            enabled.PackageDigest,
+            PocketAppLifecycleState.Enabled,
+            true,
+            null);
+    }
+
     public PocketAppLifecycleReceipt Remove(
         string packageId,
         PocketAppDataDisposition dataDisposition,

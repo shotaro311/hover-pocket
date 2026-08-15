@@ -459,6 +459,50 @@ final class PocketAppLifecycleManager {
         )
     }
 
+    func enable(packageID: String, now: Date = Date()) throws -> PocketAppLifecycleReceipt {
+        guard let current = try readActiveRecord(packageID: packageID),
+              current.state == .disabled,
+              let version = current.version,
+              let digest = current.packageDigest else {
+            throw PocketAppLifecycleError.invalidPackage
+        }
+        let package = try verifiedInstalledPackage(
+            at: installedPackageDirectory(packageID: packageID, version: version, digest: digest)
+        )
+        guard package.manifest.id == packageID,
+              package.manifest.version == version,
+              package.manifestDigest == digest,
+              current.permissions == permissions(package).sorted(),
+              current.stateSchemaDigest == package.stateSchemaDigest,
+              current.statePropertyNames == package.statePropertyNames.sorted() else {
+            throw PocketAppLifecycleError.corruptVersion
+        }
+        try validateHostCompatibility(package)
+        let enabled = ActiveRecord(
+            packageID: packageID,
+            version: version,
+            packageDigest: digest,
+            permissions: current.permissions,
+            stateSchemaDigest: current.stateSchemaDigest,
+            statePropertyNames: current.statePropertyNames,
+            state: .enabled,
+            updatedAt: now
+        )
+        try writeAndVerify(record: enabled)
+        guard try activePackage(packageID: packageID)?.manifestDigest == digest else {
+            throw PocketAppLifecycleError.readbackFailed
+        }
+        return PocketAppLifecycleReceipt(
+            action: "enable",
+            packageID: packageID,
+            version: version,
+            packageDigest: digest,
+            state: .enabled,
+            readbackVerified: true,
+            dataDisposition: nil
+        )
+    }
+
     func remove(
         packageID: String,
         dataDisposition: PocketAppDataDisposition,

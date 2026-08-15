@@ -91,6 +91,21 @@ enum PocketAppGenerationVerification {
 
             let disabled = try lifecycle.disable(packageID: request.appID)
             require(disabled.readbackVerified && disabled.state == .disabled, "generation_disable", failures: &failures)
+            let enabled = try lifecycle.enable(packageID: request.appID)
+            let enabledPackage = try lifecycle.activePackage(packageID: request.appID)
+            require(
+                enabled.readbackVerified
+                    && enabled.state == .enabled
+                    && enabledPackage?.manifestDigest == enabled.packageDigest,
+                "generation_enable_readback",
+                failures: &failures
+            )
+            let disabledAgain = try lifecycle.disable(packageID: request.appID)
+            require(
+                disabledAgain.readbackVerified && disabledAgain.state == .disabled,
+                "generation_disable_after_enable",
+                failures: &failures
+            )
             let packageDataRoot = dataRoot.appendingPathComponent(request.appID, isDirectory: true)
             try FileManager.default.createDirectory(at: packageDataRoot, withIntermediateDirectories: true)
             let sentinel = packageDataRoot.appendingPathComponent("sentinel.txt")

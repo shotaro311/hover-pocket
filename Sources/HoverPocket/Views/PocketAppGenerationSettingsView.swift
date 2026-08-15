@@ -190,6 +190,10 @@ struct PocketAppGenerationSettingsView: View {
                     Button(localized(japanese: "無効化", english: "Disable")) {
                         controller.disable(packageID: package.packageID)
                     }
+                } else if package.state == .disabled {
+                    Button(localized(japanese: "有効化", english: "Enable")) {
+                        controller.enable(packageID: package.packageID)
+                    }
                 }
                 Menu(localized(japanese: "ロールバック", english: "Rollback")) {
                     ForEach(rollbackVersions, id: \.self) { version in

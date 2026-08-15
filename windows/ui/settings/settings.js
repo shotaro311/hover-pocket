@@ -268,6 +268,12 @@ function renderPocketGeneration(generation, language) {
       disableButton.textContent = language === "en" ? "Disable" : "無効化";
       disableButton.addEventListener("click", () => runGenerationAction("pocketApps.disable", { appId: app.appId }));
       actions.append(disableButton);
+    } else if (app.state === "disabled") {
+      const enableButton = document.createElement("button");
+      enableButton.type = "button";
+      enableButton.textContent = language === "en" ? "Enable" : "有効化";
+      enableButton.addEventListener("click", () => runGenerationAction("pocketApps.enable", { appId: app.appId }));
+      actions.append(enableButton);
     }
 
     for (const rollbackVersion of app.rollbackVersions ?? []) {
