@@ -1,0 +1,45 @@
+{
+  "$schema": "hoverpocket://schemas/execution-plan/v1",
+  "planId": "plan-strong-per-call-batched",
+  "planVersion": 1,
+  "createdAt": "2026-08-15T00:00:00Z",
+  "origin": "text",
+  "principal": {
+    "userId": "user-fixture",
+    "agentSessionId": "session-root-a"
+  },
+  "steps": [
+    {
+      "stepId": "deleteNote",
+      "capabilityId": "sticky.note.delete",
+      "capabilityVersion": 1,
+      "arguments": {
+        "noteId": "44444444-4444-4444-8444-444444444444"
+      },
+      "idempotencyKey": "idem-sticky-delete-0001",
+      "dependsOn": []
+    },
+    {
+      "stepId": "readNote",
+      "capabilityId": "sticky.note.status",
+      "capabilityVersion": 1,
+      "arguments": {
+        "noteId": "44444444-4444-4444-8444-444444444444"
+      },
+      "idempotencyKey": "idem-sticky-status-0002",
+      "dependsOn": [
+        "deleteNote"
+      ]
+    }
+  ],
+  "approval": {
+    "mode": "per_step",
+    "group": "step",
+    "exactArgumentsRequired": true
+  },
+  "requiredPermissions": [
+    "sticky.delete",
+    "sticky.read"
+  ],
+  "canonicalDigest": "sha256:9c14e25b4754e9cf41cdce6cbe15ab8a3686b09c1921ed361eb8b1aeff800518"
+}

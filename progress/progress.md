@@ -2,8 +2,16 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pro-pending; capability-expansion-sticky-lifecycle-merged
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pro-pending; capability-expansion-strong-approval-pr-ready
 ---
+
+## 2026-08-15 AI-native Strong Approval Isolation
+
+- Sticky Notes lifecycle統合後のexact `main` `56607cf`からbranch `codex/ai-native-strong-approval`を作成し、`strong_per_call` Capabilityを1計画1stepだけに限定した。状態確認などの低リスク操作と削除を同じ承認へ混在させるplanは、承認要求を作る前にmacOS / WindowsのBrokerが拒否し、実行時にも同じplanを再検証する。
+- 共通contract verifierにも同じ規則とnegative fixtureを追加し、12 schema / 57 fixtureへ更新した。途中レビューでHost-native planだけPocket App scope検査を省く過度な一般化を検出したため撤回し、requested Capability、range、namespaceの既存検査を緩めずに`strong_per_call`を先に拒否する形へ固定した。
+- ローカルではSwift warnings-as-errors build、Broker 15 descriptor / 14 handler・negative 11件、Capability、Timer、Clipboard、2回の決定論的contract report、`git diff --check`が成功した。単独の`sticky.note.delete@1`は既存どおり承認、実行、missing readbackまで成功し、複数step planだけを拒否する。
+- 最終source range `56607cf...bcbf7b0`のCodex Security diff scan `c0238875-7481-4226-8a22-eccdb874226d`は変更source 5 / 5とfixture 2件を確認し、coverage complete、reportable finding 0件でsealed complete。旧head `67fee14`のscan `965505c2-53d2-4fd4-8b2e-59dcf8f40abd`で見つけたCI verifier限定のscope検査低下はproduction到達性なしとしてsuppressedし、後続`bcbf7b0`で撤回済みである。
+- Ready PR [#12](https://github.com/shotaro311/hover-pocket/pull/12)のsource head `bcbf7b0`で、Windows [31856092749](https://github.com/shotaro311/hover-pocket/actions/runs/31856092749)、macOS [31856092697](https://github.com/shotaro311/hover-pocket/actions/runs/31856092697)、Pocket contract [31856092742](https://github.com/shotaro311/hover-pocket/actions/runs/31856092742)、PR Router [31856092669](https://github.com/shotaro311/hover-pocket/actions/runs/31856092669)が成功した。3 OS contract reportもbyte一致した。進捗文書追加後の最終head CIとreview thread解決、merge / main readbackが残る。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-strong-approval.md`。
 
 ## 2026-08-15 AI-native Sticky Notes Lifecycle Capability
 
