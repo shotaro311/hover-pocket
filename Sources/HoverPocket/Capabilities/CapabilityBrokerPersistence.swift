@@ -185,6 +185,10 @@ final class CapabilityApprovalStore {
         pending[requestID]?.request
     }
 
+    func discardPending(requestID: String) {
+        pending.removeValue(forKey: requestID)
+    }
+
     func request(
         for plan: CapabilityExecutionPlan,
         digest: String,

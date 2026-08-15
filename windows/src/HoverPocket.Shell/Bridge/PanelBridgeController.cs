@@ -76,7 +76,8 @@ internal sealed class PanelBridgeController : IDisposable
                 _capabilityBroker = new CapabilityBroker(
                     new CapabilityRegistry(_capabilityHandlers),
                     new CapabilityBrokerLedger(brokerRoot),
-                    new CapabilityBrokerAuditLog(brokerRoot));
+                    new CapabilityBrokerAuditLog(brokerRoot),
+                    approvalPresentationResolver: new HostCapabilityApprovalPresentationResolver(stickyStore));
                 _todayFocusTextAdapter = new TodayFocusTextAdapter(_capabilityBroker);
             }
             catch (CapabilityBrokerException)
