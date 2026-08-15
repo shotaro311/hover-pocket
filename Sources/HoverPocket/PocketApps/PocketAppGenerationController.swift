@@ -171,7 +171,7 @@ final class PocketAppGenerationController: ObservableObject {
             }
             recordCommittedReceipt(
                 receipt,
-                phase: pendingProposal == nil ? .disabled : .awaitingApproval,
+                phase: .disabled,
                 clearPending: false
             )
             postCommitHook?()
@@ -191,7 +191,7 @@ final class PocketAppGenerationController: ObservableObject {
             }
             recordCommittedReceipt(
                 receipt,
-                phase: pendingProposal == nil ? .installed : .awaitingApproval,
+                phase: .installed,
                 clearPending: false
             )
             postCommitHook?()
@@ -214,7 +214,7 @@ final class PocketAppGenerationController: ObservableObject {
             }
             recordCommittedReceipt(
                 receipt,
-                phase: pendingProposal == nil ? .removed : .awaitingApproval,
+                phase: .removed,
                 clearPending: false
             )
             postCommitHook?()
@@ -382,7 +382,7 @@ final class PocketAppGenerationController: ObservableObject {
         }
         lastReceipt = receipt
         errorCode = nil
-        phase = committedPhase
+        phase = !clearPending && pendingProposal != nil ? .awaitingApproval : committedPhase
         if receipt.state == .removed {
             managedPackages.removeAll { $0.packageID == receipt.packageID }
             return
