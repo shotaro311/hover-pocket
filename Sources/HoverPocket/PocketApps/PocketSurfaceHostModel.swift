@@ -307,8 +307,8 @@ final class PocketSurfaceHostModel: ObservableObject {
             case PocketCapabilityKeys.stickyUpsert:
                 let title = string(step.arguments["title"]) ?? "今日の目的"
                 let body = string(step.arguments["body"]) ?? "今日の目的"
-                let stableKey = string(step.arguments["stableKey"]) ?? "対象未指定"
-                lines.append("Sticky Notes「\(title)」（\(stableKey)）へ「\(body)」を保存")
+                let stableKey = string(step.arguments["stableKey"]).flatMap { try? PocketStableKey.validate($0) }
+                lines.append("Sticky Notes「\(title)」（\(stableKey ?? "対象未指定")）へ「\(body)」を保存")
             default:
                 lines.append(step.capability.id)
             }

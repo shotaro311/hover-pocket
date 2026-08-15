@@ -51,6 +51,7 @@ internal sealed record PocketAppPackage(
     PocketAppManifestDocument Manifest,
     string ManifestDigest,
     string Intent,
+    string StateSchemaDigest,
     IReadOnlySet<string> StatePropertyNames,
     IReadOnlyDictionary<string, PocketSurfaceDocument> Surfaces,
     IReadOnlyDictionary<string, PocketAppWorkflowDocument> Workflows,
@@ -91,11 +92,17 @@ internal sealed class PocketAppPackageRuntime
 
     public PocketAppPackage Load(string directory)
     {
-        var root = Path.GetFullPath(directory);
-        var rootInfo = new DirectoryInfo(root);
-        Require(rootInfo.Exists && !rootInfo.Attributes.HasFlag(FileAttributes.ReparsePoint), "$:package_root");
-        var inventory = Inventory(root);
-        var manifestData = Read("manifest.json", root, inventory);
+        return Load(PocketAppFileSnapshot.Capture(directory));
+    }
+
+    public PocketAppPackage Load(PocketAppFileSnapshot snapshot)
+    {
+        var root = snapshot.RootDirectory;
+        var packageFiles = snapshot.Files;
+        if (!packageFiles.TryGetValue("manifest.json", out var manifestData))
+        {
+            throw new PocketAppPackageRuntimeException("$:package_files");
+        }
         var manifestElement = ReadObject(manifestData, "$.manifest");
         var manifest = ParseManifest(manifestElement);
 
@@ -108,19 +115,12 @@ internal sealed class PocketAppPackageRuntime
         expectedFiles.UnionWith(manifest.Surfaces.Values);
         expectedFiles.UnionWith(manifest.Workflows.Values);
         expectedFiles.UnionWith(manifest.Tests);
-        Require(expectedFiles.SetEquals(inventory.Keys), "$:package_files");
-        var packageFiles = new Dictionary<string, byte[]>(StringComparer.Ordinal)
-        {
-            ["manifest.json"] = manifestData
-        };
-        foreach (var path in expectedFiles.OrderBy(path => path, StringComparer.Ordinal).Where(path => path != "manifest.json"))
-        {
-            packageFiles.Add(path, Read(path, root, inventory));
-        }
+        Require(expectedFiles.SetEquals(packageFiles.Keys), "$:package_files");
         var manifestDigest = PackageDigest(packageFiles);
 
         var intent = Encoding.UTF8.GetString(packageFiles[manifest.IntentPath]);
         Require(!string.IsNullOrWhiteSpace(intent) && intent.EnumerateRunes().Count() <= 20_000, "$.intent");
+        var stateSchemaDigest = "sha256:" + Convert.ToHexString(SHA256.HashData(packageFiles[manifest.StateSchemaPath])).ToLowerInvariant();
         var statePropertyNames = ValidateStateSchema(ReadObject(packageFiles[manifest.StateSchemaPath], "$.state.schema"));
 
         var requestedScopes = manifest.RequestedCapabilities.ToDictionary(item => item.Key, item => item.Scope);
@@ -170,6 +170,7 @@ internal sealed class PocketAppPackageRuntime
             manifest,
             manifestDigest,
             intent,
+            stateSchemaDigest,
             statePropertyNames,
             surfaces,
             workflows,
@@ -514,7 +515,19 @@ internal sealed class PocketAppPackageRuntime
             Require(arguments.TryGetValue("stableKey", out var value) && value.ValueKind == JsonValueKind.String, $"{path}.stableKey:scope");
             var stableKey = value.GetString() ?? string.Empty;
             var contextBinding = expectedNamespace == "today-focus" && stableKey == "$context.todayFocusStableKey";
-            Require(stableKey.StartsWith(expectedNamespace + ":", StringComparison.Ordinal) || contextBinding, $"{path}.stableKey:scope");
+            var literalBinding = false;
+            if (!stableKey.StartsWith('$'))
+            {
+                try
+                {
+                    literalBinding = PocketStableKey.Namespace(stableKey) == expectedNamespace;
+                }
+                catch (CapabilityBrokerException)
+                {
+                    literalBinding = false;
+                }
+            }
+            Require(literalBinding || contextBinding, $"{path}.stableKey:scope");
         }
         _ = key;
     }

@@ -316,7 +316,7 @@ internal sealed class CapabilityVerifier
             await blockedHandler.HandleAsync(
                 Json(new
                 {
-                    stableKey = "blocked",
+                    stableKey = "verify:blocked",
                     title = "Blocked",
                     body = "Must not remain in memory",
                     color = "yellow"

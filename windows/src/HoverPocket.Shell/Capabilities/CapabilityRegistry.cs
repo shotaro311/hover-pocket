@@ -463,7 +463,7 @@ internal static partial class CapabilitySchemaValidation
     public static void StickyUpsertInput(JsonElement value)
     {
         ExactKeys(value, ["stableKey", "title", "body", "color"]);
-        _ = String(value, "stableKey", 1, 160);
+        _ = PocketStableKey.Validate(String(value, "stableKey", 1, PocketStableKey.MaximumScalars));
         _ = String(value, "title", 0, 120);
         _ = String(value, "body", 0, 10_000);
         _ = String(value, "color", 1, 16, new HashSet<string>(["yellow", "blue", "green", "pink", "gray"], StringComparer.Ordinal));

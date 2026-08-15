@@ -280,7 +280,7 @@ final class PocketAppExecutionRuntime {
         }
         if case .string(let namespace)? = scope["namespace"] {
             guard case .string(let stableKey)? = arguments["stableKey"],
-                  stableKey.hasPrefix("\(namespace):") else {
+                  try PocketStableKey.namespace(stableKey) == namespace else {
                 throw CapabilityBrokerError.invalidPlan("pocket_scope_namespace")
             }
         }

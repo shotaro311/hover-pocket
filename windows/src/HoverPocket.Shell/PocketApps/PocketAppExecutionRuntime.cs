@@ -296,10 +296,10 @@ internal sealed class PocketAppExecutionRuntime
         }
         if (scope.TryGetProperty("namespace", out var namespaceElement))
         {
-            var expected = (namespaceElement.GetString() ?? string.Empty) + ":";
+            var expected = namespaceElement.GetString() ?? string.Empty;
             if (!arguments.TryGetProperty("stableKey", out var stableKey)
                 || stableKey.ValueKind != JsonValueKind.String
-                || !(stableKey.GetString() ?? string.Empty).StartsWith(expected, StringComparison.Ordinal))
+                || PocketStableKey.Namespace(stableKey.GetString() ?? string.Empty) != expected)
             {
                 throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "pocket_scope_namespace");
             }

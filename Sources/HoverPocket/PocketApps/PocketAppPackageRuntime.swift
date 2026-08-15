@@ -56,6 +56,7 @@ struct PocketAppPackage: Equatable, Sendable {
     let manifest: PocketAppManifestDocument
     let manifestDigest: String
     let intent: String
+    let stateSchemaDigest: String
     let statePropertyNames: Set<String>
     let surfaces: [String: PocketSurfaceDocument]
     let workflows: [String: PocketAppWorkflowDocument]
@@ -74,11 +75,15 @@ struct PocketAppPackageRuntime {
     }
 
     func load(directory: URL) throws -> PocketAppPackage {
-        let root = directory.standardizedFileURL
-        let values = try root.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-        try require(values.isDirectory == true && values.isSymbolicLink != true, "$:package_root")
-        let actualFiles = try inventory(root: root)
-        let manifestData = try read(relativePath: "manifest.json", root: root, inventory: actualFiles)
+        try load(snapshot: PocketAppFileSnapshot.capture(directory: directory))
+    }
+
+    func load(snapshot: PocketAppFileSnapshot) throws -> PocketAppPackage {
+        let root = snapshot.rootDirectory
+        let packageFiles = snapshot.files
+        guard let manifestData = packageFiles["manifest.json"] else {
+            throw PocketAppPackageError.invalid("$:package_files")
+        }
         let manifestObject = try jsonObject(manifestData, path: "$.manifest")
         let manifest = try parseManifest(manifestObject)
 
@@ -86,11 +91,7 @@ struct PocketAppPackageRuntime {
         expectedFiles.formUnion(manifest.surfaces.values)
         expectedFiles.formUnion(manifest.workflows.values)
         expectedFiles.formUnion(manifest.tests)
-        try require(Set(actualFiles.keys) == expectedFiles, "$:package_files")
-        var packageFiles: [String: Data] = ["manifest.json": manifestData]
-        for path in expectedFiles.sorted() where path != "manifest.json" {
-            packageFiles[path] = try read(relativePath: path, root: root, inventory: actualFiles)
-        }
+        try require(Set(packageFiles.keys) == expectedFiles, "$:package_files")
         let manifestDigest = packageDigest(packageFiles)
 
         let intentData = try packageData(manifest.intentPath, files: packageFiles)
@@ -101,6 +102,7 @@ struct PocketAppPackageRuntime {
         }
 
         let stateData = try packageData(manifest.stateSchemaPath, files: packageFiles)
+        let stateSchemaDigest = "sha256:" + SHA256.hash(data: stateData).map { String(format: "%02x", $0) }.joined()
         let statePropertyNames = try validateStateSchema(jsonObject(stateData, path: "$.state.schema"))
 
         let requestedScopes = Dictionary(
@@ -161,6 +163,7 @@ struct PocketAppPackageRuntime {
             manifest: manifest,
             manifestDigest: manifestDigest,
             intent: intent,
+            stateSchemaDigest: stateSchemaDigest,
             statePropertyNames: statePropertyNames,
             surfaces: surfaces,
             workflows: workflows,
@@ -474,7 +477,9 @@ struct PocketAppPackageRuntime {
                 throw PocketAppPackageError.invalid("\(path).stableKey:scope")
             }
             let contextBinding = namespace == "today-focus" && stableKey == "$context.todayFocusStableKey"
-            try require(stableKey.hasPrefix("\(namespace):") || contextBinding, "\(path).stableKey:scope")
+            let literalBinding = !stableKey.hasPrefix("$")
+                && (try? PocketStableKey.namespace(stableKey)) == namespace
+            try require(literalBinding || contextBinding, "\(path).stableKey:scope")
         }
         _ = key
     }
