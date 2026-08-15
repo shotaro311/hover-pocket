@@ -510,6 +510,12 @@ final class HoverWindowController {
     }
 
     private func scheduleClose() {
+        // The isolated DEBUG Voice E2E harness is driven through accessibility.
+        // That interaction does not keep the physical pointer inside the hover
+        // region, so an automatic close would invalidate the explicit mic arm
+        // before WebKit requests permission. Explicit close/quit paths remain
+        // available, and Release builds cannot enable the isolated data root.
+        guard !HoverPocketApplicationData.usesIsolatedE2ERoot() else { return }
         closeTask?.cancel()
         let task = DispatchWorkItem { [weak self] in
             guard let self else { return }
