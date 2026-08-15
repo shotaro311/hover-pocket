@@ -200,10 +200,11 @@ final class PocketAppLifecycleManager {
                 throw PocketAppLifecycleError.downgradeRequiresRollback
             }
             let targetPermissions = permissions(package)
-            let currentPermissions = currentPackage.map(permissions) ?? Set<String>()
+            let currentEffectivePackage = current?.state == .enabled ? currentPackage : nil
+            let currentPermissions = currentEffectivePackage.map(permissions) ?? Set<String>()
             let diff = permissionDiff(from: currentPermissions, to: targetPermissions)
             let grantDiff = capabilityGrantDiff(
-                from: try currentPackage.map(capabilityGrants) ?? Set<String>(),
+                from: try currentEffectivePackage.map(capabilityGrants) ?? Set<String>(),
                 to: try capabilityGrants(package)
             )
             let currentDigest = current.flatMap { $0.state == .removed ? nil : $0.packageDigest }
@@ -329,9 +330,13 @@ final class PocketAppLifecycleManager {
         try validateMigration(package: targetPackage, current: current)
         let previews = try makePreviews(targetPackage)
         let previewDigest = Self.previewDigest(previews)
-        let diff = permissionDiff(from: permissions(currentPackage), to: permissions(targetPackage))
+        let currentEffectivePackage = current.state == .enabled ? currentPackage : nil
+        let diff = permissionDiff(
+            from: currentEffectivePackage.map(permissions) ?? Set<String>(),
+            to: permissions(targetPackage)
+        )
         let grantDiff = capabilityGrantDiff(
-            from: try capabilityGrants(currentPackage),
+            from: try currentEffectivePackage.map(capabilityGrants) ?? Set<String>(),
             to: try capabilityGrants(targetPackage)
         )
         let binding = Self.approvalBindingDigest(
@@ -531,10 +536,11 @@ final class PocketAppLifecycleManager {
         }
         try validateMigration(package: package, current: current)
         let currentPackage = try verifiedCurrentPackage(record: current)
-        let currentPermissions = currentPackage.map(permissions) ?? Set<String>()
+        let currentEffectivePackage = current?.state == .enabled ? currentPackage : nil
+        let currentPermissions = currentEffectivePackage.map(permissions) ?? Set<String>()
         let observedDiff = permissionDiff(from: currentPermissions, to: permissions(package))
         let observedGrantDiff = capabilityGrantDiff(
-            from: try currentPackage.map(capabilityGrants) ?? Set<String>(),
+            from: try currentEffectivePackage.map(capabilityGrants) ?? Set<String>(),
             to: try capabilityGrants(package)
         )
         guard observedDiff == proposal.permissionDiff,

@@ -643,6 +643,16 @@ enum PocketAppPackageVerificationCommand {
                     "lifecycle_disabled_state_preserved",
                     failures: &failures
                 )
+                let disabledUpdate = try manager.stage(draftDirectory: draftRoot, now: now.addingTimeInterval(3))
+                require(
+                    disabledUpdate.permissionDiff.added.count == 5
+                        && disabledUpdate.permissionDiff.removed.isEmpty
+                        && disabledUpdate.capabilityGrantDiff.added.count == 5
+                        && disabledUpdate.capabilityGrantDiff.removed.isEmpty,
+                    "lifecycle_disabled_update_restores_grants_only_with_approval",
+                    failures: &failures
+                )
+                try manager.reject(requestID: disabledUpdate.requestID, bindingDigest: disabledUpdate.bindingDigest)
 
                 try mutateJSON(draftRoot.appendingPathComponent("manifest.json")) { manifest in
                     manifest["version"] = "1.0.0"

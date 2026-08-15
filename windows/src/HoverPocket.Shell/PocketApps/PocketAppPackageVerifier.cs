@@ -564,6 +564,14 @@ internal sealed class PocketAppPackageVerifier
                 {
                 }
                 Require(manager.ActivePackage(initial.PackageId) is null, "lifecycle_disabled_state_preserved");
+                var disabledUpdate = manager.Stage(draftRoot, now.AddSeconds(3));
+                Require(
+                    disabledUpdate.PermissionDiff.Added.Count == 5
+                    && disabledUpdate.PermissionDiff.Removed.Count == 0
+                    && disabledUpdate.CapabilityGrantDiff.Added.Count == 5
+                    && disabledUpdate.CapabilityGrantDiff.Removed.Count == 0,
+                    "lifecycle_disabled_update_restores_grants_only_with_approval");
+                manager.Reject(disabledUpdate.RequestId, disabledUpdate.BindingDigest);
 
                 MutateJson(Path.Combine(draftRoot, "manifest.json"), manifest => manifest["version"] = "1.0.0");
                 var absentManager = new PocketAppLifecycleManager(absentRoot, absentDataRoot);

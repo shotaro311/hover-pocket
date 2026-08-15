@@ -178,12 +178,15 @@ internal sealed class PocketAppLifecycleManager
                 throw Failure("LIFECYCLE_DOWNGRADE_REQUIRES_ROLLBACK");
             }
             var targetPermissions = Permissions(package);
-            var currentPermissions = currentPackage is null
+            var currentEffectivePackage = current?.State == PocketAppLifecycleState.Enabled ? currentPackage : null;
+            var currentPermissions = currentEffectivePackage is null
                 ? new HashSet<string>(StringComparer.Ordinal)
-                : Permissions(currentPackage);
+                : Permissions(currentEffectivePackage);
             var diff = PermissionDiff(currentPermissions, targetPermissions);
             var grantDiff = EffectiveGrantDiff(
-                currentPackage is null ? new HashSet<string>(StringComparer.Ordinal) : CapabilityGrants(currentPackage),
+                currentEffectivePackage is null
+                    ? new HashSet<string>(StringComparer.Ordinal)
+                    : CapabilityGrants(currentEffectivePackage),
                 CapabilityGrants(package));
             var currentDigest = current is null || current.State == PocketAppLifecycleState.Removed
                 ? null
@@ -338,10 +341,17 @@ internal sealed class PocketAppLifecycleManager
         ValidateMigration(targetPackage, current);
         var previews = MakePreviews(targetPackage);
         var previewDigest = PreviewDigest(previews);
+        var currentEffectivePackage = current.State == PocketAppLifecycleState.Enabled ? currentPackage : null;
         var diff = PermissionDiff(
-            Permissions(currentPackage),
+            currentEffectivePackage is null
+                ? new HashSet<string>(StringComparer.Ordinal)
+                : Permissions(currentEffectivePackage),
             Permissions(targetPackage));
-        var grantDiff = EffectiveGrantDiff(CapabilityGrants(currentPackage), CapabilityGrants(targetPackage));
+        var grantDiff = EffectiveGrantDiff(
+            currentEffectivePackage is null
+                ? new HashSet<string>(StringComparer.Ordinal)
+                : CapabilityGrants(currentEffectivePackage),
+            CapabilityGrants(targetPackage));
         var binding = ApprovalBindingDigest(
             PocketAppLifecycleAction.Rollback,
             packageId,
@@ -567,12 +577,15 @@ internal sealed class PocketAppLifecycleManager
         }
         ValidateMigration(package, current);
         var currentPackage = VerifiedCurrentPackage(current);
-        var currentPermissions = currentPackage is null
+        var currentEffectivePackage = current?.State == PocketAppLifecycleState.Enabled ? currentPackage : null;
+        var currentPermissions = currentEffectivePackage is null
             ? new HashSet<string>(StringComparer.Ordinal)
-            : Permissions(currentPackage);
+            : Permissions(currentEffectivePackage);
         var observedDiff = PermissionDiff(currentPermissions, Permissions(package));
         var observedGrantDiff = EffectiveGrantDiff(
-            currentPackage is null ? new HashSet<string>(StringComparer.Ordinal) : CapabilityGrants(currentPackage),
+            currentEffectivePackage is null
+                ? new HashSet<string>(StringComparer.Ordinal)
+                : CapabilityGrants(currentEffectivePackage),
             CapabilityGrants(package));
         if (!PermissionDiffEquals(observedDiff, proposal.PermissionDiff)
             || !CapabilityGrantDiffEquals(observedGrantDiff, proposal.CapabilityGrantDiff)
