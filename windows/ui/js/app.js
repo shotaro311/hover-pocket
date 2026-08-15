@@ -6,7 +6,11 @@ import { renderClipboardProvider, runClipboardUiVerify } from "../providers/clip
 import { renderControlsProvider } from "../providers/controls/controls.js";
 import { renderStickyProvider } from "../providers/sticky/sticky.js";
 import { renderTimerProvider } from "../providers/timer/timer.js";
-import { handleVoicePanelClosed, renderVoiceLane } from "../voice/voice-lane.js";
+import {
+  handleVoicePanelClosed,
+  handleVoiceRuntimeReset,
+  renderVoiceLane,
+} from "../voice/voice-lane.js";
 
 const providerRenderers = {
   controls: renderControlsProvider,
@@ -46,6 +50,10 @@ on("panel.opened", (state) => {
 
 on("panel.closed", () => {
   handleVoicePanelClosed(request);
+});
+
+on("codexVoice.runtimeReset", () => {
+  handleVoiceRuntimeReset(request);
 });
 
 bootstrap();
@@ -600,6 +608,7 @@ window.__hoverPocketVerify = {
     const probePanelSize = originalPanelSize === "small" ? "medium" : "small";
     window.__hoverPocketVerifyStep = "resize-probe";
     const resizedState = await request("settings.setPanelSize", { panelSize: probePanelSize });
+    window.__hoverPocketVerifyStep = "resize-restore";
     await request("settings.setPanelSize", { panelSize: originalPanelSize });
     window.__hoverPocketVerifyStep = "complete";
 

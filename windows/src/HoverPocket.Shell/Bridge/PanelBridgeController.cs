@@ -764,9 +764,34 @@ internal sealed class PanelBridgeController : IDisposable
         var enabled = ReadRequiredBool(parameters, "enabled");
         if (CurrentSettings.CodexVoiceCalendarReadEnabled != enabled)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            var voiceRuntimeEnabled = CurrentSettings.CodexVoiceEnabled;
             var updated = CurrentSettings.Clone();
             updated.CodexVoiceCalendarReadEnabled = enabled;
-            SaveSettings(updated);
+            SaveSettings(updated, restoreVoiceAuthorization: !voiceRuntimeEnabled);
+
+            if (voiceRuntimeEnabled)
+            {
+                var refreshed = false;
+                try
+                {
+                    await PostEventAsync(
+                        "codexVoice.runtimeReset",
+                        new { reason = "calendarReadPermissionChanged" });
+                    _voiceE2EReceipt?.RecordMediaEvent(CodexVoiceMediaEventKind.SafeClose);
+                    await _codexVoiceRuntime.SetEnabledAsync(false, CancellationToken.None);
+                    await _codexVoiceRuntime.SetEnabledAsync(true, CancellationToken.None);
+                    refreshed = true;
+                }
+                finally
+                {
+                    InvalidateCodexVoiceAuthorization(
+                        refreshed
+                        && _panelOpen
+                        && CurrentSettings.AiNativeEnabled
+                        && CurrentSettings.CodexVoiceEnabled);
+                }
+            }
         }
 
         return await PublishStateAsync(cancellationToken);
@@ -1085,7 +1110,9 @@ internal sealed class PanelBridgeController : IDisposable
         await PostEventAsync("state.changed", BuildState());
     }
 
-    private void SaveSettings(UserSettings settings)
+    private void SaveSettings(
+        UserSettings settings,
+        bool restoreVoiceAuthorization = true)
     {
         var normalized = UserSettingsStore.Normalize(settings, _providerRegistry.ProviderIds);
         var authorizationChanged = normalized.AiNativeEnabled != CurrentSettings.AiNativeEnabled
@@ -1102,7 +1129,8 @@ internal sealed class PanelBridgeController : IDisposable
         {
             Volatile.Write(
                 ref _codexVoiceAuthorizationAllowed,
-                !_disposed
+                restoreVoiceAuthorization
+                    && !_disposed
                     && _panelOpen
                     && CurrentSettings.AiNativeEnabled
                     && CurrentSettings.CodexVoiceEnabled

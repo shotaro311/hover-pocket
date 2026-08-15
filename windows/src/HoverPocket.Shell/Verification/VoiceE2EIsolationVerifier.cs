@@ -83,7 +83,7 @@ internal sealed class VoiceE2EIsolationVerifier
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
-                "PASS voice-e2e-isolation verify: Debug-only fresh temp root, Release override disabled, distinct IPC, isolated persistence, safe defaults, OAuth/updater disabled, receipt allowlist/redaction/atomic transitions/safe close/feature-off");
+                "PASS voice-e2e-isolation verify: Debug-only fresh temp root, Release rejects E2E flags, distinct IPC, isolated persistence, safe defaults, OAuth/updater disabled, receipt allowlist/redaction/atomic transitions/safe close/feature-off");
             return 0;
         }
 
@@ -109,23 +109,47 @@ internal sealed class VoiceE2EIsolationVerifier
         Check(PathEquals(root, debug.RootDirectory), "Debug did not resolve the explicit isolated root");
         Check(!debug.ExternalIntegrationsEnabled, "Debug isolated mode left external integrations enabled");
 
-        var release = HoverPocketApplicationData.ResolveForBuild(requested, debugBuild: false);
-        Check(!release.IsIsolatedVoiceE2E, "Release accepted the Voice E2E override");
-        Check(!PathEquals(root, release.RootDirectory), "Release resolved the isolated override root");
+        CheckRejected(
+            requested,
+            debugBuild: false,
+            "Release accepted the Voice E2E flags");
+        CheckRejected(
+            StartupOptions.Parse([HoverPocketApplicationData.VoiceE2EFlag]),
+            debugBuild: false,
+            "Release accepted --voice-e2e without a root");
+        CheckRejected(
+            StartupOptions.Parse([HoverPocketApplicationData.VoiceE2ERootFlag, root]),
+            debugBuild: false,
+            "Release accepted --voice-e2e-root without the explicit mode flag");
+        CheckRejected(
+            StartupOptions.Parse([HoverPocketApplicationData.VoiceE2ERootFlag]),
+            debugBuild: false,
+            "Release accepted an empty --voice-e2e-root flag");
 
-        var compiled = HoverPocketApplicationData.Resolve(requested);
+        var releaseProduction = HoverPocketApplicationData.ResolveForBuild(
+            StartupOptions.Parse([]),
+            debugBuild: false);
+        Check(!releaseProduction.IsIsolatedVoiceE2E, "Release without E2E flags did not resolve production mode");
+
 #if DEBUG
+        var compiled = HoverPocketApplicationData.Resolve(requested);
         Check(compiled.IsIsolatedVoiceE2E, "compiled Debug resolver did not enable isolation");
 #else
-        Check(!compiled.IsIsolatedVoiceE2E, "compiled Release resolver accepted isolation");
+        CheckRejectedCompiled(requested, "compiled Release resolver accepted E2E flags");
 #endif
 
         CheckRejected(
             StartupOptions.Parse([HoverPocketApplicationData.VoiceE2EFlag]),
+            debugBuild: true,
             "explicit E2E flag without root was accepted");
         CheckRejected(
             StartupOptions.Parse([HoverPocketApplicationData.VoiceE2ERootFlag, root]),
+            debugBuild: true,
             "isolated root without explicit flag was accepted");
+        CheckRejected(
+            StartupOptions.Parse([HoverPocketApplicationData.VoiceE2ERootFlag]),
+            debugBuild: true,
+            "empty isolated root flag without explicit mode was accepted");
 
         var outsideRoot = Path.Combine(
             Path.GetPathRoot(root) ?? "C:\\",
@@ -137,6 +161,7 @@ internal sealed class VoiceE2EIsolationVerifier
                 HoverPocketApplicationData.VoiceE2ERootFlag,
                 outsideRoot
             ]),
+            debugBuild: true,
             "root outside system temp was accepted");
 
         var nonFreshRoot = Path.Combine(
@@ -153,6 +178,7 @@ internal sealed class VoiceE2EIsolationVerifier
                     HoverPocketApplicationData.VoiceE2ERootFlag,
                     nonFreshRoot
                 ]),
+                debugBuild: true,
                 "non-fresh isolated root was accepted");
         }
         finally
@@ -189,13 +215,21 @@ internal sealed class VoiceE2EIsolationVerifier
     private void VerifyWebRuntimeContract()
     {
         var scriptPath = Path.Combine(AppContext.BaseDirectory, "ui", "voice", "voice-lane.js");
+        var appScriptPath = Path.Combine(AppContext.BaseDirectory, "ui", "js", "app.js");
         if (!File.Exists(scriptPath))
         {
             _failures.Add("deployed Voice WebView2 runtime script was missing");
             return;
         }
 
+        if (!File.Exists(appScriptPath))
+        {
+            _failures.Add("deployed panel WebView2 application script was missing");
+            return;
+        }
+
         var script = File.ReadAllText(scriptPath);
+        var appScript = File.ReadAllText(appScriptPath);
         var requiredFragments = new[]
         {
             "let operationEpoch = 0;",
@@ -211,6 +245,10 @@ internal sealed class VoiceE2EIsolationVerifier
             "track.addEventListener(\"ended\"",
             "codexVoice.transportAttached",
             "codexVoice.transportDetached",
+            "const shouldStopPendingNativeStart = sessionStarting && !transportAttached;",
+            "if (shouldStopPendingNativeStart)",
+            "request(\"codexVoice.stop\").catch(() => {});",
+            "export function handleVoiceRuntimeReset(request)",
             "cleanupTransport(request, true)",
             "notifyMediaEvent(request, \"safeClose\")"
         };
@@ -222,6 +260,10 @@ internal sealed class VoiceE2EIsolationVerifier
         Check(
             !script.Contains("remoteAudio.play().catch(() => {})", StringComparison.Ordinal),
             "Voice WebView2 runtime swallowed playback outcome");
+        Check(
+            appScript.Contains("on(\"codexVoice.runtimeReset\"", StringComparison.Ordinal)
+            && appScript.Contains("handleVoiceRuntimeReset(request);", StringComparison.Ordinal),
+            "panel WebView2 runtime did not bind the explicit Voice runtime reset event");
     }
 
     private void VerifySafeStopEvent()
@@ -422,11 +464,23 @@ internal sealed class VoiceE2EIsolationVerifier
         Check(oauth.StoredCredentialStatus() == GoogleOAuthStoredCredentialStatus.Missing, "isolated OAuth read a credential");
     }
 
-    private void CheckRejected(StartupOptions options, string failure)
+    private void CheckRejected(StartupOptions options, bool debugBuild, string failure)
     {
         try
         {
-            _ = HoverPocketApplicationData.ResolveForBuild(options, debugBuild: true);
+            _ = HoverPocketApplicationData.ResolveForBuild(options, debugBuild);
+            _failures.Add(failure);
+        }
+        catch (VoiceE2EConfigurationException)
+        {
+        }
+    }
+
+    private void CheckRejectedCompiled(StartupOptions options, string failure)
+    {
+        try
+        {
+            _ = HoverPocketApplicationData.Resolve(options);
             _failures.Add(failure);
         }
         catch (VoiceE2EConfigurationException)

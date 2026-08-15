@@ -175,7 +175,7 @@ jobs:
           }
           $global:LASTEXITCODE = 0
 
-      - name: Verify Release ignores Voice E2E override
+      - name: Verify Release rejects Voice E2E flags
         shell: pwsh
         run: |
           $project = ".\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj"

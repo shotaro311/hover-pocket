@@ -118,7 +118,7 @@ foreach ($target in $targets) {
     }
 }
 
-Invoke-Checked "Release verifier: voice-e2e-isolation override disabled" {
+Invoke-Checked "Release verifier: voice-e2e-isolation flags rejected" {
     $logPath = Join-Path $env:TEMP ("hoverpocket-verify-voice-e2e-release-" + [Guid]::NewGuid().ToString("N") + ".log")
     $env:HOVERPOCKET_VERIFY_LOG = $logPath
     try {

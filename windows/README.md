@@ -71,7 +71,7 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 
 `--verify voice-lane-layout` はVoice Laneの既定オフ、Compact / Expanded、既存Provider高さ不変、下方向拡張、短い画面でのCompact縮退、設定永続化を検証します。`--verify ui`ではCompactの視覚タイトルなし・会話幅優先、明示toggle、Expandedのtranscript / root-scoped session 2列、fullscreenなしもWebView2実描画で確認します。
 
-`--verify voice-e2e-isolation` は、Debug限定のfresh temp root、Release override無効、製品版と異なるmutex / open-request event、全保存先、Updater / OAuth無効化、安全な初期設定、sanitized receiptのallowlist・atomic更新・playback成功/失敗・safe close・feature-off無副作用を決定的に検証します。マイクや手動GUIは起動しません。
+`--verify voice-e2e-isolation` は、Debug限定のfresh temp root、ReleaseでのE2E flag起動前拒否、製品版と異なるmutex / open-request event、全保存先、Updater / OAuth無効化、安全な初期設定、sanitized receiptのallowlist・atomic更新・playback成功/失敗・safe close・feature-off無副作用を決定的に検証します。マイクや手動GUIは起動しません。
 
 ## Isolated Windows Voice E2E
 
@@ -85,6 +85,8 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 ```
 
 `Readback`は`voice-e2e-receipt.json`の固定allowlistだけを表示します。receiptにはtranscript本文、音声、SDP、token、path、Provider data、PIDを保存しません。`Stop`は同じDebug exe path、`--voice-e2e`、指定rootがすべて一致する隔離processだけへ専用safe-stop eventを送り、WebRTC / microphone / app-server cleanupのreceiptを確認します。rootは検証根拠として残します。
+
+SettingsのVoice欄には、既定オフの「今日の予定タイトルと時間をCodexと共有」があります。Voiceがオフの間は変更できず、オンからオフへ戻すとCalendar toolは即時拒否されます。設定変更時は現在のVoice sessionとローカル音声transportを安全に閉じ、runtimeを再生成して新しいtool権限を反映します。
 
 ## Windows updates and release packaging
 

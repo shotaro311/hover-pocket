@@ -73,12 +73,18 @@ internal sealed class HoverPocketApplicationData
     {
         if (!debugBuild)
         {
+            if (options.VoiceE2ERequested || options.VoiceE2ERoot is not null)
+            {
+                throw new VoiceE2EConfigurationException(
+                    "Voice E2E flags are not accepted by Release builds.");
+            }
+
             return Production();
         }
 
         if (!options.VoiceE2ERequested)
         {
-            if (!string.IsNullOrWhiteSpace(options.VoiceE2ERoot))
+            if (options.VoiceE2ERoot is not null)
             {
                 throw new VoiceE2EConfigurationException(
                     "The isolated data root requires the explicit --voice-e2e flag.");

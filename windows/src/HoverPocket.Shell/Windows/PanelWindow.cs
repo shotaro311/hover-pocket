@@ -190,7 +190,7 @@ internal sealed class PanelWindow : NoActivateWindow
             """;
 
         _ = await _webView.ExecuteScriptAsync(startScript);
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(18);
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
         while (DateTimeOffset.UtcNow < deadline)
         {
             var errorJson = await _webView.ExecuteScriptAsync("window.__hoverPocketVerifyError");

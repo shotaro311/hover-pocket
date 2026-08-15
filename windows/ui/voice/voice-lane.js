@@ -89,10 +89,18 @@ export function renderVoiceLane({ container, state, request }) {
 
 export function handleVoicePanelClosed(request) {
   const shouldNotifyDetach = transportAttached;
+  const shouldStopPendingNativeStart = sessionStarting && !transportAttached;
   cleanupTransport(request, true);
+  if (shouldStopPendingNativeStart) {
+    request("codexVoice.stop").catch(() => {});
+  }
   if (shouldNotifyDetach) {
     request("codexVoice.transportDetached", { reconnectExpected: true }).catch(() => {});
   }
+}
+
+export function handleVoiceRuntimeReset(request) {
+  cleanupTransport(request, true);
 }
 
 async function startVoiceSession(request) {
