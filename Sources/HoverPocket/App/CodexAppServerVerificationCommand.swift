@@ -111,6 +111,15 @@ enum CodexAppServerVerificationCommand {
 
     @MainActor
     private static func verifyRuntimeHost() async throws {
+        try require(
+            CodexVoiceAppServerLaunchPolicy.arguments == [
+                "-c",
+                "features.realtime_conversation=true",
+                "app-server",
+                "--stdio"
+            ],
+            "realtime_feature_process_scoped"
+        )
         let model = VoiceLaneViewModel()
         let toolAdapter = CodexVoiceVerificationToolAdapter()
         let workspace = FileManager.default.temporaryDirectory
@@ -278,6 +287,7 @@ enum CodexAppServerVerificationCommand {
         try require(host.snapshot.sessionStatus == .muted, "runtime_muted")
         await host.stopRealtime()
         try require(host.snapshot.sessionStatus == .closed, "runtime_stopped")
+        try require(host.snapshot.lastErrorCode == nil, "runtime_expected_stop_not_error")
 
         await host.setEnabled(false)
         try require(host.snapshot.availability == .disabled, "runtime_disabled")
@@ -341,6 +351,10 @@ enum CodexAppServerVerificationCommand {
             throw CodexAppServerVerificationFailure("sdp_timeout_missing")
         } catch CodexVoiceRuntimeError.sdpTimedOut {
         }
+        try require(
+            coordinator.snapshot.lastErrorCode == "sdp_timed_out",
+            "sdp_timeout_error_code"
+        )
         try require(coordinator.snapshot.rootThreadID == nil, "sdp_failed_root_invalidated")
 
         let answer = try await coordinator.startWebRTC(
@@ -479,11 +493,11 @@ for raw in sys.stdin:
     elif method == "thread/realtime/start":
         params = message.get("params") or {}
         transport = params.get("transport") or {}
-        if params.get("threadId") != "root-thread" or params.get("outputModality") != "audio" or transport.get("type") != "webrtc" or not transport.get("sdp", "").startswith("v=0"):
+        if params.get("threadId") != "root-thread" or params.get("outputModality") != "audio" or params.get("version") != "v3" or params.get("includeStartupContext") is not False or transport.get("type") != "webrtc" or not transport.get("sdp", "").startswith("v=0"):
             print(json.dumps({"id": request_id, "error": {"code": -32602, "message": "invalid realtime params"}}), flush=True)
             continue
         print(json.dumps({"id": request_id, "result": {}}), flush=True)
-        print(json.dumps({"method": "thread/realtime/started", "params": {"threadId": "root-thread", "realtimeSessionId": "fake-realtime", "version": "v1"}}), flush=True)
+        print(json.dumps({"method": "thread/realtime/started", "params": {"threadId": "root-thread", "realtimeSessionId": "fake-realtime", "version": "v3"}}), flush=True)
         print(json.dumps({"method": "thread/realtime/sdp", "params": {"threadId": "root-thread", "sdp": "v=0\r\ns=fake-answer\r\n"}}), flush=True)
         print(json.dumps({"id": "tool-1", "method": "item/tool/call", "params": {"threadId": "root-thread"}}), flush=True)
     elif method == "thread/realtime/stop":

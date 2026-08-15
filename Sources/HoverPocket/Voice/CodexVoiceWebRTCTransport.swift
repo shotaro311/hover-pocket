@@ -25,12 +25,13 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
 
     func detach(webView: WKWebView) {
         guard self.webView === webView else { return }
+        closeTransport(
+            event: "webview_detached",
+            clearTransientUIState: true
+        )
         self.webView = nil
         pageReady = false
         isReady = false
-        sessionStarting = false
-        transportGeneration &+= 1
-        activeOperationID = nil
     }
 
     func startSession() {
@@ -89,9 +90,10 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
             guard let self,
                   self.activeOperationID == operationID,
                   error != nil else { return }
-            self.sessionStarting = false
-            self.activeOperationID = nil
-            self.runtimeHost?.markSessionFailure("webrtc_start_failed")
+            self.closeTransport(
+                event: "transport_start_failed",
+                errorCode: "webrtc_start_failed"
+            )
         }
     }
 
@@ -101,34 +103,30 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
     }
 
     func stopSession() {
-        transportGeneration &+= 1
-        sessionStarting = false
-        activeOperationID = nil
-        CodexVoiceE2EReceipt.transportClosed(event: "session_stopped")
-        evaluate("window.hoverPocketVoice.cleanup(false)")
-        guard let runtimeHost else { return }
-        Task { @MainActor in
-            await runtimeHost.stopRealtime()
-        }
+        closeTransport(event: "session_stopped")
     }
 
     func detachForPanelClose() {
-        transportGeneration &+= 1
-        sessionStarting = false
-        activeOperationID = nil
-        CodexVoiceE2EReceipt.transportClosed(event: "panel_detached")
-        evaluate("window.hoverPocketVoice.cleanup(false)")
-        guard let runtimeHost else { return }
-        runtimeHost.clearTransientUIState()
-        Task { @MainActor in
-            await runtimeHost.stopRealtime()
-        }
+        closeTransport(
+            event: "panel_detached",
+            clearTransientUIState: true
+        )
+    }
+
+    func prepareForApplicationTermination() {
+        closeTransport(
+            event: "application_terminated",
+            clearTransientUIState: true
+        )
     }
 
     func handleMessage(_ body: Any) {
         guard let object = body as? [String: Any],
               let type = object["type"] as? String else {
-            runtimeHost?.markSessionFailure("webrtc_message_invalid")
+            closeTransport(
+                event: "transport_message_invalid",
+                errorCode: "webrtc_message_invalid"
+            )
             return
         }
 
@@ -143,7 +141,10 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
             guard let sdp = object["sdp"] as? String,
                   !sdp.isEmpty,
                   sdp.utf8.count <= 131_072 else {
-                runtimeHost?.markSessionFailure("webrtc_offer_invalid")
+                closeTransport(
+                    event: "transport_offer_invalid",
+                    errorCode: "webrtc_offer_invalid"
+                )
                 return
             }
             negotiate(sdpOffer: sdp, operationID: operationID)
@@ -172,14 +173,15 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
             runtimeHost?.markTransportDetached(reconnectExpected: reconnectExpected)
         case "failure":
             guard object["operationId"] as? String == activeOperationID else { return }
-            sessionStarting = false
-            activeOperationID = nil
-            CodexVoiceE2EReceipt.transportClosed(event: "transport_failure")
-            runtimeHost?.markSessionFailure(
-                Self.safeErrorCode(object["code"] as? String)
+            closeTransport(
+                event: "transport_failure",
+                errorCode: Self.safeErrorCode(object["code"] as? String)
             )
         default:
-            runtimeHost?.markSessionFailure("webrtc_message_unknown")
+            closeTransport(
+                event: "transport_message_unknown",
+                errorCode: "webrtc_message_unknown"
+            )
         }
     }
 
@@ -206,18 +208,44 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
                     guard let self,
                           self.activeOperationID == operationID,
                           error != nil else { return }
-                    self.sessionStarting = false
-                    self.activeOperationID = nil
-                    self.runtimeHost?.markSessionFailure("webrtc_answer_failed")
+                    self.closeTransport(
+                        event: "transport_answer_failed",
+                        errorCode: "webrtc_answer_failed"
+                    )
                 }
             } catch {
                 guard let self,
                       self.transportGeneration == generation,
                       self.activeOperationID == operationID else { return }
-                self.sessionStarting = false
-                self.activeOperationID = nil
-                self.evaluate("window.hoverPocketVoice.cleanup(false)")
-                self.runtimeHost?.markSessionFailure("webrtc_negotiation_failed")
+                let errorCode = self.runtimeHost?.snapshot.lastErrorCode
+                    ?? "webrtc_negotiation_failed"
+                self.closeTransport(
+                    event: "transport_negotiation_failed",
+                    errorCode: errorCode
+                )
+            }
+        }
+    }
+
+    private func closeTransport(
+        event: String,
+        errorCode: String? = nil,
+        clearTransientUIState: Bool = false
+    ) {
+        transportGeneration &+= 1
+        sessionStarting = false
+        activeOperationID = nil
+        CodexVoiceE2EReceipt.transportClosed(event: event)
+        evaluate("window.hoverPocketVoice.cleanup(false)")
+        guard let runtimeHost else { return }
+        if clearTransientUIState {
+            runtimeHost.clearTransientUIState()
+        }
+        Task { @MainActor [weak runtimeHost] in
+            guard let runtimeHost else { return }
+            await runtimeHost.stopRealtime()
+            if let errorCode {
+                runtimeHost.markSessionFailure(errorCode)
             }
         }
     }

@@ -5,6 +5,8 @@ import Carbon
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hoverWindowController = HoverWindowController()
     private var statusBarMenuController: StatusBarMenuController?
+    private var terminationCleanupStarted = false
+    private var terminationCleanupFinished = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -59,6 +61,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSWorkspace.sessionDidBecomeActiveNotification,
             object: nil
         )
+    }
+
+    func applicationShouldTerminate(
+        _ sender: NSApplication
+    ) -> NSApplication.TerminateReply {
+        guard !terminationCleanupFinished else { return .terminateNow }
+        guard !terminationCleanupStarted else { return .terminateLater }
+        terminationCleanupStarted = true
+        Task { @MainActor [weak self] in
+            guard let self else {
+                sender.reply(toApplicationShouldTerminate: true)
+                return
+            }
+            await hoverWindowController.shutdownForApplicationTermination()
+            terminationCleanupFinished = true
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     private func configureAINativeRuntimeIfEnabled() {

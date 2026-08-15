@@ -8,6 +8,15 @@ enum CodexVoiceRuntimeError: Error, Equatable, Sendable {
     case disposed
 }
 
+enum CodexVoiceAppServerLaunchPolicy {
+    static let arguments = [
+        "-c",
+        "features.realtime_conversation=true",
+        "app-server",
+        "--stdio"
+    ]
+}
+
 @MainActor
 final class CodexVoiceCoordinator {
     typealias ClientFactory = @Sendable () async throws -> CodexAppServerClient
@@ -67,6 +76,7 @@ final class CodexVoiceCoordinator {
     private var threadReadCache: [ThreadReadCacheKey: ThreadReadCacheValue] = [:]
     private var sessionRefreshTask: Task<Void, Never>?
     private var transportAttached = false
+    private var realtimeStopRequested = false
     private var isMuted = true
     private var lastErrorCode: String?
     private var appServerProcessID: Int32?
@@ -108,6 +118,7 @@ final class CodexVoiceCoordinator {
         self.clientFactory = clientFactory ?? {
             try await CodexAppServerClient.start(
                 options: CodexAppServerClientOptions(
+                    launchArguments: CodexVoiceAppServerLaunchPolicy.arguments,
                     clientTitle: "HoverPocket Voice Lane",
                     clientVersion: Bundle.main.object(
                         forInfoDictionaryKey: "CFBundleShortVersionString"
@@ -275,6 +286,7 @@ final class CodexVoiceCoordinator {
         }
 
         let generation = clientGeneration
+        realtimeStopRequested = false
         nextSDPAttempt &+= 1
         let attemptID = nextSDPAttempt
         activeNegotiationAttemptID = attemptID
@@ -292,6 +304,7 @@ final class CodexVoiceCoordinator {
         }
 
         var attemptThreadID: String?
+        var negotiationStage = "thread_start"
         do {
             let threadID = try await ensureRootThread(
                 client: client,
@@ -320,13 +333,15 @@ final class CodexVoiceCoordinator {
                 result: result,
                 timeoutTask: timeoutTask
             )
+            negotiationStage = "realtime_start"
             _ = try await client.sendRequest(
                 "thread/realtime/start",
                 params: .object([
                     "threadId": .string(threadID),
                     "outputModality": .string("audio"),
-                    "version": .string("v1"),
+                    "version": .string("v3"),
                     "voice": .string(defaultVoice),
+                    "includeStartupContext": .bool(false),
                     "prompt": .string(
                         "Respond concisely for a compact desktop voice interface. "
                             + "Use only HoverPocket capabilities when they are available."
@@ -337,6 +352,7 @@ final class CodexVoiceCoordinator {
                     ])
                 ])
             )
+            negotiationStage = "sdp_wait"
             let answer = try await result.wait()
             return CodexVoiceWebRTCAnswer(rootThreadID: threadID, sdp: answer)
         } catch {
@@ -349,11 +365,96 @@ final class CodexVoiceCoordinator {
                 update(
                     availability: .ready,
                     status: .recoverableFailure,
-                    errorCode: "webrtc_negotiation_failed"
+                    errorCode: Self.negotiationErrorCode(
+                        error,
+                        stage: negotiationStage
+                    )
                 )
             }
             throw error
         }
+    }
+
+    private static func negotiationErrorCode(_ error: Error, stage: String) -> String {
+        switch error {
+        case CodexVoiceRuntimeError.sdpTimedOut:
+            return "sdp_timed_out"
+        case CodexVoiceRuntimeError.negotiationCancelled:
+            return "negotiation_cancelled"
+        case CodexVoiceRuntimeError.disposed:
+            return "voice_disposed"
+        case CodexVoiceRuntimeError.signedOut:
+            return "signed_out"
+        case CodexVoiceRuntimeError.compatibility(let code):
+            return safeErrorCode(code)
+        case let rpcError as CodexAppServerRPCError:
+            let boundedCode = min(rpcError.code.magnitude, 999_999)
+            let structuredDetail = safeRPCDataCategory(rpcError.data)
+                ?? safeRPCMessageCategory(rpcError.message)
+            return safeErrorCode(
+                [stage, "rpc", String(boundedCode), structuredDetail]
+                    .compactMap { $0 }
+                    .joined(separator: "_")
+            )
+        case CodexAppServerClientError.requestTimedOut:
+            return "\(stage)_timed_out"
+        case is CodexAppServerClientError:
+            return "app_server_transport_failed"
+        case is CancellationError:
+            return "negotiation_cancelled"
+        default:
+            return "\(stage)_failed"
+        }
+    }
+
+    private static func safeRPCMessageCategory(_ message: String) -> String? {
+        let normalized = message.lowercased()
+        let markers: [(needle: String, code: String)] = [
+            ("requires api key", "requires_api_key"),
+            ("does not support", "not_supported"),
+            ("api key", "api_key"),
+            ("authentication", "authentication"),
+            ("unauthorized", "unauthorized"),
+            ("forbidden", "forbidden"),
+            ("not enabled", "not_enabled"),
+            ("not available", "unavailable"),
+            ("unsupported", "unsupported"),
+            ("bad request", "bad_request"),
+            ("invalid request", "invalid_request"),
+            ("failed to start", "start_failed"),
+            ("realtime", "realtime"),
+            ("conversation", "conversation"),
+            ("websocket", "websocket"),
+            ("webrtc", "webrtc"),
+            ("sdp", "sdp"),
+            ("version", "version"),
+            ("transport", "transport"),
+            ("model", "model"),
+            ("voice", "voice"),
+            ("session", "session"),
+            ("internal", "internal")
+        ]
+        let matched = markers.compactMap { marker in
+            normalized.contains(marker.needle) ? marker.code : nil
+        }
+        guard !matched.isEmpty else { return nil }
+        return matched.prefix(3).joined(separator: "_")
+    }
+
+    private static func safeRPCDataCategory(_ data: CodexJSONValue?) -> String? {
+        guard let data else { return nil }
+        if let value = data.stringValue {
+            return safeRPCMessageCategory(value)
+        }
+        guard let object = data.objectValue else { return nil }
+        if let value = object["code"]?.stringValue ?? object["type"]?.stringValue {
+            return safeErrorCode(value)
+        }
+        guard let nested = object["error"]?.objectValue else { return nil }
+        if let value = nested["code"]?.stringValue ?? nested["type"]?.stringValue {
+            return safeErrorCode(value)
+        }
+        return nested["message"]?.stringValue.flatMap(safeRPCMessageCategory)
     }
 
     private func ensureRootThread(
@@ -833,6 +934,7 @@ final class CodexVoiceCoordinator {
 
     func stopRealtime() async {
         guard !isDisposed else { return }
+        realtimeStopRequested = true
         await cancelPendingSDP(.negotiationCancelled)
         guard let client, let rootThreadID else {
             detachTransport(reconnectExpected: false)
@@ -845,6 +947,7 @@ final class CodexVoiceCoordinator {
                 "thread/realtime/stop",
                 params: .object(["threadId": .string(rootThreadID)])
             )
+            lastErrorCode = nil
         } catch {
             lastErrorCode = "realtime_stop_failed"
         }
@@ -921,7 +1024,11 @@ final class CodexVoiceCoordinator {
             transportAttached = false
             isMuted = true
             sessionStatus = .closed
-            lastErrorCode = params["reason"]?.stringValue == nil ? nil : "realtime_closed"
+            let expectedClose = realtimeStopRequested
+            realtimeStopRequested = false
+            lastErrorCode = expectedClose || params["reason"]?.stringValue == nil
+                ? nil
+                : "realtime_closed"
         case "thread/realtime/error":
             guard params["threadId"]?.stringValue.map(isCurrentRoot) ?? true else { return }
             transportAttached = false
@@ -1136,6 +1243,7 @@ final class CodexVoiceCoordinator {
         availability = .disabled
         sessionStatus = .closed
         transportAttached = false
+        realtimeStopRequested = false
         isMuted = true
         appServerProcessID = nil
         publish()

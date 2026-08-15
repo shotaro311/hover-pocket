@@ -112,6 +112,14 @@ final class HoverWindowController {
         }
     }
 
+    func shutdownForApplicationTermination() async {
+        voiceToolSurfaceActive = false
+        invalidateVoiceToolAuthorization()
+        voiceWebRTCDriver.prepareForApplicationTermination()
+        await voiceRuntimeHost.dispose()
+        CodexVoiceE2EReceipt.transportClosed(event: "application_terminated")
+    }
+
     func showPill() {
         syncAccessWindows(orderFront: true)
         startAccessMonitor()
