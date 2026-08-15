@@ -13,7 +13,7 @@ AN5-BのHost側縦断をmacOS / Windowsへ実装した。ユーザー要求を�
 - base: `151043c023098a8b8782895946cf01f8194579b3`
 - stacked base branch: `origin/codex/ai-native-an5-generator-install`
 - AN5-A PR: #16。最終review修正と両OSCI成功後、merge commit `c8db98d424cad04d88688bbca52b3afd72d521d2`でmainへ取り込んだ。
-- AN5-B PR: #17。AN5-A merge後に`origin/main`をmergeし、baseをmainへ変更した。最終source headは`7f6fad6490688bd19e00930a30b9a5f4adeeb2d2`。
+- AN5-B PR: #17。AN5-A merge後に`origin/main`をmergeし、baseをmainへ変更した。最終source headは`63f5e9cac2378b48898b75596c6d9fa339f5aba2`。
 
 ## 実装内容
 
@@ -120,6 +120,7 @@ AN5-BのHost側縦断をmacOS / Windowsへ実装した。ユーザー要求を�
 - `695689dc-62ad-45ff-a733-62ce8389e1c1`: `736d207...cc95d61`、coverage complete、findings 0、sealed complete。
 - `5756c702-3d31-4da0-a285-c7a477a57fdc`: `3bac0f6`からの最終review修正6 file、coverage complete、findings 0、sealed complete。
 - `c68750f8-a73f-4491-812c-e0bf96c4b599`: `3744f69...7f6fad6`の追加review修正と両OS回帰、関連境界6件、coverage complete、findings 0、sealed complete。
+- `3117e462-c7c2-455c-ae94-02291a2c116e`: `b1efe58...63f5e9c`の新規app IDと破損package隔離、変更8 / 8 file、coverage complete、findings 0、sealed complete。
 
 最終review修正:
 
@@ -133,7 +134,14 @@ AN5-BのHost側縦断をmacOS / Windowsへ実装した。ユーザー要求を�
 - Windowsの更新対象を「新規Appとして作成」で明示解除できるようにし、AI-native OFF、receipt、生成後の承認待ちでも決定論的に解除する。
 - Windowsのenableはactive recordだけでなくpackage実byteを再検証し、不一致時は元のdisabled recordへ戻す。
 - 別Appのdisable / enable / removeでは承認待ちproposalとactivation flagを保持する。phase判定はWindowsのstate lock内を含む同一更新処理で行い、両OS verifierで同じproposalが`awaitingApproval`に残ることを確認する。
-- PR #17最終head `7f6fad6`でWindows [31911734637](https://github.com/shotaro311/hover-pocket/actions/runs/31911734637)、macOS [31911734658](https://github.com/shotaro311/hover-pocket/actions/runs/31911734658)、3OS contract / compare [31911734659](https://github.com/shotaro311/hover-pocket/actions/runs/31911734659)、PR Router [31911733717](https://github.com/shotaro311/hover-pocket/actions/runs/31911733717)が成功した。未解決review threadは0、PRは`MERGEABLE / CLEAN`である。
+- 中間head `7f6fad6`でWindows [31911734637](https://github.com/shotaro311/hover-pocket/actions/runs/31911734637)、macOS [31911734658](https://github.com/shotaro311/hover-pocket/actions/runs/31911734658)、3OS contract / compare [31911734659](https://github.com/shotaro311/hover-pocket/actions/runs/31911734659)、PR Router [31911733717](https://github.com/shotaro311/hover-pocket/actions/runs/31911733717)が成功した。
+
+最終追加review修正:
+
+- 更新対象なしの依頼では、同じ文章を再利用してもHostが毎回新しいUUIDベースのapp IDを割り当て、`1.0.0`の新規Appとして生成する。updateはユーザーが管理カードから対象を明示選択した場合だけ行う。
+- 管理一覧の読込をApp単位に分離し、壊れたpackageはgeneric errorの要修復カードへ隔離する。正常Appの管理、controller起動、Settings表示は継続する。
+- 要修復Appはupdate / enable / disableへ使わず、active recordを安全に読める場合だけ「削除（データ保持）」を提供する。起動時隔離、正常App非干渉、preserve-only removeを両OS回帰へ追加した。
+- source head `63f5e9c`でWindows [31912271187](https://github.com/shotaro311/hover-pocket/actions/runs/31912271187)、macOS [31912271209](https://github.com/shotaro311/hover-pocket/actions/runs/31912271209)、3OS contract / compare [31912271135](https://github.com/shotaro311/hover-pocket/actions/runs/31912271135)、PR Router [31912270332](https://github.com/shotaro311/hover-pocket/actions/runs/31912270332)が成功した。
 
 ## AN5-Cへ分離したruntime activation gate
 
