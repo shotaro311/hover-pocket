@@ -12,8 +12,8 @@ AN5-BのHost側縦断をmacOS / Windowsへ実装した。ユーザー要求を�
 - branch: `codex/ai-native-an5-generator-ui`
 - base: `151043c023098a8b8782895946cf01f8194579b3`
 - stacked base branch: `origin/codex/ai-native-an5-generator-install`
-- AN5-A PR: #16。AN5-B作業中はmergeしていない。
-- AN5-B PR: #17。head `cc95d6178c053dd47dbe7a0cfeae6f6fc1f9c5cd`、GitHub判定はMERGEABLE / CLEAN、必須CI成功。
+- AN5-A PR: #16。最終review修正と両OSCI成功後、merge commit `c8db98d424cad04d88688bbca52b3afd72d521d2`でmainへ取り込んだ。
+- AN5-B PR: #17。AN5-A merge後に`origin/main`をmergeし、baseをmainへ変更した。統合source headは`2a1cc007a7b883ef63761ebf402110de41edd8b3`。
 
 ## 実装内容
 
