@@ -676,9 +676,9 @@ internal sealed class PocketAppGenerationVerifier
                 """{"id":"pending-disable","method":"pocketApps.disable","params":{"appId":"local.example.pending-unrelated"}}""");
             Require(
                 pending is not null
-                    && pending.Contains("\"phase\":\"awaitingApproval\"", StringComparison.Ordinal)
+                    && pending.Contains("\"phase\":\"awaiting_approval\"", StringComparison.Ordinal)
                     && disabled is not null
-                    && disabled.Contains("\"phase\":\"awaitingApproval\"", StringComparison.Ordinal)
+                    && disabled.Contains("\"phase\":\"awaiting_approval\"", StringComparison.Ordinal)
                     && disabled.Contains("\"appId\":\"local.example.pending\"", StringComparison.Ordinal)
                     && disabled.Contains("\"action\":\"disable\"", StringComparison.Ordinal)
                     && disabled.Contains("\"appId\":\"local.example.pending-unrelated\",\"state\":\"disabled\"", StringComparison.Ordinal),
