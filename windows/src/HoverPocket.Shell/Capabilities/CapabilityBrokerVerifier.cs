@@ -41,7 +41,7 @@ internal sealed class CapabilityBrokerVerifier
         Console.WriteLine("broker_sticky_lifecycle=ok");
         Console.WriteLine("broker_today_focus=ok");
         Console.WriteLine("broker_concurrent_duplicate=ok");
-        Console.WriteLine("broker_negative_cases=10");
+        Console.WriteLine("broker_negative_cases=11");
         Console.WriteLine($"broker_golden_plan_digest={GoldenPlanDigest}");
         return 0;
     }
@@ -75,6 +75,7 @@ internal sealed class CapabilityBrokerVerifier
                 PocketCapabilityDescriptors.BuiltIn.Single(item => item.Key == CapabilityIds.StickyDelete).ApprovalPolicy
                     == CapabilityApprovalPolicy.StrongPerCall,
                 "sticky_delete_strong_approval");
+            VerifyStrongPerCallIsolation(broker, now);
             try
             {
                 PocketCapabilityDescriptors.BuiltIn.Single(item => item.Key == CapabilityIds.StickyArchive).ValidateOutput(
@@ -411,6 +412,45 @@ internal sealed class CapabilityBrokerVerifier
         Require(receipt.Steps[0].Readback.Status == CapabilityReadbackStatus.Verified, "calculator_readback");
         Require(receipt.Steps[0].Readback.Strategy == CapabilityReadbackStrategy.None, "calculator_readback_strategy");
         Require(receipt.Steps[0].Readback.Observed is not null, "calculator_observed");
+    }
+
+    private void VerifyStrongPerCallIsolation(CapabilityBroker broker, DateTimeOffset now)
+    {
+        var principal = new CapabilityPrincipal("user-strong-approval-fixture");
+        var noteId = Guid.Parse("44444444-4444-4444-8444-444444444444");
+        var plan = new CapabilityExecutionPlan(
+            "strong-approval-batch-plan",
+            now,
+            CapabilityOrigin.Text,
+            principal,
+            null,
+            [
+                new CapabilityPlanStep(
+                    "readNote",
+                    CapabilityIds.StickyStatus,
+                    CapabilityJson.From(new { noteId }),
+                    "strong-approval-read-key-0001",
+                    []),
+                new CapabilityPlanStep(
+                    "deleteNote",
+                    CapabilityIds.StickyDelete,
+                    CapabilityJson.From(new { noteId }),
+                    "strong-approval-delete-key-0001",
+                    ["readNote"])
+            ],
+            new HashSet<string>(["sticky.delete", "sticky.read"], StringComparer.Ordinal));
+        try
+        {
+            _ = broker.Prepare(
+                plan,
+                Permissions(principal, "sticky.delete", "sticky.read"),
+                now);
+            _failures.Add("strong_per_call_batch_accepted");
+        }
+        catch (CapabilityBrokerException ex) when (
+            ex.Code == "CAPABILITY_PLAN_INVALID" && ex.Message.Contains("strong_per_call", StringComparison.Ordinal))
+        {
+        }
     }
 
     private async Task VerifyStickyLifecycleAsync(

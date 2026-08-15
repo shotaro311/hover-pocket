@@ -308,6 +308,11 @@ internal sealed class CapabilityBroker
         {
             throw InvalidPlan("permissions");
         }
+        if (descriptors.Any(descriptor => descriptor.ApprovalPolicy == CapabilityApprovalPolicy.StrongPerCall)
+            && descriptors.Count != 1)
+        {
+            throw InvalidPlan("strong_per_call");
+        }
         if (!permissions.Contains(requiredPermissions))
         {
             var missing = requiredPermissions.Except(permissions.Permissions).Order(StringComparer.Ordinal).FirstOrDefault() ?? "unknown";

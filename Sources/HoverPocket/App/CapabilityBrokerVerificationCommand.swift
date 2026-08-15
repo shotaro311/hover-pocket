@@ -16,7 +16,7 @@ enum CapabilityBrokerVerificationCommand {
                 print("broker_sticky_lifecycle=ok")
                 print("broker_today_focus=ok")
                 print("broker_concurrent_duplicate=ok")
-                print("broker_negative_cases=10")
+                print("broker_negative_cases=11")
                 print("broker_golden_plan_digest=\(goldenPlanDigest)")
                 Darwin.exit(0)
             } catch {
@@ -74,6 +74,7 @@ enum CapabilityBrokerVerificationCommand {
             registry.descriptor(PocketCapabilityKeys.stickyDelete)?.approvalPolicy == .strongPerCall,
             "sticky_delete_strong_approval"
         )
+        try verifyStrongPerCallIsolation(broker: broker, noteID: noteID, now: now)
         do {
             try registry.descriptor(PocketCapabilityKeys.stickyArchive)?.validateOutput([
                 "noteId": .string(noteID.uuidString),
@@ -479,6 +480,52 @@ enum CapabilityBrokerVerificationCommand {
         try await verifyPartialRollback(root: root, now: now, principal: principal)
         try await verifyCurrentStepRollback(root: root, now: now, principal: principal)
         try await verifyTimeout(root: root, now: now, principal: principal)
+    }
+
+    @MainActor
+    private static func verifyStrongPerCallIsolation(
+        broker: CapabilityBroker,
+        noteID: UUID,
+        now: Date
+    ) throws {
+        let principal = CapabilityPrincipal(userID: "user-strong-approval-fixture")
+        let plan = CapabilityExecutionPlan(
+            id: "strong-approval-batch-plan",
+            createdAt: now,
+            origin: .text,
+            principal: principal,
+            appContext: nil,
+            steps: [
+                CapabilityPlanStep(
+                    id: "readNote",
+                    capability: PocketCapabilityKeys.stickyStatus,
+                    arguments: ["noteId": .string(noteID.uuidString)],
+                    idempotencyKey: "strong-approval-read-key-0001",
+                    dependencies: []
+                ),
+                CapabilityPlanStep(
+                    id: "deleteNote",
+                    capability: PocketCapabilityKeys.stickyDelete,
+                    arguments: ["noteId": .string(noteID.uuidString)],
+                    idempotencyKey: "strong-approval-delete-key-0001",
+                    dependencies: ["readNote"]
+                )
+            ],
+            requiredPermissions: ["sticky.delete", "sticky.read"]
+        )
+        do {
+            _ = try broker.prepare(
+                plan,
+                permissions: CapabilityPermissionSet(
+                    principal: principal,
+                    permissions: ["sticky.delete", "sticky.read"]
+                ),
+                now: now
+            )
+            throw BrokerVerificationFailure("strong_per_call_batch_accepted")
+        } catch CapabilityBrokerError.invalidPlan(let field) {
+            try require(field == "strong_per_call", "strong_per_call_error")
+        }
     }
 
     @MainActor

@@ -147,6 +147,16 @@
       "expectedDigest": "sha256:b139dcd4113e94272d34a76d32f85a1620920cd72f92962a0c6bdd42399e0a93"
     },
     {
+      "id": "invalid-execution-plan-strong-per-call-batched",
+      "path": "invalid/execution-plan.strong-per-call-batched.json",
+      "kind": "schema",
+      "expected": "reject",
+      "schema": "execution-plan.schema.json",
+      "errorCode": "PLAN_APPROVAL_REQUIRED",
+      "errorLocation": "$.steps[1].capability",
+      "expectedDigest": "sha256:6339f70d58b37ac70d90d28d7a274090eb0806a9a0eb6b40b4edcde5eaf1b0f1"
+    },
+    {
       "id": "invalid-geometry-provider-rect",
       "path": "invalid/geometry.provider-rect-changed.json",
       "kind": "geometry-mutation",
