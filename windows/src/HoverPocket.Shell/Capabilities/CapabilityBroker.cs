@@ -308,6 +308,11 @@ internal sealed class CapabilityBroker
         {
             throw InvalidPlan("permissions");
         }
+        if (descriptors.Any(descriptor => descriptor.ApprovalPolicy == CapabilityApprovalPolicy.StrongPerCall)
+            && descriptors.Count != 1)
+        {
+            throw InvalidPlan("strong_per_call");
+        }
         if (!permissions.Contains(requiredPermissions))
         {
             var missing = requiredPermissions.Except(permissions.Permissions).Order(StringComparer.Ordinal).FirstOrDefault() ?? "unknown";
@@ -474,7 +479,7 @@ internal sealed class CapabilityBroker
             ? "eventRef"
             : query == CapabilityIds.TimerGet
                 ? "timerId"
-                : query == CapabilityIds.StickyGet
+                : query == CapabilityIds.StickyGet || query == CapabilityIds.StickyStatus
                     ? "noteId"
                     : throw InvalidPlan("readback_query");
         if (!output.TryGetProperty(field, out var value))

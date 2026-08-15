@@ -35,11 +35,13 @@ internal sealed class CapabilityBrokerVerifier
         }
 
         Console.WriteLine("broker_verify=ok");
-        Console.WriteLine("broker_registry_descriptors=11");
-        Console.WriteLine("broker_available_handlers=10");
+        Console.WriteLine("broker_registry_descriptors=15");
+        Console.WriteLine("broker_available_handlers=14");
+        Console.WriteLine("broker_calculator_evaluate=ok");
+        Console.WriteLine("broker_sticky_lifecycle=ok");
         Console.WriteLine("broker_today_focus=ok");
         Console.WriteLine("broker_concurrent_duplicate=ok");
-        Console.WriteLine("broker_negative_cases=10");
+        Console.WriteLine("broker_negative_cases=11");
         Console.WriteLine($"broker_golden_plan_digest={GoldenPlanDigest}");
         return 0;
     }
@@ -67,8 +69,27 @@ internal sealed class CapabilityBrokerVerifier
                 new CapabilityBrokerLedger(brokerRoot),
                 audit);
 
-            Require(registry.DescriptorKeys.Count == 11, "registry_descriptor_count");
-            Require(registry.AvailableHandlerKeys.Count == 10, "registry_handler_count");
+            Require(registry.DescriptorKeys.Count == 15, "registry_descriptor_count");
+            Require(registry.AvailableHandlerKeys.Count == 14, "registry_handler_count");
+            Require(
+                PocketCapabilityDescriptors.BuiltIn.Single(item => item.Key == CapabilityIds.StickyDelete).ApprovalPolicy
+                    == CapabilityApprovalPolicy.StrongPerCall,
+                "sticky_delete_strong_approval");
+            VerifyStrongPerCallIsolation(broker, now);
+            try
+            {
+                PocketCapabilityDescriptors.BuiltIn.Single(item => item.Key == CapabilityIds.StickyArchive).ValidateOutput(
+                    CapabilityJson.From(new
+                    {
+                        noteId = Guid.NewGuid(),
+                        state = "active",
+                        updatedAt = now.ToString("O", CultureInfo.InvariantCulture)
+                    }));
+                _failures.Add("sticky_archive_wrong_postcondition_accepted");
+            }
+            catch (CapabilityBrokerException ex) when (ex.Code == "CAPABILITY_ARGUMENT_INVALID")
+            {
+            }
             Require(!new UserSettings().AiNativeEnabled, "feature_default_off");
             VerifyGoldenDigest(now);
             VerifyCalendarIdempotencyEquivalence(now);
@@ -81,6 +102,9 @@ internal sealed class CapabilityBrokerVerifier
             catch (CapabilityBrokerException ex) when (ex.Code == "CAPABILITY_RUNTIME_PROHIBITED")
             {
             }
+
+            await VerifyCalculatorAsync(broker, now);
+            await VerifyStickyLifecycleAsync(broker, stickyStore, now);
 
             var principal = new CapabilityPrincipal("user-broker-fixture");
             var allPermissions = Permissions(principal, "calendar.events.read", "sticky.write", "timer.write");
@@ -354,6 +378,146 @@ internal sealed class CapabilityBrokerVerifier
                 Directory.Delete(root, recursive: true);
             }
         }
+    }
+
+    private async Task VerifyCalculatorAsync(CapabilityBroker broker, DateTimeOffset now)
+    {
+        var principal = new CapabilityPrincipal("user-calculator-fixture");
+        var plan = new CapabilityExecutionPlan(
+            "calculator-pure-plan",
+            now,
+            CapabilityOrigin.Text,
+            principal,
+            null,
+            [new CapabilityPlanStep(
+                "evaluate",
+                CapabilityIds.CalculatorEvaluate,
+                CapabilityJson.From(new { expression = "8 / 4 + 1" }),
+                "calculator-pure-key-0001",
+                [])],
+            new HashSet<string>(StringComparer.Ordinal));
+        var permissions = Permissions(principal);
+        var preparation = broker.Prepare(plan, permissions, now);
+        Require(preparation.ApprovalRequest is null, "calculator_approval_not_required");
+        var receipt = await broker.ExecuteAsync(plan, permissions, null, now);
+        Require(receipt.Status == CapabilityReceiptStatus.Succeeded, "calculator_receipt_status");
+        Require(receipt.Steps.Count == 1, "calculator_receipt_count");
+        var output = receipt.Steps[0].Output;
+        Require(output is not null, "calculator_receipt_output");
+        if (output is { } value)
+        {
+            Require(value.GetProperty("normalizedExpression").GetString() == "8 / 4 + 1", "calculator_normalized");
+            Require(value.GetProperty("result").GetString() == "3", "calculator_result");
+        }
+        Require(receipt.Steps[0].Readback.Status == CapabilityReadbackStatus.Verified, "calculator_readback");
+        Require(receipt.Steps[0].Readback.Strategy == CapabilityReadbackStrategy.None, "calculator_readback_strategy");
+        Require(receipt.Steps[0].Readback.Observed is not null, "calculator_observed");
+    }
+
+    private void VerifyStrongPerCallIsolation(CapabilityBroker broker, DateTimeOffset now)
+    {
+        var principal = new CapabilityPrincipal("user-strong-approval-fixture");
+        var noteId = Guid.Parse("44444444-4444-4444-8444-444444444444");
+        var plan = new CapabilityExecutionPlan(
+            "strong-approval-batch-plan",
+            now,
+            CapabilityOrigin.Text,
+            principal,
+            null,
+            [
+                new CapabilityPlanStep(
+                    "readNote",
+                    CapabilityIds.StickyStatus,
+                    CapabilityJson.From(new { noteId }),
+                    "strong-approval-read-key-0001",
+                    []),
+                new CapabilityPlanStep(
+                    "deleteNote",
+                    CapabilityIds.StickyDelete,
+                    CapabilityJson.From(new { noteId }),
+                    "strong-approval-delete-key-0001",
+                    ["readNote"])
+            ],
+            new HashSet<string>(["sticky.delete", "sticky.read"], StringComparer.Ordinal));
+        try
+        {
+            _ = broker.Prepare(
+                plan,
+                Permissions(principal, "sticky.delete", "sticky.read"),
+                now);
+            _failures.Add("strong_per_call_batch_accepted");
+        }
+        catch (CapabilityBrokerException ex) when (
+            ex.Code == "CAPABILITY_PLAN_INVALID" && ex.Message.Contains("strong_per_call", StringComparison.Ordinal))
+        {
+        }
+    }
+
+    private async Task VerifyStickyLifecycleAsync(
+        CapabilityBroker broker,
+        StickyNotesStore store,
+        DateTimeOffset now)
+    {
+        var note = store.UpsertNote("broker-lifecycle-fixture", "Private title", "Private body", StickyNoteColor.Yellow);
+        var principal = new CapabilityPrincipal("user-sticky-lifecycle-fixture");
+        var archivePermissions = Permissions(principal, "sticky.write");
+        var archivePlan = new CapabilityExecutionPlan(
+            "sticky-archive-plan",
+            now,
+            CapabilityOrigin.Text,
+            principal,
+            null,
+            [new CapabilityPlanStep(
+                "archiveNote",
+                CapabilityIds.StickyArchive,
+                CapabilityJson.From(new { noteId = note.Id }),
+                "sticky-broker-archive-key-0001",
+                [])],
+            new HashSet<string>(["sticky.write"], StringComparer.Ordinal));
+        var archivePreparation = broker.Prepare(archivePlan, archivePermissions, now);
+        Require(archivePreparation.ApprovalRequest is not null, "sticky_archive_approval_missing");
+        var archiveGrant = broker.DecideApproval(
+            archivePreparation.ApprovalRequest!.Id,
+            archivePreparation.PlanDigest,
+            CapabilityApprovalDecision.Approve,
+            now);
+        var archiveReceipt = await broker.ExecuteAsync(archivePlan, archivePermissions, archiveGrant, now);
+        Require(archiveReceipt.Status == CapabilityReceiptStatus.Succeeded, "sticky_archive_receipt");
+        Require(
+            archiveReceipt.Steps[0].Output?.GetProperty("state").GetString() == "archived",
+            "sticky_archive_output");
+        Require(archiveReceipt.Steps[0].Readback.Status == CapabilityReadbackStatus.Verified, "sticky_archive_readback");
+        Require(store.GetNote(note.Id)?.ArchivedAt == now, "sticky_archive_effect");
+
+        var deleteNow = now.AddSeconds(1);
+        var deletePermissions = Permissions(principal, "sticky.delete");
+        var deletePlan = new CapabilityExecutionPlan(
+            "sticky-delete-plan",
+            deleteNow,
+            CapabilityOrigin.Text,
+            principal,
+            null,
+            [new CapabilityPlanStep(
+                "deleteNote",
+                CapabilityIds.StickyDelete,
+                CapabilityJson.From(new { noteId = note.Id }),
+                "sticky-broker-delete-key-0001",
+                [])],
+            new HashSet<string>(["sticky.delete"], StringComparer.Ordinal));
+        var deletePreparation = broker.Prepare(deletePlan, deletePermissions, deleteNow);
+        Require(deletePreparation.ApprovalRequest is not null, "sticky_delete_approval_missing");
+        var deleteGrant = broker.DecideApproval(
+            deletePreparation.ApprovalRequest!.Id,
+            deletePreparation.PlanDigest,
+            CapabilityApprovalDecision.Approve,
+            deleteNow);
+        var deleteReceipt = await broker.ExecuteAsync(deletePlan, deletePermissions, deleteGrant, deleteNow);
+        Require(deleteReceipt.Status == CapabilityReceiptStatus.Succeeded, "sticky_delete_receipt");
+        Require(
+            deleteReceipt.Steps[0].Output?.GetProperty("state").GetString() == "missing",
+            "sticky_delete_output");
+        Require(deleteReceipt.Steps[0].Readback.Status == CapabilityReadbackStatus.Verified, "sticky_delete_readback");
+        Require(store.GetNote(note.Id) is null, "sticky_delete_effect");
     }
 
     private void VerifyGoldenDigest(DateTimeOffset now)

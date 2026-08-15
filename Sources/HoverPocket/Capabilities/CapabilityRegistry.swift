@@ -1,6 +1,7 @@
 import Foundation
 
 enum PocketCapabilityKeys {
+    static let calculatorEvaluate = PocketCapabilityKey(id: "calculator.expression.evaluate", version: 1)
     static let calendarList = PocketCapabilityKey(id: "calendar.events.list", version: 1)
     static let calendarGet = PocketCapabilityKey(id: "calendar.event.get", version: 1)
     static let calendarCreate = PocketCapabilityKey(id: "calendar.event.create", version: 1)
@@ -11,6 +12,9 @@ enum PocketCapabilityKeys {
     static let timerStop = PocketCapabilityKey(id: "timer.countdown.stop", version: 1)
     static let stickyUpsert = PocketCapabilityKey(id: "sticky.note.upsert", version: 1)
     static let stickyGet = PocketCapabilityKey(id: "sticky.note.get", version: 1)
+    static let stickyStatus = PocketCapabilityKey(id: "sticky.note.status", version: 1)
+    static let stickyArchive = PocketCapabilityKey(id: "sticky.note.archive", version: 1)
+    static let stickyDelete = PocketCapabilityKey(id: "sticky.note.delete", version: 1)
     static let nativeAuthority = PocketCapabilityKey(id: "system.native.authority", version: 1)
 }
 
@@ -147,6 +151,18 @@ enum PocketCapabilityDescriptors {
 
     static let builtIn: [PocketCapabilityDescriptor] = [
         descriptor(
+            PocketCapabilityKeys.calculatorEvaluate,
+            effect: .pure,
+            permissions: [],
+            approval: .none,
+            idempotency: .notApplicable,
+            limits: CapabilityLimits(timeoutMilliseconds: 1_000, maximumPayloadBytes: 1_024, maximumCallsPerMinute: 600),
+            readback: CapabilityReadbackPolicy(strategy: .none, query: nil, matchFields: ["normalizedExpression", "result"]),
+            rollback: false,
+            input: CapabilitySchemaValidation.calculatorInput,
+            output: CapabilitySchemaValidation.calculatorOutput
+        ),
+        descriptor(
             PocketCapabilityKeys.calendarCreate,
             effect: .externalWrite,
             permissions: ["calendar.events.write"],
@@ -183,6 +199,30 @@ enum PocketCapabilityDescriptors {
             output: CapabilitySchemaValidation.calendarListOutput
         ),
         descriptor(
+            PocketCapabilityKeys.stickyArchive,
+            effect: .reversibleLocalWrite,
+            permissions: ["sticky.write"],
+            approval: .brokerPolicy,
+            idempotency: .required,
+            limits: localWriteLimits,
+            readback: CapabilityReadbackPolicy(strategy: .capabilityQuery, query: PocketCapabilityKeys.stickyStatus, matchFields: ["noteId", "state", "updatedAt"]),
+            rollback: false,
+            input: CapabilitySchemaValidation.stickyIDInput,
+            output: CapabilitySchemaValidation.stickyArchivedOutput
+        ),
+        descriptor(
+            PocketCapabilityKeys.stickyDelete,
+            effect: .destructiveSensitive,
+            permissions: ["sticky.delete"],
+            approval: .strongPerCall,
+            idempotency: .required,
+            limits: localWriteLimits,
+            readback: CapabilityReadbackPolicy(strategy: .capabilityQuery, query: PocketCapabilityKeys.stickyStatus, matchFields: ["noteId", "state", "updatedAt"]),
+            rollback: false,
+            input: CapabilitySchemaValidation.stickyIDInput,
+            output: CapabilitySchemaValidation.stickyDeletedOutput
+        ),
+        descriptor(
             PocketCapabilityKeys.stickyGet,
             effect: .privateRead,
             permissions: ["sticky.read"],
@@ -193,6 +233,18 @@ enum PocketCapabilityDescriptors {
             rollback: false,
             input: { try CapabilitySchemaValidation.identifierInput($0, key: "noteId", maximum: 128, uuid: false) },
             output: CapabilitySchemaValidation.stickyOutput
+        ),
+        descriptor(
+            PocketCapabilityKeys.stickyStatus,
+            effect: .privateRead,
+            permissions: ["sticky.read"],
+            approval: .permissionGrant,
+            idempotency: .optional,
+            limits: readLimits,
+            readback: CapabilityReadbackPolicy(strategy: .sameStoreSnapshot, query: nil, matchFields: ["noteId", "state", "updatedAt"]),
+            rollback: false,
+            input: CapabilitySchemaValidation.stickyIDInput,
+            output: CapabilitySchemaValidation.stickyStatusOutput
         ),
         descriptor(
             PocketCapabilityKeys.stickyUpsert,
@@ -348,6 +400,23 @@ enum CapabilitySchemaValidation {
         }
     }
 
+    static func calculatorInput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["expression"])
+        _ = try string(object, "expression", minimum: 1, maximum: 256)
+    }
+
+    static func calculatorOutput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["normalizedExpression", "result"])
+        _ = try string(object, "normalizedExpression", minimum: 1, maximum: 512)
+        let result = try string(object, "result", minimum: 1, maximum: 32)
+        guard result.range(
+            of: "^-?(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{1,12})?$",
+            options: .regularExpression
+        ) != nil else {
+            throw CapabilityBrokerError.invalidPlan("schema_result")
+        }
+    }
+
     static func calendarGetInput(_ object: CapabilityObject) throws {
         try identifierInput(object, key: "eventRef", maximum: 256, uuid: false)
     }
@@ -423,6 +492,39 @@ enum CapabilitySchemaValidation {
         _ = try string(object, "title", maximum: 120)
         _ = try string(object, "body", maximum: 10_000)
         _ = try string(object, "color", minimum: 1, maximum: 16, allowed: ["yellow", "blue", "green", "pink", "gray"])
+    }
+
+    static func stickyIDInput(_ object: CapabilityObject) throws {
+        try identifierInput(object, key: "noteId", maximum: 128, uuid: true)
+    }
+
+    static func stickyStatusOutput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["noteId", "state", "updatedAt"])
+        _ = try string(object, "noteId", minimum: 1, maximum: 128)
+        let state = try string(object, "state", minimum: 1, maximum: 16, allowed: ["active", "archived", "missing"])
+        switch object["updatedAt"] {
+        case .some(.null) where state == "missing":
+            return
+        case .some(.string(let value))
+            where state != "missing" && CapabilityDateCodec.date(from: value) != nil:
+            return
+        default:
+            throw CapabilityBrokerError.invalidPlan("schema_updatedAt")
+        }
+    }
+
+    static func stickyArchivedOutput(_ object: CapabilityObject) throws {
+        try stickyStatusOutput(object)
+        guard object["state"] == .string("archived") else {
+            throw CapabilityBrokerError.invalidPlan("schema_state")
+        }
+    }
+
+    static func stickyDeletedOutput(_ object: CapabilityObject) throws {
+        try stickyStatusOutput(object)
+        guard object["state"] == .string("missing") else {
+            throw CapabilityBrokerError.invalidPlan("schema_state")
+        }
     }
 
     static func stickyOutput(_ object: CapabilityObject) throws {

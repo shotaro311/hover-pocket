@@ -253,6 +253,10 @@ final class CapabilityBroker {
         guard requiredPermissions == plan.requiredPermissions else {
             throw CapabilityBrokerError.invalidPlan("permissions")
         }
+        if descriptors.contains(where: { $0.approvalPolicy == .strongPerCall }),
+           descriptors.count != 1 {
+            throw CapabilityBrokerError.invalidPlan("strong_per_call")
+        }
         guard permissions.contains(requiredPermissions) else {
             let missing = requiredPermissions.subtracting(permissions.permissions).sorted().first ?? "unknown"
             throw CapabilityBrokerError.permissionDenied(missing)
@@ -442,7 +446,7 @@ final class CapabilityBroker {
         case PocketCapabilityKeys.timerGet:
             sourceField = "timerId"
             targetField = "timerId"
-        case PocketCapabilityKeys.stickyGet:
+        case PocketCapabilityKeys.stickyGet, PocketCapabilityKeys.stickyStatus:
             sourceField = "noteId"
             targetField = "noteId"
         default:

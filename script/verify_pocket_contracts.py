@@ -1245,6 +1245,12 @@ def validate_execution_plan(document: Mapping[str, Any], context: FixtureContext
             f"$.steps[{index}].capability",
         )
         ensure_capability_executable(descriptor, f"$.steps[{index}].capability")
+        if descriptor["approvalPolicy"] == "strong_per_call" and len(document["steps"]) != 1:
+            fail(
+                "PLAN_APPROVAL_REQUIRED",
+                f"$.steps[{index}].capability",
+                "strong_per_call capability must be the only plan step",
+            )
         validate_capability_payload(
             step["arguments"],
             descriptor,

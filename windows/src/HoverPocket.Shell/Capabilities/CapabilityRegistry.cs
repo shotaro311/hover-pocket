@@ -99,6 +99,17 @@ internal static class PocketCapabilityDescriptors
     public static IReadOnlyList<PocketCapabilityDescriptor> BuiltIn { get; } = new[]
     {
         Descriptor(
+            CapabilityIds.CalculatorEvaluate,
+            CapabilityEffect.Pure,
+            [],
+            CapabilityApprovalPolicy.None,
+            CapabilityIdempotencyPolicy.NotApplicable,
+            new CapabilityLimits(1_000, 1_024, 600),
+            new CapabilityReadbackPolicy(CapabilityReadbackStrategy.None, null, ["normalizedExpression", "result"]),
+            false,
+            CapabilitySchemaValidation.CalculatorInput,
+            CapabilitySchemaValidation.CalculatorOutput),
+        Descriptor(
             CapabilityIds.CalendarCreate,
             CapabilityEffect.ExternalWrite,
             ["calendar.events.write"],
@@ -132,6 +143,28 @@ internal static class PocketCapabilityDescriptors
             CapabilitySchemaValidation.CalendarListInput,
             CapabilitySchemaValidation.CalendarListOutput),
         Descriptor(
+            CapabilityIds.StickyArchive,
+            CapabilityEffect.ReversibleLocalWrite,
+            ["sticky.write"],
+            CapabilityApprovalPolicy.BrokerPolicy,
+            CapabilityIdempotencyPolicy.Required,
+            LocalWriteLimits,
+            new CapabilityReadbackPolicy(CapabilityReadbackStrategy.CapabilityQuery, CapabilityIds.StickyStatus, ["noteId", "state", "updatedAt"]),
+            false,
+            CapabilitySchemaValidation.StickyIdInput,
+            CapabilitySchemaValidation.StickyArchivedOutput),
+        Descriptor(
+            CapabilityIds.StickyDelete,
+            CapabilityEffect.DestructiveSensitive,
+            ["sticky.delete"],
+            CapabilityApprovalPolicy.StrongPerCall,
+            CapabilityIdempotencyPolicy.Required,
+            LocalWriteLimits,
+            new CapabilityReadbackPolicy(CapabilityReadbackStrategy.CapabilityQuery, CapabilityIds.StickyStatus, ["noteId", "state", "updatedAt"]),
+            false,
+            CapabilitySchemaValidation.StickyIdInput,
+            CapabilitySchemaValidation.StickyDeletedOutput),
+        Descriptor(
             CapabilityIds.StickyGet,
             CapabilityEffect.PrivateRead,
             ["sticky.read"],
@@ -142,6 +175,17 @@ internal static class PocketCapabilityDescriptors
             false,
             value => CapabilitySchemaValidation.IdentifierInput(value, "noteId", 128, false),
             CapabilitySchemaValidation.StickyOutput),
+        Descriptor(
+            CapabilityIds.StickyStatus,
+            CapabilityEffect.PrivateRead,
+            ["sticky.read"],
+            CapabilityApprovalPolicy.PermissionGrant,
+            CapabilityIdempotencyPolicy.Optional,
+            ReadLimits,
+            new CapabilityReadbackPolicy(CapabilityReadbackStrategy.SameStoreSnapshot, null, ["noteId", "state", "updatedAt"]),
+            false,
+            CapabilitySchemaValidation.StickyIdInput,
+            CapabilitySchemaValidation.StickyStatusOutput),
         Descriptor(
             CapabilityIds.StickyUpsert,
             CapabilityEffect.ReversibleLocalWrite,
@@ -227,6 +271,9 @@ internal static class PocketCapabilityDescriptors
 
 internal static partial class CapabilitySchemaValidation
 {
+    private static readonly Regex CalculatorResultPattern = new(
+        "^-?(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{1,12})?$",
+        RegexOptions.CultureInvariant);
     private static readonly Regex TimeZonePattern = new(
         "^(?:UTC|Etc/UTC|[A-Za-z_]+(?:/[A-Za-z0-9._+-]+)+)$",
         RegexOptions.CultureInvariant);
@@ -326,6 +373,22 @@ internal static partial class CapabilitySchemaValidation
         }
     }
 
+    public static void CalculatorInput(JsonElement value)
+    {
+        ExactKeys(value, ["expression"]);
+        _ = String(value, "expression", 1, 256);
+    }
+
+    public static void CalculatorOutput(JsonElement value)
+    {
+        ExactKeys(value, ["normalizedExpression", "result"]);
+        _ = String(value, "normalizedExpression", 1, 512);
+        if (!CalculatorResultPattern.IsMatch(String(value, "result", 1, 32)))
+        {
+            throw Invalid("result");
+        }
+    }
+
     public static void CalendarGetInput(JsonElement value) => IdentifierInput(value, "eventRef", 256, false);
 
     public static void CalendarCreateInput(JsonElement value)
@@ -404,6 +467,45 @@ internal static partial class CapabilitySchemaValidation
         _ = String(value, "title", 0, 120);
         _ = String(value, "body", 0, 10_000);
         _ = String(value, "color", 1, 16, new HashSet<string>(["yellow", "blue", "green", "pink", "gray"], StringComparer.Ordinal));
+    }
+
+    public static void StickyIdInput(JsonElement value) => IdentifierInput(value, "noteId", 128, true);
+
+    public static void StickyStatusOutput(JsonElement value)
+    {
+        ExactKeys(value, ["noteId", "state", "updatedAt"]);
+        _ = String(value, "noteId", 1, 128);
+        var state = String(value, "state", 1, 16, new HashSet<string>(["active", "archived", "missing"], StringComparer.Ordinal));
+        var updatedAt = value.GetProperty("updatedAt");
+        if (state == "missing" && updatedAt.ValueKind == JsonValueKind.Null)
+        {
+            return;
+        }
+        if (state is "active" or "archived"
+            && updatedAt.ValueKind == JsonValueKind.String
+            && DateTimeOffset.TryParse(updatedAt.GetString(), out _))
+        {
+            return;
+        }
+        throw Invalid("updatedAt");
+    }
+
+    public static void StickyArchivedOutput(JsonElement value)
+    {
+        StickyStatusOutput(value);
+        if (value.GetProperty("state").GetString() != "archived")
+        {
+            throw Invalid("state");
+        }
+    }
+
+    public static void StickyDeletedOutput(JsonElement value)
+    {
+        StickyStatusOutput(value);
+        if (value.GetProperty("state").GetString() != "missing")
+        {
+            throw Invalid("state");
+        }
     }
 
     public static void StickyOutput(JsonElement value)

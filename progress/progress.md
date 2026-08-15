@@ -2,8 +2,32 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: an2-registry-broker; implementation-complete; local-pass; security-pass; ci-pass; pro-critic-blocked-no-artifact; pr-ready
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pro-pending; capability-expansion-strong-approval-pr-ready
 ---
+
+## 2026-08-15 AI-native Strong Approval Isolation
+
+- Sticky Notes lifecycle統合後のexact `main` `56607cf`からbranch `codex/ai-native-strong-approval`を作成し、`strong_per_call` Capabilityを1計画1stepだけに限定した。状態確認などの低リスク操作と削除を同じ承認へ混在させるplanは、承認要求を作る前にmacOS / WindowsのBrokerが拒否し、実行時にも同じplanを再検証する。
+- 共通contract verifierにも同じ規則とnegative fixtureを追加し、12 schema / 57 fixtureへ更新した。途中レビューでHost-native planだけPocket App scope検査を省く過度な一般化を検出したため撤回し、requested Capability、range、namespaceの既存検査を緩めずに`strong_per_call`を先に拒否する形へ固定した。
+- ローカルではSwift warnings-as-errors build、Broker 15 descriptor / 14 handler・negative 11件、Capability、Timer、Clipboard、2回の決定論的contract report、`git diff --check`が成功した。単独の`sticky.note.delete@1`は既存どおり承認、実行、missing readbackまで成功し、複数step planだけを拒否する。
+- 最終source range `56607cf...bcbf7b0`のCodex Security diff scan `c0238875-7481-4226-8a22-eccdb874226d`は変更source 5 / 5とfixture 2件を確認し、coverage complete、reportable finding 0件でsealed complete。旧head `67fee14`のscan `965505c2-53d2-4fd4-8b2e-59dcf8f40abd`で見つけたCI verifier限定のscope検査低下はproduction到達性なしとしてsuppressedし、後続`bcbf7b0`で撤回済みである。
+- PR [#12](https://github.com/shotaro311/hover-pocket/pull/12)の最終head `0439757`で、Windows [31856271399](https://github.com/shotaro311/hover-pocket/actions/runs/31856271399)、macOS [31856271417](https://github.com/shotaro311/hover-pocket/actions/runs/31856271417)、Pocket contract [31856271438](https://github.com/shotaro311/hover-pocket/actions/runs/31856271438)、PR Router [31856275029](https://github.com/shotaro311/hover-pocket/actions/runs/31856275029)が成功し、3 OS contract reportもbyte一致した。review thread 0、`MERGEABLE / CLEAN`をreadbackしてmergeし、merge commit `005f174`のWindows [31856376397](https://github.com/shotaro311/hover-pocket/actions/runs/31856376397)、macOS [31856376384](https://github.com/shotaro311/hover-pocket/actions/runs/31856376384)、Pocket contract [31856376430](https://github.com/shotaro311/hover-pocket/actions/runs/31856376430)も成功した。進捗記録の追記後もmain / origin/mainは一致し、ahead / behind `0 / 0`となった。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-strong-approval.md`。
+
+## 2026-08-15 AI-native Sticky Notes Lifecycle Capability
+
+- Calculator統合後のexact `main` `8d7127f`から隔離branch `codex/ai-native-sticky-lifecycle`を作成し、Sticky Notesの状態確認、archive、deleteをmacOS / Windowsの共通Capabilityへ追加した。既存UIのStoreと同じ保存先を使い、Provider Viewや生成UIからStoreへ直接アクセスさせない。
+- `sticky.note.status@1`は`sticky.read`、`sticky.note.archive@1`は`sticky.write`とBroker承認、`sticky.note.delete@1`は独立した`sticky.delete`と`strong_per_call`承認を要求する。archive/deleteはidempotency key、atomic save、保存失敗時memory rollback、状態再照会によるreadbackを必須にした。
+- 共有Golden Registryへ未反映だったCalculator descriptorと今回の3 descriptorを追加し、runtimeは15 descriptor / 14 handler、共通契約は12 schema / 56 fixtureへ揃えた。macOSでwarnings-as-errors build、Capability、Broker、Timer、Clipboard、2回の決定論的contract report、`git diff --check`が成功した。Windowsはローカルに.NET SDKがないためPR CIを必須gateとする。
+- exact source range `8d7127f...dd91448`のSecurity diff scan `9f03efcd-fbd3-4799-a5fd-c591a9ee1219`は変更source 12 / 12をレビューし、reportable finding 0、sealed complete。将来のVoice / Pocket App / MCPからdeleteを公開する前に、Host-ownedの対象メモ表示と`strong_per_call`固有制約を追加する項目はdeferredとして固定した。現時点のproduction経路はToday Focusのみでdeleteを公開も権限付与もしていない。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-sticky-lifecycle.md`。
+- Draft PR [#11](https://github.com/shotaro311/hover-pocket/pull/11)のhead `696912b`で、Windows [31854456305](https://github.com/shotaro311/hover-pocket/actions/runs/31854456305)、macOS [31854456232](https://github.com/shotaro311/hover-pocket/actions/runs/31854456232)、Pocket contract [31854456221](https://github.com/shotaro311/hover-pocket/actions/runs/31854456221)、PR Router [31854456370](https://github.com/shotaro311/hover-pocket/actions/runs/31854456370)が成功した。3 OS contract reportはbyte一致し、review thread 0、`MERGEABLE / CLEAN`をreadbackした。
+- 最終head `bda78d8`でもWindows [31854634564](https://github.com/shotaro311/hover-pocket/actions/runs/31854634564)、macOS [31854634576](https://github.com/shotaro311/hover-pocket/actions/runs/31854634576)、Pocket contract [31854634592](https://github.com/shotaro311/hover-pocket/actions/runs/31854634592)、PR Router [31854643283](https://github.com/shotaro311/hover-pocket/actions/runs/31854643283)が成功した。PR #11をmergeし、main / origin/mainはmerge commit `4640f5c`で一致、ahead / behind `0 / 0`をreadbackした。
+
+## 2026-08-15 AI-native Built-in Capability Expansion
+
+- AN2 merge後のexact `main` `014032d`から隔離worktreeとbranch `codex/ai-native-capability-expansion`を作成し、最初のExpansion単位としてCalculatorをpure local `calculator.expression.evaluate@1`へCapability化した。
+- macOS / WindowsのRegistry、Broker、runtime composition、単体 / Broker verifierへ同じID、schema、制限、決定論的な結果形式を追加した。任意コード評価は使わず、式長、値数、桁数、演算子、overflow、除算ゼロをfail closedで制限する。
+- macOSでSwift warnings-as-errors build、Capability 11 handler、Broker 12 descriptor / 11 handler、Calculator、Timer、Clipboard、Panel layout 112件、Media、Pocket contract 12 schema / 52 fixture、`git diff --check`が成功した。
+- 最終head `ff7d642`のPR [#10](https://github.com/shotaro311/hover-pocket/pull/10)で、macOS [31853288589](https://github.com/shotaro311/hover-pocket/actions/runs/31853288589)、Windows [31853288565](https://github.com/shotaro311/hover-pocket/actions/runs/31853288565)、PR Router [31853287341](https://github.com/shotaro311/hover-pocket/actions/runs/31853287341)が成功し、review thread 0、`MERGEABLE / CLEAN`をreadbackしてmainへmergeした。main / origin/mainはmerge commit `e456222ae3d064ab3c1efbf73aea97fdb4a41fcc`で一致した。Security diff scan `1b18c190-d37b-450c-960f-c924f26ea9ae`は変更source 10 / 10、coverage complete、finding 0でsealed complete。既存Calculator UIのBroker移行と、Expansion trackの残りは後続単位である。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-capability-expansion.md`。
 
 ## 2026-08-15 AI-native AN2 Registry / Broker / Text Today Focus
 

@@ -2,6 +2,11 @@
   "registryVersion": 1,
   "capabilities": [
     {
+      "id": "calculator.expression.evaluate",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.calculator-expression-evaluate.json"
+    },
+    {
       "id": "calendar.event.create",
       "version": 1,
       "descriptor": "valid/capability-descriptor.calendar-event-create.json"
@@ -17,9 +22,24 @@
       "descriptor": "valid/capability-descriptor.calendar-events-list.json"
     },
     {
+      "id": "sticky.note.archive",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.sticky-note-archive.json"
+    },
+    {
+      "id": "sticky.note.delete",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.sticky-note-delete.json"
+    },
+    {
       "id": "sticky.note.get",
       "version": 1,
       "descriptor": "valid/capability-descriptor.sticky-note-get.json"
+    },
+    {
+      "id": "sticky.note.status",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.sticky-note-status.json"
     },
     {
       "id": "sticky.note.upsert",

@@ -130,12 +130,53 @@ final class StickyNotesStore: ObservableObject {
     }
 
     @discardableResult
+    func archiveNoteAtomically(id: UUID, at date: Date = Date()) throws -> StickyNoteItem? {
+        guard let index = notes.firstIndex(where: { $0.id == id }) else { return nil }
+        if notes[index].archivedAt != nil {
+            return notes[index]
+        }
+        let previousNotes = notes
+        let previousLastAction = lastAction
+        let previous = notes[index]
+        notes[index].archivedAt = date
+        notes[index].updatedAt = date
+        lastAction = StickyNoteUndoAction(kind: .archived, note: previous, previousIndex: index)
+        do {
+            try saveOrThrow()
+            return notes[index]
+        } catch {
+            notes = previousNotes
+            lastAction = previousLastAction
+            lastErrorMessage = "Sticky notes could not be saved."
+            throw error
+        }
+    }
+
+    @discardableResult
     func deleteNote(id: UUID) -> Bool {
         guard let index = notes.firstIndex(where: { $0.id == id }) else { return false }
         let removed = notes.remove(at: index)
         lastAction = StickyNoteUndoAction(kind: .deleted, note: removed, previousIndex: index)
         save()
         return true
+    }
+
+    @discardableResult
+    func deleteNoteAtomically(id: UUID) throws -> Bool {
+        guard let index = notes.firstIndex(where: { $0.id == id }) else { return false }
+        let previousNotes = notes
+        let previousLastAction = lastAction
+        let removed = notes.remove(at: index)
+        lastAction = StickyNoteUndoAction(kind: .deleted, note: removed, previousIndex: index)
+        do {
+            try saveOrThrow()
+            return true
+        } catch {
+            notes = previousNotes
+            lastAction = previousLastAction
+            lastErrorMessage = "Sticky notes could not be saved."
+            throw error
+        }
     }
 
     @discardableResult

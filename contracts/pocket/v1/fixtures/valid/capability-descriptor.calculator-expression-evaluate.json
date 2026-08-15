@@ -1,0 +1,52 @@
+{
+  "$schema": "hoverpocket://schemas/capability-descriptor/v1",
+  "id": "calculator.expression.evaluate",
+  "version": 1,
+  "titleKey": "capability.calculator.expression.evaluate",
+  "effect": "pure",
+  "permissions": [],
+  "approvalPolicy": "none",
+  "idempotency": "not_applicable",
+  "availability": {
+    "macos": "available",
+    "windows": "available"
+  },
+  "limits": {
+    "timeoutMs": 1000,
+    "maxPayloadBytes": 1024,
+    "maxCallsPerMinute": 600
+  },
+  "inputSchema": {
+    "type": "object",
+    "required": ["expression"],
+    "properties": {
+      "expression": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": ["normalizedExpression", "result"],
+    "properties": {
+      "normalizedExpression": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      },
+      "result": {
+        "type": "string",
+        "pattern": "^-?(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{1,12})?$",
+        "maxLength": 32
+      }
+    },
+    "additionalProperties": false
+  },
+  "readback": {
+    "strategy": "none",
+    "match": ["normalizedExpression", "result"]
+  }
+}
