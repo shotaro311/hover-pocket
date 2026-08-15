@@ -12,7 +12,7 @@ AN5全体はまだ完了ではない。Codexへの生成依頼、Host preview / 
 - branch: `codex/ai-native-an5-generator-install`
 - worktree: `/Users/shotaro/code/share/hover-menu-preview-ai-native-an5`
 - PR: [#16](https://github.com/shotaro311/hover-pocket/pull/16)
-- source head: `0289f152683bf2b8fee1ff33f40768f178cf883f`
+- source head: `3003bb908848cace06a06c3f08af47fd5eecf2a0`
 - ChatGPT Pro Orchestrator generation 2: delivery `return-86ca754d9b618c814b0d87e2615c6b51`
 - Pro返却はdelivery ID / state hash、receipt、base SHA、allowed path、artifact hashを検証してから適用した。Pro成果物を完了扱いせず、Codexが両OSの安全境界、回帰テスト、セキュリティ差分監査を追加した。
 
@@ -46,6 +46,7 @@ AN5全体はまだ完了ではない。Codexへの生成依頼、Host preview / 
 ### Stable key
 
 - package-controlled `stableKey`を長さと文字種が有限のgrammarへ制限する。
+- macOS / Windowsともtrue end-of-string anchorを使い、ASCII制御文字と末尾改行を明示的に拒否する。
 - 表示用に別の見かけ値へ変換せず、承認表示、plan digest、Provider実行、readback対象を同じcanonical値へ固定する。
 
 ## 検証
@@ -66,14 +67,14 @@ AN5全体はまだ完了ではない。Codexへの生成依頼、Host preview / 
 Windows:
 
 - macOSと同じLifecycle Manager、任意長version比較、59桁downgrade verifierを実装した。
-- このMacには.NET SDKがないためローカル実行は未実施した。PR source head `0289f15`のWindows run [31894065940](https://github.com/shotaro311/hover-pocket/actions/runs/31894065940)でRelease buildとPocket App lifecycleを含む既存verifierが成功した。
+- このMacには.NET SDKがないためローカル実行は未実施した。PR source head `3003bb9`のWindows run [31896377388](https://github.com/shotaro311/hover-pocket/actions/runs/31896377388)でRelease buildとPocket App lifecycleを含む既存verifierが成功した。
 
 GitHub Actions:
 
-- Windows verify [31894065940](https://github.com/shotaro311/hover-pocket/actions/runs/31894065940): 成功
-- macOS verify [31894065933](https://github.com/shotaro311/hover-pocket/actions/runs/31894065933): 成功
-- Pocket contracts [31894065998](https://github.com/shotaro311/hover-pocket/actions/runs/31894065998): Ubuntu / macOS / Windowsとcross-OS report比較が成功
-- PR Router [31894246704](https://github.com/shotaro311/hover-pocket/actions/runs/31894246704): 成功
+- Windows verify [31896377388](https://github.com/shotaro311/hover-pocket/actions/runs/31896377388): 成功
+- macOS verify [31896377398](https://github.com/shotaro311/hover-pocket/actions/runs/31896377398): 成功
+- Pocket contracts [31896377387](https://github.com/shotaro311/hover-pocket/actions/runs/31896377387): Ubuntu / macOS / Windowsとcross-OS report比較が成功
+- PR Router [31896377423](https://github.com/shotaro311/hover-pocket/actions/runs/31896377423): 成功
 
 最初のPR head `aa6e8e2`では、macOS CIだけがimmutable化した一時フォルダを最終名へ移動できず失敗した。最終headでは、検証済みprivate treeを先に最終digest pathへatomic moveし、直後にimmutable化してreadbackする順序へ両OSを統一した。hardeningまたはreadbackが失敗した場合は、この操作が移動したfinal treeをmutable化してcleanupし、active recordは更新しない。
 
@@ -90,9 +91,11 @@ GitHub Actions:
 
 既知のdestination root pathname TOCTOUは今回のfollow-upで悪化しておらず、現行production経路から到達しないため新規findingには含めていない。Lifecycle ManagerをUI、Voice、Pocket App、MCP、WebViewへ接続する前に、macOSではno-follow descriptor、Windowsでは検証済みdirectory handle相当で保存先rootを固定し、symlink / reparse race testを通す。
 
+最終レビューhardeningでは、承認preview実byteの再digest、grantのrequest ID binding、remove recordのdurable sync、manager破棄時のstaging cleanup、両OSstable keyのtrue-end anchorを追加した。exact range `16e7cda162653749c07c125f3e662477687f3153...88f41bd988b5dc2426afdf72fc9b48770f35db58`のscan `f62b2099-b34d-4ce9-8609-5f514aa90358`は5 / 5 file、`88f41bd988b5dc2426afdf72fc9b48770f35db58...3003bb908848cace06a06c3f08af47fd5eecf2a0`のscan `38a3798b-2171-4980-9db7-59492e69c7ff`は1 / 1 fileを完全レビューし、どちらもfinding 0でsealed completeとなった。
+
 ## 残り
 
-- PR #16はReady、全CI成功、`needs-human-merge`付き。人間によるmerge判断は未実施。
+- PR #16はReady、全CI成功、未解決review thread 0、`MERGEABLE / CLEAN`、`needs-human-merge`付き。人間によるmerge判断は未実施。
 - AN5-B: user requestからCodex draft生成、Host preview、権限差分表示、導入確認、version管理UIへの接続。
 - production composition前のdestination root pinningと両OSrace test。
 - AN3のWindows実音声E2Eは別の実機gateとして継続する。

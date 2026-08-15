@@ -7,11 +7,13 @@ PR [#16](https://github.com/shotaro311/hover-pocket/pull/16)のPocket App lifecy
 ## 最終source
 
 - branch: `codex/ai-native-an5-generator-install`
-- source head: `0289f152683bf2b8fee1ff33f40768f178cf883f`
-- Windows verify: [31894065940](https://github.com/shotaro311/hover-pocket/actions/runs/31894065940) 成功
-- macOS verify: [31894065933](https://github.com/shotaro311/hover-pocket/actions/runs/31894065933) 成功
-- Pocket contracts: [31894065998](https://github.com/shotaro311/hover-pocket/actions/runs/31894065998) でUbuntu / macOS / Windowsとcross-OS byte比較が成功
-- PR Router: [31894246704](https://github.com/shotaro311/hover-pocket/actions/runs/31894246704) 成功
+- source head: `3003bb908848cace06a06c3f08af47fd5eecf2a0`
+- Windows verify: [31896377388](https://github.com/shotaro311/hover-pocket/actions/runs/31896377388) 成功
+- macOS verify: [31896377398](https://github.com/shotaro311/hover-pocket/actions/runs/31896377398) 成功
+- Pocket contracts: [31896377387](https://github.com/shotaro311/hover-pocket/actions/runs/31896377387) でUbuntu / macOS / Windowsとcross-OS byte比較が成功
+- PR Router: [31896377423](https://github.com/shotaro311/hover-pocket/actions/runs/31896377423) 成功
+- unresolved review threads: 0
+- merge state: `MERGEABLE / CLEAN`
 
 ## 追加hardening
 
@@ -20,6 +22,11 @@ PR [#16](https://github.com/shotaro311/hover-pocket/pull/16)のPocket App lifecy
 - preserve removeのtombstone復元直後にimmutable属性を再適用してreadbackする。
 - さらに毎回の起動で、全既存final snapshotを再保護してreadbackする。tombstone rename後、再保護前に異常終了しても次回起動で回復する。
 - macOS / Windows verifierへ期限切れ3経路、複数manager競合、tombstone復元、通常final treeの反復起動再保護を追加した。
+- previewの実byte列をdefensive copyし、proposalとfresh packageのpreview digestをactivation直前に再計算する。
+- approval grantをbinding digestだけでなくrequest IDにも結び付け、別requestでの流用失敗時に元grantを消費しない。
+- macOSはactive record fileと親directoryをfsyncし、Windowsはwrite-through replace後にだけtombstone cleanupへ進む。
+- manager破棄時にlive staging ownershipを解放し、pending stagingを削除する。
+- stable keyは両OSでtrue end-of-string anchorを使い、ASCII制御文字と末尾改行を拒否する。
 
 ## ローカル検証
 
@@ -41,6 +48,8 @@ exact range `38aaf88212b8afe5405c877ed262eff27ab2a857...0289f152683bf2b8fee1ff33
 - status: sealed complete
 
 前scanの「tombstone復元直後に異常終了すると通常final treeがmutableのまま残り得る」候補は、毎起動時の再保護と反復起動testで解消した。既知のdestination root pathname TOCTOUはこの差分で悪化しておらず、production composition前の別gateとして残す。
+
+review follow-up range `16e7cda162653749c07c125f3e662477687f3153...88f41bd988b5dc2426afdf72fc9b48770f35db58`はscan `f62b2099-b34d-4ce9-8609-5f514aa90358`で5 / 5 file、最終stable key range `88f41bd988b5dc2426afdf72fc9b48770f35db58...3003bb908848cace06a06c3f08af47fd5eecf2a0`はscan `38a3798b-2171-4980-9db7-59492e69c7ff`で1 / 1 fileを完全レビューした。両scanともcoverage complete、reportable finding 0、sealed completeである。
 
 ## 次
 
