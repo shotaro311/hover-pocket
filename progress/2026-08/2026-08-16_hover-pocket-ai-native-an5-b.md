@@ -2,7 +2,7 @@
 
 ## 結論
 
-AN5-BのHost側縦断をmacOS / Windowsへ実装した。ユーザー要求を固定schemaのPocket App draftへ変換し、Hostが検証、テスト、プレビュー、権限差分、ネイティブ承認、immutable lifecycle、実行後readbackを担当する。Macのローカル検証と最新差分のSecurity scanは成功した。
+AN5-BのHost側縦断をmacOS / Windowsへ実装した。ユーザー要求を固定schemaのPocket App draftへ変換し、Hostが検証、テスト、プレビュー、権限差分、ネイティブ承認、immutable lifecycle、実行後readbackを担当する。PR #17の両OS / 3OS contract CIと、最終hardening差分のSecurity scanは成功した。
 
 ただし、実Codex processのproduction接続は完了扱いにしていない。Codexのread-only sandboxは書込みを防ぐが、ユーザーのローカルファイル読取りを十分に隔離しないため、両OSでfail closedにした。現在のproduction UIは安全な「生成機能は利用不可」状態になり、activation可能な生成はfixture verifierだけで通る。
 
@@ -13,6 +13,7 @@ AN5-BのHost側縦断をmacOS / Windowsへ実装した。ユーザー要求を�
 - base: `151043c023098a8b8782895946cf01f8194579b3`
 - stacked base branch: `origin/codex/ai-native-an5-generator-install`
 - AN5-A PR: #16。AN5-B作業中はmergeしていない。
+- AN5-B PR: #17。head `cc95d6178c053dd47dbe7a0cfeae6f6fc1f9c5cd`、GitHub判定はMERGEABLE / CLEAN、必須CI成功。
 
 ## 実装内容
 
@@ -33,6 +34,8 @@ AN5-BのHost側縦断をmacOS / Windowsへ実装した。ユーザー要求を�
 - 承認対象はpackage / preview / request / binding digestと完全なgrant差分を含む。
 - install / update / rollback後はactive version、package digest、stateを再読込する。
 - disable / preserve-only removeもHost receiptのreadback成功を必須にする。
+- disabled packageをimmutable package ID / version / digest / permissions / state schema / Host compatibilityから再検証して有効化する。
+- remove前に同じpackageのpending proposalだけをrejectし、別packageのproposalとstagingを保持する。
 
 ### 3. macOS UI
 
@@ -111,10 +114,27 @@ AN5-BのHost側縦断をmacOS / Windowsへ実装した。ユーザー要求を�
   - explicit lifecycle操作をdescriptor / handle相対へ全面移行する。
   - Mac sandbox helper / Windows restricted tokenまたはAppContainerで実Codexのread範囲を実証する。
 
+追加の最終hardening scan:
+
+- `8e5e2370-6361-4e35-a1fd-6fe835e7db85`: `0bc4051...736d207`、coverage complete、findings 0、sealed complete。
+- `695689dc-62ad-45ff-a733-62ce8389e1c1`: `736d207...cc95d61`、coverage complete、findings 0、sealed complete。
+
+## AN5-Cへ分離したruntime activation gate
+
+PR reviewで、AN5-BのLifecycleが保持するactive packageと、実際の`pocketAppExecutionRuntime` / Surface登録がまだ接続されていないことを確認した。現在のproduction generatorはmacOS / Windowsともactivation不可なので、この未接続による成功receiptは利用者経路から到達しない。
+
+任意app IDの生成Appを組み込みToday Focusの単一runtimeへ直接差し替えると、別アプリをToday Focusとして誤表示する。この簡易修正は採用せず、次のAN5-Cで以下を実装する。
+
+- app ID単位の`PocketSurfaceRegistry` / execution-runtime registry。
+- install / update / enable / disable / remove / rollbackの各操作で、Lifecycleと描画・実行側のapp ID、version、package digest、permission grantを照合するreadback。
+- built-in Today Focusと複数generated appの分離、再起動後の復元、他app非干渉の回帰検証。
+- runtime側の一致が確認できない場合はLifecycle操作の成功receiptを出さずfail closed。
+- 上記とlocal-file confinementの両方が通るまでreal Codex activationを無効のまま維持する。
+
 ## 次のgate
 
-1. この差分をcommit / pushし、AN5-A branch向けstacked PRを作る。
-2. Windows / macOS / 3OS contract CIをreadbackする。
-3. AN5-Aをmergeする場合はAN5-Bのbaseをmainへ更新し、差分とSecurity snapshotを再確認する。
+1. PR #17のreview threadを閉じ、docs更新後のCIとremote parityをreadbackする。
+2. AN5-Aをmergeする場合はAN5-Bのbaseをmainへ更新し、差分とSecurity snapshotを再確認する。
+3. AN5-Cでgenerated packageをSurface / execution runtimeへ接続し、lifecycle receiptとの一致を両OSで検証する。
 4. 実Codex confinementを別の小さいPRで実装・実機検証する。
 5. AN3 Voiceと接続し、「こういうパネルが欲しい」からdraft / previewまでのCore Integration E2Eへ進む。
