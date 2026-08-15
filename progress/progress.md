@@ -2,7 +2,7 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-local-complete-pr-pending; capability-expansion-merged
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-pr-ready-ci-green; capability-expansion-merged
 ---
 
 ## 2026-08-15 AI-native AN5-A Pocket App Lifecycle Foundation
@@ -11,8 +11,8 @@ status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; a
 - 両OSへ、untrusted draftをno-follow / stable identityでHost所有snapshotへ取り込む処理、package validate / declared tests / preview、permissionと実効Capability grant差分、exact single-use approval、immutable version install、update、disable、preserve-only remove、rollback、active version / digest readbackを追加した。`stableKey`は安全な有限grammarへ制限し、承認表示と実行値を同じ値へ固定した。
 - mutableな`active.json`を権限の正本にせず、検証済みimmutable packageから現在の権限を復元する。rollback対象はversionとpackage digestの一致を必須にし、通常updateでのdowngradeを拒否する。64文字内の巨大な数値versionも任意長の数字列として比較し、59桁versionから`1.0.0`へのdowngrade回帰を両OS verifierへ追加した。
 - removeはユーザーデータを保持する経路だけを実装した。Versionsをtombstoneへ移動し、removed stateのdurable write後だけcleanupする。途中失敗・再起動時はactive stateに応じて復元またはcleanupし、`dataDisposition=delete`はAN5-Aでは拒否する。
-- macOSでSwift warnings-as-errors build、Pocket App lifecycle、Pocket Surface、Capability、Broker、Panel layout、Timer、Calculator、Clipboard、Weather、共通contract 12 schema / 57 fixture、Python compile、`git diff --check`が成功した。Windows側へ同じ実装とverifierを追加したが、このMacには.NET SDKがないため、Windows build / runtimeはPR CIを必須gateとする。
-- 最終working-tree digest `codex-security-snapshot/v1:sha256:37f697dd6b046607687f7d4214efa2cd91af4d589fc71b8af257987dbbd03ff6`のCodex Security diff scan `8c157a4d-3351-4531-bb2e-fc8815d6a462`は変更21 / 21 fileを閉じ、reportable finding 0件でsealed completeとなった。保存先rootのpathname TOCTOUは現行production到達不能のためdeferredだが、初回production接続前の必須gateとする。
+- macOSでSwift warnings-as-errors build、Pocket App lifecycle、Pocket Surface、Capability、Broker、Panel layout、Timer、Calculator、Clipboard、Weather、共通contract 12 schema / 57 fixture、Python compile、`git diff --check`が成功した。PR [#16](https://github.com/shotaro311/hover-pocket/pull/16)のhead `2efac67`でWindows [31890644140](https://github.com/shotaro311/hover-pocket/actions/runs/31890644140)、macOS [31890644188](https://github.com/shotaro311/hover-pocket/actions/runs/31890644188)、3OS contract / cross-OS compare [31890644159](https://github.com/shotaro311/hover-pocket/actions/runs/31890644159)が成功した。
+- exact committed range `2cd51b9...2efac67`のCodex Security diff scan `5b314036-2b06-4806-844b-48f65c503fc9`は変更21 / 21 fileを閉じ、reportable finding 0件でsealed completeとなった。保存先rootと短いmove-to-harden区間のpathname TOCTOUは現行production到達不能のためdeferredだが、初回production接続前の必須gateとする。
 - AN5全体は未完了である。AN5-BのCodex requestからdraft生成、Host preview / 導入確認 / 管理UI、production composition、保存先root pinningが残る。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-an5-a.md`。
 
 ## 2026-08-15 AI-native AN4 Pocket App DSL / Renderer

@@ -11,6 +11,8 @@ AN5全体はまだ完了ではない。Codexへの生成依頼、Host preview / 
 - base main: `2cd51b9d09dd50c00150b62be5175a56ff808e0f`
 - branch: `codex/ai-native-an5-generator-install`
 - worktree: `/Users/shotaro/code/share/hover-menu-preview-ai-native-an5`
+- PR: [#16](https://github.com/shotaro311/hover-pocket/pull/16)
+- implementation head: `2efac67e77fddc7eae4c5dbd214019873d93c680`
 - ChatGPT Pro Orchestrator generation 2: delivery `return-86ca754d9b618c814b0d87e2615c6b51`
 - Pro返却はdelivery ID / state hash、receipt、base SHA、allowed path、artifact hashを検証してから適用した。Pro成果物を完了扱いせず、Codexが両OSの安全境界、回帰テスト、セキュリティ差分監査を追加した。
 
@@ -61,23 +63,32 @@ AN5全体はまだ完了ではない。Codexへの生成依頼、Host preview / 
 Windows:
 
 - macOSと同じLifecycle Manager、任意長version比較、59桁downgrade verifierを実装した。
-- このMacには.NET SDKがないためローカル実行は未実施。PRのWindows Release buildとPocket App verifierを必須gateとする。
+- このMacには.NET SDKがないためローカル実行は未実施した。PR head `2efac67`のWindows run [31890644140](https://github.com/shotaro311/hover-pocket/actions/runs/31890644140)でRelease buildとPocket App lifecycleを含む既存verifierが成功した。
+
+GitHub Actions:
+
+- Windows verify [31890644140](https://github.com/shotaro311/hover-pocket/actions/runs/31890644140): 成功
+- macOS verify [31890644188](https://github.com/shotaro311/hover-pocket/actions/runs/31890644188): 成功
+- Pocket contracts [31890644159](https://github.com/shotaro311/hover-pocket/actions/runs/31890644159): Ubuntu / macOS / Windowsとcross-OS report比較が成功
+- PR Router [31890642661](https://github.com/shotaro311/hover-pocket/actions/runs/31890642661): 成功
+
+最初のPR head `aa6e8e2`では、macOS CIだけがimmutable化した一時フォルダを最終名へ移動できず失敗した。最終headでは、検証済みprivate treeを先に最終digest pathへatomic moveし、直後にimmutable化してreadbackする順序へ両OSを統一した。hardeningまたはreadbackが失敗した場合は、この操作が移動したfinal treeをmutable化してcleanupし、active recordは更新しない。
 
 ## Security readback
 
-最終working-tree digest `codex-security-snapshot/v1:sha256:37f697dd6b046607687f7d4214efa2cd91af4d589fc71b8af257987dbbd03ff6`をCodex Security diff scan `8c157a4d-3351-4531-bb2e-fc8815d6a462`で検査した。
+exact committed range `2cd51b9d09dd50c00150b62be5175a56ff808e0f...2efac67e77fddc7eae4c5dbd214019873d93c680`をCodex Security diff scan `5b314036-2b06-4806-844b-48f65c503fc9`で検査した。
 
 - changed file: 21 / 21 reviewed
 - reportable finding: 0
 - status: sealed complete
 - oversized SemVerのdowngrade誤分類: 両OSの任意長比較と回帰testで解消
-- deferred: lifecycle destination rootのpathname TOCTOU
+- deferred: lifecycle destination rootと短いmove-to-harden区間のpathname TOCTOU
 
 deferred項目は現行production経路から到達しない。Lifecycle ManagerをUI、Voice、Pocket App、MCP、WebViewへ接続する前に、macOSではno-follow descriptor、Windowsでは検証済みdirectory handle相当で保存先rootを固定し、symlink / reparse race testを通す。
 
 ## 残り
 
-- Ready PR作成とWindows / macOS / Pocket contract CIのreadback。
+- PR #16はReady、全CI成功、`needs-human-merge`付き。人間によるmerge判断は未実施。
 - AN5-B: user requestからCodex draft生成、Host preview、権限差分表示、導入確認、version管理UIへの接続。
 - production composition前のdestination root pinningと両OSrace test。
 - AN3のWindows実音声E2Eは別の実機gateとして継続する。
