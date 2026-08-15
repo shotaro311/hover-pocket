@@ -118,6 +118,13 @@ AN5-BのHost側縦断をmacOS / Windowsへ実装した。ユーザー要求を�
 
 - `8e5e2370-6361-4e35-a1fd-6fe835e7db85`: `0bc4051...736d207`、coverage complete、findings 0、sealed complete。
 - `695689dc-62ad-45ff-a733-62ce8389e1c1`: `736d207...cc95d61`、coverage complete、findings 0、sealed complete。
+- `5756c702-3d31-4da0-a285-c7a477a57fdc`: `3bac0f6`からの最終review修正6 file、coverage complete、findings 0、sealed complete。
+
+最終review修正:
+
+- Windowsの`settings.resetDefaults`は保存値だけでなく、起動済みgeneration controllerへ`SetEnabled(false)`を通知する。進行中生成をcancelし、Host保持proposalをrejectして、write routeを`GENERATION_DISABLED`で拒否する回帰をSettings verifierへ追加した。
+- macOS / Windowsの`enable`は、enabled record確定後のpackage / active record readbackが失敗した場合、元のdisabled recordを再書込みしてreadbackした後に失敗を返す。一回だけreadback failureを注入し、再起動相当の再読込でもdisabled、active packageなしとなる回帰を追加した。
+- Macのwarnings-as-errors build、Pocket App package / lifecycle / generation verifier、共通contract 13 schema / 58 fixture、Windows Settings JavaScript syntax、`git diff --check`が成功した。Windows本体とSettings verifierはPR CIを最終gateとする。
 
 ## AN5-Cへ分離したruntime activation gate
 
