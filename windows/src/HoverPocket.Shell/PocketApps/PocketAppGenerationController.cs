@@ -443,7 +443,7 @@ internal sealed class PocketAppGenerationController : IDisposable
         {
             lock (_stateSync) { if (!_enabled) { return FailLocked("GENERATION_DISABLED"); } }
             ValidatePins();
-            RejectPendingProposalIfNeeded();
+            RejectPendingProposalIfNeeded(packageId);
             var receipt = _lifecycle.Remove(packageId, PocketAppDataDisposition.Preserve);
             if (!receipt.ReadbackVerified
                 || receipt.State != PocketAppLifecycleState.Removed
@@ -454,9 +454,9 @@ internal sealed class PocketAppGenerationController : IDisposable
             lock (_stateSync)
             {
                 _lastReceipt = receipt;
-                _pendingProposal = null;
-                _pendingAllowsActivation = false;
-                _phase = PocketAppGenerationPhase.Removed;
+                _phase = _pendingProposal is null
+                    ? PocketAppGenerationPhase.Removed
+                    : PocketAppGenerationPhase.AwaitingApproval;
                 _errorCode = null;
             }
             RefreshManagedPackages();
@@ -577,11 +577,11 @@ internal sealed class PocketAppGenerationController : IDisposable
         }
     }
 
-    private void RejectPendingProposalIfNeeded()
+    private void RejectPendingProposalIfNeeded(string packageId)
     {
         PocketAppLifecycleProposal? proposal;
         lock (_stateSync) { proposal = _pendingProposal; }
-        if (proposal is null) { return; }
+        if (proposal is null || !ShouldRejectPendingProposal(packageId, proposal.PackageId)) { return; }
         _lifecycle.Reject(proposal.RequestId, proposal.BindingDigest);
         lock (_stateSync)
         {
@@ -592,6 +592,9 @@ internal sealed class PocketAppGenerationController : IDisposable
             }
         }
     }
+
+    internal static bool ShouldRejectPendingProposal(string removingPackageId, string pendingPackageId) =>
+        string.Equals(removingPackageId, pendingPackageId, StringComparison.Ordinal);
 
     private void RefreshManagedPackages()
     {

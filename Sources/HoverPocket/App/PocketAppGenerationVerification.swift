@@ -295,6 +295,18 @@ enum PocketAppGenerationVerification {
             "generation_rollback_targets_only_older_versions",
             failures: &failures
         )
+        require(
+            PocketAppGenerationController.shouldRejectPendingProposal(
+                removingPackageID: "local.example.focus",
+                pendingPackageID: "local.example.focus"
+            )
+                && !PocketAppGenerationController.shouldRejectPendingProposal(
+                    removingPackageID: "local.example.calendar",
+                    pendingPackageID: "local.example.focus"
+                ),
+            "generation_remove_rejects_only_same_package_proposal",
+            failures: &failures
+        )
         let now = Date()
         let crafted = PocketAppLifecycleProposal(
             requestID: "request-safe",

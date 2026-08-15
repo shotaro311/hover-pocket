@@ -267,6 +267,14 @@ internal sealed class PocketAppGenerationVerifier
                     .SequenceEqual(["1.0.0"], StringComparer.Ordinal),
             "generation_rollback_targets_only_older_versions");
         Require(
+            PocketAppGenerationController.ShouldRejectPendingProposal(
+                "local.example.focus",
+                "local.example.focus")
+                && !PocketAppGenerationController.ShouldRejectPendingProposal(
+                    "local.example.calendar",
+                    "local.example.focus"),
+            "generation_remove_rejects_only_same_package_proposal");
+        Require(
             CodexPocketAppGenerationAdapter.ResolveExecutable() is null,
             "generation_real_codex_confidentiality_gate");
     }

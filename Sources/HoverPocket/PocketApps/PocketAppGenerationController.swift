@@ -198,7 +198,7 @@ final class PocketAppGenerationController: ObservableObject {
     func removePreservingData(packageID: String) {
         do {
             try validatePins()
-            try rejectPendingProposalIfNeeded()
+            try rejectPendingProposalIfNeeded(for: packageID)
             let receipt = try lifecycle.remove(packageID: packageID, dataDisposition: .preserve)
             guard receipt.readbackVerified,
                   receipt.state == .removed,
@@ -206,9 +206,7 @@ final class PocketAppGenerationController: ObservableObject {
                 throw PocketAppGenerationError.packageInvalid
             }
             lastReceipt = receipt
-            pendingProposal = nil
-            pendingAllowsActivation = false
-            phase = .removed
+            phase = pendingProposal == nil ? .removed : .awaitingApproval
             errorCode = nil
             try refreshManagedPackages()
             try validatePins()
@@ -353,11 +351,22 @@ final class PocketAppGenerationController: ObservableObject {
         pendingAllowsActivation = false
     }
 
-    private func rejectPendingProposalIfNeeded() throws {
-        guard let proposal = pendingProposal else { return }
+    private func rejectPendingProposalIfNeeded(for packageID: String) throws {
+        guard let proposal = pendingProposal,
+              Self.shouldRejectPendingProposal(
+                  removingPackageID: packageID,
+                  pendingPackageID: proposal.packageID
+              ) else { return }
         try lifecycle.reject(requestID: proposal.requestID, bindingDigest: proposal.bindingDigest)
         pendingProposal = nil
         pendingAllowsActivation = false
+    }
+
+    static func shouldRejectPendingProposal(
+        removingPackageID: String,
+        pendingPackageID: String
+    ) -> Bool {
+        removingPackageID == pendingPackageID
     }
 
     private func validatePins() throws {
