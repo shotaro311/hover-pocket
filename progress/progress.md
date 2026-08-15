@@ -2,7 +2,7 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pro-pending; capability-expansion-calculator-local-pass
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pro-pending; capability-expansion-calculator-merged
 ---
 
 ## 2026-08-15 AI-native Built-in Capability Expansion
@@ -10,7 +10,7 @@ status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pro-pendi
 - AN2 merge後のexact `main` `014032d`から隔離worktreeとbranch `codex/ai-native-capability-expansion`を作成し、最初のExpansion単位としてCalculatorをpure local `calculator.expression.evaluate@1`へCapability化した。
 - macOS / WindowsのRegistry、Broker、runtime composition、単体 / Broker verifierへ同じID、schema、制限、決定論的な結果形式を追加した。任意コード評価は使わず、式長、値数、桁数、演算子、overflow、除算ゼロをfail closedで制限する。
 - macOSでSwift warnings-as-errors build、Capability 11 handler、Broker 12 descriptor / 11 handler、Calculator、Timer、Clipboard、Panel layout 112件、Media、Pocket contract 12 schema / 52 fixture、`git diff --check`が成功した。
-- 実装head `76990dc`のDraft PR [#10](https://github.com/shotaro311/hover-pocket/pull/10)で、macOS [31852926760](https://github.com/shotaro311/hover-pocket/actions/runs/31852926760)、Windows [31852926787](https://github.com/shotaro311/hover-pocket/actions/runs/31852926787)、PR Router [31852926762](https://github.com/shotaro311/hover-pocket/actions/runs/31852926762)が成功し、`MERGEABLE / CLEAN`をreadbackした。Security diff scan `1b18c190-d37b-450c-960f-c924f26ea9ae`は変更source 10 / 10、coverage complete、finding 0でsealed complete。既存Calculator UIのBroker移行と、Expansion trackの残りは後続単位である。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-capability-expansion.md`。
+- 最終head `ff7d642`のPR [#10](https://github.com/shotaro311/hover-pocket/pull/10)で、macOS [31853288589](https://github.com/shotaro311/hover-pocket/actions/runs/31853288589)、Windows [31853288565](https://github.com/shotaro311/hover-pocket/actions/runs/31853288565)、PR Router [31853287341](https://github.com/shotaro311/hover-pocket/actions/runs/31853287341)が成功し、review thread 0、`MERGEABLE / CLEAN`をreadbackしてmainへmergeした。main / origin/mainはmerge commit `e456222ae3d064ab3c1efbf73aea97fdb4a41fcc`で一致した。Security diff scan `1b18c190-d37b-450c-960f-c924f26ea9ae`は変更source 10 / 10、coverage complete、finding 0でsealed complete。既存Calculator UIのBroker移行と、Expansion trackの残りは後続単位である。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-capability-expansion.md`。
 
 ## 2026-08-15 AI-native AN2 Registry / Broker / Text Today Focus
 

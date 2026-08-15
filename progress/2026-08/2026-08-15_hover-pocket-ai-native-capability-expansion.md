@@ -51,7 +51,6 @@ git diff --check
 
 ## 未完了
 
-- 検証結果を進捗文書へ反映したdocs commitをpushし、最終PR headのcheck、mergeability、未解決reviewを再確認する。
 - Expansion trackの残りで、Calendar update / delete、Timer / Sticky既存UI移行、Controls、Clipboard、Calculator既存UI移行を段階実装する。
 - AN3の実音声E2E、AN4以降のDSL / 生成 / sandbox / MCP / Connector / 配布gateは別worktreeで継続する。
 
@@ -66,3 +65,13 @@ git diff --check
 - PR Router run: [31852926762](https://github.com/shotaro311/hover-pocket/actions/runs/31852926762) `SUCCESS`
 - exact headのPR readbackは`MERGEABLE / CLEAN`、3 check成功だった。
 - Codex Security diff scan `1b18c190-d37b-450c-960f-c924f26ea9ae`は変更source 10 / 10を完全レビューし、coverage `complete`、finding 0、sealed `completed`となった。総token usageは104,917。外部service mutationはpure Calculator差分に存在せず対象外である。
+
+## Merge readback
+
+- 最終PR head: `ff7d642a2fb5b4a62078e981d77fc2ede851942f`
+- 最終macOS run: [31853288589](https://github.com/shotaro311/hover-pocket/actions/runs/31853288589) `SUCCESS`
+- 最終Windows run: [31853288565](https://github.com/shotaro311/hover-pocket/actions/runs/31853288565) `SUCCESS`
+- 最終PR Router run: [31853287341](https://github.com/shotaro311/hover-pocket/actions/runs/31853287341) `SUCCESS`
+- review thread 0、Ready、`MERGEABLE / CLEAN`をreadbackしてPR #10をmergeした。
+- merge commit: `e456222ae3d064ab3c1efbf73aea97fdb4a41fcc`
+- merge後のmain / origin/mainは上記SHAで一致し、ahead / behindは`0 / 0`だった。
