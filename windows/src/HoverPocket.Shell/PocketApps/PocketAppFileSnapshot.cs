@@ -15,6 +15,9 @@ internal sealed record PocketAppFileSnapshot(
     IReadOnlyDictionary<string, byte[]> Files,
     IReadOnlyDictionary<string, PocketAppFileIdentity> Identities)
 {
+    private const int MaximumInventoryEntries = 256;
+    private const int MaximumDirectoryDepth = 16;
+
     public static PocketAppFileSnapshot Capture(string directory)
     {
         var root = Path.GetFullPath(directory);
@@ -97,7 +100,8 @@ internal sealed record PocketAppFileSnapshot(
     private static HashSet<string> Inventory(string root)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
-        Visit(root, root, result);
+        var entryCount = 0;
+        Visit(root, root, result, 0, ref entryCount);
         if (result.Count > PocketAppPackageRuntime.MaximumFiles)
         {
             throw new PocketAppPackageRuntimeException("$:package_size");
@@ -105,10 +109,20 @@ internal sealed record PocketAppFileSnapshot(
         return result;
     }
 
-    private static void Visit(string root, string current, HashSet<string> result)
+    private static void Visit(string root, string current, HashSet<string> result, int depth, ref int entryCount)
     {
         foreach (var entry in Directory.EnumerateFileSystemEntries(current).Order(StringComparer.Ordinal))
         {
+            entryCount++;
+            if (entryCount > MaximumInventoryEntries)
+            {
+                throw new PocketAppPackageRuntimeException("$:package_size");
+            }
+            var entryDepth = depth + 1;
+            if (entryDepth > MaximumDirectoryDepth)
+            {
+                throw new PocketAppPackageRuntimeException("$:package_depth");
+            }
             var attributes = File.GetAttributes(entry);
             if (attributes.HasFlag(FileAttributes.ReparsePoint))
             {
@@ -116,7 +130,7 @@ internal sealed record PocketAppFileSnapshot(
             }
             if (attributes.HasFlag(FileAttributes.Directory))
             {
-                Visit(root, entry, result);
+                Visit(root, entry, result, entryDepth, ref entryCount);
                 continue;
             }
             var relative = Path.GetRelativePath(root, entry).Replace(Path.DirectorySeparatorChar, '/');

@@ -5,6 +5,14 @@ namespace HoverPocket.Shell.PocketApps;
 
 internal sealed class PocketAppStagingTestRunner
 {
+    public static IReadOnlySet<string> SupportedCaseIds { get; } = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "calendar-read",
+        "start-focus-approved",
+        "start-focus-idempotent-replay",
+        "start-focus-rejected"
+    };
+
     private readonly IReadOnlyDictionary<PocketCapabilityKey, PocketCapabilityDescriptor> _descriptors;
 
     public PocketAppStagingTestRunner(IEnumerable<PocketCapabilityDescriptor>? descriptors = null)

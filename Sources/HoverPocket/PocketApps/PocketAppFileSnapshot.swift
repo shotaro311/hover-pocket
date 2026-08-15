@@ -10,6 +10,9 @@ struct PocketAppFileIdentity: Equatable, Sendable {
 }
 
 struct PocketAppFileSnapshot: Sendable {
+    private static let maximumInventoryEntries = 256
+    private static let maximumDirectoryDepth = 16
+
     let rootDirectory: URL
     let files: [String: Data]
     let identities: [String: PocketAppFileIdentity]
@@ -129,18 +132,30 @@ struct PocketAppFileSnapshot: Sendable {
             throw PocketAppPackageError.invalid("$:package_inventory")
         }
         var paths: Set<String> = []
+        var entryCount = 0
         for case let url as URL in enumerator {
+            entryCount += 1
+            guard entryCount <= maximumInventoryEntries else {
+                enumerator.skipDescendants()
+                throw PocketAppPackageError.invalid("$:package_size")
+            }
             let values = try url.resourceValues(forKeys: keys)
             guard values.isSymbolicLink != true else {
                 enumerator.skipDescendants()
                 throw PocketAppPackageError.invalid("$:package_symlink")
             }
-            if values.isDirectory == true { continue }
-            guard values.isRegularFile == true else { throw PocketAppPackageError.invalid("$:package_file") }
             let relative = String(url.standardizedFileURL.path.dropFirst(root.path.count + 1))
-            guard safeRelativePath(relative), paths.insert(relative).inserted else {
+            guard safeRelativePath(relative) else {
                 throw PocketAppPackageError.invalid("$:package_path")
             }
+            let depth = relative.split(separator: "/", omittingEmptySubsequences: false).count
+            guard depth <= maximumDirectoryDepth else {
+                enumerator.skipDescendants()
+                throw PocketAppPackageError.invalid("$:package_depth")
+            }
+            if values.isDirectory == true { continue }
+            guard values.isRegularFile == true else { throw PocketAppPackageError.invalid("$:package_file") }
+            guard paths.insert(relative).inserted else { throw PocketAppPackageError.invalid("$:package_path") }
             guard paths.count <= PocketAppPackageRuntime.maximumFiles else {
                 throw PocketAppPackageError.invalid("$:package_size")
             }

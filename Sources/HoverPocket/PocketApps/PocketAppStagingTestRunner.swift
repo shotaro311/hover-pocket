@@ -1,6 +1,13 @@
 import Foundation
 
 struct PocketAppStagingTestRunner {
+    static let supportedCaseIDs: Set<String> = [
+        "calendar-read",
+        "start-focus-approved",
+        "start-focus-idempotent-replay",
+        "start-focus-rejected"
+    ]
+
     private let descriptors: [PocketCapabilityKey: PocketCapabilityDescriptor]
 
     init(descriptors: [PocketCapabilityDescriptor] = PocketCapabilityDescriptors.builtIn) {

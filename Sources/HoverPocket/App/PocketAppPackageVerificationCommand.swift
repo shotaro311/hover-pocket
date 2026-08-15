@@ -126,6 +126,27 @@ enum PocketAppPackageVerificationCommand {
                 return true
             }
         }
+        rejectPackage("unsupported_test_case", failures: &failures) { root in
+            try mutateJSON(root.appendingPathComponent("tests/calendar-read.json")) { test in
+                test["case"] = "custom-generated-case"
+                return true
+            }
+        }
+        rejectPackage("deep_empty_directories", failures: &failures) { root in
+            let relative = Array(repeating: "nested", count: 17).joined(separator: "/")
+            try FileManager.default.createDirectory(
+                at: root.appendingPathComponent(relative, isDirectory: true),
+                withIntermediateDirectories: true
+            )
+        }
+        rejectPackage("excess_empty_directories", failures: &failures) { root in
+            for index in 0..<257 {
+                try FileManager.default.createDirectory(
+                    at: root.appendingPathComponent("empty-\(index)", isDirectory: true),
+                    withIntermediateDirectories: false
+                )
+            }
+        }
 
         MainActor.assumeIsolated {
             verifyStableKey(failures: &failures)
@@ -135,7 +156,7 @@ enum PocketAppPackageVerificationCommand {
         print("pocket_app_package_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_app_package_valid_files=9")
         print("pocket_app_package_bundled=ok")
-        print("pocket_app_package_negative_cases=10")
+        print("pocket_app_package_negative_cases=13")
         print("pocket_app_lifecycle_verify=\(failures.isEmpty ? "ok" : "failed")")
         if !failures.isEmpty {
             print("pocket_app_package_failures=\(failures.joined(separator: ","))")
@@ -260,6 +281,24 @@ enum PocketAppPackageVerificationCommand {
                 let installed = try manager.install(proposal, approvalGrant: grant, now: now)
                 require(try installed.readbackVerified && manager.activePackage(packageID: proposal.packageID)?.manifestDigest == proposal.packageDigest, "lifecycle_install_readback", failures: &failures)
                 try Data(contentsOf: fixtureURL("package/intent.md")).write(to: draftRoot.appendingPathComponent("intent.md"), options: .atomic)
+
+                let installedIntent = root
+                    .appendingPathComponent("Apps/\(proposal.packageID)/Versions/\(proposal.version)/\(proposal.packageDigest.dropFirst("sha256:".count))/package/intent.md")
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: installedIntent.path)
+                let reharden = try manager.stage(draftDirectory: draftRoot, now: now.addingTimeInterval(0.5))
+                let rehardenGrant = try manager.approve(
+                    requestID: reharden.requestID,
+                    bindingDigest: reharden.bindingDigest,
+                    now: now.addingTimeInterval(0.5)
+                )
+                _ = try manager.install(reharden, approvalGrant: rehardenGrant, now: now.addingTimeInterval(0.5))
+                let rehardenedAttributes = try FileManager.default.attributesOfItem(atPath: installedIntent.path)
+                let rehardenedPermissions = (rehardenedAttributes[.posixPermissions] as? NSNumber)?.intValue
+                require(
+                    rehardenedPermissions.map { $0 & 0o222 == 0 } == true,
+                    "lifecycle_existing_snapshot_rehardened",
+                    failures: &failures
+                )
 
                 try mutateJSON(draftRoot.appendingPathComponent("manifest.json")) { manifest in
                     manifest["version"] = "1.0.1"
@@ -432,6 +471,15 @@ enum PocketAppPackageVerificationCommand {
                     "lifecycle_remove_failure_invariant",
                     failures: &failures
                 )
+                let recoveredIntent = root
+                    .appendingPathComponent("Apps/\(clean.packageID)/Versions/\(clean.version)/\(clean.packageDigest.dropFirst("sha256:".count))/package/intent.md")
+                let recoveredAttributes = try FileManager.default.attributesOfItem(atPath: recoveredIntent.path)
+                let recoveredPermissions = (recoveredAttributes[.posixPermissions] as? NSNumber)?.intValue
+                require(
+                    recoveredPermissions.map { $0 & 0o222 == 0 } == true,
+                    "lifecycle_remove_failure_rehardened",
+                    failures: &failures
+                )
                 try mutateJSON(draftRoot.appendingPathComponent("manifest.json")) { manifest in
                     manifest["version"] = "1.0.0"
                     return true
@@ -458,13 +506,95 @@ enum PocketAppPackageVerificationCommand {
                 } catch PocketAppLifecycleError.corruptVersion {
                 }
 
-                let interrupted = root.appendingPathComponent("Apps/\(clean.packageID)/Versions/9.9.9/.installing-fixture", isDirectory: true)
+                let versionsRoot = root.appendingPathComponent("Apps/\(clean.packageID)/Versions", isDirectory: true)
+                try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: versionsRoot.path)
+                let interrupted = versionsRoot.appendingPathComponent("9.9.9/.installing-fixture", isDirectory: true)
                 try FileManager.default.createDirectory(at: interrupted, withIntermediateDirectories: true)
                 _ = try PocketAppLifecycleManager(rootDirectory: root, userDataRoot: dataRoot)
                 require(!FileManager.default.fileExists(atPath: interrupted.path), "lifecycle_interrupted_cleanup", failures: &failures)
             }
         } catch {
             failures.append("lifecycle_negative:\(error)")
+        }
+
+        do {
+            try withPackage { draftRoot in
+                let root = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("hover-pocket-lifecycle-state-binding-\(UUID().uuidString)", isDirectory: true)
+                let dataRoot = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("hover-pocket-lifecycle-state-binding-data-\(UUID().uuidString)", isDirectory: true)
+                let absentRoot = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("hover-pocket-lifecycle-absent-binding-\(UUID().uuidString)", isDirectory: true)
+                let absentDataRoot = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("hover-pocket-lifecycle-absent-binding-data-\(UUID().uuidString)", isDirectory: true)
+                defer {
+                    for directory in [root, absentRoot] {
+                        makeTreeMutable(directory)
+                        try? FileManager.default.removeItem(at: directory)
+                    }
+                    try? FileManager.default.removeItem(at: dataRoot)
+                    try? FileManager.default.removeItem(at: absentDataRoot)
+                }
+
+                let manager = try PocketAppLifecycleManager(rootDirectory: root, userDataRoot: dataRoot)
+                let initial = try manager.stage(draftDirectory: draftRoot, now: now)
+                let initialGrant = try manager.approve(
+                    requestID: initial.requestID,
+                    bindingDigest: initial.bindingDigest,
+                    now: now
+                )
+                _ = try manager.install(initial, approvalGrant: initialGrant, now: now)
+                try mutateJSON(draftRoot.appendingPathComponent("manifest.json")) { manifest in
+                    manifest["version"] = "1.0.1"
+                    return true
+                }
+                let enabledProposal = try manager.stage(draftDirectory: draftRoot, now: now.addingTimeInterval(1))
+                let enabledGrant = try manager.approve(
+                    requestID: enabledProposal.requestID,
+                    bindingDigest: enabledProposal.bindingDigest,
+                    now: now.addingTimeInterval(1)
+                )
+                _ = try manager.disable(packageID: initial.packageID, now: now.addingTimeInterval(2))
+                do {
+                    _ = try manager.install(enabledProposal, approvalGrant: enabledGrant, now: now.addingTimeInterval(2))
+                    failures.append("lifecycle_enabled_proposal_after_disable_accepted")
+                } catch PocketAppLifecycleError.activeChanged {
+                }
+                require(
+                    try manager.activePackage(packageID: initial.packageID) == nil,
+                    "lifecycle_disabled_state_preserved",
+                    failures: &failures
+                )
+
+                try mutateJSON(draftRoot.appendingPathComponent("manifest.json")) { manifest in
+                    manifest["version"] = "1.0.0"
+                    return true
+                }
+                let absentManager = try PocketAppLifecycleManager(rootDirectory: absentRoot, userDataRoot: absentDataRoot)
+                let absentProposal = try absentManager.stage(draftDirectory: draftRoot, now: now)
+                let absentGrant = try absentManager.approve(
+                    requestID: absentProposal.requestID,
+                    bindingDigest: absentProposal.bindingDigest,
+                    now: now
+                )
+                _ = try absentManager.remove(
+                    packageID: absentProposal.packageID,
+                    dataDisposition: .preserve,
+                    now: now.addingTimeInterval(1)
+                )
+                do {
+                    _ = try absentManager.install(absentProposal, approvalGrant: absentGrant, now: now.addingTimeInterval(1))
+                    failures.append("lifecycle_absent_proposal_after_remove_accepted")
+                } catch PocketAppLifecycleError.activeChanged {
+                }
+                require(
+                    try absentManager.activePackage(packageID: absentProposal.packageID) == nil,
+                    "lifecycle_removed_state_preserved",
+                    failures: &failures
+                )
+            }
+        } catch {
+            failures.append("lifecycle_state_binding:\(error)")
         }
 
         do {

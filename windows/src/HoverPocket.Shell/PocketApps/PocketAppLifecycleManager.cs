@@ -48,6 +48,7 @@ internal sealed record PocketAppLifecycleProposal(
     string Version,
     string PackageDigest,
     string? CurrentDigest,
+    PocketAppLifecycleState? CurrentState,
     string PreviewDigest,
     IReadOnlyList<PocketAppPreviewSurface> Previews,
     PocketAppPermissionDiff PermissionDiff,
@@ -184,6 +185,7 @@ internal sealed class PocketAppLifecycleManager
                 package.Manifest.Version,
                 package.ManifestDigest,
                 currentDigest,
+                current?.State,
                 previewDigest,
                 diff,
                 grantDiff);
@@ -196,6 +198,7 @@ internal sealed class PocketAppLifecycleManager
                 package.Manifest.Version,
                 package.ManifestDigest,
                 currentDigest,
+                current?.State,
                 previewDigest,
                 previews,
                 diff,
@@ -311,6 +314,7 @@ internal sealed class PocketAppLifecycleManager
             targetPackage.Manifest.Version,
             targetPackage.ManifestDigest,
             current.PackageDigest,
+            current.State,
             previewDigest,
             diff,
             grantDiff);
@@ -324,6 +328,7 @@ internal sealed class PocketAppLifecycleManager
             targetPackage.Manifest.Version,
             targetPackage.ManifestDigest,
             current.PackageDigest,
+            current.State,
             previewDigest,
             previews,
             diff,
@@ -394,11 +399,15 @@ internal sealed class PocketAppLifecycleManager
             now ?? DateTimeOffset.UtcNow);
         var versions = VersionsRoot(packageId);
         var tombstone = Path.Combine(AppRoot(packageId), $".removed-Versions-{Guid.NewGuid():N}");
+        var quarantine = previous?.State == PocketAppLifecycleState.Enabled
+            ? previous with { State = PocketAppLifecycleState.Disabled, UpdatedAt = now ?? DateTimeOffset.UtcNow }
+            : null;
         var movedVersions = false;
         try
         {
             if (Directory.Exists(versions))
             {
+                if (quarantine is not null) { WriteAndVerify(quarantine); }
                 MakeMutable(versions);
                 if (_failureInjection?.Invoke("remove_stage") == true) { throw Failure("LIFECYCLE_STORAGE_FAILED"); }
                 Directory.Move(versions, tombstone);
@@ -412,7 +421,19 @@ internal sealed class PocketAppLifecycleManager
             {
                 try { Directory.Move(tombstone, versions); } catch { }
             }
-            try { Restore(previous, packageId); } catch { }
+            try
+            {
+                if (Directory.Exists(versions))
+                {
+                    MakeImmutable(versions);
+                    VerifyImmutable(versions);
+                }
+                Restore(previous, packageId);
+            }
+            catch
+            {
+                if (quarantine is not null) { try { Write(quarantine); } catch { } }
+            }
             throw Failure("LIFECYCLE_STORAGE_FAILED");
         }
         if (movedVersions)
@@ -470,7 +491,8 @@ internal sealed class PocketAppLifecycleManager
         var currentDigest = current is null || current.State == PocketAppLifecycleState.Removed
             ? null
             : current.PackageDigest;
-        if (!string.Equals(currentDigest, proposal.CurrentDigest, StringComparison.Ordinal))
+        if (!string.Equals(currentDigest, proposal.CurrentDigest, StringComparison.Ordinal)
+            || current?.State != proposal.CurrentState)
         {
             throw Failure("LIFECYCLE_ACTIVE_CHANGED");
         }
@@ -516,6 +538,7 @@ internal sealed class PocketAppLifecycleManager
             proposal.Version,
             proposal.PackageDigest,
             proposal.CurrentDigest,
+            proposal.CurrentState,
             proposal.PreviewDigest,
             observedDiff,
             observedGrantDiff);
@@ -609,6 +632,12 @@ internal sealed class PocketAppLifecycleManager
             {
                 throw Failure("LIFECYCLE_CORRUPT_VERSION");
             }
+            MakeImmutable(finalRoot);
+            VerifyImmutable(finalRoot);
+            if (VerifiedInstalledPackage(finalPackage).ManifestDigest != package.ManifestDigest)
+            {
+                throw Failure("LIFECYCLE_READBACK_FAILED");
+            }
             return finalPackage;
         }
 
@@ -630,6 +659,7 @@ internal sealed class PocketAppLifecycleManager
             Directory.Move(temporaryRoot, finalRoot);
             movedToFinal = true;
             MakeImmutable(finalRoot);
+            VerifyImmutable(finalRoot);
             if (VerifiedInstalledPackage(finalPackage).ManifestDigest != package.ManifestDigest)
             {
                 throw Failure("LIFECYCLE_READBACK_FAILED");
@@ -990,6 +1020,19 @@ internal sealed class PocketAppLifecycleManager
         }
     }
 
+    private static void VerifyImmutable(string directory)
+    {
+        if (!Directory.Exists(directory)) { throw Failure("LIFECYCLE_READBACK_FAILED"); }
+        EnsureTreeHasNoReparsePoints(directory);
+        foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+        {
+            if (!File.GetAttributes(file).HasFlag(FileAttributes.ReadOnly))
+            {
+                throw Failure("LIFECYCLE_READBACK_FAILED");
+            }
+        }
+    }
+
     private static void EnsureTreeHasNoReparsePoints(string directory)
     {
         EnsureDirectoryNotReparsePoint(directory);
@@ -1029,6 +1072,7 @@ internal sealed class PocketAppLifecycleManager
         string version,
         string packageDigest,
         string? currentDigest,
+        PocketAppLifecycleState? currentState,
         string previewDigest,
         PocketAppPermissionDiff permissionDiff,
         PocketAppCapabilityGrantDiff capabilityGrantDiff)
@@ -1039,12 +1083,13 @@ internal sealed class PocketAppLifecycleManager
             hash.AppendData(Encoding.UTF8.GetBytes(value));
             hash.AppendData([0]);
         }
-        Field("hoverpocket.lifecycle-approval/v1");
+        Field("hoverpocket.lifecycle-approval/v2");
         Field(action.ToString().ToLowerInvariant());
         Field(packageId);
         Field(version);
         Field(packageDigest);
         Field(currentDigest ?? "none");
+        Field(currentState?.ToString().ToLowerInvariant() ?? "none");
         Field(previewDigest);
         foreach (var item in permissionDiff.Added.Order(StringComparer.Ordinal)) { Field($"+{item}"); }
         foreach (var item in permissionDiff.Removed.Order(StringComparer.Ordinal)) { Field($"-{item}"); }

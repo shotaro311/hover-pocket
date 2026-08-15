@@ -95,6 +95,26 @@ internal sealed class PocketAppPackageVerifier
         {
             surface["root"]!["children"]![2]!["value"] = "$input.missing";
         }));
+        RejectPackage("unsupported_test_case", root => MutateJson(Path.Combine(root, "tests", "calendar-read.json"), test =>
+        {
+            test["case"] = "custom-generated-case";
+        }));
+        RejectPackage("deep_empty_directories", root =>
+        {
+            var current = root;
+            for (var index = 0; index < 17; index++)
+            {
+                current = Path.Combine(current, "nested");
+                Directory.CreateDirectory(current);
+            }
+        });
+        RejectPackage("excess_empty_directories", root =>
+        {
+            for (var index = 0; index < 257; index++)
+            {
+                Directory.CreateDirectory(Path.Combine(root, $"empty-{index}"));
+            }
+        });
 
         VerifyStableKey();
         VerifyLifecycle();
@@ -112,7 +132,7 @@ internal sealed class PocketAppPackageVerifier
         Console.WriteLine("pocket_app_package_verify=ok");
         Console.WriteLine("pocket_app_package_valid_files=9");
         Console.WriteLine("pocket_app_package_bundled=ok");
-        Console.WriteLine("pocket_app_package_negative_cases=9");
+        Console.WriteLine("pocket_app_package_negative_cases=12");
         Console.WriteLine("pocket_app_lifecycle_verify=ok");
         return 0;
     }
@@ -243,6 +263,23 @@ internal sealed class PocketAppPackageVerifier
                 var installed = manager.Install(proposal, grant, now);
                 Require(installed.ReadbackVerified && manager.ActivePackage(proposal.PackageId)?.ManifestDigest == proposal.PackageDigest, "lifecycle_install_readback");
                 File.WriteAllBytes(Path.Combine(draftRoot, "intent.md"), FixtureData("package/intent.md"));
+
+                var installedIntent = Path.Combine(
+                    root,
+                    "Apps",
+                    proposal.PackageId,
+                    "Versions",
+                    proposal.Version,
+                    proposal.PackageDigest["sha256:".Length..],
+                    "package",
+                    "intent.md");
+                File.SetAttributes(installedIntent, File.GetAttributes(installedIntent) & ~FileAttributes.ReadOnly);
+                var reharden = manager.Stage(draftRoot, now.AddMilliseconds(500));
+                var rehardenGrant = manager.Approve(reharden.RequestId, reharden.BindingDigest, now.AddMilliseconds(500));
+                _ = manager.Install(reharden, rehardenGrant, now.AddMilliseconds(500));
+                Require(
+                    File.GetAttributes(installedIntent).HasFlag(FileAttributes.ReadOnly),
+                    "lifecycle_existing_snapshot_rehardened");
 
                 MutateJson(Path.Combine(draftRoot, "manifest.json"), manifest => manifest["version"] = "1.0.1");
                 var update = manager.Stage(draftRoot, now.AddSeconds(1));
@@ -385,6 +422,18 @@ internal sealed class PocketAppPackageVerifier
                 {
                 }
                 Require(failingRemoveManager.ActivePackage(clean.PackageId)?.Manifest.Version == "1.0.0", "lifecycle_remove_failure_invariant");
+                var recoveredIntent = Path.Combine(
+                    root,
+                    "Apps",
+                    clean.PackageId,
+                    "Versions",
+                    clean.Version,
+                    clean.PackageDigest["sha256:".Length..],
+                    "package",
+                    "intent.md");
+                Require(
+                    File.GetAttributes(recoveredIntent).HasFlag(FileAttributes.ReadOnly),
+                    "lifecycle_remove_failure_rehardened");
                 MutateJson(Path.Combine(draftRoot, "manifest.json"), manifest => manifest["version"] = "1.0.0");
                 MutateJson(Path.Combine(draftRoot, "data.schema.json"), schema =>
                 {
@@ -430,6 +479,66 @@ internal sealed class PocketAppPackageVerifier
                 try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
             }
         }, "lifecycle_negative");
+
+        WithPackage(draftRoot =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-state-binding-{Guid.NewGuid():N}");
+            var dataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-state-binding-data-{Guid.NewGuid():N}");
+            var absentRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-absent-binding-{Guid.NewGuid():N}");
+            var absentDataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-absent-binding-data-{Guid.NewGuid():N}");
+            try
+            {
+                var manager = new PocketAppLifecycleManager(root, dataRoot);
+                var initial = manager.Stage(draftRoot, now);
+                var initialGrant = manager.Approve(initial.RequestId, initial.BindingDigest, now);
+                _ = manager.Install(initial, initialGrant, now);
+                MutateJson(Path.Combine(draftRoot, "manifest.json"), manifest => manifest["version"] = "1.0.1");
+                var enabledProposal = manager.Stage(draftRoot, now.AddSeconds(1));
+                var enabledGrant = manager.Approve(enabledProposal.RequestId, enabledProposal.BindingDigest, now.AddSeconds(1));
+                _ = manager.Disable(initial.PackageId, now.AddSeconds(2));
+                try
+                {
+                    _ = manager.Install(enabledProposal, enabledGrant, now.AddSeconds(2));
+                    _failures.Add("lifecycle_enabled_proposal_after_disable_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_ACTIVE_CHANGED")
+                {
+                }
+                Require(manager.ActivePackage(initial.PackageId) is null, "lifecycle_disabled_state_preserved");
+
+                MutateJson(Path.Combine(draftRoot, "manifest.json"), manifest => manifest["version"] = "1.0.0");
+                var absentManager = new PocketAppLifecycleManager(absentRoot, absentDataRoot);
+                var absentProposal = absentManager.Stage(draftRoot, now);
+                var absentGrant = absentManager.Approve(absentProposal.RequestId, absentProposal.BindingDigest, now);
+                _ = absentManager.Remove(absentProposal.PackageId, PocketAppDataDisposition.Preserve, now.AddSeconds(1));
+                try
+                {
+                    _ = absentManager.Install(absentProposal, absentGrant, now.AddSeconds(1));
+                    _failures.Add("lifecycle_absent_proposal_after_remove_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_ACTIVE_CHANGED")
+                {
+                }
+                Require(absentManager.ActivePackage(absentProposal.PackageId) is null, "lifecycle_removed_state_preserved");
+            }
+            finally
+            {
+                foreach (var directory in new[] { root, absentRoot })
+                {
+                    try
+                    {
+                        if (Directory.Exists(directory))
+                        {
+                            PocketAppVerifierFileSystem.MakeTreeMutable(directory);
+                            Directory.Delete(directory, true);
+                        }
+                    }
+                    catch { }
+                }
+                try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
+                try { if (Directory.Exists(absentDataRoot)) { Directory.Delete(absentDataRoot, true); } } catch { }
+            }
+        }, "lifecycle_state_binding");
 
         WithPackage(draftRoot =>
         {

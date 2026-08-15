@@ -161,6 +161,7 @@ internal sealed class PocketAppPackageRuntime
             ExactKeys(test, ["case", "expected"], [], "$.tests");
             var name = BoundedString(test.GetProperty("case"), 1, 120, "$.tests.case");
             var expected = BoundedString(test.GetProperty("expected"), 1, 32, "$.tests.expected");
+            Require(PocketAppStagingTestRunner.SupportedCaseIds.Contains(name), "$.tests.case:unsupported");
             Require(expected is "pass" or "reject", "$.tests.expected");
             Require(testCases.TryAdd(name, expected), "$.tests.case:duplicate");
         }

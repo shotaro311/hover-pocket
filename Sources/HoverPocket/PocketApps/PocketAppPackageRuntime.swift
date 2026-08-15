@@ -153,6 +153,7 @@ struct PocketAppPackageRuntime {
             try exactKeys(object, required: ["case", "expected"], optional: [], path: "$.tests")
             let name = try boundedString(object["case"], range: 1...120, path: "$.tests.case")
             let expected = try boundedString(object["expected"], range: 1...32, path: "$.tests.expected")
+            try require(PocketAppStagingTestRunner.supportedCaseIDs.contains(name), "$.tests.case:unsupported")
             try require(["pass", "reject"].contains(expected), "$.tests.expected")
             try require(testCases[name] == nil, "$.tests.case:duplicate")
             testCases[name] = expected
