@@ -343,6 +343,19 @@ internal sealed class PocketAppGenerationVerifier
                     "local.example.calendar",
                     "local.example.focus"),
             "generation_remove_rejects_only_same_package_proposal");
+        var freshAppId1 = PocketAppGenerationController.FreshAppId();
+        var freshAppId2 = PocketAppGenerationController.FreshAppId();
+        Require(
+            freshAppId1 != freshAppId2
+                && System.Text.RegularExpressions.Regex.IsMatch(
+                    freshAppId1,
+                    "^local\\.generated\\.a[0-9a-f]{32}$",
+                    System.Text.RegularExpressions.RegexOptions.CultureInvariant)
+                && System.Text.RegularExpressions.Regex.IsMatch(
+                    freshAppId2,
+                    "^local\\.generated\\.a[0-9a-f]{32}$",
+                    System.Text.RegularExpressions.RegexOptions.CultureInvariant),
+            "generation_untargeted_request_gets_fresh_app_id");
         Require(
             CodexPocketAppGenerationAdapter.ResolveExecutable() is null,
             "generation_real_codex_confidentiality_gate");
@@ -577,8 +590,28 @@ internal sealed class PocketAppGenerationVerifier
                     && response.Contains("\"errorCode\":null", StringComparison.Ordinal)
                     && response.Contains("\"action\":\"disable\"", StringComparison.Ordinal)
                     && response.Contains("\"readbackVerified\":true", StringComparison.Ordinal)
-                    && response.Contains("\"appId\":\"local.example.selected\",\"state\":\"disabled\"", StringComparison.Ordinal),
+                    && response.Contains("\"appId\":\"local.example.selected\",\"state\":\"disabled\"", StringComparison.Ordinal)
+                    && response.Contains("\"appId\":\"local.example.unrelated\",\"errorCode\":\"LIFECYCLE_PACKAGE_CORRUPT\",\"removalAllowed\":true", StringComparison.Ordinal),
                 "generation_committed_receipt_survives_unrelated_refresh_failure");
+            using var recoveredController = new PocketAppGenerationController(root, dataRoot, draftRoot, null);
+            var recoveredSettings = new HoverPocket.Shell.Bridge.BridgeDispatcher();
+            recoveredController.AttachSettings(recoveredSettings, approvalDecision: _ => true);
+            var recovered = await recoveredSettings.ProcessRawMessageAsync(
+                """{"id":"refresh-corrupt","method":"pocketApps.generationState","params":{}}""");
+            Require(
+                recovered is not null
+                    && recovered.Contains("\"appId\":\"local.example.selected\",\"state\":\"disabled\"", StringComparison.Ordinal)
+                    && recovered.Contains("\"appId\":\"local.example.unrelated\",\"errorCode\":\"LIFECYCLE_PACKAGE_CORRUPT\",\"removalAllowed\":true", StringComparison.Ordinal),
+                "generation_corrupt_package_isolated_on_startup");
+            var removed = await recoveredSettings.ProcessRawMessageAsync(
+                """{"id":"remove-corrupt","method":"pocketApps.removePreservingData","params":{"appId":"local.example.unrelated"}}""");
+            Require(
+                removed is not null
+                    && removed.Contains("\"appId\":\"local.example.unrelated\",\"state\":\"removed\"", StringComparison.Ordinal)
+                    && removed.Contains("\"readbackVerified\":true", StringComparison.Ordinal)
+                    && !removed.Contains("\"errorCode\":\"LIFECYCLE_PACKAGE_CORRUPT\"", StringComparison.Ordinal)
+                    && removed.Contains("\"appId\":\"local.example.selected\",\"state\":\"disabled\"", StringComparison.Ordinal),
+                "generation_corrupt_package_remove_preserves_healthy_management");
         }
         catch (Exception ex)
         {

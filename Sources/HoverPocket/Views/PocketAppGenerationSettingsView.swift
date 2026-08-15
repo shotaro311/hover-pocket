@@ -98,6 +98,36 @@ struct PocketAppGenerationSettingsView: View {
                     packageCard(package)
                 }
             }
+
+            if !controller.managementIssues.isEmpty {
+                Divider()
+                Text(localized(japanese: "要修復", english: "Needs repair"))
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.orange)
+                ForEach(controller.managementIssues, id: \.packageID) { issue in
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(issue.packageID)
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            Text(issue.errorCode)
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundStyle(.orange)
+                        }
+                        Spacer()
+                        Button(
+                            localized(japanese: "削除（データ保持）", english: "Remove, preserve data"),
+                            role: .destructive
+                        ) {
+                            controller.removePreservingData(packageID: issue.packageID)
+                        }
+                        .font(.system(size: 9))
+                        .disabled(!issue.removalAllowed)
+                    }
+                    .padding(9)
+                    .background(.orange.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                }
+            }
         }
     }
 

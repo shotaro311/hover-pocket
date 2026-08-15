@@ -97,6 +97,15 @@ internal sealed record PocketAppManagedPackage(
     string? PackageDigest,
     IReadOnlyList<string> InstalledVersions);
 
+internal sealed record PocketAppManagementIssue(
+    string PackageId,
+    string ErrorCode,
+    bool RemovalAllowed);
+
+internal sealed record PocketAppManagementSnapshot(
+    IReadOnlyList<PocketAppManagedPackage> Packages,
+    IReadOnlyList<PocketAppManagementIssue> Issues);
+
 internal sealed class PocketAppLifecycleException(string code) : Exception(code)
 {
     public string Code { get; } = code;
@@ -617,6 +626,50 @@ internal sealed class PocketAppLifecycleManager : IDisposable
             if (package is not null) { result.Add(package); }
         }
         return result;
+    }
+
+    public PocketAppManagementSnapshot ManagementSnapshot() =>
+        WithLifecycleLock(ManagementSnapshotCore);
+
+    private PocketAppManagementSnapshot ManagementSnapshotCore()
+    {
+        if (!Directory.Exists(AppsRoot))
+        {
+            return new PocketAppManagementSnapshot(
+                Array.Empty<PocketAppManagedPackage>(),
+                Array.Empty<PocketAppManagementIssue>());
+        }
+        EnsureDirectoryNotReparsePoint(AppsRoot);
+        var packages = new List<PocketAppManagedPackage>();
+        var issues = new List<PocketAppManagementIssue>();
+        foreach (var appDirectory in Directory.EnumerateDirectories(AppsRoot).Order(StringComparer.Ordinal))
+        {
+            var packageId = Path.GetFileName(appDirectory);
+            if (!ValidPackageId(packageId)) { throw Failure("LIFECYCLE_CORRUPT_VERSION"); }
+            try
+            {
+                EnsureDirectoryNotReparsePoint(appDirectory);
+                var package = ManagedPackageCore(packageId);
+                if (package is not null) { packages.Add(package); }
+            }
+            catch (Exception ex) when (ex is PocketAppLifecycleException or IOException or UnauthorizedAccessException)
+            {
+                var removalAllowed = false;
+                try
+                {
+                    _ = ReadActiveRecord(packageId);
+                    removalAllowed = true;
+                }
+                catch (Exception readError) when (readError is PocketAppLifecycleException or IOException or UnauthorizedAccessException)
+                {
+                }
+                issues.Add(new PocketAppManagementIssue(
+                    packageId,
+                    "LIFECYCLE_PACKAGE_CORRUPT",
+                    removalAllowed));
+            }
+        }
+        return new PocketAppManagementSnapshot(packages, issues);
     }
 
     public PocketAppManagedPackage? ManagedPackage(string packageId) =>

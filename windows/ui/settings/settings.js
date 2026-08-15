@@ -306,6 +306,34 @@ function renderPocketGeneration(generation, language) {
     card.append(heading, digest, actions);
     pocketGenerationManagedEl.append(card);
   }
+
+  for (const issue of generation.managementIssues ?? []) {
+    const card = document.createElement("article");
+    card.className = "pocket-app-card";
+    const heading = document.createElement("div");
+    heading.className = "pocket-app-heading";
+    const name = document.createElement("strong");
+    name.textContent = issue.appId;
+    const status = document.createElement("span");
+    status.textContent = language === "en" ? "Needs repair" : "要修復";
+    heading.append(name, status);
+    const error = document.createElement("code");
+    error.textContent = issue.errorCode;
+    const actions = document.createElement("div");
+    actions.className = "settings-button-row";
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "danger";
+    removeButton.textContent = language === "en" ? "Remove, preserve data" : "削除（データ保持）";
+    removeButton.disabled = issue.removalAllowed !== true;
+    removeButton.addEventListener("click", () => runGenerationAction(
+      "pocketApps.removePreservingData",
+      { appId: issue.appId },
+    ));
+    actions.append(removeButton);
+    card.append(heading, error, actions);
+    pocketGenerationManagedEl.append(card);
+  }
 }
 
 async function runGenerationAction(method, params = undefined) {

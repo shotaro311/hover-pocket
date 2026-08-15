@@ -333,6 +333,21 @@ enum PocketAppGenerationVerification {
             "generation_remove_rejects_only_same_package_proposal",
             failures: &failures
         )
+        let freshAppID1 = PocketAppGenerationController.freshAppID()
+        let freshAppID2 = PocketAppGenerationController.freshAppID()
+        require(
+            freshAppID1 != freshAppID2
+                && freshAppID1.range(
+                    of: "^local\\.generated\\.a[0-9a-f]{32}$",
+                    options: .regularExpression
+                ) != nil
+                && freshAppID2.range(
+                    of: "^local\\.generated\\.a[0-9a-f]{32}$",
+                    options: .regularExpression
+                ) != nil,
+            "generation_untargeted_request_gets_fresh_app_id",
+            failures: &failures
+        )
         let now = Date()
         let crafted = PocketAppLifecycleProposal(
             requestID: "request-safe",
@@ -550,8 +565,35 @@ enum PocketAppGenerationVerification {
                 && controller.errorCode == nil
                 && controller.lastReceipt?.readbackVerified == true
                 && controller.lastReceipt?.action == "disable"
-                && observed?.state == .disabled,
+                && observed?.state == .disabled
+                && controller.managementIssues.contains {
+                    $0.packageID == unrelated.appID && $0.removalAllowed
+                },
             "generation_committed_receipt_survives_unrelated_refresh_failure",
+            failures: &failures
+        )
+        let recoveredController = try PocketAppGenerationController(
+            rootDirectory: root,
+            userDataRoot: dataRoot,
+            generationRoot: draftRoot,
+            generator: nil
+        )
+        require(
+            recoveredController.managedPackages.contains { $0.packageID == selected.appID }
+                && recoveredController.managementIssues.contains {
+                    $0.packageID == unrelated.appID && $0.removalAllowed
+                },
+            "generation_corrupt_package_isolated_on_startup",
+            failures: &failures
+        )
+        recoveredController.removePreservingData(packageID: unrelated.appID)
+        require(
+            recoveredController.lastReceipt?.packageID == unrelated.appID
+                && recoveredController.lastReceipt?.state == .removed
+                && recoveredController.lastReceipt?.readbackVerified == true
+                && !recoveredController.managementIssues.contains { $0.packageID == unrelated.appID }
+                && recoveredController.managedPackages.contains { $0.packageID == selected.appID },
+            "generation_corrupt_package_remove_preserves_healthy_management",
             failures: &failures
         )
     }

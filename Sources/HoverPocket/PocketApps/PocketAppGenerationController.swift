@@ -1,5 +1,4 @@
 import Combine
-import CryptoKit
 import Foundation
 
 @MainActor
@@ -7,6 +6,7 @@ final class PocketAppGenerationController: ObservableObject {
     @Published private(set) var phase: PocketAppGenerationPhase = .idle
     @Published private(set) var pendingProposal: PocketAppLifecycleProposal?
     @Published private(set) var managedPackages: [PocketAppManagedPackage] = []
+    @Published private(set) var managementIssues: [PocketAppManagementIssue] = []
     @Published private(set) var lastReceipt: PocketAppLifecycleReceipt?
     @Published private(set) var errorCode: String?
     @Published private(set) var pendingAllowsActivation = false
@@ -45,7 +45,9 @@ final class PocketAppGenerationController: ObservableObject {
 
     func refreshManagedPackages() throws {
         try validatePins()
-        managedPackages = try lifecycle.managedPackages().filter { $0.state != .removed }
+        let snapshot = try lifecycle.managementSnapshot()
+        managedPackages = snapshot.packages.filter { $0.state != .removed }
+        managementIssues = snapshot.issues
         try validatePins()
     }
 
@@ -165,6 +167,9 @@ final class PocketAppGenerationController: ObservableObject {
         do {
             try validatePins()
             try refreshManagedPackages()
+            guard !managementIssues.contains(where: { $0.packageID == packageID }) else {
+                throw PocketAppGenerationError.packageInvalid
+            }
             let receipt = try lifecycle.disable(packageID: packageID)
             guard receipt.readbackVerified, receipt.state == .disabled else {
                 throw PocketAppGenerationError.packageInvalid
@@ -185,6 +190,9 @@ final class PocketAppGenerationController: ObservableObject {
         do {
             try validatePins()
             try refreshManagedPackages()
+            guard !managementIssues.contains(where: { $0.packageID == packageID }) else {
+                throw PocketAppGenerationError.packageInvalid
+            }
             let receipt = try lifecycle.enable(packageID: packageID)
             guard receipt.readbackVerified, receipt.state == .enabled else {
                 throw PocketAppGenerationError.packageInvalid
@@ -264,18 +272,13 @@ final class PocketAppGenerationController: ObservableObject {
                 currentVersion: activeVersion
             )
         } else {
-            let digest = SHA256.hash(data: Data(trimmed.utf8)).prefix(8)
-                .map { String(format: "%02x", $0) }.joined()
-            appID = "local.generated.a\(digest)"
-            if let existing = managedPackages.first(where: { $0.packageID == appID }),
-               let activeVersion = existing.version {
-                version = try Self.nextVersion(
-                    installedVersions: existing.installedVersions,
-                    currentVersion: activeVersion
-                )
-            } else {
-                version = "1.0.0"
+            var allocated = Self.freshAppID()
+            while managedPackages.contains(where: { $0.packageID == allocated })
+                || managementIssues.contains(where: { $0.packageID == allocated }) {
+                allocated = Self.freshAppID()
             }
+            appID = allocated
+            version = "1.0.0"
         }
         let namespace = "today-focus"
         let request = PocketAppGenerationRequest(
@@ -297,6 +300,10 @@ final class PocketAppGenerationController: ObservableObject {
             throw PocketAppGenerationError.invalidRequest
         }
         return try nextPatchVersion(highest)
+    }
+
+    static func freshAppID() -> String {
+        "local.generated.a" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     }
 
     static func rollbackVersions(installedVersions: [String], currentVersion: String?) -> [String] {
@@ -385,6 +392,7 @@ final class PocketAppGenerationController: ObservableObject {
         phase = !clearPending && pendingProposal != nil ? .awaitingApproval : committedPhase
         if receipt.state == .removed {
             managedPackages.removeAll { $0.packageID == receipt.packageID }
+            managementIssues.removeAll { $0.packageID == receipt.packageID }
             return
         }
         guard let version = receipt.version, let digest = receipt.packageDigest else { return }
@@ -402,22 +410,20 @@ final class PocketAppGenerationController: ObservableObject {
         managedPackages.removeAll { $0.packageID == receipt.packageID }
         managedPackages.append(observed)
         managedPackages.sort { $0.packageID < $1.packageID }
+        managementIssues.removeAll { $0.packageID == receipt.packageID }
     }
 
     private func refreshManagedPackagesAfterCommit(_ receipt: PocketAppLifecycleReceipt) throws {
         try validatePins()
-        do {
-            managedPackages = try lifecycle.managedPackages().filter { $0.state != .removed }
-        } catch {
-            guard let target = try lifecycle.managedPackage(packageID: receipt.packageID),
-                  target.state == receipt.state,
-                  target.version == receipt.version,
-                  target.packageDigest == receipt.packageDigest else {
-                throw PocketAppGenerationError.packageInvalid
-            }
-            // The target still matches its verified receipt. Keep that result if an
-            // unrelated package prevents a complete list refresh.
+        guard let target = try lifecycle.managedPackage(packageID: receipt.packageID),
+              target.state == receipt.state,
+              target.version == receipt.version,
+              target.packageDigest == receipt.packageDigest else {
+            throw PocketAppGenerationError.packageInvalid
         }
+        let snapshot = try lifecycle.managementSnapshot()
+        managedPackages = snapshot.packages.filter { $0.state != .removed }
+        managementIssues = snapshot.issues
         try validatePins()
     }
 
