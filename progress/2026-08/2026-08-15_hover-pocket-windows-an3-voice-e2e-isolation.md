@@ -18,6 +18,8 @@
 - Windows Settingsへ既定オフのCalendar read opt-inを追加した。Voice OFF時はcheckboxをdisabledにし、日英の共有対象と取り消し可能な説明を表示する。設定は永続化し、resetでfalseへ戻す。
 - Calendar read設定変更時はauthorization epochを先に失効させ、WebView2のlocal media / peer connectionを明示resetしてcurrent sessionを閉じ、Voice runtimeをOFF→ONで再生成する。Calendar OFF時はDynamicToolsをTimerだけにし、Calendar requestはProvider到達前に即時拒否する。ON時はCalendar 3 toolを含む4 toolへ戻す。
 - panel closeが`getUserMedia` / SDP / native realtime startの途中でも、operation epochによるlocal media破棄に加えて`codexVoice.stop`を送る。Hostの`_sessionGate`でin-flight start完了後にstopが直列化され、接続済みtransportの既存reconnect detachは維持する。
+- Mac Codex CLI 0.145.0の実機で、feature未有効時のWebRTC startがRPC `-32600` / `thread does not support realtime conversation`へ安全に分類された追加根拠を受領した。ユーザーglobal configは変更せず、macOS / Windows双方のHoverPocket production app-server既定引数だけを`-c features.realtime_conversation=true app-server --stdio`相当へ変更した。fake serverの明示launch argumentsは従来値を維持し、Voice既定OFFではprocessを起動しない。
+- Windows Codex CLI 0.147.0でprocess-local override付き`features list`が`realtime_conversation=true`、Phase 0がschema realtime start / SDP / voice list、initialize、account read、rate limits read、19 voice、raw保持なし、timeoutなしで成功した。production option / launch順序とgeneric / fake引数不変はCoordinator / protocol verifierへ固定した。追加差分後もDebug / Release warnings-as-errors、Debug 19 + Release 1の計20 verifier、JS 13件、PowerShell 5件、E2E Build、diff checkが成功した。
 - `voice_e2e_windows.ps1`へ`Build / Run / Readback / Stop`を追加した。receipt本文のallowlistをReadbackとStopの両方で検査し、Stopは専用eventによるsafe shutdown後にtransport、app-server、mic、track、playbackのcurrent状態がfalseであることを要求する。隔離rootは証跡として残す。
 
 ## 検証済み
@@ -27,6 +29,7 @@
 - Debug / Release warnings-as-errors、Verifier例外終了fixture、JS syntax 13件、PowerShell parse 5件、`voice_e2e_windows.ps1 -Action Build`、`git diff --check`が成功。
 - 隔離VerifierはDebug flag/root、Release E2E flag拒否、製品と別IPC、全保存path、safe defaults、OAuth / updater遮断、receipt exact allowlist / redaction / atomic更新、playback成功・失敗、safe close current=false、feature-off無副作用、panel close中のpending native stopとruntime resetを含むWeb runtime event契約を検査する。
 - Settings / UI model / Voice tool verifierはCalendar readの既定false、永続化true、reset false、Voice OFF時UI disabled、設定変更ごとのruntime再生成、Calendar OFF時Timer-only tool schemaとProvider未到達拒否、ON時4 tool復帰を検査する。
+- macOS app-server verifierはproduction既定のprocess-local realtime overrideを固定し、Python fake serverの明示launch argumentsを継続利用する。Windows環境ではSwift buildを実行せず、macOS CI / 実機buildは後続readback対象とする。
 - rendered UI Verifierの動的stylesheet読込前に寸法を評価する揺れにはVerifier専用visual settleを維持した。さらにfull suite順序で全predicate完了が18秒を超える`resize-probe` timeoutを再現したため、判定項目を変えず全体deadlineを30秒へ広げ、resize / restoreの診断stepを分離した。
 
 ## 未完了gate

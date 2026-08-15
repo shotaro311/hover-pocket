@@ -20,6 +20,8 @@ internal sealed record CodexAppServerClientOptions
     public string ClientVersion { get; init; } = "0.0.0";
 
     public bool ExperimentalApi { get; init; }
+
+    public bool EnableRealtimeConversation { get; init; }
 }
 
 internal sealed record CodexAppServerRequest(
@@ -133,7 +135,9 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         var executablePath = CodexExecutableResolver.Resolve(options.ExecutablePath);
         var process = new Process
         {
-            StartInfo = CodexExecutableResolver.CreateAppServerStartInfo(executablePath),
+            StartInfo = CodexExecutableResolver.CreateAppServerStartInfo(
+                executablePath,
+                options.EnableRealtimeConversation),
             EnableRaisingEvents = true
         };
 
@@ -818,6 +822,8 @@ internal sealed class CodexAppServerRpcException(
 
 internal static class CodexExecutableResolver
 {
+    internal const string RealtimeConversationFeatureOverride =
+        "features.realtime_conversation=true";
     private static readonly string[] SupportedExtensions = [".exe", ".cmd", ".bat", ".ps1"];
 
     public static string Resolve(string? explicitPath = null)
@@ -847,7 +853,9 @@ internal static class CodexExecutableResolver
                 "Codex CLI was not found on PATH. Set HOVERPOCKET_CODEX_EXECUTABLE to codex.exe, codex.cmd, or codex.ps1.");
     }
 
-    public static ProcessStartInfo CreateAppServerStartInfo(string executablePath)
+    public static ProcessStartInfo CreateAppServerStartInfo(
+        string executablePath,
+        bool enableRealtimeConversation = false)
     {
         var extension = Path.GetExtension(executablePath);
         ProcessStartInfo startInfo;
@@ -856,7 +864,11 @@ internal static class CodexExecutableResolver
         {
             startInfo = CreateBaseStartInfo(
                 Path.Combine(Environment.SystemDirectory, "cmd.exe"));
-            startInfo.Arguments = $"/d /s /c \"\"{executablePath}\" app-server --stdio\"";
+            var featureOverride = enableRealtimeConversation
+                ? $" -c {RealtimeConversationFeatureOverride}"
+                : string.Empty;
+            startInfo.Arguments =
+                $"/d /s /c \"\"{executablePath}\"{featureOverride} app-server --stdio\"";
         }
         else if (extension.Equals(".ps1", StringComparison.OrdinalIgnoreCase))
         {
@@ -871,18 +883,30 @@ internal static class CodexExecutableResolver
             startInfo.ArgumentList.Add("Bypass");
             startInfo.ArgumentList.Add("-File");
             startInfo.ArgumentList.Add(executablePath);
-            startInfo.ArgumentList.Add("app-server");
-            startInfo.ArgumentList.Add("--stdio");
+            AddAppServerArguments(startInfo, enableRealtimeConversation);
         }
         else
         {
             startInfo = CreateBaseStartInfo(executablePath);
-            startInfo.ArgumentList.Add("app-server");
-            startInfo.ArgumentList.Add("--stdio");
+            AddAppServerArguments(startInfo, enableRealtimeConversation);
         }
 
         startInfo.Environment["LOG_FORMAT"] = "json";
         return startInfo;
+    }
+
+    private static void AddAppServerArguments(
+        ProcessStartInfo startInfo,
+        bool enableRealtimeConversation)
+    {
+        if (enableRealtimeConversation)
+        {
+            startInfo.ArgumentList.Add("-c");
+            startInfo.ArgumentList.Add(RealtimeConversationFeatureOverride);
+        }
+
+        startInfo.ArgumentList.Add("app-server");
+        startInfo.ArgumentList.Add("--stdio");
     }
 
     private static ProcessStartInfo CreateBaseStartInfo(string fileName)

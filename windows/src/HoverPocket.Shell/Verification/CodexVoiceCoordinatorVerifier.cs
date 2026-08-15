@@ -13,6 +13,7 @@ internal sealed class CodexVoiceCoordinatorVerifier
 
     public async Task<int> RunAsync(CancellationToken cancellationToken = default)
     {
+        VerifyProductionLaunchContract();
         await VerifyFeatureDisabledDoesNotStartCodexAsync(cancellationToken);
         await VerifySignedOutFailsClosedAsync(cancellationToken);
         await VerifyNegotiationFailureInvalidatesRootAsync(cancellationToken);
@@ -23,7 +24,7 @@ internal sealed class CodexVoiceCoordinatorVerifier
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
-                "PASS codex-voice-coordinator verify: disabled no-start, account/capability gate, app-server ownership, fake WebRTC SDP/stop, root-scoped current/child/descendant cards, Broker-routed Voice tools with approval/readback/idempotency, transcript continuity, UI detach/reconnect, bounded crash restart, bounded memory");
+                "PASS codex-voice-coordinator verify: process-local realtime feature override, disabled no-start, account/capability gate, app-server ownership, fake WebRTC SDP/stop, root-scoped current/child/descendant cards, Broker-routed Voice tools with approval/readback/idempotency, transcript continuity, UI detach/reconnect, bounded crash restart, bounded memory");
             return 0;
         }
 
@@ -34,6 +35,40 @@ internal sealed class CodexVoiceCoordinatorVerifier
         }
 
         return 1;
+    }
+
+    private void VerifyProductionLaunchContract()
+    {
+        var options = CodexVoiceRuntimeHost.CreateProductionClientOptions();
+        if (!options.ExperimentalApi || !options.EnableRealtimeConversation)
+        {
+            _failures.Add("production Voice app-server options did not enable experimental realtime");
+        }
+
+        const string executablePath = @"C:\Program Files\Codex\codex.exe";
+        var startInfo = CodexExecutableResolver.CreateAppServerStartInfo(
+            executablePath,
+            options.EnableRealtimeConversation);
+        var expectedArguments = new[]
+        {
+            "-c",
+            CodexExecutableResolver.RealtimeConversationFeatureOverride,
+            "app-server",
+            "--stdio"
+        };
+        if (!string.Equals(startInfo.FileName, executablePath, StringComparison.OrdinalIgnoreCase)
+            || !startInfo.ArgumentList.SequenceEqual(expectedArguments, StringComparer.Ordinal))
+        {
+            _failures.Add("production Voice app-server launch arguments lost the realtime override");
+        }
+
+        var fakeStartInfo = CodexExecutableResolver.CreateAppServerStartInfo(executablePath);
+        if (!fakeStartInfo.ArgumentList.SequenceEqual(
+                new[] { "app-server", "--stdio" },
+                StringComparer.Ordinal))
+        {
+            _failures.Add("generic/fake app-server explicit launch contract was changed");
+        }
     }
 
     private async Task VerifySignedOutFailsClosedAsync(CancellationToken cancellationToken)

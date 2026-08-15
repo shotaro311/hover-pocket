@@ -7,6 +7,8 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$realtimeFeatureOverride = "features.realtime_conversation=true"
+$codexFeatureArguments = @("-c", $realtimeFeatureOverride)
 
 function Write-Step {
     param([string]$Message)
@@ -85,6 +87,17 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "Codex: $codexVersion"
 Write-Host "Path : $codexPath"
 
+Write-Step "process-local Realtime feature overrideを確認"
+$featureListOutput = @(& $codexPath @codexFeatureArguments features list 2>&1)
+$featureListExitCode = $LASTEXITCODE
+$realtimeFeatureLine = $featureListOutput |
+    Where-Object { [string]$_ -match "^\s*realtime_conversation\s+" } |
+    Select-Object -First 1
+$realtimeFeatureEnabled = $featureListExitCode -eq 0 `
+    -and $null -ne $realtimeFeatureLine `
+    -and [string]$realtimeFeatureLine -match "\btrue\s*$"
+Write-Host "realtime_conversation=$($realtimeFeatureEnabled.ToString().ToLowerInvariant())"
+
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $schemaDirectory = Join-Path $OutputDirectory "schema"
 $stdoutPath = Join-Path $OutputDirectory "app-server.stdout.jsonl"
@@ -93,7 +106,7 @@ $summaryPath = Join-Path $OutputDirectory "summary.json"
 
 Write-Step "インストール済みCodexからJSON Schemaを生成"
 New-Item -ItemType Directory -Path $schemaDirectory -Force | Out-Null
-$schemaOutput = & $codexPath app-server generate-json-schema --experimental --out $schemaDirectory 2>&1
+$schemaOutput = & $codexPath @codexFeatureArguments app-server generate-json-schema --experimental --out $schemaDirectory 2>&1
 $schemaExitCode = $LASTEXITCODE
 $schemaGenerated = $schemaExitCode -eq 0
 if (-not $schemaGenerated) {
@@ -175,16 +188,35 @@ try {
     $extension = [System.IO.Path]::GetExtension($codexPath)
     if ($extension -in @(".cmd", ".bat")) {
         $startInfo.FileName = Join-Path ([Environment]::SystemDirectory) "cmd.exe"
-        $startInfo.Arguments = '/d /s /c ""{0}" app-server --stdio"' -f $codexPath
+        $startInfo.Arguments = '/d /s /c ""{0}" -c {1} app-server --stdio"' -f $codexPath, $realtimeFeatureOverride
     }
     elseif ($extension -eq ".ps1") {
         $powerShellPath = (Get-Process -Id $PID).Path
         $startInfo.FileName = $powerShellPath
-        $startInfo.Arguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$codexPath`" app-server --stdio"
+        foreach ($argument in @(
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            $codexPath,
+            "-c",
+            $realtimeFeatureOverride,
+            "app-server",
+            "--stdio")) {
+            [void]$startInfo.ArgumentList.Add($argument)
+        }
     }
     else {
         $startInfo.FileName = $codexPath
-        $startInfo.Arguments = "app-server --stdio"
+        foreach ($argument in @(
+            "-c",
+            $realtimeFeatureOverride,
+            "app-server",
+            "--stdio")) {
+            [void]$startInfo.ArgumentList.Add($argument)
+        }
     }
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
@@ -289,6 +321,9 @@ $summary = [ordered]@{
     checkedAt = (Get-Date).ToString("o")
     codexVersion = $codexVersion
     codexPath = $codexPath
+    realtimeFeatureOverride = $realtimeFeatureOverride
+    realtimeFeatureListExitCode = $featureListExitCode
+    realtimeFeatureEnabled = $realtimeFeatureEnabled
     schemaGenerated = $schemaGenerated
     schemaExitCode = $schemaExitCode
     schemaExperimental = $true
@@ -321,6 +356,7 @@ Write-Host "`nSummary: $summaryPath"
 Write-Host "Schema : $schemaDirectory"
 
 $gatePassed = @(
+    [bool]$realtimeFeatureEnabled
     [bool]$schemaGenerated
     [bool]$schemaRealtimeStartPresent
     [bool]$schemaRealtimeSdpPresent

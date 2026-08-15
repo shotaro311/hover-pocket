@@ -2,6 +2,13 @@ import Darwin
 import Foundation
 
 struct CodexAppServerClientOptions: Sendable {
+    static let defaultLaunchArguments = [
+        "-c",
+        "features.realtime_conversation=true",
+        "app-server",
+        "--stdio"
+    ]
+
     var executableURL: URL?
     var launchArguments: [String]?
     var requestTimeout: TimeInterval
@@ -152,7 +159,8 @@ actor CodexAppServerClient {
         let outputPipe = Pipe()
         let errorPipe = Pipe()
         process.executableURL = executableURL
-        process.arguments = options.launchArguments ?? ["app-server", "--stdio"]
+        process.arguments = options.launchArguments
+            ?? CodexAppServerClientOptions.defaultLaunchArguments
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
         process.standardError = errorPipe

@@ -88,6 +88,8 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 
 SettingsのVoice欄には、既定オフの「今日の予定タイトルと時間をCodexと共有」があります。Voiceがオフの間は変更できず、オンからオフへ戻すとCalendar toolは即時拒否されます。設定変更時は現在のVoice sessionとローカル音声transportを安全に閉じ、runtimeを再生成して新しいtool権限を反映します。
 
+Voiceを明示的に有効化した場合だけ、HoverPocket専用Codex app-serverを`-c features.realtime_conversation=true app-server --stdio`相当のprocess-local引数で起動します。ユーザーのglobal Codex configは変更しません。generic / fake app-serverの明示引数にはこのoverrideを注入せず、Releaseを含む製品設定のVoice既定OFFも維持します。`phase0_codex_app_server_probe.ps1`は同じoverrideで`features list`、schema、initialize、read-only endpointを確認します。
+
 ## Windows updates and release packaging
 
 Windows 版の更新確認は Velopack と GitHub Releases (`shotaro311/hover-pocket`) を使います。トレイと Settings の `Check for Updates` は Windows channel `win` の feed (`releases.win.json`) へ接続し、更新が見つかった場合はダウンロード前と適用/再起動前に確認します。起動時の自動チェックは既定オンで、失敗しても起動を止めません。
