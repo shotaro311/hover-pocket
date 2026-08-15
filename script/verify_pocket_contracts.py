@@ -1238,7 +1238,6 @@ def validate_execution_plan(document: Mapping[str, Any], context: FixtureContext
     required_permissions: set[str] = set()
     has_writes = False
     idempotency_keys: set[str] = set()
-    strong_per_call_indices: list[int] = []
     for index, step in enumerate(document["steps"]):
         descriptor = context.registry.resolve(
             step["capabilityId"],
@@ -1246,6 +1245,12 @@ def validate_execution_plan(document: Mapping[str, Any], context: FixtureContext
             f"$.steps[{index}].capability",
         )
         ensure_capability_executable(descriptor, f"$.steps[{index}].capability")
+        if descriptor["approvalPolicy"] == "strong_per_call" and len(document["steps"]) != 1:
+            fail(
+                "PLAN_APPROVAL_REQUIRED",
+                f"$.steps[{index}].capability",
+                "strong_per_call capability must be the only plan step",
+            )
         validate_capability_payload(
             step["arguments"],
             descriptor,
@@ -1255,28 +1260,19 @@ def validate_execution_plan(document: Mapping[str, Any], context: FixtureContext
             "CAPABILITY_ARGUMENT_INVALID",
         )
         validate_payload_size(step["arguments"], descriptor, f"$.steps[{index}].arguments")
-        if document.get("appContext") is not None:
-            validate_capability_scope(
-                step["arguments"],
-                requested_scope(context, step["capabilityId"], step["capabilityVersion"], f"$.steps[{index}].capability"),
-                f"$.steps[{index}].arguments",
-            )
+        validate_capability_scope(
+            step["arguments"],
+            requested_scope(context, step["capabilityId"], step["capabilityVersion"], f"$.steps[{index}].capability"),
+            f"$.steps[{index}].arguments",
+        )
         required_permissions.update(descriptor["permissions"])
         has_writes = has_writes or descriptor["effect"] in WRITE_EFFECTS
-        if descriptor["approvalPolicy"] == "strong_per_call":
-            strong_per_call_indices.append(index)
         if step["idempotencyKey"] in idempotency_keys:
             fail("PLAN_DEPENDENCY_INVALID", f"$.steps[{index}].idempotencyKey", "idempotency key is reused")
         idempotency_keys.add(step["idempotencyKey"])
 
     if document["requiredPermissions"] != sorted(required_permissions):
         fail("PLAN_PERMISSION_MISMATCH", "$.requiredPermissions", "permissions must equal the sorted descriptor union")
-    if strong_per_call_indices and len(document["steps"]) != 1:
-        fail(
-            "PLAN_APPROVAL_REQUIRED",
-            f"$.steps[{strong_per_call_indices[0]}].capability",
-            "strong_per_call capability must be the only plan step",
-        )
     approval = document["approval"]
     if has_writes:
         if approval["mode"] not in {"before_writes", "per_step"} or approval["group"] == "none":

@@ -153,8 +153,8 @@
       "expected": "reject",
       "schema": "execution-plan.schema.json",
       "errorCode": "PLAN_APPROVAL_REQUIRED",
-      "errorLocation": "$.steps[1].capability",
-      "expectedDigest": "sha256:6339f70d58b37ac70d90d28d7a274090eb0806a9a0eb6b40b4edcde5eaf1b0f1"
+      "errorLocation": "$.steps[0].capability",
+      "expectedDigest": "sha256:6b96634767b4b0f2d849f5aef16c5a271cbb24064f0732d88927e7cd9ca4c433"
     },
     {
       "id": "invalid-geometry-provider-rect",

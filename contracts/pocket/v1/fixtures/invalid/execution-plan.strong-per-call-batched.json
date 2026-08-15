@@ -10,25 +10,25 @@
   },
   "steps": [
     {
-      "stepId": "readNote",
-      "capabilityId": "sticky.note.status",
-      "capabilityVersion": 1,
-      "arguments": {
-        "noteId": "44444444-4444-4444-8444-444444444444"
-      },
-      "idempotencyKey": "idem-sticky-status-0001",
-      "dependsOn": []
-    },
-    {
       "stepId": "deleteNote",
       "capabilityId": "sticky.note.delete",
       "capabilityVersion": 1,
       "arguments": {
         "noteId": "44444444-4444-4444-8444-444444444444"
       },
-      "idempotencyKey": "idem-sticky-delete-0002",
+      "idempotencyKey": "idem-sticky-delete-0001",
+      "dependsOn": []
+    },
+    {
+      "stepId": "readNote",
+      "capabilityId": "sticky.note.status",
+      "capabilityVersion": 1,
+      "arguments": {
+        "noteId": "44444444-4444-4444-8444-444444444444"
+      },
+      "idempotencyKey": "idem-sticky-status-0002",
       "dependsOn": [
-        "readNote"
+        "deleteNote"
       ]
     }
   ],
@@ -41,5 +41,5 @@
     "sticky.delete",
     "sticky.read"
   ],
-  "canonicalDigest": "sha256:c5317b953b1e1634feb757caff32423ef4197a01951144d555bc20e7c096d88c"
+  "canonicalDigest": "sha256:9c14e25b4754e9cf41cdce6cbe15ab8a3686b09c1921ed361eb8b1aeff800518"
 }
