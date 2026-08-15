@@ -306,7 +306,7 @@ internal sealed class PocketAppGenerationController : IDisposable
             {
                 throw Failure("GENERATION_PACKAGE_INVALID");
             }
-            RecordCommittedReceipt(receipt, PocketAppGenerationPhase.Installed);
+            RecordCommittedReceipt(receipt, PocketAppGenerationPhase.Installed, clearPending: true);
             _postCommitHook?.Invoke();
             RefreshManagedPackagesAfterCommit(receipt);
             return BuildState();
@@ -380,7 +380,14 @@ internal sealed class PocketAppGenerationController : IDisposable
             {
                 throw Failure("GENERATION_PACKAGE_INVALID");
             }
-            RecordCommittedReceipt(receipt, PocketAppGenerationPhase.Disabled);
+            PocketAppGenerationPhase committedPhase;
+            lock (_stateSync)
+            {
+                committedPhase = _pendingProposal is null
+                    ? PocketAppGenerationPhase.Disabled
+                    : PocketAppGenerationPhase.AwaitingApproval;
+            }
+            RecordCommittedReceipt(receipt, committedPhase, clearPending: false);
             _postCommitHook?.Invoke();
             RefreshManagedPackagesAfterCommit(receipt);
             return BuildState();
@@ -409,7 +416,14 @@ internal sealed class PocketAppGenerationController : IDisposable
             {
                 throw Failure("GENERATION_PACKAGE_INVALID");
             }
-            RecordCommittedReceipt(receipt, PocketAppGenerationPhase.Installed);
+            PocketAppGenerationPhase committedPhase;
+            lock (_stateSync)
+            {
+                committedPhase = _pendingProposal is null
+                    ? PocketAppGenerationPhase.Installed
+                    : PocketAppGenerationPhase.AwaitingApproval;
+            }
+            RecordCommittedReceipt(receipt, committedPhase, clearPending: false);
             _postCommitHook?.Invoke();
             RefreshManagedPackagesAfterCommit(receipt);
             return BuildState();
@@ -448,7 +462,7 @@ internal sealed class PocketAppGenerationController : IDisposable
                     ? PocketAppGenerationPhase.Removed
                     : PocketAppGenerationPhase.AwaitingApproval;
             }
-            RecordCommittedReceipt(receipt, committedPhase);
+            RecordCommittedReceipt(receipt, committedPhase, clearPending: false);
             _postCommitHook?.Invoke();
             RefreshManagedPackagesAfterCommit(receipt);
             return BuildState();
@@ -598,12 +612,16 @@ internal sealed class PocketAppGenerationController : IDisposable
 
     private void RecordCommittedReceipt(
         PocketAppLifecycleReceipt receipt,
-        PocketAppGenerationPhase committedPhase)
+        PocketAppGenerationPhase committedPhase,
+        bool clearPending)
     {
         lock (_stateSync)
         {
-            _pendingProposal = null;
-            _pendingAllowsActivation = false;
+            if (clearPending)
+            {
+                _pendingProposal = null;
+                _pendingAllowsActivation = false;
+            }
             _lastReceipt = receipt;
             _phase = committedPhase;
             _errorCode = null;

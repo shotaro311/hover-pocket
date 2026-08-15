@@ -190,6 +190,7 @@ enum PocketAppGenerationVerification {
             try verifyRootPin(failures: &failures)
             try verifyGenerationStartupDoesNotRecover(failures: &failures)
             try verifyCommittedReceiptSurvivesManagedRefreshFailure(failures: &failures)
+            try verifyUnrelatedActionPreservesPendingProposal(failures: &failures)
         } catch {
             failures.append("generation_e2e:\(error)")
         }
@@ -553,6 +554,76 @@ enum PocketAppGenerationVerification {
             "generation_committed_receipt_survives_unrelated_refresh_failure",
             failures: &failures
         )
+    }
+
+    private static func verifyUnrelatedActionPreservesPendingProposal(
+        failures: inout [String]
+    ) throws {
+        let temporaryRoot = URL(
+            fileURLWithPath: FileManager.default.currentDirectoryPath,
+            isDirectory: true
+        ).appendingPathComponent(".build", isDirectory: true)
+        let root = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-pending-host-\(UUID().uuidString)", isDirectory: true)
+        let dataRoot = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-pending-data-\(UUID().uuidString)", isDirectory: true)
+        let draftRoot = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-pending-draft-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            makeTreeMutable(root)
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: dataRoot)
+            try? FileManager.default.removeItem(at: draftRoot)
+        }
+        try FileManager.default.createDirectory(at: draftRoot, withIntermediateDirectories: true)
+        let adapter = FixturePocketAppGenerationAdapter(fixtureRoot: fixtureURL("."))
+        let materializer = PocketAppGenerationMaterializer(rootDirectory: draftRoot)
+        let pendingV1 = try makeRequest(
+            requestID: "generation-pending-v1",
+            userRequest: "Create the pending focus app.",
+            appID: "local.example.pending",
+            version: "1.0.0",
+            namespace: "today-focus"
+        )
+        let pendingV2 = try makeRequest(
+            requestID: "generation-pending-v2",
+            userRequest: pendingV1.userRequest,
+            appID: pendingV1.appID,
+            version: "1.0.1",
+            namespace: pendingV1.namespace
+        )
+        let unrelated = try makeRequest(
+            requestID: "generation-pending-unrelated",
+            userRequest: "Create the unrelated focus app.",
+            appID: "local.example.pending-unrelated",
+            version: "1.0.0",
+            namespace: "today-focus"
+        )
+        do {
+            let lifecycle = try PocketAppLifecycleManager(rootDirectory: root, userDataRoot: dataRoot)
+            _ = try installFixture(pendingV1, adapter: adapter, materializer: materializer, lifecycle: lifecycle)
+            _ = try installFixture(pendingV2, adapter: adapter, materializer: materializer, lifecycle: lifecycle)
+            _ = try installFixture(unrelated, adapter: adapter, materializer: materializer, lifecycle: lifecycle)
+        }
+        let controller = try PocketAppGenerationController(
+            rootDirectory: root,
+            userDataRoot: dataRoot,
+            generationRoot: draftRoot,
+            generator: nil
+        )
+        controller.prepareRollback(packageID: pendingV1.appID, version: pendingV1.version)
+        let pendingRequestID = controller.pendingProposal?.requestID
+        controller.disable(packageID: unrelated.appID)
+        require(
+            pendingRequestID != nil
+                && controller.pendingProposal?.requestID == pendingRequestID
+                && controller.phase == .awaitingApproval
+                && controller.lastReceipt?.packageID == unrelated.appID
+                && controller.lastReceipt?.state == .disabled,
+            "generation_unrelated_action_preserves_pending_proposal",
+            failures: &failures
+        )
+        controller.rejectPending()
     }
 
     private static func installFixture(

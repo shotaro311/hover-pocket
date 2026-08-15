@@ -13,6 +13,7 @@ internal sealed class PocketAppGenerationVerifier
         VerifySettingsApprovalBoundary().GetAwaiter().GetResult();
         VerifyPreviewOnlyBoundary().GetAwaiter().GetResult();
         VerifyCommittedReceiptSurvivesManagedRefreshFailure().GetAwaiter().GetResult();
+        VerifyUnrelatedActionPreservesPendingProposal().GetAwaiter().GetResult();
         VerifyApprovalTextSanitization();
         return _failures;
     }
@@ -582,6 +583,77 @@ internal sealed class PocketAppGenerationVerifier
         catch (Exception ex)
         {
             _failures.Add($"generation_committed_receipt:{ex.GetType().Name}:{ex.Message}");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    PocketAppVerifierFileSystem.MakeTreeMutable(root);
+                    Directory.Delete(root, true);
+                }
+            }
+            catch { }
+            try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
+            try { if (Directory.Exists(draftRoot)) { Directory.Delete(draftRoot, true); } } catch { }
+        }
+    }
+
+    private async Task VerifyUnrelatedActionPreservesPendingProposal()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-pending-host-{Guid.NewGuid():N}");
+        var dataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-pending-data-{Guid.NewGuid():N}");
+        var draftRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-pending-draft-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(draftRoot);
+            var adapter = new FixturePocketAppGenerationAdapter(FixtureRoot());
+            var materializer = new PocketAppGenerationMaterializer(draftRoot);
+            var pendingV1 = MakeRequest(
+                "generation-pending-v1",
+                "Create the pending focus app.",
+                "local.example.pending",
+                "1.0.0",
+                "today-focus");
+            var pendingV2 = MakeRequest(
+                "generation-pending-v2",
+                pendingV1.UserRequest,
+                pendingV1.AppId,
+                "1.0.1",
+                pendingV1.Namespace);
+            var unrelated = MakeRequest(
+                "generation-pending-unrelated",
+                "Create the unrelated focus app.",
+                "local.example.pending-unrelated",
+                "1.0.0",
+                "today-focus");
+            using (var lifecycle = new PocketAppLifecycleManager(root, dataRoot))
+            {
+                _ = InstallFixture(pendingV1, adapter, materializer, lifecycle);
+                _ = InstallFixture(pendingV2, adapter, materializer, lifecycle);
+                _ = InstallFixture(unrelated, adapter, materializer, lifecycle);
+            }
+            using var controller = new PocketAppGenerationController(root, dataRoot, draftRoot, null);
+            var settings = new HoverPocket.Shell.Bridge.BridgeDispatcher();
+            controller.AttachSettings(settings, approvalDecision: _ => true);
+            var pending = await settings.ProcessRawMessageAsync(
+                """{"id":"pending-rollback","method":"pocketApps.prepareRollback","params":{"appId":"local.example.pending","version":"1.0.0"}}""");
+            var disabled = await settings.ProcessRawMessageAsync(
+                """{"id":"pending-disable","method":"pocketApps.disable","params":{"appId":"local.example.pending-unrelated"}}""");
+            Require(
+                pending is not null
+                    && pending.Contains("\"phase\":\"awaitingApproval\"", StringComparison.Ordinal)
+                    && disabled is not null
+                    && disabled.Contains("\"phase\":\"awaitingApproval\"", StringComparison.Ordinal)
+                    && disabled.Contains("\"appId\":\"local.example.pending\"", StringComparison.Ordinal)
+                    && disabled.Contains("\"action\":\"disable\"", StringComparison.Ordinal)
+                    && disabled.Contains("\"appId\":\"local.example.pending-unrelated\",\"state\":\"disabled\"", StringComparison.Ordinal),
+                "generation_unrelated_action_preserves_pending_proposal");
+        }
+        catch (Exception ex)
+        {
+            _failures.Add($"generation_pending_preservation:{ex.GetType().Name}:{ex.Message}");
         }
         finally
         {

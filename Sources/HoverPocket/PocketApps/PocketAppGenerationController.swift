@@ -136,7 +136,7 @@ final class PocketAppGenerationController: ObservableObject {
                   receipt.packageDigest == proposal.packageDigest else {
                 throw PocketAppGenerationError.packageInvalid
             }
-            recordCommittedReceipt(receipt, phase: .installed)
+            recordCommittedReceipt(receipt, phase: .installed, clearPending: true)
             postCommitHook?()
             try refreshManagedPackagesAfterCommit(receipt)
         } catch let error as PocketAppGenerationError {
@@ -169,7 +169,11 @@ final class PocketAppGenerationController: ObservableObject {
             guard receipt.readbackVerified, receipt.state == .disabled else {
                 throw PocketAppGenerationError.packageInvalid
             }
-            recordCommittedReceipt(receipt, phase: .disabled)
+            recordCommittedReceipt(
+                receipt,
+                phase: pendingProposal == nil ? .disabled : .awaitingApproval,
+                clearPending: false
+            )
             postCommitHook?()
             try refreshManagedPackagesAfterCommit(receipt)
         } catch {
@@ -185,7 +189,11 @@ final class PocketAppGenerationController: ObservableObject {
             guard receipt.readbackVerified, receipt.state == .enabled else {
                 throw PocketAppGenerationError.packageInvalid
             }
-            recordCommittedReceipt(receipt, phase: .installed)
+            recordCommittedReceipt(
+                receipt,
+                phase: pendingProposal == nil ? .installed : .awaitingApproval,
+                clearPending: false
+            )
             postCommitHook?()
             try refreshManagedPackagesAfterCommit(receipt)
         } catch {
@@ -206,7 +214,8 @@ final class PocketAppGenerationController: ObservableObject {
             }
             recordCommittedReceipt(
                 receipt,
-                phase: pendingProposal == nil ? .removed : .awaitingApproval
+                phase: pendingProposal == nil ? .removed : .awaitingApproval,
+                clearPending: false
             )
             postCommitHook?()
             try refreshManagedPackagesAfterCommit(receipt)
@@ -364,10 +373,13 @@ final class PocketAppGenerationController: ObservableObject {
 
     private func recordCommittedReceipt(
         _ receipt: PocketAppLifecycleReceipt,
-        phase committedPhase: PocketAppGenerationPhase
+        phase committedPhase: PocketAppGenerationPhase,
+        clearPending: Bool
     ) {
-        pendingProposal = nil
-        pendingAllowsActivation = false
+        if clearPending {
+            pendingProposal = nil
+            pendingAllowsActivation = false
+        }
         lastReceipt = receipt
         errorCode = nil
         phase = committedPhase
