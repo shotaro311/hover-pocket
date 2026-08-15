@@ -786,6 +786,7 @@ internal sealed record UiWebVerifyResult(
     bool PocketSurfacePurposeOk,
     bool PocketSurfaceStatePersistedOk,
     bool PocketSurfaceApprovalHostOwnedOk,
+    bool PocketSurfaceLayoutMatrixOk,
     bool TextSizeScaleReadyOk,
     bool ProviderSwitchOk,
     bool SettingsWriteOk,

@@ -17,7 +17,16 @@ enum PocketAppPackageVerificationCommand {
                 require(package.workflows["startFocus"]?.steps.count == 2, "package_workflow", failures: &failures)
                 require(package.workflows["startFocus"]?.requiredPermissions == ["sticky.write", "timer.write"], "package_permissions", failures: &failures)
                 require(package.statePropertyNames == ["selectedEventRef"], "package_state_schema", failures: &failures)
-                require(package.testCases.count == 4 && package.testCases["start-focus-rejected"] == "reject", "package_tests", failures: &failures)
+                require(
+                    package.testCases == [
+                        "calendar-read": "pass",
+                        "start-focus-approved": "pass",
+                        "start-focus-idempotent-replay": "pass",
+                        "start-focus-rejected": "reject"
+                    ],
+                    "package_tests",
+                    failures: &failures
+                )
                 print("pocket_app_manifest_digest=\(package.manifestDigest)")
             }
         } catch {

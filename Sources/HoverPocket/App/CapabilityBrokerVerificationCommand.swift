@@ -1,5 +1,7 @@
+import AppKit
 import Darwin
 import Foundation
+import SwiftUI
 
 enum CapabilityBrokerVerificationCommand {
     private static let goldenPlanDigest = "sha256:d098ea1b5f9f70e91486fd53229e7ddb68f73a9952ab94f17eed27cdeeb6413f"
@@ -16,6 +18,8 @@ enum CapabilityBrokerVerificationCommand {
                 print("broker_sticky_lifecycle=ok")
                 print("broker_today_focus=ok")
                 print("broker_pocket_app=ok")
+                print("broker_pocket_app_declared_tests=4")
+                print("broker_pocket_app_layout_cases=16")
                 print("broker_concurrent_duplicate=ok")
                 print("broker_negative_cases=11")
                 print("broker_golden_plan_digest=\(goldenPlanDigest)")
@@ -535,6 +539,7 @@ enum CapabilityBrokerVerificationCommand {
         let hostModel = try PocketSurfaceHostModel(runtime: runtime, surfaceID: "main")
         try require(hostModel.integerValue(for: "$input.durationSeconds") == 1_500, "pocket_app_surface_default")
         await hostModel.load(now: now)
+        try verifyPocketSurfaceLayoutMatrix(model: hostModel)
         let selectedEventRef = hostModel.stringValue(for: "$state.selectedEventRef")
         try require(!selectedEventRef.isEmpty, "pocket_app_surface_selection")
         let reloadedStateStore = try PocketAppUserStateStore(
@@ -619,6 +624,33 @@ enum CapabilityBrokerVerificationCommand {
         )
         try require(replay.replayed, "pocket_app_replay")
         try require(timerStore.runningTimers.count == 1 && stickyStore.notes.count == 1, "pocket_app_replay_effect")
+    }
+
+    @MainActor
+    private static func verifyPocketSurfaceLayoutMatrix(model: PocketSurfaceHostModel) throws {
+        var cases = 0
+        for panelSize in PanelSizeOption.allCases {
+            let panel = PanelLayout.previewSize(for: panelSize)
+            let contentSize = CGSize(width: panel.width, height: max(0, panel.height - 55))
+            for textSize in PanelTextSizeOption.allCases {
+                let view = PocketSurfaceHostView(model: model)
+                    .environment(\.panelTextSize, textSize)
+                    .frame(width: contentSize.width, height: contentSize.height)
+                let host = NSHostingView(rootView: view)
+                host.frame = CGRect(origin: .zero, size: contentSize)
+                host.layoutSubtreeIfNeeded()
+                let fitting = host.fittingSize
+                try require(
+                    fitting.width.isFinite
+                    && fitting.height.isFinite
+                    && fitting.width <= contentSize.width
+                    && fitting.height <= contentSize.height,
+                    "pocket_app_layout_\(panelSize.rawValue)_\(textSize.rawValue)"
+                )
+                cases += 1
+            }
+        }
+        try require(cases == 16, "pocket_app_layout_matrix")
     }
 
     @MainActor

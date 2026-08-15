@@ -21,7 +21,13 @@ internal sealed class PocketAppPackageVerifier
             Require(package.Workflows["startFocus"].Steps.Count == 2, "package_workflow");
             Require(package.Workflows["startFocus"].RequiredPermissions.SetEquals(["sticky.write", "timer.write"]), "package_permissions");
             Require(package.StatePropertyNames.SetEquals(["selectedEventRef"]), "package_state_schema");
-            Require(package.TestCases.Count == 4 && package.TestCases["start-focus-rejected"] == "reject", "package_tests");
+            Require(
+                package.TestCases.Count == 4
+                && package.TestCases["calendar-read"] == "pass"
+                && package.TestCases["start-focus-approved"] == "pass"
+                && package.TestCases["start-focus-idempotent-replay"] == "pass"
+                && package.TestCases["start-focus-rejected"] == "reject",
+                "package_tests");
             Console.WriteLine($"pocket_app_manifest_digest={package.ManifestDigest}");
         }, "valid_package");
 

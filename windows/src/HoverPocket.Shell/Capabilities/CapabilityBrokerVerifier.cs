@@ -43,6 +43,7 @@ internal sealed class CapabilityBrokerVerifier
         Console.WriteLine("broker_sticky_lifecycle=ok");
         Console.WriteLine("broker_today_focus=ok");
         Console.WriteLine("broker_pocket_app=ok");
+        Console.WriteLine("broker_pocket_app_declared_tests=4");
         Console.WriteLine("broker_concurrent_duplicate=ok");
         Console.WriteLine("broker_negative_cases=11");
         Console.WriteLine($"broker_golden_plan_digest={GoldenPlanDigest}");
@@ -472,14 +473,29 @@ internal sealed class CapabilityBrokerVerifier
         var dispatcher = new BridgeDispatcher();
         hostController.Attach(dispatcher);
         var loadResponse = await dispatcher.ProcessRawMessageAsync(
-            $$"""{"id":"load","method":"pocketApp.load","params":{"appId":"{{package.Manifest.Id}}","surfaceId":"main"}}""");
+            JsonSerializer.Serialize(new
+            {
+                id = "load",
+                method = "pocketApp.load",
+                @params = new { appId = package.Manifest.Id, surfaceId = "main" }
+            }));
         Require(loadResponse is not null, "pocket_app_host_load_response");
         using (var loadDocument = JsonDocument.Parse(loadResponse!))
         {
             Require(loadDocument.RootElement.GetProperty("error").ValueKind == JsonValueKind.Null, "pocket_app_host_load");
         }
         var updateResponse = await dispatcher.ProcessRawMessageAsync(
-            $$"""{"id":"state","method":"pocketApp.updateState","params":{"appId":"{{package.Manifest.Id}}","key":"selectedEventRef","value":"primary:sensitive-event-ref"}}""");
+            JsonSerializer.Serialize(new
+            {
+                id = "state",
+                method = "pocketApp.updateState",
+                @params = new
+                {
+                    appId = package.Manifest.Id,
+                    key = "selectedEventRef",
+                    value = "primary:sensitive-event-ref"
+                }
+            }));
         using (var updateDocument = JsonDocument.Parse(updateResponse!))
         {
             Require(updateDocument.RootElement.GetProperty("error").ValueKind == JsonValueKind.Null, "pocket_app_state_update");
@@ -492,7 +508,17 @@ internal sealed class CapabilityBrokerVerifier
             reloadedStateStore.Snapshot().GetValueOrDefault("selectedEventRef") == "primary:sensitive-event-ref",
             "pocket_app_state_persistence");
         var forgedStateResponse = await dispatcher.ProcessRawMessageAsync(
-            $$"""{"id":"forged","method":"pocketApp.updateState","params":{"appId":"{{package.Manifest.Id}}","key":"selectedEventRef","value":"primary:forged"}}""");
+            JsonSerializer.Serialize(new
+            {
+                id = "forged",
+                method = "pocketApp.updateState",
+                @params = new
+                {
+                    appId = package.Manifest.Id,
+                    key = "selectedEventRef",
+                    value = "primary:forged"
+                }
+            }));
         using (var forgedDocument = JsonDocument.Parse(forgedStateResponse!))
         {
             Require(forgedDocument.RootElement.GetProperty("error").ValueKind == JsonValueKind.Object, "pocket_app_forged_state_ref");
@@ -535,6 +561,19 @@ internal sealed class CapabilityBrokerVerifier
             "pocket_app_readback");
         Require(timerStore.RunningTimers.Count == 1, "pocket_app_timer_effect");
         Require(stickyStore.Notes.Count == 1, "pocket_app_sticky_effect");
+        var replay = await broker.ExecuteAsync(
+            draft.Plan,
+            new CapabilityPermissionSet(
+                draft.Plan.Principal,
+                new HashSet<string>(
+                    ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"],
+                    StringComparer.Ordinal)),
+            null,
+            now.AddSeconds(1));
+        Require(replay.Replayed, "pocket_app_replay");
+        Require(
+            timerStore.RunningTimers.Count == 1 && stickyStore.Notes.Count == 1,
+            "pocket_app_replay_effect");
 
         try
         {

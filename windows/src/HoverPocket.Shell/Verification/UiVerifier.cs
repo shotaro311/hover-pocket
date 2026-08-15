@@ -171,6 +171,11 @@ internal sealed class UiVerifier
                     _failures.Add("pocket surface: generated UI attempted to own approval rendering");
                 }
 
+                if (!result.PocketSurfaceLayoutMatrixOk)
+                {
+                    _failures.Add("pocket surface: controls overflowed the Windows S/M/L by text-size layout matrix");
+                }
+
                 if (!result.TextSizeScaleReadyOk)
                 {
                     _failures.Add("text size: global small/medium/large scaling was not active");

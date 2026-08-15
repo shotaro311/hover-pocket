@@ -573,6 +573,7 @@ window.__hoverPocketVerify = {
       pocketSurfacePurposeOk: pocketSurfaceVerify.purpose,
       pocketSurfaceStatePersistedOk: pocketSurfaceVerify.statePersisted,
       pocketSurfaceApprovalHostOwnedOk: pocketSurfaceVerify.approvalHostOwned,
+      pocketSurfaceLayoutMatrixOk: pocketSurfaceVerify.layoutMatrix,
       textSizeScaleReadyOk: getComputedStyle(document.documentElement).getPropertyValue("--hp-text-scale").trim() !== "",
       providerSwitchOk: switchedState.selectedProvider?.id === targetProvider.id,
       settingsWriteOk: resizedState.settings?.panelSize === probePanelSize,

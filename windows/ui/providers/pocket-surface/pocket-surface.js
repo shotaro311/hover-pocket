@@ -380,9 +380,6 @@ function ensureStyle(href) {
 }
 
 export async function runPocketSurfaceUiVerify() {
-  const host = document.createElement("div");
-  host.style.cssText = "position:fixed;left:-10000px;top:0;width:520px;height:318px";
-  document.body.append(host);
   const model = {
     appId: "local.example.today-focus",
     surfaceId: "main",
@@ -398,30 +395,79 @@ export async function runPocketSurfaceUiVerify() {
       },
     },
   };
-  let statePersisted = false;
-  renderPocketSurfaceProvider({
-    container: host,
-    state: { pocketSurface: model },
-    request: async (method, params) => {
-      if (method === "pocketApp.load") {
-        return { queryResults: [{ query: "calendar.events.list@1", output: { events: [{ eventRef: "event:1", safeTitle: "Focus", start: "2026-08-15T01:00:00Z", end: "2026-08-15T02:00:00Z" }] } }] };
-      }
-      if (method === "pocketApp.updateState") {
-        statePersisted = params?.key === "selectedEventRef" && params?.value === "event:1";
-        return { saved: true };
-      }
-      throw new Error("unexpected_method");
-    },
-  });
-  await new Promise((resolve) => window.setTimeout(resolve, 0));
-  const result = {
-    rendered: Boolean(host.querySelector(".hp-pocket-surface .hp-pocket-text.is-title")),
-    selection: host.querySelector("select")?.value === "event:1",
-    duration: host.querySelector(".hp-pocket-duration input")?.value === "1500",
-    purpose: host.querySelector(".hp-pocket-field input")?.value === "Focus",
-    statePersisted,
-    approvalHostOwned: !host.querySelector("[data-approval], .hp-pocket-approval"),
+  const panelCases = [
+    { name: "small", width: 520, height: 318 },
+    { name: "medium", width: 600, height: 376 },
+    { name: "large", width: 680, height: 434 },
+  ];
+  const textCases = [
+    { name: "small", scale: 1 },
+    { name: "medium", scale: 1.12 },
+    { name: "large", scale: 1.24 },
+  ];
+  let baseline;
+  let layoutMatrix = true;
+  let layoutCases = 0;
+
+  for (const panelCase of panelCases) {
+    for (const textCase of textCases) {
+      const host = document.createElement("div");
+      host.dataset.panelSize = panelCase.name;
+      host.dataset.textSize = textCase.name;
+      host.style.cssText = `position:fixed;left:-10000px;top:0;width:${panelCase.width}px;height:${panelCase.height}px;--hp-text-scale:${textCase.scale}`;
+      document.body.append(host);
+      let statePersisted = false;
+      const provider = renderPocketSurfaceProvider({
+        container: host,
+        state: { pocketSurface: model },
+        request: async (method, params) => {
+          if (method === "pocketApp.load") {
+            return { queryResults: [{ query: "calendar.events.list@1", output: { events: [{ eventRef: "event:1", safeTitle: "Focus", start: "2026-08-15T01:00:00Z", end: "2026-08-15T02:00:00Z" }] } }] };
+          }
+          if (method === "pocketApp.updateState") {
+            statePersisted = params?.key === "selectedEventRef" && params?.value === "event:1";
+            return { saved: true };
+          }
+          throw new Error("unexpected_method");
+        },
+      });
+      await nextLayout();
+      const surface = host.querySelector(".hp-pocket-surface");
+      const surfaceRect = surface?.getBoundingClientRect();
+      const controlsFit = [...host.querySelectorAll("input, select, button")].every((control) => {
+        const rect = control.getBoundingClientRect();
+        return surfaceRect && rect.left >= surfaceRect.left - 1 && rect.right <= surfaceRect.right + 1;
+      });
+      layoutCases += 1;
+      layoutMatrix &&= Boolean(
+        surface
+        && surfaceRect
+        && surfaceRect.width > 0
+        && surfaceRect.height > 0
+        && surface.scrollWidth <= surface.clientWidth + 1
+        && controlsFit,
+      );
+      baseline ??= {
+        rendered: Boolean(host.querySelector(".hp-pocket-surface .hp-pocket-text.is-title")),
+        selection: host.querySelector("select")?.value === "event:1",
+        duration: host.querySelector(".hp-pocket-duration input")?.value === "1500",
+        purpose: host.querySelector(".hp-pocket-field input")?.value === "Focus",
+        statePersisted,
+        approvalHostOwned: !host.querySelector("[data-approval], .hp-pocket-approval"),
+      };
+      provider?.dispose?.();
+      host.remove();
+    }
+  }
+
+  return {
+    ...baseline,
+    layoutMatrix: layoutMatrix && layoutCases === panelCases.length * textCases.length,
   };
-  host.remove();
-  return result;
+}
+
+function nextLayout() {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+  });
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PocketSurfaceHostView: View {
     @StateObject private var model: PocketSurfaceHostModel
+    @Environment(\.panelTextSize) private var panelTextSize
 
     init(model: PocketSurfaceHostModel) {
         _model = StateObject(wrappedValue: model)
@@ -48,7 +49,7 @@ struct PocketSurfaceHostView: View {
             Text(text)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.system(size: 11, weight: .semibold, design: .rounded))
+        .font(.system(size: panelTextSize.scaled(11), weight: .semibold, design: .rounded))
         .foregroundStyle(color)
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -63,6 +64,7 @@ struct PocketSurfaceHostView: View {
 private struct PocketSurfaceNodeView: View {
     let node: PocketSurfaceRenderNode
     @ObservedObject var model: PocketSurfaceHostModel
+    @Environment(\.panelTextSize) private var panelTextSize
 
     var body: some View {
         render(node)
@@ -125,7 +127,7 @@ private struct PocketSurfaceNodeView: View {
                         }
                         Text(label)
                     }
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .font(scaledFont(size: 12, weight: .bold))
                     .foregroundStyle(.black.opacity(0.88))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
@@ -146,14 +148,14 @@ private struct PocketSurfaceNodeView: View {
             return AnyView(
                 VStack(alignment: .leading, spacing: 6) {
                     Text(label)
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .font(scaledFont(size: 10, weight: .bold))
                         .foregroundStyle(.white.opacity(0.48))
                     TextField(label, text: Binding(
                         get: { model.stringValue(for: binding) },
                         set: { model.updateString($0, binding: binding, maximumLength: maximum) }
                     ))
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(scaledFont(size: 12, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 11)
                     .frame(height: 34)
@@ -177,7 +179,7 @@ private struct PocketSurfaceNodeView: View {
                     set: { model.updateBool($0, binding: binding) }
                 ))
                 .toggleStyle(.switch)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .font(scaledFont(size: 11, weight: .semibold))
             )
 
         case "picker":
@@ -194,7 +196,7 @@ private struct PocketSurfaceNodeView: View {
             let tone = node.stringProperty("tone") ?? "neutral"
             return AnyView(
                 Text(value)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(scaledFont(size: 11, weight: .semibold))
                     .foregroundStyle(statusColor(tone))
                     .frame(maxWidth: .infinity, alignment: .leading)
             )
@@ -242,7 +244,7 @@ private struct PocketSurfaceNodeView: View {
                 Text(option.0).tag(option.1)
             }
         }
-        .font(.system(size: 11, weight: .semibold, design: .rounded))
+        .font(scaledFont(size: 11, weight: .semibold))
     }
 
     private func calendarEventPicker(_ node: PocketSurfaceRenderNode) -> some View {
@@ -258,11 +260,11 @@ private struct PocketSurfaceNodeView: View {
         let choices = model.choicesByQuery[query] ?? []
         return VStack(alignment: .leading, spacing: 7) {
             Text("集中する予定")
-                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .font(scaledFont(size: 10, weight: .bold))
                 .foregroundStyle(.white.opacity(0.48))
             if choices.isEmpty {
                 Text(model.isLoading ? "読み込み中…" : "今日の予定はありません")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(scaledFont(size: 11, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.52))
                     .padding(.vertical, 10)
             } else {
@@ -276,7 +278,7 @@ private struct PocketSurfaceNodeView: View {
                     }
                 }
                 .labelsHidden()
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .font(scaledFont(size: 11, weight: .semibold))
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -311,7 +313,7 @@ private struct PocketSurfaceNodeView: View {
                 Text("\(max(1, value / 60))分")
                     .foregroundStyle(.white)
             }
-            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .font(scaledFont(size: 11, weight: .bold))
         }
         .padding(.horizontal, 11)
         .frame(height: 36)
@@ -323,11 +325,19 @@ private struct PocketSurfaceNodeView: View {
 
     private func textFont(_ style: String) -> Font {
         switch style {
-        case "title": .system(size: 16, weight: .bold, design: .rounded)
-        case "caption": .system(size: 10, weight: .medium, design: .rounded)
-        case "monospace": .system(size: 11, weight: .medium, design: .monospaced)
-        default: .system(size: 12, weight: .medium, design: .rounded)
+        case "title": scaledFont(size: 16, weight: .bold)
+        case "caption": scaledFont(size: 10, weight: .medium)
+        case "monospace": scaledFont(size: 11, weight: .medium, design: .monospaced)
+        default: scaledFont(size: 12, weight: .medium)
         }
+    }
+
+    private func scaledFont(
+        size: CGFloat,
+        weight: Font.Weight,
+        design: Font.Design = .rounded
+    ) -> Font {
+        .system(size: panelTextSize.scaled(size), weight: weight, design: design)
     }
 
     private func statusColor(_ tone: String) -> Color {
