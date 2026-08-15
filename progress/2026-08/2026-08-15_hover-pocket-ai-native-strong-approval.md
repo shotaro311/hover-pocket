@@ -75,3 +75,5 @@ GitHub Actions（source head `bcbf7b0`）:
 - PR #12は`2026-08-15T01:23:26Z`にmergeされた。
 - merge commit: `005f174ab4a7a85b943c1d902be26053934e7ba1`
 - merge直後の`main == origin/main`、ahead / behind `0 / 0`をreadbackした。
+- merge commitのpush CIはWindows [31856376397](https://github.com/shotaro311/hover-pocket/actions/runs/31856376397)、macOS [31856376384](https://github.com/shotaro311/hover-pocket/actions/runs/31856376384)、Pocket contracts [31856376430](https://github.com/shotaro311/hover-pocket/actions/runs/31856376430)がすべて成功した。
+- 進捗確定commit `2299abb825ed092e7296aee73ab0a5a96407f6b1`をmainへpushし、`main == origin/main`、ahead / behind `0 / 0`を再確認した。
