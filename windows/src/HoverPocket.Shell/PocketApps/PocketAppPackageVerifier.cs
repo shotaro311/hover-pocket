@@ -442,6 +442,29 @@ internal sealed class PocketAppPackageVerifier
                     "lifecycle_second_manager_preserves_live_staging");
                 manager.Reject(replacement.RequestId, replacement.BindingDigest);
 
+                using var capacityPeer = new PocketAppLifecycleManager(root, dataRoot);
+                var capacityProposals = new List<(PocketAppLifecycleManager Owner, PocketAppLifecycleProposal Proposal)>();
+                for (var index = 0; index < 4; index++)
+                {
+                    var owner = index % 2 == 0 ? manager : capacityPeer;
+                    capacityProposals.Add((owner, owner.Stage(draftRoot, now.AddSeconds(906 + index))));
+                }
+                try
+                {
+                    _ = manager.Stage(draftRoot, now.AddSeconds(910));
+                    _failures.Add("lifecycle_pending_limit_not_enforced");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_PENDING_LIMIT_EXCEEDED")
+                {
+                }
+                Require(
+                    capacityProposals.All(item => Directory.Exists(item.Proposal.StagingDirectory)),
+                    "lifecycle_pending_limit_preserves_existing");
+                foreach (var item in capacityProposals)
+                {
+                    item.Owner.Reject(item.Proposal.RequestId, item.Proposal.BindingDigest);
+                }
+
                 var abandonedRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-abandoned-{Guid.NewGuid():N}");
                 var abandonedDataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-abandoned-data-{Guid.NewGuid():N}");
                 try

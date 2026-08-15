@@ -116,6 +116,7 @@ internal sealed class PocketAppLifecycleManager : IDisposable
     private sealed record IssuedApproval(string RequestId, string BindingDigest, DateTimeOffset ExpiresAt);
 
     private static readonly TimeSpan ApprovalLifetime = TimeSpan.FromMinutes(5);
+    private const int MaxPendingStagingSnapshots = 4;
     private readonly string _rootDirectory;
     private readonly string _userDataRoot;
     private readonly PocketAppPackageRuntime _runtime;
@@ -181,6 +182,10 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         try
         {
             PurgeExpiredApprovals(timestamp);
+            if (LiveStagingDirectories.Count(path => IsWithinDirectory(path, StagingRoot)) >= MaxPendingStagingSnapshots)
+            {
+                throw Failure("LIFECYCLE_PENDING_LIMIT_EXCEEDED");
+            }
             var sourceSnapshot = PocketAppFileSnapshot.Capture(draftDirectory);
             var stagingDirectory = Path.Combine(StagingRoot, Guid.NewGuid().ToString("N"), "package");
             cleanupDirectory = Directory.GetParent(stagingDirectory)?.FullName;
@@ -814,6 +819,13 @@ internal sealed class PocketAppLifecycleManager : IDisposable
             _grants.Remove(token);
             _consumedGrants.Remove(token);
         }
+    }
+
+    private static bool IsWithinDirectory(string path, string directory)
+    {
+        var normalizedPath = Path.GetFullPath(path);
+        var normalizedDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+        return normalizedPath.StartsWith(normalizedDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     private void DiscardPendingApproval(string requestId, PendingApproval pending)

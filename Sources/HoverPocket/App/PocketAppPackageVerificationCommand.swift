@@ -503,6 +503,29 @@ enum PocketAppPackageVerificationCommand {
                 )
                 try manager.reject(requestID: replacement.requestID, bindingDigest: replacement.bindingDigest)
 
+                let capacityPeer = try PocketAppLifecycleManager(rootDirectory: root, userDataRoot: dataRoot)
+                var capacityProposals: [(PocketAppLifecycleManager, PocketAppLifecycleProposal)] = []
+                for index in 0..<4 {
+                    let owner = index.isMultiple(of: 2) ? manager : capacityPeer
+                    capacityProposals.append((owner, try owner.stage(
+                        draftDirectory: draftRoot,
+                        now: now.addingTimeInterval(906 + Double(index))
+                    )))
+                }
+                do {
+                    _ = try manager.stage(draftDirectory: draftRoot, now: now.addingTimeInterval(910))
+                    failures.append("lifecycle_pending_limit_not_enforced")
+                } catch PocketAppLifecycleError.pendingLimitExceeded {
+                }
+                require(
+                    capacityProposals.allSatisfy { FileManager.default.fileExists(atPath: $0.1.stagingDirectory.path) },
+                    "lifecycle_pending_limit_preserves_existing",
+                    failures: &failures
+                )
+                for (owner, pending) in capacityProposals {
+                    try owner.reject(requestID: pending.requestID, bindingDigest: pending.bindingDigest)
+                }
+
                 let abandonedRoot = FileManager.default.temporaryDirectory
                     .appendingPathComponent("hover-pocket-lifecycle-abandoned-\(UUID().uuidString)", isDirectory: true)
                 let abandonedDataRoot = FileManager.default.temporaryDirectory

@@ -96,6 +96,7 @@ enum PocketAppLifecycleError: Error, Equatable {
     case downgradeRequiresRollback
     case corruptVersion
     case migrationRequired
+    case pendingLimitExceeded
     case storageFailure
     case readbackFailed
 }
@@ -116,6 +117,13 @@ final class PocketAppLifecycleManager {
 
         func contains(_ path: String) -> Bool {
             lock.withLock { paths.contains(path) }
+        }
+
+        func count(under rootPath: String) -> Int {
+            let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+            return lock.withLock {
+                paths.lazy.filter { $0.hasPrefix(prefix) }.count
+            }
         }
     }
 
@@ -157,6 +165,7 @@ final class PocketAppLifecycleManager {
     private var grants: [String: IssuedApproval] = [:]
     private var consumedGrants: Set<String> = []
     private let approvalLifetime: TimeInterval = 300
+    private let maxPendingStagingSnapshots = 4
 
     init(
         rootDirectory: URL,
@@ -203,6 +212,9 @@ final class PocketAppLifecycleManager {
         var cleanupDirectory: URL?
         do {
             try purgeExpiredApprovals(now: now)
+            guard Self.liveStagingRegistry.count(under: stagingRoot.standardizedFileURL.path) < maxPendingStagingSnapshots else {
+                throw PocketAppLifecycleError.pendingLimitExceeded
+            }
             let sourceSnapshot = try PocketAppFileSnapshot.capture(directory: draftDirectory)
             let stagingID = UUID().uuidString.lowercased()
             let stagingDirectory = stagingRoot
