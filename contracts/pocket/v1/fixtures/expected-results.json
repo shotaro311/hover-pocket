@@ -17,7 +17,7 @@
       {
         "path": "surfaces/main.surface.json",
         "source": "valid/pocket-surface.today-focus.json",
-        "digest": "sha256:903aa24068cebc47aefc9e5ef0a708331cc882b669050e1bf9fcb265686a7a20"
+        "digest": "sha256:36342c6e536c63ef4666f31929b432be846f06292657a01fbf4072447518fd33"
       },
       {
         "path": "tests/calendar-read.json",
@@ -42,7 +42,7 @@
       {
         "path": "workflows/start-focus.workflow.json",
         "source": "valid/pocket-workflow.today-focus.json",
-        "digest": "sha256:cdb62a919bf4f05c1eaf85937cdaf6a58addcccad3ee69d569ebbfdc4034de09"
+        "digest": "sha256:4d2702055f7d2a08a4f51aed760b90867dae8a848b3d53bd3656239ef2a2f9a1"
       }
     ]
   },

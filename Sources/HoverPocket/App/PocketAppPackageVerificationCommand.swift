@@ -4,10 +4,12 @@ enum PocketAppPackageVerificationCommand {
     static func run() -> Never {
         var failures: [String] = []
         let runtime = PocketAppPackageRuntime()
+        var referencePackage: PocketAppPackage?
 
         do {
             try withPackage { root in
                 let package = try runtime.load(directory: root)
+                referencePackage = package
                 require(package.manifest.id == "local.example.today-focus", "package_id", failures: &failures)
                 require(package.manifest.version == "1.0.0", "package_version", failures: &failures)
                 require(package.manifestDigest.hasPrefix("sha256:") && package.manifestDigest.count == 71, "manifest_digest", failures: &failures)
@@ -20,6 +22,22 @@ enum PocketAppPackageVerificationCommand {
             }
         } catch {
             failures.append("valid_package:\(error)")
+        }
+
+        do {
+            guard let resourceRoot = Bundle.module.resourceURL else {
+                throw PocketAppPackageError.invalid("$:bundle_resource")
+            }
+            let bundledRoot = resourceRoot
+                .appendingPathComponent("PocketApps", isDirectory: true)
+                .appendingPathComponent("local.example.today-focus", isDirectory: true)
+            let bundled = try runtime.load(directory: bundledRoot)
+            require(bundled.manifestDigest == referencePackage?.manifestDigest, "bundled_manifest", failures: &failures)
+            require(bundled.surfaces == referencePackage?.surfaces, "bundled_surfaces", failures: &failures)
+            require(bundled.workflows == referencePackage?.workflows, "bundled_workflows", failures: &failures)
+            require(bundled.testCases == referencePackage?.testCases, "bundled_tests", failures: &failures)
+        } catch {
+            failures.append("bundled_package:\(error)")
         }
 
         rejectPackage("unlisted_file", failures: &failures) { root in
@@ -83,6 +101,7 @@ enum PocketAppPackageVerificationCommand {
 
         print("pocket_app_package_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_app_package_valid_files=9")
+        print("pocket_app_package_bundled=ok")
         print("pocket_app_package_negative_cases=10")
         if !failures.isEmpty {
             print("pocket_app_package_failures=\(failures.joined(separator: ","))")

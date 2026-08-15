@@ -15,6 +15,8 @@ enum PocketAppPackageError: Error, Equatable, CustomStringConvertible {
 struct PocketAppRequestedCapability: Equatable, Sendable {
     let key: PocketCapabilityKey
     let scope: PocketJSONValue?
+    let effect: CapabilityEffect
+    let permissions: Set<String>
 }
 
 struct PocketAppManifestDocument: Equatable, Sendable {
@@ -97,7 +99,9 @@ struct PocketAppPackageRuntime {
         let stateData = try read(relativePath: manifest.stateSchemaPath, root: root, inventory: actualFiles)
         let statePropertyNames = try validateStateSchema(jsonObject(stateData, path: "$.state.schema"))
 
-        let requestedKeys = Set(manifest.requestedCapabilities.map(\.key))
+        let requestedScopes = Dictionary(
+            uniqueKeysWithValues: manifest.requestedCapabilities.map { ($0.key, $0.scope) }
+        )
         let readableQueries = Set(manifest.requestedCapabilities.compactMap { request -> String? in
             guard descriptors[request.key]?.effect == .privateRead else { return nil }
             return "\(request.key.id)@\(request.key.version)"
@@ -117,21 +121,25 @@ struct PocketAppPackageRuntime {
         for (id, path) in manifest.workflows.sorted(by: { $0.key < $1.key }) {
             let workflow = try parseWorkflow(
                 jsonObject(try read(relativePath: path, root: root, inventory: actualFiles), path: "$.workflows.\(id)"),
-                requestedKeys: requestedKeys
+                requestedScopes: requestedScopes
             )
             try require(workflow.id == id, "$.workflows.\(id):id")
             workflows[id] = workflow
         }
 
         let workflowInputNames = Set(workflows.values.flatMap { $0.inputs.keys })
+        var boundNames: Set<String> = []
         for surface in surfaces.values {
             try validateBindings(
                 node: surface.root,
                 inputNames: workflowInputNames,
                 stateNames: statePropertyNames,
+                boundNames: &boundNames,
                 path: "$.surfaces.\(surface.id).root"
             )
+            try validateSurfaceScopes(node: surface.root, requestedScopes: requestedScopes, path: "$.surfaces.\(surface.id).root")
         }
+        try require(workflowInputNames.isSubset(of: boundNames), "$.workflows:unbound_input")
 
         var testCases: [String: String] = [:]
         for path in manifest.tests {
@@ -207,7 +215,12 @@ struct PocketAppPackageRuntime {
             try require(capabilityKeys.insert(key).inserted, "$.manifest.requestedCapabilities:duplicate")
             let scope = try request["scope"].map { try PocketJSONValue(any: $0, path: "$.manifest.requestedCapabilities[\(index)].scope") }
             try validateScope(scope, key: key, path: "$.manifest.requestedCapabilities[\(index)].scope")
-            capabilities.append(PocketAppRequestedCapability(key: key, scope: scope))
+            capabilities.append(PocketAppRequestedCapability(
+                key: key,
+                scope: scope,
+                effect: descriptor.effect,
+                permissions: descriptor.permissions
+            ))
         }
 
         let workflowObject = try dictionary(object["workflows"], path: "$.manifest.workflows")
@@ -250,7 +263,7 @@ struct PocketAppPackageRuntime {
 
     private func parseWorkflow(
         _ object: [String: Any],
-        requestedKeys: Set<PocketCapabilityKey>
+        requestedScopes: [PocketCapabilityKey: PocketJSONValue?]
     ) throws -> PocketAppWorkflowDocument {
         try exactKeys(object, required: ["$schema", "workflowVersion", "id", "inputs", "approval", "steps", "onPartialFailure", "limits"], optional: [], path: "$.workflow")
         try require(try string(object["$schema"], path: "$.workflow.$schema") == "hoverpocket://schemas/pocket-workflow/v1", "$.workflow.$schema")
@@ -294,7 +307,7 @@ struct PocketAppPackageRuntime {
             try require(seen.insert(stepID).inserted, "$.workflow.steps:duplicate")
             let use = try boundedString(step["use"], range: 3...160, path: "$.workflow.steps[\(index)].use")
             let capability = try capabilityKey(use, path: "$.workflow.steps[\(index)].use")
-            try require(requestedKeys.contains(capability), "$.workflow.steps[\(index)].use:undeclared")
+            try require(requestedScopes.keys.contains(capability), "$.workflow.steps[\(index)].use:undeclared")
             guard let descriptor = descriptors[capability], descriptor.approvalPolicy != .runtimeProhibited else {
                 throw PocketAppPackageError.invalid("$.workflow.steps[\(index)].use:unknown")
             }
@@ -312,6 +325,12 @@ struct PocketAppPackageRuntime {
                 try validateWorkflowBinding(value, inputs: Set(inputs.keys), path: "$.workflow.steps[\(index)].with.\(key)")
                 arguments[key] = value
             }
+            try validateCapabilityScope(
+                arguments: arguments,
+                scope: requestedScopes[capability] ?? nil,
+                key: capability,
+                path: "$.workflow.steps[\(index)].with"
+            )
             let dependencies = try array(step["dependsOn"], path: "$.workflow.steps[\(index)].dependsOn").enumerated().map {
                 try identifier($0.element, path: "$.workflow.steps[\(index)].dependsOn[\($0.offset)]")
             }
@@ -371,27 +390,39 @@ struct PocketAppPackageRuntime {
         return Set(properties.keys)
     }
 
-    private func validateBindings(node: PocketSurfaceRenderNode, inputNames: Set<String>, stateNames: Set<String>, path: String) throws {
+    private func validateBindings(
+        node: PocketSurfaceRenderNode,
+        inputNames: Set<String>,
+        stateNames: Set<String>,
+        boundNames: inout Set<String>,
+        path: String
+    ) throws {
         for (key, value) in node.properties {
             if case .string(let binding) = value, binding.hasPrefix("$") {
                 if binding.hasPrefix("$input.") {
-                    try require(inputNames.contains(String(binding.dropFirst("$input.".count))), "\(path).\(key):binding")
+                    let name = String(binding.dropFirst("$input.".count))
+                    try require(inputNames.contains(name), "\(path).\(key):binding")
+                    boundNames.insert(name)
                 } else if binding.hasPrefix("$state.") {
-                    try require(stateNames.contains(String(binding.dropFirst("$state.".count))), "\(path).\(key):binding")
+                    let name = String(binding.dropFirst("$state.".count))
+                    try require(stateNames.contains(name), "\(path).\(key):binding")
+                    boundNames.insert(name)
                 } else {
                     throw PocketAppPackageError.invalid("\(path).\(key):binding")
                 }
             }
         }
         for (index, child) in node.children.enumerated() {
-            try validateBindings(node: child, inputNames: inputNames, stateNames: stateNames, path: "\(path).children[\(index)]")
+            try validateBindings(node: child, inputNames: inputNames, stateNames: stateNames, boundNames: &boundNames, path: "\(path).children[\(index)]")
         }
     }
 
     private func validateWorkflowBinding(_ value: PocketJSONValue, inputs: Set<String>, path: String) throws {
         switch value {
         case .string(let text) where text.hasPrefix("$"):
-            try require(text.hasPrefix("$input.") && inputs.contains(String(text.dropFirst("$input.".count))), "\(path):binding")
+            let inputBinding = text.hasPrefix("$input.") && inputs.contains(String(text.dropFirst("$input.".count)))
+            let contextBinding = text == "$context.todayFocusStableKey"
+            try require(inputBinding || contextBinding, "\(path):binding")
         case .array(let values):
             for (index, value) in values.enumerated() { try validateWorkflowBinding(value, inputs: inputs, path: "\(path)[\(index)]") }
         case .object(let object):
@@ -399,6 +430,49 @@ struct PocketAppPackageRuntime {
         default:
             break
         }
+    }
+
+    private func validateSurfaceScopes(
+        node: PocketSurfaceRenderNode,
+        requestedScopes: [PocketCapabilityKey: PocketJSONValue?],
+        path: String
+    ) throws {
+        if node.type == "calendarEventPicker",
+           case .object(let items)? = node.properties["items"],
+           case .string(let query)? = items["query"],
+           case .object(let arguments)? = items["arguments"] {
+            let key = try capabilityKey(query, path: "\(path).items.query")
+            try require(requestedScopes.keys.contains(key), "\(path).items.query:undeclared")
+            try validateCapabilityScope(
+                arguments: arguments,
+                scope: requestedScopes[key] ?? nil,
+                key: key,
+                path: "\(path).items.arguments"
+            )
+        }
+        for (index, child) in node.children.enumerated() {
+            try validateSurfaceScopes(node: child, requestedScopes: requestedScopes, path: "\(path).children[\(index)]")
+        }
+    }
+
+    private func validateCapabilityScope(
+        arguments: [String: PocketJSONValue],
+        scope: PocketJSONValue?,
+        key: PocketCapabilityKey,
+        path: String
+    ) throws {
+        guard case .object(let object)? = scope else { return }
+        if case .string(let range)? = object["range"] {
+            try require(arguments["range"] == .string(range), "\(path).range:scope")
+        }
+        if case .string(let namespace)? = object["namespace"] {
+            guard case .string(let stableKey)? = arguments["stableKey"] else {
+                throw PocketAppPackageError.invalid("\(path).stableKey:scope")
+            }
+            let contextBinding = namespace == "today-focus" && stableKey == "$context.todayFocusStableKey"
+            try require(stableKey.hasPrefix("\(namespace):") || contextBinding, "\(path).stableKey:scope")
+        }
+        _ = key
     }
 
     private func validateScope(_ scope: PocketJSONValue?, key: PocketCapabilityKey, path: String) throws {

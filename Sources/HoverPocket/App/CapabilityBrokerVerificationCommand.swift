@@ -15,6 +15,7 @@ enum CapabilityBrokerVerificationCommand {
                 print("broker_calculator_evaluate=ok")
                 print("broker_sticky_lifecycle=ok")
                 print("broker_today_focus=ok")
+                print("broker_pocket_app=ok")
                 print("broker_concurrent_duplicate=ok")
                 print("broker_negative_cases=11")
                 print("broker_golden_plan_digest=\(goldenPlanDigest)")
@@ -477,9 +478,113 @@ enum CapabilityBrokerVerificationCommand {
             try require(!durableLedgerText.contains(forbidden), "ledger_redaction_\(forbidden)")
         }
 
+        try await verifyPocketAppExecution(root: root, calendar: calendar, now: now)
         try await verifyPartialRollback(root: root, now: now, principal: principal)
         try await verifyCurrentStepRollback(root: root, now: now, principal: principal)
         try await verifyTimeout(root: root, now: now, principal: principal)
+    }
+
+    @MainActor
+    private static func verifyPocketAppExecution(
+        root: URL,
+        calendar: BrokerFakeCalendarDataSource,
+        now: Date
+    ) async throws {
+        guard let resourceRoot = Bundle.module.resourceURL else {
+            throw BrokerVerificationFailure("pocket_app_bundle")
+        }
+        let packageRoot = resourceRoot
+            .appendingPathComponent("PocketApps", isDirectory: true)
+            .appendingPathComponent("local.example.today-focus", isDirectory: true)
+        let package = try PocketAppPackageRuntime().load(directory: packageRoot)
+        let timerStore = TimerStore(
+            storageDirectory: root.appendingPathComponent("pocket-app-timer", isDirectory: true),
+            observesWake: false,
+            persistenceEnabled: true
+        )
+        let stickyStore = StickyNotesStore(
+            storageDirectory: root.appendingPathComponent("pocket-app-sticky", isDirectory: true)
+        )
+        let noteID = UUID(uuidString: "66666666-6666-4666-8666-666666666666")!
+        let handlers = try makeHandlers(
+            calendar: calendar,
+            timerStore: timerStore,
+            stickyStore: stickyStore,
+            noteID: noteID
+        )
+        let brokerRoot = root.appendingPathComponent("pocket-app-broker", isDirectory: true)
+        let broker = CapabilityBroker(
+            registry: try CapabilityRegistry(handlers: handlers),
+            ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
+            auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+        )
+        let runtime = PocketAppExecutionRuntime(
+            package: package,
+            broker: broker,
+            userID: "pocket-app-user",
+            grantedPermissions: ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"],
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!
+        )
+        let query = try await runtime.query(
+            reference: "calendar.events.list@1",
+            arguments: [
+                "range": .string("today"),
+                "timezone": .string("$context.timezone")
+            ],
+            now: now
+        )
+        guard case .array(let events)? = query["events"],
+              case .object(let event)? = events.first,
+              case .string(let eventRef)? = event["eventRef"] else {
+            throw BrokerVerificationFailure("pocket_app_query")
+        }
+        do {
+            _ = try await runtime.query(
+                reference: "timer.countdown.start@1",
+                arguments: [
+                    "durationSeconds": .number(60),
+                    "title": .string("must-not-run"),
+                    "sourceRef": .null
+                ],
+                now: now
+            )
+            throw BrokerVerificationFailure("pocket_app_query_write_not_rejected")
+        } catch let error as CapabilityBrokerError {
+            guard case .invalidPlan("query_effect") = error else { throw error }
+        }
+        let tokyoBoundary = ISO8601DateFormatter().date(from: "2026-08-14T16:00:00Z")!
+        let draft = try runtime.prepare(
+            workflowID: "startFocus",
+            inputs: [
+                "selectedEventRef": .string(eventRef),
+                "durationSeconds": .integer(1_500),
+                "purpose": .string("pocket-app-purpose")
+            ],
+            now: tokyoBoundary
+        )
+        try require(draft.plan.origin == .pocketSurface, "pocket_app_origin")
+        try require(draft.plan.principal.pocketAppID == package.manifest.id, "pocket_app_principal")
+        try require(draft.plan.appContext?.manifestDigest == package.manifestDigest, "pocket_app_context")
+        try require(
+            draft.plan.steps[1].arguments["stableKey"] == .string("today-focus:2026-08-15"),
+            "pocket_app_local_date"
+        )
+        let receipt = try await runtime.approveAndExecute(draft, now: tokyoBoundary)
+        try require(receipt.status == .succeeded, "pocket_app_status")
+        try require(receipt.steps.allSatisfy { $0.readback.status == .verified }, "pocket_app_readback")
+        try require(timerStore.runningTimers.count == 1, "pocket_app_timer")
+        try require(stickyStore.note(id: noteID)?.body == "pocket-app-purpose", "pocket_app_sticky")
+        let replay = try await broker.execute(
+            draft.plan,
+            permissions: CapabilityPermissionSet(
+                principal: draft.plan.principal,
+                permissions: ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"]
+            ),
+            approvalGrant: nil,
+            now: tokyoBoundary.addingTimeInterval(1)
+        )
+        try require(replay.replayed, "pocket_app_replay")
+        try require(timerStore.runningTimers.count == 1 && stickyStore.notes.count == 1, "pocket_app_replay_effect")
     }
 
     @MainActor

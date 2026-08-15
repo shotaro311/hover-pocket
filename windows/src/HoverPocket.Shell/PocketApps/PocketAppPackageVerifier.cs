@@ -9,9 +9,11 @@ internal sealed class PocketAppPackageVerifier
 
     public int Run()
     {
+        PocketAppPackage? referencePackage = null;
         WithPackage(root =>
         {
             var package = new PocketAppPackageRuntime().Load(root);
+            referencePackage = package;
             Require(package.Manifest.Id == "local.example.today-focus", "package_id");
             Require(package.Manifest.Version == "1.0.0", "package_version");
             Require(package.ManifestDigest.StartsWith("sha256:", StringComparison.Ordinal) && package.ManifestDigest.Length == 71, "manifest_digest");
@@ -22,6 +24,28 @@ internal sealed class PocketAppPackageVerifier
             Require(package.TestCases.Count == 4 && package.TestCases["start-focus-rejected"] == "reject", "package_tests");
             Console.WriteLine($"pocket_app_manifest_digest={package.ManifestDigest}");
         }, "valid_package");
+
+        try
+        {
+            if (referencePackage is null)
+            {
+                throw new InvalidOperationException("reference_package");
+            }
+            var bundledRoot = Path.Combine(AppContext.BaseDirectory, "PocketApps", "local.example.today-focus");
+            var bundled = new PocketAppPackageRuntime().Load(bundledRoot);
+            Require(bundled.ManifestDigest == referencePackage.ManifestDigest, "bundled_manifest");
+            Require(bundled.Surfaces["main"].CanonicalRenderModelBytes().AsSpan().SequenceEqual(
+                referencePackage.Surfaces["main"].CanonicalRenderModelBytes()), "bundled_surfaces");
+            Require(bundled.Workflows["startFocus"].Id == referencePackage.Workflows["startFocus"].Id
+                && bundled.Workflows["startFocus"].Steps.Count == referencePackage.Workflows["startFocus"].Steps.Count
+                && bundled.Workflows["startFocus"].RequiredPermissions.SetEquals(referencePackage.Workflows["startFocus"].RequiredPermissions), "bundled_workflows");
+            Require(bundled.TestCases.OrderBy(item => item.Key).SequenceEqual(
+                referencePackage.TestCases.OrderBy(item => item.Key)), "bundled_tests");
+        }
+        catch (Exception ex)
+        {
+            _failures.Add($"bundled_package:{ex.GetType().Name}:{ex.Message}");
+        }
 
         RejectPackage("unlisted_file", root => File.WriteAllText(Path.Combine(root, "unexpected.txt"), "unexpected", Encoding.UTF8));
         RejectPackage("hidden_unlisted_file", root => File.WriteAllText(Path.Combine(root, ".unexpected"), "unexpected", Encoding.UTF8));
@@ -60,6 +84,7 @@ internal sealed class PocketAppPackageVerifier
 
         Console.WriteLine("pocket_app_package_verify=ok");
         Console.WriteLine("pocket_app_package_valid_files=9");
+        Console.WriteLine("pocket_app_package_bundled=ok");
         Console.WriteLine("pocket_app_package_negative_cases=9");
         return 0;
     }

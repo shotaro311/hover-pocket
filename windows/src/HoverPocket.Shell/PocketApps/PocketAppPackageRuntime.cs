@@ -11,7 +11,11 @@ internal sealed class PocketAppPackageRuntimeException(string path) : Exception(
     public string Path { get; } = path;
 }
 
-internal sealed record PocketAppRequestedCapability(PocketCapabilityKey Key, JsonElement? Scope);
+internal sealed record PocketAppRequestedCapability(
+    PocketCapabilityKey Key,
+    JsonElement? Scope,
+    CapabilityEffect Effect,
+    IReadOnlySet<string> Permissions);
 
 internal sealed record PocketAppManifestDocument(
     string Id,
@@ -110,7 +114,7 @@ internal sealed class PocketAppPackageRuntime
         Require(!string.IsNullOrWhiteSpace(intent) && intent.EnumerateRunes().Count() <= 20_000, "$.intent");
         var statePropertyNames = ValidateStateSchema(ReadObject(Read(manifest.StateSchemaPath, root, inventory), "$.state.schema"));
 
-        var requestedKeys = manifest.RequestedCapabilities.Select(item => item.Key).ToHashSet();
+        var requestedScopes = manifest.RequestedCapabilities.ToDictionary(item => item.Key, item => item.Scope);
         var readableQueries = manifest.RequestedCapabilities
             .Where(item => _descriptors[item.Key].Effect == CapabilityEffect.PrivateRead)
             .Select(item => $"{item.Key.Id}@{item.Key.Version}")
@@ -127,16 +131,19 @@ internal sealed class PocketAppPackageRuntime
         var workflows = new Dictionary<string, PocketAppWorkflowDocument>(StringComparer.Ordinal);
         foreach (var item in manifest.Workflows.OrderBy(item => item.Key, StringComparer.Ordinal))
         {
-            var workflow = ParseWorkflow(ReadObject(Read(item.Value, root, inventory), $"$.workflows.{item.Key}"), requestedKeys);
+            var workflow = ParseWorkflow(ReadObject(Read(item.Value, root, inventory), $"$.workflows.{item.Key}"), requestedScopes);
             Require(workflow.Id == item.Key, $"$.workflows.{item.Key}:id");
             workflows.Add(item.Key, workflow);
         }
 
         var workflowInputNames = workflows.Values.SelectMany(item => item.Inputs.Keys).ToHashSet(StringComparer.Ordinal);
+        var boundNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var surface in surfaces.Values)
         {
-            ValidateBindings(surface.Root, workflowInputNames, statePropertyNames, $"$.surfaces.{surface.Id}.root");
+            ValidateBindings(surface.Root, workflowInputNames, statePropertyNames, boundNames, $"$.surfaces.{surface.Id}.root");
+            ValidateSurfaceScopes(surface.Root, requestedScopes, $"$.surfaces.{surface.Id}.root");
         }
+        Require(workflowInputNames.IsSubsetOf(boundNames), "$.workflows:unbound_input");
 
         var testCases = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var testPath in manifest.Tests)
@@ -211,7 +218,11 @@ internal sealed class PocketAppPackageRuntime
             Require(capabilityKeys.Add(key), "$.manifest.requestedCapabilities:duplicate");
             JsonElement? scope = request.TryGetProperty("scope", out var rawScope) ? rawScope.Clone() : null;
             ValidateScope(scope, key, $"$.manifest.requestedCapabilities[{index}].scope");
-            requestedCapabilities.Add(new PocketAppRequestedCapability(key, scope));
+            requestedCapabilities.Add(new PocketAppRequestedCapability(
+                key,
+                scope,
+                descriptor.Effect,
+                descriptor.Permissions));
         }
 
         var workflowObject = RequireObject(value.GetProperty("workflows"), "$.manifest.workflows");
@@ -251,7 +262,9 @@ internal sealed class PocketAppPackageRuntime
             tests);
     }
 
-    private PocketAppWorkflowDocument ParseWorkflow(JsonElement value, IReadOnlySet<PocketCapabilityKey> requestedKeys)
+    private PocketAppWorkflowDocument ParseWorkflow(
+        JsonElement value,
+        IReadOnlyDictionary<PocketCapabilityKey, JsonElement?> requestedScopes)
     {
         ExactKeys(value, ["$schema", "workflowVersion", "id", "inputs", "approval", "steps", "onPartialFailure", "limits"], [], "$.workflow");
         Require(GetString(value.GetProperty("$schema"), "$.workflow.$schema") == "hoverpocket://schemas/pocket-workflow/v1", "$.workflow.$schema");
@@ -295,7 +308,7 @@ internal sealed class PocketAppPackageRuntime
             var stepId = Identifier(step.GetProperty("id"), $"$.workflow.steps[{index}].id");
             Require(seen.Add(stepId), "$.workflow.steps:duplicate");
             var capability = CapabilityKey(BoundedString(step.GetProperty("use"), 3, 160, $"$.workflow.steps[{index}].use"), $"$.workflow.steps[{index}].use");
-            Require(requestedKeys.Contains(capability), $"$.workflow.steps[{index}].use:undeclared");
+            Require(requestedScopes.ContainsKey(capability), $"$.workflow.steps[{index}].use:undeclared");
             if (!_descriptors.TryGetValue(capability, out var descriptor) || descriptor.ApprovalPolicy == CapabilityApprovalPolicy.RuntimeProhibited)
             {
                 throw new PocketAppPackageRuntimeException($"$.workflow.steps[{index}].use:unknown");
@@ -312,6 +325,11 @@ internal sealed class PocketAppPackageRuntime
                 ValidateWorkflowBinding(property.Value, inputs.Keys.ToHashSet(StringComparer.Ordinal), $"$.workflow.steps[{index}].with.{property.Name}");
                 arguments.Add(property.Name, property.Value.Clone());
             }
+            ValidateCapabilityScope(
+                arguments,
+                requestedScopes[capability],
+                capability,
+                $"$.workflow.steps[{index}].with");
 
             var dependencies = RequireArray(step.GetProperty("dependsOn"), 0, 32, $"$.workflow.steps[{index}].dependsOn")
                 .Select((item, dependencyIndex) => Identifier(item, $"$.workflow.steps[{index}].dependsOn[{dependencyIndex}]")).ToArray();
@@ -379,6 +397,7 @@ internal sealed class PocketAppPackageRuntime
         PocketSurfaceRenderNode node,
         IReadOnlySet<string> inputNames,
         IReadOnlySet<string> stateNames,
+        ISet<string> boundNames,
         string path)
     {
         foreach (var property in node.Properties)
@@ -389,11 +408,15 @@ internal sealed class PocketAppPackageRuntime
             }
             if (binding.StartsWith("$input.", StringComparison.Ordinal))
             {
-                Require(inputNames.Contains(binding["$input.".Length..]), $"{path}.{property.Key}:binding");
+                var name = binding["$input.".Length..];
+                Require(inputNames.Contains(name), $"{path}.{property.Key}:binding");
+                boundNames.Add(name);
             }
             else if (binding.StartsWith("$state.", StringComparison.Ordinal))
             {
-                Require(stateNames.Contains(binding["$state.".Length..]), $"{path}.{property.Key}:binding");
+                var name = binding["$state.".Length..];
+                Require(stateNames.Contains(name), $"{path}.{property.Key}:binding");
+                boundNames.Add(name);
             }
             else
             {
@@ -402,7 +425,7 @@ internal sealed class PocketAppPackageRuntime
         }
         for (var index = 0; index < node.Children.Count; index++)
         {
-            ValidateBindings(node.Children[index], inputNames, stateNames, $"{path}.children[{index}]");
+            ValidateBindings(node.Children[index], inputNames, stateNames, boundNames, $"{path}.children[{index}]");
         }
     }
 
@@ -414,7 +437,10 @@ internal sealed class PocketAppPackageRuntime
                 var text = value.GetString() ?? string.Empty;
                 if (text.StartsWith('$'))
                 {
-                    Require(text.StartsWith("$input.", StringComparison.Ordinal) && inputs.Contains(text["$input.".Length..]), $"{path}:binding");
+                    var inputBinding = text.StartsWith("$input.", StringComparison.Ordinal)
+                        && inputs.Contains(text["$input.".Length..]);
+                    var contextBinding = text == "$context.todayFocusStableKey";
+                    Require(inputBinding || contextBinding, $"{path}:binding");
                 }
                 break;
             case JsonValueKind.Array:
@@ -431,6 +457,82 @@ internal sealed class PocketAppPackageRuntime
                 }
                 break;
         }
+    }
+
+    private static void ValidateSurfaceScopes(
+        PocketSurfaceRenderNode node,
+        IReadOnlyDictionary<PocketCapabilityKey, JsonElement?> requestedScopes,
+        string path)
+    {
+        if (node.Type == "calendarEventPicker"
+            && node.Properties.TryGetValue("items", out var rawItems)
+            && rawItems is IReadOnlyDictionary<string, object?> items
+            && items.TryGetValue("query", out var rawQuery)
+            && rawQuery is string query
+            && items.TryGetValue("arguments", out var rawArguments)
+            && rawArguments is JsonElement arguments)
+        {
+            var key = CapabilityKey(query, $"{path}.items.query");
+            Require(requestedScopes.ContainsKey(key), $"{path}.items.query:undeclared");
+            ValidateCapabilityScope(arguments, requestedScopes[key], key, $"{path}.items.arguments");
+        }
+        for (var index = 0; index < node.Children.Count; index++)
+        {
+            ValidateSurfaceScopes(node.Children[index], requestedScopes, $"{path}.children[{index}]");
+        }
+    }
+
+    private static void ValidateCapabilityScope(
+        IReadOnlyDictionary<string, JsonElement> arguments,
+        JsonElement? scope,
+        PocketCapabilityKey key,
+        string path)
+    {
+        if (scope is not { } rawScope)
+        {
+            return;
+        }
+        var scopeObject = RequireObject(rawScope, path);
+        if (scopeObject.TryGetProperty("range", out var range))
+        {
+            Require(arguments.TryGetValue("range", out var value)
+                && value.ValueKind == JsonValueKind.String
+                && value.GetString() == range.GetString(), $"{path}.range:scope");
+        }
+        if (scopeObject.TryGetProperty("namespace", out var namespaceValue))
+        {
+            var expectedNamespace = namespaceValue.GetString() ?? string.Empty;
+            Require(arguments.TryGetValue("stableKey", out var value) && value.ValueKind == JsonValueKind.String, $"{path}.stableKey:scope");
+            var stableKey = value.GetString() ?? string.Empty;
+            var contextBinding = expectedNamespace == "today-focus" && stableKey == "$context.todayFocusStableKey";
+            Require(stableKey.StartsWith(expectedNamespace + ":", StringComparison.Ordinal) || contextBinding, $"{path}.stableKey:scope");
+        }
+        _ = key;
+    }
+
+    private static void ValidateCapabilityScope(
+        JsonElement arguments,
+        JsonElement? scope,
+        PocketCapabilityKey key,
+        string path)
+    {
+        if (scope is not { } rawScope)
+        {
+            return;
+        }
+        var scopeObject = RequireObject(rawScope, path);
+        if (scopeObject.TryGetProperty("range", out var range))
+        {
+            Require(arguments.ValueKind == JsonValueKind.Object
+                && arguments.TryGetProperty("range", out var value)
+                && value.ValueKind == JsonValueKind.String
+                && value.GetString() == range.GetString(), $"{path}.range:scope");
+        }
+        if (scopeObject.TryGetProperty("namespace", out _))
+        {
+            throw new PocketAppPackageRuntimeException($"{path}.stableKey:scope");
+        }
+        _ = key;
     }
 
     private static void ValidateScope(JsonElement? scope, PocketCapabilityKey key, string path)
