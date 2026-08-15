@@ -1,8 +1,12 @@
+import CryptoKit
 import Foundation
 
 enum PocketSurfaceVerificationCommand {
+    private static let goldenRenderDigest = "sha256:6e3ac77b36cc0aeb3f93e1cf6350b0ef134bc2757f7888ee3687e0aa1058dba1"
+
     static func run() -> Never {
         var failures: [String] = []
+        var renderDigest = "unavailable"
         let runtime = PocketSurfaceRuntime(
             knownQueries: ["calendar.events.list@1"],
             knownWorkflows: ["startFocus"]
@@ -16,11 +20,25 @@ enum PocketSurfaceVerificationCommand {
             require(document.maximumDepth == 2, "maximum_depth", failures: &failures)
 
             let rendered = try document.canonicalRenderModelData()
+            renderDigest = "sha256:" + SHA256.hash(data: rendered)
+                .map { String(format: "%02x", $0) }
+                .joined()
             let renderedAgain = try runtime.load(data: valid).canonicalRenderModelData()
             require(rendered == renderedAgain, "render_determinism", failures: &failures)
+            require(renderDigest == goldenRenderDigest, "render_golden_digest", failures: &failures)
             require(
                 String(data: rendered, encoding: .utf8)?.contains("calendar.events.list@1") == true,
                 "render_query",
+                failures: &failures
+            )
+            require(
+                document.root.children[1].stringProperty("titleTarget") == "$input.purpose",
+                "selection_title_target",
+                failures: &failures
+            )
+            require(
+                document.root.children[2].integerProperty("default") == 1_500,
+                "duration_default",
                 failures: &failures
             )
         } catch {
@@ -59,6 +77,18 @@ enum PocketSurfaceVerificationCommand {
             runtime: runtime,
             failures: &failures
         )
+        rejectMutation(
+            ["root": ["children": [2, ["default": 14_401]]]],
+            label: "duration_default",
+            runtime: runtime,
+            failures: &failures
+        )
+        rejectMutation(
+            ["root": ["children": [1, ["titleTarget": "$state.purpose"]]]],
+            label: "selection_title_target",
+            runtime: runtime,
+            failures: &failures
+        )
         rejectData(Data(repeating: 0x20, count: PocketSurfaceRuntime.maximumDocumentBytes + 1), label: "document_size", runtime: runtime, failures: &failures)
         rejectSynthetic(root: deepRoot(), label: "depth", runtime: runtime, failures: &failures)
         rejectSynthetic(root: wideRoot(), label: "node_count", runtime: runtime, failures: &failures)
@@ -71,7 +101,8 @@ enum PocketSurfaceVerificationCommand {
 
         print("pocket_surface_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_surface_valid_nodes=6")
-        print("pocket_surface_negative_cases=11")
+        print("pocket_surface_negative_cases=13")
+        print("pocket_surface_render_digest=\(renderDigest)")
         if !failures.isEmpty {
             print("pocket_surface_failures=\(failures.joined(separator: ","))")
         }

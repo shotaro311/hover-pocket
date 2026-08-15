@@ -30,7 +30,11 @@ final class ProviderStore: ObservableObject {
     }
 
     var visibleManifests: [PluginManifest] {
-        let manifests = settings.visibleManifests(registry.manifests)
+        let eligibleManifests = registry.manifests.filter { manifest in
+            manifest.defaultEnabled
+                || (manifest.id == TodayFocusPocketProvider.pluginID && settings.aiNativeEnabled)
+        }
+        let manifests = settings.visibleManifests(eligibleManifests)
         return manifests.filter { manifest in
             guard manifest.id == MirrorProvider.pluginID else { return true }
             if isPanelOnSecondaryDisplay, !settings.showMirrorOnSecondaryDisplays {
@@ -149,6 +153,14 @@ final class ProviderStore: ObservableObject {
 
         settings.$showMirrorOnSecondaryDisplays
             .dropFirst()
+            .sink { [weak self] _ in
+                self?.scheduleSettingsDidChange()
+            }
+            .store(in: &settingsCancellables)
+
+        settings.$aiNativeEnabled
+            .dropFirst()
+            .removeDuplicates()
             .sink { [weak self] _ in
                 self?.scheduleSettingsDidChange()
             }

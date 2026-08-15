@@ -236,17 +236,38 @@ struct PocketSurfaceRuntime {
         case "picker":
             return try validatePicker(node, path: path)
         case "calendarEventPicker":
-            try exactKeys(node, required: ["type", "items", "selection"], optional: [], path: path)
+            try exactKeys(node, required: ["type", "items", "selection"], optional: ["titleTarget"], path: path)
             let items = try queryBinding(node["items"], path: "\(path).items")
             let selection = try binding(node["selection"], inputAllowed: false, stateAllowed: true, path: "\(path).selection")
-            return renderNode(type, ["items": items, "selection": .string(selection)])
+            var properties: [String: PocketJSONValue] = ["items": items, "selection": .string(selection)]
+            if let titleTarget = node["titleTarget"] {
+                properties["titleTarget"] = .string(try binding(
+                    titleTarget,
+                    inputAllowed: true,
+                    stateAllowed: false,
+                    path: "\(path).titleTarget"
+                ))
+            }
+            return renderNode(type, properties)
         case "durationPicker":
-            try exactKeys(node, required: ["type", "value", "min", "max"], optional: [], path: path)
+            try exactKeys(node, required: ["type", "value", "min", "max"], optional: ["default"], path: path)
             let binding = try binding(node["value"], inputAllowed: true, stateAllowed: false, path: "\(path).value")
             let minimum = try integer(node["min"], path: "\(path).min")
             let maximum = try integer(node["max"], path: "\(path).max")
-            try require((1...86_400).contains(minimum) && (1...86_400).contains(maximum) && minimum <= maximum, "\(path):duration_range")
-            return renderNode(type, ["max": .number(Double(maximum)), "min": .number(Double(minimum)), "value": .string(binding)])
+            let defaultValue = try optionalInteger(node["default"], defaultValue: minimum, path: "\(path).default")
+            try require(
+                (1...86_400).contains(minimum)
+                    && (1...86_400).contains(maximum)
+                    && minimum <= defaultValue
+                    && defaultValue <= maximum,
+                "\(path):duration_range"
+            )
+            return renderNode(type, [
+                "default": .number(Double(defaultValue)),
+                "max": .number(Double(maximum)),
+                "min": .number(Double(minimum)),
+                "value": .string(binding)
+            ])
         case "status":
             try exactKeys(node, required: ["type", "value", "tone"], optional: [], path: path)
             let text = try boundedString(node["value"], range: 0...1000, path: "\(path).value")

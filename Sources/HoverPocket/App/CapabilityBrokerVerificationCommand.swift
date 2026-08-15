@@ -525,6 +525,18 @@ enum CapabilityBrokerVerificationCommand {
             grantedPermissions: ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"],
             timeZone: TimeZone(identifier: "Asia/Tokyo")!
         )
+        let hostModel = try PocketSurfaceHostModel(runtime: runtime, surfaceID: "main")
+        try require(hostModel.integerValue(for: "$input.durationSeconds") == 1_500, "pocket_app_surface_default")
+        await hostModel.load(now: now)
+        try require(!hostModel.stringValue(for: "$state.selectedEventRef").isEmpty, "pocket_app_surface_selection")
+        try require(!hostModel.stringValue(for: "$input.purpose").isEmpty, "pocket_app_surface_title_target")
+        hostModel.updateString("safe\ntext\u{202E}", binding: "$input.purpose", maximumLength: 80)
+        try require(hostModel.stringValue(for: "$input.purpose") == "safe text", "pocket_app_surface_sanitize")
+        try require(hostModel.canPrepare(workflowID: "startFocus"), "pocket_app_surface_ready")
+        hostModel.prepare(workflowID: "startFocus")
+        try require(hostModel.showsApproval, "pocket_app_surface_approval")
+        try require(hostModel.approvalText.contains("safe text"), "pocket_app_surface_approval_exact")
+        hostModel.reject()
         let query = try await runtime.query(
             reference: "calendar.events.list@1",
             arguments: [

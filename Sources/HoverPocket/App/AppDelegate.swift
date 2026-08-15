@@ -1,14 +1,17 @@
 import AppKit
 import Carbon
+import Combine
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hoverWindowController = HoverWindowController()
     private var statusBarMenuController: StatusBarMenuController?
+    private var settingsCancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         configureAINativeRuntimeIfEnabled()
+        observeAINativeRuntimeSetting()
         installMainMenu()
         registerURLSchemeCallbackHandler()
         statusBarMenuController = StatusBarMenuController(
@@ -58,7 +61,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureAINativeRuntimeIfEnabled() {
-        guard hoverWindowController.appSettings.aiNativeEnabled else { return }
+        guard hoverWindowController.appSettings.aiNativeEnabled else {
+            AINativeRuntime.shared.configure(adapter: nil)
+            return
+        }
         do {
             let handlers = try ProviderCapabilityCompositionRoot.live(
                 calendarDataSource: GoogleCalendarCapabilityDataSource()
@@ -78,10 +84,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
                 auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
             )
-            AINativeRuntime.shared.configure(adapter: TodayFocusTextAdapter(broker: broker))
+            guard let resources = Bundle.module.resourceURL else {
+                throw PocketAppPackageError.invalid("$:resources")
+            }
+            let packageRoot = resources
+                .appendingPathComponent("PocketApps", isDirectory: true)
+                .appendingPathComponent("local.example.today-focus", isDirectory: true)
+            let package = try PocketAppPackageRuntime().load(directory: packageRoot)
+            let pocketAppRuntime = PocketAppExecutionRuntime(
+                package: package,
+                broker: broker,
+                userID: "local-user",
+                grantedPermissions: [
+                    "calendar.events.read",
+                    "sticky.read",
+                    "sticky.write",
+                    "timer.read",
+                    "timer.write"
+                ]
+            )
+            AINativeRuntime.shared.configure(
+                adapter: TodayFocusTextAdapter(broker: broker),
+                pocketAppExecutionRuntime: pocketAppRuntime
+            )
         } catch {
             AINativeRuntime.shared.configure(adapter: nil)
         }
+    }
+
+    private func observeAINativeRuntimeSetting() {
+        hoverWindowController.appSettings.$aiNativeEnabled
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                self?.configureAINativeRuntimeIfEnabled()
+            }
+            .store(in: &settingsCancellables)
     }
 
     @objc private func screenParametersChanged() {

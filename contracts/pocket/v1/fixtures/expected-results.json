@@ -17,7 +17,7 @@
       {
         "path": "surfaces/main.surface.json",
         "source": "valid/pocket-surface.today-focus.json",
-        "digest": "sha256:36342c6e536c63ef4666f31929b432be846f06292657a01fbf4072447518fd33"
+        "digest": "sha256:e0a0e990ceb1410cc8d21e5adbe3d1a8fddcb368a75f5f9596010343eeec19e9"
       },
       {
         "path": "tests/calendar-read.json",

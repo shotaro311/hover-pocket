@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using HoverPocket.Shell.Configuration;
+using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Providers.Calendar;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
@@ -40,6 +41,7 @@ internal sealed class CapabilityBrokerVerifier
         Console.WriteLine("broker_calculator_evaluate=ok");
         Console.WriteLine("broker_sticky_lifecycle=ok");
         Console.WriteLine("broker_today_focus=ok");
+        Console.WriteLine("broker_pocket_app=ok");
         Console.WriteLine("broker_concurrent_duplicate=ok");
         Console.WriteLine("broker_negative_cases=11");
         Console.WriteLine($"broker_golden_plan_digest={GoldenPlanDigest}");
@@ -105,6 +107,7 @@ internal sealed class CapabilityBrokerVerifier
 
             await VerifyCalculatorAsync(broker, now);
             await VerifyStickyLifecycleAsync(broker, stickyStore, now);
+            await VerifyPocketAppAsync(root);
 
             var principal = new CapabilityPrincipal("user-broker-fixture");
             var allPermissions = Permissions(principal, "calendar.events.read", "sticky.write", "timer.write");
@@ -412,6 +415,100 @@ internal sealed class CapabilityBrokerVerifier
         Require(receipt.Steps[0].Readback.Status == CapabilityReadbackStatus.Verified, "calculator_readback");
         Require(receipt.Steps[0].Readback.Strategy == CapabilityReadbackStrategy.None, "calculator_readback_strategy");
         Require(receipt.Steps[0].Readback.Observed is not null, "calculator_observed");
+    }
+
+    private async Task VerifyPocketAppAsync(string root)
+    {
+        var now = new DateTimeOffset(2026, 8, 14, 16, 0, 0, TimeSpan.Zero);
+        using var timerStore = new TimerStore(
+            Path.Combine(root, "pocket-app-timer"),
+            new ManualTimerClock(now),
+            new NullTimerAlertSound(),
+            enableScheduler: false);
+        var stickyStore = new StickyNotesStore(Path.Combine(root, "pocket-app-sticky"));
+        var calendar = new BrokerFakeCalendarDataSource(now);
+        var handlers = ProviderCapabilityCompositionRoot.Create(calendar, timerStore, stickyStore);
+        var brokerRoot = Path.Combine(root, "pocket-app-broker");
+        var broker = new CapabilityBroker(
+            new CapabilityRegistry(handlers),
+            new CapabilityBrokerLedger(brokerRoot),
+            new CapabilityBrokerAuditLog(brokerRoot));
+        var package = new PocketAppPackageRuntime().Load(Path.Combine(
+            AppContext.BaseDirectory,
+            "PocketApps",
+            "local.example.today-focus"));
+        var timeZone = TimeZoneInfo.CreateCustomTimeZone(
+            $"JST-pocket-{Guid.NewGuid():N}",
+            TimeSpan.FromHours(9),
+            "JST",
+            "JST");
+        var runtime = new PocketAppExecutionRuntime(
+            package,
+            broker,
+            "user-pocket-app-fixture",
+            new HashSet<string>(
+                ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"],
+                StringComparer.Ordinal),
+            timeZone);
+
+        var queryOutput = await runtime.QueryAsync(
+            "calendar.events.list@1",
+            CapabilityJson.From(new { range = "today", timezone = "$context.timezone" }),
+            now);
+        Require(queryOutput.GetProperty("events").GetArrayLength() == 1, "pocket_app_calendar_query");
+
+        var inputs = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+        {
+            ["selectedEventRef"] = CapabilityJson.From("primary:sensitive-event-ref"),
+            ["durationSeconds"] = CapabilityJson.From(1_500),
+            ["purpose"] = CapabilityJson.From("Pocket Focus")
+        };
+        var draft = runtime.Prepare("startFocus", inputs, now);
+        Require(draft.Plan.Origin == CapabilityOrigin.PocketSurface, "pocket_app_origin");
+        Require(draft.Plan.Principal.PocketAppId == package.Manifest.Id, "pocket_app_principal");
+        Require(draft.Plan.AppContext?.Id == package.Manifest.Id, "pocket_app_context_id");
+        Require(draft.Plan.AppContext?.Version == package.Manifest.Version, "pocket_app_context_version");
+        Require(draft.Plan.AppContext?.ManifestDigest == package.ManifestDigest, "pocket_app_context_digest");
+        Require(
+            draft.Plan.Steps[1].Arguments.GetProperty("stableKey").GetString() == "today-focus:2026-08-15",
+            "pocket_app_local_date_key");
+        Require(
+            draft.Plan.Steps[0].Arguments.GetProperty("title").GetString() == "Pocket Focus",
+            "pocket_app_timer_title");
+        Require(
+            draft.Plan.Steps[1].Arguments.GetProperty("body").GetString() == "Pocket Focus",
+            "pocket_app_sticky_body");
+        Require(draft.Preparation.ApprovalRequest?.Effects.Count == 2, "pocket_app_approval_effects");
+
+        var receipt = await runtime.ApproveAndExecuteAsync(draft, now);
+        Require(receipt.Status == CapabilityReceiptStatus.Succeeded, "pocket_app_receipt_status");
+        Require(receipt.Steps.Count == 2, "pocket_app_receipt_steps");
+        Require(
+            receipt.Steps.All(step => step.Readback.Status == CapabilityReadbackStatus.Verified),
+            "pocket_app_readback");
+        Require(timerStore.RunningTimers.Count == 1, "pocket_app_timer_effect");
+        Require(stickyStore.Notes.Count == 1, "pocket_app_sticky_effect");
+
+        try
+        {
+            _ = await runtime.QueryAsync(
+                "timer.start@1",
+                CapabilityJson.From(new
+                {
+                    durationSeconds = 60,
+                    sourceRef = "pocket:query",
+                    title = "not allowed"
+                }),
+                now);
+            _failures.Add("pocket_app_write_query_accepted");
+        }
+        catch (CapabilityBrokerException ex) when (ex.Code == "CAPABILITY_PLAN_INVALID")
+        {
+        }
+
+        var rejected = runtime.Prepare("startFocus", inputs, now.AddSeconds(1));
+        runtime.Reject(rejected, now.AddSeconds(1));
+        Require(timerStore.RunningTimers.Count == 1 && stickyStore.Notes.Count == 1, "pocket_app_reject_no_write");
     }
 
     private void VerifyStrongPerCallIsolation(CapabilityBroker broker, DateTimeOffset now)

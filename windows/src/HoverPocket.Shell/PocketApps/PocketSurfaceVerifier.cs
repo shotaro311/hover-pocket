@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -6,6 +7,7 @@ namespace HoverPocket.Shell.PocketApps;
 
 internal sealed class PocketSurfaceVerifier
 {
+    private const string GoldenRenderDigest = "sha256:6e3ac77b36cc0aeb3f93e1cf6350b0ef134bc2757f7888ee3687e0aa1058dba1";
     private readonly List<string> _failures = [];
 
     public int Run()
@@ -13,6 +15,7 @@ internal sealed class PocketSurfaceVerifier
         var runtime = new PocketSurfaceRuntime(
             new HashSet<string>(["calendar.events.list@1"], StringComparer.Ordinal),
             new HashSet<string>(["startFocus"], StringComparer.Ordinal));
+        var renderDigest = "unavailable";
 
         try
         {
@@ -22,9 +25,13 @@ internal sealed class PocketSurfaceVerifier
             Require(document.NodeCount == 6, "node_count");
             Require(document.MaximumDepth == 2, "maximum_depth");
             var rendered = document.CanonicalRenderModelBytes();
+            renderDigest = "sha256:" + Convert.ToHexString(SHA256.HashData(rendered)).ToLowerInvariant();
             var renderedAgain = runtime.Load(valid).CanonicalRenderModelBytes();
             Require(rendered.AsSpan().SequenceEqual(renderedAgain), "render_determinism");
+            Require(renderDigest == GoldenRenderDigest, "render_golden_digest");
             Require(Encoding.UTF8.GetString(rendered).Contains("calendar.events.list@1", StringComparison.Ordinal), "render_query");
+            Require(document.Root.Children[1].Properties["titleTarget"] as string == "$input.purpose", "selection_title_target");
+            Require(Convert.ToInt32(document.Root.Children[2].Properties["default"]) == 1_500, "duration_default");
         }
         catch (Exception ex)
         {
@@ -42,6 +49,8 @@ internal sealed class PocketSurfaceVerifier
             root["root"]!["children"]![2]!["min"] = 500;
             root["root"]!["children"]![2]!["max"] = 60;
         }, "duration_range", runtime);
+        RejectMutation(root => root["root"]!["children"]![2]!["default"] = 14_401, "duration_default", runtime);
+        RejectMutation(root => root["root"]!["children"]![1]!["titleTarget"] = "$state.purpose", "selection_title_target", runtime);
         RejectData(new byte[PocketSurfaceRuntime.MaximumDocumentBytes + 1], "document_size", runtime);
         RejectData(DeepSurfaceData(), "depth", runtime);
         RejectData(WideSurfaceData(), "node_count", runtime);
@@ -59,7 +68,8 @@ internal sealed class PocketSurfaceVerifier
 
         Console.WriteLine("pocket_surface_verify=ok");
         Console.WriteLine("pocket_surface_valid_nodes=6");
-        Console.WriteLine("pocket_surface_negative_cases=11");
+        Console.WriteLine("pocket_surface_negative_cases=13");
+        Console.WriteLine($"pocket_surface_render_digest={renderDigest}");
         return 0;
     }
 

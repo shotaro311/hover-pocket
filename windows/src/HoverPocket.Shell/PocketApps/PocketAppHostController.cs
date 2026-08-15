@@ -1,0 +1,267 @@
+using System.Text.Json;
+using System.Text;
+using HoverPocket.Shell.Bridge;
+using HoverPocket.Shell.Capabilities;
+using HoverPocket.Shell.Configuration;
+
+namespace HoverPocket.Shell.PocketApps;
+
+internal sealed class PocketAppHostController
+{
+    private readonly PocketAppExecutionRuntime _runtime;
+    private readonly Func<UserSettings> _settings;
+    private readonly object _eventRefSync = new();
+    private readonly HashSet<string> _allowedEventRefs = new(StringComparer.Ordinal);
+
+    public PocketAppHostController(
+        PocketAppExecutionRuntime runtime,
+        Func<UserSettings> settings)
+    {
+        _runtime = runtime;
+        _settings = settings;
+    }
+
+    public object BuildSurfaceState(string surfaceId = "main")
+    {
+        if (!_runtime.Package.Surfaces.TryGetValue(surfaceId, out var surface))
+        {
+            throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "pocket_surface");
+        }
+        using var document = JsonDocument.Parse(surface.CanonicalRenderModelBytes());
+        return new
+        {
+            appId = _runtime.Package.Manifest.Id,
+            appName = _runtime.Package.Manifest.Name,
+            version = _runtime.Package.Manifest.Version,
+            manifestDigest = _runtime.Package.ManifestDigest,
+            surfaceId,
+            renderModel = document.RootElement.Clone()
+        };
+    }
+
+    public void Attach(BridgeDispatcher dispatcher)
+    {
+        dispatcher.Register("pocketApp.load", LoadAsync);
+        dispatcher.Register("pocketApp.invokeWorkflow", InvokeWorkflowAsync);
+    }
+
+    private async Task<object?> LoadAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        EnsureApp(parameters);
+        var surfaceId = RequiredString(parameters, "surfaceId", 64);
+        if (!_runtime.Package.Surfaces.TryGetValue(surfaceId, out var surface))
+        {
+            throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "pocket_surface");
+        }
+
+        var queryResults = new List<object>();
+        var allowedEventRefs = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var query in QueryBindings(surface.Root))
+        {
+            var output = await _runtime.QueryAsync(
+                query.Reference,
+                query.Arguments,
+                DateTimeOffset.Now,
+                cancellationToken);
+            queryResults.Add(new
+            {
+                query = query.Reference,
+                output = SafeQueryOutput(output, allowedEventRefs)
+            });
+        }
+        lock (_eventRefSync)
+        {
+            _allowedEventRefs.Clear();
+            _allowedEventRefs.UnionWith(allowedEventRefs);
+        }
+        return new
+        {
+            surface = BuildSurfaceState(surfaceId),
+            queryResults
+        };
+    }
+
+    private async Task<object?> InvokeWorkflowAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        EnsureApp(parameters);
+        var workflowId = RequiredString(parameters, "workflowId", 64);
+        if (parameters is null
+            || !parameters.Value.TryGetProperty("inputs", out var inputsValue)
+            || inputsValue.ValueKind != JsonValueKind.Object)
+        {
+            throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "pocket_inputs");
+        }
+        var inputs = inputsValue.EnumerateObject().ToDictionary(
+            property => property.Name,
+            property => property.Value.Clone(),
+            StringComparer.Ordinal);
+        if (inputs.TryGetValue("selectedEventRef", out var selectedEventRef))
+        {
+            var eventRef = selectedEventRef.ValueKind == JsonValueKind.String
+                ? selectedEventRef.GetString() ?? string.Empty
+                : string.Empty;
+            lock (_eventRefSync)
+            {
+                if (!_allowedEventRefs.Contains(eventRef))
+                {
+                    throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "selected_event_ref");
+                }
+            }
+        }
+        if (inputs.TryGetValue("purpose", out var purpose))
+        {
+            if (purpose.ValueKind != JsonValueKind.String)
+            {
+                throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "purpose");
+            }
+            inputs["purpose"] = CapabilityJson.From(TodayFocusApprovalText.Sanitize(purpose.GetString() ?? string.Empty));
+        }
+
+        var draft = _runtime.Prepare(workflowId, inputs, DateTimeOffset.Now);
+        if (draft.Preparation.ApprovalRequest is null)
+        {
+            throw new CapabilityBrokerException("CAPABILITY_APPROVAL_REQUIRED", draft.Plan.Id);
+        }
+        var english = _settings().Language == AppLanguage.English;
+        var approvalText = ApprovalSummary(draft, english);
+        var result = System.Windows.MessageBox.Show(
+            approvalText,
+            english ? "Approve Pocket App" : "Pocket Appを承認",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Question,
+            System.Windows.MessageBoxResult.No);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (result != System.Windows.MessageBoxResult.Yes)
+        {
+            _runtime.Reject(draft);
+            return new { status = "rejected" };
+        }
+
+        var receipt = await _runtime.ApproveAndExecuteAsync(
+            draft,
+            DateTimeOffset.Now,
+            cancellationToken);
+        return new
+        {
+            status = receipt.Status.WireValue(),
+            replayed = receipt.Replayed,
+            readbackVerified = receipt.Steps.All(step => step.Readback.Status == CapabilityReadbackStatus.Verified),
+            capabilities = receipt.Steps.Select(step => step.Capability.Id).ToArray()
+        };
+    }
+
+    private void EnsureApp(JsonElement? parameters)
+    {
+        var appId = RequiredString(parameters, "appId", 160);
+        if (appId != _runtime.Package.Manifest.Id)
+        {
+            throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "pocket_app");
+        }
+    }
+
+    private static object SafeQueryOutput(JsonElement output, ISet<string> allowedEventRefs)
+    {
+        if (!output.TryGetProperty("events", out var events) || events.ValueKind != JsonValueKind.Array)
+        {
+            throw new CapabilityBrokerException("CAPABILITY_READBACK_MISMATCH", "calendar_events");
+        }
+        var safeEvents = new List<object>();
+        foreach (var item in events.EnumerateArray())
+        {
+            if (!item.TryGetProperty("eventRef", out var eventRefElement)
+                || eventRefElement.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+            var eventRef = eventRefElement.GetString() ?? string.Empty;
+            if (string.IsNullOrEmpty(eventRef) || eventRef.EnumerateRunes().Count() > 256)
+            {
+                continue;
+            }
+            allowedEventRefs.Add(eventRef);
+            safeEvents.Add(new
+            {
+                eventRef,
+                safeTitle = TodayFocusApprovalText.Sanitize(
+                    item.TryGetProperty("safeTitle", out var title) ? title.GetString() ?? string.Empty : string.Empty),
+                start = item.TryGetProperty("start", out var start) ? start.GetString() : null,
+                end = item.TryGetProperty("end", out var end) ? end.GetString() : null
+            });
+        }
+        return new { events = safeEvents };
+    }
+
+    private static string ApprovalSummary(PocketAppWorkflowDraft draft, bool english)
+    {
+        var lines = new List<string>();
+        foreach (var step in draft.Plan.Steps)
+        {
+            if (step.Capability == CapabilityIds.TimerStart)
+            {
+                var title = step.Arguments.TryGetProperty("title", out var titleElement)
+                    ? titleElement.GetString() ?? "Focus"
+                    : "Focus";
+                var seconds = step.Arguments.TryGetProperty("durationSeconds", out var duration)
+                    && duration.TryGetInt32(out var parsed) ? parsed : 0;
+                lines.Add(english
+                    ? $"Start a {Math.Max(1, seconds / 60)}-minute timer for \"{title}\""
+                    : $"「{title}」のタイマーを{Math.Max(1, seconds / 60)}分で開始");
+            }
+            else if (step.Capability == CapabilityIds.StickyUpsert)
+            {
+                var body = step.Arguments.TryGetProperty("body", out var bodyElement)
+                    ? bodyElement.GetString() ?? "Focus"
+                    : "Focus";
+                lines.Add(english
+                    ? $"Save \"{body}\" to Sticky Notes"
+                    : $"Sticky Notesへ「{body}」を保存");
+            }
+            else
+            {
+                lines.Add(step.Capability.Id);
+            }
+        }
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static IEnumerable<QueryBinding> QueryBindings(PocketSurfaceRenderNode node)
+    {
+        if (node.Type == "calendarEventPicker"
+            && node.Properties.TryGetValue("items", out var rawItems)
+            && rawItems is IReadOnlyDictionary<string, object?> items
+            && items.TryGetValue("query", out var rawQuery)
+            && rawQuery is string reference
+            && items.TryGetValue("arguments", out var rawArguments)
+            && rawArguments is JsonElement arguments)
+        {
+            yield return new QueryBinding(reference, arguments);
+        }
+        foreach (var child in node.Children)
+        {
+            foreach (var query in QueryBindings(child))
+            {
+                yield return query;
+            }
+        }
+    }
+
+    private static string RequiredString(JsonElement? parameters, string name, int maximumLength)
+    {
+        if (parameters is null
+            || !parameters.Value.TryGetProperty(name, out var value)
+            || value.ValueKind != JsonValueKind.String)
+        {
+            throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", name);
+        }
+        var text = value.GetString() ?? string.Empty;
+        if (string.IsNullOrEmpty(text) || text.EnumerateRunes().Count() > maximumLength)
+        {
+            throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", name);
+        }
+        return text;
+    }
+
+    private sealed record QueryBinding(string Reference, JsonElement Arguments);
+}

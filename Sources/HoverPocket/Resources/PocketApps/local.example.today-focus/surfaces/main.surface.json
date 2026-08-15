@@ -28,13 +28,15 @@
             "timezone": "$context.timezone"
           }
         },
-        "selection": "$state.selectedEventRef"
+        "selection": "$state.selectedEventRef",
+        "titleTarget": "$input.purpose"
       },
       {
         "type": "durationPicker",
         "value": "$input.durationSeconds",
         "min": 60,
-        "max": 14400
+        "max": 14400,
+        "default": 1500
       },
       {
         "type": "textField",

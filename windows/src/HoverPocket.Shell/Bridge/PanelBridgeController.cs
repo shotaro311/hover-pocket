@@ -12,6 +12,7 @@ using HoverPocket.Shell.Providers.Clipboard;
 using HoverPocket.Shell.Providers.Controls;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
+using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Services;
 using HoverPocket.Shell.Settings;
 
@@ -33,6 +34,7 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly PocketCapabilityHandlerSet _capabilityHandlers;
     private readonly CapabilityBroker? _capabilityBroker;
     private readonly TodayFocusTextAdapter? _todayFocusTextAdapter;
+    private readonly PocketAppHostController? _pocketAppHostController;
     private readonly List<BridgeDispatcher> _dispatchers = [];
     private readonly object _previewFrameSync = new();
     private string _selectedProviderId;
@@ -78,11 +80,29 @@ internal sealed class PanelBridgeController : IDisposable
                     new CapabilityBrokerLedger(brokerRoot),
                     new CapabilityBrokerAuditLog(brokerRoot));
                 _todayFocusTextAdapter = new TodayFocusTextAdapter(_capabilityBroker);
+                var packageRoot = Path.Combine(
+                    AppContext.BaseDirectory,
+                    "PocketApps",
+                    "local.example.today-focus");
+                var package = new PocketAppPackageRuntime().Load(packageRoot);
+                _pocketAppHostController = new PocketAppHostController(
+                    new PocketAppExecutionRuntime(
+                        package,
+                        _capabilityBroker,
+                        "local-user",
+                        new HashSet<string>(
+                            ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"],
+                            StringComparer.Ordinal)),
+                    () => CurrentSettings);
             }
-            catch (CapabilityBrokerException)
+            catch (Exception ex) when (ex is CapabilityBrokerException
+                or PocketAppPackageRuntimeException
+                or IOException
+                or UnauthorizedAccessException)
             {
                 _capabilityBroker = null;
                 _todayFocusTextAdapter = null;
+                _pocketAppHostController = null;
             }
         }
         _clipboardBridgeController = new ClipboardBridgeController(
@@ -156,6 +176,7 @@ internal sealed class PanelBridgeController : IDisposable
         dispatcher.Register("ailane.approve", ApproveAiLaneAsync);
         dispatcher.Register("ailane.reject", RejectAiLaneAsync);
         dispatcher.Register("todayFocus.startFromCalendar", StartTodayFocusFromCalendarAsync);
+        _pocketAppHostController?.Attach(dispatcher);
         _calculatorBridgeHandlers.Register(dispatcher);
         _controlsBridgeController.Attach(dispatcher);
         _calendarBridgeController.Attach(dispatcher);
@@ -265,7 +286,8 @@ internal sealed class PanelBridgeController : IDisposable
                     body = ProviderText(selected, ProviderTextKind.Body)
                 }
             ,
-            aiLane = _aiLaneController.CurrentState
+            aiLane = _aiLaneController.CurrentState,
+            pocketSurface = _pocketAppHostController?.BuildSurfaceState()
         };
     }
 
@@ -865,6 +887,12 @@ internal sealed class PanelBridgeController : IDisposable
 
     private bool IsVisible(string providerId)
     {
+        var provider = _providerRegistry.Find(providerId);
+        if (provider is null
+            || (!provider.DefaultVisible && !CurrentSettings.AiNativeEnabled))
+        {
+            return false;
+        }
         return !CurrentSettings.ProviderVisibility.TryGetValue(providerId, out var visible) || visible;
     }
 
@@ -1108,6 +1136,9 @@ internal sealed class PanelBridgeController : IDisposable
             ("calendar", ProviderTextKind.Title) => "カレンダー",
             ("calendar", ProviderTextKind.Summary) => "Google カレンダー",
             ("calendar", ProviderTextKind.Body) => "月間予定の確認と予定の追加・編集・削除ができます。",
+            ("today-focus", ProviderTextKind.Title) => "Today Focus",
+            ("today-focus", ProviderTextKind.Summary) => "今日の予定に集中",
+            ("today-focus", ProviderTextKind.Body) => "予定を選び、タイマーと今日の目的をまとめて開始します。",
             ("clipboard", ProviderTextKind.Title) => "クリップボード",
             ("clipboard", ProviderTextKind.Summary) => "クリップボード履歴",
             ("clipboard", ProviderTextKind.Body) => "テキストと画像の履歴を確認し、お気に入り、全体プレビュー、コピー、個別削除を行えます。",

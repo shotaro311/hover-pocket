@@ -301,25 +301,39 @@ internal sealed class PocketSurfaceRuntime(
 
     private PocketSurfaceRenderNode ValidateCalendarEventPicker(JsonElement node, string path, string type)
     {
-        ExactKeys(node, ["type", "items", "selection"], [], path);
+        ExactKeys(node, ["type", "items", "selection"], ["titleTarget"], path);
         var items = QueryBinding(node.GetProperty("items"), $"{path}.items");
         var selection = Binding(node.GetProperty("selection"), inputAllowed: false, stateAllowed: true, $"{path}.selection");
-        return RenderNode(type, new SortedDictionary<string, object?>
+        var properties = new SortedDictionary<string, object?>
         {
             ["items"] = items,
             ["selection"] = selection
-        });
+        };
+        if (node.TryGetProperty("titleTarget", out var titleTarget))
+        {
+            properties["titleTarget"] = Binding(titleTarget, inputAllowed: true, stateAllowed: false, $"{path}.titleTarget");
+        }
+        return RenderNode(type, properties);
     }
 
     private static PocketSurfaceRenderNode ValidateDurationPicker(JsonElement node, string path, string type)
     {
-        ExactKeys(node, ["type", "value", "min", "max"], [], path);
+        ExactKeys(node, ["type", "value", "min", "max"], ["default"], path);
         var binding = Binding(node.GetProperty("value"), inputAllowed: true, stateAllowed: false, $"{path}.value");
         var minimum = GetInteger(node.GetProperty("min"), $"{path}.min");
         var maximum = GetInteger(node.GetProperty("max"), $"{path}.max");
-        Require(minimum is >= 1 and <= 86_400 && maximum is >= 1 and <= 86_400 && minimum <= maximum, $"{path}:duration_range");
+        var defaultValue = node.TryGetProperty("default", out var defaultElement)
+            ? GetInteger(defaultElement, $"{path}.default")
+            : minimum;
+        Require(
+            minimum is >= 1 and <= 86_400
+                && maximum is >= 1 and <= 86_400
+                && minimum <= defaultValue
+                && defaultValue <= maximum,
+            $"{path}:duration_range");
         return RenderNode(type, new SortedDictionary<string, object?>
         {
+            ["default"] = defaultValue,
             ["max"] = maximum,
             ["min"] = minimum,
             ["value"] = binding

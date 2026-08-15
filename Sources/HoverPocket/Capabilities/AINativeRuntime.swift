@@ -1,18 +1,26 @@
+import Combine
 import Foundation
 
 @MainActor
-final class AINativeRuntime {
+final class AINativeRuntime: ObservableObject {
     static let shared = AINativeRuntime()
 
     private let principal = CapabilityPrincipal(userID: "local-user")
     private var adapter: TodayFocusTextAdapter?
+    @Published private(set) var pocketAppExecutionRuntime: PocketAppExecutionRuntime?
 
     private init() {}
 
     var isAvailable: Bool { adapter != nil }
 
-    func configure(adapter: TodayFocusTextAdapter?) {
+    var isPocketAppAvailable: Bool { pocketAppExecutionRuntime != nil }
+
+    func configure(
+        adapter: TodayFocusTextAdapter?,
+        pocketAppExecutionRuntime: PocketAppExecutionRuntime? = nil
+    ) {
         self.adapter = adapter
+        self.pocketAppExecutionRuntime = pocketAppExecutionRuntime
     }
 
     func prepareTodayFocus(
