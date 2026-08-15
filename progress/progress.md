@@ -1,6 +1,6 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-08-15
+updated: 2026-08-16
 updated_by: codex
 status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-pr-ready-ci-green; capability-expansion-merged
 ---
@@ -10,10 +10,10 @@ status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; a
 - exact `main` `2cd51b9`から隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an5`、branch `codex/ai-native-an5-generator-install`でAN5-Aを実装した。ChatGPT Pro Orchestratorのgeneration 2返却はdelivery ID / state hash、receipt、base、allowed path、artifact hashを検証した後だけ適用し、Codexが安全境界と回帰検証を補完した。
 - 両OSへ、untrusted draftをno-follow / stable identityでHost所有snapshotへ取り込む処理、package validate / declared tests / preview、permissionと実効Capability grant差分、exact single-use approval、immutable version install、update、disable、preserve-only remove、rollback、active version / digest readbackを追加した。`stableKey`は安全な有限grammarへ制限し、承認表示と実行値を同じ値へ固定した。
 - mutableな`active.json`を権限の正本にせず、検証済みimmutable packageから現在の権限を復元する。rollback対象はversionとpackage digestの一致を必須にし、通常updateでのdowngradeを拒否する。64文字内の巨大な数値versionも任意長の数字列として比較し、59桁versionから`1.0.0`へのdowngrade回帰を両OS verifierへ追加した。
-- removeはユーザーデータを保持する経路だけを実装した。Versionsをtombstoneへ移動し、removed stateのdurable write後だけcleanupする。途中失敗・再起動時はactive stateに応じて復元またはcleanupし、`dataDisposition=delete`はAN5-Aでは拒否する。
-- macOSでSwift warnings-as-errors build、Pocket App lifecycle、Pocket Surface、Capability、Broker、Panel layout、Timer、Calculator、Clipboard、Weather、共通contract 12 schema / 57 fixture、Python compile、`git diff --check`が成功した。PR [#16](https://github.com/shotaro311/hover-pocket/pull/16)のhead `2efac67`でWindows [31890644140](https://github.com/shotaro311/hover-pocket/actions/runs/31890644140)、macOS [31890644188](https://github.com/shotaro311/hover-pocket/actions/runs/31890644188)、3OS contract / cross-OS compare [31890644159](https://github.com/shotaro311/hover-pocket/actions/runs/31890644159)が成功した。
-- exact committed range `2cd51b9...2efac67`のCodex Security diff scan `5b314036-2b06-4806-844b-48f65c503fc9`は変更21 / 21 fileを閉じ、reportable finding 0件でsealed completeとなった。保存先rootと短いmove-to-harden区間のpathname TOCTOUは現行production到達不能のためdeferredだが、初回production接続前の必須gateとする。
-- AN5全体は未完了である。AN5-BのCodex requestからdraft生成、Host preview / 導入確認 / 管理UI、production composition、保存先root pinningが残る。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-an5-a.md`。
+- removeはユーザーデータを保持する経路だけを実装した。Versionsをtombstoneへ移動し、removed stateのdurable write後だけcleanupする。途中失敗・再起動時はactive stateに応じて復元またはcleanupし、`dataDisposition=delete`はAN5-Aでは拒否する。承認期限切れ時のstaging / grant cleanup、複数manager間のWindows lifecycle直列化、起動ごとの全final snapshot再保護とreadbackも両OSの回帰検証へ固定した。
+- macOSでSwift warnings-as-errors build、Pocket App lifecycle、Pocket Surface、Capability、Broker、Panel layout、Timer、Calculator、Clipboard、Weather、共通contract 12 schema / 57 fixtureの2回byte一致、`git diff --check`が成功した。PR [#16](https://github.com/shotaro311/hover-pocket/pull/16)のsource head `0289f15`でWindows [31894065940](https://github.com/shotaro311/hover-pocket/actions/runs/31894065940)、macOS [31894065933](https://github.com/shotaro311/hover-pocket/actions/runs/31894065933)、3OS contract / cross-OS compare [31894065998](https://github.com/shotaro311/hover-pocket/actions/runs/31894065998)、PR Router [31894246704](https://github.com/shotaro311/hover-pocket/actions/runs/31894246704)が成功した。
+- exact follow-up range `38aaf88...0289f15`のCodex Security diff scan `b2698e1d-350b-4975-bed3-33d71de87ad4`は変更4 / 4 fileを閉じ、coverage complete、reportable finding 0件、deferred 0件でsealed completeとなった。前scanで保留したtombstone復元直後のクラッシュ窓は、通常final directoryも毎回再保護する処理と反復起動testで解消した。保存先rootの既知pathname TOCTOUはproduction接続前の別gateとして残す。
+- AN5全体は未完了である。AN5-BのCodex requestからdraft生成、Host preview / 導入確認 / 管理UI、production composition、保存先root pinningが残る。初回実装: `progress/2026-08/2026-08-15_hover-pocket-ai-native-an5-a.md`。最終hardening: `progress/2026-08/2026-08-16_hover-pocket-ai-native-an5-a-hardening.md`。
 
 ## 2026-08-15 AI-native AN4 Pocket App DSL / Renderer
 
