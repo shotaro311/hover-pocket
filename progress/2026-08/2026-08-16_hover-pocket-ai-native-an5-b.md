@@ -13,7 +13,7 @@ AN5-BのHost側縦断をmacOS / Windowsへ実装した。ユーザー要求を�
 - base: `151043c023098a8b8782895946cf01f8194579b3`
 - stacked base branch: `origin/codex/ai-native-an5-generator-install`
 - AN5-A PR: #16。最終review修正と両OSCI成功後、merge commit `c8db98d424cad04d88688bbca52b3afd72d521d2`でmainへ取り込んだ。
-- AN5-B PR: #17。AN5-A merge後に`origin/main`をmergeし、baseをmainへ変更した。統合source headは`2a1cc007a7b883ef63761ebf402110de41edd8b3`。
+- AN5-B PR: #17。AN5-A merge後に`origin/main`をmergeし、baseをmainへ変更した。最終source headは`7f6fad6490688bd19e00930a30b9a5f4adeeb2d2`。
 
 ## 実装内容
 
@@ -119,12 +119,21 @@ AN5-BのHost側縦断をmacOS / Windowsへ実装した。ユーザー要求を�
 - `8e5e2370-6361-4e35-a1fd-6fe835e7db85`: `0bc4051...736d207`、coverage complete、findings 0、sealed complete。
 - `695689dc-62ad-45ff-a733-62ce8389e1c1`: `736d207...cc95d61`、coverage complete、findings 0、sealed complete。
 - `5756c702-3d31-4da0-a285-c7a477a57fdc`: `3bac0f6`からの最終review修正6 file、coverage complete、findings 0、sealed complete。
+- `c68750f8-a73f-4491-812c-e0bf96c4b599`: `3744f69...7f6fad6`の追加review修正と両OS回帰、関連境界6件、coverage complete、findings 0、sealed complete。
 
 最終review修正:
 
 - Windowsの`settings.resetDefaults`は保存値だけでなく、起動済みgeneration controllerへ`SetEnabled(false)`を通知する。進行中生成をcancelし、Host保持proposalをrejectして、write routeを`GENERATION_DISABLED`で拒否する回帰をSettings verifierへ追加した。
 - macOS / Windowsの`enable`は、enabled record確定後のpackage / active record readbackが失敗した場合、元のdisabled recordを再書込みしてreadbackした後に失敗を返す。一回だけreadback failureを注入し、再起動相当の再読込でもdisabled、active packageなしとなる回帰を追加した。
 - Macのwarnings-as-errors build、Pocket App package / lifecycle / generation verifier、共通contract 13 schema / 58 fixture、Windows Settings JavaScript syntax、`git diff --check`が成功した。Windows本体とSettings verifierはPR CIを最終gateとする。
+
+追加の最終review修正:
+
+- lifecycle commit後に別Appの破損で全体refreshが失敗しても、操作対象を単独readbackし、receiptのstate / version / digestと一致した場合だけ成功状態を保持する。対象自体の不一致は失敗へ戻す。
+- Windowsの更新対象を「新規Appとして作成」で明示解除できるようにし、AI-native OFF、receipt、生成後の承認待ちでも決定論的に解除する。
+- Windowsのenableはactive recordだけでなくpackage実byteを再検証し、不一致時は元のdisabled recordへ戻す。
+- 別Appのdisable / enable / removeでは承認待ちproposalとactivation flagを保持する。phase判定はWindowsのstate lock内を含む同一更新処理で行い、両OS verifierで同じproposalが`awaitingApproval`に残ることを確認する。
+- PR #17最終head `7f6fad6`でWindows [31911734637](https://github.com/shotaro311/hover-pocket/actions/runs/31911734637)、macOS [31911734658](https://github.com/shotaro311/hover-pocket/actions/runs/31911734658)、3OS contract / compare [31911734659](https://github.com/shotaro311/hover-pocket/actions/runs/31911734659)、PR Router [31911733717](https://github.com/shotaro311/hover-pocket/actions/runs/31911733717)が成功した。未解決review threadは0、PRは`MERGEABLE / CLEAN`である。
 
 ## AN5-Cへ分離したruntime activation gate
 
@@ -140,8 +149,8 @@ PR reviewで、AN5-BのLifecycleが保持するactive packageと、実際の`poc
 
 ## 次のgate
 
-1. PR #17のreview threadを閉じ、docs更新後のCIとremote parityをreadbackする。
-2. AN5-Aをmergeする場合はAN5-Bのbaseをmainへ更新し、差分とSecurity snapshotを再確認する。
-3. AN5-Cでgenerated packageをSurface / execution runtimeへ接続し、lifecycle receiptとの一致を両OSで検証する。
+1. docs更新後のPR #17 CIとremote parityを再確認し、mainへmergeする。
+2. exact mainからAN5-C用の隔離worktree / branchを作る。
+3. generated packageをapp ID単位のSurface / execution runtimeへ接続し、lifecycle receiptとの一致を両OSで検証する。
 4. 実Codex confinementを別の小さいPRで実装・実機検証する。
 5. AN3 Voiceと接続し、「こういうパネルが欲しい」からdraft / previewまでのCore Integration E2Eへ進む。
