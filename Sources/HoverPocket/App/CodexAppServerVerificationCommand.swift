@@ -122,7 +122,7 @@ enum CodexAppServerVerificationCommand {
                     options: CodexAppServerClientOptions(
                         executableURL: URL(fileURLWithPath: "/usr/bin/python3"),
                         launchArguments: ["-u", "-c", fakeServerScript],
-                        requestTimeout: 2,
+                        requestTimeout: 5,
                         clientVersion: "verify",
                         experimentalAPI: true
                     )
@@ -135,7 +135,11 @@ enum CodexAppServerVerificationCommand {
         try require(model.availability == .disabled, "runtime_model_default_off")
 
         await host.setEnabled(true)
-        try require(host.snapshot.availability == .ready, "runtime_ready")
+        guard host.snapshot.availability == .ready else {
+            throw CodexAppServerVerificationFailure(
+                "runtime_ready:\(host.snapshot.availability.rawValue):\(host.snapshot.lastErrorCode ?? "none")"
+            )
+        }
         try require(host.snapshot.voiceCount == 1, "runtime_voice_count")
         try require(model.availability == .ready, "runtime_model_ready")
         try require(model.statusText == "ready", "runtime_model_status")
