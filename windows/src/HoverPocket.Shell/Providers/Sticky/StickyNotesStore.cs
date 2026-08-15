@@ -2,6 +2,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using HoverPocket.Shell.Configuration;
 
 namespace HoverPocket.Shell.Providers.Sticky;
 
@@ -19,10 +20,7 @@ internal sealed class StickyNotesStore
     private StickyNotePreferences _preferences = new();
 
     public StickyNotesStore()
-        : this(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "HoverPocket",
-            "sticky"))
+        : this(HoverPocketApplicationData.ProductionDefault().StickyDirectory)
     {
     }
 

@@ -67,6 +67,7 @@ jobs:
           $scripts = @(
             ".\windows\script\phase0_codex_app_server_probe.ps1",
             ".\windows\script\verify_voice_lane_foundation.ps1",
+            ".\windows\script\voice_e2e_windows.ps1",
             ".\windows\script\cleanup_merged_remote_branches.ps1"
           )
 
@@ -135,6 +136,7 @@ jobs:
             "voice-lane-layout",
             "codex-app-server-protocol",
             "codex-voice-coordinator",
+            "voice-e2e-isolation",
             "updater"
           )
 
@@ -172,3 +174,12 @@ jobs:
             throw "Injected verifier failure did not exit cleanly with code 1."
           }
           $global:LASTEXITCODE = 0
+
+      - name: Verify Release ignores Voice E2E override
+        shell: pwsh
+        run: |
+          $project = ".\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj"
+          dotnet run --project $project -c Release --no-build -- --verify voice-e2e-isolation
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release Voice E2E isolation verifier failed."
+          }

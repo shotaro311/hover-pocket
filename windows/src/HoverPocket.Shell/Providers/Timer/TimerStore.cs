@@ -2,6 +2,7 @@ using System.IO;
 using System.Media;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using HoverPocket.Shell.Configuration;
 
 namespace HoverPocket.Shell.Providers.Timer;
 
@@ -651,8 +652,7 @@ internal sealed class TimerStore : IDisposable
 
     private static string DefaultStorageDirectory()
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        return Path.Combine(appData, "HoverPocket", "timer");
+        return HoverPocketApplicationData.ProductionDefault().TimerDirectory;
     }
 
     private sealed record DraftsSnapshot(

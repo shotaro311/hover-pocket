@@ -41,6 +41,8 @@ internal sealed class UserSettings
 
     public bool CodexVoiceAutoListen { get; set; }
 
+    public bool CodexVoiceCalendarReadEnabled { get; set; }
+
     public List<string> ProviderOrder { get; set; } = [];
 
     public Dictionary<string, bool> ProviderVisibility { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -75,6 +77,7 @@ internal sealed class UserSettings
             CodexVoiceEnabled = CodexVoiceEnabled,
             CodexVoiceLayoutMode = CodexVoiceLayoutMode,
             CodexVoiceAutoListen = CodexVoiceAutoListen,
+            CodexVoiceCalendarReadEnabled = CodexVoiceCalendarReadEnabled,
             ProviderOrder = [.. ProviderOrder],
             ProviderVisibility = new Dictionary<string, bool>(ProviderVisibility, StringComparer.OrdinalIgnoreCase)
         };

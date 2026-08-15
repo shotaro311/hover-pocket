@@ -169,7 +169,10 @@ internal sealed class UiVerifier
 
                 if (!result.VoiceProviderInvariantOk)
                 {
-                    _failures.Add("voice lane: expanding changed the existing provider rect");
+                    _failures.Add(
+                        "voice lane: expanding changed the existing provider rect "
+                        + $"({result.VoiceCompactProviderWidth:0.##}x{result.VoiceCompactProviderHeight:0.##} -> "
+                        + $"{result.VoiceExpandedProviderWidth:0.##}x{result.VoiceExpandedProviderHeight:0.##})");
                 }
 
                 if (!result.VoiceExplicitToggleOnlyOk)

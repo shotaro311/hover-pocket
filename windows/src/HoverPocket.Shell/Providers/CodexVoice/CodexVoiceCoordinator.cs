@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using HoverPocket.Shell.Configuration;
 
 namespace HoverPocket.Shell.Providers.CodexVoice;
 
@@ -166,10 +167,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         _toolAdapter = toolAdapter;
         _workspaceDirectory = Path.GetFullPath(
             workspaceDirectory
-                ?? Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "HoverPocket",
-                    "VoiceWorkspace"));
+                ?? HoverPocketApplicationData.ProductionDefault().VoiceWorkspaceDirectory);
     }
 
     public event EventHandler<CodexVoiceSnapshot>? SnapshotChanged;
