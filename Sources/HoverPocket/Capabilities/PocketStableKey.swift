@@ -2,12 +2,12 @@ import Foundation
 
 enum PocketStableKey {
     static let maximumScalars = 96
-    private static let namespacePattern = "^[a-z][a-z0-9-]{0,31}$"
-    private static let keyPattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$"
+    private static let namespacePattern = "\\A[a-z][a-z0-9-]{0,31}\\z"
+    private static let keyPattern = "\\A[A-Za-z0-9][A-Za-z0-9._-]{0,62}\\z"
 
     static func validate(_ value: String) throws -> String {
         guard value.unicodeScalars.count <= maximumScalars,
-              value.unicodeScalars.allSatisfy({ $0.value < 0x80 }),
+              value.unicodeScalars.allSatisfy({ 0x21...0x7E ~= $0.value }),
               value.firstIndex(of: ":") == value.lastIndex(of: ":"),
               let separator = value.firstIndex(of: ":") else {
             throw CapabilityBrokerError.invalidPlan("stable_key")
