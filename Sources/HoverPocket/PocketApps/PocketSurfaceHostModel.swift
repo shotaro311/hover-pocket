@@ -156,7 +156,7 @@ final class PocketSurfaceHostModel: ObservableObject {
                     statusText = "処理結果を確認できませんでした。"
                     return
                 }
-                receiptText = "TimerとSticky Notesへ反映しました（\(verified)件確認済み）"
+                receiptText = Self.receiptSummary(receipt)
             } catch {
                 statusText = "処理を完了できませんでした。"
             }
@@ -291,7 +291,7 @@ final class PocketSurfaceHostModel: ObservableObject {
         return "\(formatter.string(from: startDate))–\(formatter.string(from: endDate))"
     }
 
-    private static func approvalSummary(_ draft: PocketAppWorkflowDraft) -> String {
+    static func approvalSummary(_ draft: PocketAppWorkflowDraft) -> String {
         var lines: [String] = []
         for step in draft.plan.steps {
             switch step.capability {
@@ -305,13 +305,34 @@ final class PocketSurfaceHostModel: ObservableObject {
                 }
                 lines.append("「\(title)」のタイマーを\(max(1, seconds / 60))分で開始")
             case PocketCapabilityKeys.stickyUpsert:
+                let title = string(step.arguments["title"]) ?? "今日の目的"
                 let body = string(step.arguments["body"]) ?? "今日の目的"
-                lines.append("Sticky Notesへ「\(body)」を保存")
+                let stableKey = string(step.arguments["stableKey"]) ?? "対象未指定"
+                lines.append("Sticky Notes「\(title)」（\(stableKey)）へ「\(body)」を保存")
             default:
                 lines.append(step.capability.id)
             }
         }
         return lines.joined(separator: "\n")
+    }
+
+    static func receiptSummary(_ receipt: CapabilityWorkflowReceipt) -> String {
+        var labels: [String] = []
+        for step in receipt.steps {
+            let label: String
+            switch step.capability {
+            case PocketCapabilityKeys.timerStart:
+                label = "Timer"
+            case PocketCapabilityKeys.stickyUpsert:
+                label = "Sticky Notes"
+            default:
+                label = "変更"
+            }
+            if !labels.contains(label) {
+                labels.append(label)
+            }
+        }
+        return "\(labels.joined(separator: "、"))へ反映しました（\(receipt.steps.count)件確認済み）"
     }
 
     static func sanitizeVisibleText(_ value: String) -> String {

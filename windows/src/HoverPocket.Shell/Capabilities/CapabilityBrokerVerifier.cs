@@ -536,6 +536,25 @@ internal sealed class CapabilityBrokerVerifier
             ["durationSeconds"] = CapabilityJson.From(1_500),
             ["purpose"] = CapabilityJson.From("Pocket Focus")
         };
+        var presentationInputs = new Dictionary<string, JsonElement>(inputs, StringComparer.Ordinal)
+        {
+            ["purpose"] = CapabilityJson.From("表示\n偽装\u202E確認")
+        };
+        var presentationDraft = runtime.Prepare("startFocus", presentationInputs, now);
+        const string canonicalPurpose = "表示 偽装 確認";
+        Require(
+            !PocketAppExecutionRuntime.SupportsWorkflowPresentation(CapabilityIds.CalendarList),
+            "pocket_app_unpresentable_workflow_rejected");
+        Require(
+            presentationDraft.Plan.Steps[0].Arguments.GetProperty("title").GetString() == canonicalPurpose,
+            "pocket_app_approval_timer_exact");
+        Require(
+            presentationDraft.Plan.Steps[1].Arguments.GetProperty("body").GetString() == canonicalPurpose,
+            "pocket_app_approval_sticky_exact");
+        Require(
+            PocketAppHostController.ApprovalSummary(presentationDraft, english: false).Contains(canonicalPurpose, StringComparison.Ordinal),
+            "pocket_app_approval_presentation_exact");
+        runtime.Reject(presentationDraft, now);
         var draft = runtime.Prepare("startFocus", inputs, now);
         Require(draft.Plan.Origin == CapabilityOrigin.PocketSurface, "pocket_app_origin");
         Require(draft.Plan.Principal.PocketAppId == package.Manifest.Id, "pocket_app_principal");
@@ -559,6 +578,9 @@ internal sealed class CapabilityBrokerVerifier
         Require(
             receipt.Steps.All(step => step.Readback.Status == CapabilityReadbackStatus.Verified),
             "pocket_app_readback");
+        Require(
+            PocketAppHostController.ReceiptSummary(receipt, english: false) == "Timer、Sticky Notesへ反映しました（2件確認済み）",
+            "pocket_app_receipt_summary");
         Require(timerStore.RunningTimers.Count == 1, "pocket_app_timer_effect");
         Require(stickyStore.Notes.Count == 1, "pocket_app_sticky_effect");
         var replay = await broker.ExecuteAsync(

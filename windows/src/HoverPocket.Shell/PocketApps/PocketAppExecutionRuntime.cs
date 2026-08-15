@@ -12,6 +12,12 @@ internal sealed record PocketAppWorkflowDraft(
 
 internal sealed class PocketAppExecutionRuntime
 {
+    private static readonly HashSet<PocketCapabilityKey> PresentableWorkflowCapabilities =
+    [
+        CapabilityIds.TimerStart,
+        CapabilityIds.StickyUpsert
+    ];
+
     private readonly CapabilityBroker _broker;
     private readonly CapabilityPrincipal _principal;
     private readonly IReadOnlySet<string> _permissions;
@@ -91,10 +97,15 @@ internal sealed class PocketAppExecutionRuntime
         var nonce = Guid.NewGuid().ToString("D");
         var steps = workflow.Steps.Select(step =>
         {
-            var arguments = ResolveObject(
+            if (!SupportsWorkflowPresentation(step.Capability))
+            {
+                throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "pocket_workflow_presentation");
+            }
+            var resolvedArguments = ResolveObject(
                 CapabilityJson.From(step.Arguments.ToDictionary(item => item.Key, item => item.Value)),
                 inputs,
                 current);
+            var arguments = CanonicalWorkflowArguments(resolvedArguments, step.Capability);
             var request = RequestedCapability(step.Capability);
             ValidateScope(arguments, request);
             return new CapabilityPlanStep(
@@ -306,4 +317,42 @@ internal sealed class PocketAppExecutionRuntime
         }
         return new PocketCapabilityKey(reference[..marker], version);
     }
+
+    private static JsonElement CanonicalWorkflowArguments(
+        JsonElement arguments,
+        PocketCapabilityKey capability)
+    {
+        var values = arguments.EnumerateObject().ToDictionary(
+            property => property.Name,
+            property => property.Value.Clone(),
+            StringComparer.Ordinal);
+        if (capability == CapabilityIds.TimerStart)
+        {
+            CanonicalizeVisibleString(values, "title");
+        }
+        else if (capability == CapabilityIds.StickyUpsert)
+        {
+            CanonicalizeVisibleString(values, "title");
+            CanonicalizeVisibleString(values, "body");
+        }
+        else
+        {
+            throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "pocket_workflow_presentation");
+        }
+        return CapabilityJson.From(values);
+    }
+
+    private static void CanonicalizeVisibleString(
+        IDictionary<string, JsonElement> values,
+        string field)
+    {
+        if (!values.TryGetValue(field, out var value) || value.ValueKind != JsonValueKind.String)
+        {
+            throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "pocket_workflow_presentation");
+        }
+        values[field] = CapabilityJson.From(TodayFocusApprovalText.Sanitize(value.GetString() ?? string.Empty));
+    }
+
+    internal static bool SupportsWorkflowPresentation(PocketCapabilityKey capability) =>
+        PresentableWorkflowCapabilities.Contains(capability);
 }

@@ -95,9 +95,9 @@ internal sealed class PocketAppPackageRuntime
         var rootInfo = new DirectoryInfo(root);
         Require(rootInfo.Exists && !rootInfo.Attributes.HasFlag(FileAttributes.ReparsePoint), "$:package_root");
         var inventory = Inventory(root);
-        var manifestElement = ReadObject(Read("manifest.json", root, inventory), "$.manifest");
+        var manifestData = Read("manifest.json", root, inventory);
+        var manifestElement = ReadObject(manifestData, "$.manifest");
         var manifest = ParseManifest(manifestElement);
-        var manifestDigest = "sha256:" + Convert.ToHexString(SHA256.HashData(CapabilityCanonicalJson.CanonicalBytes(manifestElement))).ToLowerInvariant();
 
         var expectedFiles = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -109,10 +109,19 @@ internal sealed class PocketAppPackageRuntime
         expectedFiles.UnionWith(manifest.Workflows.Values);
         expectedFiles.UnionWith(manifest.Tests);
         Require(expectedFiles.SetEquals(inventory.Keys), "$:package_files");
+        var packageFiles = new Dictionary<string, byte[]>(StringComparer.Ordinal)
+        {
+            ["manifest.json"] = manifestData
+        };
+        foreach (var path in expectedFiles.OrderBy(path => path, StringComparer.Ordinal).Where(path => path != "manifest.json"))
+        {
+            packageFiles.Add(path, Read(path, root, inventory));
+        }
+        var manifestDigest = PackageDigest(packageFiles);
 
-        var intent = Encoding.UTF8.GetString(Read(manifest.IntentPath, root, inventory));
+        var intent = Encoding.UTF8.GetString(packageFiles[manifest.IntentPath]);
         Require(!string.IsNullOrWhiteSpace(intent) && intent.EnumerateRunes().Count() <= 20_000, "$.intent");
-        var statePropertyNames = ValidateStateSchema(ReadObject(Read(manifest.StateSchemaPath, root, inventory), "$.state.schema"));
+        var statePropertyNames = ValidateStateSchema(ReadObject(packageFiles[manifest.StateSchemaPath], "$.state.schema"));
 
         var requestedScopes = manifest.RequestedCapabilities.ToDictionary(item => item.Key, item => item.Scope);
         var readableQueries = manifest.RequestedCapabilities
@@ -123,7 +132,7 @@ internal sealed class PocketAppPackageRuntime
         var surfaces = new Dictionary<string, PocketSurfaceDocument>(StringComparer.Ordinal);
         foreach (var item in manifest.Surfaces.OrderBy(item => item.Key, StringComparer.Ordinal))
         {
-            var surface = surfaceRuntime.Load(Read(item.Value, root, inventory));
+            var surface = surfaceRuntime.Load(packageFiles[item.Value]);
             Require(surface.Id == item.Key, $"$.surfaces.{item.Key}:id");
             surfaces.Add(item.Key, surface);
         }
@@ -131,7 +140,7 @@ internal sealed class PocketAppPackageRuntime
         var workflows = new Dictionary<string, PocketAppWorkflowDocument>(StringComparer.Ordinal);
         foreach (var item in manifest.Workflows.OrderBy(item => item.Key, StringComparer.Ordinal))
         {
-            var workflow = ParseWorkflow(ReadObject(Read(item.Value, root, inventory), $"$.workflows.{item.Key}"), requestedScopes);
+            var workflow = ParseWorkflow(ReadObject(packageFiles[item.Value], $"$.workflows.{item.Key}"), requestedScopes);
             Require(workflow.Id == item.Key, $"$.workflows.{item.Key}:id");
             workflows.Add(item.Key, workflow);
         }
@@ -148,7 +157,7 @@ internal sealed class PocketAppPackageRuntime
         var testCases = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var testPath in manifest.Tests)
         {
-            var test = ReadObject(Read(testPath, root, inventory), "$.tests");
+            var test = ReadObject(packageFiles[testPath], "$.tests");
             ExactKeys(test, ["case", "expected"], [], "$.tests");
             var name = BoundedString(test.GetProperty("case"), 1, 120, "$.tests.case");
             var expected = BoundedString(test.GetProperty("expected"), 1, 32, "$.tests.expected");
@@ -591,6 +600,19 @@ internal sealed class PocketAppPackageRuntime
         var path = Path.GetFullPath(Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
         Require(path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "$:package_reference");
         return File.ReadAllBytes(path);
+    }
+
+    private static string PackageDigest(IReadOnlyDictionary<string, byte[]> files)
+    {
+        using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hasher.AppendData(Encoding.UTF8.GetBytes("hoverpocket.package/v1\0"));
+        foreach (var path in files.Keys.OrderBy(path => path, StringComparer.Ordinal))
+        {
+            hasher.AppendData(Encoding.UTF8.GetBytes(path));
+            hasher.AppendData(new byte[] { 0 });
+            hasher.AppendData(SHA256.HashData(files[path]));
+        }
+        return "sha256:" + Convert.ToHexString(hasher.GetHashAndReset()).ToLowerInvariant();
     }
 
     private static JsonElement ReadObject(ReadOnlyMemory<byte> data, string path)

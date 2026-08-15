@@ -81,22 +81,26 @@ struct PocketAppPackageRuntime {
         let manifestData = try read(relativePath: "manifest.json", root: root, inventory: actualFiles)
         let manifestObject = try jsonObject(manifestData, path: "$.manifest")
         let manifest = try parseManifest(manifestObject)
-        let manifestDigest = try canonicalDigest(manifestObject)
 
         var expectedFiles: Set<String> = ["manifest.json", manifest.intentPath, manifest.stateSchemaPath]
         expectedFiles.formUnion(manifest.surfaces.values)
         expectedFiles.formUnion(manifest.workflows.values)
         expectedFiles.formUnion(manifest.tests)
         try require(Set(actualFiles.keys) == expectedFiles, "$:package_files")
+        var packageFiles: [String: Data] = ["manifest.json": manifestData]
+        for path in expectedFiles.sorted() where path != "manifest.json" {
+            packageFiles[path] = try read(relativePath: path, root: root, inventory: actualFiles)
+        }
+        let manifestDigest = packageDigest(packageFiles)
 
-        let intentData = try read(relativePath: manifest.intentPath, root: root, inventory: actualFiles)
+        let intentData = try packageData(manifest.intentPath, files: packageFiles)
         guard let intent = String(data: intentData, encoding: .utf8),
               !intent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               intent.unicodeScalars.count <= 20_000 else {
             throw PocketAppPackageError.invalid("$.intent")
         }
 
-        let stateData = try read(relativePath: manifest.stateSchemaPath, root: root, inventory: actualFiles)
+        let stateData = try packageData(manifest.stateSchemaPath, files: packageFiles)
         let statePropertyNames = try validateStateSchema(jsonObject(stateData, path: "$.state.schema"))
 
         let requestedScopes = Dictionary(
@@ -112,7 +116,7 @@ struct PocketAppPackageRuntime {
         )
         var surfaces: [String: PocketSurfaceDocument] = [:]
         for (id, path) in manifest.surfaces.sorted(by: { $0.key < $1.key }) {
-            let document = try surfaceRuntime.load(data: read(relativePath: path, root: root, inventory: actualFiles))
+            let document = try surfaceRuntime.load(data: packageData(path, files: packageFiles))
             try require(document.id == id, "$.surfaces.\(id):id")
             surfaces[id] = document
         }
@@ -120,7 +124,7 @@ struct PocketAppPackageRuntime {
         var workflows: [String: PocketAppWorkflowDocument] = [:]
         for (id, path) in manifest.workflows.sorted(by: { $0.key < $1.key }) {
             let workflow = try parseWorkflow(
-                jsonObject(try read(relativePath: path, root: root, inventory: actualFiles), path: "$.workflows.\(id)"),
+                jsonObject(try packageData(path, files: packageFiles), path: "$.workflows.\(id)"),
                 requestedScopes: requestedScopes
             )
             try require(workflow.id == id, "$.workflows.\(id):id")
@@ -143,7 +147,7 @@ struct PocketAppPackageRuntime {
 
         var testCases: [String: String] = [:]
         for path in manifest.tests {
-            let object = try jsonObject(try read(relativePath: path, root: root, inventory: actualFiles), path: "$.tests")
+            let object = try jsonObject(try packageData(path, files: packageFiles), path: "$.tests")
             try exactKeys(object, required: ["case", "expected"], optional: [], path: "$.tests")
             let name = try boundedString(object["case"], range: 1...120, path: "$.tests.case")
             let expected = try boundedString(object["expected"], range: 1...32, path: "$.tests.expected")
@@ -530,9 +534,20 @@ struct PocketAppPackageRuntime {
         }
     }
 
-    private func canonicalDigest(_ object: [String: Any]) throws -> String {
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])
-        return "sha256:" + SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    private func packageData(_ path: String, files: [String: Data]) throws -> Data {
+        guard let data = files[path] else { throw PocketAppPackageError.invalid("$:package_reference") }
+        return data
+    }
+
+    private func packageDigest(_ files: [String: Data]) -> String {
+        var hasher = SHA256()
+        hasher.update(data: Data("hoverpocket.package/v1\0".utf8))
+        for path in files.keys.sorted() {
+            hasher.update(data: Data(path.utf8))
+            hasher.update(data: Data([0]))
+            hasher.update(data: Data(SHA256.hash(data: files[path]!)))
+        }
+        return "sha256:" + hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     private func capabilityKey(_ value: String, path: String) throws -> PocketCapabilityKey {

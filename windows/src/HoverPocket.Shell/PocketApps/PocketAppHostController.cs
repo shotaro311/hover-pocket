@@ -168,12 +168,16 @@ internal sealed class PocketAppHostController
             draft,
             DateTimeOffset.Now,
             cancellationToken);
+        var readbackVerified = receipt.Steps.All(step => step.Readback.Status == CapabilityReadbackStatus.Verified);
         return new
         {
             status = receipt.Status.WireValue(),
             replayed = receipt.Replayed,
-            readbackVerified = receipt.Steps.All(step => step.Readback.Status == CapabilityReadbackStatus.Verified),
-            capabilities = receipt.Steps.Select(step => step.Capability.Id).ToArray()
+            readbackVerified,
+            capabilities = receipt.Steps.Select(step => step.Capability.Id).ToArray(),
+            summary = receipt.Status == CapabilityReceiptStatus.Succeeded && readbackVerified
+                ? ReceiptSummary(receipt, english)
+                : null
         };
     }
 
@@ -253,7 +257,7 @@ internal sealed class PocketAppHostController
         return new { events = safeEvents };
     }
 
-    private static string ApprovalSummary(PocketAppWorkflowDraft draft, bool english)
+    internal static string ApprovalSummary(PocketAppWorkflowDraft draft, bool english)
     {
         var lines = new List<string>();
         foreach (var step in draft.Plan.Steps)
@@ -271,12 +275,18 @@ internal sealed class PocketAppHostController
             }
             else if (step.Capability == CapabilityIds.StickyUpsert)
             {
+                var title = step.Arguments.TryGetProperty("title", out var titleElement)
+                    ? titleElement.GetString() ?? "Focus"
+                    : "Focus";
                 var body = step.Arguments.TryGetProperty("body", out var bodyElement)
                     ? bodyElement.GetString() ?? "Focus"
                     : "Focus";
+                var stableKey = step.Arguments.TryGetProperty("stableKey", out var stableKeyElement)
+                    ? stableKeyElement.GetString() ?? "unknown"
+                    : "unknown";
                 lines.Add(english
-                    ? $"Save \"{body}\" to Sticky Notes"
-                    : $"Sticky Notesへ「{body}」を保存");
+                    ? $"Save \"{body}\" to Sticky Notes \"{title}\" ({stableKey})"
+                    : $"Sticky Notes「{title}」（{stableKey}）へ「{body}」を保存");
             }
             else
             {
@@ -284,6 +294,26 @@ internal sealed class PocketAppHostController
             }
         }
         return string.Join(Environment.NewLine, lines);
+    }
+
+    internal static string ReceiptSummary(CapabilityWorkflowReceipt receipt, bool english)
+    {
+        var labels = new List<string>();
+        foreach (var step in receipt.Steps)
+        {
+            var label = step.Capability == CapabilityIds.TimerStart
+                ? "Timer"
+                : step.Capability == CapabilityIds.StickyUpsert
+                    ? "Sticky Notes"
+                    : english ? "Changes" : "変更";
+            if (!labels.Contains(label, StringComparer.Ordinal))
+            {
+                labels.Add(label);
+            }
+        }
+        return english
+            ? $"Applied to {string.Join(" and ", labels)} ({receipt.Steps.Count} verified)"
+            : $"{string.Join("、", labels)}へ反映しました（{receipt.Steps.Count}件確認済み）";
     }
 
     private static IEnumerable<QueryBinding> QueryBindings(PocketSurfaceRenderNode node)

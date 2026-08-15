@@ -13,6 +13,11 @@ enum PocketAppPackageVerificationCommand {
                 require(package.manifest.id == "local.example.today-focus", "package_id", failures: &failures)
                 require(package.manifest.version == "1.0.0", "package_version", failures: &failures)
                 require(package.manifestDigest.hasPrefix("sha256:") && package.manifestDigest.count == 71, "manifest_digest", failures: &failures)
+                require(
+                    package.manifestDigest == "sha256:e9c369e0b52620d95c14baa2e04070535a1f21020308090f0467eed8cf4f04df",
+                    "package_digest_golden",
+                    failures: &failures
+                )
                 require(package.surfaces["main"]?.nodeCount == 6, "package_surface", failures: &failures)
                 require(package.workflows["startFocus"]?.steps.count == 2, "package_workflow", failures: &failures)
                 require(package.workflows["startFocus"]?.requiredPermissions == ["sticky.write", "timer.write"], "package_permissions", failures: &failures)
@@ -31,6 +36,20 @@ enum PocketAppPackageVerificationCommand {
             }
         } catch {
             failures.append("valid_package:\(error)")
+        }
+
+        do {
+            guard let originalDigest = referencePackage?.manifestDigest else {
+                throw PocketAppPackageError.invalid("$:reference_digest")
+            }
+            try withPackage { root in
+                try Data("Changed intent without manifest changes".utf8)
+                    .write(to: root.appendingPathComponent("intent.md"), options: .atomic)
+                let changed = try runtime.load(directory: root)
+                require(changed.manifestDigest != originalDigest, "package_resource_digest", failures: &failures)
+            }
+        } catch {
+            failures.append("package_resource_digest:fixture:\(error)")
         }
 
         do {

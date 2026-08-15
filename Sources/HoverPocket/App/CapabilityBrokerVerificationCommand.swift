@@ -592,6 +592,33 @@ enum CapabilityBrokerVerificationCommand {
             guard case .invalidPlan("query_effect") = error else { throw error }
         }
         let tokyoBoundary = ISO8601DateFormatter().date(from: "2026-08-14T16:00:00Z")!
+        let presentationDraft = try runtime.prepare(
+            workflowID: "startFocus",
+            inputs: [
+                "selectedEventRef": .string(eventRef),
+                "durationSeconds": .integer(1_500),
+                "purpose": .string("表示\n偽装\u{202E}確認")
+            ],
+            now: tokyoBoundary
+        )
+        let canonicalPurpose = "表示 偽装 確認"
+        try require(
+            !PocketAppExecutionRuntime.supportsWorkflowPresentation(PocketCapabilityKeys.calendarList),
+            "pocket_app_unpresentable_workflow_rejected"
+        )
+        try require(
+            presentationDraft.plan.steps[0].arguments["title"] == .string(canonicalPurpose),
+            "pocket_app_approval_timer_exact"
+        )
+        try require(
+            presentationDraft.plan.steps[1].arguments["body"] == .string(canonicalPurpose),
+            "pocket_app_approval_sticky_exact"
+        )
+        try require(
+            PocketSurfaceHostModel.approvalSummary(presentationDraft).contains(canonicalPurpose),
+            "pocket_app_approval_presentation_exact"
+        )
+        runtime.reject(presentationDraft, now: tokyoBoundary)
         let draft = try runtime.prepare(
             workflowID: "startFocus",
             inputs: [
@@ -611,6 +638,10 @@ enum CapabilityBrokerVerificationCommand {
         let receipt = try await runtime.approveAndExecute(draft, now: tokyoBoundary)
         try require(receipt.status == .succeeded, "pocket_app_status")
         try require(receipt.steps.allSatisfy { $0.readback.status == .verified }, "pocket_app_readback")
+        try require(
+            PocketSurfaceHostModel.receiptSummary(receipt) == "Timer、Sticky Notesへ反映しました（2件確認済み）",
+            "pocket_app_receipt_summary"
+        )
         try require(timerStore.runningTimers.count == 1, "pocket_app_timer")
         try require(stickyStore.note(id: noteID)?.body == "pocket-app-purpose", "pocket_app_sticky")
         let replay = try await broker.execute(

@@ -17,6 +17,9 @@ internal sealed class PocketAppPackageVerifier
             Require(package.Manifest.Id == "local.example.today-focus", "package_id");
             Require(package.Manifest.Version == "1.0.0", "package_version");
             Require(package.ManifestDigest.StartsWith("sha256:", StringComparison.Ordinal) && package.ManifestDigest.Length == 71, "manifest_digest");
+            Require(
+                package.ManifestDigest == "sha256:e9c369e0b52620d95c14baa2e04070535a1f21020308090f0467eed8cf4f04df",
+                "package_digest_golden");
             Require(package.Surfaces["main"].NodeCount == 6, "package_surface");
             Require(package.Workflows["startFocus"].Steps.Count == 2, "package_workflow");
             Require(package.Workflows["startFocus"].RequiredPermissions.SetEquals(["sticky.write", "timer.write"]), "package_permissions");
@@ -30,6 +33,20 @@ internal sealed class PocketAppPackageVerifier
                 "package_tests");
             Console.WriteLine($"pocket_app_manifest_digest={package.ManifestDigest}");
         }, "valid_package");
+
+        WithPackage(root =>
+        {
+            if (referencePackage is null)
+            {
+                throw new InvalidOperationException("reference_package");
+            }
+            File.WriteAllText(
+                Path.Combine(root, "intent.md"),
+                "Changed intent without manifest changes",
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            var changed = new PocketAppPackageRuntime().Load(root);
+            Require(changed.ManifestDigest != referencePackage.ManifestDigest, "package_resource_digest");
+        }, "package_resource_digest");
 
         try
         {

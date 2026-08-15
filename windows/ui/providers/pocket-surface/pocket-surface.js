@@ -96,13 +96,14 @@ export function renderPocketSurfaceProvider(context) {
               workflowId: node.workflow,
               inputs: Object.fromEntries(inputs),
             });
+            const succeeded = receipt.status === "succeeded" && receipt.readbackVerified;
             setHostStatus(
-              receipt.status === "succeeded" && receipt.readbackVerified
-                ? "TimerとSticky Notesへ反映しました（確認済み）"
+              succeeded
+                ? (typeof receipt.summary === "string" ? receipt.summary : "変更を反映して確認しました。")
                 : receipt.status === "rejected"
                   ? "変更をキャンセルしました。"
                   : "処理結果を確認できませんでした。",
-              receipt.status === "succeeded" && receipt.readbackVerified ? "success" : "neutral",
+              succeeded ? "success" : "neutral",
             );
           } catch {
             setHostStatus("処理を完了できませんでした。", "error");
