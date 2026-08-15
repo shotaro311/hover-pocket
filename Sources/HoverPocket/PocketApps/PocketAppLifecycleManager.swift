@@ -101,6 +101,8 @@ enum PocketAppLifecycleError: Error, Equatable {
 
 @MainActor
 final class PocketAppLifecycleManager {
+    private static var liveStagingParents: Set<String> = []
+
     private struct ActiveRecord: Codable, Equatable {
         var recordVersion = 1
         let packageID: String
@@ -244,6 +246,7 @@ final class PocketAppLifecycleManager {
                 stagingDirectory: stagingDirectory,
                 disposableStaging: true
             )
+            Self.liveStagingParents.insert(stagingDirectory.deletingLastPathComponent().standardizedFileURL.path)
             cleanupDirectory = nil
             return proposal
         } catch let error as PocketAppLifecycleError {
@@ -280,13 +283,16 @@ final class PocketAppLifecycleManager {
     }
 
     func reject(requestID: String, bindingDigest: String) throws {
-        guard let pending = pendingApprovals.removeValue(forKey: requestID),
+        guard let pending = pendingApprovals[requestID],
               pending.bindingDigest == bindingDigest else {
             throw PocketAppLifecycleError.approvalInvalid
         }
+        pendingApprovals.removeValue(forKey: requestID)
         decidedRequests.remove(requestID)
         if pending.disposableStaging {
-            try? FileManager.default.removeItem(at: pending.stagingDirectory.deletingLastPathComponent())
+            let stagingParent = pending.stagingDirectory.deletingLastPathComponent()
+            Self.liveStagingParents.remove(stagingParent.standardizedFileURL.path)
+            try? FileManager.default.removeItem(at: stagingParent)
         }
     }
 
@@ -426,24 +432,9 @@ final class PocketAppLifecycleManager {
         let versions = versionsRoot(packageID: packageID)
         let tombstone = appRoot(packageID: packageID)
             .appendingPathComponent(".removed-Versions-\(UUID().uuidString.lowercased())", isDirectory: true)
-        let quarantine = previous.flatMap { record -> ActiveRecord? in
-            guard record.state == .enabled else { return nil }
-            return ActiveRecord(
-                packageID: record.packageID,
-                version: record.version,
-                packageDigest: record.packageDigest,
-                permissions: record.permissions,
-                stateSchemaDigest: record.stateSchemaDigest,
-                statePropertyNames: record.statePropertyNames,
-                state: .disabled,
-                updatedAt: now
-            )
-        }
         var movedVersions = false
         do {
             if FileManager.default.fileExists(atPath: versions.path) {
-                if let quarantine { try writeAndVerify(record: quarantine) }
-                try makeMutable(directory: versions)
                 if failureInjection?("remove_stage") == true { throw PocketAppLifecycleError.storageFailure }
                 try FileManager.default.moveItem(at: versions, to: tombstone)
                 movedVersions = true
@@ -461,12 +452,11 @@ final class PocketAppLifecycleManager {
                     try verifyImmutable(directory: versions)
                 }
                 try restore(record: previous, packageID: packageID)
-            } catch {
-                if let quarantine { try? write(record: quarantine) }
-            }
+            } catch {}
             throw PocketAppLifecycleError.storageFailure
         }
         if movedVersions {
+            try? makeMutable(directory: tombstone)
             try? FileManager.default.removeItem(at: tombstone)
         }
         guard try readActiveRecord(packageID: packageID)?.state == .removed,
@@ -599,7 +589,9 @@ final class PocketAppLifecycleManager {
             throw error
         }
         if proposal.action != .rollback {
-            try? FileManager.default.removeItem(at: proposal.stagingDirectory.deletingLastPathComponent())
+            let stagingParent = proposal.stagingDirectory.deletingLastPathComponent()
+            Self.liveStagingParents.remove(stagingParent.standardizedFileURL.path)
+            try? FileManager.default.removeItem(at: stagingParent)
         }
         pendingApprovals.removeValue(forKey: proposal.requestID)
         decidedRequests.remove(proposal.requestID)
@@ -727,6 +719,7 @@ final class PocketAppLifecycleManager {
                     throw PocketAppLifecycleError.storageFailure
                 }
             }
+            Self.liveStagingParents.remove(stagingParent.standardizedFileURL.path)
         }
         pendingApprovals.removeValue(forKey: requestID)
         decidedRequests.remove(requestID)
@@ -927,7 +920,10 @@ final class PocketAppLifecycleManager {
         let fileManager = FileManager.default
         if fileManager.fileExists(atPath: stagingRoot.path) {
             try ensureNoSymlinks(in: stagingRoot)
-            try fileManager.removeItem(at: stagingRoot)
+            for stagingDirectory in try safeChildDirectories(of: stagingRoot)
+                where !Self.liveStagingParents.contains(stagingDirectory.standardizedFileURL.path) {
+                try fileManager.removeItem(at: stagingDirectory)
+            }
         }
         try fileManager.createDirectory(
             at: stagingRoot,

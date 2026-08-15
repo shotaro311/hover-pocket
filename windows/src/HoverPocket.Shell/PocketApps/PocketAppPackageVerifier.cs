@@ -397,6 +397,21 @@ internal sealed class PocketAppPackageVerifier
                 Require(
                     !Directory.Exists(Directory.GetParent(abandoned.StagingDirectory)!.FullName),
                     "lifecycle_stage_purges_expired");
+                try
+                {
+                    manager.Reject(replacement.RequestId, $"sha256:{new string('0', 64)}");
+                    _failures.Add("lifecycle_reject_wrong_binding_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_APPROVAL_INVALID")
+                {
+                }
+                Require(
+                    Directory.Exists(replacement.StagingDirectory),
+                    "lifecycle_reject_wrong_binding_preserves_proposal");
+                _ = new PocketAppLifecycleManager(root, dataRoot);
+                Require(
+                    Directory.Exists(replacement.StagingDirectory),
+                    "lifecycle_second_manager_preserves_live_staging");
                 manager.Reject(replacement.RequestId, replacement.BindingDigest);
 
                 var changed = manager.Stage(draftRoot, now);

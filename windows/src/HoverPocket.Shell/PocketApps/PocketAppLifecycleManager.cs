@@ -106,6 +106,7 @@ internal sealed class PocketAppLifecycleManager
     private readonly string _hostVersion;
     private readonly Func<string, bool>? _failureInjection;
     private static readonly object LifecycleGate = new();
+    private static readonly HashSet<string> LiveStagingDirectories = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, PendingApproval> _pendingApprovals = new(StringComparer.Ordinal);
     private readonly HashSet<string> _decidedRequests = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IssuedApproval> _grants = new(StringComparer.Ordinal);
@@ -220,6 +221,8 @@ internal sealed class PocketAppLifecycleManager
                 package.StateSchemaDigest,
                 package.StatePropertyNames.ToHashSet(StringComparer.Ordinal));
             _pendingApprovals[requestId] = new PendingApproval(binding, expires, stagingDirectory, true);
+            var stagingParent = Directory.GetParent(stagingDirectory)?.FullName;
+            if (stagingParent is not null) { LiveStagingDirectories.Add(Path.GetFullPath(stagingParent)); }
             cleanupDirectory = null;
             return proposal;
         }
@@ -270,17 +273,22 @@ internal sealed class PocketAppLifecycleManager
 
     private void RejectCore(string requestId, string bindingDigest)
     {
-        if (!_pendingApprovals.Remove(requestId, out var pending) || pending.BindingDigest != bindingDigest)
+        if (!_pendingApprovals.TryGetValue(requestId, out var pending) || pending.BindingDigest != bindingDigest)
         {
             throw Failure("LIFECYCLE_APPROVAL_INVALID");
         }
+        _pendingApprovals.Remove(requestId);
         _decidedRequests.Remove(requestId);
         if (pending.DisposableStaging)
         {
             try
             {
                 var parent = Directory.GetParent(pending.StagingDirectory)?.FullName;
-                if (parent is not null && Directory.Exists(parent)) { Directory.Delete(parent, true); }
+                if (parent is not null)
+                {
+                    LiveStagingDirectories.Remove(Path.GetFullPath(parent));
+                    if (Directory.Exists(parent)) { Directory.Delete(parent, true); }
+                }
             }
             catch { }
         }
@@ -434,16 +442,11 @@ internal sealed class PocketAppLifecycleManager
             now ?? DateTimeOffset.UtcNow);
         var versions = VersionsRoot(packageId);
         var tombstone = Path.Combine(AppRoot(packageId), $".removed-Versions-{Guid.NewGuid():N}");
-        var quarantine = previous?.State == PocketAppLifecycleState.Enabled
-            ? previous with { State = PocketAppLifecycleState.Disabled, UpdatedAt = now ?? DateTimeOffset.UtcNow }
-            : null;
         var movedVersions = false;
         try
         {
             if (Directory.Exists(versions))
             {
-                if (quarantine is not null) { WriteAndVerify(quarantine); }
-                MakeMutable(versions);
                 if (_failureInjection?.Invoke("remove_stage") == true) { throw Failure("LIFECYCLE_STORAGE_FAILED"); }
                 Directory.Move(versions, tombstone);
                 movedVersions = true;
@@ -465,15 +468,12 @@ internal sealed class PocketAppLifecycleManager
                 }
                 Restore(previous, packageId);
             }
-            catch
-            {
-                if (quarantine is not null) { try { Write(quarantine); } catch { } }
-            }
+            catch { }
             throw Failure("LIFECYCLE_STORAGE_FAILED");
         }
         if (movedVersions)
         {
-            try { Directory.Delete(tombstone, true); } catch { }
+            try { MakeMutable(tombstone); Directory.Delete(tombstone, true); } catch { }
         }
         if (ReadActiveRecord(packageId)?.State != PocketAppLifecycleState.Removed || Directory.Exists(versions))
         {
@@ -648,7 +648,11 @@ internal sealed class PocketAppLifecycleManager
             try
             {
                 var stagingParent = Directory.GetParent(proposal.StagingDirectory)?.FullName;
-                if (stagingParent is not null && Directory.Exists(stagingParent)) { Directory.Delete(stagingParent, true); }
+                if (stagingParent is not null)
+                {
+                    LiveStagingDirectories.Remove(Path.GetFullPath(stagingParent));
+                    if (Directory.Exists(stagingParent)) { Directory.Delete(stagingParent, true); }
+                }
             }
             catch { }
         }
@@ -790,9 +794,10 @@ internal sealed class PocketAppLifecycleManager
             try
             {
                 var stagingParent = Directory.GetParent(pending.StagingDirectory)?.FullName;
-                if (stagingParent is not null && Directory.Exists(stagingParent))
+                if (stagingParent is not null)
                 {
-                    Directory.Delete(stagingParent, true);
+                    if (Directory.Exists(stagingParent)) { Directory.Delete(stagingParent, true); }
+                    LiveStagingDirectories.Remove(Path.GetFullPath(stagingParent));
                 }
             }
             catch
@@ -1040,7 +1045,12 @@ internal sealed class PocketAppLifecycleManager
         if (Directory.Exists(StagingRoot))
         {
             EnsureTreeHasNoReparsePoints(StagingRoot);
-            Directory.Delete(StagingRoot, true);
+            foreach (var stagingDirectory in Directory.EnumerateDirectories(StagingRoot).ToArray())
+            {
+                var normalized = Path.GetFullPath(stagingDirectory);
+                if (LiveStagingDirectories.Contains(normalized)) { continue; }
+                Directory.Delete(stagingDirectory, true);
+            }
         }
         Directory.CreateDirectory(StagingRoot);
         if (!Directory.Exists(AppsRoot)) { return; }

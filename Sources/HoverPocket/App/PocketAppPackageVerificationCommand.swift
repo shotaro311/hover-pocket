@@ -437,6 +437,22 @@ enum PocketAppPackageVerificationCommand {
                     "lifecycle_stage_purges_expired",
                     failures: &failures
                 )
+                do {
+                    try manager.reject(requestID: replacement.requestID, bindingDigest: "sha256:\(String(repeating: "0", count: 64))")
+                    failures.append("lifecycle_reject_wrong_binding_accepted")
+                } catch PocketAppLifecycleError.approvalInvalid {
+                }
+                require(
+                    FileManager.default.fileExists(atPath: replacement.stagingDirectory.path),
+                    "lifecycle_reject_wrong_binding_preserves_proposal",
+                    failures: &failures
+                )
+                _ = try PocketAppLifecycleManager(rootDirectory: root, userDataRoot: dataRoot)
+                require(
+                    FileManager.default.fileExists(atPath: replacement.stagingDirectory.path),
+                    "lifecycle_second_manager_preserves_live_staging",
+                    failures: &failures
+                )
                 try manager.reject(requestID: replacement.requestID, bindingDigest: replacement.bindingDigest)
 
                 let changed = try manager.stage(draftDirectory: draftRoot, now: now)
