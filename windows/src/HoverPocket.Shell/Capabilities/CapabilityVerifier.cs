@@ -32,7 +32,8 @@ internal sealed class CapabilityVerifier
         }
 
         Console.WriteLine("capability_verify=ok");
-        Console.WriteLine("capability_handlers=10");
+        Console.WriteLine("capability_handlers=11");
+        Console.WriteLine("capability_calculator_evaluate=ok");
         Console.WriteLine("capability_timer_lifecycle=ok");
         Console.WriteLine("capability_sticky_upsert=ok");
         Console.WriteLine("capability_calendar_readback=ok");
@@ -56,7 +57,8 @@ internal sealed class CapabilityVerifier
             var stickyStore = new StickyNotesStore(stickyRoot);
             var calendar = new FakeCalendarCapabilityDataSource();
             var handlers = ProviderCapabilityCompositionRoot.Create(calendar, timerStore, stickyStore);
-            Require(handlers.Keys.Count == 10, "handler_count");
+            Require(handlers.Keys.Count == 11, "handler_count");
+            await VerifyCalculatorAsync(handlers);
 
             await VerifyTimerAsync(handlers, timerStore, alertSound, clock, root);
             await VerifyStickyAsync(handlers, stickyStore, stickyRoot);
@@ -87,6 +89,39 @@ internal sealed class CapabilityVerifier
             if (Directory.Exists(root))
             {
                 Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    private async Task VerifyCalculatorAsync(PocketCapabilityHandlerSet handlers)
+    {
+        var vectors = new[]
+        {
+            (Expression: "1 + 2 * 3", Normalized: "1 + 2 * 3", Result: "7"),
+            (Expression: "1 / 3", Normalized: "1 / 3", Result: "0.333333333333"),
+            (Expression: "-5 + 2.5", Normalized: "-5 + 2.5", Result: "-2.5"),
+            (Expression: "1,5 × 2", Normalized: "1.5 * 2", Result: "3")
+        };
+        foreach (var vector in vectors)
+        {
+            var output = await handlers.InvokeAsync(
+                CapabilityIds.CalculatorEvaluate,
+                Json(new { expression = vector.Expression }));
+            Require(output.GetProperty("normalizedExpression").GetString() == vector.Normalized, $"calculator_normalized_{vector.Expression}");
+            Require(output.GetProperty("result").GetString() == vector.Result, $"calculator_result_{vector.Expression}");
+        }
+
+        foreach (var invalid in new[] { "1 / 0", "1 +", "2 ** 3", "999999999999999999 + 1" })
+        {
+            try
+            {
+                _ = await handlers.InvokeAsync(
+                    CapabilityIds.CalculatorEvaluate,
+                    Json(new { expression = invalid }));
+                _failures.Add("calculator_invalid_accepted");
+            }
+            catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_ARGUMENT_INVALID")
+            {
             }
         }
     }

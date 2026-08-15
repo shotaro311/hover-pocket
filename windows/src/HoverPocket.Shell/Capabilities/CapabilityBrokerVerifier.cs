@@ -35,8 +35,9 @@ internal sealed class CapabilityBrokerVerifier
         }
 
         Console.WriteLine("broker_verify=ok");
-        Console.WriteLine("broker_registry_descriptors=11");
-        Console.WriteLine("broker_available_handlers=10");
+        Console.WriteLine("broker_registry_descriptors=12");
+        Console.WriteLine("broker_available_handlers=11");
+        Console.WriteLine("broker_calculator_evaluate=ok");
         Console.WriteLine("broker_today_focus=ok");
         Console.WriteLine("broker_concurrent_duplicate=ok");
         Console.WriteLine("broker_negative_cases=10");
@@ -67,8 +68,8 @@ internal sealed class CapabilityBrokerVerifier
                 new CapabilityBrokerLedger(brokerRoot),
                 audit);
 
-            Require(registry.DescriptorKeys.Count == 11, "registry_descriptor_count");
-            Require(registry.AvailableHandlerKeys.Count == 10, "registry_handler_count");
+            Require(registry.DescriptorKeys.Count == 12, "registry_descriptor_count");
+            Require(registry.AvailableHandlerKeys.Count == 11, "registry_handler_count");
             Require(!new UserSettings().AiNativeEnabled, "feature_default_off");
             VerifyGoldenDigest(now);
             VerifyCalendarIdempotencyEquivalence(now);
@@ -81,6 +82,8 @@ internal sealed class CapabilityBrokerVerifier
             catch (CapabilityBrokerException ex) when (ex.Code == "CAPABILITY_RUNTIME_PROHIBITED")
             {
             }
+
+            await VerifyCalculatorAsync(broker, now);
 
             var principal = new CapabilityPrincipal("user-broker-fixture");
             var allPermissions = Permissions(principal, "calendar.events.read", "sticky.write", "timer.write");
@@ -354,6 +357,40 @@ internal sealed class CapabilityBrokerVerifier
                 Directory.Delete(root, recursive: true);
             }
         }
+    }
+
+    private async Task VerifyCalculatorAsync(CapabilityBroker broker, DateTimeOffset now)
+    {
+        var principal = new CapabilityPrincipal("user-calculator-fixture");
+        var plan = new CapabilityExecutionPlan(
+            "calculator-pure-plan",
+            now,
+            CapabilityOrigin.Text,
+            principal,
+            null,
+            [new CapabilityPlanStep(
+                "evaluate",
+                CapabilityIds.CalculatorEvaluate,
+                CapabilityJson.From(new { expression = "8 / 4 + 1" }),
+                "calculator-pure-key-0001",
+                [])],
+            new HashSet<string>(StringComparer.Ordinal));
+        var permissions = Permissions(principal);
+        var preparation = broker.Prepare(plan, permissions, now);
+        Require(preparation.ApprovalRequest is null, "calculator_approval_not_required");
+        var receipt = await broker.ExecuteAsync(plan, permissions, null, now);
+        Require(receipt.Status == CapabilityReceiptStatus.Succeeded, "calculator_receipt_status");
+        Require(receipt.Steps.Count == 1, "calculator_receipt_count");
+        var output = receipt.Steps[0].Output;
+        Require(output is not null, "calculator_receipt_output");
+        if (output is { } value)
+        {
+            Require(value.GetProperty("normalizedExpression").GetString() == "8 / 4 + 1", "calculator_normalized");
+            Require(value.GetProperty("result").GetString() == "3", "calculator_result");
+        }
+        Require(receipt.Steps[0].Readback.Status == CapabilityReadbackStatus.Verified, "calculator_readback");
+        Require(receipt.Steps[0].Readback.Strategy == CapabilityReadbackStrategy.None, "calculator_readback_strategy");
+        Require(receipt.Steps[0].Readback.Observed is not null, "calculator_observed");
     }
 
     private void VerifyGoldenDigest(DateTimeOffset now)

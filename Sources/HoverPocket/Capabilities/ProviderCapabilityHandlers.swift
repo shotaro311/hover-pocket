@@ -519,6 +519,7 @@ enum ProviderCapabilityCompositionRoot {
             CalendarListCapabilityHandler(dataSource: calendarDataSource),
             CalendarGetCapabilityHandler(dataSource: calendarDataSource),
             CalendarCreateCapabilityHandler(dataSource: calendarDataSource),
+            CalculatorEvaluateCapabilityHandler(),
             TimerCapabilityHandler(operation: .start, store: .shared),
             TimerCapabilityHandler(operation: .get, store: .shared),
             TimerCapabilityHandler(operation: .pause, store: .shared),

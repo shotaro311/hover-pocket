@@ -2,8 +2,15 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: an2-registry-broker; implementation-complete; local-pass; security-pass; ci-pass; pro-critic-blocked-no-artifact; pr-ready
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pro-pending; capability-expansion-calculator-local-pass
 ---
+
+## 2026-08-15 AI-native Built-in Capability Expansion
+
+- AN2 merge後のexact `main` `014032d`から隔離worktreeとbranch `codex/ai-native-capability-expansion`を作成し、最初のExpansion単位としてCalculatorをpure local `calculator.expression.evaluate@1`へCapability化した。
+- macOS / WindowsのRegistry、Broker、runtime composition、単体 / Broker verifierへ同じID、schema、制限、決定論的な結果形式を追加した。任意コード評価は使わず、式長、値数、桁数、演算子、overflow、除算ゼロをfail closedで制限する。
+- macOSでSwift warnings-as-errors build、Capability 11 handler、Broker 12 descriptor / 11 handler、Calculator、Timer、Clipboard、Panel layout 112件、Media、Pocket contract 12 schema / 52 fixture、`git diff --check`が成功した。
+- Windows Release / verifierはbranch push後のGitHub Actionsで確認する。既存Calculator UIのBroker移行と、Expansion trackの残りは後続単位である。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-capability-expansion.md`。
 
 ## 2026-08-15 AI-native AN2 Registry / Broker / Text Today Focus
 

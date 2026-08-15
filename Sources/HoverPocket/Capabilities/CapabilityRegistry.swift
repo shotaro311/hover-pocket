@@ -1,6 +1,7 @@
 import Foundation
 
 enum PocketCapabilityKeys {
+    static let calculatorEvaluate = PocketCapabilityKey(id: "calculator.expression.evaluate", version: 1)
     static let calendarList = PocketCapabilityKey(id: "calendar.events.list", version: 1)
     static let calendarGet = PocketCapabilityKey(id: "calendar.event.get", version: 1)
     static let calendarCreate = PocketCapabilityKey(id: "calendar.event.create", version: 1)
@@ -146,6 +147,18 @@ enum PocketCapabilityDescriptors {
     )
 
     static let builtIn: [PocketCapabilityDescriptor] = [
+        descriptor(
+            PocketCapabilityKeys.calculatorEvaluate,
+            effect: .pure,
+            permissions: [],
+            approval: .none,
+            idempotency: .notApplicable,
+            limits: CapabilityLimits(timeoutMilliseconds: 1_000, maximumPayloadBytes: 1_024, maximumCallsPerMinute: 600),
+            readback: CapabilityReadbackPolicy(strategy: .none, query: nil, matchFields: ["normalizedExpression", "result"]),
+            rollback: false,
+            input: CapabilitySchemaValidation.calculatorInput,
+            output: CapabilitySchemaValidation.calculatorOutput
+        ),
         descriptor(
             PocketCapabilityKeys.calendarCreate,
             effect: .externalWrite,
@@ -345,6 +358,23 @@ enum CapabilitySchemaValidation {
         let timezone = try string(object, "timezone", minimum: 1, maximum: 64)
         guard TimeZone(identifier: timezone) != nil else {
             throw CapabilityBrokerError.invalidPlan("schema_timezone")
+        }
+    }
+
+    static func calculatorInput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["expression"])
+        _ = try string(object, "expression", minimum: 1, maximum: 256)
+    }
+
+    static func calculatorOutput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["normalizedExpression", "result"])
+        _ = try string(object, "normalizedExpression", minimum: 1, maximum: 512)
+        let result = try string(object, "result", minimum: 1, maximum: 32)
+        guard result.range(
+            of: "^-?(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{1,12})?$",
+            options: .regularExpression
+        ) != nil else {
+            throw CapabilityBrokerError.invalidPlan("schema_result")
         }
     }
 

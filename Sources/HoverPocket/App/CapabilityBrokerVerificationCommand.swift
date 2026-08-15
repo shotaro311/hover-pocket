@@ -10,8 +10,9 @@ enum CapabilityBrokerVerificationCommand {
             do {
                 try await verify()
                 print("broker_verify=ok")
-                print("broker_registry_descriptors=11")
-                print("broker_available_handlers=10")
+                print("broker_registry_descriptors=12")
+                print("broker_available_handlers=11")
+                print("broker_calculator_evaluate=ok")
                 print("broker_today_focus=ok")
                 print("broker_concurrent_duplicate=ok")
                 print("broker_negative_cases=10")
@@ -66,8 +67,8 @@ enum CapabilityBrokerVerificationCommand {
             auditLog: audit
         )
 
-        try require(registry.descriptorKeys.count == 11, "registry_descriptor_count")
-        try require(registry.availableHandlerKeys.count == 10, "registry_handler_count")
+        try require(registry.descriptorKeys.count == 12, "registry_descriptor_count")
+        try require(registry.availableHandlerKeys.count == 11, "registry_handler_count")
         try verifyGoldenDigest(now: now)
         try verifyCalendarCreateEventBody(now: now)
         try verifyCalendarIdempotencyEquivalence(now: now)
@@ -76,6 +77,8 @@ enum CapabilityBrokerVerificationCommand {
             throw BrokerVerificationFailure("native_authority_resolved")
         } catch CapabilityBrokerError.runtimeProhibited {
         }
+
+        try await verifyCalculator(broker: broker, now: now)
 
         let invalidArgumentsPlan = CapabilityExecutionPlan(
             id: "invalid-extra-argument-plan",
@@ -458,6 +461,44 @@ enum CapabilityBrokerVerificationCommand {
         try await verifyTimeout(root: root, now: now, principal: principal)
     }
 
+    @MainActor
+    private static func verifyCalculator(broker: CapabilityBroker, now: Date) async throws {
+        let principal = CapabilityPrincipal(userID: "user-calculator-fixture")
+        let plan = CapabilityExecutionPlan(
+            id: "calculator-pure-plan",
+            createdAt: now,
+            origin: .text,
+            principal: principal,
+            appContext: nil,
+            steps: [CapabilityPlanStep(
+                id: "evaluate",
+                capability: PocketCapabilityKeys.calculatorEvaluate,
+                arguments: ["expression": .string("8 / 4 + 1")],
+                idempotencyKey: "calculator-pure-key-0001",
+                dependencies: []
+            )],
+            requiredPermissions: []
+        )
+        let permissions = CapabilityPermissionSet(principal: principal, permissions: [])
+        let preparation = try broker.prepare(plan, permissions: permissions, now: now)
+        try require(preparation.approvalRequest == nil, "calculator_approval_not_required")
+        let receipt = try await broker.execute(
+            plan,
+            permissions: permissions,
+            approvalGrant: nil,
+            now: now
+        )
+        try require(receipt.status == .succeeded, "calculator_receipt_status")
+        try require(receipt.steps.count == 1, "calculator_receipt_count")
+        try require(receipt.steps[0].output == [
+            "normalizedExpression": .string("8 / 4 + 1"),
+            "result": .string("3")
+        ], "calculator_receipt_output")
+        try require(receipt.steps[0].readback.status == .verified, "calculator_readback")
+        try require(receipt.steps[0].readback.strategy == .none, "calculator_readback_strategy")
+        try require(receipt.steps[0].readback.observed == receipt.steps[0].output, "calculator_observed")
+    }
+
     private static func verifyCalendarCreateEventBody(now: Date) throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -816,6 +857,7 @@ enum CapabilityBrokerVerificationCommand {
             CalendarListCapabilityHandler(dataSource: calendar),
             CalendarGetCapabilityHandler(dataSource: calendar),
             CalendarCreateCapabilityHandler(dataSource: calendar),
+            CalculatorEvaluateCapabilityHandler(),
             TimerCapabilityHandler(operation: .start, store: timerStore),
             TimerCapabilityHandler(operation: .get, store: timerStore),
             TimerCapabilityHandler(operation: .pause, store: timerStore),

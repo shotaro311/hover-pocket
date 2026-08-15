@@ -8,6 +8,7 @@ namespace HoverPocket.Shell.Capabilities;
 
 internal static class CapabilityIds
 {
+    public static readonly PocketCapabilityKey CalculatorEvaluate = new("calculator.expression.evaluate", 1);
     public static readonly PocketCapabilityKey CalendarList = new("calendar.events.list", 1);
     public static readonly PocketCapabilityKey CalendarGet = new("calendar.event.get", 1);
     public static readonly PocketCapabilityKey CalendarCreate = new("calendar.event.create", 1);
@@ -534,6 +535,7 @@ internal static class ProviderCapabilityCompositionRoot
             new CalendarListCapabilityHandler(calendarDataSource),
             new CalendarGetCapabilityHandler(calendarDataSource),
             new CalendarCreateCapabilityHandler(calendarDataSource),
+            new CalculatorEvaluateCapabilityHandler(),
             new TimerCapabilityHandler(TimerCapabilityOperation.Start, timerStore),
             new TimerCapabilityHandler(TimerCapabilityOperation.Get, timerStore),
             new TimerCapabilityHandler(TimerCapabilityOperation.Pause, timerStore),
