@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using HoverPocket.Shell.Capabilities;
@@ -94,7 +95,7 @@ internal sealed class PocketAppLifecycleException(string code) : Exception(code)
     public string Code { get; } = code;
 }
 
-internal sealed class PocketAppLifecycleManager
+internal sealed class PocketAppLifecycleManager : IDisposable
 {
     private sealed record ActiveRecord(
         int RecordVersion,
@@ -127,6 +128,7 @@ internal sealed class PocketAppLifecycleManager
     private readonly HashSet<string> _decidedRequests = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IssuedApproval> _grants = new(StringComparer.Ordinal);
     private readonly HashSet<string> _consumedGrants = new(StringComparer.Ordinal);
+    private bool _disposed;
 
     public PocketAppLifecycleManager(
         string rootDirectory,
@@ -159,6 +161,14 @@ internal sealed class PocketAppLifecycleManager
         {
             throw Failure("LIFECYCLE_STORAGE_FAILED");
         }
+    }
+
+    ~PocketAppLifecycleManager() => Dispose(disposing: false);
+
+    public void Dispose()
+    {
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
     }
 
     public PocketAppLifecycleProposal Stage(string draftDirectory, DateTimeOffset? now = null) =>
@@ -296,21 +306,7 @@ internal sealed class PocketAppLifecycleManager
         {
             throw Failure("LIFECYCLE_APPROVAL_INVALID");
         }
-        _pendingApprovals.Remove(requestId);
-        _decidedRequests.Remove(requestId);
-        if (pending.DisposableStaging)
-        {
-            try
-            {
-                var parent = Directory.GetParent(pending.StagingDirectory)?.FullName;
-                if (parent is not null)
-                {
-                    LiveStagingDirectories.Remove(Path.GetFullPath(parent));
-                    if (Directory.Exists(parent)) { Directory.Delete(parent, true); }
-                }
-            }
-            catch { }
-        }
+        DiscardPendingApproval(requestId, pending);
     }
 
     public PocketAppLifecycleReceipt Install(
@@ -628,7 +624,7 @@ internal sealed class PocketAppLifecycleManager
             throw Failure("LIFECYCLE_APPROVAL_INVALID");
         }
         if (approvalGrant is null) { throw Failure("LIFECYCLE_APPROVAL_REQUIRED"); }
-        Consume(approvalGrant, proposal.BindingDigest, now);
+        Consume(approvalGrant, proposal.RequestId, proposal.BindingDigest, now);
 
         string targetDirectory;
         if (proposal.Action == PocketAppLifecycleAction.Rollback)
@@ -847,13 +843,20 @@ internal sealed class PocketAppLifecycleManager
         }
     }
 
-    private void Consume(PocketAppLifecycleApprovalGrant grant, string bindingDigest, DateTimeOffset now)
+    private void Consume(
+        PocketAppLifecycleApprovalGrant grant,
+        string requestId,
+        string bindingDigest,
+        DateTimeOffset now)
     {
         if (_consumedGrants.Contains(grant.Token)) { throw Failure("LIFECYCLE_APPROVAL_REPLAYED"); }
-        if (!_grants.Remove(grant.Token, out var issued) || issued.BindingDigest != bindingDigest)
+        if (!_grants.TryGetValue(grant.Token, out var issued)
+            || issued.RequestId != requestId
+            || issued.BindingDigest != bindingDigest)
         {
             throw Failure("LIFECYCLE_APPROVAL_INVALID");
         }
+        _grants.Remove(grant.Token);
         _consumedGrants.Add(grant.Token);
         if (now > issued.ExpiresAt) { throw Failure("LIFECYCLE_APPROVAL_EXPIRED"); }
     }
@@ -993,13 +996,12 @@ internal sealed class PocketAppLifecycleManager
                 stream.Write(data);
                 stream.Flush(true);
             }
-            if (File.Exists(target))
+            if (!MoveFileEx(
+                    temporary,
+                    target,
+                    MoveFileFlags.ReplaceExisting | MoveFileFlags.WriteThrough))
             {
-                File.Replace(temporary, target, null, true);
-            }
-            else
-            {
-                File.Move(temporary, target);
+                throw new IOException($"MoveFileEx failed: {Marshal.GetLastWin32Error()}");
             }
         }
         catch
@@ -1206,6 +1208,7 @@ internal sealed class PocketAppLifecycleManager
     {
         lock (LifecycleGate)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             return operation();
         }
     }
@@ -1214,9 +1217,48 @@ internal sealed class PocketAppLifecycleManager
     {
         lock (LifecycleGate)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             operation();
         }
     }
+
+    private void Dispose(bool disposing)
+    {
+        lock (LifecycleGate)
+        {
+            if (_disposed) { return; }
+            foreach (var pending in _pendingApprovals.Values.Where(item => item.DisposableStaging))
+            {
+                try
+                {
+                    var stagingParent = Directory.GetParent(pending.StagingDirectory)?.FullName;
+                    if (stagingParent is null) { continue; }
+                    LiveStagingDirectories.Remove(Path.GetFullPath(stagingParent));
+                    if (Directory.Exists(stagingParent)) { Directory.Delete(stagingParent, true); }
+                }
+                catch { }
+            }
+            _pendingApprovals.Clear();
+            _decidedRequests.Clear();
+            _grants.Clear();
+            _consumedGrants.Clear();
+            _disposed = true;
+        }
+    }
+
+    [Flags]
+    private enum MoveFileFlags : uint
+    {
+        ReplaceExisting = 0x1,
+        WriteThrough = 0x8
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool MoveFileEx(
+        string existingFileName,
+        string newFileName,
+        MoveFileFlags flags);
 
     private string StagingRoot => Path.Combine(_rootDirectory, "Staging");
     private string AppsRoot => Path.Combine(_rootDirectory, "Apps");

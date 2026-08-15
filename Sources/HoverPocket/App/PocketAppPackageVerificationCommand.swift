@@ -170,6 +170,7 @@ enum PocketAppPackageVerificationCommand {
         require((try? PocketStableKey.validate(valid)) == valid, "stable_key_valid", failures: &failures)
         let invalid = [
             "today-focus:bad\nkey",
+            "today-focus:key\n",
             "today-focus:bad\u{202E}key",
             "today-focus:bad\u{0007}key",
             "today-focus:" + String(repeating: "a", count: 90),
@@ -276,8 +277,19 @@ enum PocketAppPackageVerificationCommand {
                     failures.append("lifecycle_permission_increase_accepted")
                 } catch PocketAppLifecycleError.approvalRequired {
                 }
+                let duplicateProposal = try manager.stage(draftDirectory: draftRoot, now: now)
+                require(
+                    duplicateProposal.bindingDigest == proposal.bindingDigest,
+                    "lifecycle_duplicate_binding_fixture",
+                    failures: &failures
+                )
                 try Data("draft changed after staging".utf8).write(to: draftRoot.appendingPathComponent("intent.md"), options: .atomic)
                 let grant = try manager.approve(requestID: proposal.requestID, bindingDigest: proposal.bindingDigest, now: now)
+                do {
+                    _ = try manager.install(duplicateProposal, approvalGrant: grant, now: now)
+                    failures.append("lifecycle_cross_request_grant_accepted")
+                } catch PocketAppLifecycleError.approvalInvalid {
+                }
                 var tamperedBytes = proposal.previews[0].canonicalRenderModel
                 tamperedBytes[0] ^= 0xff
                 let tamperedProposal = PocketAppLifecycleProposal(
@@ -311,6 +323,10 @@ enum PocketAppPackageVerificationCommand {
                 } catch PocketAppLifecycleError.packageChanged {
                 }
                 let installed = try manager.install(proposal, approvalGrant: grant, now: now)
+                try manager.reject(
+                    requestID: duplicateProposal.requestID,
+                    bindingDigest: duplicateProposal.bindingDigest
+                )
                 require(try installed.readbackVerified && manager.activePackage(packageID: proposal.packageID)?.manifestDigest == proposal.packageDigest, "lifecycle_install_readback", failures: &failures)
                 try Data(contentsOf: fixtureURL("package/intent.md")).write(to: draftRoot.appendingPathComponent("intent.md"), options: .atomic)
 
@@ -486,6 +502,31 @@ enum PocketAppPackageVerificationCommand {
                     failures: &failures
                 )
                 try manager.reject(requestID: replacement.requestID, bindingDigest: replacement.bindingDigest)
+
+                let abandonedRoot = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("hover-pocket-lifecycle-abandoned-\(UUID().uuidString)", isDirectory: true)
+                let abandonedDataRoot = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("hover-pocket-lifecycle-abandoned-data-\(UUID().uuidString)", isDirectory: true)
+                defer {
+                    makeTreeMutable(abandonedRoot)
+                    try? FileManager.default.removeItem(at: abandonedRoot)
+                    try? FileManager.default.removeItem(at: abandonedDataRoot)
+                }
+                let abandonedParent = try {
+                    let abandonedManager = try PocketAppLifecycleManager(
+                        rootDirectory: abandonedRoot,
+                        userDataRoot: abandonedDataRoot
+                    )
+                    return try abandonedManager.stage(draftDirectory: draftRoot, now: now)
+                        .stagingDirectory
+                        .deletingLastPathComponent()
+                }()
+                _ = try PocketAppLifecycleManager(rootDirectory: abandonedRoot, userDataRoot: abandonedDataRoot)
+                require(
+                    !FileManager.default.fileExists(atPath: abandonedParent.path),
+                    "lifecycle_abandoned_manager_cleans_staging",
+                    failures: &failures
+                )
 
                 let changed = try manager.stage(draftDirectory: draftRoot, now: now)
                 let changedGrant = try manager.approve(requestID: changed.requestID, bindingDigest: changed.bindingDigest, now: now)

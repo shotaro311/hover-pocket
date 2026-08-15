@@ -7,10 +7,10 @@ internal static partial class PocketStableKey
 {
     public const int MaximumScalars = 96;
 
-    [GeneratedRegex("^[a-z][a-z0-9-]{0,31}$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("\\A[a-z][a-z0-9-]{0,31}\\z", RegexOptions.CultureInvariant)]
     private static partial Regex NamespacePattern();
 
-    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("\\A[A-Za-z0-9][A-Za-z0-9._-]{0,62}\\z", RegexOptions.CultureInvariant)]
     private static partial Regex KeyPattern();
 
     public static string Validate(string value)

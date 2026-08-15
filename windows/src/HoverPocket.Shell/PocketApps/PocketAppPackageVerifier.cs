@@ -153,6 +153,7 @@ internal sealed class PocketAppPackageVerifier
         var invalid = new[]
         {
             "today-focus:bad\nkey",
+            "today-focus:key\n",
             "today-focus:bad\u202ekey",
             "today-focus:bad\u0007key",
             "today-focus:" + new string('a', 90),
@@ -259,8 +260,20 @@ internal sealed class PocketAppPackageVerifier
                 catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_APPROVAL_REQUIRED")
                 {
                 }
+                var duplicateProposal = manager.Stage(draftRoot, now);
+                Require(
+                    duplicateProposal.BindingDigest == proposal.BindingDigest,
+                    "lifecycle_duplicate_binding_fixture");
                 File.WriteAllText(Path.Combine(draftRoot, "intent.md"), "draft changed after staging", new UTF8Encoding(false));
                 var grant = manager.Approve(proposal.RequestId, proposal.BindingDigest, now);
+                try
+                {
+                    _ = manager.Install(duplicateProposal, grant, now);
+                    _failures.Add("lifecycle_cross_request_grant_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_APPROVAL_INVALID")
+                {
+                }
                 var previewBytes = proposal.Previews[0].CanonicalRenderModel;
                 previewBytes[0] ^= 0xff;
                 var tamperedPreview = new PocketAppPreviewSurface(
@@ -276,6 +289,7 @@ internal sealed class PocketAppPackageVerifier
                 {
                 }
                 var installed = manager.Install(proposal, grant, now);
+                manager.Reject(duplicateProposal.RequestId, duplicateProposal.BindingDigest);
                 Require(installed.ReadbackVerified && manager.ActivePackage(proposal.PackageId)?.ManifestDigest == proposal.PackageDigest, "lifecycle_install_readback");
                 File.WriteAllBytes(Path.Combine(draftRoot, "intent.md"), FixtureData("package/intent.md"));
 
@@ -427,6 +441,26 @@ internal sealed class PocketAppPackageVerifier
                     Directory.Exists(replacement.StagingDirectory),
                     "lifecycle_second_manager_preserves_live_staging");
                 manager.Reject(replacement.RequestId, replacement.BindingDigest);
+
+                var abandonedRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-abandoned-{Guid.NewGuid():N}");
+                var abandonedDataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-abandoned-data-{Guid.NewGuid():N}");
+                try
+                {
+                    string abandonedParent;
+                    using (var abandonedManager = new PocketAppLifecycleManager(abandonedRoot, abandonedDataRoot))
+                    {
+                        var abandonedProposal = abandonedManager.Stage(draftRoot, now);
+                        abandonedParent = Directory.GetParent(abandonedProposal.StagingDirectory)!.FullName;
+                    }
+                    _ = new PocketAppLifecycleManager(abandonedRoot, abandonedDataRoot);
+                    Require(!Directory.Exists(abandonedParent), "lifecycle_abandoned_manager_cleans_staging");
+                }
+                finally
+                {
+                    PocketAppVerifierFileSystem.MakeTreeMutable(abandonedRoot);
+                    try { Directory.Delete(abandonedRoot, true); } catch { }
+                    try { Directory.Delete(abandonedDataRoot, true); } catch { }
+                }
 
                 var changed = manager.Stage(draftRoot, now);
                 var changedGrant = manager.Approve(changed.RequestId, changed.BindingDigest, now);
