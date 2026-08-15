@@ -7,11 +7,11 @@ PR [#16](https://github.com/shotaro311/hover-pocket/pull/16)のPocket App lifecy
 ## 最終source
 
 - branch: `codex/ai-native-an5-generator-install`
-- source head: `c9496763765d4137f27302eb99cf350c4286153d`
-- Windows verify: [31897102514](https://github.com/shotaro311/hover-pocket/actions/runs/31897102514) 成功
-- macOS verify: [31897102528](https://github.com/shotaro311/hover-pocket/actions/runs/31897102528) 成功
-- Pocket contracts: [31897102509](https://github.com/shotaro311/hover-pocket/actions/runs/31897102509) でUbuntu / macOS / Windowsとcross-OS byte比較が成功
-- PR Router: [31897110408](https://github.com/shotaro311/hover-pocket/actions/runs/31897110408) 成功
+- source head: `a9fb8ed0bfd065d1a78d33a128dc14894718342d`
+- Windows verify: [31897975620](https://github.com/shotaro311/hover-pocket/actions/runs/31897975620) 成功
+- macOS verify: [31897975587](https://github.com/shotaro311/hover-pocket/actions/runs/31897975587) 成功
+- Pocket contracts: [31897975600](https://github.com/shotaro311/hover-pocket/actions/runs/31897975600) でUbuntu / macOS / Windowsとcross-OS byte比較が成功
+- PR Router: [31897982011](https://github.com/shotaro311/hover-pocket/actions/runs/31897982011) 成功
 - unresolved review threads: 0
 - merge state: `MERGEABLE / CLEAN`
 
@@ -28,6 +28,9 @@ PR [#16](https://github.com/shotaro311/hover-pocket/pull/16)のPocket App lifecy
 - manager破棄時にlive staging ownershipを解放し、pending stagingを削除する。
 - stable keyは両OSでtrue end-of-string anchorを使い、ASCII制御文字と末尾改行を拒否する。
 - 公開Capability descriptorも`$(?![\\s\\S])`で真の終端を要求し、末尾改行をschema段階で拒否するnegative fixtureを追加した。
+- macOSのimmutable snapshotは全regular file、深いdirectory、Versions / App / Apps / lifecycle rootをactive record確定前にfsyncする。`snapshot_sync`失敗時に旧active versionを保持する回帰testを追加した。
+- version保存先は両OSでUTF-8 byte列の可逆な16進keyを使う。case-insensitive filesystemでも`1.0.0-ALPHA`と`1.0.0-alpha`が共存し、それぞれへrollbackできる。
+- 承認待ちのdisposable staging snapshotは同一rootにつき最大4件とし、複数managerのprocess-wide registryで合算する。5件目はcopy前に拒否し、既存4 proposalは保持する回帰testを両OSへ追加した。
 
 ## ローカル検証
 
@@ -53,6 +56,8 @@ exact range `38aaf88212b8afe5405c877ed262eff27ab2a857...0289f152683bf2b8fee1ff33
 review follow-up range `16e7cda162653749c07c125f3e662477687f3153...88f41bd988b5dc2426afdf72fc9b48770f35db58`はscan `f62b2099-b34d-4ce9-8609-5f514aa90358`で5 / 5 file、最終stable key range `88f41bd988b5dc2426afdf72fc9b48770f35db58...3003bb908848cace06a06c3f08af47fd5eecf2a0`はscan `38a3798b-2171-4980-9db7-59492e69c7ff`で1 / 1 fileを完全レビューした。両scanともcoverage complete、reportable finding 0、sealed completeである。
 
 その後のPR reviewで、runtimeは末尾改行を拒否する一方、公開Capability descriptorの`$`だけが改行直前matchを許す不一致を検出した。`c949676`で真の終端確認と末尾改行negative fixtureを追加し、ローカル2回byte一致、3 OS契約CI、Windows / macOS本体CIで解消をreadbackした。
+
+snapshot durabilityとcase-insensitive version storageのexact range `c9496763765d4137f27302eb99cf350c4286153d...5f6a04f0b43f49fea047943261e4997c66824231`はscan `114557d4-7318-42cd-b744-c7cdc392025c`で4 / 4 fileを確認した。承認待ち上限のexact range `5f6a04f0b43f49fea047943261e4997c66824231...a9fb8ed0bfd065d1a78d33a128dc14894718342d`はscan `28517aef-7d8b-45a4-80d7-a97c92fd3834`で4 / 4 fileを確認した。両scanともcoverage complete、reportable finding 0、sealed completeである。
 
 ## 次
 
