@@ -8,7 +8,8 @@ enum CapabilityVerificationCommand {
             do {
                 try await verify()
                 print("capability_verify=ok")
-                print("capability_handlers=10")
+                print("capability_handlers=11")
+                print("capability_calculator_evaluate=ok")
                 print("capability_timer_lifecycle=ok")
                 print("capability_sticky_upsert=ok")
                 print("capability_calendar_readback=ok")
@@ -43,6 +44,7 @@ enum CapabilityVerificationCommand {
             CalendarListCapabilityHandler(dataSource: calendar),
             CalendarGetCapabilityHandler(dataSource: calendar),
             CalendarCreateCapabilityHandler(dataSource: calendar),
+            CalculatorEvaluateCapabilityHandler(),
             TimerCapabilityHandler(operation: .start, store: timerStore, idGenerator: { timerID }),
             TimerCapabilityHandler(operation: .get, store: timerStore),
             TimerCapabilityHandler(operation: .pause, store: timerStore),
@@ -52,9 +54,10 @@ enum CapabilityVerificationCommand {
             StickyCapabilityHandler(operation: .get, store: stickyStore)
         ])
 
-        guard handlers.keys.count == 10 else {
+        guard handlers.keys.count == 11 else {
             throw VerificationFailure("handler_count")
         }
+        try await verifyCalculator(handlers: handlers)
         try await verifyTimer(handlers: handlers, timerID: timerID)
         try await verifyTimerPersistenceFailure(root: root)
         try await verifySticky(handlers: handlers, noteID: noteID, root: stickyRoot)
@@ -67,6 +70,37 @@ enum CapabilityVerificationCommand {
             )
             throw VerificationFailure("unknown_capability_accepted")
         } catch CapabilityHandlerError.unknownCapability {
+        }
+    }
+
+    @MainActor
+    private static func verifyCalculator(handlers: PocketCapabilityHandlerSet) async throws {
+        let vectors: [(String, String, String)] = [
+            ("1 + 2 * 3", "1 + 2 * 3", "7"),
+            ("1 / 3", "1 / 3", "0.333333333333"),
+            ("-5 + 2.5", "-5 + 2.5", "-2.5"),
+            ("1,5 × 2", "1.5 * 2", "3")
+        ]
+        for (expression, normalized, result) in vectors {
+            let output = try await handlers.invoke(
+                PocketCapabilityKeys.calculatorEvaluate,
+                arguments: ["expression": .string(expression)]
+            )
+            try require(output == [
+                "normalizedExpression": .string(normalized),
+                "result": .string(result)
+            ], "calculator_\(expression)")
+        }
+
+        for invalid in ["1 / 0", "1 +", "2 ** 3", "999999999999999999 + 1"] {
+            do {
+                _ = try await handlers.invoke(
+                    PocketCapabilityKeys.calculatorEvaluate,
+                    arguments: ["expression": .string(invalid)]
+                )
+                throw VerificationFailure("calculator_invalid_accepted")
+            } catch CapabilityHandlerError.invalidArgument(let field) where field == "expression" {
+            }
         }
     }
 

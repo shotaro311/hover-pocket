@@ -99,6 +99,17 @@ internal static class PocketCapabilityDescriptors
     public static IReadOnlyList<PocketCapabilityDescriptor> BuiltIn { get; } = new[]
     {
         Descriptor(
+            CapabilityIds.CalculatorEvaluate,
+            CapabilityEffect.Pure,
+            [],
+            CapabilityApprovalPolicy.None,
+            CapabilityIdempotencyPolicy.NotApplicable,
+            new CapabilityLimits(1_000, 1_024, 600),
+            new CapabilityReadbackPolicy(CapabilityReadbackStrategy.None, null, ["normalizedExpression", "result"]),
+            false,
+            CapabilitySchemaValidation.CalculatorInput,
+            CapabilitySchemaValidation.CalculatorOutput),
+        Descriptor(
             CapabilityIds.CalendarCreate,
             CapabilityEffect.ExternalWrite,
             ["calendar.events.write"],
@@ -227,6 +238,9 @@ internal static class PocketCapabilityDescriptors
 
 internal static partial class CapabilitySchemaValidation
 {
+    private static readonly Regex CalculatorResultPattern = new(
+        "^-?(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{1,12})?$",
+        RegexOptions.CultureInvariant);
     private static readonly Regex TimeZonePattern = new(
         "^(?:UTC|Etc/UTC|[A-Za-z_]+(?:/[A-Za-z0-9._+-]+)+)$",
         RegexOptions.CultureInvariant);
@@ -323,6 +337,22 @@ internal static partial class CapabilitySchemaValidation
         if (!TimeZonePattern.IsMatch(timezone))
         {
             throw Invalid("timezone");
+        }
+    }
+
+    public static void CalculatorInput(JsonElement value)
+    {
+        ExactKeys(value, ["expression"]);
+        _ = String(value, "expression", 1, 256);
+    }
+
+    public static void CalculatorOutput(JsonElement value)
+    {
+        ExactKeys(value, ["normalizedExpression", "result"]);
+        _ = String(value, "normalizedExpression", 1, 512);
+        if (!CalculatorResultPattern.IsMatch(String(value, "result", 1, 32)))
+        {
+            throw Invalid("result");
         }
     }
 
