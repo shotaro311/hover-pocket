@@ -91,6 +91,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .appendingPathComponent("PocketApps", isDirectory: true)
                 .appendingPathComponent("local.example.today-focus", isDirectory: true)
             let package = try PocketAppPackageRuntime().load(directory: packageRoot)
+            let userStateStore = try PocketAppUserStateStore(
+                packageID: package.manifest.id,
+                allowedKeys: package.statePropertyNames,
+                rootDirectory: applicationSupport
+                    .appendingPathComponent("HoverPocket", isDirectory: true)
+                    .appendingPathComponent("PocketApps", isDirectory: true)
+                    .appendingPathComponent("UserData", isDirectory: true)
+            )
             let pocketAppRuntime = PocketAppExecutionRuntime(
                 package: package,
                 broker: broker,
@@ -101,7 +109,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     "sticky.write",
                     "timer.read",
                     "timer.write"
-                ]
+                ],
+                userStateStore: userStateStore
             )
             AINativeRuntime.shared.configure(
                 adapter: TodayFocusTextAdapter(broker: broker),

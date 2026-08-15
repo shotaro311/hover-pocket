@@ -35,7 +35,9 @@ internal sealed class PocketAppHostController
             version = _runtime.Package.Manifest.Version,
             manifestDigest = _runtime.Package.ManifestDigest,
             surfaceId,
-            renderModel = document.RootElement.Clone()
+            renderModel = document.RootElement.Clone(),
+            initialState = _runtime.UserStateStore?.Snapshot()
+                ?? new Dictionary<string, string>(StringComparer.Ordinal)
         };
     }
 
@@ -65,6 +67,7 @@ internal sealed class PocketAppHostController
     {
         dispatcher.Register("pocketApp.load", LoadAsync);
         dispatcher.Register("pocketApp.invokeWorkflow", InvokeWorkflowAsync);
+        dispatcher.Register("pocketApp.updateState", UpdateStateAsync);
     }
 
     private async Task<object?> LoadAsync(JsonElement? parameters, CancellationToken cancellationToken)
@@ -172,6 +175,41 @@ internal sealed class PocketAppHostController
             readbackVerified = receipt.Steps.All(step => step.Readback.Status == CapabilityReadbackStatus.Verified),
             capabilities = receipt.Steps.Select(step => step.Capability.Id).ToArray()
         };
+    }
+
+    private Task<object?> UpdateStateAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureApp(parameters);
+        var key = RequiredString(parameters, "key", 128);
+        if (parameters is null
+            || !parameters.Value.TryGetProperty("value", out var rawValue)
+            || rawValue.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
+        {
+            throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "state_value");
+        }
+        var value = rawValue.ValueKind == JsonValueKind.Null ? null : rawValue.GetString();
+        if (key == "selectedEventRef" && value is not null)
+        {
+            lock (_eventRefSync)
+            {
+                if (!_allowedEventRefs.Contains(value))
+                {
+                    throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "selected_event_ref");
+                }
+            }
+        }
+        var store = _runtime.UserStateStore
+            ?? throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "pocket_state");
+        try
+        {
+            store.SetString(key, value);
+        }
+        catch (PocketAppUserStateStoreException)
+        {
+            throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "pocket_state");
+        }
+        return Task.FromResult<object?>(new { saved = true });
     }
 
     private void EnsureApp(JsonElement? parameters)

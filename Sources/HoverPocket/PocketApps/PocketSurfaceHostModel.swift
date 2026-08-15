@@ -32,6 +32,9 @@ final class PocketSurfaceHostModel: ObservableObject {
         self.runtime = runtime
         self.surface = surface
         self.packageName = runtime.package.manifest.name
+        if let userStateStore = runtime.userStateStore {
+            self.state = userStateStore.snapshot().mapValues(CapabilityValue.string)
+        }
         applyDefaults(in: surface.root)
     }
 
@@ -51,10 +54,11 @@ final class PocketSurfaceHostModel: ObservableObject {
                 )
                 let choices = Self.makeChoices(output)
                 choicesByQuery[query.reference] = choices
-                if let first = choices.first {
-                    set(.string(first.id), for: query.selection)
+                let persistedID = stringValue(for: query.selection)
+                if let selected = choices.first(where: { $0.id == persistedID }) ?? choices.first {
+                    set(.string(selected.id), for: query.selection)
                     if let titleTarget = query.titleTarget {
-                        set(.string(Self.sanitizeVisibleText(first.title)), for: titleTarget)
+                        set(.string(Self.sanitizeVisibleText(selected.title)), for: titleTarget)
                     }
                 }
             }
@@ -96,9 +100,9 @@ final class PocketSurfaceHostModel: ObservableObject {
     }
 
     func selectChoice(_ id: String, query: String, selection: String, titleTarget: String?) {
+        guard let choice = choicesByQuery[query]?.first(where: { $0.id == id }) else { return }
         set(.string(id), for: selection)
-        guard let titleTarget,
-              let choice = choicesByQuery[query]?.first(where: { $0.id == id }) else { return }
+        guard let titleTarget else { return }
         set(.string(Self.sanitizeVisibleText(choice.title)), for: titleTarget)
     }
 
@@ -183,6 +187,19 @@ final class PocketSurfaceHostModel: ObservableObject {
         } else if binding.hasPrefix("$state.") {
             let name = String(binding.dropFirst("$state.".count))
             state[name] = value
+            if case .string(let persisted) = value {
+                do {
+                    try runtime.userStateStore?.setString(persisted, for: name)
+                } catch {
+                    statusText = "保存状態を更新できませんでした。"
+                }
+            } else if value == .null {
+                do {
+                    try runtime.userStateStore?.setString(nil, for: name)
+                } catch {
+                    statusText = "保存状態を更新できませんでした。"
+                }
+            }
             if runtime.package.workflows.values.contains(where: { $0.inputs[name] != nil }) {
                 inputs[name] = value
             }

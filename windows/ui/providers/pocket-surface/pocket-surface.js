@@ -18,6 +18,7 @@ export function renderPocketSurfaceProvider(context) {
   const state = new Map();
   const queryResults = new Map();
   let disposed = false;
+  initializeState(surface.initialState, state);
   initializeDefaults(surface.renderModel.root, inputs, state);
   draw();
   void load();
@@ -33,8 +34,11 @@ export function renderPocketSurfaceProvider(context) {
       for (const result of payload.queryResults ?? []) {
         queryResults.set(result.query, result.output);
       }
-      initializeQuerySelections(surface.renderModel.root, inputs, state, queryResults);
+      const stateUpdates = initializeQuerySelections(surface.renderModel.root, inputs, state, queryResults);
       draw();
+      for (const update of stateUpdates) {
+        await persistState(update.binding, update.value);
+      }
     } catch {
       setHostStatus("今日の予定を読み込めませんでした。", "error");
     }
@@ -140,7 +144,7 @@ export function renderPocketSurfaceProvider(context) {
       case "picker":
         return pickerNode(node, inputs, state);
       case "calendarEventPicker":
-        return calendarPickerNode(node, inputs, state, queryResults, refreshButtons);
+        return calendarPickerNode(node, inputs, state, queryResults, refreshButtons, persistState);
       case "durationPicker":
         return durationNode(node, inputs, state);
       case "status":
@@ -174,12 +178,32 @@ export function renderPocketSurfaceProvider(context) {
     element.textContent = sanitizeVisibleText(text);
   }
 
+  async function persistState(binding, value) {
+    try {
+      await context.request("pocketApp.updateState", {
+        appId: surface.appId,
+        key: bindingName(binding),
+        value,
+      });
+      return true;
+    } catch {
+      setHostStatus("選択を保存できませんでした。", "error");
+      return false;
+    }
+  }
+
   return {
     refresh: load,
     dispose() {
       disposed = true;
     },
   };
+}
+
+function initializeState(initialState, state) {
+  for (const [key, value] of Object.entries(initialState ?? {})) {
+    if (typeof value === "string" && key) state.set(key, value);
+  }
 }
 
 function initializeDefaults(node, inputs, state) {
@@ -194,19 +218,25 @@ function initializeDefaults(node, inputs, state) {
 }
 
 function initializeQuerySelections(node, inputs, state, queryResults) {
+  const updates = [];
   if (node.type === "calendarEventPicker") {
     const events = queryResults.get(node.items?.query)?.events ?? [];
-    const first = events[0];
-    if (first) {
-      setBinding(node.selection, first.eventRef, inputs, state);
-      inputs.set(bindingName(node.selection), first.eventRef);
-      if (node.titleTarget) setBinding(node.titleTarget, sanitizeVisibleText(first.safeTitle ?? ""), inputs, state);
+    const persisted = stringValue(valueFor(node.selection, inputs, state));
+    const selected = events.find((event) => event.eventRef === persisted) ?? events[0];
+    if (selected) {
+      setBinding(node.selection, selected.eventRef, inputs, state);
+      inputs.set(bindingName(node.selection), selected.eventRef);
+      if (persisted !== selected.eventRef) updates.push({ binding: node.selection, value: selected.eventRef });
+      if (node.titleTarget) setBinding(node.titleTarget, sanitizeVisibleText(selected.safeTitle ?? ""), inputs, state);
     }
   }
-  for (const child of node.children ?? []) initializeQuerySelections(child, inputs, state, queryResults);
+  for (const child of node.children ?? []) {
+    updates.push(...initializeQuerySelections(child, inputs, state, queryResults));
+  }
+  return updates;
 }
 
-function calendarPickerNode(node, inputs, state, queryResults, onChange) {
+function calendarPickerNode(node, inputs, state, queryResults, onChange, persistState) {
   const field = document.createElement("label");
   field.className = "hp-pocket-calendar-field";
   const label = document.createElement("span");
@@ -228,7 +258,7 @@ function calendarPickerNode(node, inputs, state, queryResults, onChange) {
       select.append(option);
     }
     select.value = stringValue(valueFor(node.selection, inputs, state));
-    select.addEventListener("change", () => {
+    select.addEventListener("change", async () => {
       setBinding(node.selection, select.value, inputs, state);
       inputs.set(bindingName(node.selection), select.value);
       const selected = events.find((event) => event.eventRef === select.value);
@@ -239,6 +269,7 @@ function calendarPickerNode(node, inputs, state, queryResults, onChange) {
         if (purpose) purpose.value = stringValue(valueFor(node.titleTarget, inputs, state));
       }
       onChange();
+      await persistState(node.selection, select.value);
     });
   }
   field.append(label, select);
@@ -367,12 +398,17 @@ export async function runPocketSurfaceUiVerify() {
       },
     },
   };
+  let statePersisted = false;
   renderPocketSurfaceProvider({
     container: host,
     state: { pocketSurface: model },
-    request: async (method) => {
+    request: async (method, params) => {
       if (method === "pocketApp.load") {
         return { queryResults: [{ query: "calendar.events.list@1", output: { events: [{ eventRef: "event:1", safeTitle: "Focus", start: "2026-08-15T01:00:00Z", end: "2026-08-15T02:00:00Z" }] } }] };
+      }
+      if (method === "pocketApp.updateState") {
+        statePersisted = params?.key === "selectedEventRef" && params?.value === "event:1";
+        return { saved: true };
       }
       throw new Error("unexpected_method");
     },
@@ -383,6 +419,7 @@ export async function runPocketSurfaceUiVerify() {
     selection: host.querySelector("select")?.value === "event:1",
     duration: host.querySelector(".hp-pocket-duration input")?.value === "1500",
     purpose: host.querySelector(".hp-pocket-field input")?.value === "Focus",
+    statePersisted,
     approvalHostOwned: !host.querySelector("[data-approval], .hp-pocket-approval"),
   };
   host.remove();

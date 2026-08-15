@@ -518,17 +518,39 @@ enum CapabilityBrokerVerificationCommand {
             ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
             auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
         )
+        let stateRoot = root.appendingPathComponent("pocket-app-user-state", isDirectory: true)
+        let userStateStore = try PocketAppUserStateStore(
+            packageID: package.manifest.id,
+            allowedKeys: package.statePropertyNames,
+            rootDirectory: stateRoot
+        )
         let runtime = PocketAppExecutionRuntime(
             package: package,
             broker: broker,
             userID: "pocket-app-user",
             grantedPermissions: ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"],
-            timeZone: TimeZone(identifier: "Asia/Tokyo")!
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!,
+            userStateStore: userStateStore
         )
         let hostModel = try PocketSurfaceHostModel(runtime: runtime, surfaceID: "main")
         try require(hostModel.integerValue(for: "$input.durationSeconds") == 1_500, "pocket_app_surface_default")
         await hostModel.load(now: now)
-        try require(!hostModel.stringValue(for: "$state.selectedEventRef").isEmpty, "pocket_app_surface_selection")
+        let selectedEventRef = hostModel.stringValue(for: "$state.selectedEventRef")
+        try require(!selectedEventRef.isEmpty, "pocket_app_surface_selection")
+        let reloadedStateStore = try PocketAppUserStateStore(
+            packageID: package.manifest.id,
+            allowedKeys: package.statePropertyNames,
+            rootDirectory: stateRoot
+        )
+        try require(
+            reloadedStateStore.snapshot()["selectedEventRef"] == selectedEventRef,
+            "pocket_app_surface_state_persistence"
+        )
+        do {
+            try reloadedStateStore.setString("forbidden", for: "unknown")
+            throw BrokerVerificationFailure("pocket_app_unknown_state_key_accepted")
+        } catch PocketAppUserStateStoreError.invalidKey {
+        }
         try require(!hostModel.stringValue(for: "$input.purpose").isEmpty, "pocket_app_surface_title_target")
         hostModel.updateString("safe\ntext\u{202E}", binding: "$input.purpose", maximumLength: 80)
         try require(hostModel.stringValue(for: "$input.purpose") == "safe text", "pocket_app_surface_sanitize")

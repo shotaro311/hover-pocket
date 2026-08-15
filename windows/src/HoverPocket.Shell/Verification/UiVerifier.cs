@@ -160,9 +160,10 @@ internal sealed class UiVerifier
                 if (!result.PocketSurfaceRenderedOk
                     || !result.PocketSurfaceSelectionOk
                     || !result.PocketSurfaceDurationOk
-                    || !result.PocketSurfacePurposeOk)
+                    || !result.PocketSurfacePurposeOk
+                    || !result.PocketSurfaceStatePersistedOk)
                 {
-                    _failures.Add("pocket surface: declarative Today Focus controls did not render from the canonical model");
+                    _failures.Add("pocket surface: declarative Today Focus controls or separated user state did not match the canonical model");
                 }
 
                 if (!result.PocketSurfaceApprovalHostOwnedOk)

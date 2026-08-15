@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Providers.Calendar;
@@ -442,6 +443,11 @@ internal sealed class CapabilityBrokerVerifier
             TimeSpan.FromHours(9),
             "JST",
             "JST");
+        var stateRoot = Path.Combine(root, "pocket-app-user-state");
+        var userStateStore = new PocketAppUserStateStore(
+            package.Manifest.Id,
+            package.StatePropertyNames,
+            stateRoot);
         var runtime = new PocketAppExecutionRuntime(
             package,
             broker,
@@ -449,9 +455,10 @@ internal sealed class CapabilityBrokerVerifier
             new HashSet<string>(
                 ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"],
                 StringComparer.Ordinal),
-            timeZone);
-        var managerState = JsonSerializer.SerializeToElement(
-            new PocketAppHostController(runtime, () => new UserSettings()).BuildManagerState());
+            timeZone,
+            userStateStore);
+        var hostController = new PocketAppHostController(runtime, () => new UserSettings());
+        var managerState = JsonSerializer.SerializeToElement(hostController.BuildManagerState());
         Require(managerState.GetProperty("appId").GetString() == package.Manifest.Id, "pocket_app_manager_id");
         Require(managerState.GetProperty("version").GetString() == package.Manifest.Version, "pocket_app_manager_version");
         Require(managerState.GetProperty("testsCount").GetInt32() == 4, "pocket_app_manager_tests");
@@ -461,6 +468,35 @@ internal sealed class CapabilityBrokerVerifier
         Require(
             !managerState.GetRawText().Contains(package.RootDirectory, StringComparison.OrdinalIgnoreCase),
             "pocket_app_manager_path_redaction");
+
+        var dispatcher = new BridgeDispatcher();
+        hostController.Attach(dispatcher);
+        var loadResponse = await dispatcher.ProcessRawMessageAsync(
+            $$"""{"id":"load","method":"pocketApp.load","params":{"appId":"{{package.Manifest.Id}}","surfaceId":"main"}}""");
+        Require(loadResponse is not null, "pocket_app_host_load_response");
+        using (var loadDocument = JsonDocument.Parse(loadResponse!))
+        {
+            Require(loadDocument.RootElement.GetProperty("error").ValueKind == JsonValueKind.Null, "pocket_app_host_load");
+        }
+        var updateResponse = await dispatcher.ProcessRawMessageAsync(
+            $$"""{"id":"state","method":"pocketApp.updateState","params":{"appId":"{{package.Manifest.Id}}","key":"selectedEventRef","value":"primary:sensitive-event-ref"}}""");
+        using (var updateDocument = JsonDocument.Parse(updateResponse!))
+        {
+            Require(updateDocument.RootElement.GetProperty("error").ValueKind == JsonValueKind.Null, "pocket_app_state_update");
+        }
+        var reloadedStateStore = new PocketAppUserStateStore(
+            package.Manifest.Id,
+            package.StatePropertyNames,
+            stateRoot);
+        Require(
+            reloadedStateStore.Snapshot().GetValueOrDefault("selectedEventRef") == "primary:sensitive-event-ref",
+            "pocket_app_state_persistence");
+        var forgedStateResponse = await dispatcher.ProcessRawMessageAsync(
+            $$"""{"id":"forged","method":"pocketApp.updateState","params":{"appId":"{{package.Manifest.Id}}","key":"selectedEventRef","value":"primary:forged"}}""");
+        using (var forgedDocument = JsonDocument.Parse(forgedStateResponse!))
+        {
+            Require(forgedDocument.RootElement.GetProperty("error").ValueKind == JsonValueKind.Object, "pocket_app_forged_state_ref");
+        }
 
         var queryOutput = await runtime.QueryAsync(
             "calendar.events.list@1",

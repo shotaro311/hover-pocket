@@ -10,6 +10,7 @@ struct PocketAppWorkflowDraft: Equatable, Sendable {
 @MainActor
 final class PocketAppExecutionRuntime {
     let package: PocketAppPackage
+    let userStateStore: PocketAppUserStateStore?
 
     private let broker: CapabilityBroker
     private let principal: CapabilityPrincipal
@@ -21,13 +22,15 @@ final class PocketAppExecutionRuntime {
         broker: CapabilityBroker,
         userID: String,
         grantedPermissions: Set<String>,
-        timeZone: TimeZone = .current
+        timeZone: TimeZone = .current,
+        userStateStore: PocketAppUserStateStore? = nil
     ) {
         self.package = package
         self.broker = broker
         self.principal = CapabilityPrincipal(userID: userID, pocketAppID: package.manifest.id)
         self.grantedPermissions = grantedPermissions
         self.timeZone = timeZone
+        self.userStateStore = userStateStore
     }
 
     func query(

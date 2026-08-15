@@ -22,7 +22,8 @@ internal sealed class PocketAppExecutionRuntime
         CapabilityBroker broker,
         string userId,
         IReadOnlySet<string> grantedPermissions,
-        TimeZoneInfo? timeZone = null)
+        TimeZoneInfo? timeZone = null,
+        PocketAppUserStateStore? userStateStore = null)
     {
         Package = package;
         _broker = broker;
@@ -32,9 +33,12 @@ internal sealed class PocketAppExecutionRuntime
             .SelectMany(item => item.Permissions)
             .ToHashSet(StringComparer.Ordinal);
         _permissions = grantedPermissions.Where(requested.Contains).ToHashSet(StringComparer.Ordinal);
+        UserStateStore = userStateStore;
     }
 
     public PocketAppPackage Package { get; }
+
+    public PocketAppUserStateStore? UserStateStore { get; }
 
     public async Task<JsonElement> QueryAsync(
         string reference,

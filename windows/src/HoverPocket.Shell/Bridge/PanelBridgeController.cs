@@ -85,6 +85,10 @@ internal sealed class PanelBridgeController : IDisposable
                     "PocketApps",
                     "local.example.today-focus");
                 var package = new PocketAppPackageRuntime().Load(packageRoot);
+                var userStateStore = new PocketAppUserStateStore(
+                    package.Manifest.Id,
+                    package.StatePropertyNames,
+                    Path.Combine(settingsStore.RootDirectory, "PocketApps", "UserData"));
                 _pocketAppHostController = new PocketAppHostController(
                     new PocketAppExecutionRuntime(
                         package,
@@ -92,11 +96,13 @@ internal sealed class PanelBridgeController : IDisposable
                         "local-user",
                         new HashSet<string>(
                             ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"],
-                            StringComparer.Ordinal)),
+                            StringComparer.Ordinal),
+                        userStateStore: userStateStore),
                     () => CurrentSettings);
             }
             catch (Exception ex) when (ex is CapabilityBrokerException
                 or PocketAppPackageRuntimeException
+                or PocketAppUserStateStoreException
                 or IOException
                 or UnauthorizedAccessException)
             {
