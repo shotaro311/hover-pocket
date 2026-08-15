@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import WebKit
 
@@ -41,9 +42,45 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
             return
         }
         transportGeneration &+= 1
-        let operationID = String(transportGeneration)
-        activeOperationID = operationID
+        let generation = transportGeneration
         sessionStarting = true
+
+        switch CodexVoiceSystemMicrophoneAuthorizationPolicy.decision(
+            for: AVCaptureDevice.authorizationStatus(for: .audio)
+        ) {
+        case .proceed:
+            continueAfterSystemAuthorization(granted: true, generation: generation)
+        case .request:
+            AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
+                Task { @MainActor [weak self] in
+                    self?.continueAfterSystemAuthorization(
+                        granted: granted,
+                        generation: generation
+                    )
+                }
+            }
+        case .deny:
+            continueAfterSystemAuthorization(granted: false, generation: generation)
+        }
+    }
+
+    private func continueAfterSystemAuthorization(granted: Bool, generation: UInt64) {
+        guard sessionStarting,
+              transportGeneration == generation else { return }
+        guard granted else {
+            sessionStarting = false
+            runtimeHost?.markSessionFailure("microphone_permission_denied")
+            return
+        }
+        guard let runtimeHost,
+              runtimeHost.beginMicrophoneRequest() else {
+            sessionStarting = false
+            runtimeHost?.markSessionFailure("microphone_request_not_armed")
+            return
+        }
+
+        let operationID = String(generation)
+        activeOperationID = operationID
         CodexVoiceE2EReceipt.startSession()
         callAsync(
             "return await window.hoverPocketVoice.start(operationId);",
@@ -234,6 +271,29 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
         }
         let bounded = String(String.UnicodeScalarView(allowed.prefix(64)))
         return bounded.isEmpty ? "webrtc_failed" : bounded
+    }
+}
+
+enum CodexVoiceSystemMicrophoneAuthorizationDecision: Equatable {
+    case proceed
+    case request
+    case deny
+}
+
+enum CodexVoiceSystemMicrophoneAuthorizationPolicy {
+    static func decision(
+        for status: AVAuthorizationStatus
+    ) -> CodexVoiceSystemMicrophoneAuthorizationDecision {
+        switch status {
+        case .authorized:
+            .proceed
+        case .notDetermined:
+            .request
+        case .denied, .restricted:
+            .deny
+        @unknown default:
+            .deny
+        }
     }
 }
 

@@ -144,6 +144,7 @@ final class CodexVoiceRuntimeHost {
     }
 
     func markSessionFailure(_ errorCode: String) {
+        microphonePermissionArmedUntil = nil
         coordinator?.markSessionFailure(errorCode)
     }
 

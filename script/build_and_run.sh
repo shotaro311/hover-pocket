@@ -20,7 +20,7 @@ if [[ "$ISOLATED_VOICE_E2E" == "1" ]]; then
   ISOLATED_E2E_BASE="${TMPDIR:-/tmp}"
   ISOLATED_E2E_ROOT="$(mktemp -d "${ISOLATED_E2E_BASE%/}/hoverpocket-voice-e2e.XXXXXX")"
   ISOLATED_E2E_DATA_ROOT="$ISOLATED_E2E_ROOT/data"
-  BUNDLE_DIR="$ISOLATED_E2E_ROOT/$APP_NAME.app"
+  BUNDLE_DIR="$ROOT_DIR/dist/$APP_NAME.app"
 else
   BUNDLE_DIR="$ROOT_DIR/dist/$APP_NAME.app"
 fi
@@ -193,7 +193,12 @@ install_app_icon() {
   rm -rf "$(dirname "$iconset_dir")"
 }
 
-if [[ "$ISOLATED_VOICE_E2E" != "1" ]]; then
+if [[ "$ISOLATED_VOICE_E2E" == "1" ]]; then
+  if pgrep -x "$APP_NAME" >/dev/null 2>&1; then
+    pkill -x "$APP_NAME" || true
+    sleep 0.2
+  fi
+else
   for process_name in "$APP_NAME" "${LEGACY_PROCESS_NAMES[@]}"; do
     if pgrep -x "$process_name" >/dev/null 2>&1; then
       pkill -x "$process_name" || true

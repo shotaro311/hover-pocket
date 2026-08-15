@@ -1,3 +1,4 @@
+import AVFoundation
 import Darwin
 import Foundation
 
@@ -193,6 +194,19 @@ enum CodexAppServerVerificationCommand {
                 armed: true
             ),
             "camera_denied"
+        )
+        try require(
+            CodexVoiceSystemMicrophoneAuthorizationPolicy.decision(for: .authorized) == .proceed,
+            "system_microphone_authorized"
+        )
+        try require(
+            CodexVoiceSystemMicrophoneAuthorizationPolicy.decision(for: .notDetermined) == .request,
+            "system_microphone_request"
+        )
+        try require(
+            CodexVoiceSystemMicrophoneAuthorizationPolicy.decision(for: .denied) == .deny
+                && CodexVoiceSystemMicrophoneAuthorizationPolicy.decision(for: .restricted) == .deny,
+            "system_microphone_denied"
         )
 
         let answer = try await host.startWebRTC(

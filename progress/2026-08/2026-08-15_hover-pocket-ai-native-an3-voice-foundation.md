@@ -196,12 +196,14 @@ GitHub Actions / implementation head 0ca7834
 
 ## macOS隔離Voice E2E受入基盤
 
-- 製品版HoverPocketを停止・上書きせず、毎回freshな0700 temp rootへ`HoverPocketVoiceE2E.app`と専用data rootを作る`--voice-e2e-build-only` / `--voice-e2e-run`を追加した。bundle ID、実行名、Keychain namespaceを分離し、Google OAuth、Sparkle feed、installer launcherを無効化した。
+- 製品版HoverPocketとユーザーデータを上書きせず、LaunchServices / TCCが同じ検証アプリを追跡できる安定した`dist/HoverPocketVoiceE2E.app`と、毎回freshな0700 temp data rootを作る`--voice-e2e-build-only` / `--voice-e2e-run`を追加した。bundle ID、実行名、Keychain namespaceを分離し、Google OAuth、Sparkle feed、installer launcherを無効化した。再build前は検証用processだけを終了し、製品processには触れない。
 - DEBUG時だけ`HOVERPOCKET_ISOLATED_E2E=1`とsystem temp配下の`HOVERPOCKET_TEST_DATA_ROOT`を受け入れ、Audit、Clipboard、Sticky、Timer、Broker、Voice workspaceを隔離data rootへ向ける。Releaseは同じ環境変数を無視し、通常のApplication Supportを使う。
 - 検証用署名は`HoverPocketVoiceE2E.entitlements`へ分離し、microphone entitlementだけを持たせた。製品用のcamera / Apple Events entitlementは検証bundleへ含めない。
 - `voice-e2e-receipt.json`はavailability、session、root / transport、transcriptのrole別件数、app-server / voice数、microphone / remote audioの取得・現在状態だけを保存する。生transcript、音声、SDP、token、file path、Provider dataは保存しない。
 - 隔離bundleの署名、bundle ID、実行名、LSEnvironment、OAuth / Sparkle key不在、installer launcher false、0700 temp rootをreadbackした。起動後はCodex app-server ready、voice 19件、feature enabled、microphone未取得、remote audio未取得で待機し、既存製品processは継続稼働した。
-- Macの画面がlock中のため、明示mic click、TCC許可、音声1往復、remote audio playback、safe closeは未実施である。auto-listenはOFFのため、ユーザー操作前にマイク権限要求や音声取得は発生していない。
+- Compact / Expandedの実画面は`600x494` / `600x650`で、幅とProvider領域を変えずVoice Lane分だけ下へ伸びた。Compactは視覚タイトルなし、短い波形、会話優先、明示expand、Expandedは左会話 / 右current-root session cards、明示collapse、fullscreenなしで契約と一致した。
+- WebViewのmedia permissionだけでTCCへ進めていた経路を修正し、明示mic click後にnative `AVCaptureDevice` authorizationを確認し、未決定ならOS許可を要求、許可済みの場合だけ5秒single-use armを再発行してWebView `getUserMedia`へ進む。denied / restricted / unknownはWebRTC開始前にfail closedとし、failure時はarmを消去する。policy verifierはauthorized / notDetermined / denied / restrictedを固定した。
+- 安定bundleのLaunchServices登録、Codex app-server ready、voice 19件、feature enabled、native許可要求、receiptのsession=`requestingPermission`を実機readbackした。TCCの明示許可、microphone取得、remote audio、音声1往復、safe closeは未完了である。auto-listenはOFFのため、ユーザーのmic click前に権限要求や音声取得は発生しない。
 
 ## 追加検証
 
@@ -213,7 +215,7 @@ swift build -c release -Xswiftc -warnings-as-errors
   PASS
 
 .build/debug/HoverPocket --verify-codex-app-server
-  PASS / microphone policy / WebRTC / epoch / restart / tool dispatch / root-scoped sessions
+  PASS / native microphone policy / exact-origin WebView policy / WebRTC / epoch / restart / tool dispatch / root-scoped sessions
 
 .build/debug/HoverPocket --verify-broker
   PASS / 11 descriptors / 10 handlers / Today Focus / Voice tools / negative cases
