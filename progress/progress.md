@@ -2,7 +2,7 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pro-pending; capability-expansion-sticky-lifecycle-ready
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pro-pending; capability-expansion-sticky-lifecycle-merged
 ---
 
 ## 2026-08-15 AI-native Sticky Notes Lifecycle Capability
@@ -12,6 +12,7 @@ status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pro-pendi
 - 共有Golden Registryへ未反映だったCalculator descriptorと今回の3 descriptorを追加し、runtimeは15 descriptor / 14 handler、共通契約は12 schema / 56 fixtureへ揃えた。macOSでwarnings-as-errors build、Capability、Broker、Timer、Clipboard、2回の決定論的contract report、`git diff --check`が成功した。Windowsはローカルに.NET SDKがないためPR CIを必須gateとする。
 - exact source range `8d7127f...dd91448`のSecurity diff scan `9f03efcd-fbd3-4799-a5fd-c591a9ee1219`は変更source 12 / 12をレビューし、reportable finding 0、sealed complete。将来のVoice / Pocket App / MCPからdeleteを公開する前に、Host-ownedの対象メモ表示と`strong_per_call`固有制約を追加する項目はdeferredとして固定した。現時点のproduction経路はToday Focusのみでdeleteを公開も権限付与もしていない。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-sticky-lifecycle.md`。
 - Draft PR [#11](https://github.com/shotaro311/hover-pocket/pull/11)のhead `696912b`で、Windows [31854456305](https://github.com/shotaro311/hover-pocket/actions/runs/31854456305)、macOS [31854456232](https://github.com/shotaro311/hover-pocket/actions/runs/31854456232)、Pocket contract [31854456221](https://github.com/shotaro311/hover-pocket/actions/runs/31854456221)、PR Router [31854456370](https://github.com/shotaro311/hover-pocket/actions/runs/31854456370)が成功した。3 OS contract reportはbyte一致し、review thread 0、`MERGEABLE / CLEAN`をreadbackした。
+- 最終head `bda78d8`でもWindows [31854634564](https://github.com/shotaro311/hover-pocket/actions/runs/31854634564)、macOS [31854634576](https://github.com/shotaro311/hover-pocket/actions/runs/31854634576)、Pocket contract [31854634592](https://github.com/shotaro311/hover-pocket/actions/runs/31854634592)、PR Router [31854643283](https://github.com/shotaro311/hover-pocket/actions/runs/31854643283)が成功した。PR #11をmergeし、main / origin/mainはmerge commit `4640f5c`で一致、ahead / behind `0 / 0`をreadbackした。
 
 ## 2026-08-15 AI-native Built-in Capability Expansion
 

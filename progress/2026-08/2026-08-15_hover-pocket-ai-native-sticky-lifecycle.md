@@ -71,7 +71,6 @@ macOS verifierは、archive/delete、実行後status readback、永続化、inva
 
 ## 未完了
 
-- Ready化、main merge、merge後のlocal / origin readback。
 - Sticky既存UIのBroker移行。
 - `sticky.delete`を外部入力経路へ公開する前のtarget-specific approvalとstrong-per-call hardening。
 - AN3実音声E2E、AN4 DSL Renderer回収、AN5以降の生成・sandbox・MCP / Connector・配布gate。
@@ -88,3 +87,14 @@ macOS verifierは、archive/delete、実行後status readback、永続化、inva
   - Ubuntu / macOS / Windows 56 fixtureとcross-OS report byte比較が成功した。
 - PR Router run: [31854456370](https://github.com/shotaro311/hover-pocket/actions/runs/31854456370) `SUCCESS`
 - review thread 0、`MERGEABLE / CLEAN`。
+
+## Merge readback
+
+- final PR head: `bda78d8ad39a5f08d4930f441841ffac50e32adb`
+- final Windows run: [31854634564](https://github.com/shotaro311/hover-pocket/actions/runs/31854634564) `SUCCESS`
+- final macOS run: [31854634576](https://github.com/shotaro311/hover-pocket/actions/runs/31854634576) `SUCCESS`
+- final Pocket contract run: [31854634592](https://github.com/shotaro311/hover-pocket/actions/runs/31854634592) `SUCCESS`
+- final PR Router run: [31854643283](https://github.com/shotaro311/hover-pocket/actions/runs/31854643283) `SUCCESS`
+- PR #11をReady化し、review thread 0、`MERGEABLE / CLEAN`のreadback後にmergeした。
+- merge commit: `4640f5cf42ae18546de2b9f8bf4ba1b680fb6a55`
+- merge後のmain / origin/mainは上記SHAで一致し、ahead / behindは`0 / 0`だった。
