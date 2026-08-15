@@ -2,7 +2,7 @@
 
 ## 現在地
 
-Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し、Windows / macOSの両方でapplication-lifetime runtime、origin限定microphone permission、WebRTC SDP / remote audio、VoiceからBrokerへのdynamic tool dispatchまでproduction経路へ接続した。両OSのText / Voice / Native UIで共有するroute-independent canonical plan digestと、current root配下だけを表示するchild / descendant session cardsも実装済みである。これはAN3完了ではなく、対象実機のマイク・remote audio・音声1往復・実Calendar操作と、Windows実機のinstalled schema probeが残っている。
+Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し、Windows / macOSの両方でapplication-lifetime runtime、origin限定microphone permission、WebRTC SDP / remote audio、VoiceからBrokerへのdynamic tool dispatchまでproduction経路へ接続した。両OSのText / Voice / Native UIで共有するroute-independent canonical plan digestと、current root配下だけを表示するchild / descendant session cardsも実装済みである。両OS実機でmicrophone、WebRTC transport、remote audio track / playbackまで到達し、安全終了も個別に確認した。これはAN3完了ではなく、人間発話による1往復とVoice経由の実Calendar / Timer / Today Focus readbackが残っている。
 
 ## Git / worktree
 
@@ -12,6 +12,7 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 - 統合対象AN2 head: `5d7cbe1ba6be44261c578ea3195d7fe5ccb03d45`
 - AN2実装と両OSのVoice Lane表示基盤をmerge commit `52bf00c`で統合し、AN2最終進捗commit `15e44f0`もmerge commit `cdc5a8f`で取り込んだ。
 - AN2 Ready PR [#9](https://github.com/shotaro311/hover-pocket/pull/9)はWindows / macOS / PR Routerが全成功、MERGEABLE / CLEANのreadback後にmergeした。`origin/main`は`014032d412ab488c5e526f1ed2e7d23218c38a87`、AN3は通常merge commit `90bd31fd9a772387027add6c93414d7882b3eed5`で同期した。Draft PR #6は未マージのまま維持する。
+- 最新headは`91e2f46becd6db71d9d2452d0ab7cc2ec7e2b008`。`origin/feature/codex-voice-lane`とahead / behind `0 / 0`、worktree clean、Draft PR #6は`MERGEABLE / CLEAN`である。
 
 ## 再利用したVoice基盤
 
@@ -187,11 +188,18 @@ GitHub Actions / implementation head 0ca7834
   PASS / macOS verify run 31845756517
   PASS / PR Router run 31845754575
   PASS / Windows real-device read-only gate / Codex 0.147.0 / phase0 / 18 verifiers / process residue 0
+
+GitHub Actions / implementation head 91e2f46
+  PASS / Voice Lane Windows CI runs 31869249790 and 31869252400
+  PASS / Windows verify run 31869252398
+  PASS / macOS verify run 31869252401
+  PASS / PR Router run 31869250442
+  PASS / Draft PR #6 MERGEABLE / CLEAN / remote parity 0 / 0
 ```
 
 ## 未完了gate
 
-1. origin限定microphone、WebRTC SDP / remote audio、1往復、safe closeを対象Windows / macOS実機で検証する。
+1. 対象Windows / macOS実機で人間発話によるuser / assistant transcript各1件以上の1往復を確認する。Windowsは接続済みrunで発話待ち、macOSは接続・再生・safe close済みだが人間発話1往復が未確認である。
 2. 対象Windows / macOS実機でVoice intentからCalendar read / create、Timer start、Today Focusを呼び、Host approval、実Provider状態、event / timer / note ID readbackを確認する。
 
 ## macOS隔離Voice E2E受入基盤
@@ -203,7 +211,14 @@ GitHub Actions / implementation head 0ca7834
 - 隔離bundleの署名、bundle ID、実行名、LSEnvironment、OAuth / Sparkle key不在、installer launcher false、0700 temp rootをreadbackした。起動後はCodex app-server ready、voice 19件、feature enabled、microphone未取得、remote audio未取得で待機し、既存製品processは継続稼働した。
 - Compact / Expandedの実画面は`600x494` / `600x650`で、幅とProvider領域を変えずVoice Lane分だけ下へ伸びた。Compactは視覚タイトルなし、短い波形、会話優先、明示expand、Expandedは左会話 / 右current-root session cards、明示collapse、fullscreenなしで契約と一致した。
 - WebViewのmedia permissionだけでTCCへ進めていた経路を修正し、明示mic click後にnative `AVCaptureDevice` authorizationを確認し、未決定ならOS許可を要求、許可済みの場合だけ5秒single-use armを再発行してWebView `getUserMedia`へ進む。denied / restricted / unknownはWebRTC開始前にfail closedとし、failure時はarmを消去する。policy verifierはauthorized / notDetermined / denied / restrictedを固定した。
-- 安定bundleのLaunchServices登録、Codex app-server ready、voice 19件、feature enabled、native許可要求、receiptのsession=`requestingPermission`を実機readbackした。TCCの明示許可、microphone取得、remote audio、音声1往復、safe closeは未完了である。auto-listenはOFFのため、ユーザーのmic click前に権限要求や音声取得は発生しない。
+- 安定bundleのLaunchServices登録、Codex app-server ready、voice 19件、feature enabled、native許可要求、receiptのsession=`requestingPermission`を実機readbackした。この時点ではTCC許可後の検査を未実施だったが、後述の最新readbackでmicrophone、remote audio、safe closeまで成功した。auto-listenはOFFのため、ユーザーのmic click前に権限要求や音声取得は発生しない。
+
+## 両OS隔離Voice E2Eの最新readback
+
+- macOSでは安定した隔離bundleから明示mic開始後、Codex app-server Realtime v3、microphone取得、WebRTC transport接続、remote audio track / playbackまで実機で成功した。通常stop後はエラーを残さず、media current=false、app-server process=falseへ解放した。合成音声はecho cancellationのためuser transcriptにならなかったので、人間発話1往復は未確認として残す。
+- WindowsではDebug限定の隔離root、製品版と別のsingle-instance namespace、E2E専用event、E2E時だけtaskbarへ見えるpanel titleを使い、自動操作でVoice開始まで到達した。最新receiptはsession=`connected`、microphone current=true、transport current=true、remote audio track / playbackのEver / Current=trueである。人間発話前なのでtranscript 1往復は未確認で、接続済みrunを不用意に再起動・再クリックしていない。
+- Windowsの先行safe-stop検査では、明示Stopから1.068秒でE2E shell 0件、Codex app-server child 0件、current app-server / transport / microphone / remote audio=falseをreadbackした。既存製品0.2.7は継続し、製品データrootは変更されなかった。
+- WindowsのE2E可視化はDebugかつ明示E2E時だけである。ReleaseはE2E flagを副作用前に拒否し、製品の通常window、no-activate、tool-window、taskbar非表示契約は維持する。
 
 ## 追加検証
 
