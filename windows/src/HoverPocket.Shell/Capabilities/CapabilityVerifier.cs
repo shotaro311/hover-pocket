@@ -32,10 +32,11 @@ internal sealed class CapabilityVerifier
         }
 
         Console.WriteLine("capability_verify=ok");
-        Console.WriteLine("capability_handlers=11");
+        Console.WriteLine("capability_handlers=14");
         Console.WriteLine("capability_calculator_evaluate=ok");
         Console.WriteLine("capability_timer_lifecycle=ok");
         Console.WriteLine("capability_sticky_upsert=ok");
+        Console.WriteLine("capability_sticky_lifecycle=ok");
         Console.WriteLine("capability_calendar_readback=ok");
         return 0;
     }
@@ -57,7 +58,7 @@ internal sealed class CapabilityVerifier
             var stickyStore = new StickyNotesStore(stickyRoot);
             var calendar = new FakeCalendarCapabilityDataSource();
             var handlers = ProviderCapabilityCompositionRoot.Create(calendar, timerStore, stickyStore);
-            Require(handlers.Keys.Count == 11, "handler_count");
+            Require(handlers.Keys.Count == 14, "handler_count");
             await VerifyCalculatorAsync(handlers);
 
             await VerifyTimerAsync(handlers, timerStore, alertSound, clock, root);
@@ -273,6 +274,39 @@ internal sealed class CapabilityVerifier
         Require(restored.GetNote(parsed)?.StableKey == "today-focus:purpose", "sticky_persistence");
         Require(restored.GetNote(parsed)?.Title == longTitle, "sticky_title_persistence");
 
+        var archiveTime = DateTimeOffset.FromUnixTimeSeconds(1_800_000_200);
+        var idArguments = Json(new { noteId });
+        var archived = await handlers.InvokeAsync(
+            CapabilityIds.StickyArchive,
+            idArguments,
+            new CapabilityHandlerContext("sticky-verifier-key-003", archiveTime));
+        Require(archived.GetProperty("state").GetString() == "archived", "sticky_archive");
+        Require(
+            DateTimeOffset.Parse(archived.GetProperty("updatedAt").GetString()!, CultureInfo.InvariantCulture) == archiveTime,
+            "sticky_archive_time");
+        var archivedStatus = await handlers.InvokeAsync(CapabilityIds.StickyStatus, idArguments);
+        Require(archivedStatus.GetRawText() == archived.GetRawText(), "sticky_archive_readback");
+        Require(new StickyNotesStore(root).GetNote(parsed)?.ArchivedAt == archiveTime, "sticky_archive_persistence");
+
+        var deleted = await handlers.InvokeAsync(
+            CapabilityIds.StickyDelete,
+            idArguments,
+            new CapabilityHandlerContext("sticky-verifier-key-004", archiveTime.AddSeconds(1)));
+        Require(deleted.GetProperty("state").GetString() == "missing", "sticky_delete");
+        Require(deleted.GetProperty("updatedAt").ValueKind == JsonValueKind.Null, "sticky_delete_time");
+        var deletedStatus = await handlers.InvokeAsync(CapabilityIds.StickyStatus, idArguments);
+        Require(deletedStatus.GetRawText() == deleted.GetRawText(), "sticky_delete_readback");
+        Require(new StickyNotesStore(root).GetNote(parsed) is null, "sticky_delete_persistence");
+
+        try
+        {
+            await handlers.InvokeAsync(CapabilityIds.StickyStatus, Json(new { noteId = "not-a-uuid" }));
+            _failures.Add("sticky_invalid_id_accepted");
+        }
+        catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_ARGUMENT_INVALID" && ex.Field == "noteId")
+        {
+        }
+
         var blockedRoot = Path.Combine(root, "blocked-store");
         File.WriteAllText(blockedRoot, "blocked");
         var blockedStore = new StickyNotesStore(blockedRoot);
@@ -287,13 +321,15 @@ internal sealed class CapabilityVerifier
                     body = "Must not remain in memory",
                     color = "yellow"
                 }),
-                new CapabilityHandlerContext("sticky-verifier-key-003", DateTimeOffset.UtcNow));
+                new CapabilityHandlerContext("sticky-verifier-key-005", DateTimeOffset.UtcNow));
             _failures.Add("sticky_persistence_failure_accepted");
         }
         catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_UNAVAILABLE" && ex.Field == "sticky_storage")
         {
         }
         Require(blockedStore.Notes.Count == 0, "sticky_persistence_failure_rollback");
+
+        await VerifyStickyLifecyclePersistenceFailureAsync(Path.Combine(root, "blocked-lifecycle"));
 
         var oversized = stickyStore.CreateNote();
         stickyStore.UpdateNote(
@@ -309,6 +345,40 @@ internal sealed class CapabilityVerifier
         catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_READBACK_MISMATCH" && ex.Field == "sticky.body")
         {
         }
+    }
+
+    private async Task VerifyStickyLifecyclePersistenceFailureAsync(string root)
+    {
+        var store = new StickyNotesStore(root);
+        var note = store.UpsertNote("failure-fixture", "Failure fixture", "Must survive", StickyNoteColor.Yellow);
+        Directory.Delete(root, recursive: true);
+        File.WriteAllText(root, "blocked");
+
+        var archive = new StickyCapabilityHandler(StickyCapabilityOperation.Archive, store);
+        try
+        {
+            await archive.HandleAsync(
+                Json(new { noteId = note.Id }),
+                new CapabilityHandlerContext("sticky-verifier-key-006", DateTimeOffset.UtcNow));
+            _failures.Add("sticky_archive_failure_accepted");
+        }
+        catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_UNAVAILABLE" && ex.Field == "sticky_storage")
+        {
+        }
+        Require(store.GetNote(note.Id)?.ArchivedAt is null, "sticky_archive_failure_rollback");
+
+        var delete = new StickyCapabilityHandler(StickyCapabilityOperation.Delete, store);
+        try
+        {
+            await delete.HandleAsync(
+                Json(new { noteId = note.Id }),
+                new CapabilityHandlerContext("sticky-verifier-key-007", DateTimeOffset.UtcNow));
+            _failures.Add("sticky_delete_failure_accepted");
+        }
+        catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_UNAVAILABLE" && ex.Field == "sticky_storage")
+        {
+        }
+        Require(store.GetNote(note.Id) is not null, "sticky_delete_failure_rollback");
     }
 
     private async Task VerifyCalendarAsync(

@@ -442,7 +442,7 @@ final class CapabilityBroker {
         case PocketCapabilityKeys.timerGet:
             sourceField = "timerId"
             targetField = "timerId"
-        case PocketCapabilityKeys.stickyGet:
+        case PocketCapabilityKeys.stickyGet, PocketCapabilityKeys.stickyStatus:
             sourceField = "noteId"
             targetField = "noteId"
         default:

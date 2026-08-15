@@ -19,6 +19,9 @@ internal static class CapabilityIds
     public static readonly PocketCapabilityKey TimerStop = new("timer.countdown.stop", 1);
     public static readonly PocketCapabilityKey StickyUpsert = new("sticky.note.upsert", 1);
     public static readonly PocketCapabilityKey StickyGet = new("sticky.note.get", 1);
+    public static readonly PocketCapabilityKey StickyStatus = new("sticky.note.status", 1);
+    public static readonly PocketCapabilityKey StickyArchive = new("sticky.note.archive", 1);
+    public static readonly PocketCapabilityKey StickyDelete = new("sticky.note.delete", 1);
     public static readonly PocketCapabilityKey NativeAuthority = new("system.native.authority", 1);
 }
 
@@ -432,7 +435,10 @@ internal sealed class TimerCapabilityHandler : IPocketCapabilityHandler
 internal enum StickyCapabilityOperation
 {
     Upsert,
-    Get
+    Get,
+    Status,
+    Archive,
+    Delete
 }
 
 internal sealed class StickyCapabilityHandler : IPocketCapabilityHandler
@@ -446,9 +452,15 @@ internal sealed class StickyCapabilityHandler : IPocketCapabilityHandler
         _store = store;
     }
 
-    public PocketCapabilityKey Key => _operation == StickyCapabilityOperation.Upsert
-        ? CapabilityIds.StickyUpsert
-        : CapabilityIds.StickyGet;
+    public PocketCapabilityKey Key => _operation switch
+    {
+        StickyCapabilityOperation.Upsert => CapabilityIds.StickyUpsert,
+        StickyCapabilityOperation.Get => CapabilityIds.StickyGet,
+        StickyCapabilityOperation.Status => CapabilityIds.StickyStatus,
+        StickyCapabilityOperation.Archive => CapabilityIds.StickyArchive,
+        StickyCapabilityOperation.Delete => CapabilityIds.StickyDelete,
+        _ => throw new ArgumentOutOfRangeException(nameof(_operation))
+    };
 
     public Task<JsonElement> HandleAsync(
         JsonElement arguments,
@@ -456,13 +468,19 @@ internal sealed class StickyCapabilityHandler : IPocketCapabilityHandler
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (_operation == StickyCapabilityOperation.Upsert)
+        if (_operation is StickyCapabilityOperation.Upsert or StickyCapabilityOperation.Archive or StickyCapabilityOperation.Delete)
         {
             _ = context.RequireIdempotencyKey();
         }
-        return Task.FromResult(_operation == StickyCapabilityOperation.Upsert
-            ? Upsert(arguments)
-            : Get(arguments));
+        return Task.FromResult(_operation switch
+        {
+            StickyCapabilityOperation.Upsert => Upsert(arguments),
+            StickyCapabilityOperation.Get => Get(arguments),
+            StickyCapabilityOperation.Status => Status(arguments),
+            StickyCapabilityOperation.Archive => Archive(arguments, context.Now),
+            StickyCapabilityOperation.Delete => Delete(arguments),
+            _ => throw new ArgumentOutOfRangeException(nameof(_operation))
+        });
     }
 
     private JsonElement Upsert(JsonElement arguments)
@@ -485,8 +503,8 @@ internal sealed class StickyCapabilityHandler : IPocketCapabilityHandler
 
     private JsonElement Get(JsonElement arguments)
     {
-        var rawId = CapabilityJson.RequiredString(arguments, "noteId", 128);
-        if (!Guid.TryParse(rawId, out var id) || _store.GetNote(id) is not { } note)
+        var id = NoteId(arguments);
+        if (_store.GetNote(id) is not { } note)
         {
             throw new CapabilityHandlerException("CAPABILITY_UNAVAILABLE", "sticky_note");
         }
@@ -496,6 +514,67 @@ internal sealed class StickyCapabilityHandler : IPocketCapabilityHandler
             Title = CapabilityJson.OutputString(note.Title, 120, "sticky.title", allowEmpty: true),
             Body = CapabilityJson.OutputString(note.Body, 10_000, "sticky.body", allowEmpty: true),
             updatedAt = note.UpdatedAt.ToString("O", CultureInfo.InvariantCulture)
+        });
+    }
+
+    private JsonElement Status(JsonElement arguments)
+    {
+        var id = NoteId(arguments);
+        return _store.GetNote(id) is { } note ? StatusOutput(note) : MissingStatusOutput(id);
+    }
+
+    private JsonElement Archive(JsonElement arguments, DateTimeOffset now)
+    {
+        try
+        {
+            var note = _store.ArchiveNoteAtomically(NoteId(arguments), now);
+            return note is not null
+                ? StatusOutput(note)
+                : throw new CapabilityHandlerException("CAPABILITY_UNAVAILABLE", "sticky_note");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new CapabilityHandlerException("CAPABILITY_UNAVAILABLE", "sticky_storage");
+        }
+    }
+
+    private JsonElement Delete(JsonElement arguments)
+    {
+        var id = NoteId(arguments);
+        try
+        {
+            _ = _store.DeleteNoteAtomically(id);
+            return MissingStatusOutput(id);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new CapabilityHandlerException("CAPABILITY_UNAVAILABLE", "sticky_storage");
+        }
+    }
+
+    private static Guid NoteId(JsonElement arguments)
+    {
+        var rawId = CapabilityJson.RequiredString(arguments, "noteId", 128);
+        return Guid.TryParse(rawId, out var id) ? id : throw CapabilityJson.Invalid("noteId");
+    }
+
+    private static JsonElement StatusOutput(StickyNoteItem note)
+    {
+        return CapabilityJson.From(new
+        {
+            noteId = note.Id.ToString("D").ToLowerInvariant(),
+            state = note.ArchivedAt is null ? "active" : "archived",
+            updatedAt = note.UpdatedAt.ToString("O", CultureInfo.InvariantCulture)
+        });
+    }
+
+    private static JsonElement MissingStatusOutput(Guid id)
+    {
+        return CapabilityJson.From(new
+        {
+            noteId = id.ToString("D").ToLowerInvariant(),
+            state = "missing",
+            updatedAt = (string?)null
         });
     }
 
@@ -542,7 +621,10 @@ internal static class ProviderCapabilityCompositionRoot
             new TimerCapabilityHandler(TimerCapabilityOperation.Resume, timerStore),
             new TimerCapabilityHandler(TimerCapabilityOperation.Stop, timerStore),
             new StickyCapabilityHandler(StickyCapabilityOperation.Upsert, stickyStore),
-            new StickyCapabilityHandler(StickyCapabilityOperation.Get, stickyStore)
+            new StickyCapabilityHandler(StickyCapabilityOperation.Get, stickyStore),
+            new StickyCapabilityHandler(StickyCapabilityOperation.Status, stickyStore),
+            new StickyCapabilityHandler(StickyCapabilityOperation.Archive, stickyStore),
+            new StickyCapabilityHandler(StickyCapabilityOperation.Delete, stickyStore)
         ]);
     }
 }
