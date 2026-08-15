@@ -59,8 +59,23 @@ review follow-up range `16e7cda162653749c07c125f3e662477687f3153...88f41bd988b5d
 
 snapshot durabilityとcase-insensitive version storageのexact range `c9496763765d4137f27302eb99cf350c4286153d...5f6a04f0b43f49fea047943261e4997c66824231`はscan `114557d4-7318-42cd-b744-c7cdc392025c`で4 / 4 fileを確認した。承認待ち上限のexact range `5f6a04f0b43f49fea047943261e4997c66824231...a9fb8ed0bfd065d1a78d33a128dc14894718342d`はscan `28517aef-7d8b-45a4-80d7-a97c92fd3834`で4 / 4 fileを確認した。両scanともcoverage complete、reportable finding 0、sealed completeである。
 
+### Rollback直前の再保護
+
+最終reviewで、manager起動時に保護済みだった保存版でも、proposal作成後からrollback実行までに同一ユーザーがfileの書込み属性を復元すると、従来はpackage digest一致だけでactive recordを確定できることを確認した。
+
+head `9dc6ac7`でmacOS / Windowsを同じ順序へ揃えた。
+
+1. rollback対象のdigest container全体をimmutable / read-onlyへ再設定する。
+2. 全file / directory属性を検証する。
+3. packageを再読込し、承認済みdigestと一致することを確認する。
+4. 属性をもう一度検証してからactive recordを確定する。
+
+両OS verifierはproposal作成後に対象`intent.md`を書込み可能へ戻し、rollback後に再保護済みであることを確認する。Macの`swift build -Xswiftc -warnings-as-errors`、Pocket App package / lifecycle verifier、共通contract 12 schema / 58 fixture、`git diff --check`は成功した。Windows実行検証はPR CIを必須gateとする。
+
+exact working-tree差分のCodex Security scan `71bed277-674c-4551-8bf4-72e0abda759e`は4 / 4 surfaceを確認し、coverage complete、reportable finding 0、sealed completeとなった。既知のdescriptor-relative pathname raceはこの27行で解消したとは扱わず、production接続前の別gateとして維持する。
+
 ## 次
 
-- PR #16は人間によるmerge判断待ち。自動mergeしない。
+- PR #16の最終CIとreview thread解決後にmergeする。
 - merge後はAN5-Bとして、Codex requestからdraft生成、Host preview、権限差分表示、導入確認、管理UI、production compositionへ進む。
 - lifecycleをproductionへ接続する前に、保存先root pinningとsymlink / reparse race testを完了する。

@@ -717,8 +717,14 @@ final class PocketAppLifecycleManager {
         let targetDirectory: URL
         if proposal.action == .rollback {
             targetDirectory = proposal.stagingDirectory
+            let snapshotRoot = targetDirectory.deletingLastPathComponent()
             let verified = try verifiedInstalledPackage(at: targetDirectory)
             guard verified.manifestDigest == proposal.packageDigest else { throw PocketAppLifecycleError.corruptVersion }
+            try makeImmutable(directory: snapshotRoot)
+            try verifyImmutable(directory: snapshotRoot)
+            let hardened = try verifiedInstalledPackage(at: targetDirectory)
+            guard hardened.manifestDigest == proposal.packageDigest else { throw PocketAppLifecycleError.readbackFailed }
+            try verifyImmutable(directory: snapshotRoot)
         } else {
             targetDirectory = try installImmutableSnapshot(sourceSnapshot, package: package)
         }
