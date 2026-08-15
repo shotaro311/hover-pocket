@@ -66,7 +66,8 @@ internal sealed class PanelBridgeController : IDisposable
         _capabilityHandlers = ProviderCapabilityCompositionRoot.Create(
             new GoogleCalendarCapabilityDataSource(_calendarBridgeController.Store),
             timerStore,
-            stickyStore);
+            stickyStore,
+            new LiveControlsCapabilityDataSource(_controlsBridgeController));
         _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.Normalize(settings, providerRegistry.ProviderIds);

@@ -37,9 +37,10 @@ internal sealed class CapabilityBrokerVerifier
         }
 
         Console.WriteLine("broker_verify=ok");
-        Console.WriteLine("broker_registry_descriptors=15");
-        Console.WriteLine("broker_available_handlers=14");
+        Console.WriteLine("broker_registry_descriptors=21");
+        Console.WriteLine("broker_available_handlers=20");
         Console.WriteLine("broker_calculator_evaluate=ok");
+        Console.WriteLine("broker_controls_os_readback=ok");
         Console.WriteLine("broker_sticky_lifecycle=ok");
         Console.WriteLine("broker_today_focus=ok");
         Console.WriteLine("broker_pocket_app=ok");
@@ -64,7 +65,11 @@ internal sealed class CapabilityBrokerVerifier
                 enableScheduler: false);
             var stickyStore = new StickyNotesStore(Path.Combine(root, "sticky"));
             var calendar = new BrokerFakeCalendarDataSource(now);
-            var handlers = ProviderCapabilityCompositionRoot.Create(calendar, timerStore, stickyStore);
+            var handlers = ProviderCapabilityCompositionRoot.Create(
+                calendar,
+                timerStore,
+                stickyStore,
+                new FakeControlsCapabilityDataSource());
             var registry = new CapabilityRegistry(handlers);
             var brokerRoot = Path.Combine(root, "broker");
             var audit = new CapabilityBrokerAuditLog(brokerRoot);
@@ -73,8 +78,8 @@ internal sealed class CapabilityBrokerVerifier
                 new CapabilityBrokerLedger(brokerRoot),
                 audit);
 
-            Require(registry.DescriptorKeys.Count == 15, "registry_descriptor_count");
-            Require(registry.AvailableHandlerKeys.Count == 14, "registry_handler_count");
+            Require(registry.DescriptorKeys.Count == 21, "registry_descriptor_count");
+            Require(registry.AvailableHandlerKeys.Count == 20, "registry_handler_count");
             Require(
                 PocketCapabilityDescriptors.BuiltIn.Single(item => item.Key == CapabilityIds.StickyDelete).ApprovalPolicy
                     == CapabilityApprovalPolicy.StrongPerCall,
@@ -108,6 +113,7 @@ internal sealed class CapabilityBrokerVerifier
             }
 
             await VerifyCalculatorAsync(broker, now);
+            await VerifyControlsAsync(broker, now);
             await VerifyStickyLifecycleAsync(broker, stickyStore, now);
             await VerifyPocketAppAsync(root);
 
@@ -417,6 +423,42 @@ internal sealed class CapabilityBrokerVerifier
         Require(receipt.Steps[0].Readback.Status == CapabilityReadbackStatus.Verified, "calculator_readback");
         Require(receipt.Steps[0].Readback.Strategy == CapabilityReadbackStrategy.None, "calculator_readback_strategy");
         Require(receipt.Steps[0].Readback.Observed is not null, "calculator_observed");
+    }
+
+    private async Task VerifyControlsAsync(CapabilityBroker broker, DateTimeOffset now)
+    {
+        var principal = new CapabilityPrincipal("controls-broker-user");
+        var permissions = Permissions(principal, "controls.write");
+        var plan = new CapabilityExecutionPlan(
+            "controls-volume-plan",
+            now,
+            CapabilityOrigin.Text,
+            principal,
+            null,
+            [new CapabilityPlanStep(
+                "setVolume",
+                CapabilityIds.ControlsVolumeSet,
+                CapabilityJson.From(new { level = 0.75 }),
+                "controls-broker-volume-key-0001",
+                [])],
+            new HashSet<string>(["controls.write"], StringComparer.Ordinal));
+        var preparation = broker.Prepare(plan, permissions, now);
+        Require(preparation.ApprovalRequest is not null, "controls_approval_missing");
+        if (preparation.ApprovalRequest is null)
+        {
+            return;
+        }
+        var grant = broker.DecideApproval(
+            preparation.ApprovalRequest.Id,
+            preparation.PlanDigest,
+            CapabilityApprovalDecision.Approve,
+            now);
+        var receipt = await broker.ExecuteAsync(plan, permissions, grant, now);
+        Require(receipt.Status == CapabilityReceiptStatus.Succeeded, "controls_receipt_status");
+        Require(receipt.Steps[0].Readback.Status == CapabilityReadbackStatus.Verified, "controls_readback_verified");
+        Require(
+            Math.Abs((receipt.Steps[0].Output?.GetProperty("level").GetDouble() ?? 0) - 0.75) < 0.001,
+            "controls_readback_level");
     }
 
     private async Task VerifyPocketAppAsync(string root)
