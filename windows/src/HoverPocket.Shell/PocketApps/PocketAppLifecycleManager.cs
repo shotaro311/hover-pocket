@@ -105,6 +105,7 @@ internal sealed class PocketAppLifecycleManager
     private readonly PocketAppStagingTestRunner _stagingTestRunner;
     private readonly string _hostVersion;
     private readonly Func<string, bool>? _failureInjection;
+    private static readonly object LifecycleGate = new();
     private readonly Dictionary<string, PendingApproval> _pendingApprovals = new(StringComparer.Ordinal);
     private readonly HashSet<string> _decidedRequests = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IssuedApproval> _grants = new(StringComparer.Ordinal);
@@ -126,9 +127,12 @@ internal sealed class PocketAppLifecycleManager
         _failureInjection = failureInjection;
         try
         {
-            Directory.CreateDirectory(_rootDirectory);
-            Directory.CreateDirectory(_userDataRoot);
-            RecoverInterruptedTransactions();
+            lock (LifecycleGate)
+            {
+                Directory.CreateDirectory(_rootDirectory);
+                Directory.CreateDirectory(_userDataRoot);
+                RecoverInterruptedTransactions();
+            }
         }
         catch (PocketAppLifecycleException)
         {
@@ -140,7 +144,10 @@ internal sealed class PocketAppLifecycleManager
         }
     }
 
-    public PocketAppLifecycleProposal Stage(string draftDirectory, DateTimeOffset? now = null)
+    public PocketAppLifecycleProposal Stage(string draftDirectory, DateTimeOffset? now = null) =>
+        WithLifecycleLock(() => StageCore(draftDirectory, now));
+
+    private PocketAppLifecycleProposal StageCore(string draftDirectory, DateTimeOffset? now)
     {
         var timestamp = now ?? DateTimeOffset.UtcNow;
         string? cleanupDirectory = null;
@@ -230,7 +237,13 @@ internal sealed class PocketAppLifecycleManager
     public PocketAppLifecycleApprovalGrant Approve(
         string requestId,
         string bindingDigest,
-        DateTimeOffset? now = null)
+        DateTimeOffset? now = null) =>
+        WithLifecycleLock(() => ApproveCore(requestId, bindingDigest, now));
+
+    private PocketAppLifecycleApprovalGrant ApproveCore(
+        string requestId,
+        string bindingDigest,
+        DateTimeOffset? now)
     {
         if (_decidedRequests.Contains(requestId)
             || !_pendingApprovals.TryGetValue(requestId, out var pending)
@@ -249,6 +262,11 @@ internal sealed class PocketAppLifecycleManager
     }
 
     public void Reject(string requestId, string bindingDigest)
+    {
+        WithLifecycleLock(() => RejectCore(requestId, bindingDigest));
+    }
+
+    private void RejectCore(string requestId, string bindingDigest)
     {
         if (!_pendingApprovals.Remove(requestId, out var pending) || pending.BindingDigest != bindingDigest)
         {
@@ -275,7 +293,13 @@ internal sealed class PocketAppLifecycleManager
     public PocketAppLifecycleProposal PrepareRollback(
         string packageId,
         string version,
-        DateTimeOffset? now = null)
+        DateTimeOffset? now = null) =>
+        WithLifecycleLock(() => PrepareRollbackCore(packageId, version, now));
+
+    private PocketAppLifecycleProposal PrepareRollbackCore(
+        string packageId,
+        string version,
+        DateTimeOffset? now)
     {
         if (!ValidPackageId(packageId) || !ValidVersion(version)) { throw Failure("LIFECYCLE_PACKAGE_INVALID"); }
         var current = ReadActiveRecord(packageId);
@@ -357,7 +381,10 @@ internal sealed class PocketAppLifecycleManager
         return ActivateProposal(proposal, approvalGrant, now ?? DateTimeOffset.UtcNow);
     }
 
-    public PocketAppLifecycleReceipt Disable(string packageId, DateTimeOffset? now = null)
+    public PocketAppLifecycleReceipt Disable(string packageId, DateTimeOffset? now = null) =>
+        WithLifecycleLock(() => DisableCore(packageId, now));
+
+    private PocketAppLifecycleReceipt DisableCore(string packageId, DateTimeOffset? now)
     {
         var current = ReadActiveRecord(packageId);
         if (current is null || current.State == PocketAppLifecycleState.Removed)
@@ -379,7 +406,13 @@ internal sealed class PocketAppLifecycleManager
     public PocketAppLifecycleReceipt Remove(
         string packageId,
         PocketAppDataDisposition dataDisposition,
-        DateTimeOffset? now = null)
+        DateTimeOffset? now = null) =>
+        WithLifecycleLock(() => RemoveCore(packageId, dataDisposition, now));
+
+    private PocketAppLifecycleReceipt RemoveCore(
+        string packageId,
+        PocketAppDataDisposition dataDisposition,
+        DateTimeOffset? now)
     {
         if (!ValidPackageId(packageId)) { throw Failure("LIFECYCLE_PACKAGE_INVALID"); }
         if (dataDisposition != PocketAppDataDisposition.Preserve)
@@ -454,7 +487,10 @@ internal sealed class PocketAppLifecycleManager
             dataDisposition);
     }
 
-    public PocketAppPackage? ActivePackage(string packageId)
+    public PocketAppPackage? ActivePackage(string packageId) =>
+        WithLifecycleLock(() => ActivePackageCore(packageId));
+
+    private PocketAppPackage? ActivePackageCore(string packageId)
     {
         var record = ReadActiveRecord(packageId);
         if (record is null || record.State != PocketAppLifecycleState.Enabled) { return null; }
@@ -475,6 +511,12 @@ internal sealed class PocketAppLifecycleManager
     }
 
     private PocketAppLifecycleReceipt ActivateProposal(
+        PocketAppLifecycleProposal proposal,
+        PocketAppLifecycleApprovalGrant? approvalGrant,
+        DateTimeOffset now) =>
+        WithLifecycleLock(() => ActivateProposalCore(proposal, approvalGrant, now));
+
+    private PocketAppLifecycleReceipt ActivateProposalCore(
         PocketAppLifecycleProposal proposal,
         PocketAppLifecycleApprovalGrant? approvalGrant,
         DateTimeOffset now)
@@ -561,6 +603,10 @@ internal sealed class PocketAppLifecycleManager
         else
         {
             targetDirectory = InstallImmutableSnapshot(sourceSnapshot, package);
+        }
+        if (_failureInjection?.Invoke("before_active_commit") == true)
+        {
+            throw Failure("LIFECYCLE_STORAGE_FAILED");
         }
 
         var previous = current;
@@ -1055,6 +1101,22 @@ internal sealed class PocketAppLifecycleManager
         if (File.GetAttributes(directory).HasFlag(FileAttributes.ReparsePoint))
         {
             throw Failure("LIFECYCLE_CORRUPT_VERSION");
+        }
+    }
+
+    private T WithLifecycleLock<T>(Func<T> operation)
+    {
+        lock (LifecycleGate)
+        {
+            return operation();
+        }
+    }
+
+    private void WithLifecycleLock(Action operation)
+    {
+        lock (LifecycleGate)
+        {
+            operation();
         }
     }
 

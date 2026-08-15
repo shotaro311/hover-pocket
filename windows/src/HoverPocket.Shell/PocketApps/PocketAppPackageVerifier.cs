@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json.Nodes;
 using HoverPocket.Shell.Capabilities;
@@ -539,6 +540,85 @@ internal sealed class PocketAppPackageVerifier
                 try { if (Directory.Exists(absentDataRoot)) { Directory.Delete(absentDataRoot, true); } } catch { }
             }
         }, "lifecycle_state_binding");
+
+        WithPackage(draftRoot =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-concurrency-{Guid.NewGuid():N}");
+            var dataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-concurrency-data-{Guid.NewGuid():N}");
+            using var activationReached = new ManualResetEventSlim(false);
+            using var allowActivation = new ManualResetEventSlim(false);
+            using var disableStarted = new ManualResetEventSlim(false);
+            using var disableDone = new ManualResetEventSlim(false);
+            var errors = new ConcurrentQueue<string>();
+            var pauseActivation = 0;
+            try
+            {
+                var manager = new PocketAppLifecycleManager(
+                    root,
+                    dataRoot,
+                    failureInjection: point =>
+                    {
+                        if (point != "before_active_commit" || Interlocked.Exchange(ref pauseActivation, 0) != 1)
+                        {
+                            return false;
+                        }
+                        activationReached.Set();
+                        return !allowActivation.Wait(TimeSpan.FromSeconds(5));
+                    });
+                var initial = manager.Stage(draftRoot, now);
+                var initialGrant = manager.Approve(initial.RequestId, initial.BindingDigest, now);
+                _ = manager.Install(initial, initialGrant, now);
+
+                MutateJson(Path.Combine(draftRoot, "manifest.json"), manifest => manifest["version"] = "1.0.1");
+                var update = manager.Stage(draftRoot, now.AddSeconds(1));
+                var updateGrant = manager.Approve(update.RequestId, update.BindingDigest, now.AddSeconds(1));
+                var competingManager = new PocketAppLifecycleManager(root, dataRoot);
+                Interlocked.Exchange(ref pauseActivation, 1);
+
+                var activationTask = Task.Run(() =>
+                {
+                    try
+                    {
+                        _ = manager.Install(update, updateGrant, now.AddSeconds(2));
+                    }
+                    catch (Exception ex)
+                    {
+                        errors.Enqueue($"activate:{ex.GetType().Name}:{ex.Message}");
+                    }
+                });
+                Require(activationReached.Wait(TimeSpan.FromSeconds(5)), "lifecycle_concurrent_activation_reached");
+
+                var disableTask = Task.Run(() =>
+                {
+                    disableStarted.Set();
+                    try
+                    {
+                        _ = competingManager.Disable(initial.PackageId, now.AddSeconds(3));
+                    }
+                    catch (Exception ex)
+                    {
+                        errors.Enqueue($"disable:{ex.GetType().Name}:{ex.Message}");
+                    }
+                    finally
+                    {
+                        disableDone.Set();
+                    }
+                });
+                Require(disableStarted.Wait(TimeSpan.FromSeconds(5)), "lifecycle_concurrent_disable_started");
+                var disableWasSerialized = !disableDone.Wait(TimeSpan.FromMilliseconds(100));
+                allowActivation.Set();
+                Require(Task.WaitAll([activationTask, disableTask], TimeSpan.FromSeconds(5)), "lifecycle_concurrent_tasks_completed");
+                Require(disableWasSerialized, "lifecycle_concurrent_disable_serialized");
+                Require(errors.IsEmpty, $"lifecycle_concurrent_errors:{string.Join("|", errors)}");
+                Require(manager.ActivePackage(initial.PackageId) is null, "lifecycle_concurrent_disable_wins");
+            }
+            finally
+            {
+                allowActivation.Set();
+                try { if (Directory.Exists(root)) { PocketAppVerifierFileSystem.MakeTreeMutable(root); Directory.Delete(root, true); } } catch { }
+                try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
+            }
+        }, "lifecycle_concurrency");
 
         WithPackage(draftRoot =>
         {
