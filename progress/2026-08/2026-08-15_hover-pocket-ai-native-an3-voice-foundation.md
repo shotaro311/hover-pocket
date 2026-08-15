@@ -54,7 +54,7 @@ Draft PR #6のVoice Lane foundationをAN2のRegistry / Broker実装へ統合し�
 
 - `CodexVoiceRuntimeHost`がapp lifetimeでCoordinatorを所有し、設定の有効化時だけexperimental app-serverを起動する。`initialize`後にaccountとvoice capabilityを確認し、signed-out / incompatibleはfail closed、process crashはbounded backoffで再起動する。
 - Panel WebViewのマイク許可は、exact origin `https://app.hoverpocket.local`、ユーザー操作、Voice有効、Panel表示中、8秒以内のsingle-use armをすべて満たす場合だけ許可する。許可はprofileへ保存せず、その他のpermissionは拒否する。
-- `thread/realtime/start`はisolated workspace、read-only sandbox、approval `never`、永続root thread、WebRTC対応の`v1`で開始する。SDP offer / answer、remote audio、mute、transport detach、stop / closedをtyped Bridgeで接続し、audioとfull transcriptはHoverPocketへ保存しない。
+- `thread/realtime/start`はisolated workspace、read-only sandbox、approval `never`、永続root threadで開始する。初期実装時はWebRTC対応の`v1`だったが、同日のMac実音声PASSを正本として現在は`v3` / `includeStartupContext=false`へ更新した。SDP offer / answer、remote audio、mute、transport detach、stop / closedをtyped Bridgeで接続し、audioとfull transcriptはHoverPocketへ保存しない。
 - fake app-server verifierへthread開始、WebRTC SDP、transport接続、transcript、detach、crash / restart、stopを追加した。実装head `91aa8d3`のGitHub ActionsはWindows Voice 2系統、Windows通常verify、macOS verify、PR Routerがすべて成功した。
 
 ## Windows Voice → Capability Broker

@@ -88,7 +88,7 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 
 SettingsのVoice欄には、既定オフの「今日の予定タイトルと時間をCodexと共有」があります。Voiceがオフの間は変更できず、オンからオフへ戻すとCalendar toolは即時拒否されます。設定変更時は現在のVoice sessionとローカル音声transportを安全に閉じ、runtimeを再生成して新しいtool権限を反映します。
 
-Voiceを明示的に有効化した場合だけ、HoverPocket専用Codex app-serverを`-c features.realtime_conversation=true app-server --stdio`相当のprocess-local引数で起動します。ユーザーのglobal Codex configは変更しません。generic / fake app-serverの明示引数にはこのoverrideを注入せず、Releaseを含む製品設定のVoice既定OFFも維持します。`phase0_codex_app_server_probe.ps1`は同じoverrideで`features list`、schema、initialize、read-only endpointを確認します。
+Voiceを明示的に有効化した場合だけ、HoverPocket専用Codex app-serverを`-c features.realtime_conversation=true app-server --stdio`相当のprocess-local引数で起動します。ユーザーのglobal Codex configは変更しません。generic / fake app-serverの明示引数にはこのoverrideを注入せず、Releaseを含む製品設定のVoice既定OFFも維持します。productionの`thread/realtime/start`はMac実機で音声E2Eが成功した`version="v3"`と`includeStartupContext=false`を必須にします。明示stop中の同一root / app-server generationから届く`thread/realtime/closed`はreasonが非空でも正常終了として扱い、それ以外の非空reasonはエラーとして保持します。`phase0_codex_app_server_probe.ps1`は同じoverrideで`features list`、schema、initialize、read-only endpointを確認します。
 
 ## Windows updates and release packaging
 

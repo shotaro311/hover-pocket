@@ -24,7 +24,7 @@ internal sealed class CodexVoiceCoordinatorVerifier
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
-                "PASS codex-voice-coordinator verify: process-local realtime feature override, disabled no-start, account/capability gate, app-server ownership, fake WebRTC SDP/stop, root-scoped current/child/descendant cards, Broker-routed Voice tools with approval/readback/idempotency, transcript continuity, UI detach/reconnect, bounded crash restart, bounded memory");
+                "PASS codex-voice-coordinator verify: process-local realtime feature override, exact realtime v3/startup-context false, expected-stop close classification, disabled no-start, account/capability gate, app-server ownership, fake WebRTC SDP/stop, root-scoped current/child/descendant cards, Broker-routed Voice tools with approval/readback/idempotency, transcript continuity, UI detach/reconnect, bounded crash restart, bounded memory");
             return 0;
         }
 
@@ -39,6 +39,12 @@ internal sealed class CodexVoiceCoordinatorVerifier
 
     private void VerifyProductionLaunchContract()
     {
+        if (CodexVoiceCoordinator.RealtimeProtocolVersion != "v3"
+            || CodexVoiceCoordinator.RealtimeIncludeStartupContext)
+        {
+            _failures.Add("production realtime start contract was not exact v3/startup-context false");
+        }
+
         var options = CodexVoiceRuntimeHost.CreateProductionClientOptions();
         if (!options.ExperimentalApi || !options.EnableRealtimeConversation)
         {
@@ -276,6 +282,37 @@ internal sealed class CodexVoiceCoordinatorVerifier
                 _failures.Add("transport reattachment did not restore the logical session");
             }
 
+            coordinator.ProcessNotificationForVerify(
+                "thread/realtime/closed",
+                new { threadId = "root-thread", reason = "server_closed" });
+            var unexpectedClose = coordinator.Snapshot;
+            if (unexpectedClose.SessionStatus != CodexVoiceSessionStatus.Closed
+                || unexpectedClose.LastErrorCode != "realtime_closed")
+            {
+                _failures.Add("unexpected realtime close reason was not retained as an error");
+            }
+
+            var restartedAnswer = await coordinator.StartWebRtcAsync(
+                "v=0\r\ns=restart-before-stop\r\n",
+                timeout.Token);
+            coordinator.MarkTransportAttached();
+            if (restartedAnswer.RootThreadId != "root-thread"
+                || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.Connected
+                || coordinator.Snapshot.LastErrorCode is not null)
+            {
+                _failures.Add("realtime restart after an unexpected close did not recover the current root");
+            }
+
+            await coordinator.StopRealtimeAsync(timeout.Token);
+            var explicitlyStopped = coordinator.Snapshot;
+            if (explicitlyStopped.SessionStatus != CodexVoiceSessionStatus.Closed
+                || explicitlyStopped.TransportAttached
+                || explicitlyStopped.RootThreadId != "root-thread"
+                || explicitlyStopped.LastErrorCode is not null)
+            {
+                _failures.Add("explicit realtime stop treated its non-empty closed reason as an error");
+            }
+
             await coordinator.TriggerTransportExitForVerifyAsync(timeout.Token);
             var restarted = await WaitForSnapshotAsync(
                 coordinator,
@@ -294,11 +331,6 @@ internal sealed class CodexVoiceCoordinatorVerifier
             else
             {
                 appServerProcessId = restarted.AppServerProcessId;
-                await coordinator.StopRealtimeAsync(timeout.Token);
-                if (coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.Closed)
-                {
-                    _failures.Add("realtime stop did not close only the audio session");
-                }
             }
 
             if (notifications == 0)

@@ -515,6 +515,19 @@ internal static class FakeCodexAppServer
                     break;
                 }
                 case "thread/realtime/start":
+                    if (!HasRealtimeStartV3Contract(message))
+                    {
+                        Write(output, new
+                        {
+                            id = idElement.Clone(),
+                            error = new
+                            {
+                                code = -32602,
+                                message = "Expected realtime version v3 with includeStartupContext=false."
+                            }
+                        });
+                        break;
+                    }
                     realtimeStartAttempts++;
                     if (failFirstWebRtc && realtimeStartAttempts == 1)
                     {
@@ -539,7 +552,7 @@ internal static class FakeCodexAppServer
                                 ? $"root-thread-{threadStartAttempts}"
                                 : "root-thread",
                             realtimeSessionId = "fake-realtime",
-                            version = "v1"
+                            version = "v3"
                         }
                     });
                     Write(output, new
@@ -555,19 +568,20 @@ internal static class FakeCodexAppServer
                     });
                     break;
                 case "thread/realtime/stop":
-                    Write(output, new
-                    {
-                        id = idElement.Clone(),
-                        result = new { }
-                    });
+                    var stoppedThreadId = message.GetProperty("params").GetProperty("threadId").GetString();
                     Write(output, new
                     {
                         method = "thread/realtime/closed",
                         @params = new
                         {
-                            threadId = "root-thread",
-                            reason = (string?)null
+                            threadId = stoppedThreadId,
+                            reason = "client_requested"
                         }
+                    });
+                    Write(output, new
+                    {
+                        id = idElement.Clone(),
+                        result = new { }
                     });
                     break;
                 case "fake/emitNotification":
@@ -725,6 +739,17 @@ internal static class FakeCodexAppServer
             && parameters.TryGetProperty("refreshToken", out var refreshToken)
             && refreshToken.ValueKind == JsonValueKind.False
             && parameters.EnumerateObject().Count() == 1;
+    }
+
+    private static bool HasRealtimeStartV3Contract(JsonElement message)
+    {
+        return message.TryGetProperty("params", out var parameters)
+            && parameters.ValueKind == JsonValueKind.Object
+            && parameters.TryGetProperty("version", out var version)
+            && version.ValueKind == JsonValueKind.String
+            && string.Equals(version.GetString(), "v3", StringComparison.Ordinal)
+            && parameters.TryGetProperty("includeStartupContext", out var includeStartupContext)
+            && includeStartupContext.ValueKind == JsonValueKind.False;
     }
 
     private static void Write(StreamWriter output, object value)
