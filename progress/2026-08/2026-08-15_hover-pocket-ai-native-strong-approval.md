@@ -40,6 +40,14 @@ GitHub Actions（source head `bcbf7b0`）:
 - Ubuntu / macOS / Windows report byte比較: 成功
 - PR Router: [31856092669](https://github.com/shotaro311/hover-pocket/actions/runs/31856092669) 成功
 
+進捗文書を含む最終PR head `0439757`:
+
+- Windows: [31856271399](https://github.com/shotaro311/hover-pocket/actions/runs/31856271399) 成功
+- macOS: [31856271417](https://github.com/shotaro311/hover-pocket/actions/runs/31856271417) 成功
+- Pocket contracts: [31856271438](https://github.com/shotaro311/hover-pocket/actions/runs/31856271438) 成功
+- Ubuntu / macOS / Windows report byte比較: 成功
+- PR Router: [31856275029](https://github.com/shotaro311/hover-pocket/actions/runs/31856275029) 成功
+
 ## Security readback
 
 初回source head `67fee14`のdiff scan `965505c2-53d2-4fd4-8b2e-59dcf8f40abd`は、共通contract verifierだけでHost-native planのPocket App scope検査を省く一般化を候補化した。これはproduction runtimeへ到達せず、現行Pocket App principalもappContextを省略できないためreportable findingにはならなかったが、security assurance低下として採用せず`bcbf7b0`で撤回した。
@@ -61,8 +69,9 @@ GitHub Actions（source head `bcbf7b0`）:
 - 生成UIへraw note本文、raw identifier、provider store参照を渡さない。
 - WindowsはローカルMacに.NET SDKがないため、実行検証の正本はPR CIとWindows実機gateである。
 
-## 次の完了条件
+## 完了readback
 
-- 進捗文書追加後のPR headで全GitHub Actions成功。
-- unresolved review thread 0、MERGEABLE / CLEAN。
-- PR #12をmergeし、`main == origin/main`、ahead / behind `0 / 0`をreadbackする。
+- unresolved review thread 0、`MERGEABLE / CLEAN`を確認した。
+- PR #12は`2026-08-15T01:23:26Z`にmergeされた。
+- merge commit: `005f174ab4a7a85b943c1d902be26053934e7ba1`
+- merge直後の`main == origin/main`、ahead / behind `0 / 0`をreadbackした。
