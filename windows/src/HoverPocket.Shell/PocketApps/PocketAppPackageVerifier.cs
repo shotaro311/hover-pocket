@@ -334,9 +334,13 @@ internal sealed class PocketAppPackageVerifier
                 }
                 var rollback = manager.PrepareRollback(proposal.PackageId, "1.0.0", now.AddSeconds(2));
                 Require(rollback.ApprovalRequired, "lifecycle_rollback_approval");
+                File.SetAttributes(installedIntent, File.GetAttributes(installedIntent) & ~FileAttributes.ReadOnly);
                 var rollbackGrant = manager.Approve(rollback.RequestId, rollback.BindingDigest, now.AddSeconds(2));
                 _ = manager.Rollback(rollback, rollbackGrant, now.AddSeconds(2));
                 Require(manager.ActivePackage(proposal.PackageId)?.Manifest.Version == "1.0.0", "lifecycle_rollback");
+                Require(
+                    File.GetAttributes(installedIntent).HasFlag(FileAttributes.ReadOnly),
+                    "lifecycle_rollback_snapshot_rehardened");
                 MutateJson(Path.Combine(draftRoot, "manifest.json"), manifest =>
                 {
                     manifest["version"] = "1.0.2";

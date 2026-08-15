@@ -376,6 +376,7 @@ enum PocketAppPackageVerificationCommand {
                 }
                 let rollback = try manager.prepareRollback(packageID: proposal.packageID, version: "1.0.0", now: now.addingTimeInterval(2))
                 require(rollback.approvalRequired, "lifecycle_rollback_approval", failures: &failures)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: installedIntent.path)
                 let rollbackGrant = try manager.approve(
                     requestID: rollback.requestID,
                     bindingDigest: rollback.bindingDigest,
@@ -383,6 +384,13 @@ enum PocketAppPackageVerificationCommand {
                 )
                 _ = try manager.rollback(rollback, approvalGrant: rollbackGrant, now: now.addingTimeInterval(2))
                 require(try manager.activePackage(packageID: proposal.packageID)?.manifest.version == "1.0.0", "lifecycle_rollback", failures: &failures)
+                let rollbackAttributes = try FileManager.default.attributesOfItem(atPath: installedIntent.path)
+                let rollbackPermissions = (rollbackAttributes[.posixPermissions] as? NSNumber)?.intValue
+                require(
+                    rollbackPermissions.map { $0 & 0o222 == 0 } == true,
+                    "lifecycle_rollback_snapshot_rehardened",
+                    failures: &failures
+                )
                 try mutateJSON(draftRoot.appendingPathComponent("manifest.json")) { manifest in
                     manifest["version"] = "1.0.2"
                     guard var capabilities = manifest["requestedCapabilities"] as? [[String: Any]],

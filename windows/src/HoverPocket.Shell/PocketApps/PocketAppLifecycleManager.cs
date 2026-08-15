@@ -639,6 +639,15 @@ internal sealed class PocketAppLifecycleManager : IDisposable
             {
                 throw Failure("LIFECYCLE_CORRUPT_VERSION");
             }
+            var snapshotRoot = Directory.GetParent(targetDirectory)?.FullName
+                ?? throw Failure("LIFECYCLE_CORRUPT_VERSION");
+            MakeImmutable(snapshotRoot);
+            VerifyImmutable(snapshotRoot);
+            if (VerifiedInstalledPackage(targetDirectory).ManifestDigest != proposal.PackageDigest)
+            {
+                throw Failure("LIFECYCLE_READBACK_FAILED");
+            }
+            VerifyImmutable(snapshotRoot);
         }
         else
         {
