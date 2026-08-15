@@ -147,6 +147,16 @@
       "expectedDigest": "sha256:b139dcd4113e94272d34a76d32f85a1620920cd72f92962a0c6bdd42399e0a93"
     },
     {
+      "id": "invalid-execution-plan-stable-key-trailing-newline",
+      "path": "invalid/execution-plan.stable-key-trailing-newline.json",
+      "kind": "schema-mutation",
+      "expected": "reject",
+      "schema": "execution-plan.schema.json",
+      "errorCode": "CAPABILITY_ARGUMENT_INVALID",
+      "errorLocation": "$.steps[2].arguments.stableKey",
+      "expectedDigest": "sha256:8a6fae57d390e09ae2a3ccd8e83fb7c51e2e94194f2c30b6997cb1db1fe6daa2"
+    },
+    {
       "id": "invalid-execution-plan-strong-per-call-batched",
       "path": "invalid/execution-plan.strong-per-call-batched.json",
       "kind": "schema",

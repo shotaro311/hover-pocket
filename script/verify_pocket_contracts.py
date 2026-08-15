@@ -177,6 +177,21 @@ MAX_SURFACE_DEPTH = 16
 MAX_SURFACE_NODES = 256
 MAX_SCHEMA_DEPTH = 128
 
+STABLE_KEY_PATTERN = re.compile(
+    r"^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9][A-Za-z0-9._-]{0,62}$",
+    re.ASCII,
+)
+
+
+def valid_stable_key(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) <= 96
+        and value.isascii()
+        and STABLE_KEY_PATTERN.fullmatch(value) is not None
+    )
+
+
 V1_CONTEXT_BINDINGS = {
     "today": "string",
     "selectedEvent.title": "string",
@@ -1137,15 +1152,15 @@ def validate_capability_scope(
         fail("APP_REFERENCE_INVALID", safe_location(location, "range"), "argument escapes the granted range scope")
     if "namespace" in scope:
         stable_key = arguments.get("stableKey")
-        prefix = scope["namespace"] + ":"
         context_matches_namespace = (
             stable_key == "$context.todayFocusStableKey"
             and scope["namespace"] == "today-focus"
         )
-        if (
-            not isinstance(stable_key, str)
-            or (not stable_key.startswith(prefix) and not context_matches_namespace)
-        ):
+        literal_matches_namespace = (
+            valid_stable_key(stable_key)
+            and stable_key.split(":", 1)[0] == scope["namespace"]
+        )
+        if not context_matches_namespace and not literal_matches_namespace:
             fail(
                 "APP_REFERENCE_INVALID",
                 safe_location(location, "stableKey"),

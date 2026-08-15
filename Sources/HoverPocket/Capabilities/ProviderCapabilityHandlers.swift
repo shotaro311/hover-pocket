@@ -464,7 +464,7 @@ final class StickyCapabilityHandler: PocketCapabilityHandler {
         switch operation {
         case .upsert:
             _ = try context.requiredIdempotencyKey()
-            let stableKey = try arguments.requiredString("stableKey", maxLength: 160)
+            let stableKey = try PocketStableKey.validate(arguments.requiredString("stableKey", maxLength: PocketStableKey.maximumScalars))
             let title = try arguments.requiredString("title", maxLength: 120, allowEmpty: true)
             let body = try arguments.requiredString("body", maxLength: 10_000, allowEmpty: true)
             let color = try Self.color(try arguments.requiredString("color", maxLength: 16))

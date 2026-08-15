@@ -489,7 +489,7 @@ internal sealed class StickyCapabilityHandler : IPocketCapabilityHandler
         try
         {
             note = _store.UpsertNote(
-                CapabilityJson.RequiredString(arguments, "stableKey", 160),
+                PocketStableKey.Validate(CapabilityJson.RequiredString(arguments, "stableKey", PocketStableKey.MaximumScalars)),
                 CapabilityJson.RequiredString(arguments, "title", 120, allowEmpty: true),
                 CapabilityJson.RequiredString(arguments, "body", 10_000, allowEmpty: true),
                 Color(CapabilityJson.RequiredString(arguments, "color", 16)));

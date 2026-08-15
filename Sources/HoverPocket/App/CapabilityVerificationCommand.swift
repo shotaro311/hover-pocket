@@ -302,7 +302,7 @@ enum CapabilityVerificationCommand {
         do {
             _ = try await blockedHandler.handle(
                 arguments: [
-                    "stableKey": .string("blocked"),
+                    "stableKey": .string("verify:blocked"),
                     "title": .string("Blocked"),
                     "body": .string("Must not remain in memory"),
                     "color": .string("yellow")

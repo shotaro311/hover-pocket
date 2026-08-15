@@ -1,9 +1,22 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-08-15
+updated: 2026-08-16
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-next; capability-expansion-merged
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-pr-ready-ci-green; capability-expansion-merged
 ---
+
+## 2026-08-15 AI-native AN5-A Pocket App Lifecycle Foundation
+
+- exact `main` `2cd51b9`から隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an5`、branch `codex/ai-native-an5-generator-install`でAN5-Aを実装した。ChatGPT Pro Orchestratorのgeneration 2返却はdelivery ID / state hash、receipt、base、allowed path、artifact hashを検証した後だけ適用し、Codexが安全境界と回帰検証を補完した。
+- 両OSへ、untrusted draftをno-follow / stable identityでHost所有snapshotへ取り込む処理、package validate / declared tests / preview、permissionと実効Capability grant差分、exact single-use approval、immutable version install、update、disable、preserve-only remove、rollback、active version / digest readbackを追加した。`stableKey`は安全な有限grammarへ制限し、承認表示と実行値を同じ値へ固定した。
+- mutableな`active.json`を権限の正本にせず、検証済みimmutable packageから現在の権限を復元する。rollback対象はversionとpackage digestの一致を必須にし、通常updateでのdowngradeを拒否する。64文字内の巨大な数値versionも任意長の数字列として比較し、59桁versionから`1.0.0`へのdowngrade回帰を両OS verifierへ追加した。
+- removeはユーザーデータを保持する経路だけを実装した。Versionsをtombstoneへ移動し、removed stateのdurable write後だけcleanupする。途中失敗・再起動時はactive stateに応じて復元またはcleanupし、`dataDisposition=delete`はAN5-Aでは拒否する。承認期限切れ時のstaging / grant cleanup、複数manager間のWindows lifecycle直列化、起動ごとの全final snapshot再保護とreadbackも両OSの回帰検証へ固定した。
+- macOSでSwift warnings-as-errors build、Pocket App lifecycle、Pocket Surface、Capability、Broker、Panel layout、Timer、Calculator、Clipboard、Weather、共通contract 12 schema / 58 fixtureの2回byte一致、`git diff --check`が成功した。公開Capability schemaも末尾改行を真の終端で拒否し、runtimeとの不一致をnegative fixtureへ固定した。PR [#16](https://github.com/shotaro311/hover-pocket/pull/16)のsource head `a9fb8ed`でWindows [31897975620](https://github.com/shotaro311/hover-pocket/actions/runs/31897975620)、macOS [31897975587](https://github.com/shotaro311/hover-pocket/actions/runs/31897975587)、3OS contract / cross-OS compare [31897975600](https://github.com/shotaro311/hover-pocket/actions/runs/31897975600)、PR Router [31897982011](https://github.com/shotaro311/hover-pocket/actions/runs/31897982011)が成功した。未解決review threadは0、remote parity `0 / 0`をreadbackした。PRは自動mergeしていない。
+- 承認previewの実byte再検証、grantのrequest ID binding、remove recordのfile / directory durable sync、manager破棄時のstaging ownership解放、両OSのstable key true-end anchorとASCII制御文字拒否まで追加hardeningした。さらにmacOSのimmutable snapshotをactive record確定前に全file / directoryへdurable syncし、両OSのversion保存先をUTF-8 byteの可逆な16進keyへ変更してcase-insensitive filesystemの衝突を防いだ。同一rootの承認待ちsnapshotは複数manager合算で最大4件に制限し、5件目を既存proposalを壊さずfail closedにした。
+- exact range `c949676...5f6a04f`のscan `114557d4-7318-42cd-b744-c7cdc392025c`と、承認待ち上限range `5f6a04f...a9fb8ed`のscan `28517aef-7d8b-45a4-80d7-a97c92fd3834`は各4 / 4 fileを完全レビューし、どちらもcoverage complete、reportable finding 0件でsealed completeとなった。既知の保存先root pathname TOCTOUはproduction接続前の別gateとして残す。
+- 最終reviewで、起動後からrollback実行までに保存版fileの書込み属性が復元された場合、digest一致だけでactive化できる経路を検出した。`9dc6ac7`でmacOS / Windowsとも、承認後のactive record確定直前にdigest container全体を再保護し、属性、package digest、属性の順で再検証するよう修正した。両OS verifierはproposal作成後に対象fileを書込み可能へ戻し、rollback成功時に再びimmutable / read-onlyであることを確認する。
+- 上記27行のexact working-tree差分はCodex Security scan `71bed277-674c-4551-8bf4-72e0abda759e`で4 / 4 surfaceを確認し、coverage complete、reportable finding 0件、sealed completeとなった。Macのwarnings-as-errors buildとPocket App lifecycle verifierは成功し、WindowsはPR CIを最終gateとする。
+- AN5全体は未完了である。AN5-BのCodex requestからdraft生成、Host preview / 導入確認 / 管理UI、production composition、保存先root pinningが残る。初回実装: `progress/2026-08/2026-08-15_hover-pocket-ai-native-an5-a.md`。最終hardening: `progress/2026-08/2026-08-16_hover-pocket-ai-native-an5-a-hardening.md`。
 
 ## 2026-08-15 AI-native AN4 Pocket App DSL / Renderer
 

@@ -488,7 +488,7 @@ enum CapabilitySchemaValidation {
 
     static func stickyUpsertInput(_ object: CapabilityObject) throws {
         try exactKeys(object, ["stableKey", "title", "body", "color"])
-        _ = try string(object, "stableKey", minimum: 1, maximum: 160)
+        _ = try PocketStableKey.validate(string(object, "stableKey", minimum: 1, maximum: PocketStableKey.maximumScalars))
         _ = try string(object, "title", maximum: 120)
         _ = try string(object, "body", maximum: 10_000)
         _ = try string(object, "color", minimum: 1, maximum: 16, allowed: ["yellow", "blue", "green", "pink", "gray"])

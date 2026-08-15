@@ -282,7 +282,7 @@ internal sealed class PocketAppHostController
                     ? bodyElement.GetString() ?? "Focus"
                     : "Focus";
                 var stableKey = step.Arguments.TryGetProperty("stableKey", out var stableKeyElement)
-                    ? stableKeyElement.GetString() ?? "unknown"
+                    ? PocketStableKey.Validate(stableKeyElement.GetString() ?? string.Empty)
                     : "unknown";
                 lines.Add(english
                     ? $"Save \"{body}\" to Sticky Notes \"{title}\" ({stableKey})"
