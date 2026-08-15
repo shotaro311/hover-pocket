@@ -25,6 +25,11 @@ internal enum PocketAppLifecycleState
     Removed
 }
 
+internal static class PocketAppHostContract
+{
+    public const string Version = "1.0.0";
+}
+
 internal sealed record PocketAppPermissionDiff(
     IReadOnlyList<string> Added,
     IReadOnlyList<string> Removed);
@@ -96,6 +101,8 @@ internal sealed class PocketAppLifecycleManager
     private readonly string _rootDirectory;
     private readonly string _userDataRoot;
     private readonly PocketAppPackageRuntime _runtime;
+    private readonly PocketAppStagingTestRunner _stagingTestRunner;
+    private readonly string _hostVersion;
     private readonly Func<string, bool>? _failureInjection;
     private readonly Dictionary<string, PendingApproval> _pendingApprovals = new(StringComparer.Ordinal);
     private readonly HashSet<string> _decidedRequests = new(StringComparer.Ordinal);
@@ -106,11 +113,15 @@ internal sealed class PocketAppLifecycleManager
         string rootDirectory,
         string userDataRoot,
         PocketAppPackageRuntime? runtime = null,
-        Func<string, bool>? failureInjection = null)
+        Func<string, bool>? failureInjection = null,
+        string hostVersion = PocketAppHostContract.Version)
     {
+        if (!ValidVersion(hostVersion)) { throw Failure("LIFECYCLE_PACKAGE_INVALID"); }
         _rootDirectory = Path.GetFullPath(rootDirectory);
         _userDataRoot = Path.GetFullPath(userDataRoot);
         _runtime = runtime ?? new PocketAppPackageRuntime();
+        _stagingTestRunner = new PocketAppStagingTestRunner();
+        _hostVersion = hostVersion;
         _failureInjection = failureInjection;
         try
         {
@@ -141,15 +152,10 @@ internal sealed class PocketAppLifecycleManager
             var stagedSnapshot = PocketAppFileSnapshot.Capture(stagingDirectory);
             RequireSnapshotMatches(sourceSnapshot, stagedSnapshot);
             var package = _runtime.Load(stagedSnapshot);
+            ValidateHostCompatibility(package);
             var previews = MakePreviews(package);
             var previewDigest = PreviewDigest(previews);
-            var tests = new[]
-            {
-                new PocketAppStagingTestResult("host.snapshot-byte-binding", "pass", "pass"),
-                new PocketAppStagingTestResult("host.preview-determinism", "pass", "pass")
-            }.Concat(package.TestCases.OrderBy(item => item.Key, StringComparer.Ordinal)
-                .Select(item => new PocketAppStagingTestResult(item.Key, item.Value, "validated_declaration")))
-                .ToArray();
+            var tests = _stagingTestRunner.Run(package);
             var current = ReadActiveRecord(package.Manifest.Id);
             ValidateMigration(package, current);
             var action = current is null || current.State == PocketAppLifecycleState.Removed
@@ -285,6 +291,7 @@ internal sealed class PocketAppLifecycleManager
         {
             throw Failure("LIFECYCLE_CORRUPT_VERSION");
         }
+        ValidateHostCompatibility(targetPackage);
         var currentPackage = VerifiedCurrentPackage(current);
         if (currentPackage is null
             || CompareSemanticVersions(targetPackage.Manifest.Version, currentPackage.Manifest.Version) >= 0)
@@ -321,13 +328,7 @@ internal sealed class PocketAppLifecycleManager
             previews,
             diff,
             grantDiff,
-            new[]
-            {
-                new PocketAppStagingTestResult("host.snapshot-byte-binding", "pass", "pass"),
-                new PocketAppStagingTestResult("host.preview-determinism", "pass", "pass")
-            }.Concat(targetPackage.TestCases.OrderBy(item => item.Key, StringComparer.Ordinal)
-                .Select(item => new PocketAppStagingTestResult(item.Key, item.Value, "validated_declaration")))
-                .ToArray(),
+            _stagingTestRunner.Run(targetPackage),
             binding,
             timestamp,
             expires,
@@ -448,6 +449,7 @@ internal sealed class PocketAppLifecycleManager
         {
             throw Failure("LIFECYCLE_CORRUPT_VERSION");
         }
+        ValidateHostCompatibility(package);
         return package;
     }
 
@@ -483,8 +485,13 @@ internal sealed class PocketAppLifecycleManager
         {
             throw Failure("LIFECYCLE_PACKAGE_CHANGED");
         }
+        ValidateHostCompatibility(package);
         var previews = MakePreviews(package);
         if (PreviewDigest(previews) != proposal.PreviewDigest)
+        {
+            throw Failure("LIFECYCLE_PACKAGE_CHANGED");
+        }
+        if (!_stagingTestRunner.Run(package).SequenceEqual(proposal.Tests))
         {
             throw Failure("LIFECYCLE_PACKAGE_CHANGED");
         }
@@ -670,6 +677,14 @@ internal sealed class PocketAppLifecycleManager
             || !package.StatePropertyNames.SetEquals(current.StatePropertyNames))
         {
             throw Failure("LIFECYCLE_MIGRATION_REQUIRED");
+        }
+    }
+
+    private void ValidateHostCompatibility(PocketAppPackage package)
+    {
+        if (CompareSemanticVersions(package.Manifest.MinimumHostVersion, _hostVersion) > 0)
+        {
+            throw Failure("LIFECYCLE_HOST_VERSION_UNSUPPORTED");
         }
     }
 

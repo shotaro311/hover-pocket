@@ -18,6 +18,10 @@ enum PocketAppLifecycleState: String, Codable, Sendable {
     case removed
 }
 
+enum PocketAppHostContract {
+    static let version = "1.0.0"
+}
+
 struct PocketAppPermissionDiff: Codable, Equatable, Sendable {
     let added: [String]
     let removed: [String]
@@ -77,6 +81,8 @@ struct PocketAppLifecycleReceipt: Codable, Equatable, Sendable {
 
 enum PocketAppLifecycleError: Error, Equatable {
     case invalidPackage
+    case hostVersionUnsupported
+    case stagingTestFailed
     case approvalRequired
     case approvalInvalid
     case approvalExpired
@@ -121,6 +127,8 @@ final class PocketAppLifecycleManager {
     private let rootDirectory: URL
     private let userDataRoot: URL
     private let runtime: PocketAppPackageRuntime
+    private let stagingTestRunner: PocketAppStagingTestRunner
+    private let hostVersion: String
     private let failureInjection: ((String) -> Bool)?
     private var pendingApprovals: [String: PendingApproval] = [:]
     private var decidedRequests: Set<String> = []
@@ -132,11 +140,15 @@ final class PocketAppLifecycleManager {
         rootDirectory: URL,
         userDataRoot: URL,
         runtime: PocketAppPackageRuntime = PocketAppPackageRuntime(),
-        failureInjection: ((String) -> Bool)? = nil
+        failureInjection: ((String) -> Bool)? = nil,
+        hostVersion: String = PocketAppHostContract.version
     ) throws {
+        guard Self.validVersion(hostVersion) else { throw PocketAppLifecycleError.invalidPackage }
         self.rootDirectory = rootDirectory.standardizedFileURL
         self.userDataRoot = userDataRoot.standardizedFileURL
         self.runtime = runtime
+        self.stagingTestRunner = PocketAppStagingTestRunner()
+        self.hostVersion = hostVersion
         self.failureInjection = failureInjection
         do {
             try FileManager.default.createDirectory(
@@ -170,14 +182,10 @@ final class PocketAppLifecycleManager {
             let stagedSnapshot = try PocketAppFileSnapshot.capture(directory: stagingDirectory)
             let package = try runtime.load(snapshot: stagedSnapshot)
             try requireSnapshotMatches(source: sourceSnapshot, staged: stagedSnapshot)
+            try validateHostCompatibility(package)
             let previews = try makePreviews(package)
             let previewDigest = Self.previewDigest(previews)
-            let tests = [
-                PocketAppStagingTestResult(id: "host.snapshot-byte-binding", expected: "pass", status: "pass"),
-                PocketAppStagingTestResult(id: "host.preview-determinism", expected: "pass", status: "pass")
-            ] + package.testCases.keys.sorted().map {
-                PocketAppStagingTestResult(id: $0, expected: package.testCases[$0]!, status: "validated_declaration")
-            }
+            let tests = try stagingTestRunner.run(package)
             let current = try readActiveRecord(packageID: package.manifest.id)
             try validateMigration(package: package, current: current)
             let action: PocketAppLifecycleAction = current == nil || current?.state == .removed ? .install : .update
@@ -294,6 +302,7 @@ final class PocketAppLifecycleManager {
                 == String(targetPackage.manifestDigest.dropFirst("sha256:".count)) else {
             throw PocketAppLifecycleError.corruptVersion
         }
+        try validateHostCompatibility(targetPackage)
         let currentPackage = try verifiedCurrentPackage(record: current)
         guard let currentPackage,
               Self.compareSemanticVersions(targetPackage.manifest.version, currentPackage.manifest.version) == .orderedAscending else {
@@ -329,12 +338,7 @@ final class PocketAppLifecycleManager {
             previews: previews,
             permissionDiff: diff,
             capabilityGrantDiff: grantDiff,
-            tests: [
-                PocketAppStagingTestResult(id: "host.snapshot-byte-binding", expected: "pass", status: "pass"),
-                PocketAppStagingTestResult(id: "host.preview-determinism", expected: "pass", status: "pass")
-            ] + targetPackage.testCases.keys.sorted().map {
-                PocketAppStagingTestResult(id: $0, expected: targetPackage.testCases[$0]!, status: "validated_declaration")
-            },
+            tests: try stagingTestRunner.run(targetPackage),
             bindingDigest: binding,
             createdAt: now,
             expiresAt: now.addingTimeInterval(approvalLifetime),
@@ -456,6 +460,7 @@ final class PocketAppLifecycleManager {
               package.manifestDigest == digest else {
             throw PocketAppLifecycleError.corruptVersion
         }
+        try validateHostCompatibility(package)
         return package
     }
 
@@ -484,8 +489,12 @@ final class PocketAppLifecycleManager {
               package.statePropertyNames == proposal.statePropertyNames else {
             throw PocketAppLifecycleError.packageChanged
         }
+        try validateHostCompatibility(package)
         let previews = try makePreviews(package)
         guard Self.previewDigest(previews) == proposal.previewDigest else {
+            throw PocketAppLifecycleError.packageChanged
+        }
+        guard try stagingTestRunner.run(package) == proposal.tests else {
             throw PocketAppLifecycleError.packageChanged
         }
         try validateMigration(package: package, current: current)
@@ -635,6 +644,12 @@ final class PocketAppLifecycleManager {
         guard current.stateSchemaDigest == package.stateSchemaDigest,
               Set(current.statePropertyNames) == package.statePropertyNames else {
             throw PocketAppLifecycleError.migrationRequired
+        }
+    }
+
+    private func validateHostCompatibility(_ package: PocketAppPackage) throws {
+        guard Self.compareSemanticVersions(package.manifest.minimumHostVersion, hostVersion) != .orderedDescending else {
+            throw PocketAppLifecycleError.hostVersionUnsupported
         }
     }
 

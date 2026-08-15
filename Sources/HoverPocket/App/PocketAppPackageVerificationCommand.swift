@@ -246,7 +246,7 @@ enum PocketAppPackageVerificationCommand {
                 require(
                     proposal.tests.count == 6
                         && proposal.tests.prefix(2).allSatisfy { $0.status == "pass" }
-                        && proposal.tests.dropFirst(2).allSatisfy { $0.status == "validated_declaration" },
+                        && proposal.tests.dropFirst(2).allSatisfy { $0.status == $0.expected },
                     "lifecycle_tests",
                     failures: &failures
                 )
@@ -299,10 +299,10 @@ enum PocketAppPackageVerificationCommand {
                 try mutateJSON(draftRoot.appendingPathComponent("manifest.json")) { manifest in
                     manifest["version"] = "1.0.2"
                     guard var capabilities = manifest["requestedCapabilities"] as? [[String: Any]],
-                          let calendarIndex = capabilities.firstIndex(where: { $0["id"] as? String == "calendar.events.list" }) else {
+                          let stickyIndex = capabilities.firstIndex(where: { $0["id"] as? String == "sticky.note.get" }) else {
                         return false
                     }
-                    capabilities[calendarIndex].removeValue(forKey: "scope")
+                    capabilities[stickyIndex].removeValue(forKey: "scope")
                     manifest["requestedCapabilities"] = capabilities
                     return true
                 }
@@ -503,6 +503,99 @@ enum PocketAppPackageVerificationCommand {
             }
         } catch {
             failures.append("lifecycle_large_version:\(error)")
+        }
+
+        do {
+            try withPackage { draftRoot in
+                let root = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("hover-pocket-lifecycle-test-gate-\(UUID().uuidString)", isDirectory: true)
+                let dataRoot = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("hover-pocket-lifecycle-test-gate-data-\(UUID().uuidString)", isDirectory: true)
+                defer {
+                    makeTreeMutable(root)
+                    try? FileManager.default.removeItem(at: root)
+                    try? FileManager.default.removeItem(at: dataRoot)
+                }
+                let manager = try PocketAppLifecycleManager(rootDirectory: root, userDataRoot: dataRoot)
+                try mutateJSON(draftRoot.appendingPathComponent("tests/calendar-read.json")) { test in
+                    test["expected"] = "reject"
+                    return true
+                }
+                do {
+                    _ = try manager.stage(draftDirectory: draftRoot, now: now)
+                    failures.append("lifecycle_declared_test_not_executed")
+                } catch PocketAppLifecycleError.stagingTestFailed {
+                }
+            }
+        } catch {
+            failures.append("lifecycle_test_gate:\(error)")
+        }
+
+        do {
+            try withPackage { draftRoot in
+                let root = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("hover-pocket-lifecycle-host-version-\(UUID().uuidString)", isDirectory: true)
+                let dataRoot = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("hover-pocket-lifecycle-host-version-data-\(UUID().uuidString)", isDirectory: true)
+                defer {
+                    makeTreeMutable(root)
+                    try? FileManager.default.removeItem(at: root)
+                    try? FileManager.default.removeItem(at: dataRoot)
+                }
+                try mutateJSON(draftRoot.appendingPathComponent("manifest.json")) { manifest in
+                    manifest["minHostVersion"] = "2.0.0"
+                    return true
+                }
+                let incompatibleHost = try PocketAppLifecycleManager(rootDirectory: root, userDataRoot: dataRoot)
+                do {
+                    _ = try incompatibleHost.stage(draftDirectory: draftRoot, now: now)
+                    failures.append("lifecycle_incompatible_stage_accepted")
+                } catch PocketAppLifecycleError.hostVersionUnsupported {
+                }
+                let hostTwo = try PocketAppLifecycleManager(
+                    rootDirectory: root,
+                    userDataRoot: dataRoot,
+                    hostVersion: "2.0.0"
+                )
+                let initial = try hostTwo.stage(draftDirectory: draftRoot, now: now)
+                let initialGrant = try hostTwo.approve(
+                    requestID: initial.requestID,
+                    bindingDigest: initial.bindingDigest,
+                    now: now
+                )
+                _ = try hostTwo.install(initial, approvalGrant: initialGrant, now: now)
+
+                let hostOne = try PocketAppLifecycleManager(rootDirectory: root, userDataRoot: dataRoot)
+                do {
+                    _ = try hostOne.activePackage(packageID: initial.packageID)
+                    failures.append("lifecycle_incompatible_active_package_accepted")
+                } catch PocketAppLifecycleError.hostVersionUnsupported {
+                }
+
+                try mutateJSON(draftRoot.appendingPathComponent("manifest.json")) { manifest in
+                    manifest["version"] = "2.0.0"
+                    manifest["minHostVersion"] = "1.0.0"
+                    return true
+                }
+                let update = try hostTwo.stage(draftDirectory: draftRoot, now: now.addingTimeInterval(1))
+                let updateGrant = try hostTwo.approve(
+                    requestID: update.requestID,
+                    bindingDigest: update.bindingDigest,
+                    now: now.addingTimeInterval(1)
+                )
+                _ = try hostTwo.install(update, approvalGrant: updateGrant, now: now.addingTimeInterval(1))
+                do {
+                    _ = try hostOne.prepareRollback(
+                        packageID: initial.packageID,
+                        version: "1.0.0",
+                        now: now.addingTimeInterval(2)
+                    )
+                    failures.append("lifecycle_incompatible_rollback_accepted")
+                } catch PocketAppLifecycleError.hostVersionUnsupported {
+                }
+            }
+        } catch {
+            failures.append("lifecycle_host_version:\(error)")
         }
     }
 

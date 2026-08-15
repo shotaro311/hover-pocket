@@ -228,7 +228,7 @@ internal sealed class PocketAppPackageVerifier
                 Require(
                     proposal.Tests.Count == 6
                     && proposal.Tests.Take(2).All(item => item.Status == "pass")
-                    && proposal.Tests.Skip(2).All(item => item.Status == "validated_declaration"),
+                    && proposal.Tests.Skip(2).All(item => item.Status == item.Expected),
                     "lifecycle_tests");
                 try
                 {
@@ -274,9 +274,9 @@ internal sealed class PocketAppPackageVerifier
                 MutateJson(Path.Combine(draftRoot, "manifest.json"), manifest =>
                 {
                     manifest["version"] = "1.0.2";
-                    var calendarRequest = manifest["requestedCapabilities"]!.AsArray()
-                        .First(item => item?["id"]?.GetValue<string>() == "calendar.events.list")!;
-                    calendarRequest.AsObject().Remove("scope");
+                    var stickyRequest = manifest["requestedCapabilities"]!.AsArray()
+                        .First(item => item?["id"]?.GetValue<string>() == "sticky.note.get")!;
+                    stickyRequest.AsObject().Remove("scope");
                 });
                 var authorityUpdate = manager.Stage(draftRoot, now.AddSeconds(2));
                 Require(
@@ -459,6 +459,85 @@ internal sealed class PocketAppPackageVerifier
                 try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
             }
         }, "lifecycle_large_version");
+
+        WithPackage(draftRoot =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-test-gate-{Guid.NewGuid():N}");
+            var dataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-test-gate-data-{Guid.NewGuid():N}");
+            try
+            {
+                var manager = new PocketAppLifecycleManager(root, dataRoot);
+                MutateJson(Path.Combine(draftRoot, "tests", "calendar-read.json"), test => test["expected"] = "reject");
+                try
+                {
+                    _ = manager.Stage(draftRoot, now);
+                    _failures.Add("lifecycle_declared_test_not_executed");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_STAGING_TEST_FAILED")
+                {
+                }
+            }
+            finally
+            {
+                try { if (Directory.Exists(root)) { PocketAppVerifierFileSystem.MakeTreeMutable(root); Directory.Delete(root, true); } } catch { }
+                try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
+            }
+        }, "lifecycle_test_gate");
+
+        WithPackage(draftRoot =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-host-version-{Guid.NewGuid():N}");
+            var dataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-host-version-data-{Guid.NewGuid():N}");
+            try
+            {
+                MutateJson(Path.Combine(draftRoot, "manifest.json"), manifest => manifest["minHostVersion"] = "2.0.0");
+                var incompatibleHost = new PocketAppLifecycleManager(root, dataRoot);
+                try
+                {
+                    _ = incompatibleHost.Stage(draftRoot, now);
+                    _failures.Add("lifecycle_incompatible_stage_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_HOST_VERSION_UNSUPPORTED")
+                {
+                }
+                var hostTwo = new PocketAppLifecycleManager(root, dataRoot, hostVersion: "2.0.0");
+                var initial = hostTwo.Stage(draftRoot, now);
+                var initialGrant = hostTwo.Approve(initial.RequestId, initial.BindingDigest, now);
+                _ = hostTwo.Install(initial, initialGrant, now);
+
+                var hostOne = new PocketAppLifecycleManager(root, dataRoot);
+                try
+                {
+                    _ = hostOne.ActivePackage(initial.PackageId);
+                    _failures.Add("lifecycle_incompatible_active_package_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_HOST_VERSION_UNSUPPORTED")
+                {
+                }
+
+                MutateJson(Path.Combine(draftRoot, "manifest.json"), manifest =>
+                {
+                    manifest["version"] = "2.0.0";
+                    manifest["minHostVersion"] = "1.0.0";
+                });
+                var update = hostTwo.Stage(draftRoot, now.AddSeconds(1));
+                var updateGrant = hostTwo.Approve(update.RequestId, update.BindingDigest, now.AddSeconds(1));
+                _ = hostTwo.Install(update, updateGrant, now.AddSeconds(1));
+                try
+                {
+                    _ = hostOne.PrepareRollback(initial.PackageId, "1.0.0", now.AddSeconds(2));
+                    _failures.Add("lifecycle_incompatible_rollback_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_HOST_VERSION_UNSUPPORTED")
+                {
+                }
+            }
+            finally
+            {
+                try { if (Directory.Exists(root)) { PocketAppVerifierFileSystem.MakeTreeMutable(root); Directory.Delete(root, true); } } catch { }
+                try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
+            }
+        }, "lifecycle_host_version");
     }
 
     private void RejectPackage(string label, Action<string> mutation)
