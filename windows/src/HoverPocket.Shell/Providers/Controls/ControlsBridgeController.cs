@@ -177,6 +177,17 @@ internal sealed class ControlsBridgeController : IDisposable
         return snapshot;
     }
 
+    public async Task<ControlsSnapshot> SetMutedAsync(bool muted, CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        var current = await GetSnapshotAsync(cancellationToken, forceRefresh: true);
+        if (!current.Volume.Available || current.Volume.Muted == muted)
+        {
+            return current;
+        }
+        return await ToggleMuteAsync(cancellationToken);
+    }
+
     public async Task<ControlsSnapshot> SetBrightnessAsync(
         string displayId,
         int value,

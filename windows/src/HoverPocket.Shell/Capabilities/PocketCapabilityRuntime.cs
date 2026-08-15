@@ -205,6 +205,21 @@ internal static class CapabilityJson
         return value;
     }
 
+    public static double RequiredNumber(JsonElement arguments, string name, double minimum, double maximum)
+    {
+        if (arguments.ValueKind != JsonValueKind.Object
+            || !arguments.TryGetProperty(name, out var property)
+            || property.ValueKind != JsonValueKind.Number
+            || !property.TryGetDouble(out var value)
+            || !double.IsFinite(value)
+            || value < minimum
+            || value > maximum)
+        {
+            throw Invalid(name);
+        }
+        return value;
+    }
+
     public static bool RequiredBool(JsonElement arguments, string name)
     {
         if (arguments.ValueKind != JsonValueKind.Object

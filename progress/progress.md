@@ -2,8 +2,16 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-next; capability-expansion-merged
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-in-progress; capability-expansion-in-progress
 ---
+
+## 2026-08-15 AI-native Controls Capability
+
+- exact `main` `2cd51b9`から隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-core-expansion`、branch `codex/ai-native-core-capability-expansion`を作成し、Built-in Capability ExpansionのControls単位を実装した。
+- macOS / WindowsのRegistryとProvider adapterへ`controls.availability.get@1`、`controls.volume.get@1`、`controls.volume.set@1`、`controls.mute.set@1`、`controls.brightness.set@1`、`controls.media.command@1`を追加した。readは`controls.read`、writeは`controls.write`、writeはidempotency key、Broker承認、実OS状態readbackを必須にし、出力はvolume / mute、bounded display ID、safe title / sourceだけへ限定した。
+- 監査で、再生位置の自然な進行だけでnext / previous成功と誤認できる問題と、macOSのvolume setが承認されていないmute解除も行う問題を検出して修正した。track readbackはtitleの変化を要求し、volume setはmute状態を保持する。外部DDCで保持できない場合は、音を出さずfail closedにする。
+- ローカルMacでSwift warnings-as-errors build、Capability 20 handler、Broker 21 descriptor / 20 handler、Controlsのnegative readback、Media、Timer、Clipboard、Pocket Surface、Pocket App、Panel layout、12 schema / 63 fixtureの2回の決定論的contract report、全Windows JavaScript syntax、`git diff --check`が成功した。Windows .NET SDKはこのMacにないため、Windows Release build / verifierはPR CIを必須gateとする。
+- exact working-treeのCodex Security diff scan `27dc0225-9797-4d2f-b8eb-0eb111210182`は変更source 15 / 15を確認し、sealed complete、reportable finding 0件となった。2件は現行のdefault-offかつControls adapter未公開では攻撃経路なしとしてrejectedだが、将来Voice / Pocket App / MCPへ公開する前の必須修正として実装へ反映済みである。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-controls-capability.md`。
 
 ## 2026-08-15 AI-native AN4 Pocket App DSL / Renderer
 

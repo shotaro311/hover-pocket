@@ -34,6 +34,11 @@ final class ControlsStore: ObservableObject {
     private var mediaEventCounter = 0
     private var enrichmentTask: Task<Void, Never>?
 
+    enum CapabilityFailure: Error {
+        case unavailable(String)
+        case readbackMismatch(String)
+    }
+
     func startPolling() {
         startMediaStreamIfAvailable()
         refresh()
@@ -93,6 +98,130 @@ final class ControlsStore: ObservableObject {
                 self.updateExtrapolatedProgress()
             }
         }
+    }
+
+    func capabilitySnapshot() async -> (
+        displays: [ControlsDisplay],
+        volume: ControlsVolumeState,
+        volumeAvailable: Bool,
+        media: ControlsNowPlayingState
+    ) {
+        let displays = await brightnessService.displays()
+        let observedVolume = await volumeService.capabilityState()
+        let volume = observedVolume ?? .empty
+        let media = await mediaService.nowPlaying()
+        self.displays = displays
+        self.volume = volume
+        self.nowPlaying = media
+        return (displays, volume, observedVolume != nil, media)
+    }
+
+    func setVolumeForCapability(_ level: Double) async throws -> ControlsVolumeState {
+        let target = level.clamped(to: 0...1)
+        guard let before = await volumeService.capabilityState() else {
+            throw CapabilityFailure.unavailable("controls.volume")
+        }
+        await volumeService.setVolume(target, unmute: false)
+        guard let observed = await readVolumeForCapability(
+            targetLevel: target,
+            targetMuted: before.isMuted
+        ) else {
+            throw CapabilityFailure.unavailable("controls.volume")
+        }
+        guard abs(observed.level - target) <= 0.02,
+              observed.isMuted == before.isMuted else {
+            throw CapabilityFailure.readbackMismatch("controls.volume")
+        }
+        volume = observed
+        return observed
+    }
+
+    func setMutedForCapability(_ muted: Bool) async throws -> ControlsVolumeState {
+        await volumeService.setMuted(muted)
+        guard let observed = await readVolumeForCapability(targetLevel: nil, targetMuted: muted) else {
+            throw CapabilityFailure.unavailable("controls.volume")
+        }
+        guard observed.isMuted == muted else {
+            throw CapabilityFailure.readbackMismatch("controls.mute")
+        }
+        volume = observed
+        return observed
+    }
+
+    func setBrightnessForCapability(_ level: Double, displayID: String) async throws -> ControlsDisplay {
+        let target = level.clamped(to: DisplayBrightnessService.minimumBrightness...1)
+        guard let existing = (await brightnessService.displays()).first(where: { $0.id == displayID }),
+              existing.isControllable else {
+            throw CapabilityFailure.unavailable("controls.display")
+        }
+        guard brightnessService.setBrightness(target, for: CGDirectDisplayID(existing.displayID)) else {
+            throw CapabilityFailure.unavailable("controls.brightness")
+        }
+        for delay in [150_000_000, 350_000_000, 700_000_000] as [UInt64] {
+            try? await Task.sleep(nanoseconds: delay)
+            let observedDisplays = await brightnessService.displays()
+            displays = observedDisplays
+            if let observed = observedDisplays.first(where: { $0.id == displayID }),
+               observed.isControllable,
+               abs(observed.brightness - target) <= 0.03 {
+                return observed
+            }
+        }
+        throw CapabilityFailure.readbackMismatch("controls.brightness")
+    }
+
+    func executeMediaCommandForCapability(_ command: String) async throws -> ControlsNowPlayingState {
+        let before = await mediaService.nowPlaying()
+        guard before.hasMedia else {
+            throw CapabilityFailure.unavailable("controls.media")
+        }
+        switch command {
+        case "play_pause":
+            await mediaService.togglePlayPause()
+        case "next":
+            await mediaService.nextTrack()
+        case "previous":
+            await mediaService.previousTrack()
+        default:
+            throw CapabilityFailure.unavailable("controls.media_command")
+        }
+        for delay in [150_000_000, 400_000_000, 800_000_000] as [UInt64] {
+            try? await Task.sleep(nanoseconds: delay)
+            let observed = await mediaService.nowPlaying()
+            guard observed.hasMedia else { continue }
+            let verified: Bool
+            if command == "play_pause" {
+                verified = observed.isPlaying != before.isPlaying
+            } else {
+                verified = observed.title != before.title
+            }
+            if verified {
+                nowPlaying = observed
+                return observed
+            }
+        }
+        throw CapabilityFailure.readbackMismatch("controls.media")
+    }
+
+    private func readVolumeForCapability(
+        targetLevel: Double?,
+        targetMuted: Bool?
+    ) async -> ControlsVolumeState? {
+        var latest = await volumeService.capabilityState()
+        for delay in [100_000_000, 250_000_000, 500_000_000] as [UInt64] {
+            let levelMatches = latest.map { observed in
+                targetLevel.map { abs(observed.level - $0) <= 0.02 } ?? true
+            } ?? false
+            let mutedMatches = latest.map { observed in
+                targetMuted.map { observed.isMuted == $0 } ?? true
+            } ?? false
+            if levelMatches, mutedMatches {
+                return latest
+            }
+            try? await Task.sleep(nanoseconds: delay)
+            latest = await volumeService.capabilityState()
+        }
+        return latest
     }
 
     // MARK: - Adapter event stream
@@ -844,21 +973,30 @@ private final class SystemVolumeService: @unchecked Sendable {
     private var lastMonitorMuted = false
 
     func currentState() async -> ControlsVolumeState {
-        await Task.detached(priority: .utility) { [self] in
-            readCurrentState()
-        }.value ?? .empty
+        await capabilityState() ?? .empty
     }
 
-    func setVolume(_ level: Double) async {
+    func capabilityState() async -> ControlsVolumeState? {
+        await Task.detached(priority: .utility) { [self] in
+            readCurrentState()
+        }.value
+    }
+
+    func setVolume(_ level: Double, unmute: Bool = true) async {
         let normalized = Float32(level.clamped(to: 0...1))
         await Task.detached(priority: .utility) { [self] in
+            let wasMuted = readCurrentState()?.isMuted ?? false
             let deviceID = Self.defaultOutputDevice()
             let shouldWriteMonitorVolume = deviceID.map { Self.isDisplayAudioOutput(deviceID: $0) } ?? true
             let didSetCoreAudio = Self.setVolume(normalized)
-            if normalized > 0 {
+            if unmute, normalized > 0 {
                 _ = Self.setMuted(false)
             }
             if shouldWriteMonitorVolume || !didSetCoreAudio {
+                if wasMuted, !unmute, normalized > 0.01 {
+                    rememberAudibleMonitorVolume(Double(normalized))
+                    return
+                }
                 let didSetMonitor = ddcBridge.setSpeakerVolume(Double(normalized))
                 if didSetMonitor, normalized > 0.01 {
                     rememberAudibleMonitorVolume(Double(normalized))

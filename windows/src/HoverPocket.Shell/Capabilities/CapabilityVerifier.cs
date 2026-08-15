@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using HoverPocket.Shell.Providers.Calendar;
+using HoverPocket.Shell.Providers.Controls;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
 
@@ -32,8 +33,9 @@ internal sealed class CapabilityVerifier
         }
 
         Console.WriteLine("capability_verify=ok");
-        Console.WriteLine("capability_handlers=14");
+        Console.WriteLine("capability_handlers=20");
         Console.WriteLine("capability_calculator_evaluate=ok");
+        Console.WriteLine("capability_controls_readback=ok");
         Console.WriteLine("capability_timer_lifecycle=ok");
         Console.WriteLine("capability_sticky_upsert=ok");
         Console.WriteLine("capability_sticky_lifecycle=ok");
@@ -57,9 +59,11 @@ internal sealed class CapabilityVerifier
             var stickyRoot = Path.Combine(root, "sticky");
             var stickyStore = new StickyNotesStore(stickyRoot);
             var calendar = new FakeCalendarCapabilityDataSource();
-            var handlers = ProviderCapabilityCompositionRoot.Create(calendar, timerStore, stickyStore);
-            Require(handlers.Keys.Count == 14, "handler_count");
+            var controls = new FakeControlsCapabilityDataSource();
+            var handlers = ProviderCapabilityCompositionRoot.Create(calendar, timerStore, stickyStore, controls);
+            Require(handlers.Keys.Count == 20, "handler_count");
             await VerifyCalculatorAsync(handlers);
+            await VerifyControlsAsync(handlers, controls);
 
             await VerifyTimerAsync(handlers, timerStore, alertSound, clock, root);
             await VerifyStickyAsync(handlers, stickyStore, stickyRoot);
@@ -124,6 +128,104 @@ internal sealed class CapabilityVerifier
             catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_ARGUMENT_INVALID")
             {
             }
+        }
+    }
+
+    private async Task VerifyControlsAsync(
+        PocketCapabilityHandlerSet handlers,
+        FakeControlsCapabilityDataSource controls)
+    {
+        var available = await handlers.InvokeAsync(CapabilityIds.ControlsAvailability, Json(new { }));
+        Require(available.GetProperty("volumeAvailable").GetBoolean(), "controls_volume_available");
+        Require(available.GetProperty("brightnessAvailable").GetBoolean(), "controls_brightness_available");
+        Require(available.GetProperty("mediaAvailable").GetBoolean(), "controls_media_available");
+        Require(
+            available.GetProperty("displayIds").EnumerateArray().Select(item => item.GetString()).SequenceEqual(["display-1"]),
+            "controls_display_ids");
+
+        var initial = await handlers.InvokeAsync(CapabilityIds.ControlsVolumeGet, Json(new { }));
+        Require(Math.Abs(initial.GetProperty("level").GetDouble() - 0.3) < 0.001, "controls_volume_get");
+        Require(!initial.GetProperty("muted").GetBoolean(), "controls_mute_get");
+
+        var volume = await handlers.InvokeAsync(
+            CapabilityIds.ControlsVolumeSet,
+            Json(new { level = 0.7 }),
+            new CapabilityHandlerContext("controls-verifier-key-0001", DateTimeOffset.UtcNow));
+        Require(Math.Abs(volume.GetProperty("level").GetDouble() - 0.7) < 0.001, "controls_volume_set");
+
+        var muted = await handlers.InvokeAsync(
+            CapabilityIds.ControlsMuteSet,
+            Json(new { muted = true }),
+            new CapabilityHandlerContext("controls-verifier-key-0002", DateTimeOffset.UtcNow));
+        Require(muted.GetProperty("muted").GetBoolean(), "controls_mute_set");
+
+        var mutedVolume = await handlers.InvokeAsync(
+            CapabilityIds.ControlsVolumeSet,
+            Json(new { level = 0.4 }),
+            new CapabilityHandlerContext("controls-verifier-key-0002b", DateTimeOffset.UtcNow));
+        Require(mutedVolume.GetProperty("muted").GetBoolean(), "controls_volume_preserves_mute");
+
+        var brightness = await handlers.InvokeAsync(
+            CapabilityIds.ControlsBrightnessSet,
+            Json(new { displayId = "display-1", level = 0.6 }),
+            new CapabilityHandlerContext("controls-verifier-key-0003", DateTimeOffset.UtcNow));
+        Require(brightness.GetProperty("displayId").GetString() == "display-1", "controls_brightness_id");
+        Require(Math.Abs(brightness.GetProperty("level").GetDouble() - 0.6) < 0.001, "controls_brightness_set");
+
+        var media = await handlers.InvokeAsync(
+            CapabilityIds.ControlsMediaCommand,
+            Json(new { command = "play_pause" }),
+            new CapabilityHandlerContext("controls-verifier-key-0004", DateTimeOffset.UtcNow));
+        Require(media.GetProperty("available").GetBoolean(), "controls_media_available_output");
+        Require(media.GetProperty("isPlaying").GetBoolean(), "controls_media_play_pause");
+        Require(media.GetProperty("safeTitle").GetString() == "Track A", "controls_media_safe_title");
+
+        try
+        {
+            await handlers.InvokeAsync(CapabilityIds.ControlsVolumeSet, Json(new { level = 0.5 }));
+            _failures.Add("controls_missing_idempotency_accepted");
+        }
+        catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_ARGUMENT_INVALID" && ex.Field == "idempotencyKey")
+        {
+        }
+
+        controls.MismatchNextVolume = true;
+        try
+        {
+            await handlers.InvokeAsync(
+                CapabilityIds.ControlsVolumeSet,
+                Json(new { level = 0.2 }),
+                new CapabilityHandlerContext("controls-verifier-key-0005", DateTimeOffset.UtcNow));
+            _failures.Add("controls_volume_mismatch_accepted");
+        }
+        catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_READBACK_MISMATCH" && ex.Field == "controls.volume")
+        {
+        }
+
+        controls.ChangeMuteOnNextVolume = true;
+        try
+        {
+            await handlers.InvokeAsync(
+                CapabilityIds.ControlsVolumeSet,
+                Json(new { level = 0.25 }),
+                new CapabilityHandlerContext("controls-verifier-key-0006", DateTimeOffset.UtcNow));
+            _failures.Add("controls_hidden_mute_change_accepted");
+        }
+        catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_READBACK_MISMATCH" && ex.Field == "controls.volume")
+        {
+        }
+
+        controls.ProgressOnlyNextMediaChange = true;
+        try
+        {
+            await handlers.InvokeAsync(
+                CapabilityIds.ControlsMediaCommand,
+                Json(new { command = "next" }),
+                new CapabilityHandlerContext("controls-verifier-key-0007", DateTimeOffset.UtcNow));
+            _failures.Add("controls_progress_only_media_change_accepted");
+        }
+        catch (CapabilityHandlerException ex) when (ex.Code == "CAPABILITY_READBACK_MISMATCH" && ex.Field == "controls.media")
+        {
         }
     }
 
@@ -676,4 +778,112 @@ internal sealed class FakeCalendarCapabilityDataSource : ICalendarCapabilityData
         _events[item.EventRef] = item;
         return Task.FromResult(item);
     }
+}
+
+internal sealed class FakeControlsCapabilityDataSource : IControlsCapabilityDataSource
+{
+    private int _volume = 30;
+    private bool _muted;
+    private int _brightness = 40;
+    private MediaSessionState _media = Media(
+        title: "Track A",
+        isPlaying: false,
+        positionSeconds: 10);
+
+    public bool MismatchNextVolume { get; set; }
+    public bool ChangeMuteOnNextVolume { get; set; }
+    public bool ProgressOnlyNextMediaChange { get; set; }
+
+    public Task<ControlsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Snapshot());
+    }
+
+    public Task<ControlsSnapshot> SetVolumeAsync(int value, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (MismatchNextVolume)
+        {
+            MismatchNextVolume = false;
+            _volume = Math.Clamp(value + 20, 0, 100);
+        }
+        else
+        {
+            _volume = value;
+        }
+        if (ChangeMuteOnNextVolume)
+        {
+            ChangeMuteOnNextVolume = false;
+            _muted = !_muted;
+        }
+        return Task.FromResult(Snapshot());
+    }
+
+    public Task<ControlsSnapshot> SetMutedAsync(bool muted, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _muted = muted;
+        return Task.FromResult(Snapshot());
+    }
+
+    public Task<ControlsSnapshot> SetBrightnessAsync(
+        string displayId,
+        int value,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!string.Equals(displayId, "display-1", StringComparison.Ordinal))
+        {
+            return Task.FromResult(Snapshot());
+        }
+        _brightness = value;
+        return Task.FromResult(Snapshot());
+    }
+
+    public Task<ControlsSnapshot> ExecuteMediaCommandAsync(string command, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (ProgressOnlyNextMediaChange && command is "next" or "previous")
+        {
+            ProgressOnlyNextMediaChange = false;
+            _media = _media with { PositionSeconds = _media.PositionSeconds + 2 };
+        }
+        else
+        {
+            _media = command switch
+            {
+                "play_pause" => _media with { IsPlaying = !_media.IsPlaying },
+                "next" => _media with { Title = "Track B", PositionSeconds = 0 },
+                "previous" => _media with { Title = "Track Previous", PositionSeconds = 0 },
+                _ => _media
+            };
+        }
+        return Task.FromResult(Snapshot());
+    }
+
+    private ControlsSnapshot Snapshot() => new(
+        [new DisplayBrightnessState("display-1", "Display", true, _brightness, WriteVerified: true)],
+        new VolumeState(true, _volume, _muted),
+        _media,
+        MediaPreviewState.Inactive,
+        DateTimeOffset.UtcNow);
+
+    private static MediaSessionState Media(string title, bool isPlaying, double positionSeconds) => new(
+        true,
+        title,
+        "Artist",
+        "Music",
+        null,
+        positionSeconds,
+        180,
+        isPlaying,
+        1,
+        true,
+        true,
+        false,
+        true,
+        true,
+        "music",
+        null);
 }
