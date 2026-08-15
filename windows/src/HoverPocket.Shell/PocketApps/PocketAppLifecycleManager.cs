@@ -1423,7 +1423,7 @@ internal sealed class PocketAppLifecycleManager : IDisposable
             "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$",
             System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
-    private static int CompareSemanticVersions(string left, string right)
+    internal static int CompareSemanticVersions(string left, string right)
     {
         static (string[] Core, string[]? Prerelease) Parse(string value)
         {

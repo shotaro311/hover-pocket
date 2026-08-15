@@ -1350,7 +1350,7 @@ final class PocketAppLifecycleManager {
             ) != nil
     }
 
-    private static func compareSemanticVersions(_ lhs: String, _ rhs: String) -> ComparisonResult {
+    static func compareSemanticVersions(_ lhs: String, _ rhs: String) -> ComparisonResult {
         func parsed(_ value: String) -> ([String], [String]?)? {
             let pieces = value.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
             let core = pieces[0].split(separator: ".").map(String.init)

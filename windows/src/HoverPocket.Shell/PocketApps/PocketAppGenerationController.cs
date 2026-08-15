@@ -505,14 +505,16 @@ internal sealed class PocketAppGenerationController : IDisposable
             var existing = managed.FirstOrDefault(item => item.PackageId == updatingAppId && item.Version is not null)
                 ?? throw Failure("GENERATION_REQUEST_INVALID");
             appId = existing.PackageId;
-            version = NextPatchVersion(existing.Version!);
+            version = NextVersion(existing.InstalledVersions, existing.Version!);
         }
         else
         {
             var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(trimmed))).ToLowerInvariant()[..16];
             appId = $"local.generated.a{digest}";
             var existing = managed.FirstOrDefault(item => item.PackageId == appId && item.Version is not null);
-            version = existing is null ? "1.0.0" : NextPatchVersion(existing.Version!);
+            version = existing is null
+                ? "1.0.0"
+                : NextVersion(existing.InstalledVersions, existing.Version!);
         }
         const string @namespace = "today-focus";
         var request = new PocketAppGenerationRequest(
@@ -621,7 +623,8 @@ internal sealed class PocketAppGenerationController : IDisposable
         state = package.State.ToString().ToLowerInvariant(),
         version = package.Version,
         packageDigest = package.PackageDigest,
-        installedVersions = package.InstalledVersions
+        installedVersions = package.InstalledVersions,
+        rollbackVersions = RollbackVersions(package.InstalledVersions, package.Version)
     };
 
     private static object ReceiptState(PocketAppLifecycleReceipt receipt) => new
@@ -691,6 +694,26 @@ internal sealed class PocketAppGenerationController : IDisposable
         PocketAppGenerationPhase.AwaitingApproval => "awaiting_approval",
         _ => phase.ToString().ToLowerInvariant()
     };
+
+    internal static string NextVersion(IReadOnlyList<string> installedVersions, string currentVersion)
+    {
+        var highest = installedVersions
+            .Append(currentVersion)
+            .Order(Comparer<string>.Create(PocketAppLifecycleManager.CompareSemanticVersions))
+            .Last();
+        return NextPatchVersion(highest);
+    }
+
+    internal static IReadOnlyList<string> RollbackVersions(
+        IReadOnlyList<string> installedVersions,
+        string? currentVersion)
+    {
+        if (currentVersion is null) { return Array.Empty<string>(); }
+        return installedVersions
+            .Where(version => PocketAppLifecycleManager.CompareSemanticVersions(version, currentVersion) < 0)
+            .Order(Comparer<string>.Create(PocketAppLifecycleManager.CompareSemanticVersions))
+            .ToArray();
+    }
 
     internal static string NextPatchVersion(string value)
     {

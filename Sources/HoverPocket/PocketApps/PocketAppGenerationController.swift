@@ -234,14 +234,20 @@ final class PocketAppGenerationController: ObservableObject {
                 throw PocketAppGenerationError.invalidRequest
             }
             appID = packageID
-            version = try Self.nextPatchVersion(activeVersion)
+            version = try Self.nextVersion(
+                installedVersions: existing.installedVersions,
+                currentVersion: activeVersion
+            )
         } else {
             let digest = SHA256.hash(data: Data(trimmed.utf8)).prefix(8)
                 .map { String(format: "%02x", $0) }.joined()
             appID = "local.generated.a\(digest)"
             if let existing = managedPackages.first(where: { $0.packageID == appID }),
                let activeVersion = existing.version {
-                version = try Self.nextPatchVersion(activeVersion)
+                version = try Self.nextVersion(
+                    installedVersions: existing.installedVersions,
+                    currentVersion: activeVersion
+                )
             } else {
                 version = "1.0.0"
             }
@@ -257,6 +263,26 @@ final class PocketAppGenerationController: ObservableObject {
         )
         try request.validate()
         return request
+    }
+
+    static func nextVersion(installedVersions: [String], currentVersion: String) throws -> String {
+        guard let highest = (installedVersions + [currentVersion]).max(by: {
+            PocketAppLifecycleManager.compareSemanticVersions($0, $1) == .orderedAscending
+        }) else {
+            throw PocketAppGenerationError.invalidRequest
+        }
+        return try nextPatchVersion(highest)
+    }
+
+    static func rollbackVersions(installedVersions: [String], currentVersion: String?) -> [String] {
+        guard let currentVersion else { return [] }
+        return installedVersions
+            .filter {
+                PocketAppLifecycleManager.compareSemanticVersions($0, currentVersion) == .orderedAscending
+            }
+            .sorted {
+                PocketAppLifecycleManager.compareSemanticVersions($0, $1) == .orderedAscending
+            }
     }
 
     static func nextPatchVersion(_ value: String) throws -> String {

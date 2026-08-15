@@ -249,6 +249,14 @@ internal sealed class PocketAppGenerationVerifier
             PocketAppGenerationController.NextPatchVersion($"1.0.{largePatch}") == expected,
             "generation_large_patch_increment");
         Require(
+            PocketAppGenerationController.NextVersion(["1.0.0", "1.0.1"], "1.0.0") == "1.0.2",
+            "generation_update_after_rollback_uses_highest_version");
+        Require(
+            PocketAppGenerationController.RollbackVersions(["1.0.0", "1.0.1"], "1.0.0").Count == 0
+                && PocketAppGenerationController.RollbackVersions(["1.0.0", "1.0.1"], "1.0.1")
+                    .SequenceEqual(["1.0.0"], StringComparer.Ordinal),
+            "generation_rollback_targets_only_older_versions");
+        Require(
             CodexPocketAppGenerationAdapter.ResolveExecutable() is null,
             "generation_real_codex_confidentiality_gate");
     }

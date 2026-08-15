@@ -166,6 +166,10 @@ struct PocketAppGenerationSettingsView: View {
 
     @ViewBuilder
     private func packageCard(_ package: PocketAppManagedPackage) -> some View {
+        let rollbackVersions = PocketAppGenerationController.rollbackVersions(
+            installedVersions: package.installedVersions,
+            currentVersion: package.version
+        )
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(package.packageID)
@@ -188,13 +192,13 @@ struct PocketAppGenerationSettingsView: View {
                     }
                 }
                 Menu(localized(japanese: "ロールバック", english: "Rollback")) {
-                    ForEach(package.installedVersions.filter { $0 != package.version }, id: \.self) { version in
+                    ForEach(rollbackVersions, id: \.self) { version in
                         Button(version) {
                             controller.prepareRollback(packageID: package.packageID, version: version)
                         }
                     }
                 }
-                .disabled(package.installedVersions.filter { $0 != package.version }.isEmpty)
+                .disabled(rollbackVersions.isEmpty)
                 Button(localized(japanese: "削除（データ保持）", english: "Remove, preserve data"), role: .destructive) {
                     controller.removePreservingData(packageID: package.packageID)
                 }

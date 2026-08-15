@@ -270,7 +270,7 @@ function renderPocketGeneration(generation, language) {
       actions.append(disableButton);
     }
 
-    for (const rollbackVersion of (app.installedVersions ?? []).filter((item) => item !== app.version)) {
+    for (const rollbackVersion of app.rollbackVersions ?? []) {
       const rollbackButton = document.createElement("button");
       rollbackButton.type = "button";
       rollbackButton.textContent = language === "en" ? `Rollback ${rollbackVersion}` : `${rollbackVersion}へ戻す`;

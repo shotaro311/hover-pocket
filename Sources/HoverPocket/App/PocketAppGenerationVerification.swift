@@ -260,6 +260,26 @@ enum PocketAppGenerationVerification {
             "generation_large_patch_increment",
             failures: &failures
         )
+        require(
+            try PocketAppGenerationController.nextVersion(
+                installedVersions: ["1.0.0", "1.0.1"],
+                currentVersion: "1.0.0"
+            ) == "1.0.2",
+            "generation_update_after_rollback_uses_highest_version",
+            failures: &failures
+        )
+        require(
+            PocketAppGenerationController.rollbackVersions(
+                installedVersions: ["1.0.0", "1.0.1"],
+                currentVersion: "1.0.0"
+            ).isEmpty
+                && PocketAppGenerationController.rollbackVersions(
+                    installedVersions: ["1.0.0", "1.0.1"],
+                    currentVersion: "1.0.1"
+                ) == ["1.0.0"],
+            "generation_rollback_targets_only_older_versions",
+            failures: &failures
+        )
         let now = Date()
         let crafted = PocketAppLifecycleProposal(
             requestID: "request-safe",
