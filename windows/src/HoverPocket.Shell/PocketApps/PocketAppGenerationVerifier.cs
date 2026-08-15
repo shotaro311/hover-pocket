@@ -108,6 +108,32 @@ internal sealed class PocketAppGenerationVerifier
             Require(
                 disabledAgain.ReadbackVerified && disabledAgain.State == PocketAppLifecycleState.Disabled,
                 "generation_disable_after_enable");
+            var failEnableReadback = true;
+            using (var failingEnableLifecycle = new PocketAppLifecycleManager(
+                root,
+                dataRoot,
+                failureInjection: point =>
+                {
+                    if (point != "enable_readback" || !failEnableReadback) { return false; }
+                    failEnableReadback = false;
+                    return true;
+                }))
+            {
+                try
+                {
+                    _ = failingEnableLifecycle.Enable(request.AppId);
+                    _failures.Add("generation_enable_readback_failure_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_READBACK_FAILED")
+                {
+                }
+                var restoredDisabled = failingEnableLifecycle.ManagedPackages()
+                    .FirstOrDefault(item => item.PackageId == request.AppId);
+                Require(
+                    restoredDisabled?.State == PocketAppLifecycleState.Disabled
+                        && failingEnableLifecycle.ActivePackage(request.AppId) is null,
+                    "generation_enable_readback_failure_restored_disabled");
+            }
             var packageDataRoot = Path.Combine(dataRoot, request.AppId);
             Directory.CreateDirectory(packageDataRoot);
             var sentinel = Path.Combine(packageDataRoot, "sentinel.txt");

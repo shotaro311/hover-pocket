@@ -682,6 +682,7 @@ internal sealed class PanelBridgeController : IDisposable
     {
         _ = parameters;
         _startupRegistration.SetRegistered(false);
+        _pocketAppGenerationController?.SetEnabled(false);
         SaveSettings(UserSettingsStore.CreateDefault(_providerRegistry.ProviderIds));
         return await PublishStateAsync(cancellationToken);
     }

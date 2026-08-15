@@ -106,6 +106,30 @@ enum PocketAppGenerationVerification {
                 "generation_disable_after_enable",
                 failures: &failures
             )
+            var failEnableReadback = true
+            let failingEnableLifecycle = try PocketAppLifecycleManager(
+                rootDirectory: root,
+                userDataRoot: dataRoot,
+                failureInjection: { point in
+                    guard point == "enable_readback", failEnableReadback else { return false }
+                    failEnableReadback = false
+                    return true
+                }
+            )
+            do {
+                _ = try failingEnableLifecycle.enable(packageID: request.appID)
+                failures.append("generation_enable_readback_failure_accepted")
+            } catch PocketAppLifecycleError.readbackFailed {
+            }
+            let restoredDisabled = try failingEnableLifecycle.managedPackages()
+                .first { $0.packageID == request.appID }
+            let restoredActivePackage = try failingEnableLifecycle.activePackage(packageID: request.appID)
+            require(
+                restoredDisabled?.state == .disabled
+                    && restoredActivePackage == nil,
+                "generation_enable_readback_failure_restored_disabled",
+                failures: &failures
+            )
             let packageDataRoot = dataRoot.appendingPathComponent(request.appID, isDirectory: true)
             try FileManager.default.createDirectory(at: packageDataRoot, withIntermediateDirectories: true)
             let sentinel = packageDataRoot.appendingPathComponent("sentinel.txt")

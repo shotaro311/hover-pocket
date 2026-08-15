@@ -160,6 +160,35 @@ internal sealed class SettingsVerifier
 
         await Send(dispatcher, """{"id":"9","method":"settings.resetDefaults"}""");
         VerifyDefaults(store, registry, startup);
+        await VerifyResetDisablesGenerationAsync(registry);
+    }
+
+    private async Task VerifyResetDisablesGenerationAsync(ProviderRegistry registry)
+    {
+        var store = UserSettingsStore.CreateTemporary("SettingsResetGenerationVerify");
+        var enabled = UserSettingsStore.CreateDefault(registry.ProviderIds);
+        enabled.AiNativeEnabled = true;
+        store.Save(enabled);
+        using var controller = new PanelBridgeController(
+            registry,
+            store,
+            store.Load(registry.ProviderIds),
+            new InMemoryStartupRegistrationService());
+        var dispatcher = new BridgeDispatcher();
+        using var attachment = controller.Attach(dispatcher, BridgeSurface.Settings);
+
+        var before = await Send(dispatcher, """{"id":"reset-before","method":"pocketApps.generationState"}""");
+        await Send(dispatcher, """{"id":"reset","method":"settings.resetDefaults"}""");
+        var after = await Send(dispatcher, """{"id":"reset-after","method":"pocketApps.generationState"}""");
+        var blocked = await Send(
+            dispatcher,
+            """{"id":"reset-disabled","method":"pocketApps.disable","params":{"appId":"local.example.reset"}}""");
+        if (!before.Contains("\"enabled\":true", StringComparison.Ordinal)
+            || !after.Contains("\"enabled\":false", StringComparison.Ordinal)
+            || !blocked.Contains("GENERATION_DISABLED", StringComparison.Ordinal))
+        {
+            _failures.Add("settings reset did not disable the existing Pocket App generation controller");
+        }
     }
 
     private void VerifyWebViewSecurityPolicy()

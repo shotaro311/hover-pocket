@@ -488,9 +488,21 @@ final class PocketAppLifecycleManager {
             state: .enabled,
             updatedAt: now
         )
-        try writeAndVerify(record: enabled)
-        guard try activePackage(packageID: packageID)?.manifestDigest == digest else {
-            throw PocketAppLifecycleError.readbackFailed
+        do {
+            try writeAndVerify(record: enabled)
+            if failureInjection?("enable_readback") == true {
+                throw PocketAppLifecycleError.readbackFailed
+            }
+            guard try activePackage(packageID: packageID)?.manifestDigest == digest else {
+                throw PocketAppLifecycleError.readbackFailed
+            }
+        } catch {
+            do {
+                try writeAndVerify(record: current)
+            } catch {
+                throw PocketAppLifecycleError.readbackFailed
+            }
+            throw error
         }
         return PocketAppLifecycleReceipt(
             action: "enable",

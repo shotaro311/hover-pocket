@@ -477,14 +477,33 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         }
         ValidateHostCompatibility(package);
         var enabled = current with { State = PocketAppLifecycleState.Enabled, UpdatedAt = now ?? DateTimeOffset.UtcNow };
-        WriteAndVerify(enabled);
-        var observed = ReadActiveRecord(packageId);
-        if (observed is null
-            || observed.State != PocketAppLifecycleState.Enabled
-            || observed.Version != enabled.Version
-            || observed.PackageDigest != enabled.PackageDigest)
+        try
         {
-            throw Failure("LIFECYCLE_READBACK_FAILED");
+            WriteAndVerify(enabled);
+            if (_failureInjection?.Invoke("enable_readback") == true)
+            {
+                throw Failure("LIFECYCLE_READBACK_FAILED");
+            }
+            var observed = ReadActiveRecord(packageId);
+            if (observed is null
+                || observed.State != PocketAppLifecycleState.Enabled
+                || observed.Version != enabled.Version
+                || observed.PackageDigest != enabled.PackageDigest)
+            {
+                throw Failure("LIFECYCLE_READBACK_FAILED");
+            }
+        }
+        catch
+        {
+            try
+            {
+                WriteAndVerify(current);
+            }
+            catch
+            {
+                throw Failure("LIFECYCLE_READBACK_FAILED");
+            }
+            throw;
         }
         return new PocketAppLifecycleReceipt(
             "enable",
