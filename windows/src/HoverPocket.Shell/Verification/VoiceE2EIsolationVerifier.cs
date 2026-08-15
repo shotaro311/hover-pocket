@@ -317,9 +317,23 @@ internal sealed class VoiceE2EIsolationVerifier
             HoverShellController.ShouldKeepPanelOpenForVoiceE2E(applicationData),
             "isolated Voice E2E mode did not retain the panel for explicit UI interaction");
         Check(
+            PanelWindow.ShouldExposeToAutomation(applicationData),
+            "isolated Voice E2E mode did not expose the panel to UI automation");
+        Check(
+            !HoverShellController.ShouldRunHealthTimer(applicationData),
+            "isolated Voice E2E mode enabled automatic native style repair");
+        Check(
             !HoverShellController.ShouldKeepPanelOpenForVoiceE2E(
                 HoverPocketApplicationData.ProductionDefault()),
             "production mode retained the panel with the Voice E2E policy");
+        Check(
+            !PanelWindow.ShouldExposeToAutomation(
+                HoverPocketApplicationData.ProductionDefault()),
+            "production mode exposed the panel with the Voice E2E automation policy");
+        Check(
+            HoverShellController.ShouldRunHealthTimer(
+                HoverPocketApplicationData.ProductionDefault()),
+            "production mode disabled native style repair");
 
         var sticky = new StickyNotesStore(applicationData.StickyDirectory);
         using var timer = new TimerStore(applicationData.TimerDirectory, enableScheduler: false);

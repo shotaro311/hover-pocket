@@ -63,6 +63,11 @@ internal sealed class PanelWindow : NoActivateWindow
         _applicationData = applicationData;
         _enableWebView = enableWebView;
         _enableDevTools = enableDevTools;
+        if (ShouldExposeToAutomation(applicationData))
+        {
+            Title = "HoverPocket Voice E2E";
+            ShowInTaskbar = true;
+        }
 
         var metrics = PanelSizeCatalog.Get(
             _bridgeController.CurrentSettings.PanelSize,
@@ -114,9 +119,26 @@ internal sealed class PanelWindow : NoActivateWindow
 
     public bool KeyboardInteractionEnabled => ActivationEnabled;
 
+    public bool ExposesToAutomation => ShouldExposeToAutomation(_applicationData);
+
     protected override bool ActivatesOnMouseInteraction => true;
 
     public WebView2? WebView => _webView;
+
+    internal static bool ShouldExposeToAutomation(
+        HoverPocketApplicationData applicationData)
+    {
+        return applicationData.IsIsolatedVoiceE2E;
+    }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        if (ExposesToAutomation)
+        {
+            NativeMethods.SetToolWindowStyle(Hwnd, enabled: false);
+        }
+    }
 
     public void ReleaseBridgeAttachment()
     {

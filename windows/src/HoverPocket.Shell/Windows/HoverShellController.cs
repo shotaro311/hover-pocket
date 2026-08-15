@@ -160,13 +160,22 @@ internal sealed class HoverShellController : IDisposable
         return applicationData.IsIsolatedVoiceE2E;
     }
 
+    internal static bool ShouldRunHealthTimer(
+        HoverPocketApplicationData applicationData)
+    {
+        return !applicationData.IsIsolatedVoiceE2E;
+    }
+
     public void Start()
     {
         AttachPanelWindow(_panel);
         ResyncDisplayLayout();
         _ = _panelBridgeController.StartVoiceRuntimeAsync();
         _pollingTimer.Start();
-        _healthTimer.Start();
+        if (ShouldRunHealthTimer(_applicationData))
+        {
+            _healthTimer.Start();
+        }
     }
 
     public void ShowPanelFromUser()
@@ -705,9 +714,13 @@ internal sealed class HoverShellController : IDisposable
                     expectedVisible: true,
                     layout.AccessSurface.PhysicalRect,
                     checkFrame: true,
-                    requireNoActivate: true))
+                    requireNoActivate: true,
+                    requireToolWindow: true))
             {
-                RepairStyles(accessSurface.Hwnd, requireNoActivate: true);
+                RepairStyles(
+                    accessSurface.Hwnd,
+                    requireNoActivate: true,
+                    requireToolWindow: true);
                 accessSurface.UpdateAppearance(_panelBridgeController.CurrentSettings);
                 accessSurface.ApplyPlacement(layout.AccessSurface, show: true);
                 accessSurface.ShowNoActivate();
@@ -734,9 +747,13 @@ internal sealed class HoverShellController : IDisposable
                     _panelExpectedVisible,
                     expectedPlacement.PhysicalRect,
                     checkFrame: true,
-                    requireNoActivate: !_panel.KeyboardInteractionEnabled))
+                    requireNoActivate: !_panel.KeyboardInteractionEnabled,
+                    requireToolWindow: !_panel.ExposesToAutomation))
             {
-                RepairStyles(_panel.Hwnd, requireNoActivate: !_panel.KeyboardInteractionEnabled);
+                RepairStyles(
+                    _panel.Hwnd,
+                    requireNoActivate: !_panel.KeyboardInteractionEnabled,
+                    requireToolWindow: !_panel.ExposesToAutomation);
                 if (_panelExpectedVisible)
                 {
                     _panel.ApplyPlacement(expectedPlacement, show: true);
@@ -821,16 +838,22 @@ internal sealed class HoverShellController : IDisposable
         bool expectedVisible,
         PhysicalRect expectedFrame,
         bool checkFrame,
-        bool requireNoActivate)
+        bool requireNoActivate,
+        bool requireToolWindow)
     {
         var styles = NativeMethods.GetExtendedStyles(hwnd);
-        var requiredStyles = NativeMethods.WsExToolWindow | NativeMethods.WsExTopmost;
+        var requiredStyles = NativeMethods.WsExTopmost;
+        if (requireToolWindow)
+        {
+            requiredStyles |= NativeMethods.WsExToolWindow;
+        }
         if (requireNoActivate)
         {
             requiredStyles |= NativeMethods.WsExNoActivate;
         }
 
         var styleHealthy = (styles & requiredStyles) == requiredStyles
+            && (requireToolWindow || (styles & NativeMethods.WsExToolWindow) == 0)
             && (requireNoActivate || (styles & NativeMethods.WsExNoActivate) == 0);
         var visibilityHealthy = wpfVisible == expectedVisible
             && NativeMethods.IsWindowShown(hwnd) == expectedVisible;
@@ -840,11 +863,12 @@ internal sealed class HoverShellController : IDisposable
         return !styleHealthy || !visibilityHealthy || !frameHealthy;
     }
 
-    private static void RepairStyles(IntPtr hwnd, bool requireNoActivate)
+    private static void RepairStyles(
+        IntPtr hwnd,
+        bool requireNoActivate,
+        bool requireToolWindow)
     {
-        NativeMethods.AddExtendedStyles(
-            hwnd,
-            NativeMethods.WsExToolWindow | (requireNoActivate ? NativeMethods.WsExNoActivate : 0));
+        NativeMethods.SetToolWindowStyle(hwnd, requireToolWindow);
         NativeMethods.SetNoActivateStyle(hwnd, requireNoActivate);
         NativeMethods.SetTopmostNoActivate(hwnd);
     }

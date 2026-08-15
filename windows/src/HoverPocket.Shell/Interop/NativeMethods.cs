@@ -55,6 +55,28 @@ internal static partial class NativeMethods
         _ = SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, flags);
     }
 
+    public static void SetToolWindowStyle(IntPtr hwnd, bool enabled)
+    {
+        var current = GetWindowLongPtr(hwnd, GwlExStyle).ToInt64();
+        var updated = enabled
+            ? current | WsExToolWindow
+            : current & ~WsExToolWindow;
+        if (updated == current)
+        {
+            return;
+        }
+
+        _ = SetWindowLongPtr(hwnd, GwlExStyle, new IntPtr(updated));
+        _ = SetWindowPos(
+            hwnd,
+            IntPtr.Zero,
+            0,
+            0,
+            0,
+            0,
+            SwpNoMove | SwpNoSize | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
+    }
+
     public static bool ActivateWindowForTextInput(IntPtr hwnd)
     {
         if (!IsWindowHandleValid(hwnd))
