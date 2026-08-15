@@ -297,7 +297,7 @@ final class PocketSurfaceHostModel: ObservableObject {
         return lines.joined(separator: "\n")
     }
 
-    private static func sanitizeVisibleText(_ value: String) -> String {
+    static func sanitizeVisibleText(_ value: String) -> String {
         let bidirectionalControls: Set<UInt32> = [
             0x061C, 0x200E, 0x200F,
             0x202A, 0x202B, 0x202C, 0x202D, 0x202E,

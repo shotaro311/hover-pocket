@@ -39,6 +39,28 @@ internal sealed class PocketAppHostController
         };
     }
 
+    public object BuildManagerState()
+    {
+        var package = _runtime.Package;
+        return new
+        {
+            appId = package.Manifest.Id,
+            name = package.Manifest.Name,
+            version = package.Manifest.Version,
+            manifestDigest = package.ManifestDigest,
+            intent = BoundedVisibleText(package.Intent, 500),
+            capabilities = package.Manifest.RequestedCapabilities
+                .Select(item => item.Key.Id)
+                .OrderBy(id => id, StringComparer.Ordinal)
+                .ToArray(),
+            workflows = package.Workflows.Keys.OrderBy(id => id, StringComparer.Ordinal).ToArray(),
+            testsCount = package.TestCases.Count,
+            stateStore = package.Manifest.StateStore,
+            storageBoundary = "separate_definition_data_receipts",
+            status = "active"
+        };
+    }
+
     public void Attach(BridgeDispatcher dispatcher)
     {
         dispatcher.Register("pocketApp.load", LoadAsync);
@@ -261,6 +283,38 @@ internal sealed class PocketAppHostController
             throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", name);
         }
         return text;
+    }
+
+    private static string BoundedVisibleText(string value, int maximumLength)
+    {
+        var builder = new StringBuilder();
+        var pendingSpace = false;
+        var scalarCount = 0;
+        foreach (var rune in value.EnumerateRunes())
+        {
+            var disallowed = Rune.GetUnicodeCategory(rune) is System.Globalization.UnicodeCategory.Control
+                or System.Globalization.UnicodeCategory.Format
+                or System.Globalization.UnicodeCategory.LineSeparator
+                or System.Globalization.UnicodeCategory.ParagraphSeparator;
+            if (disallowed || Rune.IsWhiteSpace(rune))
+            {
+                pendingSpace = builder.Length > 0;
+                continue;
+            }
+            if (pendingSpace && scalarCount < maximumLength)
+            {
+                builder.Append(' ');
+                scalarCount += 1;
+                pendingSpace = false;
+            }
+            if (scalarCount >= maximumLength)
+            {
+                break;
+            }
+            builder.Append(rune.ToString());
+            scalarCount += 1;
+        }
+        return builder.ToString().Trim();
     }
 
     private sealed record QueryBinding(string Reference, JsonElement Arguments);

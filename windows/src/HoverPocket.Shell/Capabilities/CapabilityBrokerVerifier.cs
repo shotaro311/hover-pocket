@@ -450,6 +450,17 @@ internal sealed class CapabilityBrokerVerifier
                 ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"],
                 StringComparer.Ordinal),
             timeZone);
+        var managerState = JsonSerializer.SerializeToElement(
+            new PocketAppHostController(runtime, () => new UserSettings()).BuildManagerState());
+        Require(managerState.GetProperty("appId").GetString() == package.Manifest.Id, "pocket_app_manager_id");
+        Require(managerState.GetProperty("version").GetString() == package.Manifest.Version, "pocket_app_manager_version");
+        Require(managerState.GetProperty("testsCount").GetInt32() == 4, "pocket_app_manager_tests");
+        Require(
+            managerState.GetProperty("storageBoundary").GetString() == "separate_definition_data_receipts",
+            "pocket_app_manager_storage_boundary");
+        Require(
+            !managerState.GetRawText().Contains(package.RootDirectory, StringComparison.OrdinalIgnoreCase),
+            "pocket_app_manager_path_redaction");
 
         var queryOutput = await runtime.QueryAsync(
             "calendar.events.list@1",

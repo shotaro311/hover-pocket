@@ -287,7 +287,10 @@ internal sealed class PanelBridgeController : IDisposable
                 }
             ,
             aiLane = _aiLaneController.CurrentState,
-            pocketSurface = _pocketAppHostController?.BuildSurfaceState()
+            pocketSurface = _pocketAppHostController?.BuildSurfaceState(),
+            pocketApps = _pocketAppHostController is null
+                ? Array.Empty<object>()
+                : new[] { _pocketAppHostController.BuildManagerState() }
         };
     }
 
