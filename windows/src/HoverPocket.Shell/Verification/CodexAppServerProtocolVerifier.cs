@@ -55,9 +55,15 @@ internal sealed class CodexAppServerProtocolVerifier
 
     private void VerifyOptionsFailClosed()
     {
-        if (new CodexAppServerClientOptions().ExperimentalApi)
+        var defaults = new CodexAppServerClientOptions();
+        if (defaults.ExperimentalApi)
         {
             _failures.Add("experimental app-server capability was enabled by default");
+        }
+
+        if (defaults.EnableRealtimeConversation)
+        {
+            _failures.Add("generic/fake app-server launch enabled realtime by default");
         }
     }
 

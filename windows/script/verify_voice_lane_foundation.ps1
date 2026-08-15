@@ -38,7 +38,14 @@ Invoke-Checked "Fetch remote refs" {
 }
 
 Invoke-Checked "Patch whitespace" {
-    git diff --check origin/main...HEAD
+    git show-ref --verify --quiet refs/remotes/origin/main
+    if ($LASTEXITCODE -eq 0) {
+        git diff --check origin/main...HEAD
+    }
+    else {
+        $global:LASTEXITCODE = 0
+        git diff --check
+    }
 }
 
 Invoke-Checked "Restore Windows solution" {
@@ -70,16 +77,24 @@ Invoke-Checked "Windows UI JavaScript syntax" {
 }
 
 $targets = @(
+    "shell",
+    "display",
+    "ui",
     "ui-model",
     "sticky",
+    "clipboard",
+    "controls",
     "calc",
     "timer",
     "calendar",
     "settings",
     "ailane",
+    "capabilities",
+    "broker",
     "voice-lane-layout",
     "codex-app-server-protocol",
     "codex-voice-coordinator",
+    "voice-e2e-isolation",
     "updater"
 )
 
@@ -100,6 +115,24 @@ foreach ($target in $targets) {
             Remove-Item Env:HOVERPOCKET_VERIFY_LOG -ErrorAction SilentlyContinue
             Remove-Item -Path $logPath -Force -ErrorAction SilentlyContinue
         }
+    }
+}
+
+Invoke-Checked "Release verifier: voice-e2e-isolation flags rejected" {
+    $logPath = Join-Path $env:TEMP ("hoverpocket-verify-voice-e2e-release-" + [Guid]::NewGuid().ToString("N") + ".log")
+    $env:HOVERPOCKET_VERIFY_LOG = $logPath
+    try {
+        dotnet run --project $project -c Release --no-build -- --verify voice-e2e-isolation
+        $exitCode = $LASTEXITCODE
+        if (Test-Path $logPath) {
+            Get-Content -Path $logPath
+        }
+
+        $global:LASTEXITCODE = $exitCode
+    }
+    finally {
+        Remove-Item Env:HOVERPOCKET_VERIFY_LOG -ErrorAction SilentlyContinue
+        Remove-Item -Path $logPath -Force -ErrorAction SilentlyContinue
     }
 }
 

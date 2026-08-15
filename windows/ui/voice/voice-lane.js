@@ -6,6 +6,8 @@ let microphoneStream = null;
 let remoteAudio = null;
 let sessionStarting = false;
 let transportAttached = false;
+let remoteTrackCurrent = false;
+let operationEpoch = 0;
 
 export function renderVoiceLane({ container, state, request }) {
   const voice = state.voiceLane ?? {};
@@ -15,6 +17,13 @@ export function renderVoiceLane({ container, state, request }) {
   container.setAttribute("aria-label", t("voiceAccessibilityLabel"));
   container.replaceChildren();
   if (layout === "disabled") {
+    if (peerConnection || microphoneStream || remoteAudio || transportAttached) {
+      const shouldNotifyDetach = transportAttached;
+      cleanupTransport(request, true);
+      if (shouldNotifyDetach) {
+        request("codexVoice.transportDetached", { reconnectExpected: false }).catch(() => {});
+      }
+    }
     return;
   }
 
@@ -79,12 +88,19 @@ export function renderVoiceLane({ container, state, request }) {
 }
 
 export function handleVoicePanelClosed(request) {
-  if (!peerConnection && !microphoneStream) {
-    return;
+  const shouldNotifyDetach = transportAttached;
+  const shouldStopPendingNativeStart = sessionStarting && !transportAttached;
+  cleanupTransport(request, true);
+  if (shouldStopPendingNativeStart) {
+    request("codexVoice.stop").catch(() => {});
   }
+  if (shouldNotifyDetach) {
+    request("codexVoice.transportDetached", { reconnectExpected: true }).catch(() => {});
+  }
+}
 
-  cleanupTransport();
-  request("codexVoice.transportDetached", { reconnectExpected: true }).catch(() => {});
+export function handleVoiceRuntimeReset(request) {
+  cleanupTransport(request, true);
 }
 
 async function startVoiceSession(request) {
@@ -93,13 +109,18 @@ async function startVoiceSession(request) {
   }
 
   sessionStarting = true;
+  const epoch = ++operationEpoch;
+  let acquiredMicrophone = null;
   try {
     const arm = await request("codexVoice.beginMicrophoneRequest");
     if (!arm?.armed) {
       throw new DOMException("Microphone request was not armed.", "NotAllowedError");
     }
+    if (epoch !== operationEpoch) {
+      return;
+    }
 
-    microphoneStream = await navigator.mediaDevices.getUserMedia({
+    acquiredMicrophone = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
@@ -107,64 +128,121 @@ async function startVoiceSession(request) {
       },
       video: false,
     });
+    if (epoch !== operationEpoch) {
+      acquiredMicrophone.getTracks().forEach((track) => track.stop());
+      return;
+    }
+
+    microphoneStream = acquiredMicrophone;
+    notifyMediaEvent(request, "microphoneAcquired");
 
     const connection = new RTCPeerConnection();
     peerConnection = connection;
     connection.createDataChannel("oai-events");
     microphoneStream.getAudioTracks().forEach((track) => {
       connection.addTrack(track, microphoneStream);
+      track.addEventListener("ended", () => {
+        if (epoch === operationEpoch && microphoneStream === acquiredMicrophone) {
+          notifyMediaEvent(request, "microphoneStopped");
+        }
+      }, { once: true });
     });
     connection.addEventListener("track", (event) => {
+      if (epoch !== operationEpoch || connection !== peerConnection) {
+        return;
+      }
+
+      remoteTrackCurrent = true;
+      notifyMediaEvent(request, "remoteAudioTrackReceived");
       remoteAudio ??= new Audio();
       remoteAudio.autoplay = true;
       remoteAudio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
-      remoteAudio.play().catch(() => {});
+      event.track.addEventListener("ended", () => {
+        if (epoch !== operationEpoch || connection !== peerConnection) {
+          return;
+        }
+        remoteTrackCurrent = false;
+        notifyMediaEvent(request, "remoteAudioTrackStopped");
+        remoteAudio?.pause();
+        notifyMediaEvent(request, "remoteAudioPlaybackStopped");
+      }, { once: true });
+      remoteAudio.play()
+        .then(() => {
+          if (epoch === operationEpoch && connection === peerConnection) {
+            notifyMediaEvent(request, "remoteAudioPlaybackSucceeded");
+          }
+        })
+        .catch(() => {
+          if (epoch === operationEpoch && connection === peerConnection) {
+            notifyMediaEvent(request, "remoteAudioPlaybackFailed");
+          }
+        });
     });
     connection.addEventListener("connectionstatechange", () => {
-      if (connection !== peerConnection) {
+      if (epoch !== operationEpoch || connection !== peerConnection) {
         return;
       }
 
       if (["failed", "disconnected", "closed"].includes(connection.connectionState)) {
         const shouldNotify = transportAttached;
-        cleanupTransport();
+        cleanupTransport(request);
         if (shouldNotify) {
           request("codexVoice.transportDetached", { reconnectExpected: true }).catch(() => {});
+        } else {
+          request("codexVoice.startFailed", { errorCode: "webrtc_failed" }).catch(() => {});
         }
       }
     });
 
     const offer = await connection.createOffer({ offerToReceiveAudio: true });
+    if (epoch !== operationEpoch || connection !== peerConnection) {
+      return;
+    }
     await connection.setLocalDescription(offer);
     await waitForIceGatheringComplete(connection);
+    if (epoch !== operationEpoch || connection !== peerConnection) {
+      return;
+    }
     const localSdp = connection.localDescription?.sdp;
     if (!localSdp) {
       throw new Error("WebRTC local SDP was unavailable.");
     }
 
     const answer = await request("codexVoice.startWebRtc", { sdp: localSdp });
-    if (!answer?.sdp || connection !== peerConnection) {
+    if (!answer?.sdp || epoch !== operationEpoch || connection !== peerConnection) {
       throw new Error("WebRTC remote SDP was unavailable.");
     }
 
     await connection.setRemoteDescription({ type: "answer", sdp: answer.sdp });
+    if (epoch !== operationEpoch || connection !== peerConnection) {
+      return;
+    }
     transportAttached = true;
     setLocalMuted(false);
     await request("codexVoice.transportAttached");
   } catch (error) {
+    if (epoch !== operationEpoch) {
+      if (acquiredMicrophone && acquiredMicrophone !== microphoneStream) {
+        acquiredMicrophone.getTracks().forEach((track) => track.stop());
+      }
+      return;
+    }
+
     const errorCode = error?.name === "NotAllowedError"
       ? "microphone_denied"
       : "webrtc_failed";
-    cleanupTransport();
+    cleanupTransport(request);
     await request("codexVoice.startFailed", { errorCode }).catch(() => {});
     throw error;
   } finally {
-    sessionStarting = false;
+    if (epoch === operationEpoch) {
+      sessionStarting = false;
+    }
   }
 }
 
 async function endVoiceSession(request) {
-  cleanupTransport();
+  cleanupTransport(request, true);
   await request("codexVoice.stop");
 }
 
@@ -174,7 +252,9 @@ function setLocalMuted(muted) {
   });
 }
 
-function cleanupTransport() {
+function cleanupTransport(request, safeClose = false) {
+  operationEpoch += 1;
+  sessionStarting = false;
   transportAttached = false;
   const connection = peerConnection;
   peerConnection = null;
@@ -183,13 +263,32 @@ function cleanupTransport() {
     connection.close();
   }
 
+  const hadMicrophone = Boolean(microphoneStream);
   microphoneStream?.getTracks().forEach((track) => track.stop());
   microphoneStream = null;
+  if (hadMicrophone) {
+    notifyMediaEvent(request, "microphoneStopped");
+  }
+
   if (remoteAudio) {
     remoteAudio.pause();
     remoteAudio.srcObject = null;
     remoteAudio = null;
+    notifyMediaEvent(request, "remoteAudioPlaybackStopped");
   }
+
+  if (remoteTrackCurrent) {
+    remoteTrackCurrent = false;
+    notifyMediaEvent(request, "remoteAudioTrackStopped");
+  }
+
+  if (safeClose) {
+    notifyMediaEvent(request, "safeClose");
+  }
+}
+
+function notifyMediaEvent(request, kind) {
+  request("codexVoice.mediaEvent", { kind }).catch(() => {});
 }
 
 function waitForIceGatheringComplete(connection) {

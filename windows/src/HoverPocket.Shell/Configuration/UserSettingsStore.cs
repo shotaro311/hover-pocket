@@ -6,6 +6,7 @@ namespace HoverPocket.Shell.Configuration;
 
 internal sealed class UserSettingsStore
 {
+    private readonly HoverPocketApplicationData _applicationData;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -14,16 +15,20 @@ internal sealed class UserSettingsStore
     };
 
     public UserSettingsStore()
-        : this(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "HoverPocket"))
+        : this(HoverPocketApplicationData.ProductionDefault())
     {
     }
 
     public UserSettingsStore(string rootDirectory)
+        : this(HoverPocketApplicationData.ForRoot(rootDirectory))
     {
-        RootDirectory = rootDirectory;
-        SettingsPath = Path.Combine(rootDirectory, "settings.json");
+    }
+
+    public UserSettingsStore(HoverPocketApplicationData applicationData)
+    {
+        _applicationData = applicationData;
+        RootDirectory = applicationData.RootDirectory;
+        SettingsPath = applicationData.SettingsPath;
     }
 
     public string RootDirectory { get; }
@@ -60,7 +65,7 @@ internal sealed class UserSettingsStore
             }
         }
 
-        var normalized = Normalize(loaded ?? CreateDefault(providerIds), providerIds);
+        var normalized = Normalize(loaded ?? CreateDefaultForContext(providerIds), providerIds);
         if (loaded is null)
         {
             TrySave(normalized);
@@ -95,6 +100,25 @@ internal sealed class UserSettingsStore
         return Load(providerIds);
     }
 
+    public UserSettings CreateDefaultForContext(IReadOnlyList<string> providerIds)
+    {
+        var settings = CreateDefault(providerIds);
+        if (!_applicationData.IsIsolatedVoiceE2E)
+        {
+            return settings;
+        }
+
+        settings.AutoCheckForUpdates = false;
+        settings.StartWithWindows = false;
+        settings.AiNativeEnabled = true;
+        settings.CodexVoiceEnabled = true;
+        settings.CodexVoiceLayoutMode = VoiceLaneLayoutMode.Compact;
+        settings.CodexVoiceAutoListen = false;
+        settings.CodexVoiceCalendarReadEnabled = false;
+        settings.ClipboardPrivateMode = true;
+        return Normalize(settings, providerIds);
+    }
+
     public static UserSettings CreateDefault(IReadOnlyList<string> providerIds)
     {
         var settings = new UserSettings
@@ -115,6 +139,7 @@ internal sealed class UserSettingsStore
             CodexVoiceEnabled = false,
             CodexVoiceLayoutMode = VoiceLaneLayoutMode.Compact,
             CodexVoiceAutoListen = false,
+            CodexVoiceCalendarReadEnabled = false,
             ProviderOrder = [.. providerIds],
             ProviderVisibility = providerIds.ToDictionary(id => id, _ => true, StringComparer.OrdinalIgnoreCase)
         };

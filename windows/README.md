@@ -2,7 +2,7 @@
 
 WPF の常駐シェルと WebView2 のパネルで構成する Windows 版です。画面上端の access surface、非アクティブ表示のパネル、タスクトレイ、設定画面を提供します。
 
-Windows 版の provider は Controls、Calendar、Clipboard、Sticky Notes、Timer、Calculator です。Mirror provider は Windows 版の対象外です。Codex Voice Laneはproviderではなく全パネル共通のHost-owned最下段として別管理し、既定オフです。AN3のUI骨格段階ではmicrophone / WebRTC / 実音声runtimeへまだ接続しません。
+Windows 版の provider は Controls、Calendar、Clipboard、Sticky Notes、Timer、Calculator です。Mirror provider は Windows 版の対象外です。Codex Voice Laneはproviderではなく全パネル共通のHost-owned最下段として別管理し、製品版では既定オフです。AN3のWindows隔離E2Eでは、明示クリックからWebView2 microphone / WebRTC / remote audioへ接続します。
 
 Controlsでは再生速度を「− / ＋」で0.25倍刻みに変更し、Windowsメディアセッションの読み戻し値を表示します。再生サムネイルを押すと、一意に特定できた再生元ウィンドウだけを前面へ表示してパネルを閉じます。Timerはストップウォッチ、タイマー、ポモドーロの3種類を横並びの追加カードから登録できます。実行中項目は1列のコンパクトなリストへ表示し、ストップウォッチとカウントダウンを各4件まで独立して扱います。ストップウォッチは100分の1秒表示で、providerを切り替えたりパネルを閉じたりしてもアプリ稼働中は計測を続けます。
 
@@ -50,6 +50,7 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify voice-lane-layout
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify codex-app-server-protocol
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify codex-voice-coordinator
+dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify voice-e2e-isolation
 ```
 
 `--verify shell` は access surface と panel の `WS_EX_NOACTIVATE`、`WS_EX_TOOLWINDOW`、`WS_EX_TOPMOST`、2 回目起動、120ms pollingだけによるopen、hidden / 位置ずれ / style欠落の自己修復、window再生成、3段階recovery、ポインター移動、open/close 25回、描画フレーム数と最大フレーム間隔を検査します。
@@ -69,6 +70,25 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 `--verify capabilities` はCalendar / Timer / Sticky NotesのProvider Capability handlerを検証します。`--verify broker` はRegistry、権限、承認の改変・期限切れ・再利用拒否、永続idempotency、実行後readback、監査ログの本文非保存、Today Focus、部分失敗時のTimer補償、timeout、macOSと共通のplan digestを検証します。
 
 `--verify voice-lane-layout` はVoice Laneの既定オフ、Compact / Expanded、既存Provider高さ不変、下方向拡張、短い画面でのCompact縮退、設定永続化を検証します。`--verify ui`ではCompactの視覚タイトルなし・会話幅優先、明示toggle、Expandedのtranscript / root-scoped session 2列、fullscreenなしもWebView2実描画で確認します。
+
+`--verify voice-e2e-isolation` は、Debug限定のfresh temp root、ReleaseでのE2E flag起動前拒否、製品版と異なるmutex / open-request event、全保存先、Updater / OAuth無効化、安全な初期設定、sanitized receiptのallowlist・atomic更新・playback成功/失敗・safe close・feature-off無副作用を決定的に検証します。マイクや手動GUIは起動しません。
+
+## Isolated Windows Voice E2E
+
+次のスクリプトだけを入口にします。`Run`はDebug build後にsystem temp配下へfresh rootを作り、製品版とは別のsingle-instance名で検証exeを起動します。インストール版、既存製品process、`%APPDATA%\HoverPocket`、既存OAuth credential、Updater / installerは使用しません。Windowsのマイク許可は起動だけでは要求されず、ユーザーがアプリ内Voiceボタンを明示クリックした後にだけ開始します。
+
+```powershell
+.\windows\script\voice_e2e_windows.ps1 -Action Build
+.\windows\script\voice_e2e_windows.ps1 -Action Run
+.\windows\script\voice_e2e_windows.ps1 -Action Readback -Root <Runが返したvoice_e2e_root>
+.\windows\script\voice_e2e_windows.ps1 -Action Stop -Root <Runが返したvoice_e2e_root>
+```
+
+`Readback`は`voice-e2e-receipt.json`の固定allowlistだけを表示します。receiptにはtranscript本文、音声、SDP、token、path、Provider data、PIDを保存しません。`Stop`は同じDebug exe path、`--voice-e2e`、指定rootがすべて一致する隔離processだけへ専用safe-stop eventを送り、WebRTC / microphone / app-server cleanupのreceiptを確認します。rootは検証根拠として残します。
+
+SettingsのVoice欄には、既定オフの「今日の予定タイトルと時間をCodexと共有」があります。Voiceがオフの間は変更できず、オンからオフへ戻すとCalendar toolは即時拒否されます。設定変更時は現在のVoice sessionとローカル音声transportを安全に閉じ、runtimeを再生成して新しいtool権限を反映します。
+
+Voiceを明示的に有効化した場合だけ、HoverPocket専用Codex app-serverを`-c features.realtime_conversation=true app-server --stdio`相当のprocess-local引数で起動します。ユーザーのglobal Codex configは変更しません。generic / fake app-serverの明示引数にはこのoverrideを注入せず、Releaseを含む製品設定のVoice既定OFFも維持します。productionの`thread/realtime/start`はMac実機で音声E2Eが成功した`version="v3"`と`includeStartupContext=false`を必須にします。明示stop中の同一root / app-server generationから届く`thread/realtime/closed`はreasonが非空でも正常終了として扱い、それ以外の非空reasonはエラーとして保持します。`phase0_codex_app_server_probe.ps1`は同じoverrideで`features list`、schema、initialize、read-only endpointを確認します。
 
 ## Windows updates and release packaging
 

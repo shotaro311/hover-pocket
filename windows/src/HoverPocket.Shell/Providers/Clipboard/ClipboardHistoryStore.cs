@@ -11,6 +11,7 @@ using WpfClipboard = System.Windows.Clipboard;
 using WpfDataFormats = System.Windows.DataFormats;
 using WpfDataObject = System.Windows.DataObject;
 using WpfTextDataFormat = System.Windows.TextDataFormat;
+using HoverPocket.Shell.Configuration;
 
 namespace HoverPocket.Shell.Providers.Clipboard;
 
@@ -654,9 +655,6 @@ internal sealed class ClipboardHistoryStore
 
     private static string DefaultStorageDirectory()
     {
-        return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "HoverPocket",
-            "clipboard");
+        return HoverPocketApplicationData.ProductionDefault().ClipboardDirectory;
     }
 }

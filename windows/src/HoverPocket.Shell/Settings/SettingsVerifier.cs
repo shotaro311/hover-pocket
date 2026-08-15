@@ -24,7 +24,7 @@ internal sealed class SettingsVerifier
 
         if (_failures.Count == 0)
         {
-            VerifyConsole.WriteLine("PASS settings verify: settings read/write, defaults, HKCU Run dry-run registration, update auto-check");
+            VerifyConsole.WriteLine("PASS settings verify: settings read/write, defaults, Voice Calendar read opt-in UI/persistence/reset, HKCU Run dry-run registration, update auto-check");
             return 0;
         }
 
@@ -48,6 +48,7 @@ internal sealed class SettingsVerifier
 
         VerifyDefaults(store, registry, startup);
         VerifyWebViewSecurityPolicy();
+        VerifySettingsUiContract();
 
         await Send(dispatcher, """{"id":"1","method":"settings.setLanguage","params":{"language":"en"}}""");
         await Send(dispatcher, """{"id":"2","method":"settings.setTextSize","params":{"textSize":"large"}}""");
@@ -65,6 +66,9 @@ internal sealed class SettingsVerifier
         await Send(dispatcher, """{"id":"7a","method":"settings.setShowTopHandleSideArea","params":{"visible":false}}""");
         await Send(dispatcher, """{"id":"7x","method":"settings.setDisableTopEdgeInFullscreen","params":{"disabled":false}}""");
         await Send(dispatcher, """{"id":"7z","method":"sticky.setGridSize","params":{"gridSize":"large"}}""");
+        var calendarReadResponse = await Send(
+            dispatcher,
+            """{"id":"7v","method":"settings.setCodexVoiceCalendarReadEnabled","params":{"enabled":true}}""");
 
         var written = store.ReloadOrDefault(registry.ProviderIds);
         if (written.Language != AppLanguage.English
@@ -78,7 +82,11 @@ internal sealed class SettingsVerifier
             || written.ShowTopHandleSideArea
             || written.DisableTopEdgeInFullscreen
             || !written.StartWithWindows
-            || written.AutoCheckForUpdates)
+            || written.AutoCheckForUpdates
+            || !written.CodexVoiceCalendarReadEnabled
+            || !calendarReadResponse.Contains(
+                "\"codexVoiceCalendarReadEnabled\":true",
+                StringComparison.Ordinal))
         {
             _failures.Add("settings write/read did not preserve scalar values");
         }
@@ -175,6 +183,45 @@ internal sealed class SettingsVerifier
         }
     }
 
+    private void VerifySettingsUiContract()
+    {
+        var uiRoot = Path.Combine(AppContext.BaseDirectory, "ui");
+        var htmlPath = Path.Combine(uiRoot, "settings", "index.html");
+        var scriptPath = Path.Combine(uiRoot, "settings", "settings.js");
+        var localizationPath = Path.Combine(uiRoot, "js", "i18n.js");
+        if (!File.Exists(htmlPath) || !File.Exists(scriptPath) || !File.Exists(localizationPath))
+        {
+            _failures.Add("settings UI contract files were missing");
+            return;
+        }
+
+        var html = File.ReadAllText(htmlPath);
+        var script = File.ReadAllText(scriptPath);
+        var localization = File.ReadAllText(localizationPath);
+        if (!html.Contains("data-voice-calendar-read", StringComparison.Ordinal)
+            || !script.Contains(
+                "voiceCalendarReadEl.disabled = !state.settings.codexVoiceEnabled;",
+                StringComparison.Ordinal)
+            || !script.Contains(
+                "settings.setCodexVoiceCalendarReadEnabled",
+                StringComparison.Ordinal)
+            || !localization.Contains(
+                "今日の予定タイトルと時間をCodexと共有",
+                StringComparison.Ordinal)
+            || !localization.Contains(
+                "Share today's event titles and times with Codex",
+                StringComparison.Ordinal)
+            || !localization.Contains(
+                "いつでもオフにできます",
+                StringComparison.Ordinal)
+            || !localization.Contains(
+                "turn this sharing off at any time",
+                StringComparison.Ordinal))
+        {
+            _failures.Add("Voice Calendar read opt-in UI contract was incomplete");
+        }
+    }
+
     private void VerifyDefaults(UserSettingsStore store, ProviderRegistry registry, InMemoryStartupRegistrationService startup)
     {
         var defaults = store.ReloadOrDefault(registry.ProviderIds);
@@ -189,7 +236,8 @@ internal sealed class SettingsVerifier
             || defaults.PreferredProviderId != "controls"
             || defaults.HandleIconStyle != HandleIconStyle.B
             || !defaults.ShowTopHandleSideArea
-            || !defaults.DisableTopEdgeInFullscreen)
+            || !defaults.DisableTopEdgeInFullscreen
+            || defaults.CodexVoiceCalendarReadEnabled)
         {
             _failures.Add("defaults were not restored");
         }

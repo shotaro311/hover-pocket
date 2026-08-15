@@ -173,18 +173,24 @@ internal sealed class CodexVoiceRuntimeHost : IAsyncDisposable
     private static Task<CodexAppServerClient> StartProductionClientAsync(
         CancellationToken cancellationToken)
     {
+        return CodexAppServerClient.StartAsync(
+            CreateProductionClientOptions(),
+            cancellationToken);
+    }
+
+    internal static CodexAppServerClientOptions CreateProductionClientOptions()
+    {
         var version = typeof(CodexVoiceRuntimeHost).Assembly.GetName().Version?.ToString()
             ?? "0.0.0";
-        return CodexAppServerClient.StartAsync(
-            new CodexAppServerClientOptions
-            {
-                ClientName = "hover_pocket",
-                ClientTitle = "HoverPocket Voice Lane",
-                ClientVersion = version,
-                ExperimentalApi = true,
-                RequestTimeout = TimeSpan.FromSeconds(12)
-            },
-            cancellationToken);
+        return new CodexAppServerClientOptions
+        {
+            ClientName = "hover_pocket",
+            ClientTitle = "HoverPocket Voice Lane",
+            ClientVersion = version,
+            ExperimentalApi = true,
+            EnableRealtimeConversation = true,
+            RequestTimeout = TimeSpan.FromSeconds(12)
+        };
     }
 
     private static CodexVoiceSnapshot DisabledSnapshot()

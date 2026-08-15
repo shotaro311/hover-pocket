@@ -35,6 +35,15 @@ enum CodexAppServerVerificationCommand {
     }
 
     private static func verify() async throws {
+        try require(
+            CodexAppServerClientOptions.defaultLaunchArguments == [
+                "-c",
+                "features.realtime_conversation=true",
+                "app-server",
+                "--stdio"
+            ],
+            "production_realtime_feature_override"
+        )
         let recorder = CodexAppServerVerificationRecorder()
         let client = try await CodexAppServerClient.start(
             options: CodexAppServerClientOptions(

@@ -9,6 +9,7 @@ const switchingEl = document.querySelector("[data-switching]");
 const voiceEnabledEl = document.querySelector("[data-voice-enabled]");
 const voiceLayoutEl = document.querySelector("[data-voice-layout]");
 const voiceAutoListenEl = document.querySelector("[data-voice-auto-listen]");
+const voiceCalendarReadEl = document.querySelector("[data-voice-calendar-read]");
 const providerListEl = document.querySelector("[data-provider-list]");
 const providerSelectionEl = document.querySelector("[data-provider-selection]");
 const preferredProviderEl = document.querySelector("[data-preferred-provider]");
@@ -92,6 +93,8 @@ function render(state) {
   });
   voiceAutoListenEl.checked = Boolean(state.settings.codexVoiceAutoListen);
   voiceAutoListenEl.disabled = !state.settings.codexVoiceEnabled;
+  voiceCalendarReadEl.checked = Boolean(state.settings.codexVoiceCalendarReadEnabled);
+  voiceCalendarReadEl.disabled = !state.settings.codexVoiceEnabled;
 
   renderProviders(state);
   renderProviderSelection(state);
@@ -213,6 +216,10 @@ voiceEnabledEl.addEventListener("change", () => {
 
 voiceAutoListenEl.addEventListener("change", () => {
   update("settings.setCodexVoiceAutoListen", { enabled: voiceAutoListenEl.checked });
+});
+
+voiceCalendarReadEl.addEventListener("change", () => {
+  update("settings.setCodexVoiceCalendarReadEnabled", { enabled: voiceCalendarReadEl.checked });
 });
 
 preferredProviderEl.addEventListener("change", () => {

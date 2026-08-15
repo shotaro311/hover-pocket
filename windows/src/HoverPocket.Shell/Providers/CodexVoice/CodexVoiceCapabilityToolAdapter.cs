@@ -54,6 +54,7 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
     private readonly TodayFocusTextAdapter _todayFocus;
     private readonly Func<CodexVoiceCapabilityApproval, CancellationToken, Task<bool>> _requestApproval;
     private readonly Func<CodexVoiceToolAuthorization> _authorization;
+    private readonly Func<bool> _calendarReadEnabled;
     private readonly SemaphoreSlim _callGate = new(1, 1);
     private readonly Dictionary<string, CachedToolReply> _completedCalls = new(StringComparer.Ordinal);
     private readonly Queue<string> _completedCallOrder = new();
@@ -63,16 +64,20 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
         CapabilityBroker broker,
         TodayFocusTextAdapter todayFocus,
         Func<CodexVoiceCapabilityApproval, CancellationToken, Task<bool>> requestApproval,
-        Func<CodexVoiceToolAuthorization>? authorization = null)
+        Func<CodexVoiceToolAuthorization>? authorization = null,
+        Func<bool>? calendarReadEnabled = null)
     {
         _broker = broker;
         _todayFocus = todayFocus;
         _requestApproval = requestApproval;
         _authorization = authorization
             ?? (() => new CodexVoiceToolAuthorization(true, 0));
+        _calendarReadEnabled = calendarReadEnabled ?? (() => true);
     }
 
-    public IReadOnlyList<object> DynamicTools => ToolSpecs;
+    public IReadOnlyList<object> DynamicTools => _calendarReadEnabled()
+        ? ToolSpecs
+        : [ToolSpecs[1]];
 
     internal int PendingCallCountForVerify => Volatile.Read(ref _pendingCalls);
 
@@ -124,6 +129,11 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
                 }
 
                 var callToken = CallToken(call);
+                if (IsCalendarDependentTool(call.Tool) && !_calendarReadEnabled())
+                {
+                    return ToolReply(false, new { status = "rejected", code = "CAPABILITY_REQUEST_DENIED" });
+                }
+
                 var cacheKey = $"{context.ClientGeneration}:{authorization.Epoch}:{callToken}";
                 var argumentDigest = CapabilityCanonicalJson.ArgumentsDigest(call.Arguments);
                 var callFingerprint = $"{call.Tool}:{argumentDigest}";
@@ -629,6 +639,11 @@ internal sealed class CodexVoiceCapabilityToolAdapter : ICodexVoiceCapabilityToo
                         ["purpose"] = new { type = "string", maxLength = 10_000 }
                     }))
         ];
+    }
+
+    private static bool IsCalendarDependentTool(string toolName)
+    {
+        return toolName is CalendarTodayTool or CalendarCreateTool or TodayFocusTool;
     }
 
     private static object FunctionTool(string name, string description, JsonElement inputSchema)

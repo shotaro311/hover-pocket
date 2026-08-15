@@ -6,7 +6,11 @@ import { renderClipboardProvider, runClipboardUiVerify } from "../providers/clip
 import { renderControlsProvider } from "../providers/controls/controls.js";
 import { renderStickyProvider } from "../providers/sticky/sticky.js";
 import { renderTimerProvider } from "../providers/timer/timer.js";
-import { handleVoicePanelClosed, renderVoiceLane } from "../voice/voice-lane.js";
+import {
+  handleVoicePanelClosed,
+  handleVoiceRuntimeReset,
+  renderVoiceLane,
+} from "../voice/voice-lane.js";
 
 const providerRenderers = {
   controls: renderControlsProvider,
@@ -46,6 +50,10 @@ on("panel.opened", (state) => {
 
 on("panel.closed", () => {
   handleVoicePanelClosed(request);
+});
+
+on("codexVoice.runtimeReset", () => {
+  handleVoiceRuntimeReset(request);
 });
 
 bootstrap();
@@ -448,6 +456,7 @@ window.__hoverPocketVerify = {
       await request("provider.select", { id: clipboardProvider.id });
       window.__hoverPocketVerifyStep = "render-clipboard";
       const clipboardRoot = await waitForElement(".clipboard-root", 4500);
+      await waitForVisualSettle();
       window.__hoverPocketVerifyStep = "verify-clipboard-refresh";
       const clipboardVerify = await runClipboardUiVerify(request);
       window.__hoverPocketVerifyStep = "render-same-clipboard";
@@ -473,6 +482,7 @@ window.__hoverPocketVerify = {
       window.__hoverPocketVerifyStep = "select-calculator";
       await request("provider.select", { id: calculatorProvider.id });
       await waitForElement(".hp-calc", 4500);
+      await waitForVisualSettle();
       window.__hoverPocketVerifyStep = "verify-calculator-history-sidebar";
       calculatorHistorySidebarOk = await runCalculatorUiVerify();
     }
@@ -538,6 +548,10 @@ window.__hoverPocketVerify = {
     let voiceCompactOk = false;
     let voiceExpandedOk = false;
     let voiceProviderInvariantOk = false;
+    let voiceCompactProviderWidth = 0;
+    let voiceCompactProviderHeight = 0;
+    let voiceExpandedProviderWidth = 0;
+    let voiceExpandedProviderHeight = 0;
     let voiceExplicitToggleOnlyOk = false;
     let voiceNoFullscreenOk = false;
     try {
@@ -549,6 +563,8 @@ window.__hoverPocketVerify = {
       await waitForVisualSettle();
       const compactLane = document.querySelector("[data-voice-lane][data-layout=compact]");
       const compactProviderBounds = providerContainerEl.getBoundingClientRect();
+      voiceCompactProviderWidth = compactProviderBounds.width;
+      voiceCompactProviderHeight = compactProviderBounds.height;
       const waveformBounds = compactLane?.querySelector(".hp-voice-waveform")?.getBoundingClientRect();
       const conversationBounds = compactLane?.querySelector(".hp-voice-conversation")?.getBoundingClientRect();
       voiceCompactOk = Boolean(
@@ -565,6 +581,8 @@ window.__hoverPocketVerify = {
       await waitForVisualSettle();
       const expandedLane = document.querySelector("[data-voice-lane][data-layout=expanded]");
       const expandedProviderBounds = providerContainerEl.getBoundingClientRect();
+      voiceExpandedProviderWidth = expandedProviderBounds.width;
+      voiceExpandedProviderHeight = expandedProviderBounds.height;
       voiceExpandedOk = Boolean(
         expandedLane?.querySelector(".hp-voice-expanded")
         && expandedLane.querySelectorAll(":scope .hp-voice-expanded > .hp-voice-column").length === 2
@@ -590,6 +608,7 @@ window.__hoverPocketVerify = {
     const probePanelSize = originalPanelSize === "small" ? "medium" : "small";
     window.__hoverPocketVerifyStep = "resize-probe";
     const resizedState = await request("settings.setPanelSize", { panelSize: probePanelSize });
+    window.__hoverPocketVerifyStep = "resize-restore";
     await request("settings.setPanelSize", { panelSize: originalPanelSize });
     window.__hoverPocketVerifyStep = "complete";
 
@@ -623,6 +642,10 @@ window.__hoverPocketVerify = {
       voiceCompactOk,
       voiceExpandedOk,
       voiceProviderInvariantOk,
+      voiceCompactProviderWidth,
+      voiceCompactProviderHeight,
+      voiceExpandedProviderWidth,
+      voiceExpandedProviderHeight,
       voiceExplicitToggleOnlyOk,
       voiceNoFullscreenOk,
       textSizeScaleReadyOk: getComputedStyle(document.documentElement).getPropertyValue("--hp-text-scale").trim() !== "",

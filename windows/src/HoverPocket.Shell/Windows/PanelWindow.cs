@@ -26,6 +26,7 @@ internal sealed class PanelWindow : NoActivateWindow
     private const double CornerRadiusDips = 18;
 
     private readonly PanelBridgeController _bridgeController;
+    private readonly HoverPocketApplicationData _applicationData;
     private readonly bool _enableWebView;
     private readonly bool _enableDevTools;
     private readonly Grid _root = new();
@@ -51,10 +52,15 @@ internal sealed class PanelWindow : NoActivateWindow
 
     public AnimationDiagnostics LastAnimationDiagnostics { get; private set; } = AnimationDiagnostics.Empty;
 
-    public PanelWindow(PanelBridgeController bridgeController, bool enableWebView, bool enableDevTools)
+    public PanelWindow(
+        PanelBridgeController bridgeController,
+        HoverPocketApplicationData applicationData,
+        bool enableWebView,
+        bool enableDevTools)
         : base(allowsTransparency: false)
     {
         _bridgeController = bridgeController;
+        _applicationData = applicationData;
         _enableWebView = enableWebView;
         _enableDevTools = enableDevTools;
 
@@ -184,7 +190,7 @@ internal sealed class PanelWindow : NoActivateWindow
             """;
 
         _ = await _webView.ExecuteScriptAsync(startScript);
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(18);
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
         while (DateTimeOffset.UtcNow < deadline)
         {
             var errorJson = await _webView.ExecuteScriptAsync("window.__hoverPocketVerifyError");
@@ -260,6 +266,7 @@ internal sealed class PanelWindow : NoActivateWindow
     public Task CloseAsync(DisplaySurfaceLayout layout)
     {
         EndKeyboardInteraction();
+        _microphonePermissionArmedUntil = null;
         if (!IsVisible)
         {
             return Task.CompletedTask;
@@ -584,10 +591,7 @@ internal sealed class PanelWindow : NoActivateWindow
             CreationProperties = new CoreWebView2CreationProperties
             {
                 AdditionalBrowserArguments = DisableGpuRequested() ? "--disable-gpu" : string.Empty,
-                UserDataFolder = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "HoverPocket",
-                    "WebView2")
+                UserDataFolder = _applicationData.PanelWebViewDataDirectory
             },
             DefaultBackgroundColor = System.Drawing.Color.Transparent
         };
@@ -838,6 +842,10 @@ internal sealed record UiWebVerifyResult(
     bool VoiceCompactOk,
     bool VoiceExpandedOk,
     bool VoiceProviderInvariantOk,
+    double VoiceCompactProviderWidth,
+    double VoiceCompactProviderHeight,
+    double VoiceExpandedProviderWidth,
+    double VoiceExpandedProviderHeight,
     bool VoiceExplicitToggleOnlyOk,
     bool VoiceNoFullscreenOk,
     bool TextSizeScaleReadyOk,

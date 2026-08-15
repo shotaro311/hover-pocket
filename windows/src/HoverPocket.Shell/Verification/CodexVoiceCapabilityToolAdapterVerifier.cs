@@ -47,6 +47,7 @@ internal sealed class CodexVoiceCapabilityToolAdapterVerifier
             var authorizationAllowed = true;
             var authorizationEpoch = 1L;
             var invalidateDuringApproval = false;
+            var calendarReadEnabled = true;
             var adapter = new CodexVoiceCapabilityToolAdapter(
                 broker,
                 new TodayFocusTextAdapter(broker),
@@ -61,10 +62,41 @@ internal sealed class CodexVoiceCapabilityToolAdapterVerifier
                     }
                     return Task.FromResult(approvalDecisions.Count == 0 || approvalDecisions.Dequeue());
                 },
-                () => new CodexVoiceToolAuthorization(authorizationAllowed, authorizationEpoch));
+                () => new CodexVoiceToolAuthorization(authorizationAllowed, authorizationEpoch),
+                () => calendarReadEnabled);
             var context = new CodexVoiceToolRequestContext("root-thread", 1);
 
             VerifyToolSpecs(adapter);
+            calendarReadEnabled = false;
+            var disabledSpecs = JsonSerializer.SerializeToElement(adapter.DynamicTools);
+            Require(
+                disabledSpecs.GetArrayLength() == 1
+                && disabledSpecs[0].GetProperty("name").GetString()
+                    == CodexVoiceCapabilityToolAdapter.TimerStartTool,
+                "voice_tool_calendar_off_timer_only_dynamic_tools");
+            var listCountBeforeCalendarPermissionDeny = calendar.ListRequestCount;
+            var calendarPermissionDenied = await adapter.HandleAsync(
+                Request(
+                    CodexVoiceCapabilityToolAdapter.CalendarTodayTool,
+                    new { },
+                    "root-thread",
+                    "calendar-permission-off"),
+                context,
+                cancellationToken);
+            var calendarPermissionPayload = Payload(
+                calendarPermissionDenied,
+                expectedSuccess: false,
+                "voice_tool_calendar_off_request_denied");
+            Require(
+                calendarPermissionPayload is { } permissionValue
+                && permissionValue.GetProperty("code").GetString() == "CAPABILITY_REQUEST_DENIED",
+                "voice_tool_calendar_off_request_denied_code");
+            Require(
+                calendar.ListRequestCount == listCountBeforeCalendarPermissionDeny,
+                "voice_tool_calendar_off_provider_not_reached");
+            calendarReadEnabled = true;
+            VerifyToolSpecs(adapter);
+
             var unsupported = await adapter.HandleAsync(
                 new CodexAppServerRequest(
                     JsonSerializer.SerializeToElement(1),

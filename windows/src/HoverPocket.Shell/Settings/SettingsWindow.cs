@@ -15,15 +15,20 @@ internal sealed class SettingsWindow : Window
     private const string SettingsUrl = "https://settings.hoverpocket.local/settings/index.html";
 
     private readonly PanelBridgeController _bridgeController;
+    private readonly HoverPocketApplicationData _applicationData;
     private readonly bool _enableDevTools;
     private readonly Grid _root = new();
     private IDisposable? _bridgeAttachment;
     private WebView2? _webView;
     private Task? _initializationTask;
 
-    public SettingsWindow(PanelBridgeController bridgeController, bool enableDevTools)
+    public SettingsWindow(
+        PanelBridgeController bridgeController,
+        HoverPocketApplicationData applicationData,
+        bool enableDevTools)
     {
         _bridgeController = bridgeController;
+        _applicationData = applicationData;
         _enableDevTools = enableDevTools;
         ApplyLanguage(_bridgeController.CurrentSettings.Language);
         Width = 620;
@@ -60,10 +65,7 @@ internal sealed class SettingsWindow : Window
         {
             CreationProperties = new CoreWebView2CreationProperties
             {
-                UserDataFolder = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "HoverPocket",
-                    "SettingsWebView2")
+                UserDataFolder = _applicationData.SettingsWebViewDataDirectory
             },
             DefaultBackgroundColor = System.Drawing.Color.FromArgb(255, 8, 10, 13)
         };

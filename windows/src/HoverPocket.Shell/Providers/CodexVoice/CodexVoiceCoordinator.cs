@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using HoverPocket.Shell.Configuration;
 
 namespace HoverPocket.Shell.Providers.CodexVoice;
 
@@ -73,6 +74,8 @@ internal sealed record CodexVoiceWebRtcAnswer(
 
 internal sealed class CodexVoiceCoordinator : IAsyncDisposable
 {
+    internal static string RealtimeProtocolVersion => "v3";
+    internal static bool RealtimeIncludeStartupContext => false;
     private const int DefaultTranscriptEntryLimit = 120;
     private const int DefaultTranscriptCharacterLimit = 32_000;
     private const int ThreadListPageLimit = 64;
@@ -139,6 +142,8 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
     private string? _defaultVoice;
     private string? _pendingSdpThreadId;
     private TaskCompletionSource<string>? _pendingSdp;
+    private string? _expectedStopThreadId;
+    private long _expectedStopGeneration;
     private long _nextClientGeneration;
     private long _clientGeneration;
     private long _rootThreadGeneration;
@@ -166,10 +171,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         _toolAdapter = toolAdapter;
         _workspaceDirectory = Path.GetFullPath(
             workspaceDirectory
-                ?? Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "HoverPocket",
-                    "VoiceWorkspace"));
+                ?? HoverPocketApplicationData.ProductionDefault().VoiceWorkspaceDirectory);
     }
 
     public event EventHandler<CodexVoiceSnapshot>? SnapshotChanged;
@@ -328,6 +330,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
 
             _sessionStatus = CodexVoiceSessionStatus.Negotiating;
             _lastErrorCode = null;
+            ClearExpectedStopLocked();
         }
 
         PublishSnapshot();
@@ -424,7 +427,8 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                     {
                         threadId = rootThreadId,
                         outputModality = "audio",
-                        version = "v1",
+                        version = RealtimeProtocolVersion,
+                        includeStartupContext = RealtimeIncludeStartupContext,
                         voice,
                         prompt = "Respond concisely for a compact desktop voice interface. Use only HoverPocket capabilities when they are available.",
                         transport = new
@@ -496,9 +500,22 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         {
             var client = _client;
             string? rootThreadId;
+            long clientGeneration;
             lock (_stateSync)
             {
                 rootThreadId = _rootThreadId;
+                clientGeneration = _clientGeneration;
+                if (client is not null && !string.IsNullOrWhiteSpace(rootThreadId))
+                {
+                    _expectedStopThreadId = rootThreadId;
+                    _expectedStopGeneration = clientGeneration;
+                    _sessionStatus = CodexVoiceSessionStatus.Stopping;
+                    _lastErrorCode = null;
+                }
+                else
+                {
+                    ClearExpectedStopLocked();
+                }
             }
 
             if (client is null || string.IsNullOrWhiteSpace(rootThreadId))
@@ -507,11 +524,29 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                 return;
             }
 
-            MarkSessionStopping();
-            _ = await client.SendRequestAsync(
-                "thread/realtime/stop",
-                new { threadId = rootThreadId },
-                cancellationToken);
+            PublishSnapshot();
+            try
+            {
+                _ = await client.SendRequestAsync(
+                    "thread/realtime/stop",
+                    new { threadId = rootThreadId },
+                    cancellationToken);
+            }
+            catch
+            {
+                lock (_stateSync)
+                {
+                    if (_expectedStopGeneration == clientGeneration
+                        && string.Equals(
+                            _expectedStopThreadId,
+                            rootThreadId,
+                            StringComparison.Ordinal))
+                    {
+                        ClearExpectedStopLocked();
+                    }
+                }
+                throw;
+            }
             DetachTransport(reconnectExpected: false);
         }
         finally
@@ -936,6 +971,13 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
         _rootThreadGeneration = 0;
         _childSessions = Array.Empty<CodexVoiceThreadSummary>();
         _threadReadCache.Clear();
+        ClearExpectedStopLocked();
+    }
+
+    private void ClearExpectedStopLocked()
+    {
+        _expectedStopThreadId = null;
+        _expectedStopGeneration = 0;
     }
 
     private static bool TryParseThreadListPage(
@@ -1578,9 +1620,16 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                     {
                         break;
                     }
+                    var expectedStop = _expectedStopGeneration == _clientGeneration
+                        && string.Equals(
+                            _expectedStopThreadId,
+                            _rootThreadId,
+                            StringComparison.Ordinal);
+                    ClearExpectedStopLocked();
                     _transportAttached = false;
                     _sessionStatus = CodexVoiceSessionStatus.Closed;
-                    _lastErrorCode = ReadString(parameters, "reason") is { Length: > 0 }
+                    _lastErrorCode = !expectedStop
+                        && ReadString(parameters, "reason") is { Length: > 0 }
                         ? "realtime_closed"
                         : null;
                     changed = true;
@@ -1606,6 +1655,7 @@ internal sealed class CodexVoiceCoordinator : IAsyncDisposable
                     break;
                 }
                 case "thread/realtime/error":
+                    ClearExpectedStopLocked();
                     _sessionStatus = CodexVoiceSessionStatus.RecoverableFailure;
                     _lastErrorCode = "realtime_error";
                     changed = true;

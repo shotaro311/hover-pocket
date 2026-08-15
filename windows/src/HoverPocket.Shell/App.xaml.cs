@@ -9,6 +9,7 @@ using HoverPocket.Shell.Providers.Clipboard;
 using HoverPocket.Shell.Providers.Controls;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
+using HoverPocket.Shell.Providers.CodexVoice;
 using HoverPocket.Shell.Services;
 using HoverPocket.Shell.Settings;
 using HoverPocket.Shell.Verification;
@@ -22,10 +23,21 @@ public partial class App : System.Windows.Application
     private HoverShellController? _shellController;
     private TrayIconService? _trayIconService;
     private UpdaterService? _updaterService;
+    private StartupOptions? _startupOptions;
+    private HoverPocketApplicationData? _applicationData;
+
+    internal void ConfigureStartup(
+        StartupOptions options,
+        HoverPocketApplicationData applicationData)
+    {
+        _startupOptions = options;
+        _applicationData = applicationData;
+    }
 
     protected override void OnStartup(StartupEventArgs e)
     {
-        var options = StartupOptions.Parse(e.Args);
+        var options = _startupOptions ?? StartupOptions.Parse(e.Args);
+        var applicationData = _applicationData ?? HoverPocketApplicationData.Resolve(options);
         base.OnStartup(e);
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -84,6 +96,14 @@ public partial class App : System.Windows.Application
         {
             VerifyConsole.AttachParent();
             _ = RunCodexVoiceCoordinatorVerificationAsync();
+            return;
+        }
+
+        if (options.VerifyVoiceE2EIsolation)
+        {
+            VerifyConsole.AttachParent();
+            Environment.ExitCode = new VoiceE2EIsolationVerifier().Run();
+            Shutdown();
             return;
         }
 
@@ -166,7 +186,12 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        if (!SingleInstanceGate.TryAcquire(out var singleInstanceGate))
+        var singleInstanceNames = applicationData.IsIsolatedVoiceE2E
+            ? SingleInstanceNames.VoiceE2E
+            : options.IsVerify
+                ? SingleInstanceNames.Verification
+                : SingleInstanceNames.Production;
+        if (!SingleInstanceGate.TryAcquire(singleInstanceNames, out var singleInstanceGate))
         {
             Environment.ExitCode = 0;
             Shutdown();
@@ -176,23 +201,31 @@ public partial class App : System.Windows.Application
         ArgumentNullException.ThrowIfNull(singleInstanceGate);
         _singleInstanceGate = singleInstanceGate;
         var providerRegistry = ProviderRegistry.CreateDefault();
-        var settingsStore = options.VerifyShell || options.VerifyDisplay || options.VerifyUi
-            ? UserSettingsStore.CreateTemporary("Verify")
-            : new UserSettingsStore();
-        var updaterService = new UpdaterService();
+        var effectiveApplicationData = options.VerifyShell || options.VerifyDisplay || options.VerifyUi
+            ? HoverPocketApplicationData.CreateTemporaryVerifier("Shell")
+            : applicationData;
+        var settingsStore = new UserSettingsStore(effectiveApplicationData);
+        var updaterService = new UpdaterService(
+            effectiveApplicationData.ExternalIntegrationsEnabled && !options.IsVerify);
         _updaterService = updaterService;
+        var voiceE2EReceipt = CodexVoiceE2EReceiptStore.Create(effectiveApplicationData);
         var enablePanelWebView = !options.VerifyShell && !options.VerifyDisplay;
         var shellController = new HoverShellController(
             Dispatcher,
             options.Settings,
             providerRegistry,
+            effectiveApplicationData,
             settingsStore,
             enablePanelWebView,
             options.EnableDevTools,
-            updaterService);
+            options.IsVerify,
+            updaterService,
+            voiceE2EReceipt);
         _shellController = shellController;
         singleInstanceGate.ShowPanelRequested += (_, _) =>
             Dispatcher.BeginInvoke(shellController.ShowPanelFromUser);
+        singleInstanceGate.StopRequested += (_, _) =>
+            Dispatcher.BeginInvoke(new Action(Shutdown));
         shellController.Start();
 
         if (options.VerifyShell || options.VerifyDisplay || options.VerifyUi)
@@ -207,7 +240,8 @@ public partial class App : System.Windows.Application
         }
 
         _trayIconService = new TrayIconService(shellController, updaterService);
-        if (shellController.PanelBridgeController.CurrentSettings.AutoCheckForUpdates)
+        if (updaterService.IsEnabled
+            && shellController.PanelBridgeController.CurrentSettings.AutoCheckForUpdates)
         {
             _ = updaterService.CheckOnStartupAsync();
         }

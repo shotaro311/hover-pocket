@@ -138,6 +138,7 @@ internal sealed class UiModelVerifier
         settings.CodexVoiceEnabled = true;
         settings.CodexVoiceLayoutMode = VoiceLaneLayoutMode.Expanded;
         settings.CodexVoiceAutoListen = true;
+        settings.CodexVoiceCalendarReadEnabled = true;
         settings.ProviderOrder = ["sticky", "calculator", "timer"];
         settings.ProviderVisibility["timer"] = false;
         store.Save(settings);
@@ -157,7 +158,8 @@ internal sealed class UiModelVerifier
             || reloaded.DisableTopEdgeInFullscreen
             || !reloaded.CodexVoiceEnabled
             || reloaded.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Expanded
-            || !reloaded.CodexVoiceAutoListen)
+            || !reloaded.CodexVoiceAutoListen
+            || !reloaded.CodexVoiceCalendarReadEnabled)
         {
             _failures.Add("settings round-trip: scalar values were not preserved");
         }
@@ -184,7 +186,8 @@ internal sealed class UiModelVerifier
             || !settings.AutoCheckForUpdates
             || settings.CodexVoiceEnabled
             || settings.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Compact
-            || settings.CodexVoiceAutoListen)
+            || settings.CodexVoiceAutoListen
+            || settings.CodexVoiceCalendarReadEnabled)
         {
             _failures.Add("settings corrupt fallback: defaults were not restored");
         }
@@ -193,12 +196,17 @@ internal sealed class UiModelVerifier
     private async Task VerifyBridgeDispatch(ProviderRegistry registry, UserSettingsStore store)
     {
         var settings = store.Load(registry.ProviderIds);
+        var voiceClientFactoryCalls = 0;
         using var controller = new PanelBridgeController(
             registry,
             store,
             settings,
-            codexVoiceClientFactory: _ => Task.FromException<CodexAppServerClient>(
-                new FileNotFoundException("Deterministic verifier does not start Codex.")));
+            codexVoiceClientFactory: _ =>
+            {
+                Interlocked.Increment(ref voiceClientFactoryCalls);
+                return Task.FromException<CodexAppServerClient>(
+                    new FileNotFoundException("Deterministic verifier does not start Codex."));
+            });
         var postedEvents = new List<string>();
         var dispatcher = new BridgeDispatcher(json =>
         {
@@ -240,15 +248,33 @@ internal sealed class UiModelVerifier
             """{"id":"3b","method":"settings.setCodexVoiceLayout","params":{"layout":"expanded"}}""");
         var voiceAutoListenResponse = await dispatcher.ProcessRawMessageAsync(
             """{"id":"3c","method":"settings.setCodexVoiceAutoListen","params":{"enabled":true}}""");
+        var calendarReadEnabledResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"3d","method":"settings.setCodexVoiceCalendarReadEnabled","params":{"enabled":true}}""");
+        var factoryCallsAfterCalendarEnable = Volatile.Read(ref voiceClientFactoryCalls);
+        var calendarReadDisabledResponse = await dispatcher.ProcessRawMessageAsync(
+            """{"id":"3e","method":"settings.setCodexVoiceCalendarReadEnabled","params":{"enabled":false}}""");
         var voiceReloaded = store.Load(registry.ProviderIds);
         if (!voiceReloaded.CodexVoiceEnabled
             || voiceReloaded.CodexVoiceLayoutMode != VoiceLaneLayoutMode.Expanded
             || !voiceReloaded.CodexVoiceAutoListen
+            || voiceReloaded.CodexVoiceCalendarReadEnabled
             || !ResponseContains(voiceEnabledResponse, "\"codexVoiceEnabled\":true")
             || !ResponseContains(voiceLayoutResponse, "\"codexVoiceLayoutMode\":\"expanded\"")
-            || !ResponseContains(voiceAutoListenResponse, "\"codexVoiceAutoListen\":true"))
+            || !ResponseContains(voiceAutoListenResponse, "\"codexVoiceAutoListen\":true")
+            || !ResponseContains(
+                calendarReadEnabledResponse,
+                "\"codexVoiceCalendarReadEnabled\":true")
+            || !ResponseContains(
+                calendarReadDisabledResponse,
+                "\"codexVoiceCalendarReadEnabled\":false"))
         {
             _failures.Add("bridge dispatcher: Voice Lane settings did not persist");
+        }
+
+        if (factoryCallsAfterCalendarEnable != 2
+            || Volatile.Read(ref voiceClientFactoryCalls) != 3)
+        {
+            _failures.Add("bridge dispatcher: Calendar read changes did not restart the Voice runtime");
         }
 
         var calculatorResponse = await dispatcher.ProcessRawMessageAsync(
