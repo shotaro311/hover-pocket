@@ -261,6 +261,20 @@ internal sealed class PocketAppPackageVerifier
                 }
                 File.WriteAllText(Path.Combine(draftRoot, "intent.md"), "draft changed after staging", new UTF8Encoding(false));
                 var grant = manager.Approve(proposal.RequestId, proposal.BindingDigest, now);
+                var previewBytes = proposal.Previews[0].CanonicalRenderModel;
+                previewBytes[0] ^= 0xff;
+                var tamperedPreview = new PocketAppPreviewSurface(
+                    proposal.Previews[0].Id,
+                    proposal.Previews[0].RenderDigest,
+                    previewBytes);
+                try
+                {
+                    _ = manager.Install(proposal with { Previews = new[] { tamperedPreview } }, grant, now);
+                    _failures.Add("lifecycle_tampered_preview_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_PACKAGE_CHANGED")
+                {
+                }
                 var installed = manager.Install(proposal, grant, now);
                 Require(installed.ReadbackVerified && manager.ActivePackage(proposal.PackageId)?.ManifestDigest == proposal.PackageDigest, "lifecycle_install_readback");
                 File.WriteAllBytes(Path.Combine(draftRoot, "intent.md"), FixtureData("package/intent.md"));

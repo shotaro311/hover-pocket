@@ -189,7 +189,7 @@ final class PocketAppLifecycleManager {
             try requireSnapshotMatches(source: sourceSnapshot, staged: stagedSnapshot)
             try validateHostCompatibility(package)
             let previews = try makePreviews(package)
-            let previewDigest = Self.previewDigest(previews)
+            let previewDigest = try Self.previewDigest(previews)
             let tests = try stagingTestRunner.run(package)
             let current = try readActiveRecord(packageID: package.manifest.id)
             try validateMigration(package: package, current: current)
@@ -329,7 +329,7 @@ final class PocketAppLifecycleManager {
         }
         try validateMigration(package: targetPackage, current: current)
         let previews = try makePreviews(targetPackage)
-        let previewDigest = Self.previewDigest(previews)
+        let previewDigest = try Self.previewDigest(previews)
         let currentEffectivePackage = current.state == .enabled ? currentPackage : nil
         let diff = permissionDiff(
             from: currentEffectivePackage.map(permissions) ?? Set<String>(),
@@ -527,8 +527,11 @@ final class PocketAppLifecycleManager {
             throw PocketAppLifecycleError.packageChanged
         }
         try validateHostCompatibility(package)
+        guard try Self.previewDigest(proposal.previews) == proposal.previewDigest else {
+            throw PocketAppLifecycleError.packageChanged
+        }
         let previews = try makePreviews(package)
-        guard Self.previewDigest(previews) == proposal.previewDigest else {
+        guard try Self.previewDigest(previews) == proposal.previewDigest else {
             throw PocketAppLifecycleError.packageChanged
         }
         guard try stagingTestRunner.run(package) == proposal.tests else {
@@ -1114,10 +1117,13 @@ final class PocketAppLifecycleManager {
         return "sha256:" + hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func previewDigest(_ previews: [PocketAppPreviewSurface]) -> String {
+    private static func previewDigest(_ previews: [PocketAppPreviewSurface]) throws -> String {
         var hasher = SHA256()
         hasher.update(data: Data("hoverpocket.preview/v1\0".utf8))
         for preview in previews.sorted(by: { $0.id < $1.id }) {
+            guard sha256(preview.canonicalRenderModel) == preview.renderDigest else {
+                throw PocketAppLifecycleError.packageChanged
+            }
             hasher.update(data: Data(preview.id.utf8))
             hasher.update(data: Data([0]))
             hasher.update(data: Data(preview.renderDigest.utf8))

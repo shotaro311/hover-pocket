@@ -38,7 +38,23 @@ internal sealed record PocketAppCapabilityGrantDiff(
     IReadOnlyList<string> Added,
     IReadOnlyList<string> Removed);
 
-internal sealed record PocketAppPreviewSurface(string Id, string RenderDigest, byte[] CanonicalRenderModel);
+internal sealed class PocketAppPreviewSurface
+{
+    private readonly byte[] _canonicalRenderModel;
+
+    public PocketAppPreviewSurface(string id, string renderDigest, ReadOnlySpan<byte> canonicalRenderModel)
+    {
+        Id = id;
+        RenderDigest = renderDigest;
+        _canonicalRenderModel = canonicalRenderModel.ToArray();
+    }
+
+    public string Id { get; }
+    public string RenderDigest { get; }
+    public byte[] CanonicalRenderModel => _canonicalRenderModel.ToArray();
+
+    internal byte[] CanonicalRenderModelBytes() => _canonicalRenderModel.ToArray();
+}
 internal sealed record PocketAppStagingTestResult(string Id, string Expected, string Status);
 
 internal sealed record PocketAppLifecycleProposal(
@@ -566,6 +582,10 @@ internal sealed class PocketAppLifecycleManager
             throw Failure("LIFECYCLE_PACKAGE_CHANGED");
         }
         ValidateHostCompatibility(package);
+        if (PreviewDigest(proposal.Previews) != proposal.PreviewDigest)
+        {
+            throw Failure("LIFECYCLE_PACKAGE_CHANGED");
+        }
         var previews = MakePreviews(package);
         if (PreviewDigest(previews) != proposal.PreviewDigest)
         {
@@ -847,7 +867,8 @@ internal sealed class PocketAppLifecycleManager
                 if (!data.AsSpan().SequenceEqual(repeated)) { throw Failure("LIFECYCLE_PACKAGE_CHANGED"); }
                 return new PocketAppPreviewSurface(item.Key, Sha256(data), data);
             })
-            .ToArray();
+            .ToList()
+            .AsReadOnly();
 
     private static HashSet<string> Permissions(PocketAppPackage package) =>
         package.Manifest.RequestedCapabilities.SelectMany(item => item.Permissions).ToHashSet(StringComparer.Ordinal);
@@ -1243,6 +1264,11 @@ internal sealed class PocketAppLifecycleManager
         hash.AppendData(Encoding.UTF8.GetBytes("hoverpocket.preview/v1\0"));
         foreach (var preview in previews.OrderBy(item => item.Id, StringComparer.Ordinal))
         {
+            var renderModel = preview.CanonicalRenderModelBytes();
+            if (!string.Equals(Sha256(renderModel), preview.RenderDigest, StringComparison.Ordinal))
+            {
+                throw Failure("LIFECYCLE_PACKAGE_CHANGED");
+            }
             hash.AppendData(Encoding.UTF8.GetBytes(preview.Id));
             hash.AppendData([0]);
             hash.AppendData(Encoding.UTF8.GetBytes(preview.RenderDigest));

@@ -278,6 +278,38 @@ enum PocketAppPackageVerificationCommand {
                 }
                 try Data("draft changed after staging".utf8).write(to: draftRoot.appendingPathComponent("intent.md"), options: .atomic)
                 let grant = try manager.approve(requestID: proposal.requestID, bindingDigest: proposal.bindingDigest, now: now)
+                var tamperedBytes = proposal.previews[0].canonicalRenderModel
+                tamperedBytes[0] ^= 0xff
+                let tamperedProposal = PocketAppLifecycleProposal(
+                    requestID: proposal.requestID,
+                    action: proposal.action,
+                    packageID: proposal.packageID,
+                    version: proposal.version,
+                    packageDigest: proposal.packageDigest,
+                    currentDigest: proposal.currentDigest,
+                    currentState: proposal.currentState,
+                    previewDigest: proposal.previewDigest,
+                    previews: [PocketAppPreviewSurface(
+                        id: proposal.previews[0].id,
+                        renderDigest: proposal.previews[0].renderDigest,
+                        canonicalRenderModel: tamperedBytes
+                    )],
+                    permissionDiff: proposal.permissionDiff,
+                    capabilityGrantDiff: proposal.capabilityGrantDiff,
+                    tests: proposal.tests,
+                    bindingDigest: proposal.bindingDigest,
+                    createdAt: proposal.createdAt,
+                    expiresAt: proposal.expiresAt,
+                    approvalRequired: proposal.approvalRequired,
+                    stagingDirectory: proposal.stagingDirectory,
+                    stateSchemaDigest: proposal.stateSchemaDigest,
+                    statePropertyNames: proposal.statePropertyNames
+                )
+                do {
+                    _ = try manager.install(tamperedProposal, approvalGrant: grant, now: now)
+                    failures.append("lifecycle_tampered_preview_accepted")
+                } catch PocketAppLifecycleError.packageChanged {
+                }
                 let installed = try manager.install(proposal, approvalGrant: grant, now: now)
                 require(try installed.readbackVerified && manager.activePackage(packageID: proposal.packageID)?.manifestDigest == proposal.packageDigest, "lifecycle_install_readback", failures: &failures)
                 try Data(contentsOf: fixtureURL("package/intent.md")).write(to: draftRoot.appendingPathComponent("intent.md"), options: .atomic)
