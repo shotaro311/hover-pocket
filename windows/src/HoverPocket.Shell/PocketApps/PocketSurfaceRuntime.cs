@@ -441,15 +441,17 @@ internal sealed class PocketSurfaceRuntime(
 
     private static void ExactKeys(
         JsonElement value,
-        IReadOnlySet<string> required,
-        IReadOnlySet<string> optional,
+        IEnumerable<string> required,
+        IEnumerable<string> optional,
         string path)
     {
         var properties = value.EnumerateObject().ToArray();
         var keys = properties.Select(property => property.Name).ToHashSet(StringComparer.Ordinal);
+        var requiredKeys = required.ToHashSet(StringComparer.Ordinal);
+        var optionalKeys = optional.ToHashSet(StringComparer.Ordinal);
         Require(keys.Count == properties.Length, $"{path}:duplicate_key");
-        Require(required.All(keys.Contains), $"{path}:missing_key");
-        Require(keys.All(key => required.Contains(key) || optional.Contains(key)), $"{path}:unknown_key");
+        Require(requiredKeys.All(keys.Contains), $"{path}:missing_key");
+        Require(keys.All(key => requiredKeys.Contains(key) || optionalKeys.Contains(key)), $"{path}:unknown_key");
     }
 
     private static bool ValidAssetReference(string value)

@@ -517,7 +517,10 @@ internal sealed class PocketAppPackageRuntime
     private static PocketCapabilityKey CapabilityKey(string value, string path)
     {
         var marker = value.LastIndexOf('@');
-        Require(marker > 0 && int.TryParse(value[(marker + 1)..], out var version) && version >= 1, path);
+        if (marker <= 0 || !int.TryParse(value[(marker + 1)..], out var version) || version < 1)
+        {
+            throw new PocketAppPackageRuntimeException(path);
+        }
         var id = value[..marker];
         Require(CapabilityIdPattern.IsMatch(id), path);
         return new PocketCapabilityKey(id, version);
@@ -596,7 +599,10 @@ internal sealed class PocketAppPackageRuntime
 
     private static int GetInteger(JsonElement value, string path)
     {
-        Require(value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var result), $"{path}:integer");
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var result))
+        {
+            throw new PocketAppPackageRuntimeException($"{path}:integer");
+        }
         return result;
     }
 
