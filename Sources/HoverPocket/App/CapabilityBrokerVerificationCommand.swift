@@ -770,6 +770,9 @@ enum CapabilityBrokerVerificationCommand {
             throw BrokerVerificationFailure("voice_tool_payload")
         }
         return payload
+    }
+
+    @MainActor
     private static func verifyStrongPerCallIsolation(
         broker: CapabilityBroker,
         noteID: UUID,
