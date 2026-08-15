@@ -2,7 +2,7 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pr-ready; an5-next; capability-expansion-merged
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-next; capability-expansion-merged
 ---
 
 ## 2026-08-15 AI-native AN4 Pocket App DSL / Renderer
@@ -13,6 +13,7 @@ status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pr-ready;
 - ローカルMacでSwift warnings-as-errors build、Broker、Pocket App package、Pocket Surface、Panel layout、12 schema / 57 fixtureの共通contract、JavaScript syntax、`git diff --check`が成功した。PR [#14](https://github.com/shotaro311/hover-pocket/pull/14)のhead `5eb528f`でWindows、macOS、Ubuntu / macOS / Windows contract、cross-OS byte比較、PR Routerがすべて成功し、`MERGEABLE / CLEAN`をreadbackした。
 - exact hardening range `341db0a...5eb528f`のCodex Security diff scan `d6d90a84-3a8e-4b34-882a-a03f0c3d0c09`は変更11 / 11 fileを確認し、reportable finding 0件でsealed completeとなった。4件は現行の固定内蔵packageから到達せず、AN5で生成package導入を開く時だけ成立する境界としてdeferredにした。
 - AN5の必須gateは、両OSでHost所有のimmutable install snapshotへno-follow / stable identityで取り込み、検証byteと実行byteを同一にすること、`stableKey`を安全な有限grammarまたはHost所有canonical表示へ固定し、承認表示と実行値を完全一致させることである。これらを実装するまで外部生成packageをactivateしない。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-an4.md`。
+- 最終head `b1cdd0d`の11 check成功、未解決review thread 0、Ready、`MERGEABLE / CLEAN`をreadbackしてPR #14をmergeした。merge commit `1a6565f`でmain / origin/mainは一致し、merge後のWindows [31884679828](https://github.com/shotaro311/hover-pocket/actions/runs/31884679828)、macOS [31884679826](https://github.com/shotaro311/hover-pocket/actions/runs/31884679826)、Pocket contracts [31884679824](https://github.com/shotaro311/hover-pocket/actions/runs/31884679824)もすべて成功した。
 
 ## 2026-08-15 AI-native Strong Approval Isolation
 

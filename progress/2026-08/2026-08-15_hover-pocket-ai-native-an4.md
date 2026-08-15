@@ -2,7 +2,7 @@
 
 ## 結論
 
-AN4のPocket App DSL、汎用Renderer、宣言型Today Focus packageをmacOS / Windowsへ実装した。生成UIはProvider Storeへ直接触れず、Calendar read、Timer start、Sticky upsertを既存UIと同じCapability Registry / Broker経由で実行する。実装head `5eb528fa63e4d4233f254cea2eac4e3cc0e6867a`はローカル検証と全GitHub Actionsに合格し、PR #14は`MERGEABLE / CLEAN`である。
+AN4のPocket App DSL、汎用Renderer、宣言型Today Focus packageをmacOS / Windowsへ実装した。生成UIはProvider Storeへ直接触れず、Calendar read、Timer start、Sticky upsertを既存UIと同じCapability Registry / Broker経由で実行する。最終PR head `b1cdd0d14ed1f346d6f2f262b708f4520586956d`はローカル検証と全GitHub Actionsに合格し、PR #14をmerge commit `1a6565fe7ffc3fbac431644797a3c97ef168ed7b`としてmainへ統合した。
 
 ## Git / Pro回収
 
@@ -84,8 +84,14 @@ exact hardening range `341db0a26bc8eecd72b43aefab124cf08508c711...5eb528fa63e4d4
 - control / bidi / 長文fixtureで、承認表示、plan digest、実行値、readback対象が一致することを両OSで検証する。
 - このgateが通るまで生成 / import packageをactivateしない。
 
-## 残件
+## 完了readback
 
-- PR #14をReady化し、最終headの全check、未解決review thread 0、mergeabilityを再readbackしてmainへ統合する。
+- 最終head `b1cdd0d`の11 check成功、未解決review thread 0、Ready、`MERGEABLE / CLEAN`を確認した。
+- PR #14は`2026-08-15T12:28:10Z`にmergeされ、merge commitは`1a6565fe7ffc3fbac431644797a3c97ef168ed7b`。
+- merge直後にmain / origin/main一致、ahead / behind `0 / 0`をreadbackした。
+- merge commitのWindows [31884679828](https://github.com/shotaro311/hover-pocket/actions/runs/31884679828)、macOS [31884679826](https://github.com/shotaro311/hover-pocket/actions/runs/31884679826)、Pocket contracts [31884679824](https://github.com/shotaro311/hover-pocket/actions/runs/31884679824)はすべて成功した。
+
+## 次のPhase
+
 - AN5でCodex生成、検証、preview、permission diff、atomic install、disable / remove / rollbackへ進む。
 - AN3のWindowsユーザー発話とProvider live E2Eは別branchの実機gateとして残る。
