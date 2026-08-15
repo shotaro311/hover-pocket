@@ -2,8 +2,16 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pro-pending; capability-expansion-strong-approval-pr-ready
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pro-repair-pending; capability-expansion-approval-presentation-pr-ready
 ---
+
+## 2026-08-15 AI-native Host-owned Approval Presentation
+
+- Strong Approval統合後のexact `main` `da0d5b6`からbranch `codex/ai-native-approval-presentation`を作成し、`sticky.note.delete@1`の対象をHostが解決して表示する、メモリ上だけの承認presentationをmacOS / Windowsへ追加した。表示はrequest、plan、step、argument digestへ結合し、対象タイトルは改行・制御文字・双方向制御文字を除去して80 Unicode scalar / rune以内に制限する。
+- `strong_per_call`は有効なpresentationを生成できない場合に承認要求を破棄してfail closedにする。対象が既に存在しない場合も`missing`状態を明示し、raw本文・UUID・表示ラベルをcontract、audit、ledger、receipt、生成Surface、agent transcriptへ保存しない。
+- Swift warnings-as-errors build、Broker 15 descriptor / 14 handler、Capability、Timer、Clipboard、Calculator、Panel layout 112件、12 schema / 57 fixtureの共通contractを2回実行し、contract reportのbyte一致と`git diff --check`を確認した。Windowsはローカルに.NET SDKがないためPR CIを必須gateとする。
+- exact range `da0d5b6...4f6c201`のCodex Security diff scan `6d4c59cd-c0e9-49bf-9afc-d6c8e4f5ab32`は変更source 12 / 12、coverage complete、reportable finding 0件でsealed complete。Host verifierが承認UIを描画せず直接実行できる候補は、productionの外部到達経路と`sticky.delete`権限がなくsuppressed。plan metadataへUUIDを符号化できる候補は既存挙動で今回の差分が到達性を広げておらずnot applicableと判定した。将来のPocket App / Voice / MCP Adapterでは、Host承認APIを外部へ公開せず、metadata IDもHost生成に限定する。
+- ChatGPT Pro OrchestratorのAN4初回成果物は実装方針を満たしたが、許可外の新規pathと必須`implementation-notes.md`欠落があり適用しなかった。1回限りの修正依頼を同じexact AN4 headへ送信済みで、自動回収待ちである。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-approval-presentation.md`。
 
 ## 2026-08-15 AI-native Strong Approval Isolation
 

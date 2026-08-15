@@ -3,6 +3,7 @@ import Foundation
 
 enum CapabilityBrokerVerificationCommand {
     private static let goldenPlanDigest = "sha256:d098ea1b5f9f70e91486fd53229e7ddb68f73a9952ab94f17eed27cdeeb6413f"
+    private static let privatePresentationTitle = "  Private\n\u{202E} title " + String(repeating: "x", count: 90)
 
     @MainActor
     static func run() -> Never {
@@ -14,9 +15,10 @@ enum CapabilityBrokerVerificationCommand {
                 print("broker_available_handlers=14")
                 print("broker_calculator_evaluate=ok")
                 print("broker_sticky_lifecycle=ok")
+                print("broker_approval_presentation=ok")
                 print("broker_today_focus=ok")
                 print("broker_concurrent_duplicate=ok")
-                print("broker_negative_cases=11")
+                print("broker_negative_cases=12")
                 print("broker_golden_plan_digest=\(goldenPlanDigest)")
                 Darwin.exit(0)
             } catch {
@@ -65,7 +67,10 @@ enum CapabilityBrokerVerificationCommand {
         let broker = CapabilityBroker(
             registry: registry,
             ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
-            auditLog: audit
+            auditLog: audit,
+            approvalPresentationResolver: HostCapabilityApprovalPresentationResolver(
+                stickyStore: stickyStore
+            )
         )
 
         try require(registry.descriptorKeys.count == 15, "registry_descriptor_count")
@@ -75,6 +80,12 @@ enum CapabilityBrokerVerificationCommand {
             "sticky_delete_strong_approval"
         )
         try verifyStrongPerCallIsolation(broker: broker, noteID: noteID, now: now)
+        try verifyStrongApprovalPresentationRequired(
+            registry: registry,
+            root: root,
+            noteID: noteID,
+            now: now
+        )
         do {
             try registry.descriptor(PocketCapabilityKeys.stickyArchive)?.validateOutput([
                 "noteId": .string(noteID.uuidString),
@@ -460,7 +471,9 @@ enum CapabilityBrokerVerificationCommand {
             "secret-purpose-approved",
             "secret-purpose-rejected",
             "secret-purpose-concurrent",
-            principal.userID
+            principal.userID,
+            privatePresentationTitle,
+            noteID.uuidString.lowercased()
         ] {
             try require(!auditText.contains(forbidden), "audit_redaction_\(forbidden)")
         }
@@ -473,7 +486,13 @@ enum CapabilityBrokerVerificationCommand {
         try require(!auditText.contains(invalidAuditMarker), "invalid_plan_audit_redaction")
         try require(!auditText.contains(invalidVersionMarker), "invalid_version_audit_redaction")
         let durableLedgerText = String(data: try Data(contentsOf: ledgerURL), encoding: .utf8) ?? ""
-        for forbidden in ["secret-purpose-approved", "secret-purpose-concurrent", "Sensitive Calendar Title"] {
+        for forbidden in [
+            "secret-purpose-approved",
+            "secret-purpose-concurrent",
+            "Sensitive Calendar Title",
+            privatePresentationTitle,
+            noteID.uuidString.lowercased()
+        ] {
             try require(!durableLedgerText.contains(forbidden), "ledger_redaction_\(forbidden)")
         }
 
@@ -529,6 +548,50 @@ enum CapabilityBrokerVerificationCommand {
     }
 
     @MainActor
+    private static func verifyStrongApprovalPresentationRequired(
+        registry: CapabilityRegistry,
+        root: URL,
+        noteID: UUID,
+        now: Date
+    ) throws {
+        let brokerRoot = root.appendingPathComponent("missing-presentation-broker", isDirectory: true)
+        let broker = CapabilityBroker(
+            registry: registry,
+            ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
+            auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+        )
+        let principal = CapabilityPrincipal(userID: "user-missing-presentation-fixture")
+        let plan = CapabilityExecutionPlan(
+            id: "missing-presentation-plan",
+            createdAt: now,
+            origin: .text,
+            principal: principal,
+            appContext: nil,
+            steps: [CapabilityPlanStep(
+                id: "deleteNote",
+                capability: PocketCapabilityKeys.stickyDelete,
+                arguments: ["noteId": .string(noteID.uuidString)],
+                idempotencyKey: "missing-presentation-key-0001",
+                dependencies: []
+            )],
+            requiredPermissions: ["sticky.delete"]
+        )
+        do {
+            _ = try broker.prepare(
+                plan,
+                permissions: CapabilityPermissionSet(
+                    principal: principal,
+                    permissions: ["sticky.delete"]
+                ),
+                now: now
+            )
+            throw BrokerVerificationFailure("missing_strong_presentation_accepted")
+        } catch CapabilityBrokerError.invalidPlan(let field) {
+            try require(field == "approval_presentation", "missing_strong_presentation_error")
+        }
+    }
+
+    @MainActor
     private static func verifyCalculator(broker: CapabilityBroker, now: Date) async throws {
         let principal = CapabilityPrincipal(userID: "user-calculator-fixture")
         let plan = CapabilityExecutionPlan(
@@ -575,7 +638,7 @@ enum CapabilityBrokerVerificationCommand {
     ) async throws {
         _ = try store.upsertNote(
             stableKey: "broker-lifecycle-fixture",
-            title: "Private title",
+            title: privatePresentationTitle,
             body: "Private body",
             color: .yellow,
             id: noteID,
@@ -643,6 +706,25 @@ enum CapabilityBrokerVerificationCommand {
         guard let deleteRequest = deletePreparation.approvalRequest else {
             throw BrokerVerificationFailure("sticky_delete_approval_missing")
         }
+        guard deletePreparation.approvalPresentations.count == 1,
+              let presentation = deletePreparation.approvalPresentations.first,
+              let effect = deleteRequest.effects.first else {
+            throw BrokerVerificationFailure("sticky_delete_presentation_missing")
+        }
+        try require(presentation.requestID == deleteRequest.id, "sticky_presentation_request_binding")
+        try require(presentation.planDigest == deletePreparation.planDigest, "sticky_presentation_plan_binding")
+        try require(presentation.stepID == "deleteNote", "sticky_presentation_step_binding")
+        try require(presentation.argumentDigest == effect.argumentDigest, "sticky_presentation_argument_binding")
+        try require(presentation.targetKind == "sticky_note", "sticky_presentation_target_kind")
+        try require(presentation.targetState == .present, "sticky_presentation_target_state")
+        try require(presentation.destructive, "sticky_presentation_destructive")
+        try require(presentation.targetDisplayLabel?.hasPrefix("Private title ") == true, "sticky_presentation_label")
+        try require((presentation.targetDisplayLabel?.unicodeScalars.count ?? 0) <= 80, "sticky_presentation_label_limit")
+        try require(presentation.targetDisplayLabel?.contains("\n") == false, "sticky_presentation_label_newline")
+        try require(presentation.targetDisplayLabel?.contains("\u{202E}") == false, "sticky_presentation_label_bidi")
+        let encodedRequest = String(data: try JSONEncoder().encode(deleteRequest), encoding: .utf8) ?? ""
+        try require(!encodedRequest.contains(privatePresentationTitle), "sticky_presentation_not_in_request")
+        try require(!encodedRequest.contains(noteID.uuidString.lowercased()), "sticky_target_id_not_in_request")
         let deleteGrant = try broker.decideApproval(
             requestID: deleteRequest.id,
             planDigest: deletePreparation.planDigest,
@@ -659,6 +741,35 @@ enum CapabilityBrokerVerificationCommand {
         try require(deleteReceipt.steps.first?.output?["state"] == .string("missing"), "sticky_delete_output")
         try require(deleteReceipt.steps.first?.readback.status == .verified, "sticky_delete_readback")
         try require(store.note(id: noteID) == nil, "sticky_delete_effect")
+
+        let missingPlan = CapabilityExecutionPlan(
+            id: "sticky-delete-missing-plan",
+            createdAt: now.addingTimeInterval(2),
+            origin: .text,
+            principal: principal,
+            appContext: nil,
+            steps: [CapabilityPlanStep(
+                id: "deleteMissingNote",
+                capability: PocketCapabilityKeys.stickyDelete,
+                arguments: ["noteId": .string(noteID.uuidString)],
+                idempotencyKey: "sticky-broker-delete-missing-key-0001",
+                dependencies: []
+            )],
+            requiredPermissions: ["sticky.delete"]
+        )
+        let missingPreparation = try broker.prepare(
+            missingPlan,
+            permissions: deletePermissions,
+            now: now.addingTimeInterval(2)
+        )
+        try require(
+            missingPreparation.approvalPresentations.first?.targetState == .missing,
+            "sticky_missing_presentation_state"
+        )
+        try require(
+            missingPreparation.approvalPresentations.first?.targetDisplayLabel == nil,
+            "sticky_missing_presentation_label"
+        )
     }
 
     private static func verifyCalendarCreateEventBody(now: Date) throws {
