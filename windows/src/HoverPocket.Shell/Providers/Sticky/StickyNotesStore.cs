@@ -154,6 +154,39 @@ internal sealed class StickyNotesStore
         return true;
     }
 
+    public StickyNoteItem? ArchiveNoteAtomically(Guid id, DateTimeOffset now)
+    {
+        var index = _notes.FindIndex(note => note.Id == id);
+        if (index < 0)
+        {
+            return null;
+        }
+        if (_notes[index].ArchivedAt is not null)
+        {
+            return _notes[index].Clone();
+        }
+
+        var previousNotes = _notes.Select(item => item.Clone()).ToArray();
+        var previousLastAction = LastAction;
+        try
+        {
+            var previous = _notes[index].Clone();
+            _notes[index].ArchivedAt = now;
+            _notes[index].UpdatedAt = now;
+            LastAction = new StickyNoteUndoAction(StickyNoteUndoActionKind.Archived, previous, index);
+            SaveNotesAtomically();
+            return _notes[index].Clone();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _notes.Clear();
+            _notes.AddRange(previousNotes);
+            LastAction = previousLastAction;
+            LastErrorMessage = "Sticky notes could not be saved.";
+            throw;
+        }
+    }
+
     public bool ArchiveDroppedNote(Guid id)
     {
         return ArchiveNote(id);
@@ -172,6 +205,34 @@ internal sealed class StickyNotesStore
         LastAction = new StickyNoteUndoAction(StickyNoteUndoActionKind.Deleted, removed, index);
         SaveNotes();
         return true;
+    }
+
+    public bool DeleteNoteAtomically(Guid id)
+    {
+        var index = _notes.FindIndex(note => note.Id == id);
+        if (index < 0)
+        {
+            return false;
+        }
+
+        var previousNotes = _notes.Select(item => item.Clone()).ToArray();
+        var previousLastAction = LastAction;
+        try
+        {
+            var removed = _notes[index].Clone();
+            _notes.RemoveAt(index);
+            LastAction = new StickyNoteUndoAction(StickyNoteUndoActionKind.Deleted, removed, index);
+            SaveNotesAtomically();
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _notes.Clear();
+            _notes.AddRange(previousNotes);
+            LastAction = previousLastAction;
+            LastErrorMessage = "Sticky notes could not be saved.";
+            throw;
+        }
     }
 
     public bool DiscardNote(Guid id)

@@ -11,6 +11,9 @@ private enum CapabilityIDs {
     static let timerStop = PocketCapabilityKey(id: "timer.countdown.stop", version: 1)
     static let stickyUpsert = PocketCapabilityKey(id: "sticky.note.upsert", version: 1)
     static let stickyGet = PocketCapabilityKey(id: "sticky.note.get", version: 1)
+    static let stickyStatus = PocketCapabilityKey(id: "sticky.note.status", version: 1)
+    static let stickyArchive = PocketCapabilityKey(id: "sticky.note.archive", version: 1)
+    static let stickyDelete = PocketCapabilityKey(id: "sticky.note.delete", version: 1)
 }
 
 struct CalendarCapabilityEvent: Equatable, Sendable {
@@ -430,11 +433,17 @@ final class StickyCapabilityHandler: PocketCapabilityHandler {
     enum Operation {
         case upsert
         case get
+        case status
+        case archive
+        case delete
 
         var key: PocketCapabilityKey {
             switch self {
             case .upsert: CapabilityIDs.stickyUpsert
             case .get: CapabilityIDs.stickyGet
+            case .status: CapabilityIDs.stickyStatus
+            case .archive: CapabilityIDs.stickyArchive
+            case .delete: CapabilityIDs.stickyDelete
             }
         }
     }
@@ -474,12 +483,44 @@ final class StickyCapabilityHandler: PocketCapabilityHandler {
             }
             return try Self.readOutput(note)
         case .get:
-            let rawID = try arguments.requiredString("noteId", maxLength: 128)
-            guard let id = UUID(uuidString: rawID), let note = store.note(id: id) else {
+            let id = try Self.noteID(arguments)
+            guard let note = store.note(id: id) else {
                 throw CapabilityHandlerError.unavailable("sticky_note")
             }
             return try Self.readOutput(note)
+        case .status:
+            return Self.statusOutput(noteID: try Self.noteID(arguments), store: store)
+        case .archive:
+            _ = try context.requiredIdempotencyKey()
+            let id = try Self.noteID(arguments)
+            do {
+                guard let note = try store.archiveNoteAtomically(id: id, at: context.now) else {
+                    throw CapabilityHandlerError.unavailable("sticky_note")
+                }
+                return Self.statusOutput(note)
+            } catch let error as CapabilityHandlerError {
+                throw error
+            } catch {
+                throw CapabilityHandlerError.unavailable("sticky_storage")
+            }
+        case .delete:
+            _ = try context.requiredIdempotencyKey()
+            let id = try Self.noteID(arguments)
+            do {
+                _ = try store.deleteNoteAtomically(id: id)
+                return Self.missingStatusOutput(noteID: id)
+            } catch {
+                throw CapabilityHandlerError.unavailable("sticky_storage")
+            }
         }
+    }
+
+    private static func noteID(_ arguments: CapabilityObject) throws -> UUID {
+        let rawID = try arguments.requiredString("noteId", maxLength: 128)
+        guard let id = UUID(uuidString: rawID) else {
+            throw CapabilityHandlerError.invalidArgument("noteId")
+        }
+        return id
     }
 
     private static func color(_ value: String) throws -> StickyNoteColor {
@@ -510,6 +551,29 @@ final class StickyCapabilityHandler: PocketCapabilityHandler {
         output["body"] = .string(note.body)
         return output
     }
+
+    private static func statusOutput(noteID: UUID, store: StickyNotesStore) -> CapabilityObject {
+        guard let note = store.note(id: noteID) else {
+            return missingStatusOutput(noteID: noteID)
+        }
+        return statusOutput(note)
+    }
+
+    private static func statusOutput(_ note: StickyNoteItem) -> CapabilityObject {
+        [
+            "noteId": .string(note.id.uuidString.lowercased()),
+            "state": .string(note.archivedAt == nil ? "active" : "archived"),
+            "updatedAt": .string(CapabilityDateCodec.string(from: note.updatedAt))
+        ]
+    }
+
+    private static func missingStatusOutput(noteID: UUID) -> CapabilityObject {
+        [
+            "noteId": .string(noteID.uuidString.lowercased()),
+            "state": .string("missing"),
+            "updatedAt": .null
+        ]
+    }
 }
 
 @MainActor
@@ -526,7 +590,10 @@ enum ProviderCapabilityCompositionRoot {
             TimerCapabilityHandler(operation: .resume, store: .shared),
             TimerCapabilityHandler(operation: .stop, store: .shared),
             StickyCapabilityHandler(operation: .upsert, store: .shared),
-            StickyCapabilityHandler(operation: .get, store: .shared)
+            StickyCapabilityHandler(operation: .get, store: .shared),
+            StickyCapabilityHandler(operation: .status, store: .shared),
+            StickyCapabilityHandler(operation: .archive, store: .shared),
+            StickyCapabilityHandler(operation: .delete, store: .shared)
         ])
     }
 }

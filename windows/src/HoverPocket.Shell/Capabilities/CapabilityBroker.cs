@@ -474,7 +474,7 @@ internal sealed class CapabilityBroker
             ? "eventRef"
             : query == CapabilityIds.TimerGet
                 ? "timerId"
-                : query == CapabilityIds.StickyGet
+                : query == CapabilityIds.StickyGet || query == CapabilityIds.StickyStatus
                     ? "noteId"
                     : throw InvalidPlan("readback_query");
         if (!output.TryGetProperty(field, out var value))
