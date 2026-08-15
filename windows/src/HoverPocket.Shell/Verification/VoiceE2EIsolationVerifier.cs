@@ -189,6 +189,11 @@ internal sealed class VoiceE2EIsolationVerifier
 
     private void VerifySingleInstanceNames()
     {
+        var secondInstanceProbe = StartupOptions.Parse(["--second-instance-probe"]);
+        Check(
+            secondInstanceProbe.SecondInstanceProbe && secondInstanceProbe.IsVerify,
+            "second-instance probe did not select verifier isolation");
+
         var names = new[]
         {
             SingleInstanceNames.Production,

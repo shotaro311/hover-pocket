@@ -57,7 +57,8 @@ internal sealed record StartupOptions(
         || VerifyCodexVoiceCoordinator
         || VerifyVoiceE2EIsolation
         || VerifyUpdater
-        || VerifyReleaseConfig;
+        || VerifyReleaseConfig
+        || SecondInstanceProbe;
 
     public static StartupOptions Parse(string[] args)
     {
