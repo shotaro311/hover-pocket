@@ -45,6 +45,10 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>ui\%(RecursiveDir)%(Filename)%(Extension)</Link>
     </Content>
+    <Content Include="..\..\..\Sources\HoverPocket\Resources\PocketApps\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>PocketApps\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
   </ItemGroup>
 
 </Project>

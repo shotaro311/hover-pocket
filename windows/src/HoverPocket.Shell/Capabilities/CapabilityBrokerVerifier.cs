@@ -1,7 +1,9 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
+using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Providers.Calendar;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
@@ -40,6 +42,8 @@ internal sealed class CapabilityBrokerVerifier
         Console.WriteLine("broker_calculator_evaluate=ok");
         Console.WriteLine("broker_sticky_lifecycle=ok");
         Console.WriteLine("broker_today_focus=ok");
+        Console.WriteLine("broker_pocket_app=ok");
+        Console.WriteLine("broker_pocket_app_declared_tests=4");
         Console.WriteLine("broker_concurrent_duplicate=ok");
         Console.WriteLine("broker_negative_cases=11");
         Console.WriteLine($"broker_golden_plan_digest={GoldenPlanDigest}");
@@ -105,6 +109,7 @@ internal sealed class CapabilityBrokerVerifier
 
             await VerifyCalculatorAsync(broker, now);
             await VerifyStickyLifecycleAsync(broker, stickyStore, now);
+            await VerifyPocketAppAsync(root);
 
             var principal = new CapabilityPrincipal("user-broker-fixture");
             var allPermissions = Permissions(principal, "calendar.events.read", "sticky.write", "timer.write");
@@ -412,6 +417,206 @@ internal sealed class CapabilityBrokerVerifier
         Require(receipt.Steps[0].Readback.Status == CapabilityReadbackStatus.Verified, "calculator_readback");
         Require(receipt.Steps[0].Readback.Strategy == CapabilityReadbackStrategy.None, "calculator_readback_strategy");
         Require(receipt.Steps[0].Readback.Observed is not null, "calculator_observed");
+    }
+
+    private async Task VerifyPocketAppAsync(string root)
+    {
+        var now = new DateTimeOffset(2026, 8, 14, 16, 0, 0, TimeSpan.Zero);
+        using var timerStore = new TimerStore(
+            Path.Combine(root, "pocket-app-timer"),
+            new ManualTimerClock(now),
+            new NullTimerAlertSound(),
+            enableScheduler: false);
+        var stickyStore = new StickyNotesStore(Path.Combine(root, "pocket-app-sticky"));
+        var calendar = new BrokerFakeCalendarDataSource(now);
+        var handlers = ProviderCapabilityCompositionRoot.Create(calendar, timerStore, stickyStore);
+        var brokerRoot = Path.Combine(root, "pocket-app-broker");
+        var broker = new CapabilityBroker(
+            new CapabilityRegistry(handlers),
+            new CapabilityBrokerLedger(brokerRoot),
+            new CapabilityBrokerAuditLog(brokerRoot));
+        var package = new PocketAppPackageRuntime().Load(Path.Combine(
+            AppContext.BaseDirectory,
+            "PocketApps",
+            "local.example.today-focus"));
+        var timeZone = TimeZoneInfo.CreateCustomTimeZone(
+            $"JST-pocket-{Guid.NewGuid():N}",
+            TimeSpan.FromHours(9),
+            "JST",
+            "JST");
+        var stateRoot = Path.Combine(root, "pocket-app-user-state");
+        var userStateStore = new PocketAppUserStateStore(
+            package.Manifest.Id,
+            package.StatePropertyNames,
+            stateRoot);
+        var runtime = new PocketAppExecutionRuntime(
+            package,
+            broker,
+            "user-pocket-app-fixture",
+            new HashSet<string>(
+                ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"],
+                StringComparer.Ordinal),
+            timeZone,
+            userStateStore);
+        var hostController = new PocketAppHostController(runtime, () => new UserSettings());
+        var managerState = JsonSerializer.SerializeToElement(hostController.BuildManagerState());
+        Require(managerState.GetProperty("appId").GetString() == package.Manifest.Id, "pocket_app_manager_id");
+        Require(managerState.GetProperty("version").GetString() == package.Manifest.Version, "pocket_app_manager_version");
+        Require(managerState.GetProperty("testsCount").GetInt32() == 4, "pocket_app_manager_tests");
+        Require(
+            managerState.GetProperty("storageBoundary").GetString() == "separate_definition_data_receipts",
+            "pocket_app_manager_storage_boundary");
+        Require(
+            !managerState.GetRawText().Contains(package.RootDirectory, StringComparison.OrdinalIgnoreCase),
+            "pocket_app_manager_path_redaction");
+
+        var dispatcher = new BridgeDispatcher();
+        hostController.Attach(dispatcher);
+        var loadResponse = await dispatcher.ProcessRawMessageAsync(
+            JsonSerializer.Serialize(new
+            {
+                id = "load",
+                method = "pocketApp.load",
+                @params = new { appId = package.Manifest.Id, surfaceId = "main" }
+            }));
+        Require(loadResponse is not null, "pocket_app_host_load_response");
+        using (var loadDocument = JsonDocument.Parse(loadResponse!))
+        {
+            Require(loadDocument.RootElement.GetProperty("error").ValueKind == JsonValueKind.Null, "pocket_app_host_load");
+        }
+        var updateResponse = await dispatcher.ProcessRawMessageAsync(
+            JsonSerializer.Serialize(new
+            {
+                id = "state",
+                method = "pocketApp.updateState",
+                @params = new
+                {
+                    appId = package.Manifest.Id,
+                    key = "selectedEventRef",
+                    value = "primary:sensitive-event-ref"
+                }
+            }));
+        using (var updateDocument = JsonDocument.Parse(updateResponse!))
+        {
+            Require(updateDocument.RootElement.GetProperty("error").ValueKind == JsonValueKind.Null, "pocket_app_state_update");
+        }
+        var reloadedStateStore = new PocketAppUserStateStore(
+            package.Manifest.Id,
+            package.StatePropertyNames,
+            stateRoot);
+        Require(
+            reloadedStateStore.Snapshot().GetValueOrDefault("selectedEventRef") == "primary:sensitive-event-ref",
+            "pocket_app_state_persistence");
+        var forgedStateResponse = await dispatcher.ProcessRawMessageAsync(
+            JsonSerializer.Serialize(new
+            {
+                id = "forged",
+                method = "pocketApp.updateState",
+                @params = new
+                {
+                    appId = package.Manifest.Id,
+                    key = "selectedEventRef",
+                    value = "primary:forged"
+                }
+            }));
+        using (var forgedDocument = JsonDocument.Parse(forgedStateResponse!))
+        {
+            Require(forgedDocument.RootElement.GetProperty("error").ValueKind == JsonValueKind.Object, "pocket_app_forged_state_ref");
+        }
+
+        var queryOutput = await runtime.QueryAsync(
+            "calendar.events.list@1",
+            CapabilityJson.From(new { range = "today", timezone = "$context.timezone" }),
+            now);
+        Require(queryOutput.GetProperty("events").GetArrayLength() == 1, "pocket_app_calendar_query");
+
+        var inputs = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+        {
+            ["selectedEventRef"] = CapabilityJson.From("primary:sensitive-event-ref"),
+            ["durationSeconds"] = CapabilityJson.From(1_500),
+            ["purpose"] = CapabilityJson.From("Pocket Focus")
+        };
+        var presentationInputs = new Dictionary<string, JsonElement>(inputs, StringComparer.Ordinal)
+        {
+            ["purpose"] = CapabilityJson.From("表示\n偽装\u202E確認")
+        };
+        var presentationDraft = runtime.Prepare("startFocus", presentationInputs, now);
+        const string canonicalPurpose = "表示 偽装 確認";
+        Require(
+            !PocketAppExecutionRuntime.SupportsWorkflowPresentation(CapabilityIds.CalendarList),
+            "pocket_app_unpresentable_workflow_rejected");
+        Require(
+            presentationDraft.Plan.Steps[0].Arguments.GetProperty("title").GetString() == canonicalPurpose,
+            "pocket_app_approval_timer_exact");
+        Require(
+            presentationDraft.Plan.Steps[1].Arguments.GetProperty("body").GetString() == canonicalPurpose,
+            "pocket_app_approval_sticky_exact");
+        Require(
+            PocketAppHostController.ApprovalSummary(presentationDraft, english: false).Contains(canonicalPurpose, StringComparison.Ordinal),
+            "pocket_app_approval_presentation_exact");
+        runtime.Reject(presentationDraft, now);
+        var draft = runtime.Prepare("startFocus", inputs, now);
+        Require(draft.Plan.Origin == CapabilityOrigin.PocketSurface, "pocket_app_origin");
+        Require(draft.Plan.Principal.PocketAppId == package.Manifest.Id, "pocket_app_principal");
+        Require(draft.Plan.AppContext?.Id == package.Manifest.Id, "pocket_app_context_id");
+        Require(draft.Plan.AppContext?.Version == package.Manifest.Version, "pocket_app_context_version");
+        Require(draft.Plan.AppContext?.ManifestDigest == package.ManifestDigest, "pocket_app_context_digest");
+        Require(
+            draft.Plan.Steps[1].Arguments.GetProperty("stableKey").GetString() == "today-focus:2026-08-15",
+            "pocket_app_local_date_key");
+        Require(
+            draft.Plan.Steps[0].Arguments.GetProperty("title").GetString() == "Pocket Focus",
+            "pocket_app_timer_title");
+        Require(
+            draft.Plan.Steps[1].Arguments.GetProperty("body").GetString() == "Pocket Focus",
+            "pocket_app_sticky_body");
+        Require(draft.Preparation.ApprovalRequest?.Effects.Count == 2, "pocket_app_approval_effects");
+
+        var receipt = await runtime.ApproveAndExecuteAsync(draft, now);
+        Require(receipt.Status == CapabilityReceiptStatus.Succeeded, "pocket_app_receipt_status");
+        Require(receipt.Steps.Count == 2, "pocket_app_receipt_steps");
+        Require(
+            receipt.Steps.All(step => step.Readback.Status == CapabilityReadbackStatus.Verified),
+            "pocket_app_readback");
+        Require(
+            PocketAppHostController.ReceiptSummary(receipt, english: false) == "Timer、Sticky Notesへ反映しました（2件確認済み）",
+            "pocket_app_receipt_summary");
+        Require(timerStore.RunningTimers.Count == 1, "pocket_app_timer_effect");
+        Require(stickyStore.Notes.Count == 1, "pocket_app_sticky_effect");
+        var replay = await broker.ExecuteAsync(
+            draft.Plan,
+            new CapabilityPermissionSet(
+                draft.Plan.Principal,
+                new HashSet<string>(
+                    ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"],
+                    StringComparer.Ordinal)),
+            null,
+            now.AddSeconds(1));
+        Require(replay.Replayed, "pocket_app_replay");
+        Require(
+            timerStore.RunningTimers.Count == 1 && stickyStore.Notes.Count == 1,
+            "pocket_app_replay_effect");
+
+        try
+        {
+            _ = await runtime.QueryAsync(
+                "timer.start@1",
+                CapabilityJson.From(new
+                {
+                    durationSeconds = 60,
+                    sourceRef = "pocket:query",
+                    title = "not allowed"
+                }),
+                now);
+            _failures.Add("pocket_app_write_query_accepted");
+        }
+        catch (CapabilityBrokerException ex) when (ex.Code == "CAPABILITY_PLAN_INVALID")
+        {
+        }
+
+        var rejected = runtime.Prepare("startFocus", inputs, now.AddSeconds(1));
+        runtime.Reject(rejected, now.AddSeconds(1));
+        Require(timerStore.RunningTimers.Count == 1 && stickyStore.Notes.Count == 1, "pocket_app_reject_no_write");
     }
 
     private void VerifyStrongPerCallIsolation(CapabilityBroker broker, DateTimeOffset now)

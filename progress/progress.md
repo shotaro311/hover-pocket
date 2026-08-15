@@ -2,8 +2,17 @@
 project_slug: hover-menu-preview
 updated: 2026-08-15
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pro-pending; capability-expansion-strong-approval-pr-ready
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-pr-ready; an5-next; capability-expansion-merged
 ---
+
+## 2026-08-15 AI-native AN4 Pocket App DSL / Renderer
+
+- exact `main` `da0d5b6`を取り込んだ隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an4`、branch `codex/ai-native-an4-dsl-renderer`でAN4を実装した。ChatGPT Pro Orchestratorの返却patchはdelivery ID / state hash、base、allowed path、artifact hashを検証した後だけ適用し、Codexが不足分と安全境界を補完した。
+- `manifest.json`、intent、state schema、Surface、workflow、testsを閉じたpackageとして読み込み、unknown file / component / capability、path traversal、symlink / reparse、oversize、unbound input、scope逸脱を両OSでfail closedにした。package digestは全構成fileのpathとraw byte digestを順序付きで束ね、macOS / Windowsのgolden値 `sha256:e9c369e0b52620d95c14baa2e04070535a1f21020308090f0467eed8cf4f04df`へ一致させた。
+- SwiftUIとWindows DOMの有限component renderer、Host所有state store、read query、workflow実行、approval、Broker、readback付きreceiptを接続した。Today Focusは宣言packageだけから描画し、Calendar read、Timer start、Sticky upsertを既存UIと同じCapability Registry / Brokerへ通す。title / bodyは承認前にcanonical化し、承認と実行を同じplan digestへ結び付け、成功表示は実Capability receiptとreadbackからHostが動的に生成する。
+- ローカルMacでSwift warnings-as-errors build、Broker、Pocket App package、Pocket Surface、Panel layout、12 schema / 57 fixtureの共通contract、JavaScript syntax、`git diff --check`が成功した。PR [#14](https://github.com/shotaro311/hover-pocket/pull/14)のhead `5eb528f`でWindows、macOS、Ubuntu / macOS / Windows contract、cross-OS byte比較、PR Routerがすべて成功し、`MERGEABLE / CLEAN`をreadbackした。
+- exact hardening range `341db0a...5eb528f`のCodex Security diff scan `d6d90a84-3a8e-4b34-882a-a03f0c3d0c09`は変更11 / 11 fileを確認し、reportable finding 0件でsealed completeとなった。4件は現行の固定内蔵packageから到達せず、AN5で生成package導入を開く時だけ成立する境界としてdeferredにした。
+- AN5の必須gateは、両OSでHost所有のimmutable install snapshotへno-follow / stable identityで取り込み、検証byteと実行byteを同一にすること、`stableKey`を安全な有限grammarまたはHost所有canonical表示へ固定し、承認表示と実行値を完全一致させることである。これらを実装するまで外部生成packageをactivateしない。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-an4.md`。
 
 ## 2026-08-15 AI-native Strong Approval Isolation
 

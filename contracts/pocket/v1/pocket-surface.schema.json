@@ -371,6 +371,11 @@
           "type": "string",
           "pattern": "^\\$state\\.[A-Za-z][A-Za-z0-9_]*$",
           "maxLength": 128
+        },
+        "titleTarget": {
+          "type": "string",
+          "pattern": "^\\$input\\.[A-Za-z][A-Za-z0-9_]*$",
+          "maxLength": 128
         }
       },
       "additionalProperties": false
@@ -398,6 +403,11 @@
           "maximum": 86400
         },
         "max": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "default": {
           "type": "integer",
           "minimum": 1,
           "maximum": 86400

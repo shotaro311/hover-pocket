@@ -12,6 +12,7 @@ struct ProviderRegistry: Sendable {
             ControlsProvider(),
             CalculatorProvider(),
             GoogleCalendarProvider(),
+            TodayFocusPocketProvider(),
             ClipboardProvider(),
             StickyNotesProvider(),
             TimerProvider()

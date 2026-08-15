@@ -5,6 +5,7 @@ struct SettingsView: View {
     @ObservedObject var providerStore: ProviderStore
     @ObservedObject private var calendarStore = GoogleCalendarStore.shared
     @ObservedObject private var appUpdater = AppUpdater.shared
+    @ObservedObject private var aiNativeRuntime = AINativeRuntime.shared
     @StateObject private var weatherLocationModel = WeatherLocationSettingsModel()
 
     var body: some View {
@@ -27,6 +28,10 @@ struct SettingsView: View {
                 Divider()
 
                 providersSection
+
+                Divider()
+
+                pocketAppsSection
 
                 Divider()
 
@@ -224,6 +229,59 @@ struct SettingsView: View {
             return settings.text(.handleIconHiddenDetail)
         }
         return settings.pillHandleIconStyle.detail(language: language)
+    }
+
+    private var pocketAppsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Pocket Apps")
+                .font(.system(size: 13, weight: .bold))
+
+            if let package = aiNativeRuntime.pocketAppExecutionRuntime?.package {
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "target")
+                            .foregroundStyle(.secondary)
+                        Text(package.manifest.name)
+                            .font(.system(size: 12, weight: .semibold))
+                        Spacer()
+                        Text("v\(package.manifest.version)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text(PocketSurfaceHostModel.sanitizeVisibleText(package.intent).prefixingUnicodeScalars(500))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(package.manifest.requestedCapabilities.map { $0.key.id }.sorted().joined(separator: " · "))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+
+                    Label(
+                        localized(
+                            japanese: "定義、ユーザーデータ、実行履歴は分離して保持",
+                            english: "Definition, user data, and receipts are stored separately"
+                        ),
+                        systemImage: "externaldrive.badge.checkmark"
+                    )
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                }
+                .padding(10)
+                .background(.quaternary.opacity(0.28))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else {
+                Text(localized(
+                    japanese: "有効なPocket Appはありません。AIネイティブ機能は既定でオフです。",
+                    english: "No Pocket App is active. AI-native features are off by default."
+                ))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     private var mirrorSection: some View {

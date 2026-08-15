@@ -22,6 +22,12 @@ if CommandLine.arguments.contains("--verify-timer") {
 if CommandLine.arguments.contains("--verify-capabilities") {
     CapabilityVerificationCommand.run()
 }
+if CommandLine.arguments.contains("--verify-pocket-surface") {
+    PocketSurfaceVerificationCommand.run()
+}
+if CommandLine.arguments.contains("--verify-pocket-app") {
+    PocketAppPackageVerificationCommand.run()
+}
 if CommandLine.arguments.contains("--verify-broker") {
     CapabilityBrokerVerificationCommand.run()
 }

@@ -6,11 +6,13 @@ import { renderClipboardProvider, runClipboardUiVerify } from "../providers/clip
 import { renderControlsProvider } from "../providers/controls/controls.js";
 import { renderStickyProvider } from "../providers/sticky/sticky.js";
 import { renderTimerProvider } from "../providers/timer/timer.js";
+import { renderPocketSurfaceProvider, runPocketSurfaceUiVerify } from "../providers/pocket-surface/pocket-surface.js";
 
 const providerRenderers = {
   controls: renderControlsProvider,
   calculator: renderCalculatorProvider,
   calendar: renderCalendarProvider,
+  "today-focus": renderPocketSurfaceProvider,
   clipboard: renderClipboardProvider,
   sticky: renderStickyProvider,
   timer: renderTimerProvider,
@@ -361,6 +363,7 @@ function iconSvg(name) {
     calendar: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01"/></svg>',
     clipboard: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M9 4h6l1 2h2v15H6V6h2z"/><path d="M9 4h6v4H9zM9 12h6M9 16h4"/></svg>',
     timer: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M10 2h4M12 14l3-3"/><circle cx="12" cy="13" r="8"/></svg>',
+    target: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><path d="M12 2v3M22 12h-3M12 22v-3M2 12h3"/></svg>',
     note: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M6 3h9l3 3v15H6z"/><path d="M14 3v4h4M9 11h6M9 15h4"/></svg>',
     refresh: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v6h-6"/></svg>',
     settings: '<svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a8 8 0 0 0-1.8-1L14.4 3h-4.8l-.4 3.1a8 8 0 0 0-1.8 1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a8 8 0 0 0 1.8 1l.4 3.1h4.8l.4-3.1a8 8 0 0 0 1.8-1l2.4 1 2-3.4-2-1.5c.1-.3.1-.7.1-1z"/></svg>',
@@ -525,6 +528,8 @@ window.__hoverPocketVerify = {
           && runningStopwatch.querySelector("[data-stopwatch-stop]"))),
       );
     }
+    window.__hoverPocketVerifyStep = "verify-pocket-surface-renderer";
+    const pocketSurfaceVerify = await runPocketSurfaceUiVerify();
     const targetProvider = state.providers.find((provider) => provider.id !== originalProvider) ?? state.providers[0];
     window.__hoverPocketVerifyStep = "switch-provider";
     const switchedState = await request("provider.select", { id: targetProvider.id });
@@ -562,6 +567,13 @@ window.__hoverPocketVerify = {
       timerLayoutOk,
       timerInteractionStableOk,
       timerStopwatchOk,
+      pocketSurfaceRenderedOk: pocketSurfaceVerify.rendered,
+      pocketSurfaceSelectionOk: pocketSurfaceVerify.selection,
+      pocketSurfaceDurationOk: pocketSurfaceVerify.duration,
+      pocketSurfacePurposeOk: pocketSurfaceVerify.purpose,
+      pocketSurfaceStatePersistedOk: pocketSurfaceVerify.statePersisted,
+      pocketSurfaceApprovalHostOwnedOk: pocketSurfaceVerify.approvalHostOwned,
+      pocketSurfaceLayoutMatrixOk: pocketSurfaceVerify.layoutMatrix,
       textSizeScaleReadyOk: getComputedStyle(document.documentElement).getPropertyValue("--hp-text-scale").trim() !== "",
       providerSwitchOk: switchedState.selectedProvider?.id === targetProvider.id,
       settingsWriteOk: resizedState.settings?.panelSize === probePanelSize,

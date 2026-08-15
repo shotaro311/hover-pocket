@@ -180,6 +180,15 @@ MAX_SCHEMA_DEPTH = 128
 V1_CONTEXT_BINDINGS = {
     "today": "string",
     "selectedEvent.title": "string",
+    "todayFocusStableKey": "string",
+    "timezone": "string",
+}
+
+V1_CONTEXT_SAMPLES = {
+    "today": "2026-08-15",
+    "selectedEvent.title": "Focus",
+    "todayFocusStableKey": "today-focus:2026-08-15",
+    "timezone": "Etc/UTC",
 }
 
 V1_CAPABILITY_SCOPES: Mapping[str, tuple[str, ...]] = {
@@ -1129,7 +1138,14 @@ def validate_capability_scope(
     if "namespace" in scope:
         stable_key = arguments.get("stableKey")
         prefix = scope["namespace"] + ":"
-        if not isinstance(stable_key, str) or not stable_key.startswith(prefix):
+        context_matches_namespace = (
+            stable_key == "$context.todayFocusStableKey"
+            and scope["namespace"] == "today-focus"
+        )
+        if (
+            not isinstance(stable_key, str)
+            or (not stable_key.startswith(prefix) and not context_matches_namespace)
+        ):
             fail(
                 "APP_REFERENCE_INVALID",
                 safe_location(location, "stableKey"),
@@ -1605,15 +1621,38 @@ def validate_pocket_surface(document: Mapping[str, Any], context: FixtureContext
             scope = requested_scope(context, capability_id, version, f"{location}.items.query")
             if descriptor["effect"] not in {"pure", "private_read"}:
                 fail("APP_REFERENCE_INVALID", f"{location}.items.query", "surface query must be read-only")
+            resolved_arguments = dict(node["items"]["arguments"])
+            for argument_name, argument_value in list(resolved_arguments.items()):
+                context_match = (
+                    re.fullmatch(r"\$context\.([A-Za-z][A-Za-z0-9_.]*)", argument_value)
+                    if isinstance(argument_value, str)
+                    else None
+                )
+                if context_match is None:
+                    continue
+                context_name = context_match.group(1)
+                context_type = V1_CONTEXT_BINDINGS.get(context_name)
+                argument_schema = descriptor_properties(descriptor, "inputSchema").get(argument_name)
+                if (
+                    context_type is None
+                    or argument_schema is None
+                    or not input_schema_accepts_type(argument_schema, context_type)
+                ):
+                    fail(
+                        "APP_REFERENCE_INVALID",
+                        f"{location}.items.arguments.{argument_name}",
+                        "surface context binding is not allowlisted or type-compatible",
+                    )
+                resolved_arguments[argument_name] = V1_CONTEXT_SAMPLES[context_name]
             validate_capability_payload(
-                node["items"]["arguments"],
+                resolved_arguments,
                 descriptor,
                 "inputSchema",
                 f"{location}.items.arguments",
                 context.schemas_by_id,
                 "CAPABILITY_ARGUMENT_INVALID",
             )
-            validate_capability_scope(node["items"]["arguments"], scope, f"{location}.items.arguments")
+            validate_capability_scope(resolved_arguments, scope, f"{location}.items.arguments")
         elif component_type == "button" and node["workflow"] not in workflow_ids:
             fail("APP_REFERENCE_INVALID", f"{location}.workflow", "button references an unknown manifest workflow")
         elif component_type == "image":

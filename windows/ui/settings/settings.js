@@ -9,6 +9,7 @@ const switchingEl = document.querySelector("[data-switching]");
 const providerListEl = document.querySelector("[data-provider-list]");
 const providerSelectionEl = document.querySelector("[data-provider-selection]");
 const preferredProviderEl = document.querySelector("[data-preferred-provider]");
+const pocketAppListEl = document.querySelector("[data-pocket-app-list]");
 const handleIconEl = document.querySelector("[data-handle-icon]");
 const handleSideAreaEl = document.querySelector("[data-handle-side-area]");
 const disableFullscreenEl = document.querySelector("[data-disable-fullscreen]");
@@ -76,6 +77,7 @@ function render(state) {
 
   renderProviders(state);
   renderProviderSelection(state);
+  renderPocketApps(state);
   renderSegment(handleIconEl, [
     { id: "b", label: "B" },
     { id: "c", label: "C" },
@@ -89,6 +91,44 @@ function render(state) {
   startupStatusEl.textContent = state.settings.startWithWindowsRegistered ? t("registered") : t("off");
   autoUpdatesEl.checked = state.settings.autoCheckForUpdates !== false;
   updateStatusEl.textContent = state.updater?.message ?? "";
+}
+
+function renderPocketApps(state) {
+  pocketAppListEl.replaceChildren();
+  const apps = state.pocketApps ?? [];
+  if (!apps.length) {
+    const empty = document.createElement("p");
+    empty.className = "settings-note";
+    empty.textContent = state.settings.language === "en"
+      ? "No Pocket App is active. AI-native features are off by default."
+      : "有効なPocket Appはありません。AIネイティブ機能は既定でオフです。";
+    pocketAppListEl.append(empty);
+    return;
+  }
+
+  for (const app of apps) {
+    const card = document.createElement("article");
+    card.className = "pocket-app-card";
+    const heading = document.createElement("div");
+    heading.className = "pocket-app-heading";
+    const name = document.createElement("strong");
+    name.textContent = app.name;
+    const version = document.createElement("span");
+    version.textContent = `v${app.version}`;
+    heading.append(name, version);
+
+    const intent = document.createElement("p");
+    intent.textContent = app.intent;
+    const capabilities = document.createElement("code");
+    capabilities.textContent = (app.capabilities ?? []).join(" · ");
+    const boundary = document.createElement("p");
+    boundary.className = "settings-note";
+    boundary.textContent = state.settings.language === "en"
+      ? "Definition, user data, and receipts are stored separately."
+      : "定義、ユーザーデータ、実行履歴は分離して保持します。";
+    card.append(heading, intent, capabilities, boundary);
+    pocketAppListEl.append(card);
+  }
 }
 
 function renderStickySettings() {

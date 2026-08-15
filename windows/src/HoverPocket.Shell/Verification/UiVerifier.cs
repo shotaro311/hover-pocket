@@ -157,6 +157,25 @@ internal sealed class UiVerifier
                     _failures.Add("timer: stopwatch controls did not render");
                 }
 
+                if (!result.PocketSurfaceRenderedOk
+                    || !result.PocketSurfaceSelectionOk
+                    || !result.PocketSurfaceDurationOk
+                    || !result.PocketSurfacePurposeOk
+                    || !result.PocketSurfaceStatePersistedOk)
+                {
+                    _failures.Add("pocket surface: declarative Today Focus controls or separated user state did not match the canonical model");
+                }
+
+                if (!result.PocketSurfaceApprovalHostOwnedOk)
+                {
+                    _failures.Add("pocket surface: generated UI attempted to own approval rendering");
+                }
+
+                if (!result.PocketSurfaceLayoutMatrixOk)
+                {
+                    _failures.Add("pocket surface: controls overflowed the Windows S/M/L by text-size layout matrix");
+                }
+
                 if (!result.TextSizeScaleReadyOk)
                 {
                     _failures.Add("text size: global small/medium/large scaling was not active");
@@ -186,7 +205,7 @@ internal sealed class UiVerifier
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
-                "PASS ui verify: stable Controls refresh, source activation and rate actions, responsive Timer cards/input/stopwatch, media fallback, tabbed centered Clipboard split/full preview/trash actions, Calculator history sidebar, draggable stable icons, text scaling/input activation, stable Mac-style calendar editor, bridge/provider/settings round-trip");
+                "PASS ui verify: stable Controls refresh, source activation and rate actions, responsive Timer cards/input/stopwatch, media fallback, tabbed centered Clipboard split/full preview/trash actions, Calculator history sidebar, declarative PocketSurface renderer with host-owned approval, draggable stable icons, text scaling/input activation, stable Mac-style calendar editor, bridge/provider/settings round-trip");
             return 0;
         }
 

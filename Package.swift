@@ -21,7 +21,10 @@ let package = Package(
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "MediaRemoteAdapter", package: "mediaremote-adapter")
             ],
-            path: "Sources/HoverPocket"
+            path: "Sources/HoverPocket",
+            resources: [
+                .copy("Resources/PocketApps")
+            ]
         )
     ]
 )

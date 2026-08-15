@@ -36,6 +36,13 @@ internal sealed class ProviderRegistry
                 "Google Calendar",
                 "Connect with loopback OAuth, view a 42-day month grid, and add, edit, or delete events."),
             new ProviderDescriptor(
+                "today-focus",
+                "Today Focus",
+                "target",
+                "Focus on today's calendar",
+                "Select an event, start a Timer, and save the purpose to Sticky Notes through one approved workflow.",
+                DefaultVisible: false),
+            new ProviderDescriptor(
                 "clipboard",
                 "Clipboard",
                 "clipboard",

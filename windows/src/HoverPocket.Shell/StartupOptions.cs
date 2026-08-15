@@ -14,6 +14,7 @@ internal sealed record StartupOptions(
     bool VerifyTimer,
     bool VerifyCalendar,
     bool VerifyCapabilities,
+    bool VerifyPocketSurface,
     bool VerifyBroker,
     bool VerifyCalendarLive,
     bool VerifySettings,
@@ -40,6 +41,7 @@ internal sealed record StartupOptions(
         || VerifyTimer
         || VerifyCalendar
         || VerifyCapabilities
+        || VerifyPocketSurface
         || VerifyBroker
         || VerifyCalendarLive
         || VerifySettings
@@ -60,6 +62,7 @@ internal sealed record StartupOptions(
         var verifyTimer = false;
         var verifyCalendar = false;
         var verifyCapabilities = false;
+        var verifyPocketSurface = false;
         var verifyBroker = false;
         var verifyCalendarLive = false;
         var verifySettings = false;
@@ -91,6 +94,7 @@ internal sealed record StartupOptions(
                 verifyTimer = string.Equals(verifyTarget, "timer", StringComparison.OrdinalIgnoreCase);
                 verifyCalendar = string.Equals(verifyTarget, "calendar", StringComparison.OrdinalIgnoreCase);
                 verifyCapabilities = string.Equals(verifyTarget, "capabilities", StringComparison.OrdinalIgnoreCase);
+                verifyPocketSurface = string.Equals(verifyTarget, "pocket-surface", StringComparison.OrdinalIgnoreCase);
                 verifyBroker = string.Equals(verifyTarget, "broker", StringComparison.OrdinalIgnoreCase);
                 verifyCalendarLive = string.Equals(verifyTarget, "calendar-live", StringComparison.OrdinalIgnoreCase);
                 verifySettings = string.Equals(verifyTarget, "settings", StringComparison.OrdinalIgnoreCase);
@@ -156,6 +160,7 @@ internal sealed record StartupOptions(
             verifyTimer,
             verifyCalendar,
             verifyCapabilities,
+            verifyPocketSurface,
             verifyBroker,
             verifyCalendarLive,
             verifySettings,

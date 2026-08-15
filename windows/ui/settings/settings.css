@@ -171,6 +171,37 @@ select {
   font-size: 12px;
 }
 
+.pocket-app-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.pocket-app-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pocket-app-heading span,
+.pocket-app-card code {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.pocket-app-card p {
+  margin: 0;
+}
+
+.pocket-app-card code {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .settings-footer {
   min-height: 18px;
 }

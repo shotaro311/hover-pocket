@@ -1,5 +1,7 @@
+import AppKit
 import Darwin
 import Foundation
+import SwiftUI
 
 enum CapabilityBrokerVerificationCommand {
     private static let goldenPlanDigest = "sha256:d098ea1b5f9f70e91486fd53229e7ddb68f73a9952ab94f17eed27cdeeb6413f"
@@ -15,6 +17,9 @@ enum CapabilityBrokerVerificationCommand {
                 print("broker_calculator_evaluate=ok")
                 print("broker_sticky_lifecycle=ok")
                 print("broker_today_focus=ok")
+                print("broker_pocket_app=ok")
+                print("broker_pocket_app_declared_tests=4")
+                print("broker_pocket_app_layout_cases=16")
                 print("broker_concurrent_duplicate=ok")
                 print("broker_negative_cases=11")
                 print("broker_golden_plan_digest=\(goldenPlanDigest)")
@@ -477,9 +482,206 @@ enum CapabilityBrokerVerificationCommand {
             try require(!durableLedgerText.contains(forbidden), "ledger_redaction_\(forbidden)")
         }
 
+        try await verifyPocketAppExecution(root: root, calendar: calendar, now: now)
         try await verifyPartialRollback(root: root, now: now, principal: principal)
         try await verifyCurrentStepRollback(root: root, now: now, principal: principal)
         try await verifyTimeout(root: root, now: now, principal: principal)
+    }
+
+    @MainActor
+    private static func verifyPocketAppExecution(
+        root: URL,
+        calendar: BrokerFakeCalendarDataSource,
+        now: Date
+    ) async throws {
+        guard let resourceRoot = Bundle.module.resourceURL else {
+            throw BrokerVerificationFailure("pocket_app_bundle")
+        }
+        let packageRoot = resourceRoot
+            .appendingPathComponent("PocketApps", isDirectory: true)
+            .appendingPathComponent("local.example.today-focus", isDirectory: true)
+        let package = try PocketAppPackageRuntime().load(directory: packageRoot)
+        let timerStore = TimerStore(
+            storageDirectory: root.appendingPathComponent("pocket-app-timer", isDirectory: true),
+            observesWake: false,
+            persistenceEnabled: true
+        )
+        let stickyStore = StickyNotesStore(
+            storageDirectory: root.appendingPathComponent("pocket-app-sticky", isDirectory: true)
+        )
+        let noteID = UUID(uuidString: "66666666-6666-4666-8666-666666666666")!
+        let handlers = try makeHandlers(
+            calendar: calendar,
+            timerStore: timerStore,
+            stickyStore: stickyStore,
+            noteID: noteID
+        )
+        let brokerRoot = root.appendingPathComponent("pocket-app-broker", isDirectory: true)
+        let broker = CapabilityBroker(
+            registry: try CapabilityRegistry(handlers: handlers),
+            ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
+            auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+        )
+        let stateRoot = root.appendingPathComponent("pocket-app-user-state", isDirectory: true)
+        let userStateStore = try PocketAppUserStateStore(
+            packageID: package.manifest.id,
+            allowedKeys: package.statePropertyNames,
+            rootDirectory: stateRoot
+        )
+        let runtime = PocketAppExecutionRuntime(
+            package: package,
+            broker: broker,
+            userID: "pocket-app-user",
+            grantedPermissions: ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"],
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!,
+            userStateStore: userStateStore
+        )
+        let hostModel = try PocketSurfaceHostModel(runtime: runtime, surfaceID: "main")
+        try require(hostModel.integerValue(for: "$input.durationSeconds") == 1_500, "pocket_app_surface_default")
+        await hostModel.load(now: now)
+        try verifyPocketSurfaceLayoutMatrix(model: hostModel)
+        let selectedEventRef = hostModel.stringValue(for: "$state.selectedEventRef")
+        try require(!selectedEventRef.isEmpty, "pocket_app_surface_selection")
+        let reloadedStateStore = try PocketAppUserStateStore(
+            packageID: package.manifest.id,
+            allowedKeys: package.statePropertyNames,
+            rootDirectory: stateRoot
+        )
+        try require(
+            reloadedStateStore.snapshot()["selectedEventRef"] == selectedEventRef,
+            "pocket_app_surface_state_persistence"
+        )
+        do {
+            try reloadedStateStore.setString("forbidden", for: "unknown")
+            throw BrokerVerificationFailure("pocket_app_unknown_state_key_accepted")
+        } catch PocketAppUserStateStoreError.invalidKey {
+        }
+        try require(!hostModel.stringValue(for: "$input.purpose").isEmpty, "pocket_app_surface_title_target")
+        hostModel.updateString("safe\ntext\u{202E}", binding: "$input.purpose", maximumLength: 80)
+        try require(hostModel.stringValue(for: "$input.purpose") == "safe text", "pocket_app_surface_sanitize")
+        try require(hostModel.canPrepare(workflowID: "startFocus"), "pocket_app_surface_ready")
+        hostModel.prepare(workflowID: "startFocus")
+        try require(hostModel.showsApproval, "pocket_app_surface_approval")
+        try require(hostModel.approvalText.contains("safe text"), "pocket_app_surface_approval_exact")
+        hostModel.reject()
+        let query = try await runtime.query(
+            reference: "calendar.events.list@1",
+            arguments: [
+                "range": .string("today"),
+                "timezone": .string("$context.timezone")
+            ],
+            now: now
+        )
+        guard case .array(let events)? = query["events"],
+              case .object(let event)? = events.first,
+              case .string(let eventRef)? = event["eventRef"] else {
+            throw BrokerVerificationFailure("pocket_app_query")
+        }
+        do {
+            _ = try await runtime.query(
+                reference: "timer.countdown.start@1",
+                arguments: [
+                    "durationSeconds": .number(60),
+                    "title": .string("must-not-run"),
+                    "sourceRef": .null
+                ],
+                now: now
+            )
+            throw BrokerVerificationFailure("pocket_app_query_write_not_rejected")
+        } catch let error as CapabilityBrokerError {
+            guard case .invalidPlan("query_effect") = error else { throw error }
+        }
+        let tokyoBoundary = ISO8601DateFormatter().date(from: "2026-08-14T16:00:00Z")!
+        let presentationDraft = try runtime.prepare(
+            workflowID: "startFocus",
+            inputs: [
+                "selectedEventRef": .string(eventRef),
+                "durationSeconds": .integer(1_500),
+                "purpose": .string("表示\n偽装\u{202E}確認")
+            ],
+            now: tokyoBoundary
+        )
+        let canonicalPurpose = "表示 偽装 確認"
+        try require(
+            !PocketAppExecutionRuntime.supportsWorkflowPresentation(PocketCapabilityKeys.calendarList),
+            "pocket_app_unpresentable_workflow_rejected"
+        )
+        try require(
+            presentationDraft.plan.steps[0].arguments["title"] == .string(canonicalPurpose),
+            "pocket_app_approval_timer_exact"
+        )
+        try require(
+            presentationDraft.plan.steps[1].arguments["body"] == .string(canonicalPurpose),
+            "pocket_app_approval_sticky_exact"
+        )
+        try require(
+            PocketSurfaceHostModel.approvalSummary(presentationDraft).contains(canonicalPurpose),
+            "pocket_app_approval_presentation_exact"
+        )
+        runtime.reject(presentationDraft, now: tokyoBoundary)
+        let draft = try runtime.prepare(
+            workflowID: "startFocus",
+            inputs: [
+                "selectedEventRef": .string(eventRef),
+                "durationSeconds": .integer(1_500),
+                "purpose": .string("pocket-app-purpose")
+            ],
+            now: tokyoBoundary
+        )
+        try require(draft.plan.origin == .pocketSurface, "pocket_app_origin")
+        try require(draft.plan.principal.pocketAppID == package.manifest.id, "pocket_app_principal")
+        try require(draft.plan.appContext?.manifestDigest == package.manifestDigest, "pocket_app_context")
+        try require(
+            draft.plan.steps[1].arguments["stableKey"] == .string("today-focus:2026-08-15"),
+            "pocket_app_local_date"
+        )
+        let receipt = try await runtime.approveAndExecute(draft, now: tokyoBoundary)
+        try require(receipt.status == .succeeded, "pocket_app_status")
+        try require(receipt.steps.allSatisfy { $0.readback.status == .verified }, "pocket_app_readback")
+        try require(
+            PocketSurfaceHostModel.receiptSummary(receipt) == "Timer、Sticky Notesへ反映しました（2件確認済み）",
+            "pocket_app_receipt_summary"
+        )
+        try require(timerStore.runningTimers.count == 1, "pocket_app_timer")
+        try require(stickyStore.note(id: noteID)?.body == "pocket-app-purpose", "pocket_app_sticky")
+        let replay = try await broker.execute(
+            draft.plan,
+            permissions: CapabilityPermissionSet(
+                principal: draft.plan.principal,
+                permissions: ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"]
+            ),
+            approvalGrant: nil,
+            now: tokyoBoundary.addingTimeInterval(1)
+        )
+        try require(replay.replayed, "pocket_app_replay")
+        try require(timerStore.runningTimers.count == 1 && stickyStore.notes.count == 1, "pocket_app_replay_effect")
+    }
+
+    @MainActor
+    private static func verifyPocketSurfaceLayoutMatrix(model: PocketSurfaceHostModel) throws {
+        var cases = 0
+        for panelSize in PanelSizeOption.allCases {
+            let panel = PanelLayout.previewSize(for: panelSize)
+            let contentSize = CGSize(width: panel.width, height: max(0, panel.height - 55))
+            for textSize in PanelTextSizeOption.allCases {
+                let view = PocketSurfaceHostView(model: model)
+                    .environment(\.panelTextSize, textSize)
+                    .frame(width: contentSize.width, height: contentSize.height)
+                let host = NSHostingView(rootView: view)
+                host.frame = CGRect(origin: .zero, size: contentSize)
+                host.layoutSubtreeIfNeeded()
+                let fitting = host.fittingSize
+                try require(
+                    fitting.width.isFinite
+                    && fitting.height.isFinite
+                    && fitting.width <= contentSize.width
+                    && fitting.height <= contentSize.height,
+                    "pocket_app_layout_\(panelSize.rawValue)_\(textSize.rawValue)"
+                )
+                cases += 1
+            }
+        }
+        try require(cases == 16, "pocket_app_layout_matrix")
     }
 
     @MainActor
