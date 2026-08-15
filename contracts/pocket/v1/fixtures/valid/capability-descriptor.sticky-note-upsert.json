@@ -31,7 +31,7 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 96,
-        "pattern": "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9][A-Za-z0-9._-]{0,62}$"
+        "pattern": "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9][A-Za-z0-9._-]{0,62}$(?![\\s\\S])"
       },
       "title": {
         "type": "string",
