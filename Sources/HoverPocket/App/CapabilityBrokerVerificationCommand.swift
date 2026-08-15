@@ -12,13 +12,15 @@ enum CapabilityBrokerVerificationCommand {
             do {
                 try await verify()
                 print("broker_verify=ok")
-                print("broker_registry_descriptors=11")
-                print("broker_available_handlers=10")
+                print("broker_registry_descriptors=15")
+                print("broker_available_handlers=14")
+                print("broker_calculator_evaluate=ok")
+                print("broker_sticky_lifecycle=ok")
                 print("broker_today_focus=ok")
                 print("broker_today_focus_route_digest=ok")
                 print("broker_voice_tools=ok")
                 print("broker_concurrent_duplicate=ok")
-                print("broker_negative_cases=10")
+                print("broker_negative_cases=11")
                 print("broker_golden_plan_digest=\(goldenPlanDigest)")
                 Darwin.exit(0)
             } catch {
@@ -102,8 +104,22 @@ enum CapabilityBrokerVerificationCommand {
             auditLog: audit
         )
 
-        try require(registry.descriptorKeys.count == 11, "registry_descriptor_count")
-        try require(registry.availableHandlerKeys.count == 10, "registry_handler_count")
+        try require(registry.descriptorKeys.count == 15, "registry_descriptor_count")
+        try require(registry.availableHandlerKeys.count == 14, "registry_handler_count")
+        try require(
+            registry.descriptor(PocketCapabilityKeys.stickyDelete)?.approvalPolicy == .strongPerCall,
+            "sticky_delete_strong_approval"
+        )
+        try verifyStrongPerCallIsolation(broker: broker, noteID: noteID, now: now)
+        do {
+            try registry.descriptor(PocketCapabilityKeys.stickyArchive)?.validateOutput([
+                "noteId": .string(noteID.uuidString),
+                "state": .string("active"),
+                "updatedAt": .string(CapabilityDateCodec.string(from: now))
+            ])
+            throw BrokerVerificationFailure("sticky_archive_wrong_postcondition_accepted")
+        } catch CapabilityBrokerError.invalidPlan {
+        }
         try verifyGoldenDigest(now: now, registry: registry)
         try verifyCalendarCreateEventBody(now: now)
         try verifyCalendarIdempotencyEquivalence(now: now)
@@ -112,6 +128,14 @@ enum CapabilityBrokerVerificationCommand {
             throw BrokerVerificationFailure("native_authority_resolved")
         } catch CapabilityBrokerError.runtimeProhibited {
         }
+
+        try await verifyCalculator(broker: broker, now: now)
+        try await verifyStickyLifecycle(
+            broker: broker,
+            store: stickyStore,
+            noteID: noteID,
+            now: now
+        )
 
         let invalidArgumentsPlan = CapabilityExecutionPlan(
             id: "invalid-extra-argument-plan",
@@ -746,6 +770,182 @@ enum CapabilityBrokerVerificationCommand {
             throw BrokerVerificationFailure("voice_tool_payload")
         }
         return payload
+    private static func verifyStrongPerCallIsolation(
+        broker: CapabilityBroker,
+        noteID: UUID,
+        now: Date
+    ) throws {
+        let principal = CapabilityPrincipal(userID: "user-strong-approval-fixture")
+        let plan = CapabilityExecutionPlan(
+            id: "strong-approval-batch-plan",
+            createdAt: now,
+            origin: .text,
+            principal: principal,
+            appContext: nil,
+            steps: [
+                CapabilityPlanStep(
+                    id: "readNote",
+                    capability: PocketCapabilityKeys.stickyStatus,
+                    arguments: ["noteId": .string(noteID.uuidString)],
+                    idempotencyKey: "strong-approval-read-key-0001",
+                    dependencies: []
+                ),
+                CapabilityPlanStep(
+                    id: "deleteNote",
+                    capability: PocketCapabilityKeys.stickyDelete,
+                    arguments: ["noteId": .string(noteID.uuidString)],
+                    idempotencyKey: "strong-approval-delete-key-0001",
+                    dependencies: ["readNote"]
+                )
+            ],
+            requiredPermissions: ["sticky.delete", "sticky.read"]
+        )
+        do {
+            _ = try broker.prepare(
+                plan,
+                permissions: CapabilityPermissionSet(
+                    principal: principal,
+                    permissions: ["sticky.delete", "sticky.read"]
+                ),
+                now: now
+            )
+            throw BrokerVerificationFailure("strong_per_call_batch_accepted")
+        } catch CapabilityBrokerError.invalidPlan(let field) {
+            try require(field == "strong_per_call", "strong_per_call_error")
+        }
+    }
+
+    @MainActor
+    private static func verifyCalculator(broker: CapabilityBroker, now: Date) async throws {
+        let principal = CapabilityPrincipal(userID: "user-calculator-fixture")
+        let plan = CapabilityExecutionPlan(
+            id: "calculator-pure-plan",
+            createdAt: now,
+            origin: .text,
+            principal: principal,
+            appContext: nil,
+            steps: [CapabilityPlanStep(
+                id: "evaluate",
+                capability: PocketCapabilityKeys.calculatorEvaluate,
+                arguments: ["expression": .string("8 / 4 + 1")],
+                idempotencyKey: "calculator-pure-key-0001",
+                dependencies: []
+            )],
+            requiredPermissions: []
+        )
+        let permissions = CapabilityPermissionSet(principal: principal, permissions: [])
+        let preparation = try broker.prepare(plan, permissions: permissions, now: now)
+        try require(preparation.approvalRequest == nil, "calculator_approval_not_required")
+        let receipt = try await broker.execute(
+            plan,
+            permissions: permissions,
+            approvalGrant: nil,
+            now: now
+        )
+        try require(receipt.status == .succeeded, "calculator_receipt_status")
+        try require(receipt.steps.count == 1, "calculator_receipt_count")
+        try require(receipt.steps[0].output == [
+            "normalizedExpression": .string("8 / 4 + 1"),
+            "result": .string("3")
+        ], "calculator_receipt_output")
+        try require(receipt.steps[0].readback.status == .verified, "calculator_readback")
+        try require(receipt.steps[0].readback.strategy == .none, "calculator_readback_strategy")
+        try require(receipt.steps[0].readback.observed == receipt.steps[0].output, "calculator_observed")
+    }
+
+    @MainActor
+    private static func verifyStickyLifecycle(
+        broker: CapabilityBroker,
+        store: StickyNotesStore,
+        noteID: UUID,
+        now: Date
+    ) async throws {
+        _ = try store.upsertNote(
+            stableKey: "broker-lifecycle-fixture",
+            title: "Private title",
+            body: "Private body",
+            color: .yellow,
+            id: noteID,
+            at: now
+        )
+        let principal = CapabilityPrincipal(userID: "user-sticky-lifecycle-fixture")
+        let archivePermissions = CapabilityPermissionSet(principal: principal, permissions: ["sticky.write"])
+        let archivePlan = CapabilityExecutionPlan(
+            id: "sticky-archive-plan",
+            createdAt: now,
+            origin: .text,
+            principal: principal,
+            appContext: nil,
+            steps: [CapabilityPlanStep(
+                id: "archiveNote",
+                capability: PocketCapabilityKeys.stickyArchive,
+                arguments: ["noteId": .string(noteID.uuidString)],
+                idempotencyKey: "sticky-broker-archive-key-0001",
+                dependencies: []
+            )],
+            requiredPermissions: ["sticky.write"]
+        )
+        let archivePreparation = try broker.prepare(archivePlan, permissions: archivePermissions, now: now)
+        guard let archiveRequest = archivePreparation.approvalRequest else {
+            throw BrokerVerificationFailure("sticky_archive_approval_missing")
+        }
+        let archiveGrant = try broker.decideApproval(
+            requestID: archiveRequest.id,
+            planDigest: archivePreparation.planDigest,
+            decision: .approve,
+            now: now
+        )
+        let archiveReceipt = try await broker.execute(
+            archivePlan,
+            permissions: archivePermissions,
+            approvalGrant: archiveGrant,
+            now: now
+        )
+        try require(archiveReceipt.status == .succeeded, "sticky_archive_receipt")
+        try require(archiveReceipt.steps.first?.output?["state"] == .string("archived"), "sticky_archive_output")
+        try require(archiveReceipt.steps.first?.readback.status == .verified, "sticky_archive_readback")
+        try require(store.note(id: noteID)?.archivedAt == now, "sticky_archive_effect")
+
+        let deletePermissions = CapabilityPermissionSet(principal: principal, permissions: ["sticky.delete"])
+        let deletePlan = CapabilityExecutionPlan(
+            id: "sticky-delete-plan",
+            createdAt: now.addingTimeInterval(1),
+            origin: .text,
+            principal: principal,
+            appContext: nil,
+            steps: [CapabilityPlanStep(
+                id: "deleteNote",
+                capability: PocketCapabilityKeys.stickyDelete,
+                arguments: ["noteId": .string(noteID.uuidString)],
+                idempotencyKey: "sticky-broker-delete-key-0001",
+                dependencies: []
+            )],
+            requiredPermissions: ["sticky.delete"]
+        )
+        let deletePreparation = try broker.prepare(
+            deletePlan,
+            permissions: deletePermissions,
+            now: now.addingTimeInterval(1)
+        )
+        guard let deleteRequest = deletePreparation.approvalRequest else {
+            throw BrokerVerificationFailure("sticky_delete_approval_missing")
+        }
+        let deleteGrant = try broker.decideApproval(
+            requestID: deleteRequest.id,
+            planDigest: deletePreparation.planDigest,
+            decision: .approve,
+            now: now.addingTimeInterval(1)
+        )
+        let deleteReceipt = try await broker.execute(
+            deletePlan,
+            permissions: deletePermissions,
+            approvalGrant: deleteGrant,
+            now: now.addingTimeInterval(1)
+        )
+        try require(deleteReceipt.status == .succeeded, "sticky_delete_receipt")
+        try require(deleteReceipt.steps.first?.output?["state"] == .string("missing"), "sticky_delete_output")
+        try require(deleteReceipt.steps.first?.readback.status == .verified, "sticky_delete_readback")
+        try require(store.note(id: noteID) == nil, "sticky_delete_effect")
     }
 
     private static func verifyCalendarCreateEventBody(now: Date) throws {
@@ -1154,13 +1354,17 @@ enum CapabilityBrokerVerificationCommand {
             CalendarListCapabilityHandler(dataSource: calendar),
             CalendarGetCapabilityHandler(dataSource: calendar),
             CalendarCreateCapabilityHandler(dataSource: calendar),
+            CalculatorEvaluateCapabilityHandler(),
             TimerCapabilityHandler(operation: .start, store: timerStore),
             TimerCapabilityHandler(operation: .get, store: timerStore),
             TimerCapabilityHandler(operation: .pause, store: timerStore),
             TimerCapabilityHandler(operation: .resume, store: timerStore),
             TimerCapabilityHandler(operation: .stop, store: timerStore),
             StickyCapabilityHandler(operation: .upsert, store: stickyStore, idGenerator: { noteID }),
-            StickyCapabilityHandler(operation: .get, store: stickyStore)
+            StickyCapabilityHandler(operation: .get, store: stickyStore),
+            StickyCapabilityHandler(operation: .status, store: stickyStore),
+            StickyCapabilityHandler(operation: .archive, store: stickyStore),
+            StickyCapabilityHandler(operation: .delete, store: stickyStore)
         ])
     }
 

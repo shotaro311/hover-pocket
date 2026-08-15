@@ -1,0 +1,53 @@
+{
+  "$schema": "hoverpocket://schemas/capability-descriptor/v1",
+  "id": "sticky.note.delete",
+  "version": 1,
+  "titleKey": "capability.sticky.note.delete",
+  "effect": "destructive_sensitive",
+  "permissions": ["sticky.delete"],
+  "approvalPolicy": "strong_per_call",
+  "idempotency": "required",
+  "availability": {
+    "macos": "available",
+    "windows": "available"
+  },
+  "limits": {
+    "timeoutMs": 3000,
+    "maxPayloadBytes": 4096,
+    "maxCallsPerMinute": 120
+  },
+  "inputSchema": {
+    "type": "object",
+    "required": ["noteId"],
+    "properties": {
+      "noteId": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": ["noteId", "state", "updatedAt"],
+    "properties": {
+      "noteId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "state": {
+        "const": "missing"
+      },
+      "updatedAt": {
+        "type": "null"
+      }
+    },
+    "additionalProperties": false
+  },
+  "readback": {
+    "strategy": "capability_query",
+    "capabilityId": "sticky.note.status",
+    "capabilityVersion": 1,
+    "match": ["noteId", "state", "updatedAt"]
+  }
+}

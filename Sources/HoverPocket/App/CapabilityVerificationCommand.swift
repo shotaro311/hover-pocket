@@ -8,9 +8,11 @@ enum CapabilityVerificationCommand {
             do {
                 try await verify()
                 print("capability_verify=ok")
-                print("capability_handlers=10")
+                print("capability_handlers=14")
+                print("capability_calculator_evaluate=ok")
                 print("capability_timer_lifecycle=ok")
                 print("capability_sticky_upsert=ok")
+                print("capability_sticky_lifecycle=ok")
                 print("capability_calendar_readback=ok")
                 Darwin.exit(0)
             } catch {
@@ -43,18 +45,23 @@ enum CapabilityVerificationCommand {
             CalendarListCapabilityHandler(dataSource: calendar),
             CalendarGetCapabilityHandler(dataSource: calendar),
             CalendarCreateCapabilityHandler(dataSource: calendar),
+            CalculatorEvaluateCapabilityHandler(),
             TimerCapabilityHandler(operation: .start, store: timerStore, idGenerator: { timerID }),
             TimerCapabilityHandler(operation: .get, store: timerStore),
             TimerCapabilityHandler(operation: .pause, store: timerStore),
             TimerCapabilityHandler(operation: .resume, store: timerStore),
             TimerCapabilityHandler(operation: .stop, store: timerStore),
             StickyCapabilityHandler(operation: .upsert, store: stickyStore, idGenerator: { noteID }),
-            StickyCapabilityHandler(operation: .get, store: stickyStore)
+            StickyCapabilityHandler(operation: .get, store: stickyStore),
+            StickyCapabilityHandler(operation: .status, store: stickyStore),
+            StickyCapabilityHandler(operation: .archive, store: stickyStore),
+            StickyCapabilityHandler(operation: .delete, store: stickyStore)
         ])
 
-        guard handlers.keys.count == 10 else {
+        guard handlers.keys.count == 14 else {
             throw VerificationFailure("handler_count")
         }
+        try await verifyCalculator(handlers: handlers)
         try await verifyTimer(handlers: handlers, timerID: timerID)
         try await verifyTimerPersistenceFailure(root: root)
         try await verifySticky(handlers: handlers, noteID: noteID, root: stickyRoot)
@@ -67,6 +74,37 @@ enum CapabilityVerificationCommand {
             )
             throw VerificationFailure("unknown_capability_accepted")
         } catch CapabilityHandlerError.unknownCapability {
+        }
+    }
+
+    @MainActor
+    private static func verifyCalculator(handlers: PocketCapabilityHandlerSet) async throws {
+        let vectors: [(String, String, String)] = [
+            ("1 + 2 * 3", "1 + 2 * 3", "7"),
+            ("1 / 3", "1 / 3", "0.333333333333"),
+            ("-5 + 2.5", "-5 + 2.5", "-2.5"),
+            ("1,5 × 2", "1.5 * 2", "3")
+        ]
+        for (expression, normalized, result) in vectors {
+            let output = try await handlers.invoke(
+                PocketCapabilityKeys.calculatorEvaluate,
+                arguments: ["expression": .string(expression)]
+            )
+            try require(output == [
+                "normalizedExpression": .string(normalized),
+                "result": .string(result)
+            ], "calculator_\(expression)")
+        }
+
+        for invalid in ["1 / 0", "1 +", "2 ** 3", "999999999999999999 + 1"] {
+            do {
+                _ = try await handlers.invoke(
+                    PocketCapabilityKeys.calculatorEvaluate,
+                    arguments: ["expression": .string(invalid)]
+                )
+                throw VerificationFailure("calculator_invalid_accepted")
+            } catch CapabilityHandlerError.invalidArgument(let field) where field == "expression" {
+            }
         }
     }
 
@@ -218,6 +256,45 @@ enum CapabilityVerificationCommand {
         try require(restored.note(id: noteID)?.stableKey == "today-focus:purpose", "sticky_persistence")
         try require(restored.note(id: noteID)?.title == longTitle, "sticky_title_persistence")
 
+        let archivedAt = secondTime.addingTimeInterval(1)
+        let idArguments: CapabilityObject = ["noteId": .string(noteID.uuidString)]
+        let archived = try await handlers.invoke(
+            PocketCapabilityKeys.stickyArchive,
+            arguments: idArguments,
+            context: CapabilityHandlerContext(
+                idempotencyKey: "sticky-verifier-key-003",
+                now: archivedAt
+            )
+        )
+        try require(archived["state"] == .string("archived"), "sticky_archive")
+        try require(
+            archived["updatedAt"] == .string(CapabilityDateCodec.string(from: archivedAt)),
+            "sticky_archive_time"
+        )
+        let archivedStatus = try await handlers.invoke(PocketCapabilityKeys.stickyStatus, arguments: idArguments)
+        try require(archivedStatus == archived, "sticky_archive_readback")
+        let archivedRestored = StickyNotesStore(storageDirectory: root)
+        try require(archivedRestored.note(id: noteID)?.archivedAt == archivedAt, "sticky_archive_persistence")
+
+        let deleted = try await handlers.invoke(
+            PocketCapabilityKeys.stickyDelete,
+            arguments: idArguments,
+            context: CapabilityHandlerContext(idempotencyKey: "sticky-verifier-key-004")
+        )
+        try require(deleted["state"] == .string("missing") && deleted["updatedAt"] == .null, "sticky_delete")
+        let deletedStatus = try await handlers.invoke(PocketCapabilityKeys.stickyStatus, arguments: idArguments)
+        try require(deletedStatus == deleted, "sticky_delete_readback")
+        try require(StickyNotesStore(storageDirectory: root).note(id: noteID) == nil, "sticky_delete_persistence")
+
+        do {
+            _ = try await handlers.invoke(
+                PocketCapabilityKeys.stickyStatus,
+                arguments: ["noteId": .string("not-a-uuid")]
+            )
+            throw VerificationFailure("sticky_invalid_id_accepted")
+        } catch CapabilityHandlerError.invalidArgument(let field) where field == "noteId" {
+        }
+
         let blockedRoot = root.appendingPathComponent("blocked-store", isDirectory: false)
         try Data("blocked".utf8).write(to: blockedRoot)
         let blockedStore = StickyNotesStore(storageDirectory: blockedRoot)
@@ -230,21 +307,26 @@ enum CapabilityVerificationCommand {
                     "body": .string("Must not remain in memory"),
                     "color": .string("yellow")
                 ],
-                context: CapabilityHandlerContext(idempotencyKey: "sticky-verifier-key-003")
+                context: CapabilityHandlerContext(idempotencyKey: "sticky-verifier-key-005")
             )
             throw VerificationFailure("sticky_persistence_failure_accepted")
         } catch CapabilityHandlerError.unavailable(let field) where field == "sticky_storage" {
         }
         try require(blockedStore.notes.isEmpty, "sticky_persistence_failure_rollback")
 
-        let oversized = restored.createNote()
-        _ = restored.updateNote(
+        try await verifyStickyLifecyclePersistenceFailure(
+            root: root.appendingPathComponent("blocked-lifecycle", isDirectory: true)
+        )
+
+        let postDeleteStore = StickyNotesStore(storageDirectory: root)
+        let oversized = postDeleteStore.createNote()
+        _ = postDeleteStore.updateNote(
             id: oversized.id,
             title: String(repeating: "T", count: 121),
             body: String(repeating: "B", count: 10_001),
             color: .yellow
         )
-        let oversizedHandler = StickyCapabilityHandler(operation: .get, store: restored)
+        let oversizedHandler = StickyCapabilityHandler(operation: .get, store: postDeleteStore)
         do {
             _ = try await oversizedHandler.handle(
                 arguments: ["noteId": .string(oversized.id.uuidString)],
@@ -253,6 +335,44 @@ enum CapabilityVerificationCommand {
             throw VerificationFailure("sticky_oversized_readback_accepted")
         } catch CapabilityHandlerError.readbackMismatch(let field) where field == "sticky.note" {
         }
+    }
+
+    @MainActor
+    private static func verifyStickyLifecyclePersistenceFailure(root: URL) async throws {
+        let noteID = UUID(uuidString: "33333333-3333-4333-8333-333333333333")!
+        let store = StickyNotesStore(storageDirectory: root)
+        _ = try store.upsertNote(
+            stableKey: "failure-fixture",
+            title: "Failure fixture",
+            body: "Must survive",
+            color: .yellow,
+            id: noteID,
+            at: Date(timeIntervalSince1970: 1_800_000_200)
+        )
+        try FileManager.default.removeItem(at: root)
+        try Data("blocked".utf8).write(to: root)
+
+        let archive = StickyCapabilityHandler(operation: .archive, store: store)
+        do {
+            _ = try await archive.handle(
+                arguments: ["noteId": .string(noteID.uuidString)],
+                context: CapabilityHandlerContext(idempotencyKey: "sticky-verifier-key-006")
+            )
+            throw VerificationFailure("sticky_archive_failure_accepted")
+        } catch CapabilityHandlerError.unavailable(let field) where field == "sticky_storage" {
+        }
+        try require(store.note(id: noteID)?.archivedAt == nil, "sticky_archive_failure_rollback")
+
+        let delete = StickyCapabilityHandler(operation: .delete, store: store)
+        do {
+            _ = try await delete.handle(
+                arguments: ["noteId": .string(noteID.uuidString)],
+                context: CapabilityHandlerContext(idempotencyKey: "sticky-verifier-key-007")
+            )
+            throw VerificationFailure("sticky_delete_failure_accepted")
+        } catch CapabilityHandlerError.unavailable(let field) where field == "sticky_storage" {
+        }
+        try require(store.note(id: noteID) != nil, "sticky_delete_failure_rollback")
     }
 
     @MainActor
