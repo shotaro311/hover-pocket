@@ -18,6 +18,12 @@ using HoverPocket.Shell.Settings;
 
 namespace HoverPocket.Shell.Bridge;
 
+internal enum BridgeSurface
+{
+    Panel,
+    Settings
+}
+
 internal sealed class PanelBridgeController : IDisposable
 {
     private readonly ProviderRegistry _providerRegistry;
@@ -35,7 +41,8 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly CapabilityBroker? _capabilityBroker;
     private readonly TodayFocusTextAdapter? _todayFocusTextAdapter;
     private readonly PocketAppHostController? _pocketAppHostController;
-    private readonly List<BridgeDispatcher> _dispatchers = [];
+    private readonly PocketAppGenerationController? _pocketAppGenerationController;
+    private readonly Dictionary<BridgeDispatcher, BridgeSurface> _dispatchers = [];
     private readonly object _previewFrameSync = new();
     private string _selectedProviderId;
     private MediaPreviewFrame? _pendingPreviewFrame;
@@ -111,6 +118,41 @@ internal sealed class PanelBridgeController : IDisposable
                 _pocketAppHostController = null;
             }
         }
+        if (CurrentSettings.AiNativeEnabled)
+        {
+            try
+            {
+                var pocketAppsRoot = Path.Combine(settingsStore.RootDirectory, "PocketApps");
+                var generationRoot = Path.Combine(pocketAppsRoot, "Generation");
+                IPocketAppGenerationAdapter? generator = null;
+                if (CodexPocketAppGenerationAdapter.ResolveExecutable() is { } executable)
+                {
+                    generator = new CodexPocketAppGenerationAdapter(
+                        executable,
+                        Path.Combine(generationRoot, "CodexWorkspaces"));
+                }
+                try
+                {
+                    _pocketAppGenerationController = new PocketAppGenerationController(
+                        Path.Combine(pocketAppsRoot, "GeneratedHost"),
+                        Path.Combine(pocketAppsRoot, "UserData"),
+                        Path.Combine(generationRoot, "Drafts"),
+                        generator);
+                }
+                catch
+                {
+                    if (generator is IDisposable disposable) { disposable.Dispose(); }
+                    throw;
+                }
+            }
+            catch (Exception ex) when (ex is PocketAppGenerationException
+                or PocketAppLifecycleException
+                or IOException
+                or UnauthorizedAccessException)
+            {
+                _pocketAppGenerationController = null;
+            }
+        }
         _clipboardBridgeController = new ClipboardBridgeController(
             new ClipboardHistoryStore(Path.Combine(settingsStore.RootDirectory, "clipboard")),
             new ClipboardNativeListener(System.Windows.Application.Current?.Dispatcher ?? System.Windows.Threading.Dispatcher.CurrentDispatcher),
@@ -148,10 +190,16 @@ internal sealed class PanelBridgeController : IDisposable
 
     public TodayFocusTextAdapter? TodayFocusTextAdapter => _todayFocusTextAdapter;
 
-    public IDisposable Attach(BridgeDispatcher dispatcher)
+    public IDisposable Attach(
+        BridgeDispatcher dispatcher,
+        BridgeSurface surface = BridgeSurface.Panel,
+        Func<System.Windows.Window?>? approvalOwner = null,
+        Func<bool>? aiNativeEnableDecision = null)
     {
-        _dispatchers.Add(dispatcher);
-        dispatcher.Register("app.getState", (_, _) => Task.FromResult<object?>(BuildState()));
+        _dispatchers[dispatcher] = surface;
+        dispatcher.Register(
+            "app.getState",
+            (_, _) => Task.FromResult<object?>(BuildState(includeGeneration: surface == BridgeSurface.Settings)));
         dispatcher.Register("app.ready", (_, _) => Task.FromResult<object?>(new { ok = true }));
         dispatcher.Register("diagnostics.echo", (parameters, _) => Task.FromResult<object?>(DeserializeObject(parameters)));
         dispatcher.Register("provider.select", SelectProviderAsync);
@@ -183,6 +231,17 @@ internal sealed class PanelBridgeController : IDisposable
         dispatcher.Register("ailane.reject", RejectAiLaneAsync);
         dispatcher.Register("todayFocus.startFromCalendar", StartTodayFocusFromCalendarAsync);
         _pocketAppHostController?.Attach(dispatcher);
+        if (surface == BridgeSurface.Settings)
+        {
+            dispatcher.Register(
+                "settings.setAiNativeEnabled",
+                (parameters, cancellationToken) => SetAiNativeEnabledAsync(
+                    parameters,
+                    approvalOwner,
+                    aiNativeEnableDecision,
+                    cancellationToken));
+            _pocketAppGenerationController?.AttachSettings(dispatcher, approvalOwner);
+        }
         _calculatorBridgeHandlers.Register(dispatcher);
         _controlsBridgeController.Attach(dispatcher);
         _calendarBridgeController.Attach(dispatcher);
@@ -210,9 +269,10 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.PreviewFrameArrived -= OnControlsPreviewFrameArrived;
         _controlsBridgeController.MediaSourceOpened -= OnControlsMediaSourceOpened;
         _controlsBridgeController.Dispose();
+        _pocketAppGenerationController?.Dispose();
     }
 
-    public object BuildState()
+    public object BuildState(bool includeGeneration = false)
     {
         var orderedProviders = OrderedProviders().ToArray();
         var selected = orderedProviders.FirstOrDefault(provider => string.Equals(provider.Id, _selectedProviderId, StringComparison.OrdinalIgnoreCase))
@@ -293,10 +353,13 @@ internal sealed class PanelBridgeController : IDisposable
                 }
             ,
             aiLane = _aiLaneController.CurrentState,
-            pocketSurface = _pocketAppHostController?.BuildSurfaceState(),
-            pocketApps = _pocketAppHostController is null
+            pocketSurface = CurrentSettings.AiNativeEnabled ? _pocketAppHostController?.BuildSurfaceState() : null,
+            pocketApps = !CurrentSettings.AiNativeEnabled || _pocketAppHostController is null
                 ? Array.Empty<object>()
-                : new[] { _pocketAppHostController.BuildManagerState() }
+                : new[] { _pocketAppHostController.BuildManagerState() },
+            pocketAppGeneration = includeGeneration && CurrentSettings.AiNativeEnabled
+                ? _pocketAppGenerationController?.BuildState()
+                : null
         };
     }
 
@@ -542,6 +605,62 @@ internal sealed class PanelBridgeController : IDisposable
         return await PublishStateAsync(cancellationToken);
     }
 
+    private async Task<object?> SetAiNativeEnabledAsync(
+        JsonElement? parameters,
+        Func<System.Windows.Window?>? approvalOwner,
+        Func<bool>? enableDecision,
+        CancellationToken cancellationToken)
+    {
+        var enabled = ReadRequiredBool(parameters, "enabled");
+        if (enabled && !CurrentSettings.AiNativeEnabled)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var approved = enableDecision is not null
+                ? enableDecision()
+                : ShowAiNativeEnableApproval(approvalOwner?.Invoke());
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!approved)
+            {
+                return await PublishStateAsync(cancellationToken);
+            }
+        }
+        if (CurrentSettings.AiNativeEnabled != enabled)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.AiNativeEnabled = enabled;
+            SaveSettings(updated);
+        }
+
+        // Never hot-create a generation composition root. If one exists from startup, disabling
+        // cancels an in-flight Codex process immediately and gates every generation bridge route.
+        _pocketAppGenerationController?.SetEnabled(enabled);
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private bool ShowAiNativeEnableApproval(System.Windows.Window? owner)
+    {
+        var english = CurrentSettings.Language == AppLanguage.English;
+        var message = english
+            ? "Enable AI-native features? HoverPocket will make the Capability Broker and Pocket App management available after restart. Real Codex generation remains unavailable until the local-file confinement gate passes."
+            : "AIネイティブ機能を有効にしますか？ 再起動後にCapability BrokerとPocket App管理が利用可能になります。ローカルファイルの隔離検証が完了するまで、実Codex生成は利用できません。";
+        var title = english ? "Enable AI-native features" : "AIネイティブ機能を有効化";
+        var result = owner is null
+            ? System.Windows.MessageBox.Show(
+                message,
+                title,
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Warning,
+                System.Windows.MessageBoxResult.No)
+            : System.Windows.MessageBox.Show(
+                owner,
+                message,
+                title,
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Warning,
+                System.Windows.MessageBoxResult.No);
+        return result == System.Windows.MessageBoxResult.Yes;
+    }
+
     private async Task<object?> SetClipboardPrivateModeAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         return await SetClipboardPrivateModeAsync(ReadRequiredBool(parameters, "enabled"), cancellationToken);
@@ -728,9 +847,8 @@ internal sealed class PanelBridgeController : IDisposable
             _selectedProviderId = ResolvePreferredProviderId();
         }
 
-        var state = BuildState();
         await SynchronizeControlsLifecycleAsync();
-        await PostEventAsync("panel.opened", state);
+        await PostStateEventAsync("panel.opened");
     }
 
     public async Task NotifyPanelClosedAsync()
@@ -766,7 +884,7 @@ internal sealed class PanelBridgeController : IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         var state = BuildState();
         await SynchronizeControlsLifecycleAsync(cancellationToken);
-        await PostEventAsync("state.changed", state);
+        await PostStateEventAsync("state.changed");
         return state;
     }
 
@@ -858,9 +976,19 @@ internal sealed class PanelBridgeController : IDisposable
 
     private async Task PostEventAsync(string eventName, object? payload)
     {
-        foreach (var dispatcher in _dispatchers.ToArray())
+        foreach (var dispatcher in _dispatchers.Keys.ToArray())
         {
             await dispatcher.PostEventAsync(eventName, payload);
+        }
+    }
+
+    private async Task PostStateEventAsync(string eventName)
+    {
+        foreach (var item in _dispatchers.ToArray())
+        {
+            await item.Key.PostEventAsync(
+                eventName,
+                BuildState(includeGeneration: item.Value == BridgeSurface.Settings));
         }
     }
 

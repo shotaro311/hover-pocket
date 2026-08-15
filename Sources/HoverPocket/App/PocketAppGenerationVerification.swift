@@ -1,0 +1,447 @@
+import Darwin
+import Foundation
+
+@MainActor
+enum PocketAppGenerationVerification {
+    static func verify(failures: inout [String]) {
+        verifyDefaultOff(failures: &failures)
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hover-pocket-generation-host-\(UUID().uuidString)", isDirectory: true)
+        let dataRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hover-pocket-generation-data-\(UUID().uuidString)", isDirectory: true)
+        let draftRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hover-pocket-generation-drafts-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            makeTreeMutable(root)
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: dataRoot)
+            try? FileManager.default.removeItem(at: draftRoot)
+        }
+        do {
+            try FileManager.default.createDirectory(at: draftRoot, withIntermediateDirectories: true)
+            let fixture = try fixtureDocument()
+            let fixtureRoot = fixtureURL(".")
+            let adapter = FixturePocketAppGenerationAdapter(fixtureRoot: fixtureRoot)
+            let materializer = PocketAppGenerationMaterializer(rootDirectory: draftRoot)
+            let lifecycle = try PocketAppLifecycleManager(rootDirectory: root, userDataRoot: dataRoot)
+
+            let request = try makeRequest(
+                requestID: string(fixture, "requestId"),
+                userRequest: string(fixture, "userRequest"),
+                appID: string(fixture, "appId"),
+                version: string(fixture, "initialVersion"),
+                namespace: string(fixture, "namespace")
+            )
+            require(
+                request.requestDigest == string(fixture, "expectedRequestDigest"),
+                "generation_request_digest",
+                failures: &failures
+            )
+            let envelope = try adapter.generate(request, cancellation: PocketAppGenerationCancellation())
+            let materialized = try materializer.materialize(envelope: envelope, request: request)
+            defer { try? FileManager.default.removeItem(at: materialized.directory) }
+            require(
+                materialized.package.manifestDigest == string(fixture, "expectedInitialPackageDigest"),
+                "generation_initial_digest",
+                failures: &failures
+            )
+            let proposal = try lifecycle.stage(draftDirectory: materialized.directory)
+            let expectedPermissions = Set(stringArray(fixture, "expectedAddedPermissions"))
+            require(Set(proposal.permissionDiff.added) == expectedPermissions, "generation_permission_diff", failures: &failures)
+            require(proposal.approvalRequired && proposal.previews.count == 1, "generation_preview", failures: &failures)
+            require(proposal.tests.allSatisfy { $0.status == $0.expected }, "generation_tests", failures: &failures)
+            let grant = try lifecycle.approve(requestID: proposal.requestID, bindingDigest: proposal.bindingDigest)
+            let installed = try lifecycle.install(proposal, approvalGrant: grant)
+            require(installed.readbackVerified, "generation_install_readback", failures: &failures)
+            require(
+                try lifecycle.activePackage(packageID: request.appID)?.manifestDigest == proposal.packageDigest,
+                "generation_active_digest",
+                failures: &failures
+            )
+
+            let updateRequest = try makeRequest(
+                requestID: "generation-fixture-0002",
+                userRequest: request.userRequest,
+                appID: request.appID,
+                version: string(fixture, "updateVersion"),
+                namespace: request.namespace
+            )
+            let updateEnvelope = try adapter.generate(updateRequest, cancellation: PocketAppGenerationCancellation())
+            let updateMaterialized = try materializer.materialize(envelope: updateEnvelope, request: updateRequest)
+            defer { try? FileManager.default.removeItem(at: updateMaterialized.directory) }
+            let update = try lifecycle.stage(draftDirectory: updateMaterialized.directory)
+            require(update.action == .update && update.permissionDiff.added.isEmpty, "generation_update", failures: &failures)
+            let updateGrant = try lifecycle.approve(requestID: update.requestID, bindingDigest: update.bindingDigest)
+            let updated = try lifecycle.install(update, approvalGrant: updateGrant)
+            require(updated.readbackVerified && updated.version == updateRequest.version, "generation_update_readback", failures: &failures)
+
+            let managed = try lifecycle.managedPackages().first { $0.packageID == request.appID }
+            require(
+                managed?.version == updateRequest.version
+                    && managed?.packageDigest == update.packageDigest
+                    && managed?.installedVersions.contains(request.version) == true,
+                "generation_managed_readback",
+                failures: &failures
+            )
+
+            let rollback = try lifecycle.prepareRollback(packageID: request.appID, version: request.version)
+            let rollbackGrant = try lifecycle.approve(requestID: rollback.requestID, bindingDigest: rollback.bindingDigest)
+            let rolledBack = try lifecycle.rollback(rollback, approvalGrant: rollbackGrant)
+            require(rolledBack.readbackVerified && rolledBack.version == request.version, "generation_rollback", failures: &failures)
+
+            let disabled = try lifecycle.disable(packageID: request.appID)
+            require(disabled.readbackVerified && disabled.state == .disabled, "generation_disable", failures: &failures)
+            let packageDataRoot = dataRoot.appendingPathComponent(request.appID, isDirectory: true)
+            try FileManager.default.createDirectory(at: packageDataRoot, withIntermediateDirectories: true)
+            let sentinel = packageDataRoot.appendingPathComponent("sentinel.txt")
+            try Data("preserve".utf8).write(to: sentinel)
+            let removed = try lifecycle.remove(packageID: request.appID, dataDisposition: .preserve)
+            require(
+                removed.readbackVerified
+                    && removed.state == .removed
+                    && removed.dataDisposition == .preserve
+                    && FileManager.default.fileExists(atPath: sentinel.path),
+                "generation_remove_preserve",
+                failures: &failures
+            )
+
+            let tampered = PocketAppGenerationEnvelope(
+                requestID: envelope.requestID,
+                requestDigest: "sha256:" + String(repeating: "0", count: 64),
+                appID: envelope.appID,
+                version: envelope.version,
+                namespace: envelope.namespace,
+                files: envelope.files
+            )
+            do {
+                _ = try materializer.materialize(envelope: tampered, request: request)
+                failures.append("generation_tampered_envelope_accepted")
+            } catch PocketAppGenerationError.envelopeMismatch {
+            }
+
+            var unsafeFiles = envelope.files
+            unsafeFiles[0] = PocketAppGeneratedFile(path: "../manifest.json", utf8: unsafeFiles[0].utf8)
+            let unsafe = PocketAppGenerationEnvelope(
+                requestID: envelope.requestID,
+                requestDigest: envelope.requestDigest,
+                appID: envelope.appID,
+                version: envelope.version,
+                namespace: envelope.namespace,
+                files: unsafeFiles
+            )
+            do {
+                _ = try materializer.materialize(envelope: unsafe, request: request)
+                failures.append("generation_unsafe_path_accepted")
+            } catch PocketAppGenerationError.unsafePath {
+            }
+
+            let cancelled = PocketAppGenerationCancellation()
+            cancelled.cancel()
+            do {
+                _ = try adapter.generate(request, cancellation: cancelled)
+                failures.append("generation_cancel_ignored")
+            } catch PocketAppGenerationError.generatorCancelled {
+            }
+
+            try verifySchemaParity(failures: &failures)
+            try verifyRealOutputFixture(request: request, failures: &failures)
+            try verifyPromptAndVersioning(request: request, failures: &failures)
+            verifyRealCodexFailsClosed(failures: &failures)
+            try verifyProcessTreeCleanup(failures: &failures)
+            try verifyRootPin(failures: &failures)
+            try verifyGenerationStartupDoesNotRecover(failures: &failures)
+        } catch {
+            failures.append("generation_e2e:\(error)")
+        }
+    }
+
+    private static func verifyDefaultOff(failures: inout [String]) {
+        let suite = "hover-pocket-generation-default-off-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            failures.append("generation_default_off_defaults")
+            return
+        }
+        defaults.removePersistentDomain(forName: suite)
+        let settings = AppSettings(defaults: defaults)
+        require(!settings.aiNativeEnabled, "generation_default_off", failures: &failures)
+        defaults.removePersistentDomain(forName: suite)
+    }
+
+    private static func makeRequest(
+        requestID: String,
+        userRequest: String,
+        appID: String,
+        version: String,
+        namespace: String
+    ) throws -> PocketAppGenerationRequest {
+        let request = PocketAppGenerationRequest(
+            requestID: requestID,
+            userRequest: userRequest,
+            appID: appID,
+            version: version,
+            namespace: namespace,
+            capabilities: PocketAppGenerationCapability.boundedCatalog(namespace: namespace)
+        )
+        try request.validate()
+        return request
+    }
+
+    private static func verifySchemaParity(failures: inout [String]) throws {
+        let source = try Data(contentsOf: contractURL("pocket-app-generation-output.schema.json"))
+        let runtime = Data(PocketAppGenerationContract.outputSchemaJSON.utf8)
+        let sourceObject = try JSONSerialization.jsonObject(with: source)
+        let runtimeObject = try JSONSerialization.jsonObject(with: runtime)
+        let canonicalSource = try JSONSerialization.data(withJSONObject: sourceObject, options: [.sortedKeys])
+        let canonicalRuntime = try JSONSerialization.data(withJSONObject: runtimeObject, options: [.sortedKeys])
+        require(canonicalSource == canonicalRuntime, "generation_schema_parity", failures: &failures)
+        let sourceDictionary = sourceObject as? [String: Any]
+        let properties = sourceDictionary?["properties"] as? [String: Any]
+        let schemaProperty = properties?["$schema"] as? [String: Any]
+        require(
+            schemaProperty?["type"] as? String == "string"
+                && schemaProperty?["const"] as? String == PocketAppGenerationContract.schemaID,
+            "generation_schema_const_type",
+            failures: &failures
+        )
+    }
+
+    private static func verifyRealOutputFixture(
+        request: PocketAppGenerationRequest,
+        failures: inout [String]
+    ) throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hover-pocket-real-output-host-\(UUID().uuidString)", isDirectory: true)
+        let dataRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hover-pocket-real-output-data-\(UUID().uuidString)", isDirectory: true)
+        let draftRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hover-pocket-real-output-draft-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            makeTreeMutable(root)
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: dataRoot)
+            try? FileManager.default.removeItem(at: draftRoot)
+        }
+        try FileManager.default.createDirectory(at: draftRoot, withIntermediateDirectories: true)
+        let bytes = try Data(contentsOf: fixtureURL("support/pocket-app-generation.real-codex-output.json"))
+        let envelope = try PocketAppGenerationContract.decodeEnvelope(bytes)
+        let materializer = PocketAppGenerationMaterializer(rootDirectory: draftRoot)
+        let materialized = try materializer.materialize(envelope: envelope, request: request)
+        defer { try? FileManager.default.removeItem(at: materialized.directory) }
+        let lifecycle = try PocketAppLifecycleManager(rootDirectory: root, userDataRoot: dataRoot)
+        let proposal = try lifecycle.stage(draftDirectory: materialized.directory)
+        require(proposal.tests.allSatisfy { $0.status == $0.expected }, "generation_real_output_tests", failures: &failures)
+        require(!proposal.previews.isEmpty, "generation_real_output_preview", failures: &failures)
+        require(!proposal.permissionDiff.added.isEmpty, "generation_real_output_permission_diff", failures: &failures)
+        require(!proposal.capabilityGrantDiff.added.isEmpty, "generation_real_output_grant_diff", failures: &failures)
+        let grant = try lifecycle.approve(requestID: proposal.requestID, bindingDigest: proposal.bindingDigest)
+        let receipt = try lifecycle.install(proposal, approvalGrant: grant)
+        let active = try lifecycle.activePackage(packageID: request.appID)
+        require(
+            receipt.readbackVerified
+                && receipt.packageDigest == proposal.packageDigest
+                && active?.manifestDigest == proposal.packageDigest,
+            "generation_real_output_active_readback",
+            failures: &failures
+        )
+    }
+
+    private static func verifyPromptAndVersioning(
+        request: PocketAppGenerationRequest,
+        failures: inout [String]
+    ) throws {
+        let prompt = try PocketAppGenerationContract.prompt(request)
+        require(prompt.contains("\"apiVersion\":\"hoverpocket.app/v1\""), "generation_prompt_manifest_shape", failures: &failures)
+        require(prompt.contains("\"approval\":{\"mode\":\"before_writes\""), "generation_prompt_workflow_shape", failures: &failures)
+        require(prompt.contains("Explicitly forbidden legacy output"), "generation_prompt_legacy_rejection", failures: &failures)
+        let largePatch = String(repeating: "9", count: 59)
+        let expected = "1.0.1" + String(repeating: "0", count: 59)
+        require(
+            try PocketAppGenerationController.nextPatchVersion("1.0.\(largePatch)") == expected,
+            "generation_large_patch_increment",
+            failures: &failures
+        )
+        let now = Date()
+        let crafted = PocketAppLifecycleProposal(
+            requestID: "request-safe",
+            action: .install,
+            packageID: request.appID,
+            version: request.version,
+            packageDigest: "sha256:" + String(repeating: "a", count: 64),
+            currentDigest: nil,
+            currentState: nil,
+            previewDigest: "sha256:" + String(repeating: "b", count: 64),
+            previews: [],
+            permissionDiff: PocketAppPermissionDiff(added: ["calendar.events.read\nspoof\u{202E}"], removed: []),
+            capabilityGrantDiff: PocketAppCapabilityGrantDiff(
+                added: ["{\"capabilityId\":\"safe\u{202E}evil\",\"capabilityVersion\":1,\"effect\":\"private_read\",\"permissions\":[\"calendar.events.read\"],\"scope\":{\"range\":\"today\"}}"],
+                removed: []
+            ),
+            tests: [],
+            bindingDigest: "sha256:" + String(repeating: "c", count: 64),
+            createdAt: now,
+            expiresAt: now.addingTimeInterval(300),
+            approvalRequired: true,
+            stagingDirectory: FileManager.default.temporaryDirectory,
+            stateSchemaDigest: "sha256:" + String(repeating: "d", count: 64),
+            statePropertyNames: []
+        )
+        let approval = PocketAppGenerationApprovalPresentation.text(crafted, source: "codex-preview-only")
+        require(
+            !approval.contains("\u{202E}")
+                && !approval.contains("read\nspoof")
+                && approval.contains("\"capabilityVersion\":1")
+                && approval.contains(crafted.packageDigest)
+                && approval.contains(crafted.bindingDigest),
+            "generation_approval_text_sanitized_exact",
+            failures: &failures
+        )
+    }
+
+    private static func verifyRealCodexFailsClosed(failures: inout [String]) {
+        require(
+            !CodexPocketAppGenerationAdapter.supportsConfidentialGeneration
+                && CodexPocketAppGenerationAdapter.resolveExecutable() == nil,
+            "generation_real_codex_confidentiality_gate",
+            failures: &failures
+        )
+    }
+
+    private static func verifyProcessTreeCleanup(failures: inout [String]) throws {
+        for reason in ["cancel", "timeout", "disable"] {
+            let childFile = FileManager.default.temporaryDirectory
+                .appendingPathComponent("hover-pocket-generation-child-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: childFile) }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", "sleep 30 & child=$!; printf '%s' \"$child\" > \"$1\"; wait", "hoverpocket-test", childFile.path]
+            try process.run()
+            let pid = process.processIdentifier
+            if setpgid(pid, pid) != 0, getpgid(pid) != pid {
+                process.terminate()
+                process.waitUntilExit()
+                failures.append("generation_process_group_\(reason)")
+                continue
+            }
+            let deadline = Date().addingTimeInterval(2)
+            while !FileManager.default.fileExists(atPath: childFile.path), Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+            let childText = (try? String(contentsOf: childFile, encoding: .utf8)) ?? ""
+            let childPID = Int32(childText) ?? -1
+            CodexPocketAppGenerationAdapter.stop(process)
+            process.waitUntilExit()
+            let childAlive = childPID > 0 && kill(childPID, 0) == 0
+            require(!process.isRunning && !childAlive, "generation_process_tree_\(reason)", failures: &failures)
+        }
+    }
+
+    private static func verifyRootPin(failures: inout [String]) throws {
+        let temporaryRoot = URL(
+            fileURLWithPath: FileManager.default.currentDirectoryPath,
+            isDirectory: true
+        ).appendingPathComponent(".build", isDirectory: true)
+        let target = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-pin-target-\(UUID().uuidString)", isDirectory: true)
+        let link = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-pin-link-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: link)
+            try? FileManager.default.removeItem(at: target)
+        }
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        do {
+            _ = try PocketAppPinnedDirectory(url: link)
+            failures.append("generation_symlink_root_accepted")
+        } catch PocketAppGenerationError.rootUnsafe {
+        }
+    }
+
+    private static func verifyGenerationStartupDoesNotRecover(failures: inout [String]) throws {
+        let temporaryRoot = URL(
+            fileURLWithPath: FileManager.default.currentDirectoryPath,
+            isDirectory: true
+        ).appendingPathComponent(".build", isDirectory: true)
+        let root = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-no-recovery-host-\(UUID().uuidString)", isDirectory: true)
+        let dataRoot = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-no-recovery-data-\(UUID().uuidString)", isDirectory: true)
+        let draftRoot = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-no-recovery-draft-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            makeTreeMutable(root)
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: dataRoot)
+            try? FileManager.default.removeItem(at: draftRoot)
+        }
+        let abandoned = root
+            .appendingPathComponent("Staging", isDirectory: true)
+            .appendingPathComponent("abandoned", isDirectory: true)
+        try FileManager.default.createDirectory(at: abandoned, withIntermediateDirectories: true)
+        let sentinel = abandoned.appendingPathComponent("sentinel.txt")
+        try Data("preserve-until-explicit-recovery".utf8).write(to: sentinel)
+        let controller = try PocketAppGenerationController(
+            rootDirectory: root,
+            userDataRoot: dataRoot,
+            generationRoot: draftRoot,
+            generator: nil
+        )
+        require(
+            FileManager.default.fileExists(atPath: sentinel.path),
+            "generation_startup_recovery_disabled",
+            failures: &failures
+        )
+        withExtendedLifetime(controller) {}
+    }
+
+    private static func fixtureDocument() throws -> [String: Any] {
+        let data = try Data(contentsOf: fixtureURL("support/pocket-app-generation.e2e.json"))
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw PocketAppGenerationError.outputInvalid
+        }
+        return object
+    }
+
+    private static func string(_ object: [String: Any], _ key: String) -> String {
+        object[key] as? String ?? ""
+    }
+
+    private static func stringArray(_ object: [String: Any], _ key: String) -> [String] {
+        object[key] as? [String] ?? []
+    }
+
+    private static func fixtureURL(_ relativePath: String) -> URL {
+        contractURL("fixtures/\(relativePath)")
+    }
+
+    private static func contractURL(_ relativePath: String) -> URL {
+        var current = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        while current.path != "/" {
+            let candidate = current
+                .appendingPathComponent("contracts/pocket/v1", isDirectory: true)
+                .appendingPathComponent(relativePath, isDirectory: false)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+            current.deleteLastPathComponent()
+        }
+        return current.appendingPathComponent("missing-contract")
+    }
+
+    private static func makeTreeMutable(_ root: URL) {
+        guard FileManager.default.fileExists(atPath: root.path) else { return }
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
+        guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey]) else { return }
+        for case let url as URL in enumerator {
+            let directory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: directory ? 0o700 : 0o600],
+                ofItemAtPath: url.path
+            )
+        }
+    }
+
+    private static func require(_ condition: Bool, _ label: String, failures: inout [String]) {
+        if !condition { failures.append(label) }
+    }
+}

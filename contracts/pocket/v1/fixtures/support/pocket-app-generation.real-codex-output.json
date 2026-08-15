@@ -1,0 +1,46 @@
+{
+  "$schema": "hoverpocket://schemas/pocket-app-generation-output/v1",
+  "requestId": "generation-fixture-0001",
+  "requestDigest": "sha256:50aee649d04a4b78bb590fbb38e53c747efc8e2d419f418ae3cd3cf01d0dd34d",
+  "appId": "local.example.today-focus",
+  "version": "1.0.0",
+  "namespace": "today-focus",
+  "files": [
+    {
+      "path": "manifest.json",
+      "utf8": "{\"$schema\":\"hoverpocket://schemas/pocket-app/v1\",\"apiVersion\":\"hoverpocket.app/v1\",\"id\":\"local.example.today-focus\",\"name\":\"Today Focus Pocket\",\"version\":\"1.0.0\",\"minHostVersion\":\"1.0.0\",\"intent\":\"intent.md\",\"state\":{\"schema\":\"data.schema.json\",\"store\":\"user-data://local.example.today-focus\"},\"surfaces\":[{\"id\":\"main\",\"kind\":\"declarative\",\"source\":\"surfaces/main.surface.json\"}],\"requestedCapabilities\":[{\"id\":\"calendar.events.list\",\"version\":1,\"scope\":{\"range\":\"today\"}},{\"id\":\"sticky.note.get\",\"version\":1,\"scope\":{\"namespace\":\"today-focus\"}},{\"id\":\"sticky.note.upsert\",\"version\":1,\"scope\":{\"namespace\":\"today-focus\"}},{\"id\":\"timer.countdown.get\",\"version\":1},{\"id\":\"timer.countdown.start\",\"version\":1}],\"workflows\":{\"startFocus\":\"workflows/start-focus.workflow.json\"},\"tests\":[\"tests/calendar-read.json\",\"tests/start-focus-approved.json\",\"tests/start-focus-idempotent-replay.json\",\"tests/start-focus-rejected.json\"],\"workspace\":{\"ownership\":\"user\",\"definitionRoot\":\"app_definition\",\"dataRoot\":\"separate_user_data\",\"secrets\":\"credential_store_only\",\"exportable\":true,\"deletable\":true,\"rollback\":\"versioned_snapshot\"}}"
+    },
+    {
+      "path": "intent.md",
+      "utf8": "# Today Focus Pocket\n\nRead today's Calendar events, start a selected focus Timer, and preserve the user's purpose in Sticky Notes.\n"
+    },
+    {
+      "path": "data.schema.json",
+      "utf8": "{\"type\":\"object\",\"required\":[\"selectedEventRef\"],\"properties\":{\"selectedEventRef\":{\"type\":[\"string\",\"null\"]}},\"additionalProperties\":false}"
+    },
+    {
+      "path": "surfaces/main.surface.json",
+      "utf8": "{\"$schema\":\"hoverpocket://schemas/pocket-surface/v1\",\"surfaceVersion\":1,\"id\":\"main\",\"hostBoundary\":{\"region\":\"provider_host\",\"mayRenderHeader\":false,\"mayRenderVoiceLane\":false,\"mayRenderApproval\":false,\"mayRenderReceipt\":false},\"root\":{\"type\":\"stack\",\"axis\":\"vertical\",\"spacing\":12,\"children\":[{\"type\":\"text\",\"style\":\"title\",\"value\":\"Today Focus\"},{\"type\":\"calendarEventPicker\",\"items\":{\"query\":\"calendar.events.list@1\",\"arguments\":{\"range\":\"today\",\"timezone\":\"$context.timezone\"}},\"selection\":\"$state.selectedEventRef\",\"titleTarget\":\"$input.purpose\"},{\"type\":\"durationPicker\",\"value\":\"$input.durationSeconds\",\"min\":60,\"max\":14400,\"default\":1500},{\"type\":\"textField\",\"label\":\"Purpose\",\"value\":\"$input.purpose\",\"maxLength\":80},{\"type\":\"button\",\"label\":\"Start focus\",\"workflow\":\"startFocus\"}]}}"
+    },
+    {
+      "path": "workflows/start-focus.workflow.json",
+      "utf8": "{\"$schema\":\"hoverpocket://schemas/pocket-workflow/v1\",\"workflowVersion\":1,\"id\":\"startFocus\",\"inputs\":{\"selectedEventRef\":\"entity-ref\",\"durationSeconds\":\"integer\",\"purpose\":\"string\"},\"approval\":{\"mode\":\"before_writes\",\"group\":\"all_writes\"},\"steps\":[{\"id\":\"startTimer\",\"use\":\"timer.countdown.start@1\",\"with\":{\"durationSeconds\":\"$input.durationSeconds\",\"title\":\"$input.purpose\",\"sourceRef\":\"$input.selectedEventRef\"},\"dependsOn\":[]},{\"id\":\"savePurpose\",\"use\":\"sticky.note.upsert@1\",\"with\":{\"stableKey\":\"$context.todayFocusStableKey\",\"title\":\"Focus purpose\",\"body\":\"$input.purpose\",\"color\":\"yellow\"},\"dependsOn\":[\"startTimer\"]}],\"onPartialFailure\":{\"mode\":\"compensate_if_available\",\"presentReceipt\":true},\"limits\":{\"maxSteps\":8,\"maxDepth\":2,\"timeoutSeconds\":30}}"
+    },
+    {
+      "path": "tests/calendar-read.json",
+      "utf8": "{\"case\":\"calendar-read\",\"expected\":\"pass\"}"
+    },
+    {
+      "path": "tests/start-focus-approved.json",
+      "utf8": "{\"case\":\"start-focus-approved\",\"expected\":\"pass\"}"
+    },
+    {
+      "path": "tests/start-focus-idempotent-replay.json",
+      "utf8": "{\"case\":\"start-focus-idempotent-replay\",\"expected\":\"pass\"}"
+    },
+    {
+      "path": "tests/start-focus-rejected.json",
+      "utf8": "{\"case\":\"start-focus-rejected\",\"expected\":\"reject\"}"
+    }
+  ]
+}

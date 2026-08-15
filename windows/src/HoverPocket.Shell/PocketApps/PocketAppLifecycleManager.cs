@@ -90,6 +90,13 @@ internal sealed record PocketAppLifecycleReceipt(
     bool ReadbackVerified,
     PocketAppDataDisposition? DataDisposition);
 
+internal sealed record PocketAppManagedPackage(
+    string PackageId,
+    PocketAppLifecycleState State,
+    string? Version,
+    string? PackageDigest,
+    IReadOnlyList<string> InstalledVersions);
+
 internal sealed class PocketAppLifecycleException(string code) : Exception(code)
 {
     public string Code { get; } = code;
@@ -136,7 +143,8 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         string userDataRoot,
         PocketAppPackageRuntime? runtime = null,
         Func<string, bool>? failureInjection = null,
-        string hostVersion = PocketAppHostContract.Version)
+        string hostVersion = PocketAppHostContract.Version,
+        bool performStartupRecovery = true)
     {
         if (!ValidVersion(hostVersion)) { throw Failure("LIFECYCLE_PACKAGE_INVALID"); }
         _rootDirectory = Path.GetFullPath(rootDirectory);
@@ -151,7 +159,10 @@ internal sealed class PocketAppLifecycleManager : IDisposable
             {
                 Directory.CreateDirectory(_rootDirectory);
                 Directory.CreateDirectory(_userDataRoot);
-                RecoverInterruptedTransactions();
+                if (performStartupRecovery)
+                {
+                    RecoverInterruptedTransactions();
+                }
             }
         }
         catch (PocketAppLifecycleException)
@@ -514,6 +525,74 @@ internal sealed class PocketAppLifecycleManager : IDisposable
             PocketAppLifecycleState.Removed,
             true,
             dataDisposition);
+    }
+
+    public IReadOnlyList<PocketAppManagedPackage> ManagedPackages() =>
+        WithLifecycleLock(ManagedPackagesCore);
+
+    private IReadOnlyList<PocketAppManagedPackage> ManagedPackagesCore()
+    {
+        if (!Directory.Exists(AppsRoot)) { return Array.Empty<PocketAppManagedPackage>(); }
+        EnsureDirectoryNotReparsePoint(AppsRoot);
+        var result = new List<PocketAppManagedPackage>();
+        foreach (var appDirectory in Directory.EnumerateDirectories(AppsRoot).Order(StringComparer.Ordinal))
+        {
+            EnsureDirectoryNotReparsePoint(appDirectory);
+            var packageId = Path.GetFileName(appDirectory);
+            if (!ValidPackageId(packageId)) { throw Failure("LIFECYCLE_CORRUPT_VERSION"); }
+            var record = ReadActiveRecord(packageId);
+            if (record is null) { continue; }
+            if (record.State == PocketAppLifecycleState.Removed)
+            {
+                result.Add(new PocketAppManagedPackage(
+                    packageId,
+                    PocketAppLifecycleState.Removed,
+                    null,
+                    null,
+                    Array.Empty<string>()));
+                continue;
+            }
+            if (record.Version is null || record.PackageDigest is null)
+            {
+                throw Failure("LIFECYCLE_READBACK_FAILED");
+            }
+            var package = VerifiedInstalledPackage(InstalledPackageDirectory(packageId, record.Version, record.PackageDigest));
+            if (package.Manifest.Id != packageId
+                || package.Manifest.Version != record.Version
+                || package.ManifestDigest != record.PackageDigest)
+            {
+                throw Failure("LIFECYCLE_CORRUPT_VERSION");
+            }
+            result.Add(new PocketAppManagedPackage(
+                packageId,
+                record.State,
+                record.Version,
+                record.PackageDigest,
+                InstalledVersionsCore(packageId)));
+        }
+        return result;
+    }
+
+    private IReadOnlyList<string> InstalledVersionsCore(string packageId)
+    {
+        var versionsRoot = VersionsRoot(packageId);
+        if (!Directory.Exists(versionsRoot)) { return Array.Empty<string>(); }
+        EnsureDirectoryNotReparsePoint(versionsRoot);
+        var versions = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var versionDirectory in Directory.EnumerateDirectories(versionsRoot))
+        {
+            EnsureDirectoryNotReparsePoint(versionDirectory);
+            foreach (var digestDirectory in Directory.EnumerateDirectories(versionDirectory))
+            {
+                EnsureDirectoryNotReparsePoint(digestDirectory);
+                if (Path.GetFileName(digestDirectory).StartsWith(".installing-", StringComparison.Ordinal)) { continue; }
+                VerifyImmutable(digestDirectory);
+                var package = VerifiedInstalledPackage(Path.Combine(digestDirectory, "package"));
+                if (package.Manifest.Id != packageId) { throw Failure("LIFECYCLE_CORRUPT_VERSION"); }
+                versions.Add(package.Manifest.Version);
+            }
+        }
+        return versions.Order(Comparer<string>.Create(CompareSemanticVersions)).ToArray();
     }
 
     public PocketAppPackage? ActivePackage(string packageId) =>

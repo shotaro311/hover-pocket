@@ -2,8 +2,18 @@
 project_slug: hover-menu-preview
 updated: 2026-08-16
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-pr-ready-ci-green; capability-expansion-merged
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-pr-ready-ci-green; an5-b-local-verified-pr-pending; capability-expansion-merged
 ---
+
+## 2026-08-16 AI-native AN5-B Codex Pocket App Generation / Management UI
+
+- AN5-A exact head `151043c`をbaseに、隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an5b`、branch `codex/ai-native-an5-generator-ui`でAN5-Bを実装した。自然言語要求、Host割当app ID / version / namespace、有限Capability catalogをrequest digestへ束ね、固定schemaのPocket App draftだけを受け取る。生成物はHost側でmaterialize、package再検証、declared test、preview、permission / effective grant差分へ進み、承認後だけAN5-Aのimmutable lifecycleへ渡す。
+- macOS SettingsへSwiftUIの生成・preview・導入確認・管理UI、Windows Settings WebViewへ同等UIを追加した。install / update / disable / preserve-only remove / rollbackはHost保持proposalとネイティブ既定No承認へ結び、rendererからapproval binding値を受け取らない。WindowsのAI-native有効化もSettings surface限定かつネイティブ既定Noにし、Panelからの呼出しは`unknown_method`、OFF起動後のONではCodex / workspaceをhot-startしない。
+- 実Codexは、read-only sandboxだけではユーザーのローカルファイル読取りを隔離できないためproductionでfail closedにした。macOSは`supportsConfidentialGeneration=false`、Windowsは`ResolveExecutable()=null`、両OSとも実Codex出力はactivation不可である。activation可能な生成adapterはdeterministic fixture専用で、Host pipeline全体の検証にだけ使う。
+- 保存先rootはdescriptor / handleでidentityを固定する。生成controllerの起動時にはpathnameベースの自動recoveryを実行せず、放置Stagingを勝手に削除しない回帰を両OSへ追加した。通常の明示lifecycle操作をdescriptor-relativeへ全面移行することと、Mac sandbox helper / Windows AppContainer等による実Codexのlocal-file confinementは次gateに残す。
+- ChatGPT Pro Orchestratorは通常Pro `gpt-5.6-sol` target / builderとして使用した。follow-upはdelta patch `186896 bytes / c9de646b...`を申告したが、回収artifactは初回patch `71029 bytes / f3c81be...`のままで一致しなかった。1回のrepair上限後はSkill例外に従い、Codexが不足実装と修正を担当した。run: `20260816-024012-hoverpocket-an5-boscodexpocket-app-drafthostimmutableuireadbackpatch`。
+- MacローカルでSwift warnings-as-errors build、Pocket App package / lifecycle / generation、Capability、Broker、Pocket Surface、Timer、Clipboard、Calculator、Panel layout 128件、共通contract 13 schema / 58 fixture、Windows Settings JavaScript syntax、`git diff --check`が成功した。最新working-treeのSecurity diff scan `7d0275cd-1935-4f89-8088-35189a382445`は25 / 25 file、coverage complete、reportable finding 0件でsealed completeとなった。
+- 未完了gateは、stacked PRのWindows / macOS / 3OS contract CI、Windows実機でのSettings native approvalと管理UI、実Codex confinement、Voiceから生成依頼するCore Integration E2Eである。詳細: `progress/2026-08/2026-08-16_hover-pocket-ai-native-an5-b.md`。
 
 ## 2026-08-15 AI-native AN5-A Pocket App Lifecycle Foundation
 
@@ -14,7 +24,7 @@ status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; a
 - macOSでSwift warnings-as-errors build、Pocket App lifecycle、Pocket Surface、Capability、Broker、Panel layout、Timer、Calculator、Clipboard、Weather、共通contract 12 schema / 58 fixtureの2回byte一致、`git diff --check`が成功した。公開Capability schemaも末尾改行を真の終端で拒否し、runtimeとの不一致をnegative fixtureへ固定した。PR [#16](https://github.com/shotaro311/hover-pocket/pull/16)のsource head `a9fb8ed`でWindows [31897975620](https://github.com/shotaro311/hover-pocket/actions/runs/31897975620)、macOS [31897975587](https://github.com/shotaro311/hover-pocket/actions/runs/31897975587)、3OS contract / cross-OS compare [31897975600](https://github.com/shotaro311/hover-pocket/actions/runs/31897975600)、PR Router [31897982011](https://github.com/shotaro311/hover-pocket/actions/runs/31897982011)が成功した。未解決review threadは0、remote parity `0 / 0`をreadbackした。PRは自動mergeしていない。
 - 承認previewの実byte再検証、grantのrequest ID binding、remove recordのfile / directory durable sync、manager破棄時のstaging ownership解放、両OSのstable key true-end anchorとASCII制御文字拒否まで追加hardeningした。さらにmacOSのimmutable snapshotをactive record確定前に全file / directoryへdurable syncし、両OSのversion保存先をUTF-8 byteの可逆な16進keyへ変更してcase-insensitive filesystemの衝突を防いだ。同一rootの承認待ちsnapshotは複数manager合算で最大4件に制限し、5件目を既存proposalを壊さずfail closedにした。
 - exact range `c949676...5f6a04f`のscan `114557d4-7318-42cd-b744-c7cdc392025c`と、承認待ち上限range `5f6a04f...a9fb8ed`のscan `28517aef-7d8b-45a4-80d7-a97c92fd3834`は各4 / 4 fileを完全レビューし、どちらもcoverage complete、reportable finding 0件でsealed completeとなった。既知の保存先root pathname TOCTOUはproduction接続前の別gateとして残す。
-- AN5全体は未完了である。AN5-BのCodex requestからdraft生成、Host preview / 導入確認 / 管理UI、production composition、保存先root pinningが残る。初回実装: `progress/2026-08/2026-08-15_hover-pocket-ai-native-an5-a.md`。最終hardening: `progress/2026-08/2026-08-16_hover-pocket-ai-native-an5-a-hardening.md`。
+- AN5全体は未完了である。AN5-BでCodex requestからdraft生成、Host preview / 導入確認 / 管理UI、production composition、保存先root pinningまでローカル実装した。残るgateはstacked PRの両OSCI、実Codex confinement、Voice生成E2Eである。初回実装: `progress/2026-08/2026-08-15_hover-pocket-ai-native-an5-a.md`。最終hardening: `progress/2026-08/2026-08-16_hover-pocket-ai-native-an5-a-hardening.md`。AN5-B: `progress/2026-08/2026-08-16_hover-pocket-ai-native-an5-b.md`。
 
 ## 2026-08-15 AI-native AN4 Pocket App DSL / Renderer
 

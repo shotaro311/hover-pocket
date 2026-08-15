@@ -18,6 +18,7 @@ AN0で固定したmacOS / Windows共通machine contractである。AN1以降のS
 | `pocket-app.schema.json` | user-owned app manifestとworkspace boundary |
 | `pocket-surface.schema.json` | finite declarative ProviderHost surface |
 | `pocket-workflow.schema.json` | finite typed workflow |
+| `pocket-app-generation-output.schema.json` | CodexからHostへ返す、request/app/version/namespace binding付きの有限file envelope |
 
 全schemaはDraft 2020-12と`hoverpocket://schemas/.../v1` IDを使用する。objectは`additionalProperties`を必ず明示し、未知fieldを暗黙受理しない。
 
@@ -61,5 +62,7 @@ python3 script/verify_pocket_contracts.py --report-json pocket-contracts-report.
 ```
 
 Validatorは外部library、package manager、network、secret、環境値を使用しない。未知schema keyword、未解決`$ref`、重複JSON key、非有限数、unknown capability、version mismatch、semantic invariant違反を成功扱いにしない。CIは固定OS / Python / Action revisionで3OS reportを生成し、最後にbyte-for-byte一致を確認する。
+
+AN5-Bのgeneration adapterは自然言語要求を実行せず、Host割当のrequest ID / app ID / version / stable-key namespaceとbounded capability catalogだけをCodexへ渡す。 generation stateは両OSで `idle` / `generating` / `awaiting_approval` / `installing` / `installed` / `disabled` / `removed` / `failed` を共有し、success表示はHost-owned lifecycle receiptの`readbackVerified=true`に限定する。Codexはread-only sandboxからschema-bound envelopeをstdoutへ返し、Hostがfile path、file count、UTF-8 bytes、package schema、capability scope、staging testsを再検証してからAN5-A lifecycleへ渡す。approvalはLifecycleのrequest ID / package digest / preview digest / permission diff / effective grant diffへexact bindingされ、user request本文、raw filesystem path、process command lineはauditへ保存しない。
 
 AN1の初期handler inventoryはCalendar list/get/create、Timer start/get/pause/resume/stop、Sticky upsert/getである。macOSとWindowsのruntime handlerは同じID/versionを登録し、各OSのCLI verifierがStore mutation後のID readbackとCalendar create後のGET一致を検証する。承認、重複抑止ledger、監査receiptはAN2のBroker責務であり、handlerからProvider Viewは参照しない。

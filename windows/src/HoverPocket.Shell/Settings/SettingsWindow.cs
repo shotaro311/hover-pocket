@@ -98,7 +98,10 @@ internal sealed class SettingsWindow : Window
             webView.CoreWebView2.PostWebMessageAsJson(json);
             return Task.CompletedTask;
         });
-        _bridgeAttachment = _bridgeController.Attach(dispatcher);
+        _bridgeAttachment = _bridgeController.Attach(
+            dispatcher,
+            BridgeSurface.Settings,
+            () => this);
         webView.CoreWebView2.WebMessageReceived += async (_, args) =>
         {
             await dispatcher.HandleRawMessageAsync(args.TryGetWebMessageAsString());

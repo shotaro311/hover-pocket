@@ -33,6 +33,7 @@ EXPECTED_SCHEMAS: dict[str, str] = {
     "execution-plan.schema.json": "hoverpocket://schemas/execution-plan/v1",
     "invocation.schema.json": "hoverpocket://schemas/invocation/v1",
     "pocket-app.schema.json": "hoverpocket://schemas/pocket-app/v1",
+    "pocket-app-generation-output.schema.json": "hoverpocket://schemas/pocket-app-generation-output/v1",
     "pocket-surface.schema.json": "hoverpocket://schemas/pocket-surface/v1",
     "pocket-workflow.schema.json": "hoverpocket://schemas/pocket-workflow/v1",
     "receipt.schema.json": "hoverpocket://schemas/receipt/v1",
@@ -865,7 +866,7 @@ def load_schemas(contract_dir: Path) -> tuple[dict[str, Mapping[str, Any]], dict
         fail(
             "SCHEMA_POLICY_VIOLATION",
             "contracts/pocket/v1",
-            f"expected exactly 12 schemas; expected={expected_files}, actual={actual_files}",
+            f"expected exactly {len(expected_files)} schemas; expected={expected_files}, actual={actual_files}",
         )
 
     by_filename: dict[str, Mapping[str, Any]] = {}

@@ -236,6 +236,11 @@ struct SettingsView: View {
             Text("Pocket Apps")
                 .font(.system(size: 13, weight: .bold))
 
+            Toggle(
+                localized(japanese: "AIネイティブ機能", english: "AI-native features"),
+                isOn: $settings.aiNativeEnabled
+            )
+
             if let package = aiNativeRuntime.pocketAppExecutionRuntime?.package {
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 8) {
@@ -280,6 +285,15 @@ struct SettingsView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if settings.aiNativeEnabled,
+               let generationController = aiNativeRuntime.pocketAppGenerationController {
+                Divider()
+                PocketAppGenerationSettingsView(
+                    controller: generationController,
+                    language: language
+                )
             }
         }
     }

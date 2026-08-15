@@ -91,13 +91,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .appendingPathComponent("PocketApps", isDirectory: true)
                 .appendingPathComponent("local.example.today-focus", isDirectory: true)
             let package = try PocketAppPackageRuntime().load(directory: packageRoot)
+            let pocketAppsRoot = applicationSupport
+                .appendingPathComponent("HoverPocket", isDirectory: true)
+                .appendingPathComponent("PocketApps", isDirectory: true)
+            let userDataRoot = pocketAppsRoot.appendingPathComponent("UserData", isDirectory: true)
             let userStateStore = try PocketAppUserStateStore(
                 packageID: package.manifest.id,
                 allowedKeys: package.statePropertyNames,
-                rootDirectory: applicationSupport
-                    .appendingPathComponent("HoverPocket", isDirectory: true)
-                    .appendingPathComponent("PocketApps", isDirectory: true)
-                    .appendingPathComponent("UserData", isDirectory: true)
+                rootDirectory: userDataRoot
             )
             let pocketAppRuntime = PocketAppExecutionRuntime(
                 package: package,
@@ -112,9 +113,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ],
                 userStateStore: userStateStore
             )
+            let generationController: PocketAppGenerationController?
+            do {
+                let generationRoot = pocketAppsRoot.appendingPathComponent("Generation", isDirectory: true)
+                let generator: (any PocketAppGenerationAdapter)?
+                if let executableURL = CodexPocketAppGenerationAdapter.resolveExecutable() {
+                    generator = try? CodexPocketAppGenerationAdapter(
+                        executableURL: executableURL,
+                        workspaceRoot: generationRoot.appendingPathComponent("CodexWorkspaces", isDirectory: true)
+                    )
+                } else {
+                    generator = nil
+                }
+                generationController = try PocketAppGenerationController(
+                    rootDirectory: pocketAppsRoot.appendingPathComponent("GeneratedHost", isDirectory: true),
+                    userDataRoot: userDataRoot,
+                    generationRoot: generationRoot.appendingPathComponent("Drafts", isDirectory: true),
+                    generator: generator
+                )
+            } catch {
+                generationController = nil
+            }
             AINativeRuntime.shared.configure(
                 adapter: TodayFocusTextAdapter(broker: broker),
-                pocketAppExecutionRuntime: pocketAppRuntime
+                pocketAppExecutionRuntime: pocketAppRuntime,
+                pocketAppGenerationController: generationController
             )
         } catch {
             AINativeRuntime.shared.configure(adapter: nil)
