@@ -121,6 +121,7 @@ final class PocketAppLifecycleManager {
     }
 
     private struct IssuedApproval {
+        let requestID: String
         let bindingDigest: String
         let expiresAt: Date
     }
@@ -173,6 +174,7 @@ final class PocketAppLifecycleManager {
     func stage(draftDirectory: URL, now: Date = Date()) throws -> PocketAppLifecycleProposal {
         var cleanupDirectory: URL?
         do {
+            try purgeExpiredApprovals(now: now)
             let sourceSnapshot = try PocketAppFileSnapshot.capture(directory: draftDirectory)
             let stagingID = UUID().uuidString.lowercased()
             let stagingDirectory = stagingRoot
@@ -263,10 +265,17 @@ final class PocketAppLifecycleManager {
               pending.bindingDigest == bindingDigest else {
             throw PocketAppLifecycleError.approvalInvalid
         }
-        guard now <= pending.expiresAt else { throw PocketAppLifecycleError.approvalExpired }
+        guard now <= pending.expiresAt else {
+            try discardPendingApproval(requestID: requestID, pending: pending)
+            throw PocketAppLifecycleError.approvalExpired
+        }
         decidedRequests.insert(requestID)
         let token = "install-grant:\(UUID().uuidString.lowercased())"
-        grants[token] = IssuedApproval(bindingDigest: bindingDigest, expiresAt: pending.expiresAt)
+        grants[token] = IssuedApproval(
+            requestID: requestID,
+            bindingDigest: bindingDigest,
+            expiresAt: pending.expiresAt
+        )
         return PocketAppLifecycleApprovalGrant(token: token)
     }
 
@@ -502,7 +511,10 @@ final class PocketAppLifecycleManager {
               pending.stagingDirectory == proposal.stagingDirectory else {
             throw PocketAppLifecycleError.approvalInvalid
         }
-        guard now <= proposal.expiresAt else { throw PocketAppLifecycleError.approvalExpired }
+        guard now <= proposal.expiresAt else {
+            try discardPendingApproval(requestID: proposal.requestID, pending: pending)
+            throw PocketAppLifecycleError.approvalExpired
+        }
         let current = try readActiveRecord(packageID: proposal.packageID)
         let currentDigest = current.flatMap { $0.state == .removed ? nil : $0.packageDigest }
         guard currentDigest == proposal.currentDigest,
@@ -688,6 +700,42 @@ final class PocketAppLifecycleManager {
     private func validateHostCompatibility(_ package: PocketAppPackage) throws {
         guard Self.compareSemanticVersions(package.manifest.minimumHostVersion, hostVersion) != .orderedDescending else {
             throw PocketAppLifecycleError.hostVersionUnsupported
+        }
+    }
+
+    private func purgeExpiredApprovals(now: Date) throws {
+        let expired = pendingApprovals.filter { now > $0.value.expiresAt }
+        for (requestID, pending) in expired {
+            try discardPendingApproval(requestID: requestID, pending: pending)
+        }
+        let orphanedTokens = grants.compactMap { token, issued in
+            now > issued.expiresAt ? token : nil
+        }
+        for token in orphanedTokens {
+            grants.removeValue(forKey: token)
+            consumedGrants.remove(token)
+        }
+    }
+
+    private func discardPendingApproval(requestID: String, pending: PendingApproval) throws {
+        if pending.disposableStaging {
+            let stagingParent = pending.stagingDirectory.deletingLastPathComponent()
+            if FileManager.default.fileExists(atPath: stagingParent.path) {
+                do {
+                    try FileManager.default.removeItem(at: stagingParent)
+                } catch {
+                    throw PocketAppLifecycleError.storageFailure
+                }
+            }
+        }
+        pendingApprovals.removeValue(forKey: requestID)
+        decidedRequests.remove(requestID)
+        let issuedTokens = grants.compactMap { token, issued in
+            issued.requestID == requestID ? token : nil
+        }
+        for token in issuedTokens {
+            grants.removeValue(forKey: token)
+            consumedGrants.remove(token)
         }
     }
 
@@ -902,6 +950,8 @@ final class PocketAppLifecycleManager {
                         try fileManager.removeItem(at: tombstone)
                     } else if tombstones.count == 1, !fileManager.fileExists(atPath: versions.path) {
                         try fileManager.moveItem(at: tombstone, to: versions)
+                        try makeImmutable(directory: versions)
+                        try verifyImmutable(directory: versions)
                     } else {
                         throw PocketAppLifecycleError.corruptVersion
                     }

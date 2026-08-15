@@ -371,6 +371,33 @@ internal sealed class PocketAppPackageVerifier
                 catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_APPROVAL_EXPIRED")
                 {
                 }
+                Require(
+                    !Directory.Exists(Directory.GetParent(expired.StagingDirectory)!.FullName),
+                    "lifecycle_expired_approval_cleanup");
+
+                var expiredInstall = manager.Stage(draftRoot, now.AddSeconds(302));
+                var expiredInstallGrant = manager.Approve(
+                    expiredInstall.RequestId,
+                    expiredInstall.BindingDigest,
+                    now.AddSeconds(302));
+                try
+                {
+                    _ = manager.Install(expiredInstall, expiredInstallGrant, now.AddSeconds(603));
+                    _failures.Add("lifecycle_expired_install_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_APPROVAL_EXPIRED")
+                {
+                }
+                Require(
+                    !Directory.Exists(Directory.GetParent(expiredInstall.StagingDirectory)!.FullName),
+                    "lifecycle_expired_install_cleanup");
+
+                var abandoned = manager.Stage(draftRoot, now.AddSeconds(604));
+                var replacement = manager.Stage(draftRoot, now.AddSeconds(905));
+                Require(
+                    !Directory.Exists(Directory.GetParent(abandoned.StagingDirectory)!.FullName),
+                    "lifecycle_stage_purges_expired");
+                manager.Reject(replacement.RequestId, replacement.BindingDigest);
 
                 var changed = manager.Stage(draftRoot, now);
                 var changedGrant = manager.Approve(changed.RequestId, changed.BindingDigest, now);
@@ -435,6 +462,17 @@ internal sealed class PocketAppPackageVerifier
                 Require(
                     File.GetAttributes(recoveredIntent).HasFlag(FileAttributes.ReadOnly),
                     "lifecycle_remove_failure_rehardened");
+                var recoveryVersions = Path.Combine(root, "Apps", clean.PackageId, "Versions");
+                var recoveryTombstone = Path.Combine(root, "Apps", clean.PackageId, ".removed-Versions-recovery");
+                PocketAppVerifierFileSystem.MakeTreeMutable(recoveryVersions);
+                Directory.Move(recoveryVersions, recoveryTombstone);
+                var startupRecoveredManager = new PocketAppLifecycleManager(root, dataRoot);
+                Require(
+                    startupRecoveredManager.ActivePackage(clean.PackageId)?.Manifest.Version == "1.0.0",
+                    "lifecycle_startup_remove_recovery_active");
+                Require(
+                    File.GetAttributes(recoveredIntent).HasFlag(FileAttributes.ReadOnly),
+                    "lifecycle_startup_remove_recovery_rehardened");
                 MutateJson(Path.Combine(draftRoot, "manifest.json"), manifest => manifest["version"] = "1.0.0");
                 MutateJson(Path.Combine(draftRoot, "data.schema.json"), schema =>
                 {

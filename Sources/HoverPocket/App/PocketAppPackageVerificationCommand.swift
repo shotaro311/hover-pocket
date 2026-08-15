@@ -403,6 +403,41 @@ enum PocketAppPackageVerificationCommand {
                     failures.append("lifecycle_stale_approval_accepted")
                 } catch PocketAppLifecycleError.approvalExpired {
                 }
+                require(
+                    !FileManager.default.fileExists(atPath: expired.stagingDirectory.deletingLastPathComponent().path),
+                    "lifecycle_expired_approval_cleanup",
+                    failures: &failures
+                )
+
+                let expiredInstall = try manager.stage(draftDirectory: draftRoot, now: now.addingTimeInterval(302))
+                let expiredInstallGrant = try manager.approve(
+                    requestID: expiredInstall.requestID,
+                    bindingDigest: expiredInstall.bindingDigest,
+                    now: now.addingTimeInterval(302)
+                )
+                do {
+                    _ = try manager.install(
+                        expiredInstall,
+                        approvalGrant: expiredInstallGrant,
+                        now: now.addingTimeInterval(603)
+                    )
+                    failures.append("lifecycle_expired_install_accepted")
+                } catch PocketAppLifecycleError.approvalExpired {
+                }
+                require(
+                    !FileManager.default.fileExists(atPath: expiredInstall.stagingDirectory.deletingLastPathComponent().path),
+                    "lifecycle_expired_install_cleanup",
+                    failures: &failures
+                )
+
+                let abandoned = try manager.stage(draftDirectory: draftRoot, now: now.addingTimeInterval(604))
+                let replacement = try manager.stage(draftDirectory: draftRoot, now: now.addingTimeInterval(905))
+                require(
+                    !FileManager.default.fileExists(atPath: abandoned.stagingDirectory.deletingLastPathComponent().path),
+                    "lifecycle_stage_purges_expired",
+                    failures: &failures
+                )
+                try manager.reject(requestID: replacement.requestID, bindingDigest: replacement.bindingDigest)
 
                 let changed = try manager.stage(draftDirectory: draftRoot, now: now)
                 let changedGrant = try manager.approve(requestID: changed.requestID, bindingDigest: changed.bindingDigest, now: now)
@@ -478,6 +513,24 @@ enum PocketAppPackageVerificationCommand {
                 require(
                     recoveredPermissions.map { $0 & 0o222 == 0 } == true,
                     "lifecycle_remove_failure_rehardened",
+                    failures: &failures
+                )
+                let recoveryVersions = root.appendingPathComponent("Apps/\(clean.packageID)/Versions", isDirectory: true)
+                let recoveryTombstone = root
+                    .appendingPathComponent("Apps/\(clean.packageID)/.removed-Versions-recovery", isDirectory: true)
+                makeTreeMutable(recoveryVersions)
+                try FileManager.default.moveItem(at: recoveryVersions, to: recoveryTombstone)
+                let startupRecoveredManager = try PocketAppLifecycleManager(rootDirectory: root, userDataRoot: dataRoot)
+                require(
+                    try startupRecoveredManager.activePackage(packageID: clean.packageID)?.manifest.version == "1.0.0",
+                    "lifecycle_startup_remove_recovery_active",
+                    failures: &failures
+                )
+                let startupRecoveredAttributes = try FileManager.default.attributesOfItem(atPath: recoveredIntent.path)
+                let startupRecoveredPermissions = (startupRecoveredAttributes[.posixPermissions] as? NSNumber)?.intValue
+                require(
+                    startupRecoveredPermissions.map { $0 & 0o222 == 0 } == true,
+                    "lifecycle_startup_remove_recovery_rehardened",
                     failures: &failures
                 )
                 try mutateJSON(draftRoot.appendingPathComponent("manifest.json")) { manifest in

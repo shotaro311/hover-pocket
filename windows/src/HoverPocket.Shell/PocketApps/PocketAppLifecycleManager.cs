@@ -96,7 +96,7 @@ internal sealed class PocketAppLifecycleManager
         DateTimeOffset ExpiresAt,
         string StagingDirectory,
         bool DisposableStaging);
-    private sealed record IssuedApproval(string BindingDigest, DateTimeOffset ExpiresAt);
+    private sealed record IssuedApproval(string RequestId, string BindingDigest, DateTimeOffset ExpiresAt);
 
     private static readonly TimeSpan ApprovalLifetime = TimeSpan.FromMinutes(5);
     private readonly string _rootDirectory;
@@ -153,6 +153,7 @@ internal sealed class PocketAppLifecycleManager
         string? cleanupDirectory = null;
         try
         {
+            PurgeExpiredApprovals(timestamp);
             var sourceSnapshot = PocketAppFileSnapshot.Capture(draftDirectory);
             var stagingDirectory = Path.Combine(StagingRoot, Guid.NewGuid().ToString("N"), "package");
             cleanupDirectory = Directory.GetParent(stagingDirectory)?.FullName;
@@ -253,11 +254,12 @@ internal sealed class PocketAppLifecycleManager
         }
         if ((now ?? DateTimeOffset.UtcNow) > pending.ExpiresAt)
         {
+            DiscardPendingApproval(requestId, pending);
             throw Failure("LIFECYCLE_APPROVAL_EXPIRED");
         }
         _decidedRequests.Add(requestId);
         var token = $"install-grant:{Guid.NewGuid():N}";
-        _grants[token] = new IssuedApproval(bindingDigest, pending.ExpiresAt);
+        _grants[token] = new IssuedApproval(requestId, bindingDigest, pending.ExpiresAt);
         return new PocketAppLifecycleApprovalGrant(token);
     }
 
@@ -528,7 +530,11 @@ internal sealed class PocketAppLifecycleManager
         {
             throw Failure("LIFECYCLE_APPROVAL_INVALID");
         }
-        if (now > proposal.ExpiresAt) { throw Failure("LIFECYCLE_APPROVAL_EXPIRED"); }
+        if (now > proposal.ExpiresAt)
+        {
+            DiscardPendingApproval(proposal.RequestId, pending);
+            throw Failure("LIFECYCLE_APPROVAL_EXPIRED");
+        }
         var current = ReadActiveRecord(proposal.PackageId);
         var currentDigest = current is null || current.State == PocketAppLifecycleState.Removed
             ? null
@@ -761,6 +767,45 @@ internal sealed class PocketAppLifecycleManager
         if (CompareSemanticVersions(package.Manifest.MinimumHostVersion, _hostVersion) > 0)
         {
             throw Failure("LIFECYCLE_HOST_VERSION_UNSUPPORTED");
+        }
+    }
+
+    private void PurgeExpiredApprovals(DateTimeOffset now)
+    {
+        foreach (var item in _pendingApprovals.Where(item => now > item.Value.ExpiresAt).ToArray())
+        {
+            DiscardPendingApproval(item.Key, item.Value);
+        }
+        foreach (var token in _grants.Where(item => now > item.Value.ExpiresAt).Select(item => item.Key).ToArray())
+        {
+            _grants.Remove(token);
+            _consumedGrants.Remove(token);
+        }
+    }
+
+    private void DiscardPendingApproval(string requestId, PendingApproval pending)
+    {
+        if (pending.DisposableStaging)
+        {
+            try
+            {
+                var stagingParent = Directory.GetParent(pending.StagingDirectory)?.FullName;
+                if (stagingParent is not null && Directory.Exists(stagingParent))
+                {
+                    Directory.Delete(stagingParent, true);
+                }
+            }
+            catch
+            {
+                throw Failure("LIFECYCLE_STORAGE_FAILED");
+            }
+        }
+        _pendingApprovals.Remove(requestId);
+        _decidedRequests.Remove(requestId);
+        foreach (var token in _grants.Where(item => item.Value.RequestId == requestId).Select(item => item.Key).ToArray())
+        {
+            _grants.Remove(token);
+            _consumedGrants.Remove(token);
         }
     }
 
@@ -1023,6 +1068,8 @@ internal sealed class PocketAppLifecycleManager
                     else if (tombstones.Length == 1 && !Directory.Exists(versionsPath))
                     {
                         Directory.Move(tombstone, versionsPath);
+                        MakeImmutable(versionsPath);
+                        VerifyImmutable(versionsPath);
                     }
                     else
                     {
