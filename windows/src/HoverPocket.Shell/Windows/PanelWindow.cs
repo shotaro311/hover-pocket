@@ -131,15 +131,6 @@ internal sealed class PanelWindow : NoActivateWindow
         return applicationData.IsIsolatedVoiceE2E;
     }
 
-    protected override void OnSourceInitialized(EventArgs e)
-    {
-        base.OnSourceInitialized(e);
-        if (ExposesToAutomation)
-        {
-            NativeMethods.SetToolWindowStyle(Hwnd, enabled: false);
-        }
-    }
-
     public void ReleaseBridgeAttachment()
     {
         _bridgeAttachment?.Dispose();
@@ -597,6 +588,10 @@ internal sealed class PanelWindow : NoActivateWindow
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
+        if (ExposesToAutomation)
+        {
+            NativeMethods.SetToolWindowStyle(Hwnd, enabled: false);
+        }
         ApplyRoundedRegion();
     }
 
