@@ -298,7 +298,7 @@ internal sealed class PocketAppPackageVerifier
                     "Apps",
                     proposal.PackageId,
                     "Versions",
-                    proposal.Version,
+                    VersionStorageKey(proposal.Version),
                     proposal.PackageDigest["sha256:".Length..],
                     "package",
                     "intent.md");
@@ -518,7 +518,7 @@ internal sealed class PocketAppPackageVerifier
                     "Apps",
                     clean.PackageId,
                     "Versions",
-                    clean.Version,
+                    VersionStorageKey(clean.Version),
                     clean.PackageDigest["sha256:".Length..],
                     "package",
                     "intent.md");
@@ -560,7 +560,7 @@ internal sealed class PocketAppPackageVerifier
                     "Apps",
                     clean.PackageId,
                     "Versions",
-                    clean.Version,
+                    VersionStorageKey(clean.Version),
                     clean.PackageDigest["sha256:".Length..],
                     "package",
                     "intent.md");
@@ -765,6 +765,44 @@ internal sealed class PocketAppPackageVerifier
 
         WithPackage(draftRoot =>
         {
+            var root = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-case-version-{Guid.NewGuid():N}");
+            var dataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-case-version-data-{Guid.NewGuid():N}");
+            try
+            {
+                using var manager = new PocketAppLifecycleManager(root, dataRoot);
+                MutateJson(Path.Combine(draftRoot, "manifest.json"), manifest => manifest["version"] = "1.0.0-ALPHA");
+                var initial = manager.Stage(draftRoot, now);
+                var initialGrant = manager.Approve(initial.RequestId, initial.BindingDigest, now);
+                _ = manager.Install(initial, initialGrant, now);
+                MutateJson(Path.Combine(draftRoot, "manifest.json"), manifest => manifest["version"] = "1.0.0-alpha");
+                var update = manager.Stage(draftRoot, now.AddSeconds(1));
+                var updateGrant = manager.Approve(update.RequestId, update.BindingDigest, now.AddSeconds(1));
+                _ = manager.Install(update, updateGrant, now.AddSeconds(1));
+                Require(
+                    manager.ActivePackage(initial.PackageId)?.Manifest.Version == "1.0.0-alpha",
+                    "lifecycle_case_distinct_version_update");
+                var rollback = manager.PrepareRollback(initial.PackageId, "1.0.0-ALPHA", now.AddSeconds(2));
+                var rollbackGrant = manager.Approve(rollback.RequestId, rollback.BindingDigest, now.AddSeconds(2));
+                _ = manager.Rollback(rollback, rollbackGrant, now.AddSeconds(2));
+                Require(
+                    manager.ActivePackage(initial.PackageId)?.Manifest.Version == "1.0.0-ALPHA",
+                    "lifecycle_case_distinct_version_rollback");
+                Require(
+                    Directory.EnumerateDirectories(Path.Combine(root, "Apps", initial.PackageId, "Versions"))
+                        .Select(Path.GetFileName)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Count() == 2,
+                    "lifecycle_case_distinct_version_storage");
+            }
+            finally
+            {
+                try { if (Directory.Exists(root)) { PocketAppVerifierFileSystem.MakeTreeMutable(root); Directory.Delete(root, true); } } catch { }
+                try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
+            }
+        }, "lifecycle_case_distinct_version");
+
+        WithPackage(draftRoot =>
+        {
             var root = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-test-gate-{Guid.NewGuid():N}");
             var dataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-lifecycle-test-gate-data-{Guid.NewGuid():N}");
             try
@@ -937,6 +975,9 @@ internal sealed class PocketAppPackageVerifier
         }
         throw new FileNotFoundException(relativePath);
     }
+
+    private static string VersionStorageKey(string version) =>
+        "v-" + Convert.ToHexString(Encoding.UTF8.GetBytes(version)).ToLowerInvariant();
 
     private void Require(bool condition, string label)
     {

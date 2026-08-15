@@ -645,7 +645,7 @@ final class PocketAppLifecycleManager {
         package: PocketAppPackage
     ) throws -> URL {
         let versionRoot = versionsRoot(packageID: package.manifest.id)
-            .appendingPathComponent(package.manifest.version, isDirectory: true)
+            .appendingPathComponent(Self.versionStorageKey(package.manifest.version), isDirectory: true)
         try FileManager.default.createDirectory(
             at: versionRoot,
             withIntermediateDirectories: true,
@@ -670,6 +670,11 @@ final class PocketAppLifecycleManager {
             guard hardened.manifestDigest == package.manifestDigest else {
                 throw PocketAppLifecycleError.readbackFailed
             }
+            try durablySynchronizeInstalledSnapshot(
+                finalRoot: finalRoot,
+                versionRoot: versionRoot,
+                packageID: package.manifest.id
+            )
             return finalPackage
         }
 
@@ -694,6 +699,11 @@ final class PocketAppLifecycleManager {
             guard readback.manifestDigest == package.manifestDigest else {
                 throw PocketAppLifecycleError.readbackFailed
             }
+            try durablySynchronizeInstalledSnapshot(
+                finalRoot: finalRoot,
+                versionRoot: versionRoot,
+                packageID: package.manifest.id
+            )
             return finalPackage
         } catch {
             let cleanupRoot = movedToFinal ? finalRoot : temporaryRoot
@@ -911,6 +921,64 @@ final class PocketAppLifecycleManager {
         guard fsync(directoryDescriptor) == 0 else { throw PocketAppLifecycleError.storageFailure }
     }
 
+    private func durablySynchronizeInstalledSnapshot(
+        finalRoot: URL,
+        versionRoot: URL,
+        packageID: String
+    ) throws {
+        if failureInjection?("snapshot_sync") == true { throw PocketAppLifecycleError.storageFailure }
+        try ensureNoSymlinks(in: finalRoot)
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey]
+        guard let enumerator = FileManager.default.enumerator(
+            at: finalRoot,
+            includingPropertiesForKeys: Array(keys),
+            options: []
+        ) else {
+            throw PocketAppLifecycleError.storageFailure
+        }
+        var files: [URL] = []
+        var directories: [URL] = [finalRoot]
+        for case let url as URL in enumerator {
+            let values = try url.resourceValues(forKeys: keys)
+            guard values.isSymbolicLink != true else { throw PocketAppLifecycleError.storageFailure }
+            if values.isDirectory == true {
+                directories.append(url)
+            } else if values.isRegularFile == true {
+                files.append(url)
+            } else {
+                throw PocketAppLifecycleError.storageFailure
+            }
+        }
+        for file in files.sorted(by: { $0.path < $1.path }) {
+            try Self.durablySynchronize(node: file, isDirectory: false)
+        }
+        for directory in directories.sorted(by: {
+            $0.pathComponents.count == $1.pathComponents.count
+                ? $0.path > $1.path
+                : $0.pathComponents.count > $1.pathComponents.count
+        }) {
+            try Self.durablySynchronize(node: directory, isDirectory: true)
+        }
+        for directory in [
+            versionRoot,
+            versionsRoot(packageID: packageID),
+            appRoot(packageID: packageID),
+            appsRoot,
+            rootDirectory
+        ] {
+            try Self.durablySynchronize(node: directory, isDirectory: true)
+        }
+    }
+
+    private static func durablySynchronize(node: URL, isDirectory: Bool) throws {
+        var flags = O_RDONLY | O_NOFOLLOW
+        if isDirectory { flags |= O_DIRECTORY }
+        let descriptor = open(node.path, flags)
+        guard descriptor >= 0 else { throw PocketAppLifecycleError.storageFailure }
+        defer { close(descriptor) }
+        guard fsync(descriptor) == 0 else { throw PocketAppLifecycleError.storageFailure }
+    }
+
     private func restore(record: ActiveRecord?, packageID: String) throws {
         if let record {
             try write(record: record)
@@ -961,7 +1029,8 @@ final class PocketAppLifecycleManager {
     }
 
     private func uniqueVersionDirectory(packageID: String, version: String) throws -> URL {
-        let versionRoot = versionsRoot(packageID: packageID).appendingPathComponent(version, isDirectory: true)
+        let versionRoot = versionsRoot(packageID: packageID)
+            .appendingPathComponent(Self.versionStorageKey(version), isDirectory: true)
         let candidates = try FileManager.default.contentsOfDirectory(at: versionRoot, includingPropertiesForKeys: nil)
             .filter { !$0.lastPathComponent.hasPrefix(".installing-") }
         guard candidates.count == 1 else { throw PocketAppLifecycleError.corruptVersion }
@@ -1124,9 +1193,13 @@ final class PocketAppLifecycleManager {
     private func activeRecordURL(packageID: String) -> URL { appRoot(packageID: packageID).appendingPathComponent("active.json") }
     private func installedPackageDirectory(packageID: String, version: String, digest: String) -> URL {
         versionsRoot(packageID: packageID)
-            .appendingPathComponent(version, isDirectory: true)
+            .appendingPathComponent(Self.versionStorageKey(version), isDirectory: true)
             .appendingPathComponent(String(digest.dropFirst("sha256:".count)), isDirectory: true)
             .appendingPathComponent("package", isDirectory: true)
+    }
+
+    private static func versionStorageKey(_ version: String) -> String {
+        "v-" + version.utf8.map { String(format: "%02x", $0) }.joined()
     }
 
     private static func approvalBindingDigest(

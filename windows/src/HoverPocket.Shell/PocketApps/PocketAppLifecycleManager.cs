@@ -699,7 +699,7 @@ internal sealed class PocketAppLifecycleManager : IDisposable
 
     private string InstallImmutableSnapshot(PocketAppFileSnapshot snapshot, PocketAppPackage package)
     {
-        var versionRoot = Path.Combine(VersionsRoot(package.Manifest.Id), package.Manifest.Version);
+        var versionRoot = Path.Combine(VersionsRoot(package.Manifest.Id), VersionStorageKey(package.Manifest.Version));
         Directory.CreateDirectory(versionRoot);
         var digestName = package.ManifestDigest["sha256:".Length..];
         var finalRoot = Path.Combine(versionRoot, digestName);
@@ -1067,7 +1067,7 @@ internal sealed class PocketAppLifecycleManager : IDisposable
 
     private string UniqueVersionDirectory(string packageId, string version)
     {
-        var versionRoot = Path.Combine(VersionsRoot(packageId), version);
+        var versionRoot = Path.Combine(VersionsRoot(packageId), VersionStorageKey(version));
         if (!Directory.Exists(versionRoot)) { throw Failure("LIFECYCLE_CORRUPT_VERSION"); }
         var candidates = Directory.EnumerateDirectories(versionRoot)
             .Where(path => !Path.GetFileName(path).StartsWith(".installing-", StringComparison.Ordinal))
@@ -1266,7 +1266,10 @@ internal sealed class PocketAppLifecycleManager : IDisposable
     private string VersionsRoot(string packageId) => Path.Combine(AppRoot(packageId), "Versions");
     private string ActiveRecordPath(string packageId) => Path.Combine(AppRoot(packageId), "active.json");
     private string InstalledPackageDirectory(string packageId, string version, string digest) =>
-        Path.Combine(VersionsRoot(packageId), version, digest["sha256:".Length..], "package");
+        Path.Combine(VersionsRoot(packageId), VersionStorageKey(version), digest["sha256:".Length..], "package");
+
+    private static string VersionStorageKey(string version) =>
+        "v-" + Convert.ToHexString(Encoding.UTF8.GetBytes(version)).ToLowerInvariant();
 
     private static string ApprovalBindingDigest(
         PocketAppLifecycleAction action,

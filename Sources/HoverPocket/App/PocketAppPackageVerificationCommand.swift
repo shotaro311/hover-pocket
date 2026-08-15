@@ -331,7 +331,7 @@ enum PocketAppPackageVerificationCommand {
                 try Data(contentsOf: fixtureURL("package/intent.md")).write(to: draftRoot.appendingPathComponent("intent.md"), options: .atomic)
 
                 let installedIntent = root
-                    .appendingPathComponent("Apps/\(proposal.packageID)/Versions/\(proposal.version)/\(proposal.packageDigest.dropFirst("sha256:".count))/package/intent.md")
+                    .appendingPathComponent("Apps/\(proposal.packageID)/Versions/\(versionStorageKey(proposal.version))/\(proposal.packageDigest.dropFirst("sha256:".count))/package/intent.md")
                 try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: installedIntent.path)
                 let reharden = try manager.stage(draftDirectory: draftRoot, now: now.addingTimeInterval(0.5))
                 let rehardenGrant = try manager.approve(
@@ -555,6 +555,32 @@ enum PocketAppPackageVerificationCommand {
                 require(reconciled.permissionDiff.added.isEmpty, "lifecycle_active_record_permission_reconciled", failures: &failures)
                 try manager.reject(requestID: reconciled.requestID, bindingDigest: reconciled.bindingDigest)
 
+                let syncFailingManager = try PocketAppLifecycleManager(
+                    rootDirectory: root,
+                    userDataRoot: dataRoot,
+                    failureInjection: { $0 == "snapshot_sync" }
+                )
+                let syncFailure = try syncFailingManager.stage(draftDirectory: draftRoot, now: now.addingTimeInterval(1))
+                let syncFailureGrant = try syncFailingManager.approve(
+                    requestID: syncFailure.requestID,
+                    bindingDigest: syncFailure.bindingDigest,
+                    now: now.addingTimeInterval(1)
+                )
+                do {
+                    _ = try syncFailingManager.install(
+                        syncFailure,
+                        approvalGrant: syncFailureGrant,
+                        now: now.addingTimeInterval(1)
+                    )
+                    failures.append("lifecycle_snapshot_sync_failure_accepted")
+                } catch PocketAppLifecycleError.storageFailure {
+                }
+                require(
+                    try syncFailingManager.activePackage(packageID: clean.packageID)?.manifest.version == "1.0.0",
+                    "lifecycle_snapshot_sync_precedes_active_commit",
+                    failures: &failures
+                )
+
                 let failingManager = try PocketAppLifecycleManager(
                     rootDirectory: root,
                     userDataRoot: dataRoot,
@@ -596,7 +622,7 @@ enum PocketAppPackageVerificationCommand {
                     failures: &failures
                 )
                 let recoveredIntent = root
-                    .appendingPathComponent("Apps/\(clean.packageID)/Versions/\(clean.version)/\(clean.packageDigest.dropFirst("sha256:".count))/package/intent.md")
+                    .appendingPathComponent("Apps/\(clean.packageID)/Versions/\(versionStorageKey(clean.version))/\(clean.packageDigest.dropFirst("sha256:".count))/package/intent.md")
                 let recoveredAttributes = try FileManager.default.attributesOfItem(atPath: recoveredIntent.path)
                 let recoveredPermissions = (recoveredAttributes[.posixPermissions] as? NSNumber)?.intValue
                 require(
@@ -648,7 +674,7 @@ enum PocketAppPackageVerificationCommand {
                 }
 
                 let corrupt = root
-                    .appendingPathComponent("Apps/\(clean.packageID)/Versions/\(clean.version)/\(clean.packageDigest.dropFirst("sha256:".count))/package/intent.md")
+                    .appendingPathComponent("Apps/\(clean.packageID)/Versions/\(versionStorageKey(clean.version))/\(clean.packageDigest.dropFirst("sha256:".count))/package/intent.md")
                 try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: corrupt.path)
                 try Data("corrupt".utf8).write(to: corrupt)
                 do {
@@ -794,6 +820,75 @@ enum PocketAppPackageVerificationCommand {
             }
         } catch {
             failures.append("lifecycle_large_version:\(error)")
+        }
+
+        do {
+            try withPackage { draftRoot in
+                let root = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("hover-pocket-lifecycle-case-version-\(UUID().uuidString)", isDirectory: true)
+                let dataRoot = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("hover-pocket-lifecycle-case-version-data-\(UUID().uuidString)", isDirectory: true)
+                defer {
+                    makeTreeMutable(root)
+                    try? FileManager.default.removeItem(at: root)
+                    try? FileManager.default.removeItem(at: dataRoot)
+                }
+                let manager = try PocketAppLifecycleManager(rootDirectory: root, userDataRoot: dataRoot)
+                try mutateJSON(draftRoot.appendingPathComponent("manifest.json")) { manifest in
+                    manifest["version"] = "1.0.0-ALPHA"
+                    return true
+                }
+                let initial = try manager.stage(draftDirectory: draftRoot, now: now)
+                let initialGrant = try manager.approve(
+                    requestID: initial.requestID,
+                    bindingDigest: initial.bindingDigest,
+                    now: now
+                )
+                _ = try manager.install(initial, approvalGrant: initialGrant, now: now)
+                try mutateJSON(draftRoot.appendingPathComponent("manifest.json")) { manifest in
+                    manifest["version"] = "1.0.0-alpha"
+                    return true
+                }
+                let update = try manager.stage(draftDirectory: draftRoot, now: now.addingTimeInterval(1))
+                let updateGrant = try manager.approve(
+                    requestID: update.requestID,
+                    bindingDigest: update.bindingDigest,
+                    now: now.addingTimeInterval(1)
+                )
+                _ = try manager.install(update, approvalGrant: updateGrant, now: now.addingTimeInterval(1))
+                require(
+                    try manager.activePackage(packageID: initial.packageID)?.manifest.version == "1.0.0-alpha",
+                    "lifecycle_case_distinct_version_update",
+                    failures: &failures
+                )
+                let rollback = try manager.prepareRollback(
+                    packageID: initial.packageID,
+                    version: "1.0.0-ALPHA",
+                    now: now.addingTimeInterval(2)
+                )
+                let rollbackGrant = try manager.approve(
+                    requestID: rollback.requestID,
+                    bindingDigest: rollback.bindingDigest,
+                    now: now.addingTimeInterval(2)
+                )
+                _ = try manager.rollback(rollback, approvalGrant: rollbackGrant, now: now.addingTimeInterval(2))
+                require(
+                    try manager.activePackage(packageID: initial.packageID)?.manifest.version == "1.0.0-ALPHA",
+                    "lifecycle_case_distinct_version_rollback",
+                    failures: &failures
+                )
+                let versionDirectories = try FileManager.default.contentsOfDirectory(
+                    at: root.appendingPathComponent("Apps/\(initial.packageID)/Versions", isDirectory: true),
+                    includingPropertiesForKeys: nil
+                )
+                require(
+                    Set(versionDirectories.map(\.lastPathComponent)).count == 2,
+                    "lifecycle_case_distinct_version_storage",
+                    failures: &failures
+                )
+            }
+        } catch {
+            failures.append("lifecycle_case_distinct_version:\(error)")
         }
 
         do {
@@ -976,6 +1071,10 @@ enum PocketAppPackageVerificationCommand {
             current.deleteLastPathComponent()
         }
         return current.appendingPathComponent("missing-fixture")
+    }
+
+    private static func versionStorageKey(_ version: String) -> String {
+        "v-" + version.utf8.map { String(format: "%02x", $0) }.joined()
     }
 
     private static func require(_ condition: Bool, _ label: String, failures: inout [String]) {
