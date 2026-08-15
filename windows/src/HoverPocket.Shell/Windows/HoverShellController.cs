@@ -35,6 +35,7 @@ internal sealed class HoverShellController : IDisposable
     private readonly bool _enablePanelWebView;
     private readonly bool _enableDevTools;
     private readonly bool _deterministicVerification;
+    private readonly bool _keepPanelOpenForVoiceE2E;
     private readonly PanelBridgeController _panelBridgeController;
     private readonly DisplayLayoutService _displayLayoutService = new();
     private readonly List<AccessSurfaceWindow> _accessSurfaces = [];
@@ -77,6 +78,7 @@ internal sealed class HoverShellController : IDisposable
         _enablePanelWebView = enablePanelWebView;
         _enableDevTools = enableDevTools;
         _deterministicVerification = deterministicVerification;
+        _keepPanelOpenForVoiceE2E = ShouldKeepPanelOpenForVoiceE2E(applicationData);
         _hoverTracePath = applicationData.ResolveHoverTracePath(
             Environment.GetEnvironmentVariable("HOVERPOCKET_HOVER_TRACE"));
         var userSettings = userSettingsStore.Load(providerRegistry.ProviderIds);
@@ -117,7 +119,7 @@ internal sealed class HoverShellController : IDisposable
             var pointer = GetPointerPosition();
             var inside = IsPointerInHoverRegion(pointer, out var hoveredLayout);
             TraceHover("close-delay", pointer, inside, hoveredLayout, inside ? "keep-open" : "close");
-            if (!_timerAlertActive && !inside)
+            if (!_keepPanelOpenForVoiceE2E && !_timerAlertActive && !inside)
             {
                 _ = HidePanelAsync();
             }
@@ -151,6 +153,12 @@ internal sealed class HoverShellController : IDisposable
     public bool HealthTimerEnabledForVerify => _healthTimer.IsEnabled;
 
     public bool PanelExpectedVisibleForVerify => _panelExpectedVisible;
+
+    internal static bool ShouldKeepPanelOpenForVoiceE2E(
+        HoverPocketApplicationData applicationData)
+    {
+        return applicationData.IsIsolatedVoiceE2E;
+    }
 
     public void Start()
     {
@@ -208,6 +216,14 @@ internal sealed class HoverShellController : IDisposable
     public void ClearPointerSimulationForVerify()
     {
         _pointerOverrideForVerify = null;
+    }
+
+    public Task PrepareForApplicationShutdownAsync()
+    {
+        _pollingTimer.Stop();
+        _closeDelayTimer.Stop();
+        _healthTimer.Stop();
+        return _panelBridgeController.PrepareForApplicationShutdownAsync();
     }
 
     public Task<ShellHealthReport> RunHealthCheckForVerifyAsync()
@@ -439,6 +455,7 @@ internal sealed class HoverShellController : IDisposable
         if (_panel.IsVisible
             && _closingTask is not { IsCompleted: false }
             && !_closeDelayTimer.IsEnabled
+            && !_keepPanelOpenForVoiceE2E
             && !_timerAlertActive)
         {
             TraceHover("poll", pointer, false, _activeLayout, "start-close-delay");

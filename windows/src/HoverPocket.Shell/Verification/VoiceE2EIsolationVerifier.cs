@@ -8,6 +8,7 @@ using HoverPocket.Shell.Providers.CodexVoice;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
 using HoverPocket.Shell.Services;
+using HoverPocket.Shell.Windows;
 
 namespace HoverPocket.Shell.Verification;
 
@@ -312,6 +313,13 @@ internal sealed class VoiceE2EIsolationVerifier
         Check(!settings.AutoCheckForUpdates, "isolated default enabled updater checks");
         Check(!settings.StartWithWindows, "isolated default enabled startup registration");
         Check(settings.ClipboardPrivateMode, "isolated default enabled Clipboard monitoring");
+        Check(
+            HoverShellController.ShouldKeepPanelOpenForVoiceE2E(applicationData),
+            "isolated Voice E2E mode did not retain the panel for explicit UI interaction");
+        Check(
+            !HoverShellController.ShouldKeepPanelOpenForVoiceE2E(
+                HoverPocketApplicationData.ProductionDefault()),
+            "production mode retained the panel with the Voice E2E policy");
 
         var sticky = new StickyNotesStore(applicationData.StickyDirectory);
         using var timer = new TimerStore(applicationData.TimerDirectory, enableScheduler: false);

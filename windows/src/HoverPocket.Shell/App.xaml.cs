@@ -25,6 +25,7 @@ public partial class App : System.Windows.Application
     private UpdaterService? _updaterService;
     private StartupOptions? _startupOptions;
     private HoverPocketApplicationData? _applicationData;
+    private int _voiceE2EShutdownState;
 
     internal void ConfigureStartup(
         StartupOptions options,
@@ -225,7 +226,7 @@ public partial class App : System.Windows.Application
         singleInstanceGate.ShowPanelRequested += (_, _) =>
             Dispatcher.BeginInvoke(shellController.ShowPanelFromUser);
         singleInstanceGate.StopRequested += (_, _) =>
-            Dispatcher.BeginInvoke(new Action(Shutdown));
+            Dispatcher.BeginInvoke(BeginVoiceE2EShutdown);
         shellController.Start();
 
         if (options.VerifyShell || options.VerifyDisplay || options.VerifyUi)
@@ -253,6 +254,35 @@ public partial class App : System.Windows.Application
         _shellController?.Dispose();
         _singleInstanceGate?.Dispose();
         base.OnExit(e);
+    }
+
+    private void BeginVoiceE2EShutdown()
+    {
+        if (Interlocked.Exchange(ref _voiceE2EShutdownState, 1) != 0)
+        {
+            return;
+        }
+
+        _ = CompleteVoiceE2EShutdownAsync();
+    }
+
+    private async Task CompleteVoiceE2EShutdownAsync()
+    {
+        try
+        {
+            if (_shellController is not null)
+            {
+                await _shellController.PrepareForApplicationShutdownAsync();
+            }
+        }
+        catch (Exception)
+        {
+            Environment.ExitCode = 1;
+        }
+        finally
+        {
+            Shutdown();
+        }
     }
 
     private async Task RunShellVerificationAsync()

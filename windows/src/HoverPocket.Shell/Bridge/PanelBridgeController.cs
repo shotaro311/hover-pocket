@@ -39,12 +39,14 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly CodexVoiceE2EReceiptStore? _voiceE2EReceipt;
     private readonly List<BridgeDispatcher> _dispatchers = [];
     private readonly object _previewFrameSync = new();
+    private readonly object _voiceShutdownSync = new();
     private string _selectedProviderId;
     private VoiceLaneLayoutState _resolvedVoiceLaneLayout;
     private MediaPreviewFrame? _pendingPreviewFrame;
     private bool _previewPostScheduled;
     private bool _panelOpen;
     private bool _disposed;
+    private Task? _voiceShutdownTask;
     private long _codexVoiceAuthorizationEpoch = 1;
     private int _codexVoiceAuthorizationAllowed;
 
@@ -211,6 +213,23 @@ internal sealed class PanelBridgeController : IDisposable
         return new BridgeAttachment(() => _dispatchers.Remove(dispatcher));
     }
 
+    public Task PrepareForApplicationShutdownAsync()
+    {
+        lock (_voiceShutdownSync)
+        {
+            return _voiceShutdownTask ??= ShutdownVoiceRuntimeAsync();
+        }
+    }
+
+    private async Task ShutdownVoiceRuntimeAsync()
+    {
+        InvalidateCodexVoiceAuthorization(allowed: false);
+        _codexVoiceRuntime.SnapshotChanged -= OnCodexVoiceSnapshotChanged;
+        _voiceE2EReceipt?.RecordMediaEvent(CodexVoiceMediaEventKind.SafeClose);
+        await _codexVoiceRuntime.DisposeAsync();
+        _voiceE2EReceipt?.RecordSnapshot(_codexVoiceRuntime.Snapshot);
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -230,10 +249,7 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.PreviewFrameArrived -= OnControlsPreviewFrameArrived;
         _controlsBridgeController.MediaSourceOpened -= OnControlsMediaSourceOpened;
         _controlsBridgeController.Dispose();
-        _codexVoiceRuntime.SnapshotChanged -= OnCodexVoiceSnapshotChanged;
-        _voiceE2EReceipt?.RecordMediaEvent(CodexVoiceMediaEventKind.SafeClose);
-        _codexVoiceRuntime.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        _voiceE2EReceipt?.RecordSnapshot(_codexVoiceRuntime.Snapshot);
+        PrepareForApplicationShutdownAsync().GetAwaiter().GetResult();
     }
 
     public object BuildState()
