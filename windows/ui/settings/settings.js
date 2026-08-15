@@ -1,5 +1,6 @@
 import { on, request } from "../js/bridge.js";
 import { labelForSize, setLanguage, t } from "../js/i18n.js";
+import { createGenerationTargetState } from "./generation-target-state.mjs";
 
 const languageEl = document.querySelector("[data-language]");
 const displayPlacementEl = document.querySelector("[data-display-placement]");
@@ -10,6 +11,20 @@ const providerListEl = document.querySelector("[data-provider-list]");
 const providerSelectionEl = document.querySelector("[data-provider-selection]");
 const preferredProviderEl = document.querySelector("[data-preferred-provider]");
 const pocketAppListEl = document.querySelector("[data-pocket-app-list]");
+const aiNativeEl = document.querySelector("[data-ai-native]");
+const aiNativeLabelEl = document.querySelector("[data-ai-native-label]");
+const aiNativeNoteEl = document.querySelector("[data-ai-native-note]");
+const pocketGenerationEl = document.querySelector("[data-pocket-generation]");
+const pocketGenerationNoteEl = document.querySelector("[data-pocket-generation-note]");
+const pocketGenerationRequestEl = document.querySelector("[data-pocket-generation-request]");
+const pocketGenerationUpdateSelectionEl = document.querySelector("[data-pocket-generation-update-selection]");
+const pocketGenerationUpdateTargetEl = document.querySelector("[data-pocket-generation-update-target]");
+const pocketGenerationClearTargetEl = document.querySelector("[data-pocket-generation-clear-target]");
+const pocketGenerateEl = document.querySelector("[data-pocket-generate]");
+const pocketCancelEl = document.querySelector("[data-pocket-cancel]");
+const pocketGenerationStatusEl = document.querySelector("[data-pocket-generation-status]");
+const pocketGenerationProposalEl = document.querySelector("[data-pocket-generation-proposal]");
+const pocketGenerationManagedEl = document.querySelector("[data-pocket-generation-managed]");
 const handleIconEl = document.querySelector("[data-handle-icon]");
 const handleSideAreaEl = document.querySelector("[data-handle-side-area]");
 const disableFullscreenEl = document.querySelector("[data-disable-fullscreen]");
@@ -28,6 +43,8 @@ const openDataFolderEl = document.querySelector("[data-open-data-folder]");
 
 let currentState = null;
 let stickyState = null;
+let generationState = null;
+const generationTarget = createGenerationTargetState();
 
 on("state.changed", (state) => render(state));
 
@@ -77,7 +94,14 @@ function render(state) {
 
   renderProviders(state);
   renderProviderSelection(state);
+  aiNativeEl.checked = Boolean(state.settings.aiNativeEnabled);
+  aiNativeLabelEl.textContent = state.settings.language === "en" ? "AI-native features" : "AIネイティブ機能";
+  aiNativeNoteEl.textContent = state.settings.language === "en"
+    ? "Off by default. Disabling cancels generation immediately; enabling after an OFF startup requires a HoverPocket restart and never hot-starts Codex."
+    : "既定ではオフです。OFFは生成を即時停止します。OFFで起動した後のONはHoverPocket再起動後に有効となり、Codexをhot-startしません。";
   renderPocketApps(state);
+  generationState = state.pocketAppGeneration ?? generationState;
+  renderPocketGeneration(generationState, state.settings.language);
   renderSegment(handleIconEl, [
     { id: "b", label: "B" },
     { id: "c", label: "C" },
@@ -129,6 +153,205 @@ function renderPocketApps(state) {
     card.append(heading, intent, capabilities, boundary);
     pocketAppListEl.append(card);
   }
+}
+
+function renderPocketGeneration(generation, language) {
+  const enabled = Boolean(currentState?.settings?.aiNativeEnabled && generation);
+  pocketGenerationEl.hidden = !enabled;
+  if (!enabled) {
+    generationState = null;
+    generationTarget.clear();
+    return;
+  }
+
+  generationState = generation;
+  pocketGenerationNoteEl.textContent = language === "en"
+    ? "Codex returns definition files only. HoverPocket revalidates exact bytes, previews, permissions, grants, and tests before explicit approval."
+    : "Codexは定義ファイルだけを返します。HoverPocketがbytes・preview・権限・grant・testsを再検証し、明示承認後にだけ導入します。";
+  pocketGenerateEl.textContent = language === "en" ? "Generate & Validate" : "生成して検証";
+  pocketCancelEl.textContent = language === "en" ? "Cancel" : "キャンセル";
+  pocketCancelEl.hidden = generation.phase !== "generating";
+  pocketGenerateEl.disabled = generation.phase === "generating"
+    || generation.phase === "installing"
+    || Boolean(generation.proposal)
+    || generation.generatorAvailable === false;
+
+  const updateTarget = generationTarget.value;
+  pocketGenerationUpdateSelectionEl.hidden = updateTarget === null;
+  pocketGenerationUpdateTargetEl.textContent = updateTarget === null
+    ? ""
+    : (language === "en" ? `Update target: ${updateTarget}` : `更新対象: ${updateTarget}`);
+  pocketGenerationClearTargetEl.textContent = language === "en" ? "Create new app instead" : "新規Appとして作成";
+
+  const statusParts = [generation.phase, generation.errorCode].filter(Boolean);
+  if (generation.receipt?.readbackVerified) {
+    statusParts.push(language === "en"
+      ? `readback verified: ${generation.receipt.action} ${generation.receipt.appId} ${generation.receipt.version ?? "-"}`
+      : `readback確認済み: ${generation.receipt.action} ${generation.receipt.appId} ${generation.receipt.version ?? "-"}`);
+  }
+  pocketGenerationStatusEl.textContent = statusParts.join(" · ");
+
+  pocketGenerationProposalEl.replaceChildren();
+  if (generation.proposal) {
+    const proposal = generation.proposal;
+    const card = document.createElement("article");
+    card.className = "pocket-app-card";
+    const heading = document.createElement("div");
+    heading.className = "pocket-app-heading";
+    const title = document.createElement("strong");
+    title.textContent = `${proposal.action} · ${proposal.appId} · v${proposal.version}`;
+    const digest = document.createElement("span");
+    digest.textContent = shortDigest(proposal.packageDigest);
+    heading.append(title, digest);
+
+    const binding = document.createElement("code");
+    binding.textContent = `request=${proposal.requestId}\nbinding=${proposal.bindingDigest}\npreview=${proposal.previewDigest}`;
+    const diff = document.createElement("code");
+    diff.textContent = `permissions +[${proposal.permissionDiff.added.join(", ")}] -[${proposal.permissionDiff.removed.join(", ")}]\ngrants +${proposal.capabilityGrantDiff.added.length} / -${proposal.capabilityGrantDiff.removed.length}\ntests ${proposal.tests.filter((item) => item.status === item.expected).length}/${proposal.tests.length}`;
+    card.append(heading, binding, diff);
+
+    for (const preview of proposal.previews ?? []) {
+      const previewTitle = document.createElement("code");
+      previewTitle.textContent = `${preview.id} · ${shortDigest(preview.renderDigest)}`;
+      const pre = document.createElement("pre");
+      pre.textContent = JSON.stringify(preview.renderModel, null, 2).slice(0, 3000);
+      card.append(previewTitle, pre);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "settings-button-row";
+    const reject = document.createElement("button");
+    reject.type = "button";
+    reject.textContent = language === "en" ? "Reject" : "拒否";
+    reject.addEventListener("click", () => runGenerationAction("pocketApps.reject", {
+      requestId: proposal.requestId,
+      bindingDigest: proposal.bindingDigest,
+    }));
+    const approve = document.createElement("button");
+    approve.type = "button";
+    approve.textContent = language === "en" ? "Approve exact bytes & install" : "このbytesを承認して導入";
+    approve.addEventListener("click", () => runGenerationAction("pocketApps.presentApproval", {}));
+    approve.disabled = proposal.activationAllowed !== true;
+    actions.append(reject, approve);
+    card.append(actions);
+    if (proposal.activationAllowed !== true) {
+      const previewOnly = document.createElement("p");
+      previewOnly.className = "settings-note";
+      previewOnly.textContent = language === "en"
+        ? "Real Codex output is preview-only until the storage and process isolation gates are complete."
+        : "実Codexの生成物は保存先・process隔離の追加検証が完了するまでpreviewのみです。";
+      card.append(previewOnly);
+    }
+    pocketGenerationProposalEl.append(card);
+  }
+
+  pocketGenerationManagedEl.replaceChildren();
+  for (const app of generation.managedApps ?? []) {
+    const card = document.createElement("article");
+    card.className = "pocket-app-card";
+    const heading = document.createElement("div");
+    heading.className = "pocket-app-heading";
+    const name = document.createElement("strong");
+    name.textContent = app.appId;
+    const version = document.createElement("span");
+    version.textContent = `${app.state} · v${app.version ?? "-"}`;
+    heading.append(name, version);
+    const digest = document.createElement("code");
+    digest.textContent = shortDigest(app.packageDigest);
+    const actions = document.createElement("div");
+    actions.className = "settings-button-row";
+
+    const updateButton = document.createElement("button");
+    updateButton.type = "button";
+    updateButton.textContent = language === "en" ? "Update" : "更新";
+    updateButton.addEventListener("click", () => {
+      generationTarget.select(app.appId);
+      renderPocketGeneration(generationState, language);
+      pocketGenerationRequestEl.focus();
+    });
+    actions.append(updateButton);
+
+    if (app.state === "enabled") {
+      const disableButton = document.createElement("button");
+      disableButton.type = "button";
+      disableButton.textContent = language === "en" ? "Disable" : "無効化";
+      disableButton.addEventListener("click", () => runGenerationAction("pocketApps.disable", { appId: app.appId }));
+      actions.append(disableButton);
+    } else if (app.state === "disabled") {
+      const enableButton = document.createElement("button");
+      enableButton.type = "button";
+      enableButton.textContent = language === "en" ? "Enable" : "有効化";
+      enableButton.addEventListener("click", () => runGenerationAction("pocketApps.enable", { appId: app.appId }));
+      actions.append(enableButton);
+    }
+
+    for (const rollbackVersion of app.rollbackVersions ?? []) {
+      const rollbackButton = document.createElement("button");
+      rollbackButton.type = "button";
+      rollbackButton.textContent = language === "en" ? `Rollback ${rollbackVersion}` : `${rollbackVersion}へ戻す`;
+      rollbackButton.addEventListener("click", () => runGenerationAction("pocketApps.prepareRollback", {
+        appId: app.appId,
+        version: rollbackVersion,
+      }));
+      actions.append(rollbackButton);
+    }
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "danger";
+    removeButton.textContent = language === "en" ? "Remove, preserve data" : "削除（データ保持）";
+    removeButton.addEventListener("click", () => runGenerationAction("pocketApps.removePreservingData", { appId: app.appId }));
+    actions.append(removeButton);
+
+    card.append(heading, digest, actions);
+    pocketGenerationManagedEl.append(card);
+  }
+
+  for (const issue of generation.managementIssues ?? []) {
+    const card = document.createElement("article");
+    card.className = "pocket-app-card";
+    const heading = document.createElement("div");
+    heading.className = "pocket-app-heading";
+    const name = document.createElement("strong");
+    name.textContent = issue.appId;
+    const status = document.createElement("span");
+    status.textContent = language === "en" ? "Needs repair" : "要修復";
+    heading.append(name, status);
+    const error = document.createElement("code");
+    error.textContent = issue.errorCode;
+    const actions = document.createElement("div");
+    actions.className = "settings-button-row";
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "danger";
+    removeButton.textContent = language === "en" ? "Remove, preserve data" : "削除（データ保持）";
+    removeButton.disabled = issue.removalAllowed !== true;
+    removeButton.addEventListener("click", () => runGenerationAction(
+      "pocketApps.removePreservingData",
+      { appId: issue.appId },
+    ));
+    actions.append(removeButton);
+    card.append(heading, error, actions);
+    pocketGenerationManagedEl.append(card);
+  }
+}
+
+async function runGenerationAction(method, params = undefined) {
+  try {
+    pocketGenerationStatusEl.textContent = "";
+    generationState = await request(method, params);
+    if (generationState.receipt?.readbackVerified) {
+      generationTarget.clear();
+    }
+    renderPocketGeneration(generationState, currentState.settings.language);
+  } catch (error) {
+    pocketGenerationStatusEl.textContent = String(error?.message ?? error);
+  }
+}
+
+function shortDigest(value) {
+  if (!value) return "-";
+  return value.length > 22 ? `${value.slice(0, 22)}…` : value;
 }
 
 function renderStickySettings() {
@@ -232,6 +455,10 @@ preferredProviderEl.addEventListener("change", () => {
   update("settings.setPreferredProvider", { id: preferredProviderEl.value });
 });
 
+aiNativeEl.addEventListener("change", () => {
+  update("settings.setAiNativeEnabled", { enabled: aiNativeEl.checked });
+});
+
 handleSideAreaEl.addEventListener("change", () => {
   update("settings.setShowTopHandleSideArea", { visible: handleSideAreaEl.checked });
 });
@@ -264,6 +491,29 @@ stickyUndoToastEl.addEventListener("change", async () => {
     statusEl.textContent = String(error?.message ?? error);
     renderStickySettings();
   }
+});
+
+pocketGenerateEl.addEventListener("click", async () => {
+  const text = pocketGenerationRequestEl.value.trim();
+  if (!text) return;
+  await runGenerationAction("pocketApps.generate", {
+    request: text,
+    updatingAppId: generationTarget.value,
+  });
+  if (generationState?.phase === "awaiting_approval") {
+    generationTarget.clear();
+    renderPocketGeneration(generationState, currentState.settings.language);
+  }
+});
+
+pocketGenerationClearTargetEl.addEventListener("click", () => {
+  generationTarget.clear();
+  renderPocketGeneration(generationState, currentState.settings.language);
+  pocketGenerationRequestEl.focus();
+});
+
+pocketCancelEl.addEventListener("click", () => {
+  runGenerationAction("pocketApps.cancelGeneration");
 });
 
 resetEl.addEventListener("click", () => {

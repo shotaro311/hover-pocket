@@ -46,7 +46,27 @@
     </section>
     <section class="settings-section">
       <h2>Pocket Apps</h2>
+      <label class="toggle-row">
+        <span data-ai-native-label>AIネイティブ機能</span>
+        <input type="checkbox" data-ai-native>
+      </label>
+      <p class="settings-note" data-ai-native-note></p>
       <div class="pocket-app-list" data-pocket-app-list></div>
+      <div class="pocket-generation" data-pocket-generation hidden>
+        <p class="settings-note" data-pocket-generation-note></p>
+        <textarea rows="4" maxlength="8000" data-pocket-generation-request aria-label="Pocket App request"></textarea>
+        <div class="pocket-generation-update-target" data-pocket-generation-update-selection hidden>
+          <span data-pocket-generation-update-target></span>
+          <button type="button" data-pocket-generation-clear-target>新規Appとして作成</button>
+        </div>
+        <div class="settings-button-row settings-spaced-row">
+          <button type="button" data-pocket-generate>生成して検証</button>
+          <button type="button" data-pocket-cancel>キャンセル</button>
+        </div>
+        <div class="settings-status" data-pocket-generation-status></div>
+        <div class="pocket-app-list settings-spaced-row" data-pocket-generation-proposal></div>
+        <div class="pocket-app-list settings-spaced-row" data-pocket-generation-managed></div>
+      </div>
     </section>
     <section class="settings-section">
       <h2 data-i18n="topHandle">上端ハンドル</h2>

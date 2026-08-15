@@ -1,0 +1,18 @@
+{
+  "fixtureVersion": 1,
+  "requestId": "generation-fixture-0001",
+  "userRequest": "Create a Today Focus Pocket App that lets me pick today's calendar event, start a 25 minute timer, and save the focus purpose.",
+  "appId": "local.example.today-focus",
+  "namespace": "today-focus",
+  "initialVersion": "1.0.0",
+  "updateVersion": "1.0.1",
+  "expectedRequestDigest": "sha256:50aee649d04a4b78bb590fbb38e53c747efc8e2d419f418ae3cd3cf01d0dd34d",
+  "expectedInitialPackageDigest": "sha256:e9c369e0b52620d95c14baa2e04070535a1f21020308090f0467eed8cf4f04df",
+  "expectedAddedPermissions": [
+    "calendar.events.read",
+    "sticky.read",
+    "sticky.write",
+    "timer.read",
+    "timer.write"
+  ]
+}

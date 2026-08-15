@@ -23,6 +23,7 @@ internal sealed class PocketAppHostController
 
     public object BuildSurfaceState(string surfaceId = "main")
     {
+        EnsureAiNativeEnabled();
         if (!_runtime.Package.Surfaces.TryGetValue(surfaceId, out var surface))
         {
             throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "pocket_surface");
@@ -43,6 +44,7 @@ internal sealed class PocketAppHostController
 
     public object BuildManagerState()
     {
+        EnsureAiNativeEnabled();
         var package = _runtime.Package;
         return new
         {
@@ -72,6 +74,7 @@ internal sealed class PocketAppHostController
 
     private async Task<object?> LoadAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
+        EnsureAiNativeEnabled();
         EnsureApp(parameters);
         var surfaceId = RequiredString(parameters, "surfaceId", 64);
         if (!_runtime.Package.Surfaces.TryGetValue(surfaceId, out var surface))
@@ -110,6 +113,7 @@ internal sealed class PocketAppHostController
         JsonElement? parameters,
         CancellationToken cancellationToken)
     {
+        EnsureAiNativeEnabled();
         EnsureApp(parameters);
         var workflowId = RequiredString(parameters, "workflowId", 64);
         if (parameters is null
@@ -184,6 +188,7 @@ internal sealed class PocketAppHostController
     private Task<object?> UpdateStateAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        EnsureAiNativeEnabled();
         EnsureApp(parameters);
         var key = RequiredString(parameters, "key", 128);
         if (parameters is null
@@ -214,6 +219,14 @@ internal sealed class PocketAppHostController
             throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "pocket_state");
         }
         return Task.FromResult<object?>(new { saved = true });
+    }
+
+    private void EnsureAiNativeEnabled()
+    {
+        if (!_settings().AiNativeEnabled)
+        {
+            throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "ai_native_disabled");
+        }
     }
 
     private void EnsureApp(JsonElement? parameters)

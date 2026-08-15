@@ -119,6 +119,7 @@ internal sealed class PocketAppPackageVerifier
 
         VerifyStableKey();
         VerifyLifecycle();
+        _failures.AddRange(new PocketAppGenerationVerifier().Run());
 
         if (_failures.Count > 0)
         {
@@ -135,6 +136,7 @@ internal sealed class PocketAppPackageVerifier
         Console.WriteLine("pocket_app_package_bundled=ok");
         Console.WriteLine("pocket_app_package_negative_cases=12");
         Console.WriteLine("pocket_app_lifecycle_verify=ok");
+        Console.WriteLine("pocket_app_generation_verify=ok");
         return 0;
     }
 

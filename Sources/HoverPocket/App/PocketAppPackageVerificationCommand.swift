@@ -151,6 +151,7 @@ enum PocketAppPackageVerificationCommand {
         MainActor.assumeIsolated {
             verifyStableKey(failures: &failures)
             verifyLifecycle(failures: &failures)
+            PocketAppGenerationVerification.verify(failures: &failures)
         }
 
         print("pocket_app_package_verify=\(failures.isEmpty ? "ok" : "failed")")
@@ -158,6 +159,7 @@ enum PocketAppPackageVerificationCommand {
         print("pocket_app_package_bundled=ok")
         print("pocket_app_package_negative_cases=13")
         print("pocket_app_lifecycle_verify=\(failures.isEmpty ? "ok" : "failed")")
+        print("pocket_app_generation_verify=\(failures.isEmpty ? "ok" : "failed")")
         if !failures.isEmpty {
             print("pocket_app_package_failures=\(failures.joined(separator: ","))")
         }

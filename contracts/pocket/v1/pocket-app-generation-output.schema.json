@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/pocket-app-generation-output/v1",
+  "title": "HoverPocket Host-bound Pocket App generation output v1",
+  "type": "object",
+  "required": [
+    "$schema",
+    "requestId",
+    "requestDigest",
+    "appId",
+    "version",
+    "namespace",
+    "files"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "hoverpocket://schemas/pocket-app-generation-output/v1"
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "maxLength": 128
+    },
+    "requestDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "appId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z0-9][a-z0-9-]*){2,}$",
+      "maxLength": 160
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$",
+      "maxLength": 64
+    },
+    "namespace": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,63}$",
+      "maxLength": 64
+    },
+    "files": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "required": ["path", "utf8"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 240,
+            "pattern": "^(manifest\\.json|intent\\.md|data\\.schema\\.json|surfaces/[A-Za-z0-9._-]+\\.surface\\.json|workflows/[A-Za-z0-9._-]+\\.workflow\\.json|tests/[A-Za-z0-9._-]+\\.json)$"
+          },
+          "utf8": {
+            "type": "string",
+            "maxLength": 1048576
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

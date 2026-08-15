@@ -8,6 +8,7 @@ final class AINativeRuntime: ObservableObject {
     private let principal = CapabilityPrincipal(userID: "local-user")
     private var adapter: TodayFocusTextAdapter?
     @Published private(set) var pocketAppExecutionRuntime: PocketAppExecutionRuntime?
+    @Published private(set) var pocketAppGenerationController: PocketAppGenerationController?
 
     private init() {}
 
@@ -17,10 +18,13 @@ final class AINativeRuntime: ObservableObject {
 
     func configure(
         adapter: TodayFocusTextAdapter?,
-        pocketAppExecutionRuntime: PocketAppExecutionRuntime? = nil
+        pocketAppExecutionRuntime: PocketAppExecutionRuntime? = nil,
+        pocketAppGenerationController: PocketAppGenerationController? = nil
     ) {
+        self.pocketAppGenerationController?.shutdown()
         self.adapter = adapter
         self.pocketAppExecutionRuntime = pocketAppExecutionRuntime
+        self.pocketAppGenerationController = pocketAppGenerationController
     }
 
     func prepareTodayFocus(

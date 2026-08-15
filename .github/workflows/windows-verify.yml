@@ -34,6 +34,11 @@ jobs:
       - name: Build Release
         run: dotnet build .\windows\HoverPocket.Windows.sln --configuration Release --nologo -p:NuGetAudit=false
 
+      - name: Verify settings UI modules
+        run: |
+          node --check .\windows\ui\settings\settings.js
+          node .\windows\script\verify_settings_generation_target.mjs
+
       - name: Verify timer model and bridge
         run: |
           dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify capabilities

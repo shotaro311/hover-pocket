@@ -503,12 +503,16 @@ Planned Must:
 - current rootとそのchild / descendant session cardだけを表示する。全履歴browser、new / delete / archive管理は初回対象外とする。
 - Pocket Appはmanifest、data schema、layout、workflow、permissions、testsをユーザーが確認・変更・削除・rollbackできるファイルとして保持する。
 - 生成UIはauthoritative data、secret、重要処理を所有せず、削除・再生成してもユーザーの意図とデータが残る。
+- Pocket Appのinstall / update / enable / disable / remove / rollbackは、Lifecycleの保存状態だけで成功にしない。Hostが検証済みimmutable packageを`PocketSurfaceRegistry`と実行runtimeへ反映し、同じapp ID、version、package digest、permission grantが描画・実行側でも観測できた後だけ成功receiptを返す。
+- 生成Pocket Appはapp IDごとに独立したSurface / runtime entryとして登録する。任意の生成Appを組み込みToday Focusの固定slotへ差し替えない。
+- 実Codex生成とactivationは、ローカルファイル読取り隔離と上記runtime activation readbackをmacOS / Windows双方で満たすまでfail closedとする。
 - AI生成した任意native codeの即時hot installは本番要件にしない。native権限追加はworktree、review、署名、通常releaseを必須にする。
 
 受け入れ条件:
 
 - Voice、Text、既存UI、PocketSurfaceの同一要求が同じCapability ID、canonical plan digest、effect、承認判断、readback semanticsになる。receipt固有のID、時刻、originは入力ごとに異なってよい。
 - 書き込み前は副作用がなく、成功表示は実行後readback一致を根拠にする。
+- Pocket App lifecycleの成功receiptと、`PocketSurfaceRegistry` / execution runtimeが観測するapp ID、version、digest、permission grantが一致する。再起動後も一致し、disable / remove時は対象entryが実行不能、rollback / enable時は選択した検証済みentryが実行可能である。
 - Codex、MCP、生成UIからProvider StoreまたはBridgeDispatcherへ直接到達できない。
 - raw transcript、Calendar / Sticky本文、Clipboard本文、token、filesystem pathを監査ログへ残さない。
 - Voice機能を無効にした場合、Codex process、microphone、WebRTC、追加レイアウトが起動せず、既存パネル寸法とProvider体験が変わらない。

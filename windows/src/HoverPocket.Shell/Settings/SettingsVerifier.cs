@@ -44,10 +44,41 @@ internal sealed class SettingsVerifier
         var startup = new InMemoryStartupRegistrationService();
         using var controller = new PanelBridgeController(registry, store, store.Load(registry.ProviderIds), startup);
         var dispatcher = new BridgeDispatcher();
-        using var _ = controller.Attach(dispatcher);
+        using var _ = controller.Attach(
+            dispatcher,
+            BridgeSurface.Settings,
+            aiNativeEnableDecision: () => true);
+        var deniedSettingsDispatcher = new BridgeDispatcher();
+        using var deniedSettingsAttachment = controller.Attach(
+            deniedSettingsDispatcher,
+            BridgeSurface.Settings,
+            aiNativeEnableDecision: () => false);
+        var panelDispatcher = new BridgeDispatcher();
+        using var panelAttachment = controller.Attach(panelDispatcher, BridgeSurface.Panel);
 
         VerifyDefaults(store, registry, startup);
         VerifyWebViewSecurityPolicy();
+        var defaultState = await Send(dispatcher, """{"id":"0","method":"app.getState"}""");
+        if (!defaultState.Contains("\"aiNativeEnabled\":false", StringComparison.Ordinal)
+            || !defaultState.Contains("\"pocketAppGeneration\":null", StringComparison.Ordinal)
+            || Directory.Exists(Path.Combine(store.RootDirectory, "PocketApps", "Generation")))
+        {
+            _failures.Add("AI-native default-off started generation runtime or workspace");
+        }
+        var panelEnable = await panelDispatcher.ProcessRawMessageAsync(
+            """{"id":"0p","method":"settings.setAiNativeEnabled","params":{"enabled":true}}""");
+        if (panelEnable?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true)
+        {
+            _failures.Add("panel bridge exposed the Settings-only AI-native toggle");
+        }
+        var deniedEnable = await Send(
+            deniedSettingsDispatcher,
+            """{"id":"0d","method":"settings.setAiNativeEnabled","params":{"enabled":true}}""");
+        if (!deniedEnable.Contains("\"aiNativeEnabled\":false", StringComparison.Ordinal)
+            || store.ReloadOrDefault(registry.ProviderIds).AiNativeEnabled)
+        {
+            _failures.Add("native default-No AI-native approval was bypassed");
+        }
 
         await Send(dispatcher, """{"id":"1","method":"settings.setLanguage","params":{"language":"en"}}""");
         await Send(dispatcher, """{"id":"2","method":"settings.setTextSize","params":{"textSize":"large"}}""");
@@ -57,6 +88,13 @@ internal sealed class SettingsVerifier
         await Send(dispatcher, """{"id":"6","method":"settings.setProviderOrder","params":{"providerOrder":["sticky","calculator","timer"]}}""");
         await Send(dispatcher, """{"id":"7","method":"settings.setStartWithWindows","params":{"enabled":true}}""");
         await Send(dispatcher, """{"id":"7u","method":"settings.setAutoCheckForUpdates","params":{"enabled":false}}""");
+        var aiEnabledState = await Send(dispatcher, """{"id":"7n","method":"settings.setAiNativeEnabled","params":{"enabled":true}}""");
+        if (!aiEnabledState.Contains("\"aiNativeEnabled\":true", StringComparison.Ordinal)
+            || !aiEnabledState.Contains("\"pocketAppGeneration\":null", StringComparison.Ordinal)
+            || Directory.Exists(Path.Combine(store.RootDirectory, "PocketApps", "Generation")))
+        {
+            _failures.Add("AI-native enable setting hot-started generation runtime or workspace");
+        }
         await Send(dispatcher, """{"id":"7s","method":"sticky.setUndoToastVisible","params":{"visible":false}}""");
         await Send(dispatcher, """{"id":"7d","method":"settings.setDisplayPlacement","params":{"displayPlacement":"all"}}""");
         await Send(dispatcher, """{"id":"7p","method":"settings.setProviderSelection","params":{"rememberLast":false}}""");
@@ -78,7 +116,8 @@ internal sealed class SettingsVerifier
             || written.ShowTopHandleSideArea
             || written.DisableTopEdgeInFullscreen
             || !written.StartWithWindows
-            || written.AutoCheckForUpdates)
+            || written.AutoCheckForUpdates
+            || !written.AiNativeEnabled)
         {
             _failures.Add("settings write/read did not preserve scalar values");
         }
@@ -121,6 +160,35 @@ internal sealed class SettingsVerifier
 
         await Send(dispatcher, """{"id":"9","method":"settings.resetDefaults"}""");
         VerifyDefaults(store, registry, startup);
+        await VerifyResetDisablesGenerationAsync(registry);
+    }
+
+    private async Task VerifyResetDisablesGenerationAsync(ProviderRegistry registry)
+    {
+        var store = UserSettingsStore.CreateTemporary("SettingsResetGenerationVerify");
+        var enabled = UserSettingsStore.CreateDefault(registry.ProviderIds);
+        enabled.AiNativeEnabled = true;
+        store.Save(enabled);
+        using var controller = new PanelBridgeController(
+            registry,
+            store,
+            store.Load(registry.ProviderIds),
+            new InMemoryStartupRegistrationService());
+        var dispatcher = new BridgeDispatcher();
+        using var attachment = controller.Attach(dispatcher, BridgeSurface.Settings);
+
+        var before = await Send(dispatcher, """{"id":"reset-before","method":"pocketApps.generationState"}""");
+        await Send(dispatcher, """{"id":"reset","method":"settings.resetDefaults"}""");
+        var after = await Send(dispatcher, """{"id":"reset-after","method":"pocketApps.generationState"}""");
+        var blocked = await Send(
+            dispatcher,
+            """{"id":"reset-disabled","method":"pocketApps.disable","params":{"appId":"local.example.reset"}}""");
+        if (!before.Contains("\"enabled\":true", StringComparison.Ordinal)
+            || !after.Contains("\"enabled\":false", StringComparison.Ordinal)
+            || !blocked.Contains("GENERATION_DISABLED", StringComparison.Ordinal))
+        {
+            _failures.Add("settings reset did not disable the existing Pocket App generation controller");
+        }
     }
 
     private void VerifyWebViewSecurityPolicy()
@@ -185,6 +253,7 @@ internal sealed class SettingsVerifier
             || defaults.SwitchingMode != ProviderSwitchingMode.Click
             || defaults.StartWithWindows
             || !defaults.AutoCheckForUpdates
+            || defaults.AiNativeEnabled
             || !defaults.RememberLastSelectedProvider
             || defaults.PreferredProviderId != "controls"
             || defaults.HandleIconStyle != HandleIconStyle.B
