@@ -5,8 +5,11 @@ on:
     branches: ["main"]
     paths:
       - "Sources/HoverPocket/Capabilities/**"
+      - "Sources/HoverPocket/PocketApps/**"
       - "Sources/HoverPocket/App/CapabilityVerificationCommand.swift"
       - "Sources/HoverPocket/App/CapabilityBrokerVerificationCommand.swift"
+      - "Sources/HoverPocket/App/PocketAppPackageVerificationCommand.swift"
+      - "Sources/HoverPocket/App/PocketSurfaceVerificationCommand.swift"
       - "Sources/HoverPocket/App/AppDelegate.swift"
       - "Sources/HoverPocket/State/AppSettings.swift"
       - "Sources/HoverPocket/Models/GoogleCalendarModels.swift"
@@ -23,8 +26,11 @@ on:
   pull_request:
     paths:
       - "Sources/HoverPocket/Capabilities/**"
+      - "Sources/HoverPocket/PocketApps/**"
       - "Sources/HoverPocket/App/CapabilityVerificationCommand.swift"
       - "Sources/HoverPocket/App/CapabilityBrokerVerificationCommand.swift"
+      - "Sources/HoverPocket/App/PocketAppPackageVerificationCommand.swift"
+      - "Sources/HoverPocket/App/PocketSurfaceVerificationCommand.swift"
       - "Sources/HoverPocket/App/AppDelegate.swift"
       - "Sources/HoverPocket/State/AppSettings.swift"
       - "Sources/HoverPocket/Models/GoogleCalendarModels.swift"
@@ -52,13 +58,18 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Build
-        run: swift build
+        run: swift build -Xswiftc -warnings-as-errors
 
       - name: Verify capability handlers
         run: .build/debug/HoverPocket --verify-capabilities
 
       - name: Verify capability broker and text Today Focus
         run: .build/debug/HoverPocket --verify-broker
+
+      - name: Verify Pocket App package and Surface contracts
+        run: |
+          .build/debug/HoverPocket --verify-pocket-surface
+          .build/debug/HoverPocket --verify-pocket-app
 
       - name: Verify existing Timer behavior
         run: .build/debug/HoverPocket --verify-timer

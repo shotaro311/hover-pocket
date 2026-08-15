@@ -111,7 +111,9 @@ public partial class App : System.Windows.Application
         if (options.VerifyPocketSurface)
         {
             VerifyConsole.AttachParent();
-            Environment.ExitCode = new PocketSurfaceVerifier().Run();
+            var surfaceResult = new PocketSurfaceVerifier().Run();
+            var packageResult = new PocketAppPackageVerifier().Run();
+            Environment.ExitCode = surfaceResult == 0 && packageResult == 0 ? 0 : 1;
             Shutdown();
             return;
         }
