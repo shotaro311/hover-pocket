@@ -71,7 +71,20 @@ macOS verifierは、archive/delete、実行後status readback、永続化、inva
 
 ## 未完了
 
-- branch push、Draft PR、Windows / macOS / contract CI readback、mergeability確認。
+- Ready化、main merge、merge後のlocal / origin readback。
 - Sticky既存UIのBroker移行。
 - `sticky.delete`を外部入力経路へ公開する前のtarget-specific approvalとstrong-per-call hardening。
 - AN3実音声E2E、AN4 DSL Renderer回収、AN5以降の生成・sandbox・MCP / Connector・配布gate。
+
+## GitHub Actions / PR readback
+
+- implementation commit: `dd914488d5f954f3fd7dd3635f019a0d9dce9323`
+- Draft PR: [#11](https://github.com/shotaro311/hover-pocket/pull/11)
+- Windows run: [31854456305](https://github.com/shotaro311/hover-pocket/actions/runs/31854456305) `SUCCESS`
+  - .NET 10 Release build、Capability、Broker、Timer、UI model、Updater、rendered WebView UIが成功した。
+- macOS run: [31854456232](https://github.com/shotaro311/hover-pocket/actions/runs/31854456232) `SUCCESS`
+  - Swift build、Capability 14 handler、Broker 15 descriptor / 14 handler、Sticky lifecycle、Today Focus、Timerが成功した。
+- Pocket contract run: [31854456221](https://github.com/shotaro311/hover-pocket/actions/runs/31854456221) `SUCCESS`
+  - Ubuntu / macOS / Windows 56 fixtureとcross-OS report byte比較が成功した。
+- PR Router run: [31854456370](https://github.com/shotaro311/hover-pocket/actions/runs/31854456370) `SUCCESS`
+- review thread 0、`MERGEABLE / CLEAN`。
