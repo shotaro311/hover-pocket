@@ -241,4 +241,10 @@ GitHub Actions / isolated E2E implementation head d916c1d
   PASS / macOS verify run 31851024055
   PASS / PR Router run 31851022775
   PASS / Draft PR #6 MERGEABLE / CLEAN / remote parity 0 / 0
+
+GitHub Actions / native microphone gate head eaf8db4
+  PASS / Voice Lane Windows CI runs 31860148084 and 31860150830
+  PASS / Windows verify run 31860150992
+  PASS / macOS verify run 31860150901
+  PASS / PR Router run 31860149039
 ```
