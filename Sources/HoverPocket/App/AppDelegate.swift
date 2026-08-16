@@ -100,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 allowedKeys: package.statePropertyNames,
                 rootDirectory: userDataRoot
             )
+            let builtInActivationLease = PocketAppActivationLease()
             let pocketAppRuntime = PocketAppExecutionRuntime(
                 package: package,
                 broker: broker,
@@ -111,7 +112,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     "timer.read",
                     "timer.write"
                 ],
-                userStateStore: userStateStore
+                userStateStore: userStateStore,
+                activationLease: builtInActivationLease
             )
             let generationController: PocketAppGenerationController?
             let generatedActivationRegistry: PocketAppRuntimeActivationRegistry?
@@ -149,10 +151,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 generatedActivationRegistry = nil
             }
             AINativeRuntime.shared.configure(
-                adapter: TodayFocusTextAdapter(broker: broker),
+                adapter: TodayFocusTextAdapter(
+                    broker: broker,
+                    activationLease: builtInActivationLease
+                ),
                 pocketAppExecutionRuntime: pocketAppRuntime,
                 pocketAppGenerationController: generationController,
-                generatedActivationRegistry: generatedActivationRegistry
+                generatedActivationRegistry: generatedActivationRegistry,
+                builtInActivationLease: builtInActivationLease
             )
         } catch {
             AINativeRuntime.shared.configure(adapter: nil)

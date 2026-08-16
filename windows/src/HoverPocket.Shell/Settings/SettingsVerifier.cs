@@ -58,6 +58,7 @@ internal sealed class SettingsVerifier
 
         VerifyDefaults(store, registry, startup);
         VerifyWebViewSecurityPolicy();
+        await VerifyPocketAppBridgeSurfaceIsolationAsync(registry);
         var defaultState = await Send(dispatcher, """{"id":"0","method":"app.getState"}""");
         if (!defaultState.Contains("\"aiNativeEnabled\":false", StringComparison.Ordinal)
             || !defaultState.Contains("\"pocketAppGeneration\":null", StringComparison.Ordinal)
@@ -196,6 +197,46 @@ internal sealed class SettingsVerifier
             || !reenabled.Contains("\"enabled\":false", StringComparison.Ordinal))
         {
             _failures.Add("settings reset did not revoke AI-native runtimes until restart");
+        }
+    }
+
+    private async Task VerifyPocketAppBridgeSurfaceIsolationAsync(ProviderRegistry registry)
+    {
+        var store = UserSettingsStore.CreateTemporary("SettingsPocketBridgeVerify");
+        var enabled = UserSettingsStore.CreateDefault(registry.ProviderIds);
+        enabled.AiNativeEnabled = true;
+        store.Save(enabled);
+        using var controller = new PanelBridgeController(
+            registry,
+            store,
+            store.Load(registry.ProviderIds),
+            new InMemoryStartupRegistrationService());
+        var settingsDispatcher = new BridgeDispatcher();
+        using var settingsAttachment = controller.Attach(settingsDispatcher, BridgeSurface.Settings);
+        var panelDispatcher = new BridgeDispatcher();
+        using var panelAttachment = controller.Attach(panelDispatcher, BridgeSurface.Panel);
+
+        var settingsSelect = await settingsDispatcher.ProcessRawMessageAsync(
+            """{"id":"surface-settings-select","method":"provider.select","params":{"id":"today-focus"}}""");
+        var settingsLoad = await settingsDispatcher.ProcessRawMessageAsync(
+            """{"id":"surface-settings-load","method":"pocketApp.load","params":{"appId":"local.example.today-focus","surfaceId":"main"}}""");
+        var panelSelect = await Send(
+            panelDispatcher,
+            """{"id":"surface-panel-select","method":"provider.select","params":{"id":"today-focus"}}""");
+        var settingsState = await Send(
+            settingsDispatcher,
+            """{"id":"surface-settings-state","method":"app.getState"}""");
+        var settingsMutation = await Send(
+            settingsDispatcher,
+            """{"id":"surface-settings-mutation","method":"settings.setLanguage","params":{"language":"en"}}""");
+
+        if (settingsSelect?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true
+            || settingsLoad?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true
+            || !panelSelect.Contains("\"pocketSurface\":{", StringComparison.Ordinal)
+            || settingsState.Contains("\"pocketSurface\":{", StringComparison.Ordinal)
+            || settingsMutation.Contains("\"pocketSurface\":{", StringComparison.Ordinal))
+        {
+            _failures.Add("Pocket App bridge authority or state crossed the Panel/Settings surface boundary");
         }
     }
 

@@ -79,6 +79,19 @@ enum PocketAppRuntimeActivationVerification {
             "activation_inflight_cancellation",
             failures: &failures
         )
+        let builtInLease = PocketAppActivationLease()
+        var builtInCancellationObserved = false
+        _ = builtInLease.registerCancellation { builtInCancellationObserved = true }
+        AINativeRuntime.shared.configure(
+            adapter: nil,
+            builtInActivationLease: builtInLease
+        )
+        AINativeRuntime.shared.configure(adapter: nil)
+        require(
+            builtInCancellationObserved && !builtInLease.isActive,
+            "activation_builtin_off_cancellation",
+            failures: &failures
+        )
         require(
             PocketSurfaceRegistry.generatedProviderID(appID: appA).hasPrefix("generated-pocket-app:")
                 && PocketSurfaceRegistry.generatedSurfaceRouteID(appID: appA, surfaceID: "main")

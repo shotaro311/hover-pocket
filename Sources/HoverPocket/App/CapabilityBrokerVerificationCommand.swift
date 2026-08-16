@@ -483,6 +483,11 @@ enum CapabilityBrokerVerificationCommand {
         }
 
         try await verifyPocketAppExecution(root: root, calendar: calendar, now: now)
+        try await verifyTodayFocusActivationRevocation(
+            root: root,
+            now: now,
+            principal: principal
+        )
         try await verifyPartialRollback(root: root, now: now, principal: principal)
         try await verifyCurrentStepRollback(root: root, now: now, principal: principal)
         try await verifyTimeout(root: root, now: now, principal: principal)
@@ -1090,6 +1095,67 @@ enum CapabilityBrokerVerificationCommand {
     }
 
     @MainActor
+    private static func verifyTodayFocusActivationRevocation(
+        root: URL,
+        now: Date,
+        principal: CapabilityPrincipal
+    ) async throws {
+        let timerHandler = BrokerBlockingTimerStartHandler()
+        let handlers = try PocketCapabilityHandlerSet(handlers: [
+            timerHandler,
+            BrokerFailingStickyHandler()
+        ])
+        let brokerRoot = root.appendingPathComponent("activation-revocation-broker", isDirectory: true)
+        let broker = CapabilityBroker(
+            registry: try CapabilityRegistry(handlers: handlers),
+            ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
+            auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+        )
+        let permissions = CapabilityPermissionSet(
+            principal: principal,
+            permissions: ["sticky.write", "timer.write"]
+        )
+        let lease = PocketAppActivationLease()
+        let adapter = TodayFocusTextAdapter(
+            broker: broker,
+            activationLease: lease
+        )
+        let draft = try adapter.prepareFocus(
+            event: TodayFocusCalendarEvent(
+                eventRef: "event:activation-revocation",
+                safeTitle: "Activation revocation",
+                start: now,
+                end: now.addingTimeInterval(600)
+            ),
+            durationSeconds: 600,
+            purpose: "activation-revocation",
+            principal: principal,
+            permissions: permissions,
+            now: now
+        )
+        let execution = Task { @MainActor in
+            try await adapter.approveAndExecute(
+                draft,
+                permissions: permissions,
+                now: now
+            )
+        }
+        for _ in 0..<100 where !timerHandler.entered {
+            await Task.yield()
+        }
+        try require(timerHandler.entered, "today_focus_activation_entered")
+        lease.invalidate()
+        do {
+            _ = try await execution.value
+            throw BrokerVerificationFailure("today_focus_activation_result_returned")
+        } catch is CancellationError {
+        } catch PocketAppRuntimeActivationError.unavailable {
+        }
+        try require(timerHandler.wasCancelled, "today_focus_activation_handler_cancelled")
+        try require(!timerHandler.didWrite, "today_focus_activation_no_stale_write")
+    }
+
+    @MainActor
     private static func verifyTimeout(
         root: URL,
         now: Date,
@@ -1339,6 +1405,28 @@ private final class BrokerSlowReadHandler: PocketCapabilityHandler {
             throw CancellationError()
         }
         return ["value": .string("late")]
+    }
+}
+
+@MainActor
+private final class BrokerBlockingTimerStartHandler: PocketCapabilityHandler {
+    let key = PocketCapabilityKeys.timerStart
+    private(set) var entered = false
+    private(set) var wasCancelled = false
+    private(set) var didWrite = false
+
+    func handle(arguments: CapabilityObject, context: CapabilityHandlerContext) async throws -> CapabilityObject {
+        _ = arguments
+        _ = try context.requiredIdempotencyKey()
+        entered = true
+        do {
+            try await Task.sleep(for: .seconds(30))
+        } catch is CancellationError {
+            wasCancelled = true
+            throw CancellationError()
+        }
+        didWrite = true
+        return [:]
     }
 }
 
