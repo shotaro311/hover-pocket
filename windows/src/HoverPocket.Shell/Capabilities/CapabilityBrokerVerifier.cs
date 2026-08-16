@@ -617,6 +617,43 @@ internal sealed class CapabilityBrokerVerifier
         var rejected = runtime.Prepare("startFocus", inputs, now.AddSeconds(1));
         runtime.Reject(rejected, now.AddSeconds(1));
         Require(timerStore.RunningTimers.Count == 1 && stickyStore.Notes.Count == 1, "pocket_app_reject_no_write");
+
+        var blockingTimer = new BrokerBlockingTimerStartHandler();
+        var countingSticky = new BrokerCountingStickyUpsertHandler();
+        var revocationRoot = Path.Combine(root, "pocket-app-revocation-broker");
+        var revocationBroker = new CapabilityBroker(
+            new CapabilityRegistry(new PocketCapabilityHandlerSet([blockingTimer, countingSticky])),
+            new CapabilityBrokerLedger(revocationRoot),
+            new CapabilityBrokerAuditLog(revocationRoot));
+        var revocationLease = new PocketAppActivationLease();
+        var revocationRuntime = new PocketAppExecutionRuntime(
+            package,
+            revocationBroker,
+            "user-pocket-app-revocation-fixture",
+            new HashSet<string>(
+                ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"],
+                StringComparer.Ordinal),
+            timeZone,
+            activationLease: revocationLease);
+        var revocationDraft = revocationRuntime.Prepare("startFocus", inputs, now.AddSeconds(2));
+        var inFlight = revocationRuntime.ApproveAndExecuteAsync(revocationDraft, now.AddSeconds(2));
+        Require(
+            await blockingTimer.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5)),
+            "pocket_app_revocation_entered_handler");
+        revocationLease.Invalidate();
+        try
+        {
+            _ = await inFlight;
+            _failures.Add("pocket_app_revocation_execution_survived");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (PocketAppRuntimeActivationException ex) when (ex.Code == "RUNTIME_ACTIVATION_UNAVAILABLE")
+        {
+        }
+        Require(blockingTimer.WasCancelled, "pocket_app_revocation_cancelled_handler");
+        Require(countingSticky.InvocationCount == 0, "pocket_app_revocation_blocks_later_write");
     }
 
     private void VerifyStrongPerCallIsolation(CapabilityBroker broker, DateTimeOffset now)
@@ -1088,6 +1125,64 @@ internal sealed class CapabilityBrokerVerifier
                 throw;
             }
             return CapabilityJson.From(new { value = "late" });
+        }
+    }
+
+    private sealed class BrokerBlockingTimerStartHandler : IPocketCapabilityHandler
+    {
+        private int _wasCancelled;
+
+        public PocketCapabilityKey Key => CapabilityIds.TimerStart;
+
+        public TaskCompletionSource<bool> Entered { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool WasCancelled => Volatile.Read(ref _wasCancelled) == 1;
+
+        public async Task<JsonElement> HandleAsync(
+            JsonElement arguments,
+            CapabilityHandlerContext context,
+            CancellationToken cancellationToken = default)
+        {
+            _ = arguments;
+            _ = context.RequireIdempotencyKey();
+            Entered.TrySetResult(true);
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                Volatile.Write(ref _wasCancelled, 1);
+                throw;
+            }
+            throw new InvalidOperationException("unreachable");
+        }
+    }
+
+    private sealed class BrokerCountingStickyUpsertHandler : IPocketCapabilityHandler
+    {
+        private int _invocationCount;
+
+        public PocketCapabilityKey Key => CapabilityIds.StickyUpsert;
+
+        public int InvocationCount => Volatile.Read(ref _invocationCount);
+
+        public Task<JsonElement> HandleAsync(
+            JsonElement arguments,
+            CapabilityHandlerContext context,
+            CancellationToken cancellationToken = default)
+        {
+            _ = arguments;
+            _ = context.RequireIdempotencyKey();
+            cancellationToken.ThrowIfCancellationRequested();
+            Interlocked.Increment(ref _invocationCount);
+            return Task.FromResult(CapabilityJson.From(new
+            {
+                noteId = Guid.Empty,
+                state = "active",
+                updatedAt = DateTimeOffset.UnixEpoch.ToString("O", CultureInfo.InvariantCulture)
+            }));
         }
     }
 

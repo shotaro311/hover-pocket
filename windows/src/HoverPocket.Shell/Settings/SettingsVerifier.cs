@@ -175,7 +175,10 @@ internal sealed class SettingsVerifier
             store.Load(registry.ProviderIds),
             new InMemoryStartupRegistrationService());
         var dispatcher = new BridgeDispatcher();
-        using var attachment = controller.Attach(dispatcher, BridgeSurface.Settings);
+        using var attachment = controller.Attach(
+            dispatcher,
+            BridgeSurface.Settings,
+            aiNativeEnableDecision: () => true);
 
         var before = await Send(dispatcher, """{"id":"reset-before","method":"pocketApps.generationState"}""");
         await Send(dispatcher, """{"id":"reset","method":"settings.resetDefaults"}""");
@@ -183,11 +186,16 @@ internal sealed class SettingsVerifier
         var blocked = await Send(
             dispatcher,
             """{"id":"reset-disabled","method":"pocketApps.disable","params":{"appId":"local.example.reset"}}""");
+        var reenabled = await Send(
+            dispatcher,
+            """{"id":"reset-reenabled","method":"settings.setAiNativeEnabled","params":{"enabled":true}}""");
         if (!before.Contains("\"enabled\":true", StringComparison.Ordinal)
             || !after.Contains("\"enabled\":false", StringComparison.Ordinal)
-            || !blocked.Contains("GENERATION_DISABLED", StringComparison.Ordinal))
+            || !blocked.Contains("GENERATION_DISABLED", StringComparison.Ordinal)
+            || !reenabled.Contains("\"pocketSurface\":null", StringComparison.Ordinal)
+            || !reenabled.Contains("\"enabled\":false", StringComparison.Ordinal))
         {
-            _failures.Add("settings reset did not disable the existing Pocket App generation controller");
+            _failures.Add("settings reset did not revoke AI-native runtimes until restart");
         }
     }
 

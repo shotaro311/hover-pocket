@@ -21,6 +21,8 @@ internal sealed class PocketAppHostController
         _settings = settings;
     }
 
+    internal bool IsActivationActive => _runtime.IsActivationActive;
+
     public object BuildSurfaceState(string surfaceId = "main")
     {
         EnsureAiNativeEnabled();

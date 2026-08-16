@@ -225,6 +225,59 @@ internal static class PocketAppRuntimeActivationVerifier
                     && restoreFailing.SurfaceRegistry.Readback(appC) is null,
                 "activation_restore_failure_persists_disabled",
                 failures);
+
+            using var activationEntered = new ManualResetEventSlim(false);
+            using var allowActivationCommit = new ManualResetEventSlim(false);
+            var blockActivation = false;
+            using var racing = new PocketAppRuntimeActivationRegistry(
+                () => managed.Values.ToArray(),
+                appId => candidates.GetValueOrDefault(appId),
+                failureInjection: point =>
+                {
+                    if (point == "before_runtime_registry_commit" && blockActivation)
+                    {
+                        activationEntered.Set();
+                        allowActivationCommit.Wait(TimeSpan.FromSeconds(5));
+                    }
+                    return false;
+                });
+            candidates[appB] = Candidate(appB, "1.0.0", digest1);
+            managed[appB] = Managed(appB, "1.0.0", digest1, PocketAppLifecycleState.Enabled);
+            blockActivation = true;
+            var activationTask = Task.Run(() => racing.Synchronize(
+                Receipt("enable", appB, "1.0.0", digest1, PocketAppLifecycleState.Enabled)));
+            Require(
+                activationEntered.Wait(TimeSpan.FromSeconds(5)),
+                "activation_shutdown_race_entered",
+                failures);
+            using var disableStarted = new ManualResetEventSlim(false);
+            var disableTask = Task.Run(() =>
+            {
+                disableStarted.Set();
+                racing.SetEnabled(false);
+            });
+            Require(
+                disableStarted.Wait(TimeSpan.FromSeconds(5)),
+                "activation_shutdown_race_disable_started",
+                failures);
+            allowActivationCommit.Set();
+            Require(
+                Task.WaitAll([activationTask, disableTask], TimeSpan.FromSeconds(5)),
+                "activation_shutdown_race_completed",
+                failures);
+            Require(
+                racing.ExecutionRegistry.ActiveAppIds.Count == 0
+                    && racing.SurfaceRegistry.ActiveAppIds.Count == 0,
+                "activation_shutdown_race_no_survivor",
+                failures);
+            racing.SetEnabled(true);
+            _ = racing.Synchronize(
+                Receipt("enable", appB, "1.0.0", digest1, PocketAppLifecycleState.Enabled));
+            Require(
+                racing.ExecutionRegistry.Readback(appB) is not null
+                    && racing.SurfaceRegistry.Readback(appB) is not null,
+                "activation_reenable_accepts_new_transition",
+                failures);
         }
         catch
         {

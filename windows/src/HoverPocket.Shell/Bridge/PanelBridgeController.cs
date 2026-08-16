@@ -41,6 +41,7 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly CapabilityBroker? _capabilityBroker;
     private readonly TodayFocusTextAdapter? _todayFocusTextAdapter;
     private readonly PocketAppHostController? _pocketAppHostController;
+    private readonly PocketAppActivationLease? _aiNativeExecutionLease;
     private readonly PocketAppGenerationController? _pocketAppGenerationController;
     private readonly PocketAppRuntimeActivationRegistry? _generatedPocketApps;
     private readonly Dictionary<BridgeDispatcher, BridgeSurface> _dispatchers = [];
@@ -78,6 +79,9 @@ internal sealed class PanelBridgeController : IDisposable
         _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.Normalize(settings, providerRegistry.ProviderIds);
+        _aiNativeExecutionLease = CurrentSettings.AiNativeEnabled
+            ? new PocketAppActivationLease()
+            : null;
         if (CurrentSettings.AiNativeEnabled)
         {
             try
@@ -105,7 +109,8 @@ internal sealed class PanelBridgeController : IDisposable
                         new HashSet<string>(
                             ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"],
                             StringComparer.Ordinal),
-                        userStateStore: userStateStore),
+                        userStateStore: userStateStore,
+                        activationLease: _aiNativeExecutionLease),
                     () => CurrentSettings);
             }
             catch (Exception ex) when (ex is CapabilityBrokerException
@@ -288,6 +293,7 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.PreviewFrameArrived -= OnControlsPreviewFrameArrived;
         _controlsBridgeController.MediaSourceOpened -= OnControlsMediaSourceOpened;
         _controlsBridgeController.Dispose();
+        _aiNativeExecutionLease?.Invalidate();
         _pocketAppGenerationController?.Dispose();
         _generatedPocketApps?.Dispose();
     }
@@ -304,6 +310,8 @@ internal sealed class PanelBridgeController : IDisposable
         }
 
         var metrics = PanelSizeCatalog.Get(CurrentSettings.PanelSize);
+        var builtInPocketAppAvailable = CurrentSettings.AiNativeEnabled
+            && _pocketAppHostController?.IsActivationActive == true;
         return new
         {
             settings = new
@@ -373,8 +381,8 @@ internal sealed class PanelBridgeController : IDisposable
                 }
             ,
             aiLane = _aiLaneController.CurrentState,
-            pocketSurface = CurrentSettings.AiNativeEnabled ? _pocketAppHostController?.BuildSurfaceState() : null,
-            pocketApps = !CurrentSettings.AiNativeEnabled || _pocketAppHostController is null
+            pocketSurface = builtInPocketAppAvailable ? _pocketAppHostController?.BuildSurfaceState() : null,
+            pocketApps = !builtInPocketAppAvailable || _pocketAppHostController is null
                 ? Array.Empty<object>()
                 : new[] { _pocketAppHostController.BuildManagerState() },
             pocketAppGeneration = includeGeneration && CurrentSettings.AiNativeEnabled
@@ -646,8 +654,9 @@ internal sealed class PanelBridgeController : IDisposable
         }
         if (!enabled)
         {
+            _aiNativeExecutionLease?.Invalidate();
             _pocketAppGenerationController?.SetEnabled(false);
-            _generatedPocketApps?.Shutdown();
+            _generatedPocketApps?.SetEnabled(false);
         }
         if (CurrentSettings.AiNativeEnabled != enabled)
         {
@@ -658,8 +667,9 @@ internal sealed class PanelBridgeController : IDisposable
 
         // Never hot-create a generation composition root. If one exists from startup, disabling
         // cancels an in-flight Codex process immediately and gates every generation bridge route.
-        if (enabled)
+        if (enabled && _aiNativeExecutionLease?.IsActive == true)
         {
+            _generatedPocketApps?.SetEnabled(true);
             _pocketAppGenerationController?.SetEnabled(true);
         }
         return await PublishStateAsync(cancellationToken);
@@ -710,8 +720,9 @@ internal sealed class PanelBridgeController : IDisposable
     {
         _ = parameters;
         _startupRegistration.SetRegistered(false);
+        _aiNativeExecutionLease?.Invalidate();
         _pocketAppGenerationController?.SetEnabled(false);
-        _generatedPocketApps?.Shutdown();
+        _generatedPocketApps?.SetEnabled(false);
         SaveSettings(UserSettingsStore.CreateDefault(_providerRegistry.ProviderIds));
         return await PublishStateAsync(cancellationToken);
     }
@@ -777,10 +788,17 @@ internal sealed class PanelBridgeController : IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         if (!CurrentSettings.AiNativeEnabled
             || _capabilityBroker is null
-            || _todayFocusTextAdapter is null)
+            || _todayFocusTextAdapter is null
+            || _aiNativeExecutionLease is null)
         {
             throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "today_focus");
         }
+        _aiNativeExecutionLease.RequireActive();
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _aiNativeExecutionLease.CancellationToken);
+        var effectiveCancellation = linkedCancellation.Token;
+        effectiveCancellation.ThrowIfCancellationRequested();
 
         var eventRef = ReadRequiredString(parameters, "eventRef");
         if (string.IsNullOrEmpty(eventRef) || eventRef.EnumerateRunes().Count() > 256)
@@ -800,7 +818,7 @@ internal sealed class PanelBridgeController : IDisposable
             principal,
             permissions,
             now,
-            cancellationToken);
+            effectiveCancellation);
         var selected = events.FirstOrDefault(item => item.EventRef == eventRef)
             ?? throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "calendar_event");
         var purpose = string.IsNullOrEmpty(selected.SafeTitle) ? "今日の予定" : selected.SafeTitle;
@@ -823,7 +841,7 @@ internal sealed class PanelBridgeController : IDisposable
             System.Windows.MessageBoxButton.YesNo,
             System.Windows.MessageBoxImage.Question,
             System.Windows.MessageBoxResult.No);
-        cancellationToken.ThrowIfCancellationRequested();
+        effectiveCancellation.ThrowIfCancellationRequested();
         if (result != System.Windows.MessageBoxResult.Yes)
         {
             try
@@ -844,7 +862,7 @@ internal sealed class PanelBridgeController : IDisposable
             draft,
             permissions,
             DateTimeOffset.Now,
-            cancellationToken);
+            effectiveCancellation);
         return new
         {
             status = receipt.Status.WireValue(),

@@ -97,10 +97,14 @@ Lifecycle上で検証・保存されたPocket Appを、実際の描画とCapabil
 - review P1を受け、WindowsのAI-native OFFとdefaults resetでgenerationだけでなく生成Appのexecution runtime、Surface、activation leaseを全解除する。再有効化は既存方針どおりhot restoreせず、再起動後のverified package復元に限定する。
 - review P2を受け、起動時にenabled packageのruntime復元へ失敗した場合は、両OSともLifecycle Managerのdisable操作でdurable stateをdisabled、effective grantを空へ変更し、version / digestを再読込照合する。次回起動で失敗Appを再試行し続けない。
 - 両OSのruntime activation verifierへ、全App shutdownと復元失敗のdisabled永続化回帰を追加した。Macのwarnings-as-errors buildと全ローカル回帰は再成功した。WindowsはこのMacに`dotnet`がないため、PR CIをコンパイルとverifierの正式判定にする。
+- exact range `a35b0ea...8c0e2ee`のSecurity scan `9eb0f0ad-8926-4f80-b1f8-7b215fb7f407`は22 / 22 fileを確認し、組み込みToday Focus workflowがAI-native OFF後も実行継続できるlow finding 1件をreportable、生成App activationとShutdownの競合をproduction consumer接続前のdeferredとして確定した。
+- remediationでは、Windowsの組み込みPocket App runtimeとdirect Today Focus routeを共通のHost所有activation leaseへ接続する。OFF / reset / disposeがleaseを取消し、Timer handler実行中でもBroker tokenをcancelして後続Sticky writeへ進めない。OFF後の同一process再有効化はruntimeをhot復元せず、既存UI文言どおり再起動まで組み込みSurfaceとgenerationを利用不可にする。
+- 生成App Registryは、Synchronize / startup restore / activation / OFF / disposeをregistry-level lockとenabled stateで直列化する。OFFが返った後にruntime / Surface / leaseが再登録されないことを競合回帰で確認し、明示的な再有効化後は新しいtransitionだけを受理する。
+- focused verifierへ、実行中Timer handlerの取消、後続Sticky handler 0回、activation commitとOFFの競合後に両Registry 0件、再有効化後の正常activation、settings reset後のrestart-required状態を追加した。WindowsはPR CIを正式なbuild / runtime gateとし、通過後に修正後exact rangeを再scanする。
 
 ## 未完了
 
-- review修正のSecurity scan、commit / push、PR CI、review thread解決、merge後readback
+- remediationのcommit / push、PR CI、修正後exact Security scan、review thread解決、merge後readback
 - 両OS実機でのSurface / runtime activation readback
 - 実Codex generationのlocal-file confinement
 - Voiceから生成、preview、承認、install、利用するCore Integration E2E

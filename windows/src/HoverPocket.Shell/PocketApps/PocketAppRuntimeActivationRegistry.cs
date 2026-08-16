@@ -181,6 +181,8 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
     private readonly Func<string, Candidate?> _candidateSource;
     private readonly Func<PocketAppManagedPackage, bool> _restoreFailurePersistence;
     private readonly Func<string, bool>? _failureInjection;
+    private readonly object _activationSync = new();
+    private bool _enabled = true;
     private bool _disposed;
 
     public PocketExecutionRuntimeRegistry ExecutionRegistry { get; } = new();
@@ -269,6 +271,14 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
 
     public PocketAppRuntimeReadback Synchronize(PocketAppLifecycleReceipt receipt)
     {
+        lock (_activationSync)
+        {
+            return SynchronizeLocked(receipt);
+        }
+    }
+
+    private PocketAppRuntimeReadback SynchronizeLocked(PocketAppLifecycleReceipt receipt)
+    {
         ThrowIfDisposed();
         if (ReservedAppIds.Contains(receipt.PackageId))
         {
@@ -278,6 +288,11 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
 
         if (receipt.State == PocketAppLifecycleState.Enabled)
         {
+            if (!_enabled)
+            {
+                FailClosed(receipt.PackageId);
+                throw Failure("RUNTIME_ACTIVATION_UNAVAILABLE");
+            }
             var candidate = _candidateSource(receipt.PackageId);
             if (candidate is null || !candidate.Readback.Matches(receipt))
             {
@@ -307,7 +322,16 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
 
     public IReadOnlyList<string> RestoreEnabledApps()
     {
+        lock (_activationSync)
+        {
+            return RestoreEnabledAppsLocked();
+        }
+    }
+
+    private IReadOnlyList<string> RestoreEnabledAppsLocked()
+    {
         ThrowIfDisposed();
+        if (!_enabled) { return ["*"]; }
         IReadOnlyList<PocketAppManagedPackage> packages;
         try
         {
@@ -354,15 +378,36 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) { return; }
-        Shutdown();
-        _sourceLifecycle?.Dispose();
-        _disposed = true;
+        lock (_activationSync)
+        {
+            if (_disposed) { return; }
+            _enabled = false;
+            RevokeAllLocked();
+            _sourceLifecycle?.Dispose();
+            _disposed = true;
+        }
     }
 
     public void Shutdown()
     {
-        ThrowIfDisposed();
+        SetEnabled(false);
+    }
+
+    public void SetEnabled(bool enabled)
+    {
+        lock (_activationSync)
+        {
+            ThrowIfDisposed();
+            _enabled = enabled;
+            if (!enabled)
+            {
+                RevokeAllLocked();
+            }
+        }
+    }
+
+    private void RevokeAllLocked()
+    {
         foreach (var appId in ExecutionRegistry.ActiveAppIds
             .Concat(SurfaceRegistry.ActiveAppIds)
             .Distinct(StringComparer.Ordinal))
@@ -374,6 +419,11 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
     private PocketAppRuntimeReadback Activate(Candidate candidate)
     {
         if (_failureInjection?.Invoke("before_runtime_registry_commit") == true)
+        {
+            FailClosed(candidate.Readback.AppId);
+            throw Failure("RUNTIME_ACTIVATION_UNAVAILABLE");
+        }
+        if (!_enabled)
         {
             FailClosed(candidate.Readback.AppId);
             throw Failure("RUNTIME_ACTIVATION_UNAVAILABLE");
