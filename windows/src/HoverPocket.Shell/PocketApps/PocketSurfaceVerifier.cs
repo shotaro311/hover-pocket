@@ -55,6 +55,12 @@ internal sealed class PocketSurfaceVerifier
         RejectData(DeepSurfaceData(), "depth", runtime);
         RejectData(WideSurfaceData(), "node_count", runtime);
         RejectMutation(root => root["root"]!["children"]![4]!["label"] = new string('界', 121), "unicode_scalar_limit", runtime);
+        RejectData(SurfaceData(new JsonObject
+        {
+            ["type"] = "status",
+            ["value"] = "saved",
+            ["tone"] = "success"
+        }), "host_receipt_spoof", runtime);
 
         if (_failures.Count > 0)
         {
@@ -68,7 +74,7 @@ internal sealed class PocketSurfaceVerifier
 
         Console.WriteLine("pocket_surface_verify=ok");
         Console.WriteLine("pocket_surface_valid_nodes=6");
-        Console.WriteLine("pocket_surface_negative_cases=13");
+        Console.WriteLine("pocket_surface_negative_cases=14");
         Console.WriteLine($"pocket_surface_render_digest={renderDigest}");
         return 0;
     }

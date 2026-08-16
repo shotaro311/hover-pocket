@@ -272,7 +272,7 @@ struct PocketSurfaceRuntime {
             try exactKeys(node, required: ["type", "value", "tone"], optional: [], path: path)
             let text = try boundedString(node["value"], range: 0...1000, path: "\(path).value")
             let tone = try string(node["tone"], path: "\(path).tone")
-            try require(["neutral", "success", "warning", "error"].contains(tone), "\(path).tone")
+            try require(["neutral", "warning", "error"].contains(tone), "\(path).tone")
             return renderNode(type, ["tone": .string(tone), "value": .string(text)])
         default:
             throw PocketSurfaceRuntimeError.invalid("\(path).type:unknown")

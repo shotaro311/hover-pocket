@@ -345,7 +345,7 @@ internal sealed class PocketSurfaceRuntime(
         ExactKeys(node, ["type", "value", "tone"], [], path);
         var value = BoundedString(node.GetProperty("value"), 0, 1_000, $"{path}.value");
         var tone = GetString(node.GetProperty("tone"), $"{path}.tone");
-        Require(tone is "neutral" or "success" or "warning" or "error", $"{path}.tone");
+        Require(tone is "neutral" or "warning" or "error", $"{path}.tone");
         return RenderNode(type, new SortedDictionary<string, object?>
         {
             ["tone"] = tone,

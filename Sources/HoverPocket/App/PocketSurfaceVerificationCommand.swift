@@ -98,10 +98,16 @@ enum PocketSurfaceVerificationCommand {
             runtime: runtime,
             failures: &failures
         )
+        rejectSynthetic(
+            root: ["type": "status", "value": "保存済み", "tone": "success"],
+            label: "host_receipt_spoof",
+            runtime: runtime,
+            failures: &failures
+        )
 
         print("pocket_surface_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_surface_valid_nodes=6")
-        print("pocket_surface_negative_cases=13")
+        print("pocket_surface_negative_cases=14")
         print("pocket_surface_render_digest=\(renderDigest)")
         if !failures.isEmpty {
             print("pocket_surface_failures=\(failures.joined(separator: ","))")
