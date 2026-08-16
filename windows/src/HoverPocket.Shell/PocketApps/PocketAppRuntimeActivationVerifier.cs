@@ -90,6 +90,12 @@ internal static class PocketAppRuntimeActivationVerifier
                 && registry.SurfaceRegistry.ActiveAppIds.SequenceEqual([appA, appB], StringComparer.Ordinal),
                 "activation_multiple_apps",
                 failures);
+            Require(
+                registry.SurfaceRegistry.Routes.Select(route => route.ProviderId).SequenceEqual(
+                    [PocketSurfaceRegistry.GeneratedProviderId(appA), PocketSurfaceRegistry.GeneratedProviderId(appB)],
+                    StringComparer.Ordinal),
+                "activation_generated_provider_routes",
+                failures);
 
             candidates[appA] = Candidate(appA, "1.1.0", digest2);
             managed[appA] = Managed(appA, "1.1.0", digest2, PocketAppLifecycleState.Enabled);
@@ -132,6 +138,7 @@ internal static class PocketAppRuntimeActivationVerifier
             }
 
             const string corruptApp = "local.generated.activation-corrupt";
+            var corruptFailurePersisted = false;
             using (var isolated = new PocketAppRuntimeActivationRegistry(
                 () => managed.Values.ToArray(),
                 appId => candidates.GetValueOrDefault(appId),
@@ -141,11 +148,17 @@ internal static class PocketAppRuntimeActivationVerifier
                         corruptApp,
                         "LIFECYCLE_PACKAGE_CORRUPT",
                         true)
-                ]))
+                ],
+                restoreFailurePersistence: packageId =>
+                {
+                    corruptFailurePersisted = string.Equals(packageId, corruptApp, StringComparison.Ordinal);
+                    return corruptFailurePersisted;
+                }))
             {
                 var isolatedFailures = isolated.RestoreEnabledApps();
                 Require(
                     isolatedFailures.SequenceEqual([corruptApp], StringComparer.Ordinal)
+                        && corruptFailurePersisted
                         && isolated.ExecutionRegistry.ActiveAppIds.SequenceEqual([appA, appB], StringComparer.Ordinal)
                         && isolated.SurfaceRegistry.ActiveAppIds.SequenceEqual([appA, appB], StringComparer.Ordinal),
                     "activation_corrupt_package_does_not_block_healthy_restore",
@@ -221,9 +234,10 @@ internal static class PocketAppRuntimeActivationVerifier
             using var restoreFailing = new PocketAppRuntimeActivationRegistry(
                 () => managed.Values.ToArray(),
                 appId => candidates.GetValueOrDefault(appId),
-                restoreFailurePersistence: package =>
+                restoreFailurePersistence: packageId =>
                 {
-                    if (!string.Equals(package.PackageId, appC, StringComparison.Ordinal)
+                    if (!string.Equals(packageId, appC, StringComparison.Ordinal)
+                        || !managed.TryGetValue(appC, out var package)
                         || package.Version is null
                         || package.PackageDigest is null)
                     {

@@ -691,6 +691,20 @@ internal sealed class PocketAppLifecycleManager : IDisposable
     public PocketAppManagedPackage? ManagedPackage(string packageId) =>
         WithLifecycleLock(() => ManagedPackageCore(packageId));
 
+    public PocketAppManagedPackage? DurableManagedPackage(string packageId) =>
+        WithLifecycleLock(() =>
+        {
+            if (!ValidPackageId(packageId)) { throw Failure("LIFECYCLE_PACKAGE_INVALID"); }
+            var record = ReadActiveRecord(packageId);
+            if (record is null) { return null; }
+            return new PocketAppManagedPackage(
+                packageId,
+                record.State,
+                record.State == PocketAppLifecycleState.Removed ? null : record.Version,
+                record.State == PocketAppLifecycleState.Removed ? null : record.PackageDigest,
+                Array.Empty<string>());
+        });
+
     private PocketAppManagedPackage? ManagedPackageCore(string packageId)
     {
         if (!ValidPackageId(packageId)) { throw Failure("LIFECYCLE_PACKAGE_INVALID"); }

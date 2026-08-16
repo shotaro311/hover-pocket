@@ -693,6 +693,18 @@ final class PocketAppLifecycleManager {
         )
     }
 
+    func durableManagedPackage(packageID: String) throws -> PocketAppManagedPackage? {
+        guard Self.validPackageID(packageID) else { throw PocketAppLifecycleError.invalidPackage }
+        guard let record = try readActiveRecord(packageID: packageID) else { return nil }
+        return PocketAppManagedPackage(
+            packageID: packageID,
+            state: record.state,
+            version: record.state == .removed ? nil : record.version,
+            packageDigest: record.state == .removed ? nil : record.packageDigest,
+            installedVersions: []
+        )
+    }
+
     private func installedVersions(packageID: String) throws -> [String] {
         let root = versionsRoot(packageID: packageID)
         guard FileManager.default.fileExists(atPath: root.path) else { return [] }

@@ -110,6 +110,12 @@ internal sealed class PocketExecutionRuntimeRegistry
 
 internal sealed class PocketSurfaceRegistry
 {
+    internal sealed record Route(
+        string AppId,
+        string ProviderId,
+        string SurfaceId,
+        string Title);
+
     private sealed record Entry(
         PocketAppRuntimeReadback Readback,
         object HostHandle,
@@ -123,6 +129,34 @@ internal sealed class PocketSurfaceRegistry
         get
         {
             lock (_sync) { return _entries.Keys.Order(StringComparer.Ordinal).ToArray(); }
+        }
+    }
+
+    public IReadOnlyList<Route> Routes
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _entries.Values
+                    .Select(entry =>
+                    {
+                        var surfaceId = entry.SurfaceIds.Contains("main")
+                            ? "main"
+                            : entry.SurfaceIds.Order(StringComparer.Ordinal).FirstOrDefault();
+                        if (surfaceId is null) { return null; }
+                        var host = entry.HostHandle as PocketAppHostController;
+                        return new Route(
+                            entry.Readback.AppId,
+                            GeneratedProviderId(entry.Readback.AppId),
+                            surfaceId,
+                            host?.AppName ?? entry.Readback.AppId);
+                    })
+                    .Where(route => route is not null)
+                    .Cast<Route>()
+                    .OrderBy(route => route.ProviderId, StringComparer.Ordinal)
+                    .ToArray();
+            }
         }
     }
 
@@ -179,7 +213,7 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
     private readonly PocketAppLifecycleManager? _sourceLifecycle;
     private readonly Func<PocketAppManagementSnapshot> _managementSnapshotSource;
     private readonly Func<string, Candidate?> _candidateSource;
-    private readonly Func<PocketAppManagedPackage, bool> _restoreFailurePersistence;
+    private readonly Func<string, bool> _restoreFailurePersistence;
     private readonly Func<string, bool>? _failureInjection;
     private readonly object _activationSync = new();
     private bool _enabled = true;
@@ -235,12 +269,12 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
                 package.Surfaces.Keys.ToHashSet(StringComparer.Ordinal),
                 activationLease);
         };
-        _restoreFailurePersistence = package =>
+        _restoreFailurePersistence = packageId =>
         {
             try
             {
-                var receipt = lifecycle.Disable(package.PackageId);
-                var observed = lifecycle.ManagedPackage(package.PackageId);
+                var receipt = lifecycle.Disable(packageId);
+                var observed = lifecycle.DurableManagedPackage(packageId);
                 return receipt.State == PocketAppLifecycleState.Disabled
                     && receipt.EffectivePermissions.Count == 0
                     && observed is not null
@@ -260,7 +294,7 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
         Func<IReadOnlyList<PocketAppManagedPackage>> managedPackagesSource,
         Func<string, Candidate?> candidateSource,
         Func<IReadOnlyList<PocketAppManagementIssue>>? managementIssuesSource = null,
-        Func<PocketAppManagedPackage, bool>? restoreFailurePersistence = null,
+        Func<string, bool>? restoreFailurePersistence = null,
         Func<string, bool>? failureInjection = null)
     {
         _managementSnapshotSource = () => new PocketAppManagementSnapshot(
@@ -348,6 +382,7 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
         foreach (var issue in snapshot.Issues)
         {
             FailClosed(issue.PackageId);
+            _ = _restoreFailurePersistence(issue.PackageId);
         }
         foreach (var package in snapshot.Packages.OrderBy(item => item.PackageId, StringComparer.Ordinal))
         {
@@ -375,7 +410,7 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
             catch
             {
                 FailClosed(package.PackageId);
-                _ = _restoreFailurePersistence(package);
+                _ = _restoreFailurePersistence(package.PackageId);
                 failures.Add(package.PackageId);
             }
         }

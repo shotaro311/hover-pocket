@@ -290,7 +290,9 @@ function renderProvider(state, options) {
   void providerContainerEl.offsetWidth;
   providerContainerEl.classList.add("is-provider-entering");
 
-  const renderer = providerRenderers[provider?.id];
+  const renderer = provider?.id?.startsWith("generated-pocket-app:")
+    ? renderPocketSurfaceProvider
+    : providerRenderers[provider?.id];
   if (renderer) {
     const lifecycle = renderer({
       container: providerContainerEl,

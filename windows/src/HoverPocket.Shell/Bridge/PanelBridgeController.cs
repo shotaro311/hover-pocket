@@ -177,6 +177,7 @@ internal sealed class PanelBridgeController : IDisposable
                 _generatedPocketApps = null;
             }
         }
+        CurrentSettings = UserSettingsStore.Normalize(CurrentSettings, AvailableProviderIds());
         _clipboardBridgeController = new ClipboardBridgeController(
             new ClipboardHistoryStore(Path.Combine(settingsStore.RootDirectory, "clipboard")),
             new ClipboardNativeListener(System.Windows.Application.Current?.Dispatcher ?? System.Windows.Threading.Dispatcher.CurrentDispatcher),
@@ -254,7 +255,12 @@ internal sealed class PanelBridgeController : IDisposable
         dispatcher.Register("ailane.approve", ApproveAiLaneAsync);
         dispatcher.Register("ailane.reject", RejectAiLaneAsync);
         dispatcher.Register("todayFocus.startFromCalendar", StartTodayFocusFromCalendarAsync);
-        _pocketAppHostController?.Attach(dispatcher);
+        if (_pocketAppHostController is not null || _generatedPocketApps is not null)
+        {
+            dispatcher.Register("pocketApp.load", RoutePocketAppLoadAsync);
+            dispatcher.Register("pocketApp.invokeWorkflow", RoutePocketAppInvokeWorkflowAsync);
+            dispatcher.Register("pocketApp.updateState", RoutePocketAppUpdateStateAsync);
+        }
         if (surface == BridgeSurface.Settings)
         {
             dispatcher.Register(
@@ -312,6 +318,15 @@ internal sealed class PanelBridgeController : IDisposable
         var metrics = PanelSizeCatalog.Get(CurrentSettings.PanelSize);
         var builtInPocketAppAvailable = CurrentSettings.AiNativeEnabled
             && _pocketAppHostController?.IsActivationActive == true;
+        var generatedRoute = SelectedGeneratedRoute();
+        var selectedPocketSurface = selected?.Id == "today-focus" && builtInPocketAppAvailable
+            ? _pocketAppHostController?.BuildSurfaceState()
+            : generatedRoute is null
+                ? null
+                : _generatedPocketApps?.SurfaceRegistry
+                    .HostController(generatedRoute.AppId, generatedRoute.SurfaceId)?
+                    .BuildSurfaceState(generatedRoute.SurfaceId);
+        var allProviders = AvailableProviders().ToArray();
         return new
         {
             settings = new
@@ -332,7 +347,7 @@ internal sealed class PanelBridgeController : IDisposable
                 handleIcon = ToWireValue(CurrentSettings.HandleIconStyle),
                 showTopHandleSideArea = CurrentSettings.ShowTopHandleSideArea,
                 disableTopEdgeInFullscreen = CurrentSettings.DisableTopEdgeInFullscreen,
-                providerOrder = CurrentSettings.ProviderOrder,
+                providerOrder = EffectiveProviderOrder(),
                 providerVisibility = CurrentSettings.ProviderVisibility
             },
             updater = _updaterService.Snapshot,
@@ -361,7 +376,7 @@ internal sealed class PanelBridgeController : IDisposable
                 body = ProviderText(provider, ProviderTextKind.Body),
                 selected = selected is not null && string.Equals(provider.Id, selected.Id, StringComparison.OrdinalIgnoreCase)
             }),
-            allProviders = _providerRegistry.Providers.Select(provider => new
+            allProviders = allProviders.Select(provider => new
             {
                 id = provider.Id,
                 title = ProviderText(provider, ProviderTextKind.Title),
@@ -381,7 +396,7 @@ internal sealed class PanelBridgeController : IDisposable
                 }
             ,
             aiLane = _aiLaneController.CurrentState,
-            pocketSurface = builtInPocketAppAvailable ? _pocketAppHostController?.BuildSurfaceState() : null,
+            pocketSurface = selectedPocketSurface,
             pocketApps = !builtInPocketAppAvailable || _pocketAppHostController is null
                 ? Array.Empty<object>()
                 : new[] { _pocketAppHostController.BuildManagerState() },
@@ -391,10 +406,46 @@ internal sealed class PanelBridgeController : IDisposable
         };
     }
 
+    private Task<object?> RoutePocketAppLoadAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken) =>
+        ResolveSelectedPocketAppHost(parameters).LoadAsync(parameters, cancellationToken);
+
+    private Task<object?> RoutePocketAppInvokeWorkflowAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken) =>
+        ResolveSelectedPocketAppHost(parameters).InvokeWorkflowAsync(parameters, cancellationToken);
+
+    private Task<object?> RoutePocketAppUpdateStateAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken) =>
+        ResolveSelectedPocketAppHost(parameters).UpdateStateAsync(parameters, cancellationToken);
+
+    private PocketAppHostController ResolveSelectedPocketAppHost(JsonElement? parameters)
+    {
+        var appId = ReadRequiredString(parameters, "appId");
+        if (_pocketAppHostController is not null
+            && string.Equals(_selectedProviderId, "today-focus", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(_pocketAppHostController.AppId, appId, StringComparison.Ordinal))
+        {
+            return _pocketAppHostController;
+        }
+
+        var route = SelectedGeneratedRoute();
+        if (route is not null
+            && string.Equals(route.AppId, appId, StringComparison.Ordinal)
+            && _generatedPocketApps?.SurfaceRegistry.HostController(appId, route.SurfaceId) is { } generatedHost)
+        {
+            return generatedHost;
+        }
+
+        throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "pocket_app_route");
+    }
+
     private async Task<object?> SelectProviderAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         var providerId = ReadRequiredString(parameters, "id");
-        var provider = _providerRegistry.Find(providerId);
+        var provider = FindProvider(providerId);
         if (provider is null || !IsVisible(provider.Id))
         {
             throw new InvalidOperationException($"Provider is not visible: {providerId}");
@@ -480,7 +531,7 @@ internal sealed class PanelBridgeController : IDisposable
     {
         var providerId = ReadRequiredString(parameters, "id");
         var visible = ReadRequiredBool(parameters, "visible");
-        if (_providerRegistry.Find(providerId) is null)
+        if (FindProvider(providerId) is null)
         {
             throw new InvalidOperationException($"Unknown provider: {providerId}");
         }
@@ -550,7 +601,7 @@ internal sealed class PanelBridgeController : IDisposable
     private async Task<object?> SetPreferredProviderAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         var providerId = ReadRequiredString(parameters, "id");
-        var provider = _providerRegistry.Find(providerId);
+        var provider = FindProvider(providerId);
         if (provider is null || !IsVisible(provider.Id))
         {
             throw new InvalidOperationException($"Provider is not visible: {providerId}");
@@ -908,7 +959,7 @@ internal sealed class PanelBridgeController : IDisposable
 
     public async Task SelectProviderFromShellAsync(string providerId, CancellationToken cancellationToken = default)
     {
-        var provider = _providerRegistry.Find(providerId);
+        var provider = FindProvider(providerId);
         if (provider is null || !IsVisible(provider.Id))
         {
             return;
@@ -921,7 +972,7 @@ internal sealed class PanelBridgeController : IDisposable
 
     private void SaveSettings(UserSettings settings)
     {
-        CurrentSettings = UserSettingsStore.Normalize(settings, _providerRegistry.ProviderIds);
+        CurrentSettings = UserSettingsStore.Normalize(settings, AvailableProviderIds());
         _clipboardBridgeController.ApplySettings(CurrentSettings, IsVisible("clipboard"));
         _settingsStore.Save(CurrentSettings);
         SettingsChanged?.Invoke(this, CurrentSettings);
@@ -1060,10 +1111,19 @@ internal sealed class PanelBridgeController : IDisposable
 
     private IEnumerable<ProviderDescriptor> OrderedProviders()
     {
+        var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var providerId in CurrentSettings.ProviderOrder)
         {
-            var provider = _providerRegistry.Find(providerId);
+            var provider = FindProvider(providerId);
             if (provider is not null && IsVisible(provider.Id))
+            {
+                yielded.Add(provider.Id);
+                yield return provider;
+            }
+        }
+        foreach (var provider in AvailableProviders())
+        {
+            if (yielded.Add(provider.Id) && IsVisible(provider.Id))
             {
                 yield return provider;
             }
@@ -1072,7 +1132,7 @@ internal sealed class PanelBridgeController : IDisposable
 
     private bool IsVisible(string providerId)
     {
-        var provider = _providerRegistry.Find(providerId);
+        var provider = FindProvider(providerId);
         if (provider is null
             || (!provider.DefaultVisible && !CurrentSettings.AiNativeEnabled))
         {
@@ -1091,7 +1151,7 @@ internal sealed class PanelBridgeController : IDisposable
     private bool IsSelectableProvider(string? providerId)
     {
         return !string.IsNullOrWhiteSpace(providerId)
-            && _providerRegistry.Find(providerId) is not null
+            && FindProvider(providerId) is not null
             && IsVisible(providerId);
     }
 
@@ -1105,9 +1165,50 @@ internal sealed class PanelBridgeController : IDisposable
 
         var updated = CurrentSettings.Clone();
         updated.LastSelectedProviderId = providerId;
-        CurrentSettings = UserSettingsStore.Normalize(updated, _providerRegistry.ProviderIds);
+        CurrentSettings = UserSettingsStore.Normalize(updated, AvailableProviderIds());
         _settingsStore.Save(CurrentSettings);
     }
+
+    private IReadOnlyList<ProviderDescriptor> AvailableProviders()
+    {
+        var generated = _generatedPocketApps?.SurfaceRegistry.Routes
+            .Select(route => new ProviderDescriptor(
+                route.ProviderId,
+                route.Title,
+                "target",
+                "Personal Pocket App",
+                "A generated Pocket App running through the shared Capability Broker."))
+            ?? Enumerable.Empty<ProviderDescriptor>();
+        return _providerRegistry.Providers
+            .Concat(generated)
+            .GroupBy(provider => provider.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+    }
+
+    private IReadOnlyList<string> AvailableProviderIds() =>
+        AvailableProviders().Select(provider => provider.Id).ToArray();
+
+    private IReadOnlyList<string> EffectiveProviderOrder()
+    {
+        var available = AvailableProviderIds();
+        var availableSet = available.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var ordered = CurrentSettings.ProviderOrder
+            .Where(availableSet.Contains)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var orderedSet = ordered.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        ordered.AddRange(available.Where(orderedSet.Add));
+        return ordered;
+    }
+
+    private ProviderDescriptor? FindProvider(string id) =>
+        AvailableProviders().FirstOrDefault(
+            provider => string.Equals(provider.Id, id, StringComparison.OrdinalIgnoreCase));
+
+    private PocketSurfaceRegistry.Route? SelectedGeneratedRoute() =>
+        _generatedPocketApps?.SurfaceRegistry.Routes.FirstOrDefault(
+            route => string.Equals(route.ProviderId, _selectedProviderId, StringComparison.OrdinalIgnoreCase));
 
     private static object? DeserializeObject(JsonElement? parameters)
     {

@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 struct PocketAppRuntimeReadback: Equatable, Sendable {
@@ -104,7 +105,14 @@ final class PocketExecutionRuntimeRegistry {
 }
 
 @MainActor
-final class PocketSurfaceRegistry {
+final class PocketSurfaceRegistry: ObservableObject {
+    struct Route: Equatable, Sendable {
+        let appID: String
+        let providerID: String
+        let surfaceID: String
+        let title: String
+    }
+
     private final class Entry {
         let readback: PocketAppRuntimeReadback
         let runtimeHandle: AnyObject
@@ -129,8 +137,25 @@ final class PocketSurfaceRegistry {
     }
 
     private var entries: [String: Entry] = [:]
+    @Published private(set) var revision = 0
 
     var activeAppIDs: [String] { entries.keys.sorted() }
+
+    var routes: [Route] {
+        entries.values.compactMap { entry in
+            guard let surfaceID = entry.surfaceIDs.contains("main")
+                    ? "main"
+                    : entry.surfaceIDs.sorted().first else { return nil }
+            let title = (entry.runtimeHandle as? PocketAppExecutionRuntime)?.package.manifest.name
+                ?? entry.readback.appID
+            return Route(
+                appID: entry.readback.appID,
+                providerID: Self.generatedProviderID(appID: entry.readback.appID),
+                surfaceID: surfaceID,
+                title: title
+            )
+        }.sorted { $0.providerID < $1.providerID }
+    }
 
     func model(appID: String, surfaceID: String) throws -> PocketSurfaceHostModel? {
         guard let entry = entries[appID], entry.surfaceIDs.contains(surfaceID) else { return nil }
@@ -145,11 +170,11 @@ final class PocketSurfaceRegistry {
         entries[appID]?.readback
     }
 
-    static func generatedProviderID(appID: String) -> String {
+    nonisolated static func generatedProviderID(appID: String) -> String {
         "generated-pocket-app:\(appID)"
     }
 
-    static func generatedSurfaceRouteID(appID: String, surfaceID: String) -> String {
+    nonisolated static func generatedSurfaceRouteID(appID: String, surfaceID: String) -> String {
         "\(generatedProviderID(appID: appID))/\(surfaceID)"
     }
 
@@ -164,10 +189,13 @@ final class PocketSurfaceRegistry {
             runtimeHandle: runtimeHandle,
             surfaceIDs: surfaceIDs
         )
+        revision &+= 1
     }
 
     fileprivate func deactivate(appID: String) {
-        entries.removeValue(forKey: appID)?.invalidate()
+        guard let entry = entries.removeValue(forKey: appID) else { return }
+        entry.invalidate()
+        revision &+= 1
     }
 }
 
@@ -184,7 +212,7 @@ final class PocketAppRuntimeActivationRegistry {
     typealias ManagedPackagesSource = () throws -> [PocketAppManagedPackage]
     typealias ManagementIssuesSource = () throws -> [PocketAppManagementIssue]
     typealias CandidateSource = (String) throws -> Candidate?
-    typealias RestoreFailurePersistence = (PocketAppManagedPackage) -> Bool
+    typealias RestoreFailurePersistence = (String) -> Bool
 
     let executionRegistry = PocketExecutionRuntimeRegistry()
     let surfaceRegistry = PocketSurfaceRegistry()
@@ -243,10 +271,10 @@ final class PocketAppRuntimeActivationRegistry {
                 surfaceIDs: Set(package.surfaces.keys)
             )
         }
-        self.restoreFailurePersistence = { package in
+        self.restoreFailurePersistence = { packageID in
             do {
-                let receipt = try lifecycle.disable(packageID: package.packageID)
-                guard let observed = try lifecycle.managedPackage(packageID: package.packageID) else {
+                let receipt = try lifecycle.disable(packageID: packageID)
+                guard let observed = try lifecycle.durableManagedPackage(packageID: packageID) else {
                     return false
                 }
                 return receipt.state == .disabled
@@ -330,6 +358,7 @@ final class PocketAppRuntimeActivationRegistry {
         var failures = snapshot.issues.map(\.packageID)
         for issue in snapshot.issues {
             failClosed(appID: issue.packageID)
+            _ = restoreFailurePersistence(issue.packageID)
         }
         for package in snapshot.packages.sorted(by: { $0.packageID < $1.packageID }) {
             guard package.state == .enabled else {
@@ -347,7 +376,7 @@ final class PocketAppRuntimeActivationRegistry {
                 _ = try activate(candidate, expected: candidate.readback)
             } catch {
                 failClosed(appID: package.packageID)
-                _ = restoreFailurePersistence(package)
+                _ = restoreFailurePersistence(package.packageID)
                 failures.append(package.packageID)
             }
         }

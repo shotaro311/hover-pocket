@@ -105,6 +105,14 @@ enum PocketAppRuntimeActivationVerification {
                 "activation_multiple_apps",
                 failures: &failures
             )
+            require(
+                registry.surfaceRegistry.routes.map(\.providerID) == [
+                    PocketSurfaceRegistry.generatedProviderID(appID: appA),
+                    PocketSurfaceRegistry.generatedProviderID(appID: appB)
+                ],
+                "activation_generated_provider_routes",
+                failures: &failures
+            )
 
             candidates[appA] = candidate(appID: appA, version: "1.1.0", digest: digest2)
             managed[appA] = managedPackage(appID: appA, version: "1.1.0", digest: digest2, state: .enabled)
@@ -156,6 +164,7 @@ enum PocketAppRuntimeActivationVerification {
             )
 
             let corruptApp = "local.generated.activation-corrupt"
+            var corruptFailurePersisted = false
             let isolated = PocketAppRuntimeActivationRegistry(
                 managedPackagesSource: { Array(managed.values) },
                 managementIssuesSource: {
@@ -165,11 +174,16 @@ enum PocketAppRuntimeActivationVerification {
                         removalAllowed: true
                     )]
                 },
-                candidateSource: { candidates[$0] }
+                candidateSource: { candidates[$0] },
+                restoreFailurePersistence: { packageID in
+                    corruptFailurePersisted = packageID == corruptApp
+                    return corruptFailurePersisted
+                }
             )
             let isolatedFailures = isolated.restoreEnabledApps()
             require(
                 isolatedFailures == [corruptApp]
+                    && corruptFailurePersisted
                     && isolated.executionRegistry.activeAppIDs == [appA, appB]
                     && isolated.surfaceRegistry.activeAppIDs == [appA, appB],
                 "activation_corrupt_package_does_not_block_healthy_restore",
@@ -262,8 +276,9 @@ enum PocketAppRuntimeActivationVerification {
             let restoreFailing = PocketAppRuntimeActivationRegistry(
                 managedPackagesSource: { Array(managed.values) },
                 candidateSource: { candidates[$0] },
-                restoreFailurePersistence: { package in
-                    guard package.packageID == appC,
+                restoreFailurePersistence: { packageID in
+                    guard packageID == appC,
+                          let package = managed[appC],
                           let version = package.version,
                           let packageDigest = package.packageDigest else { return false }
                     managed[appC] = managedPackage(
@@ -286,6 +301,33 @@ enum PocketAppRuntimeActivationVerification {
                 "activation_restore_failure_persists_disabled",
                 failures: &failures
             )
+
+            let defaultsName = "HoverPocket.RuntimeActivationVerification.\(UUID().uuidString)"
+            if let defaults = UserDefaults(suiteName: defaultsName) {
+                defaults.set(true, forKey: "aiNativeEnabled")
+                AINativeRuntime.shared.configure(
+                    adapter: nil,
+                    generatedActivationRegistry: registry
+                )
+                let providerStore = ProviderStore(
+                    registry: .empty,
+                    settings: AppSettings(defaults: defaults)
+                )
+                let generatedID = PluginID(
+                    rawValue: PocketSurfaceRegistry.generatedProviderID(appID: appB)
+                )
+                providerStore.select(generatedID)
+                require(
+                    providerStore.visibleManifests.contains { $0.id == generatedID }
+                        && providerStore.selectedProvider?.manifest.id == generatedID,
+                    "activation_generated_provider_selectable",
+                    failures: &failures
+                )
+                AINativeRuntime.shared.configure(adapter: nil)
+                defaults.removePersistentDomain(forName: defaultsName)
+            } else {
+                failures.append("activation_generated_provider_defaults")
+            }
         } catch {
             failures.append("activation_verifier_unexpected_error")
         }
