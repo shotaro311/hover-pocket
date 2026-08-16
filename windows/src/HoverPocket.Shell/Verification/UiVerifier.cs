@@ -161,7 +161,9 @@ internal sealed class UiVerifier
                     || !result.PocketSurfaceSelectionOk
                     || !result.PocketSurfaceDurationOk
                     || !result.PocketSurfacePurposeOk
-                    || !result.PocketSurfaceStatePersistedOk)
+                    || !result.PocketSurfaceStatePersistedOk
+                    || !result.PocketSurfaceStateBoundControlsPersistedOk
+                    || !result.PocketSurfaceStateWorkflowInputOk)
                 {
                     _failures.Add("pocket surface: declarative Today Focus controls or separated user state did not match the canonical model");
                 }

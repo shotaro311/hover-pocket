@@ -35,7 +35,7 @@ final class PocketSurfaceHostModel: ObservableObject {
         self.packageName = runtime.package.manifest.name
         self.activationAvailable = runtime.isActivationActive
         if let userStateStore = runtime.userStateStore {
-            self.state = userStateStore.snapshot().mapValues(CapabilityValue.string)
+            self.state = userStateStore.snapshot()
         }
         applyDefaults(in: surface.root)
     }
@@ -205,18 +205,10 @@ final class PocketSurfaceHostModel: ObservableObject {
         } else if binding.hasPrefix("$state.") {
             let name = String(binding.dropFirst("$state.".count))
             state[name] = value
-            if case .string(let persisted) = value {
-                do {
-                    try runtime.userStateStore?.setString(persisted, for: name)
-                } catch {
-                    statusText = "保存状態を更新できませんでした。"
-                }
-            } else if value == .null {
-                do {
-                    try runtime.userStateStore?.setString(nil, for: name)
-                } catch {
-                    statusText = "保存状態を更新できませんでした。"
-                }
+            do {
+                try runtime.userStateStore?.setValue(value, for: name)
+            } catch {
+                statusText = "保存状態を更新できませんでした。"
             }
             if runtime.package.workflows.values.contains(where: { $0.inputs[name] != nil }) {
                 inputs[name] = value

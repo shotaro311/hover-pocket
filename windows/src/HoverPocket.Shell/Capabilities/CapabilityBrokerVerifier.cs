@@ -512,9 +512,28 @@ internal sealed class CapabilityBrokerVerifier
             package.Manifest.Id,
             package.StatePropertyNames,
             stateRoot);
+        var reloadedState = reloadedStateStore.Snapshot();
         Require(
-            reloadedStateStore.Snapshot().GetValueOrDefault("selectedEventRef") == "primary:sensitive-event-ref",
+            reloadedState.TryGetValue("selectedEventRef", out var reloadedEventRef)
+            && reloadedEventRef.ValueKind == JsonValueKind.String
+            && reloadedEventRef.GetString() == "primary:sensitive-event-ref",
             "pocket_app_state_persistence");
+        var typedStateStore = new PocketAppUserStateStore(
+            "local.example.typed-state",
+            new HashSet<string>(["enabled", "label", "ratio"], StringComparer.Ordinal),
+            stateRoot);
+        typedStateStore.SetValue("enabled", CapabilityJson.From(true));
+        typedStateStore.SetValue("label", CapabilityJson.From("Saved"));
+        typedStateStore.SetValue("ratio", CapabilityJson.From(1.5));
+        var typedStateReadback = new PocketAppUserStateStore(
+            "local.example.typed-state",
+            new HashSet<string>(["enabled", "label", "ratio"], StringComparer.Ordinal),
+            stateRoot).Snapshot();
+        Require(
+            typedStateReadback["enabled"].ValueKind == JsonValueKind.True
+            && typedStateReadback["label"].GetString() == "Saved"
+            && typedStateReadback["ratio"].GetDouble() == 1.5,
+            "pocket_app_typed_state_persistence");
         var forgedStateResponse = await dispatcher.ProcessRawMessageAsync(
             JsonSerializer.Serialize(new
             {

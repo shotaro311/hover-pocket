@@ -574,6 +574,7 @@ window.__hoverPocketVerify = {
       pocketSurfaceDurationOk: pocketSurfaceVerify.duration,
       pocketSurfacePurposeOk: pocketSurfaceVerify.purpose,
       pocketSurfaceStatePersistedOk: pocketSurfaceVerify.statePersisted,
+      pocketSurfaceStateBoundControlsPersistedOk: pocketSurfaceVerify.stateBoundControlsPersisted,
       pocketSurfaceStateWorkflowInputOk: pocketSurfaceVerify.stateWorkflowInputForwarded,
       pocketSurfaceApprovalHostOwnedOk: pocketSurfaceVerify.approvalHostOwned,
       pocketSurfaceLayoutMatrixOk: pocketSurfaceVerify.layoutMatrix,

@@ -1,3 +1,4 @@
+import CoreFoundation
 import Foundation
 
 enum PocketAppUserStateStoreError: Error, Equatable {
@@ -15,7 +16,7 @@ final class PocketAppUserStateStore {
 
     private let allowedKeys: Set<String>
     private let fileURL: URL
-    private var cachedState: [String: String]
+    private var cachedState: [String: CapabilityValue]
 
     init(packageID: String, allowedKeys: Set<String>, rootDirectory: URL) throws {
         guard packageID.range(
@@ -32,16 +33,20 @@ final class PocketAppUserStateStore {
         self.cachedState = try Self.load(fileURL: fileURL, allowedKeys: allowedKeys)
     }
 
-    func snapshot() -> [String: String] {
+    func snapshot() -> [String: CapabilityValue] {
         cachedState
     }
 
     func setString(_ value: String?, for key: String) throws {
+        try setValue(value.map(CapabilityValue.string), for: key)
+    }
+
+    func setValue(_ value: CapabilityValue?, for key: String) throws {
         guard allowedKeys.contains(key) else {
             throw PocketAppUserStateStoreError.invalidKey
         }
-        if let value, value.unicodeScalars.count > Self.maximumValueScalars {
-            throw PocketAppUserStateStoreError.invalidValue
+        if let value {
+            try Self.validate(value)
         }
         let previous = cachedState
         if let value {
@@ -50,7 +55,8 @@ final class PocketAppUserStateStore {
             cachedState.removeValue(forKey: key)
         }
         do {
-            let data = try JSONSerialization.data(withJSONObject: cachedState, options: [.sortedKeys])
+            let object = try cachedState.mapValues(Self.jsonValue)
+            let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
             guard data.count <= Self.maximumDocumentBytes else {
                 throw PocketAppUserStateStoreError.invalidDocument
             }
@@ -64,7 +70,7 @@ final class PocketAppUserStateStore {
         }
     }
 
-    private static func load(fileURL: URL, allowedKeys: Set<String>) throws -> [String: String] {
+    private static func load(fileURL: URL, allowedKeys: Set<String>) throws -> [String: CapabilityValue] {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return [:] }
         do {
             let data = try Data(contentsOf: fileURL)
@@ -74,12 +80,10 @@ final class PocketAppUserStateStore {
             else {
                 throw PocketAppUserStateStoreError.invalidDocument
             }
-            var state: [String: String] = [:]
+            var state: [String: CapabilityValue] = [:]
             for (key, rawValue) in object {
-                guard let value = rawValue as? String,
-                      value.unicodeScalars.count <= maximumValueScalars else {
-                    throw PocketAppUserStateStoreError.invalidDocument
-                }
+                let value = try capabilityValue(rawValue)
+                try validate(value)
                 state[key] = value
             }
             return state
@@ -88,5 +92,64 @@ final class PocketAppUserStateStore {
         } catch {
             throw PocketAppUserStateStoreError.invalidDocument
         }
+    }
+
+    private static func validate(_ value: CapabilityValue) throws {
+        switch value {
+        case .null, .bool, .integer:
+            return
+        case .number(let number):
+            guard number.isFinite else {
+                throw PocketAppUserStateStoreError.invalidValue
+            }
+        case .string(let string):
+            guard string.unicodeScalars.count <= maximumValueScalars else {
+                throw PocketAppUserStateStoreError.invalidValue
+            }
+        case .array, .object:
+            throw PocketAppUserStateStoreError.invalidValue
+        }
+    }
+
+    private static func jsonValue(_ value: CapabilityValue) throws -> Any {
+        switch value {
+        case .null:
+            return NSNull()
+        case .bool(let value):
+            return value
+        case .integer(let value):
+            return value
+        case .number(let value) where value.isFinite:
+            return value
+        case .string(let value):
+            return value
+        default:
+            throw PocketAppUserStateStoreError.invalidValue
+        }
+    }
+
+    private static func capabilityValue(_ value: Any) throws -> CapabilityValue {
+        if value is NSNull {
+            return .null
+        }
+        if let number = value as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                return .bool(number.boolValue)
+            }
+            let doubleValue = number.doubleValue
+            guard doubleValue.isFinite else {
+                throw PocketAppUserStateStoreError.invalidDocument
+            }
+            let type = String(cString: number.objCType)
+            if !["f", "d"].contains(type),
+               let integerValue = Int(exactly: number.int64Value) {
+                return .integer(integerValue)
+            }
+            return .number(doubleValue)
+        }
+        if let value = value as? String {
+            return .string(value)
+        }
+        throw PocketAppUserStateStoreError.invalidDocument
     }
 }

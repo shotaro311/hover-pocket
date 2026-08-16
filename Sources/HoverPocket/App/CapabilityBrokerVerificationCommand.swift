@@ -553,8 +553,27 @@ enum CapabilityBrokerVerificationCommand {
             rootDirectory: stateRoot
         )
         try require(
-            reloadedStateStore.snapshot()["selectedEventRef"] == selectedEventRef,
+            reloadedStateStore.snapshot()["selectedEventRef"] == .string(selectedEventRef),
             "pocket_app_surface_state_persistence"
+        )
+        let typedStateStore = try PocketAppUserStateStore(
+            packageID: "local.example.typed-state",
+            allowedKeys: ["enabled", "label", "ratio"],
+            rootDirectory: stateRoot
+        )
+        try typedStateStore.setValue(.bool(true), for: "enabled")
+        try typedStateStore.setValue(.string("Saved"), for: "label")
+        try typedStateStore.setValue(.number(1.5), for: "ratio")
+        let typedStateReadback = try PocketAppUserStateStore(
+            packageID: "local.example.typed-state",
+            allowedKeys: ["enabled", "label", "ratio"],
+            rootDirectory: stateRoot
+        ).snapshot()
+        try require(
+            typedStateReadback["enabled"] == .bool(true)
+                && typedStateReadback["label"] == .string("Saved")
+                && typedStateReadback["ratio"] == .number(1.5),
+            "pocket_app_typed_state_persistence"
         )
         do {
             try reloadedStateStore.setString("forbidden", for: "unknown")

@@ -206,16 +206,25 @@ internal sealed class PocketAppHostController
         var key = RequiredString(parameters, "key", 128);
         if (parameters is null
             || !parameters.Value.TryGetProperty("value", out var rawValue)
-            || rawValue.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
+            || rawValue.ValueKind is not (
+                JsonValueKind.String
+                or JsonValueKind.Number
+                or JsonValueKind.True
+                or JsonValueKind.False
+                or JsonValueKind.Null))
         {
             throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "state_value");
         }
-        var value = rawValue.ValueKind == JsonValueKind.Null ? null : rawValue.GetString();
-        if (key == "selectedEventRef" && value is not null)
+        var stringValue = rawValue.ValueKind == JsonValueKind.String ? rawValue.GetString() : null;
+        if (key == "selectedEventRef" && rawValue.ValueKind != JsonValueKind.Null)
         {
+            if (stringValue is null)
+            {
+                throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "selected_event_ref");
+            }
             lock (_eventRefSync)
             {
-                if (!_allowedEventRefs.Contains(value))
+                if (!_allowedEventRefs.Contains(stringValue))
                 {
                     throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "selected_event_ref");
                 }
@@ -225,7 +234,7 @@ internal sealed class PocketAppHostController
             ?? throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "pocket_state");
         try
         {
-            store.SetString(key, value);
+            store.SetValue(key, rawValue.ValueKind == JsonValueKind.Null ? null : rawValue);
         }
         catch (PocketAppUserStateStoreException)
         {

@@ -13,7 +13,7 @@ internal sealed class PocketAppUserStateStore
     private readonly object _sync = new();
     private readonly IReadOnlySet<string> _allowedKeys;
     private readonly string _filePath;
-    private Dictionary<string, string> _state;
+    private Dictionary<string, JsonElement> _state;
 
     public PocketAppUserStateStore(
         string packageId,
@@ -34,40 +34,50 @@ internal sealed class PocketAppUserStateStore
         _state = Load();
     }
 
-    public IReadOnlyDictionary<string, string> Snapshot()
+    public IReadOnlyDictionary<string, JsonElement> Snapshot()
     {
         lock (_sync)
         {
-            return new Dictionary<string, string>(_state, StringComparer.Ordinal);
+            return _state.ToDictionary(
+                item => item.Key,
+                item => item.Value.Clone(),
+                StringComparer.Ordinal);
         }
     }
 
     public void SetString(string key, string? value)
     {
+        SetValue(
+            key,
+            value is null ? null : JsonSerializer.SerializeToElement(value));
+    }
+
+    public void SetValue(string key, JsonElement? value)
+    {
         if (!_allowedKeys.Contains(key))
         {
             throw new PocketAppUserStateStoreException("state_key");
         }
-        if (value is not null && value.EnumerateRunes().Count() > MaximumValueScalars)
+        if (value is not null)
         {
-            throw new PocketAppUserStateStoreException("state_value");
+            ValidateValue(value.Value);
         }
         lock (_sync)
         {
-            var previous = new Dictionary<string, string>(_state, StringComparer.Ordinal);
+            var previous = new Dictionary<string, JsonElement>(_state, StringComparer.Ordinal);
             if (value is null)
             {
                 _state.Remove(key);
             }
             else
             {
-                _state[key] = value;
+                _state[key] = value.Value.Clone();
             }
             var temporaryPath = $"{_filePath}.{Guid.NewGuid():N}.tmp";
             try
             {
                 var data = JsonSerializer.SerializeToUtf8Bytes(
-                    new SortedDictionary<string, string>(_state, StringComparer.Ordinal));
+                    new SortedDictionary<string, JsonElement>(_state, StringComparer.Ordinal));
                 if (data.Length > MaximumDocumentBytes)
                 {
                     throw new PocketAppUserStateStoreException("state_size");
@@ -97,11 +107,11 @@ internal sealed class PocketAppUserStateStore
         }
     }
 
-    private Dictionary<string, string> Load()
+    private Dictionary<string, JsonElement> Load()
     {
         if (!File.Exists(_filePath))
         {
-            return new Dictionary<string, string>(StringComparer.Ordinal);
+            return new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         }
         try
         {
@@ -110,14 +120,22 @@ internal sealed class PocketAppUserStateStore
             {
                 throw new PocketAppUserStateStoreException("state_size");
             }
-            var values = JsonSerializer.Deserialize<Dictionary<string, string>>(data)
-                ?? throw new PocketAppUserStateStoreException("state_document");
-            if (!values.Keys.All(_allowedKeys.Contains)
-                || values.Values.Any(value => value is null || value.EnumerateRunes().Count() > MaximumValueScalars))
+            using var document = JsonDocument.Parse(data);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
             {
                 throw new PocketAppUserStateStoreException("state_document");
             }
-            return new Dictionary<string, string>(values, StringComparer.Ordinal);
+            var values = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (!_allowedKeys.Contains(property.Name))
+                {
+                    throw new PocketAppUserStateStoreException("state_document");
+                }
+                ValidateValue(property.Value);
+                values.Add(property.Name, property.Value.Clone());
+            }
+            return values;
         }
         catch (PocketAppUserStateStoreException)
         {
@@ -126,6 +144,31 @@ internal sealed class PocketAppUserStateStore
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             throw new PocketAppUserStateStoreException("state_document");
+        }
+    }
+
+    private static void ValidateValue(JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.String:
+                if ((value.GetString() ?? string.Empty).EnumerateRunes().Count() > MaximumValueScalars)
+                {
+                    throw new PocketAppUserStateStoreException("state_value");
+                }
+                return;
+            case JsonValueKind.Number:
+                if (value.GetRawText().Length > 128)
+                {
+                    throw new PocketAppUserStateStoreException("state_value");
+                }
+                return;
+            case JsonValueKind.True:
+            case JsonValueKind.False:
+            case JsonValueKind.Null:
+                return;
+            default:
+                throw new PocketAppUserStateStoreException("state_value");
         }
     }
 }

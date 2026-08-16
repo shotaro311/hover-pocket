@@ -127,6 +127,9 @@ export function renderPocketSurfaceProvider(context) {
           setBinding(node.value, truncateUnicodeScalars(sanitizeVisibleText(input.value), input.maxLength), inputs, state);
           refreshButtons();
         });
+        input.addEventListener("change", async () => {
+          await persistBoundState(node.value, valueFor(node.value, inputs, state));
+        });
         field.append(label, input);
         return field;
       }
@@ -135,15 +138,20 @@ export function renderPocketSurfaceProvider(context) {
         label.className = "hp-pocket-toggle";
         const input = document.createElement("input");
         input.type = "checkbox";
+        input.dataset.binding = node.value ?? "";
         input.checked = Boolean(valueFor(node.value, inputs, state));
-        input.addEventListener("change", () => setBinding(node.value, input.checked, inputs, state));
+        input.addEventListener("change", async () => {
+          setBinding(node.value, input.checked, inputs, state);
+          refreshButtons();
+          await persistBoundState(node.value, input.checked);
+        });
         const text = document.createElement("span");
         text.textContent = sanitizeVisibleText(node.label ?? "Toggle");
         label.append(input, text);
         return label;
       }
       case "picker":
-        return pickerNode(node, inputs, state);
+        return pickerNode(node, inputs, state, refreshButtons, persistState);
       case "calendarEventPicker":
         return calendarPickerNode(node, inputs, state, queryResults, refreshButtons, persistState);
       case "durationPicker":
@@ -193,6 +201,11 @@ export function renderPocketSurfaceProvider(context) {
     }
   }
 
+  async function persistBoundState(binding, value) {
+    if (!binding?.startsWith("$state.")) return true;
+    return persistState(binding, value);
+  }
+
   return {
     refresh: load,
     dispose() {
@@ -203,7 +216,7 @@ export function renderPocketSurfaceProvider(context) {
 
 function initializeState(initialState, state) {
   for (const [key, value] of Object.entries(initialState ?? {})) {
-    if (typeof value === "string" && key) state.set(key, value);
+    if (key && ["string", "boolean", "number"].includes(typeof value)) state.set(key, value);
   }
 }
 
@@ -299,12 +312,13 @@ function durationNode(node, inputs, state) {
   return field;
 }
 
-function pickerNode(node, inputs, state) {
+function pickerNode(node, inputs, state, onChange, persistState) {
   const field = document.createElement("label");
   field.className = "hp-pocket-field";
   const label = document.createElement("span");
   label.textContent = sanitizeVisibleText(node.label ?? "Select");
   const select = document.createElement("select");
+  select.dataset.binding = node.value ?? "";
   for (const item of node.options ?? []) {
     const option = document.createElement("option");
     option.value = item.value;
@@ -312,7 +326,13 @@ function pickerNode(node, inputs, state) {
     select.append(option);
   }
   select.value = stringValue(valueFor(node.value, inputs, state));
-  select.addEventListener("change", () => setBinding(node.value, select.value, inputs, state));
+  select.addEventListener("change", async () => {
+    setBinding(node.value, select.value, inputs, state);
+    onChange();
+    if (node.value?.startsWith("$state.")) {
+      await persistState(node.value, select.value);
+    }
+  });
   field.append(label, select);
   return field;
 }
@@ -393,6 +413,11 @@ export async function runPocketSurfaceUiVerify() {
   const model = {
     appId: "local.example.today-focus",
     surfaceId: "main",
+    initialState: {
+      note: "Before",
+      enabled: false,
+      mode: "quiet",
+    },
     workflowInputs: {
       startFocus: ["durationSeconds", "purpose", "selectedEventRef"],
     },
@@ -403,6 +428,12 @@ export async function runPocketSurfaceUiVerify() {
           { type: "calendarEventPicker", items: { query: "calendar.events.list@1", arguments: {} }, selection: "$state.selectedEventRef", titleTarget: "$input.purpose" },
           { type: "durationPicker", value: "$input.durationSeconds", min: 60, max: 14400, default: 1500 },
           { type: "textField", label: "Purpose", value: "$input.purpose", maxLength: 80 },
+          { type: "textField", label: "Note", value: "$state.note", maxLength: 80 },
+          { type: "toggle", label: "Enabled", value: "$state.enabled" },
+          { type: "picker", label: "Mode", value: "$state.mode", options: [
+            { label: "Quiet", value: "quiet" },
+            { label: "Active", value: "active" },
+          ] },
           { type: "button", label: "Start focus", workflow: "startFocus" },
         ],
       },
@@ -420,6 +451,7 @@ export async function runPocketSurfaceUiVerify() {
   ];
   let baseline;
   let stateWorkflowInputForwarded = false;
+  let stateBoundControlsPersisted = false;
   let layoutMatrix = true;
   let layoutCases = 0;
 
@@ -430,7 +462,7 @@ export async function runPocketSurfaceUiVerify() {
       host.dataset.textSize = textCase.name;
       host.style.cssText = `position:fixed;left:-10000px;top:0;width:${panelCase.width}px;height:${panelCase.height}px;--hp-text-scale:${textCase.scale}`;
       document.body.append(host);
-      let statePersisted = false;
+      const persistedState = new Map();
       const provider = renderPocketSurfaceProvider({
         container: host,
         state: { pocketSurface: model },
@@ -439,7 +471,7 @@ export async function runPocketSurfaceUiVerify() {
             return { queryResults: [{ query: "calendar.events.list@1", output: { events: [{ eventRef: "event:1", safeTitle: "Focus", start: "2026-08-15T01:00:00Z", end: "2026-08-15T02:00:00Z" }] } }] };
           }
           if (method === "pocketApp.updateState") {
-            statePersisted = params?.key === "selectedEventRef" && params?.value === "event:1";
+            persistedState.set(params?.key, params?.value);
             return { saved: true };
           }
           if (method === "pocketApp.invokeWorkflow") {
@@ -454,8 +486,27 @@ export async function runPocketSurfaceUiVerify() {
         },
       });
       await nextLayout();
+      const stateNote = host.querySelector('input[data-binding="$state.note"]');
+      if (stateNote) {
+        stateNote.value = "After";
+        stateNote.dispatchEvent(new Event("input", { bubbles: true }));
+        stateNote.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      const stateToggle = host.querySelector('input[data-binding="$state.enabled"]');
+      if (stateToggle) {
+        stateToggle.checked = true;
+        stateToggle.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      const statePicker = host.querySelector('select[data-binding="$state.mode"]');
+      if (statePicker) {
+        statePicker.value = "active";
+        statePicker.dispatchEvent(new Event("change", { bubbles: true }));
+      }
       host.querySelector(".hp-pocket-primary")?.click();
       await nextLayout();
+      stateBoundControlsPersisted ||= persistedState.get("note") === "After"
+        && persistedState.get("enabled") === true
+        && persistedState.get("mode") === "active";
       const surface = host.querySelector(".hp-pocket-surface");
       const surfaceRect = surface?.getBoundingClientRect();
       const controlsFit = [...host.querySelectorAll("input, select, button")].every((control) => {
@@ -476,7 +527,7 @@ export async function runPocketSurfaceUiVerify() {
         selection: host.querySelector("select")?.value === "event:1",
         duration: host.querySelector(".hp-pocket-duration input")?.value === "1500",
         purpose: host.querySelector(".hp-pocket-field input")?.value === "Focus",
-        statePersisted,
+        statePersisted: persistedState.get("selectedEventRef") === "event:1",
         approvalHostOwned: !host.querySelector("[data-approval], .hp-pocket-approval"),
       };
       provider?.dispose?.();
@@ -487,6 +538,7 @@ export async function runPocketSurfaceUiVerify() {
   return {
     ...baseline,
     stateWorkflowInputForwarded,
+    stateBoundControlsPersisted,
     layoutMatrix: layoutMatrix && layoutCases === panelCases.length * textCases.length,
   };
 }
