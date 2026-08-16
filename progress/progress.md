@@ -2,7 +2,7 @@
 project_slug: hover-menu-preview
 updated: 2026-08-16
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-local-complete-pr-pending; capability-expansion-merged
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-review-hardening; capability-expansion-merged
 ---
 
 ## 2026-08-16 AI-native AN5-C Runtime / Surface Activation
@@ -14,8 +14,9 @@ status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; a
 - Pro返却はdelivery ID / state hashをclaimしてreceiptを検証したが、適用可能なpatch contractを満たさなかった。1回のrepair上限後はSkillのisolated-recovery手順へ切り替え、mainを変更せず専用worktree内でCodexがAN5-Cを復元した。返却は再適用せずmark-done済みである。
 - 両OSへapp ID keyed runtime / Surface Registry、receiptとapp ID / version / digest / effective grantの一致、複数App分離、disable / remove / rollback、restart restoration、activation失敗時のdurable disabled fallbackを実装した。生成App用のglobal WebView bridgeは公開せず、実Codex生成もfail closedのままである。
 - security reviewで検出したstale runtime競合を持ち越さず、macOSはactivation leaseが実行Taskを取消し、BrokerとTimer writeが取消を再確認するようにした。Windowsはlease CancellationTokenをBridgeのtokenへ連結し、Brokerのqueue / step / handlerへ伝播する。disable / remove / default-off後にqueue済み実行がmaterial writeへ進まない回帰を追加した。
-- 最終差分digest `codex-security-snapshot/v1:sha256:b244af1e...b294f`のCodex Security scan `d40de7c5-0469-4f95-985b-d97b1a30c08e`は22 / 22 fileを完全確認し、reportable finding 0件、sealed completeとなった。Macでwarnings-as-errors build、Pocket App、Capability、Broker、Surface、Timer、共通contract、bundle build、Apple Development署名検証が成功した。
-- 未完了はPR、Windows / macOS / 3OS contract CI、merge後readback、両OS実機での生成Surface / runtime activation readback、実Codex confinement、Voiceから生成・導入するCore Integration E2Eである。詳細: `progress/2026-08/2026-08-16_hover-pocket-ai-native-an5-c.md`。
+- 初回実装commit `63fc75b`をPR [#18](https://github.com/shotaro311/hover-pocket/pull/18)へpushし、Windows Release [31917292784](https://github.com/shotaro311/hover-pocket/actions/runs/31917292784)、macOS [31917292788](https://github.com/shotaro311/hover-pocket/actions/runs/31917292788)、3OS contract / compare [31917454979](https://github.com/shotaro311/hover-pocket/actions/runs/31917454979)が成功した。reviewで、WindowsのAI-native OFF時に生成App runtimeを解除していない点と、起動時復元失敗をdurable disabledへ戻していない点を検出した。
+- review修正では、WindowsのAI-native OFF / defaults resetで全activation leaseとSurfaceを即時解除し、両OSの起動時復元失敗をLifecycle Manager経由でdisabledへ保存・再読込確認する。shutdownと復元失敗永続化のdeterministic回帰を両OSへ追加し、Macのwarnings-as-errors build、Pocket App、Capability、Broker、Surface、Timer、共通contract、bundle build、Apple Development署名検証が再成功した。旧scan `d40de7c5-0469-4f95-985b-d97b1a30c08e`は初回差分の証拠であり、review修正後のexact差分は再scanを完了条件とする。
+- 未完了はreview修正後のCodex Security scan、commit / push、Windows / macOS / 3OS contract CI再確認、review thread解決、merge後readback、両OS実機での生成Surface / runtime activation readback、実Codex confinement、Voiceから生成・導入するCore Integration E2Eである。詳細: `progress/2026-08/2026-08-16_hover-pocket-ai-native-an5-c.md`。
 
 ## 2026-08-16 AI-native AN5-B Codex Pocket App Generation / Management UI
 

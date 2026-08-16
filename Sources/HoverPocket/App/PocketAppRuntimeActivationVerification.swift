@@ -222,6 +222,49 @@ enum PocketAppRuntimeActivationVerification {
                 "activation_failure_injection_fail_closed",
                 failures: &failures
             )
+            failing.shutdown()
+            require(
+                failing.executionRegistry.activeAppIDs.isEmpty
+                    && failing.surfaceRegistry.activeAppIDs.isEmpty,
+                "activation_shutdown_revokes_all_apps",
+                failures: &failures
+            )
+
+            managed[appC] = managedPackage(
+                appID: appC,
+                version: "1.0.0",
+                digest: digest1,
+                state: .enabled
+            )
+            candidates.removeValue(forKey: appC)
+            var restoreFailurePersisted = false
+            let restoreFailing = PocketAppRuntimeActivationRegistry(
+                managedPackagesSource: { Array(managed.values) },
+                candidateSource: { candidates[$0] },
+                restoreFailurePersistence: { package in
+                    guard package.packageID == appC,
+                          let version = package.version,
+                          let packageDigest = package.packageDigest else { return false }
+                    managed[appC] = managedPackage(
+                        appID: appC,
+                        version: version,
+                        digest: packageDigest,
+                        state: .disabled
+                    )
+                    restoreFailurePersisted = true
+                    return true
+                }
+            )
+            let restoreFailureIDs = restoreFailing.restoreEnabledApps()
+            require(
+                restoreFailureIDs.contains(appC)
+                    && restoreFailurePersisted
+                    && managed[appC]?.state == .disabled
+                    && restoreFailing.executionRegistry.readback(appID: appC) == nil
+                    && restoreFailing.surfaceRegistry.readback(appID: appC) == nil,
+                "activation_restore_failure_persists_disabled",
+                failures: &failures
+            )
         } catch {
             failures.append("activation_verifier_unexpected_error")
         }

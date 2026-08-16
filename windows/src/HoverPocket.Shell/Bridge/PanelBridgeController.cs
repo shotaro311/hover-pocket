@@ -644,6 +644,11 @@ internal sealed class PanelBridgeController : IDisposable
                 return await PublishStateAsync(cancellationToken);
             }
         }
+        if (!enabled)
+        {
+            _pocketAppGenerationController?.SetEnabled(false);
+            _generatedPocketApps?.Shutdown();
+        }
         if (CurrentSettings.AiNativeEnabled != enabled)
         {
             var updated = CurrentSettings.Clone();
@@ -653,7 +658,10 @@ internal sealed class PanelBridgeController : IDisposable
 
         // Never hot-create a generation composition root. If one exists from startup, disabling
         // cancels an in-flight Codex process immediately and gates every generation bridge route.
-        _pocketAppGenerationController?.SetEnabled(enabled);
+        if (enabled)
+        {
+            _pocketAppGenerationController?.SetEnabled(true);
+        }
         return await PublishStateAsync(cancellationToken);
     }
 
@@ -703,6 +711,7 @@ internal sealed class PanelBridgeController : IDisposable
         _ = parameters;
         _startupRegistration.SetRegistered(false);
         _pocketAppGenerationController?.SetEnabled(false);
+        _generatedPocketApps?.Shutdown();
         SaveSettings(UserSettingsStore.CreateDefault(_providerRegistry.ProviderIds));
         return await PublishStateAsync(cancellationToken);
     }

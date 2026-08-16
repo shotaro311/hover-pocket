@@ -179,6 +179,7 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
     private readonly PocketAppLifecycleManager? _sourceLifecycle;
     private readonly Func<IReadOnlyList<PocketAppManagedPackage>> _managedPackagesSource;
     private readonly Func<string, Candidate?> _candidateSource;
+    private readonly Func<PocketAppManagedPackage, bool> _restoreFailurePersistence;
     private readonly Func<string, bool>? _failureInjection;
     private bool _disposed;
 
@@ -232,16 +233,37 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
                 package.Surfaces.Keys.ToHashSet(StringComparer.Ordinal),
                 activationLease);
         };
+        _restoreFailurePersistence = package =>
+        {
+            try
+            {
+                var receipt = lifecycle.Disable(package.PackageId);
+                var observed = lifecycle.ManagedPackages()
+                    .SingleOrDefault(item => string.Equals(item.PackageId, package.PackageId, StringComparison.Ordinal));
+                return receipt.State == PocketAppLifecycleState.Disabled
+                    && receipt.EffectivePermissions.Count == 0
+                    && observed is not null
+                    && observed.State == PocketAppLifecycleState.Disabled
+                    && observed.Version == receipt.Version
+                    && observed.PackageDigest == receipt.PackageDigest;
+            }
+            catch
+            {
+                return false;
+            }
+        };
         _failureInjection = failureInjection;
     }
 
     internal PocketAppRuntimeActivationRegistry(
         Func<IReadOnlyList<PocketAppManagedPackage>> managedPackagesSource,
         Func<string, Candidate?> candidateSource,
+        Func<PocketAppManagedPackage, bool>? restoreFailurePersistence = null,
         Func<string, bool>? failureInjection = null)
     {
         _managedPackagesSource = managedPackagesSource;
         _candidateSource = candidateSource;
+        _restoreFailurePersistence = restoreFailurePersistence ?? (_ => false);
         _failureInjection = failureInjection;
     }
 
@@ -323,6 +345,7 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
             catch
             {
                 FailClosed(package.PackageId);
+                _ = _restoreFailurePersistence(package);
                 failures.Add(package.PackageId);
             }
         }
@@ -332,14 +355,20 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
     public void Dispose()
     {
         if (_disposed) { return; }
+        Shutdown();
+        _sourceLifecycle?.Dispose();
+        _disposed = true;
+    }
+
+    public void Shutdown()
+    {
+        ThrowIfDisposed();
         foreach (var appId in ExecutionRegistry.ActiveAppIds
             .Concat(SurfaceRegistry.ActiveAppIds)
             .Distinct(StringComparer.Ordinal))
         {
             FailClosed(appId);
         }
-        _sourceLifecycle?.Dispose();
-        _disposed = true;
     }
 
     private PocketAppRuntimeReadback Activate(Candidate candidate)

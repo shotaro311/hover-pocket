@@ -182,6 +182,7 @@ final class PocketAppRuntimeActivationRegistry {
 
     typealias ManagedPackagesSource = () throws -> [PocketAppManagedPackage]
     typealias CandidateSource = (String) throws -> Candidate?
+    typealias RestoreFailurePersistence = (PocketAppManagedPackage) -> Bool
 
     let executionRegistry = PocketExecutionRuntimeRegistry()
     let surfaceRegistry = PocketSurfaceRegistry()
@@ -189,6 +190,7 @@ final class PocketAppRuntimeActivationRegistry {
     private let sourceLifecycle: PocketAppLifecycleManager?
     private let managedPackagesSource: ManagedPackagesSource
     private let candidateSource: CandidateSource
+    private let restoreFailurePersistence: RestoreFailurePersistence
     private let failureInjection: ((String) -> Bool)?
     private let reservedAppIDs: Set<String>
 
@@ -241,6 +243,23 @@ final class PocketAppRuntimeActivationRegistry {
                 surfaceIDs: Set(package.surfaces.keys)
             )
         }
+        self.restoreFailurePersistence = { package in
+            do {
+                let receipt = try lifecycle.disable(packageID: package.packageID)
+                guard let observed = try lifecycle.managedPackages().first(where: {
+                    $0.packageID == package.packageID
+                }) else {
+                    return false
+                }
+                return receipt.state == .disabled
+                    && receipt.effectivePermissions.isEmpty
+                    && observed.state == .disabled
+                    && observed.version == receipt.version
+                    && observed.packageDigest == receipt.packageDigest
+            } catch {
+                return false
+            }
+        }
         self.failureInjection = failureInjection
         self.reservedAppIDs = ["local.example.today-focus"]
     }
@@ -249,11 +268,13 @@ final class PocketAppRuntimeActivationRegistry {
         managedPackagesSource: @escaping ManagedPackagesSource,
         candidateSource: @escaping CandidateSource,
         reservedAppIDs: Set<String> = ["local.example.today-focus"],
+        restoreFailurePersistence: @escaping RestoreFailurePersistence = { _ in false },
         failureInjection: ((String) -> Bool)? = nil
     ) {
         self.sourceLifecycle = nil
         self.managedPackagesSource = managedPackagesSource
         self.candidateSource = candidateSource
+        self.restoreFailurePersistence = restoreFailurePersistence
         self.failureInjection = failureInjection
         self.reservedAppIDs = reservedAppIDs
     }
@@ -319,6 +340,7 @@ final class PocketAppRuntimeActivationRegistry {
                 _ = try activate(candidate, expected: candidate.readback)
             } catch {
                 failClosed(appID: package.packageID)
+                _ = restoreFailurePersistence(package)
                 failures.append(package.packageID)
             }
         }

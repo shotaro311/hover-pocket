@@ -170,7 +170,7 @@ internal static class PocketAppRuntimeActivationVerifier
             using var failing = new PocketAppRuntimeActivationRegistry(
                 () => managed.Values.ToArray(),
                 appId => candidates.GetValueOrDefault(appId),
-                point => point == "before_runtime_registry_commit" && injectFailure);
+                failureInjection: point => point == "before_runtime_registry_commit" && injectFailure);
             _ = failing.Synchronize(Receipt("install", appB, "1.0.0", digest1, PocketAppLifecycleState.Enabled));
             injectFailure = true;
             try
@@ -183,9 +183,47 @@ internal static class PocketAppRuntimeActivationVerifier
             }
             Require(
                 failing.ExecutionRegistry.Readback(appC) is null
-                && failing.SurfaceRegistry.Readback(appC) is null
-                && failing.ExecutionRegistry.Readback(appB) is not null,
+                    && failing.SurfaceRegistry.Readback(appC) is null
+                    && failing.ExecutionRegistry.Readback(appB) is not null,
                 "activation_failure_injection_fail_closed",
+                failures);
+            failing.Shutdown();
+            Require(
+                failing.ExecutionRegistry.ActiveAppIds.Count == 0
+                    && failing.SurfaceRegistry.ActiveAppIds.Count == 0,
+                "activation_shutdown_revokes_all_apps",
+                failures);
+
+            managed[appC] = Managed(appC, "1.0.0", digest1, PocketAppLifecycleState.Enabled);
+            candidates.Remove(appC);
+            var restoreFailurePersisted = false;
+            using var restoreFailing = new PocketAppRuntimeActivationRegistry(
+                () => managed.Values.ToArray(),
+                appId => candidates.GetValueOrDefault(appId),
+                restoreFailurePersistence: package =>
+                {
+                    if (!string.Equals(package.PackageId, appC, StringComparison.Ordinal)
+                        || package.Version is null
+                        || package.PackageDigest is null)
+                    {
+                        return false;
+                    }
+                    managed[appC] = Managed(
+                        appC,
+                        package.Version,
+                        package.PackageDigest,
+                        PocketAppLifecycleState.Disabled);
+                    restoreFailurePersisted = true;
+                    return true;
+                });
+            var restoreFailureIds = restoreFailing.RestoreEnabledApps();
+            Require(
+                restoreFailureIds.Contains(appC, StringComparer.Ordinal)
+                    && restoreFailurePersisted
+                    && managed[appC].State == PocketAppLifecycleState.Disabled
+                    && restoreFailing.ExecutionRegistry.Readback(appC) is null
+                    && restoreFailing.SurfaceRegistry.Readback(appC) is null,
+                "activation_restore_failure_persists_disabled",
                 failures);
         }
         catch

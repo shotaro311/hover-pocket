@@ -87,13 +87,20 @@ Lifecycle上で検証・保存されたPocket Appを、実際の描画とCapabil
 ## Security review
 
 - 初回scan `5f04b3fc-a7cc-4398-a46e-358898ae6026`で19 / 19 fileを確認し、production caller接続前のstale runtime競合を特定した。
-- 競合対策を実装した最終差分digestは`codex-security-snapshot/v1:sha256:b244af1e59a2cad40f5fce0173cbf78f491660efccde9fc0a12c69518f8b294f`。
-- 最終scan `d40de7c5-0469-4f95-985b-d97b1a30c08e`は22 / 22 file、coverage complete、reportable finding 0件、sealed complete。
+- 競合対策を実装した初回差分digestは`codex-security-snapshot/v1:sha256:b244af1e59a2cad40f5fce0173cbf78f491660efccde9fc0a12c69518f8b294f`。
+- 初回scan `d40de7c5-0469-4f95-985b-d97b1a30c08e`は22 / 22 file、coverage complete、reportable finding 0件、sealed complete。PR review修正後のexact差分は別scanで再確認する。
 - Windowsのsame-user pathname raceは追加権限を生まないhardening debt、単一破損Appによる復元停止はrobustness debtとしてsecurity findingから分離した。production生成UI接続前にApp単位recovery隔離も改善候補とする。
+
+## PR #18 review hardening
+
+- 初回head `63fc75b`でWindows Release `31917292784`、macOS `31917292788`、3OS contract / compare `31917454979`が成功した。
+- review P1を受け、WindowsのAI-native OFFとdefaults resetでgenerationだけでなく生成Appのexecution runtime、Surface、activation leaseを全解除する。再有効化は既存方針どおりhot restoreせず、再起動後のverified package復元に限定する。
+- review P2を受け、起動時にenabled packageのruntime復元へ失敗した場合は、両OSともLifecycle Managerのdisable操作でdurable stateをdisabled、effective grantを空へ変更し、version / digestを再読込照合する。次回起動で失敗Appを再試行し続けない。
+- 両OSのruntime activation verifierへ、全App shutdownと復元失敗のdisabled永続化回帰を追加した。Macのwarnings-as-errors buildと全ローカル回帰は再成功した。WindowsはこのMacに`dotnet`がないため、PR CIをコンパイルとverifierの正式判定にする。
 
 ## 未完了
 
-- PR、CI、merge後readback
+- review修正のSecurity scan、commit / push、PR CI、review thread解決、merge後readback
 - 両OS実機でのSurface / runtime activation readback
 - 実Codex generationのlocal-file confinement
 - Voiceから生成、preview、承認、install、利用するCore Integration E2E
