@@ -180,7 +180,9 @@ final class PocketAppRuntimeActivationRegistry {
         let surfaceIDs: Set<String>
     }
 
+    typealias ManagementSnapshotSource = () throws -> PocketAppManagementSnapshot
     typealias ManagedPackagesSource = () throws -> [PocketAppManagedPackage]
+    typealias ManagementIssuesSource = () throws -> [PocketAppManagementIssue]
     typealias CandidateSource = (String) throws -> Candidate?
     typealias RestoreFailurePersistence = (PocketAppManagedPackage) -> Bool
 
@@ -188,7 +190,7 @@ final class PocketAppRuntimeActivationRegistry {
     let surfaceRegistry = PocketSurfaceRegistry()
 
     private let sourceLifecycle: PocketAppLifecycleManager?
-    private let managedPackagesSource: ManagedPackagesSource
+    private let managementSnapshotSource: ManagementSnapshotSource
     private let candidateSource: CandidateSource
     private let restoreFailurePersistence: RestoreFailurePersistence
     private let failureInjection: ((String) -> Bool)?
@@ -207,9 +209,7 @@ final class PocketAppRuntimeActivationRegistry {
             performStartupRecovery: true
         )
         self.sourceLifecycle = lifecycle
-        self.managedPackagesSource = {
-            try lifecycle.managedPackages()
-        }
+        self.managementSnapshotSource = lifecycle.managementSnapshot
         self.candidateSource = { packageID in
             guard let package = try lifecycle.activePackageForActivation(packageID: packageID) else {
                 return nil
@@ -246,9 +246,7 @@ final class PocketAppRuntimeActivationRegistry {
         self.restoreFailurePersistence = { package in
             do {
                 let receipt = try lifecycle.disable(packageID: package.packageID)
-                guard let observed = try lifecycle.managedPackages().first(where: {
-                    $0.packageID == package.packageID
-                }) else {
+                guard let observed = try lifecycle.managedPackage(packageID: package.packageID) else {
                     return false
                 }
                 return receipt.state == .disabled
@@ -266,13 +264,19 @@ final class PocketAppRuntimeActivationRegistry {
 
     init(
         managedPackagesSource: @escaping ManagedPackagesSource,
+        managementIssuesSource: @escaping ManagementIssuesSource = { [] },
         candidateSource: @escaping CandidateSource,
         reservedAppIDs: Set<String> = ["local.example.today-focus"],
         restoreFailurePersistence: @escaping RestoreFailurePersistence = { _ in false },
         failureInjection: ((String) -> Bool)? = nil
     ) {
         self.sourceLifecycle = nil
-        self.managedPackagesSource = managedPackagesSource
+        self.managementSnapshotSource = {
+            PocketAppManagementSnapshot(
+                packages: try managedPackagesSource(),
+                issues: try managementIssuesSource()
+            )
+        }
         self.candidateSource = candidateSource
         self.restoreFailurePersistence = restoreFailurePersistence
         self.failureInjection = failureInjection
@@ -316,15 +320,18 @@ final class PocketAppRuntimeActivationRegistry {
 
     @discardableResult
     func restoreEnabledApps() -> [String] {
-        var failures: [String] = []
-        let managed: [PocketAppManagedPackage]
+        let snapshot: PocketAppManagementSnapshot
         do {
-            managed = try managedPackagesSource()
+            snapshot = try managementSnapshotSource()
         } catch {
             return ["*"]
         }
 
-        for package in managed.sorted(by: { $0.packageID < $1.packageID }) {
+        var failures = snapshot.issues.map(\.packageID)
+        for issue in snapshot.issues {
+            failClosed(appID: issue.packageID)
+        }
+        for package in snapshot.packages.sorted(by: { $0.packageID < $1.packageID }) {
             guard package.state == .enabled else {
                 failClosed(appID: package.packageID)
                 continue
@@ -344,7 +351,7 @@ final class PocketAppRuntimeActivationRegistry {
                 failures.append(package.packageID)
             }
         }
-        return failures
+        return Array(Set(failures)).sorted()
     }
 
     func shutdown() {

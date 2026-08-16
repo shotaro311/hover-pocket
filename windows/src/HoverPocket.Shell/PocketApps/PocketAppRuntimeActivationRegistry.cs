@@ -177,7 +177,7 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
         new HashSet<string>(["local.example.today-focus"], StringComparer.Ordinal);
 
     private readonly PocketAppLifecycleManager? _sourceLifecycle;
-    private readonly Func<IReadOnlyList<PocketAppManagedPackage>> _managedPackagesSource;
+    private readonly Func<PocketAppManagementSnapshot> _managementSnapshotSource;
     private readonly Func<string, Candidate?> _candidateSource;
     private readonly Func<PocketAppManagedPackage, bool> _restoreFailurePersistence;
     private readonly Func<string, bool>? _failureInjection;
@@ -201,7 +201,7 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
             userDataRoot,
             performStartupRecovery: true);
         _sourceLifecycle = lifecycle;
-        _managedPackagesSource = lifecycle.ManagedPackages;
+        _managementSnapshotSource = lifecycle.ManagementSnapshot;
         _candidateSource = packageId =>
         {
             var package = lifecycle.ActivePackageForActivation(packageId);
@@ -240,8 +240,7 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
             try
             {
                 var receipt = lifecycle.Disable(package.PackageId);
-                var observed = lifecycle.ManagedPackages()
-                    .SingleOrDefault(item => string.Equals(item.PackageId, package.PackageId, StringComparison.Ordinal));
+                var observed = lifecycle.ManagedPackage(package.PackageId);
                 return receipt.State == PocketAppLifecycleState.Disabled
                     && receipt.EffectivePermissions.Count == 0
                     && observed is not null
@@ -260,10 +259,13 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
     internal PocketAppRuntimeActivationRegistry(
         Func<IReadOnlyList<PocketAppManagedPackage>> managedPackagesSource,
         Func<string, Candidate?> candidateSource,
+        Func<IReadOnlyList<PocketAppManagementIssue>>? managementIssuesSource = null,
         Func<PocketAppManagedPackage, bool>? restoreFailurePersistence = null,
         Func<string, bool>? failureInjection = null)
     {
-        _managedPackagesSource = managedPackagesSource;
+        _managementSnapshotSource = () => new PocketAppManagementSnapshot(
+            managedPackagesSource(),
+            managementIssuesSource?.Invoke() ?? Array.Empty<PocketAppManagementIssue>());
         _candidateSource = candidateSource;
         _restoreFailurePersistence = restoreFailurePersistence ?? (_ => false);
         _failureInjection = failureInjection;
@@ -332,18 +334,22 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
     {
         ThrowIfDisposed();
         if (!_enabled) { return ["*"]; }
-        IReadOnlyList<PocketAppManagedPackage> packages;
+        PocketAppManagementSnapshot snapshot;
         try
         {
-            packages = _managedPackagesSource();
+            snapshot = _managementSnapshotSource();
         }
         catch
         {
             return ["*"];
         }
 
-        var failures = new List<string>();
-        foreach (var package in packages.OrderBy(item => item.PackageId, StringComparer.Ordinal))
+        var failures = snapshot.Issues.Select(item => item.PackageId).ToList();
+        foreach (var issue in snapshot.Issues)
+        {
+            FailClosed(issue.PackageId);
+        }
+        foreach (var package in snapshot.Packages.OrderBy(item => item.PackageId, StringComparer.Ordinal))
         {
             if (package.State != PocketAppLifecycleState.Enabled)
             {
@@ -373,7 +379,7 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
                 failures.Add(package.PackageId);
             }
         }
-        return failures;
+        return failures.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
     }
 
     public void Dispose()

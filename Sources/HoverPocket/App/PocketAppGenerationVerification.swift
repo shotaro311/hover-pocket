@@ -265,6 +265,7 @@ enum PocketAppGenerationVerification {
             try verifyProcessTreeCleanup(failures: &failures)
             try verifyRootPin(failures: &failures)
             try verifyGenerationStartupDoesNotRecover(failures: &failures)
+            try verifyFailedActivationRefreshesManagement(failures: &failures)
             try verifyCommittedReceiptSurvivesManagedRefreshFailure(failures: &failures)
             try verifyUnrelatedActionPreservesPendingProposal(failures: &failures)
         } catch {
@@ -556,6 +557,68 @@ enum PocketAppGenerationVerification {
             failures: &failures
         )
         withExtendedLifetime(controller) {}
+    }
+
+    private static func verifyFailedActivationRefreshesManagement(
+        failures: inout [String]
+    ) throws {
+        let temporaryRoot = URL(
+            fileURLWithPath: FileManager.default.currentDirectoryPath,
+            isDirectory: true
+        ).appendingPathComponent(".build", isDirectory: true)
+        let root = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-activation-failure-host-\(UUID().uuidString)", isDirectory: true)
+        let dataRoot = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-activation-failure-data-\(UUID().uuidString)", isDirectory: true)
+        let draftRoot = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-activation-failure-draft-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            makeTreeMutable(root)
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: dataRoot)
+            try? FileManager.default.removeItem(at: draftRoot)
+        }
+        try FileManager.default.createDirectory(at: draftRoot, withIntermediateDirectories: true)
+        let adapter = FixturePocketAppGenerationAdapter(fixtureRoot: fixtureURL("."))
+        let materializer = PocketAppGenerationMaterializer(rootDirectory: draftRoot)
+        let request = try makeRequest(
+            requestID: "generation-activation-failure",
+            userRequest: "Create a focus app whose activation fails.",
+            appID: "local.example.activation-failure",
+            version: "1.0.0",
+            namespace: "today-focus"
+        )
+        do {
+            let lifecycle = try PocketAppLifecycleManager(rootDirectory: root, userDataRoot: dataRoot)
+            _ = try installFixture(request, adapter: adapter, materializer: materializer, lifecycle: lifecycle)
+            _ = try lifecycle.disable(packageID: request.appID)
+        }
+        let controller = try PocketAppGenerationController(
+            rootDirectory: root,
+            userDataRoot: dataRoot,
+            generationRoot: draftRoot,
+            generator: nil,
+            runtimeActivationReadback: { receipt in
+                if receipt.state == .enabled {
+                    throw PocketAppRuntimeActivationError.unavailable
+                }
+                return PocketAppRuntimeReadback(
+                    appID: receipt.packageID,
+                    version: receipt.version,
+                    packageDigest: receipt.packageDigest,
+                    effectivePermissions: receipt.effectivePermissions
+                )
+            }
+        )
+        controller.enable(packageID: request.appID)
+        let observed = controller.managedPackages.first { $0.packageID == request.appID }
+        require(
+            controller.phase == .failed
+                && controller.errorCode == PocketAppGenerationError.packageInvalid.code
+                && observed?.state == .disabled,
+            "generation_failed_activation_refreshes_disabled_management",
+            failures: &failures
+        )
     }
 
     private static func verifyCommittedReceiptSurvivesManagedRefreshFailure(

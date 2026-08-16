@@ -13,6 +13,7 @@ internal sealed class PocketAppGenerationVerifier
         VerifyE2E();
         VerifySettingsApprovalBoundary().GetAwaiter().GetResult();
         VerifyPreviewOnlyBoundary().GetAwaiter().GetResult();
+        VerifyFailedActivationRefreshesManagement().GetAwaiter().GetResult();
         VerifyCommittedReceiptSurvivesManagedRefreshFailure().GetAwaiter().GetResult();
         VerifyUnrelatedActionPreservesPendingProposal().GetAwaiter().GetResult();
         VerifyApprovalTextSanitization();
@@ -583,6 +584,75 @@ internal sealed class PocketAppGenerationVerifier
         catch (Exception ex)
         {
             _failures.Add($"generation_preview_only:{ex.GetType().Name}:{ex.Message}");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    PocketAppVerifierFileSystem.MakeTreeMutable(root);
+                    Directory.Delete(root, true);
+                }
+            }
+            catch { }
+            try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
+            try { if (Directory.Exists(draftRoot)) { Directory.Delete(draftRoot, true); } } catch { }
+        }
+    }
+
+    private async Task VerifyFailedActivationRefreshesManagement()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-activation-failure-host-{Guid.NewGuid():N}");
+        var dataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-activation-failure-data-{Guid.NewGuid():N}");
+        var draftRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-activation-failure-draft-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(draftRoot);
+            var adapter = new FixturePocketAppGenerationAdapter(FixtureRoot());
+            var materializer = new PocketAppGenerationMaterializer(draftRoot);
+            var request = MakeRequest(
+                "generation-activation-failure",
+                "Create a focus app whose activation fails.",
+                "local.example.activation-failure",
+                "1.0.0",
+                "today-focus");
+            using (var lifecycle = new PocketAppLifecycleManager(root, dataRoot))
+            {
+                _ = InstallFixture(request, adapter, materializer, lifecycle);
+                _ = lifecycle.Disable(request.AppId);
+            }
+            using var controller = new PocketAppGenerationController(
+                root,
+                dataRoot,
+                draftRoot,
+                null,
+                runtimeActivationReadback: receipt =>
+                {
+                    if (receipt.State == PocketAppLifecycleState.Enabled)
+                    {
+                        throw new PocketAppRuntimeActivationException("RUNTIME_ACTIVATION_UNAVAILABLE");
+                    }
+                    return new PocketAppRuntimeReadback(
+                        receipt.PackageId,
+                        receipt.Version,
+                        receipt.PackageDigest,
+                        receipt.EffectivePermissions);
+                });
+            var settings = new HoverPocket.Shell.Bridge.BridgeDispatcher();
+            controller.AttachSettings(settings, approvalDecision: _ => true);
+            var response = await settings.ProcessRawMessageAsync(
+                """{"id":"enable-activation-failure","method":"pocketApps.enable","params":{"appId":"local.example.activation-failure"}}""");
+            Require(
+                response is not null
+                    && response.Contains("\"phase\":\"failed\"", StringComparison.Ordinal)
+                    && response.Contains("\"errorCode\":\"GENERATION_PACKAGE_INVALID\"", StringComparison.Ordinal)
+                    && response.Contains("\"appId\":\"local.example.activation-failure\",\"state\":\"disabled\"", StringComparison.Ordinal),
+                "generation_failed_activation_refreshes_disabled_management");
+        }
+        catch (Exception ex)
+        {
+            _failures.Add($"generation_failed_activation_refresh:{ex.GetType().Name}:{ex.Message}");
         }
         finally
         {

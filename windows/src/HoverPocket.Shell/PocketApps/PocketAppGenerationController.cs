@@ -317,11 +317,13 @@ internal sealed class PocketAppGenerationController : IDisposable
         catch (PocketAppGenerationException ex)
         {
             DiscardFailedActivation(activationProposal);
+            RefreshManagedPackagesAfterFailure();
             return Fail(ex.Code);
         }
         catch (PocketAppLifecycleException)
         {
             DiscardFailedActivation(activationProposal);
+            RefreshManagedPackagesAfterFailure();
             return Fail("GENERATION_APPROVAL_MISMATCH");
         }
         finally
@@ -397,6 +399,7 @@ internal sealed class PocketAppGenerationController : IDisposable
         }
         catch (Exception ex) when (ex is PocketAppGenerationException or PocketAppLifecycleException)
         {
+            RefreshManagedPackagesAfterFailure();
             return Fail("GENERATION_PACKAGE_INVALID");
         }
         finally
@@ -433,6 +436,7 @@ internal sealed class PocketAppGenerationController : IDisposable
         }
         catch (Exception ex) when (ex is PocketAppGenerationException or PocketAppLifecycleException)
         {
+            RefreshManagedPackagesAfterFailure();
             return Fail("GENERATION_PACKAGE_INVALID");
         }
         finally
@@ -465,6 +469,7 @@ internal sealed class PocketAppGenerationController : IDisposable
         }
         catch (Exception ex) when (ex is PocketAppGenerationException or PocketAppLifecycleException)
         {
+            RefreshManagedPackagesAfterFailure();
             return Fail("GENERATION_PACKAGE_INVALID");
         }
         finally
@@ -677,6 +682,20 @@ internal sealed class PocketAppGenerationController : IDisposable
             _managementIssues = snapshot.Issues;
         }
         ValidatePins();
+    }
+
+    private void RefreshManagedPackagesAfterFailure()
+    {
+        try
+        {
+            RefreshManagedPackages();
+        }
+        catch (Exception ex) when (ex is PocketAppGenerationException
+            or PocketAppLifecycleException
+            or IOException
+            or UnauthorizedAccessException)
+        {
+        }
     }
 
     private void ValidatePins()

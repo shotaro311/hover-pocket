@@ -155,6 +155,27 @@ enum PocketAppRuntimeActivationVerification {
                 failures: &failures
             )
 
+            let corruptApp = "local.generated.activation-corrupt"
+            let isolated = PocketAppRuntimeActivationRegistry(
+                managedPackagesSource: { Array(managed.values) },
+                managementIssuesSource: {
+                    [PocketAppManagementIssue(
+                        packageID: corruptApp,
+                        errorCode: "LIFECYCLE_PACKAGE_CORRUPT",
+                        removalAllowed: true
+                    )]
+                },
+                candidateSource: { candidates[$0] }
+            )
+            let isolatedFailures = isolated.restoreEnabledApps()
+            require(
+                isolatedFailures == [corruptApp]
+                    && isolated.executionRegistry.activeAppIDs == [appA, appB]
+                    && isolated.surfaceRegistry.activeAppIDs == [appA, appB],
+                "activation_corrupt_package_does_not_block_healthy_restore",
+                failures: &failures
+            )
+
             candidates[appA] = candidate(appID: appA, version: "1.0.0", digest: digest3)
             managed[appA] = managedPackage(appID: appA, version: "1.0.0", digest: digest3, state: .enabled)
             _ = try registry.synchronize(receipt(

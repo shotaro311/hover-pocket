@@ -131,6 +131,27 @@ internal static class PocketAppRuntimeActivationVerifier
                     failures);
             }
 
+            const string corruptApp = "local.generated.activation-corrupt";
+            using (var isolated = new PocketAppRuntimeActivationRegistry(
+                () => managed.Values.ToArray(),
+                appId => candidates.GetValueOrDefault(appId),
+                managementIssuesSource: () =>
+                [
+                    new PocketAppManagementIssue(
+                        corruptApp,
+                        "LIFECYCLE_PACKAGE_CORRUPT",
+                        true)
+                ]))
+            {
+                var isolatedFailures = isolated.RestoreEnabledApps();
+                Require(
+                    isolatedFailures.SequenceEqual([corruptApp], StringComparer.Ordinal)
+                        && isolated.ExecutionRegistry.ActiveAppIds.SequenceEqual([appA, appB], StringComparer.Ordinal)
+                        && isolated.SurfaceRegistry.ActiveAppIds.SequenceEqual([appA, appB], StringComparer.Ordinal),
+                    "activation_corrupt_package_does_not_block_healthy_restore",
+                    failures);
+            }
+
             candidates[appA] = Candidate(appA, "1.0.0", digest3);
             managed[appA] = Managed(appA, "1.0.0", digest3, PocketAppLifecycleState.Enabled);
             _ = registry.Synchronize(Receipt("rollback", appA, "1.0.0", digest3, PocketAppLifecycleState.Enabled));
