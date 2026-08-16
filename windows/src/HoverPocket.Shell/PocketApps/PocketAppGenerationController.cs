@@ -11,6 +11,7 @@ internal sealed class PocketAppGenerationController : IDisposable
     private readonly PocketAppGenerationMaterializer _materializer;
     private readonly PocketAppPinnedDirectory[] _pins;
     private readonly Action? _postCommitHook;
+    private readonly Action? _postRefreshHook;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateSync = new();
     private PocketAppGenerationPhase _phase = PocketAppGenerationPhase.Idle;
@@ -30,7 +31,8 @@ internal sealed class PocketAppGenerationController : IDisposable
         string generationRoot,
         IPocketAppGenerationAdapter? generator,
         Action? postCommitHook = null,
-        Func<PocketAppLifecycleReceipt, PocketAppRuntimeReadback>? runtimeActivationReadback = null)
+        Func<PocketAppLifecycleReceipt, PocketAppRuntimeReadback>? runtimeActivationReadback = null,
+        Action? postRefreshHook = null)
     {
         var definitionPin = new PocketAppPinnedDirectory(rootDirectory);
         var userDataPin = new PocketAppPinnedDirectory(userDataRoot);
@@ -38,6 +40,7 @@ internal sealed class PocketAppGenerationController : IDisposable
         _pins = [definitionPin, userDataPin, generationPin];
         _generator = generator;
         _postCommitHook = postCommitHook;
+        _postRefreshHook = postRefreshHook;
         _lifecycle = new PocketAppLifecycleManager(
             definitionPin.FullPath,
             userDataPin.FullPath,
@@ -312,6 +315,7 @@ internal sealed class PocketAppGenerationController : IDisposable
             RecordCommittedReceipt(receipt, PocketAppGenerationPhase.Installed, clearPending: true);
             _postCommitHook?.Invoke();
             RefreshManagedPackagesAfterCommit(receipt);
+            _postRefreshHook?.Invoke();
             return BuildState();
         }
         catch (PocketAppGenerationException ex)
@@ -395,6 +399,7 @@ internal sealed class PocketAppGenerationController : IDisposable
             RecordCommittedReceipt(receipt, PocketAppGenerationPhase.Disabled, clearPending: false);
             _postCommitHook?.Invoke();
             RefreshManagedPackagesAfterCommit(receipt);
+            _postRefreshHook?.Invoke();
             return BuildState();
         }
         catch (Exception ex) when (ex is PocketAppGenerationException or PocketAppLifecycleException)
@@ -432,6 +437,7 @@ internal sealed class PocketAppGenerationController : IDisposable
             RecordCommittedReceipt(receipt, PocketAppGenerationPhase.Installed, clearPending: false);
             _postCommitHook?.Invoke();
             RefreshManagedPackagesAfterCommit(receipt);
+            _postRefreshHook?.Invoke();
             return BuildState();
         }
         catch (Exception ex) when (ex is PocketAppGenerationException or PocketAppLifecycleException)
@@ -465,6 +471,7 @@ internal sealed class PocketAppGenerationController : IDisposable
             RecordCommittedReceipt(receipt, PocketAppGenerationPhase.Removed, clearPending: false);
             _postCommitHook?.Invoke();
             RefreshManagedPackagesAfterCommit(receipt);
+            _postRefreshHook?.Invoke();
             return BuildState();
         }
         catch (Exception ex) when (ex is PocketAppGenerationException or PocketAppLifecycleException)

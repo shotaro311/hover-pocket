@@ -484,6 +484,7 @@ internal sealed class PocketAppPackageRuntime
             && rawArguments is JsonElement arguments)
         {
             var key = CapabilityKey(query, $"{path}.items.query");
+            Require(key == CapabilityIds.CalendarList, $"{path}.items.query:unsupported_shape");
             Require(requestedScopes.ContainsKey(key), $"{path}.items.query:undeclared");
             ValidateCapabilityScope(arguments, requestedScopes[key], key, $"{path}.items.arguments");
         }

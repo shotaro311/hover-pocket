@@ -256,6 +256,16 @@
       "expectedDigest": "sha256:9e034e6f577d4fb32c3c4b1bd4f749e9584eed4592c19ab32b985562815cb185"
     },
     {
+      "id": "invalid-pocket-surface-unsupported-query-shape",
+      "path": "invalid/pocket-surface.unsupported-query-shape.json",
+      "kind": "schema-mutation",
+      "expected": "reject",
+      "schema": "pocket-surface.schema.json",
+      "errorCode": "APP_REFERENCE_INVALID",
+      "errorLocation": "$.root.children[1].items.query",
+      "expectedDigest": "sha256:23c5552eb3613e9483e3eed41e69a5a2949580a1ba2ada649ecb7e401ec337c3"
+    },
+    {
       "id": "invalid-pocket-workflow-native-authority",
       "path": "invalid/pocket-workflow.native-authority.json",
       "kind": "schema-mutation",

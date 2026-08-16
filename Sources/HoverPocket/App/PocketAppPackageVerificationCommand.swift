@@ -126,6 +126,18 @@ enum PocketAppPackageVerificationCommand {
                 return true
             }
         }
+        rejectPackage("unsupported_surface_query_shape", failures: &failures) { root in
+            try mutateJSON(root.appendingPathComponent("surfaces/main.surface.json")) { surface in
+                guard var rootNode = surface["root"] as? [String: Any],
+                      var children = rootNode["children"] as? [[String: Any]],
+                      var pickerItems = children[1]["items"] as? [String: Any] else { return false }
+                pickerItems["query"] = "sticky.note.get@1"
+                children[1]["items"] = pickerItems
+                rootNode["children"] = children
+                surface["root"] = rootNode
+                return true
+            }
+        }
         rejectPackage("unsupported_test_case", failures: &failures) { root in
             try mutateJSON(root.appendingPathComponent("tests/calendar-read.json")) { test in
                 test["case"] = "custom-generated-case"
@@ -157,7 +169,7 @@ enum PocketAppPackageVerificationCommand {
         print("pocket_app_package_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_app_package_valid_files=9")
         print("pocket_app_package_bundled=ok")
-        print("pocket_app_package_negative_cases=13")
+        print("pocket_app_package_negative_cases=14")
         print("pocket_app_lifecycle_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_app_generation_verify=\(failures.isEmpty ? "ok" : "failed")")
         if !failures.isEmpty {

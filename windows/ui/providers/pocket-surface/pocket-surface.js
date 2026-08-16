@@ -86,7 +86,7 @@ export function renderPocketSurfaceProvider(context) {
         button.type = "button";
         button.dataset.workflow = node.workflow ?? "";
         button.textContent = sanitizeVisibleText(node.label ?? "Run");
-        button.disabled = !canInvoke(node.workflow, inputs, state);
+        button.disabled = !canInvoke(node.workflow, surface.workflowInputs, inputs, state);
         button.addEventListener("click", async () => {
           button.disabled = true;
           setHostStatus("確認を待っています…", "neutral");
@@ -94,7 +94,7 @@ export function renderPocketSurfaceProvider(context) {
             const receipt = await context.request("pocketApp.invokeWorkflow", {
               appId: surface.appId,
               workflowId: node.workflow,
-              inputs: Object.fromEntries(inputs),
+              inputs: resolvedWorkflowInputs(node.workflow, surface.workflowInputs, inputs, state),
             });
             const succeeded = receipt.status === "succeeded" && receipt.readbackVerified;
             setHostStatus(
@@ -108,7 +108,7 @@ export function renderPocketSurfaceProvider(context) {
           } catch {
             setHostStatus("処理を完了できませんでした。", "error");
           } finally {
-            button.disabled = !canInvoke(node.workflow, inputs, state);
+            button.disabled = !canInvoke(node.workflow, surface.workflowInputs, inputs, state);
           }
         });
         return button;
@@ -157,7 +157,7 @@ export function renderPocketSurfaceProvider(context) {
 
   function refreshButtons() {
     for (const button of root.querySelectorAll(".hp-pocket-primary")) {
-      button.disabled = !canInvoke(button.dataset.workflow, inputs, state);
+      button.disabled = !canInvoke(button.dataset.workflow, surface.workflowInputs, inputs, state);
     }
   }
 
@@ -226,7 +226,6 @@ function initializeQuerySelections(node, inputs, state, queryResults) {
     const selected = events.find((event) => event.eventRef === persisted) ?? events[0];
     if (selected) {
       setBinding(node.selection, selected.eventRef, inputs, state);
-      inputs.set(bindingName(node.selection), selected.eventRef);
       if (persisted !== selected.eventRef) updates.push({ binding: node.selection, value: selected.eventRef });
       if (node.titleTarget) setBinding(node.titleTarget, sanitizeVisibleText(selected.safeTitle ?? ""), inputs, state);
     }
@@ -261,7 +260,6 @@ function calendarPickerNode(node, inputs, state, queryResults, onChange, persist
     select.value = stringValue(valueFor(node.selection, inputs, state));
     select.addEventListener("change", async () => {
       setBinding(node.selection, select.value, inputs, state);
-      inputs.set(bindingName(node.selection), select.value);
       const selected = events.find((event) => event.eventRef === select.value);
       if (node.titleTarget && selected) {
         setBinding(node.titleTarget, sanitizeVisibleText(selected.safeTitle ?? ""), inputs, state);
@@ -345,10 +343,21 @@ function stringValue(value) {
   return typeof value === "string" ? value : "";
 }
 
-function canInvoke(workflow, inputs) {
+function resolvedWorkflowInputs(workflow, workflowInputs, inputs, state) {
+  const names = workflowInputs?.[workflow];
+  if (!Array.isArray(names)) return null;
+  return Object.fromEntries(names.map((name) => [
+    name,
+    inputs.has(name) ? inputs.get(name) : state.get(name),
+  ]));
+}
+
+function canInvoke(workflow, workflowInputs, inputs, state) {
+  const resolved = resolvedWorkflowInputs(workflow, workflowInputs, inputs, state);
   return Boolean(workflow)
-    && inputs.size > 0
-    && [...inputs.values()].every((value) => (
+    && resolved !== null
+    && Object.keys(resolved).length > 0
+    && Object.values(resolved).every((value) => (
       typeof value === "string" ? value.length > 0 : value !== null && value !== undefined
     ));
 }
@@ -384,6 +393,9 @@ export async function runPocketSurfaceUiVerify() {
   const model = {
     appId: "local.example.today-focus",
     surfaceId: "main",
+    workflowInputs: {
+      startFocus: ["durationSeconds", "purpose", "selectedEventRef"],
+    },
     renderModel: {
       root: {
         type: "stack", axis: "vertical", spacing: 12, children: [
@@ -407,6 +419,7 @@ export async function runPocketSurfaceUiVerify() {
     { name: "large", scale: 1.24 },
   ];
   let baseline;
+  let stateWorkflowInputForwarded = false;
   let layoutMatrix = true;
   let layoutCases = 0;
 
@@ -429,9 +442,19 @@ export async function runPocketSurfaceUiVerify() {
             statePersisted = params?.key === "selectedEventRef" && params?.value === "event:1";
             return { saved: true };
           }
+          if (method === "pocketApp.invokeWorkflow") {
+            stateWorkflowInputForwarded ||= params?.workflowId === "startFocus"
+              && params?.inputs?.selectedEventRef === "event:1"
+              && params?.inputs?.purpose === "Focus"
+              && params?.inputs?.durationSeconds === 1500
+              && Object.keys(params.inputs).sort().join(",") === "durationSeconds,purpose,selectedEventRef";
+            return { status: "succeeded", readbackVerified: true, summary: "Verified" };
+          }
           throw new Error("unexpected_method");
         },
       });
+      await nextLayout();
+      host.querySelector(".hp-pocket-primary")?.click();
       await nextLayout();
       const surface = host.querySelector(".hp-pocket-surface");
       const surfaceRect = surface?.getBoundingClientRect();
@@ -463,6 +486,7 @@ export async function runPocketSurfaceUiVerify() {
 
   return {
     ...baseline,
+    stateWorkflowInputForwarded,
     layoutMatrix: layoutMatrix && layoutCases === panelCases.length * textCases.length,
   };
 }

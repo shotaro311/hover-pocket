@@ -238,6 +238,10 @@ struct PocketSurfaceRuntime {
         case "calendarEventPicker":
             try exactKeys(node, required: ["type", "items", "selection"], optional: ["titleTarget"], path: path)
             let items = try queryBinding(node["items"], path: "\(path).items")
+            guard case .object(let itemProperties) = items,
+                  itemProperties["query"] == .string("calendar.events.list@1") else {
+                throw PocketSurfaceRuntimeError.invalid("\(path).items.query:unsupported_shape")
+            }
             let selection = try binding(node["selection"], inputAllowed: false, stateAllowed: true, path: "\(path).selection")
             var properties: [String: PocketJSONValue] = ["items": items, "selection": .string(selection)]
             if let titleTarget = node["titleTarget"] {

@@ -303,6 +303,11 @@ internal sealed class PocketSurfaceRuntime(
     {
         ExactKeys(node, ["type", "items", "selection"], ["titleTarget"], path);
         var items = QueryBinding(node.GetProperty("items"), $"{path}.items");
+        Require(
+            items.TryGetValue("query", out var rawQuery)
+                && rawQuery is string query
+                && query == "calendar.events.list@1",
+            $"{path}.items.query:unsupported_shape");
         var selection = Binding(node.GetProperty("selection"), inputAllowed: false, stateAllowed: true, $"{path}.selection");
         var properties = new SortedDictionary<string, object?>
         {

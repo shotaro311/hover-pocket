@@ -8,7 +8,7 @@ enum PocketSurfaceVerificationCommand {
         var failures: [String] = []
         var renderDigest = "unavailable"
         let runtime = PocketSurfaceRuntime(
-            knownQueries: ["calendar.events.list@1"],
+            knownQueries: ["calendar.events.list@1", "sticky.note.get@1"],
             knownWorkflows: ["startFocus"]
         )
 
@@ -66,6 +66,12 @@ enum PocketSurfaceVerificationCommand {
             failures: &failures
         )
         rejectMutation(
+            ["root": ["children": [1, ["items": ["query": "sticky.note.get@1"]]]]],
+            label: "unsupported_query_shape",
+            runtime: runtime,
+            failures: &failures
+        )
+        rejectMutation(
             ["root": ["children": [4, ["workflow": "missing"]]]],
             label: "unknown_workflow",
             runtime: runtime,
@@ -107,7 +113,7 @@ enum PocketSurfaceVerificationCommand {
 
         print("pocket_surface_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_surface_valid_nodes=6")
-        print("pocket_surface_negative_cases=14")
+        print("pocket_surface_negative_cases=15")
         print("pocket_surface_render_digest=\(renderDigest)")
         if !failures.isEmpty {
             print("pocket_surface_failures=\(failures.joined(separator: ","))")

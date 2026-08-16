@@ -1633,6 +1633,12 @@ def validate_pocket_surface(document: Mapping[str, Any], context: FixtureContext
                 f"{location}.items.query",
                 "APP_REFERENCE_INVALID",
             )
+            if (capability_id, version) != ("calendar.events.list", 1):
+                fail(
+                    "APP_REFERENCE_INVALID",
+                    f"{location}.items.query",
+                    "calendarEventPicker requires calendar.events.list@1 output",
+                )
             descriptor = context.registry.resolve(capability_id, version, f"{location}.items.query")
             scope = requested_scope(context, capability_id, version, f"{location}.items.query")
             if descriptor["effect"] not in {"pure", "private_read"}:

@@ -450,6 +450,7 @@ struct PocketAppPackageRuntime {
            case .string(let query)? = items["query"],
            case .object(let arguments)? = items["arguments"] {
             let key = try capabilityKey(query, path: "\(path).items.query")
+            try require(key == PocketCapabilityKeys.calendarList, "\(path).items.query:unsupported_shape")
             try require(requestedScopes.keys.contains(key), "\(path).items.query:undeclared")
             try validateCapabilityScope(
                 arguments: arguments,

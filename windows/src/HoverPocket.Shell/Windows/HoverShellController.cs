@@ -69,7 +69,7 @@ internal sealed class HoverShellController : IDisposable
         _dispatcher = dispatcher;
         _enablePanelWebView = enablePanelWebView;
         _enableDevTools = enableDevTools;
-        var userSettings = userSettingsStore.Load(providerRegistry.ProviderIds);
+        var userSettings = userSettingsStore.LoadForBootstrap(providerRegistry.ProviderIds);
         if (settings.DisplayPlacementOverride is { } displayPlacementOverride)
         {
             userSettings.DisplayPlacement = displayPlacementOverride;

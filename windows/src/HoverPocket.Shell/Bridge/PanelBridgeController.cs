@@ -79,7 +79,7 @@ internal sealed class PanelBridgeController : IDisposable
             stickyStore);
         _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
-        CurrentSettings = UserSettingsStore.Normalize(settings, providerRegistry.ProviderIds);
+        CurrentSettings = UserSettingsStore.NormalizeForBootstrap(settings, providerRegistry.ProviderIds);
         _aiNativeExecutionLease = CurrentSettings.AiNativeEnabled
             ? new PocketAppActivationLease()
             : null;
@@ -158,7 +158,8 @@ internal sealed class PanelBridgeController : IDisposable
                         Path.Combine(generationRoot, "Drafts"),
                         generator,
                         runtimeActivationReadback: receipt => activationRegistry?.Synchronize(receipt)
-                            ?? throw new PocketAppRuntimeActivationException("RUNTIME_ACTIVATION_UNAVAILABLE"));
+                            ?? throw new PocketAppRuntimeActivationException("RUNTIME_ACTIVATION_UNAVAILABLE"),
+                        postRefreshHook: () => _ = PostStateEventOnUiThreadAsync("state.changed"));
                     _generatedPocketApps = activationRegistry;
                 }
                 catch
@@ -1098,6 +1099,17 @@ internal sealed class PanelBridgeController : IDisposable
         }
 
         return dispatcher.InvokeAsync(() => PostEventAsync(eventName, payload)).Task.Unwrap();
+    }
+
+    private Task PostStateEventOnUiThreadAsync(string eventName)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            return PostStateEventAsync(eventName);
+        }
+
+        return dispatcher.InvokeAsync(() => PostStateEventAsync(eventName)).Task.Unwrap();
     }
 
     private async Task PostEventAsync(string eventName, object? payload)

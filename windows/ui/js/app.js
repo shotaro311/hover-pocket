@@ -574,6 +574,7 @@ window.__hoverPocketVerify = {
       pocketSurfaceDurationOk: pocketSurfaceVerify.duration,
       pocketSurfacePurposeOk: pocketSurfaceVerify.purpose,
       pocketSurfaceStatePersistedOk: pocketSurfaceVerify.statePersisted,
+      pocketSurfaceStateWorkflowInputOk: pocketSurfaceVerify.stateWorkflowInputForwarded,
       pocketSurfaceApprovalHostOwnedOk: pocketSurfaceVerify.approvalHostOwned,
       pocketSurfaceLayoutMatrixOk: pocketSurfaceVerify.layoutMatrix,
       textSizeScaleReadyOk: getComputedStyle(document.documentElement).getPropertyValue("--hp-text-scale").trim() !== "",

@@ -459,6 +459,14 @@ internal sealed class CapabilityBrokerVerifier
             timeZone,
             userStateStore);
         var hostController = new PocketAppHostController(runtime, () => new UserSettings());
+        var surfaceState = JsonSerializer.SerializeToElement(hostController.BuildSurfaceState());
+        Require(
+            surfaceState.GetProperty("workflowInputs")
+                .GetProperty("startFocus")
+                .EnumerateArray()
+                .Select(item => item.GetString() ?? string.Empty)
+                .SequenceEqual(["durationSeconds", "purpose", "selectedEventRef"], StringComparer.Ordinal),
+            "pocket_app_surface_workflow_inputs");
         var managerState = JsonSerializer.SerializeToElement(hostController.BuildManagerState());
         Require(managerState.GetProperty("appId").GetString() == package.Manifest.Id, "pocket_app_manager_id");
         Require(managerState.GetProperty("version").GetString() == package.Manifest.Version, "pocket_app_manager_version");

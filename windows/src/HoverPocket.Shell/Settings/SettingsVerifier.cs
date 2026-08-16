@@ -1,6 +1,7 @@
 using System.Text.Json;
 using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
+using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Providers;
 using HoverPocket.Shell.Verification;
 using HoverPocket.Shell.Windows;
@@ -59,6 +60,7 @@ internal sealed class SettingsVerifier
         VerifyDefaults(store, registry, startup);
         VerifyWebViewSecurityPolicy();
         await VerifyPocketAppBridgeSurfaceIsolationAsync(registry);
+        await VerifyGeneratedProviderLifecyclePublicationAsync(registry);
         var defaultState = await Send(dispatcher, """{"id":"0","method":"app.getState"}""");
         if (!defaultState.Contains("\"aiNativeEnabled\":false", StringComparison.Ordinal)
             || !defaultState.Contains("\"pocketAppGeneration\":null", StringComparison.Ordinal)
@@ -237,6 +239,79 @@ internal sealed class SettingsVerifier
             || settingsMutation.Contains("\"pocketSurface\":{", StringComparison.Ordinal))
         {
             _failures.Add("Pocket App bridge authority or state crossed the Panel/Settings surface boundary");
+        }
+    }
+
+    private async Task VerifyGeneratedProviderLifecyclePublicationAsync(ProviderRegistry registry)
+    {
+        const string appId = "local.example.today-focus";
+        var generatedProviderId = PocketSurfaceRegistry.GeneratedProviderId(appId);
+        var store = UserSettingsStore.CreateTemporary("SettingsGeneratedProviderLifecycleVerify");
+        var pocketAppsRoot = Path.Combine(store.RootDirectory, "PocketApps");
+        var generatedHostRoot = Path.Combine(pocketAppsRoot, "GeneratedHost");
+        var userDataRoot = Path.Combine(pocketAppsRoot, "UserData");
+        var packageRoot = Path.Combine(AppContext.BaseDirectory, "PocketApps", appId);
+        using (var lifecycle = new PocketAppLifecycleManager(generatedHostRoot, userDataRoot))
+        {
+            var now = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
+            var proposal = lifecycle.Stage(packageRoot, now);
+            var grant = lifecycle.Approve(proposal.RequestId, proposal.BindingDigest, now);
+            var receipt = lifecycle.Install(proposal, grant, now);
+            if (!receipt.ReadbackVerified || receipt.State != PocketAppLifecycleState.Enabled)
+            {
+                _failures.Add("generated provider lifecycle fixture did not install");
+                return;
+            }
+        }
+
+        var enabled = UserSettingsStore.CreateDefault(registry.ProviderIds);
+        enabled.AiNativeEnabled = true;
+        enabled.ProviderOrder.Insert(1, generatedProviderId);
+        enabled.ProviderVisibility[generatedProviderId] = true;
+        enabled.PreferredProviderId = generatedProviderId;
+        enabled.LastSelectedProviderId = generatedProviderId;
+        store.Save(enabled);
+
+        using var controller = new PanelBridgeController(
+            registry,
+            store,
+            store.LoadForBootstrap(registry.ProviderIds),
+            new InMemoryStartupRegistrationService());
+        var panelEvents = new List<string>();
+        var panelDispatcher = new BridgeDispatcher(json =>
+        {
+            panelEvents.Add(json);
+            return Task.CompletedTask;
+        });
+        using var panelAttachment = controller.Attach(panelDispatcher, BridgeSurface.Panel);
+        var settingsDispatcher = new BridgeDispatcher();
+        using var settingsAttachment = controller.Attach(settingsDispatcher, BridgeSurface.Settings);
+
+        var before = await Send(
+            panelDispatcher,
+            """{"id":"generated-before","method":"app.getState"}""");
+        var disabled = await Send(
+            settingsDispatcher,
+            """{"id":"generated-disable","method":"pocketApps.disable","params":{"appId":"local.example.today-focus"}}""");
+        for (var attempt = 0; attempt < 20
+             && !panelEvents.Any(item => item.Contains("\"event\":\"state.changed\"", StringComparison.Ordinal));
+             attempt++)
+        {
+            await Task.Delay(10);
+        }
+
+        var publishedProviders = panelEvents
+            .Select(item => JsonDocument.Parse(item))
+            .Where(document => document.RootElement.GetProperty("event").GetString() == "state.changed")
+            .SelectMany(document => document.RootElement.GetProperty("payload").GetProperty("providers").EnumerateArray())
+            .Select(provider => provider.GetProperty("id").GetString() ?? string.Empty)
+            .ToArray();
+        if (!before.Contains($"\"id\":\"{generatedProviderId}\"", StringComparison.Ordinal)
+            || !disabled.Contains("\"state\":\"disabled\"", StringComparison.Ordinal)
+            || publishedProviders.Length == 0
+            || publishedProviders.Contains(generatedProviderId, StringComparer.OrdinalIgnoreCase))
+        {
+            _failures.Add("generated provider lifecycle commit did not publish the refreshed Panel provider state");
         }
     }
 

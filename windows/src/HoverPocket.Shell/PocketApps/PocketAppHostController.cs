@@ -44,6 +44,10 @@ internal sealed class PocketAppHostController
             manifestDigest = _runtime.Package.ManifestDigest,
             surfaceId,
             renderModel = document.RootElement.Clone(),
+            workflowInputs = _runtime.Package.Workflows.ToDictionary(
+                item => item.Key,
+                item => item.Value.Inputs.Keys.Order(StringComparer.Ordinal).ToArray(),
+                StringComparer.Ordinal),
             initialState = _runtime.UserStateStore?.Snapshot()
                 ?? new Dictionary<string, string>(StringComparer.Ordinal)
         };

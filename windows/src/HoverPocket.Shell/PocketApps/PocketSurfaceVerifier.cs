@@ -13,7 +13,7 @@ internal sealed class PocketSurfaceVerifier
     public int Run()
     {
         var runtime = new PocketSurfaceRuntime(
-            new HashSet<string>(["calendar.events.list@1"], StringComparer.Ordinal),
+            new HashSet<string>(["calendar.events.list@1", "sticky.note.get@1"], StringComparer.Ordinal),
             new HashSet<string>(["startFocus"], StringComparer.Ordinal));
         var renderDigest = "unavailable";
 
@@ -43,6 +43,7 @@ internal sealed class PocketSurfaceVerifier
         RejectMutation(root => root["root"]!["children"]![0]!["unexpected"] = true, "unknown_key", runtime);
         RejectMutation(root => root["root"]!["children"]![0]!["type"] = "webView", "unknown_component", runtime);
         RejectMutation(root => root["root"]!["children"]![1]!["items"]!["query"] = "calendar.events.delete@1", "unknown_query", runtime);
+        RejectMutation(root => root["root"]!["children"]![1]!["items"]!["query"] = "sticky.note.get@1", "unsupported_query_shape", runtime);
         RejectMutation(root => root["root"]!["children"]![4]!["workflow"] = "missing", "unknown_workflow", runtime);
         RejectMutation(root =>
         {
@@ -74,7 +75,7 @@ internal sealed class PocketSurfaceVerifier
 
         Console.WriteLine("pocket_surface_verify=ok");
         Console.WriteLine("pocket_surface_valid_nodes=6");
-        Console.WriteLine("pocket_surface_negative_cases=14");
+        Console.WriteLine("pocket_surface_negative_cases=15");
         Console.WriteLine($"pocket_surface_render_digest={renderDigest}");
         return 0;
     }
