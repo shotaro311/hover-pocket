@@ -99,6 +99,7 @@ internal sealed class CapabilityBroker
         await _executionGate.WaitAsync(cancellationToken);
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var digest = "unavailable";
             IReadOnlyList<PocketCapabilityDescriptor> descriptors;
             try
@@ -165,6 +166,7 @@ internal sealed class CapabilityBroker
 
             if (durableExecution)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _ledger.StartWorkflow(plan.Id, digest);
             }
             var receipts = new List<CapabilityReceipt>();
@@ -172,6 +174,7 @@ internal sealed class CapabilityBroker
             var workflowStatus = CapabilityReceiptStatus.Succeeded;
             for (var index = 0; index < plan.Steps.Count; index++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var receipt = await ExecuteStepAsync(
                     plan.Steps[index],
                     descriptors[index],

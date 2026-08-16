@@ -86,6 +86,7 @@ internal sealed record PocketAppLifecycleReceipt(
     string PackageId,
     string? Version,
     string? PackageDigest,
+    IReadOnlyList<string> EffectivePermissions,
     PocketAppLifecycleState State,
     bool ReadbackVerified,
     PocketAppDataDisposition? DataDisposition);
@@ -139,6 +140,7 @@ internal sealed class PocketAppLifecycleManager : IDisposable
     private readonly PocketAppStagingTestRunner _stagingTestRunner;
     private readonly string _hostVersion;
     private readonly Func<string, bool>? _failureInjection;
+    private readonly Func<PocketAppLifecycleReceipt, PocketAppRuntimeReadback>? _activationReadback;
     private static readonly object LifecycleGate = new();
     private static readonly HashSet<string> LiveStagingDirectories = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, PendingApproval> _pendingApprovals = new(StringComparer.Ordinal);
@@ -153,7 +155,8 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         PocketAppPackageRuntime? runtime = null,
         Func<string, bool>? failureInjection = null,
         string hostVersion = PocketAppHostContract.Version,
-        bool performStartupRecovery = true)
+        bool performStartupRecovery = true,
+        Func<PocketAppLifecycleReceipt, PocketAppRuntimeReadback>? activationReadback = null)
     {
         if (!ValidVersion(hostVersion)) { throw Failure("LIFECYCLE_PACKAGE_INVALID"); }
         _rootDirectory = Path.GetFullPath(rootDirectory);
@@ -162,6 +165,7 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         _stagingTestRunner = new PocketAppStagingTestRunner();
         _hostVersion = hostVersion;
         _failureInjection = failureInjection;
+        _activationReadback = activationReadback;
         try
         {
             lock (LifecycleGate)
@@ -450,14 +454,15 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         }
         var disabled = current with { State = PocketAppLifecycleState.Disabled, UpdatedAt = now ?? DateTimeOffset.UtcNow };
         WriteAndVerify(disabled);
-        return new PocketAppLifecycleReceipt(
+        return VerifyActivationReadback(new PocketAppLifecycleReceipt(
             "disable",
             packageId,
             disabled.Version,
             disabled.PackageDigest,
+            Array.Empty<string>(),
             PocketAppLifecycleState.Disabled,
             true,
-            null);
+            null));
     }
 
     public PocketAppLifecycleReceipt Enable(string packageId, DateTimeOffset? now = null) =>
@@ -523,14 +528,24 @@ internal sealed class PocketAppLifecycleManager : IDisposable
             }
             throw;
         }
-        return new PocketAppLifecycleReceipt(
+        var receipt = new PocketAppLifecycleReceipt(
             "enable",
             packageId,
             enabled.Version,
             enabled.PackageDigest,
+            current.Permissions,
             PocketAppLifecycleState.Enabled,
             true,
             null);
+        try
+        {
+            return VerifyActivationReadback(receipt);
+        }
+        catch
+        {
+            try { RecoverAfterActivationFailure(current, enabled, now ?? DateTimeOffset.UtcNow); } catch { }
+            throw Failure("LIFECYCLE_READBACK_FAILED");
+        }
     }
 
     public PocketAppLifecycleReceipt Remove(
@@ -599,14 +614,15 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         {
             throw Failure("LIFECYCLE_READBACK_FAILED");
         }
-        return new PocketAppLifecycleReceipt(
+        return VerifyActivationReadback(new PocketAppLifecycleReceipt(
             "remove",
             packageId,
             null,
             null,
+            Array.Empty<string>(),
             PocketAppLifecycleState.Removed,
             true,
-            dataDisposition);
+            dataDisposition));
     }
 
     public IReadOnlyList<PocketAppManagedPackage> ManagedPackages() =>
@@ -752,6 +768,22 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         ValidateHostCompatibility(package);
         return package;
     }
+
+    public PocketAppPackage? ActivePackageForActivation(string packageId) =>
+        WithLifecycleLock(() =>
+        {
+            var package = ActivePackageCore(packageId);
+            if (package is null) { return null; }
+            var record = ReadActiveRecord(packageId)
+                ?? throw Failure("LIFECYCLE_READBACK_FAILED");
+            if (!Permissions(package).Order(StringComparer.Ordinal).SequenceEqual(
+                record.Permissions.Order(StringComparer.Ordinal),
+                StringComparer.Ordinal))
+            {
+                throw Failure("LIFECYCLE_CORRUPT_VERSION");
+            }
+            return package;
+        });
 
     private PocketAppLifecycleReceipt ActivateProposal(
         PocketAppLifecycleProposal proposal,
@@ -915,14 +947,74 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         }
         _pendingApprovals.Remove(proposal.RequestId);
         _decidedRequests.Remove(proposal.RequestId);
-        return new PocketAppLifecycleReceipt(
+        var receipt = new PocketAppLifecycleReceipt(
             proposal.Action.ToString().ToLowerInvariant(),
             proposal.PackageId,
             proposal.Version,
             proposal.PackageDigest,
+            Permissions(package).Order(StringComparer.Ordinal).ToArray(),
             PocketAppLifecycleState.Enabled,
             true,
             null);
+        try
+        {
+            return VerifyActivationReadback(receipt);
+        }
+        catch
+        {
+            try { RecoverAfterActivationFailure(previous, record, now); } catch { }
+            throw Failure("LIFECYCLE_READBACK_FAILED");
+        }
+    }
+
+    private void RecoverAfterActivationFailure(
+        ActiveRecord? previous,
+        ActiveRecord committed,
+        DateTimeOffset now)
+    {
+        var fallbackSource = previous ?? committed;
+        var fallback = fallbackSource.State == PocketAppLifecycleState.Removed
+            ? fallbackSource
+            : fallbackSource with
+            {
+                State = PocketAppLifecycleState.Disabled,
+                UpdatedAt = now
+            };
+        WriteAndVerify(fallback);
+        if (_activationReadback is null) { return; }
+        try
+        {
+            _ = _activationReadback(new PocketAppLifecycleReceipt(
+                "activation_failure_recovery",
+                fallback.PackageId,
+                fallback.Version,
+                fallback.PackageDigest,
+                Array.Empty<string>(),
+                fallback.State,
+                true,
+                fallback.State == PocketAppLifecycleState.Removed
+                    ? PocketAppDataDisposition.Preserve
+                    : null));
+        }
+        catch { }
+    }
+
+    private PocketAppLifecycleReceipt VerifyActivationReadback(PocketAppLifecycleReceipt receipt)
+    {
+        if (_activationReadback is null) { return receipt; }
+        try
+        {
+            var observed = _activationReadback(receipt);
+            if (!observed.Matches(receipt))
+            {
+                throw Failure("LIFECYCLE_READBACK_FAILED");
+            }
+            return receipt;
+        }
+        catch
+        {
+            throw Failure("LIFECYCLE_READBACK_FAILED");
+        }
     }
 
     private string InstallImmutableSnapshot(PocketAppFileSnapshot snapshot, PocketAppPackage package)

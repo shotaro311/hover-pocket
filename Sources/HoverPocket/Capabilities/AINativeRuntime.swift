@@ -9,6 +9,9 @@ final class AINativeRuntime: ObservableObject {
     private var adapter: TodayFocusTextAdapter?
     @Published private(set) var pocketAppExecutionRuntime: PocketAppExecutionRuntime?
     @Published private(set) var pocketAppGenerationController: PocketAppGenerationController?
+    @Published private(set) var generatedExecutionRuntimeRegistry: PocketExecutionRuntimeRegistry?
+    @Published private(set) var generatedSurfaceRegistry: PocketSurfaceRegistry?
+    private var generatedActivationRegistry: PocketAppRuntimeActivationRegistry?
 
     private init() {}
 
@@ -19,12 +22,17 @@ final class AINativeRuntime: ObservableObject {
     func configure(
         adapter: TodayFocusTextAdapter?,
         pocketAppExecutionRuntime: PocketAppExecutionRuntime? = nil,
-        pocketAppGenerationController: PocketAppGenerationController? = nil
+        pocketAppGenerationController: PocketAppGenerationController? = nil,
+        generatedActivationRegistry: PocketAppRuntimeActivationRegistry? = nil
     ) {
+        self.generatedActivationRegistry?.shutdown()
         self.pocketAppGenerationController?.shutdown()
         self.adapter = adapter
         self.pocketAppExecutionRuntime = pocketAppExecutionRuntime
         self.pocketAppGenerationController = pocketAppGenerationController
+        self.generatedActivationRegistry = generatedActivationRegistry
+        self.generatedExecutionRuntimeRegistry = generatedActivationRegistry?.executionRegistry
+        self.generatedSurfaceRegistry = generatedActivationRegistry?.surfaceRegistry
     }
 
     func prepareTodayFocus(

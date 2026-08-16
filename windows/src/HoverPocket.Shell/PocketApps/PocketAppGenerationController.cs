@@ -29,7 +29,8 @@ internal sealed class PocketAppGenerationController : IDisposable
         string userDataRoot,
         string generationRoot,
         IPocketAppGenerationAdapter? generator,
-        Action? postCommitHook = null)
+        Action? postCommitHook = null,
+        Func<PocketAppLifecycleReceipt, PocketAppRuntimeReadback>? runtimeActivationReadback = null)
     {
         var definitionPin = new PocketAppPinnedDirectory(rootDirectory);
         var userDataPin = new PocketAppPinnedDirectory(userDataRoot);
@@ -40,7 +41,8 @@ internal sealed class PocketAppGenerationController : IDisposable
         _lifecycle = new PocketAppLifecycleManager(
             definitionPin.FullPath,
             userDataPin.FullPath,
-            performStartupRecovery: false);
+            performStartupRecovery: false,
+            activationReadback: runtimeActivationReadback);
         _materializer = new PocketAppGenerationMaterializer(generationPin.FullPath);
         ValidatePins();
         RefreshManagedPackages();
@@ -766,6 +768,7 @@ internal sealed class PocketAppGenerationController : IDisposable
         appId = receipt.PackageId,
         version = receipt.Version,
         packageDigest = receipt.PackageDigest,
+        effectivePermissions = receipt.EffectivePermissions,
         state = receipt.State.ToString().ToLowerInvariant(),
         readbackVerified = receipt.ReadbackVerified,
         dataDisposition = receipt.DataDisposition?.ToString().ToLowerInvariant()

@@ -42,6 +42,7 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly TodayFocusTextAdapter? _todayFocusTextAdapter;
     private readonly PocketAppHostController? _pocketAppHostController;
     private readonly PocketAppGenerationController? _pocketAppGenerationController;
+    private readonly PocketAppRuntimeActivationRegistry? _generatedPocketApps;
     private readonly Dictionary<BridgeDispatcher, BridgeSurface> _dispatchers = [];
     private readonly object _previewFrameSync = new();
     private string _selectedProviderId;
@@ -120,10 +121,22 @@ internal sealed class PanelBridgeController : IDisposable
         }
         if (CurrentSettings.AiNativeEnabled)
         {
+            PocketAppRuntimeActivationRegistry? activationRegistry = null;
             try
             {
                 var pocketAppsRoot = Path.Combine(settingsStore.RootDirectory, "PocketApps");
+                var generatedHostRoot = Path.Combine(pocketAppsRoot, "GeneratedHost");
                 var generationRoot = Path.Combine(pocketAppsRoot, "Generation");
+                if (_capabilityBroker is not null)
+                {
+                    activationRegistry = new PocketAppRuntimeActivationRegistry(
+                        generatedHostRoot,
+                        Path.Combine(pocketAppsRoot, "UserData"),
+                        _capabilityBroker,
+                        "local-user",
+                        () => CurrentSettings);
+                    _ = activationRegistry.RestoreEnabledApps();
+                }
                 IPocketAppGenerationAdapter? generator = null;
                 if (CodexPocketAppGenerationAdapter.ResolveExecutable() is { } executable)
                 {
@@ -134,23 +147,29 @@ internal sealed class PanelBridgeController : IDisposable
                 try
                 {
                     _pocketAppGenerationController = new PocketAppGenerationController(
-                        Path.Combine(pocketAppsRoot, "GeneratedHost"),
+                        generatedHostRoot,
                         Path.Combine(pocketAppsRoot, "UserData"),
                         Path.Combine(generationRoot, "Drafts"),
-                        generator);
+                        generator,
+                        runtimeActivationReadback: receipt => activationRegistry?.Synchronize(receipt)
+                            ?? throw new PocketAppRuntimeActivationException("RUNTIME_ACTIVATION_UNAVAILABLE"));
+                    _generatedPocketApps = activationRegistry;
                 }
                 catch
                 {
                     if (generator is IDisposable disposable) { disposable.Dispose(); }
+                    activationRegistry?.Dispose();
                     throw;
                 }
             }
             catch (Exception ex) when (ex is PocketAppGenerationException
                 or PocketAppLifecycleException
+                or PocketAppRuntimeActivationException
                 or IOException
                 or UnauthorizedAccessException)
             {
                 _pocketAppGenerationController = null;
+                _generatedPocketApps = null;
             }
         }
         _clipboardBridgeController = new ClipboardBridgeController(
@@ -270,6 +289,7 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.MediaSourceOpened -= OnControlsMediaSourceOpened;
         _controlsBridgeController.Dispose();
         _pocketAppGenerationController?.Dispose();
+        _generatedPocketApps?.Dispose();
     }
 
     public object BuildState(bool includeGeneration = false)

@@ -9,6 +9,7 @@ internal sealed class PocketAppGenerationVerifier
 
     public IReadOnlyList<string> Run()
     {
+        _failures.AddRange(PocketAppRuntimeActivationVerifier.Run());
         VerifyE2E();
         VerifySettingsApprovalBoundary().GetAwaiter().GetResult();
         VerifyPreviewOnlyBoundary().GetAwaiter().GetResult();
@@ -135,6 +136,76 @@ internal sealed class PocketAppGenerationVerifier
                     restoredDisabled?.State == PocketAppLifecycleState.Disabled
                         && failingEnableLifecycle.ActivePackage(request.AppId) is null,
                     "generation_enable_readback_failure_restored_disabled");
+            }
+            using (var failingRuntimeEnableLifecycle = new PocketAppLifecycleManager(
+                root,
+                dataRoot,
+                activationReadback: receipt =>
+                {
+                    if (receipt.State == PocketAppLifecycleState.Enabled)
+                    {
+                        throw new PocketAppRuntimeActivationException("RUNTIME_ACTIVATION_UNAVAILABLE");
+                    }
+                    return new PocketAppRuntimeReadback(
+                        receipt.PackageId,
+                        receipt.Version,
+                        receipt.PackageDigest,
+                        receipt.EffectivePermissions);
+                }))
+            {
+                try
+                {
+                    _ = failingRuntimeEnableLifecycle.Enable(request.AppId);
+                    _failures.Add("generation_runtime_enable_failure_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_READBACK_FAILED")
+                {
+                }
+                Require(
+                    failingRuntimeEnableLifecycle.ManagedPackage(request.AppId)?.State == PocketAppLifecycleState.Disabled
+                        && failingRuntimeEnableLifecycle.ActivePackage(request.AppId) is null,
+                    "generation_runtime_enable_failure_remains_disabled");
+            }
+
+            var reupdate = lifecycle.Stage(updateMaterialized.Directory);
+            var reupdateGrant = lifecycle.Approve(reupdate.RequestId, reupdate.BindingDigest);
+            _ = lifecycle.Install(reupdate, reupdateGrant);
+            using (var failingRuntimeRollbackLifecycle = new PocketAppLifecycleManager(
+                root,
+                dataRoot,
+                activationReadback: receipt =>
+                {
+                    if (receipt.State == PocketAppLifecycleState.Enabled)
+                    {
+                        throw new PocketAppRuntimeActivationException("RUNTIME_ACTIVATION_UNAVAILABLE");
+                    }
+                    return new PocketAppRuntimeReadback(
+                        receipt.PackageId,
+                        receipt.Version,
+                        receipt.PackageDigest,
+                        receipt.EffectivePermissions);
+                }))
+            {
+                var failingRollback = failingRuntimeRollbackLifecycle.PrepareRollback(
+                    request.AppId,
+                    request.Version);
+                var failingRollbackGrant = failingRuntimeRollbackLifecycle.Approve(
+                    failingRollback.RequestId,
+                    failingRollback.BindingDigest);
+                try
+                {
+                    _ = failingRuntimeRollbackLifecycle.Rollback(failingRollback, failingRollbackGrant);
+                    _failures.Add("generation_runtime_rollback_failure_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_READBACK_FAILED")
+                {
+                }
+                var rollbackFallback = failingRuntimeRollbackLifecycle.ManagedPackage(request.AppId);
+                Require(
+                    rollbackFallback?.State == PocketAppLifecycleState.Disabled
+                        && rollbackFallback?.Version == updateRequest.Version
+                        && failingRuntimeRollbackLifecycle.ActivePackage(request.AppId) is null,
+                    "generation_runtime_rollback_failure_disables_previous_version");
             }
             var installedIntent = Path.Combine(
                 root,

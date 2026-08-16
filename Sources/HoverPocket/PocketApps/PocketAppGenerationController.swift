@@ -23,7 +23,8 @@ final class PocketAppGenerationController: ObservableObject {
         userDataRoot: URL,
         generationRoot: URL,
         generator: (any PocketAppGenerationAdapter)?,
-        postCommitHook: (() -> Void)? = nil
+        postCommitHook: (() -> Void)? = nil,
+        runtimeActivationReadback: ((PocketAppLifecycleReceipt) throws -> PocketAppRuntimeReadback)? = nil
     ) throws {
         let definitionPin = try PocketAppPinnedDirectory(url: rootDirectory)
         let userDataPin = try PocketAppPinnedDirectory(url: userDataRoot)
@@ -34,7 +35,8 @@ final class PocketAppGenerationController: ObservableObject {
         self.lifecycle = try PocketAppLifecycleManager(
             rootDirectory: definitionPin.url,
             userDataRoot: userDataPin.url,
-            performStartupRecovery: false
+            performStartupRecovery: false,
+            activationReadback: runtimeActivationReadback
         )
         self.materializer = PocketAppGenerationMaterializer(rootDirectory: generationPin.url)
         try validatePins()

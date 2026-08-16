@@ -11,7 +11,11 @@ struct PocketSurfaceHostView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                PocketSurfaceNodeView(node: model.surface.root, model: model)
+                if model.activationAvailable {
+                    PocketSurfaceNodeView(node: model.surface.root, model: model)
+                } else {
+                    hostStatus(text: "このPocket Appは現在利用できません。", color: .white.opacity(0.58))
+                }
 
                 if model.isLoading {
                     ProgressView()

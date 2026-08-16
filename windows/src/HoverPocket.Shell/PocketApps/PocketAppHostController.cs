@@ -24,6 +24,7 @@ internal sealed class PocketAppHostController
     public object BuildSurfaceState(string surfaceId = "main")
     {
         EnsureAiNativeEnabled();
+        _runtime.EnsureActivationActive();
         if (!_runtime.Package.Surfaces.TryGetValue(surfaceId, out var surface))
         {
             throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "pocket_surface");
@@ -45,6 +46,7 @@ internal sealed class PocketAppHostController
     public object BuildManagerState()
     {
         EnsureAiNativeEnabled();
+        _runtime.EnsureActivationActive();
         var package = _runtime.Package;
         return new
         {
@@ -72,7 +74,7 @@ internal sealed class PocketAppHostController
         dispatcher.Register("pocketApp.updateState", UpdateStateAsync);
     }
 
-    private async Task<object?> LoadAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    internal async Task<object?> LoadAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         EnsureAiNativeEnabled();
         EnsureApp(parameters);
@@ -109,7 +111,7 @@ internal sealed class PocketAppHostController
         };
     }
 
-    private async Task<object?> InvokeWorkflowAsync(
+    internal async Task<object?> InvokeWorkflowAsync(
         JsonElement? parameters,
         CancellationToken cancellationToken)
     {
@@ -185,10 +187,11 @@ internal sealed class PocketAppHostController
         };
     }
 
-    private Task<object?> UpdateStateAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    internal Task<object?> UpdateStateAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         EnsureAiNativeEnabled();
+        _runtime.EnsureActivationActive();
         EnsureApp(parameters);
         var key = RequiredString(parameters, "key", 128);
         if (parameters is null

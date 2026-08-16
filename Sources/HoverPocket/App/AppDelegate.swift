@@ -114,8 +114,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 userStateStore: userStateStore
             )
             let generationController: PocketAppGenerationController?
+            let generatedActivationRegistry: PocketAppRuntimeActivationRegistry?
             do {
                 let generationRoot = pocketAppsRoot.appendingPathComponent("Generation", isDirectory: true)
+                let generatedHostRoot = pocketAppsRoot.appendingPathComponent("GeneratedHost", isDirectory: true)
+                let activationRegistry = try PocketAppRuntimeActivationRegistry(
+                    rootDirectory: generatedHostRoot,
+                    userDataRoot: userDataRoot,
+                    broker: broker,
+                    userID: "local-user"
+                )
+                _ = activationRegistry.restoreEnabledApps()
                 let generator: (any PocketAppGenerationAdapter)?
                 if let executableURL = CodexPocketAppGenerationAdapter.resolveExecutable() {
                     generator = try? CodexPocketAppGenerationAdapter(
@@ -126,18 +135,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     generator = nil
                 }
                 generationController = try PocketAppGenerationController(
-                    rootDirectory: pocketAppsRoot.appendingPathComponent("GeneratedHost", isDirectory: true),
+                    rootDirectory: generatedHostRoot,
                     userDataRoot: userDataRoot,
                     generationRoot: generationRoot.appendingPathComponent("Drafts", isDirectory: true),
-                    generator: generator
+                    generator: generator,
+                    runtimeActivationReadback: { receipt in
+                        try activationRegistry.synchronize(receipt)
+                    }
                 )
+                generatedActivationRegistry = activationRegistry
             } catch {
                 generationController = nil
+                generatedActivationRegistry = nil
             }
             AINativeRuntime.shared.configure(
                 adapter: TodayFocusTextAdapter(broker: broker),
                 pocketAppExecutionRuntime: pocketAppRuntime,
-                pocketAppGenerationController: generationController
+                pocketAppGenerationController: generationController,
+                generatedActivationRegistry: generatedActivationRegistry
             )
         } catch {
             AINativeRuntime.shared.configure(adapter: nil)

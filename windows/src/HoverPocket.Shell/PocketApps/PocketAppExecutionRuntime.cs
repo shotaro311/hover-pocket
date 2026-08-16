@@ -22,6 +22,7 @@ internal sealed class PocketAppExecutionRuntime
     private readonly CapabilityPrincipal _principal;
     private readonly IReadOnlySet<string> _permissions;
     private readonly TimeZoneInfo _timeZone;
+    private readonly PocketAppActivationLease? _activationLease;
 
     public PocketAppExecutionRuntime(
         PocketAppPackage package,
@@ -29,7 +30,8 @@ internal sealed class PocketAppExecutionRuntime
         string userId,
         IReadOnlySet<string> grantedPermissions,
         TimeZoneInfo? timeZone = null,
-        PocketAppUserStateStore? userStateStore = null)
+        PocketAppUserStateStore? userStateStore = null,
+        PocketAppActivationLease? activationLease = null)
     {
         Package = package;
         _broker = broker;
@@ -40,11 +42,16 @@ internal sealed class PocketAppExecutionRuntime
             .ToHashSet(StringComparer.Ordinal);
         _permissions = grantedPermissions.Where(requested.Contains).ToHashSet(StringComparer.Ordinal);
         UserStateStore = userStateStore;
+        _activationLease = activationLease;
     }
 
     public PocketAppPackage Package { get; }
 
     public PocketAppUserStateStore? UserStateStore { get; }
+
+    internal bool IsActivationActive => _activationLease?.IsActive ?? true;
+
+    internal void EnsureActivationActive() => _activationLease?.RequireActive();
 
     public async Task<JsonElement> QueryAsync(
         string reference,
@@ -52,6 +59,7 @@ internal sealed class PocketAppExecutionRuntime
         DateTimeOffset? now = null,
         CancellationToken cancellationToken = default)
     {
+        EnsureActivationActive();
         var key = CapabilityKey(reference);
         var request = RequestedCapability(key);
         if (request.Effect is not (CapabilityEffect.Pure or CapabilityEffect.PrivateRead))
@@ -76,7 +84,11 @@ internal sealed class PocketAppExecutionRuntime
         {
             throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "query_approval");
         }
-        var receipt = await _broker.ExecuteAsync(plan, permissions, null, current, cancellationToken);
+        using var linkedCancellation = LinkedActivationCancellation(cancellationToken);
+        var effectiveCancellation = linkedCancellation?.Token ?? cancellationToken;
+        effectiveCancellation.ThrowIfCancellationRequested();
+        var receipt = await _broker.ExecuteAsync(plan, permissions, null, current, effectiveCancellation);
+        EnsureActivationActive();
         return receipt.Status == CapabilityReceiptStatus.Succeeded
             && receipt.Steps.FirstOrDefault()?.Output is { } output
             ? output
@@ -88,6 +100,7 @@ internal sealed class PocketAppExecutionRuntime
         IReadOnlyDictionary<string, JsonElement> inputs,
         DateTimeOffset? now = null)
     {
+        EnsureActivationActive();
         if (!Package.Workflows.TryGetValue(workflowId, out var workflow))
         {
             throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "pocket_workflow");
@@ -135,6 +148,7 @@ internal sealed class PocketAppExecutionRuntime
         DateTimeOffset? now = null,
         CancellationToken cancellationToken = default)
     {
+        EnsureActivationActive();
         ValidateDraft(draft);
         var request = draft.Preparation.ApprovalRequest
             ?? throw new CapabilityBrokerException("CAPABILITY_APPROVAL_REQUIRED", draft.Plan.Id);
@@ -144,11 +158,17 @@ internal sealed class PocketAppExecutionRuntime
             draft.Preparation.PlanDigest,
             CapabilityApprovalDecision.Approve,
             current);
-        return await _broker.ExecuteAsync(draft.Plan, PermissionSet, grant, current, cancellationToken);
+        using var linkedCancellation = LinkedActivationCancellation(cancellationToken);
+        var effectiveCancellation = linkedCancellation?.Token ?? cancellationToken;
+        effectiveCancellation.ThrowIfCancellationRequested();
+        var receipt = await _broker.ExecuteAsync(draft.Plan, PermissionSet, grant, current, effectiveCancellation);
+        EnsureActivationActive();
+        return receipt;
     }
 
     public void Reject(PocketAppWorkflowDraft draft, DateTimeOffset? now = null)
     {
+        if (!IsActivationActive) { return; }
         ValidateDraft(draft);
         if (draft.Preparation.ApprovalRequest is not { } request)
         {
@@ -173,6 +193,13 @@ internal sealed class PocketAppExecutionRuntime
         Package.ManifestDigest);
 
     private CapabilityPermissionSet PermissionSet => new(_principal, _permissions);
+
+    private CancellationTokenSource? LinkedActivationCancellation(CancellationToken cancellationToken) =>
+        _activationLease is null
+            ? null
+            : CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                _activationLease.CancellationToken);
 
     private PocketAppRequestedCapability RequestedCapability(PocketCapabilityKey key) =>
         Package.Manifest.RequestedCapabilities.FirstOrDefault(item => item.Key == key)

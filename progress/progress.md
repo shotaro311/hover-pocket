@@ -2,8 +2,20 @@
 project_slug: hover-menu-preview
 updated: 2026-08-16
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-pr-ready-ci-green; an5-c-runtime-activation-pending; capability-expansion-merged
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-local-complete-pr-pending; capability-expansion-merged
 ---
+
+## 2026-08-16 AI-native AN5-C Runtime / Surface Activation
+
+- PR #17はmerge commit `a35b0ea8c224809ad4ff1bf1dc466882fc70169b`でmainへ統合し、merge後のWindows、macOS、3OS contract CIも成功した。最新`origin/main`から隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an5c`、branch `codex/ai-native-an5-runtime-activation`を作成し、ahead / behind `0 / 0`、cleanをreadbackした。
+- AN5-Cは、検証済みactive packageをapp ID単位の`PocketSurfaceRegistry` / execution-runtime registryへ反映し、install / update / enable / disable / preserve-only remove / rollback / restart restoration後にapp ID、version、package digest、effective permission grantがLifecycle receiptと描画・実行側で一致した場合だけ成功にする。組み込みToday Focusと生成Appは別entryとし、複数生成Appを共存させる。
+- ChatGPT Pro Orchestratorへexact base `a35b0ea`、GitHub read-only、GPT-5.6 Sol / Pro、builder、patch artifactとして実装と両OS回帰を委譲した。run: `20260816-074324-hoverpocket-an5-c-runtime-activation-registryos`。Codexはartifactのbase / hash / path検証、適用、ローカル検証、security review、Git / PR / mergeを担当する。実Codex生成activationは引き続きfail closedとする。
+- 適用前baselineとして、Swift warnings-as-errors build、Pocket App package / lifecycle / generation、Capability 14 handler、Broker、Today Focus、Pocket Surface、Timer、共通contract、`git diff --check`が成功した。`./script/build_and_run.sh --build-only`でmacOS app bundleを作成し、Apple Development署名の`codesign --verify --deep --strict`も成功した。開発buildは`SPARKLE_FEED_URL`を明示しない限り`SUFeedURL`を持たない設計であり、feed、notarization、配布署名はAN8の正式成果物で検証する。
+- Pro返却はdelivery ID / state hashをclaimしてreceiptを検証したが、適用可能なpatch contractを満たさなかった。1回のrepair上限後はSkillのisolated-recovery手順へ切り替え、mainを変更せず専用worktree内でCodexがAN5-Cを復元した。返却は再適用せずmark-done済みである。
+- 両OSへapp ID keyed runtime / Surface Registry、receiptとapp ID / version / digest / effective grantの一致、複数App分離、disable / remove / rollback、restart restoration、activation失敗時のdurable disabled fallbackを実装した。生成App用のglobal WebView bridgeは公開せず、実Codex生成もfail closedのままである。
+- security reviewで検出したstale runtime競合を持ち越さず、macOSはactivation leaseが実行Taskを取消し、BrokerとTimer writeが取消を再確認するようにした。Windowsはlease CancellationTokenをBridgeのtokenへ連結し、Brokerのqueue / step / handlerへ伝播する。disable / remove / default-off後にqueue済み実行がmaterial writeへ進まない回帰を追加した。
+- 最終差分digest `codex-security-snapshot/v1:sha256:b244af1e...b294f`のCodex Security scan `d40de7c5-0469-4f95-985b-d97b1a30c08e`は22 / 22 fileを完全確認し、reportable finding 0件、sealed completeとなった。Macでwarnings-as-errors build、Pocket App、Capability、Broker、Surface、Timer、共通contract、bundle build、Apple Development署名検証が成功した。
+- 未完了はPR、Windows / macOS / 3OS contract CI、merge後readback、両OS実機での生成Surface / runtime activation readback、実Codex confinement、Voiceから生成・導入するCore Integration E2Eである。詳細: `progress/2026-08/2026-08-16_hover-pocket-ai-native-an5-c.md`。
 
 ## 2026-08-16 AI-native AN5-B Codex Pocket App Generation / Management UI
 

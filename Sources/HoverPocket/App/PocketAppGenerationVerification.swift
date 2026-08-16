@@ -5,6 +5,7 @@ import Foundation
 enum PocketAppGenerationVerification {
     static func verify(failures: inout [String]) {
         verifyDefaultOff(failures: &failures)
+        PocketAppRuntimeActivationVerification.verify(failures: &failures)
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("hover-pocket-generation-host-\(UUID().uuidString)", isDirectory: true)
         let dataRoot = FileManager.default.temporaryDirectory
@@ -128,6 +129,81 @@ enum PocketAppGenerationVerification {
                 restoredDisabled?.state == .disabled
                     && restoredActivePackage == nil,
                 "generation_enable_readback_failure_restored_disabled",
+                failures: &failures
+            )
+            let failingRuntimeEnableLifecycle = try PocketAppLifecycleManager(
+                rootDirectory: root,
+                userDataRoot: dataRoot,
+                activationReadback: { receipt in
+                    if receipt.state == .enabled {
+                        throw PocketAppRuntimeActivationError.unavailable
+                    }
+                    return PocketAppRuntimeReadback(
+                        appID: receipt.packageID,
+                        version: receipt.version,
+                        packageDigest: receipt.packageDigest,
+                        effectivePermissions: receipt.effectivePermissions
+                    )
+                }
+            )
+            do {
+                _ = try failingRuntimeEnableLifecycle.enable(packageID: request.appID)
+                failures.append("generation_runtime_enable_failure_accepted")
+            } catch PocketAppLifecycleError.readbackFailed {
+            }
+            require(
+                try failingRuntimeEnableLifecycle.managedPackage(packageID: request.appID)?.state == .disabled
+                    && failingRuntimeEnableLifecycle.activePackage(packageID: request.appID) == nil,
+                "generation_runtime_enable_failure_remains_disabled",
+                failures: &failures
+            )
+
+            let reupdate = try lifecycle.stage(draftDirectory: updateMaterialized.directory)
+            let reupdateGrant = try lifecycle.approve(
+                requestID: reupdate.requestID,
+                bindingDigest: reupdate.bindingDigest
+            )
+            _ = try lifecycle.install(reupdate, approvalGrant: reupdateGrant)
+            let failingRuntimeRollbackLifecycle = try PocketAppLifecycleManager(
+                rootDirectory: root,
+                userDataRoot: dataRoot,
+                activationReadback: { receipt in
+                    if receipt.state == .enabled {
+                        throw PocketAppRuntimeActivationError.unavailable
+                    }
+                    return PocketAppRuntimeReadback(
+                        appID: receipt.packageID,
+                        version: receipt.version,
+                        packageDigest: receipt.packageDigest,
+                        effectivePermissions: receipt.effectivePermissions
+                    )
+                }
+            )
+            let failingRollback = try failingRuntimeRollbackLifecycle.prepareRollback(
+                packageID: request.appID,
+                version: request.version
+            )
+            let failingRollbackGrant = try failingRuntimeRollbackLifecycle.approve(
+                requestID: failingRollback.requestID,
+                bindingDigest: failingRollback.bindingDigest
+            )
+            do {
+                _ = try failingRuntimeRollbackLifecycle.rollback(
+                    failingRollback,
+                    approvalGrant: failingRollbackGrant
+                )
+                failures.append("generation_runtime_rollback_failure_accepted")
+            } catch PocketAppLifecycleError.readbackFailed {
+            }
+            let rollbackFallback = try failingRuntimeRollbackLifecycle.managedPackage(packageID: request.appID)
+            let rollbackFallbackActivePackage = try failingRuntimeRollbackLifecycle.activePackage(
+                packageID: request.appID
+            )
+            require(
+                rollbackFallback?.state == .disabled
+                    && rollbackFallback?.version == updateRequest.version
+                    && rollbackFallbackActivePackage == nil,
+                "generation_runtime_rollback_failure_disables_previous_version",
                 failures: &failures
             )
             let packageDataRoot = dataRoot.appendingPathComponent(request.appID, isDirectory: true)

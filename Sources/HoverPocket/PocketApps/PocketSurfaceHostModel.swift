@@ -20,6 +20,7 @@ final class PocketSurfaceHostModel: ObservableObject {
     @Published private(set) var receiptText: String?
     @Published var showsApproval = false
     @Published private(set) var approvalText = ""
+    @Published private(set) var activationAvailable = true
 
     private let runtime: PocketAppExecutionRuntime
     private var pendingDraft: PocketAppWorkflowDraft?
@@ -32,6 +33,7 @@ final class PocketSurfaceHostModel: ObservableObject {
         self.runtime = runtime
         self.surface = surface
         self.packageName = runtime.package.manifest.name
+        self.activationAvailable = runtime.isActivationActive
         if let userStateStore = runtime.userStateStore {
             self.state = userStateStore.snapshot().mapValues(CapabilityValue.string)
         }
@@ -39,7 +41,7 @@ final class PocketSurfaceHostModel: ObservableObject {
     }
 
     func load(now: Date = Date()) async {
-        guard !didLoad else { return }
+        guard activationAvailable, runtime.isActivationActive, !didLoad else { return }
         didLoad = true
         isLoading = true
         statusText = nil
@@ -107,7 +109,9 @@ final class PocketSurfaceHostModel: ObservableObject {
     }
 
     func canPrepare(workflowID: String) -> Bool {
-        guard let workflow = runtime.package.workflows[workflowID] else { return false }
+        guard activationAvailable,
+              runtime.isActivationActive,
+              let workflow = runtime.package.workflows[workflowID] else { return false }
         return workflow.inputs.allSatisfy { name, type in
             guard let value = inputs[name] ?? state[name] else { return false }
             if type == "string" || type == "entity-ref" {
@@ -119,7 +123,7 @@ final class PocketSurfaceHostModel: ObservableObject {
     }
 
     func prepare(workflowID: String) {
-        guard !isExecuting else { return }
+        guard activationAvailable, runtime.isActivationActive, !isExecuting else { return }
         do {
             guard let workflow = runtime.package.workflows[workflowID] else {
                 throw CapabilityBrokerError.invalidPlan("pocket_workflow")
@@ -143,7 +147,7 @@ final class PocketSurfaceHostModel: ObservableObject {
     }
 
     func approve() {
-        guard let draft = pendingDraft else { return }
+        guard activationAvailable, runtime.isActivationActive, let draft = pendingDraft else { return }
         showsApproval = false
         pendingDraft = nil
         isExecuting = true
@@ -164,11 +168,24 @@ final class PocketSurfaceHostModel: ObservableObject {
     }
 
     func reject() {
-        guard let draft = pendingDraft else { return }
+        guard activationAvailable, runtime.isActivationActive, let draft = pendingDraft else { return }
         showsApproval = false
         pendingDraft = nil
         runtime.reject(draft)
         statusText = "変更をキャンセルしました。"
+    }
+
+    func invalidateActivation() {
+        activationAvailable = false
+        pendingDraft = nil
+        showsApproval = false
+        isExecuting = false
+        isLoading = false
+        inputs.removeAll()
+        state.removeAll()
+        choicesByQuery.removeAll()
+        receiptText = nil
+        statusText = "このPocket Appは現在利用できません。"
     }
 
     private func value(for binding: String) -> CapabilityValue? {
@@ -182,6 +199,7 @@ final class PocketSurfaceHostModel: ObservableObject {
     }
 
     private func set(_ value: CapabilityValue, for binding: String) {
+        guard activationAvailable, runtime.isActivationActive else { return }
         if binding.hasPrefix("$input.") {
             inputs[String(binding.dropFirst("$input.".count))] = value
         } else if binding.hasPrefix("$state.") {
