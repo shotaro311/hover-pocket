@@ -7,6 +7,7 @@ using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Providers.Calendar;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
+using HoverPocket.Shell.Verification;
 
 namespace HoverPocket.Shell.Capabilities;
 
@@ -28,25 +29,25 @@ internal sealed class CapabilityBrokerVerifier
 
         if (_failures.Count > 0)
         {
-            Console.Error.WriteLine("broker_verify=failed");
+            VerifyConsole.WriteLine("broker_verify=failed");
             foreach (var failure in _failures)
             {
-                Console.Error.WriteLine($"failure={failure}");
+                VerifyConsole.WriteLine($"failure={failure}");
             }
             return 1;
         }
 
-        Console.WriteLine("broker_verify=ok");
-        Console.WriteLine("broker_registry_descriptors=15");
-        Console.WriteLine("broker_available_handlers=14");
-        Console.WriteLine("broker_calculator_evaluate=ok");
-        Console.WriteLine("broker_sticky_lifecycle=ok");
-        Console.WriteLine("broker_today_focus=ok");
-        Console.WriteLine("broker_pocket_app=ok");
-        Console.WriteLine("broker_pocket_app_declared_tests=4");
-        Console.WriteLine("broker_concurrent_duplicate=ok");
-        Console.WriteLine("broker_negative_cases=11");
-        Console.WriteLine($"broker_golden_plan_digest={GoldenPlanDigest}");
+        VerifyConsole.WriteLine("broker_verify=ok");
+        VerifyConsole.WriteLine("broker_registry_descriptors=15");
+        VerifyConsole.WriteLine("broker_available_handlers=14");
+        VerifyConsole.WriteLine("broker_calculator_evaluate=ok");
+        VerifyConsole.WriteLine("broker_sticky_lifecycle=ok");
+        VerifyConsole.WriteLine("broker_today_focus=ok");
+        VerifyConsole.WriteLine("broker_pocket_app=ok");
+        VerifyConsole.WriteLine("broker_pocket_app_declared_tests=4");
+        VerifyConsole.WriteLine("broker_concurrent_duplicate=ok");
+        VerifyConsole.WriteLine("broker_negative_cases=11");
+        VerifyConsole.WriteLine($"broker_golden_plan_digest={GoldenPlanDigest}");
         return 0;
     }
 
