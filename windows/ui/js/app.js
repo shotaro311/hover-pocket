@@ -475,7 +475,7 @@ function renderCompactVoiceLane(lane) {
   root.className = "hp-voice-compact";
 
   const microphone = voiceButton(
-    "Microphone unavailable until Voice runtime activation",
+    t("voiceMicrophoneUnavailable"),
     "◉",
     () => {},
   );
@@ -498,28 +498,30 @@ function renderCompactVoiceLane(lane) {
   status.textContent = voiceStatusText(lane);
   const preview = document.createElement("span");
   preview.className = "hp-voice-preview";
-  preview.textContent = lane.transcriptPreview || "Voice runtime is not active.";
+  preview.textContent = lane.transcriptPreview || t("voiceRuntimeInactive");
   conversation.append(status, preview);
 
   const count = document.createElement("span");
   count.className = "hp-voice-session-count";
   count.textContent = String(lane.visibleSessionCount ?? 0);
-  count.setAttribute("aria-label", `${lane.visibleSessionCount ?? 0} sessions`);
+  count.setAttribute("aria-label", formatText("voiceSessionCount", {
+    count: lane.visibleSessionCount ?? 0,
+  }));
 
   const mute = voiceButton(
-    lane.muted ? "Unmute Voice Lane" : "Mute Voice Lane",
+    lane.muted ? t("voiceUnmute") : t("voiceMute"),
     lane.muted ? "M" : "S",
     () => request("voice.setMuted", { muted: !lane.muted }).then(render),
   );
   mute.disabled = Boolean(lane.muted && !lane.transportAttached);
   const expand = voiceButton(
-    "Expand Voice Lane",
+    t("voiceExpand"),
     "⌄",
     () => request("voice.setLayout", { layout: "expanded" }).then(render),
     false,
   );
   const end = voiceButton(
-    "End Voice audio session",
+    t("voiceEndSession"),
     "×",
     () => request("voice.endSession").then(render),
   );
@@ -542,14 +544,17 @@ function renderExpandedVoiceLane(lane) {
   const count = document.createElement("span");
   count.className = "hp-voice-session-count";
   count.textContent = String(lane.visibleSessionCount ?? 0);
+  count.setAttribute("aria-label", formatText("voiceSessionCount", {
+    count: lane.visibleSessionCount ?? 0,
+  }));
   const collapse = voiceButton(
-    "Collapse Voice Lane",
+    t("voiceCollapse"),
     "⌃",
     () => request("voice.setLayout", { layout: "compact" }).then(render),
     true,
   );
   const end = voiceButton(
-    "End Voice audio session",
+    t("voiceEndSession"),
     "×",
     () => request("voice.endSession").then(render),
   );
@@ -559,23 +564,23 @@ function renderExpandedVoiceLane(lane) {
   grid.className = "hp-voice-expanded-grid";
   const transcript = document.createElement("div");
   transcript.className = "hp-voice-transcript-scroll";
-  transcript.setAttribute("aria-label", "Current Voice transcript");
+  transcript.setAttribute("aria-label", t("voiceTranscript"));
   for (const event of lane.transcript ?? []) {
     const item = document.createElement("p");
     item.className = "hp-voice-transcript-event";
-    item.textContent = `${event.role}: ${event.text}`;
+    item.textContent = `${voiceTranscriptRoleText(event.role)}: ${event.text}`;
     transcript.append(item);
   }
   if (!transcript.childElementCount) {
     const empty = document.createElement("p");
     empty.className = "hp-voice-empty";
-    empty.textContent = "No transcript in memory.";
+    empty.textContent = t("voiceNoTranscript");
     transcript.append(empty);
   }
 
   const cards = document.createElement("div");
   cards.className = "hp-voice-cards-scroll";
-  cards.setAttribute("aria-label", "Current root sessions");
+  cards.setAttribute("aria-label", t("voiceRootSessions"));
   const rootSessionId = lane.rootSessionId;
   const scoped = (lane.sessions ?? []).filter((session) => (
     rootSessionId && session.rootSessionId === rootSessionId
@@ -586,7 +591,7 @@ function renderExpandedVoiceLane(lane) {
     const title = document.createElement("strong");
     title.textContent = session.title;
     const meta = document.createElement("span");
-    meta.textContent = `${session.status} · ${voiceSessionUpdatedText(session.updatedAt)}`;
+    meta.textContent = `${voiceSessionStatusText(session.status)} · ${voiceSessionUpdatedText(session.updatedAt)}`;
     card.append(title, meta);
     if (session.safeSummary) {
       const summary = document.createElement("p");
@@ -600,7 +605,7 @@ function renderExpandedVoiceLane(lane) {
       progress.className = "hp-voice-session-progress";
       progress.max = total;
       progress.value = completed;
-      progress.setAttribute("aria-label", `${completed} of ${total} complete`);
+      progress.setAttribute("aria-label", formatText("voiceProgress", { completed, total }));
       card.append(progress);
     }
     cards.append(card);
@@ -608,7 +613,7 @@ function renderExpandedVoiceLane(lane) {
   if (!cards.childElementCount) {
     const empty = document.createElement("p");
     empty.className = "hp-voice-empty";
-    empty.textContent = "No sessions for this root.";
+    empty.textContent = t("voiceNoSessions");
     cards.append(empty);
   }
 
@@ -620,22 +625,95 @@ function renderExpandedVoiceLane(lane) {
 function voiceSessionUpdatedText(value) {
   const parsed = typeof value === "string" ? new Date(value) : new Date(Number.NaN);
   if (Number.isNaN(parsed.getTime())) {
-    return "updated unknown";
+    return t("voiceUpdatedUnknown");
   }
-  return `updated ${parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  const locale = document.documentElement.lang === "en" ? "en-US" : "ja-JP";
+  const time = parsed.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+  return formatText("voiceUpdated", { time });
 }
 
 function voiceStatusText(lane) {
   if (lane.expansionBlocked) {
-    return "Expanded表示には画面の高さが足りません";
+    return t("voiceExpansionBlocked");
   }
   if (lane.safeErrorCode) {
-    return lane.safeErrorCode;
+    return voiceErrorText(lane.safeErrorCode);
   }
+  const availability = voiceAvailabilityText(lane.availability);
   if (lane.availability && lane.availability !== "ready") {
-    return lane.availability;
+    return availability;
   }
-  return lane.activity ?? lane.sessionStatus ?? "idle";
+  return `${availability} · ${voiceActivityText(lane.activity ?? lane.sessionStatus ?? "idle")}`;
+}
+
+function voiceAvailabilityText(value) {
+  const keys = {
+    disabled: "voiceAvailabilityDisabled",
+    ready: "voiceAvailabilityReady",
+    unavailable: "voiceAvailabilityUnavailable",
+    signedOut: "voiceAvailabilitySignedOut",
+    schemaMismatch: "voiceAvailabilitySchemaMismatch",
+    capabilityBlocked: "voiceAvailabilityCapabilityBlocked",
+  };
+  return t(keys[value] ?? "voiceAvailabilityUnavailable");
+}
+
+function voiceActivityText(value) {
+  const keys = {
+    idle: "voiceActivityIdle",
+    listening: "voiceActivityListening",
+    thinking: "voiceActivityThinking",
+    speaking: "voiceActivitySpeaking",
+    waitingForApproval: "voiceActivityWaitingForApproval",
+    reconnecting: "voiceActivityReconnecting",
+    failed: "voiceActivityFailed",
+    connecting: "voiceActivityReconnecting",
+    requestingPermission: "voiceActivityWaitingForApproval",
+    negotiating: "voiceActivityReconnecting",
+    stopping: "voiceActivityIdle",
+    recovering: "voiceActivityReconnecting",
+    recoverableFailure: "voiceActivityFailed",
+    blockedFailure: "voiceActivityFailed",
+  };
+  return t(keys[value] ?? "voiceActivityIdle");
+}
+
+function voiceSessionStatusText(value) {
+  const keys = {
+    queued: "voiceSessionQueued",
+    running: "voiceSessionRunning",
+    waitingForUser: "voiceSessionWaitingForUser",
+    succeeded: "voiceSessionSucceeded",
+    failed: "voiceSessionFailed",
+    cancelled: "voiceSessionCancelled",
+  };
+  return t(keys[value] ?? "voiceSessionQueued");
+}
+
+function voiceTranscriptRoleText(value) {
+  const keys = {
+    user: "voiceRoleUser",
+    assistant: "voiceRoleAssistant",
+    system: "voiceRoleSystem",
+  };
+  return t(keys[value] ?? "voiceRoleSystem");
+}
+
+function voiceErrorText(value) {
+  const keys = {
+    voice_transport_crashed: "voiceErrorDisconnected",
+    unexpected_server_request: "voiceErrorUnsupportedRequest",
+    voice_restart_exhausted: "voiceErrorRestartExhausted",
+  };
+  return t(keys[value] ?? "voiceErrorUnavailable");
+}
+
+function formatText(key, values) {
+  let result = t(key);
+  for (const [name, value] of Object.entries(values)) {
+    result = result.replaceAll(`{${name}}`, String(value));
+  }
+  return result;
 }
 
 function renderCommands() {
@@ -951,12 +1029,62 @@ window.__hoverPocketVerify = {
     const voiceDefaultOffOk = state.settings.voiceEnabled === false
       && voiceLaneEl.hidden
       && Number(state.panel.voiceLaneHeight ?? 0) === 0;
+    const voiceFixture = {
+      availability: "ready",
+      sessionStatus: "idle",
+      activity: "listening",
+      muted: true,
+      transportAttached: true,
+      transcriptPreview: null,
+      transcript: [{ role: "user", text: "予定を確認して" }],
+      rootSessionId: "root-localization",
+      visibleSessionCount: 1,
+      sessions: [{
+        sessionId: "child-localization",
+        rootSessionId: "root-localization",
+        title: "Today Focus",
+        status: "running",
+        updatedAt: "2026-08-20T12:00:00Z",
+        progress: { completed: 1, total: 2 },
+      }],
+    };
+    setLanguage("ja");
+    voiceLaneEl.replaceChildren();
+    renderCompactVoiceLane(voiceFixture);
+    const japaneseCompactOk = voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "利用可能 · 聞き取り中"
+      && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "音声接続はAN3-Aではまだ利用できません。"
+      && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "音声機能の有効化まではマイクを利用できません"
+      && voiceLaneEl.querySelector(".hp-voice-session-count")?.getAttribute("aria-label") === "セッション 1件";
+    voiceLaneEl.replaceChildren();
+    renderExpandedVoiceLane(voiceFixture);
+    const japaneseExpandedOk = voiceLaneEl.querySelector(".hp-voice-transcript-event")?.textContent === "あなた: 予定を確認して"
+      && voiceLaneEl.querySelector(".hp-voice-session-card span")?.textContent?.startsWith("実行中 · 更新 ")
+      && voiceLaneEl.querySelector("progress")?.getAttribute("aria-label") === "1 / 2 完了";
+    setLanguage("en");
+    voiceLaneEl.replaceChildren();
+    renderCompactVoiceLane(voiceFixture);
+    const englishCompactOk = voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "Ready · Listening"
+      && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "Voice transport is unavailable in AN3-A."
+      && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "Microphone unavailable until Voice runtime activation"
+      && voiceLaneEl.querySelector(".hp-voice-session-count")?.getAttribute("aria-label") === "1 sessions";
+    voiceLaneEl.replaceChildren();
+    renderExpandedVoiceLane(voiceFixture);
+    const englishExpandedOk = voiceLaneEl.querySelector(".hp-voice-transcript-event")?.textContent === "You: 予定を確認して"
+      && voiceLaneEl.querySelector(".hp-voice-session-card span")?.textContent?.startsWith("Running · updated ")
+      && voiceLaneEl.querySelector("progress")?.getAttribute("aria-label") === "1 of 2 complete";
+    const voiceLocalizationOk = japaneseCompactOk
+      && japaneseExpandedOk
+      && englishCompactOk
+      && englishExpandedOk;
+    setLanguage(state.settings.language);
+    renderVoiceLane(state);
     window.__hoverPocketVerifyStep = "complete";
 
     return {
       echoOk: echo?.value === "ui-round-trip",
       legacyAiLaneNotMountedOk,
       voiceDefaultOffOk,
+      voiceLocalizationOk,
       controlsRenderedOk,
       controlsLayoutOk,
       controlsHitAreasOk,

@@ -51,6 +51,7 @@ internal sealed class VoiceFoundationVerifier
         await RunCaseAsync("restart", VerifyRestartIsBoundedAsync, timeout.Token);
         await RunCaseAsync("failed-initialize-cleanup", VerifyFailedInitializeDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("disable-inflight-cleanup", VerifyDisableDisposesInFlightCandidateAsync, timeout.Token);
+        await RunCaseAsync("disable-retry-cleanup", VerifyDisableDisposesInFlightRetryCandidateAsync, timeout.Token);
         await RunCaseAsync("crash-cleanup", VerifyTransportCrashDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("transition-cleanup", VerifySystemTransitionDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("stale-start", VerifyStaleStartFailureDoesNotReplaceReadyClientAsync, timeout.Token);
@@ -296,6 +297,34 @@ internal sealed class VoiceFoundationVerifier
             || coordinator.Snapshot != CodexVoiceSnapshot.Disabled)
         {
             _failures.Add("disabling Voice retained an in-flight startup candidate");
+        }
+    }
+
+    private async Task VerifyDisableDisposesInFlightRetryCandidateAsync(CancellationToken cancellationToken)
+    {
+        var factoryCalls = 0;
+        var retryDisposeCount = 0;
+        var initialHarness = new AppServerHarness();
+        var retryHarness = new DeferredInitializeHarness(
+            () => Interlocked.Increment(ref retryDisposeCount));
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ => Task.FromResult(
+                Interlocked.Increment(ref factoryCalls) == 1
+                    ? initialHarness.CreateClient()
+                    : retryHarness.CreateClient()),
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: [TimeSpan.Zero]);
+
+        await coordinator.InitializeAsync(cancellationToken);
+        initialHarness.Close();
+        await retryHarness.InitializationRequested.WaitAsync(cancellationToken);
+        await coordinator.SetFeatureEnabledAsync(false, cancellationToken);
+
+        if (Volatile.Read(ref retryDisposeCount) != 1
+            || coordinator.Snapshot != CodexVoiceSnapshot.Disabled)
+        {
+            _failures.Add("disabling Voice retained an in-flight retry candidate");
         }
     }
 

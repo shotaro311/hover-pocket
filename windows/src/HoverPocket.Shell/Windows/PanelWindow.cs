@@ -880,6 +880,9 @@ internal sealed record AnimationDiagnostics(
 
 internal sealed record UiWebVerifyResult(
     bool EchoOk,
+    bool LegacyAiLaneNotMountedOk,
+    bool VoiceDefaultOffOk,
+    bool VoiceLocalizationOk,
     bool ControlsRenderedOk,
     bool ControlsLayoutOk,
     bool ControlsHitAreasOk,

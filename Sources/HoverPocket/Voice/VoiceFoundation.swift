@@ -412,7 +412,6 @@ final class VoiceLaneRuntime: ObservableObject {
     func endAudioSession() {
         guard featureEnabled else { return }
         publish(
-            connection: .disconnected,
             activity: .idle,
             muted: true
         )

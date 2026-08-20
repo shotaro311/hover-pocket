@@ -231,6 +231,8 @@ def main() -> None:
         fail("Windows Voice verifier command is not independently addressable")
     if "voiceLane = surface == BridgeSurface.Panel" not in bridge:
         fail("Windows Settings bridge can receive Voice transcript/session state")
+    if "voiceLocalizationOk" not in app_js or 't("voiceMicrophoneUnavailable")' not in app_js:
+        fail("Windows rendered Voice UI does not verify Japanese and English localized copy")
     if "ReadBoundedLineAsync" not in windows_client or ".ReadLineAsync(" in windows_client:
         fail("Windows app-server response allocation is not bounded before newline parsing")
     if "MaxLineBytes" not in windows_client or "utf8ByteCount" not in windows_client:
@@ -239,6 +241,8 @@ def main() -> None:
         fail("Windows app-server stderr is not drained through a bounded sink")
     if "DisposeDetachedClientAsync" not in windows_coordinator:
         fail("Windows failed/crashed app-server clients are not disposed through one boundary")
+    if "RunTrackedRestartAsync" not in windows_coordinator or "CancelRestartAsync" not in windows_coordinator:
+        fail("Windows Voice OFF cannot await an in-flight retry startup")
     if "voice_compatibility_probe_failed" not in windows_coordinator:
         fail("Windows compatibility probe failures do not transition Voice fail-closed")
     request_handler = windows_coordinator[windows_coordinator.find("private void OnServerRequestReceived"):]

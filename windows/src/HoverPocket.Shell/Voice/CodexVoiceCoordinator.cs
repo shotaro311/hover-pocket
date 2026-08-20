@@ -260,15 +260,16 @@ internal sealed class CodexVoiceCoordinator : IDisposable
     private readonly Dictionary<CodexAppServerClient, int> _clientGenerations = [];
     private CancellationTokenSource _lifetime = new();
     private CancellationTokenSource? _restartCancellation;
+    private Task? _restartTask;
     private CancellationTokenSource? _startupCancellation;
     private Task? _startupTask;
     private CodexAppServerClient? _client;
     private CodexVoiceSnapshot _snapshot = CodexVoiceSnapshot.Disabled;
-    private bool _featureEnabled;
+    private volatile bool _featureEnabled;
     private string? _rootSessionId;
     private int _restartAttempt;
     private int _generation;
-    private bool _disposed;
+    private volatile bool _disposed;
 
     public CodexVoiceCoordinator(
         bool featureEnabled,
@@ -345,9 +346,9 @@ internal sealed class CodexVoiceCoordinator : IDisposable
 
         _featureEnabled = enabled;
         Interlocked.Increment(ref _generation);
-        CancelRestart();
         if (!enabled)
         {
+            await CancelRestartAsync().ConfigureAwait(false);
             await CancelStartupAsync().ConfigureAwait(false);
             var client = DetachClient();
             if (client is not null)
@@ -572,6 +573,10 @@ internal sealed class CodexVoiceCoordinator : IDisposable
 
     private async Task StartClientAsync(CancellationToken cancellationToken)
     {
+        if (!_featureEnabled || _disposed || cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
         var generation = Interlocked.Increment(ref _generation);
         UpdateSnapshot(snapshot => snapshot with
         {
@@ -845,22 +850,48 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         PublishOutsideLock(Snapshot);
 
         CancelRestart();
-        _restartCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        var token = _restartCancellation.Token;
-        _ = Task.Run(async () =>
+        var restartCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var restartTask = RunTrackedRestartAsync(delay, restartCancellation.Token, startGate.Task);
+        var scheduled = false;
+        lock (_sync)
         {
-            try
+            if (_featureEnabled && !_disposed)
             {
-                if (delay > TimeSpan.Zero)
-                {
-                    await Task.Delay(delay, token);
-                }
-                await StartClientAsync(token);
+                _restartCancellation = restartCancellation;
+                _restartTask = restartTask;
+                scheduled = true;
             }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
+        }
+        startGate.SetResult();
+        if (!scheduled)
+        {
+            restartCancellation.Cancel();
+            _ = restartTask.ContinueWith(
+                _ => restartCancellation.Dispose(),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+    }
+
+    private async Task RunTrackedRestartAsync(
+        TimeSpan delay,
+        CancellationToken cancellationToken,
+        Task startGate)
+    {
+        try
+        {
+            await startGate.ConfigureAwait(false);
+            if (delay > TimeSpan.Zero)
             {
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
             }
-        }, token);
+            await StartClientAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
     }
 
     private void FailClosed(CodexVoiceAvailability availability, string errorCode)
@@ -1034,13 +1065,67 @@ internal sealed class CodexVoiceCoordinator : IDisposable
 
     private void CancelRestart()
     {
-        var cancellation = Interlocked.Exchange(ref _restartCancellation, null);
+        CancellationTokenSource? cancellation;
+        Task? restartTask;
+        lock (_sync)
+        {
+            cancellation = _restartCancellation;
+            restartTask = _restartTask;
+            _restartCancellation = null;
+            _restartTask = null;
+        }
         if (cancellation is null)
         {
             return;
         }
         cancellation.Cancel();
-        cancellation.Dispose();
+        if (restartTask is null)
+        {
+            cancellation.Dispose();
+            return;
+        }
+        _ = restartTask.ContinueWith(
+            _ => cancellation.Dispose(),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    private async Task CancelRestartAsync()
+    {
+        CancellationTokenSource? cancellation;
+        Task? restartTask;
+        lock (_sync)
+        {
+            cancellation = _restartCancellation;
+            restartTask = _restartTask;
+            _restartCancellation = null;
+            _restartTask = null;
+        }
+        if (cancellation is null)
+        {
+            return;
+        }
+        cancellation.Cancel();
+        try
+        {
+            if (restartTask is not null)
+            {
+                await restartTask.ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception) when (exception is CodexAppServerProtocolException
+            or IOException
+            or InvalidOperationException)
+        {
+        }
+        finally
+        {
+            cancellation.Dispose();
+        }
     }
 
     private async Task RunTrackedStartupAsync(CancellationToken cancellationToken)
@@ -1126,7 +1211,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         _disposed = true;
         _featureEnabled = false;
         Interlocked.Increment(ref _generation);
-        CancelRestart();
+        CancelRestartAsync().GetAwaiter().GetResult();
         _lifetime.Cancel();
         CancelStartupAsync().GetAwaiter().GetResult();
         var client = DetachClient();

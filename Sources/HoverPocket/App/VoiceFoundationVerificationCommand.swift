@@ -250,6 +250,19 @@ enum VoiceFoundationVerificationCommand {
         guard !runtime.snapshot.muted else {
             throw VoiceFoundationVerificationError.failed("connected_adapter_could_not_unmute")
         }
+        runtime.endAudioSession()
+        try await waitUntil { adapter.closeAudioSessionCount == 1 }
+        guard runtime.snapshot.connection == .connected,
+              runtime.snapshot.muted,
+              adapter.muted
+        else {
+            throw VoiceFoundationVerificationError.failed("ending_audio_disconnected_transport")
+        }
+        runtime.setMuted(false)
+        try await waitUntil { !adapter.muted }
+        guard runtime.snapshot.connection == .connected, !runtime.snapshot.muted else {
+            throw VoiceFoundationVerificationError.failed("ended_audio_transport_not_reusable")
+        }
         runtime.setMuted(true)
 
         runtime.setRootSessionID("root-a")
