@@ -1,9 +1,9 @@
-using System.Windows.Media;
 using System.Windows.Threading;
 using HoverPocket.Shell.Capabilities;
 using Wpf = System.Windows;
 using WpfAutomationProperties = System.Windows.Automation.AutomationProperties;
 using WpfControls = System.Windows.Controls;
+using WpfMedia = System.Windows.Media;
 
 namespace HoverPocket.Shell.Voice;
 
@@ -134,8 +134,8 @@ internal static class VoiceTimerApprovalDialog
             SizeToContent = Wpf.SizeToContent.WidthAndHeight,
             MinWidth = 420,
             MaxWidth = 560,
-            Background = new SolidColorBrush(Color.FromRgb(24, 24, 24)),
-            Foreground = Brushes.White
+            Background = new WpfMedia.SolidColorBrush(WpfMedia.Color.FromRgb(24, 24, 24)),
+            Foreground = WpfMedia.Brushes.White
         };
         var content = new WpfControls.StackPanel
         {
