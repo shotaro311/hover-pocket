@@ -253,6 +253,22 @@ final class AppSettings: ObservableObject {
         !hiddenProviderRawValues.contains(id.rawValue)
     }
 
+    var savedGeneratedProviderIDs: Set<String> {
+        var configured = Set(providerOrderRawValues).union(hiddenProviderRawValues)
+        if let preferredProviderRawValue {
+            configured.insert(preferredProviderRawValue)
+        }
+        if let lastSelectedProviderRawValue {
+            configured.insert(lastSelectedProviderRawValue)
+        }
+        return Set(configured.compactMap { providerID in
+            guard let appID = PocketSurfaceRegistry.generatedAppID(providerID: providerID) else {
+                return nil
+            }
+            return PocketSurfaceRegistry.generatedProviderID(appID: appID)
+        })
+    }
+
     func setProvider(
         _ id: PluginID,
         isVisible: Bool,

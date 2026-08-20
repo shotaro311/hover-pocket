@@ -63,8 +63,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureAINativeRuntimeIfEnabled() {
+        let savedGeneratedProviderIDs = hoverWindowController.appSettings.savedGeneratedProviderIDs
         guard hoverWindowController.appSettings.aiNativeEnabled else {
-            AINativeRuntime.shared.configure(adapter: nil)
+            AINativeRuntime.shared.configure(
+                adapter: nil,
+                preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
+            )
             return
         }
         do {
@@ -147,11 +151,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     runtimeActivationReadback: { receipt in
                         let readback = try activationRegistry.synchronize(receipt)
                         if receipt.state == .removed {
-                            appSettings.pruneProviderConfiguration(PluginID(
-                                rawValue: PocketSurfaceRegistry.generatedProviderID(
-                                    appID: receipt.packageID
-                                )
-                            ))
+                            let providerID = PocketSurfaceRegistry.generatedProviderID(
+                                appID: receipt.packageID
+                            )
+                            appSettings.pruneProviderConfiguration(PluginID(rawValue: providerID))
+                            AINativeRuntime.shared.forgetManagedGeneratedProviderID(providerID)
                         }
                         return readback
                     }
@@ -169,10 +173,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 pocketAppExecutionRuntime: pocketAppRuntime,
                 pocketAppGenerationController: generationController,
                 generatedActivationRegistry: generatedActivationRegistry,
-                builtInActivationLease: builtInActivationLease
+                builtInActivationLease: builtInActivationLease,
+                preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
             )
         } catch {
-            AINativeRuntime.shared.configure(adapter: nil)
+            AINativeRuntime.shared.configure(
+                adapter: nil,
+                preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
+            )
         }
     }
 
