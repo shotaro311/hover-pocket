@@ -53,6 +53,7 @@ struct VoiceLaneHostView: View {
                 Image(systemName: runtime.snapshot.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
             }
             .buttonStyle(.plain)
+            .disabled(runtime.snapshot.muted && runtime.snapshot.connection != .connected)
             .accessibilityLabel(runtime.snapshot.muted ? "Unmute Voice Lane" : "Mute Voice Lane")
 
             Button {

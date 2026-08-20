@@ -172,6 +172,10 @@ enum VoiceFoundationVerificationCommand {
         else {
             throw VoiceFoundationVerificationError.failed("production_adapter_fail_closed")
         }
+        runtime.setMuted(false)
+        guard runtime.snapshot.muted else {
+            throw VoiceFoundationVerificationError.failed("unavailable_adapter_reported_unmuted")
+        }
         runtime.recoverAfterSystemTransition()
         guard runtime.snapshot.connection == .disconnected,
               runtime.snapshot.activity == .failed,
@@ -185,6 +189,27 @@ enum VoiceFoundationVerificationCommand {
         else {
             throw VoiceFoundationVerificationError.failed("expanded_unavailable_reason")
         }
+
+        let unsafeGateRuntime = VoiceLaneRuntime(restartDelaysNanoseconds: [])
+        let unsafeGateAdapter = FakeVoiceSessionAdapter(gate: VoiceAdapterGate(
+            installedSchemaCompatible: false,
+            accountReady: false,
+            capabilityReady: false,
+            safeErrorCode: "token=secret /tmp/private.txt"
+        ))
+        unsafeGateRuntime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            adapterFactory: { unsafeGateAdapter }
+        )
+        try await waitUntil {
+            unsafeGateAdapter.stopCount == 1
+                && unsafeGateRuntime.snapshot.safeErrorCode != nil
+        }
+        guard unsafeGateRuntime.snapshot.safeErrorCode == "_redacted_" else {
+            throw VoiceFoundationVerificationError.failed("adapter_error_code_not_sanitized")
+        }
+        await unsafeGateRuntime.shutdown()
     }
 
     private static func verifyAppLifetimeDetachAndRestart() async throws {
@@ -198,6 +223,11 @@ enum VoiceFoundationVerificationCommand {
         try await waitUntil {
             runtime.snapshot.connection == .connected
         }
+        runtime.setMuted(false)
+        guard !runtime.snapshot.muted else {
+            throw VoiceFoundationVerificationError.failed("connected_adapter_could_not_unmute")
+        }
+        runtime.setMuted(true)
 
         runtime.setRootSessionID("root-a")
         runtime.appendTranscript(VoiceTranscriptEvent(

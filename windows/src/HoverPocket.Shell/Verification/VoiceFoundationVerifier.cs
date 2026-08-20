@@ -43,6 +43,7 @@ internal sealed class VoiceFoundationVerifier
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         await RunCaseAsync("disabled", VerifyDisabledIsInertAsync, timeout.Token);
         await RunCaseAsync("compatibility", VerifyCompatibilityGatesAsync, timeout.Token);
+        await RunCaseAsync("probe-failure", VerifyCompatibilityProbeFailureAsync, timeout.Token);
         await RunCaseAsync("unexpected-request", VerifyUnexpectedRequestFailsClosedAsync, timeout.Token);
         await RunCaseAsync("initialize-request", VerifyInitializeRequestCannotBePromotedAsync, timeout.Token);
         await RunCaseAsync("disconnect-before-promotion", VerifyDisconnectBeforePromotionAsync, timeout.Token);
@@ -138,6 +139,28 @@ internal sealed class VoiceFoundationVerifier
         }
     }
 
+    private async Task VerifyCompatibilityProbeFailureAsync(CancellationToken cancellationToken)
+    {
+        var factoryCalls = 0;
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ =>
+            {
+                factoryCalls++;
+                throw new InvalidOperationException("probe failure reached transport");
+            },
+            compatibilityProbe: new ThrowingProbe(),
+            restartDelays: []);
+
+        await coordinator.InitializeAsync(cancellationToken);
+        if (factoryCalls != 0
+            || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure
+            || coordinator.Snapshot.LastErrorCode != "voice_restart_exhausted")
+        {
+            _failures.Add("compatibility probe failure did not fail closed");
+        }
+    }
+
     private async Task VerifyUnexpectedRequestFailsClosedAsync(CancellationToken cancellationToken)
     {
         var harness = new AppServerHarness();
@@ -153,6 +176,12 @@ internal sealed class VoiceFoundationVerifier
             _failures.Add("ready gate did not initialize the fake app-server");
             return;
         }
+        coordinator.SetMuted(false);
+        if (coordinator.Snapshot.Muted)
+        {
+            _failures.Add("ready app-server transport could not unmute");
+        }
+        coordinator.SetMuted(true);
 
         harness.PushServerRequest(9001, "unknown/request");
         await WaitUntilAsync(
@@ -384,10 +413,12 @@ internal sealed class VoiceFoundationVerifier
     private void VerifyUnavailableTransitionPreservesBlockedState()
     {
         using var coordinator = new CodexVoiceCoordinator(featureEnabled: true);
+        coordinator.SetMuted(false);
         coordinator.NotifySystemTransition();
         if (coordinator.Snapshot.Availability != CodexVoiceAvailability.Unavailable
             || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure
             || coordinator.Snapshot.Activity != VoiceActivity.Failed
+            || !coordinator.Snapshot.Muted
             || coordinator.Snapshot.LastErrorCode != "production_voice_transport_unconfigured")
         {
             _failures.Add("unconfigured transport entered permanent recovery after a system transition");
@@ -584,6 +615,15 @@ internal sealed class VoiceFoundationVerifier
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(_gate);
+        }
+    }
+
+    private sealed class ThrowingProbe : ICodexVoiceCompatibilityProbe
+    {
+        public Task<CodexVoiceGate> ProbeAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new IOException("synthetic_probe_failure");
         }
     }
 

@@ -385,6 +385,13 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         {
             return;
         }
+        if (!muted
+            && (Snapshot.Availability != CodexVoiceAvailability.Ready
+                || !Snapshot.TransportAttached))
+        {
+            UpdateSnapshot(snapshot => snapshot with { Muted = true });
+            return;
+        }
         UpdateSnapshot(snapshot => snapshot with { Muted = muted });
     }
 
@@ -572,8 +579,35 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             LastErrorCode = null
         });
 
-        var gate = await _compatibilityProbe.ProbeAsync(cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
+        CodexVoiceGate gate;
+        try
+        {
+            gate = await _compatibilityProbe.ProbeAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception)
+        {
+            if (!_featureEnabled || generation != Volatile.Read(ref _generation))
+            {
+                return;
+            }
+            UpdateSnapshot(snapshot => snapshot with
+            {
+                Availability = CodexVoiceAvailability.Unavailable,
+                SessionStatus = CodexVoiceSessionStatus.RecoverableFailure,
+                Activity = VoiceActivity.Reconnecting,
+                Muted = true,
+                TransportAttached = false,
+                AppServerProcessId = null,
+                LastErrorCode = "voice_compatibility_probe_failed"
+            });
+            ScheduleRestart();
+            return;
+        }
         if (!_featureEnabled || generation != Volatile.Read(ref _generation))
         {
             return;

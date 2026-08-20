@@ -199,7 +199,8 @@ enum VoiceTextSafety {
     }
 
     static func sanitizeErrorCode(_ value: String) -> String {
-        let normalized = value.lowercased().map { character -> Character in
+        let safeValue = sanitizeVisibleText(value, limit: 80)
+        let normalized = safeValue.lowercased().map { character -> Character in
             character.isLetter || character.isNumber || character == "_" ? character : "_"
         }
         let result = String(normalized.prefix(80))
@@ -398,6 +399,10 @@ final class VoiceLaneRuntime: ObservableObject {
 
     func setMuted(_ muted: Bool) {
         guard featureEnabled else { return }
+        guard muted || (adapter != nil && snapshot.connection == .connected) else {
+            publish(muted: true)
+            return
+        }
         publish(muted: muted)
         if let adapter {
             Task { await adapter.setMuted(muted) }
@@ -567,11 +572,14 @@ final class VoiceLaneRuntime: ObservableObject {
         guard gate.isReady else {
             await candidate.stop()
             adapter = nil
+            let safeErrorCode = VoiceTextSafety.sanitizeErrorCode(
+                gate.safeErrorCode ?? "voice_compatibility_blocked"
+            )
             publish(
                 connection: .disconnected,
                 activity: .failed,
                 muted: true,
-                safeErrorCode: gate.safeErrorCode ?? "voice_compatibility_blocked"
+                safeErrorCode: safeErrorCode
             )
             return
         }

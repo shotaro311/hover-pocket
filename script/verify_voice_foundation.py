@@ -185,6 +185,8 @@ def main() -> None:
         fail("Windows internal expanded scrolling missing")
     if "fullscreen" in app_js.lower():
         fail("Windows Voice renderer gained a fullscreen route/state")
+    if "mute.disabled = Boolean(lane.muted && !lane.transportAttached);" not in app_js:
+        fail("Windows unavailable Voice transport can report an unmuted state")
     if "VoiceLaneHostView" not in mac_shell:
         fail("macOS Host Voice row missing")
     if "accessibilityLabel(\"Voice Lane\")" not in mac_voice:
@@ -193,6 +195,8 @@ def main() -> None:
         fail("macOS Voice internal scroll missing")
     if "accessibilityReduceMotion" not in mac_voice:
         fail("macOS Reduce Motion handling missing")
+    if ".disabled(runtime.snapshot.muted && runtime.snapshot.connection != .connected)" not in mac_voice:
+        fail("macOS unavailable Voice adapter can report an unmuted state")
     if "prefers-reduced-motion: reduce" not in styles:
         fail("Windows Reduce Motion handling missing")
     if "AVAudio" in mac_runtime or "WebRTC" in mac_runtime:
@@ -232,6 +236,8 @@ def main() -> None:
         fail("Windows app-server stderr is not drained through a bounded sink")
     if "DisposeDetachedClientAsync" not in windows_coordinator:
         fail("Windows failed/crashed app-server clients are not disposed through one boundary")
+    if "voice_compatibility_probe_failed" not in windows_coordinator:
+        fail("Windows compatibility probe failures do not transition Voice fail-closed")
     request_handler = windows_coordinator[windows_coordinator.find("private void OnServerRequestReceived"):]
     request_handler = request_handler[:request_handler.find("private void OnClientDisconnected")]
     if "ClientGeneration(client)" not in request_handler or "CompareExchange" not in request_handler:
@@ -244,6 +250,8 @@ def main() -> None:
         or "func shutdown() async" not in mac_runtime
     ):
         fail("macOS termination does not await Voice adapter teardown")
+    if "let safeErrorCode = VoiceTextSafety.sanitizeErrorCode(" not in mac_runtime:
+        fail("macOS adapter error codes bypass the runtime sanitizer")
     if "maxRetainedSessions" not in mac_runtime or "MaxRetainedSessions" not in windows_coordinator:
         fail("Voice session retention is not bounded on both operating systems")
     if "expansionBlocked" not in app_js:

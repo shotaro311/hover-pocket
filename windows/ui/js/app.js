@@ -511,6 +511,7 @@ function renderCompactVoiceLane(lane) {
     lane.muted ? "M" : "S",
     () => request("voice.setMuted", { muted: !lane.muted }).then(render),
   );
+  mute.disabled = Boolean(lane.muted && !lane.transportAttached);
   const expand = voiceButton(
     "Expand Voice Lane",
     "⌄",
