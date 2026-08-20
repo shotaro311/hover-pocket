@@ -111,6 +111,20 @@ internal sealed record AgentSessionSummary(
     AgentSessionProgress? Progress,
     DateTimeOffset UpdatedAt);
 
+internal sealed record VoiceTransportSignal(
+    int Generation,
+    string ThreadId,
+    string Sdp);
+
+internal sealed record VoiceRealtimeStartResult(
+    int Generation,
+    string ThreadId);
+
+internal sealed record ActiveRealtimeSession(
+    int Generation,
+    string ThreadId,
+    CodexAppServerClient Client);
+
 internal sealed record CodexVoiceSnapshot(
     CodexVoiceAvailability Availability,
     CodexVoiceSessionStatus SessionStatus,
@@ -118,6 +132,7 @@ internal sealed record CodexVoiceSnapshot(
     bool Muted,
     bool UiAttached,
     bool TransportAttached,
+    bool RealtimeAttached,
     int? AppServerProcessId,
     string? RootSessionId,
     IReadOnlyList<VoiceTranscriptEvent> Transcript,
@@ -134,6 +149,7 @@ internal sealed record CodexVoiceSnapshot(
         Muted: true,
         UiAttached: false,
         TransportAttached: false,
+        RealtimeAttached: false,
         AppServerProcessId: null,
         RootSessionId: null,
         Transcript: Array.Empty<VoiceTranscriptEvent>(),
@@ -225,7 +241,6 @@ internal static class VoiceTextSafety
     {
         "user" => "user",
         "assistant" => "assistant",
-        "system" => "system",
         _ => null
     };
 }
@@ -241,20 +256,8 @@ internal sealed class VoiceTranscriptBuffer
 
     public void Append(VoiceTranscriptEvent value)
     {
-        var role = VoiceTextSafety.NormalizeTranscriptRole(value.Role);
-        if (role is null)
-        {
-            return;
-        }
-        var sanitized = value with
-        {
-            Id = VoiceTextSafety.SanitizeIdentifier(value.Id),
-            RootSessionId = VoiceTextSafety.SanitizeIdentifier(value.RootSessionId),
-            Role = role,
-            Text = VoiceTextSafety.SanitizeVisibleText(value.Text, 1_024)
-        };
-        if (string.IsNullOrEmpty(sanitized.Id)
-            || string.IsNullOrEmpty(sanitized.RootSessionId))
+        var sanitized = Sanitize(value);
+        if (sanitized is null)
         {
             return;
         }
@@ -279,7 +282,50 @@ internal sealed class VoiceTranscriptBuffer
         TrimRuneBudget();
     }
 
+    public void Upsert(VoiceTranscriptEvent value)
+    {
+        var sanitized = Sanitize(value);
+        if (sanitized is null)
+        {
+            return;
+        }
+        var index = _events.FindIndex(item => string.Equals(item.Id, sanitized.Id, StringComparison.Ordinal));
+        if (index >= 0)
+        {
+            _events[index] = sanitized;
+        }
+        else
+        {
+            _events.Add(sanitized);
+        }
+        if (_events.Count > MaxEvents)
+        {
+            _events.RemoveRange(0, _events.Count - MaxEvents);
+        }
+        TrimRuneBudget();
+    }
+
+    public void Remove(string id) =>
+        _events.RemoveAll(item => string.Equals(item.Id, id, StringComparison.Ordinal));
+
     public void Clear() => _events.Clear();
+
+    private static VoiceTranscriptEvent? Sanitize(VoiceTranscriptEvent value)
+    {
+        var role = VoiceTextSafety.NormalizeTranscriptRole(value.Role);
+        var sanitized = value with
+        {
+            Id = VoiceTextSafety.SanitizeIdentifier(value.Id),
+            RootSessionId = VoiceTextSafety.SanitizeIdentifier(value.RootSessionId),
+            Role = role ?? string.Empty,
+            Text = VoiceTextSafety.SanitizeVisibleText(value.Text, 1_024)
+        };
+        return string.IsNullOrEmpty(sanitized.Id)
+            || string.IsNullOrEmpty(sanitized.RootSessionId)
+            || role is null
+                ? null
+                : sanitized;
+    }
 
     private void TrimRuneBudget()
     {
@@ -295,12 +341,14 @@ internal sealed class VoiceTranscriptBuffer
 internal sealed class CodexVoiceCoordinator : IDisposable
 {
     public const int MaxRetainedSessions = 64;
+    public const int MaxSdpBytes = 262_144;
 
     private readonly object _sync = new();
     private readonly Func<CancellationToken, Task<CodexAppServerClient>>? _clientFactory;
     private readonly ICodexVoiceCompatibilityProbe _compatibilityProbe;
     private readonly IReadOnlyList<TimeSpan> _restartDelays;
     private readonly SemaphoreSlim _featureTransitionGate = new(1, 1);
+    private readonly SemaphoreSlim _realtimeGate = new(1, 1);
     private readonly VoiceTranscriptBuffer _transcript = new();
     private readonly Dictionary<string, AgentSessionSummary> _sessions = new(StringComparer.Ordinal);
     private readonly Dictionary<CodexAppServerClient, int> _clientGenerations = [];
@@ -309,12 +357,18 @@ internal sealed class CodexVoiceCoordinator : IDisposable
     private Task? _restartTask;
     private CancellationTokenSource? _startupCancellation;
     private Task? _startupTask;
+    private Task _realtimeCleanupTask = Task.CompletedTask;
     private CodexAppServerClient? _client;
+    private ActiveRealtimeSession? _activeRealtime;
     private CodexVoiceSnapshot _snapshot = CodexVoiceSnapshot.Disabled;
     private volatile bool _featureEnabled;
     private string? _rootSessionId;
+    private string _defaultVoice = "alloy";
+    private string _partialTranscript = string.Empty;
     private int _restartAttempt;
     private int _generation;
+    private int _realtimeGeneration;
+    private int _transcriptSequence;
     private volatile bool _disposed;
 
     public CodexVoiceCoordinator(
@@ -347,6 +401,8 @@ internal sealed class CodexVoiceCoordinator : IDisposable
     }
 
     public event EventHandler<CodexVoiceSnapshot>? SnapshotChanged;
+
+    public event EventHandler<VoiceTransportSignal>? TransportSignal;
 
     public CodexVoiceSnapshot Snapshot
     {
@@ -426,6 +482,8 @@ internal sealed class CodexVoiceCoordinator : IDisposable
                 _transcript.Clear();
                 _sessions.Clear();
                 _rootSessionId = null;
+                _activeRealtime = null;
+                _partialTranscript = string.Empty;
                 _restartAttempt = 0;
             }
             Publish(CodexVoiceSnapshot.Disabled);
@@ -457,7 +515,8 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         }
         if (!muted
             && (Snapshot.Availability != CodexVoiceAvailability.Ready
-                || !Snapshot.TransportAttached))
+                || !Snapshot.TransportAttached
+                || !Snapshot.RealtimeAttached))
         {
             UpdateSnapshot(snapshot => snapshot with { Muted = true });
             return;
@@ -465,7 +524,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         UpdateSnapshot(snapshot => snapshot with { Muted = muted });
     }
 
-    public void CloseAudioSession()
+    public void BeginMicrophonePermissionRequest()
     {
         if (!_featureEnabled)
         {
@@ -474,8 +533,213 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         UpdateSnapshot(snapshot => snapshot with
         {
             Muted = true,
+            SessionStatus = CodexVoiceSessionStatus.RequestingPermission,
+            Activity = VoiceActivity.Idle,
+            LastErrorCode = null
+        });
+    }
+
+    public async Task<VoiceRealtimeStartResult> StartRealtimeAsync(
+        string sdp,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ValidateSdp(sdp);
+        await _realtimeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CodexAppServerClient client;
+            Task priorCleanup;
+            lock (_sync)
+            {
+                if (!_featureEnabled
+                    || !_snapshot.UiAttached
+                    || _snapshot.Availability != CodexVoiceAvailability.Ready
+                    || !_snapshot.TransportAttached
+                    || _client is null)
+                {
+                    throw new CodexAppServerProtocolException("voice_runtime_not_ready");
+                }
+                if (_activeRealtime is not null)
+                {
+                    throw new CodexAppServerProtocolException("voice_realtime_already_active");
+                }
+                client = _client;
+                priorCleanup = _realtimeCleanupTask;
+            }
+            await priorCleanup.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+            var threadId = await EnsureRootThreadAsync(client, cancellationToken).ConfigureAwait(false);
+            var generation = Interlocked.Increment(ref _realtimeGeneration);
+            var active = new ActiveRealtimeSession(generation, threadId, client);
+            lock (_sync)
+            {
+                if (!_featureEnabled || !ReferenceEquals(_client, client))
+                {
+                    throw new CodexAppServerProtocolException("voice_transport_stale");
+                }
+                _activeRealtime = active;
+                _partialTranscript = string.Empty;
+            }
+            UpdateSnapshot(snapshot => snapshot with
+            {
+                SessionStatus = CodexVoiceSessionStatus.Negotiating,
+                Activity = VoiceActivity.Reconnecting,
+                Muted = true,
+                RealtimeAttached = false,
+                LastErrorCode = null
+            });
+
+            try
+            {
+                using var request = JsonDocument.Parse(JsonSerializer.Serialize(new
+                {
+                    threadId,
+                    outputModality = "audio",
+                    transport = new { type = "webrtc", sdp },
+                    version = "v2",
+                    voice = _defaultVoice,
+                    includeStartupContext = false,
+                    clientManagedHandoffs = true,
+                    codexResponsesAsItems = false,
+                    flushTranscriptTailOnSessionEnd = false
+                }));
+                _ = await client.SendRequestAsync(
+                    "thread/realtime/start",
+                    request.RootElement.Clone(),
+                    cancellationToken).ConfigureAwait(false);
+                lock (_sync)
+                {
+                    if (!Equals(_activeRealtime, active))
+                    {
+                        throw new CodexAppServerProtocolException("voice_realtime_start_failed");
+                    }
+                }
+            }
+            catch
+            {
+                ClearRealtimeIfCurrent(active);
+                UpdateSnapshot(snapshot => snapshot with
+                {
+                    SessionStatus = CodexVoiceSessionStatus.RecoverableFailure,
+                    Activity = VoiceActivity.Failed,
+                    Muted = true,
+                    RealtimeAttached = false,
+                    LastErrorCode = "voice_realtime_start_failed"
+                });
+                throw;
+            }
+
+            return new VoiceRealtimeStartResult(generation, threadId);
+        }
+        finally
+        {
+            _realtimeGate.Release();
+        }
+    }
+
+    public void ConfirmRealtimeConnected(int generation, string threadId)
+    {
+        var active = RequireActiveRealtime(generation, threadId);
+        if (!ReferenceEquals(active.Client, CurrentClient()))
+        {
+            throw new CodexAppServerProtocolException("voice_transport_stale");
+        }
+        UpdateSnapshot(snapshot => snapshot with
+        {
             SessionStatus = CodexVoiceSessionStatus.Idle,
-            Activity = VoiceActivity.Idle
+            Activity = VoiceActivity.Listening,
+            Muted = false,
+            RealtimeAttached = true,
+            LastErrorCode = null
+        });
+    }
+
+    public async Task StopRealtimeAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        await _realtimeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ActiveRealtimeSession? active;
+            lock (_sync)
+            {
+                active = _activeRealtime;
+                _activeRealtime = null;
+                _partialTranscript = string.Empty;
+            }
+            Interlocked.Increment(ref _realtimeGeneration);
+            UpdateSnapshot(snapshot => snapshot with
+            {
+                Muted = true,
+                RealtimeAttached = false,
+                SessionStatus = active is null
+                    ? CodexVoiceSessionStatus.Idle
+                    : CodexVoiceSessionStatus.Stopping,
+                Activity = VoiceActivity.Idle,
+                LastErrorCode = null
+            });
+            if (active is not null && ReferenceEquals(active.Client, CurrentClient()))
+            {
+                using var request = JsonDocument.Parse(JsonSerializer.Serialize(new
+                {
+                    threadId = active.ThreadId
+                }));
+                try
+                {
+                    _ = await active.Client.SendRequestAsync(
+                        "thread/realtime/stop",
+                        request.RootElement.Clone(),
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is CodexAppServerProtocolException
+                    or IOException
+                    or InvalidOperationException)
+                {
+                    UpdateSnapshot(snapshot => snapshot with
+                    {
+                        SessionStatus = CodexVoiceSessionStatus.RecoverableFailure,
+                        Activity = VoiceActivity.Failed,
+                        LastErrorCode = "voice_realtime_stop_failed"
+                    });
+                    return;
+                }
+            }
+            UpdateSnapshot(snapshot => snapshot with
+            {
+                SessionStatus = CodexVoiceSessionStatus.Idle,
+                Activity = VoiceActivity.Idle,
+                Muted = true,
+                RealtimeAttached = false
+            });
+        }
+        finally
+        {
+            _realtimeGate.Release();
+        }
+    }
+
+    public async Task AbortRealtimeStartAsync(
+        string safeReason,
+        CancellationToken cancellationToken = default)
+    {
+        var allowed = safeReason is "microphone_denied"
+            or "microphone_unavailable"
+            or "webrtc_unavailable"
+            or "webrtc_offer_failed"
+            or "webrtc_connection_failed"
+            or "voice_realtime_start_failed"
+                ? safeReason
+                : "voice_realtime_start_failed";
+        await StopRealtimeAsync(cancellationToken).ConfigureAwait(false);
+        UpdateSnapshot(snapshot => snapshot with
+        {
+            SessionStatus = CodexVoiceSessionStatus.RecoverableFailure,
+            Activity = VoiceActivity.Failed,
+            Muted = true,
+            RealtimeAttached = false,
+            LastErrorCode = allowed
         });
     }
 
@@ -599,6 +863,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
                 Activity = VoiceActivity.Failed,
                 Muted = true,
                 TransportAttached = false,
+                RealtimeAttached = false,
                 AppServerProcessId = null,
                 LastErrorCode = "production_voice_transport_unconfigured"
             });
@@ -627,6 +892,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             SessionStatus = CodexVoiceSessionStatus.Recovering,
             Activity = VoiceActivity.Reconnecting,
             TransportAttached = false,
+            RealtimeAttached = false,
             AppServerProcessId = null
         });
         cancellationToken.ThrowIfCancellationRequested();
@@ -662,6 +928,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             Activity = VoiceActivity.Reconnecting,
             Muted = true,
             TransportAttached = false,
+            RealtimeAttached = false,
             AppServerProcessId = null,
             LastErrorCode = "voice_transport_crashed"
         });
@@ -707,6 +974,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
                 Activity = VoiceActivity.Reconnecting,
                 Muted = true,
                 TransportAttached = false,
+                RealtimeAttached = false,
                 AppServerProcessId = null,
                 LastErrorCode = "voice_compatibility_probe_failed"
             });
@@ -739,13 +1007,52 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             candidate = await _clientFactory!(cancellationToken).ConfigureAwait(false);
             TrackClientGeneration(candidate, generation);
             candidate.ServerRequestReceived += OnServerRequestReceived;
+            candidate.NotificationReceived += OnNotificationReceived;
             candidate.Disconnected += OnClientDisconnected;
             candidate.StartReading();
             using var initializeDocument = JsonDocument.Parse(
-                """{"clientInfo":{"name":"HoverPocket","version":"an3-a"},"capabilities":{}}""");
-            _ = await candidate.InitializeAsync(
+                """{"clientInfo":{"name":"HoverPocket","version":"an3-b1"},"capabilities":{"experimentalApi":true}}""");
+            var initializeResult = await candidate.InitializeAsync(
                 initializeDocument.RootElement.Clone(),
                 cancellationToken).ConfigureAwait(false);
+            if (!initializeResult.TryGetProperty("platformOs", out var platformOs)
+                || platformOs.ValueKind != JsonValueKind.String
+                || platformOs.GetString() != "windows")
+            {
+                throw new CodexAppServerProtocolException("installed_platform_mismatch");
+            }
+
+            using var emptyRequest = JsonDocument.Parse("{}");
+            var account = await candidate.SendRequestAsync(
+                "account/read",
+                emptyRequest.RootElement.Clone(),
+                cancellationToken).ConfigureAwait(false);
+            if (!AccountIsReady(account))
+            {
+                await DisposeDetachedClientAsync(candidate).ConfigureAwait(false);
+                candidate = null;
+                if (_featureEnabled && generation == Volatile.Read(ref _generation))
+                {
+                    FailClosed(CodexVoiceAvailability.SignedOut, "signed_out");
+                }
+                return;
+            }
+
+            var voices = await candidate.SendRequestAsync(
+                "thread/realtime/listVoices",
+                emptyRequest.RootElement.Clone(),
+                cancellationToken).ConfigureAwait(false);
+            if (!TryReadDefaultVoice(voices, out var defaultVoice))
+            {
+                await DisposeDetachedClientAsync(candidate).ConfigureAwait(false);
+                candidate = null;
+                if (_featureEnabled && generation == Volatile.Read(ref _generation))
+                {
+                    FailClosed(CodexVoiceAvailability.CapabilityBlocked, "voice_capability_unavailable");
+                }
+                return;
+            }
+            _defaultVoice = defaultVoice;
         }
         catch (OperationCanceledException)
         {
@@ -766,6 +1073,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
                 Activity = VoiceActivity.Reconnecting,
                 Muted = true,
                 TransportAttached = false,
+                RealtimeAttached = false,
                 AppServerProcessId = null,
                 LastErrorCode = "voice_transport_start_failed"
             });
@@ -792,6 +1100,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
                 Activity = VoiceActivity.Reconnecting,
                 Muted = true,
                 TransportAttached = false,
+                RealtimeAttached = false,
                 AppServerProcessId = null,
                 LastErrorCode = "voice_transport_start_failed"
             });
@@ -837,6 +1146,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
                 Activity = VoiceActivity.Idle,
                 Muted = true,
                 TransportAttached = true,
+                RealtimeAttached = false,
                 AppServerProcessId = candidate.ProcessId,
                 LastErrorCode = null,
                 RestartAttempt = 0
@@ -845,6 +1155,209 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         }
         PublishOutsideLock(ready);
         return true;
+    }
+
+    private void OnNotificationReceived(object? sender, CodexAppServerNotification notification)
+    {
+        if (sender is not CodexAppServerClient client
+            || notification.Parameters is not { } parameters)
+        {
+            return;
+        }
+
+        ActiveRealtimeSession? active;
+        lock (_sync)
+        {
+            active = _activeRealtime;
+        }
+        if (active is null
+            || !ReferenceEquals(active.Client, client)
+            || !TryReadThreadId(parameters, out var threadId)
+            || !string.Equals(active.ThreadId, threadId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        switch (notification.Method)
+        {
+            case "thread/realtime/started":
+                UpdateSnapshot(snapshot => snapshot with
+                {
+                    SessionStatus = CodexVoiceSessionStatus.Negotiating,
+                    Activity = VoiceActivity.Reconnecting,
+                    LastErrorCode = null
+                });
+                break;
+            case "thread/realtime/sdp":
+                if (!parameters.TryGetProperty("sdp", out var sdpElement)
+                    || sdpElement.ValueKind != JsonValueKind.String)
+                {
+                    FailRealtime(active, "invalid_remote_sdp");
+                    break;
+                }
+                var sdp = sdpElement.GetString() ?? string.Empty;
+                try
+                {
+                    ValidateSdp(sdp);
+                }
+                catch (CodexAppServerProtocolException)
+                {
+                    FailRealtime(active, "invalid_remote_sdp");
+                    break;
+                }
+                TransportSignal?.Invoke(
+                    this,
+                    new VoiceTransportSignal(active.Generation, active.ThreadId, sdp));
+                break;
+            case "thread/realtime/transcript/delta":
+                if (!parameters.TryGetProperty("role", out var deltaRole)
+                    || deltaRole.ValueKind != JsonValueKind.String
+                    || !parameters.TryGetProperty("delta", out var deltaElement)
+                    || deltaElement.ValueKind != JsonValueKind.String)
+                {
+                    break;
+                }
+                AppendTranscriptDelta(active, deltaRole.GetString(), deltaElement.GetString());
+                break;
+            case "thread/realtime/transcript/done":
+                if (!parameters.TryGetProperty("role", out var doneRole)
+                    || doneRole.ValueKind != JsonValueKind.String
+                    || !parameters.TryGetProperty("text", out var textElement)
+                    || textElement.ValueKind != JsonValueKind.String)
+                {
+                    break;
+                }
+                CompleteTranscript(active, doneRole.GetString(), textElement.GetString());
+                break;
+            case "thread/realtime/outputAudio/delta":
+                UpdateSnapshot(snapshot => snapshot with
+                {
+                    Activity = VoiceActivity.Speaking
+                });
+                break;
+            case "thread/realtime/error":
+                FailRealtime(active, "voice_realtime_error");
+                break;
+            case "thread/realtime/closed":
+                ClearRealtimeIfCurrent(active);
+                UpdateSnapshot(snapshot => snapshot with
+                {
+                    SessionStatus = CodexVoiceSessionStatus.Idle,
+                    Activity = VoiceActivity.Idle,
+                    Muted = true,
+                    RealtimeAttached = false,
+                    LastErrorCode = null
+                });
+                break;
+        }
+    }
+
+    private void AppendTranscriptDelta(
+        ActiveRealtimeSession active,
+        string? role,
+        string? delta)
+    {
+        var safeRole = VoiceTextSafety.NormalizeTranscriptRole(role);
+        var safeDelta = VoiceTextSafety.SanitizeVisibleText(delta, 512);
+        if (safeRole is null || string.IsNullOrEmpty(safeDelta))
+        {
+            return;
+        }
+        var partialId = $"realtime-{active.Generation}-partial";
+        lock (_sync)
+        {
+            if (!Equals(_activeRealtime, active))
+            {
+                return;
+            }
+            _partialTranscript = VoiceTextSafety.SanitizeVisibleText(
+                _partialTranscript + safeDelta,
+                1_024);
+            _transcript.Upsert(new VoiceTranscriptEvent(
+                partialId,
+                active.ThreadId,
+                safeRole,
+                _partialTranscript,
+                false,
+                DateTimeOffset.UtcNow));
+            PublishLocked();
+        }
+    }
+
+    private void CompleteTranscript(
+        ActiveRealtimeSession active,
+        string? role,
+        string? text)
+    {
+        var safeRole = VoiceTextSafety.NormalizeTranscriptRole(role);
+        var safeText = VoiceTextSafety.SanitizeVisibleText(text, 1_024);
+        if (safeRole is null || string.IsNullOrEmpty(safeText))
+        {
+            return;
+        }
+        lock (_sync)
+        {
+            if (!Equals(_activeRealtime, active))
+            {
+                return;
+            }
+            _transcript.Remove($"realtime-{active.Generation}-partial");
+            _partialTranscript = string.Empty;
+            _transcript.Append(new VoiceTranscriptEvent(
+                $"realtime-{active.Generation}-{++_transcriptSequence}",
+                active.ThreadId,
+                safeRole,
+                safeText,
+                true,
+                DateTimeOffset.UtcNow));
+            _snapshot = _snapshot with
+            {
+                Activity = string.Equals(safeRole, "assistant", StringComparison.OrdinalIgnoreCase)
+                    ? VoiceActivity.Listening
+                    : VoiceActivity.Thinking
+            };
+            PublishLocked();
+        }
+    }
+
+    private void FailRealtime(ActiveRealtimeSession active, string safeErrorCode)
+    {
+        if (!ClearRealtimeIfCurrent(active))
+        {
+            return;
+        }
+        lock (_sync)
+        {
+            _realtimeCleanupTask = StopFailedRealtimeAsync(active);
+        }
+        UpdateSnapshot(snapshot => snapshot with
+        {
+            SessionStatus = CodexVoiceSessionStatus.RecoverableFailure,
+            Activity = VoiceActivity.Failed,
+            Muted = true,
+            RealtimeAttached = false,
+            LastErrorCode = safeErrorCode
+        });
+    }
+
+    private static async Task StopFailedRealtimeAsync(ActiveRealtimeSession active)
+    {
+        try
+        {
+            using var request = JsonDocument.Parse(JsonSerializer.Serialize(new
+            {
+                threadId = active.ThreadId
+            }));
+            _ = await active.Client.SendRequestAsync(
+                "thread/realtime/stop",
+                request.RootElement.Clone(),
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is CodexAppServerProtocolException
+            or IOException
+            or InvalidOperationException)
+        {
+        }
     }
 
     private void OnServerRequestReceived(object? sender, CodexAppServerRequest request)
@@ -882,6 +1395,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             Activity = VoiceActivity.Failed,
             Muted = true,
             TransportAttached = false,
+            RealtimeAttached = false,
             AppServerProcessId = null,
             LastErrorCode = "unexpected_server_request"
         });
@@ -1009,9 +1523,163 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             Activity = VoiceActivity.Failed,
             Muted = true,
             TransportAttached = false,
+            RealtimeAttached = false,
             AppServerProcessId = null,
             LastErrorCode = VoiceTextSafety.SanitizeErrorCode(errorCode)
         });
+    }
+
+    private async Task<string> EnsureRootThreadAsync(
+        CodexAppServerClient client,
+        CancellationToken cancellationToken)
+    {
+        lock (_sync)
+        {
+            if (!string.IsNullOrEmpty(_rootSessionId))
+            {
+                return _rootSessionId;
+            }
+        }
+
+        using var request = JsonDocument.Parse(
+            """{"ephemeral":true,"sandbox":"read-only","approvalPolicy":"never","baseInstructions":"This is a voice-only conversation. Do not invoke tools, shell commands, files, MCP, connectors, or external actions."}""");
+        var response = await client.SendRequestAsync(
+            "thread/start",
+            request.RootElement.Clone(),
+            cancellationToken).ConfigureAwait(false);
+        if (!response.TryGetProperty("thread", out var thread)
+            || !thread.TryGetProperty("id", out var id)
+            || id.ValueKind != JsonValueKind.String
+            || !TryReadProtocolIdentifier(id.GetString(), out var threadId))
+        {
+            throw new CodexAppServerProtocolException("thread_start_invalid");
+        }
+        SetRootSessionId(threadId);
+        UpsertSession(new AgentSessionSummary(
+            threadId,
+            threadId,
+            null,
+            "Voice conversation",
+            AgentSessionStatus.Running,
+            null,
+            null,
+            DateTimeOffset.UtcNow));
+        return threadId;
+    }
+
+    private static bool AccountIsReady(JsonElement response)
+    {
+        if (!response.TryGetProperty("requiresOpenaiAuth", out var requiresAuth)
+            || requiresAuth.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            return false;
+        }
+        if (!requiresAuth.GetBoolean())
+        {
+            return true;
+        }
+        return response.TryGetProperty("account", out var account)
+            && account.ValueKind == JsonValueKind.Object
+            && account.TryGetProperty("type", out var accountType)
+            && accountType.ValueKind == JsonValueKind.String;
+    }
+
+    private static bool TryReadDefaultVoice(JsonElement response, out string voice)
+    {
+        voice = string.Empty;
+        if (!response.TryGetProperty("voices", out var voices)
+            || voices.ValueKind != JsonValueKind.Object
+            || !voices.TryGetProperty("defaultV2", out var defaultVoice)
+            || defaultVoice.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+        var candidate = defaultVoice.GetString();
+        if (candidate is not ("alloy" or "arbor" or "ash" or "ballad" or "breeze"
+            or "cedar" or "coral" or "cove" or "echo" or "ember" or "juniper"
+            or "maple" or "marin" or "sage" or "shimmer" or "sol" or "spruce"
+            or "vale" or "verse"))
+        {
+            return false;
+        }
+        voice = candidate;
+        return true;
+    }
+
+    internal static void ValidateSdp(string sdp)
+    {
+        if (string.IsNullOrWhiteSpace(sdp)
+            || !sdp.StartsWith("v=0", StringComparison.Ordinal)
+            || sdp.Contains('\0')
+            || Encoding.UTF8.GetByteCount(sdp) > MaxSdpBytes)
+        {
+            throw new CodexAppServerProtocolException("sdp_invalid");
+        }
+    }
+
+    private static bool TryReadThreadId(JsonElement parameters, out string threadId)
+    {
+        threadId = string.Empty;
+        return parameters.ValueKind == JsonValueKind.Object
+            && parameters.TryGetProperty("threadId", out var value)
+            && value.ValueKind == JsonValueKind.String
+            && TryReadProtocolIdentifier(value.GetString(), out threadId);
+    }
+
+    private static bool TryReadProtocolIdentifier(string? value, out string identifier)
+    {
+        identifier = string.Empty;
+        if (string.IsNullOrEmpty(value) || value.EnumerateRunes().Count() > 160)
+        {
+            return false;
+        }
+        var sanitized = VoiceTextSafety.SanitizeIdentifier(value);
+        if (!string.Equals(value, sanitized, StringComparison.Ordinal))
+        {
+            return false;
+        }
+        identifier = value;
+        return true;
+    }
+
+    private ActiveRealtimeSession RequireActiveRealtime(int generation, string threadId)
+    {
+        if (!TryReadProtocolIdentifier(threadId, out var exactThreadId))
+        {
+            throw new CodexAppServerProtocolException("voice_transport_signal_invalid");
+        }
+        lock (_sync)
+        {
+            if (_activeRealtime is not { } active
+                || active.Generation != generation
+                || !string.Equals(active.ThreadId, exactThreadId, StringComparison.Ordinal))
+            {
+                throw new CodexAppServerProtocolException("voice_transport_stale");
+            }
+            return active;
+        }
+    }
+
+    private CodexAppServerClient? CurrentClient()
+    {
+        lock (_sync)
+        {
+            return _client;
+        }
+    }
+
+    private bool ClearRealtimeIfCurrent(ActiveRealtimeSession active)
+    {
+        lock (_sync)
+        {
+            if (!Equals(_activeRealtime, active))
+            {
+                return false;
+            }
+            _activeRealtime = null;
+            _partialTranscript = string.Empty;
+            return true;
+        }
     }
 
     private CodexAppServerClient? SwapClient(CodexAppServerClient next)
@@ -1022,7 +1690,13 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             if (previous is not null)
             {
                 previous.ServerRequestReceived -= OnServerRequestReceived;
+                previous.NotificationReceived -= OnNotificationReceived;
                 previous.Disconnected -= OnClientDisconnected;
+                if (ReferenceEquals(_activeRealtime?.Client, previous))
+                {
+                    _activeRealtime = null;
+                    _partialTranscript = string.Empty;
+                }
             }
             _client = next;
             return previous;
@@ -1057,7 +1731,13 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             }
             _client = null;
             expected.ServerRequestReceived -= OnServerRequestReceived;
+            expected.NotificationReceived -= OnNotificationReceived;
             expected.Disconnected -= OnClientDisconnected;
+            if (ReferenceEquals(_activeRealtime?.Client, expected))
+            {
+                _activeRealtime = null;
+                _partialTranscript = string.Empty;
+            }
             return true;
         }
     }
@@ -1071,7 +1751,13 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             if (client is not null)
             {
                 client.ServerRequestReceived -= OnServerRequestReceived;
+                client.NotificationReceived -= OnNotificationReceived;
                 client.Disconnected -= OnClientDisconnected;
+                if (ReferenceEquals(_activeRealtime?.Client, client))
+                {
+                    _activeRealtime = null;
+                    _partialTranscript = string.Empty;
+                }
             }
             return client;
         }
@@ -1083,6 +1769,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         {
             _clientGenerations.Remove(client);
             client.ServerRequestReceived -= OnServerRequestReceived;
+            client.NotificationReceived -= OnNotificationReceived;
             client.Disconnected -= OnClientDisconnected;
         }
         try

@@ -7,7 +7,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURE = ROOT / "contracts" / "voice" / "an3-a-foundation-fixture.json"
+FOUNDATION_FIXTURE = ROOT / "contracts" / "voice" / "an3-a-foundation-fixture.json"
+WINDOWS_RUNTIME_FIXTURE = ROOT / "contracts" / "voice" / "an3-b1-windows-runtime-fixture.json"
 
 
 def fail(message: str) -> None:
@@ -15,7 +16,8 @@ def fail(message: str) -> None:
 
 
 def main() -> None:
-    fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    fixture = json.loads(FOUNDATION_FIXTURE.read_text(encoding="utf-8"))
+    runtime_fixture = json.loads(WINDOWS_RUNTIME_FIXTURE.read_text(encoding="utf-8"))
     compact_height = fixture["designTokens"]["compactHeight"]
     provider_kinds = fixture["providerKinds"]
     modes = fixture["modes"]
@@ -128,6 +130,14 @@ def main() -> None:
         / "Voice"
         / "CodexAppServerClient.cs"
     ).read_text(encoding="utf-8")
+    windows_process_job = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Voice"
+        / "WindowsProcessJob.cs"
+    ).read_text(encoding="utf-8")
     windows_coordinator = (
         ROOT
         / "windows"
@@ -136,6 +146,14 @@ def main() -> None:
         / "Voice"
         / "CodexVoiceCoordinator.cs"
     ).read_text(encoding="utf-8")
+    windows_runtime = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Voice"
+        / "CodexVoiceRuntimeComposition.cs"
+    ).read_text(encoding="utf-8")
     windows_verifier = (
         ROOT
         / "windows"
@@ -143,6 +161,14 @@ def main() -> None:
         / "HoverPocket.Shell"
         / "Verification"
         / "VoiceFoundationVerifier.cs"
+    ).read_text(encoding="utf-8")
+    windows_ui_verifier = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Verification"
+        / "UiVerifier.cs"
     ).read_text(encoding="utf-8")
     windows_geometry = (
         ROOT
@@ -159,6 +185,22 @@ def main() -> None:
         / "HoverPocket.Shell"
         / "Windows"
         / "HoverShellController.cs"
+    ).read_text(encoding="utf-8")
+    windows_panel = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Windows"
+        / "PanelWindow.cs"
+    ).read_text(encoding="utf-8")
+    windows_settings_store = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Configuration"
+        / "UserSettingsStore.cs"
     ).read_text(encoding="utf-8")
     windows_settings_html = (
         ROOT / "windows" / "ui" / "settings" / "index.html"
@@ -185,7 +227,8 @@ def main() -> None:
         fail("Windows internal expanded scrolling missing")
     if "fullscreen" in app_js.lower():
         fail("Windows Voice renderer gained a fullscreen route/state")
-    if "mute.disabled = Boolean(lane.muted && !lane.transportAttached);" not in app_js:
+    if "mute.disabled = !lane.realtimeAttached;" not in app_js \
+            or "setVoiceTransportMuted(muted);" not in app_js:
         fail("Windows unavailable Voice transport can report an unmuted state")
     if "VoiceLaneHostView" not in mac_shell:
         fail("macOS Host Voice row missing")
@@ -250,8 +293,15 @@ def main() -> None:
         fail("Windows Voice verifier command is not independently addressable")
     if "voiceLane = surface == BridgeSurface.Panel" not in bridge:
         fail("Windows Settings bridge can receive Voice transcript/session state")
-    if "voiceLocalizationOk" not in app_js or 't("voiceMicrophoneUnavailable")' not in app_js:
+    if 'CodexVoiceAvailability.SignedOut => "signedOut"' not in bridge \
+            or 'CodexVoiceAvailability.SchemaMismatch => "schemaMismatch"' not in bridge \
+            or 'CodexVoiceAvailability.CapabilityBlocked => "capabilityBlocked"' not in bridge:
+        fail("Windows Voice availability wire values do not match the rendered contract")
+    if "voiceLocalizationOk" not in app_js or 't("voiceStartMicrophone")' not in app_js:
         fail("Windows rendered Voice UI does not verify Japanese and English localized copy")
+    if 'keys[value] ?? "voiceRoleAssistant"' not in app_js \
+            or 'system: "voiceRoleSystem"' in app_js:
+        fail("Windows Voice transcript UI still grants Host authority to an untrusted role")
     if 't("voiceRegionLabel")' not in app_js \
             or 'voiceRegionLabel: "音声レーン"' not in (
                 ROOT / "windows" / "ui" / "js" / "i18n.js"
@@ -263,6 +313,10 @@ def main() -> None:
         fail("Windows app-server JSONL limit is not enforced in UTF-8 bytes")
     if "DrainStandardErrorAsync" not in windows_client:
         fail("Windows app-server stderr is not drained through a bounded sink")
+    if "WindowsProcessJob.CreateKillOnClose()" not in windows_client \
+            or "JobObjectLimitKillOnJobClose" not in windows_process_job \
+            or "AssignProcessToJobObject" not in windows_process_job:
+        fail("Windows app-server descendants are not owned by a kill-on-close job")
     handler_position = windows_coordinator.find("candidate.ServerRequestReceived += OnServerRequestReceived;")
     reader_start_position = windows_coordinator.find("candidate.StartReading();", handler_position)
     initialize_position = windows_coordinator.find("candidate.InitializeAsync(", reader_start_position)
@@ -385,10 +439,97 @@ def main() -> None:
             or "Task.sleep(nanoseconds: 20_000_000)" not in mac_verifier:
         fail("macOS recovery can overlap a cancelled non-cooperative startup")
 
+    if runtime_fixture["phase"] != "AN3-B1" \
+            or runtime_fixture["operatingSystem"] != "windows" \
+            or not runtime_fixture["defaultOff"]:
+        fail("AN3-B1 Windows runtime fixture identity/default-off mismatch")
+    runtime_activation = runtime_fixture["activation"]
+    if runtime_activation != {
+        "surface": "panel",
+        "explicitMicrophoneClick": True,
+        "exactOrigin": "https://app.hoverpocket.local",
+        "permissionLifetimeSeconds": 5,
+        "settingsPermissionPrompt": False,
+        "backgroundPermissionPrompt": False,
+    }:
+        fail("AN3-B1 microphone activation contract mismatch")
+    if "VoiceEnabled = false" not in windows_settings_store:
+        fail("Windows Voice no longer defaults to OFF")
+    if "CoreWebView2.PermissionRequested" not in windows_panel \
+            or "IsVoiceMicrophonePermissionAllowedForVerify" not in windows_panel \
+            or "ConsumeVoiceMicrophoneGesture" not in windows_panel \
+            or "args.SavesInProfile = false" not in windows_panel:
+        fail("Windows microphone permission lacks exact one-use Host gating")
+    if 'private const string UiHostName = "app.hoverpocket.local";' not in windows_panel:
+        fail("Windows microphone origin is not the exact virtual Host")
+    if '"voice.requestMicrophone"' not in bridge \
+            or 'Register("voice.startRealtime"' not in bridge \
+            or 'Register("voice.confirmRealtime"' not in bridge \
+            or 'Register("voice.abortRealtime"' not in bridge:
+        fail("Windows Panel Voice transport routes are incomplete")
+    panel_voice_routes = bridge[bridge.find("if (surface == BridgeSurface.Panel)"):
+                                bridge.find("if (surface == BridgeSurface.Settings)")]
+    if '"voice.requestMicrophone"' not in panel_voice_routes \
+            or 'Register("voice.startRealtime"' not in panel_voice_routes:
+        fail("Windows Voice transport route escaped the Panel-only surface")
+    if '"experimentalApi":true' not in windows_coordinator \
+            or '"account/read"' not in windows_coordinator \
+            or '"thread/realtime/listVoices"' not in windows_coordinator:
+        fail("Windows Codex app-server runtime gates are incomplete")
+    for method in runtime_fixture["appServer"]["requiredMethods"]:
+        if method == "initialize":
+            continue
+        if f'"{method}"' not in windows_coordinator:
+            fail(f"Windows Voice coordinator missing {method}")
+    for notification in runtime_fixture["appServer"]["requiredNotifications"]:
+        if f'"{notification}"' not in windows_coordinator:
+            fail(f"Windows Voice coordinator missing {notification}")
+    if runtime_fixture["appServer"]["sandbox"] != "read-only" \
+            or '\"sandbox\":\"read-only\"' not in windows_coordinator \
+            or '\"approvalPolicy\":\"never\"' not in windows_coordinator:
+        fail("Windows Voice root thread is not constrained to no-action mode")
+    if "generate-json-schema" not in windows_runtime \
+            or "--experimental" not in windows_runtime \
+            or "CodexVoiceSchemaContract.IsCompatible" not in windows_runtime \
+            or "WindowsProcessJob.CreateKillOnClose()" not in windows_runtime:
+        fail("installed Codex experimental schema is not probed before launch")
+    if "getUserMedia" not in app_js \
+            or "new PeerConnection()" not in app_js \
+            or 'peer.createDataChannel("oai-events")' not in app_js \
+            or 'transport.requestBridge("voice.confirmRealtime"' not in app_js:
+        fail("Windows WebView WebRTC transport is incomplete")
+    if "262_144" not in app_js or "MaxSdpBytes = 262_144" not in windows_coordinator:
+        fail("Realtime SDP is not byte-bounded on both sides of the bridge")
+    if "transport.generation !== signal.generation" not in app_js \
+            or "transport.threadId !== signal.threadId" not in app_js \
+            or "RequireActiveRealtime(generation, threadId)" not in windows_coordinator:
+        fail("Realtime SDP is not bound to the active generation and root thread")
+    if "disposeLocalVoiceTransport" not in app_js \
+            or 'disposeLocalVoiceTransport();\n  const state = await requestBridge("voice.endSession")' not in app_js \
+            or "stopVoiceMediaStream(acquiredStream)" not in app_js \
+            or '"thread/realtime/stop"' not in windows_coordinator:
+        fail("Voice failure/end paths do not stop the WebView microphone before Host shutdown")
+    if runtime_fixture["privacy"]["settingsReceivesVoiceState"] \
+            or "voiceLane = surface == BridgeSurface.Panel" not in bridge:
+        fail("Settings surface can receive Voice transcript/session state")
+    if not all(runtime_fixture["outOfScope"].values()):
+        fail("AN3-B1 scope unexpectedly includes Tool, MCP, or macOS production activation")
+    if "voiceTransportContractOk" not in app_js \
+            or "voiceWebRtcHarnessOk" not in app_js \
+            or "verifyVoiceTransportHarness" not in app_js \
+            or "failedInitializationCleaned" not in app_js \
+            or "endStoppedBeforeNative" not in app_js \
+            or "VoiceTransportContractOk" not in windows_ui_verifier \
+            or "VoiceWebRtcHarnessOk" not in windows_ui_verifier \
+            or "realtime-transport" not in windows_verifier \
+            or "realtime-sdp-fence" not in windows_verifier:
+        fail("AN3-B1 deterministic transport regressions are incomplete")
+
     print(
         "PASS voice-foundation contract: "
         f"{matrix_cases} geometry/state cases, root scope, default-off, "
-        "legacy lane negative regression, internal scroll, accessibility"
+        "legacy lane negative regression, internal scroll, accessibility, "
+        "Windows explicit-origin microphone and fenced Realtime transport"
     )
 
 

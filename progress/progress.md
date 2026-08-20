@@ -2,8 +2,19 @@
 project_slug: hover-menu-preview
 updated: 2026-08-21
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; capability-expansion-merged
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; capability-expansion-merged
 ---
+
+## 2026-08-21 AI-native AN3-B1 Windows Voice Runtime
+
+- AN3-A PR #19 head `b34c1fc`から隔離worktree / branchを作り、Windowsの明示microphone click → exact-origin permission → WebRTC offer / answer → Codex experimental Realtime → remote audio / transcript → mute / stopをdefault-offで接続した。AN3-B1のroot threadはread-only / approval never / tools禁止で、Capability Broker / MCPへは未接続である。
+- installed Codexは絶対path / SHA-256、experimental schema、platform、account、voice一覧を検証する。app-serverとschema probeはkill-on-close Job Objectへ所属し、SDPは262,144 bytes上限とroot thread / connection generationで束縛する。SettingsへVoice state / SDPを渡さず、raw audio / SDP / transcriptを監査やdiskへ保存しない。
+- 初回Security scan `2ab97a76-4999-41f5-9413-04f00df8fdf7`で、getUserMedia成功後のWebRTC構築失敗と、明示終了時のapp-server応答待ちによりlocal microphone停止が遅れる2件を再現した。取得直後のstreamを必ずcleanup対象へ置き、終了操作はnative停止より先にlocal track / peer / audioを破棄するよう修正した。exact-code回帰は両経路の即時停止を確認した。
+- 修正後のexact working-tree Security scan `878927ec-12f6-49ea-a571-ed47182f1692`は14 / 14 review itemを完了し、reportable finding 0件でsealed completeとなった。外部Codex CLIの初回trust anchorとProcess.StartからJob assignmentまでのWindows raceは、Windows実機 / 製品方針で確定するfollow-upとして残す。
+- ローカルではVoice contract 42件、Windows JS syntax、macOS warnings-as-errors build、Voice foundation、Panel layout 128件、Capability 14 handler、Broker、Pocket Surface、Pocket App、Timer、共通contract 13 schema / 60 fixture、`git diff --check`が成功した。fake app-serverとrendered fake WebRTC回帰を追加済みである。このMacには`dotnet`がないためWindows Release / native / rendered UIはPR CI、実Codex / microphone / WebRTC 1往復はWindows実機を最終gateとする。詳細: `progress/2026-08/2026-08-21_hover-pocket-ai-native-an3-b1.md`。
+- Draft PR [#21](https://github.com/shotaro311/hover-pocket/pull/21)をPR #19へstackした。初回Windows CIでJob Object情報classの定数名とstruct名が衝突するcompile errorを検出し、`aa25244`で意味を変えず定数名を修正した。修正後headではWindows [32390802586](https://github.com/shotaro311/hover-pocket/actions/runs/32390802586)、macOS [32390802558](https://github.com/shotaro311/hover-pocket/actions/runs/32390802558)、3OS contract [32390802562](https://github.com/shotaro311/hover-pocket/actions/runs/32390802562)、PR Router [32390800203](https://github.com/shotaro311/hover-pocket/actions/runs/32390800203)がすべて成功した。WindowsはRelease build、Voiceのaccount / voice / Realtime / SDP / stop回帰、Settings、rendered WebView UI、既存Provider回帰まで成功した。実Windows Codex / microphone / remote audio 1往復を通すまでDraftを維持する。
+- PR #19最終head `b506557`を通常mergeし、実Realtime transcriptへroot session ID、非損失identifier、path / secret / Unicode format control除去、重複event統合を接続した。統合Security scan `4c7e30aa-5797-4cda-bedf-739dd5093467`で外部`system` roleをHost表示に昇格できるlow finding 1件を検出し、`190ce80`で`user / assistant`だけを受理してpartial蓄積前に拒否し、UI fallbackも非権威化した。remediation scan `d8751ccf-e635-4747-9ad0-56d1b2b83539`は4 / 4 review、finding 0、sealed completeである。
+- 最終実装head `190ce80`のWindows [32418050929](https://github.com/shotaro311/hover-pocket/actions/runs/32418050929)、macOS [32418050661](https://github.com/shotaro311/hover-pocket/actions/runs/32418050661)、3OS contract / byte比較 [32418050662](https://github.com/shotaro311/hover-pocket/actions/runs/32418050662)、PR Router [32418047807](https://github.com/shotaro311/hover-pocket/actions/runs/32418047807)は全7 check成功。未解決review thread 0件、`CLEAN / MERGEABLE`、remote parity `0 / 0`をreadbackした。
 
 ## 2026-08-21 AI-native AN3-A Review Follow-up
 

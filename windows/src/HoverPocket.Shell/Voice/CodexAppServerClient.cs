@@ -118,10 +118,32 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             StartInfo = startInfo,
             EnableRaisingEvents = true
         };
-        if (!process.Start())
+        var processJob = WindowsProcessJob.CreateKillOnClose();
+        try
         {
+            if (!process.Start())
+            {
+                throw new CodexAppServerProtocolException("codex_process_start_failed");
+            }
+            processJob.Assign(process);
+        }
+        catch
+        {
+            processJob.Dispose();
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch (Exception exception) when (exception is InvalidOperationException
+                or NotSupportedException
+                or System.ComponentModel.Win32Exception)
+            {
+            }
             process.Dispose();
-            throw new CodexAppServerProtocolException("codex_process_start_failed");
+            throw;
         }
         var stderrLifetime = new CancellationTokenSource();
         var stderrDrain = DrainStandardErrorAsync(
@@ -149,6 +171,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
                 }
                 finally
                 {
+                    processJob.Dispose();
                     stderrLifetime.Cancel();
                     await stderrDrain.ConfigureAwait(false);
                     stderrLifetime.Dispose();
