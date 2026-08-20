@@ -1169,7 +1169,13 @@ internal sealed class CapabilityBrokerVerifier
             now);
         var receipt = await broker.ExecuteAsync(draft.Plan, permissions, grant, now, cancellation.Token);
         Require(receipt.Status == CapabilityReceiptStatus.Failed, "cancel_after_step_status");
-        Require(receipt.Steps.Count == 2, "cancel_after_step_receipts");
+        if (receipt.Steps.Count != 2)
+        {
+            var statuses = string.Join(",", receipt.Steps.Select(step =>
+                $"{step.Capability.Id}:{step.Status}:{step.Readback.Status}:{step.SafeError?.Code ?? "none"}"));
+            _failures.Add($"cancel_after_step_receipts:{receipt.Steps.Count}:{statuses}");
+            return;
+        }
         Require(receipt.Steps[0].Status == CapabilityReceiptStatus.Succeeded, "cancel_after_step_first_succeeded");
         Require(receipt.Steps[0].RollbackStatus == "succeeded", "cancel_after_step_rollback_succeeded");
         Require(receipt.Steps[1].Status == CapabilityReceiptStatus.Failed, "cancel_after_step_second_failed");
