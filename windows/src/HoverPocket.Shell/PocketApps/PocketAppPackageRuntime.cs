@@ -509,7 +509,6 @@ internal sealed class PocketAppPackageRuntime
                     $"{path}.{property.Key}:binding_type");
                 if (inputTypes.TryGetValue(name, out var fallbackInputType))
                 {
-                    var acceptedInputTypes = AcceptedWorkflowInputTypes(node.Type, property.Key);
                     Require(
                         acceptedInputTypes is not null && acceptedInputTypes.Contains(fallbackInputType),
                         $"{path}.{property.Key}:workflow_fallback_type");
