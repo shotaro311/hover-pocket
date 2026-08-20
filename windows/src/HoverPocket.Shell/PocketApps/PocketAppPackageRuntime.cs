@@ -468,19 +468,28 @@ internal sealed class PocketAppPackageRuntime
     {
         foreach (var property in node.Properties)
         {
-            if (property.Value is not string binding || !binding.StartsWith('$'))
+            if (property.Value is not string binding)
+            {
+                continue;
+            }
+            var acceptedInputTypes = AcceptedWorkflowInputTypes(node.Type, property.Key);
+            var acceptedStateTypes = AcceptedStateTypes(node.Type, property.Key);
+            if (acceptedInputTypes is null && acceptedStateTypes is null)
+            {
+                continue;
+            }
+            if (!binding.StartsWith('$'))
             {
                 continue;
             }
             if (binding.StartsWith("$input.", StringComparison.Ordinal))
             {
                 var name = binding["$input.".Length..];
-                if (!inputTypes.TryGetValue(name, out var declaredType))
+                if (!inputTypes.TryGetValue(name, out var declaredType) || acceptedInputTypes is null)
                 {
                     throw new PocketAppPackageRuntimeException($"{path}.{property.Key}:binding");
                 }
-                var acceptedTypes = AcceptedWorkflowInputTypes(node.Type, property.Key);
-                Require(acceptedTypes is not null && acceptedTypes.Contains(declaredType), $"{path}.{property.Key}:binding_type");
+                Require(acceptedInputTypes.Contains(declaredType), $"{path}.{property.Key}:binding_type");
                 boundNames.Add(name);
             }
             else if (binding.StartsWith("$state.", StringComparison.Ordinal))
@@ -490,7 +499,6 @@ internal sealed class PocketAppPackageRuntime
                 {
                     throw new PocketAppPackageRuntimeException($"{path}.{property.Key}:binding");
                 }
-                var acceptedStateTypes = AcceptedStateTypes(node.Type, property.Key);
                 if (acceptedStateTypes is null)
                 {
                     throw new PocketAppPackageRuntimeException($"{path}.{property.Key}:binding_type");

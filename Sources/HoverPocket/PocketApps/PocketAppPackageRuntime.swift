@@ -464,19 +464,23 @@ struct PocketAppPackageRuntime {
         path: String
     ) throws {
         for (key, value) in node.properties {
-            if case .string(let binding) = value, binding.hasPrefix("$") {
+            guard case .string(let binding) = value else { continue }
+            let acceptedInputTypes = acceptedWorkflowInputTypes(nodeType: node.type, propertyName: key)
+            let acceptedStateTypes = acceptedStateTypes(nodeType: node.type, propertyName: key)
+            guard acceptedInputTypes != nil || acceptedStateTypes != nil else { continue }
+            if binding.hasPrefix("$") {
                 if binding.hasPrefix("$input.") {
                     let name = String(binding.dropFirst("$input.".count))
                     guard let declaredType = inputTypes[name],
-                          let acceptedTypes = acceptedWorkflowInputTypes(nodeType: node.type, propertyName: key) else {
+                          let acceptedInputTypes else {
                         throw PocketAppPackageError.invalid("\(path).\(key):binding")
                     }
-                    try require(acceptedTypes.contains(declaredType), "\(path).\(key):binding_type")
+                    try require(acceptedInputTypes.contains(declaredType), "\(path).\(key):binding_type")
                     boundNames.insert(name)
                 } else if binding.hasPrefix("$state.") {
                     let name = String(binding.dropFirst("$state.".count))
                     guard let declaredStateTypes = stateTypes[name],
-                          let acceptedStateTypes = acceptedStateTypes(nodeType: node.type, propertyName: key) else {
+                          let acceptedStateTypes else {
                         throw PocketAppPackageError.invalid("\(path).\(key):binding")
                     }
                     let nonNullStateTypes = declaredStateTypes.subtracting(["null"])

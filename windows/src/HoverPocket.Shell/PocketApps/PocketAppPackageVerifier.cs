@@ -60,6 +60,18 @@ internal sealed class PocketAppPackageVerifier
             Require(changed.ManifestDigest != referencePackage.ManifestDigest, "package_resource_digest");
         }, "package_resource_digest");
 
+        WithPackage(root =>
+        {
+            MutateJson(Path.Combine(root, "surfaces", "main.surface.json"), surface =>
+            {
+                surface["root"]!["children"]![0]!["value"] = "$5";
+            });
+            var package = new PocketAppPackageRuntime().Load(root);
+            Require(
+                package.Surfaces["main"].Root.Children[0].Properties["value"] as string == "$5",
+                "surface_dollar_literal");
+        }, "surface_dollar_literal");
+
         try
         {
             if (referencePackage is null)

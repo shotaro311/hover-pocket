@@ -201,7 +201,7 @@ internal sealed class PocketAppUserStateStore : IDisposable
             }
             if (_stateProperties.Any(item => item.Value.IsRequired && !values.ContainsKey(item.Key)))
             {
-                throw new PocketAppUserStateStoreException("state_document");
+                needsRepair = true;
             }
             _packageDirectory.Validate();
             _rootDirectory.Validate();
