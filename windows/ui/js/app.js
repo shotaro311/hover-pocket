@@ -637,7 +637,14 @@ function voiceStatusText(lane) {
     return t("voiceExpansionBlocked");
   }
   if (lane.safeErrorCode) {
-    return voiceErrorText(lane.safeErrorCode);
+    const error = voiceErrorText(lane.safeErrorCode);
+    if (error) {
+      return error;
+    }
+    if (lane.availability && lane.availability !== "ready") {
+      return voiceAvailabilityText(lane.availability);
+    }
+    return t("voiceErrorUnavailable");
   }
   const availability = voiceAvailabilityText(lane.availability);
   if (lane.availability && lane.availability !== "ready") {
@@ -664,6 +671,7 @@ function voiceActivityText(value) {
     listening: "voiceActivityListening",
     thinking: "voiceActivityThinking",
     speaking: "voiceActivitySpeaking",
+    waiting_for_approval: "voiceActivityWaitingForApproval",
     waitingForApproval: "voiceActivityWaitingForApproval",
     reconnecting: "voiceActivityReconnecting",
     failed: "voiceActivityFailed",
@@ -682,6 +690,7 @@ function voiceSessionStatusText(value) {
   const keys = {
     queued: "voiceSessionQueued",
     running: "voiceSessionRunning",
+    waiting_for_user: "voiceSessionWaitingForUser",
     waitingForUser: "voiceSessionWaitingForUser",
     succeeded: "voiceSessionSucceeded",
     failed: "voiceSessionFailed",
@@ -705,7 +714,8 @@ function voiceErrorText(value) {
     unexpected_server_request: "voiceErrorUnsupportedRequest",
     voice_restart_exhausted: "voiceErrorRestartExhausted",
   };
-  return t(keys[value] ?? "voiceErrorUnavailable");
+  const key = keys[value];
+  return key ? t(key) : null;
 }
 
 function formatText(key, values) {
@@ -1032,7 +1042,7 @@ window.__hoverPocketVerify = {
     const voiceFixture = {
       availability: "ready",
       sessionStatus: "idle",
-      activity: "listening",
+      activity: "waiting_for_approval",
       muted: true,
       transportAttached: true,
       transcriptPreview: null,
@@ -1043,7 +1053,7 @@ window.__hoverPocketVerify = {
         sessionId: "child-localization",
         rootSessionId: "root-localization",
         title: "Today Focus",
-        status: "running",
+        status: "waiting_for_user",
         updatedAt: "2026-08-20T12:00:00Z",
         progress: { completed: 1, total: 2 },
       }],
@@ -1051,31 +1061,43 @@ window.__hoverPocketVerify = {
     setLanguage("ja");
     voiceLaneEl.replaceChildren();
     renderCompactVoiceLane(voiceFixture);
-    const japaneseCompactOk = voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "利用可能 · 聞き取り中"
+    const japaneseCompactOk = voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "利用可能 · 承認待ち"
       && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "音声接続はAN3-Aではまだ利用できません。"
       && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "音声機能の有効化まではマイクを利用できません"
       && voiceLaneEl.querySelector(".hp-voice-session-count")?.getAttribute("aria-label") === "セッション 1件";
     voiceLaneEl.replaceChildren();
     renderExpandedVoiceLane(voiceFixture);
     const japaneseExpandedOk = voiceLaneEl.querySelector(".hp-voice-transcript-event")?.textContent === "あなた: 予定を確認して"
-      && voiceLaneEl.querySelector(".hp-voice-session-card span")?.textContent?.startsWith("実行中 · 更新 ")
+      && voiceLaneEl.querySelector(".hp-voice-session-card span")?.textContent?.startsWith("ユーザー操作待ち · 更新 ")
       && voiceLaneEl.querySelector("progress")?.getAttribute("aria-label") === "1 / 2 完了";
+    const japaneseAvailabilityFallbackOk = voiceStatusText({
+      ...voiceFixture,
+      availability: "signedOut",
+      safeErrorCode: "signed_out",
+    }) === "サインインが必要";
     setLanguage("en");
     voiceLaneEl.replaceChildren();
     renderCompactVoiceLane(voiceFixture);
-    const englishCompactOk = voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "Ready · Listening"
+    const englishCompactOk = voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "Ready · Waiting for approval"
       && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "Voice transport is unavailable in AN3-A."
       && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "Microphone unavailable until Voice runtime activation"
       && voiceLaneEl.querySelector(".hp-voice-session-count")?.getAttribute("aria-label") === "1 sessions";
     voiceLaneEl.replaceChildren();
     renderExpandedVoiceLane(voiceFixture);
     const englishExpandedOk = voiceLaneEl.querySelector(".hp-voice-transcript-event")?.textContent === "You: 予定を確認して"
-      && voiceLaneEl.querySelector(".hp-voice-session-card span")?.textContent?.startsWith("Running · updated ")
+      && voiceLaneEl.querySelector(".hp-voice-session-card span")?.textContent?.startsWith("Waiting for user · updated ")
       && voiceLaneEl.querySelector("progress")?.getAttribute("aria-label") === "1 of 2 complete";
+    const englishAvailabilityFallbackOk = voiceStatusText({
+      ...voiceFixture,
+      availability: "schemaMismatch",
+      safeErrorCode: "installed_schema_mismatch",
+    }) === "Compatible Codex required";
     const voiceLocalizationOk = japaneseCompactOk
       && japaneseExpandedOk
+      && japaneseAvailabilityFallbackOk
       && englishCompactOk
-      && englishExpandedOk;
+      && englishExpandedOk
+      && englishAvailabilityFallbackOk;
     setLanguage(state.settings.language);
     renderVoiceLane(state);
     window.__hoverPocketVerifyStep = "complete";

@@ -650,6 +650,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             TrackClientGeneration(candidate, generation);
             candidate.ServerRequestReceived += OnServerRequestReceived;
             candidate.Disconnected += OnClientDisconnected;
+            candidate.StartReading();
             using var initializeDocument = JsonDocument.Parse(
                 """{"clientInfo":{"name":"HoverPocket","version":"an3-a"},"capabilities":{}}""");
             _ = await candidate.InitializeAsync(

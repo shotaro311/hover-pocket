@@ -45,6 +45,7 @@ internal sealed class VoiceFoundationVerifier
         await RunCaseAsync("compatibility", VerifyCompatibilityGatesAsync, timeout.Token);
         await RunCaseAsync("probe-failure", VerifyCompatibilityProbeFailureAsync, timeout.Token);
         await RunCaseAsync("unexpected-request", VerifyUnexpectedRequestFailsClosedAsync, timeout.Token);
+        await RunCaseAsync("request-before-reader-start", VerifyRequestBeforeReaderStartFailsClosedAsync, timeout.Token);
         await RunCaseAsync("initialize-request", VerifyInitializeRequestCannotBePromotedAsync, timeout.Token);
         await RunCaseAsync("disconnect-before-promotion", VerifyDisconnectBeforePromotionAsync, timeout.Token);
         await RunCaseAsync("disconnect-during-promotion", VerifyDisconnectDuringPromotionAsync, timeout.Token);
@@ -248,6 +249,29 @@ internal sealed class VoiceFoundationVerifier
             || coordinator.Snapshot.TransportAttached)
         {
             _failures.Add("initialization-time server request was promoted to a ready transport");
+        }
+    }
+
+    private async Task VerifyRequestBeforeReaderStartFailsClosedAsync(CancellationToken cancellationToken)
+    {
+        var disposeCount = 0;
+        var harness = new AppServerHarness(
+            () => Interlocked.Increment(ref disposeCount));
+        harness.PushServerRequest(42, "item/tool/call");
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ => Task.FromResult(harness.CreateClient()),
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: []);
+
+        await coordinator.InitializeAsync(cancellationToken);
+        await WaitUntilAsync(() => Volatile.Read(ref disposeCount) == 1, cancellationToken);
+        if (coordinator.Snapshot.Availability != CodexVoiceAvailability.CapabilityBlocked
+            || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure
+            || coordinator.Snapshot.TransportAttached
+            || coordinator.Snapshot.LastErrorCode != "unexpected_server_request")
+        {
+            _failures.Add("server request queued before handler attachment was promoted to ready");
         }
     }
 
@@ -575,6 +599,7 @@ internal sealed class VoiceFoundationVerifier
         await using var client = CodexAppServerClient.AttachForTesting(reader, TextWriter.Null);
         var disconnected = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         client.Disconnected += (_, _) => disconnected.TrySetResult(true);
+        client.StartReading();
         reader.Release();
         await disconnected.Task.WaitAsync(cancellationToken);
     }
@@ -586,6 +611,7 @@ internal sealed class VoiceFoundationVerifier
         await using var client = CodexAppServerClient.AttachForTesting(reader, TextWriter.Null);
         var disconnected = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         client.Disconnected += (_, _) => disconnected.TrySetResult(true);
+        client.StartReading();
         reader.Release();
         await disconnected.Task.WaitAsync(cancellationToken);
     }

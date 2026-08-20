@@ -239,6 +239,13 @@ def main() -> None:
         fail("Windows app-server JSONL limit is not enforced in UTF-8 bytes")
     if "DrainStandardErrorAsync" not in windows_client:
         fail("Windows app-server stderr is not drained through a bounded sink")
+    handler_position = windows_coordinator.find("candidate.ServerRequestReceived += OnServerRequestReceived;")
+    reader_start_position = windows_coordinator.find("candidate.StartReading();", handler_position)
+    initialize_position = windows_coordinator.find("candidate.InitializeAsync(", reader_start_position)
+    if handler_position < 0 or not handler_position < reader_start_position < initialize_position:
+        fail("Windows app-server reader starts before fail-closed handlers are attached")
+    if "request-before-reader-start" not in windows_verifier:
+        fail("Windows app-server startup request race lacks a deterministic regression")
     if "DisposeDetachedClientAsync" not in windows_coordinator:
         fail("Windows failed/crashed app-server clients are not disposed through one boundary")
     if "RunTrackedRestartAsync" not in windows_coordinator or "CancelRestartAsync" not in windows_coordinator:
@@ -263,6 +270,11 @@ def main() -> None:
         fail("Voice session retention is not bounded on both operating systems")
     if "expansionBlocked" not in app_js:
         fail("Windows compact fallback does not report why Expanded is unavailable")
+    if 'waiting_for_approval: "voiceActivityWaitingForApproval"' not in app_js \
+            or 'waiting_for_user: "voiceSessionWaitingForUser"' not in app_js:
+        fail("Windows Voice renderer does not localize wire-format activity/session states")
+    if "japaneseAvailabilityFallbackOk" not in app_js or "englishAvailabilityFallbackOk" not in app_js:
+        fail("Windows Voice renderer does not verify compatibility-specific unavailable copy")
     if "monitor.WorkArea.Bottom" not in windows_geometry:
         fail("Windows Expanded fallback ignores the taskbar work area")
     if "session.progress?.completed" not in app_js or "voiceSessionUpdatedText(session.updatedAt)" not in app_js:

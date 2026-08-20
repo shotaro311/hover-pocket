@@ -33,7 +33,8 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement>> _pending = new();
-    private readonly Task _readLoop;
+    private readonly object _readLoopSync = new();
+    private Task? _readLoop;
     private readonly char[] _readBuffer = new char[4_096];
     private int _readBufferOffset;
     private int _readBufferCount;
@@ -53,7 +54,6 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         _requestTimeout = requestTimeout;
         _disposeOwner = disposeOwner;
         ProcessId = processId;
-        _readLoop = ReadLoopAsync(_lifetime.Token);
     }
 
     public event EventHandler<CodexAppServerRequest>? ServerRequestReceived;
@@ -63,6 +63,15 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
     public event EventHandler? Disconnected;
 
     public int? ProcessId { get; }
+
+    public void StartReading()
+    {
+        ThrowIfDisposed();
+        lock (_readLoopSync)
+        {
+            _readLoop ??= ReadLoopAsync(_lifetime.Token);
+        }
+    }
 
     public static CodexAppServerClient AttachForTesting(
         TextReader reader,
@@ -470,9 +479,17 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             }
             _reader.Dispose();
             _writer.Dispose();
+            Task? readLoop;
+            lock (_readLoopSync)
+            {
+                readLoop = _readLoop;
+            }
             try
             {
-                await _readLoop.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+                if (readLoop is not null)
+                {
+                    await readLoop.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+                }
             }
             catch (Exception) when (_lifetime.IsCancellationRequested)
             {
