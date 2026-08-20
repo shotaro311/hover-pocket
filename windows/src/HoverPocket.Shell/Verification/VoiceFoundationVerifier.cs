@@ -1,7 +1,9 @@
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using System.Windows;
 using HoverPocket.Shell.Configuration;
+using HoverPocket.Shell.Display;
 using HoverPocket.Shell.Voice;
 
 namespace HoverPocket.Shell.Verification;
@@ -46,7 +48,10 @@ internal sealed class VoiceFoundationVerifier
         await RunCaseAsync("restart", VerifyRestartIsBoundedAsync, timeout.Token);
         await RunCaseAsync("failed-initialize-cleanup", VerifyFailedInitializeDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("crash-cleanup", VerifyTransportCrashDisposesCandidateAsync, timeout.Token);
+        await RunCaseAsync("transition-cleanup", VerifySystemTransitionDisposesCandidateAsync, timeout.Token);
+        await RunCaseAsync("stale-start", VerifyStaleStartFailureDoesNotReplaceReadyClientAsync, timeout.Token);
         await RunCaseAsync("oversized-response", VerifyOversizedResponseFailsClosedAsync, timeout.Token);
+        VerifyUnavailableTransitionPreservesBlockedState();
         VerifyTranscriptAndRootScope();
         VerifyUiDetachPreservesSession();
         VerifyGeometry();
@@ -257,6 +262,74 @@ internal sealed class VoiceFoundationVerifier
         }
     }
 
+    private async Task VerifySystemTransitionDisposesCandidateAsync(CancellationToken cancellationToken)
+    {
+        var disposeCount = 0;
+        var harness = new AppServerHarness(() => Interlocked.Increment(ref disposeCount));
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ => Task.FromResult(harness.CreateClient()),
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: []);
+
+        await coordinator.InitializeAsync(cancellationToken);
+        coordinator.NotifySystemTransition();
+        await WaitUntilAsync(() => Volatile.Read(ref disposeCount) == 1, cancellationToken);
+        if (coordinator.Snapshot.TransportAttached
+            || coordinator.Snapshot.AppServerProcessId is not null)
+        {
+            _failures.Add("system transition retained the previous app-server client");
+        }
+    }
+
+    private async Task VerifyStaleStartFailureDoesNotReplaceReadyClientAsync(CancellationToken cancellationToken)
+    {
+        var factoryCalls = 0;
+        var firstStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var healthyHarness = new AppServerHarness();
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: async _ =>
+            {
+                if (Interlocked.Increment(ref factoryCalls) == 1)
+                {
+                    firstStarted.TrySetResult(true);
+                    await releaseFirst.Task;
+                    throw new CodexAppServerProtocolException("stale_start_failure");
+                }
+                return healthyHarness.CreateClient();
+            },
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: []);
+
+        var staleStart = coordinator.InitializeAsync(cancellationToken);
+        await firstStarted.Task.WaitAsync(cancellationToken);
+        await coordinator.SetFeatureEnabledAsync(false, cancellationToken);
+        await coordinator.SetFeatureEnabledAsync(true, cancellationToken);
+        releaseFirst.TrySetResult(true);
+        await staleStart;
+        if (coordinator.Snapshot.Availability != CodexVoiceAvailability.Ready
+            || !coordinator.Snapshot.TransportAttached
+            || coordinator.Snapshot.LastErrorCode is not null)
+        {
+            _failures.Add("stale start failure replaced a ready app-server client");
+        }
+    }
+
+    private void VerifyUnavailableTransitionPreservesBlockedState()
+    {
+        using var coordinator = new CodexVoiceCoordinator(featureEnabled: true);
+        coordinator.NotifySystemTransition();
+        if (coordinator.Snapshot.Availability != CodexVoiceAvailability.Unavailable
+            || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure
+            || coordinator.Snapshot.Activity != VoiceActivity.Failed
+            || coordinator.Snapshot.LastErrorCode != "production_voice_transport_unconfigured")
+        {
+            _failures.Add("unconfigured transport entered permanent recovery after a system transition");
+        }
+    }
+
     private async Task VerifyOversizedResponseFailsClosedAsync(CancellationToken cancellationToken)
     {
         var reader = new GatedTextReader(
@@ -374,6 +447,35 @@ internal sealed class VoiceFoundationVerifier
             {
                 _failures.Add($"voice geometry mismatch for {size}");
             }
+        }
+
+        var largeExpanded = new UserSettings
+        {
+            VoiceEnabled = true,
+            VoiceLaneLayout = VoiceLaneLayoutPreference.Expanded,
+            PanelSize = PanelSize.Large
+        };
+        var taskbarMonitor = new DisplayMonitor(
+            "monitor",
+            "Monitor",
+            IntPtr.Zero,
+            new PhysicalRect(0, 0, 1366, 768),
+            new PhysicalRect(0, 0, 1366, 720),
+            true,
+            96,
+            96);
+        var baselinePlacement = new WindowPlacement(
+            new Rect(100, 100, 900, 488),
+            new PhysicalRect(100, 100, 900, 488));
+        var workAreaPlacement = VoicePanelGeometry.ExtendDownward(
+            baselinePlacement,
+            taskbarMonitor,
+            largeExpanded,
+            out var workAreaMode);
+        if (workAreaMode != VoiceLaneMode.Compact
+            || workAreaPlacement.PhysicalRect.Bottom > taskbarMonitor.WorkArea.Bottom)
+        {
+            _failures.Add("expanded Voice geometry ignored the monitor work area");
         }
 
         var defaults = new UserSettings();

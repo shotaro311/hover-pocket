@@ -61,7 +61,7 @@ internal static class VoicePanelGeometry
         out VoiceLaneMode resolvedMode)
     {
         var scaleY = Math.Max(0.01, monitor.ScaleY);
-        var monitorBottom = monitor.Bounds.Top + monitor.Bounds.Height;
+        var monitorBottom = monitor.WorkArea.Bottom;
         var baselineBottom = baseline.PhysicalRect.Top + baseline.PhysicalRect.Height;
         var availableExtraDips = Math.Max(0, monitorBottom - baselineBottom) / scaleY;
         resolvedMode = ResolveMode(settings, availableExtraDips);

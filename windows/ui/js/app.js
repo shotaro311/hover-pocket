@@ -585,12 +585,22 @@ function renderExpandedVoiceLane(lane) {
     const title = document.createElement("strong");
     title.textContent = session.title;
     const meta = document.createElement("span");
-    meta.textContent = session.status;
+    meta.textContent = `${session.status} · ${voiceSessionUpdatedText(session.updatedAt)}`;
     card.append(title, meta);
     if (session.safeSummary) {
       const summary = document.createElement("p");
       summary.textContent = session.safeSummary;
       card.append(summary);
+    }
+    const completed = Number(session.progress?.completed);
+    const total = Number(session.progress?.total);
+    if (Number.isInteger(completed) && Number.isInteger(total) && total > 0 && completed >= 0 && completed <= total) {
+      const progress = document.createElement("progress");
+      progress.className = "hp-voice-session-progress";
+      progress.max = total;
+      progress.value = completed;
+      progress.setAttribute("aria-label", `${completed} of ${total} complete`);
+      card.append(progress);
     }
     cards.append(card);
   }
@@ -604,6 +614,14 @@ function renderExpandedVoiceLane(lane) {
   grid.append(transcript, cards);
   root.append(toolbar, grid);
   voiceLaneEl.append(root);
+}
+
+function voiceSessionUpdatedText(value) {
+  const parsed = typeof value === "string" ? new Date(value) : new Date(Number.NaN);
+  if (Number.isNaN(parsed.getTime())) {
+    return "updated unknown";
+  }
+  return `updated ${parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 function voiceStatusText(lane) {

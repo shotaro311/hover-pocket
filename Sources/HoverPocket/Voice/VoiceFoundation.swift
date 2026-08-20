@@ -418,17 +418,35 @@ final class VoiceLaneRuntime: ObservableObject {
 
     func recoverAfterSystemTransition() {
         guard featureEnabled else { return }
+        restartGeneration &+= 1
+        let recoveryGeneration = restartGeneration
+        restartTask?.cancel()
+        restartTask = nil
         let previousAdapter = adapter
         adapter = nil
-        publish(connection: .recovering, activity: .reconnecting, muted: true)
-        if let previousAdapter {
-            Task { await previousAdapter.stop() }
+        guard adapterFactory != nil else {
+            publish(
+                connection: .disconnected,
+                activity: .failed,
+                muted: true,
+                safeErrorCode: "voice_adapter_unavailable"
+            )
+            if let previousAdapter {
+                Task { await previousAdapter.stop() }
+            }
+            return
         }
-        scheduleStart(afterNanoseconds: restartDelaysNanoseconds.first ?? 0)
+        publish(connection: .recovering, activity: .reconnecting, muted: true)
+        restartAfterStopping(previousAdapter, generation: recoveryGeneration, bounded: false)
     }
 
     func markAdapterCrashed() {
         guard featureEnabled else { return }
+        restartGeneration &+= 1
+        let crashGeneration = restartGeneration
+        restartTask?.cancel()
+        restartTask = nil
+        let previousAdapter = adapter
         adapter = nil
         publish(
             connection: .recovering,
@@ -436,7 +454,7 @@ final class VoiceLaneRuntime: ObservableObject {
             muted: true,
             safeErrorCode: "voice_transport_crashed"
         )
-        scheduleBoundedRestart()
+        restartAfterStopping(previousAdapter, generation: crashGeneration, bounded: true)
     }
 
     func handleUnexpectedServerRequest(method: String) {
@@ -575,6 +593,7 @@ final class VoiceLaneRuntime: ObservableObject {
             )
         } catch {
             await candidate.stop()
+            guard featureEnabled, generation == restartGeneration else { return }
             adapter = nil
             publish(
                 connection: .recovering,
@@ -583,6 +602,26 @@ final class VoiceLaneRuntime: ObservableObject {
                 safeErrorCode: "voice_start_failed"
             )
             scheduleBoundedRestart()
+        }
+    }
+
+    private func restartAfterStopping(
+        _ previousAdapter: (any VoiceSessionAdapter)?,
+        generation: Int,
+        bounded: Bool
+    ) {
+        Task { @MainActor [weak self] in
+            if let previousAdapter {
+                await previousAdapter.stop()
+            }
+            guard let self,
+                  self.featureEnabled,
+                  generation == self.restartGeneration else { return }
+            if bounded {
+                self.scheduleBoundedRestart()
+            } else {
+                self.scheduleStart(afterNanoseconds: self.restartDelaysNanoseconds.first ?? 0)
+            }
         }
     }
 

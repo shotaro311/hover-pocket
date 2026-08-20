@@ -133,6 +133,22 @@ def main() -> None:
         / "Voice"
         / "CodexVoiceCoordinator.cs"
     ).read_text(encoding="utf-8")
+    windows_geometry = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Voice"
+        / "VoicePanelGeometry.cs"
+    ).read_text(encoding="utf-8")
+    windows_shell = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Windows"
+        / "HoverShellController.cs"
+    ).read_text(encoding="utf-8")
     windows_settings_html = (
         ROOT / "windows" / "ui" / "settings" / "index.html"
     ).read_text(encoding="utf-8")
@@ -207,6 +223,22 @@ def main() -> None:
         fail("Voice session retention is not bounded on both operating systems")
     if "expansionBlocked" not in app_js:
         fail("Windows compact fallback does not report why Expanded is unavailable")
+    if "monitor.WorkArea.Bottom" not in windows_geometry:
+        fail("Windows Expanded fallback ignores the taskbar work area")
+    if "session.progress?.completed" not in app_js or "voiceSessionUpdatedText(session.updatedAt)" not in app_js:
+        fail("Windows session cards omit progress or update time")
+    if "session.updatedAt.formatted" not in mac_voice:
+        fail("macOS session cards omit update time")
+    staged_recovery = windows_shell[
+        windows_shell.find("private async Task RunStagedRecoveryAsync"):
+        windows_shell.find("private async Task RunRecoveryStageAsync")
+    ]
+    recovery_stage = windows_shell[
+        windows_shell.find("private async Task RunRecoveryStageAsync"):
+        windows_shell.find("private void OnWindowWin32MessageReceived")
+    ]
+    if staged_recovery.count("NotifySystemTransition()") != 1 or "NotifySystemTransition()" in recovery_stage:
+        fail("Windows staged recovery notifies Voice more than once")
 
     print(
         "PASS voice-foundation contract: "

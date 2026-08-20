@@ -189,9 +189,13 @@ struct VoiceLaneHostView: View {
             Text(session.title)
                 .font(.system(size: 11, weight: .semibold))
                 .lineLimit(1)
-            Text(session.status.rawValue)
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Text(session.status.rawValue)
+                Text(session.updatedAt.formatted(date: .omitted, time: .shortened))
+                    .accessibilityLabel("Updated \(session.updatedAt.formatted())")
+            }
+            .font(.system(size: 9, design: .monospaced))
+            .foregroundStyle(.secondary)
             if let summary = session.safeSummary {
                 Text(summary)
                     .font(.system(size: 10))

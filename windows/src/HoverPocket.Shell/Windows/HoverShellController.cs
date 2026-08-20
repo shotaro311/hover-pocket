@@ -57,6 +57,7 @@ internal sealed class HoverShellController : IDisposable
     private bool _timerAlertActive;
     private bool _disposed;
     private int _recoveryStageCountForVerify;
+    private int _voiceTransitionCountForVerify;
 
     public HoverShellController(
         Dispatcher dispatcher,
@@ -137,6 +138,7 @@ internal sealed class HoverShellController : IDisposable
     public DisplaySurfaceLayout? ActiveLayoutForVerify => _activeLayout;
 
     public int RecoveryStageCountForVerify => _recoveryStageCountForVerify;
+    public int VoiceTransitionCountForVerify => _voiceTransitionCountForVerify;
 
     public bool PollingEnabledForVerify => _pollingTimer.IsEnabled;
 
@@ -964,6 +966,9 @@ internal sealed class HoverShellController : IDisposable
         var previousDelay = TimeSpan.Zero;
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            _panelBridgeController.NotifySystemTransition();
+            _voiceTransitionCountForVerify++;
             foreach (var targetDelay in RecoveryDelays)
             {
                 var delay = targetDelay - previousDelay;
@@ -999,7 +1004,6 @@ internal sealed class HoverShellController : IDisposable
         _pollingTimer.Start();
         _healthTimer.Stop();
         _healthTimer.Start();
-        _panelBridgeController.NotifySystemTransition();
         ResyncDisplayLayout();
         await RunHealthCheckAsync();
         _recoveryStageCountForVerify++;

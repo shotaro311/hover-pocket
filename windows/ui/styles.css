@@ -385,6 +385,12 @@ input {
   font-size: calc(9px * var(--hp-text-scale));
 }
 
+.hp-voice-session-progress {
+  width: 100%;
+  height: 4px;
+  accent-color: var(--hp-accent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hp-voice-button,
   .hp-voice-waveform span {

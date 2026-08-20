@@ -492,11 +492,35 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         {
             return;
         }
+        if (_clientFactory is null)
+        {
+            UpdateSnapshot(snapshot => snapshot with
+            {
+                Availability = CodexVoiceAvailability.Unavailable,
+                SessionStatus = CodexVoiceSessionStatus.BlockedFailure,
+                Activity = VoiceActivity.Failed,
+                Muted = true,
+                TransportAttached = false,
+                AppServerProcessId = null,
+                LastErrorCode = "production_voice_transport_unconfigured"
+            });
+            return;
+        }
+        Interlocked.Increment(ref _generation);
+        CancelRestart();
+        var client = DetachClient();
+        if (client is not null)
+        {
+            _ = DisposeDetachedClientAsync(client);
+        }
         UpdateSnapshot(snapshot => snapshot with
         {
+            Availability = CodexVoiceAvailability.Unavailable,
             Muted = true,
             SessionStatus = CodexVoiceSessionStatus.Recovering,
-            Activity = VoiceActivity.Reconnecting
+            Activity = VoiceActivity.Reconnecting,
+            TransportAttached = false,
+            AppServerProcessId = null
         });
         ScheduleRestart();
     }
@@ -586,6 +610,10 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             if (candidate is not null)
             {
                 await DisposeDetachedClientAsync(candidate);
+            }
+            if (!_featureEnabled || generation != Volatile.Read(ref _generation))
+            {
+                return;
             }
             UpdateSnapshot(snapshot => snapshot with
             {

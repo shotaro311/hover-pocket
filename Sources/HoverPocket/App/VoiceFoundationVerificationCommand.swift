@@ -11,6 +11,7 @@ enum VoiceFoundationVerificationCommand {
         try verifyTranscriptBoundsAndRedaction()
         try await verifyDefaultOffAndFakeAdapter()
         try await verifyAppLifetimeDetachAndRestart()
+        try await verifyStaleAdapterFailureDoesNotReplaceReadyAdapter()
     }
 
     private static func verifyGeometryAndScope() throws {
@@ -170,6 +171,13 @@ enum VoiceFoundationVerificationCommand {
         else {
             throw VoiceFoundationVerificationError.failed("production_adapter_fail_closed")
         }
+        runtime.recoverAfterSystemTransition()
+        guard runtime.snapshot.connection == .disconnected,
+              runtime.snapshot.activity == .failed,
+              runtime.snapshot.safeErrorCode == "voice_adapter_unavailable"
+        else {
+            throw VoiceFoundationVerificationError.failed("unavailable_adapter_recovery_state")
+        }
         runtime.setResolvedLayout(requested: .expanded, resolved: .compact)
         guard runtime.snapshot.mode == .compact,
               runtime.snapshot.layoutBlockedReason != nil
@@ -245,11 +253,57 @@ enum VoiceFoundationVerificationCommand {
             throw VoiceFoundationVerificationError.failed("root_transition_isolation")
         }
 
+        let stopCountBeforeCrash = adapter.stopCount
+        runtime.markAdapterCrashed()
+        try await waitUntil {
+            runtime.snapshot.connection == .connected
+                && adapter.stopCount == stopCountBeforeCrash + 1
+        }
+
         runtime.handleUnexpectedServerRequest(method: "unknown/request")
         guard runtime.snapshot.activity == .failed,
               runtime.snapshot.safeErrorCode == "unexpected_server_request"
         else {
             throw VoiceFoundationVerificationError.failed("unexpected_request_fail_closed")
+        }
+        runtime.shutdown()
+    }
+
+    private static func verifyStaleAdapterFailureDoesNotReplaceReadyAdapter() async throws {
+        let stale = GatedVoiceSessionAdapter()
+        let healthy = FakeVoiceSessionAdapter()
+        let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        var factoryCount = 0
+        let factory: VoiceLaneRuntime.AdapterFactory = {
+            factoryCount += 1
+            return factoryCount == 1 ? stale : healthy
+        }
+        runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            adapterFactory: factory
+        )
+        try await waitUntil { stale.startCount == 1 }
+        runtime.configure(
+            featureEnabled: false,
+            preferredLayout: .compact,
+            adapterFactory: nil
+        )
+        runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            adapterFactory: factory
+        )
+        try await waitUntil {
+            runtime.snapshot.connection == .connected && healthy.startCount == 1
+        }
+        stale.failStart()
+        try await waitUntil { stale.stopCount == 1 }
+        guard runtime.snapshot.connection == .connected,
+              runtime.snapshot.safeErrorCode == nil,
+              healthy.startCount == 1
+        else {
+            throw VoiceFoundationVerificationError.failed("stale_adapter_failure_replaced_ready_adapter")
         }
         runtime.shutdown()
     }
@@ -265,4 +319,29 @@ enum VoiceFoundationVerificationCommand {
         }
         throw VoiceFoundationVerificationError.failed("timeout")
     }
+}
+
+@MainActor
+private final class GatedVoiceSessionAdapter: VoiceSessionAdapter {
+    private var startContinuation: CheckedContinuation<Void, Error>?
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
+
+    func probeCompatibility() async -> VoiceAdapterGate { .ready }
+
+    func start() async throws {
+        startCount += 1
+        try await withCheckedThrowingContinuation { continuation in
+            startContinuation = continuation
+        }
+    }
+
+    func failStart() {
+        startContinuation?.resume(throwing: FakeVoiceSessionAdapterError.startFailed)
+        startContinuation = nil
+    }
+
+    func setMuted(_ muted: Bool) async { _ = muted }
+    func closeAudioSession() async { }
+    func stop() async { stopCount += 1 }
 }
