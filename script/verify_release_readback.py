@@ -550,6 +550,25 @@ class GitHubReader:
         )
 
 
+def resolve_windows_release(
+    reader: GitHubReader,
+    requested_tag: str,
+) -> dict[str, Any]:
+    if requested_tag == "auto":
+        release = reader.latest_windows_release()
+    else:
+        if WINDOWS_TAG_RE.fullmatch(requested_tag) is None:
+            raise VerificationError("windows.release_tag: expected win-vMAJOR.MINOR.PATCH")
+        release = reader.release(requested_tag)
+
+    tag = release.get("tag_name")
+    if not isinstance(tag, str) or WINDOWS_TAG_RE.fullmatch(tag) is None:
+        raise VerificationError("windows.release_tag: expected win-vMAJOR.MINOR.PATCH")
+    if release.get("draft") is True or release.get("prerelease") is True:
+        raise VerificationError("windows.published_release: release must be published and non-prerelease")
+    return release
+
+
 def require_download_matches_release(
     verifier: Verifier,
     release: dict[str, Any],
@@ -766,11 +785,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         mac_checksum,
     )
 
-    windows_release = (
-        reader.latest_windows_release()
-        if args.windows_tag == "auto"
-        else reader.release(args.windows_tag)
-    )
+    windows_release = resolve_windows_release(reader, args.windows_tag)
     windows_tag = windows_release.get("tag_name")
     if not isinstance(windows_tag, str):
         raise VerificationError("windows.release_tag: missing tag")
@@ -837,6 +852,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default="auto",
         help="Windows release tag, or auto to select the greatest semantic win-v... tag without using GitHub latest",
     )
+    parser.add_argument(
+        "--resolve-windows-tag-only",
+        action="store_true",
+        help="resolve and print one published Windows tag without downloading release assets",
+    )
     parser.add_argument("--windows-signing-gate", choices=("beta", "formal"), default="formal")
     parser.add_argument(
         "--sparkle-public-key",
@@ -850,6 +870,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     try:
+        if args.resolve_windows_tag_only:
+            release = resolve_windows_release(GitHubReader(args.repository), args.windows_tag)
+            print(release["tag_name"])
+            return 0
         report = run(args)
     except VerificationError as error:
         if args.json_output:

@@ -9,6 +9,7 @@ import unittest
 
 
 SCRIPT = pathlib.Path(__file__).parents[1] / "verify_release_readback.py"
+WORKFLOW = pathlib.Path(__file__).parents[2] / ".github/workflows/release-readback-verify.yml"
 SPEC = importlib.util.spec_from_file_location("verify_release_readback", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -270,6 +271,23 @@ class ReleaseReadbackTests(unittest.TestCase):
         reader = MODULE.GitHubReader("shotaro311/hover-pocket")
         reader.bytes = lambda _url: json.dumps(releases).encode()
         self.assertEqual(reader.latest_windows_release()["tag_name"], "win-v0.2.10")
+
+    def test_windows_release_resolution_rejects_unpublished_explicit_tag(self):
+        reader = MODULE.GitHubReader("shotaro311/hover-pocket")
+        reader.release = lambda _tag: {
+            "tag_name": "win-v1.2.3",
+            "draft": False,
+            "prerelease": True,
+        }
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.resolve_windows_release(reader, "win-v1.2.3")
+
+    def test_formal_workflow_pins_one_windows_tag_for_both_readbacks(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        pinned = "WINDOWS_TAG: ${{ needs.resolve-windows-release.outputs.windows_tag }}"
+        self.assertEqual(workflow.count(pinned), 2)
+        self.assertIn("needs: [resolve-windows-release]", workflow)
+        self.assertNotIn("WINDOWS_TAG: ${{ inputs.windows_tag }}", workflow)
 
     def test_github_latest_must_remain_the_macos_release(self):
         verifier = MODULE.Verifier()

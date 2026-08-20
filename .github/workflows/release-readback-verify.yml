@@ -73,10 +73,39 @@ jobs:
             exit 1
           }
 
+  resolve-windows-release:
+    name: Pin one Windows release tag
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: [deterministic-unit, powershell-contract]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      windows_tag: ${{ steps.resolve.outputs.windows_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13.7"
+          check-latest: false
+
+      - name: Resolve published Windows tag once
+        id: resolve
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          WINDOWS_TAG: ${{ inputs.windows_tag || 'auto' }}
+        run: |
+          resolved_tag=$(python script/verify_release_readback.py \
+            --windows-tag "$WINDOWS_TAG" \
+            --resolve-windows-tag-only)
+          echo "windows_tag=$resolved_tag" >> "$GITHUB_OUTPUT"
+
   published-readback:
     name: Read back macOS and Windows public releases
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    needs: [deterministic-unit, powershell-contract]
+    needs: [resolve-windows-release]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -92,7 +121,7 @@ jobs:
       - name: Verify published release surfaces
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          WINDOWS_TAG: ${{ inputs.windows_tag || 'auto' }}
+          WINDOWS_TAG: ${{ needs.resolve-windows-release.outputs.windows_tag }}
           WINDOWS_SIGNING_GATE: ${{ inputs.windows_signing_gate || 'beta' }}
         run: |
           python script/verify_release_readback.py \
@@ -111,7 +140,7 @@ jobs:
   formal-authenticode-readback:
     name: Read back timestamped Windows Authenticode
     if: github.event_name == 'workflow_dispatch' && inputs.windows_signing_gate == 'formal'
-    needs: [deterministic-unit, powershell-contract]
+    needs: [resolve-windows-release]
     runs-on: windows-2025
     timeout-minutes: 20
     steps:
@@ -122,7 +151,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          WINDOWS_TAG: ${{ inputs.windows_tag }}
+          WINDOWS_TAG: ${{ needs.resolve-windows-release.outputs.windows_tag }}
         run: |
           windows/script/verify_published_authenticode.ps1 `
             -Tag "$env:WINDOWS_TAG" | Tee-Object -FilePath authenticode-readback-report.json
