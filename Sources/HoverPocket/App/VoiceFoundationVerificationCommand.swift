@@ -14,6 +14,7 @@ enum VoiceFoundationVerificationCommand {
         try await verifyAppLifetimeDetachAndRestart()
         try await verifyStaleAdapterFailureDoesNotReplaceReadyAdapter()
         try await verifyDisableWaitsForAdapterTeardown()
+        try await verifyRecoveryTeardownIsSerialized()
         try await verifyShutdownWaitsForAdapterTeardown()
     }
 
@@ -443,6 +444,44 @@ enum VoiceFoundationVerificationCommand {
         guard shutdownCompleted, runtime.snapshot == .disabled else {
             throw VoiceFoundationVerificationError.failed("shutdown_did_not_complete_after_adapter_teardown")
         }
+    }
+
+    private static func verifyRecoveryTeardownIsSerialized() async throws {
+        let oldAdapter = GatedStopVoiceSessionAdapter()
+        let replacementAdapter = FakeVoiceSessionAdapter()
+        let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        await runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            adapterFactory: { oldAdapter }
+        ).value
+        try await waitUntil { runtime.snapshot.connection == .connected }
+
+        runtime.recoverAfterSystemTransition()
+        try await waitUntil { oldAdapter.stopCount == 1 }
+        let disableTask = runtime.configure(
+            featureEnabled: false,
+            preferredLayout: .compact,
+            adapterFactory: nil
+        )
+        let replacementTask = runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            adapterFactory: { replacementAdapter }
+        )
+        await Task.yield()
+        guard replacementAdapter.startCount == 0 else {
+            throw VoiceFoundationVerificationError.failed("recovery_replacement_started_before_teardown")
+        }
+
+        oldAdapter.finishStop()
+        await disableTask.value
+        await replacementTask.value
+        try await waitUntil { runtime.snapshot.connection == .connected }
+        guard replacementAdapter.startCount == 1 else {
+            throw VoiceFoundationVerificationError.failed("recovery_replacement_not_started_after_teardown")
+        }
+        await runtime.shutdown()
     }
 
     private static func waitUntil(

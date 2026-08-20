@@ -53,6 +53,7 @@ internal sealed class VoiceFoundationVerifier
         await RunCaseAsync("failed-initialize-cleanup", VerifyFailedInitializeDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("disable-inflight-cleanup", VerifyDisableDisposesInFlightCandidateAsync, timeout.Token);
         await RunCaseAsync("disable-retry-cleanup", VerifyDisableDisposesInFlightRetryCandidateAsync, timeout.Token);
+        await RunCaseAsync("feature-transition-serialization", VerifyFeatureTransitionsAreSerializedAsync, timeout.Token);
         await RunCaseAsync("crash-cleanup", VerifyTransportCrashDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("transition-cleanup", VerifySystemTransitionDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("transition-inflight-cleanup", VerifySystemTransitionDisposesInFlightCandidateAsync, timeout.Token);
@@ -351,6 +352,41 @@ internal sealed class VoiceFoundationVerifier
             || coordinator.Snapshot != CodexVoiceSnapshot.Disabled)
         {
             _failures.Add("disabling Voice retained an in-flight retry candidate");
+        }
+    }
+
+    private async Task VerifyFeatureTransitionsAreSerializedAsync(CancellationToken cancellationToken)
+    {
+        var firstHarness = new GatedDisposeHarness();
+        var replacementHarness = new AppServerHarness();
+        var factoryCalls = 0;
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ => Task.FromResult(
+                Interlocked.Increment(ref factoryCalls) == 1
+                    ? firstHarness.CreateClient()
+                    : replacementHarness.CreateClient()),
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: []);
+
+        await coordinator.InitializeAsync(cancellationToken);
+        var disable = coordinator.SetFeatureEnabledAsync(false, cancellationToken);
+        await firstHarness.DisposeStarted.WaitAsync(cancellationToken);
+        var enable = coordinator.SetFeatureEnabledAsync(true, cancellationToken);
+        await Task.Yield();
+        if (Volatile.Read(ref factoryCalls) != 1 || enable.IsCompleted)
+        {
+            _failures.Add("Voice re-enabled before the disable transition released its client");
+        }
+
+        firstHarness.ReleaseDispose();
+        await disable;
+        await enable;
+        if (coordinator.Snapshot.Availability != CodexVoiceAvailability.Ready
+            || !coordinator.Snapshot.TransportAttached
+            || Volatile.Read(ref factoryCalls) != 2)
+        {
+            _failures.Add("serialized Voice re-enable did not create one ready replacement");
         }
     }
 

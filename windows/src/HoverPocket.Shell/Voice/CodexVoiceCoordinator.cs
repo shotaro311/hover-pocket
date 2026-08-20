@@ -257,6 +257,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
     private readonly Func<CancellationToken, Task<CodexAppServerClient>>? _clientFactory;
     private readonly ICodexVoiceCompatibilityProbe _compatibilityProbe;
     private readonly IReadOnlyList<TimeSpan> _restartDelays;
+    private readonly SemaphoreSlim _featureTransitionGate = new(1, 1);
     private readonly VoiceTranscriptBuffer _transcript = new();
     private readonly Dictionary<string, AgentSessionSummary> _sessions = new(StringComparer.Ordinal);
     private readonly Dictionary<CodexAppServerClient, int> _clientGenerations = [];
@@ -337,11 +338,25 @@ internal sealed class CodexVoiceCoordinator : IDisposable
     public async Task SetFeatureEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+        await _featureTransitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ThrowIfDisposed();
+            await SetFeatureEnabledCoreAsync(enabled, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _featureTransitionGate.Release();
+        }
+    }
+
+    private async Task SetFeatureEnabledCoreAsync(bool enabled, CancellationToken cancellationToken)
+    {
         if (_featureEnabled == enabled)
         {
             if (enabled && Snapshot.Availability != CodexVoiceAvailability.Ready)
             {
-                await InitializeAsync(cancellationToken);
+                await InitializeAsync(cancellationToken).ConfigureAwait(false);
             }
             return;
         }

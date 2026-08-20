@@ -311,6 +311,7 @@ final class VoiceLaneRuntime: ObservableObject {
     private var rootSessionID: String?
     private var configurationTask: Task<Void, Never>?
     private var restartTask: Task<Void, Never>?
+    private var recoveryTask: Task<Void, Never>?
     private var restartGeneration = 0
     private var restartAttempt = 0
     private let restartDelaysNanoseconds: [UInt64]
@@ -355,6 +356,9 @@ final class VoiceLaneRuntime: ObservableObject {
         let pendingRestart = restartTask
         pendingRestart?.cancel()
         restartTask = nil
+        let pendingRecovery = recoveryTask
+        pendingRecovery?.cancel()
+        recoveryTask = nil
         restartAttempt = 0
 
         guard featureEnabled else {
@@ -371,6 +375,7 @@ final class VoiceLaneRuntime: ObservableObject {
                 await previousAdapter.stop()
             }
             await pendingRestart?.value
+            await pendingRecovery?.value
             snapshot = .disabled
             return
         }
@@ -463,7 +468,7 @@ final class VoiceLaneRuntime: ObservableObject {
                 safeErrorCode: "voice_adapter_unavailable"
             )
             if let previousAdapter {
-                Task { await previousAdapter.stop() }
+                trackDetachedAdapterStop(previousAdapter)
             }
             return
         }
@@ -502,7 +507,7 @@ final class VoiceLaneRuntime: ObservableObject {
             safeErrorCode: "unexpected_server_request"
         )
         if let previousAdapter {
-            Task { await previousAdapter.stop() }
+            trackDetachedAdapterStop(previousAdapter)
         }
     }
 
@@ -549,12 +554,16 @@ final class VoiceLaneRuntime: ObservableObject {
         let pendingRestart = restartTask
         pendingRestart?.cancel()
         restartTask = nil
+        let pendingRecovery = recoveryTask
+        pendingRecovery?.cancel()
+        recoveryTask = nil
         let currentAdapter = adapter
         adapter = nil
         if let currentAdapter {
             await currentAdapter.stop()
         }
         await pendingRestart?.value
+        await pendingRecovery?.value
         snapshot = .disabled
     }
 
@@ -649,7 +658,10 @@ final class VoiceLaneRuntime: ObservableObject {
         generation: Int,
         bounded: Bool
     ) {
-        Task { @MainActor [weak self] in
+        let previousRecovery = recoveryTask
+        previousRecovery?.cancel()
+        recoveryTask = Task { @MainActor [weak self] in
+            await previousRecovery?.value
             if let previousAdapter {
                 await previousAdapter.stop()
             }
@@ -661,6 +673,15 @@ final class VoiceLaneRuntime: ObservableObject {
             } else {
                 self.scheduleStart(afterNanoseconds: self.restartDelaysNanoseconds.first ?? 0)
             }
+        }
+    }
+
+    private func trackDetachedAdapterStop(_ detachedAdapter: any VoiceSessionAdapter) {
+        let previousRecovery = recoveryTask
+        previousRecovery?.cancel()
+        recoveryTask = Task { @MainActor in
+            await previousRecovery?.value
+            await detachedAdapter.stop()
         }
     }
 

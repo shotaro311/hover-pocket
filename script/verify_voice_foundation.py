@@ -250,6 +250,9 @@ def main() -> None:
         fail("Windows failed/crashed app-server clients are not disposed through one boundary")
     if "RunTrackedRestartAsync" not in windows_coordinator or "CancelRestartAsync" not in windows_coordinator:
         fail("Windows Voice OFF cannot await an in-flight retry startup")
+    if "_featureTransitionGate.WaitAsync" not in windows_coordinator \
+            or "feature-transition-serialization" not in windows_verifier:
+        fail("Windows Voice enable/disable transitions are not serialized")
     if "voice_compatibility_probe_failed" not in windows_coordinator:
         fail("Windows compatibility probe failures do not transition Voice fail-closed")
     request_handler = windows_coordinator[windows_coordinator.find("private void OnServerRequestReceived"):]
@@ -264,6 +267,12 @@ def main() -> None:
         or "func shutdown() async" not in mac_runtime
     ):
         fail("macOS termination does not await Voice adapter teardown")
+    if "private var recoveryTask: Task<Void, Never>?" not in mac_runtime \
+            or "await pendingRecovery?.value" not in mac_runtime \
+            or "verifyRecoveryTeardownIsSerialized" not in (
+                ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
+            ).read_text(encoding="utf-8"):
+        fail("macOS recovery teardown is not tracked by configuration and shutdown")
     if "let safeErrorCode = VoiceTextSafety.sanitizeErrorCode(" not in mac_runtime:
         fail("macOS adapter error codes bypass the runtime sanitizer")
     if "maxRetainedSessions" not in mac_runtime or "MaxRetainedSessions" not in windows_coordinator:
