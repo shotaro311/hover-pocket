@@ -460,7 +460,9 @@ internal sealed class CapabilityBrokerVerifier
                 StringComparer.Ordinal),
             timeZone,
             userStateStore);
-        var hostController = new PocketAppHostController(runtime, () => new UserSettings());
+        var hostController = new PocketAppHostController(
+            runtime,
+            () => new UserSettings { AiNativeEnabled = true });
         var surfaceState = JsonSerializer.SerializeToElement(hostController.BuildSurfaceState());
         Require(
             surfaceState.GetProperty("workflowInputs")
