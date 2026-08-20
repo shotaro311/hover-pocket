@@ -5,6 +5,15 @@ updated_by: codex
 status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-final-security; capability-expansion-merged
 ---
 
+## 2026-08-20 AI-native AN3-A Voice Lane Foundation
+
+- AN5-Cの途中head `0c121f1`から隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an3a`、branch `codex/ai-native-an3-voice-foundation`を作り、AN3を実音声より前の安全なfoundationへ分割した。実装後、AN5-C最新head `eb08eba`の2コミットを競合なく取り込み、Pocket App入力検証を欠落させないstacked branchへ更新した。
+- macOS / Windowsへ、全Provider共通のHost-owned最下段Voice Lane、default-off、Compact / Expanded、明示toggle、root / child / descendant session card、memory-only transcript、bounded redaction、fail-closed server request、schema / account / capability gate、bounded restart stateを追加した。Compactは視覚タイトルを持たず、ExpandedはProvider領域を変えずパネル外枠だけを下へ伸ばす。
+- macOSの全パネル非表示経路を同じdetach / mute境界へ集約した。WindowsはVoice transcript / session stateをPanel surfaceだけへ返し、Settings WebViewへ渡さない。app-server clientは初期化失敗・取消・transport crashでもownerを破棄し、受信JSONLは改行前に1 MiB上限を強制する。deterministic回帰を追加した。
+- ChatGPT Pro Orchestratorはrun `20260820-170946-an5-c-exact-head-0c121f1pr-6voicean3-aoshost-owned-voice-lane-foundationdefault-offcompact-expandedroot-scoped-cardslifecycle-state-machinedeterministic-testschanges-patch`のbuilderとして使用した。返却receiptを検証後、Codexが不足修正、安全境界、検証を補完した。返却のmark-doneはローカル / CI受入完了後に行う。
+- macOSでSwift warnings-as-errors build、Voice foundation、Panel layout 128件、Capability 14 handler、Broker、Pocket Surface、Pocket App package / lifecycle / generation、Timer、共通contract 13 schema / 60 fixture、Voice geometry / scope 42件、Windows JS syntax、Settings generation target、`git diff --check`が成功した。開発bundleはApple Development署名の`codesign --verify --deep --strict`に合格し、`SUFeedURL`を持たない。
+- AN3-Aではproduction microphone、WebRTC、実Codex Realtime、Broker tool execution、MCP公開を有効化しない。Windows Release build / rendered WebView / Voice verifier、修正後exact Security scan、PR CI、両OS実機UIは未完了である。詳細: `progress/2026-08/2026-08-20_hover-pocket-ai-native-an3-a.md`。
+
 ## 2026-08-16 AI-native AN5-C Runtime / Surface Activation
 
 - 最終head `0c121f1`への追加Codex reviewで、複数Surface間の入力束縛をpackage全体で合算していたP2を検出した。ボタンから到達するworkflowごとに、同じSurface内の`$input` / `$state`束縛だけで全宣言inputを解決できることをmacOS / Windows runtimeと共通contract verifierで検証する。表示されない別Surfaceだけが不足inputを束縛するpackageを両OSのnegative回帰へ追加し、commit `54ff41e`へ反映した。ローカルのmacOS warnings-as-errors build、Pocket App 18 negative、Pocket Surface 15 negative、共通contract 13 schema / 60 fixture、`git diff --check`は成功した。PRではWindows [32348665332](https://github.com/shotaro311/hover-pocket/actions/runs/32348665332)、macOS [32348665277](https://github.com/shotaro311/hover-pocket/actions/runs/32348665277)、3OS contract / byte比較 [32348665365](https://github.com/shotaro311/hover-pocket/actions/runs/32348665365)、PR Router [32348663509](https://github.com/shotaro311/hover-pocket/actions/runs/32348663509)を含む全11 checkが成功した。review thread解決と最終remote readbackを残す。
