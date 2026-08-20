@@ -912,10 +912,9 @@ internal sealed class PocketAppGenerationVerifier
                     targetAppId,
                     $"fixture-flush-{flushCalls}",
                     allowFlush);
-            }, (lease, releaseInteraction) =>
+            }, lease =>
             {
-                if (releaseInteraction
-                    && string.Equals(lease.AppId, appId, StringComparison.Ordinal))
+                if (string.Equals(lease.AppId, appId, StringComparison.Ordinal))
                 {
                     releaseCalls += 1;
                 }
@@ -929,6 +928,7 @@ internal sealed class PocketAppGenerationVerifier
             Require(
                 flushCompleted
                     && flushCalls == 1
+                    && releaseCalls == 1
                     && disabled?.Contains("\"phase\":\"disabled\"", StringComparison.Ordinal) == true,
                 "generation_disable_awaits_state_flush");
 
@@ -942,7 +942,7 @@ internal sealed class PocketAppGenerationVerifier
                 """{"id":"flush-remove-blocked","method":"pocketApps.removePreservingData","params":{"appId":"local.example.flush"}}""");
             Require(
                 flushCalls == 2
-                    && releaseCalls == 1
+                    && releaseCalls == 2
                     && flushCompleted
                     && pending?.Contains("\"phase\":\"awaiting_approval\"", StringComparison.Ordinal) == true
                     && blocked?.Contains("GENERATION_STATE_FLUSH_FAILED", StringComparison.Ordinal) == true
@@ -956,7 +956,7 @@ internal sealed class PocketAppGenerationVerifier
                 """{"id":"flush-remove","method":"pocketApps.removePreservingData","params":{"appId":"local.example.flush"}}""");
             Require(
                 flushCalls == 3
-                    && releaseCalls == 1
+                    && releaseCalls == 3
                     && removed?.Contains("\"appId\":\"local.example.flush\",\"state\":\"removed\"", StringComparison.Ordinal) == true,
                 "generation_remove_after_state_flush_readback");
         }

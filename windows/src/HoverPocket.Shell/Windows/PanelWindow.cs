@@ -219,12 +219,12 @@ internal sealed class PanelWindow : NoActivateWindow
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            await CompletePocketAppStateTransitionCoreAsync(operationId, releaseInteraction: true);
+            await CompletePocketAppStateTransitionCoreAsync(operationId);
             throw;
         }
         catch
         {
-            await CompletePocketAppStateTransitionCoreAsync(operationId, releaseInteraction: true);
+            await CompletePocketAppStateTransitionCoreAsync(operationId);
             return PocketAppStateTransitionLease.Failed(appId);
         }
         finally
@@ -240,14 +240,12 @@ internal sealed class PanelWindow : NoActivateWindow
         }
     }
 
-    public async Task CompletePocketAppStateTransitionAsync(
-        PocketAppStateTransitionLease lease,
-        bool releaseInteraction)
+    public async Task CompletePocketAppStateTransitionAsync(PocketAppStateTransitionLease lease)
     {
         if (!Dispatcher.CheckAccess())
         {
             await Dispatcher.InvokeAsync(
-                () => CompletePocketAppStateTransitionAsync(lease, releaseInteraction)).Task.Unwrap();
+                () => CompletePocketAppStateTransitionAsync(lease)).Task.Unwrap();
             return;
         }
         if (_closed || _initializationTask is null || lease.OperationId is null)
@@ -261,20 +259,17 @@ internal sealed class PanelWindow : NoActivateWindow
             return;
         }
 
-        await CompletePocketAppStateTransitionCoreAsync(lease.OperationId, releaseInteraction);
+        await CompletePocketAppStateTransitionCoreAsync(lease.OperationId);
     }
 
-    private async Task CompletePocketAppStateTransitionCoreAsync(
-        string operationId,
-        bool releaseInteraction)
+    private async Task CompletePocketAppStateTransitionCoreAsync(string operationId)
     {
         if (_webView?.CoreWebView2 is null) { return; }
         var operationJson = JsonSerializer.Serialize(operationId, BridgeJson.Options);
-        var releaseJson = releaseInteraction ? "true" : "false";
         try
         {
             _ = await _webView.ExecuteScriptAsync(
-                $"window.__hoverPocketCompleteActiveProviderStateTransition?.({operationJson}, {releaseJson})");
+                $"window.__hoverPocketCompleteActiveProviderStateTransition?.({operationJson})");
         }
         catch
         {

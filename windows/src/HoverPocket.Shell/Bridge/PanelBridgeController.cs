@@ -48,7 +48,7 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly AsyncLocal<BridgeSurface?> _requestSurface = new();
     private readonly object _previewFrameSync = new();
     private Func<string, CancellationToken, Task<PocketAppStateTransitionLease>>? _pocketAppStateTransitionBegin;
-    private Func<PocketAppStateTransitionLease, bool, Task>? _pocketAppStateTransitionComplete;
+    private Func<PocketAppStateTransitionLease, Task>? _pocketAppStateTransitionComplete;
     private string _selectedProviderId;
     private MediaPreviewFrame? _pendingPreviewFrame;
     private bool _previewPostScheduled;
@@ -439,7 +439,7 @@ internal sealed class PanelBridgeController : IDisposable
 
     public void SetPocketAppStateFlush(
         Func<string, CancellationToken, Task<PocketAppStateTransitionLease>>? begin,
-        Func<PocketAppStateTransitionLease, bool, Task>? complete = null)
+        Func<PocketAppStateTransitionLease, Task>? complete = null)
     {
         _pocketAppStateTransitionBegin = begin;
         _pocketAppStateTransitionComplete = complete;
@@ -749,7 +749,7 @@ internal sealed class PanelBridgeController : IDisposable
             stateTransition = await BeginSelectedPocketAppStateTransitionAsync(cancellationToken);
             if (!stateTransition.Saved)
             {
-                await CompletePocketAppStateTransitionAsync(stateTransition, releaseInteraction: true);
+                await CompletePocketAppStateTransitionAsync(stateTransition);
                 stateTransition = null;
                 return await PublishStateAsync(cancellationToken);
             }
@@ -777,13 +777,13 @@ internal sealed class PanelBridgeController : IDisposable
                 _pocketAppGenerationController?.SetEnabled(true);
             }
             var published = await PublishStateAsync(cancellationToken);
-            await CompletePocketAppStateTransitionAsync(stateTransition, releaseInteraction: false);
+            await CompletePocketAppStateTransitionAsync(stateTransition);
             stateTransition = null;
             return published;
         }
         catch
         {
-            await CompletePocketAppStateTransitionAsync(stateTransition, releaseInteraction: true);
+            await CompletePocketAppStateTransitionAsync(stateTransition);
             throw;
         }
     }
@@ -835,7 +835,7 @@ internal sealed class PanelBridgeController : IDisposable
         var stateTransition = await BeginSelectedPocketAppStateTransitionAsync(cancellationToken);
         if (!stateTransition.Saved)
         {
-            await CompletePocketAppStateTransitionAsync(stateTransition, releaseInteraction: true);
+            await CompletePocketAppStateTransitionAsync(stateTransition);
             return await PublishStateAsync(cancellationToken);
         }
         try
@@ -846,13 +846,13 @@ internal sealed class PanelBridgeController : IDisposable
             _generatedPocketApps?.SetEnabled(false);
             SaveSettings(UserSettingsStore.CreateDefault(_providerRegistry.ProviderIds));
             var published = await PublishStateAsync(cancellationToken);
-            await CompletePocketAppStateTransitionAsync(stateTransition, releaseInteraction: false);
+            await CompletePocketAppStateTransitionAsync(stateTransition);
             stateTransition = null;
             return published;
         }
         catch
         {
-            await CompletePocketAppStateTransitionAsync(stateTransition, releaseInteraction: true);
+            await CompletePocketAppStateTransitionAsync(stateTransition);
             throw;
         }
     }
@@ -1353,15 +1353,13 @@ internal sealed class PanelBridgeController : IDisposable
         }
     }
 
-    private async Task CompletePocketAppStateTransitionAsync(
-        PocketAppStateTransitionLease? lease,
-        bool releaseInteraction)
+    private async Task CompletePocketAppStateTransitionAsync(PocketAppStateTransitionLease? lease)
     {
         var complete = _pocketAppStateTransitionComplete;
         if (lease is null || complete is null) { return; }
         try
         {
-            await complete(lease, releaseInteraction);
+            await complete(lease);
         }
         catch
         {

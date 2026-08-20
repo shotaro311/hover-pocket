@@ -405,13 +405,11 @@ window.__hoverPocketFlushActiveProviderState = async (appId, operationId) => {
   return await providerStateTransitionBegin() !== false;
 };
 
-window.__hoverPocketCompleteActiveProviderStateTransition = (operationId, releaseInteraction) => {
+window.__hoverPocketCompleteActiveProviderStateTransition = (operationId) => {
   const lease = providerStateTransitionLeases.get(operationId);
   if (!lease) return true;
   providerStateTransitionLeases.delete(operationId);
-  if (releaseInteraction) {
-    for (const release of lease.releases) release();
-  }
+  for (const release of lease.releases) release();
   return true;
 };
 
@@ -716,11 +714,9 @@ window.__hoverPocketVerify = {
     await attachActiveStateTransitionLeases("local.example.verify");
     const matchingHostRelease = window.__hoverPocketCompleteActiveProviderStateTransition(
       "verify-transition",
-      true,
     );
     const unrelatedHostRelease = window.__hoverPocketCompleteActiveProviderStateTransition(
       "verify-unrelated",
-      true,
     );
     const providerHostStateFlushOk = matchingHostFlush
       && unrelatedHostFlush
