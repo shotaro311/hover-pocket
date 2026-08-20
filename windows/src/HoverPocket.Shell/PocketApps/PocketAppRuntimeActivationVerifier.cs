@@ -167,6 +167,11 @@ internal static class PocketAppRuntimeActivationVerifier
                         && isolated.SurfaceRegistry.ActiveAppIds.SequenceEqual([appA, appB], StringComparer.Ordinal),
                     "activation_corrupt_package_does_not_block_healthy_restore",
                     failures);
+                Require(
+                    isolated.TryGetManagedAppIds(out var managedIds)
+                        && managedIds.SequenceEqual([appA, appB, corruptApp], StringComparer.Ordinal),
+                    "activation_corrupt_package_preserves_settings_identity",
+                    failures);
             }
 
             candidates[appA] = Candidate(appA, "1.0.0", digest3);

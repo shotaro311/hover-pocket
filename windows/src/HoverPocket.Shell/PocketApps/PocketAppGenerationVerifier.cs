@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using HoverPocket.Shell.Verification;
 
 namespace HoverPocket.Shell.PocketApps;
 
@@ -9,15 +10,32 @@ internal sealed class PocketAppGenerationVerifier
 
     public IReadOnlyList<string> Run()
     {
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN runtime-activation");
         _failures.AddRange(PocketAppRuntimeActivationVerifier.Run());
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END runtime-activation");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN e2e");
         VerifyE2E();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END e2e");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN settings-approval");
         VerifySettingsApprovalBoundary().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END settings-approval");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN preview-only");
         VerifyPreviewOnlyBoundary().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END preview-only");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN failed-activation-refresh");
         VerifyFailedActivationRefreshesManagement().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END failed-activation-refresh");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN committed-receipt");
         VerifyCommittedReceiptSurvivesManagedRefreshFailure().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END committed-receipt");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN pending-proposal");
         VerifyUnrelatedActionPreservesPendingProposal().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END pending-proposal");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN deactivate-flush");
         VerifyDeactivateFlushBoundary().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END deactivate-flush");
         VerifyApprovalTextSanitization();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END approval-text");
         return _failures;
     }
 
@@ -169,9 +187,17 @@ internal sealed class PocketAppGenerationVerifier
                     "generation_runtime_enable_failure_remains_disabled");
             }
 
-            var reupdate = lifecycle.Stage(updateMaterialized.Directory);
-            var reupdateGrant = lifecycle.Approve(reupdate.RequestId, reupdate.BindingDigest);
-            _ = lifecycle.Install(reupdate, reupdateGrant);
+            var reupdateMaterialized = materializer.Materialize(updateEnvelope, updateRequest);
+            try
+            {
+                var reupdate = lifecycle.Stage(reupdateMaterialized.Directory);
+                var reupdateGrant = lifecycle.Approve(reupdate.RequestId, reupdate.BindingDigest);
+                _ = lifecycle.Install(reupdate, reupdateGrant);
+            }
+            finally
+            {
+                TryDeleteDraft(reupdateMaterialized.Directory);
+            }
             using (var failingRuntimeRollbackLifecycle = new PocketAppLifecycleManager(
                 root,
                 dataRoot,
@@ -209,13 +235,15 @@ internal sealed class PocketAppGenerationVerifier
                         && failingRuntimeRollbackLifecycle.ActivePackage(request.AppId) is null,
                     "generation_runtime_rollback_failure_disables_previous_version");
             }
+            var raceTarget = lifecycle.ManagedPackage(request.AppId)
+                ?? throw new InvalidOperationException("generation_race_target_missing");
             var installedIntent = Path.Combine(
                 root,
                 "Apps",
                 request.AppId,
                 "Versions",
-                VersionStorageKey(disabledAgain.Version!),
-                disabledAgain.PackageDigest!["sha256:".Length..],
+                VersionStorageKey(raceTarget.Version!),
+                raceTarget.PackageDigest!["sha256:".Length..],
                 "package",
                 "intent.md");
             var originalIntent = File.ReadAllBytes(installedIntent);
@@ -769,12 +797,16 @@ internal sealed class PocketAppGenerationVerifier
                 "generation_corrupt_package_isolated_on_startup");
             var removed = await recoveredSettings.ProcessRawMessageAsync(
                 """{"id":"remove-corrupt","method":"pocketApps.removePreservingData","params":{"appId":"local.example.unrelated"}}""");
+            var removedResult = ResponseResult(removed);
+            var removedReceipt = removedResult.GetProperty("receipt");
             Require(
-                removed is not null
-                    && removed.Contains("\"appId\":\"local.example.unrelated\",\"state\":\"removed\"", StringComparison.Ordinal)
-                    && removed.Contains("\"readbackVerified\":true", StringComparison.Ordinal)
-                    && !removed.Contains("\"errorCode\":\"LIFECYCLE_PACKAGE_CORRUPT\"", StringComparison.Ordinal)
-                    && removed.Contains("\"appId\":\"local.example.selected\",\"state\":\"disabled\"", StringComparison.Ordinal),
+                removedReceipt.GetProperty("appId").GetString() == "local.example.unrelated"
+                    && removedReceipt.GetProperty("state").GetString() == "removed"
+                    && removedReceipt.GetProperty("readbackVerified").GetBoolean()
+                    && !removedResult.GetProperty("managementIssues").EnumerateArray().Any()
+                    && removedResult.GetProperty("managedApps").EnumerateArray().Any(item =>
+                        item.GetProperty("appId").GetString() == "local.example.selected"
+                        && item.GetProperty("state").GetString() == "disabled"),
                 "generation_corrupt_package_remove_preserves_healthy_management");
         }
         catch (Exception ex)
@@ -902,16 +934,15 @@ internal sealed class PocketAppGenerationVerifier
             var flushCompleted = false;
             var releaseCalls = 0;
             using var controller = new PocketAppGenerationController(root, dataRoot, draftRoot, null);
-            controller.SetBeforeDeactivate(async (targetAppId, cancellationToken) =>
+            controller.SetBeforeDeactivate((targetAppId, cancellationToken) =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await Task.Yield();
                 flushCalls += 1;
                 flushCompleted = string.Equals(targetAppId, appId, StringComparison.Ordinal);
-                return new PocketAppStateTransitionLease(
+                return Task.FromResult(new PocketAppStateTransitionLease(
                     targetAppId,
                     $"fixture-flush-{flushCalls}",
-                    allowFlush);
+                    allowFlush));
             }, lease =>
             {
                 if (string.Equals(lease.AppId, appId, StringComparison.Ordinal))
@@ -954,10 +985,13 @@ internal sealed class PocketAppGenerationVerifier
             allowFlush = true;
             var removed = await settings.ProcessRawMessageAsync(
                 """{"id":"flush-remove","method":"pocketApps.removePreservingData","params":{"appId":"local.example.flush"}}""");
+            var removedReceipt = ResponseResult(removed).GetProperty("receipt");
             Require(
                 flushCalls == 3
                     && releaseCalls == 3
-                    && removed?.Contains("\"appId\":\"local.example.flush\",\"state\":\"removed\"", StringComparison.Ordinal) == true,
+                    && removedReceipt.GetProperty("appId").GetString() == appId
+                    && removedReceipt.GetProperty("state").GetString() == "removed"
+                    && removedReceipt.GetProperty("readbackVerified").GetBoolean(),
                 "generation_remove_after_state_flush_readback");
         }
         catch (Exception ex)
@@ -978,6 +1012,22 @@ internal sealed class PocketAppGenerationVerifier
             try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
             try { if (Directory.Exists(draftRoot)) { Directory.Delete(draftRoot, true); } } catch { }
         }
+    }
+
+    private static JsonElement ResponseResult(string? response)
+    {
+        if (string.IsNullOrWhiteSpace(response))
+        {
+            throw new InvalidOperationException("fixture_response_missing");
+        }
+        using var document = JsonDocument.Parse(response);
+        var root = document.RootElement;
+        if (root.GetProperty("error").ValueKind != JsonValueKind.Null
+            || root.GetProperty("result").ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException("fixture_response_failed");
+        }
+        return root.GetProperty("result").Clone();
     }
 
     private void VerifyApprovalTextSanitization()

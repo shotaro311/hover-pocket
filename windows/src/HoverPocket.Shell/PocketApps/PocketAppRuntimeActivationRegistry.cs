@@ -240,9 +240,13 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
             }
             try
             {
-                appIds = _managementSnapshotSource().Packages
+                var snapshot = _managementSnapshotSource();
+                appIds = snapshot.Packages
                     .Where(package => package.State != PocketAppLifecycleState.Removed)
                     .Select(package => package.PackageId)
+                    .Concat(snapshot.Issues
+                        .Select(issue => issue.PackageId)
+                        .Where(ValidPackageId))
                     .Distinct(StringComparer.Ordinal)
                     .Order(StringComparer.Ordinal)
                     .ToArray();
@@ -255,6 +259,13 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
             }
         }
     }
+
+    private static bool ValidPackageId(string value) =>
+        value.Length <= 160
+        && System.Text.RegularExpressions.Regex.IsMatch(
+            value,
+            "^[a-z][a-z0-9]*(?:\\.[a-z0-9][a-z0-9-]*){2,}$",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     public PocketAppRuntimeActivationRegistry(
         string rootDirectory,
@@ -286,7 +297,7 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
             {
                 stateStore = new PocketAppUserStateStore(
                     package.Manifest.Id,
-                    package.StatePropertyTypes,
+                    package.StateProperties,
                     userDataRoot);
                 activationLease = new PocketAppActivationLease();
                 runtime = new PocketAppExecutionRuntime(

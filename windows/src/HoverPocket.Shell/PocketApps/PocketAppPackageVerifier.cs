@@ -29,6 +29,14 @@ internal sealed class PocketAppPackageVerifier
             Require(package.StatePropertyNames.SetEquals(["selectedEventRef"]), "package_state_schema");
             Require(package.StatePropertyTypes["selectedEventRef"].SetEquals(["string", "null"]), "package_state_types");
             Require(
+                package.StateProperties["selectedEventRef"] is
+                {
+                    IsRequired: true,
+                    Format: null,
+                    MaximumLength: null
+                },
+                "package_state_constraints");
+            Require(
                 package.TestCases.Count == 4
                 && package.TestCases["calendar-read"] == "pass"
                 && package.TestCases["start-focus-approved"] == "pass"
@@ -1015,14 +1023,17 @@ internal sealed class PocketAppPackageVerifier
     private void WithPackage(Action<string> body, string label)
     {
         var root = Path.Combine(Path.GetTempPath(), $"hover-pocket-package-{Guid.NewGuid():N}");
+        VerifyConsole.WriteLine($"POCKET_PACKAGE_CASE_BEGIN {label}");
         try
         {
             AssemblePackage(root);
             body(root);
+            VerifyConsole.WriteLine($"POCKET_PACKAGE_CASE_END {label}");
         }
         catch (Exception ex)
         {
             _failures.Add($"{label}:fixture:{ex.GetType().Name}:{ex.Message}");
+            VerifyConsole.WriteLine($"POCKET_PACKAGE_CASE_FAIL {label} {ex.GetType().Name}:{ex.Message}");
         }
         finally
         {

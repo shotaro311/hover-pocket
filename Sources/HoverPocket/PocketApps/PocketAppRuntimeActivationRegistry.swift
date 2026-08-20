@@ -277,7 +277,7 @@ final class PocketAppRuntimeActivationRegistry {
             }
             let stateStore = try PocketAppUserStateStore(
                 packageID: package.manifest.id,
-                propertyTypes: package.statePropertyTypes,
+                stateProperties: package.stateProperties,
                 rootDirectory: userDataRoot
             )
             let activationLease = PocketAppActivationLease()
