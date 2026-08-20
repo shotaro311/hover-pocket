@@ -105,7 +105,14 @@ export function renderPocketSurfaceProvider(context) {
         button.addEventListener("click", async () => {
           button.disabled = true;
           setHostStatus("確認を待っています…", "neutral");
+          let transitionStarted = false;
           try {
+            transitionStarted = true;
+            const saved = await beginStateTransition();
+            if (!saved) {
+              setHostStatus("入力内容を保存できないため、処理を開始しませんでした。", "error");
+              return;
+            }
             const receipt = await context.request("pocketApp.invokeWorkflow", {
               appId: surface.appId,
               workflowId: node.workflow,
@@ -123,6 +130,7 @@ export function renderPocketSurfaceProvider(context) {
           } catch {
             setHostStatus("処理を完了できませんでした。", "error");
           } finally {
+            if (transitionStarted) releaseStateTransition();
             button.disabled = !canInvoke(node.workflow, surface.workflowInputs, inputs, state);
           }
         });
@@ -589,6 +597,7 @@ export async function runPocketSurfaceUiVerify() {
   let stateBoundControlsPersisted = false;
   let pickerNormalizationPersisted = false;
   let failedStateWriteRetried = false;
+  let workflowBlockedOnStateWriteFailure = true;
   let stateTransitionBoundary = false;
   let layoutMatrix = true;
   let layoutCases = 0;
@@ -603,6 +612,7 @@ export async function runPocketSurfaceUiVerify() {
       const persistedState = new Map();
       let loadCalls = 0;
       let noteWriteAttempts = 0;
+      let startFocusInvocationCount = 0;
       const provider = renderPocketSurfaceProvider({
         container: host,
         state: { pocketSurface: model },
@@ -624,6 +634,7 @@ export async function runPocketSurfaceUiVerify() {
             return { saved: true };
           }
           if (method === "pocketApp.invokeWorkflow") {
+            if (params?.workflowId === "startFocus") startFocusInvocationCount += 1;
             inputlessWorkflowInvoked ||= params?.workflowId === "runLiteral"
               && Object.keys(params?.inputs ?? {}).length === 0;
             stateWorkflowInputForwarded ||= params?.workflowId === "startFocus"
@@ -658,7 +669,13 @@ export async function runPocketSurfaceUiVerify() {
         stateDuration.value = "1200";
         stateDuration.dispatchEvent(new Event("change", { bubbles: true }));
       }
-      host.querySelector(".hp-pocket-primary")?.click();
+      const startFocusButton = host.querySelector('[data-workflow="startFocus"]');
+      startFocusButton?.click();
+      await nextLayout();
+      workflowBlockedOnStateWriteFailure &&= startFocusInvocationCount === 0
+        && noteWriteAttempts === 1;
+      startFocusButton?.click();
+      await nextLayout();
       host.querySelector('[data-workflow="runLiteral"]')?.click();
       await nextLayout();
       const surface = host.querySelector(".hp-pocket-surface");
@@ -729,6 +746,7 @@ export async function runPocketSurfaceUiVerify() {
     stateWorkflowInputForwarded: stateWorkflowInputForwarded && inputlessWorkflowInvoked,
     stateBoundControlsPersisted,
     failedStateWriteRetried,
+    workflowBlockedOnStateWriteFailure,
     stateTransitionBoundary,
     layoutMatrix: layoutMatrix && layoutCases === panelCases.length * textCases.length,
   };
