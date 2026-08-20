@@ -16,15 +16,17 @@
 ## 修正
 
 - macOSは取消対象の`restartTask`をlocalへ保持し、`recoveryTask`が完了を待ってから旧adapter停止とreplacement schedulingへ進む。adapter unavailable / unexpected server requestでも同じdrain境界を使う。
-- Windowsは`NotifySystemTransitionAsync`へShell所有tokenを渡し、restart取消、startup取消、client破棄、snapshot更新、restart予約の境界ごとに取消を再確認する。
+- Windowsは`NotifySystemTransitionAsync`へShell所有tokenを渡し、restart取消、startup取消、client破棄、snapshot更新、restart予約の境界ごとに取消を再確認する。system transitionとfeature transitionを同じgateで直列化し、restart CTSもcaller tokenへ連結する。
 - Windows transcript roleは`user` / `assistant` / `system`の有限集合だけを受理し、未知値はbufferへ追加しない。
+- Windows Voice LaneのHost所有region labelは、初期HTMLを日本語とし、描画時は現在言語の`音声レーン` / `Voice Lane`へ更新する。
 
 ## 決定論的回帰
 
 - macOS: 取消を無視してstart待機するadapterを使い、その処理が終わる前にreplacement factoryが呼ばれないこと、解放後にreplacementが1回だけ接続することを確認する。
-- Windows: client破棄中の古いtransitionを取消して新しいtransitionを開始し、古い処理の解放後もfactory callが増えないことを確認する。
+- Windows: client破棄中の古いtransitionを取消して新しいtransitionを開始し、解放前は新transitionが待機し、解放後にreplacementが1回だけ接続することを確認する。
 - Windows: `tool` roleのtranscriptを投入し、件数が増えないことを確認する。
-- 静的contractはShellからCoordinatorへのtoken伝播、両OSの新規回帰、Windows role allowlistを必須化する。
+- rendered WebViewは日本語 / 英語のregion label、Compact / Expanded本文、操作ラベルを同じ描画経路で確認する。
+- 静的contractはShellからCoordinatorへのtoken伝播、restart token連結、両OSの新規回帰、Windows role allowlistとregion label localizationを必須化する。
 
 ## ローカル検証
 
@@ -41,10 +43,18 @@
 - Windows JavaScript構文: 成功
 - `git diff --check`: 成功
 
+## PR CI / Security readback
+
+- Source head: `bcacda3022c2d90255e8d45ff453783dfa381183`
+- Windows: [32409398168](https://github.com/shotaro311/hover-pocket/actions/runs/32409398168) 成功。Release buildは警告0 / error 0、`VOICE_CASE_PASS transition-cancellation`、全Voice case、rendered WebViewを確認した。
+- macOS: [32409398156](https://github.com/shotaro311/hover-pocket/actions/runs/32409398156) 成功。warnings-as-errors buildとVoice verifierを確認した。
+- 3OS contract / byte compare: [32409398159](https://github.com/shotaro311/hover-pocket/actions/runs/32409398159) 成功。Ubuntu / macOS / Windowsで13 schema / 60 fixtureが成功し、reportはbyte-identicalだった。
+- PR Router: [32409394119](https://github.com/shotaro311/hover-pocket/actions/runs/32409394119) 成功。
+- Security scan `ac821365-2914-4785-a2c7-ce809f14b97b`: range `b34c1fc...5a6c3bb`、7 / 7、finding 0、sealed complete。
+- Security scan `e5e3355f-411a-4bb8-96cf-d54400cce820`: range `5a6c3bb...bcacda3`、7 / 7、finding 0、sealed complete。
+
 ## 未完了gate
 
-- Windows C# Release build / native Voice verifierはMacに.NET SDKがないためPR CIで確認する。
-- 修正commit / push後に、Windows、macOS、3OS contract / byte compare、PR Routerを確認する。
-- exact修正差分のsecurity scanを完了する。
-- 3件のreview threadへ検証根拠を返信し、resolve後に未解決0件を別経路でreadbackする。
+- 4件のreview threadへ検証根拠を返信し、resolve後に未解決0件を別経路でreadbackする。
 - PR #19の修正をPR #21、その後PR #22へ通常mergeで伝播する。
+- PR #21 / #22のWindows、macOS、3OS contract CIとreviewを各headで再確認する。

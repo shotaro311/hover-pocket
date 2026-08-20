@@ -7,9 +7,9 @@ status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-real-voice-pendin
 
 ## 2026-08-21 AI-native AN3-A Review Follow-up
 
-- PR #19の最新head `b34c1fc`に新しく付いた未解決Codex review 3件を再現し、修正した。macOSはsystem recovery / crash時に取消済みの起動Taskを保持して完了まで待ち、非協調的なprobe / startとreplacementを重複させない。WindowsはShellのstaged recovery tokenをBridge / Coordinatorへ伝播し、古い復旧処理がclient破棄後に再起動を追加予約しない。Windows transcriptは`user` / `assistant` / `system`以外のroleをHost表示前に破棄する。
-- macOS warnings-as-errors build、Voice foundation、Panel layout 128件、Capability 14 handler、Broker、Pocket Surface、Pocket App package / lifecycle / generation、Timer、Voice contract 42件、共通contract 13 schema / 60 fixture、Windows JavaScript構文、`git diff --check`は成功した。Macには.NET SDKがないためWindows C# build / native Voice verifierはpush後のPR CIを最終gateとする。
-- 未完了は修正commit / push、Windows / macOS / 3OS contract CI、exact security diff scan、3 review threadへの根拠返信とresolve、PR #21 / #22への順次取り込み、最終remote readbackである。詳細: `progress/2026-08/2026-08-21_hover-pocket-ai-native-an3-a-review-followup.md`。
+- PR #19のsource head `bcacda3`で追加review 4件を修正した。macOSは取消済み起動Taskを完了まで保持し、Windowsはstaged recovery token伝播に加えてsystem transitionをfeature transitionと同じgateで直列化し、restart CTSをcaller tokenへ連結した。未知transcript roleはHost表示前に破棄し、Windows Voice Laneのscreen reader用region labelも日本語 / 英語へ連動する。
+- Windows [32409398168](https://github.com/shotaro311/hover-pocket/actions/runs/32409398168)はRelease build警告0 / error 0、`transition-cancellation`、全Voice case、rendered WebViewを含めて成功した。macOS [32409398156](https://github.com/shotaro311/hover-pocket/actions/runs/32409398156)、3OS contract / byte比較 [32409398159](https://github.com/shotaro311/hover-pocket/actions/runs/32409398159)、PR Router [32409394119](https://github.com/shotaro311/hover-pocket/actions/runs/32409394119)も成功した。ローカルのwarnings-as-errors build、Voice、Panel layout 128件、Capability 14 handler、Broker、Pocket Surface / App、Timer、Voice contract 42件、共通contract 13 schema / 60 fixtureも成功した。
+- exact Security scan `ac821365-2914-4785-a2c7-ce809f14b97b`は初回修正7 / 7、`e5e3355f-411a-4bb8-96cf-d54400cce820`は最終hardening 7 / 7を完全確認し、いずれもreportable finding 0件でsealed completeとなった。未完了は4 review threadへの根拠返信とresolve、PR #21 / #22への順次取り込み、最終remote readbackである。詳細: `progress/2026-08/2026-08-21_hover-pocket-ai-native-an3-a-review-followup.md`。
 
 ## 2026-08-20 AI-native AN3-A Voice Lane Foundation
 
