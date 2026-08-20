@@ -441,11 +441,7 @@ internal sealed class CapabilityBrokerVerifier
             AppContext.BaseDirectory,
             "PocketApps",
             "local.example.today-focus"));
-        var timeZone = TimeZoneInfo.CreateCustomTimeZone(
-            $"JST-pocket-{Guid.NewGuid():N}",
-            TimeSpan.FromHours(9),
-            "JST",
-            "JST");
+        var timeZone = TimeZoneInfo.FindSystemTimeZoneById("Tokyo Standard Time");
         var stateRoot = Path.Combine(root, "pocket-app-user-state");
         using var userStateStore = new PocketAppUserStateStore(
             package.Manifest.Id,
@@ -494,7 +490,11 @@ internal sealed class CapabilityBrokerVerifier
         Require(loadResponse is not null, "pocket_app_host_load_response");
         using (var loadDocument = JsonDocument.Parse(loadResponse!))
         {
-            Require(loadDocument.RootElement.GetProperty("error").ValueKind == JsonValueKind.Null, "pocket_app_host_load");
+            if (loadDocument.RootElement.GetProperty("error").ValueKind != JsonValueKind.Null)
+            {
+                _failures.Add("pocket_app_host_load");
+                return;
+            }
             var firstQuery = loadDocument.RootElement.GetProperty("result")
                 .GetProperty("queryResults")[0];
             Require(
