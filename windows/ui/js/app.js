@@ -1147,6 +1147,8 @@ function voiceErrorText(value) {
     voice_realtime_start_failed: "voiceErrorRealtimeFailed",
     voice_realtime_stop_failed: "voiceErrorRealtimeStopped",
     voice_realtime_error: "voiceErrorRealtimeStopped",
+    installed_broker_only_tool_policy_missing: "voiceErrorBrokerOnlyPolicyMissing",
+    installed_broker_only_tool_policy_not_approved: "voiceErrorBrokerOnlyPolicyMissing",
   };
   const key = keys[value];
   return key ? t(key) : null;
@@ -1540,7 +1542,9 @@ window.__hoverPocketVerify = {
       && typeof applyVoiceTransportSignal === "function"
       && typeof disposeLocalVoiceTransport === "function"
       && voiceErrorText("microphone_denied") === "Microphone access was not allowed"
-      && voiceErrorText("invalid_remote_sdp") === "The Voice connection response could not be verified";
+      && voiceErrorText("invalid_remote_sdp") === "The Voice connection response could not be verified"
+      && voiceErrorText("installed_broker_only_tool_policy_missing")
+        === "Voice was stopped because this Codex version cannot enforce Broker-only tools";
     setLanguage(state.settings.language);
     renderVoiceLane(state);
     window.__hoverPocketVerifyStep = "complete";

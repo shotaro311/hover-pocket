@@ -11,6 +11,10 @@
       "contentItems",
       "success"
     ],
+    "environments": [],
+    "positiveToolPolicy": "dynamicToolsOnly",
+    "codex0145SupportsPositiveToolPolicy": false,
+    "productionActivationApproved": false,
     "sandbox": "read-only",
     "approvalPolicy": "never",
     "namespace": "hoverpocket"
@@ -22,7 +26,8 @@
       "capabilityVersion": 1,
       "permission": "calendar.events.read",
       "write": false,
-      "nativeApproval": false
+      "nativeApproval": false,
+      "hostGrantRequired": true
     },
     {
       "name": "timer_countdown_start",
@@ -43,6 +48,10 @@
     "sessionCancellationRevokesPendingWrites": true,
     "repeatedCallExecutesOnce": true,
     "calendarTitlesAreUntrustedData": true,
+    "calendarGrantIsPersistedAndRevocable": true,
+    "timerApprovalSingleFlight": true,
+    "timerPromptRateLimitedBeforePresentation": true,
+    "productionFailsClosedWithoutPositiveToolPolicy": true,
     "settingsReceivesToolPayload": false,
     "auditStoresToolPayload": false
   },

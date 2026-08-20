@@ -19,6 +19,9 @@ const voiceEnabledEl = document.querySelector("[data-voice-enabled]");
 const voiceEnabledLabelEl = document.querySelector("[data-voice-enabled-label]");
 const voiceLayoutEl = document.querySelector("[data-voice-layout]");
 const voiceNoteEl = document.querySelector("[data-voice-note]");
+const voiceCalendarAccessEl = document.querySelector("[data-voice-calendar-access]");
+const voiceCalendarLabelEl = document.querySelector("[data-voice-calendar-label]");
+const voiceCalendarNoteEl = document.querySelector("[data-voice-calendar-note]");
 const pocketGenerationEl = document.querySelector("[data-pocket-generation]");
 const pocketGenerationNoteEl = document.querySelector("[data-pocket-generation-note]");
 const pocketGenerationRequestEl = document.querySelector("[data-pocket-generation-request]");
@@ -111,8 +114,15 @@ function render(state) {
     ? "Enable Voice Lane"
     : "Voice Laneを有効化";
   voiceNoteEl.textContent = state.settings.language === "en"
-    ? "Off by default. Windows Voice starts only after an explicit microphone click and uses experimental Codex Realtime. Tool execution remains unavailable in this phase."
-    : "既定はオフです。Windowsの音声会話はマイクの明示クリック後だけ開始し、Codexの実験的Realtimeを使用します。この段階ではTool実行を行いません。";
+    ? "Off by default. Voice starts only when Codex exposes a Host-verified Broker-only tool policy. Unsupported versions stay safely stopped. Timer requests require native approval every time."
+    : "既定はオフです。CodexがHost検証済みのBroker限定ツール方針に対応する場合だけ音声会話を開始します。未対応版では安全に停止します。Timerは毎回ネイティブ承認を求めます。";
+  voiceCalendarAccessEl.checked = Boolean(state.settings.voiceCalendarAccessGranted);
+  voiceCalendarLabelEl.textContent = state.settings.language === "en"
+    ? "Share today's event titles and times with Codex"
+    : "今日の予定名と時刻をCodexへ共有";
+  voiceCalendarNoteEl.textContent = state.settings.language === "en"
+    ? "Separate from Google sign-in and microphone access. You can revoke this permission at any time."
+    : "Googleログインやマイク権限とは別の許可です。いつでも取り消せます。";
   renderSegment(voiceLayoutEl, [
     { id: "compact", label: state.settings.language === "en" ? "Compact" : "コンパクト" },
     { id: "expanded", label: state.settings.language === "en" ? "Expanded" : "展開" },
@@ -480,6 +490,10 @@ aiNativeEl.addEventListener("change", () => {
 
 voiceEnabledEl.addEventListener("change", () => {
   update("settings.setVoiceEnabled", { enabled: voiceEnabledEl.checked });
+});
+
+voiceCalendarAccessEl.addEventListener("change", () => {
+  update("settings.setVoiceCalendarAccess", { enabled: voiceCalendarAccessEl.checked });
 });
 
 handleSideAreaEl.addEventListener("change", () => {

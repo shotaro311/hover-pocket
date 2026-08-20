@@ -164,6 +164,14 @@ def main() -> None:
         / "Voice"
         / "CodexVoiceDynamicToolRuntime.cs"
     ).read_text(encoding="utf-8")
+    windows_timer_approval = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Voice"
+        / "VoiceTimerApprovalCoordinator.cs"
+    ).read_text(encoding="utf-8")
     windows_verifier = (
         ROOT
         / "windows"
@@ -278,6 +286,10 @@ def main() -> None:
         fail("Windows Settings Voice controls missing")
     if 'settings.setVoiceEnabled' not in windows_settings_js or 'settings.setVoiceLayout' not in windows_settings_js:
         fail("Windows Settings Voice routes missing")
+    if 'data-voice-calendar-access' not in windows_settings_html \
+            or 'settings.setVoiceCalendarAccess' not in windows_settings_js \
+            or 'voiceCalendarAccessGranted' not in bridge:
+        fail("Windows Voice Calendar Host grant controls missing")
     if "new AiLaneVerifier().Run()" not in windows_app or "new VoiceFoundationVerifier().Run()" not in windows_app:
         fail("Windows legacy and Voice verifiers are not separate")
     if 'verifyTarget, "voice"' not in windows_options:
@@ -419,7 +431,7 @@ def main() -> None:
         fail("Windows Voice root thread is not constrained to no-action mode")
     if "generate-json-schema" not in windows_runtime \
             or "--experimental" not in windows_runtime \
-            or "CodexVoiceSchemaContract.IsCompatible" not in windows_runtime \
+            or "CodexVoiceSchemaContract.CompatibilityError" not in windows_runtime \
             or "WindowsProcessJob.CreateKillOnClose()" not in windows_runtime:
         fail("installed Codex experimental schema is not probed before launch")
     if "getUserMedia" not in app_js \
@@ -469,6 +481,10 @@ def main() -> None:
         "threadStartField": "dynamicTools",
         "requestMethod": "item/tool/call",
         "responseFields": ["contentItems", "success"],
+        "environments": [],
+        "positiveToolPolicy": "dynamicToolsOnly",
+        "codex0145SupportsPositiveToolPolicy": False,
+        "productionActivationApproved": False,
         "sandbox": "read-only",
         "approvalPolicy": "never",
         "namespace": "hoverpocket",
@@ -481,6 +497,11 @@ def main() -> None:
             or 'new HashSet<string>(["calendar.events.read"]' not in windows_dynamic_tools \
             or 'new HashSet<string>(["timer.write"]' not in windows_dynamic_tools:
         fail("Voice dynamic tools do not map to the shared Capability Registry/Broker")
+    calendar_grant_check = windows_dynamic_tools.find("if (!_calendarAccessGranted())")
+    calendar_permission = windows_dynamic_tools.find('new HashSet<string>(["calendar.events.read"]')
+    if calendar_grant_check < 0 or calendar_permission < 0 or calendar_grant_check >= calendar_permission \
+            or 'return Failure("permission_denied")' not in windows_dynamic_tools:
+        fail("Voice Calendar permission is not resolved from the Host grant before Provider access")
     if "CapabilityApprovalDecision.Approve" not in windows_dynamic_tools \
             or "CapabilityApprovalDecision.Reject" not in windows_dynamic_tools \
             or "CapabilityReadbackStatus.Verified" not in windows_dynamic_tools \
@@ -492,15 +513,26 @@ def main() -> None:
         fail("Voice tool calls are not root-bound and idempotently coalesced")
     if 'request.Method == "item/tool/call"' not in windows_coordinator \
             or "dynamicTools = _dynamicToolRuntime.Definitions" not in windows_coordinator \
+            or "dynamicToolsOnly = true" not in windows_coordinator \
+            or "environments = Array.Empty<object>()" not in windows_coordinator \
+            or "ReferenceEquals(CurrentActiveRealtime(client), active)" not in windows_coordinator \
+            or "result.ProtocolResult,\n                cancellation.Token" not in windows_coordinator \
             or "ReplyResultAsync" not in windows_coordinator \
             or "CancelActiveToolRequests" not in windows_coordinator:
         fail("Voice coordinator does not route/cancel the bounded dynamic tool protocol")
     if 'HasProperty(threadStart.RootElement, "dynamicTools")' not in windows_runtime \
+            or 'HasBooleanProperty(threadStart.RootElement, "properties", "dynamicToolsOnly")' not in windows_runtime \
+            or 'HasProperty(threadStart.RootElement, "environments")' not in windows_runtime \
+            or "BrokerOnlyToolPolicyProductionApproved = false" not in windows_runtime \
             or 'ContainsString(serverRequest.RootElement, "item/tool/call")' not in windows_runtime \
             or 'RequiredContains(toolResponse.RootElement, "contentItems", "success")' not in windows_runtime:
         fail("installed Codex schema gate does not require the dynamic tool protocol")
     if "RequestVoiceTimerApprovalAsync" not in bridge \
-            or "MessageBoxResult.No" not in bridge \
+            or "VoiceTimerApprovalCoordinator" not in bridge \
+            or "MaximumPromptsPerWindow = 3" not in windows_timer_approval \
+            or "if (_active || _promptStarts.Count >= MaximumPromptsPerWindow)" not in windows_timer_approval \
+            or "dialog.Close();" not in windows_timer_approval \
+            or "IsDefault = true" not in windows_timer_approval \
             or "approvalOwner: () => this" not in windows_panel:
         fail("Voice Timer write is not bound to a visible Host-owned native approval")
     capability_boundaries = capability_fixture["boundaries"]
@@ -516,6 +548,10 @@ def main() -> None:
             "sessionCancellationRevokesPendingWrites",
             "repeatedCallExecutesOnce",
             "calendarTitlesAreUntrustedData",
+            "calendarGrantIsPersistedAndRevocable",
+            "timerApprovalSingleFlight",
+            "timerPromptRateLimitedBeforePresentation",
+            "productionFailsClosedWithoutPositiveToolPolicy",
     )) or not all(capability_fixture["outOfScope"].values()):
         fail("AN3-B2 safety boundary or remaining scope is incomplete")
     if "voiceTransportContractOk" not in app_js \
@@ -528,6 +564,7 @@ def main() -> None:
             or "realtime-transport" not in windows_verifier \
             or "realtime-sdp-fence" not in windows_verifier \
             or 'RunCaseAsync("dynamic-tools"' not in windows_verifier \
+            or 'RunCaseAsync("timer-approval-gate"' not in windows_verifier \
             or 'RunCaseAsync("dynamic-tool-roundtrip"' not in windows_verifier:
         fail("AN3-B1 deterministic transport regressions are incomplete")
 

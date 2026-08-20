@@ -129,6 +129,7 @@ internal sealed class UserSettingsStore
             AutoCheckForUpdates = true,
             AiNativeEnabled = false,
             VoiceEnabled = false,
+            VoiceCalendarAccessGranted = false,
             VoiceLaneLayout = VoiceLaneLayoutPreference.Compact,
             RememberLastSelectedProvider = true,
             PreferredProviderId = providerIds.FirstOrDefault(),

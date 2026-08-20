@@ -193,9 +193,10 @@ internal sealed class InstalledCodexVoiceRuntime : ICodexVoiceCompatibilityProbe
 
         try
         {
-            if (!await ProbeSchemaAsync(identity, cancellationToken).ConfigureAwait(false))
+            var schemaError = await ProbeSchemaAsync(identity, cancellationToken).ConfigureAwait(false);
+            if (schemaError is not null)
             {
-                return new CodexVoiceGate(false, true, false, "installed_schema_mismatch");
+                return new CodexVoiceGate(false, true, false, schemaError);
             }
             lock (_sync)
             {
@@ -238,7 +239,7 @@ internal sealed class InstalledCodexVoiceRuntime : ICodexVoiceCompatibilityProbe
             cancellationToken);
     }
 
-    private static async Task<bool> ProbeSchemaAsync(
+    private static async Task<string?> ProbeSchemaAsync(
         CodexExecutableIdentity identity,
         CancellationToken cancellationToken)
     {
@@ -298,7 +299,9 @@ internal sealed class InstalledCodexVoiceRuntime : ICodexVoiceCompatibilityProbe
                 throw new CodexAppServerProtocolException("schema_probe_timeout");
             }
             await Task.WhenAll(stdoutDrain, stderrDrain).ConfigureAwait(false);
-            return process.ExitCode == 0 && CodexVoiceSchemaContract.IsCompatible(schemaRoot);
+            return process.ExitCode == 0
+                ? CodexVoiceSchemaContract.CompatibilityError(schemaRoot)
+                : "installed_schema_mismatch";
         }
         finally
         {
@@ -331,7 +334,13 @@ internal sealed class InstalledCodexVoiceRuntime : ICodexVoiceCompatibilityProbe
 
 internal static class CodexVoiceSchemaContract
 {
-    public static bool IsCompatible(string schemaRoot)
+    // Keep production activation closed until an official positive tool policy has been
+    // independently verified against the delegated Realtime tool router on Windows.
+    internal const bool BrokerOnlyToolPolicyProductionApproved = false;
+
+    public static bool IsCompatible(string schemaRoot) => CompatibilityError(schemaRoot) is null;
+
+    public static string? CompatibilityError(string schemaRoot)
     {
         try
         {
@@ -349,8 +358,9 @@ internal static class CodexVoiceSchemaContract
             using var toolResponse = Load(schemaRoot, "DynamicToolCallResponse.json");
             using var serverRequest = Load(schemaRoot, "ServerRequest.json");
 
-            return HasBooleanProperty(initialize.RootElement, "definitions", "InitializeCapabilities", "properties", "experimentalApi")
+            var protocolCompatible = HasBooleanProperty(initialize.RootElement, "definitions", "InitializeCapabilities", "properties", "experimentalApi")
                 && HasProperty(threadStart.RootElement, "dynamicTools")
+                && HasProperty(threadStart.RootElement, "environments")
                 && RequiredContains(start.RootElement, "threadId", "outputModality")
                 && HasWebRtcTransport(start.RootElement)
                 && RequiredContains(sdp.RootElement, "threadId", "sdp")
@@ -364,13 +374,24 @@ internal static class CodexVoiceSchemaContract
                 && RequiredContains(toolCall.RootElement, "arguments", "callId", "threadId", "tool", "turnId")
                 && RequiredContains(toolResponse.RootElement, "contentItems", "success")
                 && ContainsString(serverRequest.RootElement, "item/tool/call");
+            if (!protocolCompatible)
+            {
+                return "installed_schema_mismatch";
+            }
+            if (!HasBooleanProperty(threadStart.RootElement, "properties", "dynamicToolsOnly"))
+            {
+                return "installed_broker_only_tool_policy_missing";
+            }
+            return BrokerOnlyToolPolicyProductionApproved
+                ? null
+                : "installed_broker_only_tool_policy_not_approved";
         }
         catch (Exception exception) when (exception is IOException
             or UnauthorizedAccessException
             or JsonException
             or KeyNotFoundException)
         {
-            return false;
+            return "installed_schema_mismatch";
         }
     }
 

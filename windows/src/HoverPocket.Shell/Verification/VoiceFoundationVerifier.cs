@@ -51,6 +51,7 @@ internal sealed class VoiceFoundationVerifier
         await RunCaseAsync("runtime-voice-gate", VerifyRuntimeVoiceGateAsync, timeout.Token);
         await RunCaseAsync("realtime-transport", VerifyRealtimeTransportAsync, timeout.Token);
         await RunCaseAsync("dynamic-tools", VerifyDynamicToolsAsync, timeout.Token);
+        await RunCaseAsync("timer-approval-gate", VerifyTimerApprovalGateAsync, timeout.Token);
         await RunCaseAsync("dynamic-tool-roundtrip", VerifyDynamicToolRoundTripAsync, timeout.Token);
         await RunCaseAsync("realtime-sdp-fence", VerifyRealtimeSdpFenceAsync, timeout.Token);
         await RunCaseAsync("probe-failure", VerifyCompatibilityProbeFailureAsync, timeout.Token);
@@ -151,7 +152,8 @@ internal sealed class VoiceFoundationVerifier
         await coordinator.InitializeAsync(cancellationToken);
         if (factoryCalls != 0
             || coordinator.Snapshot.Availability != expected
-            || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure)
+            || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure
+            || coordinator.Snapshot.LastErrorCode != gate.SafeErrorCode)
         {
             _failures.Add($"{label} did not fail closed before transport");
         }
@@ -324,8 +326,9 @@ internal sealed class VoiceFoundationVerifier
             using var timerStore = new TimerStore(
                 Path.Combine(root, "timer"),
                 enableScheduler: false);
+            var calendarDataSource = new VoiceCalendarDataSource(now);
             var handlers = new PocketCapabilityHandlerSet([
-                new CalendarListCapabilityHandler(new VoiceCalendarDataSource(now)),
+                new CalendarListCapabilityHandler(calendarDataSource),
                 new TimerCapabilityHandler(TimerCapabilityOperation.Start, timerStore),
                 new TimerCapabilityHandler(TimerCapabilityOperation.Get, timerStore)
             ]);
@@ -335,6 +338,7 @@ internal sealed class VoiceFoundationVerifier
                 new CapabilityBrokerLedger(brokerRoot),
                 new CapabilityBrokerAuditLog(brokerRoot));
             var approve = false;
+            var calendarGranted = false;
             var approvalCalls = 0;
             VoiceTimerApprovalRequest? presented = null;
             var runtime = new CodexVoiceCapabilityRuntime(
@@ -346,6 +350,7 @@ internal sealed class VoiceFoundationVerifier
                     presented = request;
                     return Task.FromResult(approve);
                 },
+                () => calendarGranted,
                 () => "Etc/UTC",
                 () => now);
 
@@ -353,23 +358,43 @@ internal sealed class VoiceFoundationVerifier
             if (definitions.ValueKind != JsonValueKind.Array
                 || definitions.GetArrayLength() != 1
                 || definitions[0].GetProperty("name").GetString() != CodexVoiceCapabilityRuntime.Namespace
-                || definitions[0].GetProperty("tools").GetArrayLength() != 2)
+                || definitions[0].GetProperty("tools").GetArrayLength() != 1
+                || definitions[0].GetProperty("tools")[0].GetProperty("name").GetString()
+                    != CodexVoiceCapabilityRuntime.TimerStartTool)
             {
-                _failures.Add("dynamic tool definitions were not limited to Calendar and Timer");
+                _failures.Add("Voice Calendar tool was exposed without a Host grant");
             }
 
-            var calendar = await runtime.ExecuteAsync(
+            var deniedCalendar = await runtime.ExecuteAsync(
                 ToolCall("root-voice", "turn-calendar", "call-calendar", CodexVoiceCapabilityRuntime.CalendarListTool, new { }),
+                "root-voice",
+                cancellationToken);
+            if (deniedCalendar.Success
+                || !deniedCalendar.Text.Contains("permission_denied", StringComparison.Ordinal)
+                || calendarDataSource.ListCalls != 0)
+            {
+                _failures.Add("Voice Calendar read reached the Provider without a Host grant");
+            }
+
+            calendarGranted = true;
+            definitions = runtime.Definitions;
+            if (definitions[0].GetProperty("tools").GetArrayLength() != 2)
+            {
+                _failures.Add("Host-granted Voice Calendar tool was not published");
+            }
+            var calendar = await runtime.ExecuteAsync(
+                ToolCall("root-voice", "turn-calendar-granted", "call-calendar-granted", CodexVoiceCapabilityRuntime.CalendarListTool, new { }),
                 "root-voice",
                 cancellationToken);
             using var calendarPayload = JsonDocument.Parse(calendar.Text);
             if (!calendar.Success
                 || approvalCalls != 0
+                || calendarDataSource.ListCalls != 1
                 || calendarPayload.RootElement.GetProperty("events").GetArrayLength() != 1
                 || calendarPayload.RootElement.GetProperty("events")[0]
                     .GetProperty("safeTitle").GetString() != "Team review ignored")
             {
-                _failures.Add("Voice Calendar read did not use the Broker without a write approval");
+                _failures.Add("Host-granted Voice Calendar read did not use the Broker without per-call approval");
             }
 
             var crossRoot = await runtime.ExecuteAsync(
@@ -458,6 +483,82 @@ internal sealed class VoiceFoundationVerifier
         }
     }
 
+    private async Task VerifyTimerApprovalGateAsync(CancellationToken cancellationToken)
+    {
+        var singleFlight = new VoiceTimerApprovalCoordinator();
+        using var firstCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var presented = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = singleFlight.RequestAsync(
+            new VoiceTimerApprovalRequest("First", 60),
+            async (_, token) =>
+            {
+                presented.TrySetResult(true);
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return true;
+            },
+            firstCancellation.Token);
+        await presented.Task.WaitAsync(cancellationToken);
+        var concurrentRejected = false;
+        try
+        {
+            _ = await singleFlight.RequestAsync(
+                new VoiceTimerApprovalRequest("Second", 60),
+                (_, _) => Task.FromResult(false),
+                cancellationToken);
+        }
+        catch (CapabilityBrokerException exception) when (exception.Code == "CAPABILITY_RATE_LIMITED")
+        {
+            concurrentRejected = true;
+        }
+        firstCancellation.Cancel();
+        try
+        {
+            _ = await first;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        if (!concurrentRejected)
+        {
+            _failures.Add("concurrent Voice Timer approvals were queued instead of rejected");
+        }
+
+        var now = new DateTimeOffset(2026, 8, 21, 9, 0, 0, TimeSpan.Zero);
+        var rateGate = new VoiceTimerApprovalCoordinator(() => now);
+        var presentationCalls = 0;
+        for (var index = 0; index < VoiceTimerApprovalCoordinator.MaximumPromptsPerWindow; index++)
+        {
+            _ = await rateGate.RequestAsync(
+                new VoiceTimerApprovalRequest($"Rejected {index}", 60),
+                (_, _) =>
+                {
+                    presentationCalls++;
+                    return Task.FromResult(false);
+                },
+                cancellationToken);
+        }
+        var rateLimited = false;
+        try
+        {
+            _ = await rateGate.RequestAsync(
+                new VoiceTimerApprovalRequest("Flood", 60),
+                (_, _) =>
+                {
+                    presentationCalls++;
+                    return Task.FromResult(false);
+                },
+                cancellationToken);
+        }
+        catch (CapabilityBrokerException exception) when (exception.Code == "CAPABILITY_RATE_LIMITED")
+        {
+            rateLimited = true;
+        }
+        if (!rateLimited || presentationCalls != VoiceTimerApprovalCoordinator.MaximumPromptsPerWindow)
+        {
+            _failures.Add("rejected Voice Timer prompts bypassed the pre-presentation rate limit");
+        }
+    }
+
     private async Task VerifyDynamicToolRoundTripAsync(CancellationToken cancellationToken)
     {
         var harness = new AppServerHarness();
@@ -496,7 +597,12 @@ internal sealed class VoiceFoundationVerifier
             || harness.RequestParameters("thread/start") is not { } startParameters
             || !startParameters.TryGetProperty("dynamicTools", out var tools)
             || tools.ValueKind != JsonValueKind.Array
-            || tools.GetArrayLength() != 1)
+            || tools.GetArrayLength() != 1
+            || !startParameters.TryGetProperty("dynamicToolsOnly", out var dynamicOnly)
+            || dynamicOnly.ValueKind != JsonValueKind.True
+            || !startParameters.TryGetProperty("environments", out var environments)
+            || environments.ValueKind != JsonValueKind.Array
+            || environments.GetArrayLength() != 0)
         {
             _failures.Add("app-server dynamic tool request/response did not stay on the active Voice root");
         }
@@ -516,12 +622,13 @@ internal sealed class VoiceFoundationVerifier
         await runtime.BlockedCallStarted.WaitAsync(cancellationToken);
         await coordinator.StopRealtimeAsync(cancellationToken);
         await WaitUntilAsync(
-            () => runtime.CancelledCallCount == 1
-                && harness.ServerResponses.Any(item => item.GetProperty("id").GetInt64() == 7002),
+            () => runtime.CancelledCallCount == 1,
             cancellationToken);
-        if (runtime.CancelledCallCount != 1)
+        await Task.Delay(25, cancellationToken);
+        if (runtime.CancelledCallCount != 1
+            || harness.ServerResponses.Any(item => item.GetProperty("id").GetInt64() == 7002))
         {
-            _failures.Add("stopping Voice did not revoke the in-flight dynamic tool request");
+            _failures.Add("stopping Voice did not revoke the in-flight dynamic tool request before reply");
         }
     }
 
@@ -1245,12 +1352,15 @@ internal sealed class VoiceFoundationVerifier
 
     private sealed class VoiceCalendarDataSource(DateTimeOffset now) : ICalendarCapabilityDataSource
     {
+        public int ListCalls { get; private set; }
+
         public Task<IReadOnlyList<CalendarCapabilityEvent>> ListEventsAsync(
             DateTimeOffset start,
             DateTimeOffset end,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            ListCalls++;
             IReadOnlyList<CalendarCapabilityEvent> events =
             [
                 new CalendarCapabilityEvent(

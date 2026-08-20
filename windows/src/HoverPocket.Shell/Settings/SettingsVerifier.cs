@@ -49,12 +49,14 @@ internal sealed class SettingsVerifier
         using var _ = controller.Attach(
             dispatcher,
             BridgeSurface.Settings,
-            aiNativeEnableDecision: () => true);
+            aiNativeEnableDecision: () => true,
+            voiceCalendarAccessDecision: () => true);
         var deniedSettingsDispatcher = new BridgeDispatcher();
         using var deniedSettingsAttachment = controller.Attach(
             deniedSettingsDispatcher,
             BridgeSurface.Settings,
-            aiNativeEnableDecision: () => false);
+            aiNativeEnableDecision: () => false,
+            voiceCalendarAccessDecision: () => false);
         var panelDispatcher = new BridgeDispatcher();
         using var panelAttachment = controller.Attach(panelDispatcher, BridgeSurface.Panel);
 
@@ -80,6 +82,8 @@ internal sealed class SettingsVerifier
             """{"id":"0p","method":"settings.setAiNativeEnabled","params":{"enabled":true}}""");
         var panelVoiceEnable = await panelDispatcher.ProcessRawMessageAsync(
             """{"id":"0v","method":"settings.setVoiceEnabled","params":{"enabled":true}}""");
+        var panelVoiceCalendar = await panelDispatcher.ProcessRawMessageAsync(
+            """{"id":"0c","method":"settings.setVoiceCalendarAccess","params":{"enabled":true}}""");
         if (panelEnable?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true)
         {
             _failures.Add("panel bridge exposed the Settings-only AI-native toggle");
@@ -88,6 +92,10 @@ internal sealed class SettingsVerifier
         {
             _failures.Add("panel bridge exposed the Settings-only Voice enable toggle");
         }
+        if (panelVoiceCalendar?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true)
+        {
+            _failures.Add("panel bridge exposed the Settings-only Voice Calendar grant");
+        }
         var deniedEnable = await Send(
             deniedSettingsDispatcher,
             """{"id":"0d","method":"settings.setAiNativeEnabled","params":{"enabled":true}}""");
@@ -95,6 +103,14 @@ internal sealed class SettingsVerifier
             || store.ReloadOrDefault(registry.ProviderIds).AiNativeEnabled)
         {
             _failures.Add("native default-No AI-native approval was bypassed");
+        }
+        var deniedCalendar = await Send(
+            deniedSettingsDispatcher,
+            """{"id":"0dc","method":"settings.setVoiceCalendarAccess","params":{"enabled":true}}""");
+        if (!deniedCalendar.Contains("\"voiceCalendarAccessGranted\":false", StringComparison.Ordinal)
+            || store.ReloadOrDefault(registry.ProviderIds).VoiceCalendarAccessGranted)
+        {
+            _failures.Add("native default-No Voice Calendar approval was bypassed");
         }
 
         await Send(dispatcher, """{"id":"1","method":"settings.setLanguage","params":{"language":"en"}}""");
@@ -112,6 +128,7 @@ internal sealed class SettingsVerifier
         {
             _failures.Add("AI-native enable setting hot-started generation runtime or workspace");
         }
+        await Send(dispatcher, """{"id":"7vc","method":"settings.setVoiceCalendarAccess","params":{"enabled":true}}""");
         await Send(dispatcher, """{"id":"7v","method":"settings.setVoiceEnabled","params":{"enabled":true}}""");
         await Send(dispatcher, """{"id":"7vl","method":"settings.setVoiceLayout","params":{"layout":"expanded"}}""");
         await Send(dispatcher, """{"id":"7s","method":"sticky.setUndoToastVisible","params":{"visible":false}}""");
@@ -138,6 +155,7 @@ internal sealed class SettingsVerifier
             || written.AutoCheckForUpdates
             || !written.AiNativeEnabled
             || !written.VoiceEnabled
+            || !written.VoiceCalendarAccessGranted
             || written.VoiceLaneLayout != VoiceLaneLayoutPreference.Expanded)
         {
             _failures.Add("settings write/read did not preserve scalar values");
@@ -517,6 +535,7 @@ internal sealed class SettingsVerifier
             || !defaults.AutoCheckForUpdates
             || defaults.AiNativeEnabled
             || defaults.VoiceEnabled
+            || defaults.VoiceCalendarAccessGranted
             || defaults.VoiceLaneLayout != VoiceLaneLayoutPreference.Compact
             || !defaults.RememberLastSelectedProvider
             || defaults.PreferredProviderId != "controls"

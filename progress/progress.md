@@ -2,8 +2,17 @@
 project_slug: hover-menu-preview
 updated: 2026-08-21
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; capability-expansion-merged
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-security-remediation-local-verified; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; capability-expansion-merged
 ---
+
+## 2026-08-21 AI-native AN3-B2 Voice Capability Security Remediation
+
+- Draft PR #22のexact head `c9be7e4`を対象にしたSecurity scan `84b21db5-185f-4300-b813-3e150a52a11a`で、Codex RealtimeがHoverPocketのdynamic toolsに加えてambient shell / MCP / app / plugin / extensionを継承し得るHigh、Voice Calendar permissionをruntime自身が生成するMedium、Timer native approvalを並行要求で滞留させ得るLowの3件を確認した。
+- Codex app-server 0.145.0の`dynamicTools`は既存toolへの追加であり、`read-only`、`approvalPolicy=never`、instructions、`environments=[]`だけではBroker限定を証明できない。実生成schemaにも正のtool policyがないことをreadbackした。このため、official positive allowlistとdelegated turn E2Eを確認済みのversionだけを明示承認するproduction gateを追加し、現行0.145.0はapp-server開始前に固定理由でfail closedにした。将来fieldが追加されてもsource側の承認定数を自動解除しない。
+- Calendar予定名 / 時刻のCodex共有は、Google接続・Voice有効化・Microphoneとは別のSettings permissionとして既定OFF、native approval、永続化、取り消し可能にした。許可前はCalendar toolを定義へ含めず、runtime再確認でもProvider呼出しを0件にする。許可変更中のactive Voiceは停止して再構成する。
+- TimerはHost-owned custom WPF dialogへexact title / durationを表示し、既定操作をキャンセルにした。native promptは同時1件、1分3件までとし、拒否もrate limitへ数える。session取消ではqueued / visible dialogを閉じ、未使用Broker approvalをrejectし、停止後のtool resultをapp-serverへ返さない。
+- ローカルではSwift warnings-as-errors build、macOS Voice foundation、Panel layout 128件、Capability 14 handler、Broker、Pocket Surface、Pocket App package / lifecycle / generation、Timer、Voice contract 42件、共通contract 13 schema / 60 fixture、Settings generation、Windows JavaScript syntax、`git diff --check`が成功した。このMacには.NETがないため、Windows Release build、Voice / Settings / rendered WebView /既存Provider verifierはpush後CIを最終gateとする。
+- 詳細: `progress/2026-08/2026-08-21_hover-pocket-ai-native-an3-b2-security.md`。修正commit / CI /再Security scan / PR review readbackは未完了である。
 
 ## 2026-08-21 AI-native AN3-B1 Windows Voice Runtime
 
