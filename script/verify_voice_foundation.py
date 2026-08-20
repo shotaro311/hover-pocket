@@ -234,6 +234,9 @@ def main() -> None:
         fail("Windows panel geometry follows settings before Voice teardown completes")
     if "CodexVoiceSessionStatus.Stopping" not in windows_coordinator:
         fail("Windows Voice teardown does not publish a stopping state")
+    if 'voiceLaneEl.hidden = mode === "disabled";' not in app_js \
+            or "voiceTeardownVisibleOk" not in app_js:
+        fail("Windows rendered Voice row disappears before runtime teardown completes")
     if 'data-voice-enabled' not in windows_settings_html or 'data-voice-layout' not in windows_settings_html:
         fail("Windows Settings Voice controls missing")
     if 'settings.setVoiceEnabled' not in windows_settings_js or 'settings.setVoiceLayout' not in windows_settings_js:

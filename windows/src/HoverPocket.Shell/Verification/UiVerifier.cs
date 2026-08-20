@@ -42,6 +42,11 @@ internal sealed class UiVerifier
                     _failures.Add("voice: default-off or legacy lane absence regressed");
                 }
 
+                if (!result.VoiceTeardownVisibleOk)
+                {
+                    _failures.Add("voice: lane disappeared before runtime teardown completed");
+                }
+
                 if (!result.VoiceLocalizationOk)
                 {
                     _failures.Add("voice: Japanese and English lane copy did not render correctly");

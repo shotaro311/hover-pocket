@@ -445,7 +445,7 @@ function renderVoiceLane(state) {
   voiceLaneEl.setAttribute("aria-label", t("voiceRegionLabel"));
   const lane = state.voiceLane;
   const mode = lane?.mode ?? "disabled";
-  voiceLaneEl.hidden = !state.settings.voiceEnabled || mode === "disabled";
+  voiceLaneEl.hidden = mode === "disabled";
   voiceLaneEl.dataset.mode = mode;
   if (voiceLaneEl.hidden) {
     return;
@@ -1059,6 +1059,13 @@ window.__hoverPocketVerify = {
         progress: { completed: 1, total: 2 },
       }],
     };
+    renderVoiceLane({
+      settings: { voiceEnabled: false },
+      voiceLane: { ...voiceFixture, mode: "compact", sessionStatus: "stopping" },
+    });
+    const voiceTeardownVisibleOk = !voiceLaneEl.hidden
+      && voiceLaneEl.dataset.mode === "compact"
+      && voiceLaneEl.querySelector(".hp-voice-compact") !== null;
     setLanguage("ja");
     renderVoiceLane({
       settings: { voiceEnabled: true },
@@ -1117,6 +1124,7 @@ window.__hoverPocketVerify = {
       echoOk: echo?.value === "ui-round-trip",
       legacyAiLaneNotMountedOk,
       voiceDefaultOffOk,
+      voiceTeardownVisibleOk,
       voiceLocalizationOk,
       controlsRenderedOk,
       controlsLayoutOk,

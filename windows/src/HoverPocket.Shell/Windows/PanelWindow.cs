@@ -882,6 +882,7 @@ internal sealed record UiWebVerifyResult(
     bool EchoOk,
     bool LegacyAiLaneNotMountedOk,
     bool VoiceDefaultOffOk,
+    bool VoiceTeardownVisibleOk,
     bool VoiceLocalizationOk,
     bool ControlsRenderedOk,
     bool ControlsLayoutOk,
