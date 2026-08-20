@@ -98,6 +98,14 @@ Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pock
 Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml
 ```
 
+MacまたはCIからは、Windows releaseだけでなくmacOS appcastが変わっていないことも同時に機械検証できます。`auto`はdraft / prereleaseを除外した公開済み`win-v...`タグの最大semantic versionを選びます。公開された全Windows assetを再取得し、実測hashをfeed、checksum、GitHub metadataと照合します。GitHubの汎用Latestはrelease選択には使わず、期待するmacOS versioned releaseのままであることの確認にだけ使います。
+
+```bash
+python3 script/verify_release_readback.py --windows-tag auto --windows-signing-gate beta
+```
+
+1.0正式版では`Verify Published Release Readback` workflowを`formal`で手動実行します。`release-manifest.win.json`の`authenticode=signed-timestamped-verified`に加え、Windows上で公開Setup、Portable内`HoverPocket.Shell.exe`、Velopack full update package内`HoverPocket.Shell.exe`の実Authenticode署名、タイムスタンプ、署名者一致が揃わない限り配布完了にしません。
+
 ## Local privacy notes
 
 AI command lane の audit log は `%APPDATA%\HoverPocket\auditlog\ailane-YYYYMMDD.jsonl` に保存します。
