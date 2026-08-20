@@ -62,6 +62,8 @@
 - `VoiceTranscriptEvent`へsanitized root session IDを必須追加し、現在rootと一致しない遅延eventを両OSruntimeで拒否する。root Aから遅延したeventとroot Bの正常eventをroot切替後に投入し、Bだけが残ることを検証した。
 - Windows [32415595849](https://github.com/shotaro311/hover-pocket/actions/runs/32415595849)、macOS [32415595831](https://github.com/shotaro311/hover-pocket/actions/runs/32415595831)、3OS contract [32415595783](https://github.com/shotaro311/hover-pocket/actions/runs/32415595783)、Router [32415591319](https://github.com/shotaro311/hover-pocket/actions/runs/32415591319)は成功した。
 - Security scan `b520fb75-bb1d-4bb8-bd4b-6c14d04b434b`は7 / 7、`c90ca20e-099c-4c0d-ae80-8d1a6d59fea4`は6 / 6を確認し、いずれもfinding 0、sealed complete。PR #19は未解決review 0、`CLEAN / MERGEABLE`、remote parity `0 / 0`である。
+- 最終source head `fd616529070632b0c30a7047969a9c668bb4e2c6`では、Swiftのsynthesized `Decodable`がcustom initializerを迂回しても、transcript / sessionをruntime境界で再構築してID、root、visible text、progressを再検証する。同一event IDは既存位置で置換し、確定済みeventを遅延interimで戻さない。Windowsも同じdeduplication契約を持つ。
+- 最終CIはWindows [32416504434](https://github.com/shotaro311/hover-pocket/actions/runs/32416504434)、macOS [32416504417](https://github.com/shotaro311/hover-pocket/actions/runs/32416504417)、3OS contract [32416504404](https://github.com/shotaro311/hover-pocket/actions/runs/32416504404)、Router [32416501502](https://github.com/shotaro311/hover-pocket/actions/runs/32416501502)が成功した。Security scan `166c9616-3ea4-405a-ac6c-a3778e21b15a`は5 / 5、finding 0、sealed completeである。
 
 ## 未完了gate
 

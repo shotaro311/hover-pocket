@@ -7,9 +7,9 @@ status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-real-voice-pendin
 
 ## 2026-08-21 AI-native AN3-A Review Follow-up
 
-- PR #19の実装head `91a4f41`で、macOS / WindowsのVoice停止中表示、終了時transition drain、system recovery取消直列化、未知transcript role拒否、非損失ID検証、可視テキストのpath / secret / Unicode format control除去、互換性状態のwire値、root単位のtranscript分離を完成させた。旧rootから遅延した文字起こしは、root切替後のbufferへ入らない。
-- Windows [32415595849](https://github.com/shotaro311/hover-pocket/actions/runs/32415595849)はRelease build、Settings、Voice、rendered WebViewまで成功した。macOS [32415595831](https://github.com/shotaro311/hover-pocket/actions/runs/32415595831)、3OS contract / byte比較 [32415595783](https://github.com/shotaro311/hover-pocket/actions/runs/32415595783)、PR Router [32415591319](https://github.com/shotaro311/hover-pocket/actions/runs/32415591319)も成功した。PRは`CLEAN / MERGEABLE`、remote parity `0 / 0`、未解決review thread 0件である。
-- 追加Security scan `b520fb75-bb1d-4bb8-bd4b-6c14d04b434b`（7 / 7）と`c90ca20e-099c-4c0d-ae80-8d1a6d59fea4`（6 / 6）はcoverage complete、finding 0でsealed completeとなった。これ以前のremediation scan 3件もfinding 0である。未完了はPR #21 / #22への通常mergeと各headのCI / review、AN8 release-readback修正である。詳細: `progress/2026-08/2026-08-21_hover-pocket-ai-native-an3-a-review-followup.md`。
+- PR #19の実装head `fd61652`で、macOS / WindowsのVoice停止中表示、終了時transition drain、system recovery取消直列化、未知transcript role拒否、非損失ID検証、可視テキストのpath / secret / Unicode format control除去、互換性状態のwire値、root単位のtranscript分離を完成させた。SwiftのJSON復号でcustom initializerを迂回したevent / sessionもruntime境界で再sanitizationし、同一event IDのinterim / finalは1件へ統合してfinalからinterimへ戻さない。
+- Windows [32416504434](https://github.com/shotaro311/hover-pocket/actions/runs/32416504434)はRelease build、Settings、Voice、rendered WebViewまで成功した。macOS [32416504417](https://github.com/shotaro311/hover-pocket/actions/runs/32416504417)、3OS contract / byte比較 [32416504404](https://github.com/shotaro311/hover-pocket/actions/runs/32416504404)、PR Router [32416501502](https://github.com/shotaro311/hover-pocket/actions/runs/32416501502)も成功した。PRは`CLEAN / MERGEABLE`、remote parity `0 / 0`、未解決review thread 0件である。
+- 追加Security scan `b520fb75-bb1d-4bb8-bd4b-6c14d04b434b`（7 / 7）、`c90ca20e-099c-4c0d-ae80-8d1a6d59fea4`（6 / 6）、`166c9616-3ea4-405a-ac6c-a3778e21b15a`（5 / 5）はcoverage complete、finding 0でsealed completeとなった。これ以前のremediation scan 3件もfinding 0である。未完了はPR #21 / #22への通常mergeと各headのCI / review、AN8 release-readback修正である。詳細: `progress/2026-08/2026-08-21_hover-pocket-ai-native-an3-a-review-followup.md`。
 
 ## 2026-08-20 AI-native AN3-A Voice Lane Foundation
 
