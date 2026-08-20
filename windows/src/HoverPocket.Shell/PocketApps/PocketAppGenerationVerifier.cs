@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using HoverPocket.Shell.Verification;
 
 namespace HoverPocket.Shell.PocketApps;
 
@@ -9,15 +10,32 @@ internal sealed class PocketAppGenerationVerifier
 
     public IReadOnlyList<string> Run()
     {
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN runtime-activation");
         _failures.AddRange(PocketAppRuntimeActivationVerifier.Run());
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END runtime-activation");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN e2e");
         VerifyE2E();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END e2e");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN settings-approval");
         VerifySettingsApprovalBoundary().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END settings-approval");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN preview-only");
         VerifyPreviewOnlyBoundary().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END preview-only");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN failed-activation-refresh");
         VerifyFailedActivationRefreshesManagement().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END failed-activation-refresh");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN committed-receipt");
         VerifyCommittedReceiptSurvivesManagedRefreshFailure().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END committed-receipt");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN pending-proposal");
         VerifyUnrelatedActionPreservesPendingProposal().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END pending-proposal");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN deactivate-flush");
         VerifyDeactivateFlushBoundary().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END deactivate-flush");
         VerifyApprovalTextSanitization();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END approval-text");
         return _failures;
     }
 
