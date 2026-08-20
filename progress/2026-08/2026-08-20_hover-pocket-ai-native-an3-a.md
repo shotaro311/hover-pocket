@@ -4,6 +4,13 @@
 
 AN3を一度に実音声まで有効化せず、まず両OSのHost-owned Voice Laneとapp-server lifecycleをdefault-offで実装した。現時点では承認済みCompact / Expanded UI、root-scoped session表示、パネル非表示時のmute、失敗時のprocess cleanup、Settings surfaceからの会話データ隔離までを受入対象とする。microphone、WebRTC、実Codex Realtime、Capability tool実行はまだproductionで起動しない。
 
+## 追加Codex reviewの修正
+
+- Windows app-server clientは生成直後に受信loopを開始せず、Coordinatorが想定外requestと切断handlerを登録した後にだけ明示開始する。サーバーrequestがclient生成前から待機しているfixtureでもReadyへ昇格せず、`unexpected_server_request`としてfail closedになる回帰を追加した。
+- Voice Laneの表示は内部wire値`waiting_for_approval`と`waiting_for_user`を日本語 / 英語へ変換する。互換性error codeが汎用文字列へ未登録でも、`signedOut` / `schemaMismatch` / `capabilityBlocked`の利用不可理由を優先表示するrendered WebView回帰を追加した。
+- PR #18の最新head `2d8b89c`をmerge commit `68d7273`で取り込み、共有Picker入力のdomain一致とdurationPickerのinput-only契約をPR #19にも含めた。
+- 統合後にmacOS warnings-as-errors build、Voice foundation、Broker、Pocket App 18 negative、Voice contract 42件、共通contract 13 schema / 60 fixture、Windows panel / settings JavaScript構文、`git diff --check`が成功した。Windows C# build、起動直後request競合、rendered WebViewの日本語 / 英語回帰はPR CIを最終gateとする。
+
 ## Git / 土台
 
 - worktree: `/Users/shotaro/code/share/hover-menu-preview-ai-native-an3a`
@@ -12,7 +19,7 @@ AN3を一度に実音声まで有効化せず、まず両OSのHost-owned Voice L
 - AN3-A実装commit: `2b678c0`
 - AN5-C最新head `eb08ebaee12bd9178d4b0f1664f1b29ddd6c6807`の2コミットをmerge済み
 - PR: [#19](https://github.com/shotaro311/hover-pocket/pull/19)
-- 最終source head: `77af78f608b342c9d1069f8ab069440e6d54e8a5`
+- 追加review前source head: `77af78f608b342c9d1069f8ab069440e6d54e8a5`
 - mainへ直接変更せず、AN5-C PR #18上のstacked branchとして扱う
 
 ## 実装
@@ -38,6 +45,7 @@ AN3を一度に実音声まで有効化せず、まず両OSのHost-owned Voice L
 - PanelのHost DOM最下段へVoice Laneを追加し、Settingsからdefault-off / Compact / Expandedを設定できる。
 - `PanelBridgeController`はVoice transcript / session stateをPanel surfaceだけへ返し、Settings stateは`voiceLane: null`とする。
 - app-server JSONL clientは、受信行を固定bufferから読み、改行前に1 MiB上限を強制する。
+- app-server受信loopはCoordinatorがfail-closed request / disconnect handlerを接続してから開始し、起動直後の想定外requestも取りこぼさない。
 - initialize失敗、取消、transport crash、feature OFFでcandidate / active clientとowner process treeを破棄する。
 - 起動途中candidateをCoordinator所有Task / cancellationとして追跡し、Voice OFFは破棄完了後にだけDisabledを返す。app-serverのteardown awaitはWPF dispatcherを捕捉しない。
 - candidate切断とReady昇格の競合は、generation / current client確認とReady snapshot更新を同じlock内で行い、失効candidateがfailed stateをReadyで上書きしない。
@@ -101,7 +109,7 @@ AN3を一度に実音声まで有効化せず、まず両OSのHost-owned Voice L
 - macOS Verify: [32372769330](https://github.com/shotaro311/hover-pocket/actions/runs/32372769330) 成功。
 - 3OS contract / byte比較: [32372769256](https://github.com/shotaro311/hover-pocket/actions/runs/32372769256) 成功。
 - PR Router: [32372766956](https://github.com/shotaro311/hover-pocket/actions/runs/32372766956) 成功。
-- PR #19はhead `77af78f`、`CLEAN`、remote head一致、未解決review thread 0件である。
+- 上記は追加review前head `77af78f`のreadbackである。追加修正headのWindows / macOS / 3OS contract CI、未解決thread 0件、mergeability、remote head一致を再確認して完了判定する。
 
 ## 未完了 / 次のgate
 
