@@ -82,9 +82,10 @@ internal sealed class PanelBridgeController : IDisposable
         _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.NormalizeForBootstrap(settings, providerRegistry.ProviderIds);
-        _voiceCoordinator = voiceCoordinator ?? new CodexVoiceCoordinator(CurrentSettings.VoiceEnabled);
+        _voiceCoordinator = voiceCoordinator ?? CodexVoiceRuntimeComposition.Create(CurrentSettings.VoiceEnabled);
         _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(CurrentSettings);
         _voiceCoordinator.SnapshotChanged += OnVoiceSnapshotChanged;
+        _voiceCoordinator.TransportSignal += OnVoiceTransportSignal;
         _aiNativeExecutionLease = CurrentSettings.AiNativeEnabled
             ? new PocketAppActivationLease()
             : null;
@@ -234,7 +235,8 @@ internal sealed class PanelBridgeController : IDisposable
         BridgeDispatcher dispatcher,
         BridgeSurface surface = BridgeSurface.Panel,
         Func<System.Windows.Window?>? approvalOwner = null,
-        Func<bool>? aiNativeEnableDecision = null)
+        Func<bool>? aiNativeEnableDecision = null,
+        Func<bool>? voiceMicrophoneGesture = null)
     {
         _dispatchers[dispatcher] = surface;
         void Register(
@@ -286,6 +288,15 @@ internal sealed class PanelBridgeController : IDisposable
         if (surface == BridgeSurface.Panel)
         {
             Register("provider.select", SelectProviderAsync);
+            Register(
+                "voice.requestMicrophone",
+                (parameters, cancellationToken) => RequestVoiceMicrophoneAsync(
+                    parameters,
+                    voiceMicrophoneGesture,
+                    cancellationToken));
+            Register("voice.startRealtime", StartVoiceRealtimeAsync);
+            Register("voice.confirmRealtime", ConfirmVoiceRealtimeAsync);
+            Register("voice.abortRealtime", AbortVoiceRealtimeAsync);
             Register("voice.setMuted", SetVoiceMutedAsync);
             Register("voice.setLayout", SetVoiceLayoutAsync);
             Register("voice.endSession", EndVoiceSessionAsync);
@@ -339,6 +350,7 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.MediaSourceOpened -= OnControlsMediaSourceOpened;
         _controlsBridgeController.Dispose();
         _voiceCoordinator.SnapshotChanged -= OnVoiceSnapshotChanged;
+        _voiceCoordinator.TransportSignal -= OnVoiceTransportSignal;
         _voiceCoordinator.Dispose();
         _aiNativeExecutionLease?.Invalidate();
         _pocketAppHostController?.Dispose();
@@ -462,6 +474,7 @@ internal sealed class PanelBridgeController : IDisposable
                     muted = voiceSnapshot.Muted,
                     uiAttached = voiceSnapshot.UiAttached,
                     transportAttached = voiceSnapshot.TransportAttached,
+                    realtimeAttached = voiceSnapshot.RealtimeAttached,
                     rootSessionId = voiceSnapshot.RootSessionId,
                     visibleSessionCount = voiceSnapshot.VisibleSessionCount,
                     transcriptPreview = voiceSnapshot.TranscriptPreview,
@@ -990,11 +1003,58 @@ internal sealed class PanelBridgeController : IDisposable
         return await PublishStateAsync(cancellationToken);
     }
 
-    private async Task<object?> EndVoiceSessionAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    private Task<object?> RequestVoiceMicrophoneAsync(
+        JsonElement? parameters,
+        Func<bool>? registerGesture,
+        CancellationToken cancellationToken)
     {
         _ = parameters;
         cancellationToken.ThrowIfCancellationRequested();
-        _voiceCoordinator.CloseAudioSession();
+        if (!CurrentSettings.VoiceEnabled
+            || !_panelOpen
+            || _voiceCoordinator.Snapshot.Availability != CodexVoiceAvailability.Ready
+            || registerGesture?.Invoke() != true)
+        {
+            throw new CodexAppServerProtocolException("microphone_request_not_allowed");
+        }
+        _voiceCoordinator.BeginMicrophonePermissionRequest();
+        return Task.FromResult<object?>(new { allowedForPrompt = true });
+    }
+
+    private async Task<object?> StartVoiceRealtimeAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        var sdp = ReadRequiredString(parameters, "sdp");
+        var result = await _voiceCoordinator.StartRealtimeAsync(sdp, cancellationToken);
+        return new { generation = result.Generation, threadId = result.ThreadId };
+    }
+
+    private Task<object?> ConfirmVoiceRealtimeAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _voiceCoordinator.ConfirmRealtimeConnected(
+            ReadRequiredInt(parameters, "generation"),
+            ReadRequiredString(parameters, "threadId"));
+        return Task.FromResult<object?>(new { connected = true });
+    }
+
+    private async Task<object?> AbortVoiceRealtimeAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        await _voiceCoordinator.AbortRealtimeStartAsync(
+            ReadRequiredString(parameters, "reason"),
+            cancellationToken);
+        return new { aborted = true };
+    }
+
+    private async Task<object?> EndVoiceSessionAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        await _voiceCoordinator.StopRealtimeAsync(cancellationToken);
         return await PublishStateAsync(cancellationToken);
     }
 
@@ -1161,6 +1221,20 @@ internal sealed class PanelBridgeController : IDisposable
         _ = PostStateEventOnUiThreadAsync("voice.stateChanged");
     }
 
+    private void OnVoiceTransportSignal(object? sender, VoiceTransportSignal signal)
+    {
+        _ = sender;
+        _ = PostPanelEventOnUiThreadAsync(
+            "voice.transportSignal",
+            new
+            {
+                generation = signal.Generation,
+                threadId = signal.ThreadId,
+                type = "answer",
+                sdp = signal.Sdp
+            });
+    }
+
     private void SaveSettings(UserSettings settings)
     {
         CurrentSettings = NormalizeSettings(settings);
@@ -1264,6 +1338,16 @@ internal sealed class PanelBridgeController : IDisposable
         return dispatcher.InvokeAsync(() => PostEventAsync(eventName, payload)).Task.Unwrap();
     }
 
+    private Task PostPanelEventOnUiThreadAsync(string eventName, object? payload)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            return PostPanelEventAsync(eventName, payload);
+        }
+        return dispatcher.InvokeAsync(() => PostPanelEventAsync(eventName, payload)).Task.Unwrap();
+    }
+
     private Task PostStateEventOnUiThreadAsync(string eventName)
     {
         var dispatcher = System.Windows.Application.Current?.Dispatcher;
@@ -1280,6 +1364,17 @@ internal sealed class PanelBridgeController : IDisposable
         foreach (var dispatcher in _dispatchers.Keys.ToArray())
         {
             await dispatcher.PostEventAsync(eventName, payload);
+        }
+    }
+
+    private async Task PostPanelEventAsync(string eventName, object? payload)
+    {
+        foreach (var item in _dispatchers.ToArray())
+        {
+            if (item.Value == BridgeSurface.Panel)
+            {
+                await item.Key.PostEventAsync(eventName, payload);
+            }
         }
     }
 
@@ -1512,6 +1607,19 @@ internal sealed class PanelBridgeController : IDisposable
         return property.GetBoolean();
     }
 
+    private static int ReadRequiredInt(JsonElement? parameters, string propertyName)
+    {
+        if (parameters is null
+            || !parameters.Value.TryGetProperty(propertyName, out var property)
+            || property.ValueKind != JsonValueKind.Number
+            || !property.TryGetInt32(out var value)
+            || value <= 0)
+        {
+            throw new InvalidOperationException($"Missing integer parameter: {propertyName}");
+        }
+        return value;
+    }
+
     private static List<string> ReadRequiredStringArray(JsonElement? parameters, string propertyName)
     {
         if (parameters is null
@@ -1690,7 +1798,13 @@ internal sealed class PanelBridgeController : IDisposable
     }
 
     private static string ToWireValue(CodexVoiceAvailability availability) =>
-        availability.ToString().ToLowerInvariant();
+        availability switch
+        {
+            CodexVoiceAvailability.SignedOut => "signedOut",
+            CodexVoiceAvailability.SchemaMismatch => "schemaMismatch",
+            CodexVoiceAvailability.CapabilityBlocked => "capabilityBlocked",
+            _ => availability.ToString().ToLowerInvariant()
+        };
 
     private static string ToWireValue(CodexVoiceSessionStatus status) =>
         status switch

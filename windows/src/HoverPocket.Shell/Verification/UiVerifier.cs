@@ -47,6 +47,16 @@ internal sealed class UiVerifier
                     _failures.Add("voice: Japanese and English lane copy did not render correctly");
                 }
 
+                if (!result.VoiceTransportContractOk)
+                {
+                    _failures.Add("voice: WebRTC transport controls or safe error copy regressed");
+                }
+
+                if (!result.VoiceWebRtcHarnessOk)
+                {
+                    _failures.Add("voice: fake permission/WebRTC offer-answer cleanup failed");
+                }
+
                 if (!result.ControlsRenderedOk)
                 {
                     _failures.Add("controls: three live sections did not render");

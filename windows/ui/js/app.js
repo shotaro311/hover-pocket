@@ -41,6 +41,9 @@ let providerSelectionTask = null;
 let textInputActivationTask = null;
 let draggingProviderId = null;
 let suppressProviderSelection = false;
+let voiceTransport = null;
+let pendingVoiceTransportSignal = null;
+let voiceTransportStarting = false;
 
 on("state.changed", (state) => {
   void render(state);
@@ -51,7 +54,16 @@ on("panel.opened", (state) => {
 });
 
 on("voice.stateChanged", (state) => {
+  synchronizeVoiceTransportMute(state?.voiceLane);
   void render(state);
+});
+
+on("voice.transportSignal", (signal) => {
+  void applyVoiceTransportSignal(signal);
+});
+
+on("panel.closed", () => {
+  setVoiceTransportMuted(true);
 });
 
 bootstrap();
@@ -447,6 +459,7 @@ function renderVoiceLane(state) {
   voiceLaneEl.hidden = !state.settings.voiceEnabled || mode === "disabled";
   voiceLaneEl.dataset.mode = mode;
   if (voiceLaneEl.hidden) {
+    disposeLocalVoiceTransport();
     return;
   }
 
@@ -455,6 +468,46 @@ function renderVoiceLane(state) {
     return;
   }
   renderCompactVoiceLane(lane);
+}
+
+function createVoiceMicrophoneButton(lane) {
+  const active = Boolean(lane.realtimeAttached || voiceTransport);
+  const microphone = voiceButton(
+    active ? t("voiceMicrophoneActive") : t("voiceStartMicrophone"),
+    active ? "●" : "◉",
+    () => { void startVoiceRealtime(); },
+  );
+  microphone.disabled = active
+    || lane.availability !== "ready"
+    || ["connecting", "requesting_permission", "negotiating", "stopping", "recovering"].includes(lane.sessionStatus);
+  microphone.classList.add("hp-voice-microphone");
+  return microphone;
+}
+
+function createVoiceWaveform() {
+  const waveform = document.createElement("div");
+  waveform.className = "hp-voice-waveform";
+  waveform.setAttribute("aria-hidden", "true");
+  for (const height of [6, 12, 18, 10, 14]) {
+    const bar = document.createElement("span");
+    bar.style.height = `${height}px`;
+    waveform.append(bar);
+  }
+  return waveform;
+}
+
+function createVoiceMuteButton(lane) {
+  const mute = voiceButton(
+    lane.muted ? t("voiceUnmute") : t("voiceMute"),
+    lane.muted ? "M" : "S",
+    () => {
+      const muted = !lane.muted;
+      setVoiceTransportMuted(muted);
+      void request("voice.setMuted", { muted }).then(render);
+    },
+  );
+  mute.disabled = !lane.realtimeAttached;
+  return mute;
 }
 
 function voiceButton(label, text, action, expanded) {
@@ -474,22 +527,8 @@ function renderCompactVoiceLane(lane) {
   const root = document.createElement("div");
   root.className = "hp-voice-compact";
 
-  const microphone = voiceButton(
-    t("voiceMicrophoneUnavailable"),
-    "◉",
-    () => {},
-  );
-  microphone.disabled = true;
-  microphone.classList.add("hp-voice-microphone");
-
-  const waveform = document.createElement("div");
-  waveform.className = "hp-voice-waveform";
-  waveform.setAttribute("aria-hidden", "true");
-  for (const height of [6, 12, 18, 10, 14]) {
-    const bar = document.createElement("span");
-    bar.style.height = `${height}px`;
-    waveform.append(bar);
-  }
+  const microphone = createVoiceMicrophoneButton(lane);
+  const waveform = createVoiceWaveform();
 
   const conversation = document.createElement("div");
   conversation.className = "hp-voice-conversation";
@@ -508,12 +547,7 @@ function renderCompactVoiceLane(lane) {
     count: lane.visibleSessionCount ?? 0,
   }));
 
-  const mute = voiceButton(
-    lane.muted ? t("voiceUnmute") : t("voiceMute"),
-    lane.muted ? "M" : "S",
-    () => request("voice.setMuted", { muted: !lane.muted }).then(render),
-  );
-  mute.disabled = Boolean(lane.muted && !lane.transportAttached);
+  const mute = createVoiceMuteButton(lane);
   const expand = voiceButton(
     t("voiceExpand"),
     "⌄",
@@ -523,7 +557,7 @@ function renderCompactVoiceLane(lane) {
   const end = voiceButton(
     t("voiceEndSession"),
     "×",
-    () => request("voice.endSession").then(render),
+    () => { void endVoiceRealtime(); },
   );
 
   root.append(microphone, waveform, conversation, count, mute, expand, end);
@@ -539,6 +573,8 @@ function renderExpandedVoiceLane(lane) {
   const status = document.createElement("span");
   status.className = "hp-voice-status";
   status.textContent = voiceStatusText(lane);
+  const microphone = createVoiceMicrophoneButton(lane);
+  const waveform = createVoiceWaveform();
   const spacer = document.createElement("span");
   spacer.className = "hp-voice-spacer";
   const count = document.createElement("span");
@@ -547,6 +583,7 @@ function renderExpandedVoiceLane(lane) {
   count.setAttribute("aria-label", formatText("voiceSessionCount", {
     count: lane.visibleSessionCount ?? 0,
   }));
+  const mute = createVoiceMuteButton(lane);
   const collapse = voiceButton(
     t("voiceCollapse"),
     "⌃",
@@ -556,9 +593,9 @@ function renderExpandedVoiceLane(lane) {
   const end = voiceButton(
     t("voiceEndSession"),
     "×",
-    () => request("voice.endSession").then(render),
+    () => { void endVoiceRealtime(); },
   );
-  toolbar.append(status, spacer, count, collapse, end);
+  toolbar.append(microphone, waveform, status, spacer, count, mute, collapse, end);
 
   const grid = document.createElement("div");
   grid.className = "hp-voice-expanded-grid";
@@ -620,6 +657,394 @@ function renderExpandedVoiceLane(lane) {
   grid.append(transcript, cards);
   root.append(toolbar, grid);
   voiceLaneEl.append(root);
+}
+
+async function startVoiceRealtime(dependencies = {}) {
+  if (voiceTransportStarting || voiceTransport) {
+    return;
+  }
+  const requestBridge = dependencies.requestBridge ?? request;
+  const mediaDevices = dependencies.mediaDevices ?? navigator.mediaDevices;
+  const PeerConnection = dependencies.PeerConnection ?? globalThis.RTCPeerConnection;
+  const createAudio = dependencies.createAudio ?? (() => new Audio());
+  const waitForIce = dependencies.waitForIce ?? waitForIceGatheringComplete;
+  voiceTransportStarting = true;
+  let transport = null;
+  let acquiredStream = null;
+  let hostRealtimeRequestIssued = false;
+  try {
+    await requestBridge("voice.requestMicrophone");
+    if (!mediaDevices?.getUserMedia || typeof PeerConnection !== "function") {
+      throw Object.assign(new Error("webrtc_unavailable"), { voiceReason: "webrtc_unavailable" });
+    }
+
+    const stream = await mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+      },
+      video: false,
+    });
+    acquiredStream = stream;
+    const peer = new PeerConnection();
+    const dataChannel = peer.createDataChannel("oai-events");
+    const audio = createAudio();
+    audio.autoplay = true;
+    audio.muted = true;
+    transport = {
+      peer,
+      stream,
+      dataChannel,
+      audio,
+      generation: null,
+      threadId: null,
+      requestBridge,
+      disposed: false,
+    };
+    voiceTransport = transport;
+    acquiredStream = null;
+    for (const track of stream.getAudioTracks()) {
+      peer.addTrack(track, stream);
+      track.enabled = false;
+    }
+    peer.addEventListener("track", (event) => {
+      if (transport.disposed) {
+        return;
+      }
+      const [remoteStream] = event.streams;
+      audio.srcObject = remoteStream ?? new MediaStream([event.track]);
+      audio.muted = true;
+    });
+    peer.addEventListener("connectionstatechange", () => {
+      if (!transport.disposed && ["failed", "closed"].includes(peer.connectionState)) {
+        void abortVoiceRealtime("webrtc_connection_failed", requestBridge);
+      }
+    });
+
+    const offer = await peer.createOffer({ offerToReceiveAudio: true });
+    await peer.setLocalDescription(offer);
+    await waitForIce(peer, 8_000);
+    const localSdp = peer.localDescription?.sdp;
+    if (!localSdp || peer.localDescription?.type !== "offer") {
+      throw Object.assign(new Error("webrtc_offer_failed"), { voiceReason: "webrtc_offer_failed" });
+    }
+    hostRealtimeRequestIssued = true;
+    const result = await requestBridge("voice.startRealtime", { sdp: localSdp });
+    if (!Number.isInteger(result?.generation)
+      || typeof result?.threadId !== "string"
+      || result.threadId.length === 0
+      || result.threadId.length > 160) {
+      throw Object.assign(new Error("voice_transport_signal_invalid"), { voiceReason: "webrtc_offer_failed" });
+    }
+    transport.generation = result.generation;
+    transport.threadId = result.threadId;
+    if (pendingVoiceTransportSignal) {
+      const pending = pendingVoiceTransportSignal;
+      pendingVoiceTransportSignal = null;
+      await applyVoiceTransportSignal(pending);
+    }
+  } catch (error) {
+    const reason = voiceStartFailureReason(error, hostRealtimeRequestIssued);
+    disposeLocalVoiceTransport();
+    stopVoiceMediaStream(acquiredStream);
+    acquiredStream = null;
+    try {
+      await requestBridge("voice.abortRealtime", { reason });
+    } catch {
+    }
+  } finally {
+    voiceTransportStarting = false;
+  }
+}
+
+async function applyVoiceTransportSignal(signal) {
+  if (!signal
+    || signal.type !== "answer"
+    || !Number.isInteger(signal.generation)
+    || typeof signal.threadId !== "string"
+    || typeof signal.sdp !== "string"
+    || signal.sdp.length === 0
+    || new TextEncoder().encode(signal.sdp).byteLength > 262_144
+    || !signal.sdp.startsWith("v=0")) {
+    return;
+  }
+  const transport = voiceTransport;
+  if (!transport?.generation || !transport.threadId) {
+    if (voiceTransportStarting) {
+      pendingVoiceTransportSignal = signal;
+    }
+    return;
+  }
+  if (transport.generation !== signal.generation
+    || transport.threadId !== signal.threadId
+    || transport.disposed) {
+    return;
+  }
+  try {
+    await transport.peer.setRemoteDescription({ type: "answer", sdp: signal.sdp });
+    setVoiceTransportMuted(false);
+    await transport.audio.play().catch(() => undefined);
+    await transport.requestBridge("voice.confirmRealtime", {
+      generation: transport.generation,
+      threadId: transport.threadId,
+    });
+  } catch {
+    await abortVoiceRealtime("webrtc_connection_failed", transport.requestBridge);
+  }
+}
+
+async function endVoiceRealtime(requestBridge = request, renderState = render) {
+  disposeLocalVoiceTransport();
+  const state = await requestBridge("voice.endSession");
+  await renderState(state);
+}
+
+async function abortVoiceRealtime(reason, requestBridge = request) {
+  disposeLocalVoiceTransport();
+  try {
+    const state = await requestBridge("voice.abortRealtime", { reason });
+    if (state?.voiceLane) {
+      await render(state);
+    }
+  } catch {
+  }
+}
+
+function synchronizeVoiceTransportMute(lane) {
+  if (!lane || lane.availability === "disabled" || !lane.transportAttached) {
+    disposeLocalVoiceTransport();
+    return;
+  }
+  if (!lane.realtimeAttached
+    && ["idle", "recoverable_failure", "blocked_failure"].includes(lane.sessionStatus)) {
+    disposeLocalVoiceTransport();
+    return;
+  }
+  setVoiceTransportMuted(Boolean(lane.muted));
+}
+
+function setVoiceTransportMuted(muted) {
+  const transport = voiceTransport;
+  if (!transport || transport.disposed) {
+    return;
+  }
+  for (const track of transport.stream.getAudioTracks()) {
+    track.enabled = !muted;
+  }
+  transport.audio.muted = muted;
+  if (muted) {
+    transport.audio.pause();
+  } else {
+    void transport.audio.play().catch(() => undefined);
+  }
+}
+
+function disposeLocalVoiceTransport() {
+  pendingVoiceTransportSignal = null;
+  const transport = voiceTransport;
+  voiceTransport = null;
+  if (!transport || transport.disposed) {
+    return;
+  }
+  transport.disposed = true;
+  stopVoiceMediaStream(transport.stream);
+  try {
+    transport.dataChannel.close();
+  } catch {
+  }
+  try {
+    transport.peer.close();
+  } catch {
+  }
+  transport.audio.pause();
+  transport.audio.srcObject = null;
+}
+
+function stopVoiceMediaStream(stream) {
+  if (!stream || typeof stream.getTracks !== "function") {
+    return;
+  }
+  for (const track of stream.getTracks()) {
+    try {
+      track.stop();
+    } catch {
+    }
+  }
+}
+
+function waitForIceGatheringComplete(peer, timeoutMs) {
+  if (peer.iceGatheringState === "complete") {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      peer.removeEventListener("icegatheringstatechange", onStateChanged);
+      reject(Object.assign(new Error("webrtc_offer_failed"), { voiceReason: "webrtc_offer_failed" }));
+    }, timeoutMs);
+    function onStateChanged() {
+      if (peer.iceGatheringState === "complete") {
+        window.clearTimeout(timeout);
+        peer.removeEventListener("icegatheringstatechange", onStateChanged);
+        resolve();
+      }
+    }
+    peer.addEventListener("icegatheringstatechange", onStateChanged);
+  });
+}
+
+function voiceStartFailureReason(error, hostRealtimeRequestIssued = false) {
+  if (hostRealtimeRequestIssued) {
+    return "voice_realtime_start_failed";
+  }
+  if (error?.voiceReason) {
+    return error.voiceReason;
+  }
+  if (error?.name === "NotAllowedError" || error?.name === "SecurityError") {
+    return "microphone_denied";
+  }
+  if (error?.name === "NotFoundError" || error?.name === "NotReadableError") {
+    return "microphone_unavailable";
+  }
+  return "webrtc_offer_failed";
+}
+
+async function verifyVoiceTransportHarness() {
+  const calls = [];
+  const inputTrack = { enabled: true, stopped: false, stop() { this.stopped = true; } };
+  const stream = {
+    getAudioTracks: () => [inputTrack],
+    getTracks: () => [inputTrack],
+  };
+  const audio = {
+    autoplay: false,
+    muted: true,
+    paused: true,
+    srcObject: null,
+    play() { this.paused = false; return Promise.resolve(); },
+    pause() { this.paused = true; },
+  };
+  let peerInstance = null;
+  class FakePeerConnection {
+    constructor() {
+      this.connectionState = "new";
+      this.iceGatheringState = "complete";
+      this.localDescription = null;
+      this.remoteDescription = null;
+      this.listeners = new Map();
+      this.dataChannel = { closed: false, close() { this.closed = true; } };
+      this.closed = false;
+      peerInstance = this;
+    }
+    createDataChannel(label) { this.dataChannel.label = label; return this.dataChannel; }
+    addTrack() {}
+    addEventListener(name, handler) { this.listeners.set(name, handler); }
+    removeEventListener(name) { this.listeners.delete(name); }
+    createOffer() { return Promise.resolve({ type: "offer", sdp: "v=0\r\no=fake-offer\r\n" }); }
+    setLocalDescription(description) { this.localDescription = description; return Promise.resolve(); }
+    setRemoteDescription(description) { this.remoteDescription = description; return Promise.resolve(); }
+    close() { this.closed = true; this.connectionState = "closed"; }
+  }
+  const requestBridge = async (method) => {
+    calls.push(method);
+    if (method === "voice.startRealtime") {
+      return { generation: 7, threadId: "root-ui-verify" };
+    }
+    if (method === "voice.confirmRealtime") {
+      return { connected: true };
+    }
+    return { allowedForPrompt: true };
+  };
+
+  await startVoiceRealtime({
+    requestBridge,
+    mediaDevices: { getUserMedia: async () => stream },
+    PeerConnection: FakePeerConnection,
+    createAudio: () => audio,
+    waitForIce: async () => undefined,
+  });
+  await applyVoiceTransportSignal({
+    type: "answer",
+    generation: 7,
+    threadId: "root-ui-verify",
+    sdp: "v=0\r\no=fake-answer\r\n",
+  });
+  const connected = calls.join(",") === "voice.requestMicrophone,voice.startRealtime,voice.confirmRealtime"
+    && peerInstance?.dataChannel.label === "oai-events"
+    && peerInstance?.remoteDescription?.type === "answer"
+    && inputTrack.enabled
+    && audio.muted === false;
+  let resolveEndRequest;
+  const endRequest = new Promise((resolve) => {
+    resolveEndRequest = resolve;
+  });
+  const endTask = endVoiceRealtime(
+    async (method) => {
+      calls.push(method);
+      return await endRequest;
+    },
+    async () => undefined,
+  );
+  const endStoppedBeforeNative = inputTrack.stopped
+    && peerInstance?.dataChannel.closed
+    && peerInstance?.closed
+    && audio.paused
+    && audio.srcObject === null;
+  resolveEndRequest({});
+  await endTask;
+  const cleaned = inputTrack.stopped
+    && peerInstance?.dataChannel.closed
+    && peerInstance?.closed
+    && audio.paused
+    && audio.srcObject === null;
+
+  const failedTrack = { stopped: false, stop() { this.stopped = true; } };
+  const failedStream = {
+    getAudioTracks: () => [failedTrack],
+    getTracks: () => [failedTrack],
+  };
+  class ThrowingPeerConnection {
+    constructor() {
+      throw new Error("peer-construction-failed");
+    }
+  }
+  await startVoiceRealtime({
+    requestBridge,
+    mediaDevices: { getUserMedia: async () => failedStream },
+    PeerConnection: ThrowingPeerConnection,
+    createAudio: () => audio,
+  });
+  const failedInitializationCleaned = failedTrack.stopped && voiceTransport === null;
+
+  let mediaRequestedWithoutPermission = false;
+  const rejectedRequest = async (method) => {
+    if (method === "voice.requestMicrophone") {
+      const denied = new Error("denied");
+      denied.name = "NotAllowedError";
+      throw denied;
+    }
+    calls.push(method);
+    return { aborted: true };
+  };
+  await startVoiceRealtime({
+    requestBridge: rejectedRequest,
+    mediaDevices: {
+      getUserMedia: async () => {
+        mediaRequestedWithoutPermission = true;
+        return stream;
+      },
+    },
+    PeerConnection: FakePeerConnection,
+    createAudio: () => audio,
+  });
+  return connected
+    && cleaned
+    && endStoppedBeforeNative
+    && failedInitializationCleaned
+    && !mediaRequestedWithoutPermission
+    && calls.includes("voice.abortRealtime")
+    && voiceTransport === null;
 }
 
 function voiceSessionUpdatedText(value) {
@@ -713,6 +1138,15 @@ function voiceErrorText(value) {
     voice_transport_crashed: "voiceErrorDisconnected",
     unexpected_server_request: "voiceErrorUnsupportedRequest",
     voice_restart_exhausted: "voiceErrorRestartExhausted",
+    microphone_denied: "voiceErrorMicrophoneDenied",
+    microphone_unavailable: "voiceErrorMicrophoneUnavailable",
+    webrtc_unavailable: "voiceErrorWebRtcUnavailable",
+    webrtc_offer_failed: "voiceErrorOfferFailed",
+    webrtc_connection_failed: "voiceErrorConnectionFailed",
+    invalid_remote_sdp: "voiceErrorRemoteSdpInvalid",
+    voice_realtime_start_failed: "voiceErrorRealtimeFailed",
+    voice_realtime_stop_failed: "voiceErrorRealtimeStopped",
+    voice_realtime_error: "voiceErrorRealtimeStopped",
   };
   const key = keys[value];
   return key ? t(key) : null;
@@ -1039,12 +1473,14 @@ window.__hoverPocketVerify = {
     const voiceDefaultOffOk = state.settings.voiceEnabled === false
       && voiceLaneEl.hidden
       && Number(state.panel.voiceLaneHeight ?? 0) === 0;
+    const voiceWebRtcHarnessOk = await verifyVoiceTransportHarness();
     const voiceFixture = {
       availability: "ready",
       sessionStatus: "idle",
       activity: "waiting_for_approval",
       muted: true,
       transportAttached: true,
+      realtimeAttached: false,
       transcriptPreview: null,
       transcript: [{ role: "user", text: "予定を確認して" }],
       rootSessionId: "root-localization",
@@ -1062,8 +1498,9 @@ window.__hoverPocketVerify = {
     voiceLaneEl.replaceChildren();
     renderCompactVoiceLane(voiceFixture);
     const japaneseCompactOk = voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "利用可能 · 承認待ち"
-      && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "音声接続はAN3-Aではまだ利用できません。"
-      && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "音声機能の有効化まではマイクを利用できません"
+      && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "マイクを押すと音声会話を開始します。"
+      && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "マイクを開始"
+      && voiceLaneEl.querySelector(".hp-voice-microphone")?.disabled === false
       && voiceLaneEl.querySelector(".hp-voice-session-count")?.getAttribute("aria-label") === "セッション 1件";
     voiceLaneEl.replaceChildren();
     renderExpandedVoiceLane(voiceFixture);
@@ -1079,8 +1516,9 @@ window.__hoverPocketVerify = {
     voiceLaneEl.replaceChildren();
     renderCompactVoiceLane(voiceFixture);
     const englishCompactOk = voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "Ready · Waiting for approval"
-      && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "Voice transport is unavailable in AN3-A."
-      && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "Microphone unavailable until Voice runtime activation"
+      && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "Press the microphone to start a Voice conversation."
+      && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "Start microphone"
+      && voiceLaneEl.querySelector(".hp-voice-microphone")?.disabled === false
       && voiceLaneEl.querySelector(".hp-voice-session-count")?.getAttribute("aria-label") === "1 sessions";
     voiceLaneEl.replaceChildren();
     renderExpandedVoiceLane(voiceFixture);
@@ -1098,6 +1536,11 @@ window.__hoverPocketVerify = {
       && englishCompactOk
       && englishExpandedOk
       && englishAvailabilityFallbackOk;
+    const voiceTransportContractOk = typeof startVoiceRealtime === "function"
+      && typeof applyVoiceTransportSignal === "function"
+      && typeof disposeLocalVoiceTransport === "function"
+      && voiceErrorText("microphone_denied") === "Microphone access was not allowed"
+      && voiceErrorText("invalid_remote_sdp") === "The Voice connection response could not be verified";
     setLanguage(state.settings.language);
     renderVoiceLane(state);
     window.__hoverPocketVerifyStep = "complete";
@@ -1107,6 +1550,8 @@ window.__hoverPocketVerify = {
       legacyAiLaneNotMountedOk,
       voiceDefaultOffOk,
       voiceLocalizationOk,
+      voiceTransportContractOk,
+      voiceWebRtcHarnessOk,
       controlsRenderedOk,
       controlsLayoutOk,
       controlsHitAreasOk,

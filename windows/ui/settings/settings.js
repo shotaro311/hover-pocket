@@ -111,8 +111,8 @@ function render(state) {
     ? "Enable Voice Lane"
     : "Voice Laneを有効化";
   voiceNoteEl.textContent = state.settings.language === "en"
-    ? "Off by default. AN3-A enables only the Host-owned layout and state foundation; microphone, WebRTC, and tool execution remain unavailable."
-    : "既定はオフです。AN3-AではHost所有の表示・状態基盤だけを有効化し、マイク、WebRTC、Tool実行は使用しません。";
+    ? "Off by default. Windows Voice starts only after an explicit microphone click and uses experimental Codex Realtime. Tool execution remains unavailable in this phase."
+    : "既定はオフです。Windowsの音声会話はマイクの明示クリック後だけ開始し、Codexの実験的Realtimeを使用します。この段階ではTool実行を行いません。";
   renderSegment(voiceLayoutEl, [
     { id: "compact", label: state.settings.language === "en" ? "Compact" : "コンパクト" },
     { id: "expanded", label: state.settings.language === "en" ? "Expanded" : "展開" },
