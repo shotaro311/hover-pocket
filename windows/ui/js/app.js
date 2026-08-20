@@ -29,7 +29,12 @@ const settingsButtonEl = document.querySelector("[data-settings]");
 let currentState = null;
 let providerCleanup = null;
 let providerRefresh = null;
+let providerStateFlush = null;
+let providerStateTransitionBegin = null;
+let providerStateTransitionRelease = null;
+const providerStateTransitionLeases = new Map();
 let activeProviderKey = "";
+let renderTask = Promise.resolve(true);
 let pendingProviderId = null;
 let providerSelectionTask = null;
 let textInputActivationTask = null;
@@ -37,18 +42,18 @@ let draggingProviderId = null;
 let suppressProviderSelection = false;
 
 on("state.changed", (state) => {
-  render(state);
+  void render(state);
 });
 
 on("panel.opened", (state) => {
-  render(state, { refreshProvider: true });
+  void render(state, { refreshProvider: true });
 });
 
 bootstrap();
 
 async function bootstrap() {
-  currentState = await request("app.getState");
-  render(currentState);
+  const initialState = await request("app.getState");
+  await render(initialState);
   await request("app.ready");
   window.__hoverPocketReady = true;
 }
@@ -58,6 +63,18 @@ async function bootstrap() {
  * @param {{ forceProvider?: boolean, refreshProvider?: boolean }=} options
  */
 function render(state, options = {}) {
+  const scheduled = renderTask.then(() => renderNow(state, options));
+  renderTask = scheduled.catch(() => false);
+  return scheduled;
+}
+
+async function renderNow(state, options = {}) {
+  const providerKey = providerRenderKey(state);
+  const providerWillRemount = Boolean(options.forceProvider) || providerKey !== activeProviderKey;
+  if (providerWillRemount && !await disposeActiveProvider()) {
+    return false;
+  }
+
   currentState = state;
   document.documentElement.style.setProperty("--hp-header-height", `${state.panel.headerHeight}px`);
   document.documentElement.style.setProperty("--hp-ai-height", `${state.panel.aiLaneHeight}px`);
@@ -68,8 +85,9 @@ function render(state, options = {}) {
   renderTitle(state);
   renderSizeSwitch(state);
   renderProviderIcons(state);
-  renderProvider(state, options);
+  renderProvider(state, options, providerWillRemount);
   renderCommands();
+  return true;
 }
 
 /**
@@ -204,7 +222,7 @@ async function persistProviderIconOrder() {
     button.classList.remove("is-dragging");
   }
   try {
-    render(await request("settings.setProviderOrder", { providerOrder }));
+    await render(await request("settings.setProviderOrder", { providerOrder }));
   } catch {
     renderProviderIcons(currentState);
   } finally {
@@ -232,7 +250,42 @@ async function flushProviderSelection() {
     if (currentState?.selectedProvider?.id === providerId) {
       continue;
     }
-    render(await request("provider.select", { id: providerId }));
+    const selected = await selectProvider(providerId);
+    if (!selected) return;
+  }
+}
+
+async function disposeActiveProvider() {
+  const cleanup = providerCleanup;
+  if (!cleanup) return true;
+  const disposed = await cleanup();
+  if (disposed === false) return false;
+  if (providerCleanup === cleanup) {
+    providerCleanup = null;
+    providerRefresh = null;
+    providerStateFlush = null;
+    providerStateTransitionBegin = null;
+    providerStateTransitionRelease = null;
+  }
+  return true;
+}
+
+async function selectProvider(providerId, selectRequest = request) {
+  if (!providerId || currentState?.selectedProvider?.id === providerId) {
+    return currentState;
+  }
+
+  const previousState = currentState;
+  if (!await disposeActiveProvider()) return null;
+  try {
+    const selected = await selectRequest("provider.select", { id: providerId });
+    await render(selected);
+    return selected;
+  } catch (error) {
+    if (previousState && currentState?.selectedProvider?.id === previousState.selectedProvider?.id) {
+      await render(previousState, { forceProvider: true });
+    }
+    throw error;
   }
 }
 
@@ -270,27 +323,27 @@ function isTextEntryTarget(target) {
 /**
  * @param {any} state
  * @param {{ forceProvider?: boolean, refreshProvider?: boolean }} options
+ * @param {boolean} providerWillRemount
  */
-function renderProvider(state, options) {
+function renderProvider(state, options, providerWillRemount) {
   const provider = state.selectedProvider;
-  const providerKey = `${provider?.id ?? "none"}:${state.settings.language}`;
-  if (!options.forceProvider && providerKey === activeProviderKey) {
+  const providerKey = providerRenderKey(state);
+  if (!providerWillRemount) {
     if (options.refreshProvider) {
       void providerRefresh?.();
     }
     return;
   }
 
-  providerCleanup?.();
-  providerCleanup = null;
-  providerRefresh = null;
   activeProviderKey = providerKey;
   providerContainerEl.replaceChildren();
   providerContainerEl.classList.remove("is-provider-entering");
   void providerContainerEl.offsetWidth;
   providerContainerEl.classList.add("is-provider-entering");
 
-  const renderer = providerRenderers[provider?.id];
+  const renderer = provider?.id?.startsWith("generated-pocket-app:")
+    ? renderPocketSurfaceProvider
+    : providerRenderers[provider?.id];
   if (renderer) {
     const lifecycle = renderer({
       container: providerContainerEl,
@@ -307,6 +360,16 @@ function renderProvider(state, options) {
     providerRefresh = typeof lifecycle?.refresh === "function"
       ? () => lifecycle.refresh()
       : null;
+    providerStateFlush = typeof lifecycle?.flushPendingState === "function"
+      ? () => lifecycle.flushPendingState()
+      : null;
+    providerStateTransitionBegin = typeof lifecycle?.beginStateTransition === "function"
+      ? () => lifecycle.beginStateTransition()
+      : null;
+    providerStateTransitionRelease = typeof lifecycle?.releaseStateTransition === "function"
+      ? () => lifecycle.releaseStateTransition()
+      : null;
+    void attachActiveStateTransitionLeases(state.pocketSurface?.appId);
     return;
   }
 
@@ -322,6 +385,53 @@ function renderProvider(state, options) {
     </div>
   `;
   providerContainerEl.append(card);
+}
+
+window.__hoverPocketFlushActiveProviderState = async (appId, operationId) => {
+  if (!operationId || providerStateTransitionLeases.has(operationId)) {
+    return false;
+  }
+  const lease = {
+    appId,
+    releases: new Set(),
+  };
+  providerStateTransitionLeases.set(operationId, lease);
+  if (currentState?.pocketSurface?.appId !== appId
+    || !providerStateTransitionBegin
+    || !providerStateTransitionRelease) {
+    return true;
+  }
+  lease.releases.add(providerStateTransitionRelease);
+  return await providerStateTransitionBegin() !== false;
+};
+
+window.__hoverPocketCompleteActiveProviderStateTransition = (operationId) => {
+  const lease = providerStateTransitionLeases.get(operationId);
+  if (!lease) return true;
+  providerStateTransitionLeases.delete(operationId);
+  for (const release of lease.releases) release();
+  return true;
+};
+
+async function attachActiveStateTransitionLeases(appId) {
+  if (!appId || !providerStateTransitionBegin || !providerStateTransitionRelease) return;
+  const begin = providerStateTransitionBegin;
+  const release = providerStateTransitionRelease;
+  const attached = [];
+  for (const lease of providerStateTransitionLeases.values()) {
+    if (lease.appId !== appId || lease.releases.has(release)) continue;
+    lease.releases.add(release);
+    attached.push(Promise.resolve(begin()).catch(() => false));
+  }
+  await Promise.all(attached);
+}
+
+function providerRenderKey(state) {
+  const surface = state.pocketSurface;
+  const surfaceIdentity = surface
+    ? `:${surface.appId ?? ""}:${surface.version ?? ""}:${surface.manifestDigest ?? ""}`
+    : "";
+  return `${state.selectedProvider?.id ?? "none"}:${state.settings.language}${surfaceIdentity}`;
 }
 
 function renderCommands() {
@@ -449,7 +559,7 @@ window.__hoverPocketVerify = {
       const clipboardRootAfterInteraction = document.querySelector(".clipboard-root");
       const clipboardIcon = [...providerIconsEl.children]
         .find((candidate) => candidate.dataset.providerId === clipboardProvider.id);
-      render(currentState);
+      await render(currentState);
       clipboardStableProviderOk = clipboardRootAfterInteraction === document.querySelector(".clipboard-root");
       clipboardStableRefreshOk = clipboardVerify.clipboardStableRefreshOk;
       clipboardSplitViewOk = clipboardVerify.clipboardSplitViewOk;
@@ -484,7 +594,7 @@ window.__hoverPocketVerify = {
     let calendarEditorStableOk = false;
     if (calendarProvider) {
       window.__hoverPocketVerifyStep = "select-calendar";
-      render(await request("provider.select", { id: calendarProvider.id }));
+      await render(await request("provider.select", { id: calendarProvider.id }));
       const calendarRoot = await waitForElement(".hp-calendar", 4500);
       const dayCells = [...(calendarRoot?.querySelectorAll(".hp-calendar-day") ?? [])];
       calendarMacLayoutOk = Boolean(
@@ -503,7 +613,7 @@ window.__hoverPocketVerify = {
     let timerStopwatchOk = false;
     if (timerProvider) {
       window.__hoverPocketVerifyStep = "select-timer";
-      render(await request("provider.select", { id: timerProvider.id }));
+      await render(await request("provider.select", { id: timerProvider.id }));
       const pomodoroCard = await waitForElement(".hp-timer .hp-timer-entry.is-pomodoro", 4500);
       const timerRoot = pomodoroCard?.closest(".hp-timer");
       const timerCard = timerRoot?.querySelector(".hp-timer-entry.is-timer");
@@ -530,9 +640,103 @@ window.__hoverPocketVerify = {
     }
     window.__hoverPocketVerifyStep = "verify-pocket-surface-renderer";
     const pocketSurfaceVerify = await runPocketSurfaceUiVerify();
-    const targetProvider = state.providers.find((provider) => provider.id !== originalProvider) ?? state.providers[0];
+    const providerBeforeSwitch = currentState?.selectedProvider?.id;
+    const targetProvider = state.providers.find((provider) => provider.id !== providerBeforeSwitch) ?? state.providers[0];
     window.__hoverPocketVerifyStep = "switch-provider";
-    const switchedState = await request("provider.select", { id: targetProvider.id });
+    const cleanupBeforeSwitch = providerCleanup;
+    let providerSelectCalledAfterFailedCleanup = false;
+    providerCleanup = async () => false;
+    const blockedSwitchState = await selectProvider(targetProvider.id, async () => {
+      providerSelectCalledAfterFailedCleanup = true;
+      return currentState;
+    });
+    const providerSwitchBlockedOnSaveFailure = blockedSwitchState === null
+      && !providerSelectCalledAfterFailedCleanup
+      && currentState?.selectedProvider?.id === providerBeforeSwitch;
+    let providerCleanupAwaited = false;
+    let providerSelectAfterCleanup = false;
+    providerCleanup = async () => {
+      const disposed = await cleanupBeforeSwitch?.();
+      await Promise.resolve();
+      providerCleanupAwaited = true;
+      return disposed;
+    };
+    const switchedState = await selectProvider(targetProvider.id, async (method, params) => {
+      providerSelectAfterCleanup = providerCleanupAwaited;
+      return request(method, params);
+    });
+    const cleanupBeforeRerender = providerCleanup;
+    let providerRerenderCleanupAwaited = false;
+    providerCleanup = async () => {
+      const disposed = await cleanupBeforeRerender?.();
+      await Promise.resolve();
+      providerRerenderCleanupAwaited = true;
+      return disposed;
+    };
+    const rerendered = await render(switchedState, { forceProvider: true });
+    const providerRerenderCleanupAwaitedOk = rerendered !== false && providerRerenderCleanupAwaited;
+    const cleanupAfterRerender = providerCleanup;
+    const providerNodeBeforeBlockedRerender = providerContainerEl.firstChild;
+    providerCleanup = async () => false;
+    const blockedRerender = await render(switchedState, { forceProvider: true });
+    const providerRerenderBlockedOnSaveFailureOk = blockedRerender === false
+      && providerContainerEl.firstChild === providerNodeBeforeBlockedRerender;
+    providerCleanup = cleanupAfterRerender;
+    const stateBeforeHostFlush = currentState;
+    const flushBeforeHostProbe = providerStateFlush;
+    const beginBeforeHostProbe = providerStateTransitionBegin;
+    const releaseBeforeHostProbe = providerStateTransitionRelease;
+    let hostFlushCalls = 0;
+    let hostReleaseCalls = 0;
+    currentState = { ...currentState, pocketSurface: { appId: "local.example.verify" } };
+    providerStateTransitionBegin = async () => {
+      hostFlushCalls += 1;
+      return true;
+    };
+    providerStateTransitionRelease = () => {
+      hostReleaseCalls += 1;
+    };
+    const matchingHostFlush = await window.__hoverPocketFlushActiveProviderState(
+      "local.example.verify",
+      "verify-transition",
+    );
+    const unrelatedHostFlush = await window.__hoverPocketFlushActiveProviderState(
+      "local.example.other",
+      "verify-unrelated",
+    );
+    providerStateTransitionBegin = async () => {
+      hostFlushCalls += 1;
+      return true;
+    };
+    providerStateTransitionRelease = () => {
+      hostReleaseCalls += 1;
+    };
+    await attachActiveStateTransitionLeases("local.example.verify");
+    const matchingHostRelease = window.__hoverPocketCompleteActiveProviderStateTransition(
+      "verify-transition",
+    );
+    const unrelatedHostRelease = window.__hoverPocketCompleteActiveProviderStateTransition(
+      "verify-unrelated",
+    );
+    const providerHostStateFlushOk = matchingHostFlush
+      && unrelatedHostFlush
+      && matchingHostRelease
+      && unrelatedHostRelease
+      && hostFlushCalls === 2
+      && hostReleaseCalls === 2;
+    const providerSurfaceIdentityRemountOk = providerRenderKey({
+      selectedProvider: { id: "generated-pocket-app:local.example.verify" },
+      settings: { language: "ja" },
+      pocketSurface: { appId: "local.example.verify", version: "1.0.0", manifestDigest: "digest-a" },
+    }) !== providerRenderKey({
+      selectedProvider: { id: "generated-pocket-app:local.example.verify" },
+      settings: { language: "ja" },
+      pocketSurface: { appId: "local.example.verify", version: "1.0.1", manifestDigest: "digest-b" },
+    });
+    currentState = stateBeforeHostFlush;
+    providerStateFlush = flushBeforeHostProbe;
+    providerStateTransitionBegin = beginBeforeHostProbe;
+    providerStateTransitionRelease = releaseBeforeHostProbe;
     const originalPanelSize = state.settings.panelSize;
     const probePanelSize = originalPanelSize === "small" ? "medium" : "small";
     window.__hoverPocketVerifyStep = "resize-probe";
@@ -572,13 +776,24 @@ window.__hoverPocketVerify = {
       pocketSurfaceDurationOk: pocketSurfaceVerify.duration,
       pocketSurfacePurposeOk: pocketSurfaceVerify.purpose,
       pocketSurfaceStatePersistedOk: pocketSurfaceVerify.statePersisted,
+      pocketSurfaceStateBoundControlsPersistedOk: pocketSurfaceVerify.stateBoundControlsPersisted,
+      pocketSurfaceFailedStateWriteRetriedOk: pocketSurfaceVerify.failedStateWriteRetried,
+      pocketSurfaceWorkflowBlockedOnStateWriteFailureOk: pocketSurfaceVerify.workflowBlockedOnStateWriteFailure,
+      pocketSurfaceStateWorkflowInputOk: pocketSurfaceVerify.stateWorkflowInputForwarded,
       pocketSurfaceApprovalHostOwnedOk: pocketSurfaceVerify.approvalHostOwned,
       pocketSurfaceLayoutMatrixOk: pocketSurfaceVerify.layoutMatrix,
+      pocketSurfaceStateTransitionBoundaryOk: pocketSurfaceVerify.stateTransitionBoundary,
       textSizeScaleReadyOk: getComputedStyle(document.documentElement).getPropertyValue("--hp-text-scale").trim() !== "",
-      providerSwitchOk: switchedState.selectedProvider?.id === targetProvider.id,
+      providerSwitchOk: switchedState?.selectedProvider?.id === targetProvider.id,
+      providerSwitchCleanupAwaitedOk: providerSelectAfterCleanup,
+      providerSwitchBlockedOnSaveFailureOk: providerSwitchBlockedOnSaveFailure,
+      providerRerenderCleanupAwaitedOk,
+      providerRerenderBlockedOnSaveFailureOk,
+      providerHostStateFlushOk,
+      providerSurfaceIdentityRemountOk,
       settingsWriteOk: resizedState.settings?.panelSize === probePanelSize,
       originalProvider,
-      switchedProvider: switchedState.selectedProvider?.id,
+      switchedProvider: switchedState?.selectedProvider?.id,
       originalPanelSize,
       probePanelSize,
     };

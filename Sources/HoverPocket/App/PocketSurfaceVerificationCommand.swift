@@ -8,7 +8,7 @@ enum PocketSurfaceVerificationCommand {
         var failures: [String] = []
         var renderDigest = "unavailable"
         let runtime = PocketSurfaceRuntime(
-            knownQueries: ["calendar.events.list@1"],
+            knownQueries: ["calendar.events.list@1", "sticky.note.get@1"],
             knownWorkflows: ["startFocus"]
         )
 
@@ -44,6 +44,7 @@ enum PocketSurfaceVerificationCommand {
         } catch {
             failures.append("valid_fixture:\(error)")
         }
+        verifyOmittedDurationDefault(runtime: runtime, failures: &failures)
 
         rejectFixture("invalid/pocket-surface.asset-traversal.json", runtime: runtime, failures: &failures)
         rejectFixture("invalid/pocket-surface.receipt-component.json", runtime: runtime, failures: &failures)
@@ -62,6 +63,12 @@ enum PocketSurfaceVerificationCommand {
         rejectMutation(
             ["root": ["children": [1, ["items": ["query": "calendar.events.delete@1"]]]]],
             label: "unknown_query",
+            runtime: runtime,
+            failures: &failures
+        )
+        rejectMutation(
+            ["root": ["children": [1, ["items": ["query": "sticky.note.get@1"]]]]],
+            label: "unsupported_query_shape",
             runtime: runtime,
             failures: &failures
         )
@@ -98,10 +105,16 @@ enum PocketSurfaceVerificationCommand {
             runtime: runtime,
             failures: &failures
         )
+        rejectSynthetic(
+            root: ["type": "status", "value": "保存済み", "tone": "success"],
+            label: "host_receipt_spoof",
+            runtime: runtime,
+            failures: &failures
+        )
 
         print("pocket_surface_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_surface_valid_nodes=6")
-        print("pocket_surface_negative_cases=13")
+        print("pocket_surface_negative_cases=15")
         print("pocket_surface_render_digest=\(renderDigest)")
         if !failures.isEmpty {
             print("pocket_surface_failures=\(failures.joined(separator: ","))")
@@ -119,6 +132,33 @@ enum PocketSurfaceVerificationCommand {
             _ = try runtime.load(data: data)
             failures.append("accepted:\(relativePath)")
         } catch {
+        }
+    }
+
+    private static func verifyOmittedDurationDefault(
+        runtime: PocketSurfaceRuntime,
+        failures: inout [String]
+    ) {
+        do {
+            let base = try JSONSerialization.jsonObject(with: fixtureData("valid/pocket-surface.today-focus.json"))
+            guard var object = base as? [String: Any],
+                  var root = object["root"] as? [String: Any],
+                  var children = root["children"] as? [[String: Any]] else {
+                failures.append("duration_default_omitted:base")
+                return
+            }
+            children[2].removeValue(forKey: "default")
+            root["children"] = children
+            object["root"] = root
+            let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+            let document = try runtime.load(data: data)
+            require(
+                document.root.children[2].integerProperty("default") == 60,
+                "duration_default_omitted",
+                failures: &failures
+            )
+        } catch {
+            failures.append("duration_default_omitted:\(error)")
         }
     }
 

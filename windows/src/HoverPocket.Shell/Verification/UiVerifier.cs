@@ -161,7 +161,9 @@ internal sealed class UiVerifier
                     || !result.PocketSurfaceSelectionOk
                     || !result.PocketSurfaceDurationOk
                     || !result.PocketSurfacePurposeOk
-                    || !result.PocketSurfaceStatePersistedOk)
+                    || !result.PocketSurfaceStatePersistedOk
+                    || !result.PocketSurfaceStateBoundControlsPersistedOk
+                    || !result.PocketSurfaceStateWorkflowInputOk)
                 {
                     _failures.Add("pocket surface: declarative Today Focus controls or separated user state did not match the canonical model");
                 }
@@ -184,6 +186,51 @@ internal sealed class UiVerifier
                 if (!result.ProviderSwitchOk)
                 {
                     _failures.Add($"provider: switch failed from {result.OriginalProvider} to {result.SwitchedProvider}");
+                }
+
+                if (!result.ProviderSwitchCleanupAwaitedOk)
+                {
+                    _failures.Add("provider: switch was requested before the active provider finished flushing pending state");
+                }
+
+                if (!result.ProviderSwitchBlockedOnSaveFailureOk)
+                {
+                    _failures.Add("provider: switch continued after the active provider failed to flush pending state");
+                }
+
+                if (!result.ProviderRerenderCleanupAwaitedOk)
+                {
+                    _failures.Add("provider: rerender replaced the active provider before pending state was flushed");
+                }
+
+                if (!result.ProviderRerenderBlockedOnSaveFailureOk)
+                {
+                    _failures.Add("provider: rerender replaced the active provider after pending state flush failed");
+                }
+
+                if (!result.ProviderHostStateFlushOk)
+                {
+                    _failures.Add("provider: Host state flush was not scoped to the active Pocket App");
+                }
+
+                if (!result.PocketSurfaceStateTransitionBoundaryOk)
+                {
+                    _failures.Add("pocket-surface: state transition did not keep the generated panel inert until release");
+                }
+
+                if (!result.PocketSurfaceFailedStateWriteRetriedOk)
+                {
+                    _failures.Add("pocket-surface: failed state write was not retained for the next flush");
+                }
+
+                if (!result.PocketSurfaceWorkflowBlockedOnStateWriteFailureOk)
+                {
+                    _failures.Add("pocket-surface: workflow started before pending state was durably saved");
+                }
+
+                if (!result.ProviderSurfaceIdentityRemountOk)
+                {
+                    _failures.Add("provider: generated panel did not remount when its package identity changed");
                 }
 
                 if (!result.SettingsWriteOk)

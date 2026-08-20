@@ -61,8 +61,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureAINativeRuntimeIfEnabled() {
+        let savedGeneratedProviderIDs = hoverWindowController.appSettings.savedGeneratedProviderIDs
         guard hoverWindowController.appSettings.aiNativeEnabled else {
-            AINativeRuntime.shared.configure(adapter: nil)
+            AINativeRuntime.shared.configure(
+                adapter: nil,
+                preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
+            )
             return
         }
         do {
@@ -97,9 +101,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let userDataRoot = pocketAppsRoot.appendingPathComponent("UserData", isDirectory: true)
             let userStateStore = try PocketAppUserStateStore(
                 packageID: package.manifest.id,
-                allowedKeys: package.statePropertyNames,
+                stateProperties: package.stateProperties,
                 rootDirectory: userDataRoot
             )
+            let builtInActivationLease = PocketAppActivationLease()
             let pocketAppRuntime = PocketAppExecutionRuntime(
                 package: package,
                 broker: broker,
@@ -111,11 +116,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     "timer.read",
                     "timer.write"
                 ],
-                userStateStore: userStateStore
+                userStateStore: userStateStore,
+                activationLease: builtInActivationLease
             )
             let generationController: PocketAppGenerationController?
+            let generatedActivationRegistry: PocketAppRuntimeActivationRegistry?
             do {
                 let generationRoot = pocketAppsRoot.appendingPathComponent("Generation", isDirectory: true)
+                let generatedHostRoot = pocketAppsRoot.appendingPathComponent("GeneratedHost", isDirectory: true)
+                let activationRegistry = try PocketAppRuntimeActivationRegistry(
+                    rootDirectory: generatedHostRoot,
+                    userDataRoot: userDataRoot,
+                    broker: broker,
+                    userID: "local-user"
+                )
+                _ = activationRegistry.restoreEnabledApps()
                 let generator: (any PocketAppGenerationAdapter)?
                 if let executableURL = CodexPocketAppGenerationAdapter.resolveExecutable() {
                     generator = try? CodexPocketAppGenerationAdapter(
@@ -125,22 +140,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     generator = nil
                 }
+                let appSettings = hoverWindowController.appSettings
                 generationController = try PocketAppGenerationController(
-                    rootDirectory: pocketAppsRoot.appendingPathComponent("GeneratedHost", isDirectory: true),
+                    rootDirectory: generatedHostRoot,
                     userDataRoot: userDataRoot,
                     generationRoot: generationRoot.appendingPathComponent("Drafts", isDirectory: true),
-                    generator: generator
+                    generator: generator,
+                    runtimeActivationReadback: { receipt in
+                        let readback = try activationRegistry.synchronize(receipt)
+                        if receipt.state == .removed {
+                            let providerID = PocketSurfaceRegistry.generatedProviderID(
+                                appID: receipt.packageID
+                            )
+                            appSettings.pruneProviderConfiguration(PluginID(rawValue: providerID))
+                            AINativeRuntime.shared.forgetManagedGeneratedProviderID(providerID)
+                        }
+                        return readback
+                    }
                 )
+                generatedActivationRegistry = activationRegistry
             } catch {
                 generationController = nil
+                generatedActivationRegistry = nil
             }
             AINativeRuntime.shared.configure(
-                adapter: TodayFocusTextAdapter(broker: broker),
+                adapter: TodayFocusTextAdapter(
+                    broker: broker,
+                    activationLease: builtInActivationLease
+                ),
                 pocketAppExecutionRuntime: pocketAppRuntime,
-                pocketAppGenerationController: generationController
+                pocketAppGenerationController: generationController,
+                generatedActivationRegistry: generatedActivationRegistry,
+                builtInActivationLease: builtInActivationLease,
+                preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
             )
         } catch {
-            AINativeRuntime.shared.configure(adapter: nil)
+            AINativeRuntime.shared.configure(
+                adapter: nil,
+                preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
+            )
         }
     }
 

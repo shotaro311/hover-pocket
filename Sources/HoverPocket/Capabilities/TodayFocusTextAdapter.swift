@@ -45,9 +45,14 @@ enum TodayFocusApprovalText {
 @MainActor
 final class TodayFocusTextAdapter {
     private let broker: CapabilityBroker
+    private let activationLease: PocketAppActivationLease?
 
-    init(broker: CapabilityBroker) {
+    init(
+        broker: CapabilityBroker,
+        activationLease: PocketAppActivationLease? = nil
+    ) {
         self.broker = broker
+        self.activationLease = activationLease
     }
 
     func listToday(
@@ -56,6 +61,7 @@ final class TodayFocusTextAdapter {
         permissions: CapabilityPermissionSet,
         now: Date = Date()
     ) async throws -> [TodayFocusCalendarEvent] {
+        try activationLease?.requireActive()
         let nonce = UUID().uuidString.lowercased()
         let plan = CapabilityExecutionPlan(
             id: "today-focus-read:\(nonce)",
@@ -81,12 +87,15 @@ final class TodayFocusTextAdapter {
         guard preparation.approvalRequest == nil else {
             throw CapabilityBrokerError.invalidPlan("read_approval")
         }
-        let receipt = try await broker.execute(
-            plan,
-            permissions: permissions,
-            approvalGrant: nil,
-            now: now
-        )
+        let receipt = try await executeTracked {
+            try await self.broker.execute(
+                plan,
+                permissions: permissions,
+                approvalGrant: nil,
+                now: now
+            )
+        }
+        try activationLease?.requireActive()
         guard receipt.status == .succeeded,
               let output = receipt.steps.first?.output,
               case .array(let events)? = output["events"] else {
@@ -120,6 +129,7 @@ final class TodayFocusTextAdapter {
         now: Date = Date(),
         timeZone: TimeZone = .current
     ) throws -> TodayFocusDraft {
+        try activationLease?.requireActive()
         guard (1...86_400).contains(durationSeconds),
               !purpose.isEmpty,
               purpose.unicodeScalars.count <= 10_000 else {
@@ -173,6 +183,7 @@ final class TodayFocusTextAdapter {
         permissions: CapabilityPermissionSet,
         now: Date = Date()
     ) async throws -> CapabilityWorkflowReceipt {
+        try activationLease?.requireActive()
         guard let request = draft.preparation.approvalRequest else {
             throw CapabilityBrokerError.approvalRequired
         }
@@ -182,12 +193,16 @@ final class TodayFocusTextAdapter {
             decision: .approve,
             now: now
         )
-        return try await broker.execute(
-            draft.plan,
-            permissions: permissions,
-            approvalGrant: grant,
-            now: now
-        )
+        let receipt = try await executeTracked {
+            try await self.broker.execute(
+                draft.plan,
+                permissions: permissions,
+                approvalGrant: grant,
+                now: now
+            )
+        }
+        try activationLease?.requireActive()
+        return receipt
     }
 
     func reject(
@@ -195,12 +210,30 @@ final class TodayFocusTextAdapter {
         planDigest: String,
         now: Date
     ) throws -> CapabilityApprovalGrant {
-        try broker.decideApproval(
+        try activationLease?.requireActive()
+        return try broker.decideApproval(
             requestID: requestID,
             planDigest: planDigest,
             decision: .reject,
             now: now
         )
+    }
+
+    private func executeTracked<T: Sendable>(
+        _ operation: @escaping @MainActor @Sendable () async throws -> T
+    ) async throws -> T {
+        try activationLease?.requireActive()
+        let task = Task { @MainActor in
+            try Task.checkCancellation()
+            return try await operation()
+        }
+        let registration = activationLease?.registerCancellation { task.cancel() }
+        defer { activationLease?.unregisterCancellation(registration) }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     private static func dateKey(_ date: Date, timeZone: TimeZone) -> String {

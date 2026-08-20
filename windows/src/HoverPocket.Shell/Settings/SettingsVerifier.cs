@@ -1,6 +1,7 @@
 using System.Text.Json;
 using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
+using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Providers;
 using HoverPocket.Shell.Verification;
 using HoverPocket.Shell.Windows;
@@ -58,6 +59,9 @@ internal sealed class SettingsVerifier
 
         VerifyDefaults(store, registry, startup);
         VerifyWebViewSecurityPolicy();
+        await VerifyPocketAppBridgeSurfaceIsolationAsync(registry);
+        await VerifyGeneratedProviderLifecyclePublicationAsync(registry);
+        await VerifyAiNativeDisableFlushBoundaryAsync(registry);
         var defaultState = await Send(dispatcher, """{"id":"0","method":"app.getState"}""");
         if (!defaultState.Contains("\"aiNativeEnabled\":false", StringComparison.Ordinal)
             || !defaultState.Contains("\"pocketAppGeneration\":null", StringComparison.Ordinal)
@@ -175,7 +179,10 @@ internal sealed class SettingsVerifier
             store.Load(registry.ProviderIds),
             new InMemoryStartupRegistrationService());
         var dispatcher = new BridgeDispatcher();
-        using var attachment = controller.Attach(dispatcher, BridgeSurface.Settings);
+        using var attachment = controller.Attach(
+            dispatcher,
+            BridgeSurface.Settings,
+            aiNativeEnableDecision: () => true);
 
         var before = await Send(dispatcher, """{"id":"reset-before","method":"pocketApps.generationState"}""");
         await Send(dispatcher, """{"id":"reset","method":"settings.resetDefaults"}""");
@@ -183,11 +190,217 @@ internal sealed class SettingsVerifier
         var blocked = await Send(
             dispatcher,
             """{"id":"reset-disabled","method":"pocketApps.disable","params":{"appId":"local.example.reset"}}""");
+        var reenabled = await Send(
+            dispatcher,
+            """{"id":"reset-reenabled","method":"settings.setAiNativeEnabled","params":{"enabled":true}}""");
         if (!before.Contains("\"enabled\":true", StringComparison.Ordinal)
             || !after.Contains("\"enabled\":false", StringComparison.Ordinal)
-            || !blocked.Contains("GENERATION_DISABLED", StringComparison.Ordinal))
+            || !blocked.Contains("GENERATION_DISABLED", StringComparison.Ordinal)
+            || !reenabled.Contains("\"pocketSurface\":null", StringComparison.Ordinal)
+            || !reenabled.Contains("\"enabled\":false", StringComparison.Ordinal))
         {
-            _failures.Add("settings reset did not disable the existing Pocket App generation controller");
+            _failures.Add("settings reset did not revoke AI-native runtimes until restart");
+        }
+    }
+
+    private async Task VerifyAiNativeDisableFlushBoundaryAsync(ProviderRegistry registry)
+    {
+        var store = UserSettingsStore.CreateTemporary("SettingsAiNativeFlushVerify");
+        var enabled = UserSettingsStore.CreateDefault(registry.ProviderIds);
+        enabled.AiNativeEnabled = true;
+        store.Save(enabled);
+        using var controller = new PanelBridgeController(
+            registry,
+            store,
+            store.Load(registry.ProviderIds),
+            new InMemoryStartupRegistrationService());
+        await controller.SelectProviderFromShellAsync("today-focus");
+        var allowFlush = false;
+        var flushCalls = 0;
+        controller.SetPocketAppStateFlush((appId, cancellationToken) =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            flushCalls += 1;
+            return Task.FromResult(new PocketAppStateTransitionLease(
+                appId,
+                $"settings-flush-{flushCalls}",
+                allowFlush && !string.IsNullOrWhiteSpace(appId)));
+        });
+        var dispatcher = new BridgeDispatcher();
+        using var attachment = controller.Attach(dispatcher, BridgeSurface.Settings);
+
+        var blocked = await Send(
+            dispatcher,
+            """{"id":"ai-flush-blocked","method":"settings.setAiNativeEnabled","params":{"enabled":false}}""");
+        allowFlush = true;
+        var disabled = await Send(
+            dispatcher,
+            """{"id":"ai-flush-disabled","method":"settings.setAiNativeEnabled","params":{"enabled":false}}""");
+        if (flushCalls != 2
+            || !blocked.Contains("\"aiNativeEnabled\":true", StringComparison.Ordinal)
+            || !disabled.Contains("\"aiNativeEnabled\":false", StringComparison.Ordinal)
+            || store.ReloadOrDefault(registry.ProviderIds).AiNativeEnabled)
+        {
+            _failures.Add("AI-native disable did not await and honor the active Pocket App state flush");
+        }
+    }
+
+    private async Task VerifyPocketAppBridgeSurfaceIsolationAsync(ProviderRegistry registry)
+    {
+        var store = UserSettingsStore.CreateTemporary("SettingsPocketBridgeVerify");
+        var enabled = UserSettingsStore.CreateDefault(registry.ProviderIds);
+        enabled.AiNativeEnabled = true;
+        store.Save(enabled);
+        using var controller = new PanelBridgeController(
+            registry,
+            store,
+            store.Load(registry.ProviderIds),
+            new InMemoryStartupRegistrationService());
+        var settingsDispatcher = new BridgeDispatcher();
+        using var settingsAttachment = controller.Attach(settingsDispatcher, BridgeSurface.Settings);
+        var panelDispatcher = new BridgeDispatcher();
+        using var panelAttachment = controller.Attach(panelDispatcher, BridgeSurface.Panel);
+
+        var settingsSelect = await settingsDispatcher.ProcessRawMessageAsync(
+            """{"id":"surface-settings-select","method":"provider.select","params":{"id":"today-focus"}}""");
+        var settingsLoad = await settingsDispatcher.ProcessRawMessageAsync(
+            """{"id":"surface-settings-load","method":"pocketApp.load","params":{"appId":"local.example.today-focus","surfaceId":"main"}}""");
+        var panelSelect = await Send(
+            panelDispatcher,
+            """{"id":"surface-panel-select","method":"provider.select","params":{"id":"today-focus"}}""");
+        var settingsState = await Send(
+            settingsDispatcher,
+            """{"id":"surface-settings-state","method":"app.getState"}""");
+        var settingsMutation = await Send(
+            settingsDispatcher,
+            """{"id":"surface-settings-mutation","method":"settings.setLanguage","params":{"language":"en"}}""");
+
+        if (settingsSelect?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true
+            || settingsLoad?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true
+            || !panelSelect.Contains("\"pocketSurface\":{", StringComparison.Ordinal)
+            || settingsState.Contains("\"pocketSurface\":{", StringComparison.Ordinal)
+            || settingsMutation.Contains("\"pocketSurface\":{", StringComparison.Ordinal))
+        {
+            _failures.Add("Pocket App bridge authority or state crossed the Panel/Settings surface boundary");
+        }
+    }
+
+    private async Task VerifyGeneratedProviderLifecyclePublicationAsync(ProviderRegistry registry)
+    {
+        const string appId = "local.generated.settings-fixture";
+        var generatedProviderId = PocketSurfaceRegistry.GeneratedProviderId(appId);
+        var store = UserSettingsStore.CreateTemporary("SettingsGeneratedProviderLifecycleVerify");
+        var pocketAppsRoot = Path.Combine(store.RootDirectory, "PocketApps");
+        var generatedHostRoot = Path.Combine(pocketAppsRoot, "GeneratedHost");
+        var userDataRoot = Path.Combine(pocketAppsRoot, "UserData");
+        var sourcePackageRoot = Path.Combine(AppContext.BaseDirectory, "PocketApps", "local.example.today-focus");
+        var packageRoot = Path.Combine(store.RootDirectory, "GeneratedProviderFixture");
+        CopyDirectory(sourcePackageRoot, packageRoot);
+        var manifestPath = Path.Combine(packageRoot, "manifest.json");
+        File.WriteAllText(
+            manifestPath,
+            File.ReadAllText(manifestPath).Replace("local.example.today-focus", appId, StringComparison.Ordinal));
+        using (var lifecycle = new PocketAppLifecycleManager(generatedHostRoot, userDataRoot))
+        {
+            var now = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
+            var proposal = lifecycle.Stage(packageRoot, now);
+            var grant = lifecycle.Approve(proposal.RequestId, proposal.BindingDigest, now);
+            var receipt = lifecycle.Install(proposal, grant, now);
+            if (!receipt.ReadbackVerified || receipt.State != PocketAppLifecycleState.Enabled)
+            {
+                _failures.Add("generated provider lifecycle fixture did not install");
+                return;
+            }
+        }
+
+        var enabled = UserSettingsStore.CreateDefault(registry.ProviderIds);
+        enabled.AiNativeEnabled = true;
+        enabled.ProviderOrder.Insert(1, generatedProviderId);
+        enabled.ProviderVisibility[generatedProviderId] = true;
+        enabled.PreferredProviderId = generatedProviderId;
+        enabled.LastSelectedProviderId = generatedProviderId;
+        store.Save(enabled);
+
+        using var controller = new PanelBridgeController(
+            registry,
+            store,
+            store.LoadForBootstrap(registry.ProviderIds),
+            new InMemoryStartupRegistrationService());
+        var panelEvents = new List<string>();
+        var panelDispatcher = new BridgeDispatcher(json =>
+        {
+            panelEvents.Add(json);
+            return Task.CompletedTask;
+        });
+        using var panelAttachment = controller.Attach(panelDispatcher, BridgeSurface.Panel);
+        var settingsDispatcher = new BridgeDispatcher();
+        using var settingsAttachment = controller.Attach(settingsDispatcher, BridgeSurface.Settings);
+
+        var before = await Send(
+            panelDispatcher,
+            """{"id":"generated-before","method":"app.getState"}""");
+        var disabled = await Send(
+            settingsDispatcher,
+            JsonSerializer.Serialize(new { id = "generated-disable", method = "pocketApps.disable", @params = new { appId } }));
+        for (var attempt = 0; attempt < 20
+             && !panelEvents.Any(item => item.Contains("\"event\":\"state.changed\"", StringComparison.Ordinal));
+             attempt++)
+        {
+            await Task.Delay(10);
+        }
+
+        var publishedProviders = panelEvents
+            .Select(item => JsonDocument.Parse(item))
+            .Where(document => document.RootElement.GetProperty("event").GetString() == "state.changed")
+            .SelectMany(document => document.RootElement.GetProperty("payload").GetProperty("providers").EnumerateArray())
+            .Select(provider => provider.GetProperty("id").GetString() ?? string.Empty)
+            .ToArray();
+        if (!before.Contains($"\"id\":\"{generatedProviderId}\"", StringComparison.Ordinal)
+            || !disabled.Contains("\"state\":\"disabled\"", StringComparison.Ordinal)
+            || publishedProviders.Length == 0
+            || publishedProviders.Contains(generatedProviderId, StringComparer.OrdinalIgnoreCase))
+        {
+            _failures.Add("generated provider lifecycle commit did not publish the refreshed Panel provider state");
+        }
+
+        _ = await Send(
+            settingsDispatcher,
+            """{"id":"generated-disabled-setting","method":"settings.setTextSize","params":{"textSize":"large"}}""");
+        var preserved = controller.CurrentSettings;
+        if (!preserved.ProviderOrder.Contains(generatedProviderId, StringComparer.OrdinalIgnoreCase)
+            || !preserved.ProviderVisibility.TryGetValue(generatedProviderId, out var generatedVisible)
+            || !generatedVisible
+            || preserved.PreferredProviderId != generatedProviderId
+            || preserved.LastSelectedProviderId != generatedProviderId)
+        {
+            _failures.Add("disabled generated provider preferences were pruned by an unrelated settings write");
+        }
+
+        var reenabled = await Send(
+            settingsDispatcher,
+            JsonSerializer.Serialize(new { id = "generated-enable", method = "pocketApps.enable", @params = new { appId } }));
+        var afterEnable = await Send(panelDispatcher, """{"id":"generated-after-enable","method":"app.getState"}""");
+        if (!reenabled.Contains("\"state\":\"enabled\"", StringComparison.Ordinal)
+            || !afterEnable.Contains($"\"id\":\"{generatedProviderId}\"", StringComparison.Ordinal)
+            || controller.CurrentSettings.PreferredProviderId != generatedProviderId)
+        {
+            _failures.Add("re-enabled generated provider did not restore its retained preferences");
+        }
+
+        var removed = await Send(
+            settingsDispatcher,
+            JsonSerializer.Serialize(new { id = "generated-remove", method = "pocketApps.removePreservingData", @params = new { appId } }));
+        _ = await Send(
+            settingsDispatcher,
+            """{"id":"generated-removed-setting","method":"settings.setTextSize","params":{"textSize":"medium"}}""");
+        var pruned = controller.CurrentSettings;
+        if (!removed.Contains("\"state\":\"removed\"", StringComparison.Ordinal)
+            || pruned.ProviderOrder.Contains(generatedProviderId, StringComparer.OrdinalIgnoreCase)
+            || pruned.ProviderVisibility.ContainsKey(generatedProviderId)
+            || pruned.PreferredProviderId == generatedProviderId
+            || pruned.LastSelectedProviderId == generatedProviderId)
+        {
+            _failures.Add("removed generated provider preferences were not pruned");
         }
     }
 
@@ -291,5 +504,16 @@ internal sealed class SettingsVerifier
     {
         return actual.Count >= expectedPrefix.Count
             && actual.Take(expectedPrefix.Count).SequenceEqual(expectedPrefix, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(source, file);
+            var target = Path.Combine(destination, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target, overwrite: false);
+        }
     }
 }

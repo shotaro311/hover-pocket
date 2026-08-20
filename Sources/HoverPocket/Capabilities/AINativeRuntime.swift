@@ -9,6 +9,11 @@ final class AINativeRuntime: ObservableObject {
     private var adapter: TodayFocusTextAdapter?
     @Published private(set) var pocketAppExecutionRuntime: PocketAppExecutionRuntime?
     @Published private(set) var pocketAppGenerationController: PocketAppGenerationController?
+    @Published private(set) var generatedExecutionRuntimeRegistry: PocketExecutionRuntimeRegistry?
+    @Published private(set) var generatedSurfaceRegistry: PocketSurfaceRegistry?
+    private var generatedActivationRegistry: PocketAppRuntimeActivationRegistry?
+    private var builtInActivationLease: PocketAppActivationLease?
+    private var preservedManagedGeneratedProviderIDs: Set<String> = []
 
     private init() {}
 
@@ -16,15 +21,63 @@ final class AINativeRuntime: ObservableObject {
 
     var isPocketAppAvailable: Bool { pocketAppExecutionRuntime != nil }
 
+    var managedGeneratedProviderIDs: Set<String> {
+        var providerIDs = preservedManagedGeneratedProviderIDs
+        if let controller = pocketAppGenerationController {
+            providerIDs.formUnion(controller.managedPackages.map {
+                PocketSurfaceRegistry.generatedProviderID(appID: $0.packageID)
+            })
+            providerIDs.formUnion(controller.managementIssues.map {
+                PocketSurfaceRegistry.generatedProviderID(appID: $0.packageID)
+            })
+            return providerIDs
+        }
+        if let appIDs = try? generatedActivationRegistry?.managedAppIDs() {
+            providerIDs.formUnion(appIDs.map {
+                PocketSurfaceRegistry.generatedProviderID(appID: $0)
+            })
+        }
+        return providerIDs
+    }
+
     func configure(
         adapter: TodayFocusTextAdapter?,
         pocketAppExecutionRuntime: PocketAppExecutionRuntime? = nil,
-        pocketAppGenerationController: PocketAppGenerationController? = nil
+        pocketAppGenerationController: PocketAppGenerationController? = nil,
+        generatedActivationRegistry: PocketAppRuntimeActivationRegistry? = nil,
+        builtInActivationLease: PocketAppActivationLease? = nil,
+        preservingManagedGeneratedProviderIDs: Set<String> = []
     ) {
+        let retainedProviderIDs = managedGeneratedProviderIDs.union(
+            preservingManagedGeneratedProviderIDs.filter {
+                PocketSurfaceRegistry.generatedAppID(providerID: $0) != nil
+            }
+        )
+        self.builtInActivationLease?.invalidate()
+        self.generatedActivationRegistry?.shutdown()
         self.pocketAppGenerationController?.shutdown()
         self.adapter = adapter
         self.pocketAppExecutionRuntime = pocketAppExecutionRuntime
         self.pocketAppGenerationController = pocketAppGenerationController
+        self.generatedActivationRegistry = generatedActivationRegistry
+        self.generatedExecutionRuntimeRegistry = generatedActivationRegistry?.executionRegistry
+        self.generatedSurfaceRegistry = generatedActivationRegistry?.surfaceRegistry
+        self.builtInActivationLease = builtInActivationLease
+        if let pocketAppGenerationController {
+            self.preservedManagedGeneratedProviderIDs = Set(
+                pocketAppGenerationController.managedPackages.map {
+                    PocketSurfaceRegistry.generatedProviderID(appID: $0.packageID)
+                } + pocketAppGenerationController.managementIssues.map {
+                    PocketSurfaceRegistry.generatedProviderID(appID: $0.packageID)
+                }
+            )
+        } else {
+            self.preservedManagedGeneratedProviderIDs = retainedProviderIDs
+        }
+    }
+
+    func forgetManagedGeneratedProviderID(_ providerID: String) {
+        preservedManagedGeneratedProviderIDs.remove(providerID)
     }
 
     func prepareTodayFocus(
