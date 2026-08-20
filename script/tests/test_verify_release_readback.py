@@ -288,6 +288,8 @@ class ReleaseReadbackTests(unittest.TestCase):
         self.assertEqual(workflow.count(pinned), 2)
         self.assertIn("needs: [resolve-windows-release]", workflow)
         self.assertNotIn("WINDOWS_TAG: ${{ inputs.windows_tag }}", workflow)
+        upload_artifact_sha = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+        self.assertEqual(workflow.count(f"actions/upload-artifact@{upload_artifact_sha}"), 2)
 
     def test_github_latest_must_remain_the_macos_release(self):
         verifier = MODULE.Verifier()
