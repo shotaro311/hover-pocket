@@ -1,3 +1,5 @@
+using HoverPocket.Shell.Verification;
+
 namespace HoverPocket.Shell.PocketApps;
 
 internal static class PocketAppRuntimeActivationVerifier
@@ -5,10 +7,10 @@ internal static class PocketAppRuntimeActivationVerifier
     public static int Verify()
     {
         var failures = Run();
-        Console.WriteLine($"pocket_app_runtime_activation_verify={(failures.Count == 0 ? "ok" : "failed")}");
+        VerifyConsole.WriteLine($"pocket_app_runtime_activation_verify={(failures.Count == 0 ? "ok" : "failed")}");
         if (failures.Count != 0)
         {
-            Console.WriteLine($"pocket_app_runtime_activation_failures={string.Join(',', failures)}");
+            VerifyConsole.WriteLine($"pocket_app_runtime_activation_failures={string.Join(',', failures)}");
         }
         return failures.Count == 0 ? 0 : 1;
     }

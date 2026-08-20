@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using HoverPocket.Shell.Verification;
 
 namespace HoverPocket.Shell.PocketApps;
 
@@ -66,18 +67,18 @@ internal sealed class PocketSurfaceVerifier
 
         if (_failures.Count > 0)
         {
-            Console.Error.WriteLine("pocket_surface_verify=failed");
+            VerifyConsole.WriteLine("pocket_surface_verify=failed");
             foreach (var failure in _failures)
             {
-                Console.Error.WriteLine($"failure={failure}");
+                VerifyConsole.WriteLine($"failure={failure}");
             }
             return 1;
         }
 
-        Console.WriteLine("pocket_surface_verify=ok");
-        Console.WriteLine("pocket_surface_valid_nodes=6");
-        Console.WriteLine("pocket_surface_negative_cases=15");
-        Console.WriteLine($"pocket_surface_render_digest={renderDigest}");
+        VerifyConsole.WriteLine("pocket_surface_verify=ok");
+        VerifyConsole.WriteLine("pocket_surface_valid_nodes=6");
+        VerifyConsole.WriteLine("pocket_surface_negative_cases=15");
+        VerifyConsole.WriteLine($"pocket_surface_render_digest={renderDigest}");
         return 0;
     }
 
