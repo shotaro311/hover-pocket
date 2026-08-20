@@ -45,16 +45,18 @@
 
 ## PR CI / Security readback
 
-- Source head: `bcacda3022c2d90255e8d45ff453783dfa381183`
-- Windows: [32409398168](https://github.com/shotaro311/hover-pocket/actions/runs/32409398168) 成功。Release buildは警告0 / error 0、`VOICE_CASE_PASS transition-cancellation`、全Voice case、rendered WebViewを確認した。
-- macOS: [32409398156](https://github.com/shotaro311/hover-pocket/actions/runs/32409398156) 成功。warnings-as-errors buildとVoice verifierを確認した。
-- 3OS contract / byte compare: [32409398159](https://github.com/shotaro311/hover-pocket/actions/runs/32409398159) 成功。Ubuntu / macOS / Windowsで13 schema / 60 fixtureが成功し、reportはbyte-identicalだった。
-- PR Router: [32409394119](https://github.com/shotaro311/hover-pocket/actions/runs/32409394119) 成功。
-- Security scan `ac821365-2914-4785-a2c7-ce809f14b97b`: range `b34c1fc...5a6c3bb`、7 / 7、finding 0、sealed complete。
-- Security scan `e5e3355f-411a-4bb8-96cf-d54400cce820`: range `5a6c3bb...bcacda3`、7 / 7、finding 0、sealed complete。
+- Source head: `edcadf9a0ad54d245f16995371fad5b98e3f2ee8`
+- Windows: [32413198640](https://github.com/shotaro311/hover-pocket/actions/runs/32413198640) 成功。Release buildは警告0 / error 0、`VOICE_CASE_PASS dispose-transition-drain`、全Voice case、rendered WebViewを確認した。
+- macOS: [32413198661](https://github.com/shotaro311/hover-pocket/actions/runs/32413198661) 成功。warnings-as-errors build、Voice verifier、Panel layout 128件を確認した。
+- 3OS contract / byte compare: [32413198617](https://github.com/shotaro311/hover-pocket/actions/runs/32413198617) 成功。Ubuntu / macOS / Windowsで13 schema / 60 fixtureが成功し、reportはbyte-identicalだった。
+- PR Router: [32413196048](https://github.com/shotaro311/hover-pocket/actions/runs/32413196048) 成功。
+- Security scan `0830db5d-97ac-46ee-9c44-a2176551c462`: range `b3b83cb...70c6a56`、4 / 4、finding 0、sealed complete。
+- Security scan `742c9674-ee8c-4755-aa78-26bd9fb1072a`: range `70c6a56...4b23892`、3 / 3、finding 0、sealed complete。
+- Security scan `ea6dcbc6-8282-40aa-9bd6-5aeeb61ae830`: range `4b23892...edcadf9`、5 / 5、finding 0、sealed complete。
+- PR #19は`CLEAN / MERGEABLE`、remote parity `0 / 0`、未解決review thread 0件を別経路でreadbackした。
 
 ## 未完了gate
 
-- 4件のreview threadへ検証根拠を返信し、resolve後に未解決0件を別経路でreadbackする。
 - PR #19の修正をPR #21、その後PR #22へ通常mergeで伝播する。
 - PR #21 / #22のWindows、macOS、3OS contract CIとreviewを各headで再確認する。
+- AN8 release-readbackの並行OS dispatchでWindows latestを独立解決し得る問題を修正し、release artifactとfeedを別経路で確認する。
