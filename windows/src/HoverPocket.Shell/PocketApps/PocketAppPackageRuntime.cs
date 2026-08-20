@@ -168,14 +168,22 @@ internal sealed class PocketAppPackageRuntime
                 }
             }
         }
-        var workflowInputNames = workflowInputTypes.Keys.ToHashSet(StringComparer.Ordinal);
-        var boundNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var surface in surfaces.Values)
         {
+            var boundNames = new HashSet<string>(StringComparer.Ordinal);
             ValidateBindings(surface.Root, workflowInputTypes, statePropertyTypes, boundNames, $"$.surfaces.{surface.Id}.root");
             ValidateSurfaceScopes(surface.Root, requestedScopes, $"$.surfaces.{surface.Id}.root");
+            foreach (var workflowId in ReferencedWorkflows(surface.Root))
+            {
+                if (!workflows.TryGetValue(workflowId, out var workflow))
+                {
+                    throw new PocketAppPackageRuntimeException($"$.surfaces.{surface.Id}:workflow");
+                }
+                Require(
+                    workflow.Inputs.Keys.ToHashSet(StringComparer.Ordinal).IsSubsetOf(boundNames),
+                    $"$.surfaces.{surface.Id}:unbound_workflow_input");
+            }
         }
-        Require(workflowInputNames.IsSubsetOf(boundNames), "$.workflows:unbound_input");
 
         var testCases = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var testPath in manifest.Tests)
@@ -501,6 +509,22 @@ internal sealed class PocketAppPackageRuntime
             ("durationPicker", "value") => new HashSet<string>(["integer", "number"], StringComparer.Ordinal),
             _ => null
         };
+    }
+
+    private static IReadOnlySet<string> ReferencedWorkflows(PocketSurfaceRenderNode node)
+    {
+        var workflows = new HashSet<string>(StringComparer.Ordinal);
+        if (node.Type == "button"
+            && node.Properties.TryGetValue("workflow", out var workflowValue)
+            && workflowValue is string workflowId)
+        {
+            workflows.Add(workflowId);
+        }
+        foreach (var child in node.Children)
+        {
+            workflows.UnionWith(ReferencedWorkflows(child));
+        }
+        return workflows;
     }
 
     private static IReadOnlySet<string>? AcceptedStateTypes(string nodeType, string propertyName)

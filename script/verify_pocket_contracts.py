@@ -1732,8 +1732,15 @@ def validate_surface_workflow_input_bindings(
         declared = property_schema.get("type")
         state_types[name] = frozenset({declared} if isinstance(declared, str) else declared or [])
 
-    def walk(node: Mapping[str, Any], location: str) -> None:
+    def walk(
+        node: Mapping[str, Any],
+        location: str,
+        bound_inputs: set[str],
+        referenced_workflows: set[str],
+    ) -> None:
         node_type = node["type"]
+        if node_type == "button":
+            referenced_workflows.add(node["workflow"])
         for property_name, binding in node.items():
             if not isinstance(binding, str) or not binding.startswith(("$input.", "$state.")):
                 continue
@@ -1760,11 +1767,23 @@ def validate_surface_workflow_input_bindings(
                     f"{location}.{property_name}",
                     "surface control and declared workflow input types are incompatible",
                 )
+            if input_name in input_types:
+                bound_inputs.add(input_name)
         for index, child in enumerate(node.get("children", [])):
-            walk(child, f"{location}.children[{index}]")
+            walk(child, f"{location}.children[{index}]", bound_inputs, referenced_workflows)
 
     for surface_id, surface in surfaces.items():
-        walk(surface["root"], f"$.surfaces.{surface_id}.root")
+        bound_inputs: set[str] = set()
+        referenced_workflows: set[str] = set()
+        walk(surface["root"], f"$.surfaces.{surface_id}.root", bound_inputs, referenced_workflows)
+        for workflow_id in referenced_workflows:
+            missing_inputs = set(workflows[workflow_id]["inputs"]) - bound_inputs
+            if missing_inputs:
+                fail(
+                    "APP_REFERENCE_INVALID",
+                    f"$.surfaces.{surface_id}.root",
+                    "button workflow inputs must be bound on the same reachable surface",
+                )
 
 
 def input_schema_accepts_type(schema: Mapping[str, Any], workflow_type: str) -> bool:

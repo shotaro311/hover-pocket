@@ -113,6 +113,57 @@ internal sealed class PocketAppPackageVerifier
         {
             workflow["inputs"]!["selectedEventRef"] = "integer";
         }));
+        RejectPackage("workflow_input_bound_only_on_unreachable_surface", root =>
+        {
+            MutateJson(Path.Combine(root, "manifest.json"), manifest =>
+            {
+                manifest["surfaces"]!.AsArray().Add(new JsonObject
+                {
+                    ["id"] = "secondary",
+                    ["kind"] = "declarative",
+                    ["source"] = "surfaces/secondary.surface.json"
+                });
+            });
+            MutateJson(Path.Combine(root, "surfaces", "main.surface.json"), surface =>
+            {
+                var children = surface["root"]!["children"]!.AsArray();
+                children[1]!.AsObject().Remove("titleTarget");
+                children.RemoveAt(3);
+            });
+            var secondary = new JsonObject
+            {
+                ["$schema"] = "hoverpocket://schemas/pocket-surface/v1",
+                ["surfaceVersion"] = 1,
+                ["id"] = "secondary",
+                ["hostBoundary"] = new JsonObject
+                {
+                    ["region"] = "provider_host",
+                    ["mayRenderHeader"] = false,
+                    ["mayRenderVoiceLane"] = false,
+                    ["mayRenderApproval"] = false,
+                    ["mayRenderReceipt"] = false
+                },
+                ["root"] = new JsonObject
+                {
+                    ["type"] = "stack",
+                    ["axis"] = "vertical",
+                    ["children"] = new JsonArray
+                    {
+                        new JsonObject
+                        {
+                            ["type"] = "textField",
+                            ["label"] = "Purpose",
+                            ["value"] = "$input.purpose",
+                            ["maxLength"] = 80
+                        }
+                    }
+                }
+            };
+            File.WriteAllText(
+                Path.Combine(root, "surfaces", "secondary.surface.json"),
+                secondary.ToJsonString(),
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        });
         RejectPackage("unsupported_surface_query_shape", root => MutateJson(Path.Combine(root, "surfaces", "main.surface.json"), surface =>
         {
             surface["root"]!["children"]![1]!["items"]!["query"] = "sticky.note.get@1";
@@ -155,7 +206,7 @@ internal sealed class PocketAppPackageVerifier
         Console.WriteLine("pocket_app_package_verify=ok");
         Console.WriteLine("pocket_app_package_valid_files=9");
         Console.WriteLine("pocket_app_package_bundled=ok");
-        Console.WriteLine("pocket_app_package_negative_cases=16");
+        Console.WriteLine("pocket_app_package_negative_cases=17");
         Console.WriteLine("pocket_app_lifecycle_verify=ok");
         Console.WriteLine("pocket_app_generation_verify=ok");
         return 0;
