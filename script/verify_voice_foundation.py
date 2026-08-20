@@ -133,6 +133,14 @@ def main() -> None:
         / "Voice"
         / "CodexVoiceCoordinator.cs"
     ).read_text(encoding="utf-8")
+    windows_verifier = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Verification"
+        / "VoiceFoundationVerifier.cs"
+    ).read_text(encoding="utf-8")
     windows_geometry = (
         ROOT
         / "windows"
@@ -219,6 +227,8 @@ def main() -> None:
         fail("Windows app-server stderr is not drained through a bounded sink")
     if "DisposeDetachedClientAsync" not in windows_coordinator:
         fail("Windows failed/crashed app-server clients are not disposed through one boundary")
+    if "Task.Run(RunAsync).GetAwaiter().GetResult();" not in windows_verifier:
+        fail("Windows Voice verifier can deadlock the WPF synchronization context")
     if "maxRetainedSessions" not in mac_runtime or "MaxRetainedSessions" not in windows_coordinator:
         fail("Voice session retention is not bounded on both operating systems")
     if "expansionBlocked" not in app_js:

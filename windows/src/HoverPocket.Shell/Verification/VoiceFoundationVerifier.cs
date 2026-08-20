@@ -16,7 +16,7 @@ internal sealed class VoiceFoundationVerifier
     {
         try
         {
-            RunAsync().GetAwaiter().GetResult();
+            Task.Run(RunAsync).GetAwaiter().GetResult();
         }
         catch (Exception exception)
         {
