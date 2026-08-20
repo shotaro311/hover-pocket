@@ -48,6 +48,7 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly AsyncLocal<BridgeSurface?> _requestSurface = new();
     private readonly object _previewFrameSync = new();
     private Func<string, CancellationToken, Task<bool>>? _pocketAppStateFlush;
+    private Func<string, Task>? _pocketAppStateRelease;
     private string _selectedProviderId;
     private MediaPreviewFrame? _pendingPreviewFrame;
     private bool _previewPostScheduled;
@@ -436,10 +437,13 @@ internal sealed class PanelBridgeController : IDisposable
         };
     }
 
-    public void SetPocketAppStateFlush(Func<string, CancellationToken, Task<bool>>? flush)
+    public void SetPocketAppStateFlush(
+        Func<string, CancellationToken, Task<bool>>? flush,
+        Func<string, Task>? release = null)
     {
         _pocketAppStateFlush = flush;
-        _pocketAppGenerationController?.SetBeforeDeactivate(flush);
+        _pocketAppStateRelease = release;
+        _pocketAppGenerationController?.SetBeforeDeactivate(flush, release);
     }
 
     private Task<object?> RoutePocketAppLoadAsync(
@@ -727,6 +731,7 @@ internal sealed class PanelBridgeController : IDisposable
         CancellationToken cancellationToken)
     {
         var enabled = ReadRequiredBool(parameters, "enabled");
+        string? stateTransitionAppId = null;
         if (enabled && !CurrentSettings.AiNativeEnabled)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -741,29 +746,41 @@ internal sealed class PanelBridgeController : IDisposable
         }
         if (!enabled)
         {
+            stateTransitionAppId = SelectedPocketSurfaceAppId();
             if (!await FlushSelectedPocketAppStateAsync(cancellationToken))
             {
                 return await PublishStateAsync(cancellationToken);
             }
-            _aiNativeExecutionLease?.Invalidate();
-            _pocketAppGenerationController?.SetEnabled(false);
-            _generatedPocketApps?.SetEnabled(false);
         }
-        if (CurrentSettings.AiNativeEnabled != enabled)
+        try
         {
-            var updated = CurrentSettings.Clone();
-            updated.AiNativeEnabled = enabled;
-            SaveSettings(updated);
-        }
+            if (!enabled)
+            {
+                _aiNativeExecutionLease?.Invalidate();
+                _pocketAppGenerationController?.SetEnabled(false);
+                _generatedPocketApps?.SetEnabled(false);
+            }
+            if (CurrentSettings.AiNativeEnabled != enabled)
+            {
+                var updated = CurrentSettings.Clone();
+                updated.AiNativeEnabled = enabled;
+                SaveSettings(updated);
+            }
 
-        // Never hot-create a generation composition root. If one exists from startup, disabling
-        // cancels an in-flight Codex process immediately and gates every generation bridge route.
-        if (enabled && _aiNativeExecutionLease?.IsActive == true)
-        {
-            _generatedPocketApps?.SetEnabled(true);
-            _pocketAppGenerationController?.SetEnabled(true);
+            // Never hot-create a generation composition root. If one exists from startup, disabling
+            // cancels an in-flight Codex process immediately and gates every generation bridge route.
+            if (enabled && _aiNativeExecutionLease?.IsActive == true)
+            {
+                _generatedPocketApps?.SetEnabled(true);
+                _pocketAppGenerationController?.SetEnabled(true);
+            }
+            return await PublishStateAsync(cancellationToken);
         }
-        return await PublishStateAsync(cancellationToken);
+        catch
+        {
+            await ReleasePocketAppStateAsync(stateTransitionAppId);
+            throw;
+        }
     }
 
     private bool ShowAiNativeEnableApproval(System.Windows.Window? owner)
@@ -810,16 +827,25 @@ internal sealed class PanelBridgeController : IDisposable
     private async Task<object?> ResetDefaultsAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         _ = parameters;
+        var stateTransitionAppId = SelectedPocketSurfaceAppId();
         if (!await FlushSelectedPocketAppStateAsync(cancellationToken))
         {
             return await PublishStateAsync(cancellationToken);
         }
-        _startupRegistration.SetRegistered(false);
-        _aiNativeExecutionLease?.Invalidate();
-        _pocketAppGenerationController?.SetEnabled(false);
-        _generatedPocketApps?.SetEnabled(false);
-        SaveSettings(UserSettingsStore.CreateDefault(_providerRegistry.ProviderIds));
-        return await PublishStateAsync(cancellationToken);
+        try
+        {
+            _startupRegistration.SetRegistered(false);
+            _aiNativeExecutionLease?.Invalidate();
+            _pocketAppGenerationController?.SetEnabled(false);
+            _generatedPocketApps?.SetEnabled(false);
+            SaveSettings(UserSettingsStore.CreateDefault(_providerRegistry.ProviderIds));
+            return await PublishStateAsync(cancellationToken);
+        }
+        catch
+        {
+            await ReleasePocketAppStateAsync(stateTransitionAppId);
+            throw;
+        }
     }
 
     private async Task<object?> ResetPanelBindingAsync(JsonElement? parameters, CancellationToken cancellationToken)
@@ -1292,23 +1318,42 @@ internal sealed class PanelBridgeController : IDisposable
         _generatedPocketApps?.SurfaceRegistry.Routes.FirstOrDefault(
             route => string.Equals(route.ProviderId, _selectedProviderId, StringComparison.OrdinalIgnoreCase));
 
-    private async Task<bool> FlushSelectedPocketAppStateAsync(CancellationToken cancellationToken)
-    {
-        var appId = string.Equals(_selectedProviderId, "today-focus", StringComparison.OrdinalIgnoreCase)
+    private string? SelectedPocketSurfaceAppId() =>
+        string.Equals(_selectedProviderId, "today-focus", StringComparison.OrdinalIgnoreCase)
             ? _pocketAppHostController?.AppId
             : SelectedGeneratedRoute()?.AppId;
+
+    private async Task<bool> FlushSelectedPocketAppStateAsync(CancellationToken cancellationToken)
+    {
+        var appId = SelectedPocketSurfaceAppId();
         if (appId is null || _pocketAppStateFlush is null) { return true; }
         try
         {
-            return await _pocketAppStateFlush(appId, cancellationToken);
+            var saved = await _pocketAppStateFlush(appId, cancellationToken);
+            if (!saved) { await ReleasePocketAppStateAsync(appId); }
+            return saved;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            await ReleasePocketAppStateAsync(appId);
             throw;
         }
         catch
         {
+            await ReleasePocketAppStateAsync(appId);
             return false;
+        }
+    }
+
+    private async Task ReleasePocketAppStateAsync(string? appId)
+    {
+        if (appId is null || _pocketAppStateRelease is null) { return; }
+        try
+        {
+            await _pocketAppStateRelease(appId);
+        }
+        catch
+        {
         }
     }
 

@@ -22,10 +22,19 @@ export function renderPocketSurfaceProvider(context) {
   const statePersistenceTails = new Map();
   let disposed = false;
   let stateFlushTask = null;
+  let loadTask = Promise.resolve();
+  let transitionHeld = false;
   initializeState(surface.initialState, state);
   initializeDefaults(surface.renderModel.root, inputs, state);
   draw();
-  void load();
+  void refresh();
+
+  function refresh() {
+    if (transitionHeld || disposed) return loadTask;
+    const next = loadTask.then(load);
+    loadTask = next.catch(() => {});
+    return next;
+  }
 
   async function load() {
     setHostStatus("今日の予定を読み込んでいます…", "neutral");
@@ -253,20 +262,40 @@ export function renderPocketSurfaceProvider(context) {
     return results.every((result) => result !== false);
   }
 
-  function flushPendingState() {
+  function flushStateWrites() {
     if (stateFlushTask) return stateFlushTask;
-    const wasInert = root.inert;
-    root.inert = true;
-    stateFlushTask = flushPendingTextState().finally(() => {
+    stateFlushTask = loadTask.then(flushPendingTextState).finally(() => {
       stateFlushTask = null;
-      if (!disposed) root.inert = wasInert;
     });
     return stateFlushTask;
   }
 
+  async function flushPendingState() {
+    const wasInert = root.inert;
+    root.inert = true;
+    const saved = await flushStateWrites();
+    if (!disposed && !transitionHeld) root.inert = wasInert;
+    return saved;
+  }
+
+  async function beginStateTransition() {
+    transitionHeld = true;
+    root.inert = true;
+    const saved = await flushStateWrites();
+    if (!saved) releaseStateTransition();
+    return saved;
+  }
+
+  function releaseStateTransition() {
+    transitionHeld = false;
+    if (!disposed) root.inert = false;
+  }
+
   return {
-    refresh: load,
+    refresh,
     flushPendingState,
+    beginStateTransition,
+    releaseStateTransition,
     async dispose() {
       const saved = await flushPendingState();
       if (!saved) return false;
@@ -531,6 +560,7 @@ export async function runPocketSurfaceUiVerify() {
   let stateWorkflowInputForwarded = false;
   let inputlessWorkflowInvoked = false;
   let stateBoundControlsPersisted = false;
+  let stateTransitionBoundary = false;
   let layoutMatrix = true;
   let layoutCases = 0;
 
@@ -542,11 +572,13 @@ export async function runPocketSurfaceUiVerify() {
       host.style.cssText = `position:fixed;left:-10000px;top:0;width:${panelCase.width}px;height:${panelCase.height}px;--hp-text-scale:${textCase.scale}`;
       document.body.append(host);
       const persistedState = new Map();
+      let loadCalls = 0;
       const provider = renderPocketSurfaceProvider({
         container: host,
         state: { pocketSurface: model },
         request: async (method, params) => {
           if (method === "pocketApp.load") {
+            loadCalls += 1;
             return { queryResults: [
               { query: "calendar.events.list@1", arguments: { timeZone: "UTC" }, output: { events: [{ eventRef: "event:utc", safeTitle: "Focus", start: "2026-08-15T01:00:00Z", end: "2026-08-15T02:00:00Z" }] } },
               { query: "calendar.events.list@1", arguments: { timeZone: "Asia/Tokyo" }, output: { events: [{ eventRef: "event:jst", safeTitle: "Secondary", start: "2026-08-15T03:00:00Z", end: "2026-08-15T04:00:00Z" }] } },
@@ -613,6 +645,19 @@ export async function runPocketSurfaceUiVerify() {
           && persistedState.get("secondaryEventRef") === "event:jst",
         approvalHostOwned: !host.querySelector("[data-approval], .hp-pocket-approval"),
       };
+      const loadsBeforeTransition = loadCalls;
+      const transitionSaved = await provider?.beginStateTransition?.();
+      const inertDuringTransition = surface?.inert === true;
+      await provider?.refresh?.();
+      const refreshBlockedDuringTransition = loadCalls === loadsBeforeTransition;
+      provider?.releaseStateTransition?.();
+      const interactionRestored = surface?.inert === false;
+      await provider?.refresh?.();
+      stateTransitionBoundary ||= transitionSaved !== false
+        && inertDuringTransition
+        && refreshBlockedDuringTransition
+        && interactionRestored
+        && loadCalls === loadsBeforeTransition + 1;
       const flushed = await provider?.flushPendingState?.();
       const disposalSaved = await provider?.dispose?.();
       await nextLayout();
@@ -629,6 +674,7 @@ export async function runPocketSurfaceUiVerify() {
     ...baseline,
     stateWorkflowInputForwarded: stateWorkflowInputForwarded && inputlessWorkflowInvoked,
     stateBoundControlsPersisted,
+    stateTransitionBoundary,
     layoutMatrix: layoutMatrix && layoutCases === panelCases.length * textCases.length,
   };
 }

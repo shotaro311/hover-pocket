@@ -231,6 +231,35 @@ internal sealed class PanelWindow : NoActivateWindow
         }
     }
 
+    public async Task ReleasePocketAppStateAsync(string appId)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            await Dispatcher.InvokeAsync(() => ReleasePocketAppStateAsync(appId)).Task.Unwrap();
+            return;
+        }
+        if (_closed || _initializationTask is null)
+        {
+            return;
+        }
+
+        await _initializationTask;
+        if (_webView?.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        var appIdJson = JsonSerializer.Serialize(appId, BridgeJson.Options);
+        try
+        {
+            _ = await _webView.ExecuteScriptAsync(
+                $"window.__hoverPocketReleaseActiveProviderState?.({appIdJson})");
+        }
+        catch
+        {
+        }
+    }
+
     public async Task<UiWebVerifyResult?> RunWebVerifyScriptAsync()
     {
         await EnsureWebViewInitializedAsync();
@@ -862,6 +891,7 @@ internal sealed record UiWebVerifyResult(
     bool PocketSurfaceStateWorkflowInputOk,
     bool PocketSurfaceApprovalHostOwnedOk,
     bool PocketSurfaceLayoutMatrixOk,
+    bool PocketSurfaceStateTransitionBoundaryOk,
     bool TextSizeScaleReadyOk,
     bool ProviderSwitchOk,
     bool ProviderSwitchCleanupAwaitedOk,
@@ -869,6 +899,7 @@ internal sealed record UiWebVerifyResult(
     bool ProviderRerenderCleanupAwaitedOk,
     bool ProviderRerenderBlockedOnSaveFailureOk,
     bool ProviderHostStateFlushOk,
+    bool ProviderSurfaceIdentityRemountOk,
     bool SettingsWriteOk,
     string OriginalProvider,
     string SwitchedProvider,

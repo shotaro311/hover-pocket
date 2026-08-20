@@ -213,6 +213,16 @@ internal sealed class UiVerifier
                     _failures.Add("provider: Host state flush was not scoped to the active Pocket App");
                 }
 
+                if (!result.PocketSurfaceStateTransitionBoundaryOk)
+                {
+                    _failures.Add("pocket-surface: state transition did not keep the generated panel inert until release");
+                }
+
+                if (!result.ProviderSurfaceIdentityRemountOk)
+                {
+                    _failures.Add("provider: generated panel did not remount when its package identity changed");
+                }
+
                 if (!result.SettingsWriteOk)
                 {
                     _failures.Add($"settings: panel size write failed for {result.ProbePanelSize}");

@@ -897,6 +897,7 @@ internal sealed class PocketAppGenerationVerifier
             var allowFlush = true;
             var flushCalls = 0;
             var flushCompleted = false;
+            var releaseCalls = 0;
             using var controller = new PocketAppGenerationController(root, dataRoot, draftRoot, null);
             controller.SetBeforeDeactivate(async (targetAppId, cancellationToken) =>
             {
@@ -905,6 +906,10 @@ internal sealed class PocketAppGenerationVerifier
                 flushCalls += 1;
                 flushCompleted = string.Equals(targetAppId, appId, StringComparison.Ordinal);
                 return allowFlush;
+            }, targetAppId =>
+            {
+                if (string.Equals(targetAppId, appId, StringComparison.Ordinal)) { releaseCalls += 1; }
+                return Task.CompletedTask;
             });
             var settings = new HoverPocket.Shell.Bridge.BridgeDispatcher();
             controller.AttachSettings(settings, approvalDecision: _ => true);
@@ -927,6 +932,7 @@ internal sealed class PocketAppGenerationVerifier
                 """{"id":"flush-remove-blocked","method":"pocketApps.removePreservingData","params":{"appId":"local.example.flush"}}""");
             Require(
                 flushCalls == 2
+                    && releaseCalls == 1
                     && flushCompleted
                     && pending?.Contains("\"phase\":\"awaiting_approval\"", StringComparison.Ordinal) == true
                     && blocked?.Contains("GENERATION_STATE_FLUSH_FAILED", StringComparison.Ordinal) == true
@@ -940,6 +946,7 @@ internal sealed class PocketAppGenerationVerifier
                 """{"id":"flush-remove","method":"pocketApps.removePreservingData","params":{"appId":"local.example.flush"}}""");
             Require(
                 flushCalls == 3
+                    && releaseCalls == 1
                     && removed?.Contains("\"appId\":\"local.example.flush\",\"state\":\"removed\"", StringComparison.Ordinal) == true,
                 "generation_remove_after_state_flush_readback");
         }

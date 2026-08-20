@@ -30,6 +30,8 @@ let currentState = null;
 let providerCleanup = null;
 let providerRefresh = null;
 let providerStateFlush = null;
+let providerStateTransitionBegin = null;
+let providerStateTransitionRelease = null;
 let activeProviderKey = "";
 let renderTask = Promise.resolve(true);
 let pendingProviderId = null;
@@ -66,7 +68,7 @@ function render(state, options = {}) {
 }
 
 async function renderNow(state, options = {}) {
-  const providerKey = `${state.selectedProvider?.id ?? "none"}:${state.settings.language}`;
+  const providerKey = providerRenderKey(state);
   const providerWillRemount = Boolean(options.forceProvider) || providerKey !== activeProviderKey;
   if (providerWillRemount && !await disposeActiveProvider()) {
     return false;
@@ -261,6 +263,8 @@ async function disposeActiveProvider() {
     providerCleanup = null;
     providerRefresh = null;
     providerStateFlush = null;
+    providerStateTransitionBegin = null;
+    providerStateTransitionRelease = null;
   }
   return true;
 }
@@ -322,7 +326,7 @@ function isTextEntryTarget(target) {
  */
 function renderProvider(state, options, providerWillRemount) {
   const provider = state.selectedProvider;
-  const providerKey = `${provider?.id ?? "none"}:${state.settings.language}`;
+  const providerKey = providerRenderKey(state);
   if (!providerWillRemount) {
     if (options.refreshProvider) {
       void providerRefresh?.();
@@ -358,6 +362,12 @@ function renderProvider(state, options, providerWillRemount) {
     providerStateFlush = typeof lifecycle?.flushPendingState === "function"
       ? () => lifecycle.flushPendingState()
       : null;
+    providerStateTransitionBegin = typeof lifecycle?.beginStateTransition === "function"
+      ? () => lifecycle.beginStateTransition()
+      : null;
+    providerStateTransitionRelease = typeof lifecycle?.releaseStateTransition === "function"
+      ? () => lifecycle.releaseStateTransition()
+      : null;
     return;
   }
 
@@ -376,11 +386,27 @@ function renderProvider(state, options, providerWillRemount) {
 }
 
 window.__hoverPocketFlushActiveProviderState = async (appId) => {
-  if (currentState?.pocketSurface?.appId !== appId || !providerStateFlush) {
+  if (currentState?.pocketSurface?.appId !== appId || !providerStateTransitionBegin) {
     return true;
   }
-  return await providerStateFlush() !== false;
+  return await providerStateTransitionBegin() !== false;
 };
+
+window.__hoverPocketReleaseActiveProviderState = (appId) => {
+  if (currentState?.pocketSurface?.appId !== appId || !providerStateTransitionRelease) {
+    return true;
+  }
+  providerStateTransitionRelease();
+  return true;
+};
+
+function providerRenderKey(state) {
+  const surface = state.pocketSurface;
+  const surfaceIdentity = surface
+    ? `:${surface.appId ?? ""}:${surface.version ?? ""}:${surface.manifestDigest ?? ""}`
+    : "";
+  return `${state.selectedProvider?.id ?? "none"}:${state.settings.language}${surfaceIdentity}`;
+}
 
 function renderCommands() {
   refreshButtonEl.innerHTML = iconSvg("refresh");
@@ -632,17 +658,41 @@ window.__hoverPocketVerify = {
     providerCleanup = cleanupAfterRerender;
     const stateBeforeHostFlush = currentState;
     const flushBeforeHostProbe = providerStateFlush;
+    const beginBeforeHostProbe = providerStateTransitionBegin;
+    const releaseBeforeHostProbe = providerStateTransitionRelease;
     let hostFlushCalls = 0;
+    let hostReleaseCalls = 0;
     currentState = { ...currentState, pocketSurface: { appId: "local.example.verify" } };
-    providerStateFlush = async () => {
+    providerStateTransitionBegin = async () => {
       hostFlushCalls += 1;
       return true;
     };
+    providerStateTransitionRelease = () => {
+      hostReleaseCalls += 1;
+    };
     const matchingHostFlush = await window.__hoverPocketFlushActiveProviderState("local.example.verify");
     const unrelatedHostFlush = await window.__hoverPocketFlushActiveProviderState("local.example.other");
-    const providerHostStateFlushOk = matchingHostFlush && unrelatedHostFlush && hostFlushCalls === 1;
+    const matchingHostRelease = window.__hoverPocketReleaseActiveProviderState("local.example.verify");
+    const unrelatedHostRelease = window.__hoverPocketReleaseActiveProviderState("local.example.other");
+    const providerHostStateFlushOk = matchingHostFlush
+      && unrelatedHostFlush
+      && matchingHostRelease
+      && unrelatedHostRelease
+      && hostFlushCalls === 1
+      && hostReleaseCalls === 1;
+    const providerSurfaceIdentityRemountOk = providerRenderKey({
+      selectedProvider: { id: "generated-pocket-app:local.example.verify" },
+      settings: { language: "ja" },
+      pocketSurface: { appId: "local.example.verify", version: "1.0.0", manifestDigest: "digest-a" },
+    }) !== providerRenderKey({
+      selectedProvider: { id: "generated-pocket-app:local.example.verify" },
+      settings: { language: "ja" },
+      pocketSurface: { appId: "local.example.verify", version: "1.0.1", manifestDigest: "digest-b" },
+    });
     currentState = stateBeforeHostFlush;
     providerStateFlush = flushBeforeHostProbe;
+    providerStateTransitionBegin = beginBeforeHostProbe;
+    providerStateTransitionRelease = releaseBeforeHostProbe;
     const originalPanelSize = state.settings.panelSize;
     const probePanelSize = originalPanelSize === "small" ? "medium" : "small";
     window.__hoverPocketVerifyStep = "resize-probe";
@@ -686,6 +736,7 @@ window.__hoverPocketVerify = {
       pocketSurfaceStateWorkflowInputOk: pocketSurfaceVerify.stateWorkflowInputForwarded,
       pocketSurfaceApprovalHostOwnedOk: pocketSurfaceVerify.approvalHostOwned,
       pocketSurfaceLayoutMatrixOk: pocketSurfaceVerify.layoutMatrix,
+      pocketSurfaceStateTransitionBoundaryOk: pocketSurfaceVerify.stateTransitionBoundary,
       textSizeScaleReadyOk: getComputedStyle(document.documentElement).getPropertyValue("--hp-text-scale").trim() !== "",
       providerSwitchOk: switchedState?.selectedProvider?.id === targetProvider.id,
       providerSwitchCleanupAwaitedOk: providerSelectAfterCleanup,
@@ -693,6 +744,7 @@ window.__hoverPocketVerify = {
       providerRerenderCleanupAwaitedOk,
       providerRerenderBlockedOnSaveFailureOk,
       providerHostStateFlushOk,
+      providerSurfaceIdentityRemountOk,
       settingsWriteOk: resizedState.settings?.panelSize === probePanelSize,
       originalProvider,
       switchedProvider: switchedState?.selectedProvider?.id,

@@ -13,6 +13,7 @@ internal sealed class PocketAppGenerationController : IDisposable
     private readonly Action? _postCommitHook;
     private readonly Action? _postRefreshHook;
     private Func<string, CancellationToken, Task<bool>>? _beforeDeactivate;
+    private Func<string, Task>? _releaseAfterDeactivateFailure;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateSync = new();
     private PocketAppGenerationPhase _phase = PocketAppGenerationPhase.Idle;
@@ -74,9 +75,12 @@ internal sealed class PocketAppGenerationController : IDisposable
         }
     }
 
-    public void SetBeforeDeactivate(Func<string, CancellationToken, Task<bool>>? beforeDeactivate)
+    public void SetBeforeDeactivate(
+        Func<string, CancellationToken, Task<bool>>? beforeDeactivate,
+        Func<string, Task>? releaseAfterFailure = null)
     {
         _beforeDeactivate = beforeDeactivate;
+        _releaseAfterDeactivateFailure = releaseAfterFailure;
     }
 
     public void AttachSettings(
@@ -247,6 +251,7 @@ internal sealed class PocketAppGenerationController : IDisposable
     {
         await _gate.WaitAsync(cancellationToken);
         PocketAppLifecycleProposal? activationProposal = null;
+        var stateTransitionStarted = false;
         try
         {
             PocketAppLifecycleProposal proposal;
@@ -296,16 +301,20 @@ internal sealed class PocketAppGenerationController : IDisposable
                 }
                 return BuildState();
             }
-            if (!await FlushBeforeDeactivateAsync(proposal.PackageId, cancellationToken))
-            {
-                return Fail("GENERATION_STATE_FLUSH_FAILED");
-            }
             lock (_stateSync)
             {
                 if (!ReferenceEquals(_pendingProposal, proposal))
                 {
                     return FailLocked("GENERATION_APPROVAL_MISMATCH");
                 }
+            }
+            if (!await FlushBeforeDeactivateAsync(proposal.PackageId, cancellationToken))
+            {
+                return Fail("GENERATION_STATE_FLUSH_FAILED");
+            }
+            stateTransitionStarted = true;
+            lock (_stateSync)
+            {
                 _phase = PocketAppGenerationPhase.Installing;
                 _errorCode = null;
             }
@@ -330,15 +339,31 @@ internal sealed class PocketAppGenerationController : IDisposable
         }
         catch (PocketAppGenerationException ex)
         {
+            if (stateTransitionStarted && activationProposal is not null)
+            {
+                await ReleaseAfterDeactivateFailureAsync(activationProposal.PackageId);
+            }
             DiscardFailedActivation(activationProposal);
             RefreshManagedPackagesAfterFailure();
             return Fail(ex.Code);
         }
         catch (PocketAppLifecycleException)
         {
+            if (stateTransitionStarted && activationProposal is not null)
+            {
+                await ReleaseAfterDeactivateFailureAsync(activationProposal.PackageId);
+            }
             DiscardFailedActivation(activationProposal);
             RefreshManagedPackagesAfterFailure();
             return Fail("GENERATION_APPROVAL_MISMATCH");
+        }
+        catch
+        {
+            if (stateTransitionStarted && activationProposal is not null)
+            {
+                await ReleaseAfterDeactivateFailureAsync(activationProposal.PackageId);
+            }
+            throw;
         }
         finally
         {
@@ -389,6 +414,7 @@ internal sealed class PocketAppGenerationController : IDisposable
     {
         var packageId = RequiredString(parameters, "appId", 160);
         await _gate.WaitAsync(cancellationToken);
+        var stateTransitionStarted = false;
         try
         {
             lock (_stateSync) { if (!_enabled) { return FailLocked("GENERATION_DISABLED"); } }
@@ -405,6 +431,7 @@ internal sealed class PocketAppGenerationController : IDisposable
             {
                 return Fail("GENERATION_STATE_FLUSH_FAILED");
             }
+            stateTransitionStarted = true;
             var receipt = _lifecycle.Disable(packageId);
             if (!receipt.ReadbackVerified || receipt.State != PocketAppLifecycleState.Disabled)
             {
@@ -418,8 +445,14 @@ internal sealed class PocketAppGenerationController : IDisposable
         }
         catch (Exception ex) when (ex is PocketAppGenerationException or PocketAppLifecycleException)
         {
+            if (stateTransitionStarted) { await ReleaseAfterDeactivateFailureAsync(packageId); }
             RefreshManagedPackagesAfterFailure();
             return Fail("GENERATION_PACKAGE_INVALID");
+        }
+        catch
+        {
+            if (stateTransitionStarted) { await ReleaseAfterDeactivateFailureAsync(packageId); }
+            throw;
         }
         finally
         {
@@ -469,6 +502,7 @@ internal sealed class PocketAppGenerationController : IDisposable
     {
         var packageId = RequiredString(parameters, "appId", 160);
         await _gate.WaitAsync(cancellationToken);
+        var stateTransitionStarted = false;
         try
         {
             lock (_stateSync) { if (!_enabled) { return FailLocked("GENERATION_DISABLED"); } }
@@ -478,6 +512,7 @@ internal sealed class PocketAppGenerationController : IDisposable
             {
                 return Fail("GENERATION_STATE_FLUSH_FAILED");
             }
+            stateTransitionStarted = true;
             RejectPendingProposalIfNeeded(packageId);
             var receipt = _lifecycle.Remove(packageId, PocketAppDataDisposition.Preserve);
             if (!receipt.ReadbackVerified
@@ -494,8 +529,14 @@ internal sealed class PocketAppGenerationController : IDisposable
         }
         catch (Exception ex) when (ex is PocketAppGenerationException or PocketAppLifecycleException)
         {
+            if (stateTransitionStarted) { await ReleaseAfterDeactivateFailureAsync(packageId); }
             RefreshManagedPackagesAfterFailure();
             return Fail("GENERATION_PACKAGE_INVALID");
+        }
+        catch
+        {
+            if (stateTransitionStarted) { await ReleaseAfterDeactivateFailureAsync(packageId); }
+            throw;
         }
         finally
         {
@@ -738,16 +779,27 @@ internal sealed class PocketAppGenerationController : IDisposable
         if (flush is null) { return true; }
         try
         {
-            return await flush(packageId, cancellationToken);
+            var saved = await flush(packageId, cancellationToken);
+            if (!saved) { await ReleaseAfterDeactivateFailureAsync(packageId); }
+            return saved;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            await ReleaseAfterDeactivateFailureAsync(packageId);
             throw;
         }
         catch
         {
+            await ReleaseAfterDeactivateFailureAsync(packageId);
             return false;
         }
+    }
+
+    private async Task ReleaseAfterDeactivateFailureAsync(string packageId)
+    {
+        var release = _releaseAfterDeactivateFailure;
+        if (release is null) { return; }
+        try { await release(packageId); } catch { }
     }
 
     private void ValidatePins()

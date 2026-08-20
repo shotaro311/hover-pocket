@@ -89,7 +89,8 @@ internal sealed class HoverShellController : IDisposable
         _panelBridgeController.PanelCloseRequested += OnPanelCloseRequested;
         _panel = CreatePanelWindow();
         _panelBridgeController.SetPocketAppStateFlush(
-            (appId, cancellationToken) => _panel.FlushPocketAppStateAsync(appId, cancellationToken));
+            (appId, cancellationToken) => _panel.FlushPocketAppStateAsync(appId, cancellationToken),
+            appId => _panel.ReleasePocketAppStateAsync(appId));
 
         _pollingTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
         {
