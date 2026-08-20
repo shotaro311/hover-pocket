@@ -5,7 +5,7 @@
 - branch: `codex/ai-native-an3b-voice-runtime`
 - worktree: `/Users/shotaro/code/share/hover-menu-preview-ai-native-an3b`
 - base: AN3-A PR #19 head `b34c1fc72fc4b8012e5cd467aa5047096ec7c846`
-- status: 実装・ローカル検証・修正後exact Security scan済み。Windows Release / rendered WebView CI、実Windows Codex / microphone / WebRTC 1往復は未完了。
+- status: Draft PR #21、ローカル検証、修正後Security scan、Windows / macOS / 3OS contract CI済み。実Windows Codex / microphone / WebRTC 1往復は未完了。
 
 ## 実装
 
@@ -31,10 +31,12 @@
 - 修正後Security scan `878927ec-12f6-49ea-a571-ed47182f1692`: 14 / 14 review、reportable finding 0件、sealed complete。content digestは`codex-security-snapshot/v1:sha256:38de43dbe33b5497bbc44b34e3ebcb9b307aebdaf9e725a834c49286fe259538`。
 - `git diff --check`: PASS。
 - このMacには`dotnet`がないため、Windows C# Release buildとnative verifierはPR CIを最終gateにする。
+- Draft PR [#21](https://github.com/shotaro311/hover-pocket/pull/21)をPR #19へstackした。初回Windows buildは`WindowsProcessJob`の定数名とstruct名の衝突で失敗し、compile-onlyのrename `aa25244`で修正した。
+- 修正後head `aa25244`のWindows [32390802586](https://github.com/shotaro311/hover-pocket/actions/runs/32390802586): PASS。Release build、settings generation、Voice contract、Capability / Broker / Pocket App、Voice `runtime-account-gate`、`runtime-voice-gate`、`realtime-transport`、`realtime-sdp-fence`、rendered WebView UIを確認した。
+- macOS [32390802558](https://github.com/shotaro311/hover-pocket/actions/runs/32390802558)、3OS contract [32390802562](https://github.com/shotaro311/hover-pocket/actions/runs/32390802562)、PR Router [32390800203](https://github.com/shotaro311/hover-pocket/actions/runs/32390800203): PASS。PR checkは7 / 7成功した。
 
 ## 未完了
 
-- Windows CIのRelease build、Voice verifier、Settings、rendered WebView、既存全回帰。
 - Windows実機でインストール済みCodex path / version / generated schema、account、voice一覧、microphone allow / deny、WebRTC remote audio、1往復、mute / stop、process cleanupをreadbackする。
 - 外部Codex CLIの初回trust anchorをpublisher signature、明示path enrollment、approved digestのどれで束縛するか確定する。Process.StartからJob assignmentまでに即時生成されたdescendantが残らないこともWindows adversarial harnessで確認する。
 - AN3-B2のCalendar / Timer Capability Broker接続と書き込み承認・readback。
