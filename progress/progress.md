@@ -2,8 +2,22 @@
 project_slug: hover-menu-preview
 updated: 2026-08-21
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; capability-expansion-merged
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; capability-expansion-merged
 ---
+
+## 2026-08-21 AI-native AN3-B2 Voice Capability Security Remediation
+
+- Draft PR #22のexact head `c9be7e4`を対象にしたSecurity scan `84b21db5-185f-4300-b813-3e150a52a11a`で、Codex RealtimeがHoverPocketのdynamic toolsに加えてambient shell / MCP / app / plugin / extensionを継承し得るHigh、Voice Calendar permissionをruntime自身が生成するMedium、Timer native approvalを並行要求で滞留させ得るLowの3件を確認した。
+- Codex app-server 0.145.0の`dynamicTools`は既存toolへの追加であり、`read-only`、`approvalPolicy=never`、instructions、`environments=[]`だけではBroker限定を証明できない。実生成schemaにも正のtool policyがないことをreadbackした。このため、official positive allowlistとdelegated turn E2Eを確認済みのversionだけを明示承認するproduction gateを追加し、現行0.145.0はapp-server開始前に固定理由でfail closedにした。将来fieldが追加されてもsource側の承認定数を自動解除しない。
+- Calendar予定名 / 時刻のCodex共有は、Google接続・Voice有効化・Microphoneとは別のSettings permissionとして既定OFF、native approval、永続化、取り消し可能にした。許可前はCalendar toolを定義へ含めず、runtime再確認でもProvider呼出しを0件にする。許可変更中のactive Voiceは停止して再構成する。
+- TimerはHost-owned custom WPF dialogへexact title / durationを表示し、既定操作をキャンセルにした。native promptは同時1件、1分3件までとし、拒否もrate limitへ数える。session取消ではqueued / visible dialogを閉じ、未使用Broker approvalをrejectし、停止後のtool resultをapp-serverへ返さない。
+- ローカルではSwift warnings-as-errors build、macOS Voice foundation、Panel layout 128件、Capability 14 handler、Broker、Pocket Surface、Pocket App package / lifecycle / generation、Timer、Voice contract 42件、共通contract 13 schema / 60 fixture、Settings generation、Windows JavaScript syntax、`git diff --check`が成功した。このMacには.NETがないため、Windows Release build、Voice / Settings / rendered WebView /既存Provider verifierはpush後CIを最終gateとする。
+- 主要修正head `9705fe0`のSecurity scan `7e463a78-a2b0-4305-849e-f1418c495949`は15 / 15件、compile-only head `057d090`の増分scan `ef74ba38-38cd-4df9-8fc7-a813566d1dac`は1 / 1件を完全確認し、いずれもreportable finding 0件でsealed completeとなった。
+- 本番解禁前の防御強化として、Codexへ返すCalendar結果からProvider内部`eventRef`を除去した。Voice有効化とCalendar grant変更を同じHost semaphoreで直列化し、Calendar権限取消は設定保存より先にactive Voice tool処理を非取消で停止する。Voice contractとnative verifierへ識別子非送信、直列化、revoke-before-saveを固定した。
+- 最終source head `8e8a064`の増分Security scan `c5d44635-05a9-4081-9236-65937fbb289e`は5 / 5件、coverage complete、reportable finding 0件でsealed completeとなった。Windows [32406234638](https://github.com/shotaro311/hover-pocket/actions/runs/32406234638)、macOS [32406234704](https://github.com/shotaro311/hover-pocket/actions/runs/32406234704)、3OS contract / compare [32406234731](https://github.com/shotaro311/hover-pocket/actions/runs/32406234731)、PR Router [32406231112](https://github.com/shotaro311/hover-pocket/actions/runs/32406231112)が成功した。PR #22はDraft、`MERGEABLE / CLEAN`、remote head一致、未解決review thread・review・commentはいずれも0件である。
+- PR #21最終head `97099ea`を通常mergeし、実WebRTC / Codex Realtime / root-scoped transcriptとCalendar read / Timer startのCapability Broker経路を同じCoordinatorへ統合した。競合はHost compositionとCoordinator停止処理の2ファイルだけで、Broker-backed tool、Settings-only Calendar grant、Timer native approval、tool取消、`Stopping`表示、非取消のdisable teardownをすべて維持した。
+- 統合head `b197f3a`のexact Security scan `95c5ee8a-8105-4bcf-97f7-d3bd3f10f02e`は16 / 16 review item、coverage complete、reportable finding 0件でsealed completeとなった。Windows [32419442331](https://github.com/shotaro311/hover-pocket/actions/runs/32419442331)、macOS [32419442358](https://github.com/shotaro311/hover-pocket/actions/runs/32419442358)、3OS contract / compare [32419442324](https://github.com/shotaro311/hover-pocket/actions/runs/32419442324)、PR Router [32419439979](https://github.com/shotaro311/hover-pocket/actions/runs/32419439979)は全7 check成功。未解決review thread 0件、`CLEAN / MERGEABLE`、remote parity `0 / 0`をreadbackした。
+- 現行Codex 0.145.0ではpositive Broker-only tool policyがないためapp-server開始前に停止し、実Codex Voice E2Eは実行しない。次はCore Integration Gateの残差をlive監査し、公式positive allowlistまたはBrokerだけを公開する専用最小runtimeの採否を確定する。詳細: `progress/2026-08/2026-08-21_hover-pocket-ai-native-an3-b2-security.md`。
 
 ## 2026-08-21 AI-native AN3-B1 Windows Voice Runtime
 

@@ -44,11 +44,14 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly PocketAppGenerationController? _pocketAppGenerationController;
     private readonly PocketAppRuntimeActivationRegistry? _generatedPocketApps;
     private readonly CodexVoiceCoordinator _voiceCoordinator;
+    private readonly VoiceTimerApprovalCoordinator _voiceTimerApprovalCoordinator = new();
+    private readonly SemaphoreSlim _voiceSettingsTransitionGate = new(1, 1);
     private readonly Dictionary<BridgeDispatcher, BridgeSurface> _dispatchers = [];
     private readonly AsyncLocal<BridgeSurface?> _requestSurface = new();
     private readonly object _previewFrameSync = new();
     private Func<string, CancellationToken, Task<PocketAppStateTransitionLease>>? _pocketAppStateTransitionBegin;
     private Func<PocketAppStateTransitionLease, Task>? _pocketAppStateTransitionComplete;
+    private Func<System.Windows.Window?>? _voiceApprovalOwner;
     private string _selectedProviderId;
     private MediaPreviewFrame? _pendingPreviewFrame;
     private bool _previewPostScheduled;
@@ -83,7 +86,32 @@ internal sealed class PanelBridgeController : IDisposable
         _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.NormalizeForBootstrap(settings, providerRegistry.ProviderIds);
-        _voiceCoordinator = voiceCoordinator ?? CodexVoiceRuntimeComposition.Create(CurrentSettings.VoiceEnabled);
+        try
+        {
+            var brokerRoot = Path.Combine(settingsStore.RootDirectory, "CapabilityBroker");
+            _capabilityBroker = new CapabilityBroker(
+                new CapabilityRegistry(_capabilityHandlers),
+                new CapabilityBrokerLedger(brokerRoot),
+                new CapabilityBrokerAuditLog(brokerRoot));
+            _todayFocusTextAdapter = new TodayFocusTextAdapter(_capabilityBroker);
+        }
+        catch (Exception ex) when (ex is CapabilityBrokerException
+            or IOException
+            or UnauthorizedAccessException)
+        {
+            _capabilityBroker = null;
+            _todayFocusTextAdapter = null;
+        }
+        var voiceTools = _capabilityBroker is null
+            ? null
+            : new CodexVoiceCapabilityRuntime(
+                _capabilityBroker,
+                RequestVoiceTimerApprovalAsync,
+                () => CurrentSettings.VoiceCalendarAccessGranted,
+                CapabilityTimeZoneId);
+        _voiceCoordinator = voiceCoordinator ?? CodexVoiceRuntimeComposition.Create(
+            CurrentSettings.VoiceEnabled,
+            voiceTools);
         _voiceRuntimeActive = _voiceCoordinator.Snapshot.Availability != CodexVoiceAvailability.Disabled;
         _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(CurrentSettings);
         _voiceCoordinator.SnapshotChanged += OnVoiceSnapshotChanged;
@@ -95,12 +123,10 @@ internal sealed class PanelBridgeController : IDisposable
         {
             try
             {
-                var brokerRoot = Path.Combine(settingsStore.RootDirectory, "CapabilityBroker");
-                _capabilityBroker = new CapabilityBroker(
-                    new CapabilityRegistry(_capabilityHandlers),
-                    new CapabilityBrokerLedger(brokerRoot),
-                    new CapabilityBrokerAuditLog(brokerRoot));
-                _todayFocusTextAdapter = new TodayFocusTextAdapter(_capabilityBroker);
+                if (_capabilityBroker is null)
+                {
+                    throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "broker");
+                }
                 var packageRoot = Path.Combine(
                     AppContext.BaseDirectory,
                     "PocketApps",
@@ -128,8 +154,6 @@ internal sealed class PanelBridgeController : IDisposable
                 or IOException
                 or UnauthorizedAccessException)
             {
-                _capabilityBroker = null;
-                _todayFocusTextAdapter = null;
                 _pocketAppHostController = null;
             }
         }
@@ -244,9 +268,14 @@ internal sealed class PanelBridgeController : IDisposable
         BridgeSurface surface = BridgeSurface.Panel,
         Func<System.Windows.Window?>? approvalOwner = null,
         Func<bool>? aiNativeEnableDecision = null,
+        Func<bool>? voiceCalendarAccessDecision = null,
         Func<bool>? voiceMicrophoneGesture = null)
     {
         _dispatchers[dispatcher] = surface;
+        if (surface == BridgeSurface.Panel && approvalOwner is not null)
+        {
+            _voiceApprovalOwner = approvalOwner;
+        }
         void Register(
             string method,
             Func<JsonElement?, CancellationToken, Task<object?>> handler)
@@ -322,6 +351,13 @@ internal sealed class PanelBridgeController : IDisposable
             Register("settings.setVoiceEnabled", SetVoiceEnabledAsync);
             Register("settings.setVoiceLayout", SetVoiceLayoutAsync);
             Register(
+                "settings.setVoiceCalendarAccess",
+                (parameters, cancellationToken) => SetVoiceCalendarAccessAsync(
+                    parameters,
+                    approvalOwner,
+                    voiceCalendarAccessDecision,
+                    cancellationToken));
+            Register(
                 "settings.setAiNativeEnabled",
                 (parameters, cancellationToken) => SetAiNativeEnabledAsync(
                     parameters,
@@ -336,7 +372,16 @@ internal sealed class PanelBridgeController : IDisposable
         _clipboardBridgeController.Attach(dispatcher);
         _stickyBridgeController.Attach(dispatcher);
         _timerBridgeHandlers.Register(dispatcher);
-        return new BridgeAttachment(() => _dispatchers.Remove(dispatcher));
+        return new BridgeAttachment(() =>
+        {
+            _dispatchers.Remove(dispatcher);
+            if (surface == BridgeSurface.Panel
+                && approvalOwner is not null
+                && ReferenceEquals(_voiceApprovalOwner, approvalOwner))
+            {
+                _voiceApprovalOwner = null;
+            }
+        });
     }
 
     public void Dispose()
@@ -409,6 +454,7 @@ internal sealed class PanelBridgeController : IDisposable
                 autoCheckForUpdates = CurrentSettings.AutoCheckForUpdates,
                 aiNativeEnabled = CurrentSettings.AiNativeEnabled,
                 voiceEnabled = CurrentSettings.VoiceEnabled,
+                voiceCalendarAccessGranted = CurrentSettings.VoiceCalendarAccessGranted,
                 voiceLaneLayout = ToWireValue(CurrentSettings.VoiceLaneLayout),
                 clipboardPrivateMode = CurrentSettings.ClipboardPrivateMode,
                 rememberLastSelectedProvider = CurrentSettings.RememberLastSelectedProvider,
@@ -979,21 +1025,29 @@ internal sealed class PanelBridgeController : IDisposable
 
     private async Task<object?> SetVoiceEnabledAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
-        var enabled = ReadRequiredBool(parameters, "enabled");
-        if (CurrentSettings.VoiceEnabled != enabled)
+        await _voiceSettingsTransitionGate.WaitAsync(cancellationToken);
+        try
         {
-            var updated = CurrentSettings.Clone();
-            updated.VoiceEnabled = enabled;
-            if (enabled)
+            var enabled = ReadRequiredBool(parameters, "enabled");
+            if (CurrentSettings.VoiceEnabled != enabled)
             {
-                _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(updated);
+                var updated = CurrentSettings.Clone();
+                updated.VoiceEnabled = enabled;
+                if (enabled)
+                {
+                    _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(updated);
+                }
+                SaveSettings(updated);
             }
-            SaveSettings(updated);
+            await _voiceCoordinator.SetFeatureEnabledAsync(
+                enabled,
+                enabled ? cancellationToken : CancellationToken.None);
+            return await PublishStateAsync(cancellationToken);
         }
-        await _voiceCoordinator.SetFeatureEnabledAsync(
-            enabled,
-            enabled ? cancellationToken : CancellationToken.None);
-        return await PublishStateAsync(cancellationToken);
+        finally
+        {
+            _voiceSettingsTransitionGate.Release();
+        }
     }
 
     private async Task<object?> SetVoiceLayoutAsync(JsonElement? parameters, CancellationToken cancellationToken)
@@ -1007,6 +1061,81 @@ internal sealed class PanelBridgeController : IDisposable
             SaveSettings(updated);
         }
         return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetVoiceCalendarAccessAsync(
+        JsonElement? parameters,
+        Func<System.Windows.Window?>? approvalOwner,
+        Func<bool>? approvalDecision,
+        CancellationToken cancellationToken)
+    {
+        await _voiceSettingsTransitionGate.WaitAsync(cancellationToken);
+        try
+        {
+            var enabled = ReadRequiredBool(parameters, "enabled");
+            cancellationToken.ThrowIfCancellationRequested();
+            if (enabled
+                && !CurrentSettings.VoiceCalendarAccessGranted
+                && !ApproveVoiceCalendarAccess(approvalOwner, approvalDecision))
+            {
+                return await PublishStateAsync(cancellationToken);
+            }
+            if (CurrentSettings.VoiceCalendarAccessGranted == enabled)
+            {
+                return await PublishStateAsync(cancellationToken);
+            }
+
+            var voiceWasEnabled = CurrentSettings.VoiceEnabled;
+            var stoppedForRevocation = false;
+            if (!enabled && voiceWasEnabled)
+            {
+                await _voiceCoordinator.SetFeatureEnabledAsync(false, CancellationToken.None);
+                stoppedForRevocation = true;
+            }
+
+            var updated = CurrentSettings.Clone();
+            updated.VoiceCalendarAccessGranted = enabled;
+            SaveSettings(updated);
+            if (voiceWasEnabled)
+            {
+                if (!stoppedForRevocation)
+                {
+                    await _voiceCoordinator.SetFeatureEnabledAsync(false, cancellationToken);
+                }
+                await _voiceCoordinator.SetFeatureEnabledAsync(true, cancellationToken);
+            }
+            return await PublishStateAsync(cancellationToken);
+        }
+        finally
+        {
+            _voiceSettingsTransitionGate.Release();
+        }
+    }
+
+    private bool ApproveVoiceCalendarAccess(
+        Func<System.Windows.Window?>? approvalOwner,
+        Func<bool>? approvalDecision)
+    {
+        if (approvalDecision is not null)
+        {
+            return approvalDecision();
+        }
+        var owner = approvalOwner?.Invoke();
+        if (owner is null || !owner.IsVisible)
+        {
+            return false;
+        }
+        var english = CurrentSettings.Language == AppLanguage.English;
+        var result = System.Windows.MessageBox.Show(
+            owner,
+            english
+                ? "Voice Lane may send today's Calendar event titles and times to Codex.\n\nAllow Calendar access for Voice Lane?"
+                : "Voice Laneは今日のCalendar予定名と時刻をCodexへ送信する場合があります。\n\nVoice LaneのCalendarアクセスを許可しますか？",
+            english ? "Allow Voice Calendar access" : "VoiceのCalendarアクセスを許可",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Warning,
+            System.Windows.MessageBoxResult.No);
+        return result == System.Windows.MessageBoxResult.Yes;
     }
 
     private async Task<object?> SetVoiceMutedAsync(JsonElement? parameters, CancellationToken cancellationToken)
@@ -1069,6 +1198,33 @@ internal sealed class PanelBridgeController : IDisposable
         _ = parameters;
         await _voiceCoordinator.StopRealtimeAsync(cancellationToken);
         return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<bool> RequestVoiceTimerApprovalAsync(
+        VoiceTimerApprovalRequest request,
+        CancellationToken cancellationToken)
+    {
+        return await _voiceTimerApprovalCoordinator.RequestAsync(
+            request,
+            PresentVoiceTimerApprovalAsync,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<bool> PresentVoiceTimerApprovalAsync(
+        VoiceTimerApprovalRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var owner = _voiceApprovalOwner?.Invoke();
+        if (owner is null)
+        {
+            return false;
+        }
+        return await VoiceTimerApprovalDialog.ShowAsync(
+            owner,
+            request,
+            CurrentSettings.Language == AppLanguage.English,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<object?> StartTodayFocusFromCalendarAsync(

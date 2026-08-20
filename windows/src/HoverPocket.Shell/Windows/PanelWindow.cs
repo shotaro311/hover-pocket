@@ -779,6 +779,7 @@ internal sealed class PanelWindow : NoActivateWindow
         });
         _bridgeAttachment = _bridgeController.Attach(
             dispatcher,
+            approvalOwner: () => this,
             voiceMicrophoneGesture: RegisterVoiceMicrophoneGesture);
         dispatcher.Register("panel.beginTextInput", (_, _) =>
             Task.FromResult<object?>(BeginKeyboardInteraction()));

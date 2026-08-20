@@ -2,8 +2,10 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using System.Windows;
+using HoverPocket.Shell.Capabilities;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Display;
+using HoverPocket.Shell.Providers.Timer;
 using HoverPocket.Shell.Voice;
 using HoverPocket.Shell.Windows;
 using Microsoft.Web.WebView2.Core;
@@ -48,6 +50,9 @@ internal sealed class VoiceFoundationVerifier
         await RunCaseAsync("runtime-account-gate", VerifyRuntimeAccountGateAsync, timeout.Token);
         await RunCaseAsync("runtime-voice-gate", VerifyRuntimeVoiceGateAsync, timeout.Token);
         await RunCaseAsync("realtime-transport", VerifyRealtimeTransportAsync, timeout.Token);
+        await RunCaseAsync("dynamic-tools", VerifyDynamicToolsAsync, timeout.Token);
+        await RunCaseAsync("timer-approval-gate", VerifyTimerApprovalGateAsync, timeout.Token);
+        await RunCaseAsync("dynamic-tool-roundtrip", VerifyDynamicToolRoundTripAsync, timeout.Token);
         await RunCaseAsync("realtime-sdp-fence", VerifyRealtimeSdpFenceAsync, timeout.Token);
         await RunCaseAsync("probe-failure", VerifyCompatibilityProbeFailureAsync, timeout.Token);
         await RunCaseAsync("unexpected-request", VerifyUnexpectedRequestFailsClosedAsync, timeout.Token);
@@ -149,7 +154,8 @@ internal sealed class VoiceFoundationVerifier
         await coordinator.InitializeAsync(cancellationToken);
         if (factoryCalls != 0
             || coordinator.Snapshot.Availability != expected
-            || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure)
+            || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure
+            || coordinator.Snapshot.LastErrorCode != gate.SafeErrorCode)
         {
             _failures.Add($"{label} did not fail closed before transport");
         }
@@ -320,6 +326,338 @@ internal sealed class VoiceFoundationVerifier
             _failures.Add("explicit Realtime stop did not mute and release the active session");
         }
     }
+
+    private async Task VerifyDynamicToolsAsync(CancellationToken cancellationToken)
+    {
+        var root = Directory.CreateTempSubdirectory("HoverPocket-VoiceTools-").FullName;
+        try
+        {
+            var now = new DateTimeOffset(2026, 8, 21, 9, 0, 0, TimeSpan.Zero);
+            using var timerStore = new TimerStore(
+                Path.Combine(root, "timer"),
+                enableScheduler: false);
+            var calendarDataSource = new VoiceCalendarDataSource(now);
+            var handlers = new PocketCapabilityHandlerSet([
+                new CalendarListCapabilityHandler(calendarDataSource),
+                new TimerCapabilityHandler(TimerCapabilityOperation.Start, timerStore),
+                new TimerCapabilityHandler(TimerCapabilityOperation.Get, timerStore)
+            ]);
+            var brokerRoot = Path.Combine(root, "broker");
+            var broker = new CapabilityBroker(
+                new CapabilityRegistry(handlers),
+                new CapabilityBrokerLedger(brokerRoot),
+                new CapabilityBrokerAuditLog(brokerRoot));
+            var approve = false;
+            var calendarGranted = false;
+            var approvalCalls = 0;
+            VoiceTimerApprovalRequest? presented = null;
+            var runtime = new CodexVoiceCapabilityRuntime(
+                broker,
+                (request, token) =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    approvalCalls++;
+                    presented = request;
+                    return Task.FromResult(approve);
+                },
+                () => calendarGranted,
+                () => "Etc/UTC",
+                () => now);
+
+            var definitions = runtime.Definitions;
+            if (definitions.ValueKind != JsonValueKind.Array
+                || definitions.GetArrayLength() != 1
+                || definitions[0].GetProperty("name").GetString() != CodexVoiceCapabilityRuntime.Namespace
+                || definitions[0].GetProperty("tools").GetArrayLength() != 1
+                || definitions[0].GetProperty("tools")[0].GetProperty("name").GetString()
+                    != CodexVoiceCapabilityRuntime.TimerStartTool)
+            {
+                _failures.Add("Voice Calendar tool was exposed without a Host grant");
+            }
+
+            var deniedCalendar = await runtime.ExecuteAsync(
+                ToolCall("root-voice", "turn-calendar", "call-calendar", CodexVoiceCapabilityRuntime.CalendarListTool, new { }),
+                "root-voice",
+                cancellationToken);
+            if (deniedCalendar.Success
+                || !deniedCalendar.Text.Contains("permission_denied", StringComparison.Ordinal)
+                || calendarDataSource.ListCalls != 0)
+            {
+                _failures.Add("Voice Calendar read reached the Provider without a Host grant");
+            }
+
+            calendarGranted = true;
+            definitions = runtime.Definitions;
+            if (definitions[0].GetProperty("tools").GetArrayLength() != 2)
+            {
+                _failures.Add("Host-granted Voice Calendar tool was not published");
+            }
+            var calendar = await runtime.ExecuteAsync(
+                ToolCall("root-voice", "turn-calendar-granted", "call-calendar-granted", CodexVoiceCapabilityRuntime.CalendarListTool, new { }),
+                "root-voice",
+                cancellationToken);
+            using var calendarPayload = JsonDocument.Parse(calendar.Text);
+            if (!calendar.Success
+                || approvalCalls != 0
+                || calendarDataSource.ListCalls != 1
+                || calendarPayload.RootElement.GetProperty("events").GetArrayLength() != 1
+                || calendarPayload.RootElement.GetProperty("events")[0]
+                    .TryGetProperty("eventRef", out _)
+                || calendarPayload.RootElement.GetProperty("events")[0]
+                    .GetProperty("safeTitle").GetString() != "Team review ignored")
+            {
+                _failures.Add("Host-granted Voice Calendar read leaked identifiers or bypassed the Broker contract");
+            }
+
+            var crossRoot = await runtime.ExecuteAsync(
+                ToolCall("foreign-root", "turn-foreign", "call-foreign", CodexVoiceCapabilityRuntime.TimerStartTool, new
+                {
+                    durationSeconds = 60,
+                    title = "must not start"
+                }),
+                "root-voice",
+                cancellationToken);
+            if (crossRoot.Success || timerStore.GetSnapshot().RunningTimers.Count != 0)
+            {
+                _failures.Add("cross-root Voice tool request reached a Provider write");
+            }
+
+            var rejected = await runtime.ExecuteAsync(
+                ToolCall("root-voice", "turn-reject", "call-reject", CodexVoiceCapabilityRuntime.TimerStartTool, new
+                {
+                    durationSeconds = 600,
+                    title = "Write\nreport"
+                }),
+                "root-voice",
+                cancellationToken);
+            if (rejected.Success
+                || approvalCalls != 1
+                || presented != new VoiceTimerApprovalRequest("Write report", 600)
+                || timerStore.GetSnapshot().RunningTimers.Count != 0)
+            {
+                _failures.Add("rejected Voice Timer request produced a side effect or mismatched approval text");
+            }
+
+            approve = true;
+            var timerParameters = ToolCall(
+                "root-voice",
+                "turn-timer",
+                "call-timer",
+                CodexVoiceCapabilityRuntime.TimerStartTool,
+                new
+                {
+                    durationSeconds = 1_500,
+                    title = "Focus\nwork"
+                });
+            var started = await runtime.ExecuteAsync(
+                timerParameters,
+                "root-voice",
+                cancellationToken);
+            var replayed = await runtime.ExecuteAsync(
+                timerParameters,
+                "root-voice",
+                cancellationToken);
+            var conflict = await runtime.ExecuteAsync(
+                ToolCall(
+                    "root-voice",
+                    "turn-timer",
+                    "call-timer",
+                    CodexVoiceCapabilityRuntime.TimerStartTool,
+                    new
+                    {
+                        durationSeconds = 60,
+                        title = "Changed request"
+                    }),
+                "root-voice",
+                cancellationToken);
+            using var timerPayload = JsonDocument.Parse(started.Text);
+            if (!started.Success
+                || !replayed.Success
+                || conflict.Success
+                || started.Text != replayed.Text
+                || approvalCalls != 2
+                || presented != new VoiceTimerApprovalRequest("Focus work", 1_500)
+                || timerStore.GetSnapshot().RunningTimers.Count != 1
+                || timerPayload.RootElement.GetProperty("readback").GetString() != "verified")
+            {
+                _failures.Add("approved Voice Timer did not execute once with verified readback");
+            }
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(root, recursive: true);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+    }
+
+    private async Task VerifyTimerApprovalGateAsync(CancellationToken cancellationToken)
+    {
+        var singleFlight = new VoiceTimerApprovalCoordinator();
+        using var firstCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var presented = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = singleFlight.RequestAsync(
+            new VoiceTimerApprovalRequest("First", 60),
+            async (_, token) =>
+            {
+                presented.TrySetResult(true);
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return true;
+            },
+            firstCancellation.Token);
+        await presented.Task.WaitAsync(cancellationToken);
+        var concurrentRejected = false;
+        try
+        {
+            _ = await singleFlight.RequestAsync(
+                new VoiceTimerApprovalRequest("Second", 60),
+                (_, _) => Task.FromResult(false),
+                cancellationToken);
+        }
+        catch (CapabilityBrokerException exception) when (exception.Code == "CAPABILITY_RATE_LIMITED")
+        {
+            concurrentRejected = true;
+        }
+        firstCancellation.Cancel();
+        try
+        {
+            _ = await first;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        if (!concurrentRejected)
+        {
+            _failures.Add("concurrent Voice Timer approvals were queued instead of rejected");
+        }
+
+        var now = new DateTimeOffset(2026, 8, 21, 9, 0, 0, TimeSpan.Zero);
+        var rateGate = new VoiceTimerApprovalCoordinator(() => now);
+        var presentationCalls = 0;
+        for (var index = 0; index < VoiceTimerApprovalCoordinator.MaximumPromptsPerWindow; index++)
+        {
+            _ = await rateGate.RequestAsync(
+                new VoiceTimerApprovalRequest($"Rejected {index}", 60),
+                (_, _) =>
+                {
+                    presentationCalls++;
+                    return Task.FromResult(false);
+                },
+                cancellationToken);
+        }
+        var rateLimited = false;
+        try
+        {
+            _ = await rateGate.RequestAsync(
+                new VoiceTimerApprovalRequest("Flood", 60),
+                (_, _) =>
+                {
+                    presentationCalls++;
+                    return Task.FromResult(false);
+                },
+                cancellationToken);
+        }
+        catch (CapabilityBrokerException exception) when (exception.Code == "CAPABILITY_RATE_LIMITED")
+        {
+            rateLimited = true;
+        }
+        if (!rateLimited || presentationCalls != VoiceTimerApprovalCoordinator.MaximumPromptsPerWindow)
+        {
+            _failures.Add("rejected Voice Timer prompts bypassed the pre-presentation rate limit");
+        }
+    }
+
+    private async Task VerifyDynamicToolRoundTripAsync(CancellationToken cancellationToken)
+    {
+        var harness = new AppServerHarness();
+        var runtime = new VoiceDynamicToolHarness();
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ => Task.FromResult(harness.CreateClient()),
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: [],
+            dynamicToolRuntime: runtime);
+
+        await coordinator.InitializeAsync(cancellationToken);
+        coordinator.SetUiAttached(true);
+        coordinator.BeginMicrophonePermissionRequest();
+        var started = await coordinator.StartRealtimeAsync(
+            "v=0\r\no=hoverpocket 3 3 IN IP4 127.0.0.1\r\n",
+            cancellationToken);
+        harness.PushServerRequest(
+            7001,
+            "item/tool/call",
+            new
+            {
+                threadId = started.ThreadId,
+                turnId = "turn-roundtrip",
+                callId = "call-roundtrip",
+                @namespace = "hoverpocket",
+                tool = "calendar_events_list",
+                arguments = new { }
+            });
+        await WaitUntilAsync(
+            () => harness.ServerResponses.Any(item => item.GetProperty("id").GetInt64() == 7001),
+            cancellationToken);
+        var response = harness.ServerResponses.Single(item => item.GetProperty("id").GetInt64() == 7001);
+        if (runtime.CallCount != 1
+            || response.GetProperty("result").GetProperty("success").ValueKind != JsonValueKind.True
+            || harness.RequestParameters("thread/start") is not { } startParameters
+            || !startParameters.TryGetProperty("dynamicTools", out var tools)
+            || tools.ValueKind != JsonValueKind.Array
+            || tools.GetArrayLength() != 1
+            || !startParameters.TryGetProperty("dynamicToolsOnly", out var dynamicOnly)
+            || dynamicOnly.ValueKind != JsonValueKind.True
+            || !startParameters.TryGetProperty("environments", out var environments)
+            || environments.ValueKind != JsonValueKind.Array
+            || environments.GetArrayLength() != 0)
+        {
+            _failures.Add("app-server dynamic tool request/response did not stay on the active Voice root");
+        }
+        runtime.BlockNext = true;
+        harness.PushServerRequest(
+            7002,
+            "item/tool/call",
+            new
+            {
+                threadId = started.ThreadId,
+                turnId = "turn-cancel",
+                callId = "call-cancel",
+                @namespace = "hoverpocket",
+                tool = "timer_countdown_start",
+                arguments = new { durationSeconds = 60 }
+            });
+        await runtime.BlockedCallStarted.WaitAsync(cancellationToken);
+        await coordinator.StopRealtimeAsync(cancellationToken);
+        await WaitUntilAsync(
+            () => runtime.CancelledCallCount == 1,
+            cancellationToken);
+        await Task.Delay(25, cancellationToken);
+        if (runtime.CancelledCallCount != 1
+            || harness.ServerResponses.Any(item => item.GetProperty("id").GetInt64() == 7002))
+        {
+            _failures.Add("stopping Voice did not revoke the in-flight dynamic tool request before reply");
+        }
+    }
+
+    private static JsonElement ToolCall(
+        string threadId,
+        string turnId,
+        string callId,
+        string tool,
+        object arguments) => JsonSerializer.SerializeToElement(new
+        {
+            threadId,
+            turnId,
+            callId,
+            @namespace = CodexVoiceCapabilityRuntime.Namespace,
+            tool,
+            arguments
+        });
 
     private async Task VerifyRealtimeSdpFenceAsync(CancellationToken cancellationToken)
     {
@@ -1215,6 +1553,123 @@ internal sealed class VoiceFoundationVerifier
         }
     }
 
+    private sealed class VoiceCalendarDataSource(DateTimeOffset now) : ICalendarCapabilityDataSource
+    {
+        public int ListCalls { get; private set; }
+
+        public Task<IReadOnlyList<CalendarCapabilityEvent>> ListEventsAsync(
+            DateTimeOffset start,
+            DateTimeOffset end,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ListCalls++;
+            IReadOnlyList<CalendarCapabilityEvent> events =
+            [
+                new CalendarCapabilityEvent(
+                    "event-ref-voice",
+                    "event-id-voice",
+                    "Team\nreview\u202Eignored",
+                    now.AddHours(1),
+                    now.AddHours(2))
+            ];
+            return Task.FromResult(events);
+        }
+
+        public Task<CalendarCapabilityEvent?> GetEventAsync(
+            string eventRef,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<CalendarCapabilityEvent?>(null);
+        }
+
+        public Task<CalendarCapabilityEvent> CreateEventAsync(
+            CalendarCapabilityCreateRequest request,
+            string idempotencyKey,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new InvalidOperationException("calendar writes are not available to Voice AN3-B2 verifier");
+        }
+    }
+
+    private sealed class VoiceDynamicToolHarness : ICodexVoiceDynamicToolRuntime
+    {
+        private int _callCount;
+        private int _cancelledCallCount;
+        private readonly TaskCompletionSource<bool> _blockedCallStarted = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int CallCount => Volatile.Read(ref _callCount);
+
+        public int CancelledCallCount => Volatile.Read(ref _cancelledCallCount);
+
+        public bool BlockNext { get; set; }
+
+        public Task BlockedCallStarted => _blockedCallStarted.Task;
+
+        public JsonElement Definitions => JsonSerializer.SerializeToElement(new object[]
+        {
+            new
+            {
+                type = "namespace",
+                name = "hoverpocket",
+                description = "Verifier tools",
+                tools = new object[]
+                {
+                    new
+                    {
+                        type = "function",
+                        name = "calendar_events_list",
+                        description = "Verifier Calendar read",
+                        inputSchema = new
+                        {
+                            type = "object",
+                            additionalProperties = false,
+                            properties = new { }
+                        }
+                    }
+                }
+            }
+        });
+
+        public async Task<CodexVoiceDynamicToolResponse> ExecuteAsync(
+            JsonElement? parameters,
+            string expectedThreadId,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (parameters is not { ValueKind: JsonValueKind.Object } value
+                || value.GetProperty("threadId").GetString() != expectedThreadId)
+            {
+                return new CodexVoiceDynamicToolResponse(
+                    false,
+                    "{\"status\":\"failed\",\"code\":\"thread_mismatch\"}");
+            }
+            Interlocked.Increment(ref _callCount);
+            if (BlockNext)
+            {
+                BlockNext = false;
+                _blockedCallStarted.TrySetResult(true);
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    Interlocked.Increment(ref _cancelledCallCount);
+                    return new CodexVoiceDynamicToolResponse(
+                        false,
+                        "{\"status\":\"failed\",\"code\":\"cancelled\"}");
+                }
+            }
+            return new CodexVoiceDynamicToolResponse(
+                true,
+                "{\"status\":\"succeeded\"}");
+        }
+    }
+
     private sealed class FixedProbe : ICodexVoiceCompatibilityProbe
     {
         private readonly CodexVoiceGate _gate;
@@ -1287,6 +1742,8 @@ internal sealed class VoiceFoundationVerifier
         private readonly bool _voicesReady;
         private readonly object _requestSync = new();
         private readonly HashSet<string> _requestedMethods = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, JsonElement> _requestParameters = new(StringComparer.Ordinal);
+        private readonly List<JsonElement> _serverResponses = [];
 
         public AppServerHarness(
             Action? onDispose = null,
@@ -1313,6 +1770,27 @@ internal sealed class VoiceFoundationVerifier
             }
         }
 
+        public IReadOnlyList<JsonElement> ServerResponses
+        {
+            get
+            {
+                lock (_requestSync)
+                {
+                    return _serverResponses.Select(item => item.Clone()).ToArray();
+                }
+            }
+        }
+
+        public JsonElement? RequestParameters(string method)
+        {
+            lock (_requestSync)
+            {
+                return _requestParameters.TryGetValue(method, out var parameters)
+                    ? parameters.Clone()
+                    : null;
+            }
+        }
+
         public CodexAppServerClient CreateClient() =>
             CodexAppServerClient.AttachForTesting(
                 _reader,
@@ -1322,7 +1800,8 @@ internal sealed class VoiceFoundationVerifier
                     _disconnectAfterInitialize,
                     _accountReady,
                     _voicesReady,
-                    RecordRequest),
+                    RecordRequest,
+                    RecordServerResponse),
                 TimeSpan.FromSeconds(1),
                 () =>
                 {
@@ -1333,11 +1812,16 @@ internal sealed class VoiceFoundationVerifier
 
         public void PushServerRequest(long id, string method)
         {
+            PushServerRequest(id, method, new { });
+        }
+
+        public void PushServerRequest(long id, string method, object parameters)
+        {
             _reader.Push(JsonSerializer.Serialize(new
             {
                 id,
                 method,
-                @params = new { }
+                @params = parameters
             }));
         }
 
@@ -1352,11 +1836,23 @@ internal sealed class VoiceFoundationVerifier
 
         public void Close() => _reader.Dispose();
 
-        private void RecordRequest(string method)
+        private void RecordRequest(string method, JsonElement? parameters)
         {
             lock (_requestSync)
             {
                 _requestedMethods.Add(method);
+                if (parameters is { } value)
+                {
+                    _requestParameters[method] = value.Clone();
+                }
+            }
+        }
+
+        private void RecordServerResponse(JsonElement response)
+        {
+            lock (_requestSync)
+            {
+                _serverResponses.Add(response.Clone());
             }
         }
     }
@@ -1508,7 +2004,8 @@ internal sealed class VoiceFoundationVerifier
         private readonly bool _disconnectAfterInitialize;
         private readonly bool _accountReady;
         private readonly bool _voicesReady;
-        private readonly Action<string>? _onRequest;
+        private readonly Action<string, JsonElement?>? _onRequest;
+        private readonly Action<JsonElement>? _onServerResponse;
 
         public AutoReplyWriter(
             ChannelLineReader reader,
@@ -1516,7 +2013,8 @@ internal sealed class VoiceFoundationVerifier
             bool disconnectAfterInitialize,
             bool accountReady,
             bool voicesReady,
-            Action<string>? onRequest = null)
+            Action<string, JsonElement?>? onRequest = null,
+            Action<JsonElement>? onServerResponse = null)
         {
             _reader = reader;
             _requestDuringInitialize = requestDuringInitialize;
@@ -1524,6 +2022,7 @@ internal sealed class VoiceFoundationVerifier
             _accountReady = accountReady;
             _voicesReady = voicesReady;
             _onRequest = onRequest;
+            _onServerResponse = onServerResponse;
         }
 
         public override Encoding Encoding => Encoding.UTF8;
@@ -1533,14 +2032,24 @@ internal sealed class VoiceFoundationVerifier
             cancellationToken.ThrowIfCancellationRequested();
             using var document = JsonDocument.Parse(buffer.ToString());
             var root = document.RootElement;
-            if (!root.TryGetProperty("id", out var id)
-                || !root.TryGetProperty("method", out var method)
-                || method.ValueKind != JsonValueKind.String)
+            if (!root.TryGetProperty("id", out var id))
             {
                 return Task.CompletedTask;
             }
+            if (!root.TryGetProperty("method", out var method)
+                || method.ValueKind != JsonValueKind.String)
+            {
+                if (root.TryGetProperty("result", out _))
+                {
+                    _onServerResponse?.Invoke(root.Clone());
+                }
+                return Task.CompletedTask;
+            }
             var methodName = method.GetString() ?? string.Empty;
-            _onRequest?.Invoke(methodName);
+            JsonElement? parameters = root.TryGetProperty("params", out var requestParameters)
+                ? requestParameters.Clone()
+                : null;
+            _onRequest?.Invoke(methodName, parameters);
             object result = methodName switch
             {
                 "initialize" => new
