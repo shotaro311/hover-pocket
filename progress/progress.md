@@ -1,9 +1,18 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-08-16
+updated: 2026-08-20
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-pr-ready-ci-green; an5-c-runtime-activation-pending; capability-expansion-merged
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-pr-ready-ci-green; an5-c-runtime-activation-pending; capability-expansion-merged; an8-a-release-readback-ready
 ---
+
+## 2026-08-20 AI-native AN8-A Public Release Readback
+
+- 最新`origin/main`の`a35b0ea`から専用worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an8-readback`、branch `codex/ai-native-an8-release-readback-main`を作成した。mainは`origin/main`と同一、cleanへ戻した。
+- macOSとWindowsの公開channelをGitHubの汎用Latestで混同せず、`macos-latest` / versioned macOS releaseと最大semantic versionの`win-v...` releaseを別々にreadbackする検証器を追加した。
+- macOSはappcast、versioned ZIP、手動インストールZIPを公開URLから再取得し、実測size / SHA-256、checksum、公開鍵によるSparkle Ed25519署名を照合する。Windowsは全公開assetを再取得し、実測size / SHA-256、checksum、feed内full packageのSHA-1を照合する。
+- Windows正式版はmanifestの自己申告だけで完了にせず、Windows runnerで公開SetupとPortable内`HoverPocket.Shell.exe`の実Authenticode署名、タイムスタンプ、署名者一致を確認する別gateを追加した。週次は現行未署名betaを監視し、formalは手動実行に限定する。
+- deterministic unit 10件、Python構文、YAML parse、`git diff --check`は成功した。公開中のmacOS `0.1.0 (168)`とWindows `0.2.7`を合計約270MB再取得したlive beta readbackも成功し、Windows formal gateは未署名manifestを理由にexit 1で正しく拒否した。
+- このAN8-Aは公開asset / signature / feedの継続readback基盤である。AN8全体の完了には、Windows正式署名済みrelease、両OSのclean install / upgrade / downgrade / uninstall / reinstall、Host / Pocket App / data version rollback、migration、offline / sleep-wake / long-running soak、retention / backup / restoreの実機証拠が残る。詳細: `progress/2026-08/2026-08-20_hover-pocket-ai-native-an8-release-readback.md`。
 
 ## 2026-08-16 AI-native AN5-B Codex Pocket App Generation / Management UI
 
