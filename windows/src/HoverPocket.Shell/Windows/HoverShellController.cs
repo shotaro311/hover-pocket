@@ -473,7 +473,8 @@ internal sealed class HoverShellController : IDisposable
         var target = VoicePanelGeometry.ExtendDownward(
             layout.PanelTarget,
             layout.Monitor,
-            _panelBridgeController.CurrentSettings,
+            _panelBridgeController.CurrentSettings.PanelSize,
+            _panelBridgeController.PreferredRuntimeVoiceLaneMode,
             out var resolvedMode);
         _panelBridgeController.SetResolvedVoiceLaneMode(resolvedMode);
         return target;
@@ -967,7 +968,7 @@ internal sealed class HoverShellController : IDisposable
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await _panelBridgeController.NotifySystemTransitionAsync();
+            await _panelBridgeController.NotifySystemTransitionAsync(cancellationToken);
             _voiceTransitionCountForVerify++;
             foreach (var targetDelay in RecoveryDelays)
             {

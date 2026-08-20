@@ -7,7 +7,7 @@ struct VoiceLaneHostView: View {
 
     var body: some View {
         Group {
-            if settings.voiceEnabled {
+            if runtime.snapshot.mode != .disabled {
                 if runtime.snapshot.mode == .expanded {
                     expanded
                 } else {

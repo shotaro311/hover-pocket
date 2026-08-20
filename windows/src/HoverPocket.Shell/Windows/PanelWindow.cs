@@ -959,6 +959,7 @@ internal sealed record UiWebVerifyResult(
     bool EchoOk,
     bool LegacyAiLaneNotMountedOk,
     bool VoiceDefaultOffOk,
+    bool VoiceTeardownVisibleOk,
     bool VoiceLocalizationOk,
     bool VoiceTransportContractOk,
     bool VoiceWebRtcHarnessOk,

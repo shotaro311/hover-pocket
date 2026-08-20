@@ -4,8 +4,8 @@
 
 - branch: `codex/ai-native-an3b-voice-runtime`
 - worktree: `/Users/shotaro/code/share/hover-menu-preview-ai-native-an3b`
-- base: AN3-A PR #19 head `b34c1fc72fc4b8012e5cd467aa5047096ec7c846`
-- status: Draft PR #21、ローカル検証、修正後Security scan、Windows / macOS / 3OS contract CI済み。実Windows Codex / microphone / WebRTC 1往復は未完了。
+- base: AN3-A PR #19最終head `b506557e13b45bd13d1f4a774a60a8a2314bfa33`を通常merge済み
+- status: Draft PR #21、ローカル検証、統合 / remediation Security scan、最終Windows / macOS / 3OS contract CI済み。実Windows Codex / microphone / WebRTC 1往復は未完了。
 
 ## 実装
 
@@ -16,6 +16,7 @@
 - transcriptは既存memory-only bounded bufferへ取り込み、partial / finalをroot scopeで更新する。raw SDP / audioはSettings、監査、diskへ保存しない。
 - Codex app-serverとschema probeをWindows kill-on-close Job Objectへ所属させ、disable、crash、終了時に子processを残さない。
 - 初回Security scanで再現した2件を修正した。getUserMedia成功後はPeerConnection等の構築前から取得streamをcleanup対象にし、途中失敗でも全trackを停止する。明示終了時はCodex / app-serverの応答を待たず、先にlocal track、peer、data channel、audioを停止する。
+- AN3-A最終headを通常mergeし、実Realtime transcriptを現在root IDへ束縛した。external roleは`user / assistant`だけを受理し、`system`や未知roleをpartial蓄積前に拒否する。rendererの未知roleも`System`表示へfallbackしない。
 
 ## 検証
 
@@ -34,6 +35,9 @@
 - Draft PR [#21](https://github.com/shotaro311/hover-pocket/pull/21)をPR #19へstackした。初回Windows buildは`WindowsProcessJob`の定数名とstruct名の衝突で失敗し、compile-onlyのrename `aa25244`で修正した。
 - 修正後head `aa25244`のWindows [32390802586](https://github.com/shotaro311/hover-pocket/actions/runs/32390802586): PASS。Release build、settings generation、Voice contract、Capability / Broker / Pocket App、Voice `runtime-account-gate`、`runtime-voice-gate`、`realtime-transport`、`realtime-sdp-fence`、rendered WebView UIを確認した。
 - macOS [32390802558](https://github.com/shotaro311/hover-pocket/actions/runs/32390802558)、3OS contract [32390802562](https://github.com/shotaro311/hover-pocket/actions/runs/32390802562)、PR Router [32390800203](https://github.com/shotaro311/hover-pocket/actions/runs/32390800203): PASS。PR checkは7 / 7成功した。
+- 統合Security scan `4c7e30aa-5797-4cda-bedf-739dd5093467`: 16 / 16 review、low finding 1件。外部`system` roleをHost/System表示へ昇格できるpresentation integrity問題を再現した。
+- remediation Security scan `d8751ccf-e635-4747-9ad0-56d1b2b83539`: 4 / 4 review、finding 0、sealed complete。fake app-serverは`system` delta / doneの直後に正規user transcriptを送り、1件のuser eventだけが残ることを検証する。
+- 最終head `190ce80`のWindows [32418050929](https://github.com/shotaro311/hover-pocket/actions/runs/32418050929)、macOS [32418050661](https://github.com/shotaro311/hover-pocket/actions/runs/32418050661)、3OS contract / byte比較 [32418050662](https://github.com/shotaro311/hover-pocket/actions/runs/32418050662)、PR Router [32418047807](https://github.com/shotaro311/hover-pocket/actions/runs/32418047807): 全7 check PASS。未解決review thread 0件、`CLEAN / MERGEABLE`、remote parity `0 / 0`をreadbackした。
 
 ## 未完了
 

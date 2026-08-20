@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -92,6 +93,7 @@ internal sealed class BlockedCodexVoiceCompatibilityProbe : ICodexVoiceCompatibi
 
 internal sealed record VoiceTranscriptEvent(
     string Id,
+    string RootSessionId,
     string Role,
     string Text,
     bool IsFinal,
@@ -170,7 +172,7 @@ internal static class VoiceTextSafety
     ];
 
     private static readonly Regex AbsolutePathPattern = new(
-        "(?:^|[\\s\\\"'(=])(?:file://|/(?:[^/\\s]+/)*[^/\\s]+|[a-zA-Z]:\\\\[^\\s]+|\\\\\\\\[^\\s]+)",
+        "(?:^|[^\\p{L}\\p{N}_/])(?:file://|/(?!/)(?:[^/\\s]+/)*[^/\\s]+|[a-zA-Z]:\\\\[^\\s]+|\\\\\\\\[^\\s]+)",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     public static string SanitizeVisibleText(string? value, int maxRunes)
@@ -180,8 +182,23 @@ internal static class VoiceTextSafety
             return string.Empty;
         }
 
-        var normalized = new string(value.Select(character =>
-            char.IsControl(character) && character is not '\n' and not '\t' ? ' ' : character).ToArray());
+        var builder = new StringBuilder(value.Length);
+        foreach (var rune in value.EnumerateRunes())
+        {
+            var category = Rune.GetUnicodeCategory(rune);
+            if (category == UnicodeCategory.Format)
+            {
+                continue;
+            }
+            if (category == UnicodeCategory.Control
+                && rune.Value is not ('\n' or '\t'))
+            {
+                builder.Append(' ');
+                continue;
+            }
+            builder.Append(rune.ToString());
+        }
+        var normalized = builder.ToString();
         var lowered = normalized.ToLowerInvariant();
         if (SensitiveMarkers.Any(lowered.Contains)
             || AbsolutePathPattern.IsMatch(normalized))
@@ -199,20 +216,14 @@ internal static class VoiceTextSafety
             return string.Empty;
         }
 
-        var builder = new StringBuilder();
-        foreach (var rune in value.EnumerateRunes())
+        var runes = value.EnumerateRunes().ToArray();
+        if (runes.Length > 160
+            || runes.Any(rune => !Rune.IsLetterOrDigit(rune)
+                && rune.Value is not ('-' or '_' or '.' or ':')))
         {
-            if (Rune.IsLetterOrDigit(rune)
-                || rune.Value is '-' or '_' or '.' or ':')
-            {
-                builder.Append(rune);
-            }
-            if (builder.Length >= 160)
-            {
-                break;
-            }
+            return string.Empty;
         }
-        return builder.ToString();
+        return value;
     }
 
     public static string SanitizeErrorCode(string? value)
@@ -226,6 +237,13 @@ internal static class VoiceTextSafety
             char.IsLetterOrDigit(character) || character == '_' ? character : '_').ToArray());
         return normalized.Length <= 80 ? normalized : normalized[..80];
     }
+
+    public static string? NormalizeTranscriptRole(string? value) => value switch
+    {
+        "user" => "user",
+        "assistant" => "assistant",
+        _ => null
+    };
 }
 
 internal sealed class VoiceTranscriptBuffer
@@ -240,7 +258,24 @@ internal sealed class VoiceTranscriptBuffer
     public void Append(VoiceTranscriptEvent value)
     {
         var sanitized = Sanitize(value);
-        _events.Add(sanitized);
+        if (sanitized is null)
+        {
+            return;
+        }
+        var existingIndex = _events.FindIndex(item =>
+            string.Equals(item.Id, sanitized.Id, StringComparison.Ordinal));
+        if (existingIndex >= 0)
+        {
+            if (_events[existingIndex].IsFinal && !sanitized.IsFinal)
+            {
+                return;
+            }
+            _events[existingIndex] = sanitized;
+        }
+        else
+        {
+            _events.Add(sanitized);
+        }
         if (_events.Count > MaxEvents)
         {
             _events.RemoveRange(0, _events.Count - MaxEvents);
@@ -251,6 +286,10 @@ internal sealed class VoiceTranscriptBuffer
     public void Upsert(VoiceTranscriptEvent value)
     {
         var sanitized = Sanitize(value);
+        if (sanitized is null)
+        {
+            return;
+        }
         var index = _events.FindIndex(item => string.Equals(item.Id, sanitized.Id, StringComparison.Ordinal));
         if (index >= 0)
         {
@@ -272,12 +311,22 @@ internal sealed class VoiceTranscriptBuffer
 
     public void Clear() => _events.Clear();
 
-    private static VoiceTranscriptEvent Sanitize(VoiceTranscriptEvent value) => value with
+    private static VoiceTranscriptEvent? Sanitize(VoiceTranscriptEvent value)
     {
-        Id = VoiceTextSafety.SanitizeIdentifier(value.Id),
-        Role = VoiceTextSafety.SanitizeVisibleText(value.Role, 24),
-        Text = VoiceTextSafety.SanitizeVisibleText(value.Text, 1_024)
-    };
+        var role = VoiceTextSafety.NormalizeTranscriptRole(value.Role);
+        var sanitized = value with
+        {
+            Id = VoiceTextSafety.SanitizeIdentifier(value.Id),
+            RootSessionId = VoiceTextSafety.SanitizeIdentifier(value.RootSessionId),
+            Role = role ?? string.Empty,
+            Text = VoiceTextSafety.SanitizeVisibleText(value.Text, 1_024)
+        };
+        return string.IsNullOrEmpty(sanitized.Id)
+            || string.IsNullOrEmpty(sanitized.RootSessionId)
+            || role is null
+                ? null
+                : sanitized;
+    }
 
     private void TrimRuneBudget()
     {
@@ -420,6 +469,12 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         if (!enabled)
         {
             CancelActiveToolRequests();
+            UpdateSnapshot(snapshot => snapshot with
+            {
+                SessionStatus = CodexVoiceSessionStatus.Stopping,
+                Activity = VoiceActivity.Idle,
+                Muted = true
+            });
             await CancelRestartAsync().ConfigureAwait(false);
             await CancelStartupAsync().ConfigureAwait(false);
             var client = DetachClient();
@@ -732,7 +787,13 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         }
         lock (_sync)
         {
-            _transcript.Append(value);
+            var eventRootSessionId = VoiceTextSafety.SanitizeIdentifier(value.RootSessionId);
+            if (string.IsNullOrEmpty(_rootSessionId)
+                || !string.Equals(_rootSessionId, eventRootSessionId, StringComparison.Ordinal))
+            {
+                return;
+            }
+            _transcript.Append(value with { RootSessionId = eventRootSessionId });
             PublishLocked();
         }
     }
@@ -790,8 +851,22 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         }
     }
 
-    public async Task NotifySystemTransitionAsync()
+    public async Task NotifySystemTransitionAsync(CancellationToken cancellationToken = default)
     {
+        await _featureTransitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await NotifySystemTransitionCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _featureTransitionGate.Release();
+        }
+    }
+
+    private async Task NotifySystemTransitionCoreAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!_featureEnabled)
         {
             return;
@@ -814,16 +889,20 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         Interlocked.Increment(ref _generation);
         CancelActiveToolRequests();
         await CancelRestartAsync().ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         await CancelStartupAsync().ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         var client = DetachClient();
         if (client is not null)
         {
             await DisposeDetachedClientAsync(client).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
         }
         if (!_featureEnabled || _disposed)
         {
             return;
         }
+        cancellationToken.ThrowIfCancellationRequested();
         UpdateSnapshot(snapshot => snapshot with
         {
             Availability = CodexVoiceAvailability.Unavailable,
@@ -834,7 +913,9 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             RealtimeAttached = false,
             AppServerProcessId = null
         });
-        ScheduleRestart();
+        cancellationToken.ThrowIfCancellationRequested();
+        ScheduleRestart(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     public void NotifyTransportCrashed()
@@ -1194,9 +1275,9 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         string? role,
         string? delta)
     {
-        var safeRole = VoiceTextSafety.SanitizeVisibleText(role, 24);
+        var safeRole = VoiceTextSafety.NormalizeTranscriptRole(role);
         var safeDelta = VoiceTextSafety.SanitizeVisibleText(delta, 512);
-        if (string.IsNullOrEmpty(safeRole) || string.IsNullOrEmpty(safeDelta))
+        if (safeRole is null || string.IsNullOrEmpty(safeDelta))
         {
             return;
         }
@@ -1212,6 +1293,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
                 1_024);
             _transcript.Upsert(new VoiceTranscriptEvent(
                 partialId,
+                active.ThreadId,
                 safeRole,
                 _partialTranscript,
                 false,
@@ -1225,9 +1307,9 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         string? role,
         string? text)
     {
-        var safeRole = VoiceTextSafety.SanitizeVisibleText(role, 24);
+        var safeRole = VoiceTextSafety.NormalizeTranscriptRole(role);
         var safeText = VoiceTextSafety.SanitizeVisibleText(text, 1_024);
-        if (string.IsNullOrEmpty(safeRole) || string.IsNullOrEmpty(safeText))
+        if (safeRole is null || string.IsNullOrEmpty(safeText))
         {
             return;
         }
@@ -1241,6 +1323,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             _partialTranscript = string.Empty;
             _transcript.Append(new VoiceTranscriptEvent(
                 $"realtime-{active.Generation}-{++_transcriptSequence}",
+                active.ThreadId,
                 safeRole,
                 safeText,
                 true,
@@ -1408,9 +1491,9 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         PublishTransportCrashAndRestart();
     }
 
-    private void ScheduleRestart()
+    private void ScheduleRestart(CancellationToken cancellationToken = default)
     {
-        if (!_featureEnabled || _clientFactory is null)
+        if (!_featureEnabled || _clientFactory is null || cancellationToken.IsCancellationRequested)
         {
             return;
         }
@@ -1441,13 +1524,15 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         PublishOutsideLock(Snapshot);
 
         CancelRestart();
-        var restartCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        var restartCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _lifetime.Token,
+            cancellationToken);
         var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var restartTask = RunTrackedRestartAsync(delay, restartCancellation.Token, startGate.Task);
         var scheduled = false;
         lock (_sync)
         {
-            if (_featureEnabled && !_disposed)
+            if (_featureEnabled && !_disposed && !cancellationToken.IsCancellationRequested)
             {
                 _restartCancellation = restartCancellation;
                 _restartTask = restartTask;
@@ -2033,18 +2118,26 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             return;
         }
         _disposed = true;
-        _featureEnabled = false;
-        Interlocked.Increment(ref _generation);
-        CancelActiveToolRequests();
-        CancelRestartAsync().GetAwaiter().GetResult();
-        _lifetime.Cancel();
-        CancelStartupAsync().GetAwaiter().GetResult();
-        var client = DetachClient();
-        if (client is not null)
+        _featureTransitionGate.Wait();
+        try
         {
-            DisposeDetachedClientAsync(client).GetAwaiter().GetResult();
+            _featureEnabled = false;
+            Interlocked.Increment(ref _generation);
+            CancelActiveToolRequests();
+            CancelRestartAsync().GetAwaiter().GetResult();
+            _lifetime.Cancel();
+            CancelStartupAsync().GetAwaiter().GetResult();
+            var client = DetachClient();
+            if (client is not null)
+            {
+                DisposeDetachedClientAsync(client).GetAwaiter().GetResult();
+            }
+            _lifetime.Dispose();
+            Publish(CodexVoiceSnapshot.Disabled);
         }
-        _lifetime.Dispose();
-        Publish(CodexVoiceSnapshot.Disabled);
+        finally
+        {
+            _featureTransitionGate.Release();
+        }
     }
 }
