@@ -393,6 +393,9 @@ class ReleaseReadbackTests(unittest.TestCase):
         self.assertIn("codesign --verify --deep --strict", script)
         self.assertIn("xcrun stapler validate", script)
         self.assertIn("spctl --assess --type execute", script)
+        self.assertIn("CFBundleIdentifier", script)
+        self.assertIn("CFBundleShortVersionString", script)
+        self.assertIn("CFBundleVersion", script)
         self.assertIn("macos-gatekeeper-readback-report.json", script)
 
     def test_formal_workflow_pins_one_verified_asset_snapshot(self):
@@ -407,6 +410,9 @@ class ReleaseReadbackTests(unittest.TestCase):
         self.assertIn('Get-ReleaseAsset -Release $release -Name "RELEASES"', script)
         self.assertIn('Get-ReleaseAsset -Release $release -Name "assets.win.json"', script)
         self.assertIn("Assert-DownloadedSnapshot", script)
+        self.assertIn("Assert-NupkgReleaseIdentity", script)
+        self.assertIn("Assert-ExecutableReleaseVersion", script)
+        self.assertIn("Assert-AssemblyReleaseVersion", script)
 
     def test_github_latest_must_remain_the_macos_release(self):
         verifier = MODULE.Verifier()

@@ -9,6 +9,7 @@ fi
 EXPECTED_REPORT="$1"
 REPOSITORY="${GITHUB_REPOSITORY:-shotaro311/hover-pocket}"
 OUTPUT_PATH="${MACOS_READBACK_OUTPUT:-macos-gatekeeper-readback-report.json}"
+EXPECTED_BUNDLE_IDENTIFIER="local.codex.hover-pocket"
 
 if [[ ! -f "$EXPECTED_REPORT" ]]; then
   echo "error=release readback report not found" >&2
@@ -46,6 +47,8 @@ tag = snapshot["releaseTag"]
 name = asset.get("name")
 size = asset.get("size")
 digest = asset.get("sha256")
+version = macos.get("version")
+build = macos.get("build")
 if not isinstance(tag, str) or not re.fullmatch(r"v[0-9A-Za-z][0-9A-Za-z._+-]*", tag):
     raise SystemExit("invalid macOS release tag")
 if not isinstance(name, str) or not re.fullmatch(r"HoverPocket-[0-9A-Za-z][0-9A-Za-z._+-]*\.zip", name):
@@ -56,16 +59,24 @@ if not isinstance(size, int) or size <= 0 or size > 2 * 1024 * 1024 * 1024:
     raise SystemExit("invalid macOS archive size")
 if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
     raise SystemExit("invalid macOS archive digest")
+if not isinstance(version, str) or not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._+-]*", version):
+    raise SystemExit("invalid macOS version")
+if not isinstance(build, str) or not re.fullmatch(r"[0-9]+", build):
+    raise SystemExit("invalid macOS build")
 print(tag)
 print(name)
 print(size)
 print(digest)
+print(version)
+print(build)
 PY
 
 IFS= read -r release_tag < "$metadata_path"
 IFS= read -r asset_name < <(sed -n '2p' "$metadata_path")
 IFS= read -r expected_size < <(sed -n '3p' "$metadata_path")
 IFS= read -r expected_sha256 < <(sed -n '4p' "$metadata_path")
+IFS= read -r expected_version < <(sed -n '5p' "$metadata_path")
+IFS= read -r expected_build < <(sed -n '6p' "$metadata_path")
 
 download_dir="$work_dir/download"
 extract_dir="$work_dir/extracted"
@@ -98,6 +109,23 @@ if find "$extract_dir" -mindepth 1 -maxdepth 1 ! -name 'HoverPocket.app' -print 
   exit 1
 fi
 
+info_plist="$app_path/Contents/Info.plist"
+if [[ ! -f "$info_plist" ]]; then
+  echo "error=published app Info.plist not found" >&2
+  exit 1
+fi
+actual_bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$info_plist")"
+actual_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$info_plist")"
+actual_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$info_plist")"
+if [[ "$actual_bundle_identifier" != "$EXPECTED_BUNDLE_IDENTIFIER" ]]; then
+  echo "error=published app bundle identifier differs from HoverPocket" >&2
+  exit 1
+fi
+if [[ "$actual_version" != "$expected_version" || "$actual_build" != "$expected_build" ]]; then
+  echo "error=published app version or build differs from appcast" >&2
+  exit 1
+fi
+
 codesign --verify --deep --strict --verbose=2 "$app_path"
 xcrun stapler validate "$app_path"
 spctl --assess --type execute --verbose=2 "$app_path"
@@ -119,7 +147,7 @@ if asset.get("size") != expected_size or asset.get("digest") != f"sha256:{expect
     raise SystemExit("published macOS asset metadata changed during verification")
 PY
 
-python3 - "$OUTPUT_PATH" "$release_tag" "$asset_name" "$actual_size" "$actual_sha256" <<'PY'
+python3 - "$OUTPUT_PATH" "$release_tag" "$asset_name" "$actual_size" "$actual_sha256" "$actual_bundle_identifier" "$actual_version" "$actual_build" <<'PY'
 import json
 import pathlib
 import sys
@@ -136,6 +164,9 @@ report = {
     "codesign": "verified-deep-strict",
     "notarization": "stapled-ticket-validated",
     "gatekeeper": "accepted",
+    "bundleIdentifier": sys.argv[6],
+    "version": sys.argv[7],
+    "build": sys.argv[8],
     "snapshotReadback": "release-metadata-rechecked",
 }
 path.write_text(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")

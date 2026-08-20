@@ -107,6 +107,80 @@ function Expand-ZipArchiveSafely {
     [IO.Compression.ZipFile]::ExtractToDirectory($ArchivePath, $Destination)
 }
 
+function Assert-NupkgReleaseIdentity {
+    param(
+        [string]$PackageRoot,
+        [string]$ExpectedPackageId,
+        [string]$ExpectedVersion,
+        [string]$ExpectedChannel,
+        [string]$ExpectedRuntime
+    )
+
+    $nuspecFiles = @(Get-ChildItem -LiteralPath $PackageRoot -File -Filter "*.nuspec")
+    if ($nuspecFiles.Count -ne 1) {
+        throw "Full update package must contain exactly one root nuspec."
+    }
+    [xml]$nuspec = Get-Content -LiteralPath $nuspecFiles[0].FullName -Raw
+    $metadata = $nuspec.SelectSingleNode("/*[local-name()='package']/*[local-name()='metadata']")
+    if ($null -eq $metadata) {
+        throw "Full update package nuspec metadata is missing."
+    }
+    $identity = @{}
+    foreach ($name in @("id", "version", "mainExe", "channel", "rid")) {
+        $nodes = @($metadata.SelectNodes("*[local-name()='$name']"))
+        if ($nodes.Count -ne 1 -or [string]::IsNullOrWhiteSpace($nodes[0].InnerText)) {
+            throw "Full update package nuspec $name is missing or duplicated."
+        }
+        $identity[$name] = $nodes[0].InnerText.Trim()
+    }
+    if (
+        $identity.id -cne $ExpectedPackageId -or
+        $identity.version -cne $ExpectedVersion -or
+        $identity.mainExe -cne "HoverPocket.Shell.exe" -or
+        $identity.channel -cne $ExpectedChannel -or
+        $identity.rid -cne $ExpectedRuntime
+    ) {
+        throw "Full update package embedded identity differs from the release manifest."
+    }
+}
+
+function Assert-ExecutableReleaseVersion {
+    param([string]$Path, [string]$ExpectedVersion, [string]$Label)
+
+    $versionInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($Path)
+    $expected = [Version]$ExpectedVersion
+    $fileVersion = [Version]$versionInfo.FileVersion
+    if (
+        $fileVersion.Major -ne $expected.Major -or
+        $fileVersion.Minor -ne $expected.Minor -or
+        $fileVersion.Build -ne $expected.Build
+    ) {
+        throw "$Label file version differs from the release manifest."
+    }
+    $productVersion = [string]$versionInfo.ProductVersion
+    if ($productVersion -notmatch ('^' + [Regex]::Escape($ExpectedVersion) + '(?:$|[+ -])')) {
+        throw "$Label product version differs from the release manifest."
+    }
+}
+
+function Assert-AssemblyReleaseVersion {
+    param([string]$PackageRoot, [string]$ExpectedVersion)
+
+    $assemblies = @(Get-ChildItem -LiteralPath $PackageRoot -Recurse -File -Filter "HoverPocket.Shell.dll")
+    if ($assemblies.Count -ne 1) {
+        throw "Full update package must contain exactly one HoverPocket.Shell.dll."
+    }
+    $actual = [Reflection.AssemblyName]::GetAssemblyName($assemblies[0].FullName).Version
+    $expected = [Version]$ExpectedVersion
+    if (
+        $actual.Major -ne $expected.Major -or
+        $actual.Minor -ne $expected.Minor -or
+        $actual.Build -ne $expected.Build
+    ) {
+        throw "Full update package assembly version differs from the release manifest."
+    }
+}
+
 function Read-Checksums {
     param([string]$Path)
 
@@ -314,14 +388,23 @@ try {
         throw "Portable ZIP does not contain exactly one HoverPocket.Shell.exe."
     }
     $mainSignature = Assert-TimestampedAuthenticode -Path $mainExecutables[0].FullName -Label "HoverPocket.Shell.exe"
+    Assert-ExecutableReleaseVersion -Path $mainExecutables[0].FullName -ExpectedVersion $manifest.version -Label "Portable HoverPocket.Shell.exe"
 
     $packageExtractPath = Join-Path $temporaryRoot "update-package"
     Expand-ZipArchiveSafely -ArchivePath $packagePath -Destination $packageExtractPath
+    Assert-NupkgReleaseIdentity `
+        -PackageRoot $packageExtractPath `
+        -ExpectedPackageId $manifest.packageId `
+        -ExpectedVersion $manifest.version `
+        -ExpectedChannel $manifest.updateChannel `
+        -ExpectedRuntime $manifest.runtime
     $packageExecutables = @(Get-ChildItem -LiteralPath $packageExtractPath -Recurse -File -Filter "HoverPocket.Shell.exe")
     if ($packageExecutables.Count -ne 1) {
         throw "Full update package does not contain exactly one HoverPocket.Shell.exe."
     }
     $packageSignature = Assert-TimestampedAuthenticode -Path $packageExecutables[0].FullName -Label "Full package HoverPocket.Shell.exe"
+    Assert-ExecutableReleaseVersion -Path $packageExecutables[0].FullName -ExpectedVersion $manifest.version -Label "Full package HoverPocket.Shell.exe"
+    Assert-AssemblyReleaseVersion -PackageRoot $packageExtractPath -ExpectedVersion $manifest.version
     $signerThumbprints = @(@(
             $setupSignature.SignerCertificate.Thumbprint
             $mainSignature.SignerCertificate.Thumbprint
@@ -339,6 +422,8 @@ try {
         setup = "signed-timestamped-verified"
         portableApplication = "signed-timestamped-verified"
         updatePackageApplication = "signed-timestamped-verified"
+        packageIdentity = "manifest-version-and-runtime-verified"
+        embeddedApplicationVersion = "verified"
         signerAgreement = "verified"
         artifactSnapshot = "verified"
     } | ConvertTo-Json -Compress
