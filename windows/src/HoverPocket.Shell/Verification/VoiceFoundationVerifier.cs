@@ -312,7 +312,10 @@ internal sealed class VoiceFoundationVerifier
             restartDelays: []);
 
         await coordinator.InitializeAsync(cancellationToken);
-        await WaitUntilAsync(() => Volatile.Read(ref disposeCount) == 1, cancellationToken);
+        await WaitUntilAsync(
+            () => Volatile.Read(ref disposeCount) == 1
+                && coordinator.Snapshot.SessionStatus == CodexVoiceSessionStatus.BlockedFailure,
+            cancellationToken);
         if (coordinator.Snapshot.Availability == CodexVoiceAvailability.Ready
             || coordinator.Snapshot.TransportAttached
             || coordinator.Snapshot.AppServerProcessId is not null)
