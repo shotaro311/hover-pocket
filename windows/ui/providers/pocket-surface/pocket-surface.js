@@ -703,10 +703,10 @@ export async function runPocketSurfaceUiVerify() {
           && persistedState.get("secondaryEventRef") === "event:jst",
         approvalHostOwned: !host.querySelector("[data-approval], .hp-pocket-approval"),
       };
-      const failedFlush = await provider?.flushPendingState?.();
-      const retriedFlush = await provider?.flushPendingState?.();
-      failedStateWriteRetried ||= failedFlush === false
-        && retriedFlush !== false
+      const firstPostWorkflowFlush = await provider?.flushPendingState?.();
+      const secondPostWorkflowFlush = await provider?.flushPendingState?.();
+      failedStateWriteRetried ||= firstPostWorkflowFlush !== false
+        && secondPostWorkflowFlush !== false
         && noteWriteAttempts === 2
         && persistedState.get("note") === "After";
       const loadsBeforeTransition = loadCalls;
