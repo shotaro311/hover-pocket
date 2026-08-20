@@ -397,7 +397,10 @@ enum VoiceFoundationVerificationCommand {
             adapterFactory: nil
         )
         try await waitUntil { oldAdapter.stopCount == 1 }
-        guard runtime.snapshot != .disabled else {
+        guard runtime.snapshot != .disabled,
+              runtime.snapshot.mode == .compact,
+              runtime.snapshot.connection == .recovering
+        else {
             throw VoiceFoundationVerificationError.failed("voice_off_published_before_adapter_teardown")
         }
 

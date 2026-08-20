@@ -136,11 +136,10 @@ final class HoverWindowController {
         )
     }
 
-    private func voiceLaneHeight(on screen: NSScreen) -> CGFloat {
+    private func voiceLaneHeight(on _: NSScreen) -> CGFloat {
         CGFloat(VoiceLaneGeometry.height(
-            enabled: settings.voiceEnabled,
-            preference: resolvedVoiceLaneLayout(on: screen),
-            panelSizeRawValue: settings.panelSize.rawValue
+            panelSizeRawValue: settings.panelSize.rawValue,
+            mode: VoiceLaneRuntime.shared.snapshot.mode
         ))
     }
 
@@ -730,6 +729,17 @@ final class HoverWindowController {
         settings.$voiceEnabled
             .dropFirst()
             .removeDuplicates()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.resizePreviewForPanelSizeChange()
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        VoiceLaneRuntime.shared.$snapshot
+            .map(\.mode)
+            .removeDuplicates()
+            .dropFirst()
             .sink { [weak self] _ in
                 DispatchQueue.main.async { [weak self] in
                     self?.resizePreviewForPanelSizeChange()

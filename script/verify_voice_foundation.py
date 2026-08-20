@@ -189,6 +189,8 @@ def main() -> None:
         fail("Windows unavailable Voice transport can report an unmuted state")
     if "VoiceLaneHostView" not in mac_shell:
         fail("macOS Host Voice row missing")
+    if "if runtime.snapshot.mode != .disabled" not in mac_voice:
+        fail("macOS Voice row disappears before runtime teardown completes")
     if "accessibilityLabel(\"Voice Lane\")" not in mac_voice:
         if "localized(japanese: \"音声レーン\", english: \"Voice Lane\")" not in mac_voice:
             fail("macOS Voice accessibility region missing")
@@ -208,6 +210,9 @@ def main() -> None:
         fail("macOS memory/scope contracts missing")
     if "additionalPreviewHeight: voiceLaneHeight(on: screen)" not in mac_window:
         fail("macOS window is not extended downward for Voice Lane")
+    if "mode: VoiceLaneRuntime.shared.snapshot.mode" not in mac_window \
+            or "VoiceLaneRuntime.shared.$snapshot" not in mac_window:
+        fail("macOS panel geometry follows settings before Voice teardown completes")
     show_preview = mac_window[mac_window.find("private func showPreview"):]
     if "VoiceLaneRuntime.shared.attachPanel()" not in show_preview:
         fail("macOS panel show path does not reattach Voice state")
