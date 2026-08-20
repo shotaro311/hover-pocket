@@ -43,6 +43,11 @@
 - WindowsはUserData rootとpackage directoryをreparse拒否・`FileShare.Delete`なしのhandleで固定する。state読込みも`OPEN_REPARSE_POINT`のfile handleから行い、runtime解除時にhandleを確実に閉じる。他App directoryへの差替えを試みてもrenameを拒否し、他App stateが不変である回帰を追加した。
 - macOSは生成Providerのdisable中には表示設定を保持する一方、preserve-only removeのruntime readback成功後にorder、hidden、preferred、last-selectedから対象Provider IDを削除する。UserDefaults再読込回帰を追加した。
 
+### 最終head reviewの追加修正
+
+- 生成ProviderのSurface modelは表示ごとに新規生成し、再度開いたときにCalendar等のqueryを再取得できるようにする。Registryは生存中modelを弱参照で追跡し、disable / remove時はすべて無効化する回帰を追加した。
+- macOSの`$input`と`$state`を独立namespaceとして保持する。同じ名前のstateを更新しても一時入力を書き換えず、workflow準備時に入力を優先して不足分だけstateから解決する回帰を追加した。
+
 ## 検証
 
 ### macOSローカル
@@ -56,6 +61,7 @@
 - `git diff --check`: 成功
 - 最終review追加修正後もwarnings-as-errors build、Pocket App lifecycle / generation、Broker、Capability、Pocket Surface、Timer、13 schema / 59 fixture、JavaScript syntax、`git diff --check`が成功した。Windowsのrendered WebView回帰はPR CIを最終gateとする。
 - 最終security修正後もwarnings-as-errors build、Broker、Capability、Pocket App lifecycle / generation、Pocket Surface、Timer、Clipboard、Calculator、Panel layout 128件、13 schema / 59 fixture、JavaScript syntax、`git diff --check`が成功した。macOSのdirectory差替え拒否と削除済みProvider設定pruneもdeterministic回帰で確認した。Windowsはローカルに.NET SDKがないためPR CIを最終gateとする。
+- 最終head review追加修正後もwarnings-as-errors build、Broker、Pocket App lifecycle / generation、Capability、Pocket Surface、Timer、13 schema / 59 fixture、Windows JavaScript syntax、`git diff --check`が成功した。
 
 ### PR CI
 
@@ -77,6 +83,7 @@
 - state束縛control永続化、取消後workflow確定、disabled生成Provider設定保持の3件へ修正根拠を返信した。
 - 既存14 review threadはすべてresolvedにした。その後の最終head reviewで検出した入力0件workflowと管理外Apps entryの2件を追加修正した。
 - source headの全CI成功後に`@codex review`を1回依頼した。追加修正の2 threadはpush後のCIとreadbackを確認して解決する。
+- source head `4489791`のexact Security diff scan `e030446e-9c8f-401d-9d44-1b2cc996d943`は51 / 51 review itemを完了し、reportable finding 0件でsealed completeとなった。最終head review追加修正後は新しいexact source headを再scanする。
 
 ## 残りgate
 

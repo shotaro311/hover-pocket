@@ -114,10 +114,18 @@ final class PocketSurfaceRegistry: ObservableObject {
     }
 
     private final class Entry {
+        private final class WeakModel {
+            weak var value: PocketSurfaceHostModel?
+
+            init(_ value: PocketSurfaceHostModel) {
+                self.value = value
+            }
+        }
+
         let readback: PocketAppRuntimeReadback
         let runtimeHandle: AnyObject
         let surfaceIDs: Set<String>
-        var models: [String: PocketSurfaceHostModel] = [:]
+        private var models: [String: [WeakModel]] = [:]
 
         init(
             readback: PocketAppRuntimeReadback,
@@ -131,8 +139,20 @@ final class PocketSurfaceRegistry: ObservableObject {
 
         @MainActor
         func invalidate() {
-            models.values.forEach { $0.invalidateActivation() }
+            models.values
+                .flatMap { $0 }
+                .compactMap(\.value)
+                .forEach { $0.invalidateActivation() }
             models.removeAll()
+        }
+
+        @MainActor
+        func makeModel(surfaceID: String) throws -> PocketSurfaceHostModel? {
+            guard let runtime = runtimeHandle as? PocketAppExecutionRuntime else { return nil }
+            let model = try PocketSurfaceHostModel(runtime: runtime, surfaceID: surfaceID)
+            models[surfaceID] = (models[surfaceID] ?? [])
+                .filter { $0.value != nil } + [WeakModel(model)]
+            return model
         }
     }
 
@@ -159,11 +179,7 @@ final class PocketSurfaceRegistry: ObservableObject {
 
     func model(appID: String, surfaceID: String) throws -> PocketSurfaceHostModel? {
         guard let entry = entries[appID], entry.surfaceIDs.contains(surfaceID) else { return nil }
-        if let model = entry.models[surfaceID] { return model }
-        guard let runtime = entry.runtimeHandle as? PocketAppExecutionRuntime else { return nil }
-        let model = try PocketSurfaceHostModel(runtime: runtime, surfaceID: surfaceID)
-        entry.models[surfaceID] = model
-        return model
+        return try entry.makeModel(surfaceID: surfaceID)
     }
 
     func readback(appID: String) -> PocketAppRuntimeReadback? {
@@ -178,7 +194,7 @@ final class PocketSurfaceRegistry: ObservableObject {
         "\(generatedProviderID(appID: appID))/\(surfaceID)"
     }
 
-    fileprivate func activate(
+    func activate(
         _ readback: PocketAppRuntimeReadback,
         runtimeHandle: AnyObject,
         surfaceIDs: Set<String>
@@ -192,7 +208,7 @@ final class PocketSurfaceRegistry: ObservableObject {
         revision &+= 1
     }
 
-    fileprivate func deactivate(appID: String) {
+    func deactivate(appID: String) {
         guard let entry = entries.removeValue(forKey: appID) else { return }
         entry.invalidate()
         revision &+= 1

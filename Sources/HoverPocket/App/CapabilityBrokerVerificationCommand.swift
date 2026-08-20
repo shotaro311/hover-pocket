@@ -543,6 +543,49 @@ enum CapabilityBrokerVerificationCommand {
             userStateStore: userStateStore
         )
         let hostModel = try PocketSurfaceHostModel(runtime: runtime, surfaceID: "main")
+        let generatedSurfaceRegistry = PocketSurfaceRegistry()
+        let runtimeReadback = PocketAppRuntimeReadback(
+            appID: package.manifest.id,
+            version: package.manifest.version,
+            packageDigest: package.manifestDigest,
+            effectivePermissions: [
+                "calendar.events.read",
+                "sticky.read",
+                "sticky.write",
+                "timer.read",
+                "timer.write"
+            ]
+        )
+        generatedSurfaceRegistry.activate(
+            runtimeReadback,
+            runtimeHandle: runtime,
+            surfaceIDs: ["main"]
+        )
+        guard let firstSurfaceModel = try generatedSurfaceRegistry.model(
+            appID: package.manifest.id,
+            surfaceID: "main"
+        ), let reopenedSurfaceModel = try generatedSurfaceRegistry.model(
+            appID: package.manifest.id,
+            surfaceID: "main"
+        ) else {
+            throw BrokerVerificationFailure("pocket_app_surface_reopen_model")
+        }
+        try require(
+            firstSurfaceModel !== reopenedSurfaceModel,
+            "pocket_app_surface_reopen_refreshes_queries"
+        )
+        await firstSurfaceModel.load(now: now)
+        await reopenedSurfaceModel.load(now: now)
+        try require(
+            !firstSurfaceModel.stringValue(for: "$state.selectedEventRef").isEmpty
+                && !reopenedSurfaceModel.stringValue(for: "$state.selectedEventRef").isEmpty,
+            "pocket_app_surface_reopen_queries_loaded"
+        )
+        generatedSurfaceRegistry.deactivate(appID: package.manifest.id)
+        try require(
+            !firstSurfaceModel.activationAvailable && !reopenedSurfaceModel.activationAvailable,
+            "pocket_app_surface_reopen_models_revoked"
+        )
         try require(hostModel.integerValue(for: "$input.durationSeconds") == 1_500, "pocket_app_surface_default")
         await hostModel.load(now: now)
         try verifyPocketSurfaceLayoutMatrix(model: hostModel)
@@ -556,6 +599,14 @@ enum CapabilityBrokerVerificationCommand {
         try require(
             reloadedStateStore.snapshot()["selectedEventRef"] == .string(selectedEventRef),
             "pocket_app_surface_state_persistence"
+        )
+        let namespaceModel = try PocketSurfaceHostModel(runtime: runtime, surfaceID: "main")
+        namespaceModel.updateString("input-value", binding: "$input.selectedEventRef")
+        namespaceModel.updateString("state-value", binding: "$state.selectedEventRef")
+        try require(
+            namespaceModel.stringValue(for: "$input.selectedEventRef") == "input-value"
+                && namespaceModel.stringValue(for: "$state.selectedEventRef") == "state-value",
+            "pocket_app_input_state_namespaces_independent"
         )
         let typedStateStore = try PocketAppUserStateStore(
             packageID: "local.example.typed-state",

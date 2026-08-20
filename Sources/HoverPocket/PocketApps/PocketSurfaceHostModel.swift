@@ -210,9 +210,6 @@ final class PocketSurfaceHostModel: ObservableObject {
             } catch {
                 statusText = "保存状態を更新できませんでした。"
             }
-            if runtime.package.workflows.values.contains(where: { $0.inputs[name] != nil }) {
-                inputs[name] = value
-            }
         }
     }
 
