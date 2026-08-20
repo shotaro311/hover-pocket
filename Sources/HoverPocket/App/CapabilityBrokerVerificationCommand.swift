@@ -626,6 +626,11 @@ enum CapabilityBrokerVerificationCommand {
                 && PocketSurfaceHostModel.acceptsWorkflowInput(.bool(true), type: "boolean"),
             "pocket_app_surface_workflow_input_exact_type"
         )
+        try require(
+            !PocketSurfaceHostModel.acceptsPickerValue(.string("removed"), options: ["quiet", "active"])
+                && PocketSurfaceHostModel.acceptsPickerValue(.string("quiet"), options: ["quiet", "active"]),
+            "pocket_app_surface_picker_option_membership"
+        )
         let reloadedStateStore = try PocketAppUserStateStore(
             packageID: package.manifest.id,
             stateProperties: package.stateProperties,

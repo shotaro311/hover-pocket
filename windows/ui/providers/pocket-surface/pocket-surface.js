@@ -25,8 +25,9 @@ export function renderPocketSurfaceProvider(context) {
   let loadTask = Promise.resolve();
   let transitionHoldCount = 0;
   initializeState(surface.initialState, state);
-  initializeDefaults(surface.renderModel.root, inputs, state);
+  const defaultStateUpdates = initializeDefaults(surface.renderModel.root, inputs, state);
   draw();
+  for (const update of defaultStateUpdates) void persistBoundState(update.binding, update.value);
   void refresh();
 
   function refresh() {
@@ -322,14 +323,25 @@ function initializeState(initialState, state) {
 }
 
 function initializeDefaults(node, inputs, state) {
+  const updates = [];
+  const applyDefault = (binding, value) => {
+    setBinding(binding, value, inputs, state);
+    if (binding?.startsWith("$state.")) updates.push({ binding, value });
+  };
   if (node.type === "durationPicker" && valueFor(node.value, inputs, state) == null) {
-    setBinding(node.value, Number(node.default ?? node.min), inputs, state);
-  } else if (["textField", "picker"].includes(node.type) && valueFor(node.value, inputs, state) == null) {
-    setBinding(node.value, "", inputs, state);
+    applyDefault(node.value, Number(node.default ?? node.min));
+  } else if (node.type === "textField" && valueFor(node.value, inputs, state) == null) {
+    applyDefault(node.value, "");
+  } else if (node.type === "picker") {
+    const values = (node.options ?? []).map((option) => option.value);
+    if (!values.includes(valueFor(node.value, inputs, state)) && values.length > 0) {
+      applyDefault(node.value, values[0]);
+    }
   } else if (node.type === "toggle" && valueFor(node.value, inputs, state) == null) {
-    setBinding(node.value, false, inputs, state);
+    applyDefault(node.value, false);
   }
-  for (const child of node.children ?? []) initializeDefaults(child, inputs, state);
+  for (const child of node.children ?? []) updates.push(...initializeDefaults(child, inputs, state));
+  return updates;
 }
 
 function initializeQuerySelections(node, inputs, state, queryResults) {
@@ -533,7 +545,7 @@ export async function runPocketSurfaceUiVerify() {
     initialState: {
       note: "Before",
       enabled: false,
-      mode: "quiet",
+      mode: "removed",
       focusSeconds: 600,
     },
     workflowInputs: {
@@ -575,6 +587,7 @@ export async function runPocketSurfaceUiVerify() {
   let stateWorkflowInputForwarded = false;
   let inputlessWorkflowInvoked = false;
   let stateBoundControlsPersisted = false;
+  let pickerNormalizationPersisted = false;
   let failedStateWriteRetried = false;
   let stateTransitionBoundary = false;
   let layoutMatrix = true;
@@ -606,6 +619,7 @@ export async function runPocketSurfaceUiVerify() {
               noteWriteAttempts += 1;
               if (noteWriteAttempts === 1) throw new Error("fixture_state_write_failed");
             }
+            pickerNormalizationPersisted ||= params?.key === "mode" && params?.value === "quiet";
             persistedState.set(params?.key, params?.value);
             return { saved: true };
           }
@@ -701,6 +715,7 @@ export async function runPocketSurfaceUiVerify() {
       await nextLayout();
       stateBoundControlsPersisted ||= flushed !== false
         && disposalSaved !== false
+        && pickerNormalizationPersisted
         && persistedState.get("note") === "After"
         && persistedState.get("enabled") === true
         && persistedState.get("mode") === "active"

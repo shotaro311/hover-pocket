@@ -132,7 +132,9 @@ final class PocketSurfaceHostModel: ObservableObject {
               let workflow = runtime.package.workflows[workflowID] else { return false }
         return workflow.inputs.allSatisfy { name, type in
             guard let value = inputs[name] ?? state[name] else { return false }
+            let binding = inputs[name] == nil ? "$state.\(name)" : "$input.\(name)"
             return Self.acceptsWorkflowInput(value, type: type)
+                && surfaceAccepts(value, for: binding, in: surface.root)
         }
     }
 
@@ -235,9 +237,15 @@ final class PocketSurfaceHostModel: ObservableObject {
                let value = node.integerProperty("default") {
                 set(.integer(value), for: binding)
             }
-        case "textField", "picker":
+        case "textField":
             if let binding = node.stringProperty("value"), isMissingValue(for: binding) {
                 set(.string(""), for: binding)
+            }
+        case "picker":
+            if let binding = node.stringProperty("value"),
+               let firstOption = pickerOptions(in: node).first,
+               !pickerOptions(in: node).contains(stringValue(for: binding)) {
+                set(.string(firstOption), for: binding)
             }
         case "toggle":
             if let binding = node.stringProperty("value"), isMissingValue(for: binding) {
@@ -266,6 +274,31 @@ final class PocketSurfaceHostModel: ObservableObject {
         default:
             return false
         }
+    }
+
+    private func surfaceAccepts(
+        _ value: CapabilityValue,
+        for binding: String,
+        in node: PocketSurfaceRenderNode
+    ) -> Bool {
+        if node.type == "picker", node.stringProperty("value") == binding {
+            return Self.acceptsPickerValue(value, options: pickerOptions(in: node))
+        }
+        return node.children.allSatisfy { surfaceAccepts(value, for: binding, in: $0) }
+    }
+
+    private func pickerOptions(in node: PocketSurfaceRenderNode) -> [String] {
+        guard case .array(let values)? = node.properties["options"] else { return [] }
+        return values.compactMap { value in
+            guard case .object(let option) = value,
+                  case .string(let optionValue)? = option["value"] else { return nil }
+            return optionValue
+        }
+    }
+
+    static func acceptsPickerValue(_ value: CapabilityValue, options: [String]) -> Bool {
+        guard case .string(let selected) = value else { return false }
+        return options.contains(selected)
     }
 
     private struct QueryBinding {
