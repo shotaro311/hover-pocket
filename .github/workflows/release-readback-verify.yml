@@ -52,6 +52,9 @@ jobs:
       - name: Run deterministic tests
         run: python -m unittest script/tests/test_verify_release_readback.py
 
+      - name: Verify macOS Gatekeeper readback script syntax
+        run: bash -n script/verify_published_macos.sh
+
   powershell-contract:
     name: Windows Authenticode verifier syntax
     runs-on: windows-2025
@@ -170,5 +173,34 @@ jobs:
         with:
           name: published-authenticode-readback
           path: authenticode-readback-report.json
+          if-no-files-found: error
+          retention-days: 30
+
+  macos-gatekeeper-readback:
+    name: Read back macOS signature, notarization, and Gatekeeper
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: [published-readback]
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download verified macOS asset snapshot
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: published-release-readback
+          path: published-release-readback
+
+      - name: Verify the downloaded public app
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: script/verify_published_macos.sh published-release-readback/release-readback-report.json
+
+      - name: Upload macOS Gatekeeper readback report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: published-macos-gatekeeper-readback
+          path: macos-gatekeeper-readback-report.json
           if-no-files-found: error
           retention-days: 30

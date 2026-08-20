@@ -656,6 +656,22 @@ def build_windows_asset_snapshot(
     }
 
 
+def build_macos_asset_snapshot(
+    release_tag: str,
+    download: DownloadedAsset,
+) -> dict[str, Any]:
+    return {
+        "releaseTag": release_tag,
+        "assets": [
+            {
+                "name": download.name,
+                "size": download.size,
+                "sha256": download.sha256,
+            }
+        ],
+    }
+
+
 def require_macos_downloads(
     verifier: Verifier,
     mac_feed_release: dict[str, Any],
@@ -744,7 +760,7 @@ def verify_downloaded_releases(
     windows_feed_data: bytes,
     windows_checksum_data: bytes,
     sparkle_public_key: str,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     with tempfile.TemporaryDirectory(prefix="hoverpocket-release-readback-") as directory:
         root = pathlib.Path(directory)
         mac_version_zip = reader.download_asset(
@@ -793,7 +809,10 @@ def verify_downloaded_releases(
         release_tag = windows_release.get("tag_name")
         if not isinstance(release_tag, str):
             raise VerificationError("windows.release_tag: missing tag")
-        return build_windows_asset_snapshot(release_tag, windows_downloads)
+        return (
+            build_macos_asset_snapshot(appcast.release_tag, mac_version_zip),
+            build_windows_asset_snapshot(release_tag, windows_downloads),
+        )
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -833,7 +852,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         args.windows_signing_gate,
     )
     github_latest_release = reader.latest_release()
-    windows_asset_snapshot = verify_downloaded_releases(
+    macos_asset_snapshot, windows_asset_snapshot = verify_downloaded_releases(
         verifier,
         reader,
         mac_feed_release,
@@ -862,6 +881,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "asset": appcast.asset_name,
             "signature": "sparkle-ed25519-verified",
             "assetReadback": "downloaded-and-hashed",
+            "assetSnapshot": macos_asset_snapshot,
         },
         "windows": {
             "releaseTag": windows_tag,

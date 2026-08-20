@@ -12,6 +12,7 @@ import xml.etree.ElementTree as ET
 SCRIPT = pathlib.Path(__file__).parents[1] / "verify_release_readback.py"
 WORKFLOW = pathlib.Path(__file__).parents[2] / ".github/workflows/release-readback-verify.yml"
 AUTHENTICODE_SCRIPT = pathlib.Path(__file__).parents[2] / "windows/script/verify_published_authenticode.ps1"
+MACOS_READBACK_SCRIPT = pathlib.Path(__file__).parents[1] / "verify_published_macos.sh"
 SPEC = importlib.util.spec_from_file_location("verify_release_readback", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -271,6 +272,23 @@ class ReleaseReadbackTests(unittest.TestCase):
             sorted(downloads),
         )
 
+        mac_snapshot = MODULE.build_macos_asset_snapshot(
+            "v1.2.3-456",
+            MODULE.DownloadedAsset(
+                name="HoverPocket-1.2.3-456.zip",
+                path=pathlib.Path("HoverPocket-1.2.3-456.zip"),
+                size=17,
+                sha256="a" * 64,
+                sha1="",
+            ),
+        )
+        self.assertEqual(mac_snapshot["releaseTag"], "v1.2.3-456")
+        self.assertEqual(mac_snapshot["assets"], [{
+            "name": "HoverPocket-1.2.3-456.zip",
+            "size": 17,
+            "sha256": "a" * 64,
+        }])
+
         downloads[package_name] = MODULE.DownloadedAsset(
             name=package_name,
             path=pathlib.Path(package_name),
@@ -362,8 +380,20 @@ class ReleaseReadbackTests(unittest.TestCase):
         self.assertIn("needs: [resolve-windows-release]", workflow)
         self.assertNotIn("WINDOWS_TAG: ${{ inputs.windows_tag }}", workflow)
         upload_artifact_sha = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
-        self.assertEqual(workflow.count(f"actions/upload-artifact@{upload_artifact_sha}"), 2)
+        self.assertEqual(workflow.count(f"actions/upload-artifact@{upload_artifact_sha}"), 3)
         self.assertIn("- name: Verify published release surfaces\n        shell: bash", workflow)
+
+    def test_macos_workflow_verifies_the_public_app_with_gatekeeper(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        script = MACOS_READBACK_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("macos-gatekeeper-readback:", workflow)
+        self.assertIn("runs-on: macos-15", workflow)
+        self.assertIn("needs: [published-readback]", workflow)
+        self.assertIn("published-release-readback/release-readback-report.json", workflow)
+        self.assertIn("codesign --verify --deep --strict", script)
+        self.assertIn("xcrun stapler validate", script)
+        self.assertIn("spctl --assess --type execute", script)
+        self.assertIn("macos-gatekeeper-readback-report.json", script)
 
     def test_formal_workflow_pins_one_verified_asset_snapshot(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
