@@ -2,7 +2,7 @@
 project_slug: hover-pocket
 phase: AN3-B2
 date: 2026-08-21
-status: local-verified; windows-ci-and-security-rescan-pending
+status: pr-ci-green; security-rescan-complete; production-policy-blocked
 branch: codex/ai-native-an3b2-voice-capability-broker
 pr: 22
 ---
@@ -60,11 +60,17 @@ pr: 22
 - Settings generation target: PASS。
 - Windows UI JavaScript syntaxと`git diff --check`: PASS。
 
+## PR CI / Security readback
+
+- source head `9705fe0`への主要修正Security scan `7e463a78-a2b0-4305-849e-f1418c495949`は15 / 15 review itemを完了し、reportable finding 0件でsealed completeとなった。
+- 初回Windows CIはWPFの`Color` / `Brushes`型名衝突だけで失敗した。権限・承認・実行ロジックを変えず`WpfMedia`型へ明示したcommit `057d090`をpushした。
+- compile-only差分 `9705fe0...057d090`のSecurity scan `ef74ba38-38cd-4df9-8fc7-a813566d1dac`は1 / 1 review itemを完了し、reportable finding 0件でsealed completeとなった。
+- final source head `057d090`でWindows [32404277682](https://github.com/shotaro311/hover-pocket/actions/runs/32404277682)、macOS [32404277834](https://github.com/shotaro311/hover-pocket/actions/runs/32404277834)、3OS contract / compare [32404277647](https://github.com/shotaro311/hover-pocket/actions/runs/32404277647)、PR Router [32404274868](https://github.com/shotaro311/hover-pocket/actions/runs/32404274868)がすべて成功した。
+- PR #22はDraft、`MERGEABLE / CLEAN`、remote head一致、未解決review thread 0件である。
+- 本番解禁前の防御強化として、Codexへ返すCalendar `eventRef`の削除 / 仮名化またはnative consentへの明記と、Voice enable / Calendar grant設定transitionのHost側直列化を残す。現headはpositive Broker-only tool policy gateでapp-server開始前に停止するため、現在のproduction sinkには到達しない。
+
 ## 残りの受け入れゲート
 
-- Windows Release compile warnings 0 / errors 0。
-- Windows Voice verifierでCalendar grant、Timer single-flight / rate limit / cancellation、停止後reply 0件を確認する。
-- Settings、rendered WebView、Capability、Broker、既存Provider回帰を同じheadで通す。
-- 修正後exact diffをSecurity scanし、3 findingが再現しないことを確認する。
-- PR #22の新規Codex review、未解決thread、mergeability、remote head、CIをreadbackする。
+- 新規Codex reviewが追加された場合は、内容を確認して同じreadback gateを再実行する。
+- 上記2件のpre-activation hardeningを、official positive Broker-only tool policy解禁commitより先に実装する。
 - 実Codex Voice E2Eは正のBroker-only tool policyが公式に提供・検証されるまで実行せず、Draftを維持する。
