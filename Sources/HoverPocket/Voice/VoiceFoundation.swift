@@ -92,13 +92,22 @@ struct VoiceTranscriptEvent: Identifiable, Equatable, Codable, Sendable {
     }
 
     let id: String
+    let rootSessionID: String
     let role: Role
     let text: String
     let isFinal: Bool
     let timestamp: Date
 
-    init(id: String, role: Role, text: String, isFinal: Bool, timestamp: Date) {
+    init(
+        id: String,
+        rootSessionID: String,
+        role: Role,
+        text: String,
+        isFinal: Bool,
+        timestamp: Date
+    ) {
         self.id = VoiceTextSafety.sanitizeIdentifier(id)
+        self.rootSessionID = VoiceTextSafety.sanitizeIdentifier(rootSessionID)
         self.role = role
         self.text = VoiceTextSafety.sanitizeVisibleText(text, limit: 1_024)
         self.isFinal = isFinal
@@ -224,7 +233,7 @@ struct VoiceTranscriptBuffer: Sendable {
     private(set) var events: [VoiceTranscriptEvent] = []
 
     mutating func append(_ event: VoiceTranscriptEvent) {
-        guard !event.id.isEmpty else { return }
+        guard !event.id.isEmpty, !event.rootSessionID.isEmpty else { return }
         events.append(event)
         if events.count > Self.maxEvents {
             events.removeFirst(events.count - Self.maxEvents)
@@ -543,6 +552,7 @@ final class VoiceLaneRuntime: ObservableObject {
 
     func appendTranscript(_ event: VoiceTranscriptEvent) {
         guard featureEnabled else { return }
+        guard let rootSessionID, event.rootSessionID == rootSessionID else { return }
         transcriptBuffer.append(event)
         publish()
     }

@@ -93,6 +93,7 @@ internal sealed class BlockedCodexVoiceCompatibilityProbe : ICodexVoiceCompatibi
 
 internal sealed record VoiceTranscriptEvent(
     string Id,
+    string RootSessionId,
     string Role,
     string Text,
     bool IsFinal,
@@ -248,10 +249,12 @@ internal sealed class VoiceTranscriptBuffer
         var sanitized = value with
         {
             Id = VoiceTextSafety.SanitizeIdentifier(value.Id),
+            RootSessionId = VoiceTextSafety.SanitizeIdentifier(value.RootSessionId),
             Role = role,
             Text = VoiceTextSafety.SanitizeVisibleText(value.Text, 1_024)
         };
-        if (string.IsNullOrEmpty(sanitized.Id))
+        if (string.IsNullOrEmpty(sanitized.Id)
+            || string.IsNullOrEmpty(sanitized.RootSessionId))
         {
             return;
         }
@@ -490,7 +493,13 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         }
         lock (_sync)
         {
-            _transcript.Append(value);
+            var eventRootSessionId = VoiceTextSafety.SanitizeIdentifier(value.RootSessionId);
+            if (string.IsNullOrEmpty(_rootSessionId)
+                || !string.Equals(_rootSessionId, eventRootSessionId, StringComparison.Ordinal))
+            {
+                return;
+            }
+            _transcript.Append(value with { RootSessionId = eventRootSessionId });
             PublishLocked();
         }
     }

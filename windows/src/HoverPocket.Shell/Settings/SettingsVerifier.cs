@@ -298,6 +298,7 @@ internal sealed class SettingsVerifier
         voiceCoordinator.SetRootSessionId("root-private");
         voiceCoordinator.AppendTranscript(new VoiceTranscriptEvent(
             "event-private",
+            "root-private",
             "user",
             "settings-must-not-see-transcript",
             true,

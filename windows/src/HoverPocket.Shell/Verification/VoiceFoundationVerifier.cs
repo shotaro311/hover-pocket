@@ -777,6 +777,7 @@ internal sealed class VoiceFoundationVerifier
         {
             coordinator.AppendTranscript(new VoiceTranscriptEvent(
                 $"event-{index}",
+                "root-a",
                 "user",
                 index == 89 ? @"C:\Users\test\private.txt" : new string('あ', 160),
                 true,
@@ -786,12 +787,14 @@ internal sealed class VoiceFoundationVerifier
         var validTranscriptCount = coordinator.Snapshot.Transcript.Count;
         coordinator.AppendTranscript(new VoiceTranscriptEvent(
             "invalid/event",
+            "root-a",
             "user",
             "must not render with a colliding identity",
             true,
             now.AddSeconds(99)));
         coordinator.AppendTranscript(new VoiceTranscriptEvent(
             "untrusted-role",
+            "root-a",
             "tool",
             "must not render as system",
             true,
@@ -844,6 +847,15 @@ internal sealed class VoiceFoundationVerifier
         {
             _failures.Add("root transition retained transcript or session data from the previous conversation");
         }
+        coordinator.AppendTranscript(new VoiceTranscriptEvent(
+            "delayed-root-a", "root-a", "assistant", "must not cross roots", true, now.AddSeconds(200)));
+        coordinator.AppendTranscript(new VoiceTranscriptEvent(
+            "current-root-b", "root-b", "assistant", "current root", true, now.AddSeconds(201)));
+        if (coordinator.Snapshot.Transcript.Count != 1
+            || coordinator.Snapshot.Transcript[0].Id != "current-root-b")
+        {
+            _failures.Add("delayed transcript crossed the active root session boundary");
+        }
 
         var absolutePaths = new[]
         {
@@ -885,7 +897,7 @@ internal sealed class VoiceFoundationVerifier
         coordinator.SetRootSessionId("root-a");
         coordinator.SetUiAttached(true);
         coordinator.AppendTranscript(new VoiceTranscriptEvent(
-            "event", "assistant", "memory-only", true, DateTimeOffset.UnixEpoch));
+            "event", "root-a", "assistant", "memory-only", true, DateTimeOffset.UnixEpoch));
         coordinator.UpsertSession(new AgentSessionSummary(
             "root-a", "root-a", null, "Root", AgentSessionStatus.Running, null, null, DateTimeOffset.UnixEpoch));
 

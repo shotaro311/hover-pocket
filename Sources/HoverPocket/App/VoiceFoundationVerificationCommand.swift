@@ -146,6 +146,7 @@ enum VoiceFoundationVerificationCommand {
         for index in 0..<90 {
             buffer.append(VoiceTranscriptEvent(
                 id: "event-\(index)",
+                rootSessionID: "root-a",
                 role: .user,
                 text: index == 89
                     ? "/Users/test/private.txt"
@@ -160,6 +161,7 @@ enum VoiceFoundationVerificationCommand {
         let validEventCount = buffer.events.count
         buffer.append(VoiceTranscriptEvent(
             id: "invalid/event",
+            rootSessionID: "root-a",
             role: .user,
             text: "must not render with a colliding identity",
             isFinal: true,
@@ -175,6 +177,7 @@ enum VoiceFoundationVerificationCommand {
 
         let combining = VoiceTranscriptEvent(
             id: "combining",
+            rootSessionID: "root-a",
             role: .assistant,
             text: "a" + String(repeating: "\u{0301}", count: 10_000),
             isFinal: true,
@@ -327,6 +330,7 @@ enum VoiceFoundationVerificationCommand {
         runtime.setRootSessionID("root-a")
         runtime.appendTranscript(VoiceTranscriptEvent(
             id: "event",
+            rootSessionID: "root-a",
             role: .assistant,
             text: "memory-only",
             isFinal: true,
@@ -377,6 +381,27 @@ enum VoiceFoundationVerificationCommand {
               runtime.snapshot.rootSessionID == "root-b"
         else {
             throw VoiceFoundationVerificationError.failed("root_transition_isolation")
+        }
+        runtime.appendTranscript(VoiceTranscriptEvent(
+            id: "delayed-root-a",
+            rootSessionID: "root-a",
+            role: .assistant,
+            text: "must not cross roots",
+            isFinal: true,
+            timestamp: Date(timeIntervalSince1970: 1)
+        ))
+        runtime.appendTranscript(VoiceTranscriptEvent(
+            id: "current-root-b",
+            rootSessionID: "root-b",
+            role: .assistant,
+            text: "current root",
+            isFinal: true,
+            timestamp: Date(timeIntervalSince1970: 2)
+        ))
+        guard runtime.snapshot.transcript.count == 1,
+              runtime.snapshot.transcript.first?.id == "current-root-b"
+        else {
+            throw VoiceFoundationVerificationError.failed("delayed_transcript_root_isolation")
         }
 
         let stopCountBeforeCrash = adapter.stopCount
