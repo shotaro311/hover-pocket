@@ -461,7 +461,8 @@ internal sealed class CapabilityBrokerVerifier
             userStateStore);
         var hostController = new PocketAppHostController(
             runtime,
-            () => new UserSettings { AiNativeEnabled = true });
+            () => new UserSettings { AiNativeEnabled = true },
+            () => now);
         var surfaceState = JsonSerializer.SerializeToElement(hostController.BuildSurfaceState());
         Require(
             surfaceState.GetProperty("workflowInputs")
@@ -595,7 +596,20 @@ internal sealed class CapabilityBrokerVerifier
         try
         {
             Directory.Move(isolatedDirectory, isolatedBackup);
-            Directory.Move(isolatedBackup, isolatedDirectory);
+            Directory.CreateDirectory(isolatedDirectory);
+            try
+            {
+                isolatedStateStore.SetString("label", "must-not-write");
+            }
+            catch (PocketAppUserStateStoreException)
+            {
+                directorySwapBlocked = true;
+            }
+            finally
+            {
+                Directory.Delete(isolatedDirectory, recursive: true);
+                Directory.Move(isolatedBackup, isolatedDirectory);
+            }
         }
         catch (IOException)
         {
@@ -702,7 +716,7 @@ internal sealed class CapabilityBrokerVerifier
         try
         {
             _ = await runtime.QueryAsync(
-                "timer.start@1",
+                "timer.countdown.start@1",
                 CapabilityJson.From(new
                 {
                     durationSeconds = 60,

@@ -10,16 +10,19 @@ internal sealed class PocketAppHostController : IDisposable
 {
     private readonly PocketAppExecutionRuntime _runtime;
     private readonly Func<UserSettings> _settings;
+    private readonly Func<DateTimeOffset> _now;
     private readonly object _eventRefSync = new();
     private readonly HashSet<string> _allowedEventRefs = new(StringComparer.Ordinal);
     private bool _disposed;
 
     public PocketAppHostController(
         PocketAppExecutionRuntime runtime,
-        Func<UserSettings> settings)
+        Func<UserSettings> settings,
+        Func<DateTimeOffset>? now = null)
     {
         _runtime = runtime;
         _settings = settings;
+        _now = now ?? (() => DateTimeOffset.Now);
     }
 
     internal bool IsActivationActive => _runtime.IsActivationActive;
@@ -109,7 +112,7 @@ internal sealed class PocketAppHostController : IDisposable
             var output = await _runtime.QueryAsync(
                 query.Reference,
                 query.Arguments,
-                DateTimeOffset.Now,
+                _now(),
                 cancellationToken);
             queryResults.Add(new
             {
@@ -169,7 +172,7 @@ internal sealed class PocketAppHostController : IDisposable
             inputs["purpose"] = CapabilityJson.From(TodayFocusApprovalText.Sanitize(purpose.GetString() ?? string.Empty));
         }
 
-        var draft = _runtime.Prepare(workflowId, inputs, DateTimeOffset.Now);
+        var draft = _runtime.Prepare(workflowId, inputs, _now());
         if (draft.Preparation.ApprovalRequest is null)
         {
             throw new CapabilityBrokerException("CAPABILITY_APPROVAL_REQUIRED", draft.Plan.Id);
@@ -191,7 +194,7 @@ internal sealed class PocketAppHostController : IDisposable
 
         var receipt = await _runtime.ApproveAndExecuteAsync(
             draft,
-            DateTimeOffset.Now,
+            _now(),
             cancellationToken);
         var readbackVerified = receipt.Steps.All(step => step.Readback.Status == CapabilityReadbackStatus.Verified);
         return new
