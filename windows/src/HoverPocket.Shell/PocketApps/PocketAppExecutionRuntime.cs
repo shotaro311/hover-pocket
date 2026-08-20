@@ -304,7 +304,7 @@ internal sealed class PocketAppExecutionRuntime : IDisposable
         }
         if (value == "$context.timezone")
         {
-            return _timeZone.Id;
+            return ContractTimeZoneId(_timeZone);
         }
         if (value == "$context.todayFocusStableKey")
         {
@@ -315,6 +315,19 @@ internal sealed class PocketAppExecutionRuntime : IDisposable
             throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "pocket_context");
         }
         return value;
+    }
+
+    internal static string ContractTimeZoneId(TimeZoneInfo timeZone)
+    {
+        if (timeZone.HasIanaId)
+        {
+            return timeZone.Id;
+        }
+        if (TimeZoneInfo.TryConvertWindowsIdToIanaId(timeZone.Id, out var ianaId))
+        {
+            return ianaId;
+        }
+        throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "timezone");
     }
 
     private static void ValidateScope(JsonElement arguments, PocketAppRequestedCapability request)

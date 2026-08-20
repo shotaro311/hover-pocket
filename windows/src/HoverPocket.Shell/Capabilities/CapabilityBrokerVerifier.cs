@@ -440,11 +440,10 @@ internal sealed class CapabilityBrokerVerifier
             AppContext.BaseDirectory,
             "PocketApps",
             "local.example.today-focus"));
-        var timeZone = TimeZoneInfo.CreateCustomTimeZone(
-            $"JST-pocket-{Guid.NewGuid():N}",
-            TimeSpan.FromHours(9),
-            "JST",
-            "JST");
+        var timeZone = TimeZoneInfo.FindSystemTimeZoneById("Tokyo Standard Time");
+        Require(
+            PocketAppExecutionRuntime.ContractTimeZoneId(timeZone) == "Asia/Tokyo",
+            "pocket_app_windows_timezone_contract");
         var stateRoot = Path.Combine(root, "pocket-app-user-state");
         using var userStateStore = new PocketAppUserStateStore(
             package.Manifest.Id,
