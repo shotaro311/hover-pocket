@@ -34,8 +34,9 @@ export function renderPocketSurfaceProvider(context) {
         surfaceId: surface.surfaceId,
       });
       if (disposed) return;
+      queryResults.clear();
       for (const result of payload.queryResults ?? []) {
-        queryResults.set(result.query, result.output);
+        queryResults.set(queryBindingKey(result.query, result.arguments), result.output);
       }
       const stateUpdates = initializeQuerySelections(surface.renderModel.root, inputs, state, queryResults);
       draw();
@@ -277,7 +278,7 @@ function initializeDefaults(node, inputs, state) {
 function initializeQuerySelections(node, inputs, state, queryResults) {
   const updates = [];
   if (node.type === "calendarEventPicker") {
-    const events = queryResults.get(node.items?.query)?.events ?? [];
+    const events = queryResults.get(queryBindingKey(node.items?.query, node.items?.arguments))?.events ?? [];
     const persisted = stringValue(valueFor(node.selection, inputs, state));
     const selected = events.find((event) => event.eventRef === persisted) ?? events[0];
     if (selected) {
@@ -298,7 +299,8 @@ function calendarPickerNode(node, inputs, state, queryResults, onChange, persist
   const label = document.createElement("span");
   label.textContent = "集中する予定";
   const select = document.createElement("select");
-  const events = queryResults.get(node.items?.query)?.events ?? [];
+  select.dataset.binding = node.selection ?? "";
+  const events = queryResults.get(queryBindingKey(node.items?.query, node.items?.arguments))?.events ?? [];
   if (!events.length) {
     const option = document.createElement("option");
     option.textContent = "今日の予定はありません";
@@ -402,6 +404,18 @@ function bindingName(binding) {
   return String(binding ?? "").split(".").slice(1).join(".");
 }
 
+function queryBindingKey(query, argumentsValue) {
+  return `${String(query ?? "")}\n${JSON.stringify(canonicalJson(argumentsValue ?? {}))}`;
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalJson(value[key])]));
+  }
+  return value;
+}
+
 function stringValue(value) {
   return typeof value === "string" ? value : "";
 }
@@ -468,7 +482,8 @@ export async function runPocketSurfaceUiVerify() {
       root: {
         type: "stack", axis: "vertical", spacing: 12, children: [
           { type: "text", style: "title", value: "Today Focus" },
-          { type: "calendarEventPicker", items: { query: "calendar.events.list@1", arguments: {} }, selection: "$state.selectedEventRef", titleTarget: "$input.purpose" },
+          { type: "calendarEventPicker", items: { query: "calendar.events.list@1", arguments: { timeZone: "UTC" } }, selection: "$state.selectedEventRef", titleTarget: "$input.purpose" },
+          { type: "calendarEventPicker", items: { query: "calendar.events.list@1", arguments: { timeZone: "Asia/Tokyo" } }, selection: "$state.secondaryEventRef" },
           { type: "durationPicker", value: "$input.durationSeconds", min: 60, max: 14400, default: 1500 },
           { type: "textField", label: "Purpose", value: "$input.purpose", maxLength: 80 },
           { type: "textField", label: "Note", value: "$state.note", maxLength: 80 },
@@ -513,7 +528,10 @@ export async function runPocketSurfaceUiVerify() {
         state: { pocketSurface: model },
         request: async (method, params) => {
           if (method === "pocketApp.load") {
-            return { queryResults: [{ query: "calendar.events.list@1", output: { events: [{ eventRef: "event:1", safeTitle: "Focus", start: "2026-08-15T01:00:00Z", end: "2026-08-15T02:00:00Z" }] } }] };
+            return { queryResults: [
+              { query: "calendar.events.list@1", arguments: { timeZone: "UTC" }, output: { events: [{ eventRef: "event:utc", safeTitle: "Focus", start: "2026-08-15T01:00:00Z", end: "2026-08-15T02:00:00Z" }] } },
+              { query: "calendar.events.list@1", arguments: { timeZone: "Asia/Tokyo" }, output: { events: [{ eventRef: "event:jst", safeTitle: "Secondary", start: "2026-08-15T03:00:00Z", end: "2026-08-15T04:00:00Z" }] } },
+            ] };
           }
           if (method === "pocketApp.updateState") {
             persistedState.set(params?.key, params?.value);
@@ -523,7 +541,7 @@ export async function runPocketSurfaceUiVerify() {
             inputlessWorkflowInvoked ||= params?.workflowId === "runLiteral"
               && Object.keys(params?.inputs ?? {}).length === 0;
             stateWorkflowInputForwarded ||= params?.workflowId === "startFocus"
-              && params?.inputs?.selectedEventRef === "event:1"
+              && params?.inputs?.selectedEventRef === "event:utc"
               && params?.inputs?.purpose === "Focus"
               && params?.inputs?.durationSeconds === 1500
               && Object.keys(params.inputs).sort().join(",") === "durationSeconds,purpose,selectedEventRef";
@@ -568,10 +586,12 @@ export async function runPocketSurfaceUiVerify() {
       );
       baseline ??= {
         rendered: Boolean(host.querySelector(".hp-pocket-surface .hp-pocket-text.is-title")),
-        selection: host.querySelector("select")?.value === "event:1",
+        selection: host.querySelector('select[data-binding="$state.selectedEventRef"]')?.value === "event:utc"
+          && host.querySelector('select[data-binding="$state.secondaryEventRef"]')?.value === "event:jst",
         duration: host.querySelector(".hp-pocket-duration input")?.value === "1500",
         purpose: host.querySelector(".hp-pocket-field input")?.value === "Focus",
-        statePersisted: persistedState.get("selectedEventRef") === "event:1",
+        statePersisted: persistedState.get("selectedEventRef") === "event:utc"
+          && persistedState.get("secondaryEventRef") === "event:jst",
         approvalHostOwned: !host.querySelector("[data-approval], .hp-pocket-approval"),
       };
       provider?.dispose?.();

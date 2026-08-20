@@ -13,7 +13,7 @@ final class PocketSurfaceHostModel: ObservableObject {
 
     @Published private(set) var inputs: [String: CapabilityValue] = [:]
     @Published private(set) var state: [String: CapabilityValue] = [:]
-    @Published private(set) var choicesByQuery: [String: [PocketSurfaceChoice]] = [:]
+    @Published private(set) var choicesByQueryBinding: [String: [PocketSurfaceChoice]] = [:]
     @Published private(set) var isLoading = false
     @Published private(set) var isExecuting = false
     @Published private(set) var statusText: String?
@@ -55,7 +55,7 @@ final class PocketSurfaceHostModel: ObservableObject {
                     now: now
                 )
                 let choices = Self.makeChoices(output)
-                choicesByQuery[query.reference] = choices
+                choicesByQueryBinding[query.identity] = choices
                 let persistedID = stringValue(for: query.selection)
                 if let selected = choices.first(where: { $0.id == persistedID }) ?? choices.first {
                     set(.string(selected.id), for: query.selection)
@@ -101,8 +101,19 @@ final class PocketSurfaceHostModel: ObservableObject {
         set(.bool(value), for: binding)
     }
 
-    func selectChoice(_ id: String, query: String, selection: String, titleTarget: String?) {
-        guard let choice = choicesByQuery[query]?.first(where: { $0.id == id }) else { return }
+    func choices(query: String, arguments: [String: PocketJSONValue]) -> [PocketSurfaceChoice] {
+        choicesByQueryBinding[Self.queryIdentity(reference: query, arguments: arguments)] ?? []
+    }
+
+    func selectChoice(
+        _ id: String,
+        query: String,
+        arguments: [String: PocketJSONValue],
+        selection: String,
+        titleTarget: String?
+    ) {
+        let identity = Self.queryIdentity(reference: query, arguments: arguments)
+        guard let choice = choicesByQueryBinding[identity]?.first(where: { $0.id == id }) else { return }
         set(.string(id), for: selection)
         guard let titleTarget else { return }
         set(.string(Self.sanitizeVisibleText(choice.title)), for: titleTarget)
@@ -183,7 +194,7 @@ final class PocketSurfaceHostModel: ObservableObject {
         isLoading = false
         inputs.removeAll()
         state.removeAll()
-        choicesByQuery.removeAll()
+        choicesByQueryBinding.removeAll()
         receiptText = nil
         statusText = "このPocket Appは現在利用できません。"
     }
@@ -239,6 +250,21 @@ final class PocketSurfaceHostModel: ObservableObject {
         let arguments: [String: PocketJSONValue]
         let selection: String
         let titleTarget: String?
+
+        var identity: String {
+            PocketSurfaceHostModel.queryIdentity(reference: reference, arguments: arguments)
+        }
+    }
+
+    nonisolated static func queryIdentity(
+        reference: String,
+        arguments: [String: PocketJSONValue]
+    ) -> String {
+        let canonicalArguments = (try? JSONSerialization.data(
+            withJSONObject: arguments.mapValues(\.foundationValue),
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )) ?? Data("{}".utf8)
+        return reference + "\n" + canonicalArguments.base64EncodedString()
     }
 
     private func queryBindings(in node: PocketSurfaceRenderNode) -> [QueryBinding] {

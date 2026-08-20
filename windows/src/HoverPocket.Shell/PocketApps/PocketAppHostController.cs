@@ -114,6 +114,7 @@ internal sealed class PocketAppHostController : IDisposable
             queryResults.Add(new
             {
                 query = query.Reference,
+                arguments = query.Arguments,
                 output = SafeQueryOutput(output, allowedEventRefs)
             });
         }

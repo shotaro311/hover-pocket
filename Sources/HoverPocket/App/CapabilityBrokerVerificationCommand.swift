@@ -588,6 +588,26 @@ enum CapabilityBrokerVerificationCommand {
         )
         try require(hostModel.integerValue(for: "$input.durationSeconds") == 1_500, "pocket_app_surface_default")
         await hostModel.load(now: now)
+        try require(
+            !hostModel.choices(
+                query: "calendar.events.list@1",
+                arguments: [
+                    "range": .string("today"),
+                    "timezone": .string("$context.timezone")
+                ]
+            ).isEmpty,
+            "pocket_app_query_binding_choices"
+        )
+        try require(
+            PocketSurfaceHostModel.queryIdentity(
+                reference: "calendar.events.list@1",
+                arguments: ["timeZone": .string("UTC")]
+            ) != PocketSurfaceHostModel.queryIdentity(
+                reference: "calendar.events.list@1",
+                arguments: ["timeZone": .string("Asia/Tokyo")]
+            ),
+            "pocket_app_query_binding_arguments_isolated"
+        )
         try verifyPocketSurfaceLayoutMatrix(model: hostModel)
         let selectedEventRef = hostModel.stringValue(for: "$state.selectedEventRef")
         try require(!selectedEventRef.isEmpty, "pocket_app_surface_selection")

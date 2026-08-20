@@ -492,6 +492,12 @@ internal sealed class CapabilityBrokerVerifier
         using (var loadDocument = JsonDocument.Parse(loadResponse!))
         {
             Require(loadDocument.RootElement.GetProperty("error").ValueKind == JsonValueKind.Null, "pocket_app_host_load");
+            var firstQuery = loadDocument.RootElement.GetProperty("result")
+                .GetProperty("queryResults")[0];
+            Require(
+                firstQuery.GetProperty("query").GetString() == "calendar.events.list@1"
+                    && firstQuery.GetProperty("arguments").ValueKind == JsonValueKind.Object,
+                "pocket_app_host_query_binding_identity");
         }
         var updateResponse = await dispatcher.ProcessRawMessageAsync(
             JsonSerializer.Serialize(new
