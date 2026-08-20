@@ -10,7 +10,8 @@ status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; a
 - PR [#20](https://github.com/shotaro311/hover-pocket/pull/20)のCodex review 2件をGmailとGitHubの両方で照合した。指摘どおり、formal Windows gateはSetup / PortableだけでVelopack full update package内アプリを検証しておらず、macOS readbackはversioned release側の手動install ZIPを実downloadしていなかった。
 - Windows formal gateはfeedが指定する唯一のfull `.nupkg`を再取得し、checksum / feed size / SHA-1 / SHA-256を照合してから安全に展開する。Setup、Portable内アプリ、full package内アプリの3点すべてでtimestamped Authenticodeを確認し、署名者一致を必須にした。
 - macOSはversioned Sparkle ZIP、`macos-latest`手動ZIP、versioned release手動ZIPの3コピーを別々に再取得し、GitHub metadataと相互のsize / SHA-256一致を確認する。versioned手動ZIPの改変を拒否するunit testを追加した。
-- unit 11件、Python compile、workflow YAML parse、`git diff --check`が成功した。公開beta readbackも再実行し、macOS `v0.1.0-168`の3コピーとSparkle署名、Windows `win-v0.2.7`の全asset / feed / checksumが一致した。ローカルMacにPowerShellがないため、formal scriptのparseとWindows側確認はPR CIを最終gateとする。詳細: `progress/2026-08/2026-08-21_hover-pocket-ai-native-an8-review-followup.md`。
+- 追加reviewで、`auto`がWindows prereleaseを選び得る点と、Windows releaseがGitHub汎用Latestを置換しても検出できない点を確認した。両言語の自動選択からdraft / prereleaseを除外し、汎用Latestはrelease選択に使わずmacOS versioned releaseのままであることだけを検査する。
+- unit 12件、Python compile、workflow YAML parse、`git diff --check`が成功した。公開beta readbackも再実行し、macOS `v0.1.0-168`の3コピーとSparkle署名、Windows `win-v0.2.7`の全asset / feed / checksum、汎用Latest=`v0.1.0-168`が一致した。ローカルMacにPowerShellがないため、formal scriptのparseとWindows側確認はPR CIを最終gateとする。詳細: `progress/2026-08/2026-08-21_hover-pocket-ai-native-an8-review-followup.md`。
 
 ## 2026-08-20 AI-native AN8-A Public Release Readback
 

@@ -14,6 +14,8 @@ updated_by: codex
 - Codex review:
   - P1: Velopack full update package内アプリのAuthenticodeを検証する。
   - P2: versioned release側の`HoverPocket-macOS-app.zip`も実際にdownloadしてhashを照合する。
+  - P2: `auto`のWindows release発見からdraft / prereleaseを除外する。
+  - P2: Windows公開後もGitHub汎用LatestがmacOS versioned releaseのままであることを確認する。
 
 ## 修正
 
@@ -25,14 +27,15 @@ updated_by: codex
 - `script/verify_release_readback.py`
   - versioned Sparkle ZIP、stable手動ZIP、versioned手動ZIPを別directoryへ取得する。
   - 3コピーのsize / SHA-256とGitHub metadata、checksum、appcast lengthを照合する。
+  - Windowsの自動発見はdraft / prereleaseを除外する。GitHub汎用Latestは選択に使わず、appcastが示すmacOS versioned releaseと一致することの確認にだけ使う。
 - `script/tests/test_verify_release_readback.py`
-  - versioned手動ZIPの正常系とdigest不一致拒否を追加した。
+  - versioned手動ZIPの正常系とdigest不一致拒否、Windows prerelease除外、GitHub汎用Latest置換拒否を追加した。
 - workflow / README
   - formal gateがSetup、Portable、update packageの3署名を検査することを明記した。
 
 ## Readback
 
-- `python3 -m unittest script/tests/test_verify_release_readback.py`: 11件成功。
+- `python3 -m unittest script/tests/test_verify_release_readback.py`: 12件成功。
 - `python3 -m py_compile script/verify_release_readback.py script/tests/test_verify_release_readback.py`: 成功。
 - workflow YAML parse: 成功。
 - `git diff --check`: 成功。
@@ -40,6 +43,7 @@ updated_by: codex
   - macOS `v0.1.0-168`: versioned Sparkle ZIP、stable手動ZIP、versioned手動ZIPの実測size / SHA-256一致、Sparkle Ed25519署名成功。
   - Windows `win-v0.2.7`: 公開全assetのsize / SHA-256、checksum、full package SHA-1一致。
   - macOS / Windowsのrelease tag分離: 成功。
+  - GitHub汎用Latest=`v0.1.0-168`でappcastのmacOS versioned releaseと一致: 成功。
 - 未確認:
   - ローカルMacにはPowerShellがないため、PowerShell parseはPRのWindows CIで確認する。
   - 現行Windows `0.2.7`は未署名betaであり、3点の実Authenticode検証は正式署名済みreleaseでのみ完了できる。

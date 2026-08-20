@@ -98,7 +98,7 @@ Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pock
 Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml
 ```
 
-MacまたはCIからは、Windows releaseだけでなくmacOS appcastが変わっていないことも同時に機械検証できます。`auto`はGitHubの汎用Latestを使わず、公開済み`win-v...`タグの最大semantic versionを選びます。公開された全Windows assetを再取得し、実測hashをfeed、checksum、GitHub metadataと照合します。
+MacまたはCIからは、Windows releaseだけでなくmacOS appcastが変わっていないことも同時に機械検証できます。`auto`はdraft / prereleaseを除外した公開済み`win-v...`タグの最大semantic versionを選びます。公開された全Windows assetを再取得し、実測hashをfeed、checksum、GitHub metadataと照合します。GitHubの汎用Latestはrelease選択には使わず、期待するmacOS versioned releaseのままであることの確認にだけ使います。
 
 ```bash
 python3 script/verify_release_readback.py --windows-tag auto --windows-signing-gate beta

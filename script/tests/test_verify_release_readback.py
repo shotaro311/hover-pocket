@@ -261,14 +261,33 @@ class ReleaseReadbackTests(unittest.TestCase):
 
     def test_windows_release_discovery_uses_numeric_version_and_ignores_drafts(self):
         releases = [
-            {"tag_name": "v9.0.0", "draft": False},
-            {"tag_name": "win-v0.2.9", "draft": False},
-            {"tag_name": "win-v0.2.10", "draft": False},
-            {"tag_name": "win-v9.0.0", "draft": True},
+            {"tag_name": "v9.0.0", "draft": False, "prerelease": False},
+            {"tag_name": "win-v0.2.9", "draft": False, "prerelease": False},
+            {"tag_name": "win-v0.2.10", "draft": False, "prerelease": False},
+            {"tag_name": "win-v8.0.0", "draft": False, "prerelease": True},
+            {"tag_name": "win-v9.0.0", "draft": True, "prerelease": False},
         ]
         reader = MODULE.GitHubReader("shotaro311/hover-pocket")
         reader.bytes = lambda _url: json.dumps(releases).encode()
         self.assertEqual(reader.latest_windows_release()["tag_name"], "win-v0.2.10")
+
+    def test_github_latest_must_remain_the_macos_release(self):
+        verifier = MODULE.Verifier()
+        MODULE.validate_cross_platform_release_policy(
+            verifier,
+            "v1.2.3-456",
+            "win-v1.2.3",
+            {"tag_name": "v1.2.3-456", "draft": False, "prerelease": False},
+        )
+        self.assertIn("cross_platform.github_latest_is_macos", verifier.checks)
+
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.validate_cross_platform_release_policy(
+                MODULE.Verifier(),
+                "v1.2.3-456",
+                "win-v1.2.4",
+                {"tag_name": "win-v1.2.4", "draft": False, "prerelease": False},
+            )
 
 
 if __name__ == "__main__":

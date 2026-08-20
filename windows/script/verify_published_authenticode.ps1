@@ -29,7 +29,11 @@ function Resolve-WindowsRelease {
             throw "Windows release tag must match win-vMAJOR.MINOR.PATCH."
         }
         $encoded = [Uri]::EscapeDataString($RequestedTag)
-        return Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$Repository/releases/tags/$encoded"
+        $release = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$Repository/releases/tags/$encoded"
+        if ($release.draft -or $release.prerelease) {
+            throw "Windows release must be published and must not be a prerelease."
+        }
+        return $release
     }
 
     $releases = @()
@@ -40,7 +44,7 @@ function Resolve-WindowsRelease {
         if ($page -eq 10) { throw "Release history exceeds supported pagination." }
     }
     $candidates = @($releases | Where-Object {
-        -not $_.draft -and $_.tag_name -match '^win-v(\d+)\.(\d+)\.(\d+)$'
+        -not $_.draft -and -not $_.prerelease -and $_.tag_name -match '^win-v(\d+)\.(\d+)\.(\d+)$'
     } | ForEach-Object {
         [pscustomobject]@{
             Version = [version]($_.tag_name.Substring(5))

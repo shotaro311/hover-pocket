@@ -2,7 +2,9 @@
 """Verify HoverPocket's published macOS and Windows release surfaces.
 
 The verifier intentionally reads the two operating-system release channels
-independently. It never uses GitHub's generic ``latest`` endpoint.
+independently. GitHub's generic ``latest`` endpoint is read only to assert that
+Windows publication did not replace the macOS release; it is never used for
+release selection.
 """
 
 from __future__ import annotations
@@ -342,6 +344,11 @@ def validate_windows(
     tag = release.get("tag_name")
     if not isinstance(tag, str) or not tag.startswith("win-v"):
         raise VerificationError("windows.release_tag: expected win-v... tag")
+    verifier.require(
+        release.get("draft") is not True and release.get("prerelease") is not True,
+        "windows.published_release",
+        "Windows client channel excludes draft and prerelease releases",
+    )
     assets = asset_map(release)
     verifier.require(WINDOWS_REQUIRED_STATIC_ASSETS.issubset(assets), "windows.static_assets", "release metadata is incomplete")
     checksums = parse_sha256_sums(checksum_data)
@@ -452,6 +459,9 @@ class GitHubReader:
         encoded_tag = urllib.parse.quote(tag, safe="")
         return self.json(f"https://api.github.com/repos/{self.repository}/releases/tags/{encoded_tag}")
 
+    def latest_release(self) -> dict[str, Any]:
+        return self.json(f"https://api.github.com/repos/{self.repository}/releases/latest")
+
     def latest_windows_release(self) -> dict[str, Any]:
         candidates: list[tuple[tuple[int, int, int], dict[str, Any]]] = []
         for page in range(1, 11):
@@ -463,7 +473,11 @@ class GitHubReader:
             if not isinstance(value, list):
                 raise VerificationError("windows.release_discovery: expected an array")
             for item in value:
-                if not isinstance(item, dict) or item.get("draft") is True:
+                if (
+                    not isinstance(item, dict)
+                    or item.get("draft") is True
+                    or item.get("prerelease") is True
+                ):
                     continue
                 tag = item.get("tag_name")
                 match = WINDOWS_TAG_RE.fullmatch(tag) if isinstance(tag, str) else None
@@ -648,6 +662,30 @@ def require_macos_downloads(
     )
 
 
+def validate_cross_platform_release_policy(
+    verifier: Verifier,
+    macos_release_tag: str,
+    windows_release_tag: str,
+    github_latest_release: dict[str, Any],
+) -> None:
+    verifier.require(
+        macos_release_tag != windows_release_tag,
+        "cross_platform.release_tags_separate",
+        "macOS and Windows release tags must be separate",
+    )
+    verifier.require(
+        github_latest_release.get("draft") is not True
+        and github_latest_release.get("prerelease") is not True,
+        "cross_platform.github_latest_published",
+        "GitHub Latest must be a published non-prerelease",
+    )
+    verifier.require(
+        github_latest_release.get("tag_name") == macos_release_tag,
+        "cross_platform.github_latest_is_macos",
+        "Windows release replaced the expected macOS GitHub Latest release",
+    )
+
+
 def verify_downloaded_releases(
     verifier: Verifier,
     reader: GitHubReader,
@@ -747,6 +785,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         windows_checksums,
         args.windows_signing_gate,
     )
+    github_latest_release = reader.latest_release()
     verify_downloaded_releases(
         verifier,
         reader,
@@ -759,10 +798,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         windows_checksums,
         args.sparkle_public_key,
     )
-    verifier.require(
-        appcast.release_tag != windows_tag,
-        "cross_platform.release_tags_separate",
-        "macOS and Windows release tags must be separate",
+    validate_cross_platform_release_policy(
+        verifier,
+        appcast.release_tag,
+        windows_tag,
+        github_latest_release,
     )
     return {
         "status": "passed",
