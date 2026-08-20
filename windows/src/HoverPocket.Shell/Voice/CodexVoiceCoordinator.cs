@@ -607,12 +607,29 @@ internal sealed class CodexVoiceCoordinator : IDisposable
                 initializeDocument.RootElement.Clone(),
                 cancellationToken);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             if (candidate is not null)
             {
                 await DisposeDetachedClientAsync(candidate);
             }
+            if (cancellationToken.IsCancellationRequested
+                || !_featureEnabled
+                || generation != Volatile.Read(ref _generation))
+            {
+                return;
+            }
+            UpdateSnapshot(snapshot => snapshot with
+            {
+                Availability = CodexVoiceAvailability.Unavailable,
+                SessionStatus = CodexVoiceSessionStatus.RecoverableFailure,
+                Activity = VoiceActivity.Reconnecting,
+                Muted = true,
+                TransportAttached = false,
+                AppServerProcessId = null,
+                LastErrorCode = "voice_transport_start_failed"
+            });
+            ScheduleRestart();
             return;
         }
         catch (Exception exception) when (exception is CodexAppServerProtocolException
@@ -671,17 +688,42 @@ internal sealed class CodexVoiceCoordinator : IDisposable
 
     private void OnServerRequestReceived(object? sender, CodexAppServerRequest request)
     {
-        Interlocked.Increment(ref _generation);
-        if (sender is CodexAppServerClient client)
+        if (sender is not CodexAppServerClient client)
         {
-            _ = client.ReplyFailClosedAsync(
-                request.Id,
-                "unexpected_server_request",
-                CancellationToken.None);
+            return;
         }
-        FailClosed(
-            CodexVoiceAvailability.CapabilityBlocked,
-            "unexpected_server_request");
+
+        _ = client.ReplyFailClosedAsync(
+            request.Id,
+            "unexpected_server_request",
+            CancellationToken.None);
+        var clientGeneration = ClientGeneration(client);
+        if (clientGeneration is null
+            || !_featureEnabled
+            || _disposed
+            || Interlocked.CompareExchange(
+                ref _generation,
+                clientGeneration.Value + 1,
+                clientGeneration.Value) != clientGeneration.Value)
+        {
+            DetachClientIfCurrent(client);
+            _ = DisposeDetachedClientAsync(client);
+            return;
+        }
+
+        CancelRestart();
+        DetachClientIfCurrent(client);
+        _ = DisposeDetachedClientAsync(client);
+        UpdateSnapshot(snapshot => snapshot with
+        {
+            Availability = CodexVoiceAvailability.CapabilityBlocked,
+            SessionStatus = CodexVoiceSessionStatus.BlockedFailure,
+            Activity = VoiceActivity.Failed,
+            Muted = true,
+            TransportAttached = false,
+            AppServerProcessId = null,
+            LastErrorCode = "unexpected_server_request"
+        });
     }
 
     private void OnClientDisconnected(object? sender, EventArgs e)

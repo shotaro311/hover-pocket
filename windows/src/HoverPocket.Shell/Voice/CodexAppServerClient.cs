@@ -23,7 +23,8 @@ internal sealed class CodexAppServerProtocolException : Exception
 internal sealed class CodexAppServerClient : IAsyncDisposable
 {
     private const int MaxPendingRequests = 64;
-    internal const int MaxLineCharacters = 1_048_576;
+    internal const int MaxLineBytes = 1_048_576;
+    internal const int MaxLineCharacters = MaxLineBytes;
 
     private readonly TextReader _reader;
     private readonly TextWriter _writer;
@@ -248,7 +249,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
 
     private async Task WriteLineAsync(string value, CancellationToken cancellationToken)
     {
-        if (value.Length > MaxLineCharacters)
+        if (Encoding.UTF8.GetByteCount(value) > MaxLineBytes)
         {
             throw new CodexAppServerProtocolException("request_too_large");
         }
@@ -349,6 +350,8 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
     private async Task<string?> ReadBoundedLineAsync(CancellationToken cancellationToken)
     {
         var line = new StringBuilder(capacity: 4_096);
+        var utf8ByteCount = 0;
+        var pendingHighSurrogate = false;
         while (true)
         {
             if (_readBufferOffset >= _readBufferCount)
@@ -357,6 +360,14 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
                 _readBufferOffset = 0;
                 if (_readBufferCount == 0)
                 {
+                    if (pendingHighSurrogate)
+                    {
+                        utf8ByteCount += 3;
+                    }
+                    if (utf8ByteCount > MaxLineBytes)
+                    {
+                        throw new CodexAppServerProtocolException("response_too_large");
+                    }
                     return line.Length == 0 ? null : line.ToString();
                 }
             }
@@ -364,6 +375,14 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             var character = _readBuffer[_readBufferOffset++];
             if (character == '\n')
             {
+                if (pendingHighSurrogate)
+                {
+                    utf8ByteCount += 3;
+                }
+                if (utf8ByteCount > MaxLineBytes)
+                {
+                    throw new CodexAppServerProtocolException("response_too_large");
+                }
                 if (line.Length > 0 && line[^1] == '\r')
                 {
                     line.Length -= 1;
@@ -372,7 +391,41 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             }
 
             line.Append(character);
-            if (line.Length > MaxLineCharacters)
+            var currentCounted = false;
+            if (pendingHighSurrogate)
+            {
+                if (char.IsLowSurrogate(character))
+                {
+                    utf8ByteCount += 4;
+                    pendingHighSurrogate = false;
+                    currentCounted = true;
+                }
+                else
+                {
+                    utf8ByteCount += 3;
+                    pendingHighSurrogate = false;
+                }
+            }
+            if (!currentCounted)
+            {
+                if (char.IsHighSurrogate(character))
+                {
+                    pendingHighSurrogate = true;
+                }
+                else if (char.IsLowSurrogate(character))
+                {
+                    utf8ByteCount += 3;
+                }
+                else
+                {
+                    utf8ByteCount += character <= 0x7f
+                        ? 1
+                        : character <= 0x7ff
+                            ? 2
+                            : 3;
+                }
+            }
+            if (utf8ByteCount > MaxLineBytes)
             {
                 throw new CodexAppServerProtocolException("response_too_large");
             }

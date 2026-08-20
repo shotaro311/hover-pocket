@@ -51,7 +51,9 @@ internal sealed class VoiceFoundationVerifier
         await RunCaseAsync("crash-cleanup", VerifyTransportCrashDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("transition-cleanup", VerifySystemTransitionDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("stale-start", VerifyStaleStartFailureDoesNotReplaceReadyClientAsync, timeout.Token);
+        await RunCaseAsync("stale-request", VerifyStaleRequestDoesNotBlockReadyClientAsync, timeout.Token);
         await RunCaseAsync("oversized-response", VerifyOversizedResponseFailsClosedAsync, timeout.Token);
+        await RunCaseAsync("multibyte-response", VerifyMultibyteResponseFailsClosedAsync, timeout.Token);
         VerifyUnavailableTransitionPreservesBlockedState();
         VerifyTranscriptAndRootScope();
         VerifyUiDetachPreservesSession();
@@ -340,6 +342,45 @@ internal sealed class VoiceFoundationVerifier
         }
     }
 
+    private async Task VerifyStaleRequestDoesNotBlockReadyClientAsync(CancellationToken cancellationToken)
+    {
+        var factoryCalls = 0;
+        var staleDisposeCount = 0;
+        var staleHarness = new DeferredInitializeHarness(
+            () => Interlocked.Increment(ref staleDisposeCount));
+        var healthyHarness = new AppServerHarness();
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ => Task.FromResult(
+                Interlocked.Increment(ref factoryCalls) == 1
+                    ? staleHarness.CreateClient()
+                    : healthyHarness.CreateClient()),
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: []);
+
+        var staleStart = coordinator.InitializeAsync(cancellationToken);
+        await staleHarness.InitializationRequested.WaitAsync(cancellationToken);
+        await coordinator.SetFeatureEnabledAsync(false, cancellationToken);
+        await coordinator.SetFeatureEnabledAsync(true, cancellationToken);
+        if (coordinator.Snapshot.Availability != CodexVoiceAvailability.Ready)
+        {
+            _failures.Add("replacement app-server did not become ready");
+            return;
+        }
+
+        staleHarness.PushServerRequest(9003, "approval/request");
+        await WaitUntilAsync(
+            () => Volatile.Read(ref staleDisposeCount) == 1,
+            cancellationToken);
+        await staleStart;
+        if (coordinator.Snapshot.Availability != CodexVoiceAvailability.Ready
+            || !coordinator.Snapshot.TransportAttached
+            || coordinator.Snapshot.LastErrorCode is not null)
+        {
+            _failures.Add("stale app-server request blocked the ready replacement");
+        }
+    }
+
     private void VerifyUnavailableTransitionPreservesBlockedState()
     {
         using var coordinator = new CodexVoiceCoordinator(featureEnabled: true);
@@ -357,6 +398,17 @@ internal sealed class VoiceFoundationVerifier
     {
         var reader = new GatedTextReader(
             new string('x', CodexAppServerClient.MaxLineCharacters + 1) + "\n");
+        await using var client = CodexAppServerClient.AttachForTesting(reader, TextWriter.Null);
+        var disconnected = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        client.Disconnected += (_, _) => disconnected.TrySetResult(true);
+        reader.Release();
+        await disconnected.Task.WaitAsync(cancellationToken);
+    }
+
+    private async Task VerifyMultibyteResponseFailsClosedAsync(CancellationToken cancellationToken)
+    {
+        var reader = new GatedTextReader(
+            new string('あ', (CodexAppServerClient.MaxLineBytes / 3) + 1) + "\n");
         await using var client = CodexAppServerClient.AttachForTesting(reader, TextWriter.Null);
         var disconnected = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         client.Disconnected += (_, _) => disconnected.TrySetResult(true);
@@ -535,6 +587,43 @@ internal sealed class VoiceFoundationVerifier
         }
     }
 
+    private sealed class DeferredInitializeHarness
+    {
+        private readonly ChannelLineReader _reader = new();
+        private readonly Action? _onDispose;
+        private readonly TaskCompletionSource<bool> _initializationRequested = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public DeferredInitializeHarness(Action? onDispose = null)
+        {
+            _onDispose = onDispose;
+        }
+
+        public Task InitializationRequested => _initializationRequested.Task;
+
+        public CodexAppServerClient CreateClient() =>
+            CodexAppServerClient.AttachForTesting(
+                _reader,
+                new DeferredInitializeWriter(_initializationRequested),
+                TimeSpan.FromSeconds(1),
+                () =>
+                {
+                    _onDispose?.Invoke();
+                    _reader.Dispose();
+                    return ValueTask.CompletedTask;
+                });
+
+        public void PushServerRequest(long id, string method)
+        {
+            _reader.Push(JsonSerializer.Serialize(new
+            {
+                id,
+                method,
+                @params = new { }
+            }));
+        }
+    }
+
     private sealed class AppServerHarness
     {
         private readonly ChannelLineReader _reader = new();
@@ -625,6 +714,38 @@ internal sealed class VoiceFoundationVerifier
                 _channel.Writer.TryComplete();
             }
             base.Dispose(disposing);
+        }
+    }
+
+    private sealed class DeferredInitializeWriter : TextWriter
+    {
+        private readonly TaskCompletionSource<bool> _initializationRequested;
+
+        public DeferredInitializeWriter(TaskCompletionSource<bool> initializationRequested)
+        {
+            _initializationRequested = initializationRequested;
+        }
+
+        public override Encoding Encoding => Encoding.UTF8;
+
+        public override Task WriteLineAsync(
+            ReadOnlyMemory<char> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var document = JsonDocument.Parse(buffer.ToString());
+            if (document.RootElement.TryGetProperty("method", out var method)
+                && method.GetString() == "initialize")
+            {
+                _initializationRequested.TrySetResult(true);
+            }
+            return Task.CompletedTask;
+        }
+
+        public override Task FlushAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
         }
     }
 

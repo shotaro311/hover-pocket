@@ -111,6 +111,9 @@ def main() -> None:
     mac_geometry = (
         ROOT / "Sources" / "HoverPocket" / "Windowing" / "PanelGeometry.swift"
     ).read_text(encoding="utf-8")
+    mac_app = (
+        ROOT / "Sources" / "HoverPocket" / "App" / "AppDelegate.swift"
+    ).read_text(encoding="utf-8")
     windows_app = (
         ROOT / "windows" / "src" / "HoverPocket.Shell" / "App.xaml.cs"
     ).read_text(encoding="utf-8")
@@ -223,12 +226,24 @@ def main() -> None:
         fail("Windows Settings bridge can receive Voice transcript/session state")
     if "ReadBoundedLineAsync" not in windows_client or ".ReadLineAsync(" in windows_client:
         fail("Windows app-server response allocation is not bounded before newline parsing")
+    if "MaxLineBytes" not in windows_client or "utf8ByteCount" not in windows_client:
+        fail("Windows app-server JSONL limit is not enforced in UTF-8 bytes")
     if "DrainStandardErrorAsync" not in windows_client:
         fail("Windows app-server stderr is not drained through a bounded sink")
     if "DisposeDetachedClientAsync" not in windows_coordinator:
         fail("Windows failed/crashed app-server clients are not disposed through one boundary")
+    request_handler = windows_coordinator[windows_coordinator.find("private void OnServerRequestReceived"):]
+    request_handler = request_handler[:request_handler.find("private void OnClientDisconnected")]
+    if "ClientGeneration(client)" not in request_handler or "CompareExchange" not in request_handler:
+        fail("Windows stale app-server requests can block the active Voice generation")
     if "Task.Run(RunAsync).GetAwaiter().GetResult();" not in windows_verifier:
         fail("Windows Voice verifier can deadlock the WPF synchronization context")
+    if (
+        "func applicationShouldTerminate" not in mac_app
+        or "await VoiceLaneRuntime.shared.shutdown()" not in mac_app
+        or "func shutdown() async" not in mac_runtime
+    ):
+        fail("macOS termination does not await Voice adapter teardown")
     if "maxRetainedSessions" not in mac_runtime or "MaxRetainedSessions" not in windows_coordinator:
         fail("Voice session retention is not bounded on both operating systems")
     if "expansionBlocked" not in app_js:

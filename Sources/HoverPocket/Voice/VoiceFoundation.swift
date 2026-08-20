@@ -509,7 +509,7 @@ final class VoiceLaneRuntime: ObservableObject {
         publish()
     }
 
-    func shutdown() {
+    func shutdown() async {
         featureEnabled = false
         restartGeneration &+= 1
         restartTask?.cancel()
@@ -518,7 +518,7 @@ final class VoiceLaneRuntime: ObservableObject {
         adapter = nil
         snapshot = .disabled
         if let currentAdapter {
-            Task { await currentAdapter.stop() }
+            await currentAdapter.stop()
         }
     }
 

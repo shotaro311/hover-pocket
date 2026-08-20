@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hoverWindowController = HoverWindowController()
     private var statusBarMenuController: StatusBarMenuController?
     private var settingsCancellables = Set<AnyCancellable>()
+    private var voiceTerminationTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -233,8 +234,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hoverWindowController.recoverAfterSystemTransition()
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        VoiceLaneRuntime.shared.shutdown()
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard voiceTerminationTask == nil else { return .terminateLater }
+        voiceTerminationTask = Task { @MainActor [weak self] in
+            await VoiceLaneRuntime.shared.shutdown()
+            self?.voiceTerminationTask = nil
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     private func registerURLSchemeCallbackHandler() {

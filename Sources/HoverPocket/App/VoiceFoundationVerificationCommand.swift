@@ -12,6 +12,7 @@ enum VoiceFoundationVerificationCommand {
         try await verifyDefaultOffAndFakeAdapter()
         try await verifyAppLifetimeDetachAndRestart()
         try await verifyStaleAdapterFailureDoesNotReplaceReadyAdapter()
+        try await verifyShutdownWaitsForAdapterTeardown()
     }
 
     private static func verifyGeometryAndScope() throws {
@@ -266,7 +267,7 @@ enum VoiceFoundationVerificationCommand {
         else {
             throw VoiceFoundationVerificationError.failed("unexpected_request_fail_closed")
         }
-        runtime.shutdown()
+        await runtime.shutdown()
     }
 
     private static func verifyStaleAdapterFailureDoesNotReplaceReadyAdapter() async throws {
@@ -305,7 +306,34 @@ enum VoiceFoundationVerificationCommand {
         else {
             throw VoiceFoundationVerificationError.failed("stale_adapter_failure_replaced_ready_adapter")
         }
-        runtime.shutdown()
+        await runtime.shutdown()
+    }
+
+    private static func verifyShutdownWaitsForAdapterTeardown() async throws {
+        let adapter = GatedStopVoiceSessionAdapter()
+        let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            adapterFactory: { adapter }
+        )
+        try await waitUntil { runtime.snapshot.connection == .connected }
+
+        var shutdownCompleted = false
+        let shutdownTask = Task { @MainActor in
+            await runtime.shutdown()
+            shutdownCompleted = true
+        }
+        try await waitUntil { adapter.stopCount == 1 }
+        guard !shutdownCompleted else {
+            throw VoiceFoundationVerificationError.failed("shutdown_returned_before_adapter_teardown")
+        }
+
+        adapter.finishStop()
+        await shutdownTask.value
+        guard shutdownCompleted, runtime.snapshot == .disabled else {
+            throw VoiceFoundationVerificationError.failed("shutdown_did_not_complete_after_adapter_teardown")
+        }
     }
 
     private static func waitUntil(
@@ -344,4 +372,27 @@ private final class GatedVoiceSessionAdapter: VoiceSessionAdapter {
     func setMuted(_ muted: Bool) async { _ = muted }
     func closeAudioSession() async { }
     func stop() async { stopCount += 1 }
+}
+
+@MainActor
+private final class GatedStopVoiceSessionAdapter: VoiceSessionAdapter {
+    private var stopContinuation: CheckedContinuation<Void, Never>?
+    private(set) var stopCount = 0
+
+    func probeCompatibility() async -> VoiceAdapterGate { .ready }
+    func start() async throws { }
+    func setMuted(_ muted: Bool) async { _ = muted }
+    func closeAudioSession() async { }
+
+    func stop() async {
+        stopCount += 1
+        await withCheckedContinuation { continuation in
+            stopContinuation = continuation
+        }
+    }
+
+    func finishStop() {
+        stopContinuation?.resume()
+        stopContinuation = nil
+    }
 }
