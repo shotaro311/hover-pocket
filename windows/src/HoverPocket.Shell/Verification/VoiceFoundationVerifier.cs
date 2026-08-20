@@ -54,6 +54,7 @@ internal sealed class VoiceFoundationVerifier
         await RunCaseAsync("disable-inflight-cleanup", VerifyDisableDisposesInFlightCandidateAsync, timeout.Token);
         await RunCaseAsync("disable-retry-cleanup", VerifyDisableDisposesInFlightRetryCandidateAsync, timeout.Token);
         await RunCaseAsync("feature-transition-serialization", VerifyFeatureTransitionsAreSerializedAsync, timeout.Token);
+        await RunCaseAsync("dispose-transition-drain", VerifyDisposeDrainsActiveTransitionAsync, timeout.Token);
         await RunCaseAsync("crash-cleanup", VerifyTransportCrashDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("transition-cleanup", VerifySystemTransitionDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("transition-inflight-cleanup", VerifySystemTransitionDisposesInFlightCandidateAsync, timeout.Token);
@@ -395,6 +396,46 @@ internal sealed class VoiceFoundationVerifier
             || Volatile.Read(ref factoryCalls) != 2)
         {
             _failures.Add("serialized Voice re-enable did not create one ready replacement");
+        }
+    }
+
+    private async Task VerifyDisposeDrainsActiveTransitionAsync(CancellationToken cancellationToken)
+    {
+        var harness = new GatedDisposeHarness();
+        var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ => Task.FromResult(harness.CreateClient()),
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: []);
+
+        await coordinator.InitializeAsync(cancellationToken);
+        var disable = coordinator.SetFeatureEnabledAsync(false, cancellationToken);
+        await harness.DisposeStarted.WaitAsync(cancellationToken);
+
+        var disposeStarted = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var dispose = Task.Factory.StartNew(
+            () =>
+            {
+                disposeStarted.TrySetResult(true);
+                coordinator.Dispose();
+            },
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+        await disposeStarted.Task.WaitAsync(cancellationToken);
+        await Task.Delay(50, cancellationToken);
+        if (dispose.IsCompleted)
+        {
+            _failures.Add("coordinator disposal completed before an active Voice transition drained");
+        }
+
+        harness.ReleaseDispose();
+        await disable;
+        await dispose.WaitAsync(cancellationToken);
+        if (coordinator.Snapshot != CodexVoiceSnapshot.Disabled)
+        {
+            _failures.Add("coordinator disposal did not publish disabled after draining its transition");
         }
     }
 

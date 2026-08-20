@@ -1274,17 +1274,25 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             return;
         }
         _disposed = true;
-        _featureEnabled = false;
-        Interlocked.Increment(ref _generation);
-        CancelRestartAsync().GetAwaiter().GetResult();
-        _lifetime.Cancel();
-        CancelStartupAsync().GetAwaiter().GetResult();
-        var client = DetachClient();
-        if (client is not null)
+        _featureTransitionGate.Wait();
+        try
         {
-            DisposeDetachedClientAsync(client).GetAwaiter().GetResult();
+            _featureEnabled = false;
+            Interlocked.Increment(ref _generation);
+            CancelRestartAsync().GetAwaiter().GetResult();
+            _lifetime.Cancel();
+            CancelStartupAsync().GetAwaiter().GetResult();
+            var client = DetachClient();
+            if (client is not null)
+            {
+                DisposeDetachedClientAsync(client).GetAwaiter().GetResult();
+            }
+            _lifetime.Dispose();
+            Publish(CodexVoiceSnapshot.Disabled);
         }
-        _lifetime.Dispose();
-        Publish(CodexVoiceSnapshot.Disabled);
+        finally
+        {
+            _featureTransitionGate.Release();
+        }
     }
 }

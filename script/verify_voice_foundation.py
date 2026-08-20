@@ -234,6 +234,9 @@ def main() -> None:
         fail("Windows panel geometry follows settings before Voice teardown completes")
     if "CodexVoiceSessionStatus.Stopping" not in windows_coordinator:
         fail("Windows Voice teardown does not publish a stopping state")
+    if "_featureTransitionGate.Wait();" not in windows_coordinator \
+            or "dispose-transition-drain" not in windows_verifier:
+        fail("Windows coordinator disposal can bypass an active Voice transition")
     if 'voiceLaneEl.hidden = mode === "disabled";' not in app_js \
             or "voiceTeardownVisibleOk" not in app_js:
         fail("Windows rendered Voice row disappears before runtime teardown completes")
