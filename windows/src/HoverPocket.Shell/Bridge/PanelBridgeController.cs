@@ -159,7 +159,7 @@ internal sealed class PanelBridgeController : IDisposable
                         generator,
                         runtimeActivationReadback: receipt => activationRegistry?.Synchronize(receipt)
                             ?? throw new PocketAppRuntimeActivationException("RUNTIME_ACTIVATION_UNAVAILABLE"),
-                        postRefreshHook: () => _ = PostStateEventOnUiThreadAsync("state.changed"));
+                        postRefreshHook: OnGeneratedPocketAppsRefreshed);
                     _generatedPocketApps = activationRegistry;
                 }
                 catch
@@ -179,7 +179,7 @@ internal sealed class PanelBridgeController : IDisposable
                 _generatedPocketApps = null;
             }
         }
-        CurrentSettings = UserSettingsStore.Normalize(CurrentSettings, AvailableProviderIds());
+        CurrentSettings = NormalizeSettings(CurrentSettings);
         _clipboardBridgeController = new ClipboardBridgeController(
             new ClipboardHistoryStore(Path.Combine(settingsStore.RootDirectory, "clipboard")),
             new ClipboardNativeListener(System.Windows.Application.Current?.Dispatcher ?? System.Windows.Threading.Dispatcher.CurrentDispatcher),
@@ -1000,7 +1000,7 @@ internal sealed class PanelBridgeController : IDisposable
 
     private void SaveSettings(UserSettings settings)
     {
-        CurrentSettings = UserSettingsStore.Normalize(settings, AvailableProviderIds());
+        CurrentSettings = NormalizeSettings(settings);
         _clipboardBridgeController.ApplySettings(CurrentSettings, IsVisible("clipboard"));
         _settingsStore.Save(CurrentSettings);
         SettingsChanged?.Invoke(this, CurrentSettings);
@@ -1204,8 +1204,35 @@ internal sealed class PanelBridgeController : IDisposable
 
         var updated = CurrentSettings.Clone();
         updated.LastSelectedProviderId = providerId;
-        CurrentSettings = UserSettingsStore.Normalize(updated, AvailableProviderIds());
+        CurrentSettings = NormalizeSettings(updated);
         _settingsStore.Save(CurrentSettings);
+    }
+
+    private void OnGeneratedPocketAppsRefreshed()
+    {
+        CurrentSettings = NormalizeSettings(CurrentSettings.Clone());
+        if (!IsSelectableProvider(_selectedProviderId))
+        {
+            _selectedProviderId = ResolveInitialProviderId();
+        }
+        _settingsStore.Save(CurrentSettings);
+        SettingsChanged?.Invoke(this, CurrentSettings);
+        _ = PostStateEventOnUiThreadAsync("state.changed");
+    }
+
+    private UserSettings NormalizeSettings(UserSettings settings)
+    {
+        var activeProviderIds = AvailableProviderIds();
+        if (_generatedPocketApps is null
+            || !_generatedPocketApps.TryGetManagedAppIds(out var managedAppIds))
+        {
+            return UserSettingsStore.NormalizeForBootstrap(settings, activeProviderIds);
+        }
+        var knownProviderIds = activeProviderIds
+            .Concat(managedAppIds.Select(PocketSurfaceRegistry.GeneratedProviderId))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return UserSettingsStore.Normalize(settings, knownProviderIds);
     }
 
     private IReadOnlyList<ProviderDescriptor> AvailableProviders()

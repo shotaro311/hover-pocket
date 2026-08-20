@@ -222,6 +222,33 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
     public PocketExecutionRuntimeRegistry ExecutionRegistry { get; } = new();
     public PocketSurfaceRegistry SurfaceRegistry { get; } = new();
 
+    public bool TryGetManagedAppIds(out IReadOnlyList<string> appIds)
+    {
+        lock (_activationSync)
+        {
+            if (_disposed)
+            {
+                appIds = Array.Empty<string>();
+                return false;
+            }
+            try
+            {
+                appIds = _managementSnapshotSource().Packages
+                    .Where(package => package.State != PocketAppLifecycleState.Removed)
+                    .Select(package => package.PackageId)
+                    .Distinct(StringComparer.Ordinal)
+                    .Order(StringComparer.Ordinal)
+                    .ToArray();
+                return true;
+            }
+            catch
+            {
+                appIds = Array.Empty<string>();
+                return false;
+            }
+        }
+    }
+
     public PocketAppRuntimeActivationRegistry(
         string rootDirectory,
         string userDataRoot,

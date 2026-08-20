@@ -244,13 +244,19 @@ internal sealed class SettingsVerifier
 
     private async Task VerifyGeneratedProviderLifecyclePublicationAsync(ProviderRegistry registry)
     {
-        const string appId = "local.example.today-focus";
+        const string appId = "local.generated.settings-fixture";
         var generatedProviderId = PocketSurfaceRegistry.GeneratedProviderId(appId);
         var store = UserSettingsStore.CreateTemporary("SettingsGeneratedProviderLifecycleVerify");
         var pocketAppsRoot = Path.Combine(store.RootDirectory, "PocketApps");
         var generatedHostRoot = Path.Combine(pocketAppsRoot, "GeneratedHost");
         var userDataRoot = Path.Combine(pocketAppsRoot, "UserData");
-        var packageRoot = Path.Combine(AppContext.BaseDirectory, "PocketApps", appId);
+        var sourcePackageRoot = Path.Combine(AppContext.BaseDirectory, "PocketApps", "local.example.today-focus");
+        var packageRoot = Path.Combine(store.RootDirectory, "GeneratedProviderFixture");
+        CopyDirectory(sourcePackageRoot, packageRoot);
+        var manifestPath = Path.Combine(packageRoot, "manifest.json");
+        File.WriteAllText(
+            manifestPath,
+            File.ReadAllText(manifestPath).Replace("local.example.today-focus", appId, StringComparison.Ordinal));
         using (var lifecycle = new PocketAppLifecycleManager(generatedHostRoot, userDataRoot))
         {
             var now = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
@@ -292,7 +298,7 @@ internal sealed class SettingsVerifier
             """{"id":"generated-before","method":"app.getState"}""");
         var disabled = await Send(
             settingsDispatcher,
-            """{"id":"generated-disable","method":"pocketApps.disable","params":{"appId":"local.example.today-focus"}}""");
+            JsonSerializer.Serialize(new { id = "generated-disable", method = "pocketApps.disable", @params = new { appId } }));
         for (var attempt = 0; attempt < 20
              && !panelEvents.Any(item => item.Contains("\"event\":\"state.changed\"", StringComparison.Ordinal));
              attempt++)
@@ -312,6 +318,46 @@ internal sealed class SettingsVerifier
             || publishedProviders.Contains(generatedProviderId, StringComparer.OrdinalIgnoreCase))
         {
             _failures.Add("generated provider lifecycle commit did not publish the refreshed Panel provider state");
+        }
+
+        _ = await Send(
+            settingsDispatcher,
+            """{"id":"generated-disabled-setting","method":"settings.setTextSize","params":{"textSize":"large"}}""");
+        var preserved = controller.CurrentSettings;
+        if (!preserved.ProviderOrder.Contains(generatedProviderId, StringComparer.OrdinalIgnoreCase)
+            || !preserved.ProviderVisibility.TryGetValue(generatedProviderId, out var generatedVisible)
+            || !generatedVisible
+            || preserved.PreferredProviderId != generatedProviderId
+            || preserved.LastSelectedProviderId != generatedProviderId)
+        {
+            _failures.Add("disabled generated provider preferences were pruned by an unrelated settings write");
+        }
+
+        var reenabled = await Send(
+            settingsDispatcher,
+            JsonSerializer.Serialize(new { id = "generated-enable", method = "pocketApps.enable", @params = new { appId } }));
+        var afterEnable = await Send(panelDispatcher, """{"id":"generated-after-enable","method":"app.getState"}""");
+        if (!reenabled.Contains("\"state\":\"enabled\"", StringComparison.Ordinal)
+            || !afterEnable.Contains($"\"id\":\"{generatedProviderId}\"", StringComparison.Ordinal)
+            || controller.CurrentSettings.PreferredProviderId != generatedProviderId)
+        {
+            _failures.Add("re-enabled generated provider did not restore its retained preferences");
+        }
+
+        var removed = await Send(
+            settingsDispatcher,
+            JsonSerializer.Serialize(new { id = "generated-remove", method = "pocketApps.removePreservingData", @params = new { appId } }));
+        _ = await Send(
+            settingsDispatcher,
+            """{"id":"generated-removed-setting","method":"settings.setTextSize","params":{"textSize":"medium"}}""");
+        var pruned = controller.CurrentSettings;
+        if (!removed.Contains("\"state\":\"removed\"", StringComparison.Ordinal)
+            || pruned.ProviderOrder.Contains(generatedProviderId, StringComparer.OrdinalIgnoreCase)
+            || pruned.ProviderVisibility.ContainsKey(generatedProviderId)
+            || pruned.PreferredProviderId == generatedProviderId
+            || pruned.LastSelectedProviderId == generatedProviderId)
+        {
+            _failures.Add("removed generated provider preferences were not pruned");
         }
     }
 
@@ -415,5 +461,16 @@ internal sealed class SettingsVerifier
     {
         return actual.Count >= expectedPrefix.Count
             && actual.Take(expectedPrefix.Count).SequenceEqual(expectedPrefix, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(source, file);
+            var target = Path.Combine(destination, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target, overwrite: false);
+        }
     }
 }

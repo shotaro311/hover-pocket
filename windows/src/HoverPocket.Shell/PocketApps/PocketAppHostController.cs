@@ -49,7 +49,7 @@ internal sealed class PocketAppHostController
                 item => item.Value.Inputs.Keys.Order(StringComparer.Ordinal).ToArray(),
                 StringComparer.Ordinal),
             initialState = _runtime.UserStateStore?.Snapshot()
-                ?? new Dictionary<string, string>(StringComparer.Ordinal)
+                ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal)
         };
     }
 

@@ -490,6 +490,7 @@ enum CapabilityBrokerVerificationCommand {
         )
         try await verifyPartialRollback(root: root, now: now, principal: principal)
         try await verifyCurrentStepRollback(root: root, now: now, principal: principal)
+        try await verifyCancellationAfterSuccessfulStep(root: root, now: now, principal: principal)
         try await verifyTimeout(root: root, now: now, principal: principal)
     }
 
@@ -1296,6 +1297,77 @@ enum CapabilityBrokerVerificationCommand {
     }
 
     @MainActor
+    private static func verifyCancellationAfterSuccessfulStep(
+        root: URL,
+        now: Date,
+        principal: CapabilityPrincipal
+    ) async throws {
+        let timerID = UUID(uuidString: "77777777-7777-4777-8777-777777777777")!
+        let timerStore = TimerStore(
+            storageDirectory: root.appendingPathComponent("cancel-after-step-timer", isDirectory: true),
+            observesWake: false,
+            persistenceEnabled: true
+        )
+        let lease = PocketAppActivationLease()
+        let sticky = BrokerCountingStickyHandler()
+        let handlers = try PocketCapabilityHandlerSet(handlers: [
+            TimerCapabilityHandler(operation: .start, store: timerStore, idGenerator: { timerID }),
+            BrokerPostReadCancellationTimerReadHandler(store: timerStore, lease: lease),
+            TimerCapabilityHandler(operation: .stop, store: timerStore),
+            sticky
+        ])
+        let brokerRoot = root.appendingPathComponent("cancel-after-step-broker", isDirectory: true)
+        let broker = CapabilityBroker(
+            registry: try CapabilityRegistry(handlers: handlers),
+            ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
+            auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+        )
+        let permissions = CapabilityPermissionSet(principal: principal, permissions: ["sticky.write", "timer.write"])
+        let adapter = TodayFocusTextAdapter(broker: broker)
+        let draft = try adapter.prepareFocus(
+            event: TodayFocusCalendarEvent(
+                eventRef: "event:cancel-after-step",
+                safeTitle: "Cancel after step",
+                start: now,
+                end: now.addingTimeInterval(600)
+            ),
+            durationSeconds: 600,
+            purpose: "cancel-after-step",
+            principal: principal,
+            permissions: permissions,
+            now: now
+        )
+        let grant = try broker.decideApproval(
+            requestID: draft.preparation.approvalRequest!.id,
+            planDigest: draft.preparation.planDigest,
+            decision: .approve,
+            now: now
+        )
+        let execution = Task { @MainActor in
+            try await broker.execute(draft.plan, permissions: permissions, approvalGrant: grant, now: now)
+        }
+        let registration = lease.registerCancellation { execution.cancel() }
+        defer { lease.unregisterCancellation(registration) }
+        let receipt = try await execution.value
+        try require(receipt.status == .failed, "cancel_after_step_status")
+        try require(receipt.steps.count == 2, "cancel_after_step_receipts")
+        try require(receipt.steps[0].status == .succeeded, "cancel_after_step_first_succeeded")
+        try require(receipt.steps[0].rollbackStatus == "succeeded", "cancel_after_step_rollback_succeeded")
+        try require(receipt.steps[1].status == .failed, "cancel_after_step_second_failed")
+        try require(receipt.steps[1].safeError?.code == "CAPABILITY_CANCELLED", "cancel_after_step_safe_error")
+        try require(sticky.invocationCount == 0, "cancel_after_step_no_sticky_write")
+        try require(timerStore.runningTimers.isEmpty, "cancel_after_step_timer_removed")
+
+        let replay = try await broker.execute(
+            draft.plan,
+            permissions: permissions,
+            approvalGrant: nil,
+            now: now.addingTimeInterval(1)
+        )
+        try require(replay.replayed && replay.status == .failed, "cancel_after_step_durable_replay")
+    }
+
+    @MainActor
     private static func makeHandlers(
         calendar: BrokerFakeCalendarDataSource,
         timerStore: TimerStore,
@@ -1406,6 +1478,23 @@ private final class BrokerFailingStickyHandler: PocketCapabilityHandler {
 }
 
 @MainActor
+private final class BrokerCountingStickyHandler: PocketCapabilityHandler {
+    let key = PocketCapabilityKeys.stickyUpsert
+    private(set) var invocationCount = 0
+
+    func handle(arguments: CapabilityObject, context: CapabilityHandlerContext) async throws -> CapabilityObject {
+        _ = arguments
+        _ = try context.requiredIdempotencyKey()
+        invocationCount += 1
+        return [
+            "noteId": .string("00000000-0000-0000-0000-000000000000"),
+            "state": .string("active"),
+            "updatedAt": .string(CapabilityDateCodec.string(from: context.now))
+        ]
+    }
+}
+
+@MainActor
 private final class BrokerSlowReadHandler: PocketCapabilityHandler {
     let key: PocketCapabilityKey
     private(set) var wasCancelled = false
@@ -1469,6 +1558,34 @@ private final class BrokerMismatchedTimerReadHandler: PocketCapabilityHandler {
             "timerId": .string(rawID.lowercased()),
             "state": .string("running"),
             "endAt": .string(CapabilityDateCodec.string(from: context.now.addingTimeInterval(999)))
+        ]
+    }
+}
+
+@MainActor
+private final class BrokerPostReadCancellationTimerReadHandler: PocketCapabilityHandler {
+    let key = PocketCapabilityKeys.timerGet
+    private let store: TimerStore
+    private let lease: PocketAppActivationLease
+
+    init(store: TimerStore, lease: PocketAppActivationLease) {
+        self.store = store
+        self.lease = lease
+    }
+
+    func handle(arguments: CapabilityObject, context: CapabilityHandlerContext) async throws -> CapabilityObject {
+        guard case .string(let rawID)? = arguments["timerId"], let id = UUID(uuidString: rawID) else {
+            throw CapabilityHandlerError.invalidArgument("timerId")
+        }
+        let timer = store.runningTimer(id: id)
+        lease.invalidate()
+        guard timer != nil else {
+            return ["timerId": .string(rawID.lowercased()), "state": .string("stopped"), "endAt": .null]
+        }
+        return [
+            "timerId": .string(rawID.lowercased()),
+            "state": .string("running"),
+            "endAt": .string(CapabilityDateCodec.string(from: context.now.addingTimeInterval(600)))
         ]
     }
 }

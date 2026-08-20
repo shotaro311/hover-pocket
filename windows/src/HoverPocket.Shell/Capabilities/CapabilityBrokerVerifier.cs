@@ -374,6 +374,7 @@ internal sealed class CapabilityBrokerVerifier
             await VerifyPartialRollbackAsync(root, now, principal);
             await VerifyCurrentStepRollbackAsync(root, now, principal);
             await VerifyCancellationRollbackAsync(root, now, principal);
+            await VerifyCancellationAfterSuccessfulStepAsync(root, now, principal);
             await VerifyTimeoutAsync(root, now, principal);
         }
         finally
@@ -1046,6 +1047,57 @@ internal sealed class CapabilityBrokerVerifier
         Require(timerStore.RunningTimers.Count == 0, "cancel_rollback_timer_removed");
     }
 
+    private async Task VerifyCancellationAfterSuccessfulStepAsync(
+        string root,
+        DateTimeOffset now,
+        CapabilityPrincipal principal)
+    {
+        using var timerStore = new TimerStore(
+            Path.Combine(root, "cancel-after-step-timer"),
+            new ManualTimerClock(now),
+            new NullTimerAlertSound(),
+            enableScheduler: false);
+        using var cancellation = new CancellationTokenSource();
+        var sticky = new BrokerCountingStickyUpsertHandler();
+        var handlers = new PocketCapabilityHandlerSet([
+            new TimerCapabilityHandler(TimerCapabilityOperation.Start, timerStore),
+            new BrokerPostReadCancellationTimerReadHandler(timerStore, cancellation),
+            new TimerCapabilityHandler(TimerCapabilityOperation.Stop, timerStore),
+            sticky
+        ]);
+        var brokerRoot = Path.Combine(root, "cancel-after-step-broker");
+        var broker = new CapabilityBroker(
+            new CapabilityRegistry(handlers),
+            new CapabilityBrokerLedger(brokerRoot),
+            new CapabilityBrokerAuditLog(brokerRoot));
+        var permissions = Permissions(principal, "sticky.write", "timer.write");
+        var adapter = new TodayFocusTextAdapter(broker);
+        var draft = adapter.PrepareFocus(
+            new TodayFocusCalendarEvent("event:cancel-after-step", "Cancel after step", now, now.AddMinutes(10)),
+            600,
+            "cancel-after-step",
+            principal,
+            permissions,
+            now);
+        var grant = broker.DecideApproval(
+            draft.Preparation.ApprovalRequest!.Id,
+            draft.Preparation.PlanDigest,
+            CapabilityApprovalDecision.Approve,
+            now);
+        var receipt = await broker.ExecuteAsync(draft.Plan, permissions, grant, now, cancellation.Token);
+        Require(receipt.Status == CapabilityReceiptStatus.Failed, "cancel_after_step_status");
+        Require(receipt.Steps.Count == 2, "cancel_after_step_receipts");
+        Require(receipt.Steps[0].Status == CapabilityReceiptStatus.Succeeded, "cancel_after_step_first_succeeded");
+        Require(receipt.Steps[0].RollbackStatus == "succeeded", "cancel_after_step_rollback_succeeded");
+        Require(receipt.Steps[1].Status == CapabilityReceiptStatus.Failed, "cancel_after_step_second_failed");
+        Require(receipt.Steps[1].SafeError?.Code == "CAPABILITY_CANCELLED", "cancel_after_step_safe_error");
+        Require(sticky.InvocationCount == 0, "cancel_after_step_no_sticky_write");
+        Require(timerStore.RunningTimers.Count == 0, "cancel_after_step_timer_removed");
+
+        var replay = await broker.ExecuteAsync(draft.Plan, permissions, null, now.AddSeconds(1));
+        Require(replay.Replayed && replay.Status == CapabilityReceiptStatus.Failed, "cancel_after_step_durable_replay");
+    }
+
     private static CapabilityPermissionSet Permissions(CapabilityPrincipal principal, params string[] permissions) =>
         new(principal, new HashSet<string>(permissions, StringComparer.Ordinal));
 
@@ -1258,6 +1310,36 @@ internal sealed class CapabilityBrokerVerifier
                 throw new CapabilityHandlerException("CAPABILITY_ARGUMENT_INVALID", "timerId");
             }
             return Task.FromResult(store.GetRunningTimer(id) is null
+                ? CapabilityJson.From(new { timerId = rawId.ToLowerInvariant(), state = "stopped", endAt = (string?)null })
+                : CapabilityJson.From(new
+                {
+                    timerId = rawId.ToLowerInvariant(),
+                    state = "running",
+                    endAt = CapabilityCanonicalJson.Date(context.Now.AddMinutes(10))
+                }));
+        }
+    }
+
+    private sealed class BrokerPostReadCancellationTimerReadHandler(
+        TimerStore store,
+        CancellationTokenSource callerCancellation) : IPocketCapabilityHandler
+    {
+        public PocketCapabilityKey Key => CapabilityIds.TimerGet;
+
+        public Task<JsonElement> HandleAsync(
+            JsonElement arguments,
+            CapabilityHandlerContext context,
+            CancellationToken cancellationToken = default)
+        {
+            _ = cancellationToken;
+            var rawId = CapabilityJson.RequiredString(arguments, "timerId", 36);
+            if (!Guid.TryParse(rawId, out var id))
+            {
+                throw new CapabilityHandlerException("CAPABILITY_ARGUMENT_INVALID", "timerId");
+            }
+            var timer = store.GetRunningTimer(id);
+            callerCancellation.Cancel();
+            return Task.FromResult(timer is null
                 ? CapabilityJson.From(new { timerId = rawId.ToLowerInvariant(), state = "stopped", endAt = (string?)null })
                 : CapabilityJson.From(new
                 {
