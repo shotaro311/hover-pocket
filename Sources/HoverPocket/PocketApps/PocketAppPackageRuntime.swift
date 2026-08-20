@@ -58,6 +58,7 @@ struct PocketAppPackage: Equatable, Sendable {
     let intent: String
     let stateSchemaDigest: String
     let statePropertyNames: Set<String>
+    let statePropertyTypes: [String: Set<String>]
     let surfaces: [String: PocketSurfaceDocument]
     let workflows: [String: PocketAppWorkflowDocument]
     let testCases: [String: String]
@@ -131,6 +132,12 @@ struct PocketAppPackageRuntime {
                 requestedScopes: requestedScopes
             )
             try require(workflow.id == id, "$.workflows.\(id):id")
+            for (index, step) in workflow.steps.enumerated() {
+                try require(
+                    PocketAppWorkflowPresentationPolicy.supports(step.capability),
+                    "$.workflows.\(id).steps[\(index)]:presentation"
+                )
+            }
             workflows[id] = workflow
         }
 
@@ -177,6 +184,7 @@ struct PocketAppPackageRuntime {
             intent: intent,
             stateSchemaDigest: stateSchemaDigest,
             statePropertyNames: statePropertyNames,
+            statePropertyTypes: statePropertyTypes,
             surfaces: surfaces,
             workflows: workflows,
             testCases: testCases

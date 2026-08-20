@@ -448,7 +448,7 @@ internal sealed class CapabilityBrokerVerifier
         var stateRoot = Path.Combine(root, "pocket-app-user-state");
         using var userStateStore = new PocketAppUserStateStore(
             package.Manifest.Id,
-            package.StatePropertyNames,
+            package.StatePropertyTypes,
             stateRoot);
         var runtime = new PocketAppExecutionRuntime(
             package,
@@ -517,7 +517,7 @@ internal sealed class CapabilityBrokerVerifier
         }
         using var reloadedStateStore = new PocketAppUserStateStore(
             package.Manifest.Id,
-            package.StatePropertyNames,
+            package.StatePropertyTypes,
             stateRoot);
         var reloadedState = reloadedStateStore.Snapshot();
         Require(
@@ -542,6 +542,38 @@ internal sealed class CapabilityBrokerVerifier
             && typedStateReadback["label"].GetString() == "Saved"
             && typedStateReadback["ratio"].GetDouble() == 1.5,
             "pocket_app_typed_state_persistence");
+        var migratedStateTypes = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal)
+        {
+            ["enabled"] = new HashSet<string>(["string"], StringComparer.Ordinal),
+            ["label"] = new HashSet<string>(["string"], StringComparer.Ordinal),
+            ["ratio"] = new HashSet<string>(["integer"], StringComparer.Ordinal)
+        };
+        using var migratedStateStore = new PocketAppUserStateStore(
+            "local.example.typed-state",
+            migratedStateTypes,
+            stateRoot);
+        var migratedState = migratedStateStore.Snapshot();
+        Require(
+            migratedState.Count == 1
+                && migratedState["label"].GetString() == "Saved",
+            "pocket_app_state_schema_migration");
+        using var migratedStateReadbackStore = new PocketAppUserStateStore(
+            "local.example.typed-state",
+            migratedStateTypes,
+            stateRoot);
+        var migratedStateReadback = migratedStateReadbackStore.Snapshot();
+        Require(
+            migratedStateReadback.Count == 1
+                && migratedStateReadback["label"].GetString() == "Saved",
+            "pocket_app_state_schema_migration_persisted");
+        try
+        {
+            migratedStateStore.SetValue("label", CapabilityJson.From(true));
+            _failures.Add("pocket_app_state_schema_write_accepted");
+        }
+        catch (PocketAppUserStateStoreException)
+        {
+        }
         using var isolatedStateStore = new PocketAppUserStateStore(
             "local.example.state-isolated-a",
             new HashSet<string>(["label"], StringComparer.Ordinal),

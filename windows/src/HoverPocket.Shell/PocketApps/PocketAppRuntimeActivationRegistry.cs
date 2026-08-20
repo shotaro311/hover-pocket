@@ -281,7 +281,7 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
                 .ToArray();
             var stateStore = new PocketAppUserStateStore(
                 package.Manifest.Id,
-                package.StatePropertyNames,
+                package.StatePropertyTypes,
                 userDataRoot);
             var activationLease = new PocketAppActivationLease();
             var runtime = new PocketAppExecutionRuntime(

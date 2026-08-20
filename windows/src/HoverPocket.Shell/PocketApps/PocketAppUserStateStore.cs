@@ -12,6 +12,7 @@ internal sealed class PocketAppUserStateStore : IDisposable
 
     private readonly object _sync = new();
     private readonly IReadOnlySet<string> _allowedKeys;
+    private readonly IReadOnlyDictionary<string, IReadOnlySet<string>> _propertyTypes;
     private readonly PocketAppPinnedDirectory _rootDirectory;
     private readonly PocketAppPinnedDirectory _packageDirectory;
     private readonly string _filePath;
@@ -22,6 +23,22 @@ internal sealed class PocketAppUserStateStore : IDisposable
         string packageId,
         IReadOnlySet<string> allowedKeys,
         string rootDirectory)
+        : this(
+            packageId,
+            allowedKeys.ToDictionary(
+                key => key,
+                _ => (IReadOnlySet<string>)new HashSet<string>(
+                    ["string", "integer", "number", "boolean", "null"],
+                    StringComparer.Ordinal),
+                StringComparer.Ordinal),
+            rootDirectory)
+    {
+    }
+
+    public PocketAppUserStateStore(
+        string packageId,
+        IReadOnlyDictionary<string, IReadOnlySet<string>> propertyTypes,
+        string rootDirectory)
     {
         if (!System.Text.RegularExpressions.Regex.IsMatch(
                 packageId,
@@ -30,7 +47,8 @@ internal sealed class PocketAppUserStateStore : IDisposable
         {
             throw new PocketAppUserStateStoreException("package_id");
         }
-        _allowedKeys = allowedKeys;
+        _allowedKeys = propertyTypes.Keys.ToHashSet(StringComparer.Ordinal);
+        _propertyTypes = propertyTypes;
         var packageDirectory = Path.Combine(rootDirectory, packageId);
         PocketAppPinnedDirectory? rootPin = null;
         PocketAppPinnedDirectory? packagePin = null;
@@ -41,7 +59,12 @@ internal sealed class PocketAppUserStateStore : IDisposable
             _rootDirectory = rootPin;
             _packageDirectory = packagePin;
             _filePath = Path.Combine(packageDirectory, "state.json");
-            _state = Load();
+            var loaded = Load();
+            _state = loaded.State;
+            if (loaded.NeedsRepair)
+            {
+                Persist();
+            }
         }
         catch
         {
@@ -78,7 +101,7 @@ internal sealed class PocketAppUserStateStore : IDisposable
         }
         if (value is not null)
         {
-            ValidateValue(value.Value);
+            ValidateValue(value.Value, _propertyTypes[key]);
         }
         lock (_sync)
         {
@@ -92,45 +115,13 @@ internal sealed class PocketAppUserStateStore : IDisposable
             {
                 _state[key] = value.Value.Clone();
             }
-            var temporaryPath = $"{_filePath}.{Guid.NewGuid():N}.tmp";
             try
             {
-                var data = JsonSerializer.SerializeToUtf8Bytes(
-                    new SortedDictionary<string, JsonElement>(_state, StringComparer.Ordinal));
-                if (data.Length > MaximumDocumentBytes)
-                {
-                    throw new PocketAppUserStateStoreException("state_size");
-                }
-                _rootDirectory.Validate();
-                _packageDirectory.Validate();
-                using (var stream = new FileStream(
-                           temporaryPath,
-                           FileMode.CreateNew,
-                           FileAccess.Write,
-                           FileShare.None,
-                           bufferSize: 16_384,
-                           FileOptions.WriteThrough))
-                {
-                    stream.Write(data);
-                    stream.Flush(flushToDisk: true);
-                }
-                File.Move(temporaryPath, _filePath, overwrite: true);
-                _packageDirectory.Validate();
-                _rootDirectory.Validate();
+                Persist();
             }
             catch (Exception ex)
             {
                 _state = previous;
-                try
-                {
-                    if (File.Exists(temporaryPath))
-                    {
-                        File.Delete(temporaryPath);
-                    }
-                }
-                catch
-                {
-                }
                 if (ex is PocketAppUserStateStoreException)
                 {
                     throw;
@@ -140,7 +131,7 @@ internal sealed class PocketAppUserStateStore : IDisposable
         }
     }
 
-    private Dictionary<string, JsonElement> Load()
+    private (Dictionary<string, JsonElement> State, bool NeedsRepair) Load()
     {
         try
         {
@@ -149,7 +140,7 @@ internal sealed class PocketAppUserStateStore : IDisposable
             using var handle = _packageDirectory.OpenFileForRead("state.json");
             if (handle is null)
             {
-                return new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+                return (new Dictionary<string, JsonElement>(StringComparer.Ordinal), false);
             }
             using var stream = new FileStream(handle, FileAccess.Read);
             if (stream.Length < 0 || stream.Length > MaximumDocumentBytes)
@@ -169,18 +160,27 @@ internal sealed class PocketAppUserStateStore : IDisposable
                 throw new PocketAppUserStateStoreException("state_document");
             }
             var values = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            var needsRepair = false;
             foreach (var property in document.RootElement.EnumerateObject())
             {
-                if (!_allowedKeys.Contains(property.Name))
+                if (!_propertyTypes.TryGetValue(property.Name, out var acceptedTypes))
                 {
-                    throw new PocketAppUserStateStoreException("state_document");
+                    needsRepair = true;
+                    continue;
                 }
-                ValidateValue(property.Value);
-                values.Add(property.Name, property.Value.Clone());
+                try
+                {
+                    ValidateValue(property.Value, acceptedTypes);
+                    values.Add(property.Name, property.Value.Clone());
+                }
+                catch (PocketAppUserStateStoreException)
+                {
+                    needsRepair = true;
+                }
             }
             _packageDirectory.Validate();
             _rootDirectory.Validate();
-            return values;
+            return (values, needsRepair);
         }
         catch (PocketAppUserStateStoreException)
         {
@@ -208,7 +208,55 @@ internal sealed class PocketAppUserStateStore : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
     }
 
-    private static void ValidateValue(JsonElement value)
+    private void Persist()
+    {
+        var temporaryPath = $"{_filePath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            var data = JsonSerializer.SerializeToUtf8Bytes(
+                new SortedDictionary<string, JsonElement>(_state, StringComparer.Ordinal));
+            if (data.Length > MaximumDocumentBytes)
+            {
+                throw new PocketAppUserStateStoreException("state_size");
+            }
+            _rootDirectory.Validate();
+            _packageDirectory.Validate();
+            using (var stream = new FileStream(
+                       temporaryPath,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       bufferSize: 16_384,
+                       FileOptions.WriteThrough))
+            {
+                stream.Write(data);
+                stream.Flush(flushToDisk: true);
+            }
+            File.Move(temporaryPath, _filePath, overwrite: true);
+            _packageDirectory.Validate();
+            _rootDirectory.Validate();
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+            catch
+            {
+            }
+            if (ex is PocketAppUserStateStoreException)
+            {
+                throw;
+            }
+            throw new PocketAppUserStateStoreException("state_persistence");
+        }
+    }
+
+    private static void ValidateValue(JsonElement value, IReadOnlySet<string> acceptedTypes)
     {
         switch (value.ValueKind)
         {
@@ -217,19 +265,34 @@ internal sealed class PocketAppUserStateStore : IDisposable
                 {
                     throw new PocketAppUserStateStoreException("state_value");
                 }
+                RequireType(acceptedTypes.Contains("string"));
                 return;
             case JsonValueKind.Number:
                 if (value.GetRawText().Length > 128)
                 {
                     throw new PocketAppUserStateStoreException("state_value");
                 }
+                var isInteger = value.TryGetDecimal(out var decimalValue)
+                    && decimal.Truncate(decimalValue) == decimalValue;
+                RequireType(acceptedTypes.Contains("number") || (isInteger && acceptedTypes.Contains("integer")));
                 return;
             case JsonValueKind.True:
             case JsonValueKind.False:
+                RequireType(acceptedTypes.Contains("boolean"));
+                return;
             case JsonValueKind.Null:
+                RequireType(acceptedTypes.Contains("null"));
                 return;
             default:
                 throw new PocketAppUserStateStoreException("state_value");
+        }
+    }
+
+    private static void RequireType(bool condition)
+    {
+        if (!condition)
+        {
+            throw new PocketAppUserStateStoreException("state_value");
         }
     }
 }

@@ -44,6 +44,7 @@ enum PocketSurfaceVerificationCommand {
         } catch {
             failures.append("valid_fixture:\(error)")
         }
+        verifyOmittedDurationDefault(runtime: runtime, failures: &failures)
 
         rejectFixture("invalid/pocket-surface.asset-traversal.json", runtime: runtime, failures: &failures)
         rejectFixture("invalid/pocket-surface.receipt-component.json", runtime: runtime, failures: &failures)
@@ -131,6 +132,33 @@ enum PocketSurfaceVerificationCommand {
             _ = try runtime.load(data: data)
             failures.append("accepted:\(relativePath)")
         } catch {
+        }
+    }
+
+    private static func verifyOmittedDurationDefault(
+        runtime: PocketSurfaceRuntime,
+        failures: inout [String]
+    ) {
+        do {
+            let base = try JSONSerialization.jsonObject(with: fixtureData("valid/pocket-surface.today-focus.json"))
+            guard var object = base as? [String: Any],
+                  var root = object["root"] as? [String: Any],
+                  var children = root["children"] as? [[String: Any]] else {
+                failures.append("duration_default_omitted:base")
+                return
+            }
+            children[2].removeValue(forKey: "default")
+            root["children"] = children
+            object["root"] = root
+            let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+            let document = try runtime.load(data: data)
+            require(
+                document.root.children[2].integerProperty("default") == 60,
+                "duration_default_omitted",
+                failures: &failures
+            )
+        } catch {
+            failures.append("duration_default_omitted:\(error)")
         }
     }
 

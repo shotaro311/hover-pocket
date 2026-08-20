@@ -26,6 +26,7 @@ internal sealed class PocketAppPackageVerifier
             Require(package.Workflows["startFocus"].Steps.Count == 2, "package_workflow");
             Require(package.Workflows["startFocus"].RequiredPermissions.SetEquals(["sticky.write", "timer.write"]), "package_permissions");
             Require(package.StatePropertyNames.SetEquals(["selectedEventRef"]), "package_state_schema");
+            Require(package.StatePropertyTypes["selectedEventRef"].SetEquals(["string", "null"]), "package_state_types");
             Require(
                 package.TestCases.Count == 4
                 && package.TestCases["calendar-read"] == "pass"
@@ -92,6 +93,14 @@ internal sealed class PocketAppPackageVerifier
         {
             workflow["limits"]!["maxSteps"] = 33;
         }));
+        RejectPackage("unsupported_workflow_presentation", root => MutateJson(Path.Combine(root, "workflows", "start-focus.workflow.json"), workflow =>
+        {
+            workflow["steps"]![0]!["use"] = "calendar.events.list@1";
+            workflow["steps"]![0]!["with"] = new JsonObject
+            {
+                ["range"] = "today"
+            };
+        }));
         RejectPackage("unbound_surface_input", root => MutateJson(Path.Combine(root, "surfaces", "main.surface.json"), surface =>
         {
             surface["root"]!["children"]![2]!["value"] = "$input.missing";
@@ -146,7 +155,7 @@ internal sealed class PocketAppPackageVerifier
         Console.WriteLine("pocket_app_package_verify=ok");
         Console.WriteLine("pocket_app_package_valid_files=9");
         Console.WriteLine("pocket_app_package_bundled=ok");
-        Console.WriteLine("pocket_app_package_negative_cases=15");
+        Console.WriteLine("pocket_app_package_negative_cases=16");
         Console.WriteLine("pocket_app_lifecycle_verify=ok");
         Console.WriteLine("pocket_app_generation_verify=ok");
         return 0;

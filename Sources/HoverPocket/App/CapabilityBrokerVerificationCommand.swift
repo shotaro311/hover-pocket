@@ -531,7 +531,7 @@ enum CapabilityBrokerVerificationCommand {
         let stateRoot = root.appendingPathComponent("pocket-app-user-state", isDirectory: true)
         let userStateStore = try PocketAppUserStateStore(
             packageID: package.manifest.id,
-            allowedKeys: package.statePropertyNames,
+            propertyTypes: package.statePropertyTypes,
             rootDirectory: stateRoot
         )
         let runtime = PocketAppExecutionRuntime(
@@ -613,7 +613,7 @@ enum CapabilityBrokerVerificationCommand {
         try require(!selectedEventRef.isEmpty, "pocket_app_surface_selection")
         let reloadedStateStore = try PocketAppUserStateStore(
             packageID: package.manifest.id,
-            allowedKeys: package.statePropertyNames,
+            propertyTypes: package.statePropertyTypes,
             rootDirectory: stateRoot
         )
         try require(
@@ -647,6 +647,34 @@ enum CapabilityBrokerVerificationCommand {
                 && typedStateReadback["ratio"] == .number(1.5),
             "pocket_app_typed_state_persistence"
         )
+        let migratedStateTypes: [String: Set<String>] = [
+            "enabled": ["string"],
+            "label": ["string"],
+            "ratio": ["integer"]
+        ]
+        let migratedStateStore = try PocketAppUserStateStore(
+            packageID: "local.example.typed-state",
+            propertyTypes: migratedStateTypes,
+            rootDirectory: stateRoot
+        )
+        try require(
+            migratedStateStore.snapshot() == ["label": .string("Saved")],
+            "pocket_app_state_schema_migration"
+        )
+        let migratedStateReadback = try PocketAppUserStateStore(
+            packageID: "local.example.typed-state",
+            propertyTypes: migratedStateTypes,
+            rootDirectory: stateRoot
+        ).snapshot()
+        try require(
+            migratedStateReadback == ["label": .string("Saved")],
+            "pocket_app_state_schema_migration_persisted"
+        )
+        do {
+            try migratedStateStore.setValue(.bool(true), for: "label")
+            throw BrokerVerificationFailure("pocket_app_state_schema_write_accepted")
+        } catch PocketAppUserStateStoreError.invalidValue {
+        }
         let isolatedStateStore = try PocketAppUserStateStore(
             packageID: "local.example.state-isolated-a",
             allowedKeys: ["label"],

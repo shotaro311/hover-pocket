@@ -225,6 +225,13 @@ WRITE_EFFECTS = frozenset(
     }
 )
 
+PRESENTABLE_POCKET_WORKFLOW_CAPABILITIES = frozenset(
+    {
+        ("timer.countdown.start", 1),
+        ("sticky.note.upsert", 1),
+    }
+)
+
 EXPECTED_APPROVAL_POLICY = {
     "pure": "none",
     "private_read": "permission_grant",
@@ -1810,6 +1817,12 @@ def validate_pocket_workflow(document: Mapping[str, Any], context: FixtureContex
                 fail("WORKFLOW_REFERENCE_INVALID", exc.location, exc.detail)
             raise
         ensure_capability_executable(descriptor, f"$.steps[{index}].use")
+        if (capability_id, version) not in PRESENTABLE_POCKET_WORKFLOW_CAPABILITIES:
+            fail(
+                "WORKFLOW_REFERENCE_INVALID",
+                f"$.steps[{index}].use",
+                "Pocket App workflow capability has no Host-owned approval presentation",
+            )
         scope = requested_scope(context, capability_id, version, f"$.steps[{index}].use")
         has_writes = has_writes or descriptor["effect"] in WRITE_EFFECTS
         total_timeout_seconds += descriptor["limits"]["timeoutMs"] / 1000.0

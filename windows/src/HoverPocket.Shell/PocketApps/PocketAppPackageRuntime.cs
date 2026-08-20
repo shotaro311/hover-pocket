@@ -53,6 +53,7 @@ internal sealed record PocketAppPackage(
     string Intent,
     string StateSchemaDigest,
     IReadOnlySet<string> StatePropertyNames,
+    IReadOnlyDictionary<string, IReadOnlySet<string>> StatePropertyTypes,
     IReadOnlyDictionary<string, PocketSurfaceDocument> Surfaces,
     IReadOnlyDictionary<string, PocketAppWorkflowDocument> Workflows,
     IReadOnlyDictionary<string, string> TestCases);
@@ -143,6 +144,12 @@ internal sealed class PocketAppPackageRuntime
         {
             var workflow = ParseWorkflow(ReadObject(packageFiles[item.Value], $"$.workflows.{item.Key}"), requestedScopes);
             Require(workflow.Id == item.Key, $"$.workflows.{item.Key}:id");
+            for (var index = 0; index < workflow.Steps.Count; index++)
+            {
+                Require(
+                    PocketAppExecutionRuntime.SupportsWorkflowPresentation(workflow.Steps[index].Capability),
+                    $"$.workflows.{item.Key}.steps[{index}]:presentation");
+            }
             workflows.Add(item.Key, workflow);
         }
 
@@ -189,6 +196,7 @@ internal sealed class PocketAppPackageRuntime
             intent,
             stateSchemaDigest,
             statePropertyNames,
+            statePropertyTypes,
             surfaces,
             workflows,
             testCases);

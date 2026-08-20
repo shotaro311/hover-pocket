@@ -37,6 +37,7 @@ internal sealed class PocketSurfaceVerifier
         {
             _failures.Add($"valid_fixture:{ex.Message}");
         }
+        VerifyOmittedDurationDefault(runtime);
 
         RejectData(FixtureData("invalid/pocket-surface.asset-traversal.json"), "asset_traversal", runtime);
         RejectData(FixtureData("invalid/pocket-surface.receipt-component.json"), "receipt_component", runtime);
@@ -92,6 +93,24 @@ internal sealed class PocketSurfaceVerifier
         catch (Exception ex)
         {
             _failures.Add($"{label}:fixture:{ex.Message}");
+        }
+    }
+
+    private void VerifyOmittedDurationDefault(PocketSurfaceRuntime runtime)
+    {
+        try
+        {
+            var root = JsonNode.Parse(FixtureData("valid/pocket-surface.today-focus.json"))
+                ?? throw new InvalidOperationException("fixture_parse");
+            root["root"]!["children"]![2]!.AsObject().Remove("default");
+            var document = runtime.Load(Encoding.UTF8.GetBytes(root.ToJsonString()));
+            Require(
+                Convert.ToInt32(document.Root.Children[2].Properties["default"]) == 60,
+                "duration_default_omitted");
+        }
+        catch (Exception ex)
+        {
+            _failures.Add($"duration_default_omitted:{ex.Message}");
         }
     }
 

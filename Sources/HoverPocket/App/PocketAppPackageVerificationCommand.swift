@@ -22,6 +22,7 @@ enum PocketAppPackageVerificationCommand {
                 require(package.workflows["startFocus"]?.steps.count == 2, "package_workflow", failures: &failures)
                 require(package.workflows["startFocus"]?.requiredPermissions == ["sticky.write", "timer.write"], "package_permissions", failures: &failures)
                 require(package.statePropertyNames == ["selectedEventRef"], "package_state_schema", failures: &failures)
+                require(package.statePropertyTypes["selectedEventRef"] == ["string", "null"], "package_state_types", failures: &failures)
                 require(
                     package.testCases == [
                         "calendar-read": "pass",
@@ -116,6 +117,15 @@ enum PocketAppPackageVerificationCommand {
                 return true
             }
         }
+        rejectPackage("unsupported_workflow_presentation", failures: &failures) { root in
+            try mutateJSON(root.appendingPathComponent("workflows/start-focus.workflow.json")) { workflow in
+                guard var steps = workflow["steps"] as? [[String: Any]] else { return false }
+                steps[0]["use"] = "calendar.events.list@1"
+                steps[0]["with"] = ["range": "today"]
+                workflow["steps"] = steps
+                return true
+            }
+        }
         rejectPackage("unbound_surface_input", failures: &failures) { root in
             try mutateJSON(root.appendingPathComponent("surfaces/main.surface.json")) { surface in
                 guard var rootNode = surface["root"] as? [String: Any],
@@ -185,7 +195,7 @@ enum PocketAppPackageVerificationCommand {
         print("pocket_app_package_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_app_package_valid_files=9")
         print("pocket_app_package_bundled=ok")
-        print("pocket_app_package_negative_cases=16")
+        print("pocket_app_package_negative_cases=17")
         print("pocket_app_lifecycle_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_app_generation_verify=\(failures.isEmpty ? "ok" : "failed")")
         if !failures.isEmpty {

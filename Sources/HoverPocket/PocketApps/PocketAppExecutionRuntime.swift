@@ -1,5 +1,16 @@
 import Foundation
 
+enum PocketAppWorkflowPresentationPolicy {
+    private static let supportedCapabilities: Set<PocketCapabilityKey> = [
+        PocketCapabilityKeys.timerStart,
+        PocketCapabilityKeys.stickyUpsert
+    ]
+
+    static func supports(_ capability: PocketCapabilityKey) -> Bool {
+        supportedCapabilities.contains(capability)
+    }
+}
+
 struct PocketAppWorkflowDraft: Equatable, Sendable {
     let packageID: String
     let workflowID: String
@@ -9,11 +20,6 @@ struct PocketAppWorkflowDraft: Equatable, Sendable {
 
 @MainActor
 final class PocketAppExecutionRuntime {
-    private static let presentableWorkflowCapabilities: Set<PocketCapabilityKey> = [
-        PocketCapabilityKeys.timerStart,
-        PocketCapabilityKeys.stickyUpsert
-    ]
-
     let package: PocketAppPackage
     let userStateStore: PocketAppUserStateStore?
 
@@ -361,6 +367,6 @@ final class PocketAppExecutionRuntime {
     }
 
     static func supportsWorkflowPresentation(_ capability: PocketCapabilityKey) -> Bool {
-        presentableWorkflowCapabilities.contains(capability)
+        PocketAppWorkflowPresentationPolicy.supports(capability)
     }
 }

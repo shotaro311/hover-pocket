@@ -306,6 +306,16 @@
       "expectedDigest": "sha256:539635adb3c0f0c3839e352b8333ae2ddcf0b05b71639927e6da9e3fba3eef34"
     },
     {
+      "id": "invalid-pocket-workflow-unsupported-presentation",
+      "path": "invalid/pocket-workflow.unsupported-presentation.json",
+      "kind": "schema",
+      "expected": "reject",
+      "schema": "pocket-workflow.schema.json",
+      "errorCode": "WORKFLOW_REFERENCE_INVALID",
+      "errorLocation": "$.steps[0].use",
+      "expectedDigest": "sha256:f9f2b84285266c90d413b132d2dac7ab06d4ab924d2a7ea0a9ac1d6ed33d53ea"
+    },
+    {
       "id": "invalid-receipt-readback",
       "path": "invalid/receipt.succeeded-without-readback.json",
       "kind": "schema",

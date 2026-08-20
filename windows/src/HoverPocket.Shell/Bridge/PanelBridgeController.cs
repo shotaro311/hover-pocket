@@ -100,7 +100,7 @@ internal sealed class PanelBridgeController : IDisposable
                 var package = new PocketAppPackageRuntime().Load(packageRoot);
                 var userStateStore = new PocketAppUserStateStore(
                     package.Manifest.Id,
-                    package.StatePropertyNames,
+                    package.StatePropertyTypes,
                     Path.Combine(settingsStore.RootDirectory, "PocketApps", "UserData"));
                 _pocketAppHostController = new PocketAppHostController(
                     new PocketAppExecutionRuntime(
