@@ -108,11 +108,15 @@ AN3を一度に実音声まで有効化せず、まず両OSのHost-owned Voice L
 
 ## PR / CI 最終readback
 
+- 最終source head `7ce9a68`のWindows Verify [32378916573](https://github.com/shotaro311/hover-pocket/actions/runs/32378916573)は成功した。Release build、Voice ON / OFF直列化、起動直後request、Settings、legacy lane absence、rendered WebView日本語 / 英語を含む。
+- macOS Verify [32378916499](https://github.com/shotaro311/hover-pocket/actions/runs/32378916499)は成功した。Voice recovery / audio command順序、Capability、Broker、Pocket App、Timerを含む。
+- 3OS contract / byte比較 [32378916471](https://github.com/shotaro311/hover-pocket/actions/runs/32378916471)とPR Router [32378945838](https://github.com/shotaro311/hover-pocket/actions/runs/32378945838)は成功した。
+- PR #19は未解決review thread 0件、`CLEAN / MERGEABLE`、local / remote head差分`0 / 0`である。PR #18も最終head `2d8b89c`で全check成功、未解決thread 0件、`CLEAN / MERGEABLE`である。どちらも自動mergeしていない。
 - Windows Verify: [32372769351](https://github.com/shotaro311/hover-pocket/actions/runs/32372769351) 成功。Release build、Voice foundation、Settings、rendered WebView、既存回帰を含む。
 - macOS Verify: [32372769330](https://github.com/shotaro311/hover-pocket/actions/runs/32372769330) 成功。
 - 3OS contract / byte比較: [32372769256](https://github.com/shotaro311/hover-pocket/actions/runs/32372769256) 成功。
 - PR Router: [32372766956](https://github.com/shotaro311/hover-pocket/actions/runs/32372766956) 成功。
-- 上記は追加review前head `77af78f`のreadbackである。追加修正headのWindows / macOS / 3OS contract CI、未解決thread 0件、mergeability、remote head一致を再確認して完了判定する。
+- 上記`323727...`は追加review前head `77af78f`の履歴であり、最終完了判定は先頭の`7ce9a68` readbackを正とする。
 
 ## 未完了 / 次のgate
 
