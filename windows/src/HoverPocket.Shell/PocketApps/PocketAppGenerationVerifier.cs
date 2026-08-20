@@ -187,9 +187,17 @@ internal sealed class PocketAppGenerationVerifier
                     "generation_runtime_enable_failure_remains_disabled");
             }
 
-            var reupdate = lifecycle.Stage(updateMaterialized.Directory);
-            var reupdateGrant = lifecycle.Approve(reupdate.RequestId, reupdate.BindingDigest);
-            _ = lifecycle.Install(reupdate, reupdateGrant);
+            var reupdateMaterialized = materializer.Materialize(updateEnvelope, updateRequest);
+            try
+            {
+                var reupdate = lifecycle.Stage(reupdateMaterialized.Directory);
+                var reupdateGrant = lifecycle.Approve(reupdate.RequestId, reupdate.BindingDigest);
+                _ = lifecycle.Install(reupdate, reupdateGrant);
+            }
+            finally
+            {
+                TryDeleteDraft(reupdateMaterialized.Directory);
+            }
             using (var failingRuntimeRollbackLifecycle = new PocketAppLifecycleManager(
                 root,
                 dataRoot,
@@ -787,12 +795,16 @@ internal sealed class PocketAppGenerationVerifier
                 "generation_corrupt_package_isolated_on_startup");
             var removed = await recoveredSettings.ProcessRawMessageAsync(
                 """{"id":"remove-corrupt","method":"pocketApps.removePreservingData","params":{"appId":"local.example.unrelated"}}""");
+            var removedResult = ResponseResult(removed);
+            var removedReceipt = removedResult.GetProperty("receipt");
             Require(
-                removed is not null
-                    && removed.Contains("\"appId\":\"local.example.unrelated\",\"state\":\"removed\"", StringComparison.Ordinal)
-                    && removed.Contains("\"readbackVerified\":true", StringComparison.Ordinal)
-                    && !removed.Contains("\"errorCode\":\"LIFECYCLE_PACKAGE_CORRUPT\"", StringComparison.Ordinal)
-                    && removed.Contains("\"appId\":\"local.example.selected\",\"state\":\"disabled\"", StringComparison.Ordinal),
+                removedReceipt.GetProperty("appId").GetString() == "local.example.unrelated"
+                    && removedReceipt.GetProperty("state").GetString() == "removed"
+                    && removedReceipt.GetProperty("readbackVerified").GetBoolean()
+                    && !removedResult.GetProperty("managementIssues").EnumerateArray().Any()
+                    && removedResult.GetProperty("managedApps").EnumerateArray().Any(item =>
+                        item.GetProperty("appId").GetString() == "local.example.selected"
+                        && item.GetProperty("state").GetString() == "disabled"),
                 "generation_corrupt_package_remove_preserves_healthy_management");
         }
         catch (Exception ex)
@@ -971,10 +983,13 @@ internal sealed class PocketAppGenerationVerifier
             allowFlush = true;
             var removed = await settings.ProcessRawMessageAsync(
                 """{"id":"flush-remove","method":"pocketApps.removePreservingData","params":{"appId":"local.example.flush"}}""");
+            var removedReceipt = ResponseResult(removed).GetProperty("receipt");
             Require(
                 flushCalls == 3
                     && releaseCalls == 3
-                    && removed?.Contains("\"appId\":\"local.example.flush\",\"state\":\"removed\"", StringComparison.Ordinal) == true,
+                    && removedReceipt.GetProperty("appId").GetString() == appId
+                    && removedReceipt.GetProperty("state").GetString() == "removed"
+                    && removedReceipt.GetProperty("readbackVerified").GetBoolean(),
                 "generation_remove_after_state_flush_readback");
         }
         catch (Exception ex)
@@ -995,6 +1010,22 @@ internal sealed class PocketAppGenerationVerifier
             try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
             try { if (Directory.Exists(draftRoot)) { Directory.Delete(draftRoot, true); } } catch { }
         }
+    }
+
+    private static JsonElement ResponseResult(string? response)
+    {
+        if (string.IsNullOrWhiteSpace(response))
+        {
+            throw new InvalidOperationException("fixture_response_missing");
+        }
+        using var document = JsonDocument.Parse(response);
+        var root = document.RootElement;
+        if (root.GetProperty("error").ValueKind != JsonValueKind.Null
+            || root.GetProperty("result").ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException("fixture_response_failed");
+        }
+        return root.GetProperty("result").Clone();
     }
 
     private void VerifyApprovalTextSanitization()
