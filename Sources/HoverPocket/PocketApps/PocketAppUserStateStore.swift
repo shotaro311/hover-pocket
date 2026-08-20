@@ -151,8 +151,8 @@ final class PocketAppUserStateStore {
                     needsRepair = true
                 }
             }
-            guard stateProperties.allSatisfy({ !$0.value.isRequired || state[$0.key] != nil }) else {
-                throw PocketAppUserStateStoreError.invalidDocument
+            if stateProperties.contains(where: { $0.value.isRequired && state[$0.key] == nil }) {
+                needsRepair = true
             }
             return (state, needsRepair)
         } catch let error as PocketAppUserStateStoreError {

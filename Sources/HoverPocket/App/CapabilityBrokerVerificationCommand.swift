@@ -729,17 +729,25 @@ enum CapabilityBrokerVerificationCommand {
             propertyTypes: ["focusDate": ["string"]],
             rootDirectory: stateRoot
         )
-        try optionalRequiredLoadStore.setValue(.string("2026-08-20"), for: "focusDate")
-        try optionalRequiredLoadStore.setValue(nil, for: "focusDate")
-        do {
-            _ = try PocketAppUserStateStore(
-                packageID: "local.example.required-load-state",
-                stateProperties: constrainedStateProperties,
-                rootDirectory: stateRoot
-            )
-            throw BrokerVerificationFailure("pocket_app_state_required_load_accepted")
-        } catch PocketAppUserStateStoreError.invalidDocument {
-        }
+        try optionalRequiredLoadStore.setValue(.string("not-a-date"), for: "focusDate")
+        let repairedRequiredStateStore = try PocketAppUserStateStore(
+            packageID: "local.example.required-load-state",
+            stateProperties: constrainedStateProperties,
+            rootDirectory: stateRoot
+        )
+        try require(
+            repairedRequiredStateStore.snapshot().isEmpty,
+            "pocket_app_state_invalid_required_value_repaired"
+        )
+        let repairedRequiredStateReadback = try PocketAppUserStateStore(
+            packageID: "local.example.required-load-state",
+            stateProperties: constrainedStateProperties,
+            rootDirectory: stateRoot
+        )
+        try require(
+            repairedRequiredStateReadback.snapshot().isEmpty,
+            "pocket_app_state_invalid_required_value_repair_persisted"
+        )
         let isolatedStateStore = try PocketAppUserStateStore(
             packageID: "local.example.state-isolated-a",
             allowedKeys: ["label"],

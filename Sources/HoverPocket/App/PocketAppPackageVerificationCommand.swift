@@ -61,6 +61,27 @@ enum PocketAppPackageVerificationCommand {
         }
 
         do {
+            try withPackage { root in
+                try mutateJSON(root.appendingPathComponent("surfaces/main.surface.json")) { surface in
+                    guard var rootNode = surface["root"] as? [String: Any],
+                          var children = rootNode["children"] as? [[String: Any]] else { return false }
+                    children[0]["value"] = "$5"
+                    rootNode["children"] = children
+                    surface["root"] = rootNode
+                    return true
+                }
+                let package = try runtime.load(directory: root)
+                require(
+                    package.surfaces["main"]?.root.children.first?.properties["value"] == .string("$5"),
+                    "surface_dollar_literal",
+                    failures: &failures
+                )
+            }
+        } catch {
+            failures.append("surface_dollar_literal:fixture:\(error)")
+        }
+
+        do {
             guard let resourceRoot = Bundle.module.resourceURL else {
                 throw PocketAppPackageError.invalid("$:bundle_resource")
             }

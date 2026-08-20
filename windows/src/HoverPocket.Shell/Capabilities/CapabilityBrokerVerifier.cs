@@ -622,20 +622,22 @@ internal sealed class CapabilityBrokerVerifier
             },
             stateRoot))
         {
-            optionalRequiredLoadStore.SetValue("focusDate", CapabilityJson.From("2026-08-20"));
-            optionalRequiredLoadStore.SetValue("focusDate", null);
+            optionalRequiredLoadStore.SetValue("focusDate", CapabilityJson.From("not-a-date"));
         }
-        try
-        {
-            using var requiredLoadStore = new PocketAppUserStateStore(
-                "local.example.required-load-state",
-                constrainedStateProperties,
-                stateRoot);
-            _failures.Add("pocket_app_state_required_load_accepted");
-        }
-        catch (PocketAppUserStateStoreException)
-        {
-        }
+        using var repairedRequiredStateStore = new PocketAppUserStateStore(
+            "local.example.required-load-state",
+            constrainedStateProperties,
+            stateRoot);
+        Require(
+            repairedRequiredStateStore.Snapshot().Count == 0,
+            "pocket_app_state_invalid_required_value_repaired");
+        using var repairedRequiredStateReadbackStore = new PocketAppUserStateStore(
+            "local.example.required-load-state",
+            constrainedStateProperties,
+            stateRoot);
+        Require(
+            repairedRequiredStateReadbackStore.Snapshot().Count == 0,
+            "pocket_app_state_invalid_required_value_repair_persisted");
         using var isolatedStateStore = new PocketAppUserStateStore(
             "local.example.state-isolated-a",
             new HashSet<string>(["label"], StringComparer.Ordinal),
