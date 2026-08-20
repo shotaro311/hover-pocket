@@ -1690,6 +1690,7 @@ def validate_pocket_surface(document: Mapping[str, Any], context: FixtureContext
 def validate_surface_workflow_input_bindings(
     surfaces: Mapping[str, Mapping[str, Any]],
     workflows: Mapping[str, Mapping[str, Any]],
+    state_schema: Mapping[str, Any],
 ) -> None:
     input_types: dict[str, str] = {}
     for workflow in workflows.values():
@@ -1711,16 +1712,42 @@ def validate_surface_workflow_input_bindings(
         ("calendarEventPicker", "titleTarget"): frozenset({"string"}),
         ("durationPicker", "value"): frozenset({"integer", "number"}),
     }
+    accepted_state: dict[tuple[str, str], frozenset[str]] = {
+        ("textField", "value"): frozenset({"string"}),
+        ("toggle", "value"): frozenset({"boolean"}),
+        ("picker", "value"): frozenset({"string"}),
+        ("calendarEventPicker", "selection"): frozenset({"string"}),
+        ("calendarEventPicker", "titleTarget"): frozenset({"string"}),
+        ("durationPicker", "value"): frozenset({"integer", "number"}),
+    }
+    state_types: dict[str, frozenset[str]] = {}
+    for name, property_schema in state_schema.get("properties", {}).items():
+        declared = property_schema.get("type")
+        state_types[name] = frozenset({declared} if isinstance(declared, str) else declared or [])
 
     def walk(node: Mapping[str, Any], location: str) -> None:
         node_type = node["type"]
         for property_name, binding in node.items():
-            if not isinstance(binding, str) or not binding.startswith("$input."):
+            if not isinstance(binding, str) or not binding.startswith(("$input.", "$state.")):
                 continue
-            accepted_types = accepted.get((node_type, property_name))
-            input_name = binding[len("$input."):]
-            declared_type = input_types.get(input_name)
-            if accepted_types is None or declared_type not in accepted_types:
+            if binding.startswith("$input."):
+                accepted_types = accepted.get((node_type, property_name))
+                input_name = binding[len("$input."):]
+                declared_type = input_types.get(input_name)
+                compatible = accepted_types is not None and declared_type in accepted_types
+            else:
+                accepted_types = accepted_state.get((node_type, property_name))
+                input_name = binding[len("$state."):]
+                declared_state_types = state_types.get(input_name, frozenset()) - {"null"}
+                compatible = (
+                    accepted_types is not None
+                    and bool(declared_state_types)
+                    and declared_state_types.issubset(accepted_types)
+                )
+                fallback_type = input_types.get(input_name)
+                if fallback_type is not None:
+                    compatible = compatible and fallback_type in accepted.get((node_type, property_name), frozenset())
+            if not compatible:
                 fail(
                     "WORKFLOW_INPUT_TYPE_MISMATCH",
                     f"{location}.{property_name}",
@@ -2287,6 +2314,12 @@ def load_fixture_support(context: FixtureContext, manifest: Mapping[str, Any]) -
         source = bindings.get(package_path)
         if source is None or load_json(context.fixture_dir / source, location=source) != workflows[workflow_id]:
             fail("APP_REFERENCE_INVALID", package_path, "manifest workflow is not bound to its validated fixture")
+    state_schema_path = reference_app["state"]["schema"]
+    state_schema_source = bindings.get(state_schema_path)
+    if state_schema_source is None:
+        fail("APP_REFERENCE_INVALID", state_schema_path, "manifest state schema is not bound to the reference package")
+    state_schema = load_json(context.fixture_dir / state_schema_source, location=state_schema_source)
+    validate_surface_workflow_input_bindings(surfaces, workflows, state_schema)
     return FixtureSupport(
         plans_by_id=plans,
         invocations_by_id=invocations,
@@ -2577,10 +2610,6 @@ def build_context(repo_root: Path) -> tuple[FixtureContext, Mapping[str, Any]]:
         validate_pocket_workflow(workflow, context)
     for surface in support.surfaces_by_id.values():
         validate_pocket_surface(surface, context)
-    validate_surface_workflow_input_bindings(
-        support.surfaces_by_id,
-        support.workflows_by_id,
-    )
     return context, manifest
 
 

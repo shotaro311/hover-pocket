@@ -48,7 +48,7 @@
 - 生成ProviderのSurface modelは表示ごとに新規生成し、再度開いたときにCalendar等のqueryを再取得できるようにする。Registryは生存中modelを弱参照で追跡し、disable / remove時はすべて無効化する回帰を追加した。
 - macOSの`$input`と`$state`を独立namespaceとして保持する。同じ名前のstateを更新しても一時入力を書き換えず、workflow準備時に入力を優先して不足分だけstateから解決する回帰を追加した。
 - Windowsでinstall / update / enable後のruntime activationが失敗してrouteを解除した場合も、失敗後management refreshに続けてHostのrefresh hookを発火し、開いているPanelへ`state.changed`を配信する。失敗回帰は通知が1回発行されることを確認する。
-- macOS / Windowsのpackage loaderはSurface controlが生成する値の型とworkflow宣言input型を照合する。text fieldへintegerを束縛する等の不整合packageと、複数workflow間の同名input型競合を導入前に拒否する。共通contract verifierにも同じcross-file意味検証を追加する。
+- macOS / Windowsのpackage loaderはSurface controlが生成する値の型をstate schemaとworkflow宣言inputの両方へ照合する。text fieldへintegerを束縛する場合、stateをworkflow inputへfallbackする際の型不一致、複数workflow間の同名input型競合を導入前に拒否する。共通contract verifierにも同じcross-file意味検証を追加する。
 - Windowsのstate束縛text fieldは入力を180msでdebounce保存し、`change`またはProvider切替時の`dispose`で保留値を即時flushする。同じstate keyへのwriteは順序を直列化し、changeを発火せず切り替えても値が保存されるrendered UI回帰へ変更する。
 
 ## 検証
