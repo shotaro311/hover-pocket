@@ -184,29 +184,11 @@ internal sealed class SettingsVerifier
         var enabled = UserSettingsStore.CreateDefault(registry.ProviderIds);
         enabled.AiNativeEnabled = true;
         store.Save(enabled);
-        var voiceCoordinator = new CodexVoiceCoordinator(featureEnabled: true);
-        voiceCoordinator.SetRootSessionId("root-private");
-        voiceCoordinator.AppendTranscript(new VoiceTranscriptEvent(
-            "event-private",
-            "user",
-            "settings-must-not-see-transcript",
-            true,
-            DateTimeOffset.UnixEpoch));
-        voiceCoordinator.UpsertSession(new AgentSessionSummary(
-            "root-private",
-            "root-private",
-            null,
-            "settings-must-not-see-session",
-            AgentSessionStatus.Running,
-            "settings-must-not-see-summary",
-            null,
-            DateTimeOffset.UnixEpoch));
         using var controller = new PanelBridgeController(
             registry,
             store,
             store.Load(registry.ProviderIds),
-            new InMemoryStartupRegistrationService(),
-            voiceCoordinator: voiceCoordinator);
+            new InMemoryStartupRegistrationService());
         var dispatcher = new BridgeDispatcher();
         using var attachment = controller.Attach(
             dispatcher,
@@ -280,11 +262,29 @@ internal sealed class SettingsVerifier
         var enabled = UserSettingsStore.CreateDefault(registry.ProviderIds);
         enabled.AiNativeEnabled = true;
         store.Save(enabled);
+        var voiceCoordinator = new CodexVoiceCoordinator(featureEnabled: true);
+        voiceCoordinator.SetRootSessionId("root-private");
+        voiceCoordinator.AppendTranscript(new VoiceTranscriptEvent(
+            "event-private",
+            "user",
+            "settings-must-not-see-transcript",
+            true,
+            DateTimeOffset.UnixEpoch));
+        voiceCoordinator.UpsertSession(new AgentSessionSummary(
+            "root-private",
+            "root-private",
+            null,
+            "settings-must-not-see-session",
+            AgentSessionStatus.Running,
+            "settings-must-not-see-summary",
+            null,
+            DateTimeOffset.UnixEpoch));
         using var controller = new PanelBridgeController(
             registry,
             store,
             store.Load(registry.ProviderIds),
-            new InMemoryStartupRegistrationService());
+            new InMemoryStartupRegistrationService(),
+            voiceCoordinator: voiceCoordinator);
         var settingsDispatcher = new BridgeDispatcher();
         using var settingsAttachment = controller.Attach(settingsDispatcher, BridgeSurface.Settings);
         var panelDispatcher = new BridgeDispatcher();

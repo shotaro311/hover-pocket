@@ -253,9 +253,10 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
                 }
                 using var document = JsonDocument.Parse(line);
                 var root = document.RootElement;
+                long id = 0;
                 var hasId = root.TryGetProperty("id", out var idElement)
                     && idElement.ValueKind == JsonValueKind.Number
-                    && idElement.TryGetInt64(out var id);
+                    && idElement.TryGetInt64(out id);
                 var hasMethod = root.TryGetProperty("method", out var methodElement)
                     && methodElement.ValueKind == JsonValueKind.String;
                 var method = hasMethod ? methodElement.GetString() ?? string.Empty : string.Empty;
