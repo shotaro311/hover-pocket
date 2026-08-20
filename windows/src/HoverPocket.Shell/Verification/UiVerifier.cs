@@ -218,6 +218,11 @@ internal sealed class UiVerifier
                     _failures.Add("pocket-surface: state transition did not keep the generated panel inert until release");
                 }
 
+                if (!result.PocketSurfaceFailedStateWriteRetriedOk)
+                {
+                    _failures.Add("pocket-surface: failed state write was not retained for the next flush");
+                }
+
                 if (!result.ProviderSurfaceIdentityRemountOk)
                 {
                     _failures.Add("provider: generated panel did not remount when its package identity changed");

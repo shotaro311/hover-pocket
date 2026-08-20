@@ -189,7 +189,7 @@ internal sealed class PanelWindow : NoActivateWindow
                 Promise.resolve(
                     typeof window.__hoverPocketFlushActiveProviderState === "function"
                         ? window.__hoverPocketFlushActiveProviderState({{appIdJson}})
-                        : true)
+                        : false)
                     .then((saved) => { window.__hoverPocketStateFlushResults[operationId] = saved !== false; })
                     .catch(() => { window.__hoverPocketStateFlushResults[operationId] = false; });
                 return true;
@@ -888,6 +888,7 @@ internal sealed record UiWebVerifyResult(
     bool PocketSurfacePurposeOk,
     bool PocketSurfaceStatePersistedOk,
     bool PocketSurfaceStateBoundControlsPersistedOk,
+    bool PocketSurfaceFailedStateWriteRetriedOk,
     bool PocketSurfaceStateWorkflowInputOk,
     bool PocketSurfaceApprovalHostOwnedOk,
     bool PocketSurfaceLayoutMatrixOk,
