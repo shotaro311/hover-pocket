@@ -235,13 +235,15 @@ internal sealed class PocketAppGenerationVerifier
                         && failingRuntimeRollbackLifecycle.ActivePackage(request.AppId) is null,
                     "generation_runtime_rollback_failure_disables_previous_version");
             }
+            var raceTarget = lifecycle.ManagedPackage(request.AppId)
+                ?? throw new InvalidOperationException("generation_race_target_missing");
             var installedIntent = Path.Combine(
                 root,
                 "Apps",
                 request.AppId,
                 "Versions",
-                VersionStorageKey(disabledAgain.Version!),
-                disabledAgain.PackageDigest!["sha256:".Length..],
+                VersionStorageKey(raceTarget.Version!),
+                raceTarget.PackageDigest!["sha256:".Length..],
                 "package",
                 "intent.md");
             var originalIntent = File.ReadAllBytes(installedIntent);
