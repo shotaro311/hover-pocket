@@ -209,6 +209,56 @@ class ReleaseReadbackTests(unittest.TestCase):
                 MODULE.Verifier(), release_value, checksums, feed, downloads
             )
 
+    def test_macos_download_readback_requires_both_manual_zip_copies(self):
+        appcast_data, checksum, feed_release, version_release = self.mac_fixture()
+        appcast = MODULE.parse_appcast(appcast_data, "shotaro311/hover-pocket")
+        zip_data = b"signed-notarized-app"
+
+        def downloaded(name):
+            return MODULE.DownloadedAsset(
+                name=name,
+                path=pathlib.Path(name),
+                size=len(zip_data),
+                sha256=MODULE.sha256(zip_data),
+                sha1=hashlib.sha1(zip_data).hexdigest(),
+            )
+
+        version_zip = downloaded(appcast.asset_name)
+        stable_manual_zip = downloaded("HoverPocket-macOS-app.zip")
+        version_manual_zip = downloaded("HoverPocket-macOS-app.zip")
+        verifier = MODULE.Verifier()
+        MODULE.require_macos_downloads(
+            verifier,
+            feed_release,
+            version_release,
+            appcast,
+            checksum,
+            version_zip,
+            stable_manual_zip,
+            version_manual_zip,
+        )
+        self.assertIn("macos.download.version_manual_zip.sha256", verifier.checks)
+        self.assertIn("macos.download.version_manual_zip_parity", verifier.checks)
+
+        mismatched_version_manual = MODULE.DownloadedAsset(
+            name="HoverPocket-macOS-app.zip",
+            path=pathlib.Path("HoverPocket-macOS-app.zip"),
+            size=len(zip_data),
+            sha256="0" * 64,
+            sha1=hashlib.sha1(zip_data).hexdigest(),
+        )
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.require_macos_downloads(
+                MODULE.Verifier(),
+                feed_release,
+                version_release,
+                appcast,
+                checksum,
+                version_zip,
+                stable_manual_zip,
+                mismatched_version_manual,
+            )
+
     def test_windows_release_discovery_uses_numeric_version_and_ignores_drafts(self):
         releases = [
             {"tag_name": "v9.0.0", "draft": False},

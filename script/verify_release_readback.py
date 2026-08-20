@@ -595,6 +595,59 @@ def require_windows_downloads(
     )
 
 
+def require_macos_downloads(
+    verifier: Verifier,
+    mac_feed_release: dict[str, Any],
+    mac_version_release: dict[str, Any],
+    appcast: MacAppcast,
+    checksum_data: bytes,
+    version_zip: DownloadedAsset,
+    stable_manual_zip: DownloadedAsset,
+    version_manual_zip: DownloadedAsset,
+) -> None:
+    require_download_matches_release(
+        verifier,
+        mac_version_release,
+        version_zip,
+        "macos.download.version_zip",
+    )
+    require_download_matches_release(
+        verifier,
+        mac_feed_release,
+        stable_manual_zip,
+        "macos.download.stable_manual_zip",
+    )
+    require_download_matches_release(
+        verifier,
+        mac_version_release,
+        version_manual_zip,
+        "macos.download.version_manual_zip",
+    )
+    mac_checksums = parse_sha256_sums(checksum_data, allow_path_basename=True)
+    verifier.require(
+        version_zip.sha256 == mac_checksums.get(appcast.asset_name),
+        "macos.download.zip_checksum",
+        "downloaded ZIP differs from checksum file",
+    )
+    verifier.require(
+        version_zip.size == appcast.asset_length,
+        "macos.download.zip_length",
+        "downloaded ZIP length differs from appcast",
+    )
+    verifier.require(
+        (stable_manual_zip.sha256, stable_manual_zip.size)
+        == (version_zip.sha256, version_zip.size),
+        "macos.download.stable_manual_zip_parity",
+        "stable manual ZIP differs from versioned Sparkle ZIP",
+    )
+    verifier.require(
+        (version_manual_zip.sha256, version_manual_zip.size)
+        == (version_zip.sha256, version_zip.size),
+        "macos.download.version_manual_zip_parity",
+        "versioned manual ZIP differs from versioned Sparkle ZIP",
+    )
+
+
 def verify_downloaded_releases(
     verifier: Verifier,
     reader: GitHubReader,
@@ -619,34 +672,20 @@ def verify_downloaded_releases(
             "HoverPocket-macOS-app.zip",
             root / "mac-feed",
         )
-        require_download_matches_release(
-            verifier,
+        mac_version_manual_zip = reader.download_asset(
             mac_version_release,
-            mac_version_zip,
-            "macos.download.version_zip",
+            "HoverPocket-macOS-app.zip",
+            root / "mac-version-manual",
         )
-        require_download_matches_release(
+        require_macos_downloads(
             verifier,
             mac_feed_release,
+            mac_version_release,
+            appcast,
+            mac_checksum_data,
+            mac_version_zip,
             mac_manual_zip,
-            "macos.download.manual_zip",
-        )
-        mac_checksums = parse_sha256_sums(mac_checksum_data, allow_path_basename=True)
-        verifier.require(
-            mac_version_zip.sha256 == mac_checksums.get(appcast.asset_name),
-            "macos.download.zip_checksum",
-            "downloaded ZIP differs from checksum file",
-        )
-        verifier.require(
-            mac_version_zip.size == appcast.asset_length,
-            "macos.download.zip_length",
-            "downloaded ZIP length differs from appcast",
-        )
-        verifier.require(
-            (mac_manual_zip.sha256, mac_manual_zip.size)
-            == (mac_version_zip.sha256, mac_version_zip.size),
-            "macos.download.manual_zip_parity",
-            "stable manual ZIP differs from versioned ZIP",
+            mac_version_manual_zip,
         )
         verify_ed25519_signature(
             sparkle_public_key,

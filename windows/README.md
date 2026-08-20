@@ -104,7 +104,7 @@ MacまたはCIからは、Windows releaseだけでなくmacOS appcastが変わ�
 python3 script/verify_release_readback.py --windows-tag auto --windows-signing-gate beta
 ```
 
-1.0正式版では`Verify Published Release Readback` workflowを`formal`で手動実行します。`release-manifest.win.json`の`authenticode=signed-timestamped-verified`に加え、Windows上で公開SetupとPortable内`HoverPocket.Shell.exe`の実Authenticode署名、タイムスタンプ、署名者一致が揃わない限り配布完了にしません。
+1.0正式版では`Verify Published Release Readback` workflowを`formal`で手動実行します。`release-manifest.win.json`の`authenticode=signed-timestamped-verified`に加え、Windows上で公開Setup、Portable内`HoverPocket.Shell.exe`、Velopack full update package内`HoverPocket.Shell.exe`の実Authenticode署名、タイムスタンプ、署名者一致が揃わない限り配布完了にしません。
 
 ## Local privacy notes
 
