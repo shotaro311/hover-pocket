@@ -233,6 +233,11 @@ internal sealed class UiVerifier
                     _failures.Add("pocket-surface: failed state write was not retained for the next flush");
                 }
 
+                if (!result.PocketSurfaceWorkflowBlockedOnStateWriteFailureOk)
+                {
+                    _failures.Add("pocket-surface: workflow started before pending state was durably saved");
+                }
+
                 if (!result.ProviderSurfaceIdentityRemountOk)
                 {
                     _failures.Add("provider: generated panel did not remount when its package identity changed");

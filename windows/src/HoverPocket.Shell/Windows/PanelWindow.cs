@@ -915,6 +915,7 @@ internal sealed record UiWebVerifyResult(
     bool PocketSurfaceStatePersistedOk,
     bool PocketSurfaceStateBoundControlsPersistedOk,
     bool PocketSurfaceFailedStateWriteRetriedOk,
+    bool PocketSurfaceWorkflowBlockedOnStateWriteFailureOk,
     bool PocketSurfaceStateWorkflowInputOk,
     bool PocketSurfaceApprovalHostOwnedOk,
     bool PocketSurfaceLayoutMatrixOk,

@@ -1117,6 +1117,7 @@ window.__hoverPocketVerify = {
       pocketSurfaceStatePersistedOk: pocketSurfaceVerify.statePersisted,
       pocketSurfaceStateBoundControlsPersistedOk: pocketSurfaceVerify.stateBoundControlsPersisted,
       pocketSurfaceFailedStateWriteRetriedOk: pocketSurfaceVerify.failedStateWriteRetried,
+      pocketSurfaceWorkflowBlockedOnStateWriteFailureOk: pocketSurfaceVerify.workflowBlockedOnStateWriteFailure,
       pocketSurfaceStateWorkflowInputOk: pocketSurfaceVerify.stateWorkflowInputForwarded,
       pocketSurfaceApprovalHostOwnedOk: pocketSurfaceVerify.approvalHostOwned,
       pocketSurfaceLayoutMatrixOk: pocketSurfaceVerify.layoutMatrix,
