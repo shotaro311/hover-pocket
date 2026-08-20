@@ -210,7 +210,6 @@ internal sealed class CodexVoiceCapabilityRuntime : ICodexVoiceDynamicToolRuntim
             .Take(MaximumReturnedEvents)
             .Select(item => new
             {
-                eventRef = RequiredOutputString(item, "eventRef", 256),
                 safeTitle = TodayFocusApprovalText.Sanitize(
                     RequiredOutputString(item, "safeTitle", 160)),
                 start = RequiredOutputString(item, "start", 64),

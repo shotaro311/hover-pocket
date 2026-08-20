@@ -45,6 +45,7 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly PocketAppRuntimeActivationRegistry? _generatedPocketApps;
     private readonly CodexVoiceCoordinator _voiceCoordinator;
     private readonly VoiceTimerApprovalCoordinator _voiceTimerApprovalCoordinator = new();
+    private readonly SemaphoreSlim _voiceSettingsTransitionGate = new(1, 1);
     private readonly Dictionary<BridgeDispatcher, BridgeSurface> _dispatchers = [];
     private readonly AsyncLocal<BridgeSurface?> _requestSurface = new();
     private readonly object _previewFrameSync = new();
@@ -1016,16 +1017,24 @@ internal sealed class PanelBridgeController : IDisposable
 
     private async Task<object?> SetVoiceEnabledAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
-        var enabled = ReadRequiredBool(parameters, "enabled");
-        if (CurrentSettings.VoiceEnabled != enabled)
+        await _voiceSettingsTransitionGate.WaitAsync(cancellationToken);
+        try
         {
-            var updated = CurrentSettings.Clone();
-            updated.VoiceEnabled = enabled;
-            _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(updated);
-            SaveSettings(updated);
+            var enabled = ReadRequiredBool(parameters, "enabled");
+            if (CurrentSettings.VoiceEnabled != enabled)
+            {
+                var updated = CurrentSettings.Clone();
+                updated.VoiceEnabled = enabled;
+                _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(updated);
+                SaveSettings(updated);
+            }
+            await _voiceCoordinator.SetFeatureEnabledAsync(enabled, cancellationToken);
+            return await PublishStateAsync(cancellationToken);
         }
-        await _voiceCoordinator.SetFeatureEnabledAsync(enabled, cancellationToken);
-        return await PublishStateAsync(cancellationToken);
+        finally
+        {
+            _voiceSettingsTransitionGate.Release();
+        }
     }
 
     private async Task<object?> SetVoiceLayoutAsync(JsonElement? parameters, CancellationToken cancellationToken)
@@ -1047,29 +1056,47 @@ internal sealed class PanelBridgeController : IDisposable
         Func<bool>? approvalDecision,
         CancellationToken cancellationToken)
     {
-        var enabled = ReadRequiredBool(parameters, "enabled");
-        cancellationToken.ThrowIfCancellationRequested();
-        if (enabled
-            && !CurrentSettings.VoiceCalendarAccessGranted
-            && !ApproveVoiceCalendarAccess(approvalOwner, approvalDecision))
+        await _voiceSettingsTransitionGate.WaitAsync(cancellationToken);
+        try
         {
-            return await PublishStateAsync(cancellationToken);
-        }
-        if (CurrentSettings.VoiceCalendarAccessGranted == enabled)
-        {
-            return await PublishStateAsync(cancellationToken);
-        }
+            var enabled = ReadRequiredBool(parameters, "enabled");
+            cancellationToken.ThrowIfCancellationRequested();
+            if (enabled
+                && !CurrentSettings.VoiceCalendarAccessGranted
+                && !ApproveVoiceCalendarAccess(approvalOwner, approvalDecision))
+            {
+                return await PublishStateAsync(cancellationToken);
+            }
+            if (CurrentSettings.VoiceCalendarAccessGranted == enabled)
+            {
+                return await PublishStateAsync(cancellationToken);
+            }
 
-        var voiceWasEnabled = CurrentSettings.VoiceEnabled;
-        var updated = CurrentSettings.Clone();
-        updated.VoiceCalendarAccessGranted = enabled;
-        SaveSettings(updated);
-        if (voiceWasEnabled)
-        {
-            await _voiceCoordinator.SetFeatureEnabledAsync(false, cancellationToken);
-            await _voiceCoordinator.SetFeatureEnabledAsync(true, cancellationToken);
+            var voiceWasEnabled = CurrentSettings.VoiceEnabled;
+            var stoppedForRevocation = false;
+            if (!enabled && voiceWasEnabled)
+            {
+                await _voiceCoordinator.SetFeatureEnabledAsync(false, CancellationToken.None);
+                stoppedForRevocation = true;
+            }
+
+            var updated = CurrentSettings.Clone();
+            updated.VoiceCalendarAccessGranted = enabled;
+            SaveSettings(updated);
+            if (voiceWasEnabled)
+            {
+                if (!stoppedForRevocation)
+                {
+                    await _voiceCoordinator.SetFeatureEnabledAsync(false, cancellationToken);
+                }
+                await _voiceCoordinator.SetFeatureEnabledAsync(true, cancellationToken);
+            }
+            return await PublishStateAsync(cancellationToken);
         }
-        return await PublishStateAsync(cancellationToken);
+        finally
+        {
+            _voiceSettingsTransitionGate.Release();
+        }
     }
 
     private bool ApproveVoiceCalendarAccess(

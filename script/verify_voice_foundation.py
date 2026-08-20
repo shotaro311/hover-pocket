@@ -290,6 +290,25 @@ def main() -> None:
             or 'settings.setVoiceCalendarAccess' not in windows_settings_js \
             or 'voiceCalendarAccessGranted' not in bridge:
         fail("Windows Voice Calendar Host grant controls missing")
+    if 'private readonly SemaphoreSlim _voiceSettingsTransitionGate = new(1, 1);' not in bridge \
+            or bridge.count('await _voiceSettingsTransitionGate.WaitAsync') != 2:
+        fail("Windows Voice enable and Calendar grant transitions are not serialized by the Host")
+    calendar_transition = bridge[
+        bridge.find("private async Task<object?> SetVoiceCalendarAccessAsync"):
+        bridge.find("private bool ApproveVoiceCalendarAccess")
+    ]
+    revoke_stop = calendar_transition.find(
+        "await _voiceCoordinator.SetFeatureEnabledAsync(false, CancellationToken.None)")
+    grant_save = calendar_transition.find("SaveSettings(updated)")
+    if revoke_stop < 0 or grant_save < 0 or revoke_stop >= grant_save:
+        fail("Windows Voice Calendar revoke does not stop active work before persistence")
+    calendar_response_start = windows_dynamic_tools.find("var safeEvents = events.EnumerateArray()")
+    calendar_response_end = windows_dynamic_tools.find(
+        "private async Task<CodexVoiceDynamicToolResponse> StartTimerAsync")
+    calendar_response = windows_dynamic_tools[calendar_response_start:calendar_response_end]
+    if calendar_response_start < 0 or calendar_response_end <= calendar_response_start \
+            or "eventRef =" in calendar_response:
+        fail("Windows Voice Calendar response exposes a Provider identifier to Codex")
     if "new AiLaneVerifier().Run()" not in windows_app or "new VoiceFoundationVerifier().Run()" not in windows_app:
         fail("Windows legacy and Voice verifiers are not separate")
     if 'verifyTarget, "voice"' not in windows_options:
@@ -549,10 +568,12 @@ def main() -> None:
             "repeatedCallExecutesOnce",
             "calendarTitlesAreUntrustedData",
             "calendarGrantIsPersistedAndRevocable",
+            "voiceSettingsTransitionsSerialized",
             "timerApprovalSingleFlight",
             "timerPromptRateLimitedBeforePresentation",
             "productionFailsClosedWithoutPositiveToolPolicy",
-    )) or not all(capability_fixture["outOfScope"].values()):
+    )) or capability_boundaries["calendarResultIncludesProviderIdentifiers"] \
+            or not all(capability_fixture["outOfScope"].values()):
         fail("AN3-B2 safety boundary or remaining scope is incomplete")
     if "voiceTransportContractOk" not in app_js \
             or "voiceWebRtcHarnessOk" not in app_js \

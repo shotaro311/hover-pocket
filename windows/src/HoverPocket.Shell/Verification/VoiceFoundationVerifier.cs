@@ -392,9 +392,11 @@ internal sealed class VoiceFoundationVerifier
                 || calendarDataSource.ListCalls != 1
                 || calendarPayload.RootElement.GetProperty("events").GetArrayLength() != 1
                 || calendarPayload.RootElement.GetProperty("events")[0]
+                    .TryGetProperty("eventRef", out _)
+                || calendarPayload.RootElement.GetProperty("events")[0]
                     .GetProperty("safeTitle").GetString() != "Team review ignored")
             {
-                _failures.Add("Host-granted Voice Calendar read did not use the Broker without per-call approval");
+                _failures.Add("Host-granted Voice Calendar read leaked identifiers or bypassed the Broker contract");
             }
 
             var crossRoot = await runtime.ExecuteAsync(
