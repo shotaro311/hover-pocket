@@ -8,7 +8,7 @@ namespace HoverPocket.Shell.Voice;
 internal sealed class WindowsProcessJob : IDisposable
 {
     private const uint JobObjectLimitKillOnJobClose = 0x00002000;
-    private const int JobObjectExtendedLimitInformation = 9;
+    private const int JobObjectExtendedLimitInformationClass = 9;
     private readonly SafeFileHandle _handle;
     private int _disposed;
 
@@ -38,7 +38,7 @@ internal sealed class WindowsProcessJob : IDisposable
         };
         if (!SetInformationJobObject(
                 handle,
-                JobObjectExtendedLimitInformation,
+                JobObjectExtendedLimitInformationClass,
                 ref information,
                 (uint)Marshal.SizeOf<JobObjectExtendedLimitInformation>()))
         {
