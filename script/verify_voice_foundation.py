@@ -233,6 +233,11 @@ def main() -> None:
         fail("Windows Settings bridge can receive Voice transcript/session state")
     if "voiceLocalizationOk" not in app_js or 't("voiceMicrophoneUnavailable")' not in app_js:
         fail("Windows rendered Voice UI does not verify Japanese and English localized copy")
+    if 't("voiceRegionLabel")' not in app_js \
+            or 'voiceRegionLabel: "音声レーン"' not in (
+                ROOT / "windows" / "ui" / "js" / "i18n.js"
+            ).read_text(encoding="utf-8"):
+        fail("Windows Voice accessibility region label is not localized")
     if "ReadBoundedLineAsync" not in windows_client or ".ReadLineAsync(" in windows_client:
         fail("Windows app-server response allocation is not bounded before newline parsing")
     if "MaxLineBytes" not in windows_client or "utf8ByteCount" not in windows_client:

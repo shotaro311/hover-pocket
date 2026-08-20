@@ -442,6 +442,7 @@ function providerRenderKey(state) {
 
 function renderVoiceLane(state) {
   voiceLaneEl.replaceChildren();
+  voiceLaneEl.setAttribute("aria-label", t("voiceRegionLabel"));
   const lane = state.voiceLane;
   const mode = lane?.mode ?? "disabled";
   voiceLaneEl.hidden = !state.settings.voiceEnabled || mode === "disabled";
@@ -1059,14 +1060,19 @@ window.__hoverPocketVerify = {
       }],
     };
     setLanguage("ja");
-    voiceLaneEl.replaceChildren();
-    renderCompactVoiceLane(voiceFixture);
-    const japaneseCompactOk = voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "利用可能 · 承認待ち"
+    renderVoiceLane({
+      settings: { voiceEnabled: true },
+      voiceLane: { ...voiceFixture, mode: "compact" },
+    });
+    const japaneseCompactOk = voiceLaneEl.getAttribute("aria-label") === "音声レーン"
+      && voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "利用可能 · 承認待ち"
       && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "音声接続はAN3-Aではまだ利用できません。"
       && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "音声機能の有効化まではマイクを利用できません"
       && voiceLaneEl.querySelector(".hp-voice-session-count")?.getAttribute("aria-label") === "セッション 1件";
-    voiceLaneEl.replaceChildren();
-    renderExpandedVoiceLane(voiceFixture);
+    renderVoiceLane({
+      settings: { voiceEnabled: true },
+      voiceLane: { ...voiceFixture, mode: "expanded" },
+    });
     const japaneseExpandedOk = voiceLaneEl.querySelector(".hp-voice-transcript-event")?.textContent === "あなた: 予定を確認して"
       && voiceLaneEl.querySelector(".hp-voice-session-card span")?.textContent?.startsWith("ユーザー操作待ち · 更新 ")
       && voiceLaneEl.querySelector("progress")?.getAttribute("aria-label") === "1 / 2 完了";
@@ -1076,14 +1082,19 @@ window.__hoverPocketVerify = {
       safeErrorCode: "signed_out",
     }) === "サインインが必要";
     setLanguage("en");
-    voiceLaneEl.replaceChildren();
-    renderCompactVoiceLane(voiceFixture);
-    const englishCompactOk = voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "Ready · Waiting for approval"
+    renderVoiceLane({
+      settings: { voiceEnabled: true },
+      voiceLane: { ...voiceFixture, mode: "compact" },
+    });
+    const englishCompactOk = voiceLaneEl.getAttribute("aria-label") === "Voice Lane"
+      && voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "Ready · Waiting for approval"
       && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "Voice transport is unavailable in AN3-A."
       && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "Microphone unavailable until Voice runtime activation"
       && voiceLaneEl.querySelector(".hp-voice-session-count")?.getAttribute("aria-label") === "1 sessions";
-    voiceLaneEl.replaceChildren();
-    renderExpandedVoiceLane(voiceFixture);
+    renderVoiceLane({
+      settings: { voiceEnabled: true },
+      voiceLane: { ...voiceFixture, mode: "expanded" },
+    });
     const englishExpandedOk = voiceLaneEl.querySelector(".hp-voice-transcript-event")?.textContent === "You: 予定を確認して"
       && voiceLaneEl.querySelector(".hp-voice-session-card span")?.textContent?.startsWith("Waiting for user · updated ")
       && voiceLaneEl.querySelector("progress")?.getAttribute("aria-label") === "1 of 2 complete";
