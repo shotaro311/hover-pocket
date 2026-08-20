@@ -162,11 +162,13 @@ struct PocketAppPackageRuntime {
         }
         for surface in surfaces.values {
             var boundNames: Set<String> = []
+            var pickerDomains: [String: Set<String>] = [:]
             try validateBindings(
                 node: surface.root,
                 inputTypes: workflowInputTypes,
                 stateTypes: statePropertyTypes,
                 boundNames: &boundNames,
+                pickerDomains: &pickerDomains,
                 path: "$.surfaces.\(surface.id).root"
             )
             try validateSurfaceScopes(node: surface.root, requestedScopes: requestedScopes, path: "$.surfaces.\(surface.id).root")
@@ -461,6 +463,7 @@ struct PocketAppPackageRuntime {
         inputTypes: [String: String],
         stateTypes: [String: Set<String>],
         boundNames: inout Set<String>,
+        pickerDomains: inout [String: Set<String>],
         path: String
     ) throws {
         for (key, value) in node.properties {
@@ -501,11 +504,35 @@ struct PocketAppPackageRuntime {
                 } else {
                     throw PocketAppPackageError.invalid("\(path).\(key):binding")
                 }
+                if node.type == "picker", key == "value" {
+                    let domain = pickerDomain(node)
+                    if let existing = pickerDomains[binding] {
+                        try require(existing == domain, "\(path).\(key):picker_domain_conflict")
+                    } else {
+                        pickerDomains[binding] = domain
+                    }
+                }
             }
         }
         for (index, child) in node.children.enumerated() {
-            try validateBindings(node: child, inputTypes: inputTypes, stateTypes: stateTypes, boundNames: &boundNames, path: "\(path).children[\(index)]")
+            try validateBindings(
+                node: child,
+                inputTypes: inputTypes,
+                stateTypes: stateTypes,
+                boundNames: &boundNames,
+                pickerDomains: &pickerDomains,
+                path: "\(path).children[\(index)]"
+            )
         }
+    }
+
+    private func pickerDomain(_ node: PocketSurfaceRenderNode) -> Set<String> {
+        guard case .array(let options)? = node.properties["options"] else { return [] }
+        return Set(options.compactMap { option in
+            guard case .object(let properties) = option,
+                  case .string(let value)? = properties["value"] else { return nil }
+            return value
+        })
     }
 
     private func acceptedWorkflowInputTypes(nodeType: String, propertyName: String) -> Set<String>? {
@@ -548,8 +575,6 @@ struct PocketAppPackageRuntime {
             return ["string"]
         case ("calendarEventPicker", "selection"), ("calendarEventPicker", "titleTarget"):
             return ["string"]
-        case ("durationPicker", "value"):
-            return ["integer", "number"]
         default:
             return nil
         }

@@ -1725,7 +1725,6 @@ def validate_surface_workflow_input_bindings(
         ("picker", "value"): frozenset({"string"}),
         ("calendarEventPicker", "selection"): frozenset({"string"}),
         ("calendarEventPicker", "titleTarget"): frozenset({"string"}),
-        ("durationPicker", "value"): frozenset({"integer", "number"}),
     }
     state_types: dict[str, frozenset[str]] = {}
     for name, property_schema in state_schema.get("properties", {}).items():
@@ -1775,6 +1774,24 @@ def validate_surface_workflow_input_bindings(
     for surface_id, surface in surfaces.items():
         bound_inputs: set[str] = set()
         referenced_workflows: set[str] = set()
+        picker_domains: dict[str, frozenset[str]] = {}
+
+        def validate_picker_domains(node: Mapping[str, Any], location: str) -> None:
+            if node["type"] == "picker":
+                binding = node["value"]
+                domain = frozenset(option["value"] for option in node["options"])
+                existing = picker_domains.get(binding)
+                if existing is not None and existing != domain:
+                    fail(
+                        "APP_REFERENCE_INVALID",
+                        f"{location}.value",
+                        "pickers sharing one binding must declare the same option domain",
+                    )
+                picker_domains[binding] = domain
+            for index, child in enumerate(node.get("children", [])):
+                validate_picker_domains(child, f"{location}.children[{index}]")
+
+        validate_picker_domains(surface["root"], f"$.surfaces.{surface_id}.root")
         walk(surface["root"], f"$.surfaces.{surface_id}.root", bound_inputs, referenced_workflows)
         for workflow_id in referenced_workflows:
             missing_inputs = set(workflows[workflow_id]["inputs"]) - bound_inputs
