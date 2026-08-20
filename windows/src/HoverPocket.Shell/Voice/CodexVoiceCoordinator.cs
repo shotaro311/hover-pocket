@@ -706,21 +706,41 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         {
             await previous.DisposeAsync().ConfigureAwait(false);
         }
+        if (!TryPublishReady(candidate, generation))
+        {
+            DetachClientIfCurrent(candidate);
+            await DisposeDetachedClientAsync(candidate).ConfigureAwait(false);
+        }
+    }
+
+    private bool TryPublishReady(CodexAppServerClient candidate, int generation)
+    {
+        CodexVoiceSnapshot ready;
         lock (_sync)
         {
+            if (!_featureEnabled
+                || _disposed
+                || generation != _generation
+                || !ReferenceEquals(_client, candidate))
+            {
+                return false;
+            }
             _restartAttempt = 0;
+            _snapshot = ProjectSnapshotLocked(_snapshot) with
+            {
+                Availability = CodexVoiceAvailability.Ready,
+                SessionStatus = CodexVoiceSessionStatus.Idle,
+                Activity = VoiceActivity.Idle,
+                Muted = true,
+                TransportAttached = true,
+                AppServerProcessId = candidate.ProcessId,
+                LastErrorCode = null,
+                RestartAttempt = 0
+            };
+            ready = _snapshot;
         }
-        UpdateSnapshot(snapshot => snapshot with
-        {
-            Availability = CodexVoiceAvailability.Ready,
-            SessionStatus = CodexVoiceSessionStatus.Idle,
-            Activity = VoiceActivity.Idle,
-            Muted = true,
-            TransportAttached = true,
-            AppServerProcessId = candidate.ProcessId,
-            LastErrorCode = null,
-            RestartAttempt = 0
-        });
+        PublishOutsideLock(ready);
+        return true;
     }
 
     private void OnServerRequestReceived(object? sender, CodexAppServerRequest request)

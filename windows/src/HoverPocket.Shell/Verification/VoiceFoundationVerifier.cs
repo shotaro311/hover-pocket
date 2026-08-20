@@ -47,6 +47,7 @@ internal sealed class VoiceFoundationVerifier
         await RunCaseAsync("unexpected-request", VerifyUnexpectedRequestFailsClosedAsync, timeout.Token);
         await RunCaseAsync("initialize-request", VerifyInitializeRequestCannotBePromotedAsync, timeout.Token);
         await RunCaseAsync("disconnect-before-promotion", VerifyDisconnectBeforePromotionAsync, timeout.Token);
+        await RunCaseAsync("disconnect-during-promotion", VerifyDisconnectDuringPromotionAsync, timeout.Token);
         await RunCaseAsync("restart", VerifyRestartIsBoundedAsync, timeout.Token);
         await RunCaseAsync("failed-initialize-cleanup", VerifyFailedInitializeDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("disable-inflight-cleanup", VerifyDisableDisposesInFlightCandidateAsync, timeout.Token);
@@ -317,6 +318,38 @@ internal sealed class VoiceFoundationVerifier
             || coordinator.Snapshot.AppServerProcessId is not null)
         {
             _failures.Add("a disconnected startup candidate was promoted to ready");
+        }
+    }
+
+    private async Task VerifyDisconnectDuringPromotionAsync(CancellationToken cancellationToken)
+    {
+        var previousHarness = new GatedDisposeHarness();
+        var replacementHarness = new AppServerHarness();
+        var factoryCalls = 0;
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ => Task.FromResult(
+                Interlocked.Increment(ref factoryCalls) == 1
+                    ? previousHarness.CreateClient()
+                    : replacementHarness.CreateClient()),
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: []);
+
+        await coordinator.InitializeAsync(cancellationToken);
+        var replacementStart = coordinator.InitializeAsync(cancellationToken);
+        await previousHarness.DisposeStarted.WaitAsync(cancellationToken);
+        replacementHarness.Close();
+        await WaitUntilAsync(
+            () => coordinator.Snapshot.SessionStatus == CodexVoiceSessionStatus.BlockedFailure,
+            cancellationToken);
+        previousHarness.ReleaseDispose();
+        await replacementStart;
+
+        if (coordinator.Snapshot.Availability == CodexVoiceAvailability.Ready
+            || coordinator.Snapshot.TransportAttached
+            || coordinator.Snapshot.AppServerProcessId is not null)
+        {
+            _failures.Add("a disconnected promoted candidate overwrote the failed state with ready");
         }
     }
 
@@ -729,6 +762,31 @@ internal sealed class VoiceFoundationVerifier
         }
 
         public void Close() => _reader.Dispose();
+    }
+
+    private sealed class GatedDisposeHarness
+    {
+        private readonly ChannelLineReader _reader = new();
+        private readonly TaskCompletionSource<bool> _disposeStarted = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _releaseDispose = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task DisposeStarted => _disposeStarted.Task;
+
+        public CodexAppServerClient CreateClient() =>
+            CodexAppServerClient.AttachForTesting(
+                _reader,
+                new AutoReplyWriter(_reader, requestDuringInitialize: false, disconnectAfterInitialize: false),
+                TimeSpan.FromSeconds(1),
+                async () =>
+                {
+                    _disposeStarted.TrySetResult(true);
+                    await _releaseDispose.Task.ConfigureAwait(false);
+                    _reader.Dispose();
+                });
+
+        public void ReleaseDispose() => _releaseDispose.TrySetResult(true);
     }
 
     private sealed class ChannelLineReader : TextReader
