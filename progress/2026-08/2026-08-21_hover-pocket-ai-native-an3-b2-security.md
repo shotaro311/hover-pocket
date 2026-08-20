@@ -65,12 +65,19 @@ pr: 22
 - source head `9705fe0`への主要修正Security scan `7e463a78-a2b0-4305-849e-f1418c495949`は15 / 15 review itemを完了し、reportable finding 0件でsealed completeとなった。
 - 初回Windows CIはWPFの`Color` / `Brushes`型名衝突だけで失敗した。権限・承認・実行ロジックを変えず`WpfMedia`型へ明示したcommit `057d090`をpushした。
 - compile-only差分 `9705fe0...057d090`のSecurity scan `ef74ba38-38cd-4df9-8fc7-a813566d1dac`は1 / 1 review itemを完了し、reportable finding 0件でsealed completeとなった。
-- final source head `057d090`でWindows [32404277682](https://github.com/shotaro311/hover-pocket/actions/runs/32404277682)、macOS [32404277834](https://github.com/shotaro311/hover-pocket/actions/runs/32404277834)、3OS contract / compare [32404277647](https://github.com/shotaro311/hover-pocket/actions/runs/32404277647)、PR Router [32404274868](https://github.com/shotaro311/hover-pocket/actions/runs/32404274868)がすべて成功した。
+- final source head `8e8a064`でWindows [32406234638](https://github.com/shotaro311/hover-pocket/actions/runs/32406234638)、macOS [32406234704](https://github.com/shotaro311/hover-pocket/actions/runs/32406234704)、3OS contract / compare [32406234731](https://github.com/shotaro311/hover-pocket/actions/runs/32406234731)、PR Router [32406231112](https://github.com/shotaro311/hover-pocket/actions/runs/32406231112)がすべて成功した。WindowsはRelease build、Voice、Settings、Broker、rendered WebView UIを含む全stepが成功した。
 - PR #22はDraft、`MERGEABLE / CLEAN`、remote head一致、未解決review thread 0件である。
-- 本番解禁前の防御強化として、Codexへ返すCalendar `eventRef`の削除 / 仮名化またはnative consentへの明記と、Voice enable / Calendar grant設定transitionのHost側直列化を残す。現headはpositive Broker-only tool policy gateでapp-server開始前に停止するため、現在のproduction sinkには到達しない。
+
+## Pre-activation hardening
+
+- Codexへ返すCalendar結果からProvider内部`eventRef`を除去し、予定名・開始・終了だけをbounded / sanitized responseにした。内部Broker readbackではeventRefを維持するが、モデル境界へは渡さない。
+- Voice有効化とCalendar grant変更を同じHost semaphoreで直列化した。権限取消時は設定保存より先にactive Voiceを`CancellationToken.None`で停止し、保存失敗時も旧Calendar tool処理を継続させない。
+- `an3-b2-windows-capability-fixture.json`、Python契約、Windows native verifierへ、Provider識別子非送信、Host直列化、revoke-before-saveを固定した。ローカルでVoice contract 42件、Pocket contract 13 schema / 60 fixture、`git diff --check`が成功した。
+- exact差分 `c6d7069...8e8a064`のSecurity scan `c5d44635-05a9-4081-9236-65937fbb289e`は5 / 5 review item、coverage complete、reportable finding 0件でsealed completeとなった。
+- PR readbackはDraft、`MERGEABLE / CLEAN`、remote parity `0 / 0`、未解決review thread・review・commentはいずれも0件である。
 
 ## 残りの受け入れゲート
 
 - 新規Codex reviewが追加された場合は、内容を確認して同じreadback gateを再実行する。
-- 上記2件のpre-activation hardeningを、official positive Broker-only tool policy解禁commitより先に実装する。
+- Core Integration Gateの残差をlive監査し、公式positive Broker-only tool policyまたはBrokerだけを公開する専用最小runtimeの採否と受け入れ証拠を確定する。
 - 実Codex Voice E2Eは正のBroker-only tool policyが公式に提供・検証されるまで実行せず、Draftを維持する。
