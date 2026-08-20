@@ -12,6 +12,7 @@ internal sealed class PocketAppGenerationController : IDisposable
     private readonly PocketAppPinnedDirectory[] _pins;
     private readonly Action? _postCommitHook;
     private readonly Action? _postRefreshHook;
+    private Func<string, CancellationToken, Task<bool>>? _beforeDeactivate;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateSync = new();
     private PocketAppGenerationPhase _phase = PocketAppGenerationPhase.Idle;
@@ -71,6 +72,11 @@ internal sealed class PocketAppGenerationController : IDisposable
         {
             try { _lifecycle.Reject(pending.RequestId, pending.BindingDigest); } catch { }
         }
+    }
+
+    public void SetBeforeDeactivate(Func<string, CancellationToken, Task<bool>>? beforeDeactivate)
+    {
+        _beforeDeactivate = beforeDeactivate;
     }
 
     public void AttachSettings(
@@ -391,6 +397,10 @@ internal sealed class PocketAppGenerationController : IDisposable
                     throw Failure("GENERATION_PACKAGE_INVALID");
                 }
             }
+            if (!await FlushBeforeDeactivateAsync(packageId, cancellationToken))
+            {
+                return Fail("GENERATION_STATE_FLUSH_FAILED");
+            }
             var receipt = _lifecycle.Disable(packageId);
             if (!receipt.ReadbackVerified || receipt.State != PocketAppLifecycleState.Disabled)
             {
@@ -461,6 +471,10 @@ internal sealed class PocketAppGenerationController : IDisposable
             ValidatePins();
             RefreshManagedPackages();
             RejectPendingProposalIfNeeded(packageId);
+            if (!await FlushBeforeDeactivateAsync(packageId, cancellationToken))
+            {
+                return Fail("GENERATION_STATE_FLUSH_FAILED");
+            }
             var receipt = _lifecycle.Remove(packageId, PocketAppDataDisposition.Preserve);
             if (!receipt.ReadbackVerified
                 || receipt.State != PocketAppLifecycleState.Removed
@@ -709,6 +723,26 @@ internal sealed class PocketAppGenerationController : IDisposable
         }
         catch
         {
+        }
+    }
+
+    private async Task<bool> FlushBeforeDeactivateAsync(
+        string packageId,
+        CancellationToken cancellationToken)
+    {
+        var flush = _beforeDeactivate;
+        if (flush is null) { return true; }
+        try
+        {
+            return await flush(packageId, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
         }
     }
 

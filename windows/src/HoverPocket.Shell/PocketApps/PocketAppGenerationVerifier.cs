@@ -16,6 +16,7 @@ internal sealed class PocketAppGenerationVerifier
         VerifyFailedActivationRefreshesManagement().GetAwaiter().GetResult();
         VerifyCommittedReceiptSurvivesManagedRefreshFailure().GetAwaiter().GetResult();
         VerifyUnrelatedActionPreservesPendingProposal().GetAwaiter().GetResult();
+        VerifyDeactivateFlushBoundary().GetAwaiter().GetResult();
         VerifyApprovalTextSanitization();
         return _failures;
     }
@@ -833,6 +834,92 @@ internal sealed class PocketAppGenerationVerifier
         catch (Exception ex)
         {
             _failures.Add($"generation_pending_preservation:{ex.GetType().Name}:{ex.Message}");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    PocketAppVerifierFileSystem.MakeTreeMutable(root);
+                    Directory.Delete(root, true);
+                }
+            }
+            catch { }
+            try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
+            try { if (Directory.Exists(draftRoot)) { Directory.Delete(draftRoot, true); } } catch { }
+        }
+    }
+
+    private async Task VerifyDeactivateFlushBoundary()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-flush-host-{Guid.NewGuid():N}");
+        var dataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-flush-data-{Guid.NewGuid():N}");
+        var draftRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-flush-draft-{Guid.NewGuid():N}");
+        const string appId = "local.example.flush";
+        try
+        {
+            Directory.CreateDirectory(draftRoot);
+            var adapter = new FixturePocketAppGenerationAdapter(FixtureRoot());
+            var materializer = new PocketAppGenerationMaterializer(draftRoot);
+            var request = MakeRequest(
+                "generation-flush-v1",
+                "Create a focus app whose state must be flushed before deactivation.",
+                appId,
+                "1.0.0",
+                "today-focus");
+            using (var lifecycle = new PocketAppLifecycleManager(root, dataRoot))
+            {
+                _ = InstallFixture(request, adapter, materializer, lifecycle);
+            }
+
+            var allowFlush = true;
+            var flushCalls = 0;
+            var flushCompleted = false;
+            using var controller = new PocketAppGenerationController(root, dataRoot, draftRoot, null);
+            controller.SetBeforeDeactivate(async (targetAppId, cancellationToken) =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await Task.Yield();
+                flushCalls += 1;
+                flushCompleted = string.Equals(targetAppId, appId, StringComparison.Ordinal);
+                return allowFlush;
+            });
+            var settings = new HoverPocket.Shell.Bridge.BridgeDispatcher();
+            controller.AttachSettings(settings, approvalDecision: _ => true);
+
+            var disabled = await settings.ProcessRawMessageAsync(
+                """{"id":"flush-disable","method":"pocketApps.disable","params":{"appId":"local.example.flush"}}""");
+            Require(
+                flushCompleted
+                    && flushCalls == 1
+                    && disabled?.Contains("\"phase\":\"disabled\"", StringComparison.Ordinal) == true,
+                "generation_disable_awaits_state_flush");
+
+            _ = await settings.ProcessRawMessageAsync(
+                """{"id":"flush-enable","method":"pocketApps.enable","params":{"appId":"local.example.flush"}}""");
+            allowFlush = false;
+            flushCompleted = false;
+            var blocked = await settings.ProcessRawMessageAsync(
+                """{"id":"flush-remove-blocked","method":"pocketApps.removePreservingData","params":{"appId":"local.example.flush"}}""");
+            Require(
+                flushCalls == 2
+                    && flushCompleted
+                    && blocked?.Contains("GENERATION_STATE_FLUSH_FAILED", StringComparison.Ordinal) == true
+                    && blocked.Contains("\"appId\":\"local.example.flush\",\"state\":\"enabled\"", StringComparison.Ordinal),
+                "generation_remove_blocked_when_state_flush_fails");
+
+            allowFlush = true;
+            var removed = await settings.ProcessRawMessageAsync(
+                """{"id":"flush-remove","method":"pocketApps.removePreservingData","params":{"appId":"local.example.flush"}}""");
+            Require(
+                flushCalls == 3
+                    && removed?.Contains("\"appId\":\"local.example.flush\",\"state\":\"removed\"", StringComparison.Ordinal) == true,
+                "generation_remove_after_state_flush_readback");
+        }
+        catch (Exception ex)
+        {
+            _failures.Add($"generation_deactivate_flush:{ex.GetType().Name}:{ex.Message}");
         }
         finally
         {

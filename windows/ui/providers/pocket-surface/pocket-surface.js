@@ -21,6 +21,7 @@ export function renderPocketSurfaceProvider(context) {
   const textStateTimers = new Map();
   const statePersistenceTails = new Map();
   let disposed = false;
+  let stateFlushTask = null;
   initializeState(surface.initialState, state);
   initializeDefaults(surface.renderModel.root, inputs, state);
   draw();
@@ -41,7 +42,7 @@ export function renderPocketSurfaceProvider(context) {
       const stateUpdates = initializeQuerySelections(surface.renderModel.root, inputs, state, queryResults);
       draw();
       for (const update of stateUpdates) {
-        await persistState(update.binding, update.value);
+        await persistBoundState(update.binding, update.value);
       }
     } catch {
       setHostStatus("今日の予定を読み込めませんでした。", "error");
@@ -156,9 +157,9 @@ export function renderPocketSurfaceProvider(context) {
         return label;
       }
       case "picker":
-        return pickerNode(node, inputs, state, refreshButtons, persistState);
+        return pickerNode(node, inputs, state, refreshButtons, persistBoundState);
       case "calendarEventPicker":
-        return calendarPickerNode(node, inputs, state, queryResults, refreshButtons, persistState);
+        return calendarPickerNode(node, inputs, state, queryResults, refreshButtons, persistBoundState);
       case "durationPicker":
         return durationNode(node, inputs, state);
       case "status":
@@ -252,12 +253,25 @@ export function renderPocketSurfaceProvider(context) {
     return results.every((result) => result !== false);
   }
 
+  function flushPendingState() {
+    if (stateFlushTask) return stateFlushTask;
+    const wasInert = root.inert;
+    root.inert = true;
+    stateFlushTask = flushPendingTextState().finally(() => {
+      stateFlushTask = null;
+      if (!disposed) root.inert = wasInert;
+    });
+    return stateFlushTask;
+  }
+
   return {
     refresh: load,
+    flushPendingState,
     async dispose() {
-      const saved = await flushPendingTextState();
+      const saved = await flushPendingState();
       if (!saved) return false;
       disposed = true;
+      root.inert = true;
       return true;
     },
   };
@@ -599,9 +613,11 @@ export async function runPocketSurfaceUiVerify() {
           && persistedState.get("secondaryEventRef") === "event:jst",
         approvalHostOwned: !host.querySelector("[data-approval], .hp-pocket-approval"),
       };
+      const flushed = await provider?.flushPendingState?.();
       const disposalSaved = await provider?.dispose?.();
       await nextLayout();
-      stateBoundControlsPersisted ||= disposalSaved !== false
+      stateBoundControlsPersisted ||= flushed !== false
+        && disposalSaved !== false
         && persistedState.get("note") === "After"
         && persistedState.get("enabled") === true
         && persistedState.get("mode") === "active";

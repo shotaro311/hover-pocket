@@ -47,6 +47,7 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly Dictionary<BridgeDispatcher, BridgeSurface> _dispatchers = [];
     private readonly AsyncLocal<BridgeSurface?> _requestSurface = new();
     private readonly object _previewFrameSync = new();
+    private Func<string, CancellationToken, Task<bool>>? _pocketAppStateFlush;
     private string _selectedProviderId;
     private MediaPreviewFrame? _pendingPreviewFrame;
     private bool _previewPostScheduled;
@@ -435,6 +436,12 @@ internal sealed class PanelBridgeController : IDisposable
         };
     }
 
+    public void SetPocketAppStateFlush(Func<string, CancellationToken, Task<bool>>? flush)
+    {
+        _pocketAppStateFlush = flush;
+        _pocketAppGenerationController?.SetBeforeDeactivate(flush);
+    }
+
     private Task<object?> RoutePocketAppLoadAsync(
         JsonElement? parameters,
         CancellationToken cancellationToken) =>
@@ -734,6 +741,10 @@ internal sealed class PanelBridgeController : IDisposable
         }
         if (!enabled)
         {
+            if (!await FlushSelectedPocketAppStateAsync(cancellationToken))
+            {
+                return await PublishStateAsync(cancellationToken);
+            }
             _aiNativeExecutionLease?.Invalidate();
             _pocketAppGenerationController?.SetEnabled(false);
             _generatedPocketApps?.SetEnabled(false);
@@ -799,6 +810,10 @@ internal sealed class PanelBridgeController : IDisposable
     private async Task<object?> ResetDefaultsAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         _ = parameters;
+        if (!await FlushSelectedPocketAppStateAsync(cancellationToken))
+        {
+            return await PublishStateAsync(cancellationToken);
+        }
         _startupRegistration.SetRegistered(false);
         _aiNativeExecutionLease?.Invalidate();
         _pocketAppGenerationController?.SetEnabled(false);
@@ -1276,6 +1291,26 @@ internal sealed class PanelBridgeController : IDisposable
     private PocketSurfaceRegistry.Route? SelectedGeneratedRoute() =>
         _generatedPocketApps?.SurfaceRegistry.Routes.FirstOrDefault(
             route => string.Equals(route.ProviderId, _selectedProviderId, StringComparison.OrdinalIgnoreCase));
+
+    private async Task<bool> FlushSelectedPocketAppStateAsync(CancellationToken cancellationToken)
+    {
+        var appId = string.Equals(_selectedProviderId, "today-focus", StringComparison.OrdinalIgnoreCase)
+            ? _pocketAppHostController?.AppId
+            : SelectedGeneratedRoute()?.AppId;
+        if (appId is null || _pocketAppStateFlush is null) { return true; }
+        try
+        {
+            return await _pocketAppStateFlush(appId, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     private static object? DeserializeObject(JsonElement? parameters)
     {

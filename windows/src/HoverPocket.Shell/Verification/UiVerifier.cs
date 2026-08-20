@@ -198,6 +198,21 @@ internal sealed class UiVerifier
                     _failures.Add("provider: switch continued after the active provider failed to flush pending state");
                 }
 
+                if (!result.ProviderRerenderCleanupAwaitedOk)
+                {
+                    _failures.Add("provider: rerender replaced the active provider before pending state was flushed");
+                }
+
+                if (!result.ProviderRerenderBlockedOnSaveFailureOk)
+                {
+                    _failures.Add("provider: rerender replaced the active provider after pending state flush failed");
+                }
+
+                if (!result.ProviderHostStateFlushOk)
+                {
+                    _failures.Add("provider: Host state flush was not scoped to the active Pocket App");
+                }
+
                 if (!result.SettingsWriteOk)
                 {
                     _failures.Add($"settings: panel size write failed for {result.ProbePanelSize}");

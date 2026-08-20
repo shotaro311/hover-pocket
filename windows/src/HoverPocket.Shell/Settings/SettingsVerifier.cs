@@ -61,6 +61,7 @@ internal sealed class SettingsVerifier
         VerifyWebViewSecurityPolicy();
         await VerifyPocketAppBridgeSurfaceIsolationAsync(registry);
         await VerifyGeneratedProviderLifecyclePublicationAsync(registry);
+        await VerifyAiNativeDisableFlushBoundaryAsync(registry);
         var defaultState = await Send(dispatcher, """{"id":"0","method":"app.getState"}""");
         if (!defaultState.Contains("\"aiNativeEnabled\":false", StringComparison.Ordinal)
             || !defaultState.Contains("\"pocketAppGeneration\":null", StringComparison.Ordinal)
@@ -199,6 +200,45 @@ internal sealed class SettingsVerifier
             || !reenabled.Contains("\"enabled\":false", StringComparison.Ordinal))
         {
             _failures.Add("settings reset did not revoke AI-native runtimes until restart");
+        }
+    }
+
+    private async Task VerifyAiNativeDisableFlushBoundaryAsync(ProviderRegistry registry)
+    {
+        var store = UserSettingsStore.CreateTemporary("SettingsAiNativeFlushVerify");
+        var enabled = UserSettingsStore.CreateDefault(registry.ProviderIds);
+        enabled.AiNativeEnabled = true;
+        store.Save(enabled);
+        using var controller = new PanelBridgeController(
+            registry,
+            store,
+            store.Load(registry.ProviderIds),
+            new InMemoryStartupRegistrationService());
+        await controller.SelectProviderFromShellAsync("today-focus");
+        var allowFlush = false;
+        var flushCalls = 0;
+        controller.SetPocketAppStateFlush((appId, cancellationToken) =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            flushCalls += 1;
+            return Task.FromResult(allowFlush && !string.IsNullOrWhiteSpace(appId));
+        });
+        var dispatcher = new BridgeDispatcher();
+        using var attachment = controller.Attach(dispatcher, BridgeSurface.Settings);
+
+        var blocked = await Send(
+            dispatcher,
+            """{"id":"ai-flush-blocked","method":"settings.setAiNativeEnabled","params":{"enabled":false}}""");
+        allowFlush = true;
+        var disabled = await Send(
+            dispatcher,
+            """{"id":"ai-flush-disabled","method":"settings.setAiNativeEnabled","params":{"enabled":false}}""");
+        if (flushCalls != 2
+            || !blocked.Contains("\"aiNativeEnabled\":true", StringComparison.Ordinal)
+            || !disabled.Contains("\"aiNativeEnabled\":false", StringComparison.Ordinal)
+            || store.ReloadOrDefault(registry.ProviderIds).AiNativeEnabled)
+        {
+            _failures.Add("AI-native disable did not await and honor the active Pocket App state flush");
         }
     }
 

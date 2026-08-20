@@ -158,6 +158,79 @@ internal sealed class PanelWindow : NoActivateWindow
         return false;
     }
 
+    public async Task<bool> FlushPocketAppStateAsync(
+        string appId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            return await Dispatcher.InvokeAsync(
+                () => FlushPocketAppStateAsync(appId, cancellationToken)).Task.Unwrap();
+        }
+        if (_closed || _initializationTask is null)
+        {
+            return true;
+        }
+
+        await _initializationTask;
+        if (_webView?.CoreWebView2 is null)
+        {
+            return true;
+        }
+
+        var operationId = Guid.NewGuid().ToString("N");
+        var operationJson = JsonSerializer.Serialize(operationId, BridgeJson.Options);
+        var appIdJson = JsonSerializer.Serialize(appId, BridgeJson.Options);
+        var startScript = $$"""
+            (() => {
+                const operationId = {{operationJson}};
+                window.__hoverPocketStateFlushResults ??= Object.create(null);
+                window.__hoverPocketStateFlushResults[operationId] = null;
+                Promise.resolve(
+                    typeof window.__hoverPocketFlushActiveProviderState === "function"
+                        ? window.__hoverPocketFlushActiveProviderState({{appIdJson}})
+                        : true)
+                    .then((saved) => { window.__hoverPocketStateFlushResults[operationId] = saved !== false; })
+                    .catch(() => { window.__hoverPocketStateFlushResults[operationId] = false; });
+                return true;
+            })()
+            """;
+        try
+        {
+            _ = await _webView.ExecuteScriptAsync(startScript);
+            var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var result = await _webView.ExecuteScriptAsync(
+                    $"window.__hoverPocketStateFlushResults?.[{operationJson}] ?? null");
+                if (result.Equals("true", StringComparison.OrdinalIgnoreCase)) { return true; }
+                if (result.Equals("false", StringComparison.OrdinalIgnoreCase)) { return false; }
+                await Task.Delay(50, cancellationToken);
+            }
+            return false;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            try
+            {
+                _ = await _webView.ExecuteScriptAsync(
+                    $"delete window.__hoverPocketStateFlushResults?.[{operationJson}]");
+            }
+            catch
+            {
+            }
+        }
+    }
+
     public async Task<UiWebVerifyResult?> RunWebVerifyScriptAsync()
     {
         await EnsureWebViewInitializedAsync();
@@ -793,6 +866,9 @@ internal sealed record UiWebVerifyResult(
     bool ProviderSwitchOk,
     bool ProviderSwitchCleanupAwaitedOk,
     bool ProviderSwitchBlockedOnSaveFailureOk,
+    bool ProviderRerenderCleanupAwaitedOk,
+    bool ProviderRerenderBlockedOnSaveFailureOk,
+    bool ProviderHostStateFlushOk,
     bool SettingsWriteOk,
     string OriginalProvider,
     string SwitchedProvider,
