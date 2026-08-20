@@ -82,6 +82,19 @@ struct VoiceSessionSummary: Identifiable, Equatable, Codable, Sendable {
         }
         self.updatedAt = updatedAt
     }
+
+    func sanitized() -> VoiceSessionSummary {
+        VoiceSessionSummary(
+            sessionID: sessionID,
+            rootSessionID: rootSessionID,
+            parentSessionID: parentSessionID,
+            title: title,
+            status: status,
+            safeSummary: safeSummary,
+            progress: progress,
+            updatedAt: updatedAt
+        )
+    }
 }
 
 struct VoiceTranscriptEvent: Identifiable, Equatable, Codable, Sendable {
@@ -112,6 +125,17 @@ struct VoiceTranscriptEvent: Identifiable, Equatable, Codable, Sendable {
         self.text = VoiceTextSafety.sanitizeVisibleText(text, limit: 1_024)
         self.isFinal = isFinal
         self.timestamp = timestamp
+    }
+
+    func sanitized() -> VoiceTranscriptEvent {
+        VoiceTranscriptEvent(
+            id: id,
+            rootSessionID: rootSessionID,
+            role: role,
+            text: text,
+            isFinal: isFinal,
+            timestamp: timestamp
+        )
     }
 }
 
@@ -233,8 +257,16 @@ struct VoiceTranscriptBuffer: Sendable {
     private(set) var events: [VoiceTranscriptEvent] = []
 
     mutating func append(_ event: VoiceTranscriptEvent) {
-        guard !event.id.isEmpty, !event.rootSessionID.isEmpty else { return }
-        events.append(event)
+        let sanitized = event.sanitized()
+        guard !sanitized.id.isEmpty, !sanitized.rootSessionID.isEmpty else { return }
+        if let existingIndex = events.firstIndex(where: { $0.id == sanitized.id }) {
+            if events[existingIndex].isFinal, !sanitized.isFinal {
+                return
+            }
+            events[existingIndex] = sanitized
+        } else {
+            events.append(sanitized)
+        }
         if events.count > Self.maxEvents {
             events.removeFirst(events.count - Self.maxEvents)
         }
@@ -552,8 +584,9 @@ final class VoiceLaneRuntime: ObservableObject {
 
     func appendTranscript(_ event: VoiceTranscriptEvent) {
         guard featureEnabled else { return }
-        guard let rootSessionID, event.rootSessionID == rootSessionID else { return }
-        transcriptBuffer.append(event)
+        let sanitized = event.sanitized()
+        guard let rootSessionID, sanitized.rootSessionID == rootSessionID else { return }
+        transcriptBuffer.append(sanitized)
         publish()
     }
 
@@ -572,11 +605,12 @@ final class VoiceLaneRuntime: ObservableObject {
 
     func upsertSession(_ summary: VoiceSessionSummary) {
         guard featureEnabled else { return }
-        guard !summary.sessionID.isEmpty, !summary.rootSessionID.isEmpty else { return }
-        if let rootSessionID, summary.rootSessionID != rootSessionID {
+        let sanitized = summary.sanitized()
+        guard !sanitized.sessionID.isEmpty, !sanitized.rootSessionID.isEmpty else { return }
+        if let rootSessionID, sanitized.rootSessionID != rootSessionID {
             return
         }
-        allSessions[summary.sessionID] = summary
+        allSessions[sanitized.sessionID] = sanitized
         if allSessions.count > Self.maxRetainedSessions {
             let overflow = allSessions.values
                 .sorted {

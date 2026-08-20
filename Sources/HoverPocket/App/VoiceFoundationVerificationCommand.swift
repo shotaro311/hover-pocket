@@ -4,11 +4,37 @@ enum VoiceFoundationVerificationError: Error {
     case failed(String)
 }
 
+private struct UnsafeDecodedTranscriptFixture: Codable {
+    let id: String
+    let rootSessionID: String
+    let role: String
+    let text: String
+    let isFinal: Bool
+    let timestamp: Date
+}
+
+private struct UnsafeDecodedSessionProgressFixture: Codable {
+    let completed: Int
+    let total: Int
+}
+
+private struct UnsafeDecodedSessionFixture: Codable {
+    let sessionID: String
+    let rootSessionID: String
+    let parentSessionID: String?
+    let title: String
+    let status: String
+    let safeSummary: String?
+    let progress: UnsafeDecodedSessionProgressFixture?
+    let updatedAt: Date
+}
+
 @MainActor
 enum VoiceFoundationVerificationCommand {
     static func run() async throws {
         try verifyGeometryAndScope()
         try verifyTranscriptBoundsAndRedaction()
+        try await verifyDecodedModelsAreResanitized()
         try verifyLocalization()
         try await verifyDefaultOffAndFakeAdapter()
         try await verifyAppLifetimeDetachAndRestart()
@@ -229,6 +255,98 @@ enum VoiceFoundationVerificationCommand {
         else {
             throw VoiceFoundationVerificationError.failed("voice_localization")
         }
+    }
+
+    private static func verifyDecodedModelsAreResanitized() async throws {
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+        let now = Date(timeIntervalSince1970: 0)
+        var buffer = VoiceTranscriptBuffer()
+        let decodedEvent = try decoder.decode(
+            VoiceTranscriptEvent.self,
+            from: encoder.encode(UnsafeDecodedTranscriptFixture(
+                id: "decoded-event",
+                rootSessionID: "root-a",
+                role: "assistant",
+                text: "[/Users/alice/private]",
+                isFinal: false,
+                timestamp: now
+            ))
+        )
+        buffer.append(decodedEvent)
+        guard buffer.events.count == 1,
+              buffer.events[0].text == "[redacted]"
+        else {
+            throw VoiceFoundationVerificationError.failed("decoded_transcript_resanitized")
+        }
+        buffer.append(VoiceTranscriptEvent(
+            id: "decoded-event",
+            rootSessionID: "root-a",
+            role: .assistant,
+            text: "final revision",
+            isFinal: true,
+            timestamp: now.addingTimeInterval(1)
+        ))
+        buffer.append(VoiceTranscriptEvent(
+            id: "decoded-event",
+            rootSessionID: "root-a",
+            role: .assistant,
+            text: "late interim",
+            isFinal: false,
+            timestamp: now.addingTimeInterval(2)
+        ))
+        let invalidDecodedEvent = try decoder.decode(
+            VoiceTranscriptEvent.self,
+            from: encoder.encode(UnsafeDecodedTranscriptFixture(
+                id: "invalid/event",
+                rootSessionID: "root-a",
+                role: "assistant",
+                text: "must not render",
+                isFinal: true,
+                timestamp: now
+            ))
+        )
+        buffer.append(invalidDecodedEvent)
+        guard buffer.events.count == 1,
+              buffer.events[0].id == "decoded-event",
+              buffer.events[0].text == "final revision",
+              buffer.events[0].isFinal
+        else {
+            throw VoiceFoundationVerificationError.failed("transcript_revision_identity")
+        }
+
+        let decodedSession = try decoder.decode(
+            VoiceSessionSummary.self,
+            from: encoder.encode(UnsafeDecodedSessionFixture(
+                sessionID: "decoded-session",
+                rootSessionID: "root-a",
+                parentSessionID: "invalid/parent",
+                title: "[/Users/alice/private]",
+                status: "running",
+                safeSummary: "token=secret",
+                progress: UnsafeDecodedSessionProgressFixture(completed: -1, total: 0),
+                updatedAt: now
+            ))
+        )
+        let runtime = VoiceLaneRuntime()
+        await runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            adapterFactory: nil
+        ).value
+        runtime.setRootSessionID("root-a")
+        runtime.upsertSession(decodedSession)
+        let session = runtime.snapshot.sessions.first
+        guard runtime.snapshot.sessions.count == 1,
+              session?.sessionID == "decoded-session",
+              session?.parentSessionID == nil,
+              session?.title == "[redacted]",
+              session?.safeSummary == "[redacted]",
+              session?.progress == nil
+        else {
+            throw VoiceFoundationVerificationError.failed("decoded_session_resanitized")
+        }
+        await runtime.shutdown()
     }
 
     private static func verifyDefaultOffAndFakeAdapter() async throws {

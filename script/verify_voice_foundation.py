@@ -329,12 +329,20 @@ def main() -> None:
             ).read_text(encoding="utf-8"):
         fail("Voice session identifiers can collide after lossy normalization")
     if "string RootSessionId" not in windows_coordinator \
-            or "event.rootSessionID == rootSessionID" not in mac_runtime \
-            or "delayed transcript crossed the active root session boundary" not in windows_verifier \
+            or "sanitized.rootSessionID == rootSessionID" not in mac_runtime \
+            or "delayed transcript crossed roots or a transcript revision duplicated its event ID" not in windows_verifier \
             or "delayed_transcript_root_isolation" not in (
                 ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
             ).read_text(encoding="utf-8"):
         fail("Voice transcript events are not bound to the active root session")
+    if "func sanitized() -> VoiceTranscriptEvent" not in mac_runtime \
+            or "func sanitized() -> VoiceSessionSummary" not in mac_runtime \
+            or "events.firstIndex(where:" not in mac_runtime \
+            or "_events.FindIndex" not in windows_coordinator \
+            or "decoded_session_resanitized" not in (
+                ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
+            ).read_text(encoding="utf-8"):
+        fail("Voice decoded models are not re-sanitized or transcript revisions are not deduplicated")
     if "expansionBlocked" not in app_js:
         fail("Windows compact fallback does not report why Expanded is unavailable")
     if 'waiting_for_approval: "voiceActivityWaitingForApproval"' not in app_js \

@@ -851,10 +851,15 @@ internal sealed class VoiceFoundationVerifier
             "delayed-root-a", "root-a", "assistant", "must not cross roots", true, now.AddSeconds(200)));
         coordinator.AppendTranscript(new VoiceTranscriptEvent(
             "current-root-b", "root-b", "assistant", "current root", true, now.AddSeconds(201)));
+        coordinator.AppendTranscript(new VoiceTranscriptEvent(
+            "current-root-b", "root-b", "assistant", "final revision", true, now.AddSeconds(202)));
+        coordinator.AppendTranscript(new VoiceTranscriptEvent(
+            "current-root-b", "root-b", "assistant", "late interim", false, now.AddSeconds(203)));
         if (coordinator.Snapshot.Transcript.Count != 1
-            || coordinator.Snapshot.Transcript[0].Id != "current-root-b")
+            || coordinator.Snapshot.Transcript[0].Id != "current-root-b"
+            || coordinator.Snapshot.Transcript[0].Text != "final revision")
         {
-            _failures.Add("delayed transcript crossed the active root session boundary");
+            _failures.Add("delayed transcript crossed roots or a transcript revision duplicated its event ID");
         }
 
         var absolutePaths = new[]

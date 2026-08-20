@@ -258,7 +258,20 @@ internal sealed class VoiceTranscriptBuffer
         {
             return;
         }
-        _events.Add(sanitized);
+        var existingIndex = _events.FindIndex(item =>
+            string.Equals(item.Id, sanitized.Id, StringComparison.Ordinal));
+        if (existingIndex >= 0)
+        {
+            if (_events[existingIndex].IsFinal && !sanitized.IsFinal)
+            {
+                return;
+            }
+            _events[existingIndex] = sanitized;
+        }
+        else
+        {
+            _events.Add(sanitized);
+        }
         if (_events.Count > MaxEvents)
         {
             _events.RemoveRange(0, _events.Count - MaxEvents);
