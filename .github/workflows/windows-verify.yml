@@ -5,11 +5,15 @@ on:
     branches: ["main"]
     paths:
       - "windows/**"
+      - "contracts/voice/**"
+      - "script/verify_voice_foundation.py"
       - ".github/workflows/windows-verify.yml"
   pull_request:
     paths:
       - "windows/**"
       - "contracts/pocket/v1/**"
+      - "contracts/voice/**"
+      - "script/verify_voice_foundation.py"
       - ".github/workflows/windows-verify.yml"
   workflow_dispatch:
 
@@ -36,8 +40,10 @@ jobs:
 
       - name: Verify settings UI modules
         run: |
+          node --check .\windows\ui\js\app.js
           node --check .\windows\ui\settings\settings.js
           node .\windows\script\verify_settings_generation_target.mjs
+          python .\script\verify_voice_foundation.py
 
       - name: Verify timer model and bridge
         run: |
@@ -46,6 +52,9 @@ jobs:
           dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify pocket-surface
           dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify timer
           dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify ui-model
+          dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify settings
+          dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify ailane
+          dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify voice
           dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify updater
 
       - name: Verify rendered WebView UI

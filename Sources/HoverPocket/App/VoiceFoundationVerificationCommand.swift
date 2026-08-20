@@ -1,0 +1,213 @@
+import Foundation
+
+enum VoiceFoundationVerificationError: Error {
+    case failed(String)
+}
+
+@MainActor
+enum VoiceFoundationVerificationCommand {
+    static func run() async throws {
+        try verifyGeometryAndScope()
+        try verifyTranscriptBoundsAndRedaction()
+        try await verifyDefaultOffAndFakeAdapter()
+        try await verifyAppLifetimeDetachAndRestart()
+    }
+
+    private static func verifyGeometryAndScope() throws {
+        let sizes = ["small", "medium", "large", "extraLarge"]
+        let expectedExpanded: [String: Double] = [
+            "small": 190,
+            "medium": 220,
+            "large": 250,
+            "extraLarge": 280
+        ]
+        for size in sizes {
+            guard VoiceLaneGeometry.height(enabled: false, preference: .compact, panelSizeRawValue: size) == 0,
+                  VoiceLaneGeometry.height(enabled: true, preference: .compact, panelSizeRawValue: size) == 64,
+                  VoiceLaneGeometry.height(enabled: true, preference: .expanded, panelSizeRawValue: size) == expectedExpanded[size]
+            else {
+                throw VoiceFoundationVerificationError.failed("geometry_\(size)")
+            }
+        }
+
+        let baseline = PanelGeometry.previewSize(panelSize: .medium)
+        let compact = PanelGeometry.previewSize(
+            panelSize: .medium,
+            additionalHeight: CGFloat(VoiceLaneGeometry.compactHeight)
+        )
+        let expanded = PanelGeometry.previewSize(
+            panelSize: .medium,
+            additionalHeight: CGFloat(VoiceLaneGeometry.expandedHeight(panelSizeRawValue: "medium"))
+        )
+        guard compact.width == baseline.width,
+              expanded.width == baseline.width,
+              compact.height == baseline.height + 64,
+              expanded.height == baseline.height + 220
+        else {
+            throw VoiceFoundationVerificationError.failed("window_downward_expansion")
+        }
+
+        let now = Date(timeIntervalSince1970: 0)
+        let sessions = [
+            VoiceSessionSummary(
+                sessionID: "root-a",
+                rootSessionID: "root-a",
+                title: "Root",
+                status: .running,
+                updatedAt: now
+            ),
+            VoiceSessionSummary(
+                sessionID: "child-a",
+                rootSessionID: "root-a",
+                parentSessionID: "root-a",
+                title: "Child",
+                status: .running,
+                updatedAt: now.addingTimeInterval(1)
+            ),
+            VoiceSessionSummary(
+                sessionID: "grandchild-a",
+                rootSessionID: "root-a",
+                parentSessionID: "child-a",
+                title: "Descendant",
+                status: .running,
+                updatedAt: now.addingTimeInterval(2)
+            ),
+            VoiceSessionSummary(
+                sessionID: "root-b",
+                rootSessionID: "root-b",
+                title: "Other root",
+                status: .running,
+                updatedAt: now.addingTimeInterval(3)
+            )
+        ]
+        let visible = VoiceSessionScope.visibleSessions(
+            rootSessionID: "root-a",
+            sessions: sessions
+        )
+        guard visible.count == 3,
+              visible.allSatisfy({ $0.rootSessionID == "root-a" })
+        else {
+            throw VoiceFoundationVerificationError.failed("root_scope")
+        }
+    }
+
+    private static func verifyTranscriptBoundsAndRedaction() throws {
+        var buffer = VoiceTranscriptBuffer()
+        let now = Date(timeIntervalSince1970: 0)
+        for index in 0..<90 {
+            buffer.append(VoiceTranscriptEvent(
+                id: "event-\(index)",
+                role: .user,
+                text: index == 89
+                    ? "/Users/test/private.txt"
+                    : String(repeating: "あ", count: 160),
+                isFinal: true,
+                timestamp: now.addingTimeInterval(Double(index))
+            ))
+        }
+        let scalarCount = buffer.events.reduce(0) { count, event in
+            count + event.text.unicodeScalars.count
+        }
+        guard buffer.events.count <= 64,
+              scalarCount <= 8_192,
+              buffer.events.allSatisfy({ !$0.text.contains("/Users/") })
+        else {
+            throw VoiceFoundationVerificationError.failed("transcript_bounds_redaction")
+        }
+    }
+
+    private static func verifyDefaultOffAndFakeAdapter() async throws {
+        let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        var factoryCalled = false
+        runtime.configure(
+            featureEnabled: false,
+            preferredLayout: .compact,
+            adapterFactory: {
+                factoryCalled = true
+                return FakeVoiceSessionAdapter()
+            }
+        )
+        await Task.yield()
+        guard !factoryCalled, runtime.snapshot == .disabled else {
+            throw VoiceFoundationVerificationError.failed("default_off_side_effect")
+        }
+
+        runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            adapterFactory: nil
+        )
+        guard runtime.snapshot.mode == .compact,
+              runtime.snapshot.connection == .disconnected,
+              runtime.snapshot.safeErrorCode == "voice_adapter_unavailable"
+        else {
+            throw VoiceFoundationVerificationError.failed("production_adapter_fail_closed")
+        }
+    }
+
+    private static func verifyAppLifetimeDetachAndRestart() async throws {
+        let adapter = FakeVoiceSessionAdapter(startFailuresRemaining: 1)
+        let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0, 0])
+        runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            adapterFactory: { adapter }
+        )
+        try await waitUntil {
+            runtime.snapshot.connection == .connected
+        }
+
+        runtime.setRootSessionID("root-a")
+        runtime.appendTranscript(VoiceTranscriptEvent(
+            id: "event",
+            role: .assistant,
+            text: "memory-only",
+            isFinal: true,
+            timestamp: Date(timeIntervalSince1970: 0)
+        ))
+        runtime.upsertSession(VoiceSessionSummary(
+            sessionID: "root-a",
+            rootSessionID: "root-a",
+            title: "Root",
+            status: .running,
+            updatedAt: Date(timeIntervalSince1970: 0)
+        ))
+        runtime.attachPanel()
+        runtime.detachPanel()
+        let detached = runtime.snapshot
+        runtime.attachPanel()
+        let reattached = runtime.snapshot
+
+        guard detached.muted,
+              !detached.uiAttached,
+              detached.rootSessionID == "root-a",
+              detached.transcript.count == 1,
+              detached.sessions.count == 1,
+              reattached.rootSessionID == "root-a",
+              reattached.transcript.count == 1,
+              adapter.startCount == 2
+        else {
+            throw VoiceFoundationVerificationError.failed("lifetime_restart")
+        }
+
+        runtime.handleUnexpectedServerRequest(method: "unknown/request")
+        guard runtime.snapshot.activity == .failed,
+              runtime.snapshot.safeErrorCode == "unexpected_server_request"
+        else {
+            throw VoiceFoundationVerificationError.failed("unexpected_request_fail_closed")
+        }
+        runtime.shutdown()
+    }
+
+    private static func waitUntil(
+        _ predicate: @MainActor () -> Bool
+    ) async throws {
+        for _ in 0..<200 {
+            if predicate() {
+                return
+            }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        throw VoiceFoundationVerificationError.failed("timeout")
+    }
+}

@@ -4,6 +4,7 @@ using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Providers;
 using HoverPocket.Shell.Verification;
+using HoverPocket.Shell.Voice;
 using HoverPocket.Shell.Windows;
 
 namespace HoverPocket.Shell.Settings;
@@ -71,9 +72,15 @@ internal sealed class SettingsVerifier
         }
         var panelEnable = await panelDispatcher.ProcessRawMessageAsync(
             """{"id":"0p","method":"settings.setAiNativeEnabled","params":{"enabled":true}}""");
+        var panelVoiceEnable = await panelDispatcher.ProcessRawMessageAsync(
+            """{"id":"0v","method":"settings.setVoiceEnabled","params":{"enabled":true}}""");
         if (panelEnable?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true)
         {
             _failures.Add("panel bridge exposed the Settings-only AI-native toggle");
+        }
+        if (panelVoiceEnable?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true)
+        {
+            _failures.Add("panel bridge exposed the Settings-only Voice enable toggle");
         }
         var deniedEnable = await Send(
             deniedSettingsDispatcher,
@@ -99,6 +106,8 @@ internal sealed class SettingsVerifier
         {
             _failures.Add("AI-native enable setting hot-started generation runtime or workspace");
         }
+        await Send(dispatcher, """{"id":"7v","method":"settings.setVoiceEnabled","params":{"enabled":true}}""");
+        await Send(dispatcher, """{"id":"7vl","method":"settings.setVoiceLayout","params":{"layout":"expanded"}}""");
         await Send(dispatcher, """{"id":"7s","method":"sticky.setUndoToastVisible","params":{"visible":false}}""");
         await Send(dispatcher, """{"id":"7d","method":"settings.setDisplayPlacement","params":{"displayPlacement":"all"}}""");
         await Send(dispatcher, """{"id":"7p","method":"settings.setProviderSelection","params":{"rememberLast":false}}""");
@@ -121,7 +130,9 @@ internal sealed class SettingsVerifier
             || written.DisableTopEdgeInFullscreen
             || !written.StartWithWindows
             || written.AutoCheckForUpdates
-            || !written.AiNativeEnabled)
+            || !written.AiNativeEnabled
+            || !written.VoiceEnabled
+            || written.VoiceLaneLayout != VoiceLaneLayoutPreference.Expanded)
         {
             _failures.Add("settings write/read did not preserve scalar values");
         }
@@ -173,11 +184,29 @@ internal sealed class SettingsVerifier
         var enabled = UserSettingsStore.CreateDefault(registry.ProviderIds);
         enabled.AiNativeEnabled = true;
         store.Save(enabled);
+        var voiceCoordinator = new CodexVoiceCoordinator(featureEnabled: true);
+        voiceCoordinator.SetRootSessionId("root-private");
+        voiceCoordinator.AppendTranscript(new VoiceTranscriptEvent(
+            "event-private",
+            "user",
+            "settings-must-not-see-transcript",
+            true,
+            DateTimeOffset.UnixEpoch));
+        voiceCoordinator.UpsertSession(new AgentSessionSummary(
+            "root-private",
+            "root-private",
+            null,
+            "settings-must-not-see-session",
+            AgentSessionStatus.Running,
+            "settings-must-not-see-summary",
+            null,
+            DateTimeOffset.UnixEpoch));
         using var controller = new PanelBridgeController(
             registry,
             store,
             store.Load(registry.ProviderIds),
-            new InMemoryStartupRegistrationService());
+            new InMemoryStartupRegistrationService(),
+            voiceCoordinator: voiceCoordinator);
         var dispatcher = new BridgeDispatcher();
         using var attachment = controller.Attach(
             dispatcher,
@@ -268,6 +297,9 @@ internal sealed class SettingsVerifier
         var panelSelect = await Send(
             panelDispatcher,
             """{"id":"surface-panel-select","method":"provider.select","params":{"id":"today-focus"}}""");
+        var panelState = await Send(
+            panelDispatcher,
+            """{"id":"surface-panel-state","method":"app.getState"}""");
         var settingsState = await Send(
             settingsDispatcher,
             """{"id":"surface-settings-state","method":"app.getState"}""");
@@ -278,6 +310,10 @@ internal sealed class SettingsVerifier
         if (settingsSelect?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true
             || settingsLoad?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true
             || !panelSelect.Contains("\"pocketSurface\":{", StringComparison.Ordinal)
+            || !panelState.Contains("settings-must-not-see-transcript", StringComparison.Ordinal)
+            || !settingsState.Contains("\"voiceLane\":null", StringComparison.Ordinal)
+            || settingsState.Contains("settings-must-not-see", StringComparison.Ordinal)
+            || settingsMutation.Contains("settings-must-not-see", StringComparison.Ordinal)
             || settingsState.Contains("\"pocketSurface\":{", StringComparison.Ordinal)
             || settingsMutation.Contains("\"pocketSurface\":{", StringComparison.Ordinal))
         {
@@ -467,6 +503,8 @@ internal sealed class SettingsVerifier
             || defaults.StartWithWindows
             || !defaults.AutoCheckForUpdates
             || defaults.AiNativeEnabled
+            || defaults.VoiceEnabled
+            || defaults.VoiceLaneLayout != VoiceLaneLayoutPreference.Compact
             || !defaults.RememberLastSelectedProvider
             || defaults.PreferredProviderId != "controls"
             || defaults.HandleIconStyle != HandleIconStyle.B

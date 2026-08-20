@@ -115,8 +115,17 @@ final class HoverWindowController {
         PanelGeometry.frames(
             on: screen,
             panelSize: settings.panelSize,
+            additionalPreviewHeight: voiceLaneHeight,
             showsNotchSideHandleArea: showsVisibleNotchSideHandle
         )
+    }
+
+    private var voiceLaneHeight: CGFloat {
+        CGFloat(VoiceLaneGeometry.height(
+            enabled: settings.voiceEnabled,
+            preference: settings.voiceLaneLayoutPreference,
+            panelSizeRawValue: settings.panelSize.rawValue
+        ))
     }
 
     private var showsVisibleNotchSideHandle: Bool {
@@ -165,7 +174,13 @@ final class HoverWindowController {
             onExit: { [weak self] in self?.scheduleClose() }
         )
 
-        let panel = makePanel(size: PanelLayout.previewSize(for: settings.panelSize), acceptsKeyboardFocus: true)
+        let panel = makePanel(
+            size: PanelGeometry.previewSize(
+                panelSize: settings.panelSize,
+                additionalHeight: voiceLaneHeight
+            ),
+            acceptsKeyboardFocus: true
+        )
         panel.hasShadow = true
         let hostingController = NSHostingController(
             rootView: HoverPanelShell(
@@ -249,7 +264,7 @@ final class HoverWindowController {
         if let screen = previewWindow.screen ?? activePreviewScreen ?? targetScreen() {
             previewWindow.setFrame(panelFrames(on: screen).preview, display: false)
         }
-        previewWindow.orderOut(nil)
+        orderOutPreviewWindow(previewWindow)
         menuStore.providerStore.prepareForPanelClose()
     }
 
@@ -368,7 +383,7 @@ final class HoverWindowController {
         setProviderActive(false)
 
         guard !shouldReduceMotion, let screen = previewWindow.screen ?? activePreviewScreen ?? targetScreen() else {
-            previewWindow.orderOut(nil)
+            orderOutPreviewWindow(previewWindow)
             setPreviewContentVisible(false, animated: false)
             previewWindow.alphaValue = 1
             previewWindow.hasShadow = true
@@ -412,7 +427,7 @@ final class HoverWindowController {
         stopHoverMonitor()
         mouseEventsEnableTask?.cancel()
         mouseEventsEnableTask = nil
-        previewWindow.orderOut(nil)
+        orderOutPreviewWindow(previewWindow)
         setProviderActive(false)
         activePreviewScreen = nil
         menuStore.providerStore.prepareForPanelClose()
@@ -422,6 +437,11 @@ final class HoverWindowController {
         previewWindow.invalidateShadow()
         previewWindow.ignoresMouseEvents = false
         previewWindow.setFrame(frame, display: false)
+    }
+
+    private func orderOutPreviewWindow(_ previewWindow: NSPanel) {
+        VoiceLaneRuntime.shared.detachPanel()
+        previewWindow.orderOut(nil)
     }
 
     private func isMouseInsideHoverRegion() -> Bool {
@@ -676,6 +696,26 @@ final class HoverWindowController {
             .dropFirst()
             .sink { [weak self] _ in
                 guard let self else { return }
+                DispatchQueue.main.async { [weak self] in
+                    self?.resizePreviewForPanelSizeChange()
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        settings.$voiceEnabled
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.resizePreviewForPanelSizeChange()
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        settings.$voiceLaneLayoutPreference
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] _ in
                 DispatchQueue.main.async { [weak self] in
                     self?.resizePreviewForPanelSizeChange()
                 }

@@ -20,6 +20,7 @@ const providerRenderers = {
 
 const titleEl = document.querySelector("[data-provider-title]");
 const providerContainerEl = document.querySelector("[data-provider-container]");
+const voiceLaneEl = document.querySelector("[data-voice-lane]");
 const providerIconsEl = document.querySelector("[data-provider-icons]");
 const sizeSwitchEl = document.querySelector("[data-size-switch]");
 const refreshButtonEl = document.querySelector("[data-refresh]");
@@ -47,6 +48,10 @@ on("state.changed", (state) => {
 
 on("panel.opened", (state) => {
   void render(state, { refreshProvider: true });
+});
+
+on("voice.stateChanged", (state) => {
+  void render(state);
 });
 
 bootstrap();
@@ -77,7 +82,7 @@ async function renderNow(state, options = {}) {
 
   currentState = state;
   document.documentElement.style.setProperty("--hp-header-height", `${state.panel.headerHeight}px`);
-  document.documentElement.style.setProperty("--hp-ai-height", `${state.panel.aiLaneHeight}px`);
+  document.documentElement.style.setProperty("--hp-voice-height", `${state.panel.voiceLaneHeight ?? 0}px`);
   document.documentElement.dataset.textSize = state.settings.textSize;
   document.documentElement.dataset.panelSize = state.settings.panelSize;
   setLanguage(state.settings.language);
@@ -86,6 +91,7 @@ async function renderNow(state, options = {}) {
   renderSizeSwitch(state);
   renderProviderIcons(state);
   renderProvider(state, options, providerWillRemount);
+  renderVoiceLane(state);
   renderCommands();
   return true;
 }
@@ -434,6 +440,182 @@ function providerRenderKey(state) {
   return `${state.selectedProvider?.id ?? "none"}:${state.settings.language}${surfaceIdentity}`;
 }
 
+function renderVoiceLane(state) {
+  voiceLaneEl.replaceChildren();
+  const lane = state.voiceLane;
+  const mode = lane?.mode ?? "disabled";
+  voiceLaneEl.hidden = !state.settings.voiceEnabled || mode === "disabled";
+  voiceLaneEl.dataset.mode = mode;
+  if (voiceLaneEl.hidden) {
+    return;
+  }
+
+  if (mode === "expanded") {
+    renderExpandedVoiceLane(lane);
+    return;
+  }
+  renderCompactVoiceLane(lane);
+}
+
+function voiceButton(label, text, action, expanded) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "hp-voice-button";
+  button.textContent = text;
+  button.setAttribute("aria-label", label);
+  if (typeof expanded === "boolean") {
+    button.setAttribute("aria-expanded", String(expanded));
+  }
+  button.addEventListener("click", action);
+  return button;
+}
+
+function renderCompactVoiceLane(lane) {
+  const root = document.createElement("div");
+  root.className = "hp-voice-compact";
+
+  const microphone = voiceButton(
+    "Microphone unavailable until Voice runtime activation",
+    "◉",
+    () => {},
+  );
+  microphone.disabled = true;
+  microphone.classList.add("hp-voice-microphone");
+
+  const waveform = document.createElement("div");
+  waveform.className = "hp-voice-waveform";
+  waveform.setAttribute("aria-hidden", "true");
+  for (const height of [6, 12, 18, 10, 14]) {
+    const bar = document.createElement("span");
+    bar.style.height = `${height}px`;
+    waveform.append(bar);
+  }
+
+  const conversation = document.createElement("div");
+  conversation.className = "hp-voice-conversation";
+  const status = document.createElement("span");
+  status.className = "hp-voice-status";
+  status.textContent = voiceStatusText(lane);
+  const preview = document.createElement("span");
+  preview.className = "hp-voice-preview";
+  preview.textContent = lane.transcriptPreview || "Voice runtime is not active.";
+  conversation.append(status, preview);
+
+  const count = document.createElement("span");
+  count.className = "hp-voice-session-count";
+  count.textContent = String(lane.visibleSessionCount ?? 0);
+  count.setAttribute("aria-label", `${lane.visibleSessionCount ?? 0} sessions`);
+
+  const mute = voiceButton(
+    lane.muted ? "Unmute Voice Lane" : "Mute Voice Lane",
+    lane.muted ? "M" : "S",
+    () => request("voice.setMuted", { muted: !lane.muted }).then(render),
+  );
+  const expand = voiceButton(
+    "Expand Voice Lane",
+    "⌄",
+    () => request("voice.setLayout", { layout: "expanded" }).then(render),
+    false,
+  );
+  const end = voiceButton(
+    "End Voice audio session",
+    "×",
+    () => request("voice.endSession").then(render),
+  );
+
+  root.append(microphone, waveform, conversation, count, mute, expand, end);
+  voiceLaneEl.append(root);
+}
+
+function renderExpandedVoiceLane(lane) {
+  const root = document.createElement("div");
+  root.className = "hp-voice-expanded";
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "hp-voice-toolbar";
+  const status = document.createElement("span");
+  status.className = "hp-voice-status";
+  status.textContent = voiceStatusText(lane);
+  const spacer = document.createElement("span");
+  spacer.className = "hp-voice-spacer";
+  const count = document.createElement("span");
+  count.className = "hp-voice-session-count";
+  count.textContent = String(lane.visibleSessionCount ?? 0);
+  const collapse = voiceButton(
+    "Collapse Voice Lane",
+    "⌃",
+    () => request("voice.setLayout", { layout: "compact" }).then(render),
+    true,
+  );
+  const end = voiceButton(
+    "End Voice audio session",
+    "×",
+    () => request("voice.endSession").then(render),
+  );
+  toolbar.append(status, spacer, count, collapse, end);
+
+  const grid = document.createElement("div");
+  grid.className = "hp-voice-expanded-grid";
+  const transcript = document.createElement("div");
+  transcript.className = "hp-voice-transcript-scroll";
+  transcript.setAttribute("aria-label", "Current Voice transcript");
+  for (const event of lane.transcript ?? []) {
+    const item = document.createElement("p");
+    item.className = "hp-voice-transcript-event";
+    item.textContent = `${event.role}: ${event.text}`;
+    transcript.append(item);
+  }
+  if (!transcript.childElementCount) {
+    const empty = document.createElement("p");
+    empty.className = "hp-voice-empty";
+    empty.textContent = "No transcript in memory.";
+    transcript.append(empty);
+  }
+
+  const cards = document.createElement("div");
+  cards.className = "hp-voice-cards-scroll";
+  cards.setAttribute("aria-label", "Current root sessions");
+  const rootSessionId = lane.rootSessionId;
+  const scoped = (lane.sessions ?? []).filter((session) => (
+    rootSessionId && session.rootSessionId === rootSessionId
+  ));
+  for (const session of scoped) {
+    const card = document.createElement("article");
+    card.className = "hp-voice-session-card";
+    const title = document.createElement("strong");
+    title.textContent = session.title;
+    const meta = document.createElement("span");
+    meta.textContent = session.status;
+    card.append(title, meta);
+    if (session.safeSummary) {
+      const summary = document.createElement("p");
+      summary.textContent = session.safeSummary;
+      card.append(summary);
+    }
+    cards.append(card);
+  }
+  if (!cards.childElementCount) {
+    const empty = document.createElement("p");
+    empty.className = "hp-voice-empty";
+    empty.textContent = "No sessions for this root.";
+    cards.append(empty);
+  }
+
+  grid.append(transcript, cards);
+  root.append(toolbar, grid);
+  voiceLaneEl.append(root);
+}
+
+function voiceStatusText(lane) {
+  if (lane.safeErrorCode) {
+    return lane.safeErrorCode;
+  }
+  if (lane.availability && lane.availability !== "ready") {
+    return lane.availability;
+  }
+  return lane.activity ?? lane.sessionStatus ?? "idle";
+}
+
 function renderCommands() {
   refreshButtonEl.innerHTML = iconSvg("refresh");
   refreshButtonEl.title = t("refresh");
@@ -742,10 +924,17 @@ window.__hoverPocketVerify = {
     window.__hoverPocketVerifyStep = "resize-probe";
     const resizedState = await request("settings.setPanelSize", { panelSize: probePanelSize });
     await request("settings.setPanelSize", { panelSize: originalPanelSize });
+    const legacyAiLaneNotMountedOk = document.querySelector(".hp-ai-lane") === null
+      && !document.body.textContent.includes("Codex Voice");
+    const voiceDefaultOffOk = state.settings.voiceEnabled === false
+      && voiceLaneEl.hidden
+      && Number(state.panel.voiceLaneHeight ?? 0) === 0;
     window.__hoverPocketVerifyStep = "complete";
 
     return {
       echoOk: echo?.value === "ui-round-trip",
+      legacyAiLaneNotMountedOk,
+      voiceDefaultOffOk,
       controlsRenderedOk,
       controlsLayoutOk,
       controlsHitAreasOk,

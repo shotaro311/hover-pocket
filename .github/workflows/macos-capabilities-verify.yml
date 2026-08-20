@@ -11,7 +11,13 @@ on:
       - "Sources/HoverPocket/App/PocketAppPackageVerificationCommand.swift"
       - "Sources/HoverPocket/App/PocketSurfaceVerificationCommand.swift"
       - "Sources/HoverPocket/App/AppDelegate.swift"
+      - "Sources/HoverPocket/App/VoiceFoundationVerificationCommand.swift"
       - "Sources/HoverPocket/State/AppSettings.swift"
+      - "Sources/HoverPocket/Views/HoverPanelShell.swift"
+      - "Sources/HoverPocket/Views/VoiceLaneHostView.swift"
+      - "Sources/HoverPocket/Voice/**"
+      - "Sources/HoverPocket/Windowing/HoverWindowController.swift"
+      - "Sources/HoverPocket/Windowing/PanelGeometry.swift"
       - "Sources/HoverPocket/Models/GoogleCalendarModels.swift"
       - "Sources/HoverPocket/Models/StickyNoteModels.swift"
       - "Sources/HoverPocket/Services/GoogleCalendarAPIClient.swift"
@@ -22,6 +28,8 @@ on:
       - "Package.swift"
       - "Package.resolved"
       - "contracts/pocket/v1/**"
+      - "contracts/voice/**"
+      - "script/verify_voice_foundation.py"
       - ".github/workflows/macos-capabilities-verify.yml"
   pull_request:
     paths:
@@ -32,7 +40,13 @@ on:
       - "Sources/HoverPocket/App/PocketAppPackageVerificationCommand.swift"
       - "Sources/HoverPocket/App/PocketSurfaceVerificationCommand.swift"
       - "Sources/HoverPocket/App/AppDelegate.swift"
+      - "Sources/HoverPocket/App/VoiceFoundationVerificationCommand.swift"
       - "Sources/HoverPocket/State/AppSettings.swift"
+      - "Sources/HoverPocket/Views/HoverPanelShell.swift"
+      - "Sources/HoverPocket/Views/VoiceLaneHostView.swift"
+      - "Sources/HoverPocket/Voice/**"
+      - "Sources/HoverPocket/Windowing/HoverWindowController.swift"
+      - "Sources/HoverPocket/Windowing/PanelGeometry.swift"
       - "Sources/HoverPocket/Models/GoogleCalendarModels.swift"
       - "Sources/HoverPocket/Models/StickyNoteModels.swift"
       - "Sources/HoverPocket/Services/GoogleCalendarAPIClient.swift"
@@ -43,6 +57,8 @@ on:
       - "Package.swift"
       - "Package.resolved"
       - "contracts/pocket/v1/**"
+      - "contracts/voice/**"
+      - "script/verify_voice_foundation.py"
       - ".github/workflows/macos-capabilities-verify.yml"
   workflow_dispatch:
 
@@ -59,6 +75,12 @@ jobs:
 
       - name: Build
         run: swift build -Xswiftc -warnings-as-errors
+
+      - name: Verify Host-owned Voice Lane foundation
+        run: |
+          python3 script/verify_voice_foundation.py
+          .build/debug/HoverPocket --verify-voice-foundation
+          .build/debug/HoverPocket --verify-panel-layout
 
       - name: Verify capability handlers
         run: .build/debug/HoverPocket --verify-capabilities

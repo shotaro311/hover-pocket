@@ -12,6 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         configureAINativeRuntimeIfEnabled()
         observeAINativeRuntimeSetting()
+        configureVoiceRuntime()
+        observeVoiceRuntimeSettings()
         installMainMenu()
         registerURLSchemeCallbackHandler()
         statusBarMenuController = StatusBarMenuController(
@@ -184,6 +186,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &settingsCancellables)
     }
 
+    private func configureVoiceRuntime() {
+        let settings = hoverWindowController.appSettings
+        VoiceLaneRuntime.shared.configure(
+            featureEnabled: settings.voiceEnabled,
+            preferredLayout: settings.voiceLaneLayoutPreference,
+            adapterFactory: nil
+        )
+    }
+
+    private func observeVoiceRuntimeSettings() {
+        let settings = hoverWindowController.appSettings
+        settings.$voiceEnabled
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                self?.configureVoiceRuntime()
+            }
+            .store(in: &settingsCancellables)
+
+        settings.$voiceLaneLayoutPreference
+            .dropFirst()
+            .removeDuplicates()
+            .sink { preference in
+                VoiceLaneRuntime.shared.setPreferredLayout(preference)
+            }
+            .store(in: &settingsCancellables)
+    }
+
     @objc private func screenParametersChanged() {
         hoverWindowController.recoverAfterSystemTransition()
     }
@@ -194,11 +224,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func workspaceDidWake() {
+        VoiceLaneRuntime.shared.recoverAfterSystemTransition()
         hoverWindowController.recoverAfterSystemTransition()
     }
 
     @objc private func workspaceSessionDidBecomeActive() {
+        VoiceLaneRuntime.shared.recoverAfterSystemTransition()
         hoverWindowController.recoverAfterSystemTransition()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        VoiceLaneRuntime.shared.shutdown()
     }
 
     private func registerURLSchemeCallbackHandler() {
