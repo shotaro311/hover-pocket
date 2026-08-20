@@ -30,13 +30,15 @@ internal static class PocketAppRuntimeActivationVerifier
         PocketAppRuntimeActivationRegistry.Candidate Candidate(
             string appId,
             string version,
-            string digest) =>
+            string digest,
+            object? runtimeHandle = null,
+            PocketAppActivationLease? activationLease = null) =>
             new(
                 new PocketAppRuntimeReadback(appId, version, digest, permissions),
-                new object(),
+                runtimeHandle ?? new object(),
                 new object(),
                 new HashSet<string>(["main"], StringComparer.Ordinal),
-                new PocketAppActivationLease());
+                activationLease ?? new PocketAppActivationLease());
 
         PocketAppLifecycleReceipt Receipt(
             string action,
@@ -184,7 +186,14 @@ internal static class PocketAppRuntimeActivationVerifier
                 "activation_remove",
                 failures);
 
-            candidates[appC] = Candidate(appC, "1.0.0", digest1);
+            var mismatchRuntime = new TrackingRuntimeHandle();
+            var mismatchLease = new PocketAppActivationLease();
+            candidates[appC] = Candidate(
+                appC,
+                "1.0.0",
+                digest1,
+                mismatchRuntime,
+                mismatchLease);
             managed[appC] = Managed(appC, "1.0.0", digest1, PocketAppLifecycleState.Enabled);
             try
             {
@@ -196,11 +205,21 @@ internal static class PocketAppRuntimeActivationVerifier
             }
             Require(
                 registry.ExecutionRegistry.Readback(appC) is null
-                && registry.ExecutionRegistry.Readback(appB) is not null,
+                && registry.ExecutionRegistry.Readback(appB) is not null
+                && mismatchRuntime.Disposed
+                && !mismatchLease.IsActive,
                 "activation_mismatch_fail_closed",
                 failures);
 
             var injectFailure = false;
+            var preCommitRuntime = new TrackingRuntimeHandle();
+            var preCommitLease = new PocketAppActivationLease();
+            candidates[appC] = Candidate(
+                appC,
+                "1.0.0",
+                digest1,
+                preCommitRuntime,
+                preCommitLease);
             using var failing = new PocketAppRuntimeActivationRegistry(
                 () => managed.Values.ToArray(),
                 appId => candidates.GetValueOrDefault(appId),
@@ -218,7 +237,9 @@ internal static class PocketAppRuntimeActivationVerifier
             Require(
                 failing.ExecutionRegistry.Readback(appC) is null
                     && failing.SurfaceRegistry.Readback(appC) is null
-                    && failing.ExecutionRegistry.Readback(appB) is not null,
+                    && failing.ExecutionRegistry.Readback(appB) is not null
+                    && preCommitRuntime.Disposed
+                    && !preCommitLease.IsActive,
                 "activation_failure_injection_fail_closed",
                 failures);
             failing.Shutdown();
@@ -229,7 +250,14 @@ internal static class PocketAppRuntimeActivationVerifier
                 failures);
 
             managed[appC] = Managed(appC, "1.0.0", digest1, PocketAppLifecycleState.Enabled);
-            candidates.Remove(appC);
+            var restoreMismatchRuntime = new TrackingRuntimeHandle();
+            var restoreMismatchLease = new PocketAppActivationLease();
+            candidates[appC] = Candidate(
+                appC,
+                "9.9.9",
+                digest2,
+                restoreMismatchRuntime,
+                restoreMismatchLease);
             var restoreFailurePersisted = false;
             using var restoreFailing = new PocketAppRuntimeActivationRegistry(
                 () => managed.Values.ToArray(),
@@ -257,7 +285,9 @@ internal static class PocketAppRuntimeActivationVerifier
                     && restoreFailurePersisted
                     && managed[appC].State == PocketAppLifecycleState.Disabled
                     && restoreFailing.ExecutionRegistry.Readback(appC) is null
-                    && restoreFailing.SurfaceRegistry.Readback(appC) is null,
+                    && restoreFailing.SurfaceRegistry.Readback(appC) is null
+                    && restoreMismatchRuntime.Disposed
+                    && !restoreMismatchLease.IsActive,
                 "activation_restore_failure_persists_disabled",
                 failures);
 
@@ -325,5 +355,12 @@ internal static class PocketAppRuntimeActivationVerifier
     private static void Require(bool condition, string name, ICollection<string> failures)
     {
         if (!condition) { failures.Add(name); }
+    }
+
+    private sealed class TrackingRuntimeHandle : IDisposable
+    {
+        public bool Disposed { get; private set; }
+
+        public void Dispose() => Disposed = true;
     }
 }

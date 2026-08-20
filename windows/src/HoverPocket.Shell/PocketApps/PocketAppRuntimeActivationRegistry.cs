@@ -279,29 +279,42 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
                 .Distinct(StringComparer.Ordinal)
                 .Order(StringComparer.Ordinal)
                 .ToArray();
-            var stateStore = new PocketAppUserStateStore(
-                package.Manifest.Id,
-                package.StatePropertyTypes,
-                userDataRoot);
-            var activationLease = new PocketAppActivationLease();
-            var runtime = new PocketAppExecutionRuntime(
-                package,
-                broker,
-                userId,
-                effectivePermissions.ToHashSet(StringComparer.Ordinal),
-                userStateStore: stateStore,
-                activationLease: activationLease);
-            var host = new PocketAppHostController(runtime, settings);
-            return new Candidate(
-                new PocketAppRuntimeReadback(
+            PocketAppUserStateStore? stateStore = null;
+            PocketAppActivationLease? activationLease = null;
+            PocketAppExecutionRuntime? runtime = null;
+            try
+            {
+                stateStore = new PocketAppUserStateStore(
                     package.Manifest.Id,
-                    package.Manifest.Version,
-                    package.ManifestDigest,
-                    effectivePermissions),
-                runtime,
-                host,
-                package.Surfaces.Keys.ToHashSet(StringComparer.Ordinal),
-                activationLease);
+                    package.StatePropertyTypes,
+                    userDataRoot);
+                activationLease = new PocketAppActivationLease();
+                runtime = new PocketAppExecutionRuntime(
+                    package,
+                    broker,
+                    userId,
+                    effectivePermissions.ToHashSet(StringComparer.Ordinal),
+                    userStateStore: stateStore,
+                    activationLease: activationLease);
+                var host = new PocketAppHostController(runtime, settings);
+                return new Candidate(
+                    new PocketAppRuntimeReadback(
+                        package.Manifest.Id,
+                        package.Manifest.Version,
+                        package.ManifestDigest,
+                        effectivePermissions),
+                    runtime,
+                    host,
+                    package.Surfaces.Keys.ToHashSet(StringComparer.Ordinal),
+                    activationLease);
+            }
+            catch
+            {
+                activationLease?.Invalidate();
+                if (runtime is not null) { runtime.Dispose(); }
+                else { stateStore?.Dispose(); }
+                throw;
+            }
         };
         _restoreFailurePersistence = packageId =>
         {
@@ -364,8 +377,14 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
                 throw Failure("RUNTIME_ACTIVATION_UNAVAILABLE");
             }
             var candidate = _candidateSource(receipt.PackageId);
-            if (candidate is null || !candidate.Readback.Matches(receipt))
+            if (candidate is null)
             {
+                FailClosed(receipt.PackageId);
+                throw Failure("RUNTIME_ACTIVATION_READBACK_MISMATCH");
+            }
+            if (!candidate.Readback.Matches(receipt))
+            {
+                DisposeCandidate(candidate);
                 FailClosed(receipt.PackageId);
                 throw Failure("RUNTIME_ACTIVATION_READBACK_MISMATCH");
             }
@@ -437,6 +456,7 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
                     || candidate.Readback.Version != package.Version
                     || candidate.Readback.PackageDigest != package.PackageDigest)
                 {
+                    DisposeCandidate(candidate);
                     throw Failure("RUNTIME_ACTIVATION_READBACK_MISMATCH");
                 }
                 _ = Activate(candidate);
@@ -496,11 +516,13 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
         if (_failureInjection?.Invoke("before_runtime_registry_commit") == true)
         {
             FailClosed(candidate.Readback.AppId);
+            DisposeCandidate(candidate);
             throw Failure("RUNTIME_ACTIVATION_UNAVAILABLE");
         }
         if (!_enabled)
         {
             FailClosed(candidate.Readback.AppId);
+            DisposeCandidate(candidate);
             throw Failure("RUNTIME_ACTIVATION_UNAVAILABLE");
         }
 
@@ -518,6 +540,13 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
             throw Failure("RUNTIME_ACTIVATION_READBACK_MISMATCH");
         }
         return candidate.Readback;
+    }
+
+    private static void DisposeCandidate(Candidate? candidate)
+    {
+        if (candidate is null) { return; }
+        candidate.ActivationLease?.Invalidate();
+        if (candidate.RuntimeHandle is IDisposable disposable) { disposable.Dispose(); }
     }
 
     private void FailClosed(string appId)
