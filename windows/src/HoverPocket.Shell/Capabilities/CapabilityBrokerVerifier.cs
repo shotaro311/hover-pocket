@@ -1435,7 +1435,7 @@ internal sealed class CapabilityBrokerVerifier
                 {
                     timerId = rawId.ToLowerInvariant(),
                     state = "running",
-                    endAt = CapabilityCanonicalJson.Date(context.Now.AddMinutes(10))
+                    endAt = timer.EndAtUtc.ToString("O", CultureInfo.InvariantCulture)
                 }));
         }
     }
