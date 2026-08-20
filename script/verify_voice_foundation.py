@@ -312,13 +312,16 @@ def main() -> None:
     ) != 1 or "NotifySystemTransitionAsync(" in recovery_stage:
         fail("Windows staged recovery notifies Voice more than once")
     if "transition-cancellation" not in windows_verifier \
-            or "cancellationToken.ThrowIfCancellationRequested();" not in windows_coordinator:
+            or "ScheduleRestart(cancellationToken);" not in windows_coordinator \
+            or "CreateLinkedTokenSource(\n            _lifetime.Token,\n            cancellationToken)" not in windows_coordinator \
+            or "replacement system transition bypassed serialized teardown" not in windows_verifier:
         fail("Windows stale staged recovery can schedule a replacement after cancellation")
     mac_verifier = (
         ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
     ).read_text(encoding="utf-8")
     if "await pendingRestart?.value" not in mac_runtime \
-            or "verifyRecoveryWaitsForCancelledStartup" not in mac_verifier:
+            or "verifyRecoveryWaitsForCancelledStartup" not in mac_verifier \
+            or "Task.sleep(nanoseconds: 20_000_000)" not in mac_verifier:
         fail("macOS recovery can overlap a cancelled non-cooperative startup")
 
     print(

@@ -562,10 +562,13 @@ internal sealed class VoiceFoundationVerifier
         await staleHarness.DisposeStarted.WaitAsync(cancellationToken);
         staleTransitionCancellation.Cancel();
 
-        await coordinator.NotifySystemTransitionAsync(cancellationToken);
-        await WaitUntilAsync(
-            () => coordinator.Snapshot.Availability == CodexVoiceAvailability.Ready,
-            cancellationToken);
+        var replacementTransition = coordinator.NotifySystemTransitionAsync(cancellationToken);
+        await Task.Yield();
+        if (replacementTransition.IsCompleted || Volatile.Read(ref factoryCalls) != 1)
+        {
+            _failures.Add("replacement system transition bypassed serialized teardown");
+        }
+
         staleHarness.ReleaseDispose();
         try
         {
@@ -576,6 +579,10 @@ internal sealed class VoiceFoundationVerifier
         {
         }
 
+        await replacementTransition;
+        await WaitUntilAsync(
+            () => coordinator.Snapshot.Availability == CodexVoiceAvailability.Ready,
+            cancellationToken);
         await Task.Yield();
         if (Volatile.Read(ref factoryCalls) != 2
             || !coordinator.Snapshot.TransportAttached)

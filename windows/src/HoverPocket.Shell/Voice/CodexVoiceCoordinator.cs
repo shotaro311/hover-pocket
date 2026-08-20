@@ -530,6 +530,19 @@ internal sealed class CodexVoiceCoordinator : IDisposable
 
     public async Task NotifySystemTransitionAsync(CancellationToken cancellationToken = default)
     {
+        await _featureTransitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await NotifySystemTransitionCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _featureTransitionGate.Release();
+        }
+    }
+
+    private async Task NotifySystemTransitionCoreAsync(CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
         if (!_featureEnabled)
         {
@@ -575,7 +588,8 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             AppServerProcessId = null
         });
         cancellationToken.ThrowIfCancellationRequested();
-        ScheduleRestart();
+        ScheduleRestart(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     public void NotifyTransportCrashed()
@@ -860,9 +874,9 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         PublishTransportCrashAndRestart();
     }
 
-    private void ScheduleRestart()
+    private void ScheduleRestart(CancellationToken cancellationToken = default)
     {
-        if (!_featureEnabled || _clientFactory is null)
+        if (!_featureEnabled || _clientFactory is null || cancellationToken.IsCancellationRequested)
         {
             return;
         }
@@ -893,13 +907,15 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         PublishOutsideLock(Snapshot);
 
         CancelRestart();
-        var restartCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        var restartCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _lifetime.Token,
+            cancellationToken);
         var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var restartTask = RunTrackedRestartAsync(delay, restartCancellation.Token, startGate.Task);
         var scheduled = false;
         lock (_sync)
         {
-            if (_featureEnabled && !_disposed)
+            if (_featureEnabled && !_disposed && !cancellationToken.IsCancellationRequested)
             {
                 _restartCancellation = restartCancellation;
                 _restartTask = restartTask;

@@ -438,7 +438,7 @@ enum VoiceFoundationVerificationCommand {
         try await waitUntil { stale.startCount == 1 }
 
         runtime.recoverAfterSystemTransition()
-        await Task.yield()
+        try await Task.sleep(nanoseconds: 20_000_000)
         guard factoryCount == 1, healthy.startCount == 0 else {
             throw VoiceFoundationVerificationError.failed("recovery_overlapped_cancelled_startup")
         }
