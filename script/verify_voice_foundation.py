@@ -282,6 +282,10 @@ def main() -> None:
         fail("macOS adapter error codes bypass the runtime sanitizer")
     if "maxRetainedSessions" not in mac_runtime or "MaxRetainedSessions" not in windows_coordinator:
         fail("Voice session retention is not bounded on both operating systems")
+    if "NormalizeTranscriptRole" not in windows_coordinator \
+            or '"tool"' not in windows_verifier \
+            or "unknown transcript role was published" not in windows_verifier:
+        fail("Windows unknown transcript roles can be presented as Host/system content")
     if "expansionBlocked" not in app_js:
         fail("Windows compact fallback does not report why Expanded is unavailable")
     if 'waiting_for_approval: "voiceActivityWaitingForApproval"' not in app_js \
@@ -303,9 +307,19 @@ def main() -> None:
         windows_shell.find("private async Task RunRecoveryStageAsync"):
         windows_shell.find("private void OnWindowWin32MessageReceived")
     ]
-    if staged_recovery.count("await _panelBridgeController.NotifySystemTransitionAsync()") != 1 \
-            or "NotifySystemTransitionAsync()" in recovery_stage:
+    if staged_recovery.count(
+        "await _panelBridgeController.NotifySystemTransitionAsync(cancellationToken)"
+    ) != 1 or "NotifySystemTransitionAsync(" in recovery_stage:
         fail("Windows staged recovery notifies Voice more than once")
+    if "transition-cancellation" not in windows_verifier \
+            or "cancellationToken.ThrowIfCancellationRequested();" not in windows_coordinator:
+        fail("Windows stale staged recovery can schedule a replacement after cancellation")
+    mac_verifier = (
+        ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
+    ).read_text(encoding="utf-8")
+    if "await pendingRestart?.value" not in mac_runtime \
+            or "verifyRecoveryWaitsForCancelledStartup" not in mac_verifier:
+        fail("macOS recovery can overlap a cancelled non-cooperative startup")
 
     print(
         "PASS voice-foundation contract: "

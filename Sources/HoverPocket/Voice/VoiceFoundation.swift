@@ -460,7 +460,8 @@ final class VoiceLaneRuntime: ObservableObject {
         guard featureEnabled else { return }
         restartGeneration &+= 1
         let recoveryGeneration = restartGeneration
-        restartTask?.cancel()
+        let pendingRestart = restartTask
+        pendingRestart?.cancel()
         restartTask = nil
         let previousAdapter = adapter
         adapter = nil
@@ -471,20 +472,27 @@ final class VoiceLaneRuntime: ObservableObject {
                 muted: true,
                 safeErrorCode: "voice_adapter_unavailable"
             )
-            if let previousAdapter {
-                trackDetachedAdapterStop(previousAdapter)
-            }
+            trackDetachedWork(
+                pendingRestart: pendingRestart,
+                detachedAdapter: previousAdapter
+            )
             return
         }
         publish(connection: .recovering, activity: .reconnecting, muted: true)
-        restartAfterStopping(previousAdapter, generation: recoveryGeneration, bounded: false)
+        restartAfterStopping(
+            previousAdapter,
+            pendingRestart: pendingRestart,
+            generation: recoveryGeneration,
+            bounded: false
+        )
     }
 
     func markAdapterCrashed() {
         guard featureEnabled else { return }
         restartGeneration &+= 1
         let crashGeneration = restartGeneration
-        restartTask?.cancel()
+        let pendingRestart = restartTask
+        pendingRestart?.cancel()
         restartTask = nil
         let previousAdapter = adapter
         adapter = nil
@@ -494,7 +502,12 @@ final class VoiceLaneRuntime: ObservableObject {
             muted: true,
             safeErrorCode: "voice_transport_crashed"
         )
-        restartAfterStopping(previousAdapter, generation: crashGeneration, bounded: true)
+        restartAfterStopping(
+            previousAdapter,
+            pendingRestart: pendingRestart,
+            generation: crashGeneration,
+            bounded: true
+        )
     }
 
     func handleUnexpectedServerRequest(method: String) {
@@ -503,16 +516,19 @@ final class VoiceLaneRuntime: ObservableObject {
         let previousAdapter = adapter
         adapter = nil
         restartGeneration &+= 1
-        restartTask?.cancel()
+        let pendingRestart = restartTask
+        pendingRestart?.cancel()
+        restartTask = nil
         publish(
             connection: .disconnected,
             activity: .failed,
             muted: true,
             safeErrorCode: "unexpected_server_request"
         )
-        if let previousAdapter {
-            trackDetachedAdapterStop(previousAdapter)
-        }
+        trackDetachedWork(
+            pendingRestart: pendingRestart,
+            detachedAdapter: previousAdapter
+        )
     }
 
     func appendTranscript(_ event: VoiceTranscriptEvent) {
@@ -662,6 +678,7 @@ final class VoiceLaneRuntime: ObservableObject {
 
     private func restartAfterStopping(
         _ previousAdapter: (any VoiceSessionAdapter)?,
+        pendingRestart: Task<Void, Never>?,
         generation: Int,
         bounded: Bool
     ) {
@@ -671,6 +688,7 @@ final class VoiceLaneRuntime: ObservableObject {
         audioCommandTask = nil
         recoveryTask = Task { @MainActor [weak self] in
             await previousRecovery?.value
+            await pendingRestart?.value
             await pendingAudioCommand?.value
             if let previousAdapter {
                 await previousAdapter.stop()
@@ -686,15 +704,22 @@ final class VoiceLaneRuntime: ObservableObject {
         }
     }
 
-    private func trackDetachedAdapterStop(_ detachedAdapter: any VoiceSessionAdapter) {
+    private func trackDetachedWork(
+        pendingRestart: Task<Void, Never>?,
+        detachedAdapter: (any VoiceSessionAdapter)?
+    ) {
+        guard pendingRestart != nil || detachedAdapter != nil else { return }
         let previousRecovery = recoveryTask
         previousRecovery?.cancel()
         let pendingAudioCommand = audioCommandTask
         audioCommandTask = nil
         recoveryTask = Task { @MainActor in
             await previousRecovery?.value
+            await pendingRestart?.value
             await pendingAudioCommand?.value
-            await detachedAdapter.stop()
+            if let detachedAdapter {
+                await detachedAdapter.stop()
+            }
         }
     }
 

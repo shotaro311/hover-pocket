@@ -1149,9 +1149,9 @@ internal sealed class PanelBridgeController : IDisposable
         _ = PostStateEventOnUiThreadAsync("state.changed");
     }
 
-    public Task NotifySystemTransitionAsync()
+    public Task NotifySystemTransitionAsync(CancellationToken cancellationToken = default)
     {
-        return _voiceCoordinator.NotifySystemTransitionAsync();
+        return _voiceCoordinator.NotifySystemTransitionAsync(cancellationToken);
     }
 
     private void OnVoiceSnapshotChanged(object? sender, CodexVoiceSnapshot snapshot)

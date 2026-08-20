@@ -13,6 +13,7 @@ enum VoiceFoundationVerificationCommand {
         try await verifyDefaultOffAndFakeAdapter()
         try await verifyAppLifetimeDetachAndRestart()
         try await verifyStaleAdapterFailureDoesNotReplaceReadyAdapter()
+        try await verifyRecoveryWaitsForCancelledStartup()
         try await verifyDisableWaitsForAdapterTeardown()
         try await verifyRecoveryTeardownIsSerialized()
         try await verifyAudioCommandsRemainOrdered()
@@ -416,6 +417,40 @@ enum VoiceFoundationVerificationCommand {
         try await waitUntil { runtime.snapshot.connection == .connected }
         guard replacementAdapter.startCount == 1 else {
             throw VoiceFoundationVerificationError.failed("replacement_not_started_after_adapter_teardown")
+        }
+        await runtime.shutdown()
+    }
+
+    private static func verifyRecoveryWaitsForCancelledStartup() async throws {
+        let stale = GatedVoiceSessionAdapter()
+        let healthy = FakeVoiceSessionAdapter()
+        let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        var factoryCount = 0
+        let factory: VoiceLaneRuntime.AdapterFactory = {
+            factoryCount += 1
+            return factoryCount == 1 ? stale : healthy
+        }
+        runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            adapterFactory: factory
+        )
+        try await waitUntil { stale.startCount == 1 }
+
+        runtime.recoverAfterSystemTransition()
+        await Task.yield()
+        guard factoryCount == 1, healthy.startCount == 0 else {
+            throw VoiceFoundationVerificationError.failed("recovery_overlapped_cancelled_startup")
+        }
+
+        stale.failStart()
+        try await waitUntil {
+            runtime.snapshot.connection == .connected
+                && healthy.startCount == 1
+                && stale.stopCount == 1
+        }
+        guard factoryCount == 2 else {
+            throw VoiceFoundationVerificationError.failed("recovery_started_multiple_replacements")
         }
         await runtime.shutdown()
     }

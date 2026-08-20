@@ -57,6 +57,7 @@ internal sealed class VoiceFoundationVerifier
         await RunCaseAsync("crash-cleanup", VerifyTransportCrashDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("transition-cleanup", VerifySystemTransitionDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("transition-inflight-cleanup", VerifySystemTransitionDisposesInFlightCandidateAsync, timeout.Token);
+        await RunCaseAsync("transition-cancellation", VerifyCancelledSystemTransitionCannotRestartAsync, timeout.Token);
         await RunCaseAsync("process-launch-failure", VerifyProcessLaunchFailureIsBoundedAsync, timeout.Token);
         await RunCaseAsync("stale-start", VerifyStaleStartFailureDoesNotReplaceReadyClientAsync, timeout.Token);
         await RunCaseAsync("stale-request", VerifyStaleRequestDoesNotBlockReadyClientAsync, timeout.Token);
@@ -541,6 +542,48 @@ internal sealed class VoiceFoundationVerifier
         }
     }
 
+    private async Task VerifyCancelledSystemTransitionCannotRestartAsync(CancellationToken cancellationToken)
+    {
+        var factoryCalls = 0;
+        var staleHarness = new GatedDisposeHarness();
+        var healthyHarness = new AppServerHarness();
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ => Task.FromResult(
+                Interlocked.Increment(ref factoryCalls) == 1
+                    ? staleHarness.CreateClient()
+                    : healthyHarness.CreateClient()),
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: [TimeSpan.Zero]);
+
+        await coordinator.InitializeAsync(cancellationToken);
+        using var staleTransitionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var staleTransition = coordinator.NotifySystemTransitionAsync(staleTransitionCancellation.Token);
+        await staleHarness.DisposeStarted.WaitAsync(cancellationToken);
+        staleTransitionCancellation.Cancel();
+
+        await coordinator.NotifySystemTransitionAsync(cancellationToken);
+        await WaitUntilAsync(
+            () => coordinator.Snapshot.Availability == CodexVoiceAvailability.Ready,
+            cancellationToken);
+        staleHarness.ReleaseDispose();
+        try
+        {
+            await staleTransition;
+            _failures.Add("cancelled system transition completed without observing cancellation");
+        }
+        catch (OperationCanceledException) when (staleTransitionCancellation.IsCancellationRequested)
+        {
+        }
+
+        await Task.Yield();
+        if (Volatile.Read(ref factoryCalls) != 2
+            || !coordinator.Snapshot.TransportAttached)
+        {
+            _failures.Add("cancelled system transition scheduled a stale replacement");
+        }
+    }
+
     private async Task VerifyStaleStartFailureDoesNotReplaceReadyClientAsync(CancellationToken cancellationToken)
     {
         var factoryCalls = 0;
@@ -666,6 +709,18 @@ internal sealed class VoiceFoundationVerifier
                 index == 89 ? @"C:\Users\test\private.txt" : new string('あ', 160),
                 true,
                 now.AddSeconds(index)));
+        }
+
+        var validTranscriptCount = coordinator.Snapshot.Transcript.Count;
+        coordinator.AppendTranscript(new VoiceTranscriptEvent(
+            "untrusted-role",
+            "tool",
+            "must not render as system",
+            true,
+            now.AddSeconds(100)));
+        if (coordinator.Snapshot.Transcript.Count != validTranscriptCount)
+        {
+            _failures.Add("unknown transcript role was published as Host/system content");
         }
 
         coordinator.UpsertSession(new AgentSessionSummary(

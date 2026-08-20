@@ -209,6 +209,14 @@ internal static class VoiceTextSafety
             char.IsLetterOrDigit(character) || character == '_' ? character : '_').ToArray());
         return normalized.Length <= 80 ? normalized : normalized[..80];
     }
+
+    public static string? NormalizeTranscriptRole(string? value) => value switch
+    {
+        "user" => "user",
+        "assistant" => "assistant",
+        "system" => "system",
+        _ => null
+    };
 }
 
 internal sealed class VoiceTranscriptBuffer
@@ -222,10 +230,15 @@ internal sealed class VoiceTranscriptBuffer
 
     public void Append(VoiceTranscriptEvent value)
     {
+        var role = VoiceTextSafety.NormalizeTranscriptRole(value.Role);
+        if (role is null)
+        {
+            return;
+        }
         var sanitized = value with
         {
             Id = VoiceTextSafety.SanitizeIdentifier(value.Id),
-            Role = VoiceTextSafety.SanitizeVisibleText(value.Role, 24),
+            Role = role,
             Text = VoiceTextSafety.SanitizeVisibleText(value.Text, 1_024)
         };
         _events.Add(sanitized);
@@ -515,8 +528,9 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         }
     }
 
-    public async Task NotifySystemTransitionAsync()
+    public async Task NotifySystemTransitionAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!_featureEnabled)
         {
             return;
@@ -537,16 +551,20 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         }
         Interlocked.Increment(ref _generation);
         await CancelRestartAsync().ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         await CancelStartupAsync().ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         var client = DetachClient();
         if (client is not null)
         {
             await DisposeDetachedClientAsync(client).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
         }
         if (!_featureEnabled || _disposed)
         {
             return;
         }
+        cancellationToken.ThrowIfCancellationRequested();
         UpdateSnapshot(snapshot => snapshot with
         {
             Availability = CodexVoiceAvailability.Unavailable,
@@ -556,6 +574,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             TransportAttached = false,
             AppServerProcessId = null
         });
+        cancellationToken.ThrowIfCancellationRequested();
         ScheduleRestart();
     }
 
