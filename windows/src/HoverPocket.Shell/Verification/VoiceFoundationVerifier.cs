@@ -45,6 +45,7 @@ internal sealed class VoiceFoundationVerifier
         await RunCaseAsync("compatibility", VerifyCompatibilityGatesAsync, timeout.Token);
         await RunCaseAsync("unexpected-request", VerifyUnexpectedRequestFailsClosedAsync, timeout.Token);
         await RunCaseAsync("initialize-request", VerifyInitializeRequestCannotBePromotedAsync, timeout.Token);
+        await RunCaseAsync("disconnect-before-promotion", VerifyDisconnectBeforePromotionAsync, timeout.Token);
         await RunCaseAsync("restart", VerifyRestartIsBoundedAsync, timeout.Token);
         await RunCaseAsync("failed-initialize-cleanup", VerifyFailedInitializeDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("crash-cleanup", VerifyTransportCrashDisposesCandidateAsync, timeout.Token);
@@ -239,6 +240,28 @@ internal sealed class VoiceFoundationVerifier
             || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure)
         {
             _failures.Add("failed initialize retained a candidate app-server client");
+        }
+    }
+
+    private async Task VerifyDisconnectBeforePromotionAsync(CancellationToken cancellationToken)
+    {
+        var disposeCount = 0;
+        var harness = new AppServerHarness(
+            () => Interlocked.Increment(ref disposeCount),
+            disconnectAfterInitialize: true);
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ => Task.FromResult(harness.CreateClient()),
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: []);
+
+        await coordinator.InitializeAsync(cancellationToken);
+        await WaitUntilAsync(() => Volatile.Read(ref disposeCount) == 1, cancellationToken);
+        if (coordinator.Snapshot.Availability == CodexVoiceAvailability.Ready
+            || coordinator.Snapshot.TransportAttached
+            || coordinator.Snapshot.AppServerProcessId is not null)
+        {
+            _failures.Add("a disconnected startup candidate was promoted to ready");
         }
     }
 
@@ -517,17 +540,25 @@ internal sealed class VoiceFoundationVerifier
         private readonly ChannelLineReader _reader = new();
         private readonly Action? _onDispose;
         private readonly bool _requestDuringInitialize;
+        private readonly bool _disconnectAfterInitialize;
 
-        public AppServerHarness(Action? onDispose = null, bool requestDuringInitialize = false)
+        public AppServerHarness(
+            Action? onDispose = null,
+            bool requestDuringInitialize = false,
+            bool disconnectAfterInitialize = false)
         {
             _onDispose = onDispose;
             _requestDuringInitialize = requestDuringInitialize;
+            _disconnectAfterInitialize = disconnectAfterInitialize;
         }
 
         public CodexAppServerClient CreateClient() =>
             CodexAppServerClient.AttachForTesting(
                 _reader,
-                new AutoReplyWriter(_reader, _requestDuringInitialize),
+                new AutoReplyWriter(
+                    _reader,
+                    _requestDuringInitialize,
+                    _disconnectAfterInitialize),
                 TimeSpan.FromSeconds(1),
                 () =>
                 {
@@ -631,11 +662,16 @@ internal sealed class VoiceFoundationVerifier
     {
         private readonly ChannelLineReader _reader;
         private readonly bool _requestDuringInitialize;
+        private readonly bool _disconnectAfterInitialize;
 
-        public AutoReplyWriter(ChannelLineReader reader, bool requestDuringInitialize)
+        public AutoReplyWriter(
+            ChannelLineReader reader,
+            bool requestDuringInitialize,
+            bool disconnectAfterInitialize)
         {
             _reader = reader;
             _requestDuringInitialize = requestDuringInitialize;
+            _disconnectAfterInitialize = disconnectAfterInitialize;
         }
 
         public override Encoding Encoding => Encoding.UTF8;
@@ -654,6 +690,10 @@ internal sealed class VoiceFoundationVerifier
                     _reader.Push("{\"id\":9002,\"method\":\"approval/request\",\"params\":{}}");
                 }
                 _reader.Push($"{{\"id\":{id.GetInt64()},\"result\":{{\"ready\":true}}}}");
+                if (_disconnectAfterInitialize)
+                {
+                    _reader.Dispose();
+                }
             }
             return Task.CompletedTask;
         }

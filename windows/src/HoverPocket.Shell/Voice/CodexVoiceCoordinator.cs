@@ -257,6 +257,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
     private readonly IReadOnlyList<TimeSpan> _restartDelays;
     private readonly VoiceTranscriptBuffer _transcript = new();
     private readonly Dictionary<string, AgentSessionSummary> _sessions = new(StringComparer.Ordinal);
+    private readonly Dictionary<CodexAppServerClient, int> _clientGenerations = [];
     private CancellationTokenSource _lifetime = new();
     private CancellationTokenSource? _restartCancellation;
     private CodexAppServerClient? _client;
@@ -531,10 +532,20 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         {
             return;
         }
+        Interlocked.Increment(ref _generation);
         var client = DetachClient();
         if (client is not null)
         {
             _ = DisposeDetachedClientAsync(client);
+        }
+        PublishTransportCrashAndRestart();
+    }
+
+    private void PublishTransportCrashAndRestart()
+    {
+        if (!_featureEnabled || _disposed)
+        {
+            return;
         }
         UpdateSnapshot(snapshot => snapshot with
         {
@@ -587,6 +598,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         try
         {
             candidate = await _clientFactory!(cancellationToken);
+            TrackClientGeneration(candidate, generation);
             candidate.ServerRequestReceived += OnServerRequestReceived;
             candidate.Disconnected += OnClientDisconnected;
             using var initializeDocument = JsonDocument.Parse(
@@ -674,11 +686,31 @@ internal sealed class CodexVoiceCoordinator : IDisposable
 
     private void OnClientDisconnected(object? sender, EventArgs e)
     {
-        if (!_featureEnabled || _disposed)
+        if (sender is not CodexAppServerClient client)
         {
             return;
         }
-        NotifyTransportCrashed();
+
+        var clientGeneration = ClientGeneration(client);
+        if (clientGeneration is null)
+        {
+            return;
+        }
+        if (!_featureEnabled
+            || _disposed
+            || Interlocked.CompareExchange(
+                ref _generation,
+                clientGeneration.Value + 1,
+                clientGeneration.Value) != clientGeneration.Value)
+        {
+            DetachClientIfCurrent(client);
+            _ = DisposeDetachedClientAsync(client);
+            return;
+        }
+
+        DetachClientIfCurrent(client);
+        _ = DisposeDetachedClientAsync(client);
+        PublishTransportCrashAndRestart();
     }
 
     private void ScheduleRestart()
@@ -766,6 +798,39 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         }
     }
 
+    private void TrackClientGeneration(CodexAppServerClient client, int generation)
+    {
+        lock (_sync)
+        {
+            _clientGenerations[client] = generation;
+        }
+    }
+
+    private int? ClientGeneration(CodexAppServerClient client)
+    {
+        lock (_sync)
+        {
+            return _clientGenerations.TryGetValue(client, out var generation)
+                ? generation
+                : null;
+        }
+    }
+
+    private bool DetachClientIfCurrent(CodexAppServerClient expected)
+    {
+        lock (_sync)
+        {
+            if (!ReferenceEquals(_client, expected))
+            {
+                return false;
+            }
+            _client = null;
+            expected.ServerRequestReceived -= OnServerRequestReceived;
+            expected.Disconnected -= OnClientDisconnected;
+            return true;
+        }
+    }
+
     private CodexAppServerClient? DetachClient()
     {
         lock (_sync)
@@ -783,8 +848,12 @@ internal sealed class CodexVoiceCoordinator : IDisposable
 
     private async Task DisposeDetachedClientAsync(CodexAppServerClient client)
     {
-        client.ServerRequestReceived -= OnServerRequestReceived;
-        client.Disconnected -= OnClientDisconnected;
+        lock (_sync)
+        {
+            _clientGenerations.Remove(client);
+            client.ServerRequestReceived -= OnServerRequestReceived;
+            client.Disconnected -= OnClientDisconnected;
+        }
         try
         {
             await client.DisposeAsync();
