@@ -495,11 +495,17 @@ internal sealed class PocketAppGenerationVerifier
         try
         {
             var approve = false;
+            var allowActivationFlush = true;
             using var controller = new PocketAppGenerationController(
                 root,
                 dataRoot,
                 draftRoot,
                 new FixturePocketAppGenerationAdapter(FixtureRoot()));
+            controller.SetBeforeDeactivate((_, cancellationToken) =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return Task.FromResult(allowActivationFlush);
+            });
             var settings = new HoverPocket.Shell.Bridge.BridgeDispatcher();
             controller.AttachSettings(settings, approvalDecision: _ => approve);
             var panel = new HoverPocket.Shell.Bridge.BridgeDispatcher();
@@ -521,6 +527,14 @@ internal sealed class PocketAppGenerationVerifier
             generated = await settings.ProcessRawMessageAsync(generate.Replace("\"generate\"", "\"generate-2\"", StringComparison.Ordinal));
             Require(generated?.Contains("\"phase\":\"awaiting_approval\"", StringComparison.Ordinal) == true, "generation_native_approval_restage");
             approve = true;
+            allowActivationFlush = false;
+            var blocked = await settings.ProcessRawMessageAsync(
+                """{"id":"approve-flush-blocked","method":"pocketApps.presentApproval","params":{}}""");
+            Require(
+                blocked?.Contains("GENERATION_STATE_FLUSH_FAILED", StringComparison.Ordinal) == true
+                    && blocked.Contains("\"proposal\":{", StringComparison.Ordinal),
+                "generation_activation_flush_failure_preserves_proposal");
+            allowActivationFlush = true;
             var installed = await settings.ProcessRawMessageAsync(
                 """{"id":"approve-native","method":"pocketApps.presentApproval","params":{}}""");
             Require(
@@ -871,6 +885,13 @@ internal sealed class PocketAppGenerationVerifier
             using (var lifecycle = new PocketAppLifecycleManager(root, dataRoot))
             {
                 _ = InstallFixture(request, adapter, materializer, lifecycle);
+                var update = MakeRequest(
+                    "generation-flush-v2",
+                    request.UserRequest,
+                    appId,
+                    "1.0.1",
+                    request.Namespace);
+                _ = InstallFixture(update, adapter, materializer, lifecycle);
             }
 
             var allowFlush = true;
@@ -898,6 +919,8 @@ internal sealed class PocketAppGenerationVerifier
 
             _ = await settings.ProcessRawMessageAsync(
                 """{"id":"flush-enable","method":"pocketApps.enable","params":{"appId":"local.example.flush"}}""");
+            var pending = await settings.ProcessRawMessageAsync(
+                """{"id":"flush-rollback","method":"pocketApps.prepareRollback","params":{"appId":"local.example.flush","version":"1.0.0"}}""");
             allowFlush = false;
             flushCompleted = false;
             var blocked = await settings.ProcessRawMessageAsync(
@@ -905,9 +928,12 @@ internal sealed class PocketAppGenerationVerifier
             Require(
                 flushCalls == 2
                     && flushCompleted
+                    && pending?.Contains("\"phase\":\"awaiting_approval\"", StringComparison.Ordinal) == true
                     && blocked?.Contains("GENERATION_STATE_FLUSH_FAILED", StringComparison.Ordinal) == true
+                    && blocked.Contains("\"proposal\":{", StringComparison.Ordinal)
+                    && blocked.Contains("\"action\":\"rollback\"", StringComparison.Ordinal)
                     && blocked.Contains("\"appId\":\"local.example.flush\",\"state\":\"enabled\"", StringComparison.Ordinal),
-                "generation_remove_blocked_when_state_flush_fails");
+                "generation_remove_flush_failure_preserves_pending_proposal");
 
             allowFlush = true;
             var removed = await settings.ProcessRawMessageAsync(

@@ -296,6 +296,10 @@ internal sealed class PocketAppGenerationController : IDisposable
                 }
                 return BuildState();
             }
+            if (!await FlushBeforeDeactivateAsync(proposal.PackageId, cancellationToken))
+            {
+                return Fail("GENERATION_STATE_FLUSH_FAILED");
+            }
             lock (_stateSync)
             {
                 if (!ReferenceEquals(_pendingProposal, proposal))
@@ -470,11 +474,11 @@ internal sealed class PocketAppGenerationController : IDisposable
             lock (_stateSync) { if (!_enabled) { return FailLocked("GENERATION_DISABLED"); } }
             ValidatePins();
             RefreshManagedPackages();
-            RejectPendingProposalIfNeeded(packageId);
             if (!await FlushBeforeDeactivateAsync(packageId, cancellationToken))
             {
                 return Fail("GENERATION_STATE_FLUSH_FAILED");
             }
+            RejectPendingProposalIfNeeded(packageId);
             var receipt = _lifecycle.Remove(packageId, PocketAppDataDisposition.Preserve);
             if (!receipt.ReadbackVerified
                 || receipt.State != PocketAppLifecycleState.Removed
