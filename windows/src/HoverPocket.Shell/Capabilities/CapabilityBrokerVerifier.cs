@@ -1176,7 +1176,9 @@ internal sealed class CapabilityBrokerVerifier
         Require(receipt.Status == CapabilityReceiptStatus.Failed, "cancel_after_step_status");
         if (receipt.Steps.Count != 2)
         {
-            _failures.Add($"cancel_after_step_receipts:{receipt.Steps.Count}");
+            var statuses = string.Join(",", receipt.Steps.Select(step =>
+                $"{step.Capability.Id}:{step.Status}:{step.Readback.Status}:{step.SafeError?.Code ?? "none"}"));
+            _failures.Add($"cancel_after_step_receipts:{receipt.Steps.Count}:{statuses}");
             return;
         }
         Require(receipt.Steps[0].Status == CapabilityReceiptStatus.Succeeded, "cancel_after_step_first_succeeded");
