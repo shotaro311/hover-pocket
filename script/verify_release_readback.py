@@ -382,6 +382,11 @@ def validate_windows(
     verifier.require(package.get("Version") == version, "windows.feed_version", "feed and manifest versions differ")
     verifier.require(package.get("PackageId") == "HoverPocketWin", "windows.feed_package", "feed package ID differs")
     verifier.require(package.get("Type") == "Full", "windows.feed_type", "feed is not a full package")
+    verifier.require(
+        isinstance(package_name, str) and package_name == f"HoverPocketWin-{version}-full.nupkg",
+        "windows.feed_full_package_name",
+        "feed target is not the versioned full update package",
+    )
     verifier.require(isinstance(package_name, str) and package_name in assets, "windows.feed_asset", "feed package asset is missing")
     verifier.require(
         isinstance(package.get("SHA256"), str)

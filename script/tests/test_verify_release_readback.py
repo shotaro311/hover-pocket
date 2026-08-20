@@ -145,6 +145,27 @@ class ReleaseReadbackTests(unittest.TestCase):
         )
         self.assertEqual((version, signing), ("1.2.3", "unsigned"))
 
+    def test_windows_beta_rejects_non_nupkg_full_feed_target(self):
+        release_value, feed, manifest, checksums = self.windows_fixture()
+        feed_value = json.loads(feed)
+        wrong_name = "HoverPocketWin-win-Setup.exe"
+        wrong_bytes = b"setup"
+        package = feed_value["Assets"][0]
+        package["FileName"] = wrong_name
+        package["SHA1"] = hashlib.sha1(wrong_bytes).hexdigest().upper()
+        package["SHA256"] = MODULE.sha256(wrong_bytes).upper()
+        package["Size"] = len(wrong_bytes)
+
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.validate_windows(
+                MODULE.Verifier(),
+                release_value,
+                json.dumps(feed_value, separators=(",", ":")).encode(),
+                manifest,
+                checksums,
+                "beta",
+            )
+
     def test_windows_formal_rejects_unsigned_release(self):
         release_value, feed, manifest, checksums = self.windows_fixture()
         with self.assertRaises(MODULE.VerificationError):
