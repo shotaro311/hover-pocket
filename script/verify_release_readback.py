@@ -635,6 +635,23 @@ def require_windows_downloads(
     )
 
 
+def build_windows_asset_snapshot(
+    release_tag: str,
+    downloads: dict[str, DownloadedAsset],
+) -> dict[str, Any]:
+    return {
+        "releaseTag": release_tag,
+        "assets": [
+            {
+                "name": name,
+                "size": downloads[name].size,
+                "sha256": downloads[name].sha256,
+            }
+            for name in sorted(downloads)
+        ],
+    }
+
+
 def require_macos_downloads(
     verifier: Verifier,
     mac_feed_release: dict[str, Any],
@@ -723,7 +740,7 @@ def verify_downloaded_releases(
     windows_feed_data: bytes,
     windows_checksum_data: bytes,
     sparkle_public_key: str,
-) -> None:
+) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="hoverpocket-release-readback-") as directory:
         root = pathlib.Path(directory)
         mac_version_zip = reader.download_asset(
@@ -769,6 +786,10 @@ def verify_downloaded_releases(
             windows_feed_data,
             windows_downloads,
         )
+        release_tag = windows_release.get("tag_name")
+        if not isinstance(release_tag, str):
+            raise VerificationError("windows.release_tag: missing tag")
+        return build_windows_asset_snapshot(release_tag, windows_downloads)
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -808,7 +829,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         args.windows_signing_gate,
     )
     github_latest_release = reader.latest_release()
-    verify_downloaded_releases(
+    windows_asset_snapshot = verify_downloaded_releases(
         verifier,
         reader,
         mac_feed_release,
@@ -845,6 +866,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "signingGate": args.windows_signing_gate,
             "assetReadback": "all-assets-downloaded-and-hashed",
             "authenticodeEvidence": "manifest-declared",
+            "assetSnapshot": windows_asset_snapshot,
         },
         "checks": verifier.checks,
     }

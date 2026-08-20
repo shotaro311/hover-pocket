@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [string]$Repository = "shotaro311/hover-pocket",
-    [string]$Tag = "auto"
+    [string]$Tag = "auto",
+    [Parameter(Mandatory = $true)]
+    [string]$ExpectedSnapshotPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -134,6 +136,81 @@ function Assert-DownloadedChecksum {
     }
 }
 
+function Read-ExpectedSnapshot {
+    param([string]$Path, [string]$ExpectedTag)
+
+    if (-not [IO.File]::Exists($Path)) {
+        throw "Expected asset snapshot is missing."
+    }
+    try {
+        $report = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        throw "Expected asset snapshot is malformed."
+    }
+    $snapshot = $report.windows.assetSnapshot
+    if ($report.status -ne "passed" -or $null -eq $snapshot -or $snapshot.releaseTag -cne $ExpectedTag) {
+        throw "Expected asset snapshot does not describe the verified release."
+    }
+    $result = @{}
+    foreach ($item in @($snapshot.assets)) {
+        $name = [string]$item.name
+        $sha256 = ([string]$item.sha256).ToLowerInvariant()
+        [long]$size = 0
+        if (
+            $name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$' -or
+            $sha256 -notmatch '^[0-9a-f]{64}$' -or
+            -not [long]::TryParse(([string]$item.size), [ref]$size) -or
+            $size -lt 0 -or
+            $result.ContainsKey($name)
+        ) {
+            throw "Expected asset snapshot contains an invalid or duplicate entry."
+        }
+        $result[$name] = [pscustomobject]@{ Size = $size; SHA256 = $sha256 }
+    }
+    if ($result.Count -eq 0) {
+        throw "Expected asset snapshot is empty."
+    }
+    return $result
+}
+
+function Assert-ReleaseMatchesSnapshot {
+    param($Release, [hashtable]$ExpectedAssets)
+
+    $releaseAssets = @($Release.assets)
+    if ($releaseAssets.Count -ne $ExpectedAssets.Count) {
+        throw "Published release asset count differs from the verified snapshot."
+    }
+    foreach ($name in $ExpectedAssets.Keys) {
+        $matches = @($releaseAssets | Where-Object { $_.name -ceq $name })
+        $expected = $ExpectedAssets[$name]
+        if ($matches.Count -ne 1) {
+            throw "Published release asset $name differs from the verified snapshot."
+        }
+        $digest = [string]$matches[0].digest
+        if (
+            [long]$matches[0].size -ne $expected.Size -or
+            $digest -cne ("sha256:" + $expected.SHA256)
+        ) {
+            throw "Published release metadata for $name differs from the verified snapshot."
+        }
+    }
+}
+
+function Assert-DownloadedSnapshot {
+    param([string]$Path, [string]$Name, [hashtable]$ExpectedAssets)
+
+    if (-not $ExpectedAssets.ContainsKey($Name)) {
+        throw "Verified snapshot does not cover $Name."
+    }
+    $expected = $ExpectedAssets[$Name]
+    $file = Get-Item -LiteralPath $Path
+    $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($file.Length -ne $expected.Size -or $actual -ne $expected.SHA256) {
+        throw "Downloaded asset $Name differs from the verified snapshot."
+    }
+}
+
 function Assert-TimestampedAuthenticode {
     param([string]$Path, [string]$Label)
 
@@ -149,6 +226,8 @@ function Assert-TimestampedAuthenticode {
 
 $release = Resolve-WindowsRelease -RequestedTag $Tag
 $releaseTag = [string]$release.tag_name
+$expectedAssets = Read-ExpectedSnapshot -Path $ExpectedSnapshotPath -ExpectedTag $releaseTag
+Assert-ReleaseMatchesSnapshot -Release $release -ExpectedAssets $expectedAssets
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("hoverpocket-authenticode-" + [Guid]::NewGuid().ToString("N"))
 [IO.Directory]::CreateDirectory($temporaryRoot) | Out-Null
 
@@ -156,9 +235,13 @@ try {
     $manifestPath = Join-Path $temporaryRoot "release-manifest.win.json"
     $checksumPath = Join-Path $temporaryRoot "SHA256SUMS-win.txt"
     $feedPath = Join-Path $temporaryRoot "releases.win.json"
+    $releasesPath = Join-Path $temporaryRoot "RELEASES"
+    $assetsPath = Join-Path $temporaryRoot "assets.win.json"
     Get-ReleaseAsset -Release $release -Name "release-manifest.win.json" -Destination $manifestPath
     Get-ReleaseAsset -Release $release -Name "SHA256SUMS-win.txt" -Destination $checksumPath
     Get-ReleaseAsset -Release $release -Name "releases.win.json" -Destination $feedPath
+    Get-ReleaseAsset -Release $release -Name "RELEASES" -Destination $releasesPath
+    Get-ReleaseAsset -Release $release -Name "assets.win.json" -Destination $assetsPath
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     $feed = Get-Content -LiteralPath $feedPath -Raw | ConvertFrom-Json
     if ($manifest.authenticode -ne "signed-timestamped-verified") {
@@ -192,9 +275,27 @@ try {
     $checksums = Read-Checksums -Path $checksumPath
     Assert-DownloadedChecksum -Path $manifestPath -Name "release-manifest.win.json" -Checksums $checksums
     Assert-DownloadedChecksum -Path $feedPath -Name "releases.win.json" -Checksums $checksums
+    Assert-DownloadedChecksum -Path $releasesPath -Name "RELEASES" -Checksums $checksums
+    Assert-DownloadedChecksum -Path $assetsPath -Name "assets.win.json" -Checksums $checksums
     Assert-DownloadedChecksum -Path $setupPath -Name $setupAsset[0].name -Checksums $checksums
     Assert-DownloadedChecksum -Path $portablePath -Name $portableAsset[0].name -Checksums $checksums
     Assert-DownloadedChecksum -Path $packagePath -Name $packageName -Checksums $checksums
+    $downloadedPaths = @{
+        "release-manifest.win.json" = $manifestPath
+        "SHA256SUMS-win.txt" = $checksumPath
+        "releases.win.json" = $feedPath
+        "RELEASES" = $releasesPath
+        "assets.win.json" = $assetsPath
+    }
+    $downloadedPaths[[string]$setupAsset[0].name] = $setupPath
+    $downloadedPaths[[string]$portableAsset[0].name] = $portablePath
+    $downloadedPaths[$packageName] = $packagePath
+    if ($downloadedPaths.Count -ne $expectedAssets.Count) {
+        throw "Formal readback did not download every asset from the verified snapshot."
+    }
+    foreach ($entry in $downloadedPaths.GetEnumerator()) {
+        Assert-DownloadedSnapshot -Path $entry.Value -Name $entry.Key -ExpectedAssets $expectedAssets
+    }
     $packageFile = Get-Item -LiteralPath $packagePath
     $packageSha1 = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA1).Hash
     if (
@@ -229,6 +330,8 @@ try {
     if ($signerThumbprints.Count -ne 1) {
         throw "Setup, Portable application, and full update package application are signed by different certificates."
     }
+    $finalRelease = Resolve-WindowsRelease -RequestedTag $releaseTag
+    Assert-ReleaseMatchesSnapshot -Release $finalRelease -ExpectedAssets $expectedAssets
 
     [ordered]@{
         status = "passed"
@@ -237,6 +340,7 @@ try {
         portableApplication = "signed-timestamped-verified"
         updatePackageApplication = "signed-timestamped-verified"
         signerAgreement = "verified"
+        artifactSnapshot = "verified"
     } | ConvertTo-Json -Compress
 }
 finally {

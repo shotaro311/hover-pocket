@@ -10,6 +10,7 @@ import unittest
 
 SCRIPT = pathlib.Path(__file__).parents[1] / "verify_release_readback.py"
 WORKFLOW = pathlib.Path(__file__).parents[2] / ".github/workflows/release-readback-verify.yml"
+AUTHENTICODE_SCRIPT = pathlib.Path(__file__).parents[2] / "windows/script/verify_published_authenticode.ps1"
 SPEC = importlib.util.spec_from_file_location("verify_release_readback", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -241,6 +242,12 @@ class ReleaseReadbackTests(unittest.TestCase):
         verifier = MODULE.Verifier()
         MODULE.require_windows_downloads(verifier, release_value, checksums, feed, downloads)
         self.assertIn("windows.feed_sha1", verifier.checks)
+        snapshot = MODULE.build_windows_asset_snapshot("win-v1.2.3", downloads)
+        self.assertEqual(snapshot["releaseTag"], "win-v1.2.3")
+        self.assertEqual(
+            [item["name"] for item in snapshot["assets"]],
+            sorted(downloads),
+        )
 
         downloads[package_name] = MODULE.DownloadedAsset(
             name=package_name,
@@ -335,6 +342,19 @@ class ReleaseReadbackTests(unittest.TestCase):
         upload_artifact_sha = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
         self.assertEqual(workflow.count(f"actions/upload-artifact@{upload_artifact_sha}"), 2)
         self.assertIn("- name: Verify published release surfaces\n        shell: bash", workflow)
+
+    def test_formal_workflow_pins_one_verified_asset_snapshot(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        script = AUTHENTICODE_SCRIPT.read_text(encoding="utf-8")
+        download_artifact_sha = "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+        self.assertIn("needs: [resolve-windows-release, published-readback]", workflow)
+        self.assertIn(f"actions/download-artifact@{download_artifact_sha}", workflow)
+        self.assertIn("name: published-release-readback", workflow)
+        self.assertIn("-ExpectedSnapshotPath", workflow)
+        self.assertEqual(script.count("Assert-ReleaseMatchesSnapshot -Release"), 2)
+        self.assertIn('Get-ReleaseAsset -Release $release -Name "RELEASES"', script)
+        self.assertIn('Get-ReleaseAsset -Release $release -Name "assets.win.json"', script)
+        self.assertIn("Assert-DownloadedSnapshot", script)
 
     def test_github_latest_must_remain_the_macos_release(self):
         verifier = MODULE.Verifier()
