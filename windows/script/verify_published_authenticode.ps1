@@ -168,8 +168,8 @@ try {
         throw "Release tag and manifest version differ."
     }
 
-    $setupAsset = @($release.assets | Where-Object { $_.name -like '*-Setup.exe' })
-    $portableAsset = @($release.assets | Where-Object { $_.name -like '*-Portable.zip' })
+    $setupAsset = @($release.assets | Where-Object { $_.name -ceq 'HoverPocketWin-win-Setup.exe' })
+    $portableAsset = @($release.assets | Where-Object { $_.name -ceq 'HoverPocketWin-win-Portable.zip' })
     $fullPackages = @($feed.Assets | Where-Object { $_.Type -eq 'Full' })
     if ($setupAsset.Count -ne 1 -or $portableAsset.Count -ne 1 -or $fullPackages.Count -ne 1) {
         throw "Release must contain exactly one Setup executable, Portable ZIP, and full update package."

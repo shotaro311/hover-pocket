@@ -166,6 +166,29 @@ class ReleaseReadbackTests(unittest.TestCase):
                 "beta",
             )
 
+    def test_windows_beta_requires_canonical_download_asset_names(self):
+        release_value, feed, manifest, checksums = self.windows_fixture()
+        renamed = {
+            MODULE.WINDOWS_SETUP_ASSET: "Old-Setup.exe",
+            MODULE.WINDOWS_PORTABLE_ASSET: "Old-Portable.zip",
+        }
+        for asset in release_value["assets"]:
+            if asset["name"] in renamed:
+                asset["name"] = renamed[asset["name"]]
+        checksum_text = checksums.decode("ascii")
+        for canonical, stale in renamed.items():
+            checksum_text = checksum_text.replace(canonical, stale)
+
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.validate_windows(
+                MODULE.Verifier(),
+                release_value,
+                feed,
+                manifest,
+                checksum_text.encode("ascii"),
+                "beta",
+            )
+
     def test_windows_formal_rejects_unsigned_release(self):
         release_value, feed, manifest, checksums = self.windows_fixture()
         with self.assertRaises(MODULE.VerificationError):
@@ -311,6 +334,7 @@ class ReleaseReadbackTests(unittest.TestCase):
         self.assertNotIn("WINDOWS_TAG: ${{ inputs.windows_tag }}", workflow)
         upload_artifact_sha = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
         self.assertEqual(workflow.count(f"actions/upload-artifact@{upload_artifact_sha}"), 2)
+        self.assertIn("- name: Verify published release surfaces\n        shell: bash", workflow)
 
     def test_github_latest_must_remain_the_macos_release(self):
         verifier = MODULE.Verifier()

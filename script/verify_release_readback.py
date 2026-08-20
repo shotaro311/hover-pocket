@@ -38,6 +38,8 @@ WINDOWS_REQUIRED_STATIC_ASSETS = {
     "releases.win.json",
     "SHA256SUMS-win.txt",
 }
+WINDOWS_SETUP_ASSET = "HoverPocketWin-win-Setup.exe"
+WINDOWS_PORTABLE_ASSET = "HoverPocketWin-win-Portable.zip"
 WINDOWS_TAG_RE = re.compile(r"^win-v(\d+)\.(\d+)\.(\d+)$")
 MAX_RELEASE_ASSET_BYTES = 512 * 1024 * 1024
 
@@ -400,8 +402,8 @@ def validate_windows(
         "windows.feed_sha1_format",
         "feed package SHA-1 is missing or malformed",
     )
-    verifier.require(any(name.endswith("-Setup.exe") for name in assets), "windows.setup_asset", "Setup executable is missing")
-    verifier.require(any(name.endswith("-Portable.zip") for name in assets), "windows.portable_asset", "Portable ZIP is missing")
+    verifier.require(WINDOWS_SETUP_ASSET in assets, "windows.setup_asset", "canonical Setup executable is missing")
+    verifier.require(WINDOWS_PORTABLE_ASSET in assets, "windows.portable_asset", "canonical Portable ZIP is missing")
     authenticode = manifest.get("authenticode")
     if signing_gate == "formal":
         verifier.require(

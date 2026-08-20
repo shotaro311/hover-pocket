@@ -119,6 +119,7 @@ jobs:
           check-latest: false
 
       - name: Verify published release surfaces
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
           WINDOWS_TAG: ${{ needs.resolve-windows-release.outputs.windows_tag }}
