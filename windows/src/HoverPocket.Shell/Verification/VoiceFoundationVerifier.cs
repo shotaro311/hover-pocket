@@ -373,6 +373,13 @@ internal sealed class VoiceFoundationVerifier
         await coordinator.InitializeAsync(cancellationToken);
         var disable = coordinator.SetFeatureEnabledAsync(false, cancellationToken);
         await firstHarness.DisposeStarted.WaitAsync(cancellationToken);
+        var stopping = coordinator.Snapshot;
+        if (stopping.Availability == CodexVoiceAvailability.Disabled
+            || stopping.SessionStatus != CodexVoiceSessionStatus.Stopping
+            || !stopping.Muted)
+        {
+            _failures.Add("Voice teardown hid the active runtime before client disposal completed");
+        }
         var enable = coordinator.SetFeatureEnabledAsync(true, cancellationToken);
         await Task.Yield();
         if (Volatile.Read(ref factoryCalls) != 1 || enable.IsCompleted)
@@ -847,12 +854,25 @@ internal sealed class VoiceFoundationVerifier
         var workAreaPlacement = VoicePanelGeometry.ExtendDownward(
             baselinePlacement,
             taskbarMonitor,
-            largeExpanded,
+            largeExpanded.PanelSize,
+            VoicePanelGeometry.PreferredMode(largeExpanded),
             out var workAreaMode);
         if (workAreaMode != VoiceLaneMode.Compact
             || workAreaPlacement.PhysicalRect.Bottom > taskbarMonitor.WorkArea.Bottom)
         {
             _failures.Add("expanded Voice geometry ignored the monitor work area");
+        }
+
+        var teardownPlacement = VoicePanelGeometry.ExtendDownward(
+            baselinePlacement,
+            taskbarMonitor,
+            PanelSize.Large,
+            VoiceLaneMode.Compact,
+            out var teardownMode);
+        if (teardownMode != VoiceLaneMode.Compact
+            || teardownPlacement.DipRect.Height != baselinePlacement.DipRect.Height + VoicePanelGeometry.CompactHeight)
+        {
+            _failures.Add("Voice geometry collapsed before runtime teardown completed");
         }
 
         var defaults = new UserSettings();

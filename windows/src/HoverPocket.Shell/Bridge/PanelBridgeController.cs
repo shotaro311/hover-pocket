@@ -54,6 +54,7 @@ internal sealed class PanelBridgeController : IDisposable
     private bool _previewPostScheduled;
     private bool _panelOpen;
     private VoiceLaneMode _resolvedVoiceLaneMode;
+    private volatile bool _voiceRuntimeActive;
     private bool _disposed;
 
     public PanelBridgeController(
@@ -83,6 +84,7 @@ internal sealed class PanelBridgeController : IDisposable
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.NormalizeForBootstrap(settings, providerRegistry.ProviderIds);
         _voiceCoordinator = voiceCoordinator ?? new CodexVoiceCoordinator(CurrentSettings.VoiceEnabled);
+        _voiceRuntimeActive = _voiceCoordinator.Snapshot.Availability != CodexVoiceAvailability.Disabled;
         _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(CurrentSettings);
         _voiceCoordinator.SnapshotChanged += OnVoiceSnapshotChanged;
         _aiNativeExecutionLease = CurrentSettings.AiNativeEnabled
@@ -227,6 +229,12 @@ internal sealed class PanelBridgeController : IDisposable
     public TodayFocusTextAdapter? TodayFocusTextAdapter => _todayFocusTextAdapter;
 
     public VoiceLaneMode ResolvedVoiceLaneMode => _resolvedVoiceLaneMode;
+
+    public VoiceLaneMode PreferredRuntimeVoiceLaneMode => !_voiceRuntimeActive
+        ? VoiceLaneMode.Disabled
+        : CurrentSettings.VoiceLaneLayout == VoiceLaneLayoutPreference.Expanded
+            ? VoiceLaneMode.Expanded
+            : VoiceLaneMode.Compact;
 
     public CodexVoiceSnapshot VoiceSnapshot => _voiceCoordinator.Snapshot;
 
@@ -963,10 +971,15 @@ internal sealed class PanelBridgeController : IDisposable
         {
             var updated = CurrentSettings.Clone();
             updated.VoiceEnabled = enabled;
-            _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(updated);
+            if (enabled)
+            {
+                _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(updated);
+            }
             SaveSettings(updated);
         }
-        await _voiceCoordinator.SetFeatureEnabledAsync(enabled, cancellationToken);
+        await _voiceCoordinator.SetFeatureEnabledAsync(
+            enabled,
+            enabled ? cancellationToken : CancellationToken.None);
         return await PublishStateAsync(cancellationToken);
     }
 
@@ -1157,7 +1170,17 @@ internal sealed class PanelBridgeController : IDisposable
     private void OnVoiceSnapshotChanged(object? sender, CodexVoiceSnapshot snapshot)
     {
         _ = sender;
-        _ = snapshot;
+        var runtimeActive = snapshot.Availability != CodexVoiceAvailability.Disabled;
+        if (_voiceRuntimeActive != runtimeActive)
+        {
+            _voiceRuntimeActive = runtimeActive;
+            _resolvedVoiceLaneMode = runtimeActive
+                ? CurrentSettings.VoiceLaneLayout == VoiceLaneLayoutPreference.Expanded
+                    ? VoiceLaneMode.Expanded
+                    : VoiceLaneMode.Compact
+                : VoiceLaneMode.Disabled;
+            SettingsChanged?.Invoke(this, CurrentSettings);
+        }
         _ = PostStateEventOnUiThreadAsync("voice.stateChanged");
     }
 

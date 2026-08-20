@@ -378,6 +378,12 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         Interlocked.Increment(ref _generation);
         if (!enabled)
         {
+            UpdateSnapshot(snapshot => snapshot with
+            {
+                SessionStatus = CodexVoiceSessionStatus.Stopping,
+                Activity = VoiceActivity.Idle,
+                Muted = true
+            });
             await CancelRestartAsync().ConfigureAwait(false);
             await CancelStartupAsync().ConfigureAwait(false);
             var client = DetachClient();

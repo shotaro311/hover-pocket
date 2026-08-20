@@ -226,6 +226,14 @@ def main() -> None:
         fail("macOS panel hide paths do not converge on Voice detach/mute")
     if "additionalPreviewHeight: CGFloat = 0" not in mac_geometry:
         fail("macOS panel geometry lacks a Voice Lane height input")
+    if "PreferredRuntimeVoiceLaneMode" not in bridge \
+            or "_voiceRuntimeActive" not in bridge \
+            or "enabled ? cancellationToken : CancellationToken.None" not in bridge:
+        fail("Windows Voice row can disappear before runtime teardown completes")
+    if "_panelBridgeController.PreferredRuntimeVoiceLaneMode" not in windows_shell:
+        fail("Windows panel geometry follows settings before Voice teardown completes")
+    if "CodexVoiceSessionStatus.Stopping" not in windows_coordinator:
+        fail("Windows Voice teardown does not publish a stopping state")
     if 'data-voice-enabled' not in windows_settings_html or 'data-voice-layout' not in windows_settings_html:
         fail("Windows Settings Voice controls missing")
     if 'settings.setVoiceEnabled' not in windows_settings_js or 'settings.setVoiceLayout' not in windows_settings_js:
