@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json.Nodes;
 using HoverPocket.Shell.Capabilities;
+using HoverPocket.Shell.Verification;
 
 namespace HoverPocket.Shell.PocketApps;
 
@@ -34,7 +35,7 @@ internal sealed class PocketAppPackageVerifier
                 && package.TestCases["start-focus-idempotent-replay"] == "pass"
                 && package.TestCases["start-focus-rejected"] == "reject",
                 "package_tests");
-            Console.WriteLine($"pocket_app_manifest_digest={package.ManifestDigest}");
+            VerifyConsole.WriteLine($"pocket_app_manifest_digest={package.ManifestDigest}");
         }, "valid_package");
 
         WithPackage(root =>
@@ -59,6 +60,7 @@ internal sealed class PocketAppPackageVerifier
             }
             var bundledRoot = Path.Combine(AppContext.BaseDirectory, "PocketApps", "local.example.today-focus");
             var bundled = new PocketAppPackageRuntime().Load(bundledRoot);
+            VerifyConsole.WriteLine($"pocket_app_bundled_manifest_digest={bundled.ManifestDigest}");
             Require(bundled.ManifestDigest == referencePackage.ManifestDigest, "bundled_manifest");
             Require(bundled.Surfaces["main"].CanonicalRenderModelBytes().AsSpan().SequenceEqual(
                 referencePackage.Surfaces["main"].CanonicalRenderModelBytes()), "bundled_surfaces");
@@ -195,20 +197,20 @@ internal sealed class PocketAppPackageVerifier
 
         if (_failures.Count > 0)
         {
-            Console.Error.WriteLine("pocket_app_package_verify=failed");
+            VerifyConsole.WriteLine("pocket_app_package_verify=failed");
             foreach (var failure in _failures)
             {
-                Console.Error.WriteLine($"failure={failure}");
+                VerifyConsole.WriteLine($"failure={failure}");
             }
             return 1;
         }
 
-        Console.WriteLine("pocket_app_package_verify=ok");
-        Console.WriteLine("pocket_app_package_valid_files=9");
-        Console.WriteLine("pocket_app_package_bundled=ok");
-        Console.WriteLine("pocket_app_package_negative_cases=17");
-        Console.WriteLine("pocket_app_lifecycle_verify=ok");
-        Console.WriteLine("pocket_app_generation_verify=ok");
+        VerifyConsole.WriteLine("pocket_app_package_verify=ok");
+        VerifyConsole.WriteLine("pocket_app_package_valid_files=9");
+        VerifyConsole.WriteLine("pocket_app_package_bundled=ok");
+        VerifyConsole.WriteLine("pocket_app_package_negative_cases=17");
+        VerifyConsole.WriteLine("pocket_app_lifecycle_verify=ok");
+        VerifyConsole.WriteLine("pocket_app_generation_verify=ok");
         return 0;
     }
 
