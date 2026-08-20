@@ -920,16 +920,15 @@ internal sealed class PocketAppGenerationVerifier
             var flushCompleted = false;
             var releaseCalls = 0;
             using var controller = new PocketAppGenerationController(root, dataRoot, draftRoot, null);
-            controller.SetBeforeDeactivate(async (targetAppId, cancellationToken) =>
+            controller.SetBeforeDeactivate((targetAppId, cancellationToken) =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await Task.Yield();
                 flushCalls += 1;
                 flushCompleted = string.Equals(targetAppId, appId, StringComparison.Ordinal);
-                return new PocketAppStateTransitionLease(
+                return Task.FromResult(new PocketAppStateTransitionLease(
                     targetAppId,
                     $"fixture-flush-{flushCalls}",
-                    allowFlush);
+                    allowFlush));
             }, lease =>
             {
                 if (string.Equals(lease.AppId, appId, StringComparison.Ordinal))

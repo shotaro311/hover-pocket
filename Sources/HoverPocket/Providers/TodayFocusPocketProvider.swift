@@ -55,7 +55,7 @@ struct GeneratedPocketAppProvider: PocketProvider {
               let model = try? registry.model(appID: appID, surfaceID: surfaceID) else {
             return AnyView(GeneratedPocketAppUnavailableView())
         }
-        return AnyView(PocketSurfaceHostView(model: model))
+        return AnyView(PocketSurfaceHostView(model: model).id(model.runtimeIdentity))
     }
 }
 
@@ -82,7 +82,7 @@ private struct TodayFocusPocketView: View {
                 unavailable("AIネイティブ機能はオフです。")
             } else if let runtime = aiRuntime.pocketAppExecutionRuntime,
                       let model = try? PocketSurfaceHostModel(runtime: runtime, surfaceID: "main") {
-                PocketSurfaceHostView(model: model)
+                PocketSurfaceHostView(model: model).id(model.runtimeIdentity)
             } else {
                 unavailable("Today Focusを準備できませんでした。")
             }

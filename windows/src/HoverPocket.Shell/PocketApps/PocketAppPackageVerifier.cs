@@ -29,6 +29,14 @@ internal sealed class PocketAppPackageVerifier
             Require(package.StatePropertyNames.SetEquals(["selectedEventRef"]), "package_state_schema");
             Require(package.StatePropertyTypes["selectedEventRef"].SetEquals(["string", "null"]), "package_state_types");
             Require(
+                package.StateProperties["selectedEventRef"] is
+                {
+                    IsRequired: true,
+                    Format: null,
+                    MaximumLength: null
+                },
+                "package_state_constraints");
+            Require(
                 package.TestCases.Count == 4
                 && package.TestCases["calendar-read"] == "pass"
                 && package.TestCases["start-focus-approved"] == "pass"

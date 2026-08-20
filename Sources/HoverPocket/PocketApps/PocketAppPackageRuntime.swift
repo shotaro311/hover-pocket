@@ -51,6 +51,13 @@ struct PocketAppWorkflowDocument: Equatable, Sendable {
     let requiredPermissions: Set<String>
 }
 
+struct PocketAppStatePropertySchema: Equatable, Sendable {
+    let types: Set<String>
+    let isRequired: Bool
+    let format: String?
+    let maximumLength: Int?
+}
+
 struct PocketAppPackage: Equatable, Sendable {
     let rootDirectory: URL
     let manifest: PocketAppManifestDocument
@@ -59,6 +66,7 @@ struct PocketAppPackage: Equatable, Sendable {
     let stateSchemaDigest: String
     let statePropertyNames: Set<String>
     let statePropertyTypes: [String: Set<String>]
+    let stateProperties: [String: PocketAppStatePropertySchema]
     let surfaces: [String: PocketSurfaceDocument]
     let workflows: [String: PocketAppWorkflowDocument]
     let testCases: [String: String]
@@ -104,7 +112,8 @@ struct PocketAppPackageRuntime {
 
         let stateData = try packageData(manifest.stateSchemaPath, files: packageFiles)
         let stateSchemaDigest = "sha256:" + SHA256.hash(data: stateData).map { String(format: "%02x", $0) }.joined()
-        let statePropertyTypes = try validateStateSchema(jsonObject(stateData, path: "$.state.schema"))
+        let stateProperties = try validateStateSchema(jsonObject(stateData, path: "$.state.schema"))
+        let statePropertyTypes = stateProperties.mapValues(\.types)
         let statePropertyNames = Set(statePropertyTypes.keys)
 
         let requestedScopes = Dictionary(
@@ -192,6 +201,7 @@ struct PocketAppPackageRuntime {
             stateSchemaDigest: stateSchemaDigest,
             statePropertyNames: statePropertyNames,
             statePropertyTypes: statePropertyTypes,
+            stateProperties: stateProperties,
             surfaces: surfaces,
             workflows: workflows,
             testCases: testCases
@@ -392,7 +402,7 @@ struct PocketAppPackageRuntime {
         )
     }
 
-    private func validateStateSchema(_ object: [String: Any]) throws -> [String: Set<String>] {
+    private func validateStateSchema(_ object: [String: Any]) throws -> [String: PocketAppStatePropertySchema] {
         try exactKeys(object, required: ["type", "properties", "additionalProperties"], optional: ["$schema", "required"], path: "$.state.schema")
         if let schema = object["$schema"] {
             try require(try string(schema, path: "$.state.schema.$schema") == "https://json-schema.org/draft/2020-12/schema", "$.state.schema.$schema")
@@ -401,7 +411,14 @@ struct PocketAppPackageRuntime {
         try require(try boolean(object["additionalProperties"], path: "$.state.schema.additionalProperties") == false, "$.state.schema.additionalProperties")
         let properties = try dictionary(object["properties"], path: "$.state.schema.properties")
         try require(properties.count <= 128, "$.state.schema.properties")
-        var propertyTypes: [String: Set<String>] = [:]
+        let required = try (object["required"].map { try array($0, path: "$.state.schema.required") } ?? [])
+            .map { try string($0, path: "$.state.schema.required") }
+        try require(
+            Set(required).count == required.count && required.allSatisfy { properties[$0] != nil },
+            "$.state.schema.required"
+        )
+        let requiredNames = Set(required)
+        var stateProperties: [String: PocketAppStatePropertySchema] = [:]
         for (name, value) in properties {
             try require(matches(name, "^[A-Za-z][A-Za-z0-9_]{0,63}$"), "$.state.schema.properties")
             let property = try dictionary(value, path: "$.state.schema.properties.\(name)")
@@ -413,17 +430,30 @@ struct PocketAppPackageRuntime {
                 types = try array(property["type"], path: "$.state.schema.properties.\(name).type").map { try string($0, path: "$.state.schema.properties.\(name).type") }
             }
             try require(!types.isEmpty && Set(types).count == types.count && types.allSatisfy { ["string", "integer", "number", "boolean", "null"].contains($0) }, "$.state.schema.properties.\(name).type")
-            propertyTypes[name] = Set(types)
-            if let format = property["format"] {
-                try require(try string(format, path: "$.state.schema.properties.\(name).format") == "date", "$.state.schema.properties.\(name).format")
+            let format: String?
+            if let rawFormat = property["format"] {
+                let parsed = try string(rawFormat, path: "$.state.schema.properties.\(name).format")
+                try require(parsed == "date", "$.state.schema.properties.\(name).format")
+                format = parsed
+            } else {
+                format = nil
             }
+            let maximumLength: Int?
             if let maximum = property["maxLength"] {
-                try require((1...10_000).contains(try integer(maximum, path: "$.state.schema.properties.\(name).maxLength")), "$.state.schema.properties.\(name).maxLength")
+                let parsed = try integer(maximum, path: "$.state.schema.properties.\(name).maxLength")
+                try require((1...10_000).contains(parsed), "$.state.schema.properties.\(name).maxLength")
+                maximumLength = parsed
+            } else {
+                maximumLength = nil
             }
+            stateProperties[name] = PocketAppStatePropertySchema(
+                types: Set(types),
+                isRequired: requiredNames.contains(name),
+                format: format,
+                maximumLength: maximumLength
+            )
         }
-        let required = try (object["required"].map { try array($0, path: "$.state.schema.required") } ?? []).map { try string($0, path: "$.state.schema.required") }
-        try require(Set(required).count == required.count && required.allSatisfy { properties[$0] != nil }, "$.state.schema.required")
-        return propertyTypes
+        return stateProperties
     }
 
     private func validateBindings(

@@ -46,6 +46,12 @@ internal sealed record PocketAppWorkflowDocument(
     int TimeoutSeconds,
     IReadOnlySet<string> RequiredPermissions);
 
+internal sealed record PocketAppStatePropertySchema(
+    IReadOnlySet<string> Types,
+    bool IsRequired,
+    string? Format,
+    int? MaximumLength);
+
 internal sealed record PocketAppPackage(
     string RootDirectory,
     PocketAppManifestDocument Manifest,
@@ -54,6 +60,7 @@ internal sealed record PocketAppPackage(
     string StateSchemaDigest,
     IReadOnlySet<string> StatePropertyNames,
     IReadOnlyDictionary<string, IReadOnlySet<string>> StatePropertyTypes,
+    IReadOnlyDictionary<string, PocketAppStatePropertySchema> StateProperties,
     IReadOnlyDictionary<string, PocketSurfaceDocument> Surfaces,
     IReadOnlyDictionary<string, PocketAppWorkflowDocument> Workflows,
     IReadOnlyDictionary<string, string> TestCases);
@@ -122,7 +129,11 @@ internal sealed class PocketAppPackageRuntime
         var intent = Encoding.UTF8.GetString(packageFiles[manifest.IntentPath]);
         Require(!string.IsNullOrWhiteSpace(intent) && intent.EnumerateRunes().Count() <= 20_000, "$.intent");
         var stateSchemaDigest = "sha256:" + Convert.ToHexString(SHA256.HashData(packageFiles[manifest.StateSchemaPath])).ToLowerInvariant();
-        var statePropertyTypes = ValidateStateSchema(ReadObject(packageFiles[manifest.StateSchemaPath], "$.state.schema"));
+        var stateProperties = ValidateStateSchema(ReadObject(packageFiles[manifest.StateSchemaPath], "$.state.schema"));
+        var statePropertyTypes = stateProperties.ToDictionary(
+            item => item.Key,
+            item => item.Value.Types,
+            StringComparer.Ordinal);
         var statePropertyNames = statePropertyTypes.Keys.ToHashSet(StringComparer.Ordinal);
 
         var requestedScopes = manifest.RequestedCapabilities.ToDictionary(item => item.Key, item => item.Scope);
@@ -205,6 +216,7 @@ internal sealed class PocketAppPackageRuntime
             stateSchemaDigest,
             statePropertyNames,
             statePropertyTypes,
+            stateProperties,
             surfaces,
             workflows,
             testCases);
@@ -393,7 +405,7 @@ internal sealed class PocketAppPackageRuntime
         return new PocketAppWorkflowDocument(id, inputs, approvalMode, approvalGroup, steps, partialMode, timeoutSeconds, requiredPermissions);
     }
 
-    private static IReadOnlyDictionary<string, IReadOnlySet<string>> ValidateStateSchema(JsonElement value)
+    private static IReadOnlyDictionary<string, PocketAppStatePropertySchema> ValidateStateSchema(JsonElement value)
     {
         ExactKeys(value, ["type", "properties", "additionalProperties"], ["$schema", "required"], "$.state.schema");
         if (value.TryGetProperty("$schema", out var schema))
@@ -404,11 +416,20 @@ internal sealed class PocketAppPackageRuntime
         Require(!GetBoolean(value.GetProperty("additionalProperties"), "$.state.schema.additionalProperties"), "$.state.schema.additionalProperties");
         var properties = RequireObject(value.GetProperty("properties"), "$.state.schema.properties");
         Require(properties.EnumerateObject().Count() <= 128, "$.state.schema.properties");
-        var propertyTypes = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
+        var required = value.TryGetProperty("required", out var requiredValue)
+            ? RequireArray(requiredValue, 0, 128, "$.state.schema.required")
+                .Select(item => GetString(item, "$.state.schema.required")).ToArray()
+            : Array.Empty<string>();
+        Require(
+            required.Distinct(StringComparer.Ordinal).Count() == required.Length
+            && required.All(name => properties.TryGetProperty(name, out _)),
+            "$.state.schema.required");
+        var requiredNames = required.ToHashSet(StringComparer.Ordinal);
+        var stateProperties = new Dictionary<string, PocketAppStatePropertySchema>(StringComparer.Ordinal);
         foreach (var propertyItem in properties.EnumerateObject())
         {
             Require(ArgumentNamePattern.IsMatch(propertyItem.Name), "$.state.schema.properties");
-            Require(!propertyTypes.ContainsKey(propertyItem.Name), "$.state.schema.properties:duplicate");
+            Require(!stateProperties.ContainsKey(propertyItem.Name), "$.state.schema.properties:duplicate");
             var property = RequireObject(propertyItem.Value, $"$.state.schema.properties.{propertyItem.Name}");
             ExactKeys(property, ["type"], ["format", "maxLength"], $"$.state.schema.properties.{propertyItem.Name}");
             string[] types = property.GetProperty("type").ValueKind == JsonValueKind.String
@@ -417,24 +438,25 @@ internal sealed class PocketAppPackageRuntime
                     .Select(item => GetString(item, $"$.state.schema.properties.{propertyItem.Name}.type")).ToArray();
             Require(types.Distinct(StringComparer.Ordinal).Count() == types.Length
                 && types.All(type => type is "string" or "integer" or "number" or "boolean" or "null"), $"$.state.schema.properties.{propertyItem.Name}.type");
-            propertyTypes[propertyItem.Name] = types.ToHashSet(StringComparer.Ordinal);
+            string? parsedFormat = null;
             if (property.TryGetProperty("format", out var format))
             {
-                Require(GetString(format, $"$.state.schema.properties.{propertyItem.Name}.format") == "date", $"$.state.schema.properties.{propertyItem.Name}.format");
+                parsedFormat = GetString(format, $"$.state.schema.properties.{propertyItem.Name}.format");
+                Require(parsedFormat == "date", $"$.state.schema.properties.{propertyItem.Name}.format");
             }
+            int? maximumLength = null;
             if (property.TryGetProperty("maxLength", out var maximum))
             {
-                var maximumLength = GetInteger(maximum, $"$.state.schema.properties.{propertyItem.Name}.maxLength");
+                maximumLength = GetInteger(maximum, $"$.state.schema.properties.{propertyItem.Name}.maxLength");
                 Require(maximumLength is >= 1 and <= 10_000, $"$.state.schema.properties.{propertyItem.Name}.maxLength");
             }
+            stateProperties[propertyItem.Name] = new PocketAppStatePropertySchema(
+                types.ToHashSet(StringComparer.Ordinal),
+                requiredNames.Contains(propertyItem.Name),
+                parsedFormat,
+                maximumLength);
         }
-        if (value.TryGetProperty("required", out var requiredValue))
-        {
-            var required = RequireArray(requiredValue, 0, 128, "$.state.schema.required")
-                .Select(item => GetString(item, "$.state.schema.required")).ToArray();
-            Require(required.Distinct(StringComparer.Ordinal).Count() == required.Length && required.All(propertyTypes.ContainsKey), "$.state.schema.required");
-        }
-        return propertyTypes;
+        return stateProperties;
     }
 
     private static void ValidateBindings(

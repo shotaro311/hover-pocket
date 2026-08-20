@@ -531,7 +531,7 @@ enum CapabilityBrokerVerificationCommand {
         let stateRoot = root.appendingPathComponent("pocket-app-user-state", isDirectory: true)
         let userStateStore = try PocketAppUserStateStore(
             packageID: package.manifest.id,
-            propertyTypes: package.statePropertyTypes,
+            stateProperties: package.stateProperties,
             rootDirectory: stateRoot
         )
         let runtime = PocketAppExecutionRuntime(
@@ -611,9 +611,24 @@ enum CapabilityBrokerVerificationCommand {
         try verifyPocketSurfaceLayoutMatrix(model: hostModel)
         let selectedEventRef = hostModel.stringValue(for: "$state.selectedEventRef")
         try require(!selectedEventRef.isEmpty, "pocket_app_surface_selection")
+        hostModel.updateString(
+            String(repeating: "x", count: PocketAppUserStateStore.maximumValueScalars + 1),
+            binding: "$state.selectedEventRef"
+        )
+        try require(
+            hostModel.stringValue(for: "$state.selectedEventRef") == selectedEventRef
+                && userStateStore.snapshot()["selectedEventRef"] == .string(selectedEventRef),
+            "pocket_app_surface_failed_state_write_not_published"
+        )
+        try require(
+            !PocketSurfaceHostModel.acceptsWorkflowInput(.null, type: "boolean")
+                && !PocketSurfaceHostModel.acceptsWorkflowInput(.string("true"), type: "boolean")
+                && PocketSurfaceHostModel.acceptsWorkflowInput(.bool(true), type: "boolean"),
+            "pocket_app_surface_workflow_input_exact_type"
+        )
         let reloadedStateStore = try PocketAppUserStateStore(
             packageID: package.manifest.id,
-            propertyTypes: package.statePropertyTypes,
+            stateProperties: package.stateProperties,
             rootDirectory: stateRoot
         )
         try require(
@@ -674,6 +689,51 @@ enum CapabilityBrokerVerificationCommand {
             try migratedStateStore.setValue(.bool(true), for: "label")
             throw BrokerVerificationFailure("pocket_app_state_schema_write_accepted")
         } catch PocketAppUserStateStoreError.invalidValue {
+        }
+        let constrainedStateProperties: [String: PocketAppStatePropertySchema] = [
+            "focusDate": PocketAppStatePropertySchema(
+                types: ["string"],
+                isRequired: true,
+                format: "date",
+                maximumLength: 10
+            )
+        ]
+        let constrainedStateStore = try PocketAppUserStateStore(
+            packageID: "local.example.constrained-state",
+            stateProperties: constrainedStateProperties,
+            rootDirectory: stateRoot
+        )
+        try constrainedStateStore.setValue(.string("2026-08-20"), for: "focusDate")
+        do {
+            try constrainedStateStore.setValue(.string("2026-02-30"), for: "focusDate")
+            throw BrokerVerificationFailure("pocket_app_state_date_constraint_accepted")
+        } catch PocketAppUserStateStoreError.invalidValue {
+        }
+        do {
+            try constrainedStateStore.setValue(.string("2026-08-200"), for: "focusDate")
+            throw BrokerVerificationFailure("pocket_app_state_max_length_constraint_accepted")
+        } catch PocketAppUserStateStoreError.invalidValue {
+        }
+        do {
+            try constrainedStateStore.setValue(nil, for: "focusDate")
+            throw BrokerVerificationFailure("pocket_app_state_required_removal_accepted")
+        } catch PocketAppUserStateStoreError.invalidValue {
+        }
+        let optionalRequiredLoadStore = try PocketAppUserStateStore(
+            packageID: "local.example.required-load-state",
+            propertyTypes: ["focusDate": ["string"]],
+            rootDirectory: stateRoot
+        )
+        try optionalRequiredLoadStore.setValue(.string("2026-08-20"), for: "focusDate")
+        try optionalRequiredLoadStore.setValue(nil, for: "focusDate")
+        do {
+            _ = try PocketAppUserStateStore(
+                packageID: "local.example.required-load-state",
+                stateProperties: constrainedStateProperties,
+                rootDirectory: stateRoot
+            )
+            throw BrokerVerificationFailure("pocket_app_state_required_load_accepted")
+        } catch PocketAppUserStateStoreError.invalidDocument {
         }
         let isolatedStateStore = try PocketAppUserStateStore(
             packageID: "local.example.state-isolated-a",

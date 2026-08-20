@@ -101,7 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let userDataRoot = pocketAppsRoot.appendingPathComponent("UserData", isDirectory: true)
             let userStateStore = try PocketAppUserStateStore(
                 packageID: package.manifest.id,
-                propertyTypes: package.statePropertyTypes,
+                stateProperties: package.stateProperties,
                 rootDirectory: userDataRoot
             )
             let builtInActivationLease = PocketAppActivationLease()

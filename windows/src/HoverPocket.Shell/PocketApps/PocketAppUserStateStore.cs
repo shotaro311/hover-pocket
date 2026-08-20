@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
@@ -12,7 +13,7 @@ internal sealed class PocketAppUserStateStore : IDisposable
 
     private readonly object _sync = new();
     private readonly IReadOnlySet<string> _allowedKeys;
-    private readonly IReadOnlyDictionary<string, IReadOnlySet<string>> _propertyTypes;
+    private readonly IReadOnlyDictionary<string, PocketAppStatePropertySchema> _stateProperties;
     private readonly PocketAppPinnedDirectory _rootDirectory;
     private readonly PocketAppPinnedDirectory _packageDirectory;
     private readonly string _filePath;
@@ -27,9 +28,11 @@ internal sealed class PocketAppUserStateStore : IDisposable
             packageId,
             allowedKeys.ToDictionary(
                 key => key,
-                _ => (IReadOnlySet<string>)new HashSet<string>(
-                    ["string", "integer", "number", "boolean", "null"],
-                    StringComparer.Ordinal),
+                _ => new PocketAppStatePropertySchema(
+                    new HashSet<string>(["string", "integer", "number", "boolean", "null"], StringComparer.Ordinal),
+                    false,
+                    null,
+                    null),
                 StringComparer.Ordinal),
             rootDirectory)
     {
@@ -39,6 +42,20 @@ internal sealed class PocketAppUserStateStore : IDisposable
         string packageId,
         IReadOnlyDictionary<string, IReadOnlySet<string>> propertyTypes,
         string rootDirectory)
+        : this(
+            packageId,
+            propertyTypes.ToDictionary(
+                item => item.Key,
+                item => new PocketAppStatePropertySchema(item.Value, false, null, null),
+                StringComparer.Ordinal),
+            rootDirectory)
+    {
+    }
+
+    public PocketAppUserStateStore(
+        string packageId,
+        IReadOnlyDictionary<string, PocketAppStatePropertySchema> stateProperties,
+        string rootDirectory)
     {
         if (!System.Text.RegularExpressions.Regex.IsMatch(
                 packageId,
@@ -47,8 +64,8 @@ internal sealed class PocketAppUserStateStore : IDisposable
         {
             throw new PocketAppUserStateStoreException("package_id");
         }
-        _allowedKeys = propertyTypes.Keys.ToHashSet(StringComparer.Ordinal);
-        _propertyTypes = propertyTypes;
+        _allowedKeys = stateProperties.Keys.ToHashSet(StringComparer.Ordinal);
+        _stateProperties = stateProperties;
         var packageDirectory = Path.Combine(rootDirectory, packageId);
         PocketAppPinnedDirectory? rootPin = null;
         PocketAppPinnedDirectory? packagePin = null;
@@ -101,7 +118,11 @@ internal sealed class PocketAppUserStateStore : IDisposable
         }
         if (value is not null)
         {
-            ValidateValue(value.Value, _propertyTypes[key]);
+            ValidateValue(value.Value, _stateProperties[key]);
+        }
+        else if (_stateProperties[key].IsRequired)
+        {
+            throw new PocketAppUserStateStoreException("state_value");
         }
         lock (_sync)
         {
@@ -163,20 +184,24 @@ internal sealed class PocketAppUserStateStore : IDisposable
             var needsRepair = false;
             foreach (var property in document.RootElement.EnumerateObject())
             {
-                if (!_propertyTypes.TryGetValue(property.Name, out var acceptedTypes))
+                if (!_stateProperties.TryGetValue(property.Name, out var stateProperty))
                 {
                     needsRepair = true;
                     continue;
                 }
                 try
                 {
-                    ValidateValue(property.Value, acceptedTypes);
+                    ValidateValue(property.Value, stateProperty);
                     values.Add(property.Name, property.Value.Clone());
                 }
                 catch (PocketAppUserStateStoreException)
                 {
                     needsRepair = true;
                 }
+            }
+            if (_stateProperties.Any(item => item.Value.IsRequired && !values.ContainsKey(item.Key)))
+            {
+                throw new PocketAppUserStateStoreException("state_document");
             }
             _packageDirectory.Validate();
             _rootDirectory.Validate();
@@ -256,12 +281,22 @@ internal sealed class PocketAppUserStateStore : IDisposable
         }
     }
 
-    private static void ValidateValue(JsonElement value, IReadOnlySet<string> acceptedTypes)
+    private static void ValidateValue(JsonElement value, PocketAppStatePropertySchema property)
     {
+        var acceptedTypes = property.Types;
         switch (value.ValueKind)
         {
             case JsonValueKind.String:
-                if ((value.GetString() ?? string.Empty).EnumerateRunes().Count() > MaximumValueScalars)
+                var text = value.GetString() ?? string.Empty;
+                var scalarCount = text.EnumerateRunes().Count();
+                if (scalarCount > MaximumValueScalars
+                    || (property.MaximumLength is { } maximumLength && scalarCount > maximumLength)
+                    || (property.Format == "date" && !DateOnly.TryParseExact(
+                        text,
+                        "yyyy-MM-dd",
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.None,
+                        out _)))
                 {
                     throw new PocketAppUserStateStoreException("state_value");
                 }

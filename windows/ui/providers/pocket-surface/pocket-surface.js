@@ -170,7 +170,7 @@ export function renderPocketSurfaceProvider(context) {
       case "calendarEventPicker":
         return calendarPickerNode(node, inputs, state, queryResults, refreshButtons, persistBoundState);
       case "durationPicker":
-        return durationNode(node, inputs, state);
+        return durationNode(node, inputs, state, refreshButtons, persistBoundState);
       case "status":
         return statusNode(node.value ?? "", node.tone ?? "neutral");
       default:
@@ -322,7 +322,7 @@ function initializeState(initialState, state) {
 }
 
 function initializeDefaults(node, inputs, state) {
-  if (node.type === "durationPicker" && !inputs.has(bindingName(node.value))) {
+  if (node.type === "durationPicker" && valueFor(node.value, inputs, state) == null) {
     setBinding(node.value, Number(node.default ?? node.min), inputs, state);
   } else if (["textField", "picker"].includes(node.type) && valueFor(node.value, inputs, state) == null) {
     setBinding(node.value, "", inputs, state);
@@ -390,7 +390,7 @@ function calendarPickerNode(node, inputs, state, queryResults, onChange, persist
   return field;
 }
 
-function durationNode(node, inputs, state) {
+function durationNode(node, inputs, state, onChange, persistState) {
   const field = document.createElement("label");
   field.className = "hp-pocket-duration";
   const label = document.createElement("span");
@@ -408,7 +408,11 @@ function durationNode(node, inputs, state) {
     setBinding(node.value, seconds, inputs, state);
     unit.textContent = `${Math.max(1, Math.floor(seconds / 60))}分`;
   };
-  input.addEventListener("change", update);
+  input.addEventListener("change", async () => {
+    update();
+    onChange();
+    await persistState(node.value, Number(input.value));
+  });
   update();
   field.append(label, input, unit);
   return field;
@@ -530,6 +534,7 @@ export async function runPocketSurfaceUiVerify() {
       note: "Before",
       enabled: false,
       mode: "quiet",
+      focusSeconds: 600,
     },
     workflowInputs: {
       startFocus: ["durationSeconds", "purpose", "selectedEventRef"],
@@ -542,6 +547,7 @@ export async function runPocketSurfaceUiVerify() {
           { type: "calendarEventPicker", items: { query: "calendar.events.list@1", arguments: { timeZone: "UTC" } }, selection: "$state.selectedEventRef", titleTarget: "$input.purpose" },
           { type: "calendarEventPicker", items: { query: "calendar.events.list@1", arguments: { timeZone: "Asia/Tokyo" } }, selection: "$state.secondaryEventRef" },
           { type: "durationPicker", value: "$input.durationSeconds", min: 60, max: 14400, default: 1500 },
+          { type: "durationPicker", value: "$state.focusSeconds", min: 60, max: 14400, default: 900 },
           { type: "textField", label: "Purpose", value: "$input.purpose", maxLength: 80 },
           { type: "textField", label: "Note", value: "$state.note", maxLength: 80 },
           { type: "toggle", label: "Enabled", value: "$state.enabled" },
@@ -632,6 +638,12 @@ export async function runPocketSurfaceUiVerify() {
         statePicker.value = "active";
         statePicker.dispatchEvent(new Event("change", { bubbles: true }));
       }
+      const stateDuration = [...host.querySelectorAll(".hp-pocket-duration input")]
+        .find((input) => input.value === "600");
+      if (stateDuration) {
+        stateDuration.value = "1200";
+        stateDuration.dispatchEvent(new Event("change", { bubbles: true }));
+      }
       host.querySelector(".hp-pocket-primary")?.click();
       host.querySelector('[data-workflow="runLiteral"]')?.click();
       await nextLayout();
@@ -691,7 +703,8 @@ export async function runPocketSurfaceUiVerify() {
         && disposalSaved !== false
         && persistedState.get("note") === "After"
         && persistedState.get("enabled") === true
-        && persistedState.get("mode") === "active";
+        && persistedState.get("mode") === "active"
+        && persistedState.get("focusSeconds") === 1200;
       host.remove();
     }
   }

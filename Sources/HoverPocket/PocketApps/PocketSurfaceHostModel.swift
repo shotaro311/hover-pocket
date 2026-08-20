@@ -10,6 +10,7 @@ struct PocketSurfaceChoice: Equatable, Identifiable, Sendable {
 final class PocketSurfaceHostModel: ObservableObject {
     let packageName: String
     let surface: PocketSurfaceDocument
+    let runtimeIdentity: String
 
     @Published private(set) var inputs: [String: CapabilityValue] = [:]
     @Published private(set) var state: [String: CapabilityValue] = [:]
@@ -33,6 +34,12 @@ final class PocketSurfaceHostModel: ObservableObject {
         self.runtime = runtime
         self.surface = surface
         self.packageName = runtime.package.manifest.name
+        self.runtimeIdentity = [
+            runtime.package.manifest.id,
+            runtime.package.manifest.version,
+            runtime.package.manifestDigest,
+            surfaceID
+        ].joined(separator: ":")
         self.activationAvailable = runtime.isActivationActive
         if let userStateStore = runtime.userStateStore {
             self.state = userStateStore.snapshot()
@@ -125,11 +132,7 @@ final class PocketSurfaceHostModel: ObservableObject {
               let workflow = runtime.package.workflows[workflowID] else { return false }
         return workflow.inputs.allSatisfy { name, type in
             guard let value = inputs[name] ?? state[name] else { return false }
-            if type == "string" || type == "entity-ref" {
-                guard case .string(let text) = value else { return false }
-                return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            }
-            return true
+            return Self.acceptsWorkflowInput(value, type: type)
         }
     }
 
@@ -215,9 +218,9 @@ final class PocketSurfaceHostModel: ObservableObject {
             inputs[String(binding.dropFirst("$input.".count))] = value
         } else if binding.hasPrefix("$state.") {
             let name = String(binding.dropFirst("$state.".count))
-            state[name] = value
             do {
                 try runtime.userStateStore?.setValue(value, for: name)
+                state[name] = value
             } catch {
                 statusText = "保存状態を更新できませんでした。"
             }
@@ -228,21 +231,41 @@ final class PocketSurfaceHostModel: ObservableObject {
         switch node.type {
         case "durationPicker":
             if let binding = node.stringProperty("value"),
+               isMissingValue(for: binding),
                let value = node.integerProperty("default") {
                 set(.integer(value), for: binding)
             }
         case "textField", "picker":
-            if let binding = node.stringProperty("value"), value(for: binding) == nil {
+            if let binding = node.stringProperty("value"), isMissingValue(for: binding) {
                 set(.string(""), for: binding)
             }
         case "toggle":
-            if let binding = node.stringProperty("value"), value(for: binding) == nil {
+            if let binding = node.stringProperty("value"), isMissingValue(for: binding) {
                 set(.bool(false), for: binding)
             }
         default:
             break
         }
         node.children.forEach(applyDefaults)
+    }
+
+    private func isMissingValue(for binding: String) -> Bool {
+        guard let value = value(for: binding) else { return true }
+        if case .null = value { return true }
+        return false
+    }
+
+    static func acceptsWorkflowInput(_ value: CapabilityValue, type: String) -> Bool {
+        switch (type, value) {
+        case ("string", .string(let text)), ("entity-ref", .string(let text)):
+            return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case ("integer", .integer), ("number", .integer), ("number", .number), ("boolean", .bool):
+            return true
+        case ("date-time", .string(let text)):
+            return CapabilityDateCodec.date(from: text) != nil
+        default:
+            return false
+        }
     }
 
     private struct QueryBinding {

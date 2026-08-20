@@ -448,7 +448,7 @@ internal sealed class CapabilityBrokerVerifier
         var stateRoot = Path.Combine(root, "pocket-app-user-state");
         using var userStateStore = new PocketAppUserStateStore(
             package.Manifest.Id,
-            package.StatePropertyTypes,
+            package.StateProperties,
             stateRoot);
         var runtime = new PocketAppExecutionRuntime(
             package,
@@ -520,7 +520,7 @@ internal sealed class CapabilityBrokerVerifier
         }
         using var reloadedStateStore = new PocketAppUserStateStore(
             package.Manifest.Id,
-            package.StatePropertyTypes,
+            package.StateProperties,
             stateRoot);
         var reloadedState = reloadedStateStore.Snapshot();
         Require(
@@ -573,6 +573,65 @@ internal sealed class CapabilityBrokerVerifier
         {
             migratedStateStore.SetValue("label", CapabilityJson.From(true));
             _failures.Add("pocket_app_state_schema_write_accepted");
+        }
+        catch (PocketAppUserStateStoreException)
+        {
+        }
+        try
+        {
+            constrainedStateStore.SetValue("focusDate", CapabilityJson.From("2026-08-200"));
+            _failures.Add("pocket_app_state_max_length_constraint_accepted");
+        }
+        catch (PocketAppUserStateStoreException)
+        {
+        }
+        var constrainedStateProperties = new Dictionary<string, PocketAppStatePropertySchema>(StringComparer.Ordinal)
+        {
+            ["focusDate"] = new PocketAppStatePropertySchema(
+                new HashSet<string>(["string"], StringComparer.Ordinal),
+                true,
+                "date",
+                10)
+        };
+        using var constrainedStateStore = new PocketAppUserStateStore(
+            "local.example.constrained-state",
+            constrainedStateProperties,
+            stateRoot);
+        constrainedStateStore.SetValue("focusDate", CapabilityJson.From("2026-08-20"));
+        try
+        {
+            constrainedStateStore.SetValue("focusDate", CapabilityJson.From("2026-02-30"));
+            _failures.Add("pocket_app_state_date_constraint_accepted");
+        }
+        catch (PocketAppUserStateStoreException)
+        {
+        }
+        try
+        {
+            constrainedStateStore.SetValue("focusDate", null);
+            _failures.Add("pocket_app_state_required_removal_accepted");
+        }
+        catch (PocketAppUserStateStoreException)
+        {
+        }
+        using (var optionalRequiredLoadStore = new PocketAppUserStateStore(
+            "local.example.required-load-state",
+            new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal)
+            {
+                ["focusDate"] = new HashSet<string>(["string"], StringComparer.Ordinal)
+            },
+            stateRoot))
+        {
+            optionalRequiredLoadStore.SetValue("focusDate", CapabilityJson.From("2026-08-20"));
+            optionalRequiredLoadStore.SetValue("focusDate", null);
+        }
+        try
+        {
+            using var requiredLoadStore = new PocketAppUserStateStore(
+                "local.example.required-load-state",
+                constrainedStateProperties,
+                stateRoot);
+            _failures.Add("pocket_app_state_required_load_accepted");
         }
         catch (PocketAppUserStateStoreException)
         {

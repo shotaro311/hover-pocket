@@ -24,6 +24,13 @@ enum PocketAppPackageVerificationCommand {
                 require(package.statePropertyNames == ["selectedEventRef"], "package_state_schema", failures: &failures)
                 require(package.statePropertyTypes["selectedEventRef"] == ["string", "null"], "package_state_types", failures: &failures)
                 require(
+                    package.stateProperties["selectedEventRef"]?.isRequired == true
+                        && package.stateProperties["selectedEventRef"]?.format == nil
+                        && package.stateProperties["selectedEventRef"]?.maximumLength == nil,
+                    "package_state_constraints",
+                    failures: &failures
+                )
+                require(
                     package.testCases == [
                         "calendar-read": "pass",
                         "start-focus-approved": "pass",
