@@ -372,13 +372,40 @@ enum PocketAppRuntimeActivationVerification {
                     failures: &failures
                 )
 
+                AINativeRuntime.shared.configure(
+                    adapter: nil,
+                    preservingManagedGeneratedProviderIDs: settings.savedGeneratedProviderIDs
+                )
+                providerStore.moveProvider(StickyNotesProvider.pluginID, by: 1)
+                providerStore.setProvider(TimerProvider.pluginID, isVisible: true)
+                require(
+                    AINativeRuntime.shared.managedGeneratedProviderIDs.contains(generatedID.rawValue)
+                        && settings.providerOrderRawValues.contains(generatedID.rawValue)
+                        && settings.hiddenProviderRawValues.contains(generatedID.rawValue)
+                        && settings.preferredProviderRawValue == generatedID.rawValue
+                        && settings.lastSelectedProviderRawValue == generatedID.rawValue,
+                    "activation_master_off_provider_settings_preserved",
+                    failures: &failures
+                )
+                require(
+                    settings.savedGeneratedProviderIDs == [generatedID.rawValue]
+                        && PocketSurfaceRegistry.generatedAppID(providerID: generatedID.rawValue) == appB
+                        && PocketSurfaceRegistry.generatedAppID(
+                            providerID: "generated-pocket-app:../../not-valid"
+                        ) == nil,
+                    "activation_saved_generated_provider_identity",
+                    failures: &failures
+                )
+
                 settings.pruneProviderConfiguration(generatedID)
+                AINativeRuntime.shared.forgetManagedGeneratedProviderID(generatedID.rawValue)
                 let prunedSettings = AppSettings(defaults: defaults)
                 require(
                     !prunedSettings.providerOrderRawValues.contains(generatedID.rawValue)
                         && !prunedSettings.hiddenProviderRawValues.contains(generatedID.rawValue)
                         && prunedSettings.preferredProviderRawValue != generatedID.rawValue
-                        && prunedSettings.lastSelectedProviderRawValue != generatedID.rawValue,
+                        && prunedSettings.lastSelectedProviderRawValue != generatedID.rawValue
+                        && !AINativeRuntime.shared.managedGeneratedProviderIDs.contains(generatedID.rawValue),
                     "activation_removed_provider_settings_pruned",
                     failures: &failures
                 )

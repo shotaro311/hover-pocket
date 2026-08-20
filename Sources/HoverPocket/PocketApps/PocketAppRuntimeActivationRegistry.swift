@@ -190,6 +190,20 @@ final class PocketSurfaceRegistry: ObservableObject {
         "generated-pocket-app:\(appID)"
     }
 
+    nonisolated static func generatedAppID(providerID: String) -> String? {
+        let prefix = "generated-pocket-app:"
+        guard providerID.hasPrefix(prefix) else { return nil }
+        let appID = String(providerID.dropFirst(prefix.count))
+        guard appID.unicodeScalars.count <= 160,
+              appID.range(
+                  of: "^[a-z][a-z0-9]*(?:\\.[a-z0-9][a-z0-9-]*){2,}$",
+                  options: .regularExpression
+              ) != nil else {
+            return nil
+        }
+        return appID
+    }
+
     nonisolated static func generatedSurfaceRouteID(appID: String, surfaceID: String) -> String {
         "\(generatedProviderID(appID: appID))/\(surfaceID)"
     }
