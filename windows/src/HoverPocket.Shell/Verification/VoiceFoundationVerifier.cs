@@ -49,6 +49,7 @@ internal sealed class VoiceFoundationVerifier
         await RunCaseAsync("disconnect-before-promotion", VerifyDisconnectBeforePromotionAsync, timeout.Token);
         await RunCaseAsync("restart", VerifyRestartIsBoundedAsync, timeout.Token);
         await RunCaseAsync("failed-initialize-cleanup", VerifyFailedInitializeDisposesCandidateAsync, timeout.Token);
+        await RunCaseAsync("disable-inflight-cleanup", VerifyDisableDisposesInFlightCandidateAsync, timeout.Token);
         await RunCaseAsync("crash-cleanup", VerifyTransportCrashDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("transition-cleanup", VerifySystemTransitionDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("stale-start", VerifyStaleStartFailureDoesNotReplaceReadyClientAsync, timeout.Token);
@@ -274,6 +275,29 @@ internal sealed class VoiceFoundationVerifier
         }
     }
 
+    private async Task VerifyDisableDisposesInFlightCandidateAsync(CancellationToken cancellationToken)
+    {
+        var disposeCount = 0;
+        var harness = new DeferredInitializeHarness(
+            () => Interlocked.Increment(ref disposeCount));
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ => Task.FromResult(harness.CreateClient()),
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: []);
+
+        var startup = coordinator.InitializeAsync(cancellationToken);
+        await harness.InitializationRequested.WaitAsync(cancellationToken);
+        await coordinator.SetFeatureEnabledAsync(false, cancellationToken);
+        await startup;
+
+        if (Volatile.Read(ref disposeCount) != 1
+            || coordinator.Snapshot != CodexVoiceSnapshot.Disabled)
+        {
+            _failures.Add("disabling Voice retained an in-flight startup candidate");
+        }
+    }
+
     private async Task VerifyDisconnectBeforePromotionAsync(CancellationToken cancellationToken)
     {
         var disposeCount = 0;
@@ -340,17 +364,16 @@ internal sealed class VoiceFoundationVerifier
     {
         var factoryCalls = 0;
         var firstStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseFirst = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var healthyHarness = new AppServerHarness();
         using var coordinator = new CodexVoiceCoordinator(
             featureEnabled: true,
-            clientFactory: async _ =>
+            clientFactory: async token =>
             {
                 if (Interlocked.Increment(ref factoryCalls) == 1)
                 {
                     firstStarted.TrySetResult(true);
-                    await releaseFirst.Task;
-                    throw new CodexAppServerProtocolException("stale_start_failure");
+                    await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                    throw new InvalidOperationException("unreachable stale start");
                 }
                 return healthyHarness.CreateClient();
             },
@@ -361,7 +384,6 @@ internal sealed class VoiceFoundationVerifier
         await firstStarted.Task.WaitAsync(cancellationToken);
         await coordinator.SetFeatureEnabledAsync(false, cancellationToken);
         await coordinator.SetFeatureEnabledAsync(true, cancellationToken);
-        releaseFirst.TrySetResult(true);
         await staleStart;
         if (coordinator.Snapshot.Availability != CodexVoiceAvailability.Ready
             || !coordinator.Snapshot.TransportAttached

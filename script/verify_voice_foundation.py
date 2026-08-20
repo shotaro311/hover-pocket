@@ -190,7 +190,10 @@ def main() -> None:
     if "VoiceLaneHostView" not in mac_shell:
         fail("macOS Host Voice row missing")
     if "accessibilityLabel(\"Voice Lane\")" not in mac_voice:
-        fail("macOS Voice accessibility region missing")
+        if "localized(japanese: \"音声レーン\", english: \"Voice Lane\")" not in mac_voice:
+            fail("macOS Voice accessibility region missing")
+    if "VoiceLaneLocalization" not in mac_voice or "音声接続はAN3-Aではまだ利用できません。" not in mac_voice:
+        fail("macOS Voice Japanese/English localization missing")
     if "ScrollView" not in mac_voice:
         fail("macOS Voice internal scroll missing")
     if "accessibilityReduceMotion" not in mac_voice:

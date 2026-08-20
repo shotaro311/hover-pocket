@@ -9,6 +9,7 @@ enum VoiceFoundationVerificationCommand {
     static func run() async throws {
         try verifyGeometryAndScope()
         try verifyTranscriptBoundsAndRedaction()
+        try verifyLocalization()
         try await verifyDefaultOffAndFakeAdapter()
         try await verifyAppLifetimeDetachAndRestart()
         try await verifyStaleAdapterFailureDoesNotReplaceReadyAdapter()
@@ -142,6 +143,28 @@ enum VoiceFoundationVerificationCommand {
               pathSamples.allSatisfy({ VoiceTextSafety.sanitizeVisibleText($0, limit: 200) == "[redacted]" })
         else {
             throw VoiceFoundationVerificationError.failed("scalar_bound_or_absolute_path_redaction")
+        }
+    }
+
+    private static func verifyLocalization() throws {
+        let japanese = VoiceLaneLocalization.text(
+            japanese: "音声接続はまだ利用できません",
+            english: "Voice transport is not available yet",
+            language: .japanese
+        )
+        let english = VoiceLaneLocalization.text(
+            japanese: "音声接続はまだ利用できません",
+            english: "Voice transport is not available yet",
+            language: .english
+        )
+        guard japanese == "音声接続はまだ利用できません",
+              english == "Voice transport is not available yet",
+              VoiceLaneLocalization.connection(.connected, language: .japanese) == "接続済み",
+              VoiceLaneLocalization.connection(.connected, language: .english) == "Connected",
+              VoiceLaneLocalization.sessionStatus(.waitingForUser, language: .japanese) == "ユーザー操作待ち",
+              VoiceLaneLocalization.transcriptRole(.user, language: .english) == "You"
+        else {
+            throw VoiceFoundationVerificationError.failed("voice_localization")
         }
     }
 

@@ -130,7 +130,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
                     if (!process.HasExited)
                     {
                         process.Kill(entireProcessTree: true);
-                        await process.WaitForExitAsync();
+                        await process.WaitForExitAsync().ConfigureAwait(false);
                     }
                 }
                 catch (Exception exception) when (exception is InvalidOperationException
@@ -141,7 +141,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
                 finally
                 {
                     stderrLifetime.Cancel();
-                    await stderrDrain;
+                    await stderrDrain.ConfigureAwait(false);
                     stderrLifetime.Dispose();
                     process.Dispose();
                 }
@@ -158,7 +158,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         var buffer = new char[4_096];
         try
         {
-            while (await reader.ReadAsync(buffer.AsMemory(), cancellationToken) > 0)
+            while (await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false) > 0)
             {
                 // Intentionally discard diagnostics so stderr remains bounded and secrets are not logged.
             }
@@ -207,7 +207,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
                 method,
                 @params = parameters
             });
-            await WriteLineAsync(envelope, cancellationToken);
+            await WriteLineAsync(envelope, cancellationToken).ConfigureAwait(false);
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
                 cancellationToken,
@@ -215,7 +215,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             timeout.CancelAfter(_requestTimeout);
             try
             {
-                return await completion.Task.WaitAsync(timeout.Token);
+                return await completion.Task.WaitAsync(timeout.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested
                 && !_lifetime.IsCancellationRequested)
@@ -244,7 +244,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
                 message = VoiceTextSafety.SanitizeErrorCode(safeErrorCode)
             }
         });
-        await WriteLineAsync(envelope, cancellationToken);
+        await WriteLineAsync(envelope, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task WriteLineAsync(string value, CancellationToken cancellationToken)
@@ -254,11 +254,11 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             throw new CodexAppServerProtocolException("request_too_large");
         }
 
-        await _writeGate.WaitAsync(cancellationToken);
+        await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await _writer.WriteLineAsync(value.AsMemory(), cancellationToken);
-            await _writer.FlushAsync(cancellationToken);
+            await _writer.WriteLineAsync(value.AsMemory(), cancellationToken).ConfigureAwait(false);
+            await _writer.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -272,7 +272,7 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                var line = await ReadBoundedLineAsync(cancellationToken);
+                var line = await ReadBoundedLineAsync(cancellationToken).ConfigureAwait(false);
                 if (line is null)
                 {
                     break;
@@ -356,7 +356,9 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         {
             if (_readBufferOffset >= _readBufferCount)
             {
-                _readBufferCount = await _reader.ReadAsync(_readBuffer.AsMemory(), cancellationToken);
+                _readBufferCount = await _reader.ReadAsync(
+                    _readBuffer.AsMemory(),
+                    cancellationToken).ConfigureAwait(false);
                 _readBufferOffset = 0;
                 if (_readBufferCount == 0)
                 {
@@ -464,13 +466,13 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         {
             if (_disposeOwner is not null)
             {
-                await _disposeOwner();
+                await _disposeOwner().ConfigureAwait(false);
             }
             _reader.Dispose();
             _writer.Dispose();
             try
             {
-                await _readLoop.WaitAsync(TimeSpan.FromSeconds(2));
+                await _readLoop.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
             }
             catch (Exception) when (_lifetime.IsCancellationRequested)
             {

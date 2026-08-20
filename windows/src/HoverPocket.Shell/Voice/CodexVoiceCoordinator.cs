@@ -260,6 +260,8 @@ internal sealed class CodexVoiceCoordinator : IDisposable
     private readonly Dictionary<CodexAppServerClient, int> _clientGenerations = [];
     private CancellationTokenSource _lifetime = new();
     private CancellationTokenSource? _restartCancellation;
+    private CancellationTokenSource? _startupCancellation;
+    private Task? _startupTask;
     private CodexAppServerClient? _client;
     private CodexVoiceSnapshot _snapshot = CodexVoiceSnapshot.Disabled;
     private bool _featureEnabled;
@@ -326,7 +328,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             return;
         }
 
-        await StartClientAsync(cancellationToken);
+        await RunTrackedStartupAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task SetFeatureEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
@@ -346,10 +348,11 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         CancelRestart();
         if (!enabled)
         {
+            await CancelStartupAsync().ConfigureAwait(false);
             var client = DetachClient();
             if (client is not null)
             {
-                await DisposeDetachedClientAsync(client);
+                await DisposeDetachedClientAsync(client).ConfigureAwait(false);
             }
             lock (_sync)
             {
@@ -362,7 +365,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             return;
         }
 
-        await InitializeAsync(cancellationToken);
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public void SetUiAttached(bool attached)
@@ -582,7 +585,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         CodexVoiceGate gate;
         try
         {
-            gate = await _compatibilityProbe.ProbeAsync(cancellationToken);
+            gate = await _compatibilityProbe.ProbeAsync(cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -631,7 +634,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         CodexAppServerClient? candidate = null;
         try
         {
-            candidate = await _clientFactory!(cancellationToken);
+            candidate = await _clientFactory!(cancellationToken).ConfigureAwait(false);
             TrackClientGeneration(candidate, generation);
             candidate.ServerRequestReceived += OnServerRequestReceived;
             candidate.Disconnected += OnClientDisconnected;
@@ -639,13 +642,13 @@ internal sealed class CodexVoiceCoordinator : IDisposable
                 """{"clientInfo":{"name":"HoverPocket","version":"an3-a"},"capabilities":{}}""");
             _ = await candidate.InitializeAsync(
                 initializeDocument.RootElement.Clone(),
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             if (candidate is not null)
             {
-                await DisposeDetachedClientAsync(candidate);
+                await DisposeDetachedClientAsync(candidate).ConfigureAwait(false);
             }
             if (cancellationToken.IsCancellationRequested
                 || !_featureEnabled
@@ -672,7 +675,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         {
             if (candidate is not null)
             {
-                await DisposeDetachedClientAsync(candidate);
+                await DisposeDetachedClientAsync(candidate).ConfigureAwait(false);
             }
             if (!_featureEnabled || generation != Volatile.Read(ref _generation))
             {
@@ -694,14 +697,14 @@ internal sealed class CodexVoiceCoordinator : IDisposable
 
         if (!_featureEnabled || generation != Volatile.Read(ref _generation))
         {
-            await DisposeDetachedClientAsync(candidate);
+            await DisposeDetachedClientAsync(candidate).ConfigureAwait(false);
             return;
         }
 
         var previous = SwapClient(candidate);
         if (previous is not null)
         {
-            await previous.DisposeAsync();
+            await previous.DisposeAsync().ConfigureAwait(false);
         }
         lock (_sync)
         {
@@ -932,7 +935,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         }
         try
         {
-            await client.DisposeAsync();
+            await client.DisposeAsync().ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is CodexAppServerProtocolException
             or IOException
@@ -1020,6 +1023,75 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         cancellation.Dispose();
     }
 
+    private async Task RunTrackedStartupAsync(CancellationToken cancellationToken)
+    {
+        Task startupTask;
+        CancellationTokenSource? ownedCancellation = null;
+        lock (_sync)
+        {
+            if (_startupTask is { IsCompleted: false } activeStartup)
+            {
+                startupTask = activeStartup;
+            }
+            else
+            {
+                ownedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken,
+                    _lifetime.Token);
+                startupTask = StartClientAsync(ownedCancellation.Token);
+                _startupCancellation = ownedCancellation;
+                _startupTask = startupTask;
+            }
+        }
+
+        try
+        {
+            await startupTask.ConfigureAwait(false);
+        }
+        finally
+        {
+            if (ownedCancellation is not null)
+            {
+                lock (_sync)
+                {
+                    if (ReferenceEquals(_startupTask, startupTask))
+                    {
+                        _startupTask = null;
+                        _startupCancellation = null;
+                    }
+                }
+                ownedCancellation.Dispose();
+            }
+        }
+    }
+
+    private async Task CancelStartupAsync()
+    {
+        Task? startupTask;
+        lock (_sync)
+        {
+            _startupCancellation?.Cancel();
+            startupTask = _startupTask;
+        }
+        if (startupTask is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await startupTask.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception) when (exception is CodexAppServerProtocolException
+            or IOException
+            or InvalidOperationException)
+        {
+        }
+    }
+
     private void ThrowIfDisposed()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -1036,6 +1108,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         Interlocked.Increment(ref _generation);
         CancelRestart();
         _lifetime.Cancel();
+        CancelStartupAsync().GetAwaiter().GetResult();
         var client = DetachClient();
         if (client is not null)
         {
