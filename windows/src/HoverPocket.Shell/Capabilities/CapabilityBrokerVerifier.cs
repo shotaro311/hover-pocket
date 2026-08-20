@@ -577,14 +577,6 @@ internal sealed class CapabilityBrokerVerifier
         catch (PocketAppUserStateStoreException)
         {
         }
-        try
-        {
-            constrainedStateStore.SetValue("focusDate", CapabilityJson.From("2026-08-200"));
-            _failures.Add("pocket_app_state_max_length_constraint_accepted");
-        }
-        catch (PocketAppUserStateStoreException)
-        {
-        }
         var constrainedStateProperties = new Dictionary<string, PocketAppStatePropertySchema>(StringComparer.Ordinal)
         {
             ["focusDate"] = new PocketAppStatePropertySchema(
@@ -602,6 +594,14 @@ internal sealed class CapabilityBrokerVerifier
         {
             constrainedStateStore.SetValue("focusDate", CapabilityJson.From("2026-02-30"));
             _failures.Add("pocket_app_state_date_constraint_accepted");
+        }
+        catch (PocketAppUserStateStoreException)
+        {
+        }
+        try
+        {
+            constrainedStateStore.SetValue("focusDate", CapabilityJson.From("2026-08-200"));
+            _failures.Add("pocket_app_state_max_length_constraint_accepted");
         }
         catch (PocketAppUserStateStoreException)
         {
