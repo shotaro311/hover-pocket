@@ -2,7 +2,7 @@
 project_slug: hover-menu-preview
 updated: 2026-08-21
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-pr-ready-ci-green; an5-c-runtime-activation-pending; capability-expansion-merged; an8-a-review-fixes-local-verified-ci-pending
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-pr-ready-ci-green; an5-c-runtime-activation-pending; capability-expansion-merged; an8-a-review-fixes-ci-security-green
 ---
 
 ## 2026-08-21 AI-native AN8-A Codex Review Follow-up
@@ -12,6 +12,7 @@ status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; a
 - macOSはversioned Sparkle ZIP、`macos-latest`手動ZIP、versioned release手動ZIPの3コピーを別々に再取得し、GitHub metadataと相互のsize / SHA-256一致を確認する。versioned手動ZIPの改変を拒否するunit testを追加した。
 - 追加reviewで、`auto`がWindows prereleaseを選び得る点と、Windows releaseがGitHub汎用Latestを置換しても検出できない点を確認した。両言語の自動選択からdraft / prereleaseを除外し、汎用Latestはrelease選択に使わずmacOS versioned releaseのままであることだけを検査する。
 - unit 12件、Python compile、workflow YAML parse、`git diff --check`が成功した。公開beta readbackも再実行し、macOS `v0.1.0-168`の3コピーとSparkle署名、Windows `win-v0.2.7`の全asset / feed / checksum、汎用Latest=`v0.1.0-168`が一致した。ローカルMacにPowerShellがないため、formal scriptのparseとWindows側確認はPR CIを最終gateとする。詳細: `progress/2026-08/2026-08-21_hover-pocket-ai-native-an8-review-followup.md`。
+- source head `77dc721`でPR CIのrelease metadata、PowerShell構文、Windows verifier、PR Routerがすべて成功した。exact security diff scan `11fdb6d9-9e92-45d1-9ffe-c5f3df1c7fbc`はcoverage complete、reportable finding 0件でsealed completeとなった。4件のreviewへ検証根拠を返信し、未解決thread 0件をreadbackした。
 
 ## 2026-08-20 AI-native AN8-A Public Release Readback
 
