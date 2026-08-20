@@ -180,6 +180,27 @@ enum PocketAppPackageVerificationCommand {
                 return true
             }
         }
+        rejectPackage("conflicting_picker_domain", failures: &failures) { root in
+            try mutateJSON(root.appendingPathComponent("surfaces/main.surface.json")) { surface in
+                guard var rootNode = surface["root"] as? [String: Any],
+                      var children = rootNode["children"] as? [[String: Any]] else { return false }
+                children.append([
+                    "type": "picker",
+                    "label": "Primary mode",
+                    "value": "$input.purpose",
+                    "options": [["label": "A", "value": "a"]]
+                ])
+                children.append([
+                    "type": "picker",
+                    "label": "Secondary mode",
+                    "value": "$input.purpose",
+                    "options": [["label": "B", "value": "b"]]
+                ])
+                rootNode["children"] = children
+                surface["root"] = rootNode
+                return true
+            }
+        }
         rejectPackage("workflow_input_bound_only_on_unreachable_surface", failures: &failures) { root in
             try mutateJSON(root.appendingPathComponent("manifest.json")) { manifest in
                 guard var surfaces = manifest["surfaces"] as? [[String: Any]] else { return false }

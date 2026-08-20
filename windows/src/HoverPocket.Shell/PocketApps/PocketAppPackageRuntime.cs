@@ -182,7 +182,14 @@ internal sealed class PocketAppPackageRuntime
         foreach (var surface in surfaces.Values)
         {
             var boundNames = new HashSet<string>(StringComparer.Ordinal);
-            ValidateBindings(surface.Root, workflowInputTypes, statePropertyTypes, boundNames, $"$.surfaces.{surface.Id}.root");
+            var pickerDomains = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
+            ValidateBindings(
+                surface.Root,
+                workflowInputTypes,
+                statePropertyTypes,
+                boundNames,
+                pickerDomains,
+                $"$.surfaces.{surface.Id}.root");
             ValidateSurfaceScopes(surface.Root, requestedScopes, $"$.surfaces.{surface.Id}.root");
             foreach (var workflowId in ReferencedWorkflows(surface.Root))
             {
@@ -464,6 +471,7 @@ internal sealed class PocketAppPackageRuntime
         IReadOnlyDictionary<string, string> inputTypes,
         IReadOnlyDictionary<string, IReadOnlySet<string>> stateTypes,
         ISet<string> boundNames,
+        IDictionary<string, IReadOnlySet<string>> pickerDomains,
         string path)
     {
         foreach (var property in node.Properties)
@@ -519,11 +527,43 @@ internal sealed class PocketAppPackageRuntime
             {
                 throw new PocketAppPackageRuntimeException($"{path}.{property.Key}:binding");
             }
+            if (node.Type == "picker" && property.Key == "value")
+            {
+                var domain = PickerDomain(node);
+                if (pickerDomains.TryGetValue(binding, out var existing))
+                {
+                    Require(existing.SetEquals(domain), $"{path}.{property.Key}:picker_domain_conflict");
+                }
+                else
+                {
+                    pickerDomains[binding] = domain;
+                }
+            }
         }
         for (var index = 0; index < node.Children.Count; index++)
         {
-            ValidateBindings(node.Children[index], inputTypes, stateTypes, boundNames, $"{path}.children[{index}]");
+            ValidateBindings(
+                node.Children[index],
+                inputTypes,
+                stateTypes,
+                boundNames,
+                pickerDomains,
+                $"{path}.children[{index}]");
         }
+    }
+
+    private static IReadOnlySet<string> PickerDomain(PocketSurfaceRenderNode node)
+    {
+        if (!node.Properties.TryGetValue("options", out var rawOptions)
+            || rawOptions is not IEnumerable<IReadOnlyDictionary<string, object?>> options)
+        {
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+        return options
+            .Select(option => option.TryGetValue("value", out var value) ? value as string : null)
+            .Where(value => value is not null)
+            .Select(value => value!)
+            .ToHashSet(StringComparer.Ordinal);
     }
 
     private static IReadOnlySet<string>? AcceptedWorkflowInputTypes(string nodeType, string propertyName)
@@ -565,7 +605,6 @@ internal sealed class PocketAppPackageRuntime
             ("picker", "value") => new HashSet<string>(["string"], StringComparer.Ordinal),
             ("calendarEventPicker", "selection") => new HashSet<string>(["string"], StringComparer.Ordinal),
             ("calendarEventPicker", "titleTarget") => new HashSet<string>(["string"], StringComparer.Ordinal),
-            ("durationPicker", "value") => new HashSet<string>(["integer", "number"], StringComparer.Ordinal),
             _ => null
         };
     }

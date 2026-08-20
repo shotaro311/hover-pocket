@@ -1,5 +1,12 @@
 # HoverPocket AI-native AN5-C 再開・最終検証
 
+## 追加review: 共有Picker入力の意味整合
+
+- PR #18の最新reviewで、同じworkflow inputへ複数Pickerを束縛しながら選択肢集合が異なるpackageを両OS runtimeが受理する問題を確認した。macOSは実行時に集合の共通部分を使うためボタンが無効になり得る一方、Windowsは値が一つでもあれば実行可能になり、OS間で挙動が分岐していた。
+- package導入時にSurface単位でPicker bindingと選択肢集合を集約し、同じbindingを使うPickerは選択肢集合が完全一致する場合だけ受理するようmacOS / Windows runtimeと共通contract verifierを揃えた。相反する二つのPickerを両OSのnegative回帰へ追加した。
+- durationPickerは共通Surface schemaと両OS rendererが`$input`だけを許し、`$state`へ接続できない。意味検証側に残っていた未到達のduration state許可を削除して、契約境界を実装と一致させた。
+- ローカルでは`swift build -Xswiftc -warnings-as-errors`、`--verify-pocket-app`（18 negative）、`python3 script/verify_pocket_contracts.py`（13 schema / 60 fixture）、Windows rendererのJavaScript構文、`git diff --check`が成功した。Windows C# buildと両OS PR CIはpush後の最終gateとする。
+
 ## 最終head追加review: Surface単位のworkflow input束縛
 
 - Gmail / GitHub readbackで、PR #18の最終head `0c121f1`に未解決P2が1件追加されたことを確認した。一つ前のsource head `454a2d0`に対する「重大な問題なし」とは別のreviewである。

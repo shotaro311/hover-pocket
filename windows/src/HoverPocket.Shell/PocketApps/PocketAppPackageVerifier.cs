@@ -135,6 +135,24 @@ internal sealed class PocketAppPackageVerifier
         {
             workflow["inputs"]!["selectedEventRef"] = "integer";
         }));
+        RejectPackage("conflicting_picker_domain", root => MutateJson(Path.Combine(root, "surfaces", "main.surface.json"), surface =>
+        {
+            var children = surface["root"]!["children"]!.AsArray();
+            children.Add(new JsonObject
+            {
+                ["type"] = "picker",
+                ["label"] = "Primary mode",
+                ["value"] = "$input.purpose",
+                ["options"] = new JsonArray(new JsonObject { ["label"] = "A", ["value"] = "a" })
+            });
+            children.Add(new JsonObject
+            {
+                ["type"] = "picker",
+                ["label"] = "Secondary mode",
+                ["value"] = "$input.purpose",
+                ["options"] = new JsonArray(new JsonObject { ["label"] = "B", ["value"] = "b" })
+            });
+        }));
         RejectPackage("workflow_input_bound_only_on_unreachable_surface", root =>
         {
             MutateJson(Path.Combine(root, "manifest.json"), manifest =>
