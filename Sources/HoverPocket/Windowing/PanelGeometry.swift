@@ -82,6 +82,7 @@ enum PanelGeometry {
     static func frames(
         on screen: NSScreen,
         panelSize: PanelSizeOption,
+        additionalPreviewHeight: CGFloat = 0,
         showsNotchSideHandleArea: Bool = true
     ) -> PanelFrames {
         let notchProfile = notchProfile(on: screen)
@@ -90,7 +91,10 @@ enum PanelGeometry {
             notchProfile: notchProfile,
             showsNotchSideHandleArea: showsNotchSideHandleArea
         )
-        let previewSize = PanelLayout.panelTotalSize(for: panelSize)
+        let previewSize = previewSize(
+            panelSize: panelSize,
+            additionalHeight: additionalPreviewHeight
+        )
         let accessFrame = NSRect(
             x: access.minX,
             y: screen.frame.maxY - access.height,
@@ -119,6 +123,17 @@ enum PanelGeometry {
             preview: previewFrame,
             collapsedPreview: collapsedFrame,
             accessStyle: access.style
+        )
+    }
+
+    static func previewSize(
+        panelSize: PanelSizeOption,
+        additionalHeight: CGFloat = 0
+    ) -> NSSize {
+        let baseline = PanelLayout.panelTotalSize(for: panelSize)
+        return NSSize(
+            width: baseline.width,
+            height: baseline.height + max(0, additionalHeight)
         )
     }
 

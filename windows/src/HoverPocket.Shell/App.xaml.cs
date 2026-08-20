@@ -53,6 +53,14 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (options.VerifyVoice)
+        {
+            VerifyConsole.AttachParent();
+            Environment.ExitCode = new VoiceFoundationVerifier().Run();
+            Shutdown();
+            return;
+        }
+
         if (options.VerifySticky)
         {
             VerifyConsole.AttachParent();

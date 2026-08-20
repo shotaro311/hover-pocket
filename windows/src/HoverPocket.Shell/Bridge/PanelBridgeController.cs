@@ -5,7 +5,6 @@ using System.Text.Json;
 using HoverPocket.Shell.Capabilities;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Providers;
-using HoverPocket.Shell.Providers.AiLane;
 using HoverPocket.Shell.Providers.Calculator;
 using HoverPocket.Shell.Providers.Calendar;
 using HoverPocket.Shell.Providers.Clipboard;
@@ -15,6 +14,7 @@ using HoverPocket.Shell.Providers.Timer;
 using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Services;
 using HoverPocket.Shell.Settings;
+using HoverPocket.Shell.Voice;
 
 namespace HoverPocket.Shell.Bridge;
 
@@ -30,7 +30,6 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly UserSettingsStore _settingsStore;
     private readonly IStartupRegistrationService _startupRegistration;
     private readonly UpdaterService _updaterService;
-    private readonly AiLaneController _aiLaneController;
     private readonly CalculatorBridgeHandlers _calculatorBridgeHandlers = new();
     private readonly CalendarBridgeController _calendarBridgeController;
     private readonly ClipboardBridgeController _clipboardBridgeController;
@@ -44,6 +43,7 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly PocketAppActivationLease? _aiNativeExecutionLease;
     private readonly PocketAppGenerationController? _pocketAppGenerationController;
     private readonly PocketAppRuntimeActivationRegistry? _generatedPocketApps;
+    private readonly CodexVoiceCoordinator _voiceCoordinator;
     private readonly Dictionary<BridgeDispatcher, BridgeSurface> _dispatchers = [];
     private readonly AsyncLocal<BridgeSurface?> _requestSurface = new();
     private readonly object _previewFrameSync = new();
@@ -53,6 +53,8 @@ internal sealed class PanelBridgeController : IDisposable
     private MediaPreviewFrame? _pendingPreviewFrame;
     private bool _previewPostScheduled;
     private bool _panelOpen;
+    private VoiceLaneMode _resolvedVoiceLaneMode;
+    private volatile bool _voiceRuntimeActive;
     private bool _disposed;
 
     public PanelBridgeController(
@@ -60,17 +62,16 @@ internal sealed class PanelBridgeController : IDisposable
         UserSettingsStore settingsStore,
         UserSettings settings,
         IStartupRegistrationService? startupRegistration = null,
-        AiLaneController? aiLaneController = null,
-        UpdaterService? updaterService = null)
+        object? aiLaneController = null,
+        UpdaterService? updaterService = null,
+        CodexVoiceCoordinator? voiceCoordinator = null)
     {
         _providerRegistry = providerRegistry;
         _settingsStore = settingsStore;
         _startupRegistration = startupRegistration ?? new RunKeyStartupRegistrationService();
         _updaterService = updaterService ?? new UpdaterService();
         _calendarBridgeController = new CalendarBridgeController();
-        _aiLaneController = aiLaneController ?? new AiLaneController(
-            new AiLaneAuditLog(settingsStore.RootDirectory),
-            new CalendarAiLaneConnector(_calendarBridgeController.Store));
+        _ = aiLaneController; // Compatibility-only: the legacy AI command lane is intentionally not mounted.
         var stickyStore = new StickyNotesStore(Path.Combine(settingsStore.RootDirectory, "sticky"));
         var timerStore = new TimerStore(Path.Combine(settingsStore.RootDirectory, "timer"));
         _stickyBridgeController = new StickyBridgeController(stickyStore);
@@ -82,6 +83,10 @@ internal sealed class PanelBridgeController : IDisposable
         _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.NormalizeForBootstrap(settings, providerRegistry.ProviderIds);
+        _voiceCoordinator = voiceCoordinator ?? new CodexVoiceCoordinator(CurrentSettings.VoiceEnabled);
+        _voiceRuntimeActive = _voiceCoordinator.Snapshot.Availability != CodexVoiceAvailability.Disabled;
+        _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(CurrentSettings);
+        _voiceCoordinator.SnapshotChanged += OnVoiceSnapshotChanged;
         _aiNativeExecutionLease = CurrentSettings.AiNativeEnabled
             ? new PocketAppActivationLease()
             : null;
@@ -195,6 +200,10 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.PreviewStateChanged += OnControlsPreviewStateChanged;
         _controlsBridgeController.PreviewFrameArrived += OnControlsPreviewFrameArrived;
         _controlsBridgeController.MediaSourceOpened += OnControlsMediaSourceOpened;
+        if (CurrentSettings.VoiceEnabled)
+        {
+            _ = _voiceCoordinator.InitializeAsync();
+        }
     }
 
     public event EventHandler<UserSettings>? SettingsChanged;
@@ -218,6 +227,16 @@ internal sealed class PanelBridgeController : IDisposable
     public CapabilityBroker? CapabilityBroker => _capabilityBroker;
 
     public TodayFocusTextAdapter? TodayFocusTextAdapter => _todayFocusTextAdapter;
+
+    public VoiceLaneMode ResolvedVoiceLaneMode => _resolvedVoiceLaneMode;
+
+    public VoiceLaneMode PreferredRuntimeVoiceLaneMode => !_voiceRuntimeActive
+        ? VoiceLaneMode.Disabled
+        : CurrentSettings.VoiceLaneLayout == VoiceLaneLayoutPreference.Expanded
+            ? VoiceLaneMode.Expanded
+            : VoiceLaneMode.Compact;
+
+    public CodexVoiceSnapshot VoiceSnapshot => _voiceCoordinator.Snapshot;
 
     public IDisposable Attach(
         BridgeDispatcher dispatcher,
@@ -272,12 +291,12 @@ internal sealed class PanelBridgeController : IDisposable
         Register("settings.open", OpenSettingsAsync);
         Register("settings.openPlaceholder", OpenSettingsAsync);
         Register("updates.check", CheckForUpdatesAsync);
-        Register("ailane.submit", SubmitAiLaneAsync);
-        Register("ailane.approve", ApproveAiLaneAsync);
-        Register("ailane.reject", RejectAiLaneAsync);
         if (surface == BridgeSurface.Panel)
         {
             Register("provider.select", SelectProviderAsync);
+            Register("voice.setMuted", SetVoiceMutedAsync);
+            Register("voice.setLayout", SetVoiceLayoutAsync);
+            Register("voice.endSession", EndVoiceSessionAsync);
             Register("provider.refreshPlaceholder", RefreshPlaceholderAsync);
             Register("todayFocus.startFromCalendar", StartTodayFocusFromCalendarAsync);
             if (_pocketAppHostController is not null || _generatedPocketApps is not null)
@@ -289,6 +308,8 @@ internal sealed class PanelBridgeController : IDisposable
         }
         if (surface == BridgeSurface.Settings)
         {
+            Register("settings.setVoiceEnabled", SetVoiceEnabledAsync);
+            Register("settings.setVoiceLayout", SetVoiceLayoutAsync);
             Register(
                 "settings.setAiNativeEnabled",
                 (parameters, cancellationToken) => SetAiNativeEnabledAsync(
@@ -325,6 +346,8 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.PreviewFrameArrived -= OnControlsPreviewFrameArrived;
         _controlsBridgeController.MediaSourceOpened -= OnControlsMediaSourceOpened;
         _controlsBridgeController.Dispose();
+        _voiceCoordinator.SnapshotChanged -= OnVoiceSnapshotChanged;
+        _voiceCoordinator.Dispose();
         _aiNativeExecutionLease?.Invalidate();
         _pocketAppHostController?.Dispose();
         _pocketAppGenerationController?.Dispose();
@@ -345,6 +368,8 @@ internal sealed class PanelBridgeController : IDisposable
         }
 
         var metrics = PanelSizeCatalog.Get(CurrentSettings.PanelSize);
+        var voiceSnapshot = _voiceCoordinator.Snapshot;
+        var voiceLaneHeight = VoicePanelGeometry.Height(CurrentSettings.PanelSize, _resolvedVoiceLaneMode);
         var builtInPocketAppAvailable = CurrentSettings.AiNativeEnabled
             && _pocketAppHostController?.IsActivationActive == true;
         var generatedRoute = SelectedGeneratedRoute();
@@ -371,6 +396,8 @@ internal sealed class PanelBridgeController : IDisposable
                 startWithWindowsRegistered = IsStartupRegistered(),
                 autoCheckForUpdates = CurrentSettings.AutoCheckForUpdates,
                 aiNativeEnabled = CurrentSettings.AiNativeEnabled,
+                voiceEnabled = CurrentSettings.VoiceEnabled,
+                voiceLaneLayout = ToWireValue(CurrentSettings.VoiceLaneLayout),
                 clipboardPrivateMode = CurrentSettings.ClipboardPrivateMode,
                 rememberLastSelectedProvider = CurrentSettings.RememberLastSelectedProvider,
                 preferredProviderId = CurrentSettings.PreferredProviderId,
@@ -386,9 +413,12 @@ internal sealed class PanelBridgeController : IDisposable
             {
                 headerHeight = PanelSizeCatalog.HeaderHeight,
                 aiLaneHeight = PanelSizeCatalog.AiLaneHeight,
+                voiceLaneHeight,
+                voiceLaneMode = ToWireValue(_resolvedVoiceLaneMode),
                 width = metrics.Width,
                 providerHeight = metrics.ProviderHeight,
-                totalHeight = metrics.TotalHeight,
+                baselineHeight = metrics.TotalHeight,
+                totalHeight = metrics.TotalHeight + voiceLaneHeight,
                 sizes = PanelSizeCatalog.All.Select(size => new
                 {
                     id = size.Id,
@@ -426,7 +456,46 @@ internal sealed class PanelBridgeController : IDisposable
                     body = ProviderText(selected, ProviderTextKind.Body)
                 }
             ,
-            aiLane = _aiLaneController.CurrentState,
+            voiceLane = surface == BridgeSurface.Panel
+                ? (object)new
+                {
+                    mode = ToWireValue(_resolvedVoiceLaneMode),
+                    preferredLayout = ToWireValue(CurrentSettings.VoiceLaneLayout),
+                    expansionBlocked = CurrentSettings.VoiceEnabled
+                        && CurrentSettings.VoiceLaneLayout == VoiceLaneLayoutPreference.Expanded
+                        && _resolvedVoiceLaneMode != VoiceLaneMode.Expanded,
+                    availability = ToVoiceAvailabilityWireValue(voiceSnapshot.Availability),
+                    sessionStatus = ToWireValue(voiceSnapshot.SessionStatus),
+                    activity = ToWireValue(voiceSnapshot.Activity),
+                    muted = voiceSnapshot.Muted,
+                    uiAttached = voiceSnapshot.UiAttached,
+                    transportAttached = voiceSnapshot.TransportAttached,
+                    rootSessionId = voiceSnapshot.RootSessionId,
+                    visibleSessionCount = voiceSnapshot.VisibleSessionCount,
+                    transcriptPreview = voiceSnapshot.TranscriptPreview,
+                    transcript = voiceSnapshot.Transcript.Select(item => new
+                    {
+                        id = item.Id,
+                        role = item.Role,
+                        text = item.Text,
+                        isFinal = item.IsFinal,
+                        timestamp = item.Timestamp
+                    }),
+                    sessions = voiceSnapshot.Sessions.Select(item => new
+                    {
+                        sessionId = item.SessionId,
+                        rootSessionId = item.RootSessionId,
+                        parentSessionId = item.ParentSessionId,
+                        title = item.Title,
+                        status = ToWireValue(item.Status),
+                        safeSummary = item.SafeSummary,
+                        progress = item.Progress,
+                        updatedAt = item.UpdatedAt,
+                        navigation = "lane_detail"
+                    }),
+                    safeErrorCode = voiceSnapshot.LastErrorCode
+                }
+                : null,
             pocketSurface = selectedPocketSurface,
             pocketApps = !builtInPocketAppAvailable || _pocketAppHostController is null
                 ? Array.Empty<object>()
@@ -845,6 +914,8 @@ internal sealed class PanelBridgeController : IDisposable
             _pocketAppGenerationController?.SetEnabled(false);
             _generatedPocketApps?.SetEnabled(false);
             SaveSettings(UserSettingsStore.CreateDefault(_providerRegistry.ProviderIds));
+            await _voiceCoordinator.SetFeatureEnabledAsync(false, cancellationToken);
+            _resolvedVoiceLaneMode = VoiceLaneMode.Disabled;
             var published = await PublishStateAsync(cancellationToken);
             await CompletePocketAppStateTransitionAsync(stateTransition);
             stateTransition = null;
@@ -893,21 +964,50 @@ internal sealed class PanelBridgeController : IDisposable
         return await _updaterService.CheckWithPromptsAsync(cancellationToken: cancellationToken);
     }
 
-    private async Task<object?> SubmitAiLaneAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    private async Task<object?> SetVoiceEnabledAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
-        await _aiLaneController.SubmitAsync(ReadRequiredString(parameters, "text"), cancellationToken);
+        var enabled = ReadRequiredBool(parameters, "enabled");
+        if (CurrentSettings.VoiceEnabled != enabled)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.VoiceEnabled = enabled;
+            if (enabled)
+            {
+                _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(updated);
+            }
+            SaveSettings(updated);
+        }
+        await _voiceCoordinator.SetFeatureEnabledAsync(
+            enabled,
+            enabled ? cancellationToken : CancellationToken.None);
         return await PublishStateAsync(cancellationToken);
     }
 
-    private async Task<object?> ApproveAiLaneAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    private async Task<object?> SetVoiceLayoutAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
-        await _aiLaneController.ApproveAsync(ReadRequiredString(parameters, "actionId"), cancellationToken);
+        var layout = ParseVoiceLaneLayout(ReadRequiredString(parameters, "layout"));
+        if (CurrentSettings.VoiceLaneLayout != layout)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.VoiceLaneLayout = layout;
+            _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(updated);
+            SaveSettings(updated);
+        }
         return await PublishStateAsync(cancellationToken);
     }
 
-    private async Task<object?> RejectAiLaneAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    private async Task<object?> SetVoiceMutedAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
-        _aiLaneController.Reject(ReadRequiredString(parameters, "actionId"));
+        cancellationToken.ThrowIfCancellationRequested();
+        _voiceCoordinator.SetMuted(ReadRequiredBool(parameters, "muted"));
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> EndVoiceSessionAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        cancellationToken.ThrowIfCancellationRequested();
+        _voiceCoordinator.CloseAudioSession();
         return await PublishStateAsync(cancellationToken);
     }
 
@@ -1020,6 +1120,7 @@ internal sealed class PanelBridgeController : IDisposable
     public async Task NotifyPanelOpenedAsync()
     {
         _panelOpen = true;
+        _voiceCoordinator.SetUiAttached(true);
         if (!CurrentSettings.RememberLastSelectedProvider)
         {
             _selectedProviderId = ResolvePreferredProviderId();
@@ -1032,6 +1133,8 @@ internal sealed class PanelBridgeController : IDisposable
     public async Task NotifyPanelClosedAsync()
     {
         _panelOpen = false;
+        _voiceCoordinator.SetMuted(true);
+        _voiceCoordinator.SetUiAttached(false);
         await SynchronizeControlsLifecycleAsync();
         await PostEventAsync("panel.closed", new { closed = true });
     }
@@ -1047,6 +1150,38 @@ internal sealed class PanelBridgeController : IDisposable
         _selectedProviderId = provider.Id;
         PersistLastSelectedProvider(provider.Id);
         await PublishStateAsync(cancellationToken);
+    }
+
+    public void SetResolvedVoiceLaneMode(VoiceLaneMode mode)
+    {
+        if (_resolvedVoiceLaneMode == mode)
+        {
+            return;
+        }
+        _resolvedVoiceLaneMode = mode;
+        _ = PostStateEventOnUiThreadAsync("state.changed");
+    }
+
+    public Task NotifySystemTransitionAsync(CancellationToken cancellationToken = default)
+    {
+        return _voiceCoordinator.NotifySystemTransitionAsync(cancellationToken);
+    }
+
+    private void OnVoiceSnapshotChanged(object? sender, CodexVoiceSnapshot snapshot)
+    {
+        _ = sender;
+        var runtimeActive = snapshot.Availability != CodexVoiceAvailability.Disabled;
+        if (_voiceRuntimeActive != runtimeActive)
+        {
+            _voiceRuntimeActive = runtimeActive;
+            _resolvedVoiceLaneMode = runtimeActive
+                ? CurrentSettings.VoiceLaneLayout == VoiceLaneLayoutPreference.Expanded
+                    ? VoiceLaneMode.Expanded
+                    : VoiceLaneMode.Compact
+                : VoiceLaneMode.Disabled;
+            SettingsChanged?.Invoke(this, CurrentSettings);
+        }
+        _ = PostStateEventOnUiThreadAsync("voice.stateChanged");
     }
 
     private void SaveSettings(UserSettings settings)
@@ -1470,6 +1605,13 @@ internal sealed class PanelBridgeController : IDisposable
             : AppLanguage.Japanese;
     }
 
+    private static VoiceLaneLayoutPreference ParseVoiceLaneLayout(string value)
+    {
+        return value.Equals("expanded", StringComparison.OrdinalIgnoreCase)
+            ? VoiceLaneLayoutPreference.Expanded
+            : VoiceLaneLayoutPreference.Compact;
+    }
+
     private bool IsStartupRegistered()
     {
         try
@@ -1554,6 +1696,52 @@ internal sealed class PanelBridgeController : IDisposable
     {
         return language == AppLanguage.English ? "en" : "ja";
     }
+
+    private static string ToWireValue(VoiceLaneLayoutPreference layout)
+    {
+        return layout == VoiceLaneLayoutPreference.Expanded ? "expanded" : "compact";
+    }
+
+    private static string ToWireValue(VoiceLaneMode mode)
+    {
+        return mode switch
+        {
+            VoiceLaneMode.Compact => "compact",
+            VoiceLaneMode.Expanded => "expanded",
+            _ => "disabled"
+        };
+    }
+
+    internal static string ToVoiceAvailabilityWireValue(CodexVoiceAvailability availability) =>
+        availability switch
+        {
+            CodexVoiceAvailability.Disabled => "disabled",
+            CodexVoiceAvailability.Ready => "ready",
+            CodexVoiceAvailability.Unavailable => "unavailable",
+            CodexVoiceAvailability.SignedOut => "signedOut",
+            CodexVoiceAvailability.SchemaMismatch => "schemaMismatch",
+            CodexVoiceAvailability.CapabilityBlocked => "capabilityBlocked",
+            _ => "unavailable"
+        };
+
+    private static string ToWireValue(CodexVoiceSessionStatus status) =>
+        status switch
+        {
+            CodexVoiceSessionStatus.RequestingPermission => "requesting_permission",
+            CodexVoiceSessionStatus.RecoverableFailure => "recoverable_failure",
+            CodexVoiceSessionStatus.BlockedFailure => "blocked_failure",
+            _ => status.ToString().ToLowerInvariant()
+        };
+
+    private static string ToWireValue(VoiceActivity activity) =>
+        activity == VoiceActivity.WaitingForApproval
+            ? "waiting_for_approval"
+            : activity.ToString().ToLowerInvariant();
+
+    private static string ToWireValue(AgentSessionStatus status) =>
+        status == AgentSessionStatus.WaitingForUser
+            ? "waiting_for_user"
+            : status.ToString().ToLowerInvariant();
 
     private string ProviderText(ProviderDescriptor provider, ProviderTextKind kind)
     {

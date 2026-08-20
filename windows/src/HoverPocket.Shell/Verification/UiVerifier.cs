@@ -37,6 +37,21 @@ internal sealed class UiVerifier
                     _failures.Add("bridge: diagnostics.echo round-trip failed");
                 }
 
+                if (!result.LegacyAiLaneNotMountedOk || !result.VoiceDefaultOffOk)
+                {
+                    _failures.Add("voice: default-off or legacy lane absence regressed");
+                }
+
+                if (!result.VoiceTeardownVisibleOk)
+                {
+                    _failures.Add("voice: lane disappeared before runtime teardown completed");
+                }
+
+                if (!result.VoiceLocalizationOk)
+                {
+                    _failures.Add("voice: Japanese and English lane copy did not render correctly");
+                }
+
                 if (!result.ControlsRenderedOk)
                 {
                     _failures.Add("controls: three live sections did not render");

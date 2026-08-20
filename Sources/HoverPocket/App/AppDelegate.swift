@@ -7,11 +7,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hoverWindowController = HoverWindowController()
     private var statusBarMenuController: StatusBarMenuController?
     private var settingsCancellables = Set<AnyCancellable>()
+    private var voiceConfigurationTask: Task<Void, Never>?
+    private var voiceTerminationTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         configureAINativeRuntimeIfEnabled()
         observeAINativeRuntimeSetting()
+        configureVoiceRuntime()
+        observeVoiceRuntimeSettings()
         installMainMenu()
         registerURLSchemeCallbackHandler()
         statusBarMenuController = StatusBarMenuController(
@@ -192,6 +196,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &settingsCancellables)
     }
 
+    private func configureVoiceRuntime() {
+        let settings = hoverWindowController.appSettings
+        voiceConfigurationTask = VoiceLaneRuntime.shared.configure(
+            featureEnabled: settings.voiceEnabled,
+            preferredLayout: settings.voiceLaneLayoutPreference,
+            adapterFactory: nil
+        )
+    }
+
+    private func observeVoiceRuntimeSettings() {
+        let settings = hoverWindowController.appSettings
+        settings.$voiceEnabled
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                self?.configureVoiceRuntime()
+            }
+            .store(in: &settingsCancellables)
+    }
+
     @objc private func screenParametersChanged() {
         hoverWindowController.recoverAfterSystemTransition()
     }
@@ -202,11 +226,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func workspaceDidWake() {
+        VoiceLaneRuntime.shared.recoverAfterSystemTransition()
         hoverWindowController.recoverAfterSystemTransition()
     }
 
     @objc private func workspaceSessionDidBecomeActive() {
+        VoiceLaneRuntime.shared.recoverAfterSystemTransition()
         hoverWindowController.recoverAfterSystemTransition()
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard voiceTerminationTask == nil else { return .terminateLater }
+        voiceTerminationTask = Task { @MainActor [weak self] in
+            await self?.voiceConfigurationTask?.value
+            await VoiceLaneRuntime.shared.shutdown()
+            self?.voiceTerminationTask = nil
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     private func registerURLSchemeCallbackHandler() {

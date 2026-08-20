@@ -86,6 +86,7 @@ final class HoverWindowController {
         syncAccessWindows(orderFront: false)
         guard let screen = activePreviewScreen ?? targetScreen() else { return }
 
+        applyResolvedVoiceLaneLayout(on: screen)
         let frames = panelFrames(on: screen)
 
         if previewWindow?.isVisible == true {
@@ -115,7 +116,37 @@ final class HoverWindowController {
         PanelGeometry.frames(
             on: screen,
             panelSize: settings.panelSize,
+            additionalPreviewHeight: voiceLaneHeight(on: screen),
             showsNotchSideHandleArea: showsVisibleNotchSideHandle
+        )
+    }
+
+    private func resolvedVoiceLaneLayout(on screen: NSScreen) -> VoiceLaneLayoutPreference {
+        guard settings.voiceEnabled else { return .compact }
+        let baseline = PanelGeometry.frames(
+            on: screen,
+            panelSize: settings.panelSize,
+            showsNotchSideHandleArea: showsVisibleNotchSideHandle
+        )
+        let availableExtraHeight = max(0, baseline.preview.minY - screen.visibleFrame.minY)
+        return VoiceLaneGeometry.resolvedPreference(
+            requested: settings.voiceLaneLayoutPreference,
+            availableExtraHeight: Double(availableExtraHeight),
+            panelSizeRawValue: settings.panelSize.rawValue
+        )
+    }
+
+    private func voiceLaneHeight(on _: NSScreen) -> CGFloat {
+        CGFloat(VoiceLaneGeometry.height(
+            panelSizeRawValue: settings.panelSize.rawValue,
+            mode: VoiceLaneRuntime.shared.snapshot.mode
+        ))
+    }
+
+    private func applyResolvedVoiceLaneLayout(on screen: NSScreen) {
+        VoiceLaneRuntime.shared.setResolvedLayout(
+            requested: settings.voiceLaneLayoutPreference,
+            resolved: resolvedVoiceLaneLayout(on: screen)
         )
     }
 
@@ -165,7 +196,13 @@ final class HoverWindowController {
             onExit: { [weak self] in self?.scheduleClose() }
         )
 
-        let panel = makePanel(size: PanelLayout.previewSize(for: settings.panelSize), acceptsKeyboardFocus: true)
+        let panel = makePanel(
+            size: PanelGeometry.previewSize(
+                panelSize: settings.panelSize,
+                additionalHeight: targetScreen().map { voiceLaneHeight(on: $0) } ?? 0
+            ),
+            acceptsKeyboardFocus: true
+        )
         panel.hasShadow = true
         let hostingController = NSHostingController(
             rootView: HoverPanelShell(
@@ -249,7 +286,7 @@ final class HoverWindowController {
         if let screen = previewWindow.screen ?? activePreviewScreen ?? targetScreen() {
             previewWindow.setFrame(panelFrames(on: screen).preview, display: false)
         }
-        previewWindow.orderOut(nil)
+        orderOutPreviewWindow(previewWindow)
         menuStore.providerStore.prepareForPanelClose()
     }
 
@@ -262,6 +299,8 @@ final class HoverWindowController {
 
         guard let screen = requestedScreen ?? targetScreen(), let previewWindow else { return }
         activePreviewScreen = screen
+        applyResolvedVoiceLaneLayout(on: screen)
+        VoiceLaneRuntime.shared.attachPanel()
         let frames = panelFrames(on: screen)
         menuStore.providerStore.prepareForPanelOpen(isSecondaryDisplay: isSecondaryDisplay(screen))
         setProviderActive(true)
@@ -368,7 +407,7 @@ final class HoverWindowController {
         setProviderActive(false)
 
         guard !shouldReduceMotion, let screen = previewWindow.screen ?? activePreviewScreen ?? targetScreen() else {
-            previewWindow.orderOut(nil)
+            orderOutPreviewWindow(previewWindow)
             setPreviewContentVisible(false, animated: false)
             previewWindow.alphaValue = 1
             previewWindow.hasShadow = true
@@ -412,7 +451,7 @@ final class HoverWindowController {
         stopHoverMonitor()
         mouseEventsEnableTask?.cancel()
         mouseEventsEnableTask = nil
-        previewWindow.orderOut(nil)
+        orderOutPreviewWindow(previewWindow)
         setProviderActive(false)
         activePreviewScreen = nil
         menuStore.providerStore.prepareForPanelClose()
@@ -422,6 +461,11 @@ final class HoverWindowController {
         previewWindow.invalidateShadow()
         previewWindow.ignoresMouseEvents = false
         previewWindow.setFrame(frame, display: false)
+    }
+
+    private func orderOutPreviewWindow(_ previewWindow: NSPanel) {
+        VoiceLaneRuntime.shared.detachPanel()
+        previewWindow.orderOut(nil)
     }
 
     private func isMouseInsideHoverRegion() -> Bool {
@@ -682,6 +726,37 @@ final class HoverWindowController {
             }
             .store(in: &settingsCancellables)
 
+        settings.$voiceEnabled
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.resizePreviewForPanelSizeChange()
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        VoiceLaneRuntime.shared.$snapshot
+            .map(\.mode)
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.resizePreviewForPanelSizeChange()
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        settings.$voiceLaneLayoutPreference
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.resizePreviewForPanelSizeChange()
+                }
+            }
+            .store(in: &settingsCancellables)
+
         settings.$showNotchSideHandleArea
             .dropFirst()
             .sink { [weak self] _ in
@@ -720,6 +795,7 @@ final class HoverWindowController {
     private func resizePreviewForPanelSizeChange() {
         syncAccessWindows(orderFront: false)
         guard let screen = activePreviewScreen ?? previewWindow?.screen ?? targetScreen() else { return }
+        applyResolvedVoiceLaneLayout(on: screen)
         let frames = panelFrames(on: screen)
 
         guard let previewWindow else { return }

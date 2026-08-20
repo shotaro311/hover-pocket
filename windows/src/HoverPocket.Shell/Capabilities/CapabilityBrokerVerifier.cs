@@ -494,7 +494,11 @@ internal sealed class CapabilityBrokerVerifier
         Require(loadResponse is not null, "pocket_app_host_load_response");
         using (var loadDocument = JsonDocument.Parse(loadResponse!))
         {
-            Require(loadDocument.RootElement.GetProperty("error").ValueKind == JsonValueKind.Null, "pocket_app_host_load");
+            if (loadDocument.RootElement.GetProperty("error").ValueKind != JsonValueKind.Null)
+            {
+                _failures.Add("pocket_app_host_load");
+                return;
+            }
             var firstQuery = loadDocument.RootElement.GetProperty("result")
                 .GetProperty("queryResults")[0];
             Require(

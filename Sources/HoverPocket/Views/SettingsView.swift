@@ -35,6 +35,10 @@ struct SettingsView: View {
 
                 Divider()
 
+                voiceSection
+
+                Divider()
+
                 stickyNotesSection
 
                 Divider()
@@ -295,6 +299,38 @@ struct SettingsView: View {
                     language: language
                 )
             }
+        }
+    }
+
+    private var voiceSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(localized(japanese: "Voice Lane", english: "Voice Lane"))
+                .font(.system(size: 13, weight: .bold))
+
+            Toggle(
+                localized(japanese: "Voice Laneを有効化", english: "Enable Voice Lane"),
+                isOn: $settings.voiceEnabled
+            )
+
+            Picker(
+                localized(japanese: "表示", english: "Layout"),
+                selection: $settings.voiceLaneLayoutPreference
+            ) {
+                Text(localized(japanese: "コンパクト", english: "Compact"))
+                    .tag(VoiceLaneLayoutPreference.compact)
+                Text(localized(japanese: "展開", english: "Expanded"))
+                    .tag(VoiceLaneLayoutPreference.expanded)
+            }
+            .pickerStyle(.segmented)
+            .disabled(!settings.voiceEnabled)
+
+            Text(localized(
+                japanese: "既定はオフです。AN3-AではHost所有の表示・状態基盤だけを有効化し、マイク、WebRTC、Tool実行は使用しません。",
+                english: "Off by default. AN3-A enables only the Host-owned layout/state foundation; microphone, WebRTC, and tool execution remain unavailable."
+            ))
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 

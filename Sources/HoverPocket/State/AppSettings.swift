@@ -122,6 +122,18 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var voiceEnabled: Bool {
+        didSet {
+            defaults.set(voiceEnabled, forKey: Self.voiceEnabledKey)
+        }
+    }
+
+    @Published var voiceLaneLayoutPreference: VoiceLaneLayoutPreference {
+        didSet {
+            defaults.set(voiceLaneLayoutPreference.rawValue, forKey: Self.voiceLaneLayoutPreferenceKey)
+        }
+    }
+
     private let defaults: UserDefaults
     private static let appLanguageKey = "appLanguage"
     private static let displayPlacementModeKey = "displayPlacementMode"
@@ -143,6 +155,8 @@ final class AppSettings: ObservableObject {
     private static let showStickyNoteUndoToastKey = "showStickyNoteUndoToast"
     private static let stickyNoteGridSizeKey = "stickyNoteGridSize"
     private static let aiNativeEnabledKey = "aiNativeEnabled"
+    private static let voiceEnabledKey = "voiceEnabled"
+    private static let voiceLaneLayoutPreferenceKey = "voiceLaneLayoutPreference"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -210,6 +224,11 @@ final class AppSettings: ObservableObject {
         self.aiNativeEnabled = defaults.object(forKey: Self.aiNativeEnabledKey) == nil
             ? false
             : defaults.bool(forKey: Self.aiNativeEnabledKey)
+        self.voiceEnabled = defaults.object(forKey: Self.voiceEnabledKey) == nil
+            ? false
+            : defaults.bool(forKey: Self.voiceEnabledKey)
+        self.voiceLaneLayoutPreference = defaults.string(forKey: Self.voiceLaneLayoutPreferenceKey)
+            .flatMap(VoiceLaneLayoutPreference.init(rawValue:)) ?? .compact
 
         if defaults.data(forKey: Self.weatherLocationKey) == nil,
            let weatherLocationData = try? JSONEncoder().encode(weatherLocation) {
