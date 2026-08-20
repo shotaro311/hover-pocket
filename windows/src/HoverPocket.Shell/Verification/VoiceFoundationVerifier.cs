@@ -23,15 +23,15 @@ internal sealed class VoiceFoundationVerifier
 
         if (_failures.Count == 0)
         {
-            Console.WriteLine(
+            VerifyConsole.WriteLine(
                 "PASS voice-foundation verify: default-off inert, schema/account/capability gates, fail-closed server requests, bounded restart, root scope, bounded redacted transcript, app-lifetime UI detach, compact/expanded geometry");
             return 0;
         }
 
-        Console.WriteLine("FAIL voice-foundation verify:");
+        VerifyConsole.WriteLine("FAIL voice-foundation verify:");
         foreach (var failure in _failures)
         {
-            Console.WriteLine($"- {failure}");
+            VerifyConsole.WriteLine($"- {failure}");
         }
         return 1;
     }
@@ -39,16 +39,27 @@ internal sealed class VoiceFoundationVerifier
     private async Task RunAsync()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        await VerifyDisabledIsInertAsync(timeout.Token);
-        await VerifyCompatibilityGatesAsync(timeout.Token);
-        await VerifyUnexpectedRequestFailsClosedAsync(timeout.Token);
-        await VerifyRestartIsBoundedAsync(timeout.Token);
-        await VerifyFailedInitializeDisposesCandidateAsync(timeout.Token);
-        await VerifyTransportCrashDisposesCandidateAsync(timeout.Token);
-        await VerifyOversizedResponseFailsClosedAsync(timeout.Token);
+        await RunCaseAsync("disabled", VerifyDisabledIsInertAsync, timeout.Token);
+        await RunCaseAsync("compatibility", VerifyCompatibilityGatesAsync, timeout.Token);
+        await RunCaseAsync("unexpected-request", VerifyUnexpectedRequestFailsClosedAsync, timeout.Token);
+        await RunCaseAsync("initialize-request", VerifyInitializeRequestCannotBePromotedAsync, timeout.Token);
+        await RunCaseAsync("restart", VerifyRestartIsBoundedAsync, timeout.Token);
+        await RunCaseAsync("failed-initialize-cleanup", VerifyFailedInitializeDisposesCandidateAsync, timeout.Token);
+        await RunCaseAsync("crash-cleanup", VerifyTransportCrashDisposesCandidateAsync, timeout.Token);
+        await RunCaseAsync("oversized-response", VerifyOversizedResponseFailsClosedAsync, timeout.Token);
         VerifyTranscriptAndRootScope();
         VerifyUiDetachPreservesSession();
         VerifyGeometry();
+    }
+
+    private static async Task RunCaseAsync(
+        string label,
+        Func<CancellationToken, Task> verification,
+        CancellationToken cancellationToken)
+    {
+        VerifyConsole.WriteLine($"VOICE_CASE_BEGIN {label}");
+        await verification(cancellationToken).WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+        VerifyConsole.WriteLine($"VOICE_CASE_PASS {label}");
     }
 
     private async Task VerifyDisabledIsInertAsync(CancellationToken cancellationToken)
@@ -176,6 +187,28 @@ internal sealed class VoiceFoundationVerifier
         }
     }
 
+    private async Task VerifyInitializeRequestCannotBePromotedAsync(CancellationToken cancellationToken)
+    {
+        var disposeCount = 0;
+        var harness = new AppServerHarness(
+            () => Interlocked.Increment(ref disposeCount),
+            requestDuringInitialize: true);
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ => Task.FromResult(harness.CreateClient()),
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: []);
+
+        await coordinator.InitializeAsync(cancellationToken);
+        await WaitUntilAsync(() => Volatile.Read(ref disposeCount) == 1, cancellationToken);
+        if (coordinator.Snapshot.Availability != CodexVoiceAvailability.CapabilityBlocked
+            || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure
+            || coordinator.Snapshot.TransportAttached)
+        {
+            _failures.Add("initialization-time server request was promoted to a ready transport");
+        }
+    }
+
     private async Task VerifyFailedInitializeDisposesCandidateAsync(CancellationToken cancellationToken)
     {
         var disposeCount = 0;
@@ -269,6 +302,37 @@ internal sealed class VoiceFoundationVerifier
         {
             _failures.Add("transcript bounds/redaction or root-scoped filtering regressed");
         }
+
+        for (var index = 0; index < 90; index++)
+        {
+            coordinator.UpsertSession(new AgentSessionSummary(
+                $"child-{index}",
+                "root-a",
+                "root-a",
+                $"Child {index}",
+                AgentSessionStatus.Running,
+                "safe",
+                null,
+                now.AddSeconds(index + 4)));
+        }
+        if (coordinator.Snapshot.Sessions.Count > CodexVoiceCoordinator.MaxRetainedSessions)
+        {
+            _failures.Add("retained session summaries exceeded the bounded limit");
+        }
+
+        coordinator.SetRootSessionId("root-b");
+        if (coordinator.Snapshot.Transcript.Count != 0
+            || coordinator.Snapshot.Sessions.Count != 0
+            || coordinator.Snapshot.RootSessionId != "root-b")
+        {
+            _failures.Add("root transition retained transcript or session data from the previous conversation");
+        }
+
+        var absolutePaths = new[] { "/tmp/private.txt", "/Volumes/work/secret.mov", @"C:\work\secret.txt" };
+        if (absolutePaths.Any(path => VoiceTextSafety.SanitizeVisibleText(path, 200) != "[redacted]"))
+        {
+            _failures.Add("absolute filesystem path redaction was incomplete");
+        }
     }
 
     private void VerifyUiDetachPreservesSession()
@@ -350,16 +414,18 @@ internal sealed class VoiceFoundationVerifier
     {
         private readonly ChannelLineReader _reader = new();
         private readonly Action? _onDispose;
+        private readonly bool _requestDuringInitialize;
 
-        public AppServerHarness(Action? onDispose = null)
+        public AppServerHarness(Action? onDispose = null, bool requestDuringInitialize = false)
         {
             _onDispose = onDispose;
+            _requestDuringInitialize = requestDuringInitialize;
         }
 
         public CodexAppServerClient CreateClient() =>
             CodexAppServerClient.AttachForTesting(
                 _reader,
-                new AutoReplyWriter(_reader),
+                new AutoReplyWriter(_reader, _requestDuringInitialize),
                 TimeSpan.FromSeconds(1),
                 () =>
                 {
@@ -462,10 +528,12 @@ internal sealed class VoiceFoundationVerifier
     private sealed class AutoReplyWriter : TextWriter
     {
         private readonly ChannelLineReader _reader;
+        private readonly bool _requestDuringInitialize;
 
-        public AutoReplyWriter(ChannelLineReader reader)
+        public AutoReplyWriter(ChannelLineReader reader, bool requestDuringInitialize)
         {
             _reader = reader;
+            _requestDuringInitialize = requestDuringInitialize;
         }
 
         public override Encoding Encoding => Encoding.UTF8;
@@ -479,6 +547,10 @@ internal sealed class VoiceFoundationVerifier
                 && root.TryGetProperty("method", out var method)
                 && method.GetString() == "initialize")
             {
+                if (_requestDuringInitialize)
+                {
+                    _reader.Push("{\"id\":9002,\"method\":\"approval/request\",\"params\":{}}");
+                }
                 _reader.Push($"{{\"id\":{id.GetInt64()},\"result\":{{\"ready\":true}}}}");
             }
             return Task.CompletedTask;

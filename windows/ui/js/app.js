@@ -607,6 +607,9 @@ function renderExpandedVoiceLane(lane) {
 }
 
 function voiceStatusText(lane) {
+  if (lane.expansionBlocked) {
+    return "Expanded表示には画面の高さが足りません";
+  }
   if (lane.safeErrorCode) {
     return lane.safeErrorCode;
   }

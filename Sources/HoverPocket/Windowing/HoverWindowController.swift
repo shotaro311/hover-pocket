@@ -86,6 +86,7 @@ final class HoverWindowController {
         syncAccessWindows(orderFront: false)
         guard let screen = activePreviewScreen ?? targetScreen() else { return }
 
+        applyResolvedVoiceLaneLayout(on: screen)
         let frames = panelFrames(on: screen)
 
         if previewWindow?.isVisible == true {
@@ -115,17 +116,39 @@ final class HoverWindowController {
         PanelGeometry.frames(
             on: screen,
             panelSize: settings.panelSize,
-            additionalPreviewHeight: voiceLaneHeight,
+            additionalPreviewHeight: voiceLaneHeight(on: screen),
             showsNotchSideHandleArea: showsVisibleNotchSideHandle
         )
     }
 
-    private var voiceLaneHeight: CGFloat {
+    private func resolvedVoiceLaneLayout(on screen: NSScreen) -> VoiceLaneLayoutPreference {
+        guard settings.voiceEnabled else { return .compact }
+        let baseline = PanelGeometry.frames(
+            on: screen,
+            panelSize: settings.panelSize,
+            showsNotchSideHandleArea: showsVisibleNotchSideHandle
+        )
+        let availableExtraHeight = max(0, baseline.preview.minY - screen.visibleFrame.minY)
+        return VoiceLaneGeometry.resolvedPreference(
+            requested: settings.voiceLaneLayoutPreference,
+            availableExtraHeight: Double(availableExtraHeight),
+            panelSizeRawValue: settings.panelSize.rawValue
+        )
+    }
+
+    private func voiceLaneHeight(on screen: NSScreen) -> CGFloat {
         CGFloat(VoiceLaneGeometry.height(
             enabled: settings.voiceEnabled,
-            preference: settings.voiceLaneLayoutPreference,
+            preference: resolvedVoiceLaneLayout(on: screen),
             panelSizeRawValue: settings.panelSize.rawValue
         ))
+    }
+
+    private func applyResolvedVoiceLaneLayout(on screen: NSScreen) {
+        VoiceLaneRuntime.shared.setResolvedLayout(
+            requested: settings.voiceLaneLayoutPreference,
+            resolved: resolvedVoiceLaneLayout(on: screen)
+        )
     }
 
     private var showsVisibleNotchSideHandle: Bool {
@@ -177,7 +200,7 @@ final class HoverWindowController {
         let panel = makePanel(
             size: PanelGeometry.previewSize(
                 panelSize: settings.panelSize,
-                additionalHeight: voiceLaneHeight
+                additionalHeight: targetScreen().map { voiceLaneHeight(on: $0) } ?? 0
             ),
             acceptsKeyboardFocus: true
         )
@@ -277,6 +300,8 @@ final class HoverWindowController {
 
         guard let screen = requestedScreen ?? targetScreen(), let previewWindow else { return }
         activePreviewScreen = screen
+        applyResolvedVoiceLaneLayout(on: screen)
+        VoiceLaneRuntime.shared.attachPanel()
         let frames = panelFrames(on: screen)
         menuStore.providerStore.prepareForPanelOpen(isSecondaryDisplay: isSecondaryDisplay(screen))
         setProviderActive(true)
@@ -760,6 +785,7 @@ final class HoverWindowController {
     private func resizePreviewForPanelSizeChange() {
         syncAccessWindows(orderFront: false)
         guard let screen = activePreviewScreen ?? previewWindow?.screen ?? targetScreen() else { return }
+        applyResolvedVoiceLaneLayout(on: screen)
         let frames = panelFrames(on: screen)
 
         guard let previewWindow else { return }

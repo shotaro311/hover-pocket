@@ -113,6 +113,10 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
             process.Dispose();
             throw new CodexAppServerProtocolException("codex_process_start_failed");
         }
+        var stderrLifetime = new CancellationTokenSource();
+        var stderrDrain = DrainStandardErrorAsync(
+            process.StandardError,
+            stderrLifetime.Token);
 
         var client = new CodexAppServerClient(
             process.StandardOutput,
@@ -135,12 +139,37 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
                 }
                 finally
                 {
+                    stderrLifetime.Cancel();
+                    await stderrDrain;
+                    stderrLifetime.Dispose();
                     process.Dispose();
                 }
             },
             process.Id);
         process.Exited += (_, _) => client.SignalDisconnected();
         return Task.FromResult(client);
+    }
+
+    private static async Task DrainStandardErrorAsync(
+        TextReader reader,
+        CancellationToken cancellationToken)
+    {
+        var buffer = new char[4_096];
+        try
+        {
+            while (await reader.ReadAsync(buffer.AsMemory(), cancellationToken) > 0)
+            {
+                // Intentionally discard diagnostics so stderr remains bounded and secrets are not logged.
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (exception is IOException
+            or ObjectDisposedException
+            or InvalidOperationException)
+        {
+        }
     }
 
     public Task<JsonElement> InitializeAsync(JsonElement parameters, CancellationToken cancellationToken) =>
@@ -380,9 +409,15 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         _lifetime.Cancel();
         try
         {
+            if (_disposeOwner is not null)
+            {
+                await _disposeOwner();
+            }
+            _reader.Dispose();
+            _writer.Dispose();
             try
             {
-                await _readLoop;
+                await _readLoop.WaitAsync(TimeSpan.FromSeconds(2));
             }
             catch (Exception) when (_lifetime.IsCancellationRequested)
             {
@@ -393,10 +428,6 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
                 completion.TrySetCanceled();
             }
             _pending.Clear();
-            if (_disposeOwner is not null)
-            {
-                await _disposeOwner();
-            }
         }
         finally
         {

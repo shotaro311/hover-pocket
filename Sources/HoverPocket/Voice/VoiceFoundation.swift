@@ -150,6 +150,7 @@ struct VoiceLaneSnapshot: Equatable, Sendable {
     let sessions: [VoiceSessionSummary]
     let visibleSessionCount: Int
     let safeErrorCode: String?
+    let layoutBlockedReason: String?
     let uiAttached: Bool
     let restartAttempt: Int
 
@@ -164,29 +165,30 @@ struct VoiceLaneSnapshot: Equatable, Sendable {
         sessions: [],
         visibleSessionCount: 0,
         safeErrorCode: nil,
+        layoutBlockedReason: nil,
         uiAttached: false,
         restartAttempt: 0
     )
 }
 
 enum VoiceTextSafety {
-    private static let pathPrefixes = ["/Users/", "/home/", "\\Users\\", ":\\Users\\"]
     private static let sensitiveMarkers = ["authorization:", "token=", "api_key=", "apikey="]
+    private static let absolutePathPattern = #"(?i)(?:^|[\s\"'(=])(?:file://|/(?:[^/\s]+/)*[^/\s]+|[a-z]:\\[^\s]+|\\\\[^\s]+)"#
 
     static func sanitizeVisibleText(_ value: String, limit: Int) -> String {
-        let collapsed = value.unicodeScalars.map { scalar -> Character in
+        let collapsed = value.unicodeScalars.map { scalar -> Unicode.Scalar in
             if scalar.value < 0x20 && scalar != "\n" && scalar != "\t" {
-                return " "
+                return Unicode.Scalar(0x20)!
             }
-            return Character(String(scalar))
+            return scalar
         }
-        var text = String(collapsed)
+        var text = String(String.UnicodeScalarView(collapsed))
         let lowered = text.lowercased()
-        if pathPrefixes.contains(where: { text.contains($0) })
+        if text.range(of: absolutePathPattern, options: .regularExpression) != nil
             || sensitiveMarkers.contains(where: { lowered.contains($0) }) {
             text = "[redacted]"
         }
-        return String(text.prefix(max(0, limit)))
+        return String(text.unicodeScalars.prefix(max(0, limit)))
     }
 
     static func sanitizeIdentifier(_ value: String) -> String {
@@ -267,6 +269,17 @@ enum VoiceLaneGeometry {
         return preference == .compact ? compactHeight : expandedHeight(panelSizeRawValue: panelSizeRawValue)
     }
 
+    static func height(panelSizeRawValue: String, mode: VoiceLaneMode) -> Double {
+        switch mode {
+        case .disabled:
+            return 0
+        case .compact:
+            return compactHeight
+        case .expanded:
+            return expandedHeight(panelSizeRawValue: panelSizeRawValue)
+        }
+    }
+
     static func resolvedPreference(
         requested: VoiceLaneLayoutPreference,
         availableExtraHeight: Double,
@@ -282,6 +295,7 @@ enum VoiceLaneGeometry {
 @MainActor
 final class VoiceLaneRuntime: ObservableObject {
     static let shared = VoiceLaneRuntime()
+    static let maxRetainedSessions = 64
 
     typealias AdapterFactory = @MainActor () -> any VoiceSessionAdapter
 
@@ -348,7 +362,25 @@ final class VoiceLaneRuntime: ObservableObject {
     func setPreferredLayout(_ preference: VoiceLaneLayoutPreference) {
         preferredLayout = preference
         guard featureEnabled else { return }
-        publish(mode: preference == .expanded ? .expanded : .compact)
+        publish(
+            mode: preference == .expanded ? .expanded : .compact,
+            clearLayoutBlockedReason: true
+        )
+    }
+
+    func setResolvedLayout(
+        requested: VoiceLaneLayoutPreference,
+        resolved: VoiceLaneLayoutPreference
+    ) {
+        preferredLayout = requested
+        guard featureEnabled else { return }
+        publish(
+            mode: resolved == .expanded ? .expanded : .compact,
+            layoutBlockedReason: requested == .expanded && resolved == .compact
+                ? "Expanded表示には画面の高さが足りません"
+                : nil,
+            clearLayoutBlockedReason: requested != .expanded || resolved == .expanded
+        )
     }
 
     func attachPanel() {
@@ -432,13 +464,30 @@ final class VoiceLaneRuntime: ObservableObject {
     }
 
     func setRootSessionID(_ sessionID: String?) {
-        rootSessionID = sessionID.map(VoiceTextSafety.sanitizeIdentifier)
+        let next = sessionID.map(VoiceTextSafety.sanitizeIdentifier)
+        if next != rootSessionID {
+            transcriptBuffer = VoiceTranscriptBuffer()
+            allSessions.removeAll()
+        }
+        rootSessionID = next
         publish()
     }
 
     func upsertSession(_ summary: VoiceSessionSummary) {
         guard featureEnabled else { return }
+        if let rootSessionID, summary.rootSessionID != rootSessionID {
+            return
+        }
         allSessions[summary.sessionID] = summary
+        if allSessions.count > Self.maxRetainedSessions {
+            let overflow = allSessions.values
+                .sorted {
+                    if $0.updatedAt != $1.updatedAt { return $0.updatedAt < $1.updatedAt }
+                    return $0.sessionID < $1.sessionID
+                }
+                .prefix(allSessions.count - Self.maxRetainedSessions)
+            overflow.forEach { allSessions.removeValue(forKey: $0.sessionID) }
+        }
         publish()
     }
 
@@ -544,6 +593,8 @@ final class VoiceLaneRuntime: ObservableObject {
         muted: Bool? = nil,
         safeErrorCode: String? = nil,
         clearSafeError: Bool = false,
+        layoutBlockedReason: String? = nil,
+        clearLayoutBlockedReason: Bool = false,
         uiAttached: Bool? = nil,
         restartAttempt: Int? = nil
     ) {
@@ -571,6 +622,9 @@ final class VoiceLaneRuntime: ObservableObject {
             sessions: scoped,
             visibleSessionCount: scoped.count,
             safeErrorCode: clearSafeError ? nil : (safeErrorCode ?? snapshot.safeErrorCode),
+            layoutBlockedReason: clearLayoutBlockedReason
+                ? nil
+                : (layoutBlockedReason ?? snapshot.layoutBlockedReason),
             uiAttached: uiAttached ?? snapshot.uiAttached,
             restartAttempt: restartAttempt ?? snapshot.restartAttempt
         )

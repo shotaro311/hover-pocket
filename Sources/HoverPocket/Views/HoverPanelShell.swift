@@ -12,9 +12,8 @@ struct HoverPanelShell: View {
     var body: some View {
         let baseline = PanelLayout.panelTotalSize(for: settings.panelSize)
         let voiceHeight = VoiceLaneGeometry.height(
-            enabled: settings.voiceEnabled,
-            preference: settings.voiceLaneLayoutPreference,
-            panelSizeRawValue: settings.panelSize.rawValue
+            panelSizeRawValue: settings.panelSize.rawValue,
+            mode: voiceRuntime.snapshot.mode
         )
 
         ZStack(alignment: .top) {
@@ -63,10 +62,6 @@ struct HoverPanelShell: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
-        .onAppear {
-            voiceRuntime.attachPanel()
-            voiceRuntime.setPreferredLayout(settings.voiceLaneLayoutPreference)
-        }
         .onDisappear {
             voiceRuntime.detachPanel()
         }

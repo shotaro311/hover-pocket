@@ -8,7 +8,7 @@ struct VoiceLaneHostView: View {
     var body: some View {
         Group {
             if settings.voiceEnabled {
-                if settings.voiceLaneLayoutPreference == .expanded {
+                if runtime.snapshot.mode == .expanded {
                     expanded
                 } else {
                     compact
@@ -57,7 +57,6 @@ struct VoiceLaneHostView: View {
 
             Button {
                 settings.voiceLaneLayoutPreference = .expanded
-                runtime.setPreferredLayout(.expanded)
             } label: {
                 Image(systemName: "chevron.down")
             }
@@ -94,7 +93,6 @@ struct VoiceLaneHostView: View {
                     .foregroundStyle(.secondary)
                 Button {
                     settings.voiceLaneLayoutPreference = .compact
-                    runtime.setPreferredLayout(.compact)
                 } label: {
                     Image(systemName: "chevron.up")
                 }
@@ -212,6 +210,9 @@ struct VoiceLaneHostView: View {
     }
 
     private var statusText: String {
+        if let reason = runtime.snapshot.layoutBlockedReason {
+            return reason
+        }
         if let error = runtime.snapshot.safeErrorCode {
             return error
         }

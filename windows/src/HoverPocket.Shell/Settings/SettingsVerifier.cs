@@ -60,9 +60,15 @@ internal sealed class SettingsVerifier
 
         VerifyDefaults(store, registry, startup);
         VerifyWebViewSecurityPolicy();
-        await VerifyPocketAppBridgeSurfaceIsolationAsync(registry);
-        await VerifyGeneratedProviderLifecyclePublicationAsync(registry);
-        await VerifyAiNativeDisableFlushBoundaryAsync(registry);
+        await RunCaseAsync(
+            "surface-isolation",
+            () => VerifyPocketAppBridgeSurfaceIsolationAsync(registry));
+        await RunCaseAsync(
+            "generated-provider-lifecycle",
+            () => VerifyGeneratedProviderLifecyclePublicationAsync(registry));
+        await RunCaseAsync(
+            "ai-native-disable-flush",
+            () => VerifyAiNativeDisableFlushBoundaryAsync(registry));
         var defaultState = await Send(dispatcher, """{"id":"0","method":"app.getState"}""");
         if (!defaultState.Contains("\"aiNativeEnabled\":false", StringComparison.Ordinal)
             || !defaultState.Contains("\"pocketAppGeneration\":null", StringComparison.Ordinal)
@@ -176,6 +182,13 @@ internal sealed class SettingsVerifier
         await Send(dispatcher, """{"id":"9","method":"settings.resetDefaults"}""");
         VerifyDefaults(store, registry, startup);
         await VerifyResetDisablesGenerationAsync(registry);
+    }
+
+    private static async Task RunCaseAsync(string label, Func<Task> verification)
+    {
+        VerifyConsole.WriteLine($"SETTINGS_CASE_BEGIN {label}");
+        await verification();
+        VerifyConsole.WriteLine($"SETTINGS_CASE_PASS {label}");
     }
 
     private async Task VerifyResetDisablesGenerationAsync(ProviderRegistry registry)

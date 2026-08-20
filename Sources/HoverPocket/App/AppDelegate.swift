@@ -204,14 +204,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.configureVoiceRuntime()
             }
             .store(in: &settingsCancellables)
-
-        settings.$voiceLaneLayoutPreference
-            .dropFirst()
-            .removeDuplicates()
-            .sink { preference in
-                VoiceLaneRuntime.shared.setPreferredLayout(preference)
-            }
-            .store(in: &settingsCancellables)
     }
 
     @objc private func screenParametersChanged() {

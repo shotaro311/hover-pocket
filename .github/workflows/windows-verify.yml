@@ -45,17 +45,33 @@ jobs:
           node .\windows\script\verify_settings_generation_target.mjs
           python .\script\verify_voice_foundation.py
 
-      - name: Verify timer model and bridge
-        run: |
-          dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify capabilities
-          dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify broker
-          dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify pocket-surface
-          dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify timer
-          dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify ui-model
-          dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify settings
-          dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify ailane
-          dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify voice
-          dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify updater
+      - name: Verify capabilities
+        run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify capabilities
+
+      - name: Verify Broker
+        run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify broker
+
+      - name: Verify Pocket Surface
+        run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify pocket-surface
+
+      - name: Verify timer
+        run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify timer
+
+      - name: Verify UI model
+        run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify ui-model
+
+      - name: Verify settings
+        run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify settings
+
+      - name: Verify legacy AI lane absence
+        run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify ailane
+
+      - name: Verify Voice foundation
+        timeout-minutes: 2
+        run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify voice
+
+      - name: Verify updater
+        run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify updater
 
       - name: Verify rendered WebView UI
         run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify ui

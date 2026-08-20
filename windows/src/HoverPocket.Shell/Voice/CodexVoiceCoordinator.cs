@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace HoverPocket.Shell.Voice;
 
@@ -150,13 +151,9 @@ internal static class VoiceTextSafety
         "apikey="
     ];
 
-    private static readonly string[] PathMarkers =
-    [
-        "/Users/",
-        "/home/",
-        "\\Users\\",
-        ":\\Users\\"
-    ];
+    private static readonly Regex AbsolutePathPattern = new(
+        "(?:^|[\\s\\\"'(=])(?:file://|/(?:[^/\\s]+/)*[^/\\s]+|[a-zA-Z]:\\\\[^\\s]+|\\\\\\\\[^\\s]+)",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     public static string SanitizeVisibleText(string? value, int maxRunes)
     {
@@ -169,7 +166,7 @@ internal static class VoiceTextSafety
             char.IsControl(character) && character is not '\n' and not '\t' ? ' ' : character).ToArray());
         var lowered = normalized.ToLowerInvariant();
         if (SensitiveMarkers.Any(lowered.Contains)
-            || PathMarkers.Any(normalized.Contains))
+            || AbsolutePathPattern.IsMatch(normalized))
         {
             return "[redacted]";
         }
@@ -252,6 +249,8 @@ internal sealed class VoiceTranscriptBuffer
 
 internal sealed class CodexVoiceCoordinator : IDisposable
 {
+    public const int MaxRetainedSessions = 64;
+
     private readonly object _sync = new();
     private readonly Func<CancellationToken, Task<CodexAppServerClient>>? _clientFactory;
     private readonly ICodexVoiceCompatibilityProbe _compatibilityProbe;
@@ -406,11 +405,17 @@ internal sealed class CodexVoiceCoordinator : IDisposable
     {
         lock (_sync)
         {
-            _rootSessionId = VoiceTextSafety.SanitizeIdentifier(sessionId);
-            if (string.IsNullOrEmpty(_rootSessionId))
+            string? next = VoiceTextSafety.SanitizeIdentifier(sessionId);
+            if (string.IsNullOrEmpty(next))
             {
-                _rootSessionId = null;
+                next = null;
             }
+            if (!string.Equals(_rootSessionId, next, StringComparison.Ordinal))
+            {
+                _transcript.Clear();
+                _sessions.Clear();
+            }
+            _rootSessionId = next;
             PublishLocked();
         }
     }
@@ -460,7 +465,23 @@ internal sealed class CodexVoiceCoordinator : IDisposable
 
         lock (_sync)
         {
+            if (_rootSessionId is not null
+                && !string.Equals(sanitized.RootSessionId, _rootSessionId, StringComparison.Ordinal))
+            {
+                return;
+            }
             _sessions[sanitized.SessionId] = sanitized;
+            if (_sessions.Count > MaxRetainedSessions)
+            {
+                foreach (var expired in _sessions.Values
+                    .OrderBy(item => item.UpdatedAt)
+                    .ThenBy(item => item.SessionId, StringComparer.Ordinal)
+                    .Take(_sessions.Count - MaxRetainedSessions)
+                    .ToArray())
+                {
+                    _sessions.Remove(expired.SessionId);
+                }
+            }
             PublishLocked();
         }
     }
@@ -610,6 +631,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
 
     private void OnServerRequestReceived(object? sender, CodexAppServerRequest request)
     {
+        Interlocked.Increment(ref _generation);
         if (sender is CodexAppServerClient client)
         {
             _ = client.ReplyFailClosedAsync(

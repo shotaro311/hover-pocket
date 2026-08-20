@@ -29,6 +29,19 @@ enum VoiceFoundationVerificationCommand {
                 throw VoiceFoundationVerificationError.failed("geometry_\(size)")
             }
         }
+        guard VoiceLaneGeometry.resolvedPreference(
+            requested: .expanded,
+            availableExtraHeight: 219,
+            panelSizeRawValue: "medium"
+        ) == .compact,
+        VoiceLaneGeometry.resolvedPreference(
+            requested: .expanded,
+            availableExtraHeight: 220,
+            panelSizeRawValue: "medium"
+        ) == .expanded
+        else {
+            throw VoiceFoundationVerificationError.failed("short_display_fallback")
+        }
 
         let baseline = PanelGeometry.previewSize(panelSize: .medium)
         let compact = PanelGeometry.previewSize(
@@ -114,6 +127,20 @@ enum VoiceFoundationVerificationCommand {
         else {
             throw VoiceFoundationVerificationError.failed("transcript_bounds_redaction")
         }
+
+        let combining = VoiceTranscriptEvent(
+            id: "combining",
+            role: .assistant,
+            text: "a" + String(repeating: "\u{0301}", count: 10_000),
+            isFinal: true,
+            timestamp: now
+        )
+        let pathSamples = ["/tmp/private.txt", "/Volumes/work/secret.mov", #"C:\work\secret.txt"#]
+        guard combining.text.unicodeScalars.count <= 1_024,
+              pathSamples.allSatisfy({ VoiceTextSafety.sanitizeVisibleText($0, limit: 200) == "[redacted]" })
+        else {
+            throw VoiceFoundationVerificationError.failed("scalar_bound_or_absolute_path_redaction")
+        }
     }
 
     private static func verifyDefaultOffAndFakeAdapter() async throws {
@@ -142,6 +169,12 @@ enum VoiceFoundationVerificationCommand {
               runtime.snapshot.safeErrorCode == "voice_adapter_unavailable"
         else {
             throw VoiceFoundationVerificationError.failed("production_adapter_fail_closed")
+        }
+        runtime.setResolvedLayout(requested: .expanded, resolved: .compact)
+        guard runtime.snapshot.mode == .compact,
+              runtime.snapshot.layoutBlockedReason != nil
+        else {
+            throw VoiceFoundationVerificationError.failed("expanded_unavailable_reason")
         }
     }
 
@@ -188,6 +221,28 @@ enum VoiceFoundationVerificationCommand {
               adapter.startCount == 2
         else {
             throw VoiceFoundationVerificationError.failed("lifetime_restart")
+        }
+
+        for index in 0..<90 {
+            runtime.upsertSession(VoiceSessionSummary(
+                sessionID: "child-\(index)",
+                rootSessionID: "root-a",
+                parentSessionID: "root-a",
+                title: "Child \(index)",
+                status: .running,
+                updatedAt: Date(timeIntervalSince1970: Double(index + 1))
+            ))
+        }
+        guard runtime.snapshot.sessions.count <= VoiceLaneRuntime.maxRetainedSessions else {
+            throw VoiceFoundationVerificationError.failed("session_retention_bound")
+        }
+
+        runtime.setRootSessionID("root-b")
+        guard runtime.snapshot.transcript.isEmpty,
+              runtime.snapshot.sessions.isEmpty,
+              runtime.snapshot.rootSessionID == "root-b"
+        else {
+            throw VoiceFoundationVerificationError.failed("root_transition_isolation")
         }
 
         runtime.handleUnexpectedServerRequest(method: "unknown/request")

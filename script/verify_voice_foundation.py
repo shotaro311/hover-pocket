@@ -172,8 +172,13 @@ def main() -> None:
         fail("AN3-A macOS runtime enabled production audio")
     if "VoiceTranscriptBuffer" not in mac_runtime or "VoiceSessionScope" not in mac_runtime:
         fail("macOS memory/scope contracts missing")
-    if "additionalPreviewHeight: voiceLaneHeight" not in mac_window:
+    if "additionalPreviewHeight: voiceLaneHeight(on: screen)" not in mac_window:
         fail("macOS window is not extended downward for Voice Lane")
+    show_preview = mac_window[mac_window.find("private func showPreview"):]
+    if "VoiceLaneRuntime.shared.attachPanel()" not in show_preview:
+        fail("macOS panel show path does not reattach Voice state")
+    if "resolvedVoiceLaneLayout(on screen" not in mac_window or "screen.visibleFrame.minY" not in mac_window:
+        fail("macOS short-display fallback is not resolved against the target screen")
     if (
         "private func orderOutPreviewWindow(_ previewWindow: NSPanel)" not in mac_window
         or "VoiceLaneRuntime.shared.detachPanel()" not in mac_window
@@ -194,8 +199,14 @@ def main() -> None:
         fail("Windows Settings bridge can receive Voice transcript/session state")
     if "ReadBoundedLineAsync" not in windows_client or ".ReadLineAsync(" in windows_client:
         fail("Windows app-server response allocation is not bounded before newline parsing")
+    if "DrainStandardErrorAsync" not in windows_client:
+        fail("Windows app-server stderr is not drained through a bounded sink")
     if "DisposeDetachedClientAsync" not in windows_coordinator:
         fail("Windows failed/crashed app-server clients are not disposed through one boundary")
+    if "maxRetainedSessions" not in mac_runtime or "MaxRetainedSessions" not in windows_coordinator:
+        fail("Voice session retention is not bounded on both operating systems")
+    if "expansionBlocked" not in app_js:
+        fail("Windows compact fallback does not report why Expanded is unavailable")
 
     print(
         "PASS voice-foundation contract: "
