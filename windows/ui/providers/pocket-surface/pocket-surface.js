@@ -17,6 +17,9 @@ export function renderPocketSurfaceProvider(context) {
   const inputs = new Map();
   const state = new Map();
   const queryResults = new Map();
+  const pendingTextState = new Map();
+  const textStateTimers = new Map();
+  const statePersistenceTails = new Map();
   let disposed = false;
   initializeState(surface.initialState, state);
   initializeDefaults(surface.renderModel.root, inputs, state);
@@ -126,9 +129,10 @@ export function renderPocketSurfaceProvider(context) {
         input.addEventListener("input", () => {
           setBinding(node.value, truncateUnicodeScalars(sanitizeVisibleText(input.value), input.maxLength), inputs, state);
           refreshButtons();
+          scheduleBoundStatePersistence(node.value, valueFor(node.value, inputs, state));
         });
         input.addEventListener("change", async () => {
-          await persistBoundState(node.value, valueFor(node.value, inputs, state));
+          await flushBoundState(node.value);
         });
         field.append(label, input);
         return field;
@@ -196,19 +200,58 @@ export function renderPocketSurfaceProvider(context) {
       });
       return true;
     } catch {
-      setHostStatus("選択を保存できませんでした。", "error");
+      if (!disposed) setHostStatus("選択を保存できませんでした。", "error");
       return false;
     }
   }
 
   async function persistBoundState(binding, value) {
     if (!binding?.startsWith("$state.")) return true;
-    return persistState(binding, value);
+    return queueStatePersistence(binding, value);
+  }
+
+  function scheduleBoundStatePersistence(binding, value) {
+    if (!binding?.startsWith("$state.")) return;
+    const key = bindingName(binding);
+    pendingTextState.set(key, { binding, value });
+    clearTimeout(textStateTimers.get(key));
+    textStateTimers.set(key, setTimeout(() => {
+      textStateTimers.delete(key);
+      void flushBoundState(binding);
+    }, 180));
+  }
+
+  function queueStatePersistence(binding, value) {
+    const key = bindingName(binding);
+    const previous = statePersistenceTails.get(key) ?? Promise.resolve(true);
+    const next = previous.then(() => persistState(binding, value));
+    statePersistenceTails.set(key, next);
+    void next.then(() => {
+      if (statePersistenceTails.get(key) === next) statePersistenceTails.delete(key);
+    });
+    return next;
+  }
+
+  function flushBoundState(binding) {
+    if (!binding?.startsWith("$state.")) return Promise.resolve(true);
+    const key = bindingName(binding);
+    clearTimeout(textStateTimers.get(key));
+    textStateTimers.delete(key);
+    const pending = pendingTextState.get(key);
+    if (!pending) return statePersistenceTails.get(key) ?? Promise.resolve(true);
+    pendingTextState.delete(key);
+    return queueStatePersistence(pending.binding, pending.value);
+  }
+
+  function flushPendingTextState() {
+    const pending = [...pendingTextState.values()];
+    return Promise.all(pending.map((item) => flushBoundState(item.binding)));
   }
 
   return {
     refresh: load,
     dispose() {
+      void flushPendingTextState();
       disposed = true;
     },
   };
@@ -494,7 +537,6 @@ export async function runPocketSurfaceUiVerify() {
       if (stateNote) {
         stateNote.value = "After";
         stateNote.dispatchEvent(new Event("input", { bubbles: true }));
-        stateNote.dispatchEvent(new Event("change", { bubbles: true }));
       }
       const stateToggle = host.querySelector('input[data-binding="$state.enabled"]');
       if (stateToggle) {
@@ -509,9 +551,6 @@ export async function runPocketSurfaceUiVerify() {
       host.querySelector(".hp-pocket-primary")?.click();
       host.querySelector('[data-workflow="runLiteral"]')?.click();
       await nextLayout();
-      stateBoundControlsPersisted ||= persistedState.get("note") === "After"
-        && persistedState.get("enabled") === true
-        && persistedState.get("mode") === "active";
       const surface = host.querySelector(".hp-pocket-surface");
       const surfaceRect = surface?.getBoundingClientRect();
       const controlsFit = [...host.querySelectorAll("input, select, button")].every((control) => {
@@ -536,6 +575,10 @@ export async function runPocketSurfaceUiVerify() {
         approvalHostOwned: !host.querySelector("[data-approval], .hp-pocket-approval"),
       };
       provider?.dispose?.();
+      await nextLayout();
+      stateBoundControlsPersisted ||= persistedState.get("note") === "After"
+        && persistedState.get("enabled") === true
+        && persistedState.get("mode") === "active";
       host.remove();
     }
   }

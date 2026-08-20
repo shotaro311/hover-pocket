@@ -133,12 +133,22 @@ struct PocketAppPackageRuntime {
             workflows[id] = workflow
         }
 
-        let workflowInputNames = Set(workflows.values.flatMap { $0.inputs.keys })
+        var workflowInputTypes: [String: String] = [:]
+        for workflow in workflows.values {
+            for (name, type) in workflow.inputs {
+                if let existingType = workflowInputTypes[name] {
+                    try require(existingType == type, "$.workflows:input_type_conflict")
+                } else {
+                    workflowInputTypes[name] = type
+                }
+            }
+        }
+        let workflowInputNames = Set(workflowInputTypes.keys)
         var boundNames: Set<String> = []
         for surface in surfaces.values {
             try validateBindings(
                 node: surface.root,
-                inputNames: workflowInputNames,
+                inputTypes: workflowInputTypes,
                 stateNames: statePropertyNames,
                 boundNames: &boundNames,
                 path: "$.surfaces.\(surface.id).root"
@@ -400,7 +410,7 @@ struct PocketAppPackageRuntime {
 
     private func validateBindings(
         node: PocketSurfaceRenderNode,
-        inputNames: Set<String>,
+        inputTypes: [String: String],
         stateNames: Set<String>,
         boundNames: inout Set<String>,
         path: String
@@ -409,7 +419,11 @@ struct PocketAppPackageRuntime {
             if case .string(let binding) = value, binding.hasPrefix("$") {
                 if binding.hasPrefix("$input.") {
                     let name = String(binding.dropFirst("$input.".count))
-                    try require(inputNames.contains(name), "\(path).\(key):binding")
+                    guard let declaredType = inputTypes[name],
+                          let acceptedTypes = acceptedWorkflowInputTypes(nodeType: node.type, propertyName: key) else {
+                        throw PocketAppPackageError.invalid("\(path).\(key):binding")
+                    }
+                    try require(acceptedTypes.contains(declaredType), "\(path).\(key):binding_type")
                     boundNames.insert(name)
                 } else if binding.hasPrefix("$state.") {
                     let name = String(binding.dropFirst("$state.".count))
@@ -421,7 +435,26 @@ struct PocketAppPackageRuntime {
             }
         }
         for (index, child) in node.children.enumerated() {
-            try validateBindings(node: child, inputNames: inputNames, stateNames: stateNames, boundNames: &boundNames, path: "\(path).children[\(index)]")
+            try validateBindings(node: child, inputTypes: inputTypes, stateNames: stateNames, boundNames: &boundNames, path: "\(path).children[\(index)]")
+        }
+    }
+
+    private func acceptedWorkflowInputTypes(nodeType: String, propertyName: String) -> Set<String>? {
+        switch (nodeType, propertyName) {
+        case ("textField", "value"):
+            return ["string"]
+        case ("toggle", "value"):
+            return ["boolean"]
+        case ("picker", "value"):
+            return ["string"]
+        case ("calendarEventPicker", "selection"):
+            return ["entity-ref"]
+        case ("calendarEventPicker", "titleTarget"):
+            return ["string"]
+        case ("durationPicker", "value"):
+            return ["integer", "number"]
+        default:
+            return nil
         }
     }
 

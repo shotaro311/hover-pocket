@@ -126,6 +126,14 @@ enum PocketAppPackageVerificationCommand {
                 return true
             }
         }
+        rejectPackage("surface_input_type_mismatch", failures: &failures) { root in
+            try mutateJSON(root.appendingPathComponent("workflows/start-focus.workflow.json")) { workflow in
+                guard var inputs = workflow["inputs"] as? [String: Any] else { return false }
+                inputs["purpose"] = "integer"
+                workflow["inputs"] = inputs
+                return true
+            }
+        }
         rejectPackage("unsupported_surface_query_shape", failures: &failures) { root in
             try mutateJSON(root.appendingPathComponent("surfaces/main.surface.json")) { surface in
                 guard var rootNode = surface["root"] as? [String: Any],
@@ -169,7 +177,7 @@ enum PocketAppPackageVerificationCommand {
         print("pocket_app_package_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_app_package_valid_files=9")
         print("pocket_app_package_bundled=ok")
-        print("pocket_app_package_negative_cases=14")
+        print("pocket_app_package_negative_cases=15")
         print("pocket_app_lifecycle_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_app_generation_verify=\(failures.isEmpty ? "ok" : "failed")")
         if !failures.isEmpty {

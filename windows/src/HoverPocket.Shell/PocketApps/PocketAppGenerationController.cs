@@ -703,6 +703,13 @@ internal sealed class PocketAppGenerationController : IDisposable
             or UnauthorizedAccessException)
         {
         }
+        try
+        {
+            _postRefreshHook?.Invoke();
+        }
+        catch
+        {
+        }
     }
 
     private void ValidatePins()

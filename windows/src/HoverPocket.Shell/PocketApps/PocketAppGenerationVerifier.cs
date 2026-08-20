@@ -622,6 +622,7 @@ internal sealed class PocketAppGenerationVerifier
                 _ = InstallFixture(request, adapter, materializer, lifecycle);
                 _ = lifecycle.Disable(request.AppId);
             }
+            var refreshNotifications = 0;
             using var controller = new PocketAppGenerationController(
                 root,
                 dataRoot,
@@ -638,7 +639,8 @@ internal sealed class PocketAppGenerationVerifier
                         receipt.Version,
                         receipt.PackageDigest,
                         receipt.EffectivePermissions);
-                });
+                },
+                postRefreshHook: () => refreshNotifications++);
             var settings = new HoverPocket.Shell.Bridge.BridgeDispatcher();
             controller.AttachSettings(settings, approvalDecision: _ => true);
             var response = await settings.ProcessRawMessageAsync(
@@ -649,6 +651,9 @@ internal sealed class PocketAppGenerationVerifier
                     && response.Contains("\"errorCode\":\"GENERATION_PACKAGE_INVALID\"", StringComparison.Ordinal)
                     && response.Contains("\"appId\":\"local.example.activation-failure\",\"state\":\"disabled\"", StringComparison.Ordinal),
                 "generation_failed_activation_refreshes_disabled_management");
+            Require(
+                refreshNotifications == 1,
+                "generation_failed_activation_publishes_route_refresh");
         }
         catch (Exception ex)
         {

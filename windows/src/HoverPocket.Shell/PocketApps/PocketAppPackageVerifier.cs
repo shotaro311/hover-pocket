@@ -96,6 +96,10 @@ internal sealed class PocketAppPackageVerifier
         {
             surface["root"]!["children"]![2]!["value"] = "$input.missing";
         }));
+        RejectPackage("surface_input_type_mismatch", root => MutateJson(Path.Combine(root, "workflows", "start-focus.workflow.json"), workflow =>
+        {
+            workflow["inputs"]!["purpose"] = "integer";
+        }));
         RejectPackage("unsupported_surface_query_shape", root => MutateJson(Path.Combine(root, "surfaces", "main.surface.json"), surface =>
         {
             surface["root"]!["children"]![1]!["items"]!["query"] = "sticky.note.get@1";
@@ -138,7 +142,7 @@ internal sealed class PocketAppPackageVerifier
         Console.WriteLine("pocket_app_package_verify=ok");
         Console.WriteLine("pocket_app_package_valid_files=9");
         Console.WriteLine("pocket_app_package_bundled=ok");
-        Console.WriteLine("pocket_app_package_negative_cases=13");
+        Console.WriteLine("pocket_app_package_negative_cases=14");
         Console.WriteLine("pocket_app_lifecycle_verify=ok");
         Console.WriteLine("pocket_app_generation_verify=ok");
         return 0;

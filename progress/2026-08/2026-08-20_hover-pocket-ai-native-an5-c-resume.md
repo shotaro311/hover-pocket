@@ -47,6 +47,9 @@
 
 - 生成ProviderのSurface modelは表示ごとに新規生成し、再度開いたときにCalendar等のqueryを再取得できるようにする。Registryは生存中modelを弱参照で追跡し、disable / remove時はすべて無効化する回帰を追加した。
 - macOSの`$input`と`$state`を独立namespaceとして保持する。同じ名前のstateを更新しても一時入力を書き換えず、workflow準備時に入力を優先して不足分だけstateから解決する回帰を追加した。
+- Windowsでinstall / update / enable後のruntime activationが失敗してrouteを解除した場合も、失敗後management refreshに続けてHostのrefresh hookを発火し、開いているPanelへ`state.changed`を配信する。失敗回帰は通知が1回発行されることを確認する。
+- macOS / Windowsのpackage loaderはSurface controlが生成する値の型とworkflow宣言input型を照合する。text fieldへintegerを束縛する等の不整合packageと、複数workflow間の同名input型競合を導入前に拒否する。共通contract verifierにも同じcross-file意味検証を追加する。
+- Windowsのstate束縛text fieldは入力を180msでdebounce保存し、`change`またはProvider切替時の`dispose`で保留値を即時flushする。同じstate keyへのwriteは順序を直列化し、changeを発火せず切り替えても値が保存されるrendered UI回帰へ変更する。
 
 ## 検証
 
@@ -62,6 +65,7 @@
 - 最終review追加修正後もwarnings-as-errors build、Pocket App lifecycle / generation、Broker、Capability、Pocket Surface、Timer、13 schema / 59 fixture、JavaScript syntax、`git diff --check`が成功した。Windowsのrendered WebView回帰はPR CIを最終gateとする。
 - 最終security修正後もwarnings-as-errors build、Broker、Capability、Pocket App lifecycle / generation、Pocket Surface、Timer、Clipboard、Calculator、Panel layout 128件、13 schema / 59 fixture、JavaScript syntax、`git diff --check`が成功した。macOSのdirectory差替え拒否と削除済みProvider設定pruneもdeterministic回帰で確認した。Windowsはローカルに.NET SDKがないためPR CIを最終gateとする。
 - 最終head review追加修正後もwarnings-as-errors build、Broker、Pocket App lifecycle / generation、Capability、Pocket Surface、Timer、13 schema / 59 fixture、Windows JavaScript syntax、`git diff --check`が成功した。
+- 追加3件の修正後、macOS warnings-as-errors build、Pocket App package / lifecycle / generation、Broker、Capability、Pocket Surface、Timer、13 schema / 59 fixture、Windows JavaScript syntax、`git diff --check`が成功した。Windows C# buildとrendered WebView UIは修正push後のCIを最終gateとする。
 
 ### PR CI
 
@@ -84,6 +88,7 @@
 - 既存14 review threadはすべてresolvedにした。その後の最終head reviewで検出した入力0件workflowと管理外Apps entryの2件を追加修正した。
 - source headの全CI成功後に`@codex review`を1回依頼した。追加修正の2 threadはpush後のCIとreadbackを確認して解決する。
 - source head `4489791`のexact Security diff scan `e030446e-9c8f-401d-9d44-1b2cc996d943`は51 / 51 review itemを完了し、reportable finding 0件でsealed completeとなった。最終head review追加修正後は新しいexact source headを再scanする。
+- source head `7816771`のexact Security diff scan `e5f9404b-aeae-488c-a1ac-6cf7e986b83c`も51 / 51 review itemを完了し、reportable finding 0件でsealed completeとなった。その後の追加3件を含む新しいsource headは再scanする。
 
 ## 残りgate
 

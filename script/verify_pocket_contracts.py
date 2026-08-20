@@ -1687,6 +1687,52 @@ def validate_pocket_surface(document: Mapping[str, Any], context: FixtureContext
     walk(document["root"], "$.root", 1)
 
 
+def validate_surface_workflow_input_bindings(
+    surfaces: Mapping[str, Mapping[str, Any]],
+    workflows: Mapping[str, Mapping[str, Any]],
+) -> None:
+    input_types: dict[str, str] = {}
+    for workflow in workflows.values():
+        for name, declared_type in workflow["inputs"].items():
+            existing = input_types.get(name)
+            if existing is not None and existing != declared_type:
+                fail(
+                    "WORKFLOW_INPUT_TYPE_MISMATCH",
+                    f"$.workflows.{workflow['id']}.inputs.{name}",
+                    "the same surface input name has conflicting workflow types",
+                )
+            input_types[name] = declared_type
+
+    accepted: dict[tuple[str, str], frozenset[str]] = {
+        ("textField", "value"): frozenset({"string"}),
+        ("toggle", "value"): frozenset({"boolean"}),
+        ("picker", "value"): frozenset({"string"}),
+        ("calendarEventPicker", "selection"): frozenset({"entity-ref"}),
+        ("calendarEventPicker", "titleTarget"): frozenset({"string"}),
+        ("durationPicker", "value"): frozenset({"integer", "number"}),
+    }
+
+    def walk(node: Mapping[str, Any], location: str) -> None:
+        node_type = node["type"]
+        for property_name, binding in node.items():
+            if not isinstance(binding, str) or not binding.startswith("$input."):
+                continue
+            accepted_types = accepted.get((node_type, property_name))
+            input_name = binding[len("$input."):]
+            declared_type = input_types.get(input_name)
+            if accepted_types is None or declared_type not in accepted_types:
+                fail(
+                    "WORKFLOW_INPUT_TYPE_MISMATCH",
+                    f"{location}.{property_name}",
+                    "surface control and declared workflow input types are incompatible",
+                )
+        for index, child in enumerate(node.get("children", [])):
+            walk(child, f"{location}.children[{index}]")
+
+    for surface_id, surface in surfaces.items():
+        walk(surface["root"], f"$.surfaces.{surface_id}.root")
+
+
 def input_schema_accepts_type(schema: Mapping[str, Any], workflow_type: str) -> bool:
     expected_json_type = {
         "string": "string",
@@ -2531,6 +2577,10 @@ def build_context(repo_root: Path) -> tuple[FixtureContext, Mapping[str, Any]]:
         validate_pocket_workflow(workflow, context)
     for surface in support.surfaces_by_id.values():
         validate_pocket_surface(surface, context)
+    validate_surface_workflow_input_bindings(
+        support.surfaces_by_id,
+        support.workflows_by_id,
+    )
     return context, manifest
 
 

@@ -145,11 +145,26 @@ internal sealed class PocketAppPackageRuntime
             workflows.Add(item.Key, workflow);
         }
 
-        var workflowInputNames = workflows.Values.SelectMany(item => item.Inputs.Keys).ToHashSet(StringComparer.Ordinal);
+        var workflowInputTypes = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var workflow in workflows.Values)
+        {
+            foreach (var input in workflow.Inputs)
+            {
+                if (workflowInputTypes.TryGetValue(input.Key, out var existingType))
+                {
+                    Require(existingType == input.Value, "$.workflows:input_type_conflict");
+                }
+                else
+                {
+                    workflowInputTypes[input.Key] = input.Value;
+                }
+            }
+        }
+        var workflowInputNames = workflowInputTypes.Keys.ToHashSet(StringComparer.Ordinal);
         var boundNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var surface in surfaces.Values)
         {
-            ValidateBindings(surface.Root, workflowInputNames, statePropertyNames, boundNames, $"$.surfaces.{surface.Id}.root");
+            ValidateBindings(surface.Root, workflowInputTypes, statePropertyNames, boundNames, $"$.surfaces.{surface.Id}.root");
             ValidateSurfaceScopes(surface.Root, requestedScopes, $"$.surfaces.{surface.Id}.root");
         }
         Require(workflowInputNames.IsSubsetOf(boundNames), "$.workflows:unbound_input");
@@ -406,7 +421,7 @@ internal sealed class PocketAppPackageRuntime
 
     private static void ValidateBindings(
         PocketSurfaceRenderNode node,
-        IReadOnlySet<string> inputNames,
+        IReadOnlyDictionary<string, string> inputTypes,
         IReadOnlySet<string> stateNames,
         ISet<string> boundNames,
         string path)
@@ -420,7 +435,9 @@ internal sealed class PocketAppPackageRuntime
             if (binding.StartsWith("$input.", StringComparison.Ordinal))
             {
                 var name = binding["$input.".Length..];
-                Require(inputNames.Contains(name), $"{path}.{property.Key}:binding");
+                Require(inputTypes.TryGetValue(name, out var declaredType), $"{path}.{property.Key}:binding");
+                var acceptedTypes = AcceptedWorkflowInputTypes(node.Type, property.Key);
+                Require(acceptedTypes is not null && acceptedTypes.Contains(declaredType), $"{path}.{property.Key}:binding_type");
                 boundNames.Add(name);
             }
             else if (binding.StartsWith("$state.", StringComparison.Ordinal))
@@ -436,8 +453,22 @@ internal sealed class PocketAppPackageRuntime
         }
         for (var index = 0; index < node.Children.Count; index++)
         {
-            ValidateBindings(node.Children[index], inputNames, stateNames, boundNames, $"{path}.children[{index}]");
+            ValidateBindings(node.Children[index], inputTypes, stateNames, boundNames, $"{path}.children[{index}]");
         }
+    }
+
+    private static IReadOnlySet<string>? AcceptedWorkflowInputTypes(string nodeType, string propertyName)
+    {
+        return (nodeType, propertyName) switch
+        {
+            ("textField", "value") => new HashSet<string>(["string"], StringComparer.Ordinal),
+            ("toggle", "value") => new HashSet<string>(["boolean"], StringComparer.Ordinal),
+            ("picker", "value") => new HashSet<string>(["string"], StringComparer.Ordinal),
+            ("calendarEventPicker", "selection") => new HashSet<string>(["entity-ref"], StringComparer.Ordinal),
+            ("calendarEventPicker", "titleTarget") => new HashSet<string>(["string"], StringComparer.Ordinal),
+            ("durationPicker", "value") => new HashSet<string>(["integer", "number"], StringComparer.Ordinal),
+            _ => null
+        };
     }
 
     private static void ValidateWorkflowBinding(JsonElement value, IReadOnlySet<string> inputs, string path)
