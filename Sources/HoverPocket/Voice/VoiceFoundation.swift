@@ -312,6 +312,7 @@ final class VoiceLaneRuntime: ObservableObject {
     private var configurationTask: Task<Void, Never>?
     private var restartTask: Task<Void, Never>?
     private var recoveryTask: Task<Void, Never>?
+    private var audioCommandTask: Task<Void, Never>?
     private var restartGeneration = 0
     private var restartAttempt = 0
     private let restartDelaysNanoseconds: [UInt64]
@@ -359,6 +360,8 @@ final class VoiceLaneRuntime: ObservableObject {
         let pendingRecovery = recoveryTask
         pendingRecovery?.cancel()
         recoveryTask = nil
+        let pendingAudioCommand = audioCommandTask
+        audioCommandTask = nil
         restartAttempt = 0
 
         guard featureEnabled else {
@@ -371,6 +374,7 @@ final class VoiceLaneRuntime: ObservableObject {
             transcriptBuffer = VoiceTranscriptBuffer()
             allSessions.removeAll()
             rootSessionID = nil
+            await pendingAudioCommand?.value
             if let previousAdapter {
                 await previousAdapter.stop()
             }
@@ -425,7 +429,7 @@ final class VoiceLaneRuntime: ObservableObject {
         guard featureEnabled else { return }
         publish(muted: true, uiAttached: false)
         if let adapter {
-            Task { await adapter.setMuted(true) }
+            enqueueAudioCommand(.setMuted(true), adapter: adapter)
         }
     }
 
@@ -437,7 +441,7 @@ final class VoiceLaneRuntime: ObservableObject {
         }
         publish(muted: muted)
         if let adapter {
-            Task { await adapter.setMuted(muted) }
+            enqueueAudioCommand(.setMuted(muted), adapter: adapter)
         }
     }
 
@@ -448,7 +452,7 @@ final class VoiceLaneRuntime: ObservableObject {
             muted: true
         )
         if let adapter {
-            Task { await adapter.closeAudioSession() }
+            enqueueAudioCommand(.closeSession, adapter: adapter)
         }
     }
 
@@ -557,8 +561,11 @@ final class VoiceLaneRuntime: ObservableObject {
         let pendingRecovery = recoveryTask
         pendingRecovery?.cancel()
         recoveryTask = nil
+        let pendingAudioCommand = audioCommandTask
+        audioCommandTask = nil
         let currentAdapter = adapter
         adapter = nil
+        await pendingAudioCommand?.value
         if let currentAdapter {
             await currentAdapter.stop()
         }
@@ -660,8 +667,11 @@ final class VoiceLaneRuntime: ObservableObject {
     ) {
         let previousRecovery = recoveryTask
         previousRecovery?.cancel()
+        let pendingAudioCommand = audioCommandTask
+        audioCommandTask = nil
         recoveryTask = Task { @MainActor [weak self] in
             await previousRecovery?.value
+            await pendingAudioCommand?.value
             if let previousAdapter {
                 await previousAdapter.stop()
             }
@@ -679,9 +689,33 @@ final class VoiceLaneRuntime: ObservableObject {
     private func trackDetachedAdapterStop(_ detachedAdapter: any VoiceSessionAdapter) {
         let previousRecovery = recoveryTask
         previousRecovery?.cancel()
+        let pendingAudioCommand = audioCommandTask
+        audioCommandTask = nil
         recoveryTask = Task { @MainActor in
             await previousRecovery?.value
+            await pendingAudioCommand?.value
             await detachedAdapter.stop()
+        }
+    }
+
+    private enum AudioCommand {
+        case setMuted(Bool)
+        case closeSession
+    }
+
+    private func enqueueAudioCommand(
+        _ command: AudioCommand,
+        adapter targetAdapter: any VoiceSessionAdapter
+    ) {
+        let previousCommand = audioCommandTask
+        audioCommandTask = Task { @MainActor in
+            await previousCommand?.value
+            switch command {
+            case .setMuted(let muted):
+                await targetAdapter.setMuted(muted)
+            case .closeSession:
+                await targetAdapter.closeAudioSession()
+            }
         }
     }
 

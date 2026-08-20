@@ -15,6 +15,7 @@ enum VoiceFoundationVerificationCommand {
         try await verifyStaleAdapterFailureDoesNotReplaceReadyAdapter()
         try await verifyDisableWaitsForAdapterTeardown()
         try await verifyRecoveryTeardownIsSerialized()
+        try await verifyAudioCommandsRemainOrdered()
         try await verifyShutdownWaitsForAdapterTeardown()
     }
 
@@ -484,6 +485,32 @@ enum VoiceFoundationVerificationCommand {
         await runtime.shutdown()
     }
 
+    private static func verifyAudioCommandsRemainOrdered() async throws {
+        let adapter = GatedCloseVoiceSessionAdapter()
+        let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        await runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            adapterFactory: { adapter }
+        ).value
+        try await waitUntil { runtime.snapshot.connection == .connected }
+
+        runtime.endAudioSession()
+        try await waitUntil { adapter.closeCount == 1 }
+        runtime.setMuted(false)
+        await Task.yield()
+        guard adapter.muteValues.isEmpty else {
+            throw VoiceFoundationVerificationError.failed("unmute_overtook_audio_session_close")
+        }
+
+        adapter.finishClose()
+        try await waitUntil { adapter.muteValues == [false] }
+        guard !runtime.snapshot.muted else {
+            throw VoiceFoundationVerificationError.failed("ordered_unmute_snapshot_mismatch")
+        }
+        await runtime.shutdown()
+    }
+
     private static func waitUntil(
         _ predicate: @MainActor () -> Bool
     ) async throws {
@@ -543,4 +570,29 @@ private final class GatedStopVoiceSessionAdapter: VoiceSessionAdapter {
         stopContinuation?.resume()
         stopContinuation = nil
     }
+}
+
+@MainActor
+private final class GatedCloseVoiceSessionAdapter: VoiceSessionAdapter {
+    private var closeContinuation: CheckedContinuation<Void, Never>?
+    private(set) var closeCount = 0
+    private(set) var muteValues: [Bool] = []
+
+    func probeCompatibility() async -> VoiceAdapterGate { .ready }
+    func start() async throws { }
+    func setMuted(_ muted: Bool) async { muteValues.append(muted) }
+
+    func closeAudioSession() async {
+        closeCount += 1
+        await withCheckedContinuation { continuation in
+            closeContinuation = continuation
+        }
+    }
+
+    func finishClose() {
+        closeContinuation?.resume()
+        closeContinuation = nil
+    }
+
+    func stop() async { }
 }

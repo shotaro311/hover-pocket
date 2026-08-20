@@ -10,6 +10,7 @@ AN3を一度に実音声まで有効化せず、まず両OSのHost-owned Voice L
 - Voice Laneの表示は内部wire値`waiting_for_approval`と`waiting_for_user`を日本語 / 英語へ変換する。互換性error codeが汎用文字列へ未登録でも、`signedOut` / `schemaMismatch` / `capabilityBlocked`の利用不可理由を優先表示するrendered WebView回帰を追加した。
 - WindowsのVoice ON / OFF変更を一つずつ直列実行する。OFFが旧clientを停止中にONが来ても、旧clientの破棄完了後に一つのreplacementだけを起動し、最後の要求どおりReadyへ戻る回帰を追加した。
 - macOSはsystem transition / crash / unexpected requestで切り離した旧adapterの停止Taskをruntime所有にし、設定変更と終了処理が完了を待つ。復旧中にOFF / ONが連続しても旧adapter停止前にreplacementを起動しない回帰を追加した。
+- macOSの音声終了とミュート変更は同じ順序付きcommand queueへ通す。終了処理が待機中に解除操作が来ても、close完了後にだけunmuteをadapterへ渡し、設定変更・復旧・shutdownも保留commandの完了を待つ回帰を追加した。
 - PR #18の最新head `2d8b89c`をmerge commit `68d7273`で取り込み、共有Picker入力のdomain一致とdurationPickerのinput-only契約をPR #19にも含めた。
 - 統合後と追加競合修正後にmacOS warnings-as-errors build、Voice foundation、Broker、Pocket App 18 negative、Voice contract 42件、共通contract 13 schema / 60 fixture、Windows panel / settings JavaScript構文、`git diff --check`が成功した。Windows C# build、起動直後request競合、ON / OFF直列化、rendered WebViewの日本語 / 英語回帰はPR CIを最終gateとする。
 

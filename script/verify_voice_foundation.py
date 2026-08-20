@@ -273,6 +273,11 @@ def main() -> None:
                 ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
             ).read_text(encoding="utf-8"):
         fail("macOS recovery teardown is not tracked by configuration and shutdown")
+    if "private var audioCommandTask: Task<Void, Never>?" not in mac_runtime \
+            or "verifyAudioCommandsRemainOrdered" not in (
+                ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
+            ).read_text(encoding="utf-8"):
+        fail("macOS Voice adapter audio commands are not serialized")
     if "let safeErrorCode = VoiceTextSafety.sanitizeErrorCode(" not in mac_runtime:
         fail("macOS adapter error codes bypass the runtime sanitizer")
     if "maxRetainedSessions" not in mac_runtime or "MaxRetainedSessions" not in windows_coordinator:
