@@ -308,8 +308,14 @@ def main() -> None:
         fail("Voice session retention is not bounded on both operating systems")
     if "NormalizeTranscriptRole" not in windows_coordinator \
             or '"tool"' not in windows_verifier \
-            or "unknown transcript role was published" not in windows_verifier:
+            or "invalid transcript identity or role was published" not in windows_verifier:
         fail("Windows unknown transcript roles can be presented as Host/system content")
+    if "runes.Length > 160" not in windows_coordinator \
+            or "lossy Voice identifier collision" not in windows_verifier \
+            or "identifier_collision_rejected" not in (
+                ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
+            ).read_text(encoding="utf-8"):
+        fail("Voice session identifiers can collide after lossy normalization")
     if "expansionBlocked" not in app_js:
         fail("Windows compact fallback does not report why Expanded is unavailable")
     if 'waiting_for_approval: "voiceActivityWaitingForApproval"' not in app_js \

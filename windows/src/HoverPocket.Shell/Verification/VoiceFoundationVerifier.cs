@@ -753,6 +753,23 @@ internal sealed class VoiceFoundationVerifier
     private void VerifyTranscriptAndRootScope()
     {
         using var coordinator = new CodexVoiceCoordinator(featureEnabled: true);
+        if (VoiceTextSafety.SanitizeIdentifier("root/a") != string.Empty
+            || VoiceTextSafety.SanitizeIdentifier("roota") != "roota"
+            || VoiceTextSafety.SanitizeIdentifier(new string('a', 161)) != string.Empty)
+        {
+            _failures.Add("invalid or oversized Voice identifier was normalized instead of rejected");
+        }
+        coordinator.SetRootSessionId("roota");
+        coordinator.UpsertSession(new AgentSessionSummary(
+            "foreign/child", "root/a", null, "Foreign", AgentSessionStatus.Running, null, null, DateTimeOffset.UnixEpoch));
+        coordinator.UpsertSession(new AgentSessionSummary(
+            "local-child", "roota", null, "Local", AgentSessionStatus.Running, null, null, DateTimeOffset.UnixEpoch));
+        if (coordinator.Snapshot.Sessions.Count != 1
+            || coordinator.Snapshot.Sessions[0].SessionId != "local-child")
+        {
+            _failures.Add("lossy Voice identifier collision crossed the root session boundary");
+        }
+
         coordinator.SetRootSessionId("root-a");
         var now = DateTimeOffset.UnixEpoch;
 
@@ -768,6 +785,12 @@ internal sealed class VoiceFoundationVerifier
 
         var validTranscriptCount = coordinator.Snapshot.Transcript.Count;
         coordinator.AppendTranscript(new VoiceTranscriptEvent(
+            "invalid/event",
+            "user",
+            "must not render with a colliding identity",
+            true,
+            now.AddSeconds(99)));
+        coordinator.AppendTranscript(new VoiceTranscriptEvent(
             "untrusted-role",
             "tool",
             "must not render as system",
@@ -775,7 +798,7 @@ internal sealed class VoiceFoundationVerifier
             now.AddSeconds(100)));
         if (coordinator.Snapshot.Transcript.Count != validTranscriptCount)
         {
-            _failures.Add("unknown transcript role was published as Host/system content");
+            _failures.Add("invalid transcript identity or role was published");
         }
 
         coordinator.UpsertSession(new AgentSessionSummary(

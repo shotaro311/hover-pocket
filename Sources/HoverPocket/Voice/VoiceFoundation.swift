@@ -69,7 +69,10 @@ struct VoiceSessionSummary: Identifiable, Equatable, Codable, Sendable {
     ) {
         self.sessionID = VoiceTextSafety.sanitizeIdentifier(sessionID)
         self.rootSessionID = VoiceTextSafety.sanitizeIdentifier(rootSessionID)
-        self.parentSessionID = parentSessionID.map(VoiceTextSafety.sanitizeIdentifier)
+        self.parentSessionID = parentSessionID.flatMap {
+            let sanitized = VoiceTextSafety.sanitizeIdentifier($0)
+            return sanitized.isEmpty ? nil : sanitized
+        }
         self.title = VoiceTextSafety.sanitizeVisibleText(title, limit: 120)
         self.status = status
         self.safeSummary = safeSummary.map { VoiceTextSafety.sanitizeVisibleText($0, limit: 320) }
@@ -192,10 +195,13 @@ enum VoiceTextSafety {
     }
 
     static func sanitizeIdentifier(_ value: String) -> String {
-        let allowed = value.unicodeScalars.filter {
+        let scalars = value.unicodeScalars
+        guard !scalars.isEmpty,
+              scalars.count <= 160,
+              scalars.allSatisfy({
             CharacterSet.alphanumerics.contains($0) || "-_.:".unicodeScalars.contains($0)
-        }
-        return String(String.UnicodeScalarView(allowed).prefix(160))
+        }) else { return "" }
+        return value
     }
 
     static func sanitizeErrorCode(_ value: String) -> String {
@@ -215,6 +221,7 @@ struct VoiceTranscriptBuffer: Sendable {
     private(set) var events: [VoiceTranscriptEvent] = []
 
     mutating func append(_ event: VoiceTranscriptEvent) {
+        guard !event.id.isEmpty else { return }
         events.append(event)
         if events.count > Self.maxEvents {
             events.removeFirst(events.count - Self.maxEvents)
@@ -538,7 +545,10 @@ final class VoiceLaneRuntime: ObservableObject {
     }
 
     func setRootSessionID(_ sessionID: String?) {
-        let next = sessionID.map(VoiceTextSafety.sanitizeIdentifier)
+        let next = sessionID.flatMap {
+            let sanitized = VoiceTextSafety.sanitizeIdentifier($0)
+            return sanitized.isEmpty ? nil : sanitized
+        }
         if next != rootSessionID {
             transcriptBuffer = VoiceTranscriptBuffer()
             allSessions.removeAll()
@@ -549,6 +559,7 @@ final class VoiceLaneRuntime: ObservableObject {
 
     func upsertSession(_ summary: VoiceSessionSummary) {
         guard featureEnabled else { return }
+        guard !summary.sessionID.isEmpty, !summary.rootSessionID.isEmpty else { return }
         if let rootSessionID, summary.rootSessionID != rootSessionID {
             return
         }

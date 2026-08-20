@@ -182,20 +182,14 @@ internal static class VoiceTextSafety
             return string.Empty;
         }
 
-        var builder = new StringBuilder();
-        foreach (var rune in value.EnumerateRunes())
+        var runes = value.EnumerateRunes().ToArray();
+        if (runes.Length > 160
+            || runes.Any(rune => !Rune.IsLetterOrDigit(rune)
+                && rune.Value is not ('-' or '_' or '.' or ':')))
         {
-            if (Rune.IsLetterOrDigit(rune)
-                || rune.Value is '-' or '_' or '.' or ':')
-            {
-                builder.Append(rune);
-            }
-            if (builder.Length >= 160)
-            {
-                break;
-            }
+            return string.Empty;
         }
-        return builder.ToString();
+        return value;
     }
 
     public static string SanitizeErrorCode(string? value)
@@ -241,6 +235,10 @@ internal sealed class VoiceTranscriptBuffer
             Role = role,
             Text = VoiceTextSafety.SanitizeVisibleText(value.Text, 1_024)
         };
+        if (string.IsNullOrEmpty(sanitized.Id))
+        {
+            return;
+        }
         _events.Add(sanitized);
         if (_events.Count > MaxEvents)
         {

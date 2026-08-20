@@ -109,6 +109,35 @@ enum VoiceFoundationVerificationCommand {
         else {
             throw VoiceFoundationVerificationError.failed("root_scope")
         }
+
+        let collisionCandidates = [
+            VoiceSessionSummary(
+                sessionID: "foreign/child",
+                rootSessionID: "root/a",
+                title: "Foreign",
+                status: .running,
+                updatedAt: now
+            ),
+            VoiceSessionSummary(
+                sessionID: "local-child",
+                rootSessionID: "roota",
+                title: "Local",
+                status: .running,
+                updatedAt: now
+            )
+        ]
+        let isolated = VoiceSessionScope.visibleSessions(
+            rootSessionID: "roota",
+            sessions: collisionCandidates
+        )
+        guard VoiceTextSafety.sanitizeIdentifier("root/a").isEmpty,
+              VoiceTextSafety.sanitizeIdentifier("roota") == "roota",
+              VoiceTextSafety.sanitizeIdentifier(String(repeating: "a", count: 161)).isEmpty,
+              isolated.count == 1,
+              isolated.first?.sessionID == "local-child"
+        else {
+            throw VoiceFoundationVerificationError.failed("identifier_collision_rejected")
+        }
     }
 
     private static func verifyTranscriptBoundsAndRedaction() throws {
@@ -128,7 +157,16 @@ enum VoiceFoundationVerificationCommand {
         let scalarCount = buffer.events.reduce(0) { count, event in
             count + event.text.unicodeScalars.count
         }
+        let validEventCount = buffer.events.count
+        buffer.append(VoiceTranscriptEvent(
+            id: "invalid/event",
+            role: .user,
+            text: "must not render with a colliding identity",
+            isFinal: true,
+            timestamp: now.addingTimeInterval(100)
+        ))
         guard buffer.events.count <= 64,
+              buffer.events.count == validEventCount,
               scalarCount <= 8_192,
               buffer.events.allSatisfy({ !$0.text.contains("/Users/") })
         else {
