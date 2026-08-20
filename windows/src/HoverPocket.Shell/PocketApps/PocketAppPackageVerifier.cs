@@ -60,6 +60,7 @@ internal sealed class PocketAppPackageVerifier
             }
             var bundledRoot = Path.Combine(AppContext.BaseDirectory, "PocketApps", "local.example.today-focus");
             var bundled = new PocketAppPackageRuntime().Load(bundledRoot);
+            VerifyConsole.WriteLine($"pocket_app_bundled_manifest_digest={bundled.ManifestDigest}");
             Require(bundled.ManifestDigest == referencePackage.ManifestDigest, "bundled_manifest");
             Require(bundled.Surfaces["main"].CanonicalRenderModelBytes().AsSpan().SequenceEqual(
                 referencePackage.Surfaces["main"].CanonicalRenderModelBytes()), "bundled_surfaces");
