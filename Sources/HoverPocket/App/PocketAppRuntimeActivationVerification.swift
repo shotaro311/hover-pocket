@@ -322,18 +322,56 @@ enum PocketAppRuntimeActivationVerification {
                     adapter: nil,
                     generatedActivationRegistry: registry
                 )
+                let settings = AppSettings(defaults: defaults)
                 let providerStore = ProviderStore(
-                    registry: .empty,
-                    settings: AppSettings(defaults: defaults)
+                    registry: ProviderRegistry(providers: [StickyNotesProvider(), TimerProvider()]),
+                    settings: settings
                 )
                 let generatedID = PluginID(
                     rawValue: PocketSurfaceRegistry.generatedProviderID(appID: appB)
                 )
-                let settings = AppSettings(defaults: defaults)
-                settings.providerOrderRawValues = ["sticky", generatedID.rawValue]
+                providerStore.select(generatedID)
+                require(
+                    providerStore.visibleManifests.contains { $0.id == generatedID }
+                        && providerStore.selectedProvider?.manifest.id == generatedID,
+                    "activation_generated_provider_selectable",
+                    failures: &failures
+                )
+
+                settings.providerOrderRawValues = [
+                    StickyNotesProvider.pluginID.rawValue,
+                    generatedID.rawValue,
+                    TimerProvider.pluginID.rawValue
+                ]
                 settings.hiddenProviderRawValues = [generatedID.rawValue]
                 settings.preferredProviderRawValue = generatedID.rawValue
                 settings.lastSelectedProviderRawValue = generatedID.rawValue
+
+                managed[appB] = managedPackage(
+                    appID: appB,
+                    version: "1.0.0",
+                    digest: digest1,
+                    state: .disabled
+                )
+                candidates.removeValue(forKey: appB)
+                _ = try registry.synchronize(receipt(
+                    action: "disable",
+                    appID: appB,
+                    version: "1.0.0",
+                    digest: digest1,
+                    state: .disabled
+                ))
+                providerStore.moveProvider(StickyNotesProvider.pluginID, by: 1)
+                providerStore.setProvider(TimerProvider.pluginID, isVisible: false)
+                require(
+                    settings.providerOrderRawValues.contains(generatedID.rawValue)
+                        && settings.hiddenProviderRawValues.contains(generatedID.rawValue)
+                        && settings.preferredProviderRawValue == generatedID.rawValue
+                        && settings.lastSelectedProviderRawValue == generatedID.rawValue,
+                    "activation_disabled_provider_settings_preserved",
+                    failures: &failures
+                )
+
                 settings.pruneProviderConfiguration(generatedID)
                 let prunedSettings = AppSettings(defaults: defaults)
                 require(
@@ -342,13 +380,6 @@ enum PocketAppRuntimeActivationVerification {
                         && prunedSettings.preferredProviderRawValue != generatedID.rawValue
                         && prunedSettings.lastSelectedProviderRawValue != generatedID.rawValue,
                     "activation_removed_provider_settings_pruned",
-                    failures: &failures
-                )
-                providerStore.select(generatedID)
-                require(
-                    providerStore.visibleManifests.contains { $0.id == generatedID }
-                        && providerStore.selectedProvider?.manifest.id == generatedID,
-                    "activation_generated_provider_selectable",
                     failures: &failures
                 )
                 AINativeRuntime.shared.configure(adapter: nil)

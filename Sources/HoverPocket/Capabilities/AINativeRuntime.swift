@@ -20,6 +20,16 @@ final class AINativeRuntime: ObservableObject {
 
     var isPocketAppAvailable: Bool { pocketAppExecutionRuntime != nil }
 
+    var managedGeneratedProviderIDs: Set<String> {
+        if let controller = pocketAppGenerationController {
+            return Set(controller.managedPackages.map {
+                PocketSurfaceRegistry.generatedProviderID(appID: $0.packageID)
+            })
+        }
+        guard let appIDs = try? generatedActivationRegistry?.managedAppIDs() else { return [] }
+        return Set(appIDs.map { PocketSurfaceRegistry.generatedProviderID(appID: $0) })
+    }
+
     func configure(
         adapter: TodayFocusTextAdapter?,
         pocketAppExecutionRuntime: PocketAppExecutionRuntime? = nil,

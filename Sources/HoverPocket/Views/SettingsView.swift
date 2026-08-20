@@ -560,11 +560,7 @@ struct SettingsView: View {
                 settings.isProviderVisible(manifest.id)
             },
             set: { isVisible in
-                settings.setProvider(
-                    manifest.id,
-                    isVisible: isVisible,
-                    manifests: providerStore.availableManifests
-                )
+                providerStore.setProvider(manifest.id, isVisible: isVisible)
             }
         )
     }

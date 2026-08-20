@@ -234,7 +234,12 @@ final class AppSettings: ObservableObject {
         !hiddenProviderRawValues.contains(id.rawValue)
     }
 
-    func setProvider(_ id: PluginID, isVisible: Bool, manifests: [PluginManifest]) {
+    func setProvider(
+        _ id: PluginID,
+        isVisible: Bool,
+        manifests: [PluginManifest],
+        preservingProviderIDs: Set<String> = []
+    ) {
         var hidden = hiddenProviderRawValues
         if isVisible {
             hidden.remove(id.rawValue)
@@ -246,22 +251,31 @@ final class AppSettings: ObservableObject {
         hiddenProviderRawValues = hidden
 
         let visibleIDs = Set(visibleManifests(manifests).map(\.id.rawValue))
-        if let preferredProviderRawValue, !visibleIDs.contains(preferredProviderRawValue) {
+        let validSelectionIDs = visibleIDs.union(preservingProviderIDs)
+        if let preferredProviderRawValue, !validSelectionIDs.contains(preferredProviderRawValue) {
             self.preferredProviderRawValue = visibleIDs.first
         }
-        if let lastSelectedProviderRawValue, !visibleIDs.contains(lastSelectedProviderRawValue) {
+        if let lastSelectedProviderRawValue, !validSelectionIDs.contains(lastSelectedProviderRawValue) {
             self.lastSelectedProviderRawValue = visibleIDs.first
         }
     }
 
-    func moveProvider(_ id: PluginID, by offset: Int, manifests: [PluginManifest]) {
+    func moveProvider(
+        _ id: PluginID,
+        by offset: Int,
+        manifests: [PluginManifest],
+        preservingProviderIDs: Set<String> = []
+    ) {
         let visibleIDs = visibleManifests(manifests).map(\.id.rawValue)
         guard let index = visibleIDs.firstIndex(of: id.rawValue) else { return }
         let destination = min(max(index + offset, 0), visibleIDs.count - 1)
         guard destination != index else { return }
 
         let targetID = visibleIDs[destination]
-        var orderedIDs = orderedManifests(manifests).map(\.id.rawValue)
+        var orderedIDs = orderedProviderIDs(
+            manifests,
+            preservingProviderIDs: preservingProviderIDs
+        )
         orderedIDs.removeAll { $0 == id.rawValue }
         guard let targetIndex = orderedIDs.firstIndex(of: targetID) else { return }
         let insertionIndex = offset > 0 ? targetIndex + 1 : targetIndex
@@ -269,13 +283,21 @@ final class AppSettings: ObservableObject {
         providerOrderRawValues = orderedIDs
     }
 
-    func moveProvider(_ id: PluginID, to targetID: PluginID, manifests: [PluginManifest]) {
+    func moveProvider(
+        _ id: PluginID,
+        to targetID: PluginID,
+        manifests: [PluginManifest],
+        preservingProviderIDs: Set<String> = []
+    ) {
         guard id != targetID else { return }
         let visibleIDs = visibleManifests(manifests).map(\.id.rawValue)
         guard let sourceIndex = visibleIDs.firstIndex(of: id.rawValue),
               let targetIndex = visibleIDs.firstIndex(of: targetID.rawValue) else { return }
 
-        var orderedIDs = orderedManifests(manifests).map(\.id.rawValue)
+        var orderedIDs = orderedProviderIDs(
+            manifests,
+            preservingProviderIDs: preservingProviderIDs
+        )
         orderedIDs.removeAll { $0 == id.rawValue }
         guard let adjustedTargetIndex = orderedIDs.firstIndex(of: targetID.rawValue) else { return }
         let insertionIndex = sourceIndex < targetIndex ? adjustedTargetIndex + 1 : adjustedTargetIndex
@@ -314,6 +336,19 @@ final class AppSettings: ObservableObject {
         if lastSelectedProviderRawValue == id.rawValue {
             lastSelectedProviderRawValue = nil
         }
+    }
+
+    private func orderedProviderIDs(
+        _ manifests: [PluginManifest],
+        preservingProviderIDs: Set<String>
+    ) -> [String] {
+        let availableIDs = Set(manifests.map(\.id.rawValue))
+        let retainedIDs = availableIDs.union(preservingProviderIDs)
+        var seen = Set<String>()
+        let retainedOrder = providerOrderRawValues.filter {
+            retainedIDs.contains($0) && seen.insert($0).inserted
+        }
+        return retainedOrder + manifests.map(\.id.rawValue).filter { seen.insert($0).inserted }
     }
 
     private func setOptionalString(_ value: String?, forKey key: String) {

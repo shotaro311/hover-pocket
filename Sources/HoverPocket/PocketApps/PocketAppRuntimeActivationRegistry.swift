@@ -399,6 +399,14 @@ final class PocketAppRuntimeActivationRegistry {
         return Array(Set(failures)).sorted()
     }
 
+    func managedAppIDs() throws -> Set<String> {
+        Set(
+            try managementSnapshotSource().packages.compactMap { package in
+                package.state == .removed ? nil : package.packageID
+            }
+        )
+    }
+
     func shutdown() {
         let appIDs = Set(executionRegistry.activeAppIDs).union(surfaceRegistry.activeAppIDs)
         for appID in appIDs {

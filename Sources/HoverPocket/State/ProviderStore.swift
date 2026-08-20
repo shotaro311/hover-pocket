@@ -101,11 +101,30 @@ final class ProviderStore: ObservableObject {
     }
 
     func moveProvider(_ id: PluginID, by offset: Int) {
-        settings.moveProvider(id, by: offset, manifests: availableManifests)
+        settings.moveProvider(
+            id,
+            by: offset,
+            manifests: availableManifests,
+            preservingProviderIDs: AINativeRuntime.shared.managedGeneratedProviderIDs
+        )
     }
 
     func moveProvider(_ id: PluginID, to targetID: PluginID) {
-        settings.moveProvider(id, to: targetID, manifests: availableManifests)
+        settings.moveProvider(
+            id,
+            to: targetID,
+            manifests: availableManifests,
+            preservingProviderIDs: AINativeRuntime.shared.managedGeneratedProviderIDs
+        )
+    }
+
+    func setProvider(_ id: PluginID, isVisible: Bool) {
+        settings.setProvider(
+            id,
+            isVisible: isVisible,
+            manifests: availableManifests,
+            preservingProviderIDs: AINativeRuntime.shared.managedGeneratedProviderIDs
+        )
     }
 
     func canMoveProvider(_ id: PluginID, by offset: Int) -> Bool {
