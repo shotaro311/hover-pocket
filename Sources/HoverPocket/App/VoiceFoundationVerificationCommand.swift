@@ -180,11 +180,29 @@ enum VoiceFoundationVerificationCommand {
             isFinal: true,
             timestamp: now
         )
-        let pathSamples = ["/tmp/private.txt", "/Volumes/work/secret.mov", #"C:\work\secret.txt"#]
+        let pathSamples = [
+            "/tmp/private.txt",
+            "/Volumes/work/secret.mov",
+            #"C:\work\secret.txt"#,
+            "[/Users/alice/private]",
+            #"[C:\Users\alice\private]"#
+        ]
+        let bidiSamples = [
+            "trusted\u{202E}detadpu",
+            "trusted\u{2066}spoof\u{2069}"
+        ]
+        let nonPathSamples = ["https://example.com/path", "and/or"]
         guard combining.text.unicodeScalars.count <= 1_024,
-              pathSamples.allSatisfy({ VoiceTextSafety.sanitizeVisibleText($0, limit: 200) == "[redacted]" })
+              pathSamples.allSatisfy({ VoiceTextSafety.sanitizeVisibleText($0, limit: 200) == "[redacted]" }),
+              nonPathSamples.allSatisfy({ VoiceTextSafety.sanitizeVisibleText($0, limit: 200) == $0 }),
+              bidiSamples.allSatisfy({ sample in
+                  let sanitized = VoiceTextSafety.sanitizeVisibleText(sample, limit: 200)
+                  return !sanitized.unicodeScalars.contains(where: {
+                      $0.properties.generalCategory == .format
+                  })
+              })
         else {
-            throw VoiceFoundationVerificationError.failed("scalar_bound_or_absolute_path_redaction")
+            throw VoiceFoundationVerificationError.failed("scalar_bound_path_or_format_control_redaction")
         }
     }
 

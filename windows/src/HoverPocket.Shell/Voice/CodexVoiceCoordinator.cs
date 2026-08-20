@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -153,7 +154,7 @@ internal static class VoiceTextSafety
     ];
 
     private static readonly Regex AbsolutePathPattern = new(
-        "(?:^|[\\s\\\"'(=])(?:file://|/(?:[^/\\s]+/)*[^/\\s]+|[a-zA-Z]:\\\\[^\\s]+|\\\\\\\\[^\\s]+)",
+        "(?:^|[^\\p{L}\\p{N}_/])(?:file://|/(?!/)(?:[^/\\s]+/)*[^/\\s]+|[a-zA-Z]:\\\\[^\\s]+|\\\\\\\\[^\\s]+)",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     public static string SanitizeVisibleText(string? value, int maxRunes)
@@ -163,8 +164,23 @@ internal static class VoiceTextSafety
             return string.Empty;
         }
 
-        var normalized = new string(value.Select(character =>
-            char.IsControl(character) && character is not '\n' and not '\t' ? ' ' : character).ToArray());
+        var builder = new StringBuilder(value.Length);
+        foreach (var rune in value.EnumerateRunes())
+        {
+            var category = Rune.GetUnicodeCategory(rune);
+            if (category == UnicodeCategory.Format)
+            {
+                continue;
+            }
+            if (category == UnicodeCategory.Control
+                && rune.Value is not ('\n' or '\t'))
+            {
+                builder.Append(' ');
+                continue;
+            }
+            builder.Append(rune.ToString());
+        }
+        var normalized = builder.ToString();
         var lowered = normalized.ToLowerInvariant();
         if (SensitiveMarkers.Any(lowered.Contains)
             || AbsolutePathPattern.IsMatch(normalized))

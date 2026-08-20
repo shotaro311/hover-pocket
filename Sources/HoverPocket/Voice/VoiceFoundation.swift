@@ -176,10 +176,13 @@ struct VoiceLaneSnapshot: Equatable, Sendable {
 
 enum VoiceTextSafety {
     private static let sensitiveMarkers = ["authorization:", "token=", "api_key=", "apikey="]
-    private static let absolutePathPattern = #"(?i)(?:^|[\s\"'(=])(?:file://|/(?:[^/\s]+/)*[^/\s]+|[a-z]:\\[^\s]+|\\\\[^\s]+)"#
+    private static let absolutePathPattern = #"(?i)(?:^|[^\p{L}\p{N}_/])(?:file://|/(?!/)(?:[^/\s]+/)*[^/\s]+|[a-z]:\\[^\s]+|\\\\[^\s]+)"#
 
     static func sanitizeVisibleText(_ value: String, limit: Int) -> String {
-        let collapsed = value.unicodeScalars.map { scalar -> Unicode.Scalar in
+        let collapsed = value.unicodeScalars.compactMap { scalar -> Unicode.Scalar? in
+            if scalar.properties.generalCategory == .format {
+                return nil
+            }
             if scalar.value < 0x20 && scalar != "\n" && scalar != "\t" {
                 return Unicode.Scalar(0x20)!
             }

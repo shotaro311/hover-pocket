@@ -60,6 +60,7 @@ internal sealed class SettingsVerifier
 
         VerifyDefaults(store, registry, startup);
         VerifyWebViewSecurityPolicy();
+        VerifyVoiceAvailabilityWireValues();
         await RunCaseAsync(
             "surface-isolation",
             () => VerifyPocketAppBridgeSurfaceIsolationAsync(registry));
@@ -182,6 +183,24 @@ internal sealed class SettingsVerifier
         await Send(dispatcher, """{"id":"9","method":"settings.resetDefaults"}""");
         VerifyDefaults(store, registry, startup);
         await VerifyResetDisablesGenerationAsync(registry);
+    }
+
+    private void VerifyVoiceAvailabilityWireValues()
+    {
+        var expected = new Dictionary<CodexVoiceAvailability, string>
+        {
+            [CodexVoiceAvailability.Disabled] = "disabled",
+            [CodexVoiceAvailability.Ready] = "ready",
+            [CodexVoiceAvailability.Unavailable] = "unavailable",
+            [CodexVoiceAvailability.SignedOut] = "signedOut",
+            [CodexVoiceAvailability.SchemaMismatch] = "schemaMismatch",
+            [CodexVoiceAvailability.CapabilityBlocked] = "capabilityBlocked"
+        };
+        if (expected.Any(pair =>
+            PanelBridgeController.ToVoiceAvailabilityWireValue(pair.Key) != pair.Value))
+        {
+            _failures.Add("Voice availability wire values do not match the renderer contract");
+        }
     }
 
     private static async Task RunCaseAsync(string label, Func<Task> verification)

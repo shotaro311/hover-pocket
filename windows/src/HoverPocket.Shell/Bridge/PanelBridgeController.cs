@@ -464,7 +464,7 @@ internal sealed class PanelBridgeController : IDisposable
                     expansionBlocked = CurrentSettings.VoiceEnabled
                         && CurrentSettings.VoiceLaneLayout == VoiceLaneLayoutPreference.Expanded
                         && _resolvedVoiceLaneMode != VoiceLaneMode.Expanded,
-                    availability = ToWireValue(voiceSnapshot.Availability),
+                    availability = ToVoiceAvailabilityWireValue(voiceSnapshot.Availability),
                     sessionStatus = ToWireValue(voiceSnapshot.SessionStatus),
                     activity = ToWireValue(voiceSnapshot.Activity),
                     muted = voiceSnapshot.Muted,
@@ -1712,8 +1712,17 @@ internal sealed class PanelBridgeController : IDisposable
         };
     }
 
-    private static string ToWireValue(CodexVoiceAvailability availability) =>
-        availability.ToString().ToLowerInvariant();
+    internal static string ToVoiceAvailabilityWireValue(CodexVoiceAvailability availability) =>
+        availability switch
+        {
+            CodexVoiceAvailability.Disabled => "disabled",
+            CodexVoiceAvailability.Ready => "ready",
+            CodexVoiceAvailability.Unavailable => "unavailable",
+            CodexVoiceAvailability.SignedOut => "signedOut",
+            CodexVoiceAvailability.SchemaMismatch => "schemaMismatch",
+            CodexVoiceAvailability.CapabilityBlocked => "capabilityBlocked",
+            _ => "unavailable"
+        };
 
     private static string ToWireValue(CodexVoiceSessionStatus status) =>
         status switch

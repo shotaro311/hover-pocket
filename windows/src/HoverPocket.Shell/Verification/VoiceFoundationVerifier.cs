@@ -845,10 +845,33 @@ internal sealed class VoiceFoundationVerifier
             _failures.Add("root transition retained transcript or session data from the previous conversation");
         }
 
-        var absolutePaths = new[] { "/tmp/private.txt", "/Volumes/work/secret.mov", @"C:\work\secret.txt" };
+        var absolutePaths = new[]
+        {
+            "/tmp/private.txt",
+            "/Volumes/work/secret.mov",
+            @"C:\work\secret.txt",
+            "[/Users/alice/private]",
+            @"[C:\Users\alice\private]"
+        };
         if (absolutePaths.Any(path => VoiceTextSafety.SanitizeVisibleText(path, 200) != "[redacted]"))
         {
             _failures.Add("absolute filesystem path redaction was incomplete");
+        }
+        var nonPathText = new[] { "https://example.com/path", "and/or" };
+        if (nonPathText.Any(value => VoiceTextSafety.SanitizeVisibleText(value, 200) != value))
+        {
+            _failures.Add("absolute path redaction treated ordinary text as a filesystem path");
+        }
+        var bidiSamples = new[]
+        {
+            "trusted\u202Edetadpu",
+            "trusted\u2066spoof\u2069"
+        };
+        if (bidiSamples.Any(sample => VoiceTextSafety.SanitizeVisibleText(sample, 200)
+            .EnumerateRunes()
+            .Any(rune => Rune.GetUnicodeCategory(rune) == System.Globalization.UnicodeCategory.Format)))
+        {
+            _failures.Add("Unicode format controls survived visible Voice text sanitization");
         }
         if (VoiceTextSafety.SanitizeErrorCode("token=secret /tmp/private.txt") != "_redacted_")
         {

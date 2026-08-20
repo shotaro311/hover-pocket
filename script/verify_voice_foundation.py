@@ -310,6 +310,18 @@ def main() -> None:
             or '"tool"' not in windows_verifier \
             or "invalid transcript identity or role was published" not in windows_verifier:
         fail("Windows unknown transcript roles can be presented as Host/system content")
+    if "UnicodeCategory.Format" not in windows_coordinator \
+            or ".properties.generalCategory == .format" not in mac_runtime \
+            or "Unicode format controls survived visible Voice text sanitization" not in windows_verifier \
+            or "scalar_bound_path_or_format_control_redaction" not in (
+                ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
+            ).read_text(encoding="utf-8"):
+        fail("Voice visible text does not strip Unicode format controls on both operating systems")
+    if '"[/Users/alice/private]"' not in windows_verifier \
+            or '"[/Users/alice/private]"' not in (
+                ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
+            ).read_text(encoding="utf-8"):
+        fail("Voice path redaction is not checked after punctuation delimiters")
     if "runes.Length > 160" not in windows_coordinator \
             or "lossy Voice identifier collision" not in windows_verifier \
             or "identifier_collision_rejected" not in (
@@ -321,6 +333,10 @@ def main() -> None:
     if 'waiting_for_approval: "voiceActivityWaitingForApproval"' not in app_js \
             or 'waiting_for_user: "voiceSessionWaitingForUser"' not in app_js:
         fail("Windows Voice renderer does not localize wire-format activity/session states")
+    if 'CodexVoiceAvailability.SignedOut => "signedOut"' not in bridge \
+            or 'CodexVoiceAvailability.SchemaMismatch => "schemaMismatch"' not in bridge \
+            or 'CodexVoiceAvailability.CapabilityBlocked => "capabilityBlocked"' not in bridge:
+        fail("Windows Voice availability wire values do not match the renderer")
     if "japaneseAvailabilityFallbackOk" not in app_js or "englishAvailabilityFallbackOk" not in app_js:
         fail("Windows Voice renderer does not verify compatibility-specific unavailable copy")
     if "monitor.WorkArea.Bottom" not in windows_geometry:
