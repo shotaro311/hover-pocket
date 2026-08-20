@@ -9,6 +9,7 @@ using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Display;
 using HoverPocket.Shell.Interop;
+using HoverPocket.Shell.PocketApps;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
@@ -158,24 +159,24 @@ internal sealed class PanelWindow : NoActivateWindow
         return false;
     }
 
-    public async Task<bool> FlushPocketAppStateAsync(
+    public async Task<PocketAppStateTransitionLease> BeginPocketAppStateTransitionAsync(
         string appId,
         CancellationToken cancellationToken = default)
     {
         if (!Dispatcher.CheckAccess())
         {
             return await Dispatcher.InvokeAsync(
-                () => FlushPocketAppStateAsync(appId, cancellationToken)).Task.Unwrap();
+                () => BeginPocketAppStateTransitionAsync(appId, cancellationToken)).Task.Unwrap();
         }
         if (_closed || _initializationTask is null)
         {
-            return true;
+            return PocketAppStateTransitionLease.Noop(appId);
         }
 
         await _initializationTask;
         if (_webView?.CoreWebView2 is null)
         {
-            return true;
+            return PocketAppStateTransitionLease.Noop(appId);
         }
 
         var operationId = Guid.NewGuid().ToString("N");
@@ -188,7 +189,7 @@ internal sealed class PanelWindow : NoActivateWindow
                 window.__hoverPocketStateFlushResults[operationId] = null;
                 Promise.resolve(
                     typeof window.__hoverPocketFlushActiveProviderState === "function"
-                        ? window.__hoverPocketFlushActiveProviderState({{appIdJson}})
+                        ? window.__hoverPocketFlushActiveProviderState({{appIdJson}}, {{operationJson}})
                         : false)
                     .then((saved) => { window.__hoverPocketStateFlushResults[operationId] = saved !== false; })
                     .catch(() => { window.__hoverPocketStateFlushResults[operationId] = false; });
@@ -204,19 +205,27 @@ internal sealed class PanelWindow : NoActivateWindow
                 cancellationToken.ThrowIfCancellationRequested();
                 var result = await _webView.ExecuteScriptAsync(
                     $"window.__hoverPocketStateFlushResults?.[{operationJson}] ?? null");
-                if (result.Equals("true", StringComparison.OrdinalIgnoreCase)) { return true; }
-                if (result.Equals("false", StringComparison.OrdinalIgnoreCase)) { return false; }
+                if (result.Equals("true", StringComparison.OrdinalIgnoreCase))
+                {
+                    return new PocketAppStateTransitionLease(appId, operationId, true);
+                }
+                if (result.Equals("false", StringComparison.OrdinalIgnoreCase))
+                {
+                    return new PocketAppStateTransitionLease(appId, operationId, false);
+                }
                 await Task.Delay(50, cancellationToken);
             }
-            return false;
+            return new PocketAppStateTransitionLease(appId, operationId, false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            await CompletePocketAppStateTransitionCoreAsync(operationId, releaseInteraction: true);
             throw;
         }
         catch
         {
-            return false;
+            await CompletePocketAppStateTransitionCoreAsync(operationId, releaseInteraction: true);
+            return PocketAppStateTransitionLease.Failed(appId);
         }
         finally
         {
@@ -231,14 +240,17 @@ internal sealed class PanelWindow : NoActivateWindow
         }
     }
 
-    public async Task ReleasePocketAppStateAsync(string appId)
+    public async Task CompletePocketAppStateTransitionAsync(
+        PocketAppStateTransitionLease lease,
+        bool releaseInteraction)
     {
         if (!Dispatcher.CheckAccess())
         {
-            await Dispatcher.InvokeAsync(() => ReleasePocketAppStateAsync(appId)).Task.Unwrap();
+            await Dispatcher.InvokeAsync(
+                () => CompletePocketAppStateTransitionAsync(lease, releaseInteraction)).Task.Unwrap();
             return;
         }
-        if (_closed || _initializationTask is null)
+        if (_closed || _initializationTask is null || lease.OperationId is null)
         {
             return;
         }
@@ -249,11 +261,20 @@ internal sealed class PanelWindow : NoActivateWindow
             return;
         }
 
-        var appIdJson = JsonSerializer.Serialize(appId, BridgeJson.Options);
+        await CompletePocketAppStateTransitionCoreAsync(lease.OperationId, releaseInteraction);
+    }
+
+    private async Task CompletePocketAppStateTransitionCoreAsync(
+        string operationId,
+        bool releaseInteraction)
+    {
+        if (_webView?.CoreWebView2 is null) { return; }
+        var operationJson = JsonSerializer.Serialize(operationId, BridgeJson.Options);
+        var releaseJson = releaseInteraction ? "true" : "false";
         try
         {
             _ = await _webView.ExecuteScriptAsync(
-                $"window.__hoverPocketReleaseActiveProviderState?.({appIdJson})");
+                $"window.__hoverPocketCompleteActiveProviderStateTransition?.({operationJson}, {releaseJson})");
         }
         catch
         {

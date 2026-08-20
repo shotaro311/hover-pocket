@@ -501,10 +501,13 @@ internal sealed class PocketAppGenerationVerifier
                 dataRoot,
                 draftRoot,
                 new FixturePocketAppGenerationAdapter(FixtureRoot()));
-            controller.SetBeforeDeactivate((_, cancellationToken) =>
+            controller.SetBeforeDeactivate((appId, cancellationToken) =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                return Task.FromResult(allowActivationFlush);
+                return Task.FromResult(new PocketAppStateTransitionLease(
+                    appId,
+                    "fixture-approval",
+                    allowActivationFlush));
             });
             var settings = new HoverPocket.Shell.Bridge.BridgeDispatcher();
             controller.AttachSettings(settings, approvalDecision: _ => approve);
@@ -905,10 +908,17 @@ internal sealed class PocketAppGenerationVerifier
                 await Task.Yield();
                 flushCalls += 1;
                 flushCompleted = string.Equals(targetAppId, appId, StringComparison.Ordinal);
-                return allowFlush;
-            }, targetAppId =>
+                return new PocketAppStateTransitionLease(
+                    targetAppId,
+                    $"fixture-flush-{flushCalls}",
+                    allowFlush);
+            }, (lease, releaseInteraction) =>
             {
-                if (string.Equals(targetAppId, appId, StringComparison.Ordinal)) { releaseCalls += 1; }
+                if (releaseInteraction
+                    && string.Equals(lease.AppId, appId, StringComparison.Ordinal))
+                {
+                    releaseCalls += 1;
+                }
                 return Task.CompletedTask;
             });
             var settings = new HoverPocket.Shell.Bridge.BridgeDispatcher();

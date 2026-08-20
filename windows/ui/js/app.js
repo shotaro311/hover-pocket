@@ -32,6 +32,7 @@ let providerRefresh = null;
 let providerStateFlush = null;
 let providerStateTransitionBegin = null;
 let providerStateTransitionRelease = null;
+const providerStateTransitionLeases = new Map();
 let activeProviderKey = "";
 let renderTask = Promise.resolve(true);
 let pendingProviderId = null;
@@ -368,6 +369,7 @@ function renderProvider(state, options, providerWillRemount) {
     providerStateTransitionRelease = typeof lifecycle?.releaseStateTransition === "function"
       ? () => lifecycle.releaseStateTransition()
       : null;
+    void attachActiveStateTransitionLeases(state.pocketSurface?.appId);
     return;
   }
 
@@ -385,20 +387,46 @@ function renderProvider(state, options, providerWillRemount) {
   providerContainerEl.append(card);
 }
 
-window.__hoverPocketFlushActiveProviderState = async (appId) => {
-  if (currentState?.pocketSurface?.appId !== appId || !providerStateTransitionBegin) {
+window.__hoverPocketFlushActiveProviderState = async (appId, operationId) => {
+  if (!operationId || providerStateTransitionLeases.has(operationId)) {
+    return false;
+  }
+  const lease = {
+    appId,
+    releases: new Set(),
+  };
+  providerStateTransitionLeases.set(operationId, lease);
+  if (currentState?.pocketSurface?.appId !== appId
+    || !providerStateTransitionBegin
+    || !providerStateTransitionRelease) {
     return true;
   }
+  lease.releases.add(providerStateTransitionRelease);
   return await providerStateTransitionBegin() !== false;
 };
 
-window.__hoverPocketReleaseActiveProviderState = (appId) => {
-  if (currentState?.pocketSurface?.appId !== appId || !providerStateTransitionRelease) {
-    return true;
+window.__hoverPocketCompleteActiveProviderStateTransition = (operationId, releaseInteraction) => {
+  const lease = providerStateTransitionLeases.get(operationId);
+  if (!lease) return true;
+  providerStateTransitionLeases.delete(operationId);
+  if (releaseInteraction) {
+    for (const release of lease.releases) release();
   }
-  providerStateTransitionRelease();
   return true;
 };
+
+async function attachActiveStateTransitionLeases(appId) {
+  if (!appId || !providerStateTransitionBegin || !providerStateTransitionRelease) return;
+  const begin = providerStateTransitionBegin;
+  const release = providerStateTransitionRelease;
+  const attached = [];
+  for (const lease of providerStateTransitionLeases.values()) {
+    if (lease.appId !== appId || lease.releases.has(release)) continue;
+    lease.releases.add(release);
+    attached.push(Promise.resolve(begin()).catch(() => false));
+  }
+  await Promise.all(attached);
+}
 
 function providerRenderKey(state) {
   const surface = state.pocketSurface;
@@ -670,16 +698,36 @@ window.__hoverPocketVerify = {
     providerStateTransitionRelease = () => {
       hostReleaseCalls += 1;
     };
-    const matchingHostFlush = await window.__hoverPocketFlushActiveProviderState("local.example.verify");
-    const unrelatedHostFlush = await window.__hoverPocketFlushActiveProviderState("local.example.other");
-    const matchingHostRelease = window.__hoverPocketReleaseActiveProviderState("local.example.verify");
-    const unrelatedHostRelease = window.__hoverPocketReleaseActiveProviderState("local.example.other");
+    const matchingHostFlush = await window.__hoverPocketFlushActiveProviderState(
+      "local.example.verify",
+      "verify-transition",
+    );
+    const unrelatedHostFlush = await window.__hoverPocketFlushActiveProviderState(
+      "local.example.other",
+      "verify-unrelated",
+    );
+    providerStateTransitionBegin = async () => {
+      hostFlushCalls += 1;
+      return true;
+    };
+    providerStateTransitionRelease = () => {
+      hostReleaseCalls += 1;
+    };
+    await attachActiveStateTransitionLeases("local.example.verify");
+    const matchingHostRelease = window.__hoverPocketCompleteActiveProviderStateTransition(
+      "verify-transition",
+      true,
+    );
+    const unrelatedHostRelease = window.__hoverPocketCompleteActiveProviderStateTransition(
+      "verify-unrelated",
+      true,
+    );
     const providerHostStateFlushOk = matchingHostFlush
       && unrelatedHostFlush
       && matchingHostRelease
       && unrelatedHostRelease
-      && hostFlushCalls === 1
-      && hostReleaseCalls === 1;
+      && hostFlushCalls === 2
+      && hostReleaseCalls === 2;
     const providerSurfaceIdentityRemountOk = providerRenderKey({
       selectedProvider: { id: "generated-pocket-app:local.example.verify" },
       settings: { language: "ja" },

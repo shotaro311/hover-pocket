@@ -221,7 +221,10 @@ internal sealed class SettingsVerifier
         {
             cancellationToken.ThrowIfCancellationRequested();
             flushCalls += 1;
-            return Task.FromResult(allowFlush && !string.IsNullOrWhiteSpace(appId));
+            return Task.FromResult(new PocketAppStateTransitionLease(
+                appId,
+                $"settings-flush-{flushCalls}",
+                allowFlush && !string.IsNullOrWhiteSpace(appId)));
         });
         var dispatcher = new BridgeDispatcher();
         using var attachment = controller.Attach(dispatcher, BridgeSurface.Settings);

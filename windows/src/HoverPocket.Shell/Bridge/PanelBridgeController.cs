@@ -47,8 +47,8 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly Dictionary<BridgeDispatcher, BridgeSurface> _dispatchers = [];
     private readonly AsyncLocal<BridgeSurface?> _requestSurface = new();
     private readonly object _previewFrameSync = new();
-    private Func<string, CancellationToken, Task<bool>>? _pocketAppStateFlush;
-    private Func<string, Task>? _pocketAppStateRelease;
+    private Func<string, CancellationToken, Task<PocketAppStateTransitionLease>>? _pocketAppStateTransitionBegin;
+    private Func<PocketAppStateTransitionLease, bool, Task>? _pocketAppStateTransitionComplete;
     private string _selectedProviderId;
     private MediaPreviewFrame? _pendingPreviewFrame;
     private bool _previewPostScheduled;
@@ -438,12 +438,12 @@ internal sealed class PanelBridgeController : IDisposable
     }
 
     public void SetPocketAppStateFlush(
-        Func<string, CancellationToken, Task<bool>>? flush,
-        Func<string, Task>? release = null)
+        Func<string, CancellationToken, Task<PocketAppStateTransitionLease>>? begin,
+        Func<PocketAppStateTransitionLease, bool, Task>? complete = null)
     {
-        _pocketAppStateFlush = flush;
-        _pocketAppStateRelease = release;
-        _pocketAppGenerationController?.SetBeforeDeactivate(flush, release);
+        _pocketAppStateTransitionBegin = begin;
+        _pocketAppStateTransitionComplete = complete;
+        _pocketAppGenerationController?.SetBeforeDeactivate(begin, complete);
     }
 
     private Task<object?> RoutePocketAppLoadAsync(
@@ -731,7 +731,7 @@ internal sealed class PanelBridgeController : IDisposable
         CancellationToken cancellationToken)
     {
         var enabled = ReadRequiredBool(parameters, "enabled");
-        string? stateTransitionAppId = null;
+        PocketAppStateTransitionLease? stateTransition = null;
         if (enabled && !CurrentSettings.AiNativeEnabled)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -746,9 +746,11 @@ internal sealed class PanelBridgeController : IDisposable
         }
         if (!enabled)
         {
-            stateTransitionAppId = SelectedPocketSurfaceAppId();
-            if (!await FlushSelectedPocketAppStateAsync(cancellationToken))
+            stateTransition = await BeginSelectedPocketAppStateTransitionAsync(cancellationToken);
+            if (!stateTransition.Saved)
             {
+                await CompletePocketAppStateTransitionAsync(stateTransition, releaseInteraction: true);
+                stateTransition = null;
                 return await PublishStateAsync(cancellationToken);
             }
         }
@@ -774,11 +776,14 @@ internal sealed class PanelBridgeController : IDisposable
                 _generatedPocketApps?.SetEnabled(true);
                 _pocketAppGenerationController?.SetEnabled(true);
             }
-            return await PublishStateAsync(cancellationToken);
+            var published = await PublishStateAsync(cancellationToken);
+            await CompletePocketAppStateTransitionAsync(stateTransition, releaseInteraction: false);
+            stateTransition = null;
+            return published;
         }
         catch
         {
-            await ReleasePocketAppStateAsync(stateTransitionAppId);
+            await CompletePocketAppStateTransitionAsync(stateTransition, releaseInteraction: true);
             throw;
         }
     }
@@ -827,9 +832,10 @@ internal sealed class PanelBridgeController : IDisposable
     private async Task<object?> ResetDefaultsAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         _ = parameters;
-        var stateTransitionAppId = SelectedPocketSurfaceAppId();
-        if (!await FlushSelectedPocketAppStateAsync(cancellationToken))
+        var stateTransition = await BeginSelectedPocketAppStateTransitionAsync(cancellationToken);
+        if (!stateTransition.Saved)
         {
+            await CompletePocketAppStateTransitionAsync(stateTransition, releaseInteraction: true);
             return await PublishStateAsync(cancellationToken);
         }
         try
@@ -839,11 +845,14 @@ internal sealed class PanelBridgeController : IDisposable
             _pocketAppGenerationController?.SetEnabled(false);
             _generatedPocketApps?.SetEnabled(false);
             SaveSettings(UserSettingsStore.CreateDefault(_providerRegistry.ProviderIds));
-            return await PublishStateAsync(cancellationToken);
+            var published = await PublishStateAsync(cancellationToken);
+            await CompletePocketAppStateTransitionAsync(stateTransition, releaseInteraction: false);
+            stateTransition = null;
+            return published;
         }
         catch
         {
-            await ReleasePocketAppStateAsync(stateTransitionAppId);
+            await CompletePocketAppStateTransitionAsync(stateTransition, releaseInteraction: true);
             throw;
         }
     }
@@ -1323,34 +1332,36 @@ internal sealed class PanelBridgeController : IDisposable
             ? _pocketAppHostController?.AppId
             : SelectedGeneratedRoute()?.AppId;
 
-    private async Task<bool> FlushSelectedPocketAppStateAsync(CancellationToken cancellationToken)
+    private async Task<PocketAppStateTransitionLease> BeginSelectedPocketAppStateTransitionAsync(
+        CancellationToken cancellationToken)
     {
         var appId = SelectedPocketSurfaceAppId();
-        if (appId is null || _pocketAppStateFlush is null) { return true; }
+        if (appId is null) { return PocketAppStateTransitionLease.Noop(string.Empty); }
+        var begin = _pocketAppStateTransitionBegin;
+        if (begin is null) { return PocketAppStateTransitionLease.Noop(appId); }
         try
         {
-            var saved = await _pocketAppStateFlush(appId, cancellationToken);
-            if (!saved) { await ReleasePocketAppStateAsync(appId); }
-            return saved;
+            return await begin(appId, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            await ReleasePocketAppStateAsync(appId);
             throw;
         }
         catch
         {
-            await ReleasePocketAppStateAsync(appId);
-            return false;
+            return PocketAppStateTransitionLease.Failed(appId);
         }
     }
 
-    private async Task ReleasePocketAppStateAsync(string? appId)
+    private async Task CompletePocketAppStateTransitionAsync(
+        PocketAppStateTransitionLease? lease,
+        bool releaseInteraction)
     {
-        if (appId is null || _pocketAppStateRelease is null) { return; }
+        var complete = _pocketAppStateTransitionComplete;
+        if (lease is null || complete is null) { return; }
         try
         {
-            await _pocketAppStateRelease(appId);
+            await complete(lease, releaseInteraction);
         }
         catch
         {
