@@ -152,6 +152,51 @@ enum PocketAppPackageVerificationCommand {
                 return true
             }
         }
+        rejectPackage("workflow_input_bound_only_on_unreachable_surface", failures: &failures) { root in
+            try mutateJSON(root.appendingPathComponent("manifest.json")) { manifest in
+                guard var surfaces = manifest["surfaces"] as? [[String: Any]] else { return false }
+                surfaces.append([
+                    "id": "secondary",
+                    "kind": "declarative",
+                    "source": "surfaces/secondary.surface.json"
+                ])
+                manifest["surfaces"] = surfaces
+                return true
+            }
+            try mutateJSON(root.appendingPathComponent("surfaces/main.surface.json")) { surface in
+                guard var rootNode = surface["root"] as? [String: Any],
+                      var children = rootNode["children"] as? [[String: Any]] else { return false }
+                children[1].removeValue(forKey: "titleTarget")
+                children.remove(at: 3)
+                rootNode["children"] = children
+                surface["root"] = rootNode
+                return true
+            }
+            let secondary: [String: Any] = [
+                "$schema": "hoverpocket://schemas/pocket-surface/v1",
+                "surfaceVersion": 1,
+                "id": "secondary",
+                "hostBoundary": [
+                    "region": "provider_host",
+                    "mayRenderHeader": false,
+                    "mayRenderVoiceLane": false,
+                    "mayRenderApproval": false,
+                    "mayRenderReceipt": false
+                ],
+                "root": [
+                    "type": "stack",
+                    "axis": "vertical",
+                    "children": [[
+                        "type": "textField",
+                        "label": "Purpose",
+                        "value": "$input.purpose",
+                        "maxLength": 80
+                    ]]
+                ]
+            ]
+            try JSONSerialization.data(withJSONObject: secondary, options: [.sortedKeys])
+                .write(to: root.appendingPathComponent("surfaces/secondary.surface.json"))
+        }
         rejectPackage("unsupported_surface_query_shape", failures: &failures) { root in
             try mutateJSON(root.appendingPathComponent("surfaces/main.surface.json")) { surface in
                 guard var rootNode = surface["root"] as? [String: Any],
@@ -195,7 +240,7 @@ enum PocketAppPackageVerificationCommand {
         print("pocket_app_package_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_app_package_valid_files=9")
         print("pocket_app_package_bundled=ok")
-        print("pocket_app_package_negative_cases=17")
+        print("pocket_app_package_negative_cases=18")
         print("pocket_app_lifecycle_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_app_generation_verify=\(failures.isEmpty ? "ok" : "failed")")
         if !failures.isEmpty {

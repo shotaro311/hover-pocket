@@ -151,9 +151,8 @@ struct PocketAppPackageRuntime {
                 }
             }
         }
-        let workflowInputNames = Set(workflowInputTypes.keys)
-        var boundNames: Set<String> = []
         for surface in surfaces.values {
+            var boundNames: Set<String> = []
             try validateBindings(
                 node: surface.root,
                 inputTypes: workflowInputTypes,
@@ -162,8 +161,16 @@ struct PocketAppPackageRuntime {
                 path: "$.surfaces.\(surface.id).root"
             )
             try validateSurfaceScopes(node: surface.root, requestedScopes: requestedScopes, path: "$.surfaces.\(surface.id).root")
+            for workflowID in referencedWorkflows(node: surface.root) {
+                guard let workflow = workflows[workflowID] else {
+                    throw PocketAppPackageError.invalid("$.surfaces.\(surface.id):workflow")
+                }
+                try require(
+                    Set(workflow.inputs.keys).isSubset(of: boundNames),
+                    "$.surfaces.\(surface.id):unbound_workflow_input"
+                )
+            }
         }
-        try require(workflowInputNames.isSubset(of: boundNames), "$.workflows:unbound_input")
 
         var testCases: [String: String] = [:]
         for path in manifest.tests {
@@ -484,6 +491,17 @@ struct PocketAppPackageRuntime {
         default:
             return nil
         }
+    }
+
+    private func referencedWorkflows(node: PocketSurfaceRenderNode) -> Set<String> {
+        var workflows = Set<String>()
+        if node.type == "button", case .string(let workflowID) = node.properties["workflow"] {
+            workflows.insert(workflowID)
+        }
+        for child in node.children {
+            workflows.formUnion(referencedWorkflows(node: child))
+        }
+        return workflows
     }
 
     private func acceptedStateTypes(nodeType: String, propertyName: String) -> Set<String>? {

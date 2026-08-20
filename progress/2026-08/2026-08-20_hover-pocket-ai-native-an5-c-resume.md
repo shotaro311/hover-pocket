@@ -1,5 +1,14 @@
 # HoverPocket AI-native AN5-C 再開・最終検証
 
+## 最終head追加review: Surface単位のworkflow input束縛
+
+- Gmail / GitHub readbackで、PR #18の最終head `0c121f1`に未解決P2が1件追加されたことを確認した。一つ前のsource head `454a2d0`に対する「重大な問題なし」とは別のreviewである。
+- 従来は全Surfaceの束縛名を一つの集合へ合算していたため、表示中の`main` Surfaceに必要な入力がなくても、到達不能な別Surfaceが同名を束縛すればpackageを導入できた。実行時は表示中Surfaceだけでは値を解決できず、ボタンが無効のままになる。
+- macOS / Windows runtimeを、Surfaceごとに束縛名とbutton workflowを列挙し、そのworkflowの全宣言inputが同じSurface内で解決できる場合だけpackageを受理する方式へ変更した。共通contract verifierも同じ意味検証へ揃えた。
+- 再発防止として、`main`にworkflow button、別の`secondary`に不足inputだけを置く二Surfacepackageを両OSのnegative verifierへ追加した。このfixtureは旧実装では受理され、新実装ではfail closedになる。
+- ローカルでは`swift build -Xswiftc -warnings-as-errors`、`--verify-pocket-app`（18 negative）、`--verify-pocket-surface`（15 negative）、`python3 script/verify_pocket_contracts.py`（13 schema / 60 fixture）、`git diff --check`が成功した。このMacには`dotnet`がないため、Windows Release buildとpackage verifierはPR CIを完了根拠にした。
+- code commit `54ff41e`へのPR CIは、Windows [32348665332](https://github.com/shotaro311/hover-pocket/actions/runs/32348665332)、macOS [32348665277](https://github.com/shotaro311/hover-pocket/actions/runs/32348665277)、3OS contract / byte比較 [32348665365](https://github.com/shotaro311/hover-pocket/actions/runs/32348665365)、PR Router [32348663509](https://github.com/shotaro311/hover-pocket/actions/runs/32348663509)を含む全11 checkが成功した。
+
 ## 再開地点
 
 - branch: `codex/ai-native-an5-runtime-activation`
