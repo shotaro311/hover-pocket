@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FOUNDATION_FIXTURE = ROOT / "contracts" / "voice" / "an3-a-foundation-fixture.json"
 WINDOWS_RUNTIME_FIXTURE = ROOT / "contracts" / "voice" / "an3-b1-windows-runtime-fixture.json"
+WINDOWS_CAPABILITY_FIXTURE = ROOT / "contracts" / "voice" / "an3-b2-windows-capability-fixture.json"
 
 
 def fail(message: str) -> None:
@@ -18,6 +19,7 @@ def fail(message: str) -> None:
 def main() -> None:
     fixture = json.loads(FOUNDATION_FIXTURE.read_text(encoding="utf-8"))
     runtime_fixture = json.loads(WINDOWS_RUNTIME_FIXTURE.read_text(encoding="utf-8"))
+    capability_fixture = json.loads(WINDOWS_CAPABILITY_FIXTURE.read_text(encoding="utf-8"))
     compact_height = fixture["designTokens"]["compactHeight"]
     provider_kinds = fixture["providerKinds"]
     modes = fixture["modes"]
@@ -153,6 +155,14 @@ def main() -> None:
         / "HoverPocket.Shell"
         / "Voice"
         / "CodexVoiceRuntimeComposition.cs"
+    ).read_text(encoding="utf-8")
+    windows_dynamic_tools = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Voice"
+        / "CodexVoiceDynamicToolRuntime.cs"
     ).read_text(encoding="utf-8")
     windows_verifier = (
         ROOT
@@ -404,8 +414,8 @@ def main() -> None:
         if f'"{notification}"' not in windows_coordinator:
             fail(f"Windows Voice coordinator missing {notification}")
     if runtime_fixture["appServer"]["sandbox"] != "read-only" \
-            or '\"sandbox\":\"read-only\"' not in windows_coordinator \
-            or '\"approvalPolicy\":\"never\"' not in windows_coordinator:
+            or 'sandbox = "read-only"' not in windows_coordinator \
+            or 'approvalPolicy = "never"' not in windows_coordinator:
         fail("Windows Voice root thread is not constrained to no-action mode")
     if "generate-json-schema" not in windows_runtime \
             or "--experimental" not in windows_runtime \
@@ -433,6 +443,81 @@ def main() -> None:
         fail("Settings surface can receive Voice transcript/session state")
     if not all(runtime_fixture["outOfScope"].values()):
         fail("AN3-B1 scope unexpectedly includes Tool, MCP, or macOS production activation")
+
+    if capability_fixture["phase"] != "AN3-B2-windows-calendar-timer-slice" \
+            or capability_fixture["operatingSystem"] != "windows" \
+            or not capability_fixture["defaultOff"]:
+        fail("AN3-B2 Windows capability fixture identity/default-off mismatch")
+    expected_tools = {
+        ("calendar_events_list", "calendar.events.list", 1, "calendar.events.read", False),
+        ("timer_countdown_start", "timer.countdown.start", 1, "timer.write", True),
+    }
+    actual_tools = {
+        (
+            tool["name"],
+            tool["capabilityId"],
+            tool["capabilityVersion"],
+            tool["permission"],
+            tool["write"],
+        )
+        for tool in capability_fixture["tools"]
+    }
+    if actual_tools != expected_tools:
+        fail("AN3-B2 dynamic tool allowlist drifted from Calendar/Timer Capability IDs")
+    if capability_fixture["appServer"] != {
+        "experimentalApi": True,
+        "threadStartField": "dynamicTools",
+        "requestMethod": "item/tool/call",
+        "responseFields": ["contentItems", "success"],
+        "sandbox": "read-only",
+        "approvalPolicy": "never",
+        "namespace": "hoverpocket",
+    }:
+        fail("AN3-B2 app-server dynamic tool contract mismatch")
+    if 'Namespace = "hoverpocket"' not in windows_dynamic_tools \
+            or 'CalendarListTool = "calendar_events_list"' not in windows_dynamic_tools \
+            or 'TimerStartTool = "timer_countdown_start"' not in windows_dynamic_tools \
+            or "CapabilityOrigin.Voice" not in windows_dynamic_tools \
+            or 'new HashSet<string>(["calendar.events.read"]' not in windows_dynamic_tools \
+            or 'new HashSet<string>(["timer.write"]' not in windows_dynamic_tools:
+        fail("Voice dynamic tools do not map to the shared Capability Registry/Broker")
+    if "CapabilityApprovalDecision.Approve" not in windows_dynamic_tools \
+            or "CapabilityApprovalDecision.Reject" not in windows_dynamic_tools \
+            or "CapabilityReadbackStatus.Verified" not in windows_dynamic_tools \
+            or "TodayFocusApprovalText.Sanitize" not in windows_dynamic_tools:
+        fail("Voice Timer native approval/readback binding is incomplete")
+    if "MaximumRememberedCalls" not in windows_dynamic_tools \
+            or "Lazy<Task<CodexVoiceDynamicToolResponse>>" not in windows_dynamic_tools \
+            or "AgentSessionId: call.ThreadId" not in windows_dynamic_tools:
+        fail("Voice tool calls are not root-bound and idempotently coalesced")
+    if 'request.Method == "item/tool/call"' not in windows_coordinator \
+            or "dynamicTools = _dynamicToolRuntime.Definitions" not in windows_coordinator \
+            or "ReplyResultAsync" not in windows_coordinator \
+            or "CancelActiveToolRequests" not in windows_coordinator:
+        fail("Voice coordinator does not route/cancel the bounded dynamic tool protocol")
+    if 'HasProperty(threadStart.RootElement, "dynamicTools")' not in windows_runtime \
+            or 'ContainsString(serverRequest.RootElement, "item/tool/call")' not in windows_runtime \
+            or 'RequiredContains(toolResponse.RootElement, "contentItems", "success")' not in windows_runtime:
+        fail("installed Codex schema gate does not require the dynamic tool protocol")
+    if "RequestVoiceTimerApprovalAsync" not in bridge \
+            or "MessageBoxResult.No" not in bridge \
+            or "approvalOwner: () => this" not in windows_panel:
+        fail("Voice Timer write is not bound to a visible Host-owned native approval")
+    capability_boundaries = capability_fixture["boundaries"]
+    if any(capability_boundaries[key] for key in (
+            "providerStoreDirectAccess",
+            "bridgeDispatcherDirectAccess",
+            "mcpExposure",
+            "settingsReceivesToolPayload",
+            "auditStoresToolPayload",
+    )) or not all(capability_boundaries[key] for key in (
+            "unknownServerRequestsFailClosed",
+            "rootThreadBound",
+            "sessionCancellationRevokesPendingWrites",
+            "repeatedCallExecutesOnce",
+            "calendarTitlesAreUntrustedData",
+    )) or not all(capability_fixture["outOfScope"].values()):
+        fail("AN3-B2 safety boundary or remaining scope is incomplete")
     if "voiceTransportContractOk" not in app_js \
             or "voiceWebRtcHarnessOk" not in app_js \
             or "verifyVoiceTransportHarness" not in app_js \
@@ -441,14 +526,17 @@ def main() -> None:
             or "VoiceTransportContractOk" not in windows_ui_verifier \
             or "VoiceWebRtcHarnessOk" not in windows_ui_verifier \
             or "realtime-transport" not in windows_verifier \
-            or "realtime-sdp-fence" not in windows_verifier:
+            or "realtime-sdp-fence" not in windows_verifier \
+            or 'RunCaseAsync("dynamic-tools"' not in windows_verifier \
+            or 'RunCaseAsync("dynamic-tool-roundtrip"' not in windows_verifier:
         fail("AN3-B1 deterministic transport regressions are incomplete")
 
     print(
         "PASS voice-foundation contract: "
         f"{matrix_cases} geometry/state cases, root scope, default-off, "
         "legacy lane negative regression, internal scroll, accessibility, "
-        "Windows explicit-origin microphone and fenced Realtime transport"
+        "Windows explicit-origin microphone, fenced Realtime transport, "
+        "and AN3-B2 Calendar/Timer Broker slice"
     )
 
 

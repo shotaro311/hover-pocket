@@ -49,6 +49,7 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly object _previewFrameSync = new();
     private Func<string, CancellationToken, Task<PocketAppStateTransitionLease>>? _pocketAppStateTransitionBegin;
     private Func<PocketAppStateTransitionLease, Task>? _pocketAppStateTransitionComplete;
+    private Func<System.Windows.Window?>? _voiceApprovalOwner;
     private string _selectedProviderId;
     private MediaPreviewFrame? _pendingPreviewFrame;
     private bool _previewPostScheduled;
@@ -82,7 +83,31 @@ internal sealed class PanelBridgeController : IDisposable
         _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.NormalizeForBootstrap(settings, providerRegistry.ProviderIds);
-        _voiceCoordinator = voiceCoordinator ?? CodexVoiceRuntimeComposition.Create(CurrentSettings.VoiceEnabled);
+        try
+        {
+            var brokerRoot = Path.Combine(settingsStore.RootDirectory, "CapabilityBroker");
+            _capabilityBroker = new CapabilityBroker(
+                new CapabilityRegistry(_capabilityHandlers),
+                new CapabilityBrokerLedger(brokerRoot),
+                new CapabilityBrokerAuditLog(brokerRoot));
+            _todayFocusTextAdapter = new TodayFocusTextAdapter(_capabilityBroker);
+        }
+        catch (Exception ex) when (ex is CapabilityBrokerException
+            or IOException
+            or UnauthorizedAccessException)
+        {
+            _capabilityBroker = null;
+            _todayFocusTextAdapter = null;
+        }
+        var voiceTools = _capabilityBroker is null
+            ? null
+            : new CodexVoiceCapabilityRuntime(
+                _capabilityBroker,
+                RequestVoiceTimerApprovalAsync,
+                CapabilityTimeZoneId);
+        _voiceCoordinator = voiceCoordinator ?? CodexVoiceRuntimeComposition.Create(
+            CurrentSettings.VoiceEnabled,
+            voiceTools);
         _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(CurrentSettings);
         _voiceCoordinator.SnapshotChanged += OnVoiceSnapshotChanged;
         _voiceCoordinator.TransportSignal += OnVoiceTransportSignal;
@@ -93,12 +118,10 @@ internal sealed class PanelBridgeController : IDisposable
         {
             try
             {
-                var brokerRoot = Path.Combine(settingsStore.RootDirectory, "CapabilityBroker");
-                _capabilityBroker = new CapabilityBroker(
-                    new CapabilityRegistry(_capabilityHandlers),
-                    new CapabilityBrokerLedger(brokerRoot),
-                    new CapabilityBrokerAuditLog(brokerRoot));
-                _todayFocusTextAdapter = new TodayFocusTextAdapter(_capabilityBroker);
+                if (_capabilityBroker is null)
+                {
+                    throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "broker");
+                }
                 var packageRoot = Path.Combine(
                     AppContext.BaseDirectory,
                     "PocketApps",
@@ -126,8 +149,6 @@ internal sealed class PanelBridgeController : IDisposable
                 or IOException
                 or UnauthorizedAccessException)
             {
-                _capabilityBroker = null;
-                _todayFocusTextAdapter = null;
                 _pocketAppHostController = null;
             }
         }
@@ -239,6 +260,10 @@ internal sealed class PanelBridgeController : IDisposable
         Func<bool>? voiceMicrophoneGesture = null)
     {
         _dispatchers[dispatcher] = surface;
+        if (surface == BridgeSurface.Panel && approvalOwner is not null)
+        {
+            _voiceApprovalOwner = approvalOwner;
+        }
         void Register(
             string method,
             Func<JsonElement?, CancellationToken, Task<object?>> handler)
@@ -328,7 +353,16 @@ internal sealed class PanelBridgeController : IDisposable
         _clipboardBridgeController.Attach(dispatcher);
         _stickyBridgeController.Attach(dispatcher);
         _timerBridgeHandlers.Register(dispatcher);
-        return new BridgeAttachment(() => _dispatchers.Remove(dispatcher));
+        return new BridgeAttachment(() =>
+        {
+            _dispatchers.Remove(dispatcher);
+            if (surface == BridgeSurface.Panel
+                && approvalOwner is not null
+                && ReferenceEquals(_voiceApprovalOwner, approvalOwner))
+            {
+                _voiceApprovalOwner = null;
+            }
+        });
     }
 
     public void Dispose()
@@ -1056,6 +1090,45 @@ internal sealed class PanelBridgeController : IDisposable
         _ = parameters;
         await _voiceCoordinator.StopRealtimeAsync(cancellationToken);
         return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<bool> RequestVoiceTimerApprovalAsync(
+        VoiceTimerApprovalRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted)
+        {
+            return false;
+        }
+        var operation = dispatcher.InvokeAsync(() =>
+        {
+            var owner = _voiceApprovalOwner?.Invoke();
+            if (owner is null || !owner.IsVisible)
+            {
+                return false;
+            }
+            var english = CurrentSettings.Language == AppLanguage.English;
+            var duration = request.DurationSeconds % 60 == 0
+                ? english
+                    ? $"{request.DurationSeconds / 60} minutes"
+                    : $"{request.DurationSeconds / 60}分"
+                : english
+                    ? $"{request.DurationSeconds} seconds"
+                    : $"{request.DurationSeconds}秒";
+            var result = System.Windows.MessageBox.Show(
+                owner,
+                english
+                    ? $"Timer: {request.Title}\nDuration: {duration}\n\nStart this timer?"
+                    : $"Timer: {request.Title}\n時間: {duration}\n\nこのタイマーを開始しますか？",
+                english ? "Approve Timer" : "Timerを承認",
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Question,
+                System.Windows.MessageBoxResult.No);
+            return result == System.Windows.MessageBoxResult.Yes;
+        });
+        return await operation.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<object?> StartTodayFocusFromCalendarAsync(

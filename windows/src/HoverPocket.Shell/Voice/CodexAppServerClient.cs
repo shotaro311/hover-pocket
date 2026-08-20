@@ -279,6 +279,24 @@ internal sealed class CodexAppServerClient : IAsyncDisposable
         await WriteLineAsync(envelope, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task ReplyResultAsync(
+        long requestId,
+        JsonElement result,
+        CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        if (result.ValueKind != JsonValueKind.Object)
+        {
+            throw new CodexAppServerProtocolException("server_request_result_invalid");
+        }
+        var envelope = JsonSerializer.Serialize(new
+        {
+            id = requestId,
+            result
+        });
+        await WriteLineAsync(envelope, cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task WriteLineAsync(string value, CancellationToken cancellationToken)
     {
         if (Encoding.UTF8.GetByteCount(value) > MaxLineBytes)

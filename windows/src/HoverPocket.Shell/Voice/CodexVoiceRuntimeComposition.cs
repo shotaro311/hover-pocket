@@ -336,6 +336,7 @@ internal static class CodexVoiceSchemaContract
         try
         {
             using var initialize = Load(schemaRoot, "v1", "InitializeParams.json");
+            using var threadStart = Load(schemaRoot, "v2", "ThreadStartParams.json");
             using var start = Load(schemaRoot, "v2", "ThreadRealtimeStartParams.json");
             using var sdp = Load(schemaRoot, "v2", "ThreadRealtimeSdpNotification.json");
             using var transcriptDelta = Load(schemaRoot, "v2", "ThreadRealtimeTranscriptDeltaNotification.json");
@@ -344,8 +345,12 @@ internal static class CodexVoiceSchemaContract
             using var stop = Load(schemaRoot, "v2", "ThreadRealtimeStopParams.json");
             using var voices = Load(schemaRoot, "v2", "ThreadRealtimeListVoicesResponse.json");
             using var account = Load(schemaRoot, "v2", "GetAccountResponse.json");
+            using var toolCall = Load(schemaRoot, "DynamicToolCallParams.json");
+            using var toolResponse = Load(schemaRoot, "DynamicToolCallResponse.json");
+            using var serverRequest = Load(schemaRoot, "ServerRequest.json");
 
             return HasBooleanProperty(initialize.RootElement, "definitions", "InitializeCapabilities", "properties", "experimentalApi")
+                && HasProperty(threadStart.RootElement, "dynamicTools")
                 && RequiredContains(start.RootElement, "threadId", "outputModality")
                 && HasWebRtcTransport(start.RootElement)
                 && RequiredContains(sdp.RootElement, "threadId", "sdp")
@@ -355,7 +360,10 @@ internal static class CodexVoiceSchemaContract
                 && RequiredContains(stop.RootElement, "threadId")
                 && RequiredContains(voices.RootElement, "voices")
                 && RequiredContains(account.RootElement, "requiresOpenaiAuth")
-                && HasProperty(account.RootElement, "account");
+                && HasProperty(account.RootElement, "account")
+                && RequiredContains(toolCall.RootElement, "arguments", "callId", "threadId", "tool", "turnId")
+                && RequiredContains(toolResponse.RootElement, "contentItems", "success")
+                && ContainsString(serverRequest.RootElement, "item/tool/call");
         }
         catch (Exception exception) when (exception is IOException
             or UnauthorizedAccessException
@@ -430,16 +438,30 @@ internal static class CodexVoiceSchemaContract
         }
         return false;
     }
+
+    private static bool ContainsString(JsonElement value, string expected)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString() == expected,
+            JsonValueKind.Array => value.EnumerateArray().Any(item => ContainsString(item, expected)),
+            JsonValueKind.Object => value.EnumerateObject().Any(property => ContainsString(property.Value, expected)),
+            _ => false
+        };
+    }
 }
 
 internal static class CodexVoiceRuntimeComposition
 {
-    public static CodexVoiceCoordinator Create(bool featureEnabled)
+    public static CodexVoiceCoordinator Create(
+        bool featureEnabled,
+        ICodexVoiceDynamicToolRuntime? dynamicToolRuntime = null)
     {
         var runtime = new InstalledCodexVoiceRuntime();
         return new CodexVoiceCoordinator(
             featureEnabled,
             runtime.StartClientAsync,
-            runtime);
+            runtime,
+            dynamicToolRuntime: dynamicToolRuntime);
     }
 }
