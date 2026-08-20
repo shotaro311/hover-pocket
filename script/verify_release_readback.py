@@ -142,10 +142,14 @@ def parse_appcast(data: bytes, repository: str) -> MacAppcast:
         root = ET.fromstring(data)
     except ET.ParseError as error:
         raise VerificationError("macos.appcast: invalid XML") from error
-    item = root.find("./channel/item")
-    enclosure = root.find("./channel/item/enclosure")
-    if item is None or enclosure is None:
-        raise VerificationError("macos.appcast: missing enclosure")
+    items = root.findall("./channel/item")
+    if len(items) != 1:
+        raise VerificationError("macos.appcast: expected exactly one item")
+    item = items[0]
+    enclosures = item.findall("enclosure")
+    if len(enclosures) != 1:
+        raise VerificationError("macos.appcast: expected exactly one enclosure")
+    enclosure = enclosures[0]
     asset_url = enclosure.get("url") or ""
     parsed = urllib.parse.urlparse(asset_url)
     expected_prefix = f"/{repository}/releases/download/"

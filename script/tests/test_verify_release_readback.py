@@ -6,6 +6,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 
 SCRIPT = pathlib.Path(__file__).parents[1] / "verify_release_readback.py"
@@ -107,6 +108,27 @@ class ReleaseReadbackTests(unittest.TestCase):
         )
         self.assertEqual(parsed.release_tag, "v1.2.3-456")
         self.assertIn("macos.sparkle_signature_format", verifier.checks)
+
+    def test_macos_rejects_multiple_appcast_items_or_enclosures(self):
+        appcast, _, _, _ = self.mac_fixture()
+
+        multiple_items = ET.fromstring(appcast)
+        channel = multiple_items.find("./channel")
+        item = multiple_items.find("./channel/item")
+        self.assertIsNotNone(channel)
+        self.assertIsNotNone(item)
+        channel.append(ET.fromstring(ET.tostring(item)))
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.parse_appcast(ET.tostring(multiple_items), "shotaro311/hover-pocket")
+
+        multiple_enclosures = ET.fromstring(appcast)
+        item = multiple_enclosures.find("./channel/item")
+        enclosure = multiple_enclosures.find("./channel/item/enclosure")
+        self.assertIsNotNone(item)
+        self.assertIsNotNone(enclosure)
+        item.append(ET.fromstring(ET.tostring(enclosure)))
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.parse_appcast(ET.tostring(multiple_enclosures), "shotaro311/hover-pocket")
 
     def test_sparkle_signature_verifies_exact_downloaded_bytes(self):
         public_key = base64.b64encode(bytes.fromhex(
