@@ -64,7 +64,7 @@ Lifecycle上で検証・保存されたPocket Appを、実際の描画とCapabil
 ## stale runtime hardening
 
 - macOSのactivation leaseは登録済みのquery / workflow Taskを保持し、disable / remove / replacement / default-off時にcancelする。
-- Swift Capability Brokerはexecution slot取得後と各step前に取消を確認し、timeout用の子Taskへ親取消を伝播する。Timerはpending write待ちの直後、state変更前に再確認する。
+- Swift Capability Brokerはexecution slot取得後に取消を確認し、durable workflow開始後の取消は未実行stepのfailed receipt、既実行stepのunknown receiptとして確定する。rollbackはcaller取消を継承しないTaskで実行する。Timerはpending write待ちの直後、state変更前に再確認する。
 - Windowsのactivation leaseはCancellationTokenを所有し、runtimeがcaller tokenと連結してBrokerのqueue、各step、handlerへ伝播する。
 - verifierへlease invalidationとcancellation signalの回帰を両OSで追加した。
 
@@ -101,10 +101,14 @@ Lifecycle上で検証・保存されたPocket Appを、実際の描画とCapabil
 - remediationでは、Windowsの組み込みPocket App runtimeとdirect Today Focus routeを共通のHost所有activation leaseへ接続する。OFF / reset / disposeがleaseを取消し、Timer handler実行中でもBroker tokenをcancelして後続Sticky writeへ進めない。OFF後の同一process再有効化はruntimeをhot復元せず、既存UI文言どおり再起動まで組み込みSurfaceとgenerationを利用不可にする。
 - 生成App Registryは、Synchronize / startup restore / activation / OFF / disposeをregistry-level lockとenabled stateで直列化する。OFFが返った後にruntime / Surface / leaseが再登録されないことを競合回帰で確認し、明示的な再有効化後は新しいtransitionだけを受理する。
 - focused verifierへ、実行中Timer handlerの取消、後続Sticky handler 0回、activation commitとOFFの競合後に両Registry 0件、再有効化後の正常activation、settings reset後のrestart-required状態を追加した。WindowsはPR CIを正式なbuild / runtime gateとし、通過後に修正後exact rangeを再scanする。
+- 2026-08-20の追加review 3件をsource head `1c8b93f`で修正した。生成Surfaceのstate束縛controlを永続化し、durable workflowのstep間取消をrollback / completeへ通し、disabled生成Providerの設定をdurable managed packageが存在する間だけ保持する。
+- Timer成功直後の取消でSticky write 0回、Timer rollback、failed workflow replayを両OSに追加した。Windows Settingsは無関係な設定変更を挟むdisable / enable / removeを検証する。
+- Windows [32331372164](https://github.com/shotaro311/hover-pocket/actions/runs/32331372164)、macOS [32331372103](https://github.com/shotaro311/hover-pocket/actions/runs/32331372103)、3OS contract / compare [32331372312](https://github.com/shotaro311/hover-pocket/actions/runs/32331372312)、PR Router [32331370130](https://github.com/shotaro311/hover-pocket/actions/runs/32331370130)はすべて成功した。review threadは14 / 14 resolvedである。
 
 ## 未完了
 
-- remediationのcommit / push、PR CI、修正後exact Security scan、review thread解決、merge後readback
+- progress同期後のexact Security scan、最終CI / mergeability / remote parity readback
+- PR #18のmergeとmerge後readbackはユーザー判断後に行う
 - 両OS実機でのSurface / runtime activation readback
 - 実Codex generationのlocal-file confinement
 - Voiceから生成、preview、承認、install、利用するCore Integration E2E

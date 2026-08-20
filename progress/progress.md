@@ -1,12 +1,15 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-08-16
+updated: 2026-08-20
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-review-hardening; capability-expansion-merged
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-final-validation; capability-expansion-merged
 ---
 
 ## 2026-08-16 AI-native AN5-C Runtime / Surface Activation
 
+- 2026-08-20再開時に残っていた3件を修正した。生成Surfaceのstate束縛controlは型付きHost state storeへ保存して再生成後も復元する。durable workflow開始後の取消は、未実行stepをfailed receiptへ確定し、既成功Timerを非取消経路でrollbackしてworkflowを完了保存する。Windowsの生成Provider設定はdisabled中のdurable managed package IDを保持し、remove後だけorder / visibility / preferred / last-selectedから除去する。
+- source head `1c8b93f`で、Windows [32331372164](https://github.com/shotaro311/hover-pocket/actions/runs/32331372164)、macOS [32331372103](https://github.com/shotaro311/hover-pocket/actions/runs/32331372103)、Ubuntu / macOS / Windows contractとbyte比較 [32331372312](https://github.com/shotaro311/hover-pocket/actions/runs/32331372312)、PR Router [32331370130](https://github.com/shotaro311/hover-pocket/actions/runs/32331370130)がすべて成功した。WindowsはRelease build、Settings、Timer、rendered WebView UIを含む全verifyが成功した。
+- PR #18の既存14 review threadへ修正根拠を返信し、未解決threadを0件にした。最終headのexact Security diff scan、progress同期commit後のCI / mergeability / remote parity readback、両OS実機gateを残す。詳細: `progress/2026-08/2026-08-20_hover-pocket-ai-native-an5-c-resume.md`。
 - PR #17はmerge commit `a35b0ea8c224809ad4ff1bf1dc466882fc70169b`でmainへ統合し、merge後のWindows、macOS、3OS contract CIも成功した。最新`origin/main`から隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an5c`、branch `codex/ai-native-an5-runtime-activation`を作成し、ahead / behind `0 / 0`、cleanをreadbackした。
 - AN5-Cは、検証済みactive packageをapp ID単位の`PocketSurfaceRegistry` / execution-runtime registryへ反映し、install / update / enable / disable / preserve-only remove / rollback / restart restoration後にapp ID、version、package digest、effective permission grantがLifecycle receiptと描画・実行側で一致した場合だけ成功にする。組み込みToday Focusと生成Appは別entryとし、複数生成Appを共存させる。
 - ChatGPT Pro Orchestratorへexact base `a35b0ea`、GitHub read-only、GPT-5.6 Sol / Pro、builder、patch artifactとして実装と両OS回帰を委譲した。run: `20260816-074324-hoverpocket-an5-c-runtime-activation-registryos`。Codexはartifactのbase / hash / path検証、適用、ローカル検証、security review、Git / PR / mergeを担当する。実Codex生成activationは引き続きfail closedとする。
