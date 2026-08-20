@@ -69,7 +69,10 @@ struct VoiceSessionSummary: Identifiable, Equatable, Codable, Sendable {
     ) {
         self.sessionID = VoiceTextSafety.sanitizeIdentifier(sessionID)
         self.rootSessionID = VoiceTextSafety.sanitizeIdentifier(rootSessionID)
-        self.parentSessionID = parentSessionID.map(VoiceTextSafety.sanitizeIdentifier)
+        self.parentSessionID = parentSessionID.flatMap {
+            let sanitized = VoiceTextSafety.sanitizeIdentifier($0)
+            return sanitized.isEmpty ? nil : sanitized
+        }
         self.title = VoiceTextSafety.sanitizeVisibleText(title, limit: 120)
         self.status = status
         self.safeSummary = safeSummary.map { VoiceTextSafety.sanitizeVisibleText($0, limit: 320) }
@@ -78,6 +81,19 @@ struct VoiceSessionSummary: Identifiable, Equatable, Codable, Sendable {
             return value
         }
         self.updatedAt = updatedAt
+    }
+
+    func sanitized() -> VoiceSessionSummary {
+        VoiceSessionSummary(
+            sessionID: sessionID,
+            rootSessionID: rootSessionID,
+            parentSessionID: parentSessionID,
+            title: title,
+            status: status,
+            safeSummary: safeSummary,
+            progress: progress,
+            updatedAt: updatedAt
+        )
     }
 }
 
@@ -89,17 +105,37 @@ struct VoiceTranscriptEvent: Identifiable, Equatable, Codable, Sendable {
     }
 
     let id: String
+    let rootSessionID: String
     let role: Role
     let text: String
     let isFinal: Bool
     let timestamp: Date
 
-    init(id: String, role: Role, text: String, isFinal: Bool, timestamp: Date) {
+    init(
+        id: String,
+        rootSessionID: String,
+        role: Role,
+        text: String,
+        isFinal: Bool,
+        timestamp: Date
+    ) {
         self.id = VoiceTextSafety.sanitizeIdentifier(id)
+        self.rootSessionID = VoiceTextSafety.sanitizeIdentifier(rootSessionID)
         self.role = role
         self.text = VoiceTextSafety.sanitizeVisibleText(text, limit: 1_024)
         self.isFinal = isFinal
         self.timestamp = timestamp
+    }
+
+    func sanitized() -> VoiceTranscriptEvent {
+        VoiceTranscriptEvent(
+            id: id,
+            rootSessionID: rootSessionID,
+            role: role,
+            text: text,
+            isFinal: isFinal,
+            timestamp: timestamp
+        )
     }
 }
 
@@ -173,10 +209,13 @@ struct VoiceLaneSnapshot: Equatable, Sendable {
 
 enum VoiceTextSafety {
     private static let sensitiveMarkers = ["authorization:", "token=", "api_key=", "apikey="]
-    private static let absolutePathPattern = #"(?i)(?:^|[\s\"'(=])(?:file://|/(?:[^/\s]+/)*[^/\s]+|[a-z]:\\[^\s]+|\\\\[^\s]+)"#
+    private static let absolutePathPattern = #"(?i)(?:^|[^\p{L}\p{N}_/])(?:file://|/(?!/)(?:[^/\s]+/)*[^/\s]+|[a-z]:\\[^\s]+|\\\\[^\s]+)"#
 
     static func sanitizeVisibleText(_ value: String, limit: Int) -> String {
-        let collapsed = value.unicodeScalars.map { scalar -> Unicode.Scalar in
+        let collapsed = value.unicodeScalars.compactMap { scalar -> Unicode.Scalar? in
+            if scalar.properties.generalCategory == .format {
+                return nil
+            }
             if scalar.value < 0x20 && scalar != "\n" && scalar != "\t" {
                 return Unicode.Scalar(0x20)!
             }
@@ -192,10 +231,13 @@ enum VoiceTextSafety {
     }
 
     static func sanitizeIdentifier(_ value: String) -> String {
-        let allowed = value.unicodeScalars.filter {
+        let scalars = value.unicodeScalars
+        guard !scalars.isEmpty,
+              scalars.count <= 160,
+              scalars.allSatisfy({
             CharacterSet.alphanumerics.contains($0) || "-_.:".unicodeScalars.contains($0)
-        }
-        return String(String.UnicodeScalarView(allowed).prefix(160))
+        }) else { return "" }
+        return value
     }
 
     static func sanitizeErrorCode(_ value: String) -> String {
@@ -215,7 +257,16 @@ struct VoiceTranscriptBuffer: Sendable {
     private(set) var events: [VoiceTranscriptEvent] = []
 
     mutating func append(_ event: VoiceTranscriptEvent) {
-        events.append(event)
+        let sanitized = event.sanitized()
+        guard !sanitized.id.isEmpty, !sanitized.rootSessionID.isEmpty else { return }
+        if let existingIndex = events.firstIndex(where: { $0.id == sanitized.id }) {
+            if events[existingIndex].isFinal, !sanitized.isFinal {
+                return
+            }
+            events[existingIndex] = sanitized
+        } else {
+            events.append(sanitized)
+        }
         if events.count > Self.maxEvents {
             events.removeFirst(events.count - Self.maxEvents)
         }
@@ -460,7 +511,8 @@ final class VoiceLaneRuntime: ObservableObject {
         guard featureEnabled else { return }
         restartGeneration &+= 1
         let recoveryGeneration = restartGeneration
-        restartTask?.cancel()
+        let pendingRestart = restartTask
+        pendingRestart?.cancel()
         restartTask = nil
         let previousAdapter = adapter
         adapter = nil
@@ -471,20 +523,27 @@ final class VoiceLaneRuntime: ObservableObject {
                 muted: true,
                 safeErrorCode: "voice_adapter_unavailable"
             )
-            if let previousAdapter {
-                trackDetachedAdapterStop(previousAdapter)
-            }
+            trackDetachedWork(
+                pendingRestart: pendingRestart,
+                detachedAdapter: previousAdapter
+            )
             return
         }
         publish(connection: .recovering, activity: .reconnecting, muted: true)
-        restartAfterStopping(previousAdapter, generation: recoveryGeneration, bounded: false)
+        restartAfterStopping(
+            previousAdapter,
+            pendingRestart: pendingRestart,
+            generation: recoveryGeneration,
+            bounded: false
+        )
     }
 
     func markAdapterCrashed() {
         guard featureEnabled else { return }
         restartGeneration &+= 1
         let crashGeneration = restartGeneration
-        restartTask?.cancel()
+        let pendingRestart = restartTask
+        pendingRestart?.cancel()
         restartTask = nil
         let previousAdapter = adapter
         adapter = nil
@@ -494,7 +553,12 @@ final class VoiceLaneRuntime: ObservableObject {
             muted: true,
             safeErrorCode: "voice_transport_crashed"
         )
-        restartAfterStopping(previousAdapter, generation: crashGeneration, bounded: true)
+        restartAfterStopping(
+            previousAdapter,
+            pendingRestart: pendingRestart,
+            generation: crashGeneration,
+            bounded: true
+        )
     }
 
     func handleUnexpectedServerRequest(method: String) {
@@ -503,26 +567,34 @@ final class VoiceLaneRuntime: ObservableObject {
         let previousAdapter = adapter
         adapter = nil
         restartGeneration &+= 1
-        restartTask?.cancel()
+        let pendingRestart = restartTask
+        pendingRestart?.cancel()
+        restartTask = nil
         publish(
             connection: .disconnected,
             activity: .failed,
             muted: true,
             safeErrorCode: "unexpected_server_request"
         )
-        if let previousAdapter {
-            trackDetachedAdapterStop(previousAdapter)
-        }
+        trackDetachedWork(
+            pendingRestart: pendingRestart,
+            detachedAdapter: previousAdapter
+        )
     }
 
     func appendTranscript(_ event: VoiceTranscriptEvent) {
         guard featureEnabled else { return }
-        transcriptBuffer.append(event)
+        let sanitized = event.sanitized()
+        guard let rootSessionID, sanitized.rootSessionID == rootSessionID else { return }
+        transcriptBuffer.append(sanitized)
         publish()
     }
 
     func setRootSessionID(_ sessionID: String?) {
-        let next = sessionID.map(VoiceTextSafety.sanitizeIdentifier)
+        let next = sessionID.flatMap {
+            let sanitized = VoiceTextSafety.sanitizeIdentifier($0)
+            return sanitized.isEmpty ? nil : sanitized
+        }
         if next != rootSessionID {
             transcriptBuffer = VoiceTranscriptBuffer()
             allSessions.removeAll()
@@ -533,10 +605,12 @@ final class VoiceLaneRuntime: ObservableObject {
 
     func upsertSession(_ summary: VoiceSessionSummary) {
         guard featureEnabled else { return }
-        if let rootSessionID, summary.rootSessionID != rootSessionID {
+        let sanitized = summary.sanitized()
+        guard !sanitized.sessionID.isEmpty, !sanitized.rootSessionID.isEmpty else { return }
+        if let rootSessionID, sanitized.rootSessionID != rootSessionID {
             return
         }
-        allSessions[summary.sessionID] = summary
+        allSessions[sanitized.sessionID] = sanitized
         if allSessions.count > Self.maxRetainedSessions {
             let overflow = allSessions.values
                 .sorted {
@@ -662,6 +736,7 @@ final class VoiceLaneRuntime: ObservableObject {
 
     private func restartAfterStopping(
         _ previousAdapter: (any VoiceSessionAdapter)?,
+        pendingRestart: Task<Void, Never>?,
         generation: Int,
         bounded: Bool
     ) {
@@ -671,6 +746,7 @@ final class VoiceLaneRuntime: ObservableObject {
         audioCommandTask = nil
         recoveryTask = Task { @MainActor [weak self] in
             await previousRecovery?.value
+            await pendingRestart?.value
             await pendingAudioCommand?.value
             if let previousAdapter {
                 await previousAdapter.stop()
@@ -686,15 +762,22 @@ final class VoiceLaneRuntime: ObservableObject {
         }
     }
 
-    private func trackDetachedAdapterStop(_ detachedAdapter: any VoiceSessionAdapter) {
+    private func trackDetachedWork(
+        pendingRestart: Task<Void, Never>?,
+        detachedAdapter: (any VoiceSessionAdapter)?
+    ) {
+        guard pendingRestart != nil || detachedAdapter != nil else { return }
         let previousRecovery = recoveryTask
         previousRecovery?.cancel()
         let pendingAudioCommand = audioCommandTask
         audioCommandTask = nil
         recoveryTask = Task { @MainActor in
             await previousRecovery?.value
+            await pendingRestart?.value
             await pendingAudioCommand?.value
-            await detachedAdapter.stop()
+            if let detachedAdapter {
+                await detachedAdapter.stop()
+            }
         }
     }
 

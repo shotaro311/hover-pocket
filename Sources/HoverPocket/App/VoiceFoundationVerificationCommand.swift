@@ -4,15 +4,42 @@ enum VoiceFoundationVerificationError: Error {
     case failed(String)
 }
 
+private struct UnsafeDecodedTranscriptFixture: Codable {
+    let id: String
+    let rootSessionID: String
+    let role: String
+    let text: String
+    let isFinal: Bool
+    let timestamp: Date
+}
+
+private struct UnsafeDecodedSessionProgressFixture: Codable {
+    let completed: Int
+    let total: Int
+}
+
+private struct UnsafeDecodedSessionFixture: Codable {
+    let sessionID: String
+    let rootSessionID: String
+    let parentSessionID: String?
+    let title: String
+    let status: String
+    let safeSummary: String?
+    let progress: UnsafeDecodedSessionProgressFixture?
+    let updatedAt: Date
+}
+
 @MainActor
 enum VoiceFoundationVerificationCommand {
     static func run() async throws {
         try verifyGeometryAndScope()
         try verifyTranscriptBoundsAndRedaction()
+        try await verifyDecodedModelsAreResanitized()
         try verifyLocalization()
         try await verifyDefaultOffAndFakeAdapter()
         try await verifyAppLifetimeDetachAndRestart()
         try await verifyStaleAdapterFailureDoesNotReplaceReadyAdapter()
+        try await verifyRecoveryWaitsForCancelledStartup()
         try await verifyDisableWaitsForAdapterTeardown()
         try await verifyRecoveryTeardownIsSerialized()
         try await verifyAudioCommandsRemainOrdered()
@@ -108,6 +135,35 @@ enum VoiceFoundationVerificationCommand {
         else {
             throw VoiceFoundationVerificationError.failed("root_scope")
         }
+
+        let collisionCandidates = [
+            VoiceSessionSummary(
+                sessionID: "foreign/child",
+                rootSessionID: "root/a",
+                title: "Foreign",
+                status: .running,
+                updatedAt: now
+            ),
+            VoiceSessionSummary(
+                sessionID: "local-child",
+                rootSessionID: "roota",
+                title: "Local",
+                status: .running,
+                updatedAt: now
+            )
+        ]
+        let isolated = VoiceSessionScope.visibleSessions(
+            rootSessionID: "roota",
+            sessions: collisionCandidates
+        )
+        guard VoiceTextSafety.sanitizeIdentifier("root/a").isEmpty,
+              VoiceTextSafety.sanitizeIdentifier("roota") == "roota",
+              VoiceTextSafety.sanitizeIdentifier(String(repeating: "a", count: 161)).isEmpty,
+              isolated.count == 1,
+              isolated.first?.sessionID == "local-child"
+        else {
+            throw VoiceFoundationVerificationError.failed("identifier_collision_rejected")
+        }
     }
 
     private static func verifyTranscriptBoundsAndRedaction() throws {
@@ -116,6 +172,7 @@ enum VoiceFoundationVerificationCommand {
         for index in 0..<90 {
             buffer.append(VoiceTranscriptEvent(
                 id: "event-\(index)",
+                rootSessionID: "root-a",
                 role: .user,
                 text: index == 89
                     ? "/Users/test/private.txt"
@@ -127,7 +184,17 @@ enum VoiceFoundationVerificationCommand {
         let scalarCount = buffer.events.reduce(0) { count, event in
             count + event.text.unicodeScalars.count
         }
+        let validEventCount = buffer.events.count
+        buffer.append(VoiceTranscriptEvent(
+            id: "invalid/event",
+            rootSessionID: "root-a",
+            role: .user,
+            text: "must not render with a colliding identity",
+            isFinal: true,
+            timestamp: now.addingTimeInterval(100)
+        ))
         guard buffer.events.count <= 64,
+              buffer.events.count == validEventCount,
               scalarCount <= 8_192,
               buffer.events.allSatisfy({ !$0.text.contains("/Users/") })
         else {
@@ -136,16 +203,35 @@ enum VoiceFoundationVerificationCommand {
 
         let combining = VoiceTranscriptEvent(
             id: "combining",
+            rootSessionID: "root-a",
             role: .assistant,
             text: "a" + String(repeating: "\u{0301}", count: 10_000),
             isFinal: true,
             timestamp: now
         )
-        let pathSamples = ["/tmp/private.txt", "/Volumes/work/secret.mov", #"C:\work\secret.txt"#]
+        let pathSamples = [
+            "/tmp/private.txt",
+            "/Volumes/work/secret.mov",
+            #"C:\work\secret.txt"#,
+            "[/Users/alice/private]",
+            #"[C:\Users\alice\private]"#
+        ]
+        let bidiSamples = [
+            "trusted\u{202E}detadpu",
+            "trusted\u{2066}spoof\u{2069}"
+        ]
+        let nonPathSamples = ["https://example.com/path", "and/or"]
         guard combining.text.unicodeScalars.count <= 1_024,
-              pathSamples.allSatisfy({ VoiceTextSafety.sanitizeVisibleText($0, limit: 200) == "[redacted]" })
+              pathSamples.allSatisfy({ VoiceTextSafety.sanitizeVisibleText($0, limit: 200) == "[redacted]" }),
+              nonPathSamples.allSatisfy({ VoiceTextSafety.sanitizeVisibleText($0, limit: 200) == $0 }),
+              bidiSamples.allSatisfy({ sample in
+                  let sanitized = VoiceTextSafety.sanitizeVisibleText(sample, limit: 200)
+                  return !sanitized.unicodeScalars.contains(where: {
+                      $0.properties.generalCategory == .format
+                  })
+              })
         else {
-            throw VoiceFoundationVerificationError.failed("scalar_bound_or_absolute_path_redaction")
+            throw VoiceFoundationVerificationError.failed("scalar_bound_path_or_format_control_redaction")
         }
     }
 
@@ -169,6 +255,98 @@ enum VoiceFoundationVerificationCommand {
         else {
             throw VoiceFoundationVerificationError.failed("voice_localization")
         }
+    }
+
+    private static func verifyDecodedModelsAreResanitized() async throws {
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+        let now = Date(timeIntervalSince1970: 0)
+        var buffer = VoiceTranscriptBuffer()
+        let decodedEvent = try decoder.decode(
+            VoiceTranscriptEvent.self,
+            from: encoder.encode(UnsafeDecodedTranscriptFixture(
+                id: "decoded-event",
+                rootSessionID: "root-a",
+                role: "assistant",
+                text: "[/Users/alice/private]",
+                isFinal: false,
+                timestamp: now
+            ))
+        )
+        buffer.append(decodedEvent)
+        guard buffer.events.count == 1,
+              buffer.events[0].text == "[redacted]"
+        else {
+            throw VoiceFoundationVerificationError.failed("decoded_transcript_resanitized")
+        }
+        buffer.append(VoiceTranscriptEvent(
+            id: "decoded-event",
+            rootSessionID: "root-a",
+            role: .assistant,
+            text: "final revision",
+            isFinal: true,
+            timestamp: now.addingTimeInterval(1)
+        ))
+        buffer.append(VoiceTranscriptEvent(
+            id: "decoded-event",
+            rootSessionID: "root-a",
+            role: .assistant,
+            text: "late interim",
+            isFinal: false,
+            timestamp: now.addingTimeInterval(2)
+        ))
+        let invalidDecodedEvent = try decoder.decode(
+            VoiceTranscriptEvent.self,
+            from: encoder.encode(UnsafeDecodedTranscriptFixture(
+                id: "invalid/event",
+                rootSessionID: "root-a",
+                role: "assistant",
+                text: "must not render",
+                isFinal: true,
+                timestamp: now
+            ))
+        )
+        buffer.append(invalidDecodedEvent)
+        guard buffer.events.count == 1,
+              buffer.events[0].id == "decoded-event",
+              buffer.events[0].text == "final revision",
+              buffer.events[0].isFinal
+        else {
+            throw VoiceFoundationVerificationError.failed("transcript_revision_identity")
+        }
+
+        let decodedSession = try decoder.decode(
+            VoiceSessionSummary.self,
+            from: encoder.encode(UnsafeDecodedSessionFixture(
+                sessionID: "decoded-session",
+                rootSessionID: "root-a",
+                parentSessionID: "invalid/parent",
+                title: "[/Users/alice/private]",
+                status: "running",
+                safeSummary: "token=secret",
+                progress: UnsafeDecodedSessionProgressFixture(completed: -1, total: 0),
+                updatedAt: now
+            ))
+        )
+        let runtime = VoiceLaneRuntime()
+        await runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            adapterFactory: nil
+        ).value
+        runtime.setRootSessionID("root-a")
+        runtime.upsertSession(decodedSession)
+        let session = runtime.snapshot.sessions.first
+        guard runtime.snapshot.sessions.count == 1,
+              session?.sessionID == "decoded-session",
+              session?.parentSessionID == nil,
+              session?.title == "[redacted]",
+              session?.safeSummary == "[redacted]",
+              session?.progress == nil
+        else {
+            throw VoiceFoundationVerificationError.failed("decoded_session_resanitized")
+        }
+        await runtime.shutdown()
     }
 
     private static func verifyDefaultOffAndFakeAdapter() async throws {
@@ -270,6 +448,7 @@ enum VoiceFoundationVerificationCommand {
         runtime.setRootSessionID("root-a")
         runtime.appendTranscript(VoiceTranscriptEvent(
             id: "event",
+            rootSessionID: "root-a",
             role: .assistant,
             text: "memory-only",
             isFinal: true,
@@ -320,6 +499,27 @@ enum VoiceFoundationVerificationCommand {
               runtime.snapshot.rootSessionID == "root-b"
         else {
             throw VoiceFoundationVerificationError.failed("root_transition_isolation")
+        }
+        runtime.appendTranscript(VoiceTranscriptEvent(
+            id: "delayed-root-a",
+            rootSessionID: "root-a",
+            role: .assistant,
+            text: "must not cross roots",
+            isFinal: true,
+            timestamp: Date(timeIntervalSince1970: 1)
+        ))
+        runtime.appendTranscript(VoiceTranscriptEvent(
+            id: "current-root-b",
+            rootSessionID: "root-b",
+            role: .assistant,
+            text: "current root",
+            isFinal: true,
+            timestamp: Date(timeIntervalSince1970: 2)
+        ))
+        guard runtime.snapshot.transcript.count == 1,
+              runtime.snapshot.transcript.first?.id == "current-root-b"
+        else {
+            throw VoiceFoundationVerificationError.failed("delayed_transcript_root_isolation")
         }
 
         let stopCountBeforeCrash = adapter.stopCount
@@ -396,7 +596,10 @@ enum VoiceFoundationVerificationCommand {
             adapterFactory: nil
         )
         try await waitUntil { oldAdapter.stopCount == 1 }
-        guard runtime.snapshot != .disabled else {
+        guard runtime.snapshot != .disabled,
+              runtime.snapshot.mode == .compact,
+              runtime.snapshot.connection == .recovering
+        else {
             throw VoiceFoundationVerificationError.failed("voice_off_published_before_adapter_teardown")
         }
 
@@ -416,6 +619,40 @@ enum VoiceFoundationVerificationCommand {
         try await waitUntil { runtime.snapshot.connection == .connected }
         guard replacementAdapter.startCount == 1 else {
             throw VoiceFoundationVerificationError.failed("replacement_not_started_after_adapter_teardown")
+        }
+        await runtime.shutdown()
+    }
+
+    private static func verifyRecoveryWaitsForCancelledStartup() async throws {
+        let stale = GatedVoiceSessionAdapter()
+        let healthy = FakeVoiceSessionAdapter()
+        let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        var factoryCount = 0
+        let factory: VoiceLaneRuntime.AdapterFactory = {
+            factoryCount += 1
+            return factoryCount == 1 ? stale : healthy
+        }
+        runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            adapterFactory: factory
+        )
+        try await waitUntil { stale.startCount == 1 }
+
+        runtime.recoverAfterSystemTransition()
+        try await Task.sleep(nanoseconds: 20_000_000)
+        guard factoryCount == 1, healthy.startCount == 0 else {
+            throw VoiceFoundationVerificationError.failed("recovery_overlapped_cancelled_startup")
+        }
+
+        stale.failStart()
+        try await waitUntil {
+            runtime.snapshot.connection == .connected
+                && healthy.startCount == 1
+                && stale.stopCount == 1
+        }
+        guard factoryCount == 2 else {
+            throw VoiceFoundationVerificationError.failed("recovery_started_multiple_replacements")
         }
         await runtime.shutdown()
     }

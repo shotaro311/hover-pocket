@@ -60,6 +60,7 @@ internal sealed class SettingsVerifier
 
         VerifyDefaults(store, registry, startup);
         VerifyWebViewSecurityPolicy();
+        VerifyVoiceAvailabilityWireValues();
         await RunCaseAsync(
             "surface-isolation",
             () => VerifyPocketAppBridgeSurfaceIsolationAsync(registry));
@@ -184,6 +185,24 @@ internal sealed class SettingsVerifier
         await VerifyResetDisablesGenerationAsync(registry);
     }
 
+    private void VerifyVoiceAvailabilityWireValues()
+    {
+        var expected = new Dictionary<CodexVoiceAvailability, string>
+        {
+            [CodexVoiceAvailability.Disabled] = "disabled",
+            [CodexVoiceAvailability.Ready] = "ready",
+            [CodexVoiceAvailability.Unavailable] = "unavailable",
+            [CodexVoiceAvailability.SignedOut] = "signedOut",
+            [CodexVoiceAvailability.SchemaMismatch] = "schemaMismatch",
+            [CodexVoiceAvailability.CapabilityBlocked] = "capabilityBlocked"
+        };
+        if (expected.Any(pair =>
+            PanelBridgeController.ToVoiceAvailabilityWireValue(pair.Key) != pair.Value))
+        {
+            _failures.Add("Voice availability wire values do not match the renderer contract");
+        }
+    }
+
     private static async Task RunCaseAsync(string label, Func<Task> verification)
     {
         VerifyConsole.WriteLine($"SETTINGS_CASE_BEGIN {label}");
@@ -279,6 +298,7 @@ internal sealed class SettingsVerifier
         voiceCoordinator.SetRootSessionId("root-private");
         voiceCoordinator.AppendTranscript(new VoiceTranscriptEvent(
             "event-private",
+            "root-private",
             "user",
             "settings-must-not-see-transcript",
             true,

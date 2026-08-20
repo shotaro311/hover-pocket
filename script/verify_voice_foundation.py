@@ -232,6 +232,8 @@ def main() -> None:
         fail("Windows unavailable Voice transport can report an unmuted state")
     if "VoiceLaneHostView" not in mac_shell:
         fail("macOS Host Voice row missing")
+    if "if runtime.snapshot.mode != .disabled" not in mac_voice:
+        fail("macOS Voice row disappears before runtime teardown completes")
     if "accessibilityLabel(\"Voice Lane\")" not in mac_voice:
         if "localized(japanese: \"音声レーン\", english: \"Voice Lane\")" not in mac_voice:
             fail("macOS Voice accessibility region missing")
@@ -251,6 +253,9 @@ def main() -> None:
         fail("macOS memory/scope contracts missing")
     if "additionalPreviewHeight: voiceLaneHeight(on: screen)" not in mac_window:
         fail("macOS window is not extended downward for Voice Lane")
+    if "mode: VoiceLaneRuntime.shared.snapshot.mode" not in mac_window \
+            or "VoiceLaneRuntime.shared.$snapshot" not in mac_window:
+        fail("macOS panel geometry follows settings before Voice teardown completes")
     show_preview = mac_window[mac_window.find("private func showPreview"):]
     if "VoiceLaneRuntime.shared.attachPanel()" not in show_preview:
         fail("macOS panel show path does not reattach Voice state")
@@ -264,6 +269,20 @@ def main() -> None:
         fail("macOS panel hide paths do not converge on Voice detach/mute")
     if "additionalPreviewHeight: CGFloat = 0" not in mac_geometry:
         fail("macOS panel geometry lacks a Voice Lane height input")
+    if "PreferredRuntimeVoiceLaneMode" not in bridge \
+            or "_voiceRuntimeActive" not in bridge \
+            or "enabled ? cancellationToken : CancellationToken.None" not in bridge:
+        fail("Windows Voice row can disappear before runtime teardown completes")
+    if "_panelBridgeController.PreferredRuntimeVoiceLaneMode" not in windows_shell:
+        fail("Windows panel geometry follows settings before Voice teardown completes")
+    if "CodexVoiceSessionStatus.Stopping" not in windows_coordinator:
+        fail("Windows Voice teardown does not publish a stopping state")
+    if "_featureTransitionGate.Wait();" not in windows_coordinator \
+            or "dispose-transition-drain" not in windows_verifier:
+        fail("Windows coordinator disposal can bypass an active Voice transition")
+    if 'voiceLaneEl.hidden = mode === "disabled";' not in app_js \
+            or "voiceTeardownVisibleOk" not in app_js:
+        fail("Windows rendered Voice row disappears before runtime teardown completes")
     if 'data-voice-enabled' not in windows_settings_html or 'data-voice-layout' not in windows_settings_html:
         fail("Windows Settings Voice controls missing")
     if 'settings.setVoiceEnabled' not in windows_settings_js or 'settings.setVoiceLayout' not in windows_settings_js:
@@ -280,6 +299,11 @@ def main() -> None:
         fail("Windows Voice availability wire values do not match the rendered contract")
     if "voiceLocalizationOk" not in app_js or 't("voiceStartMicrophone")' not in app_js:
         fail("Windows rendered Voice UI does not verify Japanese and English localized copy")
+    if 't("voiceRegionLabel")' not in app_js \
+            or 'voiceRegionLabel: "音声レーン"' not in (
+                ROOT / "windows" / "ui" / "js" / "i18n.js"
+            ).read_text(encoding="utf-8"):
+        fail("Windows Voice accessibility region label is not localized")
     if "ReadBoundedLineAsync" not in windows_client or ".ReadLineAsync(" in windows_client:
         fail("Windows app-server response allocation is not bounded before newline parsing")
     if "MaxLineBytes" not in windows_client or "utf8ByteCount" not in windows_client:
@@ -333,11 +357,52 @@ def main() -> None:
         fail("macOS adapter error codes bypass the runtime sanitizer")
     if "maxRetainedSessions" not in mac_runtime or "MaxRetainedSessions" not in windows_coordinator:
         fail("Voice session retention is not bounded on both operating systems")
+    if "NormalizeTranscriptRole" not in windows_coordinator \
+            or '"tool"' not in windows_verifier \
+            or "invalid transcript identity or role was published" not in windows_verifier:
+        fail("Windows unknown transcript roles can be presented as Host/system content")
+    if "UnicodeCategory.Format" not in windows_coordinator \
+            or ".properties.generalCategory == .format" not in mac_runtime \
+            or "Unicode format controls survived visible Voice text sanitization" not in windows_verifier \
+            or "scalar_bound_path_or_format_control_redaction" not in (
+                ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
+            ).read_text(encoding="utf-8"):
+        fail("Voice visible text does not strip Unicode format controls on both operating systems")
+    if '"[/Users/alice/private]"' not in windows_verifier \
+            or '"[/Users/alice/private]"' not in (
+                ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
+            ).read_text(encoding="utf-8"):
+        fail("Voice path redaction is not checked after punctuation delimiters")
+    if "runes.Length > 160" not in windows_coordinator \
+            or "lossy Voice identifier collision" not in windows_verifier \
+            or "identifier_collision_rejected" not in (
+                ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
+            ).read_text(encoding="utf-8"):
+        fail("Voice session identifiers can collide after lossy normalization")
+    if "string RootSessionId" not in windows_coordinator \
+            or "sanitized.rootSessionID == rootSessionID" not in mac_runtime \
+            or "delayed transcript crossed roots or a transcript revision duplicated its event ID" not in windows_verifier \
+            or "delayed_transcript_root_isolation" not in (
+                ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
+            ).read_text(encoding="utf-8"):
+        fail("Voice transcript events are not bound to the active root session")
+    if "func sanitized() -> VoiceTranscriptEvent" not in mac_runtime \
+            or "func sanitized() -> VoiceSessionSummary" not in mac_runtime \
+            or "events.firstIndex(where:" not in mac_runtime \
+            or "_events.FindIndex" not in windows_coordinator \
+            or "decoded_session_resanitized" not in (
+                ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
+            ).read_text(encoding="utf-8"):
+        fail("Voice decoded models are not re-sanitized or transcript revisions are not deduplicated")
     if "expansionBlocked" not in app_js:
         fail("Windows compact fallback does not report why Expanded is unavailable")
     if 'waiting_for_approval: "voiceActivityWaitingForApproval"' not in app_js \
             or 'waiting_for_user: "voiceSessionWaitingForUser"' not in app_js:
         fail("Windows Voice renderer does not localize wire-format activity/session states")
+    if 'CodexVoiceAvailability.SignedOut => "signedOut"' not in bridge \
+            or 'CodexVoiceAvailability.SchemaMismatch => "schemaMismatch"' not in bridge \
+            or 'CodexVoiceAvailability.CapabilityBlocked => "capabilityBlocked"' not in bridge:
+        fail("Windows Voice availability wire values do not match the renderer")
     if "japaneseAvailabilityFallbackOk" not in app_js or "englishAvailabilityFallbackOk" not in app_js:
         fail("Windows Voice renderer does not verify compatibility-specific unavailable copy")
     if "monitor.WorkArea.Bottom" not in windows_geometry:
@@ -354,9 +419,22 @@ def main() -> None:
         windows_shell.find("private async Task RunRecoveryStageAsync"):
         windows_shell.find("private void OnWindowWin32MessageReceived")
     ]
-    if staged_recovery.count("await _panelBridgeController.NotifySystemTransitionAsync()") != 1 \
-            or "NotifySystemTransitionAsync()" in recovery_stage:
+    if staged_recovery.count(
+        "await _panelBridgeController.NotifySystemTransitionAsync(cancellationToken)"
+    ) != 1 or "NotifySystemTransitionAsync(" in recovery_stage:
         fail("Windows staged recovery notifies Voice more than once")
+    if "transition-cancellation" not in windows_verifier \
+            or "ScheduleRestart(cancellationToken);" not in windows_coordinator \
+            or "CreateLinkedTokenSource(\n            _lifetime.Token,\n            cancellationToken)" not in windows_coordinator \
+            or "replacement system transition bypassed serialized teardown" not in windows_verifier:
+        fail("Windows stale staged recovery can schedule a replacement after cancellation")
+    mac_verifier = (
+        ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
+    ).read_text(encoding="utf-8")
+    if "await pendingRestart?.value" not in mac_runtime \
+            or "verifyRecoveryWaitsForCancelledStartup" not in mac_verifier \
+            or "Task.sleep(nanoseconds: 20_000_000)" not in mac_verifier:
+        fail("macOS recovery can overlap a cancelled non-cooperative startup")
 
     if runtime_fixture["phase"] != "AN3-B1" \
             or runtime_fixture["operatingSystem"] != "windows" \

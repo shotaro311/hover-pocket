@@ -28,15 +28,15 @@ internal static class VoicePanelGeometry
     }
 
     public static VoiceLaneMode ResolveMode(
-        UserSettings settings,
+        VoiceLaneMode preferred,
+        PanelSize panelSize,
         double availableExtraHeightDips)
     {
-        var preferred = PreferredMode(settings);
         if (preferred != VoiceLaneMode.Expanded)
         {
             return preferred;
         }
-        return availableExtraHeightDips >= ExpandedHeight(settings.PanelSize)
+        return availableExtraHeightDips >= ExpandedHeight(panelSize)
             ? VoiceLaneMode.Expanded
             : VoiceLaneMode.Compact;
     }
@@ -57,15 +57,16 @@ internal static class VoicePanelGeometry
     public static WindowPlacement ExtendDownward(
         WindowPlacement baseline,
         DisplayMonitor monitor,
-        UserSettings settings,
+        PanelSize panelSize,
+        VoiceLaneMode preferredMode,
         out VoiceLaneMode resolvedMode)
     {
         var scaleY = Math.Max(0.01, monitor.ScaleY);
         var monitorBottom = monitor.WorkArea.Bottom;
         var baselineBottom = baseline.PhysicalRect.Top + baseline.PhysicalRect.Height;
         var availableExtraDips = Math.Max(0, monitorBottom - baselineBottom) / scaleY;
-        resolvedMode = ResolveMode(settings, availableExtraDips);
-        var extraDips = Height(settings.PanelSize, resolvedMode);
+        resolvedMode = ResolveMode(preferredMode, panelSize, availableExtraDips);
+        var extraDips = Height(panelSize, resolvedMode);
         var extraPhysical = (int)Math.Round(
             extraDips * scaleY,
             MidpointRounding.AwayFromZero);

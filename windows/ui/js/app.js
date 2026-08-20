@@ -454,9 +454,10 @@ function providerRenderKey(state) {
 
 function renderVoiceLane(state) {
   voiceLaneEl.replaceChildren();
+  voiceLaneEl.setAttribute("aria-label", t("voiceRegionLabel"));
   const lane = state.voiceLane;
   const mode = lane?.mode ?? "disabled";
-  voiceLaneEl.hidden = !state.settings.voiceEnabled || mode === "disabled";
+  voiceLaneEl.hidden = mode === "disabled";
   voiceLaneEl.dataset.mode = mode;
   if (voiceLaneEl.hidden) {
     disposeLocalVoiceTransport();
@@ -1494,16 +1495,28 @@ window.__hoverPocketVerify = {
         progress: { completed: 1, total: 2 },
       }],
     };
+    renderVoiceLane({
+      settings: { voiceEnabled: false },
+      voiceLane: { ...voiceFixture, mode: "compact", sessionStatus: "stopping" },
+    });
+    const voiceTeardownVisibleOk = !voiceLaneEl.hidden
+      && voiceLaneEl.dataset.mode === "compact"
+      && voiceLaneEl.querySelector(".hp-voice-compact") !== null;
     setLanguage("ja");
-    voiceLaneEl.replaceChildren();
-    renderCompactVoiceLane(voiceFixture);
-    const japaneseCompactOk = voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "利用可能 · 承認待ち"
+    renderVoiceLane({
+      settings: { voiceEnabled: true },
+      voiceLane: { ...voiceFixture, mode: "compact" },
+    });
+    const japaneseCompactOk = voiceLaneEl.getAttribute("aria-label") === "音声レーン"
+      && voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "利用可能 · 承認待ち"
       && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "マイクを押すと音声会話を開始します。"
       && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "マイクを開始"
       && voiceLaneEl.querySelector(".hp-voice-microphone")?.disabled === false
       && voiceLaneEl.querySelector(".hp-voice-session-count")?.getAttribute("aria-label") === "セッション 1件";
-    voiceLaneEl.replaceChildren();
-    renderExpandedVoiceLane(voiceFixture);
+    renderVoiceLane({
+      settings: { voiceEnabled: true },
+      voiceLane: { ...voiceFixture, mode: "expanded" },
+    });
     const japaneseExpandedOk = voiceLaneEl.querySelector(".hp-voice-transcript-event")?.textContent === "あなた: 予定を確認して"
       && voiceLaneEl.querySelector(".hp-voice-session-card span")?.textContent?.startsWith("ユーザー操作待ち · 更新 ")
       && voiceLaneEl.querySelector("progress")?.getAttribute("aria-label") === "1 / 2 完了";
@@ -1513,15 +1526,20 @@ window.__hoverPocketVerify = {
       safeErrorCode: "signed_out",
     }) === "サインインが必要";
     setLanguage("en");
-    voiceLaneEl.replaceChildren();
-    renderCompactVoiceLane(voiceFixture);
-    const englishCompactOk = voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "Ready · Waiting for approval"
+    renderVoiceLane({
+      settings: { voiceEnabled: true },
+      voiceLane: { ...voiceFixture, mode: "compact" },
+    });
+    const englishCompactOk = voiceLaneEl.getAttribute("aria-label") === "Voice Lane"
+      && voiceLaneEl.querySelector(".hp-voice-status")?.textContent === "Ready · Waiting for approval"
       && voiceLaneEl.querySelector(".hp-voice-preview")?.textContent === "Press the microphone to start a Voice conversation."
       && voiceLaneEl.querySelector(".hp-voice-microphone")?.getAttribute("aria-label") === "Start microphone"
       && voiceLaneEl.querySelector(".hp-voice-microphone")?.disabled === false
       && voiceLaneEl.querySelector(".hp-voice-session-count")?.getAttribute("aria-label") === "1 sessions";
-    voiceLaneEl.replaceChildren();
-    renderExpandedVoiceLane(voiceFixture);
+    renderVoiceLane({
+      settings: { voiceEnabled: true },
+      voiceLane: { ...voiceFixture, mode: "expanded" },
+    });
     const englishExpandedOk = voiceLaneEl.querySelector(".hp-voice-transcript-event")?.textContent === "You: 予定を確認して"
       && voiceLaneEl.querySelector(".hp-voice-session-card span")?.textContent?.startsWith("Waiting for user · updated ")
       && voiceLaneEl.querySelector("progress")?.getAttribute("aria-label") === "1 of 2 complete";
@@ -1549,6 +1567,7 @@ window.__hoverPocketVerify = {
       echoOk: echo?.value === "ui-round-trip",
       legacyAiLaneNotMountedOk,
       voiceDefaultOffOk,
+      voiceTeardownVisibleOk,
       voiceLocalizationOk,
       voiceTransportContractOk,
       voiceWebRtcHarnessOk,
