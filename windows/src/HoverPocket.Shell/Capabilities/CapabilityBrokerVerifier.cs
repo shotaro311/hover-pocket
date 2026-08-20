@@ -446,7 +446,7 @@ internal sealed class CapabilityBrokerVerifier
             "JST",
             "JST");
         var stateRoot = Path.Combine(root, "pocket-app-user-state");
-        var userStateStore = new PocketAppUserStateStore(
+        using var userStateStore = new PocketAppUserStateStore(
             package.Manifest.Id,
             package.StatePropertyNames,
             stateRoot);
@@ -509,7 +509,7 @@ internal sealed class CapabilityBrokerVerifier
         {
             Require(updateDocument.RootElement.GetProperty("error").ValueKind == JsonValueKind.Null, "pocket_app_state_update");
         }
-        var reloadedStateStore = new PocketAppUserStateStore(
+        using var reloadedStateStore = new PocketAppUserStateStore(
             package.Manifest.Id,
             package.StatePropertyNames,
             stateRoot);
@@ -519,22 +519,52 @@ internal sealed class CapabilityBrokerVerifier
             && reloadedEventRef.ValueKind == JsonValueKind.String
             && reloadedEventRef.GetString() == "primary:sensitive-event-ref",
             "pocket_app_state_persistence");
-        var typedStateStore = new PocketAppUserStateStore(
+        using var typedStateStore = new PocketAppUserStateStore(
             "local.example.typed-state",
             new HashSet<string>(["enabled", "label", "ratio"], StringComparer.Ordinal),
             stateRoot);
         typedStateStore.SetValue("enabled", CapabilityJson.From(true));
         typedStateStore.SetValue("label", CapabilityJson.From("Saved"));
         typedStateStore.SetValue("ratio", CapabilityJson.From(1.5));
-        var typedStateReadback = new PocketAppUserStateStore(
+        using var typedStateReadbackStore = new PocketAppUserStateStore(
             "local.example.typed-state",
             new HashSet<string>(["enabled", "label", "ratio"], StringComparer.Ordinal),
-            stateRoot).Snapshot();
+            stateRoot);
+        var typedStateReadback = typedStateReadbackStore.Snapshot();
         Require(
             typedStateReadback["enabled"].ValueKind == JsonValueKind.True
             && typedStateReadback["label"].GetString() == "Saved"
             && typedStateReadback["ratio"].GetDouble() == 1.5,
             "pocket_app_typed_state_persistence");
+        using var isolatedStateStore = new PocketAppUserStateStore(
+            "local.example.state-isolated-a",
+            new HashSet<string>(["label"], StringComparer.Ordinal),
+            stateRoot);
+        using var otherStateStore = new PocketAppUserStateStore(
+            "local.example.state-isolated-b",
+            new HashSet<string>(["label"], StringComparer.Ordinal),
+            stateRoot);
+        otherStateStore.SetString("label", "other-app");
+        var isolatedDirectory = Path.Combine(stateRoot, "local.example.state-isolated-a");
+        var isolatedBackup = Path.Combine(stateRoot, "local.example.state-isolated-a-backup");
+        var directorySwapBlocked = false;
+        try
+        {
+            Directory.Move(isolatedDirectory, isolatedBackup);
+            Directory.Move(isolatedBackup, isolatedDirectory);
+        }
+        catch (IOException)
+        {
+            directorySwapBlocked = true;
+        }
+        Require(directorySwapBlocked, "pocket_app_state_directory_swap_blocked");
+        using var otherStateReadbackStore = new PocketAppUserStateStore(
+            "local.example.state-isolated-b",
+            new HashSet<string>(["label"], StringComparer.Ordinal),
+            stateRoot);
+        Require(
+            otherStateReadbackStore.Snapshot()["label"].GetString() == "other-app",
+            "pocket_app_state_directory_swap_isolated");
         var forgedStateResponse = await dispatcher.ProcessRawMessageAsync(
             JsonSerializer.Serialize(new
             {

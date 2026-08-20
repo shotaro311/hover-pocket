@@ -376,7 +376,6 @@ function canInvoke(workflow, workflowInputs, inputs, state) {
   const resolved = resolvedWorkflowInputs(workflow, workflowInputs, inputs, state);
   return Boolean(workflow)
     && resolved !== null
-    && Object.keys(resolved).length > 0
     && Object.values(resolved).every((value) => (
       typeof value === "string" ? value.length > 0 : value !== null && value !== undefined
     ));
@@ -420,6 +419,7 @@ export async function runPocketSurfaceUiVerify() {
     },
     workflowInputs: {
       startFocus: ["durationSeconds", "purpose", "selectedEventRef"],
+      runLiteral: [],
     },
     renderModel: {
       root: {
@@ -435,6 +435,7 @@ export async function runPocketSurfaceUiVerify() {
             { label: "Active", value: "active" },
           ] },
           { type: "button", label: "Start focus", workflow: "startFocus" },
+          { type: "button", label: "Run literal", workflow: "runLiteral" },
         ],
       },
     },
@@ -451,6 +452,7 @@ export async function runPocketSurfaceUiVerify() {
   ];
   let baseline;
   let stateWorkflowInputForwarded = false;
+  let inputlessWorkflowInvoked = false;
   let stateBoundControlsPersisted = false;
   let layoutMatrix = true;
   let layoutCases = 0;
@@ -475,6 +477,8 @@ export async function runPocketSurfaceUiVerify() {
             return { saved: true };
           }
           if (method === "pocketApp.invokeWorkflow") {
+            inputlessWorkflowInvoked ||= params?.workflowId === "runLiteral"
+              && Object.keys(params?.inputs ?? {}).length === 0;
             stateWorkflowInputForwarded ||= params?.workflowId === "startFocus"
               && params?.inputs?.selectedEventRef === "event:1"
               && params?.inputs?.purpose === "Focus"
@@ -503,6 +507,7 @@ export async function runPocketSurfaceUiVerify() {
         statePicker.dispatchEvent(new Event("change", { bubbles: true }));
       }
       host.querySelector(".hp-pocket-primary")?.click();
+      host.querySelector('[data-workflow="runLiteral"]')?.click();
       await nextLayout();
       stateBoundControlsPersisted ||= persistedState.get("note") === "After"
         && persistedState.get("enabled") === true
@@ -537,7 +542,7 @@ export async function runPocketSurfaceUiVerify() {
 
   return {
     ...baseline,
-    stateWorkflowInputForwarded,
+    stateWorkflowInputForwarded: stateWorkflowInputForwarded && inputlessWorkflowInvoked,
     stateBoundControlsPersisted,
     layoutMatrix: layoutMatrix && layoutCases === panelCases.length * textCases.length,
   };

@@ -13,7 +13,15 @@ final class PocketAppPinnedDirectory: @unchecked Sendable {
     private let identity: Identity
 
     init(url: URL) throws {
-        let standardized = url.standardizedFileURL
+        let requested = url.standardizedFileURL
+        let standardized: URL
+        if requested.path == "/var" || requested.path.hasPrefix("/var/") {
+            standardized = URL(fileURLWithPath: "/private" + requested.path, isDirectory: true)
+        } else if requested.path == "/tmp" || requested.path.hasPrefix("/tmp/") {
+            standardized = URL(fileURLWithPath: "/private" + requested.path, isDirectory: true)
+        } else {
+            standardized = requested
+        }
         let opened: Int32
         do {
             opened = try Self.openAbsoluteDirectory(standardized, createMissing: true)
@@ -51,11 +59,18 @@ final class PocketAppPinnedDirectory: @unchecked Sendable {
         }
     }
 
+    func withValidatedDescriptor<T>(_ body: (Int32) throws -> T) throws -> T {
+        try validate()
+        let result = try body(descriptor)
+        try validate()
+        return result
+    }
+
     private static func openAbsoluteDirectory(_ url: URL, createMissing: Bool) throws -> Int32 {
         guard url.isFileURL, url.path.hasPrefix("/") else { throw PocketAppGenerationError.rootUnsafe }
         var current = open("/", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard current >= 0 else { throw PocketAppGenerationError.rootUnsafe }
-        for component in url.standardizedFileURL.pathComponents.dropFirst() {
+        for component in url.pathComponents.dropFirst() {
             let next: Int32 = component.withCString { pointer in
                 openat(current, pointer, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
             }

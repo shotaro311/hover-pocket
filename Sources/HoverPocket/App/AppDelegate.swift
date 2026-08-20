@@ -136,13 +136,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     generator = nil
                 }
+                let appSettings = hoverWindowController.appSettings
                 generationController = try PocketAppGenerationController(
                     rootDirectory: generatedHostRoot,
                     userDataRoot: userDataRoot,
                     generationRoot: generationRoot.appendingPathComponent("Drafts", isDirectory: true),
                     generator: generator,
                     runtimeActivationReadback: { receipt in
-                        try activationRegistry.synchronize(receipt)
+                        let readback = try activationRegistry.synchronize(receipt)
+                        if receipt.state == .removed {
+                            appSettings.pruneProviderConfiguration(PluginID(
+                                rawValue: PocketSurfaceRegistry.generatedProviderID(
+                                    appID: receipt.packageID
+                                )
+                            ))
+                        }
+                        return readback
                     }
                 )
                 generatedActivationRegistry = activationRegistry

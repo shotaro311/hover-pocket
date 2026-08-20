@@ -342,6 +342,20 @@ enum PocketAppPackageVerificationCommand {
                     bindingDigest: duplicateProposal.bindingDigest
                 )
                 require(try installed.readbackVerified && manager.activePackage(packageID: proposal.packageID)?.manifestDigest == proposal.packageDigest, "lifecycle_install_readback", failures: &failures)
+                let appsRoot = root.appendingPathComponent("Apps", isDirectory: true)
+                try Data("Finder metadata".utf8).write(to: appsRoot.appendingPathComponent(".DS_Store"))
+                try FileManager.default.createDirectory(
+                    at: appsRoot.appendingPathComponent("not-a-package", isDirectory: true),
+                    withIntermediateDirectories: false
+                )
+                let snapshotWithUnmanagedEntries = try manager.managementSnapshot()
+                require(
+                    snapshotWithUnmanagedEntries.packages.contains {
+                        $0.packageID == proposal.packageID && $0.state == .enabled
+                    } && snapshotWithUnmanagedEntries.issues.isEmpty,
+                    "lifecycle_unmanaged_entries_do_not_block_snapshot",
+                    failures: &failures
+                )
                 try Data(contentsOf: fixtureURL("package/intent.md")).write(to: draftRoot.appendingPathComponent("intent.md"), options: .atomic)
 
                 let installedIntent = root

@@ -297,6 +297,15 @@ internal sealed class PocketAppPackageVerifier
                 var installed = manager.Install(proposal, grant, now);
                 manager.Reject(duplicateProposal.RequestId, duplicateProposal.BindingDigest);
                 Require(installed.ReadbackVerified && manager.ActivePackage(proposal.PackageId)?.ManifestDigest == proposal.PackageDigest, "lifecycle_install_readback");
+                var appsRoot = Path.Combine(root, "Apps");
+                File.WriteAllText(Path.Combine(appsRoot, ".DS_Store"), "Finder metadata", new UTF8Encoding(false));
+                Directory.CreateDirectory(Path.Combine(appsRoot, "not-a-package"));
+                var snapshotWithUnmanagedEntries = manager.ManagementSnapshot();
+                Require(
+                    snapshotWithUnmanagedEntries.Packages.Any(item =>
+                        item.PackageId == proposal.PackageId && item.State == PocketAppLifecycleState.Enabled)
+                    && snapshotWithUnmanagedEntries.Issues.Count == 0,
+                    "lifecycle_unmanaged_entries_do_not_block_snapshot");
                 File.WriteAllBytes(Path.Combine(draftRoot, "intent.md"), FixtureData("package/intent.md"));
 
                 var installedIntent = Path.Combine(

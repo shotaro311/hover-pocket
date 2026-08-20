@@ -10,7 +10,7 @@ internal sealed record PocketAppWorkflowDraft(
     CapabilityExecutionPlan Plan,
     CapabilityBrokerPreparation Preparation);
 
-internal sealed class PocketAppExecutionRuntime
+internal sealed class PocketAppExecutionRuntime : IDisposable
 {
     private static readonly HashSet<PocketCapabilityKey> PresentableWorkflowCapabilities =
     [
@@ -23,6 +23,7 @@ internal sealed class PocketAppExecutionRuntime
     private readonly IReadOnlySet<string> _permissions;
     private readonly TimeZoneInfo _timeZone;
     private readonly PocketAppActivationLease? _activationLease;
+    private bool _disposed;
 
     public PocketAppExecutionRuntime(
         PocketAppPackage package,
@@ -52,6 +53,13 @@ internal sealed class PocketAppExecutionRuntime
     internal bool IsActivationActive => _activationLease?.IsActive ?? true;
 
     internal void EnsureActivationActive() => _activationLease?.RequireActive();
+
+    public void Dispose()
+    {
+        if (_disposed) { return; }
+        _disposed = true;
+        UserStateStore?.Dispose();
+    }
 
     public async Task<JsonElement> QueryAsync(
         string reference,

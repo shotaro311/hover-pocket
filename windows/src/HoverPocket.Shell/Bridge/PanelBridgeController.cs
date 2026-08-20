@@ -324,6 +324,7 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.MediaSourceOpened -= OnControlsMediaSourceOpened;
         _controlsBridgeController.Dispose();
         _aiNativeExecutionLease?.Invalidate();
+        _pocketAppHostController?.Dispose();
         _pocketAppGenerationController?.Dispose();
         _generatedPocketApps?.Dispose();
     }

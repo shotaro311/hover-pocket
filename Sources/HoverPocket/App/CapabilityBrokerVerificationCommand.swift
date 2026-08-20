@@ -576,6 +576,52 @@ enum CapabilityBrokerVerificationCommand {
                 && typedStateReadback["ratio"] == .number(1.5),
             "pocket_app_typed_state_persistence"
         )
+        let isolatedStateStore = try PocketAppUserStateStore(
+            packageID: "local.example.state-isolated-a",
+            allowedKeys: ["label"],
+            rootDirectory: stateRoot
+        )
+        let otherStateStore = try PocketAppUserStateStore(
+            packageID: "local.example.state-isolated-b",
+            allowedKeys: ["label"],
+            rootDirectory: stateRoot
+        )
+        try otherStateStore.setString("other-app", for: "label")
+        let isolatedDirectory = stateRoot.appendingPathComponent(
+            "local.example.state-isolated-a",
+            isDirectory: true
+        )
+        let isolatedBackup = stateRoot.appendingPathComponent(
+            "local.example.state-isolated-a-backup",
+            isDirectory: true
+        )
+        let otherDirectory = stateRoot.appendingPathComponent(
+            "local.example.state-isolated-b",
+            isDirectory: true
+        )
+        try FileManager.default.moveItem(at: isolatedDirectory, to: isolatedBackup)
+        try FileManager.default.createSymbolicLink(
+            at: isolatedDirectory,
+            withDestinationURL: otherDirectory
+        )
+        defer {
+            try? FileManager.default.removeItem(at: isolatedDirectory)
+            try? FileManager.default.moveItem(at: isolatedBackup, to: isolatedDirectory)
+        }
+        do {
+            try isolatedStateStore.setString("cross-app-write", for: "label")
+            throw BrokerVerificationFailure("pocket_app_state_directory_swap_accepted")
+        } catch PocketAppUserStateStoreError.persistenceFailed {
+        }
+        let otherStateReadback = try PocketAppUserStateStore(
+            packageID: "local.example.state-isolated-b",
+            allowedKeys: ["label"],
+            rootDirectory: stateRoot
+        ).snapshot()
+        try require(
+            otherStateReadback["label"] == .string("other-app"),
+            "pocket_app_state_directory_swap_isolated"
+        )
         do {
             try reloadedStateStore.setString("forbidden", for: "unknown")
             throw BrokerVerificationFailure("pocket_app_unknown_state_key_accepted")

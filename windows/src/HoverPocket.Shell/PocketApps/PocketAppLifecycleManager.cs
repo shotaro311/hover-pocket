@@ -635,9 +635,9 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         var result = new List<PocketAppManagedPackage>();
         foreach (var appDirectory in Directory.EnumerateDirectories(AppsRoot).Order(StringComparer.Ordinal))
         {
-            EnsureDirectoryNotReparsePoint(appDirectory);
             var packageId = Path.GetFileName(appDirectory);
-            if (!ValidPackageId(packageId)) { throw Failure("LIFECYCLE_CORRUPT_VERSION"); }
+            if (!ValidPackageId(packageId)) { continue; }
+            EnsureDirectoryNotReparsePoint(appDirectory);
             var package = ManagedPackageCore(packageId);
             if (package is not null) { result.Add(package); }
         }
@@ -661,7 +661,7 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         foreach (var appDirectory in Directory.EnumerateDirectories(AppsRoot).Order(StringComparer.Ordinal))
         {
             var packageId = Path.GetFileName(appDirectory);
-            if (!ValidPackageId(packageId)) { throw Failure("LIFECYCLE_CORRUPT_VERSION"); }
+            if (!ValidPackageId(packageId)) { continue; }
             try
             {
                 EnsureDirectoryNotReparsePoint(appDirectory);

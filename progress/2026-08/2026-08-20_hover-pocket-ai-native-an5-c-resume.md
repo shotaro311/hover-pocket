@@ -32,6 +32,17 @@
 - 無関係な文字サイズ変更を挟むdisable / enable / remove回帰をWindows Settings verifierへ追加した。
 - dynamic provider一覧が確定できない起動時は、有効なgenerated-provider IDを破壊しないbootstrap正規化へfail safeする。
 
+### 最終reviewの追加修正
+
+- Windowsの入力宣言が空の正当なworkflowを、入力数ではなく未解決値の有無で実行可否判定する。literalだけで構成したworkflowが空objectをHostへ渡して実行されるrendered UI回帰を追加した。
+- macOS / Windowsの`Apps`直下に`.DS_Store`やpackage IDではない管理外directoryが混在しても無視し、正常な生成Appの管理snapshotと起動時復元を継続する。両OSのlifecycle回帰を追加した。
+
+### 最終security reviewの追加修正
+
+- 生成Appの`UserData/<appID>/state.json`をpath名だけで扱わない。macOSはpackage directoryのdevice / inodeを固定し、`openat(O_NOFOLLOW)`と同一directory内の`renameat`だけで読書きする。親pathがsymlinkへ差し替わった場合は実行前後のidentity readbackで拒否する。
+- WindowsはUserData rootとpackage directoryをreparse拒否・`FileShare.Delete`なしのhandleで固定する。state読込みも`OPEN_REPARSE_POINT`のfile handleから行い、runtime解除時にhandleを確実に閉じる。他App directoryへの差替えを試みてもrenameを拒否し、他App stateが不変である回帰を追加した。
+- macOSは生成Providerのdisable中には表示設定を保持する一方、preserve-only removeのruntime readback成功後にorder、hidden、preferred、last-selectedから対象Provider IDを削除する。UserDefaults再読込回帰を追加した。
+
 ## 検証
 
 ### macOSローカル
@@ -43,6 +54,8 @@
 - `--verify-pocket-surface`: 成功、negative cases 15
 - `python3 script/verify_pocket_contracts.py`: 成功、13 schema / 59 fixture
 - `git diff --check`: 成功
+- 最終review追加修正後もwarnings-as-errors build、Pocket App lifecycle / generation、Broker、Capability、Pocket Surface、Timer、13 schema / 59 fixture、JavaScript syntax、`git diff --check`が成功した。Windowsのrendered WebView回帰はPR CIを最終gateとする。
+- 最終security修正後もwarnings-as-errors build、Broker、Capability、Pocket App lifecycle / generation、Pocket Surface、Timer、Clipboard、Calculator、Panel layout 128件、13 schema / 59 fixture、JavaScript syntax、`git diff --check`が成功した。macOSのdirectory差替え拒否と削除済みProvider設定pruneもdeterministic回帰で確認した。Windowsはローカルに.NET SDKがないためPR CIを最終gateとする。
 
 ### PR CI
 
@@ -62,8 +75,8 @@
 ## Review
 
 - state束縛control永続化、取消後workflow確定、disabled生成Provider設定保持の3件へ修正根拠を返信した。
-- 既存14 review threadはすべてresolvedにした。
-- source headの全CI成功後に`@codex review`を1回依頼した。
+- 既存14 review threadはすべてresolvedにした。その後の最終head reviewで検出した入力0件workflowと管理外Apps entryの2件を追加修正した。
+- source headの全CI成功後に`@codex review`を1回依頼した。追加修正の2 threadはpush後のCIとreadbackを確認して解決する。
 
 ## 残りgate
 

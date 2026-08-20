@@ -305,6 +305,17 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    func pruneProviderConfiguration(_ id: PluginID) {
+        providerOrderRawValues.removeAll { $0 == id.rawValue }
+        hiddenProviderRawValues.remove(id.rawValue)
+        if preferredProviderRawValue == id.rawValue {
+            preferredProviderRawValue = nil
+        }
+        if lastSelectedProviderRawValue == id.rawValue {
+            lastSelectedProviderRawValue = nil
+        }
+    }
+
     private func setOptionalString(_ value: String?, forKey key: String) {
         if let value, !value.isEmpty {
             defaults.set(value, forKey: key)

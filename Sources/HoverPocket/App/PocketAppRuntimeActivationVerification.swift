@@ -329,6 +329,21 @@ enum PocketAppRuntimeActivationVerification {
                 let generatedID = PluginID(
                     rawValue: PocketSurfaceRegistry.generatedProviderID(appID: appB)
                 )
+                let settings = AppSettings(defaults: defaults)
+                settings.providerOrderRawValues = ["sticky", generatedID.rawValue]
+                settings.hiddenProviderRawValues = [generatedID.rawValue]
+                settings.preferredProviderRawValue = generatedID.rawValue
+                settings.lastSelectedProviderRawValue = generatedID.rawValue
+                settings.pruneProviderConfiguration(generatedID)
+                let prunedSettings = AppSettings(defaults: defaults)
+                require(
+                    !prunedSettings.providerOrderRawValues.contains(generatedID.rawValue)
+                        && !prunedSettings.hiddenProviderRawValues.contains(generatedID.rawValue)
+                        && prunedSettings.preferredProviderRawValue != generatedID.rawValue
+                        && prunedSettings.lastSelectedProviderRawValue != generatedID.rawValue,
+                    "activation_removed_provider_settings_pruned",
+                    failures: &failures
+                )
                 providerStore.select(generatedID)
                 require(
                     providerStore.visibleManifests.contains { $0.id == generatedID }

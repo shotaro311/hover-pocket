@@ -91,6 +91,7 @@ internal sealed class PocketExecutionRuntimeRegistry
             if (_entries.Remove(readback.AppId, out var previous))
             {
                 previous.ActivationLease?.Invalidate();
+                DisposeRuntime(previous.RuntimeHandle);
             }
             _entries[readback.AppId] = new Entry(readback, runtimeHandle, activationLease);
         }
@@ -103,8 +104,14 @@ internal sealed class PocketExecutionRuntimeRegistry
             if (_entries.Remove(appId, out var previous))
             {
                 previous.ActivationLease?.Invalidate();
+                DisposeRuntime(previous.RuntimeHandle);
             }
         }
+    }
+
+    private static void DisposeRuntime(object runtimeHandle)
+    {
+        if (runtimeHandle is IDisposable disposable) { disposable.Dispose(); }
     }
 }
 

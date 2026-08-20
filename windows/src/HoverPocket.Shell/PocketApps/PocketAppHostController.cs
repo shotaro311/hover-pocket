@@ -6,12 +6,13 @@ using HoverPocket.Shell.Configuration;
 
 namespace HoverPocket.Shell.PocketApps;
 
-internal sealed class PocketAppHostController
+internal sealed class PocketAppHostController : IDisposable
 {
     private readonly PocketAppExecutionRuntime _runtime;
     private readonly Func<UserSettings> _settings;
     private readonly object _eventRefSync = new();
     private readonly HashSet<string> _allowedEventRefs = new(StringComparer.Ordinal);
+    private bool _disposed;
 
     public PocketAppHostController(
         PocketAppExecutionRuntime runtime,
@@ -26,6 +27,13 @@ internal sealed class PocketAppHostController
     internal string AppId => _runtime.Package.Manifest.Id;
 
     internal string AppName => _runtime.Package.Manifest.Name;
+
+    public void Dispose()
+    {
+        if (_disposed) { return; }
+        _disposed = true;
+        _runtime.Dispose();
+    }
 
     public object BuildSurfaceState(string surfaceId = "main")
     {

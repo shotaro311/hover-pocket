@@ -610,7 +610,7 @@ final class PocketAppLifecycleManager {
         guard FileManager.default.fileExists(atPath: appsRoot.path) else { return [] }
         return try safeChildDirectories(of: appsRoot).compactMap { directory in
             let packageID = directory.lastPathComponent
-            guard Self.validPackageID(packageID) else { throw PocketAppLifecycleError.corruptVersion }
+            guard Self.validPackageID(packageID) else { return nil }
             return try managedPackage(packageID: packageID)
         }.sorted { $0.packageID < $1.packageID }
     }
@@ -629,9 +629,7 @@ final class PocketAppLifecycleManager {
         ).sorted { $0.lastPathComponent < $1.lastPathComponent }
         for directory in entries {
             let packageID = directory.lastPathComponent
-            guard Self.validPackageID(packageID) else {
-                throw PocketAppLifecycleError.corruptVersion
-            }
+            guard Self.validPackageID(packageID) else { continue }
             do {
                 let values = try directory.resourceValues(forKeys: keys)
                 guard values.isDirectory == true, values.isSymbolicLink != true else {
