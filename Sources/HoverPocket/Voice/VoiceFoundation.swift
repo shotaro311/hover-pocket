@@ -309,6 +309,7 @@ final class VoiceLaneRuntime: ObservableObject {
     private var transcriptBuffer = VoiceTranscriptBuffer()
     private var allSessions: [String: VoiceSessionSummary] = [:]
     private var rootSessionID: String?
+    private var configurationTask: Task<Void, Never>?
     private var restartTask: Task<Void, Never>?
     private var restartGeneration = 0
     private var restartAttempt = 0
@@ -318,13 +319,32 @@ final class VoiceLaneRuntime: ObservableObject {
         self.restartDelaysNanoseconds = restartDelaysNanoseconds
     }
 
+    @discardableResult
     func configure(
         featureEnabled: Bool,
         preferredLayout: VoiceLaneLayoutPreference,
         adapterFactory: AdapterFactory?
-    ) {
+    ) -> Task<Void, Never> {
+        let previousTask = configurationTask
+        let task = Task { @MainActor [weak self] in
+            await previousTask?.value
+            guard let self else { return }
+            await self.applyConfiguration(
+                featureEnabled: featureEnabled,
+                preferredLayout: preferredLayout,
+                adapterFactory: adapterFactory
+            )
+        }
+        configurationTask = task
+        return task
+    }
+
+    private func applyConfiguration(
+        featureEnabled: Bool,
+        preferredLayout: VoiceLaneLayoutPreference,
+        adapterFactory: AdapterFactory?
+    ) async {
         let wasEnabled = self.featureEnabled
-        self.featureEnabled = featureEnabled
         self.preferredLayout = preferredLayout
         self.adapterFactory = adapterFactory
         if wasEnabled, featureEnabled {
@@ -332,23 +352,30 @@ final class VoiceLaneRuntime: ObservableObject {
             return
         }
         restartGeneration &+= 1
-        restartTask?.cancel()
+        let pendingRestart = restartTask
+        pendingRestart?.cancel()
         restartTask = nil
         restartAttempt = 0
 
         guard featureEnabled else {
+            if wasEnabled {
+                publish(connection: .recovering, activity: .reconnecting, muted: true)
+            }
+            self.featureEnabled = false
             let previousAdapter = adapter
             adapter = nil
             transcriptBuffer = VoiceTranscriptBuffer()
             allSessions.removeAll()
             rootSessionID = nil
-            snapshot = .disabled
             if let previousAdapter {
-                Task { await previousAdapter.stop() }
+                await previousAdapter.stop()
             }
+            await pendingRestart?.value
+            snapshot = .disabled
             return
         }
 
+        self.featureEnabled = true
         publish(
             mode: preferredLayout == .expanded ? .expanded : .compact,
             connection: .disconnected,
@@ -514,16 +541,21 @@ final class VoiceLaneRuntime: ObservableObject {
     }
 
     func shutdown() async {
+        let pendingConfiguration = configurationTask
+        configurationTask = nil
+        await pendingConfiguration?.value
         featureEnabled = false
         restartGeneration &+= 1
-        restartTask?.cancel()
+        let pendingRestart = restartTask
+        pendingRestart?.cancel()
         restartTask = nil
         let currentAdapter = adapter
         adapter = nil
-        snapshot = .disabled
         if let currentAdapter {
             await currentAdapter.stop()
         }
+        await pendingRestart?.value
+        snapshot = .disabled
     }
 
     private func scheduleBoundedRestart() {

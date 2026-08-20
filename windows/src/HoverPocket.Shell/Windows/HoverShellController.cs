@@ -967,7 +967,7 @@ internal sealed class HoverShellController : IDisposable
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            _panelBridgeController.NotifySystemTransition();
+            await _panelBridgeController.NotifySystemTransitionAsync();
             _voiceTransitionCountForVerify++;
             foreach (var targetDelay in RecoveryDelays)
             {

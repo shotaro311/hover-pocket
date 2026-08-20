@@ -277,7 +277,8 @@ def main() -> None:
         windows_shell.find("private async Task RunRecoveryStageAsync"):
         windows_shell.find("private void OnWindowWin32MessageReceived")
     ]
-    if staged_recovery.count("NotifySystemTransition()") != 1 or "NotifySystemTransition()" in recovery_stage:
+    if staged_recovery.count("await _panelBridgeController.NotifySystemTransitionAsync()") != 1 \
+            or "NotifySystemTransitionAsync()" in recovery_stage:
         fail("Windows staged recovery notifies Voice more than once")
 
     print(

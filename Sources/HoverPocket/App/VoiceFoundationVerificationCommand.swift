@@ -13,6 +13,7 @@ enum VoiceFoundationVerificationCommand {
         try await verifyDefaultOffAndFakeAdapter()
         try await verifyAppLifetimeDetachAndRestart()
         try await verifyStaleAdapterFailureDoesNotReplaceReadyAdapter()
+        try await verifyDisableWaitsForAdapterTeardown()
         try await verifyShutdownWaitsForAdapterTeardown()
     }
 
@@ -171,24 +172,23 @@ enum VoiceFoundationVerificationCommand {
     private static func verifyDefaultOffAndFakeAdapter() async throws {
         let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
         var factoryCalled = false
-        runtime.configure(
+        await runtime.configure(
             featureEnabled: false,
             preferredLayout: .compact,
             adapterFactory: {
                 factoryCalled = true
                 return FakeVoiceSessionAdapter()
             }
-        )
-        await Task.yield()
+        ).value
         guard !factoryCalled, runtime.snapshot == .disabled else {
             throw VoiceFoundationVerificationError.failed("default_off_side_effect")
         }
 
-        runtime.configure(
+        await runtime.configure(
             featureEnabled: true,
             preferredLayout: .compact,
             adapterFactory: nil
-        )
+        ).value
         guard runtime.snapshot.mode == .compact,
               runtime.snapshot.connection == .disconnected,
               runtime.snapshot.safeErrorCode == "voice_adapter_unavailable"
@@ -238,11 +238,11 @@ enum VoiceFoundationVerificationCommand {
     private static func verifyAppLifetimeDetachAndRestart() async throws {
         let adapter = FakeVoiceSessionAdapter(startFailuresRemaining: 1)
         let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0, 0])
-        runtime.configure(
+        await runtime.configure(
             featureEnabled: true,
             preferredLayout: .compact,
             adapterFactory: { adapter }
-        )
+        ).value
         try await waitUntil {
             runtime.snapshot.connection == .connected
         }
@@ -351,26 +351,69 @@ enum VoiceFoundationVerificationCommand {
             adapterFactory: factory
         )
         try await waitUntil { stale.startCount == 1 }
-        runtime.configure(
+        let disableTask = runtime.configure(
             featureEnabled: false,
             preferredLayout: .compact,
             adapterFactory: nil
         )
-        runtime.configure(
+        let replacementTask = runtime.configure(
             featureEnabled: true,
             preferredLayout: .compact,
             adapterFactory: factory
         )
+        stale.failStart()
+        await disableTask.value
+        await replacementTask.value
         try await waitUntil {
             runtime.snapshot.connection == .connected && healthy.startCount == 1
         }
-        stale.failStart()
         try await waitUntil { stale.stopCount == 1 }
         guard runtime.snapshot.connection == .connected,
               runtime.snapshot.safeErrorCode == nil,
               healthy.startCount == 1
         else {
             throw VoiceFoundationVerificationError.failed("stale_adapter_failure_replaced_ready_adapter")
+        }
+        await runtime.shutdown()
+    }
+
+    private static func verifyDisableWaitsForAdapterTeardown() async throws {
+        let oldAdapter = GatedStopVoiceSessionAdapter()
+        let replacementAdapter = FakeVoiceSessionAdapter()
+        let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        await runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            adapterFactory: { oldAdapter }
+        ).value
+        try await waitUntil { runtime.snapshot.connection == .connected }
+
+        let disableTask = runtime.configure(
+            featureEnabled: false,
+            preferredLayout: .compact,
+            adapterFactory: nil
+        )
+        try await waitUntil { oldAdapter.stopCount == 1 }
+        guard runtime.snapshot != .disabled else {
+            throw VoiceFoundationVerificationError.failed("voice_off_published_before_adapter_teardown")
+        }
+
+        let replacementTask = runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            adapterFactory: { replacementAdapter }
+        )
+        await Task.yield()
+        guard replacementAdapter.startCount == 0 else {
+            throw VoiceFoundationVerificationError.failed("replacement_started_before_adapter_teardown")
+        }
+
+        oldAdapter.finishStop()
+        await disableTask.value
+        await replacementTask.value
+        try await waitUntil { runtime.snapshot.connection == .connected }
+        guard replacementAdapter.startCount == 1 else {
+            throw VoiceFoundationVerificationError.failed("replacement_not_started_after_adapter_teardown")
         }
         await runtime.shutdown()
     }

@@ -54,11 +54,13 @@ internal sealed class VoiceFoundationVerifier
         await RunCaseAsync("disable-retry-cleanup", VerifyDisableDisposesInFlightRetryCandidateAsync, timeout.Token);
         await RunCaseAsync("crash-cleanup", VerifyTransportCrashDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("transition-cleanup", VerifySystemTransitionDisposesCandidateAsync, timeout.Token);
+        await RunCaseAsync("transition-inflight-cleanup", VerifySystemTransitionDisposesInFlightCandidateAsync, timeout.Token);
+        await RunCaseAsync("process-launch-failure", VerifyProcessLaunchFailureIsBoundedAsync, timeout.Token);
         await RunCaseAsync("stale-start", VerifyStaleStartFailureDoesNotReplaceReadyClientAsync, timeout.Token);
         await RunCaseAsync("stale-request", VerifyStaleRequestDoesNotBlockReadyClientAsync, timeout.Token);
         await RunCaseAsync("oversized-response", VerifyOversizedResponseFailsClosedAsync, timeout.Token);
         await RunCaseAsync("multibyte-response", VerifyMultibyteResponseFailsClosedAsync, timeout.Token);
-        VerifyUnavailableTransitionPreservesBlockedState();
+        await VerifyUnavailableTransitionPreservesBlockedStateAsync();
         VerifyTranscriptAndRootScope();
         VerifyUiDetachPreservesSession();
         VerifyGeometry();
@@ -416,12 +418,66 @@ internal sealed class VoiceFoundationVerifier
             restartDelays: []);
 
         await coordinator.InitializeAsync(cancellationToken);
-        coordinator.NotifySystemTransition();
+        await coordinator.NotifySystemTransitionAsync();
         await WaitUntilAsync(() => Volatile.Read(ref disposeCount) == 1, cancellationToken);
         if (coordinator.Snapshot.TransportAttached
             || coordinator.Snapshot.AppServerProcessId is not null)
         {
             _failures.Add("system transition retained the previous app-server client");
+        }
+    }
+
+    private async Task VerifySystemTransitionDisposesInFlightCandidateAsync(CancellationToken cancellationToken)
+    {
+        var factoryCalls = 0;
+        var staleDisposeCount = 0;
+        var staleHarness = new DeferredInitializeHarness(
+            () => Interlocked.Increment(ref staleDisposeCount));
+        var healthyHarness = new AppServerHarness();
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ => Task.FromResult(
+                Interlocked.Increment(ref factoryCalls) == 1
+                    ? staleHarness.CreateClient()
+                    : healthyHarness.CreateClient()),
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: [TimeSpan.Zero]);
+
+        var startup = coordinator.InitializeAsync(cancellationToken);
+        await staleHarness.InitializationRequested.WaitAsync(cancellationToken);
+        await coordinator.NotifySystemTransitionAsync();
+        await startup;
+        await WaitUntilAsync(
+            () => coordinator.Snapshot.Availability == CodexVoiceAvailability.Ready,
+            cancellationToken);
+
+        if (Volatile.Read(ref staleDisposeCount) != 1
+            || factoryCalls != 2
+            || !coordinator.Snapshot.TransportAttached)
+        {
+            _failures.Add("system transition overlapped an in-flight startup with its replacement");
+        }
+    }
+
+    private async Task VerifyProcessLaunchFailureIsBoundedAsync(CancellationToken cancellationToken)
+    {
+        var factoryCalls = 0;
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ =>
+            {
+                factoryCalls += 1;
+                throw new System.ComponentModel.Win32Exception("synthetic_process_launch_failure");
+            },
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: []);
+
+        await coordinator.InitializeAsync(cancellationToken);
+        if (factoryCalls != 1
+            || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure
+            || coordinator.Snapshot.LastErrorCode != "voice_restart_exhausted")
+        {
+            _failures.Add("process launch failure escaped bounded startup recovery");
         }
     }
 
@@ -497,11 +553,11 @@ internal sealed class VoiceFoundationVerifier
         }
     }
 
-    private void VerifyUnavailableTransitionPreservesBlockedState()
+    private async Task VerifyUnavailableTransitionPreservesBlockedStateAsync()
     {
         using var coordinator = new CodexVoiceCoordinator(featureEnabled: true);
         coordinator.SetMuted(false);
-        coordinator.NotifySystemTransition();
+        await coordinator.NotifySystemTransitionAsync();
         if (coordinator.Snapshot.Availability != CodexVoiceAvailability.Unavailable
             || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure
             || coordinator.Snapshot.Activity != VoiceActivity.Failed
@@ -598,6 +654,10 @@ internal sealed class VoiceFoundationVerifier
         if (absolutePaths.Any(path => VoiceTextSafety.SanitizeVisibleText(path, 200) != "[redacted]"))
         {
             _failures.Add("absolute filesystem path redaction was incomplete");
+        }
+        if (VoiceTextSafety.SanitizeErrorCode("token=secret /tmp/private.txt") != "_redacted_")
+        {
+            _failures.Add("sensitive error code was normalized before redaction");
         }
     }
 

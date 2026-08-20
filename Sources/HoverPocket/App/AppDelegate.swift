@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hoverWindowController = HoverWindowController()
     private var statusBarMenuController: StatusBarMenuController?
     private var settingsCancellables = Set<AnyCancellable>()
+    private var voiceConfigurationTask: Task<Void, Never>?
     private var voiceTerminationTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -197,7 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func configureVoiceRuntime() {
         let settings = hoverWindowController.appSettings
-        VoiceLaneRuntime.shared.configure(
+        voiceConfigurationTask = VoiceLaneRuntime.shared.configure(
             featureEnabled: settings.voiceEnabled,
             preferredLayout: settings.voiceLaneLayoutPreference,
             adapterFactory: nil
@@ -237,6 +238,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard voiceTerminationTask == nil else { return .terminateLater }
         voiceTerminationTask = Task { @MainActor [weak self] in
+            await self?.voiceConfigurationTask?.value
             await VoiceLaneRuntime.shared.shutdown()
             self?.voiceTerminationTask = nil
             sender.reply(toApplicationShouldTerminate: true)

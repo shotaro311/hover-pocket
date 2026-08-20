@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -199,11 +200,12 @@ internal static class VoiceTextSafety
 
     public static string SanitizeErrorCode(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        var visible = SanitizeVisibleText(value, 80);
+        if (string.IsNullOrWhiteSpace(visible))
         {
             return "voice_unavailable";
         }
-        var normalized = new string(value.ToLowerInvariant().Select(character =>
+        var normalized = new string(visible.ToLowerInvariant().Select(character =>
             char.IsLetterOrDigit(character) || character == '_' ? character : '_').ToArray());
         return normalized.Length <= 80 ? normalized : normalized[..80];
     }
@@ -498,7 +500,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         }
     }
 
-    public void NotifySystemTransition()
+    public async Task NotifySystemTransitionAsync()
     {
         if (!_featureEnabled)
         {
@@ -519,11 +521,16 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             return;
         }
         Interlocked.Increment(ref _generation);
-        CancelRestart();
+        await CancelRestartAsync().ConfigureAwait(false);
+        await CancelStartupAsync().ConfigureAwait(false);
         var client = DetachClient();
         if (client is not null)
         {
-            _ = DisposeDetachedClientAsync(client);
+            await DisposeDetachedClientAsync(client).ConfigureAwait(false);
+        }
+        if (!_featureEnabled || _disposed)
+        {
+            return;
         }
         UpdateSnapshot(snapshot => snapshot with
         {
@@ -675,6 +682,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             return;
         }
         catch (Exception exception) when (exception is CodexAppServerProtocolException
+            or Win32Exception
             or IOException
             or InvalidOperationException)
         {
