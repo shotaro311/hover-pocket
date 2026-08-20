@@ -81,3 +81,12 @@ pr: 22
 - 新規Codex reviewが追加された場合は、内容を確認して同じreadback gateを再実行する。
 - Core Integration Gateの残差をlive監査し、公式positive Broker-only tool policyまたはBrokerだけを公開する専用最小runtimeの採否と受け入れ証拠を確定する。
 - 実Codex Voice E2Eは正のBroker-only tool policyが公式に提供・検証されるまで実行せず、Draftを維持する。
+
+## AN3-B1最終統合
+
+- PR #21最終head `97099eaf2fa03d7f29ccf6eb9bdb652c6e748992`を通常mergeし、merge commit `b197f3a5ab582bce9c5705c2423778625bc58feb`へ統合した。履歴改変とforce pushは行っていない。
+- 競合は`PanelBridgeController.cs`と`CodexVoiceCoordinator.cs`の2ファイルだけである。Host compositionはCapability Brokerから作る`CodexVoiceCapabilityRuntime`とVoice実runtimeの両方を接続し、初期runtime stateもHost geometryへ反映する。
+- Voice設定変更はHost semaphoreで直列化したまま、OFF時はrequest取消の影響を受けずCoordinator停止を完了する。Coordinatorはactive tool requestを先に取消し、`Stopping`へ遷移してからrestart / startup / app-server / Realtimeを順序どおり停止する。Disposeも同じfeature transition gate内でtool取消とprocess teardownを完了する。
+- ローカルではSwift warnings-as-errors build、macOS Voice / Panel layout 128件 / Capability 14 handler / Broker / Pocket Surface / Pocket App / Timer、Voice contract 42件、共通contract 13 schema / 60 fixture、Windows JavaScript syntax、Settings generation target、`git diff --check`が成功した。
+- exact integration Security scan `95c5ee8a-8105-4bcf-97f7-d3bd3f10f02e`は16 / 16 review item、coverage complete、reportable finding 0件、sealed completeである。Codex 0.145.0のBroker-only policy不在によるproduction fail-closedは維持する。
+- 統合headのWindows [32419442331](https://github.com/shotaro311/hover-pocket/actions/runs/32419442331)、macOS [32419442358](https://github.com/shotaro311/hover-pocket/actions/runs/32419442358)、3OS contract / compare [32419442324](https://github.com/shotaro311/hover-pocket/actions/runs/32419442324)、PR Router [32419439979](https://github.com/shotaro311/hover-pocket/actions/runs/32419439979)は全7 check成功。PR #22はDraft、未解決review thread 0件、`CLEAN / MERGEABLE`、remote parity `0 / 0`である。
