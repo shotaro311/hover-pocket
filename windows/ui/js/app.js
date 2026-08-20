@@ -1129,9 +1129,8 @@ function voiceTranscriptRoleText(value) {
   const keys = {
     user: "voiceRoleUser",
     assistant: "voiceRoleAssistant",
-    system: "voiceRoleSystem",
   };
-  return t(keys[value] ?? "voiceRoleSystem");
+  return t(keys[value] ?? "voiceRoleAssistant");
 }
 
 function voiceErrorText(value) {

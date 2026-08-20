@@ -241,7 +241,6 @@ internal static class VoiceTextSafety
     {
         "user" => "user",
         "assistant" => "assistant",
-        "system" => "system",
         _ => null
     };
 }
@@ -1258,9 +1257,9 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         string? role,
         string? delta)
     {
-        var safeRole = VoiceTextSafety.SanitizeVisibleText(role, 24);
+        var safeRole = VoiceTextSafety.NormalizeTranscriptRole(role);
         var safeDelta = VoiceTextSafety.SanitizeVisibleText(delta, 512);
-        if (string.IsNullOrEmpty(safeRole) || string.IsNullOrEmpty(safeDelta))
+        if (safeRole is null || string.IsNullOrEmpty(safeDelta))
         {
             return;
         }
@@ -1290,9 +1289,9 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         string? role,
         string? text)
     {
-        var safeRole = VoiceTextSafety.SanitizeVisibleText(role, 24);
+        var safeRole = VoiceTextSafety.NormalizeTranscriptRole(role);
         var safeText = VoiceTextSafety.SanitizeVisibleText(text, 1_024);
-        if (string.IsNullOrEmpty(safeRole) || string.IsNullOrEmpty(safeText))
+        if (safeRole is null || string.IsNullOrEmpty(safeText))
         {
             return;
         }

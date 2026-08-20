@@ -299,6 +299,9 @@ def main() -> None:
         fail("Windows Voice availability wire values do not match the rendered contract")
     if "voiceLocalizationOk" not in app_js or 't("voiceStartMicrophone")' not in app_js:
         fail("Windows rendered Voice UI does not verify Japanese and English localized copy")
+    if 'keys[value] ?? "voiceRoleAssistant"' not in app_js \
+            or 'system: "voiceRoleSystem"' in app_js:
+        fail("Windows Voice transcript UI still grants Host authority to an untrusted role")
     if 't("voiceRegionLabel")' not in app_js \
             or 'voiceRegionLabel: "音声レーン"' not in (
                 ROOT / "windows" / "ui" / "js" / "i18n.js"
