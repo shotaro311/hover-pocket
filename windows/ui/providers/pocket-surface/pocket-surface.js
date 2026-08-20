@@ -244,16 +244,21 @@ export function renderPocketSurfaceProvider(context) {
     return queueStatePersistence(pending.binding, pending.value);
   }
 
-  function flushPendingTextState() {
+  async function flushPendingTextState() {
     const pending = [...pendingTextState.values()];
-    return Promise.all(pending.map((item) => flushBoundState(item.binding)));
+    const pendingFlushes = pending.map((item) => flushBoundState(item.binding));
+    const activeWrites = [...statePersistenceTails.values()];
+    const results = await Promise.all([...new Set([...pendingFlushes, ...activeWrites])]);
+    return results.every((result) => result !== false);
   }
 
   return {
     refresh: load,
-    dispose() {
-      void flushPendingTextState();
+    async dispose() {
+      const saved = await flushPendingTextState();
+      if (!saved) return false;
       disposed = true;
+      return true;
     },
   };
 }
@@ -594,9 +599,10 @@ export async function runPocketSurfaceUiVerify() {
           && persistedState.get("secondaryEventRef") === "event:jst",
         approvalHostOwned: !host.querySelector("[data-approval], .hp-pocket-approval"),
       };
-      provider?.dispose?.();
+      const disposalSaved = await provider?.dispose?.();
       await nextLayout();
-      stateBoundControlsPersisted ||= persistedState.get("note") === "After"
+      stateBoundControlsPersisted ||= disposalSaved !== false
+        && persistedState.get("note") === "After"
         && persistedState.get("enabled") === true
         && persistedState.get("mode") === "active";
       host.remove();

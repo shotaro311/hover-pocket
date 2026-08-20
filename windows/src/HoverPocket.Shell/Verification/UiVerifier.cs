@@ -188,6 +188,16 @@ internal sealed class UiVerifier
                     _failures.Add($"provider: switch failed from {result.OriginalProvider} to {result.SwitchedProvider}");
                 }
 
+                if (!result.ProviderSwitchCleanupAwaitedOk)
+                {
+                    _failures.Add("provider: switch was requested before the active provider finished flushing pending state");
+                }
+
+                if (!result.ProviderSwitchBlockedOnSaveFailureOk)
+                {
+                    _failures.Add("provider: switch continued after the active provider failed to flush pending state");
+                }
+
                 if (!result.SettingsWriteOk)
                 {
                     _failures.Add($"settings: panel size write failed for {result.ProbePanelSize}");

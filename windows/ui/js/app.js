@@ -232,7 +232,39 @@ async function flushProviderSelection() {
     if (currentState?.selectedProvider?.id === providerId) {
       continue;
     }
-    render(await request("provider.select", { id: providerId }));
+    const selected = await selectProvider(providerId);
+    if (!selected) return;
+  }
+}
+
+async function disposeActiveProvider() {
+  const cleanup = providerCleanup;
+  if (!cleanup) return true;
+  const disposed = await cleanup();
+  if (disposed === false) return false;
+  if (providerCleanup === cleanup) {
+    providerCleanup = null;
+    providerRefresh = null;
+  }
+  return true;
+}
+
+async function selectProvider(providerId, selectRequest = request) {
+  if (!providerId || currentState?.selectedProvider?.id === providerId) {
+    return currentState;
+  }
+
+  const previousState = currentState;
+  if (!await disposeActiveProvider()) return null;
+  try {
+    const selected = await selectRequest("provider.select", { id: providerId });
+    render(selected);
+    return selected;
+  } catch (error) {
+    if (previousState && currentState?.selectedProvider?.id === previousState.selectedProvider?.id) {
+      render(previousState, { forceProvider: true });
+    }
+    throw error;
   }
 }
 
@@ -532,9 +564,31 @@ window.__hoverPocketVerify = {
     }
     window.__hoverPocketVerifyStep = "verify-pocket-surface-renderer";
     const pocketSurfaceVerify = await runPocketSurfaceUiVerify();
-    const targetProvider = state.providers.find((provider) => provider.id !== originalProvider) ?? state.providers[0];
+    const providerBeforeSwitch = currentState?.selectedProvider?.id;
+    const targetProvider = state.providers.find((provider) => provider.id !== providerBeforeSwitch) ?? state.providers[0];
     window.__hoverPocketVerifyStep = "switch-provider";
-    const switchedState = await request("provider.select", { id: targetProvider.id });
+    const cleanupBeforeSwitch = providerCleanup;
+    let providerSelectCalledAfterFailedCleanup = false;
+    providerCleanup = async () => false;
+    const blockedSwitchState = await selectProvider(targetProvider.id, async () => {
+      providerSelectCalledAfterFailedCleanup = true;
+      return currentState;
+    });
+    const providerSwitchBlockedOnSaveFailure = blockedSwitchState === null
+      && !providerSelectCalledAfterFailedCleanup
+      && currentState?.selectedProvider?.id === providerBeforeSwitch;
+    let providerCleanupAwaited = false;
+    let providerSelectAfterCleanup = false;
+    providerCleanup = async () => {
+      const disposed = await cleanupBeforeSwitch?.();
+      await Promise.resolve();
+      providerCleanupAwaited = true;
+      return disposed;
+    };
+    const switchedState = await selectProvider(targetProvider.id, async (method, params) => {
+      providerSelectAfterCleanup = providerCleanupAwaited;
+      return request(method, params);
+    });
     const originalPanelSize = state.settings.panelSize;
     const probePanelSize = originalPanelSize === "small" ? "medium" : "small";
     window.__hoverPocketVerifyStep = "resize-probe";
@@ -579,10 +633,12 @@ window.__hoverPocketVerify = {
       pocketSurfaceApprovalHostOwnedOk: pocketSurfaceVerify.approvalHostOwned,
       pocketSurfaceLayoutMatrixOk: pocketSurfaceVerify.layoutMatrix,
       textSizeScaleReadyOk: getComputedStyle(document.documentElement).getPropertyValue("--hp-text-scale").trim() !== "",
-      providerSwitchOk: switchedState.selectedProvider?.id === targetProvider.id,
+      providerSwitchOk: switchedState?.selectedProvider?.id === targetProvider.id,
+      providerSwitchCleanupAwaitedOk: providerSelectAfterCleanup,
+      providerSwitchBlockedOnSaveFailureOk: providerSwitchBlockedOnSaveFailure,
       settingsWriteOk: resizedState.settings?.panelSize === probePanelSize,
       originalProvider,
-      switchedProvider: switchedState.selectedProvider?.id,
+      switchedProvider: switchedState?.selectedProvider?.id,
       originalPanelSize,
       probePanelSize,
     };

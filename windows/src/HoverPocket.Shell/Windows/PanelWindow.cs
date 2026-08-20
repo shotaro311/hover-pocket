@@ -791,6 +791,8 @@ internal sealed record UiWebVerifyResult(
     bool PocketSurfaceLayoutMatrixOk,
     bool TextSizeScaleReadyOk,
     bool ProviderSwitchOk,
+    bool ProviderSwitchCleanupAwaitedOk,
+    bool ProviderSwitchBlockedOnSaveFailureOk,
     bool SettingsWriteOk,
     string OriginalProvider,
     string SwitchedProvider,
