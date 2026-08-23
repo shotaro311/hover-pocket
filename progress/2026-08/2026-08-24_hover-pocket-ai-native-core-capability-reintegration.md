@@ -49,12 +49,21 @@ Windows DDC false readbackはコード上成立し、direct manual UIから到�
 - `git diff --check`: 成功。
 - Windows .NET SDK: このMacには未導入。Windows build / Controls / Capability / Broker verifierはPR CIで確認する。
 
+## PR / CI readback
+
+Draft PR [#24](https://github.com/shotaro311/hover-pocket/pull/24)を作成した。implementation headは`5a1369ca61f18f661a675251356fd422cf10dc42`。
+
+- Windows verify: [32650364409](https://github.com/shotaro311/hover-pocket/actions/runs/32650364409) 成功。
+- macOS Capability verify: [32650364430](https://github.com/shotaro311/hover-pocket/actions/runs/32650364430) 成功。
+- PR contract / 3OS compare: [32650364422](https://github.com/shotaro311/hover-pocket/actions/runs/32650364422) 成功。
+- push contract / 3OS compare: [32650352338](https://github.com/shotaro311/hover-pocket/actions/runs/32650352338) 成功。
+- PR Router: [32650364463](https://github.com/shotaro311/hover-pocket/actions/runs/32650364463) 成功。
+- GitHub PR state: Draft、`MERGEABLE / CLEAN`、11 / 11 check成功。
+
 ## 次の手順
 
-1. 全差分をstageし、current main向けの1 commitとしてpushする。
-2. Draft PRを作り、Windows / macOS / 3OS contract / PR Routerの全checkをreadbackする。
-3. CI失敗があれば、このbranchだけで修正して再検証する。
-4. generic Controls / sticky.delete公開前gateは、別の限定hardening単位で閉じる。
-5. ChatGPT ProのAN8-C返却はdelivery claimとreceipt / artifact hash検証後だけ、別worktreeへ適用する。
+1. PR #24をDraftのままhuman reviewへ回し、自動mergeしない。
+2. generic Controls / sticky.delete公開前gateは、別の限定hardening単位で閉じる。
+3. ChatGPT ProのAN8-C返却はdelivery claimとreceipt / artifact hash検証後だけ、別worktreeへ適用する。
 
 Windows unsigned betaは明示承認なしに実行しない。

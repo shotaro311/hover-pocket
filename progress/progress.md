@@ -12,8 +12,9 @@ status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; a
 - Windows DDC/CIでは、write後read失敗時に楽観更新値を成功readbackへ転用しない。`fresh.Error`があれば`WriteVerified=false`とし、deterministic verifierへ回帰を追加した。macOS外部display音量も、通常UIは従来の記憶値fallbackを維持する一方、Capability readbackでは実DDC/CoreAudio観測がなければfail closedにした。
 - exact working-tree Security scan `8d09288e-c2a3-4c21-988d-1c96ca07ca71`は変更source 30 / 30をreviewし、sealed complete、reportable finding 0件となった。DDC false readbackは実在したが現行は同一ユーザーのlocal manual UIだけでself-onlyのためsecurity policy上ignore。実装安全gateとして上記修正を適用した。Sticky delete target-version binding、完全なcross-platform media causal identity、custom WebView bridge分離はgeneric Voice / MCP / generated UI公開前の未完了gateとして残す。
 - ローカルMacでSwift warnings-as-errors build、Capability 20 handler、Broker 21 descriptor / 20 handler、Pocket Surface、Pocket App package / lifecycle / generation、共通contract 13 schema / 64 fixtureの2回成功、`git diff --check`をreadbackした。Windows .NET SDKはこのMacにないため、Windows build / Controls / Capability / Broker verifierはPR CIを必須gateとする。
+- Draft PR [#24](https://github.com/shotaro311/hover-pocket/pull/24)のimplementation head `5a1369c`で、Windows、macOS、Ubuntu / macOS / Windows contract、2件のcross-OS compare、PR Routerを含む11 / 11 checkが成功し、`MERGEABLE / CLEAN`をreadbackした。PRはDraftのまま保持し、自動mergeしていない。
 - ChatGPT Pro OrchestratorへAN8-C backup / export / restore / data-version readbackのexact base `2d8b89c`・両OSchanges patchを委譲済み。run `20260824-000623-hoverpocket-an8-cpocket-app-workspacebackup-export-restoredata-version-readbackmacoswindowschanges-patch`は自動回収待ちで、返却時はdelivery ID / state hash claim後だけ適用する。
-- 次はこのreintegration差分をcommit / pushしてDraft PRと両OS CIを通し、同時にAN8-C返却を隔離worktreeで検証する。Windows unsigned betaは明示承認なしに実行しない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-core-capability-reintegration.md`。
+- 次はPR #24のhuman reviewを受け、同時にAN8-C返却を隔離worktreeで検証する。Windows unsigned betaは明示承認なしに実行しない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-core-capability-reintegration.md`。
 
 ## 2026-08-15 AI-native Controls Capability
 
