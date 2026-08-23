@@ -65,10 +65,14 @@ AN5 credential brokerのproduction有効化前gateとして残っていた、接
 - coverageはpartial。ローカルに.NET SDKがないためWindows exact-head dynamic validationをDraft PR CIへ、正式配布binaryのtimestamped Authenticode signer bindingをproduction有効化前gateへ残した。
 - production credential store / confined generator E2Eはこの差分に含まれず、production confidential generationは引き続きOFFである。
 - scan使用量はtotal 2,292,338 tokens、input 2,286,313、cached input 2,252,288、output 6,025でreadbackした。
+- Windows stdin安定化まで含むfinal exact range `81cf0eee2a3ba85fd4b746b10b6d0e7584b35aa7..1d55dab31b8f7bf3255f5cd994b25ee88a05833e`を、Codex Security diff scan `210c26b0-0934-4e9d-875e-60e7fd663a63`で再走査し、完了・封印・再読込した。
+- final scanは変更source 5 / 5件を確認し、reportable findingは0件である。snapshot digestは`codex-security-snapshot/v1:sha256:ca026630152d323ee57fbdf94f326bbb28cb195b7106cad365a8aa73d3211126`。
+- macOS exact PID / uid / designated requirement、Windows exact PID / executable path、stdin bootstrap、one-shot lease、server差し替え拒否、bounded parser、generic errorの各surfaceは`no_issue_found`である。
+- coverageはpartial。Windows exact-head dynamic validationはCIで完了したためdeferredから外し、正式配布binaryのtimestamped Authenticode publisher bindingと、production store → broker → confined generator E2Eだけをproduction有効化前gateとして残した。
+- final scan使用量はtotal 6,322,371 tokens、input 6,310,908、cached input 6,165,504、output 11,463でreadbackした。
 
 ## 未完了gate
 
-- stacked Draft PRでWindows Release warning 0 / error 0、`helper`、`same-binary-wrong-pid`、`wrong-server-pid`、`foreign-peer`の全case終端をreadbackする。
 - Windows正式署名済みbinaryではexpected PIDに加えてAuthenticode signerを固定する。
 - AN3-B3A credential store統合後に、実store → broker → confined generatorの値非露出E2Eを別gateで行う。
 
@@ -78,7 +82,8 @@ AN5 credential brokerのproduction有効化前gateとして残っていた、接
 - 初回Windows run [32672078767](https://github.com/shotaro311/hover-pocket/actions/runs/32672078767)はRelease build、Settings、Capability、Brokerまで成功した。Pocket Surface内のcredential brokerは`helper`開始後に10秒でtimeoutし、同caseのENDへ到達しなかった。
 - .NET公式契約を再確認し、child側は`Console.OpenStandardInput()`から標準入力streamを明示取得するよう変更した。Host側はOS依存の`WriteLine`を使わず、UTF-8 JSONとLFを明示的に書く。
 - `Environment.ProcessPath`がapphostではなく`dotnet` hostを指す実行形態にも対応し、その場合だけentry assembly pathを先頭argumentへ追加する。launch modeはsecretを含まない固定markerだけをverification logへ残す。
-- 修正後Windows CIは未readbackである。
+- 修正後head `1d55dab31b8f7bf3255f5cd994b25ee88a05833e`で、Windows [32672304607](https://github.com/shotaro311/hover-pocket/actions/runs/32672304607)、macOS [32672304592](https://github.com/shotaro311/hover-pocket/actions/runs/32672304592)、PR Router [32672304100](https://github.com/shotaro311/hover-pocket/actions/runs/32672304100)がすべて成功した。
+- Windows Release buildはwarning 0 / error 0で、`lease`、`named-pipe`、`wrong-capability`、`foreign-peer`、`unauthorized-peer`、`helper`、`same-binary-wrong-pid`、`wrong-server-pid`の全caseがBEGIN / ENDへ到達した。apphost launch markerだけが出力され、endpoint、capability、secretはlogへ出ていない。
 
 ## Pro run状態
 
