@@ -83,6 +83,16 @@ final class AINativeRuntime: ObservableObject {
         preservedManagedGeneratedProviderIDs.remove(providerID)
     }
 
+    func recordGeneratedAppUse(appID: String) {
+        generatedActivationRegistry?.recordUse(appID: appID)
+        pocketAppGenerationController?.refreshHealth()
+    }
+
+    func recoverAfterSystemTransition() {
+        _ = generatedActivationRegistry?.recoverAfterSystemTransition()
+        pocketAppGenerationController?.recoverAfterSystemTransition()
+    }
+
     func prepareTodayFocus(
         event: GoogleCalendarEventOccurrence,
         durationSeconds: Int = 1_500,

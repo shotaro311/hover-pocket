@@ -449,6 +449,11 @@ internal sealed class PanelBridgeController : IDisposable
         var builtInPocketAppAvailable = CurrentSettings.AiNativeEnabled
             && _pocketAppHostController?.IsActivationActive == true;
         var generatedRoute = SelectedGeneratedRoute();
+        if (includePocketSurface && generatedRoute is not null)
+        {
+            _generatedPocketApps?.RecordUse(generatedRoute.AppId);
+            _pocketAppGenerationController?.RefreshHealth();
+        }
         var selectedPocketSurface = includePocketSurface
             ? selected?.Id == "today-focus" && builtInPocketAppAvailable
                 ? _pocketAppHostController?.BuildSurfaceState()
@@ -715,6 +720,8 @@ internal sealed class PanelBridgeController : IDisposable
             && string.Equals(route.AppId, appId, StringComparison.Ordinal)
             && _generatedPocketApps?.SurfaceRegistry.HostController(appId, route.SurfaceId) is { } generatedHost)
         {
+            _generatedPocketApps?.RecordUse(appId);
+            _pocketAppGenerationController?.RefreshHealth();
             return generatedHost;
         }
 
@@ -731,6 +738,11 @@ internal sealed class PanelBridgeController : IDisposable
         }
 
         _selectedProviderId = provider.Id;
+        if (SelectedGeneratedRoute() is { } generatedRoute)
+        {
+            _generatedPocketApps?.RecordUse(generatedRoute.AppId);
+            _pocketAppGenerationController?.RefreshHealth();
+        }
         PersistLastSelectedProvider(provider.Id);
         return await PublishStateAsync(cancellationToken);
     }
@@ -1489,9 +1501,17 @@ internal sealed class PanelBridgeController : IDisposable
         _ = PostStateEventOnUiThreadAsync("state.changed");
     }
 
-    public Task NotifySystemTransitionAsync(CancellationToken cancellationToken = default)
+    public async Task NotifySystemTransitionAsync(CancellationToken cancellationToken = default)
     {
-        return _voiceCoordinator.NotifySystemTransitionAsync(cancellationToken);
+        try
+        {
+            await _voiceCoordinator.NotifySystemTransitionAsync(cancellationToken);
+        }
+        finally
+        {
+            try { _ = _generatedPocketApps?.RecoverAfterSystemTransition(); } catch { }
+            _pocketAppGenerationController?.RecoverAfterSystemTransition();
+        }
     }
 
     private void OnVoiceSnapshotChanged(object? sender, CodexVoiceSnapshot snapshot)

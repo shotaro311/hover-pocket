@@ -7,6 +7,7 @@ final class PocketAppGenerationController: ObservableObject {
     @Published private(set) var pendingProposal: PocketAppLifecycleProposal?
     @Published private(set) var managedPackages: [PocketAppManagedPackage] = []
     @Published private(set) var managementIssues: [PocketAppManagementIssue] = []
+    @Published private(set) var appHealth: [PocketAppHealthSnapshot] = []
     @Published private(set) var lastReceipt: PocketAppLifecycleReceipt?
     @Published private(set) var errorCode: String?
     @Published private(set) var pendingAllowsActivation = false
@@ -50,7 +51,17 @@ final class PocketAppGenerationController: ObservableObject {
         let snapshot = try lifecycle.managementSnapshot()
         managedPackages = snapshot.packages.filter { $0.state != .removed }
         managementIssues = snapshot.issues
+        appHealth = try lifecycle.healthSnapshots()
         try validatePins()
+    }
+
+    func refreshHealth() {
+        guard let observed = try? lifecycle.healthSnapshots() else { return }
+        appHealth = observed
+    }
+
+    func recoverAfterSystemTransition() {
+        try? refreshManagedPackages()
     }
 
     func generate(userRequest: String, updating packageID: String? = nil) async {
@@ -454,6 +465,7 @@ final class PocketAppGenerationController: ObservableObject {
         let snapshot = try lifecycle.managementSnapshot()
         managedPackages = snapshot.packages.filter { $0.state != .removed }
         managementIssues = snapshot.issues
+        appHealth = try lifecycle.healthSnapshots()
         try validatePins()
     }
 

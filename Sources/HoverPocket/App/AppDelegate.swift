@@ -241,11 +241,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func workspaceDidWake() {
         VoiceLaneRuntime.shared.recoverAfterSystemTransition()
+        AINativeRuntime.shared.recoverAfterSystemTransition()
         hoverWindowController.recoverAfterSystemTransition()
     }
 
     @objc private func workspaceSessionDidBecomeActive() {
         VoiceLaneRuntime.shared.recoverAfterSystemTransition()
+        AINativeRuntime.shared.recoverAfterSystemTransition()
         hoverWindowController.recoverAfterSystemTransition()
     }
 

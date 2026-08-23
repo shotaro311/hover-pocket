@@ -21,6 +21,7 @@ internal sealed class PocketAppGenerationController : IDisposable
     private PocketAppLifecycleReceipt? _lastReceipt;
     private IReadOnlyList<PocketAppManagedPackage> _managedPackages = Array.Empty<PocketAppManagedPackage>();
     private IReadOnlyList<PocketAppManagementIssue> _managementIssues = Array.Empty<PocketAppManagementIssue>();
+    private IReadOnlyList<PocketAppHealthSnapshot> _appHealth = Array.Empty<PocketAppHealthSnapshot>();
     private string? _errorCode;
     private CancellationTokenSource? _generationCancellation;
     private bool _enabled = true;
@@ -120,6 +121,7 @@ internal sealed class PocketAppGenerationController : IDisposable
                 receipt = _lastReceipt is null ? null : ReceiptState(_lastReceipt),
                 managedApps = _managedPackages.Select(ManagedState).ToArray(),
                 managementIssues = _managementIssues.Select(ManagementIssueState).ToArray(),
+                appHealth = _appHealth.Select(HealthState).ToArray(),
                 storageBoundary = "separate_definition_data_receipts",
                 activation = "explicit_approval_only"
             };
@@ -717,12 +719,31 @@ internal sealed class PocketAppGenerationController : IDisposable
         var observed = snapshot.Packages
             .Where(item => item.State != PocketAppLifecycleState.Removed)
             .ToArray();
+        var health = _lifecycle.HealthSnapshots();
         lock (_stateSync)
         {
             _managedPackages = observed;
             _managementIssues = snapshot.Issues;
+            _appHealth = health;
         }
         ValidatePins();
+    }
+
+    internal void RefreshHealth()
+    {
+        try
+        {
+            var observed = _lifecycle.HealthSnapshots();
+            lock (_stateSync) { _appHealth = observed; }
+        }
+        catch
+        {
+        }
+    }
+
+    internal void RecoverAfterSystemTransition()
+    {
+        try { RefreshManagedPackages(); } catch { RefreshHealth(); }
     }
 
     private void RecordCommittedReceipt(
@@ -875,6 +896,7 @@ internal sealed class PocketAppGenerationController : IDisposable
             receipt = _lastReceipt is null ? null : ReceiptState(_lastReceipt),
             managedApps = _managedPackages.Select(ManagedState).ToArray(),
             managementIssues = _managementIssues.Select(ManagementIssueState).ToArray(),
+            appHealth = _appHealth.Select(HealthState).ToArray(),
             storageBoundary = "separate_definition_data_receipts",
             activation = "explicit_approval_only"
         };
@@ -923,6 +945,17 @@ internal sealed class PocketAppGenerationController : IDisposable
         removalAllowed = issue.RemovalAllowed,
         migrationAvailable = issue.MigrationAvailable,
         suggestedVersion = issue.SuggestedVersion
+    };
+
+    private static object HealthState(PocketAppHealthSnapshot health) => new
+    {
+        appId = health.PackageId,
+        status = health.Status.ToString().ToLowerInvariant(),
+        reasonCode = health.ReasonCode,
+        lastUsedAt = health.LastUsedAt,
+        lastSuccessfulActivationAt = health.LastSuccessfulActivationAt,
+        consecutiveActivationFailures = health.ConsecutiveActivationFailures,
+        disableSuggested = health.DisableSuggested
     };
 
     private static object ReceiptState(PocketAppLifecycleReceipt receipt) => new
