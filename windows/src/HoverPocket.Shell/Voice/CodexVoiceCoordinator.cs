@@ -922,7 +922,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
                 clientGeneration.Value) != clientGeneration.Value)
         {
             DetachClientIfCurrent(client);
-            _ = DisposeDetachedClientAsync(client);
+            TrackTransportTeardown(DisposeDetachedClientAsync(client));
             return;
         }
 

@@ -49,6 +49,7 @@ internal sealed class VoiceFoundationVerifier
         await RunCaseAsync("initialize-request", VerifyInitializeRequestCannotBePromotedAsync, timeout.Token);
         await RunCaseAsync("disconnect-before-promotion", VerifyDisconnectBeforePromotionAsync, timeout.Token);
         await RunCaseAsync("disconnect-during-promotion", VerifyDisconnectDuringPromotionAsync, timeout.Token);
+        await RunCaseAsync("stale-disconnect-teardown", VerifyStaleDisconnectTeardownBlocksReenableAsync, timeout.Token);
         await RunCaseAsync("restart", VerifyRestartIsBoundedAsync, timeout.Token);
         await RunCaseAsync("failed-initialize-cleanup", VerifyFailedInitializeDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("disable-inflight-cleanup", VerifyDisableDisposesInFlightCandidateAsync, timeout.Token);
@@ -533,6 +534,54 @@ internal sealed class VoiceFoundationVerifier
             || coordinator.Snapshot.AppServerProcessId is not null)
         {
             _failures.Add("a disconnected promoted candidate overwrote the failed state with ready");
+        }
+    }
+
+    private async Task VerifyStaleDisconnectTeardownBlocksReenableAsync(
+        CancellationToken cancellationToken)
+    {
+        var staleHarness = new DeferredInitializeGatedDisposeHarness();
+        var replacementHarness = new AppServerHarness();
+        var factoryCalls = 0;
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ => Task.FromResult(
+                Interlocked.Increment(ref factoryCalls) == 1
+                    ? staleHarness.CreateClient()
+                    : replacementHarness.CreateClient()),
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: []);
+
+        var startup = coordinator.InitializeAsync(cancellationToken);
+        await staleHarness.InitializationRequested.WaitAsync(cancellationToken);
+        coordinator.SnapshotChanged += (_, snapshot) =>
+        {
+            if (snapshot.SessionStatus != CodexVoiceSessionStatus.Stopping)
+            {
+                return;
+            }
+            staleHarness.Close();
+            staleHarness.DisposeStarted.GetAwaiter().GetResult();
+        };
+
+        var disable = coordinator.SetFeatureEnabledAsync(false, cancellationToken);
+        await staleHarness.DisposeStarted.WaitAsync(cancellationToken);
+        var enable = coordinator.SetFeatureEnabledAsync(true, cancellationToken);
+        await Task.Yield();
+        if (disable.IsCompleted || enable.IsCompleted || Volatile.Read(ref factoryCalls) != 1)
+        {
+            _failures.Add("stale startup disconnect released Voice before owner teardown completed");
+        }
+
+        staleHarness.ReleaseDispose();
+        await startup;
+        await disable;
+        await enable;
+        if (coordinator.Snapshot.Availability != CodexVoiceAvailability.Ready
+            || !coordinator.Snapshot.TransportAttached
+            || Volatile.Read(ref factoryCalls) != 2)
+        {
+            _failures.Add("stale startup disconnect did not allow one ready replacement after teardown");
         }
     }
 
@@ -1121,6 +1170,35 @@ internal sealed class VoiceFoundationVerifier
                 @params = new { }
             }));
         }
+    }
+
+    private sealed class DeferredInitializeGatedDisposeHarness
+    {
+        private readonly ChannelLineReader _reader = new();
+        private readonly TaskCompletionSource<bool> _initializationRequested = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _disposeStarted = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _releaseDispose = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task InitializationRequested => _initializationRequested.Task;
+        public Task DisposeStarted => _disposeStarted.Task;
+
+        public CodexAppServerClient CreateClient() =>
+            CodexAppServerClient.AttachForTesting(
+                _reader,
+                new DeferredInitializeWriter(_initializationRequested),
+                TimeSpan.FromSeconds(1),
+                async () =>
+                {
+                    _disposeStarted.TrySetResult(true);
+                    await _releaseDispose.Task.ConfigureAwait(false);
+                    _reader.Dispose();
+                });
+
+        public void Close() => _reader.Dispose();
+        public void ReleaseDispose() => _releaseDispose.TrySetResult(true);
     }
 
     private sealed class AppServerHarness
