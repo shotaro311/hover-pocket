@@ -43,11 +43,27 @@
 - `git diff --check`: 成功。
 - このMacにはPowerShell / .NET SDKがないため、PowerShell parser、contract test、Windows Release buildはDraft PR CIを最終受入gateにする。
 
+### Draft PR readback
+
+- Draft PR [#29](https://github.com/shotaro311/hover-pocket/pull/29)を、`codex/ai-native-an8-app-health`をbaseにしたstack PRとして作成した。
+- code head `397b52f4a81ec14ff01ac8cdd96a3786b1a87829`のWindows run [32658702169](https://github.com/shotaro311/hover-pocket/actions/runs/32658702169)は成功した。
+  - Release build: warning 0 / error 0。
+  - PowerShell parser: 成功。
+  - `windows_release_signing_contract_verify=ok`をreadbackした。
+  - Capabilities、Broker、Pocket Surface、Voice、Updater、rendered WebView UIを含む全stepが成功した。
+- release readback workflowはpush [32658690390](https://github.com/shotaro311/hover-pocket/actions/runs/32658690390)とPR [32658702176](https://github.com/shotaro311/hover-pocket/actions/runs/32658702176)でdeterministic testsとPowerShell publisher contractが成功した。公開asset jobはschedule / manual dispatch限定のためskipが正しい。
+- PRは`Draft / MERGEABLE / CLEAN`、review / comment 0件、remote parity `0 / 0`である。
+
+## Security review note
+
+- Codex Security diff scan `ad2ab060-a5e7-4e6f-93d7-c02981da8a93`はpreflight 3 / 3に合格したが、Workbenchがworking-tree inventoryを0件と返し、実Git差分6件を登録できなかったためsealed reportにはしていない。
+- exact Git差分6件は手動で全件確認した。既存出力再利用による余剰payload混入のhardeningを適用し、空でないdirectory / file / reparse pointのfail-closed contractをWindows CIで確認した。
+- TAC access statusはconnector未接続のため未確認であり、保護scan出力のUI表示可否は未確認である。
+
 ## Remaining gates
 
-1. Windows CI / release readback CIでPowerShell contractを実行し、artifact / logをreadbackする。
-2. 正規コード署名証明書を取得し、Windows certificate storeへ安全に導入する。secretをGitやprogressへ記録しない。
-3. 正規publisher証明書SHA-256をrepository variableへ登録する。
-4. formal modeで署名済みWindows release候補を生成し、ローカル3成果物readbackを通す。
-5. Windows専用tagへ`--latest=false`で公開し、formal readback workflowで公開3成果物の署名・timestamp・publisher一致を再検証する。
-6. 署名済み旧版 / 新版が揃った後、Windows install / update / rollback / re-upgrade / uninstall / reinstall transitionを実行する。
+1. 正規コード署名証明書を取得し、Windows certificate storeへ安全に導入する。secretをGitやprogressへ記録しない。
+2. 正規publisher証明書SHA-256をrepository variableへ登録する。
+3. formal modeで署名済みWindows release候補を生成し、ローカル3成果物readbackを通す。
+4. Windows専用tagへ`--latest=false`で公開し、formal readback workflowで公開3成果物の署名・timestamp・publisher一致を再検証する。
+5. 署名済み旧版 / 新版が揃った後、Windows install / update / rollback / re-upgrade / uninstall / reinstall transitionを実行する。
