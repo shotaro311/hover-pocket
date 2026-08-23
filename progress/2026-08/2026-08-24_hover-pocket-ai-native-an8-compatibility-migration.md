@@ -24,6 +24,12 @@ AN8完了条件のうち、古いCapabilityに廃止猶予を設け、ユーザ�
 - `git diff --check`: 成功。
 - このMacには.NET SDKがないため、Windows C# Release build / native verifier / Settings bridge / rendered WebViewはDraft PR CIを受入gateにする。
 
+## Draft PR readback
+
+- Draft PR [#27](https://github.com/shotaro311/hover-pocket/pull/27)を`codex/ai-native-an8-retention-governance`へstackした。
+- 初回Windows CIで新verifierの`VerifyConsole` namespace import漏れ1件を検出し、既存verifierと同じ参照を追加した。production codeの変更ではない。
+- 修正後head `66de848`でWindows [32655777673](https://github.com/shotaro311/hover-pocket/actions/runs/32655777673)、macOS [32655777675](https://github.com/shotaro311/hover-pocket/actions/runs/32655777675)、3 OS contract / compare [32655777690](https://github.com/shotaro311/hover-pocket/actions/runs/32655777690)、Router [32655776508](https://github.com/shotaro311/hover-pocket/actions/runs/32655776508)の全7 checkが成功した。
+
 ## 安全境界
 
 - 移行は自動installしない。Host-owned native approvalを必須とする。
@@ -35,5 +41,5 @@ AN8完了条件のうち、古いCapabilityに廃止猶予を設け、ユーザ�
 ## 外部委譲と残件
 
 - ChatGPT Pro OrchestratorのAN8-C backup / export / restore runは正式delivery待ちである。未claim成果物を先読み・再送していない。
-- 本branchは`codex/ai-native-an8-retention-governance`へstackし、Draft PRでWindows / macOS / 3OS contract / Routerを確認する。mainへ自動mergeしない。
+- PRはDraftを維持し、mainへ自動mergeしない。
 - AN8全体ではApp health、unused App disable提案、offline / sleep-wake / soak、署名配布、OS別feed readback、backup / export / restoreの統合が残る。
