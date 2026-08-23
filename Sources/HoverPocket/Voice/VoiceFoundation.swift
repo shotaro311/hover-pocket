@@ -212,6 +212,7 @@ enum VoiceTextSafety {
     private static let absolutePathPattern = #"(?i)(?:^|[^\p{L}\p{N}_/])(?:file://|/(?!/)(?:[^/\s]+/)*[^/\s]+|[a-z]:\\[^\s]+|\\\\[^\s]+)"#
     private static let relativePathPattern = #"(?i)(?:^|[^\p{L}\p{N}_./:\\])(?:\.{1,2}/(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*/)*[\p{L}\p{N}_-][\p{L}\p{N}._-]*|(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*/)+[\p{L}\p{N}_-][\p{L}\p{N}._-]*\.[\p{L}\p{N}]{1,16}|(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*/){2,}[\p{L}\p{N}_-][\p{L}\p{N}._-]*)"#
     private static let bearerCredentialPattern = #"(?i)(?:^|[^\p{L}\p{N}_])bearer[ \t]+[a-z0-9._~+/\-=]{8,}"#
+    private static let openAICredentialPattern = #"(?i)(?:^|[^\p{L}\p{N}_])sk-(?:proj-|svcacct-)?[a-z0-9_-]{16,}"#
 
     static func sanitizeVisibleText(_ value: String, limit: Int) -> String {
         let collapsed = value.unicodeScalars.compactMap { scalar -> Unicode.Scalar? in
@@ -228,6 +229,7 @@ enum VoiceTextSafety {
         if text.range(of: absolutePathPattern, options: .regularExpression) != nil
             || text.range(of: relativePathPattern, options: .regularExpression) != nil
             || text.range(of: bearerCredentialPattern, options: .regularExpression) != nil
+            || text.range(of: openAICredentialPattern, options: .regularExpression) != nil
             || sensitiveMarkers.contains(where: { lowered.contains($0) }) {
             text = "[redacted]"
         }
