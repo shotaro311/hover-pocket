@@ -275,6 +275,72 @@ function Assert-SetupEmbedsFullPackage {
     }
 }
 
+function Assert-PortablePayloadMatchesFullPackage {
+    param([string]$PortableRoot, [string]$PackageRoot)
+
+    $expectedPortableRoot = @{
+        ".portable" = "file"
+        "HoverPocket.exe" = "file"
+        "Update.exe" = "file"
+        "current" = "directory"
+    }
+    $portableRootItems = @(Get-ChildItem -LiteralPath $PortableRoot -Force)
+    if ($portableRootItems.Count -ne $expectedPortableRoot.Count) {
+        throw "Portable ZIP root layout differs from the canonical package."
+    }
+    foreach ($item in $portableRootItems) {
+        if (-not $expectedPortableRoot.ContainsKey($item.Name)) {
+            throw "Portable ZIP root contains an unexpected entry."
+        }
+        $expectedType = $expectedPortableRoot[$item.Name]
+        if (
+            ($expectedType -eq "directory" -and -not $item.PSIsContainer) -or
+            ($expectedType -eq "file" -and $item.PSIsContainer)
+        ) {
+            throw "Portable ZIP root entry type differs from the canonical package."
+        }
+    }
+
+    $portableApplicationRoot = Join-Path $PortableRoot "current"
+    $packageApplicationRoot = Join-Path $PackageRoot "lib/app"
+    $packageOnlyFiles = @("HoverPocket.Shell_ExecutionStub.exe", "Squirrel.exe")
+    foreach ($name in $packageOnlyFiles) {
+        if (-not (Test-Path -LiteralPath (Join-Path $packageApplicationRoot $name) -PathType Leaf)) {
+            throw "Full update package is missing an expected package-only file."
+        }
+    }
+
+    $portableFiles = @(Get-ChildItem -LiteralPath $portableApplicationRoot -Recurse -File -Force | ForEach-Object {
+        [pscustomobject]@{
+            Name = [IO.Path]::GetRelativePath($portableApplicationRoot, $_.FullName).Replace('\', '/')
+            Size = $_.Length
+            Sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    } | Sort-Object Name)
+    $packageFiles = @(Get-ChildItem -LiteralPath $packageApplicationRoot -Recurse -File -Force | ForEach-Object {
+        $relativeName = [IO.Path]::GetRelativePath($packageApplicationRoot, $_.FullName).Replace('\', '/')
+        if ($relativeName -cnotin $packageOnlyFiles) {
+            [pscustomobject]@{
+                Name = $relativeName
+                Size = $_.Length
+                Sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+        }
+    } | Sort-Object Name)
+    if ($portableFiles.Count -eq 0 -or $portableFiles.Count -ne $packageFiles.Count) {
+        throw "Portable application and full update package contain different file sets."
+    }
+    for ($index = 0; $index -lt $portableFiles.Count; $index++) {
+        if (
+            $portableFiles[$index].Name -cne $packageFiles[$index].Name -or
+            $portableFiles[$index].Size -ne $packageFiles[$index].Size -or
+            $portableFiles[$index].Sha256 -cne $packageFiles[$index].Sha256
+        ) {
+            throw "Portable application payload differs from the full update package."
+        }
+    }
+}
+
 function Read-Checksums {
     param([string]$Path)
 
@@ -515,6 +581,7 @@ try {
     }
     Assert-ExecutableReleaseVersion -Path $packageExecutables[0].FullName -ExpectedVersion $manifest.version -Label "Full package HoverPocket.Shell.exe"
     Assert-AssemblyReleaseVersion -PackageRoot $packageExtractPath -ExpectedVersion $manifest.version
+    Assert-PortablePayloadMatchesFullPackage -PortableRoot $extractPath -PackageRoot $packageExtractPath
 
     Assert-SetupEmbedsFullPackage -SetupPath $setupPath -PackagePath $packagePath
     if (-not $IdentityOnly) {
@@ -539,6 +606,7 @@ try {
         updatePackageApplication = if ($IdentityOnly) { "release-version-verified" } else { "signed-timestamped-verified" }
         packageIdentity = "manifest-version-and-runtime-verified"
         embeddedApplicationVersion = "verified"
+        portablePayload = "full-package-application-byte-equivalent"
         setupPayload = "full-package-byte-equivalent"
         signerAgreement = if ($IdentityOnly) { "not-evaluated" } else { "verified" }
         artifactSnapshot = "verified"

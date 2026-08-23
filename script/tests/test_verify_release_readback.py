@@ -296,14 +296,45 @@ class ReleaseReadbackTests(unittest.TestCase):
                 sha256="a" * 64,
                 sha1="",
             ),
+            MODULE.DownloadedAsset(
+                name="appcast.xml",
+                path=pathlib.Path("feed/appcast.xml"),
+                size=19,
+                sha256="b" * 64,
+                sha1="",
+            ),
+            MODULE.DownloadedAsset(
+                name="appcast.xml",
+                path=pathlib.Path("versioned/appcast.xml"),
+                size=19,
+                sha256="b" * 64,
+                sha1="",
+            ),
+            MODULE.DownloadedAsset(
+                name="HoverPocket-1.2.3-456.zip.sha256",
+                path=pathlib.Path("versioned/HoverPocket-1.2.3-456.zip.sha256"),
+                size=21,
+                sha256="c" * 64,
+                sha1="",
+            ),
         )
         self.assertEqual(mac_snapshot["versionedReleaseTag"], "v1.2.3-456")
         self.assertEqual(mac_snapshot["feedReleaseTag"], "macos-latest")
         self.assertEqual(
             [asset["role"] for asset in mac_snapshot["assets"]],
-            ["versionedSparkle", "feedManual", "versionedManual"],
+            [
+                "versionedSparkle",
+                "feedManual",
+                "versionedManual",
+                "feedAppcast",
+                "versionedAppcast",
+                "versionedChecksum",
+            ],
         )
-        self.assertTrue(all(asset["sha256"] == "a" * 64 for asset in mac_snapshot["assets"]))
+        self.assertEqual(
+            [asset["sha256"] for asset in mac_snapshot["assets"]],
+            ["a" * 64, "a" * 64, "a" * 64, "b" * 64, "b" * 64, "c" * 64],
+        )
 
         downloads[package_name] = MODULE.DownloadedAsset(
             name=package_name,
@@ -413,6 +444,14 @@ class ReleaseReadbackTests(unittest.TestCase):
         self.assertIn("CFBundleIdentifier", script)
         self.assertIn("CFBundleShortVersionString", script)
         self.assertIn("CFBundleVersion", script)
+        self.assertIn("SUFeedURL", script)
+        self.assertIn("SUPublicEDKey", script)
+        self.assertIn('EXPECTED_TEAM_IDENTIFIER="N7VVPW44ZA"', script)
+        self.assertIn("TeamIdentifier", script)
+        self.assertIn('"feedAppcast"', script)
+        self.assertIn('"versionedAppcast"', script)
+        self.assertIn('"versionedChecksum"', script)
+        self.assertIn('"appcastParity": "byte-identical"', script)
         self.assertIn("macos-gatekeeper-readback-report.json", script)
 
     def test_formal_workflow_pins_one_verified_asset_snapshot(self):
@@ -434,6 +473,10 @@ class ReleaseReadbackTests(unittest.TestCase):
         self.assertIn("Assert-ExecutableReleaseVersion", script)
         self.assertIn("Assert-AssemblyReleaseVersion", script)
         self.assertIn("Assert-SetupEmbedsFullPackage", script)
+        self.assertIn("Assert-PortablePayloadMatchesFullPackage", script)
+        self.assertIn('Join-Path $PortableRoot "current"', script)
+        self.assertIn('Join-Path $PackageRoot "lib/app"', script)
+        self.assertIn('"HoverPocket.Shell_ExecutionStub.exe", "Squirrel.exe"', script)
         self.assertIn("$payloadOffset = $setupStream.Length - $packageStream.Length", script)
         self.assertIn("ComputeHash($setupStream)", script)
         self.assertNotIn('Expand-ZipArchiveSafely -ArchivePath $setupPath', script)
@@ -444,6 +487,7 @@ class ReleaseReadbackTests(unittest.TestCase):
         self.assertIn("windows-package-identity-readback:", workflow)
         self.assertIn("published-windows-package-identity-readback", workflow)
         self.assertIn("-IdentityOnly", workflow)
+        self.assertIn('portablePayload = "full-package-application-byte-equivalent"', script)
 
     def test_github_latest_must_remain_the_macos_release(self):
         verifier = MODULE.Verifier()

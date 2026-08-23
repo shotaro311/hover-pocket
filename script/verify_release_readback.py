@@ -662,6 +662,9 @@ def build_macos_asset_snapshot(
     versioned_sparkle: DownloadedAsset,
     feed_manual: DownloadedAsset,
     versioned_manual: DownloadedAsset,
+    feed_appcast: DownloadedAsset,
+    versioned_appcast: DownloadedAsset,
+    versioned_checksum: DownloadedAsset,
 ) -> dict[str, Any]:
     return {
         "versionedReleaseTag": versioned_release_tag,
@@ -678,6 +681,9 @@ def build_macos_asset_snapshot(
                 ("versionedSparkle", versioned_release_tag, versioned_sparkle),
                 ("feedManual", feed_release_tag, feed_manual),
                 ("versionedManual", versioned_release_tag, versioned_manual),
+                ("feedAppcast", feed_release_tag, feed_appcast),
+                ("versionedAppcast", versioned_release_tag, versioned_appcast),
+                ("versionedChecksum", versioned_release_tag, versioned_checksum),
             )
         ],
     }
@@ -766,6 +772,8 @@ def verify_downloaded_releases(
     mac_feed_release: dict[str, Any],
     mac_version_release: dict[str, Any],
     appcast: MacAppcast,
+    mac_feed_appcast_data: bytes,
+    mac_version_appcast_data: bytes,
     mac_checksum_data: bytes,
     windows_release: dict[str, Any],
     windows_feed_data: bytes,
@@ -789,6 +797,21 @@ def verify_downloaded_releases(
             "HoverPocket-macOS-app.zip",
             root / "mac-version-manual",
         )
+        mac_feed_appcast = reader.download_asset(
+            mac_feed_release,
+            "appcast.xml",
+            root / "mac-feed-appcast",
+        )
+        mac_version_appcast = reader.download_asset(
+            mac_version_release,
+            "appcast.xml",
+            root / "mac-version-appcast",
+        )
+        mac_version_checksum = reader.download_asset(
+            mac_version_release,
+            f"{appcast.asset_name}.sha256",
+            root / "mac-version-checksum",
+        )
         require_macos_downloads(
             verifier,
             mac_feed_release,
@@ -798,6 +821,27 @@ def verify_downloaded_releases(
             mac_version_zip,
             mac_manual_zip,
             mac_version_manual_zip,
+        )
+        for release, download, label in (
+            (mac_feed_release, mac_feed_appcast, "macos.download.feed_appcast"),
+            (mac_version_release, mac_version_appcast, "macos.download.version_appcast"),
+            (mac_version_release, mac_version_checksum, "macos.download.version_checksum"),
+        ):
+            require_download_matches_release(verifier, release, download, label)
+        verifier.require(
+            mac_feed_appcast.path.read_bytes() == mac_feed_appcast_data,
+            "macos.download.feed_appcast_stable",
+            "stable appcast changed during readback",
+        )
+        verifier.require(
+            mac_version_appcast.path.read_bytes() == mac_version_appcast_data,
+            "macos.download.version_appcast_stable",
+            "versioned appcast changed during readback",
+        )
+        verifier.require(
+            mac_version_checksum.path.read_bytes() == mac_checksum_data,
+            "macos.download.version_checksum_stable",
+            "versioned checksum changed during readback",
         )
         verify_ed25519_signature(
             sparkle_public_key,
@@ -831,6 +875,9 @@ def verify_downloaded_releases(
                 mac_version_zip,
                 mac_manual_zip,
                 mac_version_manual_zip,
+                mac_feed_appcast,
+                mac_version_appcast,
+                mac_version_checksum,
             ),
             build_windows_asset_snapshot(release_tag, windows_downloads),
         )
@@ -879,6 +926,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         mac_feed_release,
         mac_version_release,
         appcast,
+        mac_feed_appcast,
+        mac_version_appcast,
         mac_checksum,
         windows_release,
         windows_feed,

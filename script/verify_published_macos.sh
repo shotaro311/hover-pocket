@@ -10,6 +10,9 @@ EXPECTED_REPORT="$1"
 REPOSITORY="${GITHUB_REPOSITORY:-shotaro311/hover-pocket}"
 OUTPUT_PATH="${MACOS_READBACK_OUTPUT:-macos-gatekeeper-readback-report.json}"
 EXPECTED_BUNDLE_IDENTIFIER="local.codex.hover-pocket"
+EXPECTED_SPARKLE_FEED_URL="https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml"
+EXPECTED_SPARKLE_PUBLIC_ED_KEY="J2afuh/KnvOiS3eoNrMJoCyldAXL+Oku9scoSS5OUJE="
+EXPECTED_TEAM_IDENTIFIER="N7VVPW44ZA"
 
 if [[ ! -f "$EXPECTED_REPORT" ]]; then
   echo "error=release readback report not found" >&2
@@ -44,10 +47,17 @@ if (
 ):
     raise SystemExit("macOS snapshot release tag mismatch")
 assets = snapshot.get("assets")
-if not isinstance(assets, list) or len(assets) != 3 or not all(isinstance(asset, dict) for asset in assets):
-    raise SystemExit("macOS snapshot must contain exactly three assets")
+if not isinstance(assets, list) or len(assets) != 6 or not all(isinstance(asset, dict) for asset in assets):
+    raise SystemExit("macOS snapshot must contain exactly six assets")
 by_role = {asset.get("role"): asset for asset in assets}
-if set(by_role) != {"versionedSparkle", "feedManual", "versionedManual"}:
+if set(by_role) != {
+    "versionedSparkle",
+    "feedManual",
+    "versionedManual",
+    "feedAppcast",
+    "versionedAppcast",
+    "versionedChecksum",
+}:
     raise SystemExit("macOS snapshot roles are missing or duplicated")
 versioned_tag = snapshot["versionedReleaseTag"]
 feed_tag = snapshot["feedReleaseTag"]
@@ -61,6 +71,9 @@ expected = {
     "versionedSparkle": (versioned_tag, macos.get("asset")),
     "feedManual": (feed_tag, "HoverPocket-macOS-app.zip"),
     "versionedManual": (versioned_tag, "HoverPocket-macOS-app.zip"),
+    "feedAppcast": (feed_tag, "appcast.xml"),
+    "versionedAppcast": (versioned_tag, "appcast.xml"),
+    "versionedChecksum": (versioned_tag, f"{macos.get('asset')}.sha256"),
 }
 for role, (release_tag, expected_name) in expected.items():
     asset = by_role[role]
@@ -69,10 +82,11 @@ for role, (release_tag, expected_name) in expected.items():
     size = asset.get("size")
     digest = asset.get("sha256")
     if not isinstance(size, int) or size <= 0 or size > 2 * 1024 * 1024 * 1024:
-        raise SystemExit(f"invalid macOS {role} archive size")
+        raise SystemExit(f"invalid macOS {role} asset size")
     if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
-        raise SystemExit(f"invalid macOS {role} archive digest")
-if len({(asset["size"], asset["sha256"]) for asset in assets}) != 1:
+        raise SystemExit(f"invalid macOS {role} asset digest")
+archive_roles = ("versionedSparkle", "feedManual", "versionedManual")
+if len({(by_role[role]["size"], by_role[role]["sha256"]) for role in archive_roles}) != 1:
     raise SystemExit("macOS manual and Sparkle archives differ")
 if not isinstance(version, str) or not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._+-]*", version):
     raise SystemExit("invalid macOS version")
@@ -80,7 +94,14 @@ if not isinstance(build, str) or not re.fullmatch(r"[0-9]+", build):
     raise SystemExit("invalid macOS build")
 print(versioned_tag)
 print(feed_tag)
-for role in ("versionedSparkle", "feedManual", "versionedManual"):
+for role in (
+    "versionedSparkle",
+    "feedManual",
+    "versionedManual",
+    "feedAppcast",
+    "versionedAppcast",
+    "versionedChecksum",
+):
     asset = by_role[role]
     print(asset["name"])
     print(asset["size"])
@@ -100,8 +121,17 @@ IFS= read -r feed_manual_sha256 < <(sed -n '8p' "$metadata_path")
 IFS= read -r versioned_manual_name < <(sed -n '9p' "$metadata_path")
 IFS= read -r versioned_manual_size < <(sed -n '10p' "$metadata_path")
 IFS= read -r versioned_manual_sha256 < <(sed -n '11p' "$metadata_path")
-IFS= read -r expected_version < <(sed -n '12p' "$metadata_path")
-IFS= read -r expected_build < <(sed -n '13p' "$metadata_path")
+IFS= read -r feed_appcast_name < <(sed -n '12p' "$metadata_path")
+IFS= read -r feed_appcast_size < <(sed -n '13p' "$metadata_path")
+IFS= read -r feed_appcast_sha256 < <(sed -n '14p' "$metadata_path")
+IFS= read -r versioned_appcast_name < <(sed -n '15p' "$metadata_path")
+IFS= read -r versioned_appcast_size < <(sed -n '16p' "$metadata_path")
+IFS= read -r versioned_appcast_sha256 < <(sed -n '17p' "$metadata_path")
+IFS= read -r versioned_checksum_name < <(sed -n '18p' "$metadata_path")
+IFS= read -r versioned_checksum_size < <(sed -n '19p' "$metadata_path")
+IFS= read -r versioned_checksum_sha256 < <(sed -n '20p' "$metadata_path")
+IFS= read -r expected_version < <(sed -n '21p' "$metadata_path")
+IFS= read -r expected_build < <(sed -n '22p' "$metadata_path")
 
 download_dir="$work_dir/download"
 extract_dir="$work_dir/extracted"
@@ -140,8 +170,17 @@ download_and_verify "$feed_release_tag" "$feed_manual_name" "$feed_manual_size" 
 feed_manual_path="$downloaded_path"
 download_and_verify "$versioned_release_tag" "$versioned_manual_name" "$versioned_manual_size" "$versioned_manual_sha256" "versioned-manual"
 versioned_manual_path="$downloaded_path"
+download_and_verify "$feed_release_tag" "$feed_appcast_name" "$feed_appcast_size" "$feed_appcast_sha256" "feed-appcast"
+feed_appcast_path="$downloaded_path"
+download_and_verify "$versioned_release_tag" "$versioned_appcast_name" "$versioned_appcast_size" "$versioned_appcast_sha256" "versioned-appcast"
+versioned_appcast_path="$downloaded_path"
+download_and_verify "$versioned_release_tag" "$versioned_checksum_name" "$versioned_checksum_size" "$versioned_checksum_sha256" "versioned-checksum"
 if ! cmp -s "$archive_path" "$feed_manual_path" || ! cmp -s "$archive_path" "$versioned_manual_path"; then
   echo "error=public macOS manual and Sparkle archives are not byte-identical" >&2
+  exit 1
+fi
+if ! cmp -s "$feed_appcast_path" "$versioned_appcast_path"; then
+  echo "error=public macOS feed and versioned appcasts are not byte-identical" >&2
   exit 1
 fi
 
@@ -164,6 +203,8 @@ fi
 actual_bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$info_plist")"
 actual_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$info_plist")"
 actual_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$info_plist")"
+actual_sparkle_feed_url="$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$info_plist")"
+actual_sparkle_public_ed_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$info_plist")"
 if [[ "$actual_bundle_identifier" != "$EXPECTED_BUNDLE_IDENTIFIER" ]]; then
   echo "error=published app bundle identifier differs from HoverPocket" >&2
   exit 1
@@ -172,8 +213,22 @@ if [[ "$actual_version" != "$expected_version" || "$actual_build" != "$expected_
   echo "error=published app version or build differs from appcast" >&2
   exit 1
 fi
+if [[ "$actual_sparkle_feed_url" != "$EXPECTED_SPARKLE_FEED_URL" ]]; then
+  echo "error=published app Sparkle feed URL differs from the canonical macOS feed" >&2
+  exit 1
+fi
+if [[ "$actual_sparkle_public_ed_key" != "$EXPECTED_SPARKLE_PUBLIC_ED_KEY" ]]; then
+  echo "error=published app Sparkle public key differs from the release verification key" >&2
+  exit 1
+fi
 
 codesign --verify --deep --strict --verbose=2 "$app_path"
+codesign_details="$(codesign -d --verbose=4 "$app_path" 2>&1)"
+actual_team_identifier="$(awk -F= '$1 == "TeamIdentifier" { print $2; exit }' <<< "$codesign_details")"
+if [[ "$actual_team_identifier" != "$EXPECTED_TEAM_IDENTIFIER" ]]; then
+  echo "error=published app Developer ID team differs from HoverPocket" >&2
+  exit 1
+fi
 xcrun stapler validate "$app_path"
 spctl --assess --type execute --verbose=2 "$app_path"
 
@@ -204,7 +259,7 @@ for expected in snapshot["assets"]:
         raise SystemExit(f"published macOS {expected['role']} metadata changed during verification")
 PY
 
-python3 - "$OUTPUT_PATH" "$EXPECTED_REPORT" "$actual_bundle_identifier" "$actual_version" "$actual_build" <<'PY'
+python3 - "$OUTPUT_PATH" "$EXPECTED_REPORT" "$actual_bundle_identifier" "$actual_version" "$actual_build" "$actual_sparkle_feed_url" "$actual_team_identifier" <<'PY'
 import json
 import pathlib
 import sys
@@ -222,7 +277,11 @@ report = {
     "bundleIdentifier": sys.argv[3],
     "version": sys.argv[4],
     "build": sys.argv[5],
+    "sparkleFeedURL": sys.argv[6],
+    "sparklePublicKey": "verified",
+    "teamIdentifier": sys.argv[7],
     "manualArchiveParity": "byte-identical",
+    "appcastParity": "byte-identical",
     "snapshotReadback": "all-release-metadata-rechecked",
 }
 path.write_text(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
