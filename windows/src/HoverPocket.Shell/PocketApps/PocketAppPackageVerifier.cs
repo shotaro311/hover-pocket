@@ -318,7 +318,7 @@ internal sealed class PocketAppPackageVerifier
                 "local.example.today-focus",
                 "startFocus",
                 plan,
-                new CapabilityBrokerPreparation(digest, null));
+                new CapabilityBrokerPreparation(digest, null, []));
             Require(PocketAppHostController.ApprovalSummary(draft, english: true).Contains(valid, StringComparison.Ordinal), "stable_key_approval_exact");
             var changedArgs = CapabilityJson.From(new
             {

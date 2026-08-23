@@ -348,7 +348,11 @@ enum PocketAppPackageVerificationCommand {
                 packageID: "local.example.today-focus",
                 workflowID: "startFocus",
                 plan: plan,
-                preparation: CapabilityBrokerPreparation(planDigest: digest, approvalRequest: nil)
+                preparation: CapabilityBrokerPreparation(
+                    planDigest: digest,
+                    approvalRequest: nil,
+                    approvalPresentations: []
+                )
             )
             require(PocketSurfaceHostModel.approvalSummary(draft).contains(valid), "stable_key_approval_exact", failures: &failures)
             let changedPlan = CapabilityExecutionPlan(

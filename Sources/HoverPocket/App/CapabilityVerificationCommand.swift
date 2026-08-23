@@ -8,8 +8,9 @@ enum CapabilityVerificationCommand {
             do {
                 try await verify()
                 print("capability_verify=ok")
-                print("capability_handlers=14")
+                print("capability_handlers=20")
                 print("capability_calculator_evaluate=ok")
+                print("capability_controls_readback=ok")
                 print("capability_timer_lifecycle=ok")
                 print("capability_sticky_upsert=ok")
                 print("capability_sticky_lifecycle=ok")
@@ -39,6 +40,7 @@ enum CapabilityVerificationCommand {
         let stickyRoot = root.appendingPathComponent("sticky", isDirectory: true)
         let stickyStore = StickyNotesStore(storageDirectory: stickyRoot)
         let calendar = FakeCalendarCapabilityDataSource()
+        let controls = FakeControlsCapabilityDataSource()
         let timerID = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
         let noteID = UUID(uuidString: "22222222-2222-4222-8222-222222222222")!
         let handlers = try PocketCapabilityHandlerSet(handlers: [
@@ -46,6 +48,12 @@ enum CapabilityVerificationCommand {
             CalendarGetCapabilityHandler(dataSource: calendar),
             CalendarCreateCapabilityHandler(dataSource: calendar),
             CalculatorEvaluateCapabilityHandler(),
+            ControlsCapabilityHandler(operation: .availability, dataSource: controls),
+            ControlsCapabilityHandler(operation: .volumeGet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .volumeSet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .muteSet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .brightnessSet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .mediaCommand, dataSource: controls),
             TimerCapabilityHandler(operation: .start, store: timerStore, idGenerator: { timerID }),
             TimerCapabilityHandler(operation: .get, store: timerStore),
             TimerCapabilityHandler(operation: .pause, store: timerStore),
@@ -58,10 +66,11 @@ enum CapabilityVerificationCommand {
             StickyCapabilityHandler(operation: .delete, store: stickyStore)
         ])
 
-        guard handlers.keys.count == 14 else {
+        guard handlers.keys.count == 20 else {
             throw VerificationFailure("handler_count")
         }
         try await verifyCalculator(handlers: handlers)
+        try await verifyControls(handlers: handlers, dataSource: controls)
         try await verifyTimer(handlers: handlers, timerID: timerID)
         try await verifyTimerPersistenceFailure(root: root)
         try await verifySticky(handlers: handlers, noteID: noteID, root: stickyRoot)
@@ -106,6 +115,122 @@ enum CapabilityVerificationCommand {
             } catch CapabilityHandlerError.invalidArgument(let field) where field == "expression" {
             }
         }
+    }
+
+    @MainActor
+    private static func verifyControls(
+        handlers: PocketCapabilityHandlerSet,
+        dataSource: FakeControlsCapabilityDataSource
+    ) async throws {
+        let available = try await handlers.invoke(PocketCapabilityKeys.controlsAvailability, arguments: [:])
+        try require(available["volumeAvailable"] == .bool(true), "controls_volume_available")
+        try require(available["brightnessAvailable"] == .bool(true), "controls_brightness_available")
+        try require(available["mediaAvailable"] == .bool(true), "controls_media_available")
+        try require(available["displayIds"] == .array([.string("display-1")]), "controls_display_ids")
+
+        let initial = try await handlers.invoke(PocketCapabilityKeys.controlsVolumeGet, arguments: [:])
+        try require(initial["level"] == .number(0.3), "controls_volume_get")
+        try require(initial["muted"] == .bool(false), "controls_mute_get")
+
+        let context = CapabilityHandlerContext(idempotencyKey: "controls-verifier-key-0001")
+        let volume = try await handlers.invoke(
+            PocketCapabilityKeys.controlsVolumeSet,
+            arguments: ["level": .number(0.7)],
+            context: context
+        )
+        try require(volume["level"] == .number(0.7), "controls_volume_set")
+
+        let muted = try await handlers.invoke(
+            PocketCapabilityKeys.controlsMuteSet,
+            arguments: ["muted": .bool(true)],
+            context: CapabilityHandlerContext(idempotencyKey: "controls-verifier-key-0002")
+        )
+        try require(muted["muted"] == .bool(true), "controls_mute_set")
+
+        let mutedVolume = try await handlers.invoke(
+            PocketCapabilityKeys.controlsVolumeSet,
+            arguments: ["level": .number(0.4)],
+            context: CapabilityHandlerContext(idempotencyKey: "controls-verifier-key-0002b")
+        )
+        try require(mutedVolume["muted"] == .bool(true), "controls_volume_preserves_mute")
+
+        let brightness = try await handlers.invoke(
+            PocketCapabilityKeys.controlsBrightnessSet,
+            arguments: ["displayId": .string("display-1"), "level": .number(0.6)],
+            context: CapabilityHandlerContext(idempotencyKey: "controls-verifier-key-0003")
+        )
+        try require(brightness["displayId"] == .string("display-1"), "controls_brightness_id")
+        try require(brightness["level"] == .number(0.6), "controls_brightness_set")
+
+        let media = try await handlers.invoke(
+            PocketCapabilityKeys.controlsMediaCommand,
+            arguments: ["command": .string("play_pause")],
+            context: CapabilityHandlerContext(idempotencyKey: "controls-verifier-key-0004")
+        )
+        try require(media["available"] == .bool(true), "controls_media_available_output")
+        try require(media["isPlaying"] == .bool(true), "controls_media_play_pause")
+        try require(media["safeTitle"] == .string("Track A"), "controls_media_safe_title")
+
+        do {
+            _ = try await handlers.invoke(
+                PocketCapabilityKeys.controlsVolumeSet,
+                arguments: ["level": .number(0.5)]
+            )
+            throw VerificationFailure("controls_missing_idempotency_accepted")
+        } catch CapabilityHandlerError.invalidArgument(let field) where field == "idempotencyKey" {
+        }
+
+        do {
+            _ = try await handlers.invoke(
+                PocketCapabilityKeys.controlsBrightnessSet,
+                arguments: ["displayId": .string("display-1"), "level": .number(0.01)],
+                context: CapabilityHandlerContext(idempotencyKey: "controls-verifier-key-0005")
+            )
+            throw VerificationFailure("controls_invalid_brightness_accepted")
+        } catch CapabilityHandlerError.invalidArgument(let field) where field == "level" {
+        }
+
+        dataSource.mismatchNextVolume = true
+        do {
+            _ = try await handlers.invoke(
+                PocketCapabilityKeys.controlsVolumeSet,
+                arguments: ["level": .number(0.2)],
+                context: CapabilityHandlerContext(idempotencyKey: "controls-verifier-key-0006")
+            )
+            throw VerificationFailure("controls_volume_mismatch_accepted")
+        } catch CapabilityHandlerError.readbackMismatch(let field) where field == "controls.volume" {
+        }
+
+        dataSource.changeMuteOnNextVolume = true
+        do {
+            _ = try await handlers.invoke(
+                PocketCapabilityKeys.controlsVolumeSet,
+                arguments: ["level": .number(0.25)],
+                context: CapabilityHandlerContext(idempotencyKey: "controls-verifier-key-0007")
+            )
+            throw VerificationFailure("controls_hidden_mute_change_accepted")
+        } catch CapabilityHandlerError.readbackMismatch(let field) where field == "controls.volume" {
+        }
+
+        dataSource.progressOnlyNextMediaChange = true
+        do {
+            _ = try await handlers.invoke(
+                PocketCapabilityKeys.controlsMediaCommand,
+                arguments: ["command": .string("next")],
+                context: CapabilityHandlerContext(idempotencyKey: "controls-verifier-key-0008")
+            )
+            throw VerificationFailure("controls_progress_only_media_change_accepted")
+        } catch CapabilityHandlerError.readbackMismatch(let field) where field == "controls.media" {
+        }
+
+        dataSource.unsafeMetadataNextMediaChange = true
+        let sanitizedMedia = try await handlers.invoke(
+            PocketCapabilityKeys.controlsMediaCommand,
+            arguments: ["command": .string("next")],
+            context: CapabilityHandlerContext(idempotencyKey: "controls-verifier-key-0009")
+        )
+        try require(sanitizedMedia["safeTitle"] == .string("Track spoof"), "controls_media_title_sanitized")
+        try require(sanitizedMedia["safeSource"] == .string("Source name"), "controls_media_source_sanitized")
     }
 
     @MainActor
@@ -615,6 +740,93 @@ private struct VerificationFailure: Error, CustomStringConvertible {
 
     init(_ description: String) {
         self.description = description
+    }
+}
+
+@MainActor
+private final class FakeControlsCapabilityDataSource: ControlsCapabilityDataSource {
+    private var display = ControlsDisplay(
+        id: "display-1",
+        displayID: 1,
+        name: "Display",
+        kind: .internalDisplay,
+        brightness: 0.4,
+        isControllable: true
+    )
+    private var volume = ControlsVolumeState(level: 0.3, isMuted: false)
+    private var media = ControlsNowPlayingState(
+        title: "Track A",
+        sourceName: "Music",
+        hasMedia: true,
+        artworkData: nil,
+        mediaURLString: nil,
+        previewWindowID: nil,
+        progress: 10,
+        duration: 180,
+        isPlaying: false,
+        playbackRate: 1
+    )
+    var mismatchNextVolume = false
+    var changeMuteOnNextVolume = false
+    var progressOnlyNextMediaChange = false
+    var unsafeMetadataNextMediaChange = false
+
+    func snapshot() async throws -> ControlsCapabilitySnapshot {
+        ControlsCapabilitySnapshot(
+            displays: [display],
+            volume: volume,
+            volumeAvailable: true,
+            media: media
+        )
+    }
+
+    func setVolume(_ level: Double) async throws -> ControlsVolumeState {
+        if mismatchNextVolume {
+            mismatchNextVolume = false
+            return ControlsVolumeState(level: (level + 0.2).clamped(to: 0...1), isMuted: volume.isMuted)
+        }
+        volume.level = level
+        if changeMuteOnNextVolume {
+            changeMuteOnNextVolume = false
+            volume.isMuted.toggle()
+        }
+        return volume
+    }
+
+    func setMuted(_ muted: Bool) async throws -> ControlsVolumeState {
+        volume.isMuted = muted
+        return volume
+    }
+
+    func setBrightness(_ level: Double, displayID: String) async throws -> ControlsDisplay {
+        guard display.id == displayID else {
+            throw ControlsStore.CapabilityFailure.unavailable("controls.display")
+        }
+        display.brightness = level
+        return display
+    }
+
+    func executeMediaCommand(_ command: String) async throws -> ControlsNowPlayingState {
+        switch command {
+        case "play_pause":
+            media.isPlaying.toggle()
+        case "next", "previous":
+            if progressOnlyNextMediaChange {
+                progressOnlyNextMediaChange = false
+                media.progress += 2
+            } else if unsafeMetadataNextMediaChange {
+                unsafeMetadataNextMediaChange = false
+                media.title = "Track\u{202E}spoof"
+                media.sourceName = "Source\nname"
+                media.progress = 0
+            } else {
+                media.title = command == "next" ? "Track B" : "Track Previous"
+                media.progress = 0
+            }
+        default:
+            throw ControlsStore.CapabilityFailure.unavailable("controls.media")
+        }
+        return media
     }
 }
 

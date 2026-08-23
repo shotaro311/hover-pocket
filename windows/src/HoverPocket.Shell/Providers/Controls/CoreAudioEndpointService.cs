@@ -95,6 +95,19 @@ internal sealed class CoreAudioEndpointService : IVolumeEndpointService, IDispos
         }), cancellationToken);
     }
 
+    public Task<VolumeState> SetMutedAsync(bool muted, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return Task.Run(() => WithEndpoint(endpoint =>
+        {
+            ThrowIfFailed(endpoint.SetMute(muted, EventContext));
+            var readback = Read(endpoint);
+            return readback.Muted == muted
+                ? readback
+                : readback with { Error = "Mute readback did not match the requested state." };
+        }), cancellationToken);
+    }
+
     public void Dispose()
     {
         if (_disposed)

@@ -14,6 +14,7 @@ namespace HoverPocket.Shell.Capabilities;
 internal sealed class CapabilityBrokerVerifier
 {
     private const string GoldenPlanDigest = "sha256:d098ea1b5f9f70e91486fd53229e7ddb68f73a9952ab94f17eed27cdeeb6413f";
+    private static readonly string PrivatePresentationTitle = "  Private\n\u202e title " + new string('x', 90);
     private readonly List<string> _failures = [];
 
     public int Run()
@@ -38,15 +39,17 @@ internal sealed class CapabilityBrokerVerifier
         }
 
         VerifyConsole.WriteLine("broker_verify=ok");
-        VerifyConsole.WriteLine("broker_registry_descriptors=15");
-        VerifyConsole.WriteLine("broker_available_handlers=14");
+        VerifyConsole.WriteLine("broker_registry_descriptors=21");
+        VerifyConsole.WriteLine("broker_available_handlers=20");
         VerifyConsole.WriteLine("broker_calculator_evaluate=ok");
+        VerifyConsole.WriteLine("broker_controls_os_readback=ok");
         VerifyConsole.WriteLine("broker_sticky_lifecycle=ok");
+        VerifyConsole.WriteLine("broker_approval_presentation=ok");
         VerifyConsole.WriteLine("broker_today_focus=ok");
         VerifyConsole.WriteLine("broker_pocket_app=ok");
         VerifyConsole.WriteLine("broker_pocket_app_declared_tests=4");
         VerifyConsole.WriteLine("broker_concurrent_duplicate=ok");
-        VerifyConsole.WriteLine("broker_negative_cases=11");
+        VerifyConsole.WriteLine("broker_negative_cases=12");
         VerifyConsole.WriteLine($"broker_golden_plan_digest={GoldenPlanDigest}");
         return 0;
     }
@@ -65,22 +68,28 @@ internal sealed class CapabilityBrokerVerifier
                 enableScheduler: false);
             var stickyStore = new StickyNotesStore(Path.Combine(root, "sticky"));
             var calendar = new BrokerFakeCalendarDataSource(now);
-            var handlers = ProviderCapabilityCompositionRoot.Create(calendar, timerStore, stickyStore);
+            var handlers = ProviderCapabilityCompositionRoot.Create(
+                calendar,
+                timerStore,
+                stickyStore,
+                new FakeControlsCapabilityDataSource());
             var registry = new CapabilityRegistry(handlers);
             var brokerRoot = Path.Combine(root, "broker");
             var audit = new CapabilityBrokerAuditLog(brokerRoot);
             var broker = new CapabilityBroker(
                 registry,
                 new CapabilityBrokerLedger(brokerRoot),
-                audit);
+                audit,
+                approvalPresentationResolver: new HostCapabilityApprovalPresentationResolver(stickyStore));
 
-            Require(registry.DescriptorKeys.Count == 15, "registry_descriptor_count");
-            Require(registry.AvailableHandlerKeys.Count == 14, "registry_handler_count");
+            Require(registry.DescriptorKeys.Count == 21, "registry_descriptor_count");
+            Require(registry.AvailableHandlerKeys.Count == 20, "registry_handler_count");
             Require(
                 PocketCapabilityDescriptors.BuiltIn.Single(item => item.Key == CapabilityIds.StickyDelete).ApprovalPolicy
                     == CapabilityApprovalPolicy.StrongPerCall,
                 "sticky_delete_strong_approval");
             VerifyStrongPerCallIsolation(broker, now);
+            VerifyStrongApprovalPresentationRequired(registry, root, now);
             try
             {
                 PocketCapabilityDescriptors.BuiltIn.Single(item => item.Key == CapabilityIds.StickyArchive).ValidateOutput(
@@ -109,6 +118,7 @@ internal sealed class CapabilityBrokerVerifier
             }
 
             await VerifyCalculatorAsync(broker, now);
+            await VerifyControlsAsync(broker, now);
             await VerifyStickyLifecycleAsync(broker, stickyStore, now);
             await VerifyPocketAppAsync(root);
 
@@ -353,7 +363,9 @@ internal sealed class CapabilityBrokerVerifier
                 "secret-purpose-approved",
                 "secret-purpose-rejected",
                 "secret-purpose-concurrent",
-                principal.UserId
+                principal.UserId,
+                PrivatePresentationTitle,
+                "44444444-4444-4444-8444-444444444444"
             })
             {
                 Require(!auditText.Contains(forbidden, StringComparison.Ordinal), $"audit_redaction_{forbidden}");
@@ -367,7 +379,14 @@ internal sealed class CapabilityBrokerVerifier
             Require(!auditText.Contains(invalidAuditMarker, StringComparison.Ordinal), "invalid_plan_audit_redaction");
             Require(!auditText.Contains(invalidVersionMarker, StringComparison.Ordinal), "invalid_version_audit_redaction");
             var durableLedgerText = File.ReadAllText(ledgerPath);
-            foreach (var forbidden in new[] { "secret-purpose-approved", "secret-purpose-concurrent", "Sensitive Calendar Title" })
+            foreach (var forbidden in new[]
+            {
+                "secret-purpose-approved",
+                "secret-purpose-concurrent",
+                "Sensitive Calendar Title",
+                PrivatePresentationTitle,
+                "44444444-4444-4444-8444-444444444444"
+            })
             {
                 Require(!durableLedgerText.Contains(forbidden, StringComparison.Ordinal), $"ledger_redaction_{forbidden}");
             }
@@ -419,6 +438,42 @@ internal sealed class CapabilityBrokerVerifier
         Require(receipt.Steps[0].Readback.Status == CapabilityReadbackStatus.Verified, "calculator_readback");
         Require(receipt.Steps[0].Readback.Strategy == CapabilityReadbackStrategy.None, "calculator_readback_strategy");
         Require(receipt.Steps[0].Readback.Observed is not null, "calculator_observed");
+    }
+
+    private async Task VerifyControlsAsync(CapabilityBroker broker, DateTimeOffset now)
+    {
+        var principal = new CapabilityPrincipal("controls-broker-user");
+        var permissions = Permissions(principal, "controls.write");
+        var plan = new CapabilityExecutionPlan(
+            "controls-volume-plan",
+            now,
+            CapabilityOrigin.Text,
+            principal,
+            null,
+            [new CapabilityPlanStep(
+                "setVolume",
+                CapabilityIds.ControlsVolumeSet,
+                CapabilityJson.From(new { level = 0.75 }),
+                "controls-broker-volume-key-0001",
+                [])],
+            new HashSet<string>(["controls.write"], StringComparer.Ordinal));
+        var preparation = broker.Prepare(plan, permissions, now);
+        Require(preparation.ApprovalRequest is not null, "controls_approval_missing");
+        if (preparation.ApprovalRequest is null)
+        {
+            return;
+        }
+        var grant = broker.DecideApproval(
+            preparation.ApprovalRequest.Id,
+            preparation.PlanDigest,
+            CapabilityApprovalDecision.Approve,
+            now);
+        var receipt = await broker.ExecuteAsync(plan, permissions, grant, now);
+        Require(receipt.Status == CapabilityReceiptStatus.Succeeded, "controls_receipt_status");
+        Require(receipt.Steps[0].Readback.Status == CapabilityReadbackStatus.Verified, "controls_readback_verified");
+        Require(
+            Math.Abs((receipt.Steps[0].Output?.GetProperty("level").GetDouble() ?? 0) - 0.75) < 0.001,
+            "controls_readback_level");
     }
 
     private async Task VerifyPocketAppAsync(string root)
@@ -872,12 +927,52 @@ internal sealed class CapabilityBrokerVerifier
         }
     }
 
+    private void VerifyStrongApprovalPresentationRequired(
+        CapabilityRegistry registry,
+        string root,
+        DateTimeOffset now)
+    {
+        var brokerRoot = Path.Combine(root, "missing-presentation-broker");
+        var broker = new CapabilityBroker(
+            registry,
+            new CapabilityBrokerLedger(brokerRoot),
+            new CapabilityBrokerAuditLog(brokerRoot));
+        var principal = new CapabilityPrincipal("user-missing-presentation-fixture");
+        var plan = new CapabilityExecutionPlan(
+            "missing-presentation-plan",
+            now,
+            CapabilityOrigin.Text,
+            principal,
+            null,
+            [new CapabilityPlanStep(
+                "deleteNote",
+                CapabilityIds.StickyDelete,
+                CapabilityJson.From(new { noteId = Guid.Parse("44444444-4444-4444-8444-444444444444") }),
+                "missing-presentation-key-0001",
+                [])],
+            new HashSet<string>(["sticky.delete"], StringComparer.Ordinal));
+        try
+        {
+            _ = broker.Prepare(plan, Permissions(principal, "sticky.delete"), now);
+            _failures.Add("missing_strong_presentation_accepted");
+        }
+        catch (CapabilityBrokerException ex) when (
+            ex.Code == "CAPABILITY_PLAN_INVALID"
+            && ex.Message.Contains("approval_presentation", StringComparison.Ordinal))
+        {
+        }
+    }
+
     private async Task VerifyStickyLifecycleAsync(
         CapabilityBroker broker,
         StickyNotesStore store,
         DateTimeOffset now)
     {
-        var note = store.UpsertNote("broker-lifecycle-fixture", "Private title", "Private body", StickyNoteColor.Yellow);
+        var note = store.UpsertNote(
+            "broker-lifecycle-fixture",
+            PrivatePresentationTitle,
+            "Private body",
+            StickyNoteColor.Yellow);
         var principal = new CapabilityPrincipal("user-sticky-lifecycle-fixture");
         var archivePermissions = Permissions(principal, "sticky.write");
         var archivePlan = new CapabilityExecutionPlan(
@@ -925,6 +1020,23 @@ internal sealed class CapabilityBrokerVerifier
             new HashSet<string>(["sticky.delete"], StringComparer.Ordinal));
         var deletePreparation = broker.Prepare(deletePlan, deletePermissions, deleteNow);
         Require(deletePreparation.ApprovalRequest is not null, "sticky_delete_approval_missing");
+        Require(deletePreparation.ApprovalPresentations.Count == 1, "sticky_delete_presentation_missing");
+        var presentation = deletePreparation.ApprovalPresentations.Single();
+        var effect = deletePreparation.ApprovalRequest!.Effects.Single();
+        Require(presentation.RequestId == deletePreparation.ApprovalRequest.Id, "sticky_presentation_request_binding");
+        Require(presentation.PlanDigest == deletePreparation.PlanDigest, "sticky_presentation_plan_binding");
+        Require(presentation.StepId == "deleteNote", "sticky_presentation_step_binding");
+        Require(presentation.ArgumentDigest == effect.ArgumentDigest, "sticky_presentation_argument_binding");
+        Require(presentation.TargetKind == "sticky_note", "sticky_presentation_target_kind");
+        Require(presentation.TargetState == CapabilityApprovalTargetState.Present, "sticky_presentation_target_state");
+        Require(presentation.Destructive, "sticky_presentation_destructive");
+        Require(presentation.TargetDisplayLabel?.StartsWith("Private title ", StringComparison.Ordinal) == true, "sticky_presentation_label");
+        Require((presentation.TargetDisplayLabel?.EnumerateRunes().Count() ?? 0) <= 80, "sticky_presentation_label_limit");
+        Require(presentation.TargetDisplayLabel?.Contains('\n') == false, "sticky_presentation_label_newline");
+        Require(presentation.TargetDisplayLabel?.Contains('\u202e') == false, "sticky_presentation_label_bidi");
+        var encodedRequest = JsonSerializer.Serialize(deletePreparation.ApprovalRequest);
+        Require(!encodedRequest.Contains(PrivatePresentationTitle, StringComparison.Ordinal), "sticky_presentation_not_in_request");
+        Require(!encodedRequest.Contains(note.Id.ToString("D"), StringComparison.OrdinalIgnoreCase), "sticky_target_id_not_in_request");
         var deleteGrant = broker.DecideApproval(
             deletePreparation.ApprovalRequest!.Id,
             deletePreparation.PlanDigest,
@@ -937,6 +1049,64 @@ internal sealed class CapabilityBrokerVerifier
             "sticky_delete_output");
         Require(deleteReceipt.Steps[0].Readback.Status == CapabilityReadbackStatus.Verified, "sticky_delete_readback");
         Require(store.GetNote(note.Id) is null, "sticky_delete_effect");
+
+        var missingPlan = new CapabilityExecutionPlan(
+            "sticky-delete-missing-plan",
+            deleteNow.AddSeconds(1),
+            CapabilityOrigin.Text,
+            principal,
+            null,
+            [new CapabilityPlanStep(
+                "deleteMissingNote",
+                CapabilityIds.StickyDelete,
+                CapabilityJson.From(new { noteId = note.Id }),
+                "sticky-broker-delete-missing-key-0001",
+                [])],
+            new HashSet<string>(["sticky.delete"], StringComparer.Ordinal));
+        var missingPreparation = broker.Prepare(missingPlan, deletePermissions, deleteNow.AddSeconds(1));
+        Require(
+            missingPreparation.ApprovalPresentations.Single().TargetState == CapabilityApprovalTargetState.Missing,
+            "sticky_missing_presentation_state");
+        Require(
+            missingPreparation.ApprovalPresentations.Single().TargetDisplayLabel is null,
+            "sticky_missing_presentation_label");
+
+        var bodyOnlyNote = store.UpsertNote(
+            "broker-body-only-presentation-fixture",
+            " \n ",
+            "Body fallback\n details",
+            StickyNoteColor.Blue);
+        var bodyOnlyNow = deleteNow.AddSeconds(2);
+        var bodyOnlyPlan = new CapabilityExecutionPlan(
+            "sticky-delete-body-only-plan",
+            bodyOnlyNow,
+            CapabilityOrigin.Text,
+            principal,
+            null,
+            [new CapabilityPlanStep(
+                "deleteBodyOnlyNote",
+                CapabilityIds.StickyDelete,
+                CapabilityJson.From(new { noteId = bodyOnlyNote.Id }),
+                "sticky-broker-delete-body-only-key-0001",
+                [])],
+            new HashSet<string>(["sticky.delete"], StringComparer.Ordinal));
+        var bodyOnlyPreparation = broker.Prepare(bodyOnlyPlan, deletePermissions, bodyOnlyNow);
+        Require(
+            bodyOnlyPreparation.ApprovalPresentations.Single().TargetDisplayLabel == "Body fallback details",
+            "sticky_body_fallback_presentation_label");
+        try
+        {
+            _ = broker.DecideApproval(
+                bodyOnlyPreparation.ApprovalRequest!.Id,
+                bodyOnlyPreparation.PlanDigest,
+                CapabilityApprovalDecision.Reject,
+                bodyOnlyNow);
+            _failures.Add("sticky_body_fallback_reject_accepted");
+        }
+        catch (CapabilityBrokerException ex) when (ex.Code == "CAPABILITY_APPROVAL_REJECTED")
+        {
+        }
+        Require(store.DeleteNoteAtomically(bodyOnlyNote.Id), "sticky_body_fallback_cleanup");
     }
 
     private void VerifyGoldenDigest(DateTimeOffset now)

@@ -82,7 +82,8 @@ internal sealed class PanelBridgeController : IDisposable
         _capabilityHandlers = ProviderCapabilityCompositionRoot.Create(
             new GoogleCalendarCapabilityDataSource(_calendarBridgeController.Store),
             timerStore,
-            stickyStore);
+            stickyStore,
+            new LiveControlsCapabilityDataSource(_controlsBridgeController));
         _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.NormalizeForBootstrap(settings, providerRegistry.ProviderIds);
@@ -92,7 +93,8 @@ internal sealed class PanelBridgeController : IDisposable
             _capabilityBroker = new CapabilityBroker(
                 new CapabilityRegistry(_capabilityHandlers),
                 new CapabilityBrokerLedger(brokerRoot),
-                new CapabilityBrokerAuditLog(brokerRoot));
+                new CapabilityBrokerAuditLog(brokerRoot),
+                approvalPresentationResolver: new HostCapabilityApprovalPresentationResolver(stickyStore));
             _todayFocusTextAdapter = new TodayFocusTextAdapter(_capabilityBroker);
         }
         catch (Exception ex) when (ex is CapabilityBrokerException
