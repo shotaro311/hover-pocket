@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HoverPocket.Shell.Bridge;
+using HoverPocket.Shell.Capabilities;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Providers;
@@ -50,13 +51,15 @@ internal sealed class SettingsVerifier
             dispatcher,
             BridgeSurface.Settings,
             aiNativeEnableDecision: () => true,
-            voiceCalendarAccessDecision: () => true);
+            voiceCalendarAccessDecision: () => true,
+            capabilityHistoryDeleteDecision: () => true);
         var deniedSettingsDispatcher = new BridgeDispatcher();
         using var deniedSettingsAttachment = controller.Attach(
             deniedSettingsDispatcher,
             BridgeSurface.Settings,
             aiNativeEnableDecision: () => false,
-            voiceCalendarAccessDecision: () => false);
+            voiceCalendarAccessDecision: () => false,
+            capabilityHistoryDeleteDecision: () => false);
         var panelDispatcher = new BridgeDispatcher();
         using var panelAttachment = controller.Attach(panelDispatcher, BridgeSurface.Panel);
 
@@ -74,6 +77,8 @@ internal sealed class SettingsVerifier
             () => VerifyAiNativeDisableFlushBoundaryAsync(registry));
         var defaultState = await Send(dispatcher, """{"id":"0","method":"app.getState"}""");
         if (!defaultState.Contains("\"aiNativeEnabled\":false", StringComparison.Ordinal)
+            || !defaultState.Contains("\"capabilityDataRetentionPeriod\":\"ninetyDays\"", StringComparison.Ordinal)
+            || !defaultState.Contains("\"capabilityDataGovernance\":{\"available\":true", StringComparison.Ordinal)
             || !defaultState.Contains("\"pocketAppGeneration\":null", StringComparison.Ordinal)
             || Directory.Exists(Path.Combine(store.RootDirectory, "PocketApps", "Generation")))
         {
@@ -85,6 +90,10 @@ internal sealed class SettingsVerifier
             """{"id":"0v","method":"settings.setVoiceEnabled","params":{"enabled":true}}""");
         var panelVoiceCalendar = await panelDispatcher.ProcessRawMessageAsync(
             """{"id":"0c","method":"settings.setVoiceCalendarAccess","params":{"enabled":true}}""");
+        var panelRetention = await panelDispatcher.ProcessRawMessageAsync(
+            """{"id":"0r","method":"settings.setCapabilityRetention","params":{"period":"sevenDays"}}""");
+        var panelClearHistory = await panelDispatcher.ProcessRawMessageAsync(
+            """{"id":"0h","method":"settings.clearCapabilityHistory"}""");
         if (panelEnable?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true)
         {
             _failures.Add("panel bridge exposed the Settings-only AI-native toggle");
@@ -96,6 +105,11 @@ internal sealed class SettingsVerifier
         if (panelVoiceCalendar?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true)
         {
             _failures.Add("panel bridge exposed the Settings-only Voice Calendar grant");
+        }
+        if (panelRetention?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true
+            || panelClearHistory?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true)
+        {
+            _failures.Add("panel bridge exposed Settings-only capability history controls");
         }
         var deniedEnable = await Send(
             deniedSettingsDispatcher,
@@ -132,6 +146,12 @@ internal sealed class SettingsVerifier
         await Send(dispatcher, """{"id":"7vc","method":"settings.setVoiceCalendarAccess","params":{"enabled":true}}""");
         await Send(dispatcher, """{"id":"7v","method":"settings.setVoiceEnabled","params":{"enabled":true}}""");
         await Send(dispatcher, """{"id":"7vl","method":"settings.setVoiceLayout","params":{"layout":"expanded"}}""");
+        await Send(dispatcher, """{"id":"7r","method":"settings.setCapabilityRetention","params":{"period":"sevenDays"}}""");
+        var clearedHistory = await Send(dispatcher, """{"id":"7h","method":"settings.clearCapabilityHistory"}""");
+        if (!clearedHistory.Contains("\"capabilityDataGovernance\":{\"available\":true", StringComparison.Ordinal))
+        {
+            _failures.Add("capability history clear did not return governance readback");
+        }
         await Send(dispatcher, """{"id":"7s","method":"sticky.setUndoToastVisible","params":{"visible":false}}""");
         await Send(dispatcher, """{"id":"7d","method":"settings.setDisplayPlacement","params":{"displayPlacement":"all"}}""");
         await Send(dispatcher, """{"id":"7p","method":"settings.setProviderSelection","params":{"rememberLast":false}}""");
@@ -157,7 +177,8 @@ internal sealed class SettingsVerifier
             || !written.AiNativeEnabled
             || !written.VoiceEnabled
             || !written.VoiceCalendarAccessGranted
-            || written.VoiceLaneLayout != VoiceLaneLayoutPreference.Expanded)
+            || written.VoiceLaneLayout != VoiceLaneLayoutPreference.Expanded
+            || written.CapabilityDataRetentionPeriod != CapabilityDataRetentionPeriod.SevenDays)
         {
             _failures.Add("settings write/read did not preserve scalar values");
         }
@@ -554,6 +575,7 @@ internal sealed class SettingsVerifier
             || defaults.StartWithWindows
             || !defaults.AutoCheckForUpdates
             || defaults.AiNativeEnabled
+            || defaults.CapabilityDataRetentionPeriod != CapabilityDataRetentionPeriod.NinetyDays
             || defaults.VoiceEnabled
             || defaults.VoiceCalendarAccessGranted
             || defaults.VoiceLaneLayout != VoiceLaneLayoutPreference.Compact

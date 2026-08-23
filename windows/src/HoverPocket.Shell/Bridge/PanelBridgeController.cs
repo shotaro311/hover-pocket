@@ -38,6 +38,7 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly TimerBridgeHandlers _timerBridgeHandlers;
     private readonly PocketCapabilityHandlerSet _capabilityHandlers;
     private readonly CapabilityBroker? _capabilityBroker;
+    private readonly CapabilityDataGovernanceController? _capabilityDataGovernance;
     private readonly TodayFocusTextAdapter? _todayFocusTextAdapter;
     private readonly PocketAppHostController? _pocketAppHostController;
     private readonly PocketAppActivationLease? _aiNativeExecutionLease;
@@ -87,13 +88,18 @@ internal sealed class PanelBridgeController : IDisposable
         _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.NormalizeForBootstrap(settings, providerRegistry.ProviderIds);
+        CapabilityDataGovernanceController? capabilityDataGovernance = null;
         try
         {
             var brokerRoot = Path.Combine(settingsStore.RootDirectory, "CapabilityBroker");
+            var ledger = new CapabilityBrokerLedger(brokerRoot);
+            var auditLog = new CapabilityBrokerAuditLog(brokerRoot);
+            capabilityDataGovernance = new CapabilityDataGovernanceController(ledger, auditLog);
+            _ = capabilityDataGovernance.ApplyRetention(CurrentSettings.CapabilityDataRetentionPeriod);
             _capabilityBroker = new CapabilityBroker(
                 new CapabilityRegistry(_capabilityHandlers),
-                new CapabilityBrokerLedger(brokerRoot),
-                new CapabilityBrokerAuditLog(brokerRoot),
+                ledger,
+                auditLog,
                 approvalPresentationResolver: new HostCapabilityApprovalPresentationResolver(stickyStore));
             _todayFocusTextAdapter = new TodayFocusTextAdapter(_capabilityBroker);
         }
@@ -101,9 +107,11 @@ internal sealed class PanelBridgeController : IDisposable
             or IOException
             or UnauthorizedAccessException)
         {
+            capabilityDataGovernance = null;
             _capabilityBroker = null;
             _todayFocusTextAdapter = null;
         }
+        _capabilityDataGovernance = capabilityDataGovernance;
         var voiceTools = _capabilityBroker is null
             ? null
             : new CodexVoiceCapabilityRuntime(
@@ -271,7 +279,8 @@ internal sealed class PanelBridgeController : IDisposable
         Func<System.Windows.Window?>? approvalOwner = null,
         Func<bool>? aiNativeEnableDecision = null,
         Func<bool>? voiceCalendarAccessDecision = null,
-        Func<bool>? voiceMicrophoneGesture = null)
+        Func<bool>? voiceMicrophoneGesture = null,
+        Func<bool>? capabilityHistoryDeleteDecision = null)
     {
         _dispatchers[dispatcher] = surface;
         if (surface == BridgeSurface.Panel && approvalOwner is not null)
@@ -366,6 +375,14 @@ internal sealed class PanelBridgeController : IDisposable
                     approvalOwner,
                     aiNativeEnableDecision,
                     cancellationToken));
+            Register("settings.setCapabilityRetention", SetCapabilityRetentionAsync);
+            Register(
+                "settings.clearCapabilityHistory",
+                (parameters, cancellationToken) => ClearCapabilityHistoryAsync(
+                    parameters,
+                    approvalOwner,
+                    capabilityHistoryDeleteDecision,
+                    cancellationToken));
             _pocketAppGenerationController?.AttachSettings(dispatcher, approvalOwner);
         }
         _calculatorBridgeHandlers.Register(dispatcher);
@@ -455,6 +472,7 @@ internal sealed class PanelBridgeController : IDisposable
                 startWithWindowsRegistered = IsStartupRegistered(),
                 autoCheckForUpdates = CurrentSettings.AutoCheckForUpdates,
                 aiNativeEnabled = CurrentSettings.AiNativeEnabled,
+                capabilityDataRetentionPeriod = ToWireValue(CurrentSettings.CapabilityDataRetentionPeriod),
                 voiceEnabled = CurrentSettings.VoiceEnabled,
                 voiceCalendarAccessGranted = CurrentSettings.VoiceCalendarAccessGranted,
                 voiceLaneLayout = ToWireValue(CurrentSettings.VoiceLaneLayout),
@@ -563,8 +581,99 @@ internal sealed class PanelBridgeController : IDisposable
                 : new[] { _pocketAppHostController.BuildManagerState() },
             pocketAppGeneration = includeGeneration && CurrentSettings.AiNativeEnabled
                 ? _pocketAppGenerationController?.BuildState()
+                : null,
+            capabilityDataGovernance = includeGeneration
+                ? BuildCapabilityDataGovernanceState()
                 : null
         };
+    }
+
+    private async Task<object?> SetCapabilityRetentionAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var period = ParseCapabilityDataRetentionPeriod(ReadRequiredString(parameters, "period"));
+        var governance = _capabilityDataGovernance
+            ?? throw new CapabilityBrokerException("CAPABILITY_AUDIT_UNAVAILABLE", "audit");
+        _ = governance.ApplyRetention(period);
+        if (CurrentSettings.CapabilityDataRetentionPeriod != period)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.CapabilityDataRetentionPeriod = period;
+            SaveSettings(updated);
+        }
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> ClearCapabilityHistoryAsync(
+        JsonElement? parameters,
+        Func<System.Windows.Window?>? approvalOwner,
+        Func<bool>? deleteDecision,
+        CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        cancellationToken.ThrowIfCancellationRequested();
+        var approved = deleteDecision is not null
+            ? deleteDecision()
+            : ShowCapabilityHistoryDeleteApproval(approvalOwner?.Invoke());
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!approved)
+        {
+            return await PublishStateAsync(cancellationToken);
+        }
+        var governance = _capabilityDataGovernance
+            ?? throw new CapabilityBrokerException("CAPABILITY_AUDIT_UNAVAILABLE", "audit");
+        _ = governance.ClearHistory();
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private bool ShowCapabilityHistoryDeleteApproval(System.Windows.Window? owner)
+    {
+        var english = CurrentSettings.Language == AppLanguage.English;
+        var message = english
+            ? "Delete audit logs and receipt content? Minimal completion tombstones remain to prevent duplicate execution."
+            : "監査ログと実行履歴の内容を削除しますか？ 重複実行を防ぐ最小限の実行済み情報は残ります。";
+        var title = english ? "Delete capability history" : "Capability履歴を削除";
+        var result = owner is null
+            ? System.Windows.MessageBox.Show(
+                message,
+                title,
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Warning,
+                System.Windows.MessageBoxResult.No)
+            : System.Windows.MessageBox.Show(
+                owner,
+                message,
+                title,
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Warning,
+                System.Windows.MessageBoxResult.No);
+        return result == System.Windows.MessageBoxResult.Yes;
+    }
+
+    private object BuildCapabilityDataGovernanceState()
+    {
+        try
+        {
+            var snapshot = _capabilityDataGovernance?.Snapshot();
+            return snapshot is null
+                ? (object)new { available = false }
+                : new
+                {
+                    available = true,
+                    snapshot.AuditFileCount,
+                    snapshot.AuditByteCount,
+                    snapshot.StoredReceiptCount,
+                    snapshot.RedactedTombstoneCount,
+                    snapshot.PendingCount,
+                    snapshot.LastAppliedAt
+                };
+        }
+        catch
+        {
+            return new { available = false };
+        }
     }
 
     public void SetPocketAppStateFlush(
@@ -1878,6 +1987,18 @@ internal sealed class PanelBridgeController : IDisposable
             : VoiceLaneLayoutPreference.Compact;
     }
 
+    private static CapabilityDataRetentionPeriod ParseCapabilityDataRetentionPeriod(string value)
+    {
+        return value switch
+        {
+            "sevenDays" => CapabilityDataRetentionPeriod.SevenDays,
+            "thirtyDays" => CapabilityDataRetentionPeriod.ThirtyDays,
+            "ninetyDays" => CapabilityDataRetentionPeriod.NinetyDays,
+            "forever" => CapabilityDataRetentionPeriod.Forever,
+            _ => throw new InvalidOperationException("Unknown capability data retention period.")
+        };
+    }
+
     private bool IsStartupRegistered()
     {
         try
@@ -1966,6 +2087,18 @@ internal sealed class PanelBridgeController : IDisposable
     private static string ToWireValue(VoiceLaneLayoutPreference layout)
     {
         return layout == VoiceLaneLayoutPreference.Expanded ? "expanded" : "compact";
+    }
+
+    private static string ToWireValue(CapabilityDataRetentionPeriod period)
+    {
+        return period switch
+        {
+            CapabilityDataRetentionPeriod.SevenDays => "sevenDays",
+            CapabilityDataRetentionPeriod.ThirtyDays => "thirtyDays",
+            CapabilityDataRetentionPeriod.NinetyDays => "ninetyDays",
+            CapabilityDataRetentionPeriod.Forever => "forever",
+            _ => "ninetyDays"
+        };
     }
 
     private static string ToWireValue(VoiceLaneMode mode)

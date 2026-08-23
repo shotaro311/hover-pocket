@@ -66,18 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func configureAINativeRuntimeIfEnabled() {
         let savedGeneratedProviderIDs = hoverWindowController.appSettings.savedGeneratedProviderIDs
-        guard hoverWindowController.appSettings.aiNativeEnabled else {
-            AINativeRuntime.shared.configure(
-                adapter: nil,
-                preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
-            )
-            return
-        }
         do {
-            let handlers = try ProviderCapabilityCompositionRoot.live(
-                calendarDataSource: GoogleCalendarCapabilityDataSource()
-            )
-            let registry = try CapabilityRegistry(handlers: handlers)
             let applicationSupport = try FileManager.default.url(
                 for: .applicationSupportDirectory,
                 in: .userDomainMask,
@@ -87,10 +76,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let brokerRoot = applicationSupport
                 .appendingPathComponent("HoverPocket", isDirectory: true)
                 .appendingPathComponent("CapabilityBroker", isDirectory: true)
+            let ledger = try CapabilityBrokerLedger(rootDirectory: brokerRoot)
+            let auditLog = try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+            let governanceController = CapabilityDataGovernanceController(
+                ledger: ledger,
+                auditLog: auditLog
+            )
+            _ = try governanceController.applyRetention(
+                hoverWindowController.appSettings.capabilityDataRetentionPeriod
+            )
+            guard hoverWindowController.appSettings.aiNativeEnabled else {
+                AINativeRuntime.shared.configure(
+                    adapter: nil,
+                    capabilityDataGovernanceController: governanceController,
+                    preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
+                )
+                return
+            }
+            let handlers = try ProviderCapabilityCompositionRoot.live(
+                calendarDataSource: GoogleCalendarCapabilityDataSource()
+            )
+            let registry = try CapabilityRegistry(handlers: handlers)
             let broker = CapabilityBroker(
                 registry: registry,
-                ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
-                auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot),
+                ledger: ledger,
+                auditLog: auditLog,
                 approvalPresentationResolver: HostCapabilityApprovalPresentationResolver(
                     stickyStore: .shared
                 )
@@ -179,6 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 pocketAppGenerationController: generationController,
                 generatedActivationRegistry: generatedActivationRegistry,
                 builtInActivationLease: builtInActivationLease,
+                capabilityDataGovernanceController: governanceController,
                 preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
             )
         } catch {

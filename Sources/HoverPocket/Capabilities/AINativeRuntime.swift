@@ -11,6 +11,7 @@ final class AINativeRuntime: ObservableObject {
     @Published private(set) var pocketAppGenerationController: PocketAppGenerationController?
     @Published private(set) var generatedExecutionRuntimeRegistry: PocketExecutionRuntimeRegistry?
     @Published private(set) var generatedSurfaceRegistry: PocketSurfaceRegistry?
+    @Published private(set) var capabilityDataGovernanceController: CapabilityDataGovernanceController?
     private var generatedActivationRegistry: PocketAppRuntimeActivationRegistry?
     private var builtInActivationLease: PocketAppActivationLease?
     private var preservedManagedGeneratedProviderIDs: Set<String> = []
@@ -46,6 +47,7 @@ final class AINativeRuntime: ObservableObject {
         pocketAppGenerationController: PocketAppGenerationController? = nil,
         generatedActivationRegistry: PocketAppRuntimeActivationRegistry? = nil,
         builtInActivationLease: PocketAppActivationLease? = nil,
+        capabilityDataGovernanceController: CapabilityDataGovernanceController? = nil,
         preservingManagedGeneratedProviderIDs: Set<String> = []
     ) {
         let retainedProviderIDs = managedGeneratedProviderIDs.union(
@@ -62,6 +64,7 @@ final class AINativeRuntime: ObservableObject {
         self.generatedActivationRegistry = generatedActivationRegistry
         self.generatedExecutionRuntimeRegistry = generatedActivationRegistry?.executionRegistry
         self.generatedSurfaceRegistry = generatedActivationRegistry?.surfaceRegistry
+        self.capabilityDataGovernanceController = capabilityDataGovernanceController
         self.builtInActivationLease = builtInActivationLease
         if let pocketAppGenerationController {
             self.preservedManagedGeneratedProviderIDs = Set(

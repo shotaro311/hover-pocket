@@ -49,6 +49,7 @@ internal sealed class CapabilityBrokerVerifier
         VerifyConsole.WriteLine("broker_pocket_app=ok");
         VerifyConsole.WriteLine("broker_pocket_app_declared_tests=4");
         VerifyConsole.WriteLine("broker_concurrent_duplicate=ok");
+        VerifyConsole.WriteLine("broker_retention_governance=ok");
         VerifyConsole.WriteLine("broker_negative_cases=12");
         VerifyConsole.WriteLine($"broker_golden_plan_digest={GoldenPlanDigest}");
         return 0;
@@ -391,6 +392,8 @@ internal sealed class CapabilityBrokerVerifier
                 Require(!durableLedgerText.Contains(forbidden, StringComparison.Ordinal), $"ledger_redaction_{forbidden}");
             }
 
+            VerifyCapabilityDataGovernance(brokerRoot, approved.Plan, now);
+
             await VerifyPartialRollbackAsync(root, now, principal);
             await VerifyCurrentStepRollbackAsync(root, now, principal);
             await VerifyCancellationRollbackAsync(root, now, principal);
@@ -404,6 +407,55 @@ internal sealed class CapabilityBrokerVerifier
                 Directory.Delete(root, recursive: true);
             }
         }
+    }
+
+    private void VerifyCapabilityDataGovernance(
+        string brokerRoot,
+        CapabilityExecutionPlan approvedPlan,
+        DateTimeOffset now)
+    {
+        var ledger = new CapabilityBrokerLedger(brokerRoot);
+        var audit = new CapabilityBrokerAuditLog(brokerRoot);
+        var governance = new CapabilityDataGovernanceController(ledger, audit);
+        var before = governance.Snapshot();
+        Require(before.AuditFileCount > 0, "retention_audit_before");
+        Require(before.StoredReceiptCount > 0, "retention_receipts_before");
+
+        var afterRetention = governance.ApplyRetention(
+            CapabilityDataRetentionPeriod.SevenDays,
+            now.AddDays(8));
+        Require(afterRetention.AuditFileCount == 0, "retention_audit_removed");
+        Require(afterRetention.StoredReceiptCount == 0, "retention_receipts_redacted");
+        Require(afterRetention.RedactedTombstoneCount > 0, "retention_tombstones_preserved");
+        var lookup = ledger.LookupWorkflow(approvedPlan.Id, CapabilityCanonicalJson.PlanDigest(approvedPlan));
+        Require(lookup.Kind == CapabilityLedgerStartKind.Unknown, "retention_tombstone_reexecution_allowed");
+
+        var auditDirectory = Path.Combine(brokerRoot, "audit");
+        File.WriteAllText(Path.Combine(auditDirectory, "capability-20990101.jsonl"), "{}\n");
+        var afterClear = governance.ClearHistory(now);
+        Require(afterClear.AuditFileCount == 0, "retention_explicit_clear");
+        Require(afterClear.RedactedTombstoneCount > 0, "retention_clear_tombstones_preserved");
+
+        var invalidEntry = Path.Combine(auditDirectory, "capability-20990102.jsonl");
+        Directory.CreateDirectory(invalidEntry);
+        try
+        {
+            _ = governance.Snapshot();
+            _failures.Add("retention_non_file_accepted");
+        }
+        catch (CapabilityBrokerException ex) when (ex.Code == "CAPABILITY_AUDIT_UNAVAILABLE")
+        {
+        }
+        Directory.Delete(invalidEntry);
+
+        var migrationRoot = Path.Combine(brokerRoot, "v1-migration");
+        Directory.CreateDirectory(migrationRoot);
+        var migrationPath = Path.Combine(migrationRoot, "capability-broker-ledger.json");
+        File.WriteAllText(migrationPath, "{\"invocations\":{},\"version\":1,\"workflows\":{}}");
+        _ = new CapabilityBrokerLedger(migrationRoot);
+        Require(
+            File.ReadAllText(migrationPath).Contains("\"version\":2", StringComparison.Ordinal),
+            "retention_v1_migrated");
     }
 
     private async Task VerifyCalculatorAsync(CapabilityBroker broker, DateTimeOffset now)

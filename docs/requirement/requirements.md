@@ -523,6 +523,10 @@ Planned Must:
 - Pocket App lifecycleの成功receiptと、`PocketSurfaceRegistry` / execution runtimeが観測するapp ID、version、digest、permission grantが一致する。再起動後も一致し、disable / remove時は対象entryが実行不能、rollback / enable時は選択した検証済みentryが実行可能である。
 - Codex、MCP、生成UIからProvider StoreまたはBridgeDispatcherへ直接到達できない。
 - raw transcript、Calendar / Sticky本文、Clipboard本文、token、filesystem pathを監査ログへ残さない。
+- SettingsからCapability監査ログと保存済みreceiptの保持期間を`7日 / 30日 / 90日 / 無期限`で変更でき、既定は90日とする。変更後はHostが実ファイルと台帳を再読込した件数を返す。
+- Capability履歴の全削除はSettings専用操作とし、ネイティブ確認を既定`No`で表示する。削除対象は監査ログと完了receiptの内容であり、pending recordと、同じ副作用を再実行させないplan / argument / capability digestの実行済み墓標は保持する。
+- 保持期間適用または全削除後、redact済み実行を同じidempotency key / plan IDで呼び直した場合は`unknown`として停止し、自動再実行しない。
+- audit fileはHost固定の`capability-YYYYMMDD.jsonl` regular fileだけを対象とし、malformed file、symlink / reparse point、破損台帳を検出した場合は削除や追記をfail closedにする。
 - Voice機能を無効にした場合、Codex process、microphone、WebRTC、追加レイアウトが起動せず、既存パネル寸法とProvider体験が変わらない。
 - installed runtimeがHost検証済みのBroker限定tool policyを持たない場合、Voiceは`SchemaMismatch / BlockedFailure`で停止し、app-server、microphone、Calendar read、Timer approvalを開始しない。表示理由は秘密情報を含まない固定codeから日本語 / 英語へ変換する。
 - Calendar grantの許可、拒否、取り消し、再起動後復元を検証し、許可前 / 取り消し後のProvider呼出し数が0であることを確認する。Timerは同時2件目と1分内4件目がnative dialog表示前に拒否され、session取消で表示中dialogが閉じる。

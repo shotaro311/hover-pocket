@@ -2,8 +2,16 @@
 project_slug: hover-menu-preview
 updated: 2026-08-24
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-pro-running
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-pro-running; an8-retention-draft-pr-ci-green
 ---
+
+## 2026-08-24 AI-native AN8 Capability履歴保持・削除
+
+- `codex/ai-native-an8-core-integration-candidate` head `a330099`からstack branch `codex/ai-native-an8-retention-governance`を作り、macOS / WindowsへCapability監査ログとreceiptの`7日 / 30日 / 90日 / 無期限`保持、既定90日、Settings専用の確認付き全削除を実装した。
+- 完了receipt内容を削除してもplan / argument / capability digestとcompleted stateの墓標を残し、同じidempotency key / plan IDは`unknown`で停止する。audit fileはstrict filename regular fileだけを対象とし、malformed / symlink / reparseをfail closedにする。
+- macOS warnings-as-errors build、Broker retention / migration / symlink回帰、Capability、Pocket App、Pocket Surface、Voice、Panel layout 128件、Timer、13 schema / 66 fixture、Windows Settings JavaScript構文が成功した。Draft PR [#26](https://github.com/shotaro311/hover-pocket/pull/26)のcode head `cd3b974`でWindows [32653742569](https://github.com/shotaro311/hover-pocket/actions/runs/32653742569)、macOS [32653742576](https://github.com/shotaro311/hover-pocket/actions/runs/32653742576)、3 OS contract / compare [32653742551](https://github.com/shotaro311/hover-pocket/actions/runs/32653742551)、Router [32653742728](https://github.com/shotaro311/hover-pocket/actions/runs/32653742728)が成功した。
+- PR #26は`Draft / MERGEABLE / CLEAN`、remote parity `0 / 0`である。mainへ自動mergeせず、Core Integration Candidateへのstack順とexact diffを人手gateに残す。
+- AN8-C Pro backup / export / restore runは正式delivery待ちであり、成果物を先読み・再送していない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an8-retention-governance.md`。
 
 ## 2026-08-24 AI-native Core Integration Candidate
 

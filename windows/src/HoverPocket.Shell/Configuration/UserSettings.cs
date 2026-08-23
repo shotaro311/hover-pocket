@@ -1,4 +1,5 @@
 using HoverPocket.Shell.Voice;
+using HoverPocket.Shell.Capabilities;
 
 namespace HoverPocket.Shell.Configuration;
 
@@ -19,6 +20,8 @@ internal sealed class UserSettings
     public bool AutoCheckForUpdates { get; set; } = true;
 
     public bool AiNativeEnabled { get; set; }
+
+    public CapabilityDataRetentionPeriod CapabilityDataRetentionPeriod { get; set; } = CapabilityDataRetentionPeriod.NinetyDays;
 
     public bool VoiceEnabled { get; set; }
 
@@ -56,6 +59,7 @@ internal sealed class UserSettings
             StartWithWindows = StartWithWindows,
             AutoCheckForUpdates = AutoCheckForUpdates,
             AiNativeEnabled = AiNativeEnabled,
+            CapabilityDataRetentionPeriod = CapabilityDataRetentionPeriod,
             VoiceEnabled = VoiceEnabled,
             VoiceCalendarAccessGranted = VoiceCalendarAccessGranted,
             VoiceLaneLayout = VoiceLaneLayout,

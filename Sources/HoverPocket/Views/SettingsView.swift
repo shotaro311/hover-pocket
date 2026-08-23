@@ -7,6 +7,9 @@ struct SettingsView: View {
     @ObservedObject private var appUpdater = AppUpdater.shared
     @ObservedObject private var aiNativeRuntime = AINativeRuntime.shared
     @StateObject private var weatherLocationModel = WeatherLocationSettingsModel()
+    @State private var capabilityDataSnapshot: CapabilityDataGovernanceSnapshot?
+    @State private var capabilityDataError: String?
+    @State private var isShowingCapabilityHistoryDeleteConfirmation = false
 
     var body: some View {
         ScrollView {
@@ -60,6 +63,32 @@ struct SettingsView: View {
             .padding(20)
         }
         .frame(width: 460, height: 500)
+        .onAppear {
+            refreshCapabilityDataSnapshot()
+        }
+        .onChange(of: settings.capabilityDataRetentionPeriod) { _, period in
+            applyCapabilityDataRetention(period)
+        }
+        .onChange(of: aiNativeRuntime.capabilityDataGovernanceController != nil) { _, _ in
+            refreshCapabilityDataSnapshot()
+        }
+        .alert(
+            localized(
+                japanese: "監査ログと実行履歴を削除しますか？",
+                english: "Delete audit logs and execution history?"
+            ),
+            isPresented: $isShowingCapabilityHistoryDeleteConfirmation
+        ) {
+            Button(localized(japanese: "キャンセル", english: "Cancel"), role: .cancel) {}
+            Button(localized(japanese: "削除", english: "Delete"), role: .destructive) {
+                clearCapabilityHistory()
+            }
+        } message: {
+            Text(localized(
+                japanese: "再実行防止用の実行済み情報は残し、内容と監査ログだけを削除します。",
+                english: "Receipt content and audit logs are deleted. Minimal completion tombstones remain to prevent duplicate execution."
+            ))
+        }
     }
 
     private var language: AppLanguage {
@@ -245,6 +274,50 @@ struct SettingsView: View {
                 isOn: $settings.aiNativeEnabled
             )
 
+            VStack(alignment: .leading, spacing: 8) {
+                Text(localized(japanese: "監査ログと実行履歴", english: "Audit logs and execution history"))
+                    .font(.system(size: 11, weight: .semibold))
+
+                Picker(
+                    localized(japanese: "保持期間", english: "Retention"),
+                    selection: $settings.capabilityDataRetentionPeriod
+                ) {
+                    ForEach(CapabilityDataRetentionPeriod.allCases) { period in
+                        Text(period.title(language: language)).tag(period)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if let snapshot = capabilityDataSnapshot {
+                    Text(localized(
+                        japanese: "監査ファイル \(snapshot.auditFileCount)件・保存済み履歴 \(snapshot.storedReceiptCount)件・削除済み墓標 \(snapshot.redactedTombstoneCount)件",
+                        english: "\(snapshot.auditFileCount) audit files, \(snapshot.storedReceiptCount) stored receipts, \(snapshot.redactedTombstoneCount) redacted tombstones"
+                    ))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                }
+
+                if let capabilityDataError {
+                    Text(capabilityDataError)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.red)
+                }
+
+                Button(role: .destructive) {
+                    isShowingCapabilityHistoryDeleteConfirmation = true
+                } label: {
+                    Label(
+                        localized(japanese: "履歴を削除", english: "Delete history"),
+                        systemImage: "trash"
+                    )
+                }
+                .buttonStyle(.bordered)
+                .disabled(aiNativeRuntime.capabilityDataGovernanceController == nil)
+            }
+            .padding(10)
+            .background(.quaternary.opacity(0.22))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
             if let package = aiNativeRuntime.pocketAppExecutionRuntime?.package {
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 8) {
@@ -299,6 +372,52 @@ struct SettingsView: View {
                     language: language
                 )
             }
+        }
+    }
+
+    private func applyCapabilityDataRetention(_ period: CapabilityDataRetentionPeriod) {
+        guard let controller = aiNativeRuntime.capabilityDataGovernanceController else {
+            refreshCapabilityDataSnapshot()
+            return
+        }
+        do {
+            capabilityDataSnapshot = try controller.applyRetention(period)
+            capabilityDataError = nil
+        } catch {
+            capabilityDataError = localized(
+                japanese: "保持期間を適用できませんでした。",
+                english: "Could not apply the retention period."
+            )
+        }
+    }
+
+    private func clearCapabilityHistory() {
+        guard let controller = aiNativeRuntime.capabilityDataGovernanceController else { return }
+        do {
+            capabilityDataSnapshot = try controller.clearHistory()
+            capabilityDataError = nil
+        } catch {
+            capabilityDataError = localized(
+                japanese: "履歴を削除できませんでした。",
+                english: "Could not delete history."
+            )
+        }
+    }
+
+    private func refreshCapabilityDataSnapshot() {
+        guard let controller = aiNativeRuntime.capabilityDataGovernanceController else {
+            capabilityDataSnapshot = nil
+            return
+        }
+        do {
+            capabilityDataSnapshot = try controller.snapshot()
+            capabilityDataError = nil
+        } catch {
+            capabilityDataSnapshot = nil
+            capabilityDataError = localized(
+                japanese: "履歴の状態を読み取れませんでした。",
+                english: "Could not read history status."
+            )
         }
     }
 

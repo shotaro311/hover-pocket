@@ -122,6 +122,12 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var capabilityDataRetentionPeriod: CapabilityDataRetentionPeriod {
+        didSet {
+            defaults.set(capabilityDataRetentionPeriod.rawValue, forKey: Self.capabilityDataRetentionPeriodKey)
+        }
+    }
+
     @Published var voiceEnabled: Bool {
         didSet {
             defaults.set(voiceEnabled, forKey: Self.voiceEnabledKey)
@@ -155,6 +161,7 @@ final class AppSettings: ObservableObject {
     private static let showStickyNoteUndoToastKey = "showStickyNoteUndoToast"
     private static let stickyNoteGridSizeKey = "stickyNoteGridSize"
     private static let aiNativeEnabledKey = "aiNativeEnabled"
+    private static let capabilityDataRetentionPeriodKey = "capabilityDataRetentionPeriod"
     private static let voiceEnabledKey = "voiceEnabled"
     private static let voiceLaneLayoutPreferenceKey = "voiceLaneLayoutPreference"
 
@@ -224,6 +231,8 @@ final class AppSettings: ObservableObject {
         self.aiNativeEnabled = defaults.object(forKey: Self.aiNativeEnabledKey) == nil
             ? false
             : defaults.bool(forKey: Self.aiNativeEnabledKey)
+        self.capabilityDataRetentionPeriod = defaults.string(forKey: Self.capabilityDataRetentionPeriodKey)
+            .flatMap(CapabilityDataRetentionPeriod.init(rawValue:)) ?? .ninetyDays
         self.voiceEnabled = defaults.object(forKey: Self.voiceEnabledKey) == nil
             ? false
             : defaults.bool(forKey: Self.voiceEnabledKey)
