@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using HoverPocket.Shell.Providers.Calendar;
+using HoverPocket.Shell.Providers.Controls;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
 
@@ -12,6 +13,12 @@ internal static class CapabilityIds
     public static readonly PocketCapabilityKey CalendarList = new("calendar.events.list", 1);
     public static readonly PocketCapabilityKey CalendarGet = new("calendar.event.get", 1);
     public static readonly PocketCapabilityKey CalendarCreate = new("calendar.event.create", 1);
+    public static readonly PocketCapabilityKey ControlsAvailability = new("controls.availability.get", 1);
+    public static readonly PocketCapabilityKey ControlsBrightnessSet = new("controls.brightness.set", 1);
+    public static readonly PocketCapabilityKey ControlsMediaCommand = new("controls.media.command", 1);
+    public static readonly PocketCapabilityKey ControlsMuteSet = new("controls.mute.set", 1);
+    public static readonly PocketCapabilityKey ControlsVolumeGet = new("controls.volume.get", 1);
+    public static readonly PocketCapabilityKey ControlsVolumeSet = new("controls.volume.set", 1);
     public static readonly PocketCapabilityKey TimerStart = new("timer.countdown.start", 1);
     public static readonly PocketCapabilityKey TimerGet = new("timer.countdown.get", 1);
     public static readonly PocketCapabilityKey TimerPause = new("timer.countdown.pause", 1);
@@ -608,8 +615,10 @@ internal static class ProviderCapabilityCompositionRoot
     public static PocketCapabilityHandlerSet Create(
         ICalendarCapabilityDataSource calendarDataSource,
         TimerStore timerStore,
-        StickyNotesStore stickyStore)
+        StickyNotesStore stickyStore,
+        IControlsCapabilityDataSource? controlsDataSource = null)
     {
+        controlsDataSource ??= new UnavailableControlsCapabilityDataSource();
         return new PocketCapabilityHandlerSet([
             new CalendarListCapabilityHandler(calendarDataSource),
             new CalendarGetCapabilityHandler(calendarDataSource),
@@ -624,7 +633,13 @@ internal static class ProviderCapabilityCompositionRoot
             new StickyCapabilityHandler(StickyCapabilityOperation.Get, stickyStore),
             new StickyCapabilityHandler(StickyCapabilityOperation.Status, stickyStore),
             new StickyCapabilityHandler(StickyCapabilityOperation.Archive, stickyStore),
-            new StickyCapabilityHandler(StickyCapabilityOperation.Delete, stickyStore)
+            new StickyCapabilityHandler(StickyCapabilityOperation.Delete, stickyStore),
+            new ControlsCapabilityHandler(ControlsCapabilityOperation.Availability, controlsDataSource),
+            new ControlsCapabilityHandler(ControlsCapabilityOperation.VolumeGet, controlsDataSource),
+            new ControlsCapabilityHandler(ControlsCapabilityOperation.VolumeSet, controlsDataSource),
+            new ControlsCapabilityHandler(ControlsCapabilityOperation.MuteSet, controlsDataSource),
+            new ControlsCapabilityHandler(ControlsCapabilityOperation.BrightnessSet, controlsDataSource),
+            new ControlsCapabilityHandler(ControlsCapabilityOperation.MediaCommand, controlsDataSource)
         ]);
     }
 }

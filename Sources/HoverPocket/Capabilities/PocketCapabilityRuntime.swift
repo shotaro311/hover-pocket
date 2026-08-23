@@ -144,6 +144,22 @@ extension Dictionary where Key == String, Value == CapabilityValue {
         return value
     }
 
+    func requiredNumber(_ key: String, range: ClosedRange<Double>) throws -> Double {
+        let value: Double
+        switch self[key] {
+        case .some(.number(let number)):
+            value = number
+        case .some(.integer(let integer)):
+            value = Double(integer)
+        default:
+            throw CapabilityHandlerError.invalidArgument(key)
+        }
+        guard value.isFinite, range.contains(value) else {
+            throw CapabilityHandlerError.invalidArgument(key)
+        }
+        return value
+    }
+
     func requiredBool(_ key: String) throws -> Bool {
         guard case .bool(let value)? = self[key] else {
             throw CapabilityHandlerError.invalidArgument(key)
@@ -173,5 +189,28 @@ enum CapabilityDateCodec {
 extension String {
     func prefixingUnicodeScalars(_ maximumCount: Int) -> String {
         String(unicodeScalars.prefix(maximumCount))
+    }
+
+    func sanitizedCapabilityVisibleText(maximumCount: Int) -> String {
+        var result = ""
+        var scalarCount = 0
+        var pendingSpace = false
+        for scalar in unicodeScalars {
+            if CharacterSet.whitespacesAndNewlines.contains(scalar)
+                || CharacterSet.controlCharacters.contains(scalar)
+                || scalar.properties.generalCategory == .format {
+                pendingSpace = !result.isEmpty
+                continue
+            }
+            if pendingSpace, scalarCount < maximumCount {
+                result.append(" ")
+                scalarCount += 1
+                pendingSpace = false
+            }
+            guard scalarCount < maximumCount else { break }
+            result.unicodeScalars.append(scalar)
+            scalarCount += 1
+        }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
