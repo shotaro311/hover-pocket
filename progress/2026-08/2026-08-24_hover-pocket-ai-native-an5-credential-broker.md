@@ -86,6 +86,23 @@ deinit-only cleanupは攻撃経路がないためsecurity findingからsuppresse
 
 このMacには.NET SDKがないため、Windows C#のRelease build、warning 0 / error 0、credential broker verifierはDraft PR CIを必須gateとする。
 
+## Draft PR CI readback
+
+- Draft PR: [#33](https://github.com/shotaro311/hover-pocket/pull/33)
+- verified code head: `143ed3f47cb2a8006ebc6d4d2332b21e2e6c5157`
+- base: `codex/ai-native-an5-codex-confinement`
+- Windows: [run 32668817459](https://github.com/shotaro311/hover-pocket/actions/runs/32668817459)、成功、2分7秒。
+  - Release build: warning 0 / error 0。
+  - brokerのlease、Named Pipe、wrong capability、helperはすべてbegin / endが揃った。
+  - `pocket_app_package_verify=ok`、`pocket_app_generation_verify=ok`、workspace backup / health成功。
+  - Capability、Broker、Timer、Settings、旧AI lane不在、Voice、Updater、release signing contract、rendered WebView UIを含む後続stepも成功。
+- macOS: [run 32668817516](https://github.com/shotaro311/hover-pocket/actions/runs/32668817516)、成功、2分3秒。
+  - warnings-as-errors build成功。
+  - Voice contract 42件、Voice runtime、Capability、Broker、Pocket Surface、Pocket App package / lifecycle / generation / migration / health / workspace backup成功。
+- Router: [run 32668816613](https://github.com/shotaro311/hover-pocket/actions/runs/32668816613)、成功、3秒。
+
+最初のWindows runはWPF UI context deadlockを検出する証拠であり、成功扱いにしていない。修正後のexact headでWindowsとmacOSの独立runが成功したことを受入証拠にする。
+
 ## Pro回収状態
 
 - 通知された旧AN3-B3A deliveryは`claim-synthesis`でstate hash不一致となった。
