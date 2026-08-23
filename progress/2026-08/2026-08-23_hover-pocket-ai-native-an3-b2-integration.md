@@ -63,6 +63,34 @@ readback:
 - mergeability: `MERGEABLE / CLEAN`
 - remote parity: `0 / 0`
 
+### timeout verifierのflaky修正
+
+docs-only head `608d8c0`のmacOS CIで、`Verify capability broker and text Today Focus`だけが`timeout_handler_cancelled`で失敗した。Windows、Voice、Capability、3OS contractは成功していた。
+
+原因:
+
+- timeout taskがhandler taskの開始前に勝つと、production Brokerはoperationを安全に取消して`CAPABILITY_TIMEOUT`を返す。
+- 旧verifierはhandlerが未開始でも、handler内部で`CancellationError`を捕捉したことだけを必須にしていた。
+- Swift Task cancellationは協調的であり、取消済みTaskがbody先頭の`Task.checkCancellation()`で終了する経路ではhandler内部のflagは立たない。
+
+修正:
+
+- production `CapabilityBroker`は変更していない。
+- handlerが未開始なら安全な取消として受理する。
+- handlerが開始済みなら`CancellationError`の捕捉を必須にする。
+- どちらの経路でも`didReturn == false`を必須にし、timeout後の遅延結果を禁止する。
+
+検証:
+
+- `swift build -Xswiftc -warnings-as-errors`: PASS
+- `.build/debug/HoverPocket --verify-broker`: 50回連続PASS
+- head `caa13c1695e0e9ad0c791a7da8e0b85caa0d76f3`で全7 CI成功
+  - [Verify Windows 32645098065](https://github.com/shotaro311/hover-pocket/actions/runs/32645098065)
+  - [Verify macOS Capabilities 32645098030](https://github.com/shotaro311/hover-pocket/actions/runs/32645098030)
+  - [Verify Pocket Contracts 32645098063](https://github.com/shotaro311/hover-pocket/actions/runs/32645098063)
+  - [Codex PR Router 32645096808](https://github.com/shotaro311/hover-pocket/actions/runs/32645096808)
+- Security scan `3c86f9cc-972d-4ba0-876a-2c3c0fc9fbe1`: 1 / 1 surface、coverage complete、finding 0、sealed complete
+
 ## Security readback
 
 - scan: `824fcceb-34c9-4312-a42f-155f29aeffc3`
