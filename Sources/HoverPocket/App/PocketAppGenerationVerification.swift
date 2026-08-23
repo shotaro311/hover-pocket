@@ -463,6 +463,7 @@ enum PocketAppGenerationVerification {
     }
 
     private static func verifyRealCodexFailsClosed(failures: inout [String]) {
+        verifyCredentialBroker(failures: &failures)
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("hover-pocket-codex-confinement", isDirectory: true)
         let workspace = root.appendingPathComponent("workspace", isDirectory: true)
@@ -515,6 +516,146 @@ enum PocketAppGenerationVerification {
             "generation_real_codex_confidentiality_gate",
             failures: &failures
         )
+    }
+
+    private static func verifyCredentialBroker(failures: inout [String]) {
+        let fixtureSecret = "fixture-token-not-a-real-credential"
+        do {
+            let lease = try CodexCredentialBrokerLease(
+                capability: String(repeating: "a", count: 43),
+                expiresAt: Date().addingTimeInterval(5),
+                secretProvider: { fixtureSecret }
+            )
+            let secret = try lease.redeem(String(repeating: "a", count: 43))
+            require(
+                secret == fixtureSecret && lease.isConsumed,
+                "generation_credential_broker_one_time_lease",
+                failures: &failures
+            )
+            do {
+                _ = try lease.redeem(String(repeating: "a", count: 43))
+                failures.append("generation_credential_broker_replay")
+            } catch {
+            }
+
+            let expired = try CodexCredentialBrokerLease(
+                capability: String(repeating: "b", count: 43),
+                expiresAt: Date().addingTimeInterval(-1),
+                secretProvider: { fixtureSecret }
+            )
+            do {
+                _ = try expired.redeem(String(repeating: "b", count: 43))
+                failures.append("generation_credential_broker_expired")
+            } catch {
+                require(expired.isConsumed, "generation_credential_broker_expired_consumed", failures: &failures)
+            }
+
+            let server = try CodexCredentialBrokerServer(lifetime: 5) { fixtureSecret }
+            let endpoint = server.endpoint
+            let brokerSecret = try CodexCredentialBrokerClient.fetchSecret(
+                endpoint: endpoint,
+                capability: server.capability
+            )
+            require(
+                brokerSecret == fixtureSecret,
+                "generation_credential_broker_unix_socket",
+                failures: &failures
+            )
+            do {
+                _ = try CodexCredentialBrokerClient.fetchSecret(
+                    endpoint: endpoint,
+                    capability: server.capability
+                )
+                failures.append("generation_credential_broker_socket_replay")
+            } catch {
+            }
+            server.cancel()
+            require(
+                !FileManager.default.fileExists(atPath: server.rootDirectory.path),
+                "generation_credential_broker_socket_cleanup",
+                failures: &failures
+            )
+
+            let wrongCapabilityServer = try CodexCredentialBrokerServer(lifetime: 5) { fixtureSecret }
+            defer { wrongCapabilityServer.cancel() }
+            do {
+                _ = try CodexCredentialBrokerClient.fetchSecret(
+                    endpoint: wrongCapabilityServer.endpoint,
+                    capability: String(repeating: "c", count: 43)
+                )
+                failures.append("generation_credential_broker_wrong_capability")
+            } catch {
+            }
+            do {
+                _ = try CodexCredentialBrokerClient.fetchSecret(
+                    endpoint: wrongCapabilityServer.endpoint,
+                    capability: wrongCapabilityServer.capability
+                )
+                failures.append("generation_credential_broker_wrong_capability_replay")
+            } catch {
+            }
+
+            let helperServer = try CodexCredentialBrokerServer(lifetime: 5) { fixtureSecret }
+            defer { helperServer.cancel() }
+            let helper = Process()
+            let helperOutput = Pipe()
+            let helperError = Pipe()
+            helper.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+            helper.arguments = [CodexCredentialBrokerHelper.argument]
+            helper.environment = [
+                CodexCredentialBrokerHelper.endpointEnvironmentKey: helperServer.endpoint.path,
+                CodexCredentialBrokerHelper.capabilityEnvironmentKey: helperServer.capability,
+            ]
+            helper.standardOutput = helperOutput
+            helper.standardError = helperError
+            try helper.run()
+            helper.waitUntilExit()
+            let output = helperOutput.fileHandleForReading.readDataToEndOfFile()
+            let error = helperError.fileHandleForReading.readDataToEndOfFile()
+            require(
+                helper.terminationStatus == 0
+                    && output == Data(fixtureSecret.utf8)
+                    && error.isEmpty,
+                "generation_credential_broker_helper_stdout_only",
+                failures: &failures
+            )
+
+            let deinitProbe = Process()
+            let deinitOutput = Pipe()
+            let deinitError = Pipe()
+            deinitProbe.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+            deinitProbe.arguments = [CodexCredentialBrokerDeinitProbe.argument]
+            deinitProbe.environment = [:]
+            deinitProbe.standardOutput = deinitOutput
+            deinitProbe.standardError = deinitError
+            try deinitProbe.run()
+            let deinitDeadline = Date().addingTimeInterval(3)
+            while deinitProbe.isRunning, Date() < deinitDeadline {
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+            if deinitProbe.isRunning {
+                deinitProbe.terminate()
+                let terminationDeadline = Date().addingTimeInterval(1)
+                while deinitProbe.isRunning, Date() < terminationDeadline {
+                    Thread.sleep(forTimeInterval: 0.01)
+                }
+                if deinitProbe.isRunning {
+                    _ = kill(deinitProbe.processIdentifier, SIGKILL)
+                }
+            }
+            deinitProbe.waitUntilExit()
+            let deinitStdout = deinitOutput.fileHandleForReading.readDataToEndOfFile()
+            let deinitStderr = deinitError.fileHandleForReading.readDataToEndOfFile()
+            require(
+                deinitProbe.terminationStatus == 0
+                    && deinitStdout.isEmpty
+                    && deinitStderr.isEmpty,
+                "generation_credential_broker_deinit_cleanup",
+                failures: &failures
+            )
+        } catch {
+            failures.append("generation_credential_broker_contract")
+        }
     }
 
     private static func verifyProcessTreeCleanup(failures: inout [String]) throws {

@@ -16,6 +16,9 @@ internal sealed class PocketAppGenerationVerifier
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN e2e");
         VerifyE2E();
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END e2e");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN credential-broker");
+        VerifyCredentialBrokerAsync().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END credential-broker");
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN settings-approval");
         VerifySettingsApprovalBoundary().GetAwaiter().GetResult();
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END settings-approval");
@@ -37,6 +40,117 @@ internal sealed class PocketAppGenerationVerifier
         VerifyApprovalTextSanitization();
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END approval-text");
         return _failures;
+    }
+
+    private async Task VerifyCredentialBrokerAsync()
+    {
+        const string fixtureSecret = "fixture-token-not-a-real-credential";
+        try
+        {
+            var lease = new CodexCredentialBrokerLease(
+                new string('a', 43),
+                DateTimeOffset.UtcNow.AddSeconds(5),
+                () => fixtureSecret);
+            Require(
+                lease.Redeem(new string('a', 43)) == fixtureSecret && lease.IsConsumed,
+                "generation_credential_broker_one_time_lease");
+            try
+            {
+                _ = lease.Redeem(new string('a', 43));
+                _failures.Add("generation_credential_broker_replay");
+            }
+            catch (CodexCredentialBrokerException)
+            {
+            }
+
+            var expired = new CodexCredentialBrokerLease(
+                new string('b', 43),
+                DateTimeOffset.UtcNow.AddSeconds(-1),
+                () => fixtureSecret);
+            try
+            {
+                _ = expired.Redeem(new string('b', 43));
+                _failures.Add("generation_credential_broker_expired");
+            }
+            catch (CodexCredentialBrokerException)
+            {
+                Require(expired.IsConsumed, "generation_credential_broker_expired_consumed");
+            }
+
+            using (var server = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(5),
+                () => fixtureSecret))
+            {
+                var secret = await CodexCredentialBrokerClient.FetchSecretAsync(
+                    server.PipeName,
+                    server.Capability);
+                await server.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(secret == fixtureSecret, "generation_credential_broker_named_pipe");
+                try
+                {
+                    _ = await CodexCredentialBrokerClient.FetchSecretAsync(
+                        server.PipeName,
+                        server.Capability,
+                        TimeSpan.FromMilliseconds(250));
+                    _failures.Add("generation_credential_broker_pipe_replay");
+                }
+                catch (CodexCredentialBrokerException)
+                {
+                }
+            }
+
+            using (var wrongCapabilityServer = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(5),
+                () => fixtureSecret))
+            {
+                try
+                {
+                    _ = await CodexCredentialBrokerClient.FetchSecretAsync(
+                        wrongCapabilityServer.PipeName,
+                        new string('c', 43));
+                    _failures.Add("generation_credential_broker_wrong_capability");
+                }
+                catch (CodexCredentialBrokerException)
+                {
+                }
+                await wrongCapabilityServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                try
+                {
+                    _ = await CodexCredentialBrokerClient.FetchSecretAsync(
+                        wrongCapabilityServer.PipeName,
+                        wrongCapabilityServer.Capability,
+                        TimeSpan.FromMilliseconds(250));
+                    _failures.Add("generation_credential_broker_wrong_capability_replay");
+                }
+                catch (CodexCredentialBrokerException)
+                {
+                }
+            }
+
+            using (var helperServer = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(5),
+                () => fixtureSecret))
+            using (var output = new StringWriter())
+            using (var error = new StringWriter())
+            {
+                var result = await CodexCredentialBrokerHelper.RunAsync(
+                    helperServer.PipeName,
+                    helperServer.Capability,
+                    output,
+                    error,
+                    CancellationToken.None);
+                await helperServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(
+                    result == 0
+                        && output.ToString() == fixtureSecret
+                        && string.IsNullOrEmpty(error.ToString()),
+                    "generation_credential_broker_helper_stdout_only");
+            }
+        }
+        catch (Exception ex)
+        {
+            _failures.Add($"generation_credential_broker_contract:{ex.GetType().Name}:{ex.Message}");
+        }
     }
 
     private void VerifyE2E()
