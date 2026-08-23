@@ -63,7 +63,8 @@ internal sealed record PocketAppPackage(
     IReadOnlyDictionary<string, PocketAppStatePropertySchema> StateProperties,
     IReadOnlyDictionary<string, PocketSurfaceDocument> Surfaces,
     IReadOnlyDictionary<string, PocketAppWorkflowDocument> Workflows,
-    IReadOnlyDictionary<string, string> TestCases);
+    IReadOnlyDictionary<string, string> TestCases,
+    IReadOnlyList<PocketCapabilityCompatibilityIssue> CompatibilityIssues);
 
 internal sealed class PocketAppPackageRuntime
 {
@@ -91,11 +92,15 @@ internal sealed class PocketAppPackageRuntime
         RegexOptions.CultureInvariant);
 
     private readonly IReadOnlyDictionary<PocketCapabilityKey, PocketCapabilityDescriptor> _descriptors;
+    private readonly PocketCapabilityCompatibilityCatalog _compatibilityCatalog;
 
-    public PocketAppPackageRuntime(IEnumerable<PocketCapabilityDescriptor>? descriptors = null)
+    public PocketAppPackageRuntime(
+        IEnumerable<PocketCapabilityDescriptor>? descriptors = null,
+        PocketCapabilityCompatibilityCatalog? compatibilityCatalog = null)
     {
         _descriptors = (descriptors ?? PocketCapabilityDescriptors.BuiltIn)
             .ToDictionary(descriptor => descriptor.Key);
+        _compatibilityCatalog = compatibilityCatalog ?? PocketCapabilityCompatibilityCatalog.BuiltIn;
     }
 
     public PocketAppPackage Load(string directory)
@@ -105,6 +110,18 @@ internal sealed class PocketAppPackageRuntime
 
     public PocketAppPackage Load(PocketAppFileSnapshot snapshot)
     {
+        return Load(snapshot, allowRemovedCapabilitiesForMigration: false);
+    }
+
+    public PocketAppPackage LoadMigrationSource(PocketAppFileSnapshot snapshot)
+    {
+        return Load(snapshot, allowRemovedCapabilitiesForMigration: true);
+    }
+
+    private PocketAppPackage Load(
+        PocketAppFileSnapshot snapshot,
+        bool allowRemovedCapabilitiesForMigration)
+    {
         var root = snapshot.RootDirectory;
         var packageFiles = snapshot.Files;
         if (!packageFiles.TryGetValue("manifest.json", out var manifestData))
@@ -112,7 +129,13 @@ internal sealed class PocketAppPackageRuntime
             throw new PocketAppPackageRuntimeException("$:package_files");
         }
         var manifestElement = ReadObject(manifestData, "$.manifest");
-        var manifest = ParseManifest(manifestElement);
+        var manifest = ParseManifest(manifestElement, allowRemovedCapabilitiesForMigration);
+        var compatibilityIssues = manifest.RequestedCapabilities
+            .Select(item => _compatibilityCatalog.Issue(item.Key))
+            .Where(item => item is not null)
+            .Select(item => item!)
+            .OrderBy(item => item.Key)
+            .ToArray();
 
         var expectedFiles = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -226,10 +249,13 @@ internal sealed class PocketAppPackageRuntime
             stateProperties,
             surfaces,
             workflows,
-            testCases);
+            testCases,
+            compatibilityIssues);
     }
 
-    private PocketAppManifestDocument ParseManifest(JsonElement value)
+    private PocketAppManifestDocument ParseManifest(
+        JsonElement value,
+        bool allowRemovedCapabilitiesForMigration)
     {
         ExactKeys(
             value,
@@ -276,6 +302,11 @@ internal sealed class PocketAppPackageRuntime
             if (!_descriptors.TryGetValue(key, out var descriptor) || descriptor.ApprovalPolicy == CapabilityApprovalPolicy.RuntimeProhibited)
             {
                 throw new PocketAppPackageRuntimeException($"$.manifest.requestedCapabilities[{index}]:unknown");
+            }
+            if (_compatibilityCatalog.Status(key) == PocketCapabilityLifecycleStatus.Removed
+                && !allowRemovedCapabilitiesForMigration)
+            {
+                throw new PocketAppPackageRuntimeException($"$.manifest.requestedCapabilities[{index}]:removed");
             }
             Require(capabilityKeys.Add(key), "$.manifest.requestedCapabilities:duplicate");
             JsonElement? scope = request.TryGetProperty("scope", out var rawScope) ? rawScope.Clone() : null;

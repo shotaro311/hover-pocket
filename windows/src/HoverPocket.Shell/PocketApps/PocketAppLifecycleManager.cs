@@ -101,7 +101,9 @@ internal sealed record PocketAppManagedPackage(
 internal sealed record PocketAppManagementIssue(
     string PackageId,
     string ErrorCode,
-    bool RemovalAllowed);
+    bool RemovalAllowed,
+    bool MigrationAvailable = false,
+    string? SuggestedVersion = null);
 
 internal sealed record PocketAppManagementSnapshot(
     IReadOnlyList<PocketAppManagedPackage> Packages,
@@ -137,6 +139,7 @@ internal sealed class PocketAppLifecycleManager : IDisposable
     private readonly string _rootDirectory;
     private readonly string _userDataRoot;
     private readonly PocketAppPackageRuntime _runtime;
+    private readonly PocketAppCapabilityMigrator _capabilityMigrator;
     private readonly PocketAppStagingTestRunner _stagingTestRunner;
     private readonly string _hostVersion;
     private readonly Func<string, bool>? _failureInjection;
@@ -156,12 +159,15 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         Func<string, bool>? failureInjection = null,
         string hostVersion = PocketAppHostContract.Version,
         bool performStartupRecovery = true,
-        Func<PocketAppLifecycleReceipt, PocketAppRuntimeReadback>? activationReadback = null)
+        Func<PocketAppLifecycleReceipt, PocketAppRuntimeReadback>? activationReadback = null,
+        PocketCapabilityCompatibilityCatalog? compatibilityCatalog = null)
     {
         if (!ValidVersion(hostVersion)) { throw Failure("LIFECYCLE_PACKAGE_INVALID"); }
         _rootDirectory = Path.GetFullPath(rootDirectory);
         _userDataRoot = Path.GetFullPath(userDataRoot);
-        _runtime = runtime ?? new PocketAppPackageRuntime();
+        var catalog = compatibilityCatalog ?? PocketCapabilityCompatibilityCatalog.BuiltIn;
+        _runtime = runtime ?? new PocketAppPackageRuntime(compatibilityCatalog: catalog);
+        _capabilityMigrator = new PocketAppCapabilityMigrator(catalog: catalog);
         _stagingTestRunner = new PocketAppStagingTestRunner();
         _hostVersion = hostVersion;
         _failureInjection = failureInjection;
@@ -226,7 +232,7 @@ internal sealed class PocketAppLifecycleManager : IDisposable
             var action = current is null || current.State == PocketAppLifecycleState.Removed
                 ? PocketAppLifecycleAction.Install
                 : PocketAppLifecycleAction.Update;
-            var currentPackage = VerifiedCurrentPackage(current);
+            var currentPackage = VerifiedCurrentPackage(current, allowRemovedCapabilities: true);
             if (currentPackage is not null
                 && CompareSemanticVersions(package.Manifest.Version, currentPackage.Manifest.Version) < 0)
             {
@@ -293,6 +299,77 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         {
             if (cleanupDirectory is not null) { try { Directory.Delete(cleanupDirectory, true); } catch { } }
             throw Failure("LIFECYCLE_PACKAGE_INVALID");
+        }
+    }
+
+    public PocketAppLifecycleProposal PrepareCapabilityMigration(
+        string packageId,
+        string targetVersion,
+        DateTimeOffset? now = null) =>
+        WithLifecycleLock(() => PrepareCapabilityMigrationCore(packageId, targetVersion, now));
+
+    private PocketAppLifecycleProposal PrepareCapabilityMigrationCore(
+        string packageId,
+        string targetVersion,
+        DateTimeOffset? now)
+    {
+        if (!ValidPackageId(packageId) || !ValidVersion(targetVersion))
+        {
+            throw Failure("LIFECYCLE_PACKAGE_INVALID");
+        }
+        var current = ReadActiveRecord(packageId);
+        if (current is null
+            || current.State == PocketAppLifecycleState.Removed
+            || current.Version is null
+            || current.PackageDigest is null)
+        {
+            throw Failure("LIFECYCLE_PACKAGE_INVALID");
+        }
+
+        var sourceDirectory = InstalledPackageDirectory(
+            packageId,
+            current.Version,
+            current.PackageDigest);
+        var draftRoot = Path.Combine(MigrationDraftRoot, Guid.NewGuid().ToString("N"));
+        var draftDirectory = Path.Combine(draftRoot, "package");
+        try
+        {
+            Directory.CreateDirectory(MigrationDraftRoot);
+            var receipt = _capabilityMigrator.Migrate(sourceDirectory, draftDirectory, targetVersion);
+            if (receipt.PackageId != packageId
+                || receipt.SourceVersion != current.Version
+                || receipt.SourcePackageDigest != current.PackageDigest
+                || receipt.TargetVersion != targetVersion
+                || receipt.MigrationIds.Count == 0
+                || receipt.ReplacementCounts.Values.Any(value => value <= 0))
+            {
+                throw Failure("LIFECYCLE_READBACK_FAILED");
+            }
+            var proposal = StageCore(draftDirectory, now);
+            if (proposal.PackageId != packageId
+                || proposal.Version != targetVersion
+                || proposal.PackageDigest != receipt.TargetPackageDigest
+                || !proposal.ApprovalRequired)
+            {
+                throw Failure("LIFECYCLE_READBACK_FAILED");
+            }
+            return proposal;
+        }
+        catch (PocketAppLifecycleException)
+        {
+            throw;
+        }
+        catch
+        {
+            throw Failure("LIFECYCLE_PACKAGE_INVALID");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(draftRoot)) { Directory.Delete(draftRoot, true); }
+            }
+            catch { }
         }
     }
 
@@ -665,8 +742,38 @@ internal sealed class PocketAppLifecycleManager : IDisposable
             try
             {
                 EnsureDirectoryNotReparsePoint(appDirectory);
-                var package = ManagedPackageCore(packageId);
-                if (package is not null) { packages.Add(package); }
+                var managed = ManagedPackageCore(packageId);
+                if (managed is not null)
+                {
+                    if (managed.State != PocketAppLifecycleState.Removed
+                        && managed.Version is not null
+                        && managed.PackageDigest is not null)
+                    {
+                        var package = VerifiedInstalledMigrationSource(
+                            InstalledPackageDirectory(packageId, managed.Version, managed.PackageDigest));
+                        if (package.CompatibilityIssues.Count != 0)
+                        {
+                            var removed = package.CompatibilityIssues.Any(
+                                issue => issue.Status == PocketCapabilityLifecycleStatus.Removed);
+                            issues.Add(new PocketAppManagementIssue(
+                                packageId,
+                                removed
+                                    ? "LIFECYCLE_CAPABILITY_REMOVED"
+                                    : "LIFECYCLE_CAPABILITY_DEPRECATED",
+                                true,
+                                true,
+                                NextPatchVersion(managed.Version)));
+                        }
+                        else
+                        {
+                            packages.Add(managed);
+                        }
+                    }
+                    else
+                    {
+                        packages.Add(managed);
+                    }
+                }
             }
             catch (Exception ex) when (ex is PocketAppLifecycleException or IOException or UnauthorizedAccessException)
             {
@@ -723,7 +830,8 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         {
             throw Failure("LIFECYCLE_READBACK_FAILED");
         }
-        var package = VerifiedInstalledPackage(InstalledPackageDirectory(packageId, record.Version, record.PackageDigest));
+        var package = VerifiedInstalledMigrationSource(
+            InstalledPackageDirectory(packageId, record.Version, record.PackageDigest));
         if (package.Manifest.Id != packageId
             || package.Manifest.Version != record.Version
             || package.ManifestDigest != record.PackageDigest)
@@ -752,7 +860,7 @@ internal sealed class PocketAppLifecycleManager : IDisposable
                 EnsureDirectoryNotReparsePoint(digestDirectory);
                 if (Path.GetFileName(digestDirectory).StartsWith(".installing-", StringComparison.Ordinal)) { continue; }
                 VerifyImmutable(digestDirectory);
-                var package = VerifiedInstalledPackage(Path.Combine(digestDirectory, "package"));
+                var package = VerifiedInstalledMigrationSource(Path.Combine(digestDirectory, "package"));
                 if (package.Manifest.Id != packageId) { throw Failure("LIFECYCLE_CORRUPT_VERSION"); }
                 versions.Add(package.Manifest.Version);
             }
@@ -857,7 +965,7 @@ internal sealed class PocketAppLifecycleManager : IDisposable
             throw Failure("LIFECYCLE_PACKAGE_CHANGED");
         }
         ValidateMigration(package, current);
-        var currentPackage = VerifiedCurrentPackage(current);
+        var currentPackage = VerifiedCurrentPackage(current, allowRemovedCapabilities: true);
         var currentEffectivePackage = current?.State == PocketAppLifecycleState.Enabled ? currentPackage : null;
         var currentPermissions = currentEffectivePackage is null
             ? new HashSet<string>(StringComparer.Ordinal)
@@ -1117,6 +1225,22 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         }
     }
 
+    private PocketAppPackage VerifiedInstalledMigrationSource(string directory)
+    {
+        try
+        {
+            return _runtime.LoadMigrationSource(PocketAppFileSnapshot.Capture(directory));
+        }
+        catch (PocketAppLifecycleException)
+        {
+            throw;
+        }
+        catch
+        {
+            throw Failure("LIFECYCLE_CORRUPT_VERSION");
+        }
+    }
+
     private void ValidateMigration(PocketAppPackage package, ActiveRecord? current)
     {
         if (current is null) { return; }
@@ -1268,14 +1392,31 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         left.Added.SequenceEqual(right.Added, StringComparer.Ordinal)
         && left.Removed.SequenceEqual(right.Removed, StringComparer.Ordinal);
 
-    private PocketAppPackage? VerifiedCurrentPackage(ActiveRecord? record)
+    private PocketAppPackage? VerifiedCurrentPackage(
+        ActiveRecord? record,
+        bool allowRemovedCapabilities = false)
     {
         if (record is null || record.State == PocketAppLifecycleState.Removed) { return null; }
         if (record.Version is null || record.PackageDigest is null)
         {
             throw Failure("LIFECYCLE_READBACK_FAILED");
         }
-        var package = VerifiedInstalledPackage(InstalledPackageDirectory(record.PackageId, record.Version, record.PackageDigest));
+        var directory = InstalledPackageDirectory(record.PackageId, record.Version, record.PackageDigest);
+        PocketAppPackage package;
+        try
+        {
+            package = allowRemovedCapabilities
+                ? _runtime.LoadMigrationSource(PocketAppFileSnapshot.Capture(directory))
+                : VerifiedInstalledPackage(directory);
+        }
+        catch (PocketAppLifecycleException)
+        {
+            throw;
+        }
+        catch
+        {
+            throw Failure("LIFECYCLE_CORRUPT_VERSION");
+        }
         if (package.Manifest.Id != record.PackageId
             || package.Manifest.Version != record.Version
             || package.ManifestDigest != record.PackageDigest)
@@ -1602,6 +1743,7 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         MoveFileFlags flags);
 
     private string StagingRoot => Path.Combine(_rootDirectory, "Staging");
+    private string MigrationDraftRoot => Path.Combine(_rootDirectory, "MigrationDrafts");
     private string AppsRoot => Path.Combine(_rootDirectory, "Apps");
     private string AppRoot(string packageId) => Path.Combine(AppsRoot, packageId);
     private string VersionsRoot(string packageId) => Path.Combine(AppRoot(packageId), "Versions");
@@ -1611,6 +1753,31 @@ internal sealed class PocketAppLifecycleManager : IDisposable
 
     private static string VersionStorageKey(string version) =>
         "v-" + Convert.ToHexString(Encoding.UTF8.GetBytes(version)).ToLowerInvariant();
+
+    private static string NextPatchVersion(string value)
+    {
+        if (!ValidVersion(value)) { throw Failure("LIFECYCLE_PACKAGE_INVALID"); }
+        var core = value.Split('-', 2, StringSplitOptions.None)[0].Split('.');
+        if (core.Length != 3) { throw Failure("LIFECYCLE_PACKAGE_INVALID"); }
+        var digits = core[2].ToCharArray();
+        var carry = true;
+        for (var index = digits.Length - 1; index >= 0 && carry; index--)
+        {
+            if (digits[index] == '9')
+            {
+                digits[index] = '0';
+            }
+            else
+            {
+                digits[index]++;
+                carry = false;
+            }
+        }
+        var patch = carry ? "1" + new string(digits) : new string(digits);
+        var next = $"{core[0]}.{core[1]}.{patch}";
+        if (!ValidVersion(next)) { throw Failure("LIFECYCLE_PACKAGE_INVALID"); }
+        return next;
+    }
 
     private static string ApprovalBindingDigest(
         PocketAppLifecycleAction action,

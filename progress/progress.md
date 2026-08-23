@@ -2,8 +2,16 @@
 project_slug: hover-menu-preview
 updated: 2026-08-24
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-pro-running; an8-retention-draft-pr-ci-green
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-pro-running; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green
 ---
+
+## 2026-08-24 AI-native AN8 Capability互換・移行
+
+- `codex/ai-native-an8-retention-governance` head `65694b6`からstack branch `codex/ai-native-an8-compatibility-migration`を作り、Capabilityの`active / deprecated / removed`、version基準の廃止猶予、明示置換、循環禁止をmacOS / Windows / 共有contractへ追加した。現行built-in catalogは空なので既存Capabilityは変化しない。
+- Pocket App migratorはinstalled sourceを直接変更せず、新app versionのmanifest / Workflow / Surface referenceだけを置換し、state schema bytesとuser data storeを保持する。Settingsの「互換更新を準備」から既存preview、tests、permission / grant差分、明示承認、immutable install、readbackを通す。
+- macOS warnings-as-errors buildとToday Focusの実package縦断が成功した。承認前の1.0.0維持、承認後の1.0.1、旧版snapshot保持、issue解消をreadbackした。共有contractは`14 schema / 69 fixture`全一致、report 2回byte一致、Windows Settings JavaScript構文と`git diff --check`も成功した。
+- このMacには.NET SDKがないためWindowsはDraft PR CIを必須gateにする。AN8-C Pro backup / export / restore runは正式delivery待ちで、未claim成果物を先読みしていない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an8-compatibility-migration.md`。
+- Draft PR [#27](https://github.com/shotaro311/hover-pocket/pull/27)の修正後head `66de848`でWindows、macOS、3 OS contract / compare、Routerの全7 checkが成功した。初回Windows compileで検出したverifierのnamespace import漏れは`66de848`で修正済みである。
 
 ## 2026-08-24 AI-native AN8 Capability履歴保持・削除
 

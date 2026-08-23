@@ -6,6 +6,7 @@ AN0で固定したmacOS / Windows共通machine contractである。AN1以降のS
 
 | Schema | Purpose |
 |---|---|
+| `capability-compatibility.schema.json` | Capabilityのactive / deprecated / removed、廃止猶予、置換先、決定論的reference migration |
 | `capability-descriptor.schema.json` | Capability ID、major version、effect、permission、approval、limit、input/output、readback |
 | `invocation.schema.json` | UI / Voice / Text / Surface / MCP / Connector共通呼び出し |
 | `execution-plan.schema.json` | route-independent canonical plan |
@@ -40,6 +41,8 @@ Golden digestはUTF-8、key sort、空白なしのcanonical JSONに対するSHA-
 成功receiptの`verified`は呼び出し元の自己申告ではない。Host-owned observation fixtureと一致するtyped `observed`を検証し、そのcanonical digestをverifierが再計算し、descriptorの`readback.match`で実行outputと照合する。auditは既知Invocation、descriptor、App context、入力digest、Host-owned readback digestへbindingする。固定shape、opaque ID、不可逆principal pseudonymだけを許し、key名だけでなく値に含まれるpath、URL、email、credential様文字列も拒否する。
 
 PocketWorkflow v1の動的bindingはtop-levelの`$input.<name>`と、Host型付きcontextの`$context.today` / `$context.selectedEvent.title`に限定する。未知またはnested bindingはfail closedで拒否する。
+
+Capability compatibility policyはHost versionを基準に`active` → `deprecated` → `removed`を管理する。`deprecated`は猶予期間中も実行可能だが、置換先とmigration IDを必須にする。`removed`は`removalNotBeforeHostVersion`より前には宣言できず、Registryが全入力経路で実行を拒否する。migration sourceとlifecycle entryは一対一にbindingし、置換先がremovedの場合、自己置換、重複、循環、猶予ゼロをfail closedで拒否する。移行処理はinstalled packageを直接編集せず、新しいapp versionをstagingへ生成し、schema・権限差分・approval・install・readbackの既存Host lifecycleを通す。
 
 ## Verification
 

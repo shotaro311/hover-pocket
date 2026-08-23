@@ -284,6 +284,7 @@ enum PocketAppPackageVerificationCommand {
             verifyStableKey(failures: &failures)
             verifyLifecycle(failures: &failures)
             PocketAppGenerationVerification.verify(failures: &failures)
+            PocketAppCapabilityMigrationVerification.verify(failures: &failures)
         }
 
         print("pocket_app_package_verify=\(failures.isEmpty ? "ok" : "failed")")
@@ -292,6 +293,7 @@ enum PocketAppPackageVerificationCommand {
         print("pocket_app_package_negative_cases=18")
         print("pocket_app_lifecycle_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_app_generation_verify=\(failures.isEmpty ? "ok" : "failed")")
+        print("pocket_app_capability_migration_verify=\(failures.isEmpty ? "ok" : "failed")")
         if !failures.isEmpty {
             print("pocket_app_package_failures=\(failures.joined(separator: ","))")
         }

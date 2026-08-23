@@ -381,6 +381,16 @@ function renderPocketGeneration(generation, language) {
     error.textContent = issue.errorCode;
     const actions = document.createElement("div");
     actions.className = "settings-button-row";
+    if (issue.migrationAvailable === true && typeof issue.suggestedVersion === "string") {
+      const migrationButton = document.createElement("button");
+      migrationButton.type = "button";
+      migrationButton.textContent = language === "en" ? "Prepare compatibility update" : "互換更新を準備";
+      migrationButton.addEventListener("click", () => runGenerationAction(
+        "pocketApps.prepareCapabilityMigration",
+        { appId: issue.appId, targetVersion: issue.suggestedVersion },
+      ));
+      actions.append(migrationButton);
+    }
     const removeButton = document.createElement("button");
     removeButton.type = "button";
     removeButton.className = "danger";
