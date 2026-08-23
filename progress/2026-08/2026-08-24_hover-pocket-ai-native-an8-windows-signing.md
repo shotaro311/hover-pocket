@@ -75,3 +75,14 @@
 - `macos-release-transition` artifactを別経路で取得し、receipt SHA-256 `7d72c7221dc7dc6ca9dcb8df1f22ee60817fab5e353f201c036ee8a25d4080ea`を固定した。
 - receiptは`status=passed`、`v0.1.0-161 -> v0.1.0-168`のinstall、upgrade、rollback、uninstall、reinstallがすべて`verified`、`userDataPreserved=true`を示した。
 - これによりmacOSの公開済み署名・公証版transition gateは完了した。Windowsは正式署名済みの旧版 / 新版が存在しないため、正式transition gateを未完了として維持する。
+
+## current stack release monitor readback
+
+- exact stack head `b95ef1681510781a38ccbb0b95cbf51384faa594`から週次監視と同じ`Verify Published Release Readback`をbeta modeで手動実行した。
+- run [32664908332](https://github.com/shotaro311/hover-pocket/actions/runs/32664908332)はdeterministic metadata、PowerShell signing contract、release tag pin、全公開asset取得、macOS native署名 / 公証 / Gatekeeper、Windows package identityの6 jobに成功した。formal Authenticodeはbeta指定どおりskipされた。
+- 3 artifactを別経路で取得した。各SHA-256は以前のrun `32657994406`と同一で、公開surfaceが不変であることを確認した。
+  - release readback: `f547e7f8b173697a611ac5c3f0482b59bb0d71668dd23d4a37c4683ebd613e05`
+  - macOS Gatekeeper: `9c034f6b7b189ccf0f910d1a9891b27d6ec4af903defa9a53e2633bbda4bfe7c`
+  - Windows package identity: `38382f9063bc45207032f9ca12b5fe3db2de4e1a0736299f8a3bc2309cf1c083`
+- macOSは6 asset snapshot、Sparkle署名、manual ZIP / appcast byte parity、Developer ID Team `N7VVPW44ZA`、stapled ticket、Gatekeeper acceptedを再確認した。
+- Windowsは`win-v0.2.7`の8 asset snapshot、Setup / Portable / full packageのversion / runtimeとpayload byte equivalenceを再確認した。Authenticodeは`unsigned`のためformal gateを未完了として維持する。
