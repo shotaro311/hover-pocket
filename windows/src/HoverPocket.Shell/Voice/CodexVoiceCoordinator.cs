@@ -175,6 +175,22 @@ internal static class VoiceTextSafety
         "(?:^|[^\\p{L}\\p{N}_/])(?:file://|/(?!/)(?:[^/\\s]+/)*[^/\\s]+|[a-zA-Z]:\\\\[^\\s]+|\\\\\\\\[^\\s]+)",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
+    private static readonly Regex RelativePathPattern = new(
+        """(?:^|[^\p{L}\p{N}_./:\\])(?:\.{1,2}[/\\](?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*[/\\])*[\p{L}\p{N}_-][\p{L}\p{N}._-]*|(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*[/\\])+[\p{L}\p{N}_-][\p{L}\p{N}._-]*\.[\p{L}\p{N}]{1,16}|(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*[/\\]){2,}[\p{L}\p{N}_-][\p{L}\p{N}._-]*)""",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    private static readonly Regex BearerCredentialPattern = new(
+        """(?:^|[^\p{L}\p{N}_])bearer[ \t]+[a-zA-Z0-9._~+/\-=]{8,}""",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    private static readonly Regex OpenAiCredentialPattern = new(
+        """(?:^|[^\p{L}\p{N}_])sk-(?:proj-|svcacct-)?[a-zA-Z0-9_-]{16,}""",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    private static readonly Regex JsonCredentialFieldPattern = new(
+        "\"(?:access[_-]?token|refresh[_-]?token|token|api[_-]?key|apikey|client[_-]?secret|secret)\"[\\t\\r\\n ]*:[\\t\\r\\n ]*\"[^\"\\r\\n]+\"",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
     public static string SanitizeVisibleText(string? value, int maxRunes)
     {
         if (string.IsNullOrEmpty(value) || maxRunes <= 0)
@@ -201,7 +217,11 @@ internal static class VoiceTextSafety
         var normalized = builder.ToString();
         var lowered = normalized.ToLowerInvariant();
         if (SensitiveMarkers.Any(lowered.Contains)
-            || AbsolutePathPattern.IsMatch(normalized))
+            || AbsolutePathPattern.IsMatch(normalized)
+            || RelativePathPattern.IsMatch(normalized)
+            || BearerCredentialPattern.IsMatch(normalized)
+            || OpenAiCredentialPattern.IsMatch(normalized)
+            || JsonCredentialFieldPattern.IsMatch(normalized))
         {
             return "[redacted]";
         }
@@ -360,6 +380,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
     private CancellationTokenSource? _startupCancellation;
     private Task? _startupTask;
     private Task _realtimeCleanupTask = Task.CompletedTask;
+    private Task _transportTeardownTask = Task.CompletedTask;
     private CodexAppServerClient? _client;
     private ActiveRealtimeSession? _activeRealtime;
     private CodexVoiceSnapshot _snapshot = CodexVoiceSnapshot.Disabled;
@@ -435,6 +456,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             return;
         }
 
+        await TransportTeardownTask().WaitAsync(cancellationToken).ConfigureAwait(false);
         await RunTrackedStartupAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -477,6 +499,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             });
             await CancelRestartAsync().ConfigureAwait(false);
             await CancelStartupAsync().ConfigureAwait(false);
+            await DrainTransportTeardownAsync().ConfigureAwait(false);
             var client = DetachClient();
             if (client is not null)
             {
@@ -892,6 +915,8 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         await CancelStartupAsync().ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
+        await DrainTransportTeardownAsync().ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         var client = DetachClient();
         if (client is not null)
         {
@@ -928,7 +953,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         var client = DetachClient();
         if (client is not null)
         {
-            _ = DisposeDetachedClientAsync(client);
+            TrackTransportTeardown(() => DisposeDetachedClientAsync(client));
         }
         PublishTransportCrashAndRestart();
     }
@@ -1407,13 +1432,13 @@ internal sealed class CodexVoiceCoordinator : IDisposable
                 clientGeneration.Value) != clientGeneration.Value)
         {
             DetachClientIfCurrent(client);
-            _ = DisposeDetachedClientAsync(client);
+            TrackTransportTeardown(() => DisposeDetachedClientAsync(client));
             return;
         }
 
         CancelRestart();
         DetachClientIfCurrent(client);
-        _ = DisposeDetachedClientAsync(client);
+        TrackTransportTeardown(() => DisposeDetachedClientAsync(client));
         UpdateSnapshot(snapshot => snapshot with
         {
             Availability = CodexVoiceAvailability.CapabilityBlocked,
@@ -1482,12 +1507,12 @@ internal sealed class CodexVoiceCoordinator : IDisposable
                 clientGeneration.Value) != clientGeneration.Value)
         {
             DetachClientIfCurrent(client);
-            _ = DisposeDetachedClientAsync(client);
+            TrackTransportTeardown(() => DisposeDetachedClientAsync(client));
             return;
         }
 
         DetachClientIfCurrent(client);
-        _ = DisposeDetachedClientAsync(client);
+        TrackTransportTeardown(() => DisposeDetachedClientAsync(client));
         PublishTransportCrashAndRestart();
     }
 
@@ -1528,7 +1553,11 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             _lifetime.Token,
             cancellationToken);
         var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var restartTask = RunTrackedRestartAsync(delay, restartCancellation.Token, startGate.Task);
+        var restartTask = RunTrackedRestartAsync(
+            delay,
+            restartCancellation.Token,
+            startGate.Task,
+            TransportTeardownTask());
         var scheduled = false;
         lock (_sync)
         {
@@ -1554,11 +1583,14 @@ internal sealed class CodexVoiceCoordinator : IDisposable
     private async Task RunTrackedRestartAsync(
         TimeSpan delay,
         CancellationToken cancellationToken,
-        Task startGate)
+        Task startGate,
+        Task transportTeardownTask)
     {
         try
         {
             await startGate.ConfigureAwait(false);
+            await transportTeardownTask.ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             if (delay > TimeSpan.Zero)
             {
                 await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
@@ -1904,6 +1936,49 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         }
     }
 
+    private void TrackTransportTeardown(Func<Task> teardownFactory)
+    {
+        var completion = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_sync)
+        {
+            _transportTeardownTask = Task.WhenAll(_transportTeardownTask, completion.Task);
+        }
+        _ = CompleteTrackedTransportTeardownAsync(teardownFactory, completion);
+    }
+
+    private static async Task CompleteTrackedTransportTeardownAsync(
+        Func<Task> teardownFactory,
+        TaskCompletionSource completion)
+    {
+        try
+        {
+            await teardownFactory().ConfigureAwait(false);
+            completion.TrySetResult();
+        }
+        catch (OperationCanceledException exception)
+        {
+            completion.TrySetCanceled(exception.CancellationToken);
+        }
+        catch (Exception exception)
+        {
+            completion.TrySetException(exception);
+        }
+    }
+
+    private Task TransportTeardownTask()
+    {
+        lock (_sync)
+        {
+            return _transportTeardownTask;
+        }
+    }
+
+    private async Task DrainTransportTeardownAsync()
+    {
+        await TransportTeardownTask().ConfigureAwait(false);
+    }
+
     private void UpdateSnapshot(Func<CodexVoiceSnapshot, CodexVoiceSnapshot> transform)
     {
         CodexVoiceSnapshot next;
@@ -2127,6 +2202,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             CancelRestartAsync().GetAwaiter().GetResult();
             _lifetime.Cancel();
             CancelStartupAsync().GetAwaiter().GetResult();
+            DrainTransportTeardownAsync().GetAwaiter().GetResult();
             var client = DetachClient();
             if (client is not null)
             {

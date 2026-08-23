@@ -1,9 +1,21 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-08-21
+updated: 2026-08-23
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; capability-expansion-merged
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; an8-release-readback-pr-ready; capability-expansion-merged
 ---
+
+## 2026-08-23 AI-native AN3-B1 Final Safety Integration
+
+- 検証済みPR #19 branchをDraft PR #21へ通常mergeし、Windowsのproduction microphone / WebRTC / Codex experimental Realtimeへ最終AN3-A安全境界を取り込んだ。CoordinatorはRealtime cleanup taskとtransport teardown taskを別々に保持し、crash / unexpected request / stale startup disconnectの旧client破棄完了後だけrestart、Voice再有効化、終了を進める。current-root、user / assistant role、relative path、Bearer、OpenAI key、JSON credential fieldの表示前境界も実Realtime transcriptへ接続した。
+- 署名付きmacOS app、Voice verifier、Swift warnings-as-errors、42件Voice contract、Windows JavaScript構文、`git diff --check`は成功した。Windows [32643782605](https://github.com/shotaro311/hover-pocket/actions/runs/32643782605)、macOS [32643782572](https://github.com/shotaro311/hover-pocket/actions/runs/32643782572)、3OS contract [32643782576](https://github.com/shotaro311/hover-pocket/actions/runs/32643782576)、Router [32643781540](https://github.com/shotaro311/hover-pocket/actions/runs/32643781540)も成功した。
+- exact integration Security scan `b09c2248-5609-4417-8202-59171f3bfdec`は4 / 4 surfaceをcoverage completeで閉じ、finding 0、sealed completeとなった。PR #21はDraft、review thread 0件、`CLEAN / MERGEABLE`、remote parity `0 / 0`である。実Windows端末のinstalled Codex / microphone / remote audio 1往復までDraftを維持し、次にPR #22へ通常mergeで伝播する。詳細: `progress/2026-08/2026-08-23_hover-pocket-ai-native-an3-b1-integration.md`。
+
+## 2026-08-23 AI-native AN3-A Final Review Hardening
+
+- PR #19のreview 2件をChatGPT Pro Orchestratorの`pro-primary` / builderへ委譲し、exact base `b506557`に対する`changes.patch`（13,796 bytes、SHA-256 `f7ee3235...f88d`）をbase / hash / 4 allowed pathまで検証して適用した。最終code head `90492d8`では、macOS / Windowsの可視VoiceテキストからPOSIX / Windows relative filesystem path、Bearer、裸のOpenAI key、JSON token / API key / client secretを表示前に秘匿する。Windowsのcrash / disconnect / active unexpected request / stale startup disconnect後restartは旧app-server clientの非同期teardown完了を待ち、追跡用completionをowner disposal開始前に登録する。
+- macOS bundle build、署名検証、`--verify-voice-foundation`、Swift warnings-as-errors、Voice contract 42件、`git diff --check`は成功した。ローカルMacには.NET SDKがないためWindowsローカル検証は実行できず、Windows [32643299113](https://github.com/shotaro311/hover-pocket/actions/runs/32643299113)、macOS [32643299061](https://github.com/shotaro311/hover-pocket/actions/runs/32643299061)、3OS contract [32643299059](https://github.com/shotaro311/hover-pocket/actions/runs/32643299059)、Router [32643297550](https://github.com/shotaro311/hover-pocket/actions/runs/32643297550)を最終code受入根拠とした。
+- 最終follow-up Security diff scan `e05df431-7f64-410e-87e4-c3a7bf9581a5`は`57052db...90492d8`の4 / 4 surfaceをcoverage completeで閉じ、finding 0、sealed completeとなった。先行するBearer、stale disconnect、teardown事前登録、裸のOpenAI key、JSON credential fieldのexact scanもすべてfinding 0である。PR #19はreview thread 66件中未解決0件、Ready、`CLEAN / MERGEABLE`、remote parity `0 / 0`である。docs-only headまで全CI成功後、PR #19の修正をPR #21、その後PR #21をPR #22へ通常mergeで伝播する。PRのmerge自体は人手gateを維持する。詳細: `progress/2026-08/2026-08-23_hover-pocket-ai-native-an3-a-review-followup.md`。
 
 ## 2026-08-21 AI-native AN3-B2 Voice Capability Security Remediation
 
