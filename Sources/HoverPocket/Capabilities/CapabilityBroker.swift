@@ -765,6 +765,7 @@ final class CapabilityBroker {
         return switch broker {
         case .invalidPlan: "CAPABILITY_PLAN_INVALID"
         case .unknownCapability: "CAPABILITY_UNKNOWN"
+        case .removedCapability: "CAPABILITY_REMOVED"
         case .unavailable: "CAPABILITY_UNAVAILABLE"
         case .runtimeProhibited: "CAPABILITY_RUNTIME_PROHIBITED"
         case .invalidArguments: "CAPABILITY_ARGUMENT_INVALID"

@@ -28,6 +28,7 @@ CONTRACT_NAME = "hoverpocket.pocket/v1"
 EXPECTED_SCHEMAS: dict[str, str] = {
     "agent-session-summary.schema.json": "hoverpocket://schemas/agent-session-summary/v1",
     "approval-request.schema.json": "hoverpocket://schemas/approval-request/v1",
+    "capability-compatibility.schema.json": "hoverpocket://schemas/capability-compatibility/v1",
     "capability-descriptor.schema.json": "hoverpocket://schemas/capability-descriptor/v1",
     "error.schema.json": "hoverpocket://schemas/error/v1",
     "execution-plan.schema.json": "hoverpocket://schemas/execution-plan/v1",
@@ -82,7 +83,10 @@ STABLE_ERROR_CODES = (
     "AUDIT_KEYSET_MISMATCH",
     "AUDIT_VALUE_UNSAFE",
     "CAPABILITY_ARGUMENT_INVALID",
+    "CAPABILITY_DEPRECATION_WINDOW_INVALID",
     "CAPABILITY_DESCRIPTOR_POLICY",
+    "CAPABILITY_MIGRATION_INVALID",
+    "CAPABILITY_REMOVED",
     "CAPABILITY_RUNTIME_PROHIBITED",
     "CAPABILITY_UNKNOWN",
     "CAPABILITY_VERSION_MISMATCH",
@@ -2283,6 +2287,115 @@ def validate_error_codes(document: Mapping[str, Any]) -> None:
         fail("FIXTURE_MANIFEST_MISMATCH", "$", "stable verifier error code set changed")
 
 
+def validate_capability_compatibility(document: Mapping[str, Any]) -> None:
+    def semantic_version(value: str) -> tuple[int, int, int]:
+        major, minor, patch = value.split(".")
+        return int(major), int(minor), int(patch)
+
+    def capability_key(value: Mapping[str, Any]) -> tuple[str, int]:
+        return value["id"], value["version"]
+
+    host_version = semantic_version(document["hostVersion"])
+    entries: dict[tuple[str, int], Mapping[str, Any]] = {}
+    lifecycle_sources: dict[tuple[str, int], Mapping[str, Any]] = {}
+
+    for index, entry in enumerate(document["entries"]):
+        location = f"$.entries[{index}]"
+        source = capability_key(entry["capability"])
+        if source in entries:
+            fail("CAPABILITY_MIGRATION_INVALID", f"{location}.capability", "capability lifecycle entry is duplicated")
+        entries[source] = entry
+
+        introduced = semantic_version(entry["introducedInHostVersion"])
+        if introduced > host_version:
+            fail(
+                "CAPABILITY_DEPRECATION_WINDOW_INVALID",
+                f"{location}.introducedInHostVersion",
+                "capability cannot be introduced after the policy host version",
+            )
+        if entry["status"] == "active":
+            continue
+
+        lifecycle_sources[source] = entry
+        deprecated = semantic_version(entry["deprecatedInHostVersion"])
+        removal_not_before = semantic_version(entry["removalNotBeforeHostVersion"])
+        if introduced > deprecated:
+            fail(
+                "CAPABILITY_DEPRECATION_WINDOW_INVALID",
+                f"{location}.deprecatedInHostVersion",
+                "deprecation cannot precede introduction",
+            )
+        if deprecated >= removal_not_before:
+            fail(
+                "CAPABILITY_DEPRECATION_WINDOW_INVALID",
+                f"{location}.removalNotBeforeHostVersion",
+                "deprecation window must include at least one later host version",
+            )
+        if deprecated > host_version:
+            fail(
+                "CAPABILITY_DEPRECATION_WINDOW_INVALID",
+                f"{location}.deprecatedInHostVersion",
+                "deprecated lifecycle state cannot precede the policy host version",
+            )
+        if entry["status"] == "removed" and host_version < removal_not_before:
+            fail(
+                "CAPABILITY_REMOVED",
+                f"{location}.status",
+                "capability cannot be removed before its declared removal version",
+            )
+        if capability_key(entry["replacement"]) == source:
+            fail("CAPABILITY_MIGRATION_INVALID", f"{location}.replacement", "replacement must differ from source")
+
+    migrations_by_id: dict[str, Mapping[str, Any]] = {}
+    migrations_by_source: dict[tuple[str, int], Mapping[str, Any]] = {}
+    graph: dict[tuple[str, int], tuple[str, int]] = {}
+    for index, migration in enumerate(document["migrations"]):
+        location = f"$.migrations[{index}]"
+        source = capability_key(migration["from"])
+        target = capability_key(migration["to"])
+        if migration["id"] in migrations_by_id:
+            fail("CAPABILITY_MIGRATION_INVALID", f"{location}.id", "migration id is duplicated")
+        if source in migrations_by_source:
+            fail("CAPABILITY_MIGRATION_INVALID", f"{location}.from", "migration source is duplicated")
+        if source == target:
+            fail("CAPABILITY_MIGRATION_INVALID", f"{location}.to", "migration target must differ from source")
+        migrations_by_id[migration["id"]] = migration
+        migrations_by_source[source] = migration
+        graph[source] = target
+
+    for source, entry in lifecycle_sources.items():
+        migration = migrations_by_source.get(source)
+        if migration is None:
+            fail("CAPABILITY_MIGRATION_INVALID", "$.migrations", "deprecated or removed capability requires migration")
+        expected_target = capability_key(entry["replacement"])
+        if migration["id"] != entry["migrationId"] or capability_key(migration["to"]) != expected_target:
+            fail("CAPABILITY_MIGRATION_INVALID", "$.migrations", "migration does not match lifecycle replacement")
+        target_entry = entries.get(expected_target)
+        if target_entry is not None and target_entry["status"] == "removed":
+            fail("CAPABILITY_MIGRATION_INVALID", "$.migrations", "replacement cannot target a removed capability")
+
+    if set(migrations_by_source) != set(lifecycle_sources):
+        fail("CAPABILITY_MIGRATION_INVALID", "$.migrations", "migration sources must exactly match lifecycle sources")
+
+    visited: set[tuple[str, int]] = set()
+    visiting: set[tuple[str, int]] = set()
+
+    def visit(source: tuple[str, int]) -> None:
+        if source in visiting:
+            fail("CAPABILITY_MIGRATION_INVALID", "$.migrations", "capability migration graph contains a cycle")
+        if source in visited:
+            return
+        visiting.add(source)
+        target = graph.get(source)
+        if target is not None and target in graph:
+            visit(target)
+        visiting.remove(source)
+        visited.add(source)
+
+    for source in graph:
+        visit(source)
+
+
 def load_fixture_support(context: FixtureContext, manifest: Mapping[str, Any]) -> FixtureSupport:
     engine = SchemaEngine(context.schemas_by_id)
     support_schemas = {
@@ -2535,6 +2648,8 @@ def validate_schema_case(
             schemas_by_id=context.schemas_by_id,
             registry=context.registry,
         )
+    elif schema_name == "capability-compatibility.schema.json":
+        validate_capability_compatibility(document)
     elif schema_name == "invocation.schema.json":
         validate_invocation(document, context)
     elif schema_name == "execution-plan.schema.json":

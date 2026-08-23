@@ -92,10 +92,12 @@ struct PocketCapabilityDescriptor: Sendable {
 final class CapabilityRegistry {
     private let descriptors: [PocketCapabilityKey: PocketCapabilityDescriptor]
     private let handlers: PocketCapabilityHandlerSet
+    private let compatibilityCatalog: PocketCapabilityCompatibilityCatalog
 
     init(
         descriptors: [PocketCapabilityDescriptor] = PocketCapabilityDescriptors.builtIn,
-        handlers: PocketCapabilityHandlerSet
+        handlers: PocketCapabilityHandlerSet,
+        compatibilityCatalog: PocketCapabilityCompatibilityCatalog = .builtIn
     ) throws {
         var mapped: [PocketCapabilityKey: PocketCapabilityDescriptor] = [:]
         for descriptor in descriptors {
@@ -106,6 +108,7 @@ final class CapabilityRegistry {
         }
         self.descriptors = mapped
         self.handlers = handlers
+        self.compatibilityCatalog = compatibilityCatalog
     }
 
     var descriptorKeys: [PocketCapabilityKey] {
@@ -120,6 +123,7 @@ final class CapabilityRegistry {
         guard let descriptor = descriptors[key] else {
             throw CapabilityBrokerError.unknownCapability(key)
         }
+        try compatibilityCatalog.requireRuntimeExecutable(key)
         guard descriptor.approvalPolicy != .runtimeProhibited else {
             throw CapabilityBrokerError.runtimeProhibited(key)
         }
@@ -131,6 +135,10 @@ final class CapabilityRegistry {
 
     func descriptor(_ key: PocketCapabilityKey) -> PocketCapabilityDescriptor? {
         descriptors[key]
+    }
+
+    func compatibilityIssue(_ key: PocketCapabilityKey) -> PocketCapabilityCompatibilityIssue? {
+        compatibilityCatalog.issue(for: key)
     }
 
     func invoke(

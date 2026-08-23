@@ -332,6 +332,7 @@ struct CapabilityWorkflowReceipt: Codable, Equatable, Sendable {
 enum CapabilityBrokerError: Error, Equatable, Sendable {
     case invalidPlan(String)
     case unknownCapability(PocketCapabilityKey)
+    case removedCapability(PocketCapabilityKey, PocketCapabilityKey?)
     case unavailable(PocketCapabilityKey)
     case runtimeProhibited(PocketCapabilityKey)
     case invalidArguments(PocketCapabilityKey, String)

@@ -259,6 +259,29 @@ final class PocketAppGenerationController: ObservableObject {
         }
     }
 
+    func prepareCapabilityMigration(packageID: String, targetVersion: String) {
+        guard pendingProposal == nil else {
+            fail(.busy)
+            return
+        }
+        do {
+            try validatePins()
+            let proposal = try lifecycle.prepareCapabilityMigration(
+                packageID: packageID,
+                targetVersion: targetVersion
+            )
+            guard proposal.approvalRequired else { throw PocketAppGenerationError.packageInvalid }
+            pendingProposal = proposal
+            pendingAllowsActivation = true
+            phase = .awaitingApproval
+            errorCode = nil
+            lastReceipt = nil
+            try validatePins()
+        } catch {
+            fail(.packageInvalid)
+        }
+    }
+
     private func makeRequest(userRequest: String, updating packageID: String?) throws -> PocketAppGenerationRequest {
         let trimmed = userRequest.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,

@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/capability-compatibility/v1",
+  "title": "HoverPocket Capability Compatibility Policy v1",
+  "type": "object",
+  "required": [
+    "$schema",
+    "policyVersion",
+    "hostVersion",
+    "entries",
+    "migrations"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "hoverpocket://schemas/capability-compatibility/v1"
+    },
+    "policyVersion": {
+      "const": 1
+    },
+    "hostVersion": {
+      "$ref": "#/$defs/semanticVersion"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/activeEntry"
+          },
+          {
+            "$ref": "#/$defs/deprecatedEntry"
+          }
+        ]
+      },
+      "maxItems": 512
+    },
+    "migrations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/migration"
+      },
+      "maxItems": 512
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "semanticVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "maxLength": 64
+    },
+    "capabilityKey": {
+      "type": "object",
+      "required": [
+        "id",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*){2,}$",
+          "maxLength": 128
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "noticeKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z0-9_-]+)+$",
+      "maxLength": 160
+    },
+    "migrationId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$",
+      "maxLength": 128
+    },
+    "activeEntry": {
+      "type": "object",
+      "required": [
+        "capability",
+        "status",
+        "introducedInHostVersion",
+        "noticeKey"
+      ],
+      "properties": {
+        "capability": {
+          "$ref": "#/$defs/capabilityKey"
+        },
+        "status": {
+          "const": "active"
+        },
+        "introducedInHostVersion": {
+          "$ref": "#/$defs/semanticVersion"
+        },
+        "noticeKey": {
+          "$ref": "#/$defs/noticeKey"
+        }
+      },
+      "additionalProperties": false
+    },
+    "deprecatedEntry": {
+      "type": "object",
+      "required": [
+        "capability",
+        "status",
+        "introducedInHostVersion",
+        "deprecatedInHostVersion",
+        "removalNotBeforeHostVersion",
+        "replacement",
+        "migrationId",
+        "noticeKey"
+      ],
+      "properties": {
+        "capability": {
+          "$ref": "#/$defs/capabilityKey"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "deprecated",
+            "removed"
+          ]
+        },
+        "introducedInHostVersion": {
+          "$ref": "#/$defs/semanticVersion"
+        },
+        "deprecatedInHostVersion": {
+          "$ref": "#/$defs/semanticVersion"
+        },
+        "removalNotBeforeHostVersion": {
+          "$ref": "#/$defs/semanticVersion"
+        },
+        "replacement": {
+          "$ref": "#/$defs/capabilityKey"
+        },
+        "migrationId": {
+          "$ref": "#/$defs/migrationId"
+        },
+        "noticeKey": {
+          "$ref": "#/$defs/noticeKey"
+        }
+      },
+      "additionalProperties": false
+    },
+    "migration": {
+      "type": "object",
+      "required": [
+        "id",
+        "operation",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/migrationId"
+        },
+        "operation": {
+          "const": "replace_reference"
+        },
+        "from": {
+          "$ref": "#/$defs/capabilityKey"
+        },
+        "to": {
+          "$ref": "#/$defs/capabilityKey"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

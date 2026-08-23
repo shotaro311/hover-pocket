@@ -70,6 +70,7 @@ struct PocketAppPackage: Equatable, Sendable {
     let surfaces: [String: PocketSurfaceDocument]
     let workflows: [String: PocketAppWorkflowDocument]
     let testCases: [String: String]
+    let compatibilityIssues: [PocketCapabilityCompatibilityIssue]
 }
 
 struct PocketAppPackageRuntime {
@@ -78,9 +79,14 @@ struct PocketAppPackageRuntime {
     static let maximumPackageBytes = 8 * 1_024 * 1_024
 
     private let descriptors: [PocketCapabilityKey: PocketCapabilityDescriptor]
+    private let compatibilityCatalog: PocketCapabilityCompatibilityCatalog
 
-    init(descriptors: [PocketCapabilityDescriptor] = PocketCapabilityDescriptors.builtIn) {
+    init(
+        descriptors: [PocketCapabilityDescriptor] = PocketCapabilityDescriptors.builtIn,
+        compatibilityCatalog: PocketCapabilityCompatibilityCatalog = .builtIn
+    ) {
         self.descriptors = Dictionary(uniqueKeysWithValues: descriptors.map { ($0.key, $0) })
+        self.compatibilityCatalog = compatibilityCatalog
     }
 
     func load(directory: URL) throws -> PocketAppPackage {
@@ -88,13 +94,30 @@ struct PocketAppPackageRuntime {
     }
 
     func load(snapshot: PocketAppFileSnapshot) throws -> PocketAppPackage {
+        try load(snapshot: snapshot, allowingRemovedCapabilitiesForMigration: false)
+    }
+
+    func loadMigrationSource(snapshot: PocketAppFileSnapshot) throws -> PocketAppPackage {
+        try load(snapshot: snapshot, allowingRemovedCapabilitiesForMigration: true)
+    }
+
+    private func load(
+        snapshot: PocketAppFileSnapshot,
+        allowingRemovedCapabilitiesForMigration: Bool
+    ) throws -> PocketAppPackage {
         let root = snapshot.rootDirectory
         let packageFiles = snapshot.files
         guard let manifestData = packageFiles["manifest.json"] else {
             throw PocketAppPackageError.invalid("$:package_files")
         }
         let manifestObject = try jsonObject(manifestData, path: "$.manifest")
-        let manifest = try parseManifest(manifestObject)
+        let manifest = try parseManifest(
+            manifestObject,
+            allowingRemovedCapabilitiesForMigration: allowingRemovedCapabilitiesForMigration
+        )
+        let compatibilityIssues = manifest.requestedCapabilities
+            .compactMap { compatibilityCatalog.issue(for: $0.key) }
+            .sorted { $0.key < $1.key }
 
         var expectedFiles: Set<String> = ["manifest.json", manifest.intentPath, manifest.stateSchemaPath]
         expectedFiles.formUnion(manifest.surfaces.values)
@@ -206,11 +229,15 @@ struct PocketAppPackageRuntime {
             stateProperties: stateProperties,
             surfaces: surfaces,
             workflows: workflows,
-            testCases: testCases
+            testCases: testCases,
+            compatibilityIssues: compatibilityIssues
         )
     }
 
-    private func parseManifest(_ object: [String: Any]) throws -> PocketAppManifestDocument {
+    private func parseManifest(
+        _ object: [String: Any],
+        allowingRemovedCapabilitiesForMigration: Bool
+    ) throws -> PocketAppManifestDocument {
         try exactKeys(
             object,
             required: ["$schema", "apiVersion", "id", "name", "version", "minHostVersion", "intent", "state", "surfaces", "requestedCapabilities", "workflows", "tests", "workspace"],
@@ -257,6 +284,10 @@ struct PocketAppPackageRuntime {
             let key = PocketCapabilityKey(id: capabilityID, version: capabilityVersion)
             guard let descriptor = descriptors[key], descriptor.approvalPolicy != .runtimeProhibited else {
                 throw PocketAppPackageError.invalid("$.manifest.requestedCapabilities[\(index)]:unknown")
+            }
+            if compatibilityCatalog.status(for: key) == .removed,
+               !allowingRemovedCapabilitiesForMigration {
+                throw PocketAppPackageError.invalid("$.manifest.requestedCapabilities[\(index)]:removed")
             }
             try require(capabilityKeys.insert(key).inserted, "$.manifest.requestedCapabilities:duplicate")
             let scope = try request["scope"].map { try PocketJSONValue(any: $0, path: "$.manifest.requestedCapabilities[\(index)].scope") }

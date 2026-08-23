@@ -231,6 +231,7 @@ internal sealed class PocketAppPackageVerifier
 
         VerifyStableKey();
         VerifyLifecycle();
+        _failures.AddRange(new PocketAppCapabilityMigrationVerifier().Run());
         _failures.AddRange(new PocketAppGenerationVerifier().Run());
 
         if (_failures.Count > 0)

@@ -43,10 +43,12 @@ internal sealed class CapabilityRegistry
 {
     private readonly IReadOnlyDictionary<PocketCapabilityKey, PocketCapabilityDescriptor> _descriptors;
     private readonly PocketCapabilityHandlerSet _handlers;
+    private readonly PocketCapabilityCompatibilityCatalog _compatibilityCatalog;
 
     public CapabilityRegistry(
         PocketCapabilityHandlerSet handlers,
-        IEnumerable<PocketCapabilityDescriptor>? descriptors = null)
+        IEnumerable<PocketCapabilityDescriptor>? descriptors = null,
+        PocketCapabilityCompatibilityCatalog? compatibilityCatalog = null)
     {
         var mapped = new Dictionary<PocketCapabilityKey, PocketCapabilityDescriptor>();
         foreach (var descriptor in descriptors ?? PocketCapabilityDescriptors.BuiltIn)
@@ -58,6 +60,7 @@ internal sealed class CapabilityRegistry
         }
         _descriptors = mapped;
         _handlers = handlers;
+        _compatibilityCatalog = compatibilityCatalog ?? PocketCapabilityCompatibilityCatalog.BuiltIn;
     }
 
     public IReadOnlyList<PocketCapabilityKey> DescriptorKeys => _descriptors.Keys.Order().ToArray();
@@ -69,6 +72,7 @@ internal sealed class CapabilityRegistry
         {
             throw new CapabilityBrokerException("CAPABILITY_UNKNOWN", key.Id);
         }
+        _compatibilityCatalog.RequireRuntimeExecutable(key);
         if (descriptor.ApprovalPolicy == CapabilityApprovalPolicy.RuntimeProhibited)
         {
             throw new CapabilityBrokerException("CAPABILITY_RUNTIME_PROHIBITED", key.Id);
@@ -79,6 +83,9 @@ internal sealed class CapabilityRegistry
         }
         return descriptor;
     }
+
+    public PocketCapabilityCompatibilityIssue? CompatibilityIssue(PocketCapabilityKey key) =>
+        _compatibilityCatalog.Issue(key);
 
     public async Task<JsonElement> InvokeAsync(
         PocketCapabilityKey key,

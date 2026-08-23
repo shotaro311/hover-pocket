@@ -80,7 +80,7 @@
       "path": "golden/error-codes.json",
       "kind": "error-codes",
       "expected": "pass",
-      "expectedDigest": "sha256:8c5348258632da95fcdade51781d84b37f0a56d38b0bb5c539e2fe2e695b04b9"
+      "expectedDigest": "sha256:b87c7da5d5727f15bf28ad40e753ea1db1477bc181f6e95e271a464cfa27ca81"
     },
     {
       "id": "golden-voice-lane-geometry",
@@ -125,6 +125,26 @@
       "errorCode": "AUDIT_VALUE_UNSAFE",
       "errorLocation": "$.entry.principalPseudonym",
       "expectedDigest": "sha256:acaa1da58dd0d4d68058cfbda995e117a9f491ed6dc89f70be15f64c37c9d790"
+    },
+    {
+      "id": "invalid-capability-compatibility-cycle",
+      "path": "invalid/capability-compatibility.cycle.json",
+      "kind": "schema",
+      "expected": "reject",
+      "schema": "capability-compatibility.schema.json",
+      "errorCode": "CAPABILITY_MIGRATION_INVALID",
+      "errorLocation": "$.migrations",
+      "expectedDigest": "sha256:0330512ede32ae4877754b7eac42edcdcb384ebb4e00a7a3d33c9e5d15bc356b"
+    },
+    {
+      "id": "invalid-capability-compatibility-zero-window",
+      "path": "invalid/capability-compatibility.zero-window.json",
+      "kind": "schema",
+      "expected": "reject",
+      "schema": "capability-compatibility.schema.json",
+      "errorCode": "CAPABILITY_DEPRECATION_WINDOW_INVALID",
+      "errorLocation": "$.entries[0].removalNotBeforeHostVersion",
+      "expectedDigest": "sha256:6b98aa8f185d3795da215e82575902190526e02565f9dee8d25bfa1b2cd9d1b9"
     },
     {
       "id": "invalid-execution-plan-native-authority",
@@ -386,6 +406,13 @@
       "kind": "schema",
       "expected": "pass",
       "schema": "approval-request.schema.json"
+    },
+    {
+      "id": "valid-capability-compatibility-deprecation",
+      "path": "valid/capability-compatibility.deprecation.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-compatibility.schema.json"
     },
     {
       "id": "valid-capability-descriptor.calculator-expression-evaluate",

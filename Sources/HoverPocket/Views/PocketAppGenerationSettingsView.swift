@@ -114,6 +114,15 @@ struct PocketAppGenerationSettingsView: View {
                                 .foregroundStyle(.orange)
                         }
                         Spacer()
+                        if issue.migrationAvailable, let targetVersion = issue.suggestedVersion {
+                            Button(localized(japanese: "互換更新を準備", english: "Prepare compatibility update")) {
+                                controller.prepareCapabilityMigration(
+                                    packageID: issue.packageID,
+                                    targetVersion: targetVersion
+                                )
+                            }
+                            .font(.system(size: 9))
+                        }
                         Button(
                             localized(japanese: "削除（データ保持）", english: "Remove, preserve data"),
                             role: .destructive
