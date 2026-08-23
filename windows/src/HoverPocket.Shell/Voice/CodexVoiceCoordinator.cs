@@ -659,7 +659,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         var client = DetachClient();
         if (client is not null)
         {
-            TrackTransportTeardown(DisposeDetachedClientAsync(client));
+            TrackTransportTeardown(() => DisposeDetachedClientAsync(client));
         }
         PublishTransportCrashAndRestart();
     }
@@ -883,13 +883,13 @@ internal sealed class CodexVoiceCoordinator : IDisposable
                 clientGeneration.Value) != clientGeneration.Value)
         {
             DetachClientIfCurrent(client);
-            TrackTransportTeardown(DisposeDetachedClientAsync(client));
+            TrackTransportTeardown(() => DisposeDetachedClientAsync(client));
             return;
         }
 
         CancelRestart();
         DetachClientIfCurrent(client);
-        TrackTransportTeardown(DisposeDetachedClientAsync(client));
+        TrackTransportTeardown(() => DisposeDetachedClientAsync(client));
         UpdateSnapshot(snapshot => snapshot with
         {
             Availability = CodexVoiceAvailability.CapabilityBlocked,
@@ -922,12 +922,12 @@ internal sealed class CodexVoiceCoordinator : IDisposable
                 clientGeneration.Value) != clientGeneration.Value)
         {
             DetachClientIfCurrent(client);
-            TrackTransportTeardown(DisposeDetachedClientAsync(client));
+            TrackTransportTeardown(() => DisposeDetachedClientAsync(client));
             return;
         }
 
         DetachClientIfCurrent(client);
-        TrackTransportTeardown(DisposeDetachedClientAsync(client));
+        TrackTransportTeardown(() => DisposeDetachedClientAsync(client));
         PublishTransportCrashAndRestart();
     }
 
@@ -1118,11 +1118,33 @@ internal sealed class CodexVoiceCoordinator : IDisposable
         }
     }
 
-    private void TrackTransportTeardown(Task teardownTask)
+    private void TrackTransportTeardown(Func<Task> teardownFactory)
     {
+        var completion = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_sync)
         {
-            _transportTeardownTask = Task.WhenAll(_transportTeardownTask, teardownTask);
+            _transportTeardownTask = Task.WhenAll(_transportTeardownTask, completion.Task);
+        }
+        _ = CompleteTrackedTransportTeardownAsync(teardownFactory, completion);
+    }
+
+    private static async Task CompleteTrackedTransportTeardownAsync(
+        Func<Task> teardownFactory,
+        TaskCompletionSource completion)
+    {
+        try
+        {
+            await teardownFactory().ConfigureAwait(false);
+            completion.TrySetResult();
+        }
+        catch (OperationCanceledException exception)
+        {
+            completion.TrySetCanceled(exception.CancellationToken);
+        }
+        catch (Exception exception)
+        {
+            completion.TrySetException(exception);
         }
     }
 
