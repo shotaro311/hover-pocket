@@ -17,7 +17,7 @@ internal sealed class PocketAppGenerationVerifier
         VerifyE2E();
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END e2e");
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN credential-broker");
-        VerifyCredentialBrokerAsync().GetAwaiter().GetResult();
+        Task.Run(VerifyCredentialBrokerAsync).GetAwaiter().GetResult();
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END credential-broker");
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN settings-approval");
         VerifySettingsApprovalBoundary().GetAwaiter().GetResult();
