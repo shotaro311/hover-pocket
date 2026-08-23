@@ -11,6 +11,7 @@ status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-gr
 - Codex CLI 0.145.0のnamed permission profileを実コードから確認し、`:minimal`と生成workspaceだけをread、network無効、shell environment継承なしにした。直接sandboxとGPT-5.6 Solの実`codex exec` canaryで、workspaceだけがreadable、兄弟worktree・`~/.codex/auth.json`・Obsidian Vaultはunreadableになった。
 - ファイル隔離はmacOSで成立したが、API keyを環境変数・引数・auth fileへ置かないHost-owned credential brokerとWindows実機canaryは未実装である。現行macOS / Windows production generatorのfail-closedを維持する。
 - 採用案はKeychain / Credential Manager、one-time capability、private Unix socket / named pipe、isolated `CODEX_HOME` / `HOME`、command-backed bearer auth、helper path denyを組み合わせる。AN3-B3Aのcredential store exact diff確定後、別の小さいstacked branchで実装する。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an5-codex-confinement-audit.md`。
+- 隔離branch `codex/ai-native-an5-codex-confinement`で、macOS / Windows adapterをrun単位のworkspace / `CODEX_HOME` / HOME / tempへ分離し、named permission profile、network無効、tool環境継承なしへ変更した。macOS warnings-as-errors build、Pocket App / Surface / Capability / Broker / Voice、15 schema / 71 fixtureが成功した。Windows C#はDraft PR CIを必須gateに残し、credential broker未接続のため両OSproduction generatorはfail-closedを維持する。
 
 ## 2026-08-24 AI-native AN3-B3A Realtime BYOK provider
 

@@ -463,6 +463,52 @@ enum PocketAppGenerationVerification {
     }
 
     private static func verifyRealCodexFailsClosed(failures: inout [String]) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hover-pocket-codex-confinement", isDirectory: true)
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        let codexHome = root.appendingPathComponent("codex-home", isDirectory: true)
+        let userHome = root.appendingPathComponent("user-home", isDirectory: true)
+        let temporaryDirectory = root.appendingPathComponent("tmp", isDirectory: true)
+        let schema = workspace.appendingPathComponent("generation-output.schema.json")
+        do {
+            let arguments = try CodexPocketAppGenerationAdapter.confinementArguments(
+                workspace: workspace,
+                codexHome: codexHome,
+                userHome: userHome,
+                schemaURL: schema
+            )
+            let joined = arguments.joined(separator: "\n")
+            require(
+                !arguments.contains("--sandbox")
+                    && arguments.contains("--ignore-user-config")
+                    && arguments.contains("--ignore-rules")
+                    && joined.contains("default_permissions=\"hoverpocket-generation\"")
+                    && joined.contains("\"\(workspace.path)\"=\"read\"")
+                    && joined.contains("\"\(codexHome.path)\"=\"deny\"")
+                    && joined.contains("\"\(userHome.path)\"=\"deny\"")
+                    && joined.contains("network.enabled=false")
+                    && joined.contains("shell_environment_policy.inherit=\"none\"")
+                    && arguments.suffix(3) == ["--output-schema", schema.path, "-"],
+                "generation_codex_named_permission_profile",
+                failures: &failures
+            )
+            let environment = CodexPocketAppGenerationAdapter.confinementEnvironment(
+                codexHome: codexHome,
+                userHome: userHome,
+                temporaryDirectory: temporaryDirectory
+            )
+            require(
+                Set(environment.keys) == ["CODEX_HOME", "HOME", "PATH", "TMPDIR", "LANG"]
+                    && environment["CODEX_HOME"] == codexHome.path
+                    && environment["HOME"] == userHome.path
+                    && environment["TMPDIR"] == temporaryDirectory.path
+                    && environment["PATH"] == "/usr/bin:/bin",
+                "generation_codex_isolated_environment",
+                failures: &failures
+            )
+        } catch {
+            failures.append("generation_codex_confinement_contract")
+        }
         require(
             !CodexPocketAppGenerationAdapter.supportsConfidentialGeneration
                 && CodexPocketAppGenerationAdapter.resolveExecutable() == nil,

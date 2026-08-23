@@ -131,10 +131,6 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
         var data: Data { lock.withLock { storage } }
     }
 
-    private static let allowedEnvironmentKeys = [
-        "HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "LANG", "LC_ALL", "TERM"
-    ]
-
     private let executableURL: URL
     private let executableIdentity: ExecutableIdentity
     private let workspaceRoot: PocketAppPinnedDirectory
@@ -179,15 +175,26 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
         try workspaceRoot.validate()
         if cancellation.isCancelled { throw PocketAppGenerationError.generatorCancelled }
 
-        let workspace = workspaceRoot.url
+        let runRoot = workspaceRoot.url
             .appendingPathComponent("codex-\(UUID().uuidString.lowercased())", isDirectory: true)
         try FileManager.default.createDirectory(
-            at: workspace,
+            at: runRoot,
             withIntermediateDirectories: false,
             attributes: [.posixPermissions: 0o700]
         )
         defer {
-            try? FileManager.default.removeItem(at: workspace)
+            try? FileManager.default.removeItem(at: runRoot)
+        }
+        let workspace = runRoot.appendingPathComponent("workspace", isDirectory: true)
+        let codexHome = runRoot.appendingPathComponent("codex-home", isDirectory: true)
+        let userHome = runRoot.appendingPathComponent("user-home", isDirectory: true)
+        let temporaryDirectory = runRoot.appendingPathComponent("tmp", isDirectory: true)
+        for directory in [workspace, codexHome, userHome, temporaryDirectory] {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
         }
         try workspaceRoot.validate()
 
@@ -198,19 +205,17 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
         let process = Process()
         process.executableURL = executableURL
         process.currentDirectoryURL = workspace
-        process.arguments = [
-            "exec",
-            "--sandbox", "read-only",
-            "--ephemeral",
-            "--ignore-user-config",
-            "--skip-git-repo-check",
-            "--output-schema", schemaURL.path,
-            "-"
-        ]
-        let inherited = ProcessInfo.processInfo.environment
-        process.environment = Dictionary(uniqueKeysWithValues: Self.allowedEnvironmentKeys.compactMap { key in
-            inherited[key].map { (key, $0) }
-        })
+        process.arguments = try Self.confinementArguments(
+            workspace: workspace,
+            codexHome: codexHome,
+            userHome: userHome,
+            schemaURL: schemaURL
+        )
+        process.environment = Self.confinementEnvironment(
+            codexHome: codexHome,
+            userHome: userHome,
+            temporaryDirectory: temporaryDirectory
+        )
 
         let standardInput = Pipe()
         let standardOutput = Pipe()
@@ -326,11 +331,69 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
         return nil
     }
 
-    // File-backed ChatGPT credentials are readable by the same Codex process that
-    // executes model-requested tools. Until credentials can be brokered outside that
-    // process and an OS sandbox outside-root canary passes, production generation is
-    // intentionally unavailable. Fixture generation and package preview remain usable.
+    // The named profile isolates model-requested tools from user configuration and files.
+    // Production remains unavailable until credentials are supplied by a Host-owned
+    // one-time broker and the same outside-root canary passes on both operating systems.
     static var supportsConfidentialGeneration: Bool { false }
+
+    static func confinementArguments(
+        workspace: URL,
+        codexHome: URL,
+        userHome: URL,
+        schemaURL: URL
+    ) throws -> [String] {
+        let directories = [workspace, codexHome, userHome].map(\.standardizedFileURL)
+        let standardizedSchema = schemaURL.standardizedFileURL
+        guard directories.allSatisfy({ $0.isFileURL && $0.path.hasPrefix("/") }),
+              Set(directories.map(\.path)).count == directories.count,
+              Set(directories.map { $0.deletingLastPathComponent().path }).count == 1,
+              standardizedSchema.isFileURL,
+              standardizedSchema.deletingLastPathComponent() == directories[0] else {
+            throw PocketAppGenerationError.generatorUnavailable
+        }
+        let minimal = try tomlString(":minimal")
+        let workspacePath = try tomlString(directories[0].path)
+        let codexHomePath = try tomlString(directories[1].path)
+        let userHomePath = try tomlString(directories[2].path)
+        let filesystem = "permissions.hoverpocket-generation.filesystem={\(minimal)=\"read\",\(workspacePath)=\"read\",\(codexHomePath)=\"deny\",\(userHomePath)=\"deny\"}"
+        return [
+            "exec",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--skip-git-repo-check",
+            "-c", "approval_policy=\"never\"",
+            "-c", "default_permissions=\"hoverpocket-generation\"",
+            "-c", filesystem,
+            "-c", "permissions.hoverpocket-generation.network.enabled=false",
+            "-c", "shell_environment_policy.inherit=\"none\"",
+            "-c", "shell_environment_policy.set={PATH=\"/usr/bin:/bin\",LANG=\"C\"}",
+            "--output-schema", standardizedSchema.path,
+            "-"
+        ]
+    }
+
+    static func confinementEnvironment(
+        codexHome: URL,
+        userHome: URL,
+        temporaryDirectory: URL
+    ) -> [String: String] {
+        [
+            "CODEX_HOME": codexHome.standardizedFileURL.path,
+            "HOME": userHome.standardizedFileURL.path,
+            "PATH": "/usr/bin:/bin",
+            "TMPDIR": temporaryDirectory.standardizedFileURL.path,
+            "LANG": "C"
+        ]
+    }
+
+    private static func tomlString(_ value: String) throws -> String {
+        let encoded = try JSONEncoder().encode(value)
+        guard let string = String(data: encoded, encoding: .utf8) else {
+            throw PocketAppGenerationError.generatorUnavailable
+        }
+        return string.replacingOccurrences(of: "\\/", with: "/")
+    }
 
     private static func verifyExecutable(_ url: URL) throws -> ExecutableIdentity {
         var link = stat()
