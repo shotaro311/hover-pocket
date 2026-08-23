@@ -164,10 +164,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           WINDOWS_TAG: ${{ needs.resolve-windows-release.outputs.windows_tag }}
+          EXPECTED_WINDOWS_SIGNER_CERT_SHA256: ${{ vars.WINDOWS_SIGNER_CERT_SHA256 }}
         run: |
           windows/script/verify_published_authenticode.ps1 `
             -Tag "$env:WINDOWS_TAG" `
-            -ExpectedSnapshotPath "published-release-readback/release-readback-report.json" |
+            -ExpectedSnapshotPath "published-release-readback/release-readback-report.json" `
+            -ExpectedSignerCertificateSha256 "$env:EXPECTED_WINDOWS_SIGNER_CERT_SHA256" |
             Tee-Object -FilePath authenticode-readback-report.json
 
       - name: Upload Authenticode readback report

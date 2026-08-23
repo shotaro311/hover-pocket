@@ -292,7 +292,7 @@ python3 script/verify_release_readback.py --windows-signing-gate beta
 
 この検証は公開URLから成果物を再取得し、macOS appcast、versioned ZIP、手動インストールZIP、GitHub SHA-256、公開鍵によるSparkle Ed25519署名、Windows feed、manifest、全公開assetの実測SHA-256、Velopack packageのSHA-1を照合します。Windows成果物を合計約270MB再取得するため、公開後または週次監視で使います。
 
-Windows正式版の受入時は、共通readbackに加えてWindows runner上でSetupとPortable版アプリの実Authenticode署名、タイムスタンプ、署名者一致を確認します。manifest内の文字列だけでは正式版の署名証拠にしません。
+Windows正式版の受入時は、共通readbackに加えてWindows runner上でSetup、Portable版アプリ、Velopack full package内アプリの実Authenticode署名、タイムスタンプ、3成果物の署名証明書一致、repository variableへ固定した正規証明書SHA-256との一致を確認します。manifest内の文字列だけでは正式版の署名証拠にしません。
 
 ```bash
 python3 script/verify_release_readback.py --windows-signing-gate formal

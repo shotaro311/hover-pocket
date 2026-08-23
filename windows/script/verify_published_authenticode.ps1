@@ -4,11 +4,125 @@ param(
     [string]$Tag = "auto",
     [Parameter(Mandatory = $true)]
     [string]$ExpectedSnapshotPath,
+    [string]$ExpectedSignerCertificateSha256 = "",
     [switch]$IdentityOnly
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+if (-not ("HoverPocket.ReleaseReadback.VelopackBundleReader" -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.IO;
+
+namespace HoverPocket.ReleaseReadback
+{
+    public sealed class VelopackBundleInfo
+    {
+        public long Offset { get; private set; }
+        public long Length { get; private set; }
+
+        public VelopackBundleInfo(long offset, long length)
+        {
+            Offset = offset;
+            Length = length;
+        }
+    }
+
+    public static class VelopackBundleReader
+    {
+        private static readonly byte[] Signature = new byte[] {
+            0x94, 0xf0, 0xb1, 0x7b, 0x68, 0x93, 0xe0, 0x29,
+            0x37, 0xeb, 0x34, 0xef, 0x53, 0xaa, 0xe7, 0xd4,
+            0x2b, 0x54, 0xf5, 0x70, 0x7e, 0xf5, 0xd6, 0xf5,
+            0x78, 0x54, 0x98, 0x3e, 0x5e, 0x94, 0xed, 0x7d
+        };
+
+        public static VelopackBundleInfo Read(string path)
+        {
+            long signatureOffset = FindUniqueSignature(path);
+            if (signatureOffset < 16) {
+                throw new InvalidDataException("Velopack bundle header is truncated.");
+            }
+
+            using (FileStream stream = File.OpenRead(path))
+            using (BinaryReader reader = new BinaryReader(stream)) {
+                stream.Position = signatureOffset - 16;
+                long bundleOffset = reader.ReadInt64();
+                long bundleLength = reader.ReadInt64();
+                if (
+                    bundleOffset <= 0 ||
+                    bundleLength <= 0 ||
+                    signatureOffset + Signature.Length > bundleOffset ||
+                    bundleOffset > stream.Length ||
+                    bundleLength > stream.Length - bundleOffset
+                ) {
+                    throw new InvalidDataException("Velopack bundle range is invalid.");
+                }
+                return new VelopackBundleInfo(bundleOffset, bundleLength);
+            }
+        }
+
+        private static long FindUniqueSignature(string path)
+        {
+            const int readSize = 1024 * 1024;
+            byte[] buffer = new byte[readSize];
+            int[] prefix = BuildPrefixTable();
+            int matched = 0;
+            long position = 0;
+            long foundOffset = -1;
+
+            using (FileStream stream = File.OpenRead(path)) {
+                while (true) {
+                    int read = stream.Read(buffer, 0, buffer.Length);
+                    if (read == 0) {
+                        break;
+                    }
+                    for (int index = 0; index < read; index++, position++) {
+                        while (matched > 0 && buffer[index] != Signature[matched]) {
+                            matched = prefix[matched - 1];
+                        }
+                        if (buffer[index] == Signature[matched]) {
+                            matched++;
+                        }
+                        if (matched == Signature.Length) {
+                            long absoluteOffset = position - Signature.Length + 1;
+                            if (foundOffset >= 0) {
+                                throw new InvalidDataException("Velopack bundle signature is duplicated.");
+                            }
+                            foundOffset = absoluteOffset;
+                            matched = prefix[matched - 1];
+                        }
+                    }
+                }
+            }
+
+            if (foundOffset < 0) {
+                throw new InvalidDataException("Velopack bundle signature was not found.");
+            }
+            return foundOffset;
+        }
+
+        private static int[] BuildPrefixTable()
+        {
+            int[] prefix = new int[Signature.Length];
+            int matched = 0;
+            for (int index = 1; index < Signature.Length; index++) {
+                while (matched > 0 && Signature[index] != Signature[matched]) {
+                    matched = prefix[matched - 1];
+                }
+                if (Signature[index] == Signature[matched]) {
+                    matched++;
+                }
+                prefix[index] = matched;
+            }
+            return prefix;
+        }
+    }
+}
+"@
+}
 
 function Get-GitHubHeaders {
     $headers = @{
@@ -248,23 +362,42 @@ function Assert-SetupEmbedsFullPackage {
     $setupStream = [IO.File]::OpenRead($SetupPath)
     $packageStream = [IO.File]::OpenRead($PackagePath)
     try {
-        if ($setupStream.Length -le $packageStream.Length) {
-            throw "Setup does not contain an executable prefix before the full update package."
+        $bundle = [HoverPocket.ReleaseReadback.VelopackBundleReader]::Read($SetupPath)
+        if ($bundle.Length -ne $packageStream.Length) {
+            throw "Setup embedded package length differs from the published full update package."
         }
-        $payloadOffset = $setupStream.Length - $packageStream.Length
-        if ($setupStream.Seek($payloadOffset, [IO.SeekOrigin]::Begin) -ne $payloadOffset) {
-            throw "Setup embedded package offset could not be reached."
+
+        function Get-RangeSha256 {
+            param([IO.Stream]$Stream, [long]$Offset, [long]$Length)
+
+            if ($Offset -lt 0 -or $Length -lt 0 -or $Offset -gt $Stream.Length -or $Length -gt $Stream.Length - $Offset) {
+                throw "Hash range is outside the source stream."
+            }
+            if ($Stream.Seek($Offset, [IO.SeekOrigin]::Begin) -ne $Offset) {
+                throw "Hash range offset could not be reached."
+            }
+            $hash = [Security.Cryptography.IncrementalHash]::CreateHash([Security.Cryptography.HashAlgorithmName]::SHA256)
+            try {
+                $buffer = [byte[]]::new(1048576)
+                [long]$remaining = $Length
+                while ($remaining -gt 0) {
+                    $requested = [int][Math]::Min([long]$buffer.Length, $remaining)
+                    $read = $Stream.Read($buffer, 0, $requested)
+                    if ($read -le 0) {
+                        throw "Hash range ended before the declared length."
+                    }
+                    $hash.AppendData($buffer, 0, $read)
+                    $remaining -= $read
+                }
+                return [Convert]::ToHexString($hash.GetHashAndReset())
+            }
+            finally {
+                $hash.Dispose()
+            }
         }
-        $setupHashAlgorithm = [Security.Cryptography.SHA256]::Create()
-        $packageHashAlgorithm = [Security.Cryptography.SHA256]::Create()
-        try {
-            $setupPayloadHash = [Convert]::ToHexString($setupHashAlgorithm.ComputeHash($setupStream))
-            $packageHash = [Convert]::ToHexString($packageHashAlgorithm.ComputeHash($packageStream))
-        }
-        finally {
-            $setupHashAlgorithm.Dispose()
-            $packageHashAlgorithm.Dispose()
-        }
+
+        $setupPayloadHash = Get-RangeSha256 -Stream $setupStream -Offset $bundle.Offset -Length $bundle.Length
+        $packageHash = Get-RangeSha256 -Stream $packageStream -Offset 0 -Length $packageStream.Length
         if ($setupPayloadHash -cne $packageHash) {
             throw "Setup embedded payload differs from the published full update package."
         }
@@ -458,6 +591,26 @@ function Assert-TimestampedAuthenticode {
     return $signature
 }
 
+function Get-CertificateSha256 {
+    param([Security.Cryptography.X509Certificates.X509Certificate2]$Certificate)
+
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try {
+        return [Convert]::ToHexString($hash.ComputeHash($Certificate.RawData))
+    }
+    finally {
+        $hash.Dispose()
+    }
+}
+
+$canonicalSignerCertificateSha256 = $null
+if (-not $IdentityOnly) {
+    $canonicalSignerCertificateSha256 = $ExpectedSignerCertificateSha256.Trim().ToUpperInvariant()
+    if ($canonicalSignerCertificateSha256 -notmatch '^[0-9A-F]{64}$') {
+        throw "Expected Windows signer certificate SHA-256 must be configured as exactly 64 hexadecimal characters."
+    }
+}
+
 $release = Resolve-WindowsRelease -RequestedTag $Tag
 $releaseTag = [string]$release.tag_name
 $expectedAssets = Read-ExpectedSnapshot -Path $ExpectedSnapshotPath -ExpectedTag $releaseTag
@@ -585,13 +738,16 @@ try {
 
     Assert-SetupEmbedsFullPackage -SetupPath $setupPath -PackagePath $packagePath
     if (-not $IdentityOnly) {
-        $signerThumbprints = @(@(
-                $setupSignature.SignerCertificate.Thumbprint
-                $mainSignature.SignerCertificate.Thumbprint
-                $packageSignature.SignerCertificate.Thumbprint
+        $signerCertificateSha256s = @(@(
+                Get-CertificateSha256 -Certificate $setupSignature.SignerCertificate
+                Get-CertificateSha256 -Certificate $mainSignature.SignerCertificate
+                Get-CertificateSha256 -Certificate $packageSignature.SignerCertificate
             ) | Select-Object -Unique)
-        if ($signerThumbprints.Count -ne 1) {
+        if ($signerCertificateSha256s.Count -ne 1) {
             throw "Setup, Portable application, and full update package application are signed by different certificates."
+        }
+        if (([string]$signerCertificateSha256s[0]).ToUpperInvariant() -cne $canonicalSignerCertificateSha256) {
+            throw "Published artifacts are not signed by the configured HoverPocket publisher certificate."
         }
     }
     $finalRelease = Resolve-WindowsRelease -RequestedTag $releaseTag
@@ -609,6 +765,7 @@ try {
         portablePayload = "full-package-application-byte-equivalent"
         setupPayload = "full-package-byte-equivalent"
         signerAgreement = if ($IdentityOnly) { "not-evaluated" } else { "verified" }
+        publisherIdentity = if ($IdentityOnly) { "not-evaluated" } else { "verified" }
         artifactSnapshot = "verified"
     } | ConvertTo-Json -Compress
 }
