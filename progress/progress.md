@@ -5,6 +5,13 @@ updated_by: codex
 status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; an8-release-readback-pr-ready; capability-expansion-merged
 ---
 
+## 2026-08-23 AI-native AN3-B2 Final Safety Integration
+
+- Draft PR #21の最終head `d29849a`をDraft PR #22へ通常mergeし、Calendar read / Timer startのCapability Broker経路へAN3-Aの最終表示秘匿とAN3-B1のtransport teardown直列化を伝播した。CoordinatorはRealtime cleanupとapp-server owner teardownを別Taskで保持し、crash、unexpected request、stale startup disconnect後のrestart / Voice再有効化 /終了が旧client破棄完了を待つ。Broker-only production approvalは`false`、Calendar grantはSettings-only既定OFF、`eventRef`非送信、Timer native approvalは維持した。
+- ローカルではSwift warnings-as-errors build、署名付きmacOS app、Voice foundation、Panel layout 128件、Capability 14 handlers、Broker、Pocket Surface、Pocket App package / lifecycle / generation、Timer、Voice contract 42件、共通contract 13 schema / 60 fixture、Windows JavaScript構文、署名検証、`git diff --check`が成功した。
+- 統合code head `f77ac87`でWindows [32644395509](https://github.com/shotaro311/hover-pocket/actions/runs/32644395509)、macOS [32644395539](https://github.com/shotaro311/hover-pocket/actions/runs/32644395539)、3OS contract / compare [32644395501](https://github.com/shotaro311/hover-pocket/actions/runs/32644395501)、Router [32644394230](https://github.com/shotaro311/hover-pocket/actions/runs/32644394230)の全7 checkが成功した。exact Security scan `824fcceb-34c9-4312-a42f-155f29aeffc3`は5 / 5 surface、coverage complete、finding 0、sealed completeである。
+- PR #22はDraft、`CLEAN / MERGEABLE`、remote parity `0 / 0`である。現行Codexには正のBroker-only tool allowlistがないためproduction Voiceは引き続きapp-server開始前にfail closedとし、Draftを維持する。PRのmerge自体は人手gateである。次はAN8 release-readback PR #23へ進み、配布後readbackと長期運用の残差を閉じる。詳細: `progress/2026-08/2026-08-23_hover-pocket-ai-native-an3-b2-integration.md`。
+
 ## 2026-08-23 AI-native AN3-B1 Final Safety Integration
 
 - 検証済みPR #19 branchをDraft PR #21へ通常mergeし、Windowsのproduction microphone / WebRTC / Codex experimental Realtimeへ最終AN3-A安全境界を取り込んだ。CoordinatorはRealtime cleanup taskとtransport teardown taskを別々に保持し、crash / unexpected request / stale startup disconnectの旧client破棄完了後だけrestart、Voice再有効化、終了を進める。current-root、user / assistant role、relative path、Bearer、OpenAI key、JSON credential fieldの表示前境界も実Realtime transcriptへ接続した。
