@@ -256,6 +256,16 @@
       "expectedDigest": "sha256:6cc3b5a4d9d1374331c385e1dba06a1c1a3d453ee9f258b1b7f45401e3be89cc"
     },
     {
+      "id": "invalid-pocket-app-workspace-backup-traversal",
+      "path": "invalid/pocket-app-workspace-backup.traversal.json",
+      "kind": "schema",
+      "expected": "reject",
+      "schema": "pocket-app-workspace-backup.schema.json",
+      "errorCode": "SCHEMA_VALUE_INVALID",
+      "errorLocation": "$.files[0].path",
+      "expectedDigest": "sha256:bb7b3c3f39b64e64e2826216d50e7edc80e7c3e0efedbb4748e3b38394a2da98"
+    },
+    {
       "id": "invalid-pocket-surface-asset-traversal",
       "path": "invalid/pocket-surface.asset-traversal.json",
       "kind": "schema",
@@ -588,6 +598,13 @@
       "kind": "schema",
       "expected": "pass",
       "schema": "pocket-app.schema.json"
+    },
+    {
+      "id": "valid-pocket-app-workspace-backup-empty",
+      "path": "valid/pocket-app-workspace-backup.empty.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "pocket-app-workspace-backup.schema.json"
     },
     {
       "id": "valid-pocket-surface-today-focus",

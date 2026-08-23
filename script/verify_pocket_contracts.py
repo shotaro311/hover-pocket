@@ -35,6 +35,7 @@ EXPECTED_SCHEMAS: dict[str, str] = {
     "invocation.schema.json": "hoverpocket://schemas/invocation/v1",
     "pocket-app.schema.json": "hoverpocket://schemas/pocket-app/v1",
     "pocket-app-generation-output.schema.json": "hoverpocket://schemas/pocket-app-generation-output/v1",
+    "pocket-app-workspace-backup.schema.json": "hoverpocket://schemas/pocket-app-workspace-backup/v1",
     "pocket-surface.schema.json": "hoverpocket://schemas/pocket-surface/v1",
     "pocket-workflow.schema.json": "hoverpocket://schemas/pocket-workflow/v1",
     "receipt.schema.json": "hoverpocket://schemas/receipt/v1",

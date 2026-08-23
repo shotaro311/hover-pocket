@@ -2,8 +2,14 @@
 project_slug: hover-menu-preview
 updated: 2026-08-24
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-pro-running; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-local-verified-pr-pending; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
 ---
+
+## 2026-08-24 AI-native AN8-C workspace backup / restore
+
+- 正本Pro deliveryをdelivery ID / state hash付きでclaimしたが、same-session harvest timeoutで成果物は空だった。再送せず、PR #30 exact head `d93abf8`から隔離branch `codex/ai-native-an8-backup-restore-core`を作り、CodexがAN8-Cを実装した。
+- macOS / Windows共通のversion付きcanonical JSON schema、package全version / lifecycle / permission / data digest、native file dialog、default-No承認、stale preview拒否、commit後runtime / data readback、失敗時の復元前snapshot rollbackを追加した。OAuth、credential、Capability audit / receipt、Codex workspace、外部pathは対象外である。
+- macOS warnings-as-errors build、Pocket App workspace backup回帰、Capability、Broker、Pocket Surface、Timer、Panel layout 128件、Voice foundation、共通contract `15 schema / 71 fixture`、Windows Settings JavaScript、`git diff --check`が成功した。このMacには.NET SDKがないためWindows C# / rendered UIはDraft PR CIを最終gateにする。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an8-workspace-backup-restore.md`。
 
 ## 2026-08-24 AI-native Core GA旧AI直結経路の除去
 

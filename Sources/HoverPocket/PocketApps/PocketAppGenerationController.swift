@@ -11,10 +11,15 @@ final class PocketAppGenerationController: ObservableObject {
     @Published private(set) var lastReceipt: PocketAppLifecycleReceipt?
     @Published private(set) var errorCode: String?
     @Published private(set) var pendingAllowsActivation = false
+    @Published private(set) var pendingWorkspaceRestore: PocketAppWorkspaceRestoreProposal?
+    @Published private(set) var lastWorkspaceBackupDigest: String?
+    @Published private(set) var lastWorkspaceRestoreReceipt: PocketAppWorkspaceRestoreReceipt?
+    @Published private(set) var workspaceBackupErrorCode: String?
 
     private let generator: (any PocketAppGenerationAdapter)?
     private let lifecycle: PocketAppLifecycleManager
     private let materializer: PocketAppGenerationMaterializer
+    private let workspaceBackupManager: PocketAppWorkspaceBackupManager
     private let pins: [PocketAppPinnedDirectory]
     private let postCommitHook: (() -> Void)?
     private var generationCancellation: PocketAppGenerationCancellation?
@@ -40,6 +45,13 @@ final class PocketAppGenerationController: ObservableObject {
             activationReadback: runtimeActivationReadback
         )
         self.materializer = PocketAppGenerationMaterializer(rootDirectory: generationPin.url)
+        self.workspaceBackupManager = try PocketAppWorkspaceBackupManager(
+            definitionRoot: definitionPin.url,
+            userDataRoot: userDataPin.url,
+            transactionRoot: definitionPin.url.appendingPathComponent("BackupRestore", isDirectory: true),
+            lifecycle: self.lifecycle,
+            runtimeReadback: runtimeActivationReadback
+        )
         try validatePins()
         try refreshManagedPackages()
     }
@@ -64,8 +76,108 @@ final class PocketAppGenerationController: ObservableObject {
         try? refreshManagedPackages()
     }
 
+    func exportWorkspace(to destination: URL) {
+        guard pendingWorkspaceRestore == nil,
+              pendingProposal == nil,
+              phase != .generating,
+              phase != .installing else {
+            workspaceBackupErrorCode = "BACKUP_BUSY"
+            return
+        }
+        do {
+            try validatePins()
+            let digest = try workspaceBackupManager.export(to: destination)
+            lastWorkspaceBackupDigest = digest
+            lastWorkspaceRestoreReceipt = nil
+            workspaceBackupErrorCode = nil
+            try validatePins()
+        } catch let error as PocketAppWorkspaceBackupError {
+            workspaceBackupErrorCode = error.description
+        } catch {
+            workspaceBackupErrorCode = "BACKUP_EXPORT_FAILED"
+        }
+    }
+
+    func prepareWorkspaceRestore(from source: URL) {
+        guard pendingWorkspaceRestore == nil, pendingProposal == nil, phase != .generating, phase != .installing else {
+            workspaceBackupErrorCode = "RESTORE_BUSY"
+            return
+        }
+        do {
+            try validatePins()
+            pendingWorkspaceRestore = try workspaceBackupManager.prepareRestore(from: source)
+            lastWorkspaceRestoreReceipt = nil
+            workspaceBackupErrorCode = nil
+            try validatePins()
+        } catch let error as PocketAppWorkspaceBackupError {
+            workspaceBackupErrorCode = error.description
+        } catch {
+            workspaceBackupErrorCode = "RESTORE_PREVIEW_FAILED"
+        }
+    }
+
+    func approveWorkspaceRestore() {
+        guard let proposal = pendingWorkspaceRestore else {
+            workspaceBackupErrorCode = "RESTORE_APPROVAL_INVALID"
+            return
+        }
+        do {
+            try validatePins()
+            let grant = try workspaceBackupManager.approve(
+                requestID: proposal.requestID,
+                bindingDigest: proposal.bindingDigest
+            )
+            let receipt = try workspaceBackupManager.restore(proposal, grant: grant)
+            guard receipt.readbackVerified else {
+                throw PocketAppWorkspaceBackupError.invalid("RESTORE_READBACK_MISMATCH")
+            }
+            pendingWorkspaceRestore = nil
+            lastWorkspaceRestoreReceipt = receipt
+            lastWorkspaceBackupDigest = receipt.backupDigest
+            workspaceBackupErrorCode = nil
+            postCommitHook?()
+            try refreshManagedPackages()
+            try validatePins()
+        } catch let error as PocketAppWorkspaceBackupError {
+            try? workspaceBackupManager.reject(
+                requestID: proposal.requestID,
+                bindingDigest: proposal.bindingDigest
+            )
+            pendingWorkspaceRestore = nil
+            workspaceBackupErrorCode = error.description
+            refreshManagedPackagesAfterFailure()
+        } catch {
+            try? workspaceBackupManager.reject(
+                requestID: proposal.requestID,
+                bindingDigest: proposal.bindingDigest
+            )
+            pendingWorkspaceRestore = nil
+            workspaceBackupErrorCode = "RESTORE_COMMIT_FAILED"
+            refreshManagedPackagesAfterFailure()
+        }
+    }
+
+    func rejectWorkspaceRestore() {
+        guard let proposal = pendingWorkspaceRestore else { return }
+        do {
+            try workspaceBackupManager.reject(
+                requestID: proposal.requestID,
+                bindingDigest: proposal.bindingDigest
+            )
+            pendingWorkspaceRestore = nil
+            workspaceBackupErrorCode = nil
+        } catch let error as PocketAppWorkspaceBackupError {
+            workspaceBackupErrorCode = error.description
+        } catch {
+            workspaceBackupErrorCode = "RESTORE_REJECTION_FAILED"
+        }
+    }
+
     func generate(userRequest: String, updating packageID: String? = nil) async {
-        guard phase != .generating, phase != .installing, pendingProposal == nil else {
+        guard phase != .generating,
+              phase != .installing,
+              pendingProposal == nil,
+              pendingWorkspaceRestore == nil else {
             fail(.busy)
             return
         }
@@ -179,6 +291,10 @@ final class PocketAppGenerationController: ObservableObject {
     }
 
     func disable(packageID: String) {
+        guard pendingWorkspaceRestore == nil else {
+            workspaceBackupErrorCode = "RESTORE_BUSY"
+            return
+        }
         do {
             try validatePins()
             try refreshManagedPackages()
@@ -203,6 +319,10 @@ final class PocketAppGenerationController: ObservableObject {
     }
 
     func enable(packageID: String) {
+        guard pendingWorkspaceRestore == nil else {
+            workspaceBackupErrorCode = "RESTORE_BUSY"
+            return
+        }
         do {
             try validatePins()
             try refreshManagedPackages()
@@ -227,6 +347,10 @@ final class PocketAppGenerationController: ObservableObject {
     }
 
     func removePreservingData(packageID: String) {
+        guard pendingWorkspaceRestore == nil else {
+            workspaceBackupErrorCode = "RESTORE_BUSY"
+            return
+        }
         do {
             try validatePins()
             try refreshManagedPackages()
@@ -251,7 +375,7 @@ final class PocketAppGenerationController: ObservableObject {
     }
 
     func prepareRollback(packageID: String, version: String) {
-        guard pendingProposal == nil else {
+        guard pendingProposal == nil, pendingWorkspaceRestore == nil else {
             fail(.busy)
             return
         }
@@ -271,7 +395,7 @@ final class PocketAppGenerationController: ObservableObject {
     }
 
     func prepareCapabilityMigration(packageID: String, targetVersion: String) {
-        guard pendingProposal == nil else {
+        guard pendingProposal == nil, pendingWorkspaceRestore == nil else {
             fail(.busy)
             return
         }

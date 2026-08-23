@@ -33,6 +33,11 @@ const pocketCancelEl = document.querySelector("[data-pocket-cancel]");
 const pocketGenerationStatusEl = document.querySelector("[data-pocket-generation-status]");
 const pocketGenerationProposalEl = document.querySelector("[data-pocket-generation-proposal]");
 const pocketGenerationManagedEl = document.querySelector("[data-pocket-generation-managed]");
+const pocketWorkspaceExportEl = document.querySelector("[data-pocket-workspace-export]");
+const pocketWorkspaceRestoreEl = document.querySelector("[data-pocket-workspace-restore]");
+const pocketWorkspaceStatusEl = document.querySelector("[data-pocket-workspace-status]");
+const pocketWorkspacePreviewEl = document.querySelector("[data-pocket-workspace-preview]");
+const pocketWorkspaceNoteEl = document.querySelector("[data-pocket-workspace-note]");
 const capabilityHistoryHeadingEl = document.querySelector("[data-capability-history-heading]");
 const capabilityRetentionEl = document.querySelector("[data-capability-retention]");
 const capabilityHistorySummaryEl = document.querySelector("[data-capability-history-summary]");
@@ -234,6 +239,7 @@ function renderPocketGeneration(generation, language) {
   pocketGenerateEl.disabled = generation.phase === "generating"
     || generation.phase === "installing"
     || Boolean(generation.proposal)
+    || Boolean(generation.workspaceBackup?.pending)
     || generation.generatorAvailable === false;
 
   const updateTarget = generationTarget.value;
@@ -242,6 +248,7 @@ function renderPocketGeneration(generation, language) {
     ? ""
     : (language === "en" ? `Update target: ${updateTarget}` : `更新対象: ${updateTarget}`);
   pocketGenerationClearTargetEl.textContent = language === "en" ? "Create new app instead" : "新規Appとして作成";
+  renderWorkspaceBackup(generation.workspaceBackup, generation, language);
 
   const statusParts = [generation.phase, generation.errorCode].filter(Boolean);
   if (generation.receipt?.readbackVerified) {
@@ -381,6 +388,9 @@ function renderPocketGeneration(generation, language) {
     actions.append(removeButton);
 
     card.append(heading, digest, healthLine, actions);
+    if (generation.workspaceBackup?.pending) {
+      actions.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+    }
     pocketGenerationManagedEl.append(card);
   }
 
@@ -418,9 +428,71 @@ function renderPocketGeneration(generation, language) {
       { appId: issue.appId },
     ));
     actions.append(removeButton);
+    if (generation.workspaceBackup?.pending) {
+      actions.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+    }
     card.append(heading, error, actions);
     pocketGenerationManagedEl.append(card);
   }
+}
+
+function renderWorkspaceBackup(workspace, generation, language) {
+  const busy = generation.phase === "generating"
+    || generation.phase === "installing"
+    || Boolean(generation.proposal)
+    || Boolean(workspace?.pending);
+  pocketWorkspaceExportEl.textContent = language === "en" ? "Export workspace" : "workspaceを書き出す";
+  pocketWorkspaceRestoreEl.textContent = language === "en" ? "Restore from backup" : "backupから復元";
+  pocketWorkspaceExportEl.disabled = busy;
+  pocketWorkspaceRestoreEl.disabled = busy;
+  pocketWorkspaceNoteEl.textContent = language === "en"
+    ? "OAuth, credentials, audit logs, and Codex workspaces are excluded. Restore revalidates every hash, schema, permission, and data entry."
+    : "OAuth、credential、監査ログ、Codex workspaceは含みません。復元は全hash・schema・権限・dataを再検証します。";
+
+  const status = [];
+  if (workspace?.errorCode) status.push(workspace.errorCode);
+  if (workspace?.receipt?.readbackVerified) {
+    status.push(language === "en"
+      ? `Post-restore readback verified: ${workspace.receipt.restoredApps.length} app(s)`
+      : `復元後readback確認済み: ${workspace.receipt.restoredApps.length}件`);
+  } else if (workspace?.lastBackupDigest) {
+    status.push(language === "en"
+      ? `Backup readback verified: ${shortDigest(workspace.lastBackupDigest)}`
+      : `backup readback確認済み: ${shortDigest(workspace.lastBackupDigest)}`);
+  }
+  pocketWorkspaceStatusEl.textContent = status.join(" · ");
+
+  pocketWorkspacePreviewEl.replaceChildren();
+  if (!workspace?.pending) return;
+  const proposal = workspace.pending;
+  const card = document.createElement("article");
+  card.className = "pocket-app-card";
+  const heading = document.createElement("div");
+  heading.className = "pocket-app-heading";
+  const title = document.createElement("strong");
+  title.textContent = language === "en" ? "Restore preview" : "復元preview";
+  const digest = document.createElement("span");
+  digest.textContent = shortDigest(proposal.backupDigest);
+  heading.append(title, digest);
+  card.append(heading);
+  for (const change of proposal.changes ?? []) {
+    const line = document.createElement("code");
+    line.textContent = `${change.action} · ${change.appId} · ${change.fromVersion ?? "-"} → ${change.toVersion} · state ${change.fromLifecycleState ?? "-"} → ${change.toLifecycleState} · permissions +${change.addedPermissions.length}/-${change.removedPermissions.length} · data ${change.dataChanged ? "changed" : "same"}`;
+    card.append(line);
+  }
+  const actions = document.createElement("div");
+  actions.className = "settings-button-row";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = language === "en" ? "Cancel" : "取消";
+  cancel.addEventListener("click", () => runGenerationAction("pocketApps.cancelRestore"));
+  const approve = document.createElement("button");
+  approve.type = "button";
+  approve.textContent = language === "en" ? "Review restore" : "復元内容を確認";
+  approve.addEventListener("click", () => runGenerationAction("pocketApps.presentRestoreApproval"));
+  actions.append(cancel, approve);
+  card.append(actions);
+  pocketWorkspacePreviewEl.append(card);
 }
 
 async function runGenerationAction(method, params = undefined) {
@@ -614,6 +686,14 @@ pocketGenerationClearTargetEl.addEventListener("click", () => {
 
 pocketCancelEl.addEventListener("click", () => {
   runGenerationAction("pocketApps.cancelGeneration");
+});
+
+pocketWorkspaceExportEl.addEventListener("click", () => {
+  runGenerationAction("pocketApps.exportBackup");
+});
+
+pocketWorkspaceRestoreEl.addEventListener("click", () => {
+  runGenerationAction("pocketApps.prepareRestore");
 });
 
 resetEl.addEventListener("click", () => {
