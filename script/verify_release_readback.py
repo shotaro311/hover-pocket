@@ -142,7 +142,12 @@ def parse_appcast(data: bytes, repository: str) -> MacAppcast:
         root = ET.fromstring(data)
     except ET.ParseError as error:
         raise VerificationError("macos.appcast: invalid XML") from error
-    items = root.findall("./channel/item")
+    if root.tag != "rss":
+        raise VerificationError("macos.appcast: expected rss root")
+    channels = root.findall("channel")
+    if len(channels) != 1:
+        raise VerificationError("macos.appcast: expected exactly one channel")
+    items = channels[0].findall("item")
     if len(items) != 1:
         raise VerificationError("macos.appcast: expected exactly one item")
     item = items[0]
@@ -919,7 +924,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         windows_checksums,
         args.windows_signing_gate,
     )
-    github_latest_release = reader.latest_release()
     macos_asset_snapshot, windows_asset_snapshot = verify_downloaded_releases(
         verifier,
         reader,
@@ -934,6 +938,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         windows_checksums,
         args.sparkle_public_key,
     )
+    github_latest_release = reader.latest_release()
     validate_cross_platform_release_policy(
         verifier,
         appcast.release_tag,

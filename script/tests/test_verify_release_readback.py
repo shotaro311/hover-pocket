@@ -113,9 +113,21 @@ class ReleaseReadbackTests(unittest.TestCase):
     def test_macos_rejects_multiple_appcast_items_or_enclosures(self):
         appcast, _, _, _ = self.mac_fixture()
 
+        non_rss = ET.fromstring(appcast)
+        non_rss.tag = "feed"
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.parse_appcast(ET.tostring(non_rss), "shotaro311/hover-pocket")
+
+        multiple_channels = ET.fromstring(appcast)
+        channel = multiple_channels.find("channel")
+        self.assertIsNotNone(channel)
+        multiple_channels.append(ET.fromstring(ET.tostring(channel)))
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.parse_appcast(ET.tostring(multiple_channels), "shotaro311/hover-pocket")
+
         multiple_items = ET.fromstring(appcast)
-        channel = multiple_items.find("./channel")
-        item = multiple_items.find("./channel/item")
+        channel = multiple_items.find("channel")
+        item = multiple_items.find("channel/item")
         self.assertIsNotNone(channel)
         self.assertIsNotNone(item)
         channel.append(ET.fromstring(ET.tostring(item)))
@@ -517,6 +529,13 @@ class ReleaseReadbackTests(unittest.TestCase):
                 "win-v1.2.4",
                 {"tag_name": "win-v1.2.4", "draft": False, "prerelease": False},
             )
+
+        run_source = SCRIPT.read_text(encoding="utf-8").split("def run(", 1)[1]
+        downloads_index = run_source.index("verify_downloaded_releases(")
+        latest_index = run_source.index("github_latest_release = reader.latest_release()")
+        policy_index = run_source.index("validate_cross_platform_release_policy(")
+        self.assertLess(downloads_index, latest_index)
+        self.assertLess(latest_index, policy_index)
 
 
 if __name__ == "__main__":
