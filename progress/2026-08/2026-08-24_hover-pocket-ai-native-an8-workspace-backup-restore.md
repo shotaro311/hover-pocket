@@ -49,9 +49,20 @@
 | `script/verify_pocket_contracts.py` | 15 schema / 71 fixture、全一致 |
 | Windows Settings JavaScript / generation target | 構文・state helper、成功 |
 | `git diff --check` | 成功 |
+| Draft PR #31 Windows CI [32662630254](https://github.com/shotaro311/hover-pocket/actions/runs/32662630254) | Release build成功、`pocket_app_workspace_backup_verify=ok`、Settings / Voice / Broker / rendered UIを含む全検証成功 |
+| Draft PR #31 macOS CI [32662630273](https://github.com/shotaro311/hover-pocket/actions/runs/32662630273) | warnings-as-errors build、`pocket_app_workspace_backup_verify=ok`、Capability / Broker / Voiceを含む全検証成功 |
+| 3 OS contract CI [32662630305](https://github.com/shotaro311/hover-pocket/actions/runs/32662630305) | Ubuntu / macOS / Windowsで15 schema / 71 fixture成功、3 reportのbyte一致 |
+
+初回Windows CI [32662469903](https://github.com/shotaro311/hover-pocket/actions/runs/32662469903)は、`IReadOnlySet<string>`向けcollection expressionなどのC#コンパイルエラー6件を検出した。明示的な`HashSet<string>` / `string[]`と文字列overloadへ修正したcommit `d00de9b`で、上記Windows CIが成功した。
+
+## PR readback
+
+- Draft PR [#31](https://github.com/shotaro311/hover-pocket/pull/31)のexact headは`d00de9b3f38c104a6d3048acdd493ec945a2de5c`。
+- 全7 checkが成功し、失敗0、pending 0。PRは`Draft / OPEN / MERGEABLE / CLEAN`である。
+- review / comment / unresolved threadは0件。local / remote parityは`0 / 0`、worktreeはcleanである。
+- 自動mergeは行わず、stack base `codex/ai-native-core-ga-legacy-path-removal`への人手review gateを維持する。
 
 ## 未完了gate
 
-- このMacには.NET SDKがない。Windows Release build、workspace verifier、Settings Bridge、rendered WebView UIはstacked Draft PR CIを受入gateにする。
 - macOS / Windows実機でnative file dialog、既定No、実データを含む相互importを最終確認する。
 - AN8-C完了後もCore GA全体では、production Voice positive tool allowlist / 実音声E2E、実Codex confinement E2E、Windows正式署名済みrelease / rollback、stack PRの人手mergeが残る。
