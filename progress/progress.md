@@ -2,8 +2,19 @@
 project_slug: hover-menu-preview
 updated: 2026-08-23
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-pr-ready-ci-green; an5-c-runtime-activation-pending; capability-expansion-merged; an8-a-pr-ready-review-resolved
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-pr-ready-ci-green; an5-c-runtime-activation-pending; capability-expansion-merged; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending
 ---
+
+## 2026-08-23 AI-native AN8-B Release Transition Gate
+
+- PR [#23](https://github.com/shotaro311/hover-pocket/pull/23)へ、公開済み旧版と新版のinstall、upgrade、明示rollback、再upgrade、uninstall、reinstall、user data sentinel保持を確認するOS別手動workflowを追加した。通常push / PRではBash / PowerShell構文とWindowsのrelease snapshot差し替え拒否contractだけを実行し、公開release codeはOS別の明示inputがある場合だけ使い捨てrunnerで実行する。
+- workflow_dispatchの自由入力tagは`run:`へ直接展開せずenv経由へ固定した。macOS / Windowsとも開始時にtag、draft / prerelease状態、全assetの名前・size・GitHub SHA-256・download URLをsnapshot化し、合格証跡の直前に再取得して完全一致しない場合は失敗する。
+- Windows 0.2.x未署名betaは`execute_windows_release_code`と`allow_unsigned_beta`の二重opt-inを必須にした。正式署名版はSetupだけの署名確認では受理せず、full package内アプリを独立した正式署名readback snapshotへ結合できるまで失敗側に閉じた。
+- Macローカルで公開版`v0.1.0-161`→`v0.1.0-168`の全遷移、codesign、Apple公証staple、Gatekeeper、Sparkle Ed25519署名、user data保持、開始 / 終了release snapshot一致が成功した。一時結果は恒久削除せずTrashへ移動した。
+- 手動workflow [32646526001](https://github.com/shotaro311/hover-pocket/actions/runs/32646526001)はexact head `35077c9be0109089701cc55788e7aa72aad8e2fc`でmacOS実transition、macOS / Windows contractが成功し、Windows実行は意図どおりskipした。artifact `macos-release-transition` ID `9495013952`を別経路downloadし、全遷移=`verified`、`userDataPreserved=true`を確認した。
+- 初回手動run [32646384473](https://github.com/shotaro311/hover-pocket/actions/runs/32646384473)は`actions/upload-artifact`の短縮SHAをGitHubが拒否してsetup段階で失敗した。GitHub APIが解決した完全commit SHAへ両jobを修正し、上記成功runで証跡uploadまで再確認した。
+- 初回Security scan `b4dec798-00d3-4a79-8b1e-a3019b036dea`はrelease途中差し替えで古いpassed receiptが残り得るCWE-367をlow 1件として検出した。snapshot再取得で修正し、full remediation scan `cb82d38f-2c6f-4cdc-b069-34cbb261bab4`は6領域、final action-pin scan `3ec61eaa-b29d-4b70-8e27-629bd51b599b`は2領域をcoverage complete、finding 0件でsealed completeにした。
+- PRはDraft、`MERGEABLE / CLEAN`を維持し、人間merge gateを変更していない。残る実行gateはWindows未署名betaの明示承認と、将来の正式署名Windows releaseでの再検証である。日常端末のSparkle / Velopack UI、実データmigration、sleep-wake、長時間soakは後続gateに残す。詳細: `progress/2026-08/2026-08-23_hover-pocket-ai-native-an8-transition.md`。
 
 ## 2026-08-21 AI-native AN8-A Codex Review Follow-up
 
