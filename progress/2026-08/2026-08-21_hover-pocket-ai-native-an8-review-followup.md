@@ -10,7 +10,7 @@ updated_by: codex
 ## 対象
 
 - PR: [#20 AN8-A 公開成果物のreadback検証](https://github.com/shotaro311/hover-pocket/pull/20)
-- reviewed code head: `da75587759959f5760eedb9a59b153d5971fc786`
+- reviewed code head: `e2e6a4a4f7de80c9dd40578cf138e89a858aa5f3`
 - Codex review:
   - P1: Velopack full update package内アプリのAuthenticodeを検証する。
   - P2: versioned release側の`HoverPocket-macOS-app.zip`も実際にdownloadしてhashを照合する。
@@ -28,6 +28,8 @@ updated_by: codex
   - P2: 両appcastとchecksumも最初のsnapshotから最後のmetadata再確認まで固定する。
   - P1: 署名済みSetupのPE証明書表をpackage末尾と誤認せず、Velopack bundle headerからoffset / lengthを解決する。
   - P2: Windowsの3署名が互いに一致するだけでなく、正規HoverPocket publisher証明書へ固定する。
+  - P2: 長時間のasset download後にGitHub汎用Latestを再取得する。
+  - P2: appcastの`rss` rootとdirect childの`channel` 1件を必須にする。
 
 ## 修正
 
@@ -49,6 +51,8 @@ updated_by: codex
   - Setup / Portableはexact `HoverPocketWin-win-Setup.exe` / `HoverPocketWin-win-Portable.zip`だけを許可する。
   - 実downloadした全Windows assetのname / size / SHA-256を決定論的なsnapshotとしてreportへ含める。
   - macOSの3 ZIP、stable / versioned appcast、versioned checksumの6資産を最初のimmutable snapshotへ含める。
+  - appcastはnamespaceなし`rss` root、direct childの`channel` 1件、`item` 1件、`enclosure` 1件を必須にし、曖昧なXML構造を拒否する。
+  - GitHub汎用Latestは全公開assetのdownload / digest検証完了後に再取得し、macOS versioned releaseとの一致を判定する。
 - `script/verify_published_macos.sh`
   - 6資産を別々にdownloadし、snapshotのrelease tag / name / size / SHA-256と最後のGitHub metadata再取得まで一致させる。
   - 3 ZIPと2 appcastのbyte同一性、bundle ID、version / build、`SUFeedURL`、`SUPublicEDKey`、`TeamIdentifier=N7VVPW44ZA`、codesign / stapler / Gatekeeperを検証する。
@@ -58,6 +62,7 @@ updated_by: codex
   - internally consistentな`Old-Setup.exe` / `Old-Portable.zip`を拒否し、公開readback stepが明示`bash`を使うことを追加した。
   - 8 asset snapshotの決定論的順序、formal jobのartifact依存、全asset download、署名前後のmetadata再照合を固定した。
   - macOS 6資産、Sparkle設定 / Team ID、Setup SFX全payload、Portable全payloadの回帰契約を追加した。
+  - 非RSS root、複数direct channelの拒否と、download完了後にだけLatestを再取得する呼出順を固定した。
 - workflow / README
   - formal gateがSetup、Portable、update packageの3署名を検査することを明記した。
   - `resolve-windows-release` jobでtagを1回だけ確定し、metadata / Authenticodeの両jobへ同じoutputを渡す。
@@ -84,6 +89,7 @@ updated_by: codex
 - exact diff scan `56fce146-0912-464c-9dfa-2be4262fd400`とincremental scan `44ccf6fa-b72b-495a-a731-757b87abd78e`: coverage complete、reportable finding 0件、sealed complete。
 - Setup / Portable / macOS固定を段階確認したscan `1889e238-6153-4579-8ea6-d7801b6d2351`、`7291eb3a-5841-4176-942a-66f4ae39f02b`、`84906546-9cf0-472f-9e08-a33d5b3da72a`: いずれもcoverage complete、reportable finding 0件、sealed complete。最終scanは`1e6a8c8...3e8b79f`の4 surfaceを確認した。
 - Velopack bundle headerとWindows publisher固定のexact scan `f436ab83-bc71-4ab6-b104-d49738aeeb45`: range `59cd53a...da75587`の5 / 5 fileを確認し、coverage complete、reportable finding 0件、sealed complete。
+- 最終RSS / Latest順序修正のexact scan `ce3db805-6663-48a6-aad0-c650efc9be0f`: range `f6f24f6...e2e6a4a`の2 surfaceを確認し、coverage complete、reportable finding 0件、sealed complete。
 - live beta readback:
   - macOS `v0.1.0-168`: versioned Sparkle ZIP、stable手動ZIP、versioned手動ZIPの実測size / SHA-256一致、Sparkle Ed25519署名成功。
   - Windows `win-v0.2.7`: 公開全assetのsize / SHA-256、checksum、full package SHA-1一致。
@@ -99,6 +105,7 @@ updated_by: codex
   - run [32628492824](https://github.com/shotaro311/hover-pocket/actions/runs/32628492824): Setup payload同一性を含む全job成功。3 artifactを別経路downloadして内容を確認した。
   - 最終run [32629166708](https://github.com/shotaro311/hover-pocket/actions/runs/32629166708): exact head `3e8b79f217d2052a17b6acc101e320456ccb5d62`で全job成功。3 report artifactを新しい一時directoryへ別経路downloadし、macOS 6資産、3 ZIP / 2 appcastのbyte同一性、Sparkle設定、Team ID、codesign / notarization / Gatekeeper、Windows Setup全payload、Portable 506ファイル、release tagとsnapshotの一致を確認した。
   - publisher follow-up run [32638170997](https://github.com/shotaro311/hover-pocket/actions/runs/32638170997): exact head `da75587759959f5760eedb9a59b153d5971fc786`で全job成功。Windows native jobでVelopack marker / offset / lengthによる公開Setup payload解析を実行した。3 artifactを別経路downloadし、macOS 6資産、Windows 8資産、`setupPayload=full-package-byte-equivalent`、`portablePayload=full-package-application-byte-equivalent`、betaの`publisherIdentity=not-evaluated`を確認した。
+  - final RSS / Latest run [32638515063](https://github.com/shotaro311/hover-pocket/actions/runs/32638515063): exact head `e2e6a4a4f7de80c9dd40578cf138e89a858aa5f3`で全job成功。3 report artifactを`/tmp/hoverpocket-run32638515063.k2JOcU`へ別経路downloadし、macOS 6資産と署名 / 公証 / Gatekeeper、Windows 8資産とSetup / Portable payload同一性、betaの`publisherIdentity=not-evaluated`を確認した。公開readback jobの成功により、厳格RSS構造とdownload後のLatest再取得も実データで通過した。
 - 未確認:
   - ローカルMacにはPowerShellがないため、PowerShell parseはPRのWindows CIで確認する。
   - 現行Windows `0.2.7`は未署名betaであり、3点の実Authenticode検証は正式署名済みreleaseでのみ完了できる。
