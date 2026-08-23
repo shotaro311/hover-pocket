@@ -884,7 +884,7 @@ internal sealed class CodexVoiceCoordinator : IDisposable
 
         CancelRestart();
         DetachClientIfCurrent(client);
-        _ = DisposeDetachedClientAsync(client);
+        TrackTransportTeardown(DisposeDetachedClientAsync(client));
         UpdateSnapshot(snapshot => snapshot with
         {
             Availability = CodexVoiceAvailability.CapabilityBlocked,

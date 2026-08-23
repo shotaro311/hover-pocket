@@ -172,10 +172,15 @@ internal sealed class VoiceFoundationVerifier
 
     private async Task VerifyUnexpectedRequestFailsClosedAsync(CancellationToken cancellationToken)
     {
-        var harness = new AppServerHarness();
+        var factoryCalls = 0;
+        var harness = new GatedDisposeHarness();
+        var replacementHarness = new AppServerHarness();
         using var coordinator = new CodexVoiceCoordinator(
             featureEnabled: true,
-            clientFactory: _ => Task.FromResult(harness.CreateClient()),
+            clientFactory: _ => Task.FromResult(
+                Interlocked.Increment(ref factoryCalls) == 1
+                    ? harness.CreateClient()
+                    : replacementHarness.CreateClient()),
             compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
             restartDelays: []);
 
@@ -192,15 +197,50 @@ internal sealed class VoiceFoundationVerifier
         }
         coordinator.SetMuted(true);
 
-        harness.PushServerRequest(9001, "unknown/request");
-        await WaitUntilAsync(
-            () => coordinator.Snapshot.LastErrorCode == "unexpected_server_request",
-            cancellationToken);
-
-        if (coordinator.Snapshot.Availability != CodexVoiceAvailability.CapabilityBlocked
-            || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure)
+        Task? disable = null;
+        Task? enable = null;
+        try
         {
-            _failures.Add("unexpected app-server request was not fail-closed");
+            harness.PushServerRequest(9001, "unknown/request");
+            await WaitUntilAsync(
+                () => coordinator.Snapshot.LastErrorCode == "unexpected_server_request",
+                cancellationToken);
+            await harness.DisposeStarted.WaitAsync(cancellationToken);
+            if (coordinator.Snapshot.Availability != CodexVoiceAvailability.CapabilityBlocked
+                || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure)
+            {
+                _failures.Add("unexpected app-server request was not fail-closed");
+            }
+
+            disable = coordinator.SetFeatureEnabledAsync(false, cancellationToken);
+            enable = coordinator.SetFeatureEnabledAsync(true, cancellationToken);
+            await Task.Delay(50, cancellationToken);
+            if (disable.IsCompleted
+                || enable.IsCompleted
+                || Volatile.Read(ref factoryCalls) != 1)
+            {
+                _failures.Add("unexpected-request teardown did not block disable and replacement startup");
+            }
+        }
+        finally
+        {
+            harness.ReleaseDispose();
+        }
+
+        if (disable is not null)
+        {
+            await disable;
+        }
+        if (enable is not null)
+        {
+            await enable;
+        }
+
+        if (coordinator.Snapshot.Availability != CodexVoiceAvailability.Ready
+            || !coordinator.Snapshot.TransportAttached
+            || Volatile.Read(ref factoryCalls) != 2)
+        {
+            _failures.Add("unexpected app-server request was not fail-closed through teardown and replacement");
         }
     }
 
@@ -1152,6 +1192,16 @@ internal sealed class VoiceFoundationVerifier
         public void ReleaseDispose() => _releaseDispose.TrySetResult(true);
 
         public void Close() => _reader.Dispose();
+
+        public void PushServerRequest(long id, string method)
+        {
+            _reader.Push(JsonSerializer.Serialize(new
+            {
+                id,
+                method,
+                @params = new { }
+            }));
+        }
     }
 
     private sealed class ChannelLineReader : TextReader
