@@ -303,6 +303,11 @@ internal sealed class PocketSurfaceRuntime(
     {
         ExactKeys(node, ["type", "items", "selection"], ["titleTarget"], path);
         var items = QueryBinding(node.GetProperty("items"), $"{path}.items");
+        Require(
+            items.TryGetValue("query", out var rawQuery)
+                && rawQuery is string query
+                && query == "calendar.events.list@1",
+            $"{path}.items.query:unsupported_shape");
         var selection = Binding(node.GetProperty("selection"), inputAllowed: false, stateAllowed: true, $"{path}.selection");
         var properties = new SortedDictionary<string, object?>
         {
@@ -345,7 +350,7 @@ internal sealed class PocketSurfaceRuntime(
         ExactKeys(node, ["type", "value", "tone"], [], path);
         var value = BoundedString(node.GetProperty("value"), 0, 1_000, $"{path}.value");
         var tone = GetString(node.GetProperty("tone"), $"{path}.tone");
-        Require(tone is "neutral" or "success" or "warning" or "error", $"{path}.tone");
+        Require(tone is "neutral" or "warning" or "error", $"{path}.tone");
         return RenderNode(type, new SortedDictionary<string, object?>
         {
             ["tone"] = tone,

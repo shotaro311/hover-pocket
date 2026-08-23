@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using HoverPocket.Shell.Verification;
 
 namespace HoverPocket.Shell.PocketApps;
 
@@ -9,12 +10,32 @@ internal sealed class PocketAppGenerationVerifier
 
     public IReadOnlyList<string> Run()
     {
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN runtime-activation");
+        _failures.AddRange(PocketAppRuntimeActivationVerifier.Run());
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END runtime-activation");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN e2e");
         VerifyE2E();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END e2e");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN settings-approval");
         VerifySettingsApprovalBoundary().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END settings-approval");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN preview-only");
         VerifyPreviewOnlyBoundary().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END preview-only");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN failed-activation-refresh");
+        VerifyFailedActivationRefreshesManagement().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END failed-activation-refresh");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN committed-receipt");
         VerifyCommittedReceiptSurvivesManagedRefreshFailure().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END committed-receipt");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN pending-proposal");
         VerifyUnrelatedActionPreservesPendingProposal().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END pending-proposal");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN deactivate-flush");
+        VerifyDeactivateFlushBoundary().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END deactivate-flush");
         VerifyApprovalTextSanitization();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END approval-text");
         return _failures;
     }
 
@@ -136,13 +157,93 @@ internal sealed class PocketAppGenerationVerifier
                         && failingEnableLifecycle.ActivePackage(request.AppId) is null,
                     "generation_enable_readback_failure_restored_disabled");
             }
+            using (var failingRuntimeEnableLifecycle = new PocketAppLifecycleManager(
+                root,
+                dataRoot,
+                activationReadback: receipt =>
+                {
+                    if (receipt.State == PocketAppLifecycleState.Enabled)
+                    {
+                        throw new PocketAppRuntimeActivationException("RUNTIME_ACTIVATION_UNAVAILABLE");
+                    }
+                    return new PocketAppRuntimeReadback(
+                        receipt.PackageId,
+                        receipt.Version,
+                        receipt.PackageDigest,
+                        receipt.EffectivePermissions);
+                }))
+            {
+                try
+                {
+                    _ = failingRuntimeEnableLifecycle.Enable(request.AppId);
+                    _failures.Add("generation_runtime_enable_failure_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_READBACK_FAILED")
+                {
+                }
+                Require(
+                    failingRuntimeEnableLifecycle.ManagedPackage(request.AppId)?.State == PocketAppLifecycleState.Disabled
+                        && failingRuntimeEnableLifecycle.ActivePackage(request.AppId) is null,
+                    "generation_runtime_enable_failure_remains_disabled");
+            }
+
+            var reupdateMaterialized = materializer.Materialize(updateEnvelope, updateRequest);
+            try
+            {
+                var reupdate = lifecycle.Stage(reupdateMaterialized.Directory);
+                var reupdateGrant = lifecycle.Approve(reupdate.RequestId, reupdate.BindingDigest);
+                _ = lifecycle.Install(reupdate, reupdateGrant);
+            }
+            finally
+            {
+                TryDeleteDraft(reupdateMaterialized.Directory);
+            }
+            using (var failingRuntimeRollbackLifecycle = new PocketAppLifecycleManager(
+                root,
+                dataRoot,
+                activationReadback: receipt =>
+                {
+                    if (receipt.State == PocketAppLifecycleState.Enabled)
+                    {
+                        throw new PocketAppRuntimeActivationException("RUNTIME_ACTIVATION_UNAVAILABLE");
+                    }
+                    return new PocketAppRuntimeReadback(
+                        receipt.PackageId,
+                        receipt.Version,
+                        receipt.PackageDigest,
+                        receipt.EffectivePermissions);
+                }))
+            {
+                var failingRollback = failingRuntimeRollbackLifecycle.PrepareRollback(
+                    request.AppId,
+                    request.Version);
+                var failingRollbackGrant = failingRuntimeRollbackLifecycle.Approve(
+                    failingRollback.RequestId,
+                    failingRollback.BindingDigest);
+                try
+                {
+                    _ = failingRuntimeRollbackLifecycle.Rollback(failingRollback, failingRollbackGrant);
+                    _failures.Add("generation_runtime_rollback_failure_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_READBACK_FAILED")
+                {
+                }
+                var rollbackFallback = failingRuntimeRollbackLifecycle.ManagedPackage(request.AppId);
+                Require(
+                    rollbackFallback?.State == PocketAppLifecycleState.Disabled
+                        && rollbackFallback?.Version == updateRequest.Version
+                        && failingRuntimeRollbackLifecycle.ActivePackage(request.AppId) is null,
+                    "generation_runtime_rollback_failure_disables_previous_version");
+            }
+            var raceTarget = lifecycle.ManagedPackage(request.AppId)
+                ?? throw new InvalidOperationException("generation_race_target_missing");
             var installedIntent = Path.Combine(
                 root,
                 "Apps",
                 request.AppId,
                 "Versions",
-                VersionStorageKey(disabledAgain.Version!),
-                disabledAgain.PackageDigest!["sha256:".Length..],
+                VersionStorageKey(raceTarget.Version!),
+                raceTarget.PackageDigest!["sha256:".Length..],
                 "package",
                 "intent.md");
             var originalIntent = File.ReadAllBytes(installedIntent);
@@ -422,11 +523,20 @@ internal sealed class PocketAppGenerationVerifier
         try
         {
             var approve = false;
+            var allowActivationFlush = true;
             using var controller = new PocketAppGenerationController(
                 root,
                 dataRoot,
                 draftRoot,
                 new FixturePocketAppGenerationAdapter(FixtureRoot()));
+            controller.SetBeforeDeactivate((appId, cancellationToken) =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return Task.FromResult(new PocketAppStateTransitionLease(
+                    appId,
+                    "fixture-approval",
+                    allowActivationFlush));
+            });
             var settings = new HoverPocket.Shell.Bridge.BridgeDispatcher();
             controller.AttachSettings(settings, approvalDecision: _ => approve);
             var panel = new HoverPocket.Shell.Bridge.BridgeDispatcher();
@@ -448,6 +558,14 @@ internal sealed class PocketAppGenerationVerifier
             generated = await settings.ProcessRawMessageAsync(generate.Replace("\"generate\"", "\"generate-2\"", StringComparison.Ordinal));
             Require(generated?.Contains("\"phase\":\"awaiting_approval\"", StringComparison.Ordinal) == true, "generation_native_approval_restage");
             approve = true;
+            allowActivationFlush = false;
+            var blocked = await settings.ProcessRawMessageAsync(
+                """{"id":"approve-flush-blocked","method":"pocketApps.presentApproval","params":{}}""");
+            Require(
+                blocked?.Contains("GENERATION_STATE_FLUSH_FAILED", StringComparison.Ordinal) == true
+                    && blocked.Contains("\"proposal\":{", StringComparison.Ordinal),
+                "generation_activation_flush_failure_preserves_proposal");
+            allowActivationFlush = true;
             var installed = await settings.ProcessRawMessageAsync(
                 """{"id":"approve-native","method":"pocketApps.presentApproval","params":{}}""");
             Require(
@@ -512,6 +630,80 @@ internal sealed class PocketAppGenerationVerifier
         catch (Exception ex)
         {
             _failures.Add($"generation_preview_only:{ex.GetType().Name}:{ex.Message}");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    PocketAppVerifierFileSystem.MakeTreeMutable(root);
+                    Directory.Delete(root, true);
+                }
+            }
+            catch { }
+            try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
+            try { if (Directory.Exists(draftRoot)) { Directory.Delete(draftRoot, true); } } catch { }
+        }
+    }
+
+    private async Task VerifyFailedActivationRefreshesManagement()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-activation-failure-host-{Guid.NewGuid():N}");
+        var dataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-activation-failure-data-{Guid.NewGuid():N}");
+        var draftRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-activation-failure-draft-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(draftRoot);
+            var adapter = new FixturePocketAppGenerationAdapter(FixtureRoot());
+            var materializer = new PocketAppGenerationMaterializer(draftRoot);
+            var request = MakeRequest(
+                "generation-activation-failure",
+                "Create a focus app whose activation fails.",
+                "local.example.activation-failure",
+                "1.0.0",
+                "today-focus");
+            using (var lifecycle = new PocketAppLifecycleManager(root, dataRoot))
+            {
+                _ = InstallFixture(request, adapter, materializer, lifecycle);
+                _ = lifecycle.Disable(request.AppId);
+            }
+            var refreshNotifications = 0;
+            using var controller = new PocketAppGenerationController(
+                root,
+                dataRoot,
+                draftRoot,
+                null,
+                runtimeActivationReadback: receipt =>
+                {
+                    if (receipt.State == PocketAppLifecycleState.Enabled)
+                    {
+                        throw new PocketAppRuntimeActivationException("RUNTIME_ACTIVATION_UNAVAILABLE");
+                    }
+                    return new PocketAppRuntimeReadback(
+                        receipt.PackageId,
+                        receipt.Version,
+                        receipt.PackageDigest,
+                        receipt.EffectivePermissions);
+                },
+                postRefreshHook: () => refreshNotifications++);
+            var settings = new HoverPocket.Shell.Bridge.BridgeDispatcher();
+            controller.AttachSettings(settings, approvalDecision: _ => true);
+            var response = await settings.ProcessRawMessageAsync(
+                """{"id":"enable-activation-failure","method":"pocketApps.enable","params":{"appId":"local.example.activation-failure"}}""");
+            Require(
+                response is not null
+                    && response.Contains("\"phase\":\"failed\"", StringComparison.Ordinal)
+                    && response.Contains("\"errorCode\":\"GENERATION_PACKAGE_INVALID\"", StringComparison.Ordinal)
+                    && response.Contains("\"appId\":\"local.example.activation-failure\",\"state\":\"disabled\"", StringComparison.Ordinal),
+                "generation_failed_activation_refreshes_disabled_management");
+            Require(
+                refreshNotifications == 1,
+                "generation_failed_activation_publishes_route_refresh");
+        }
+        catch (Exception ex)
+        {
+            _failures.Add($"generation_failed_activation_refresh:{ex.GetType().Name}:{ex.Message}");
         }
         finally
         {
@@ -605,12 +797,16 @@ internal sealed class PocketAppGenerationVerifier
                 "generation_corrupt_package_isolated_on_startup");
             var removed = await recoveredSettings.ProcessRawMessageAsync(
                 """{"id":"remove-corrupt","method":"pocketApps.removePreservingData","params":{"appId":"local.example.unrelated"}}""");
+            var removedResult = ResponseResult(removed);
+            var removedReceipt = removedResult.GetProperty("receipt");
             Require(
-                removed is not null
-                    && removed.Contains("\"appId\":\"local.example.unrelated\",\"state\":\"removed\"", StringComparison.Ordinal)
-                    && removed.Contains("\"readbackVerified\":true", StringComparison.Ordinal)
-                    && !removed.Contains("\"errorCode\":\"LIFECYCLE_PACKAGE_CORRUPT\"", StringComparison.Ordinal)
-                    && removed.Contains("\"appId\":\"local.example.selected\",\"state\":\"disabled\"", StringComparison.Ordinal),
+                removedReceipt.GetProperty("appId").GetString() == "local.example.unrelated"
+                    && removedReceipt.GetProperty("state").GetString() == "removed"
+                    && removedReceipt.GetProperty("readbackVerified").GetBoolean()
+                    && !removedResult.GetProperty("managementIssues").EnumerateArray().Any()
+                    && removedResult.GetProperty("managedApps").EnumerateArray().Any(item =>
+                        item.GetProperty("appId").GetString() == "local.example.selected"
+                        && item.GetProperty("state").GetString() == "disabled"),
                 "generation_corrupt_package_remove_preserves_healthy_management");
         }
         catch (Exception ex)
@@ -702,6 +898,136 @@ internal sealed class PocketAppGenerationVerifier
             try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
             try { if (Directory.Exists(draftRoot)) { Directory.Delete(draftRoot, true); } } catch { }
         }
+    }
+
+    private async Task VerifyDeactivateFlushBoundary()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-flush-host-{Guid.NewGuid():N}");
+        var dataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-flush-data-{Guid.NewGuid():N}");
+        var draftRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-flush-draft-{Guid.NewGuid():N}");
+        const string appId = "local.example.flush";
+        try
+        {
+            Directory.CreateDirectory(draftRoot);
+            var adapter = new FixturePocketAppGenerationAdapter(FixtureRoot());
+            var materializer = new PocketAppGenerationMaterializer(draftRoot);
+            var request = MakeRequest(
+                "generation-flush-v1",
+                "Create a focus app whose state must be flushed before deactivation.",
+                appId,
+                "1.0.0",
+                "today-focus");
+            using (var lifecycle = new PocketAppLifecycleManager(root, dataRoot))
+            {
+                _ = InstallFixture(request, adapter, materializer, lifecycle);
+                var update = MakeRequest(
+                    "generation-flush-v2",
+                    request.UserRequest,
+                    appId,
+                    "1.0.1",
+                    request.Namespace);
+                _ = InstallFixture(update, adapter, materializer, lifecycle);
+            }
+
+            var allowFlush = true;
+            var flushCalls = 0;
+            var flushCompleted = false;
+            var releaseCalls = 0;
+            using var controller = new PocketAppGenerationController(root, dataRoot, draftRoot, null);
+            controller.SetBeforeDeactivate((targetAppId, cancellationToken) =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                flushCalls += 1;
+                flushCompleted = string.Equals(targetAppId, appId, StringComparison.Ordinal);
+                return Task.FromResult(new PocketAppStateTransitionLease(
+                    targetAppId,
+                    $"fixture-flush-{flushCalls}",
+                    allowFlush));
+            }, lease =>
+            {
+                if (string.Equals(lease.AppId, appId, StringComparison.Ordinal))
+                {
+                    releaseCalls += 1;
+                }
+                return Task.CompletedTask;
+            });
+            var settings = new HoverPocket.Shell.Bridge.BridgeDispatcher();
+            controller.AttachSettings(settings, approvalDecision: _ => true);
+
+            var disabled = await settings.ProcessRawMessageAsync(
+                """{"id":"flush-disable","method":"pocketApps.disable","params":{"appId":"local.example.flush"}}""");
+            Require(
+                flushCompleted
+                    && flushCalls == 1
+                    && releaseCalls == 1
+                    && disabled?.Contains("\"phase\":\"disabled\"", StringComparison.Ordinal) == true,
+                "generation_disable_awaits_state_flush");
+
+            _ = await settings.ProcessRawMessageAsync(
+                """{"id":"flush-enable","method":"pocketApps.enable","params":{"appId":"local.example.flush"}}""");
+            var pending = await settings.ProcessRawMessageAsync(
+                """{"id":"flush-rollback","method":"pocketApps.prepareRollback","params":{"appId":"local.example.flush","version":"1.0.0"}}""");
+            allowFlush = false;
+            flushCompleted = false;
+            var blocked = await settings.ProcessRawMessageAsync(
+                """{"id":"flush-remove-blocked","method":"pocketApps.removePreservingData","params":{"appId":"local.example.flush"}}""");
+            Require(
+                flushCalls == 2
+                    && releaseCalls == 2
+                    && flushCompleted
+                    && pending?.Contains("\"phase\":\"awaiting_approval\"", StringComparison.Ordinal) == true
+                    && blocked?.Contains("GENERATION_STATE_FLUSH_FAILED", StringComparison.Ordinal) == true
+                    && blocked.Contains("\"proposal\":{", StringComparison.Ordinal)
+                    && blocked.Contains("\"action\":\"rollback\"", StringComparison.Ordinal)
+                    && blocked.Contains("\"appId\":\"local.example.flush\",\"state\":\"enabled\"", StringComparison.Ordinal),
+                "generation_remove_flush_failure_preserves_pending_proposal");
+
+            allowFlush = true;
+            var removed = await settings.ProcessRawMessageAsync(
+                """{"id":"flush-remove","method":"pocketApps.removePreservingData","params":{"appId":"local.example.flush"}}""");
+            var removedReceipt = ResponseResult(removed).GetProperty("receipt");
+            Require(
+                flushCalls == 3
+                    && releaseCalls == 3
+                    && removedReceipt.GetProperty("appId").GetString() == appId
+                    && removedReceipt.GetProperty("state").GetString() == "removed"
+                    && removedReceipt.GetProperty("readbackVerified").GetBoolean(),
+                "generation_remove_after_state_flush_readback");
+        }
+        catch (Exception ex)
+        {
+            _failures.Add($"generation_deactivate_flush:{ex.GetType().Name}:{ex.Message}");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    PocketAppVerifierFileSystem.MakeTreeMutable(root);
+                    Directory.Delete(root, true);
+                }
+            }
+            catch { }
+            try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
+            try { if (Directory.Exists(draftRoot)) { Directory.Delete(draftRoot, true); } } catch { }
+        }
+    }
+
+    private static JsonElement ResponseResult(string? response)
+    {
+        if (string.IsNullOrWhiteSpace(response))
+        {
+            throw new InvalidOperationException("fixture_response_missing");
+        }
+        using var document = JsonDocument.Parse(response);
+        var root = document.RootElement;
+        if (root.GetProperty("error").ValueKind != JsonValueKind.Null
+            || root.GetProperty("result").ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException("fixture_response_failed");
+        }
+        return root.GetProperty("result").Clone();
     }
 
     private void VerifyApprovalTextSanitization()

@@ -1,0 +1,46 @@
+{
+  "$schema": "hoverpocket://schemas/pocket-workflow/v1",
+  "workflowVersion": 1,
+  "id": "startFocus",
+  "inputs": {
+    "selectedEventRef": "entity-ref",
+    "durationSeconds": "integer",
+    "purpose": "string"
+  },
+  "approval": {
+    "mode": "before_writes",
+    "group": "all_writes"
+  },
+  "steps": [
+    {
+      "id": "readCalendar",
+      "use": "calendar.events.list@1",
+      "with": {
+        "range": "today"
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "savePurpose",
+      "use": "sticky.note.upsert@1",
+      "with": {
+        "stableKey": "$context.todayFocusStableKey",
+        "title": "Focus purpose",
+        "body": "$input.purpose",
+        "color": "yellow"
+      },
+      "dependsOn": [
+        "readCalendar"
+      ]
+    }
+  ],
+  "onPartialFailure": {
+    "mode": "compensate_if_available",
+    "presentReceipt": true
+  },
+  "limits": {
+    "maxSteps": 8,
+    "maxDepth": 2,
+    "timeoutSeconds": 30
+  }
+}
