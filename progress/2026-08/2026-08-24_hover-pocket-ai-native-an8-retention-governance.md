@@ -1,7 +1,7 @@
 ---
 project_slug: hover-menu-preview
 date: 2026-08-24
-status: local-verified; windows-ci-pending
+status: stacked-draft-pr-ci-green
 branch: codex/ai-native-an8-retention-governance
 base: a330099a86d9504ee700cf5bfc2478e26aa46f55
 ---
@@ -25,7 +25,8 @@ base: a330099a86d9504ee700cf5bfc2478e26aa46f55
 - `--verify-capabilities`、`--verify-pocket-app`、`--verify-pocket-surface`、`--verify-voice-foundation`、`--verify-panel-layout`、`--verify-timer`: すべて成功。
 - `python3 script/verify_pocket_contracts.py --report-json /tmp/hoverpocket-an8-retention-contract-report.json`: 13 schema / 66 fixture成功。
 - `node --check windows/ui/settings/settings.js`、`node windows/script/verify_settings_generation_target.mjs`、`git diff --check`: 成功。
-- このMacには.NET SDKがないため、Windows Release build / Broker / Settings / rendered WebViewはDraft PR CIを受入gateとする。
+- このMacには.NET SDKがないためWindowsローカル実行は行っていない。代わりにDraft PR [#26](https://github.com/shotaro311/hover-pocket/pull/26)のWindows run [32653742569](https://github.com/shotaro311/hover-pocket/actions/runs/32653742569)でRelease build、Settings UI module、Capability、Broker、Pocket Surface、Timer、Settings、Voice foundation、updater、rendered WebView UIが成功した。
+- code head `cd3b974f18e0a55c01989132b515af62b34789f4`でmacOS run [32653742576](https://github.com/shotaro311/hover-pocket/actions/runs/32653742576)、3 OS deterministic contract / byte-identical compare [32653742551](https://github.com/shotaro311/hover-pocket/actions/runs/32653742551)、Router [32653742728](https://github.com/shotaro311/hover-pocket/actions/runs/32653742728)も成功した。
 
 ## ChatGPT Proレーン
 
@@ -34,5 +35,5 @@ base: a330099a86d9504ee700cf5bfc2478e26aa46f55
 
 ## 次のgate
 
-- 変更をcommit / pushし、Core Integration CandidateへstackしたDraft PRでWindows CIとmacOS回帰をreadbackする。
-- CI成功後にexact diffを再確認し、Core Integration Candidateへ取り込む順序を固定する。mainへの自動mergeは行わない。
+- Draft PR #26は`Draft / MERGEABLE / CLEAN`、remote parity `0 / 0`である。Core Integration Candidateへ取り込む前にexact diffとstack順を人手で確認する。
+- mainへの自動mergeは行わない。次はAN8-C backup / export / restoreの正しいPro runの正式deliveryを待ちながら、schema / Capability廃止とmigration gateへ進む。
