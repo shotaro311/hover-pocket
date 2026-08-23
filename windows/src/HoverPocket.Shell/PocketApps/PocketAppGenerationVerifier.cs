@@ -457,6 +457,44 @@ internal sealed class PocketAppGenerationVerifier
                     "^local\\.generated\\.a[0-9a-f]{32}$",
                     System.Text.RegularExpressions.RegexOptions.CultureInvariant),
             "generation_untargeted_request_gets_fresh_app_id");
+        var confinementRoot = Path.Combine(Path.GetTempPath(), "hover-pocket-codex-confinement");
+        var confinementWorkspace = Path.Combine(confinementRoot, "workspace");
+        var confinementCodexHome = Path.Combine(confinementRoot, "codex-home");
+        var confinementUserHome = Path.Combine(confinementRoot, "user-home");
+        var confinementSchema = Path.Combine(confinementWorkspace, "generation-output.schema.json");
+        var confinementArguments = CodexPocketAppGenerationAdapter.ConfinementArguments(
+            confinementWorkspace,
+            confinementCodexHome,
+            confinementUserHome,
+            confinementSchema);
+        var confinementJoined = string.Join('\n', confinementArguments);
+        Require(
+            !confinementArguments.Contains("--sandbox", StringComparer.Ordinal)
+                && confinementArguments.Contains("--ignore-user-config", StringComparer.Ordinal)
+                && confinementArguments.Contains("--ignore-rules", StringComparer.Ordinal)
+                && confinementJoined.Contains("default_permissions=\"hoverpocket-generation\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementWorkspace)}=\"read\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementCodexHome)}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementUserHome)}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains("network.enabled=false", StringComparison.Ordinal)
+                && confinementJoined.Contains("shell_environment_policy.inherit=\"none\"", StringComparison.Ordinal)
+                && confinementArguments.TakeLast(3).SequenceEqual(["--output-schema", confinementSchema, "-"], StringComparer.Ordinal),
+            "generation_codex_named_permission_profile");
+        var confinementEnvironment = CodexPocketAppGenerationAdapter.ConfinementEnvironment(
+            confinementCodexHome,
+            confinementUserHome,
+            Path.Combine(confinementUserHome, "AppData", "Local"),
+            Path.Combine(confinementUserHome, "AppData", "Roaming"),
+            Path.Combine(confinementRoot, "tmp"));
+        Require(
+            confinementEnvironment.Count == 12
+                && confinementEnvironment["CODEX_HOME"] == confinementCodexHome
+                && confinementEnvironment["HOME"] == confinementUserHome
+                && confinementEnvironment["USERPROFILE"] == confinementUserHome
+                && confinementEnvironment["SYSTEMROOT"] == confinementEnvironment["WINDIR"]
+                && confinementEnvironment["COMSPEC"].EndsWith("cmd.exe", StringComparison.OrdinalIgnoreCase)
+                && confinementEnvironment["LANG"] == "C",
+            "generation_codex_isolated_environment");
         Require(
             CodexPocketAppGenerationAdapter.ResolveExecutable() is null,
             "generation_real_codex_confidentiality_gate");
