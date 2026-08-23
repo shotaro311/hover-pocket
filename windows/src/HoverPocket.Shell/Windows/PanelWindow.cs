@@ -25,6 +25,8 @@ internal sealed class PanelWindow : NoActivateWindow
     private const string UiHostName = "app.hoverpocket.local";
     private const string UiBaseUrl = "https://app.hoverpocket.local/index.html";
     private const double CornerRadiusDips = 18;
+    private static readonly long MicrophoneGestureLifetimeTicks =
+        (long)(Stopwatch.Frequency * 5.0);
 
     private readonly PanelBridgeController _bridgeController;
     private readonly bool _enableWebView;
@@ -47,6 +49,7 @@ internal sealed class PanelWindow : NoActivateWindow
     private WebView2? _webView;
     private Task? _initializationTask;
     private IDisposable? _bridgeAttachment;
+    private long _microphoneGestureExpiresAt;
     private bool _closed;
 
     public AnimationDiagnostics LastAnimationDiagnostics { get; private set; } = AnimationDiagnostics.Empty;
@@ -729,6 +732,7 @@ internal sealed class PanelWindow : NoActivateWindow
         WebViewSecurityPolicy.ApplyBrowserDebugSettings(webView.CoreWebView2.Settings, _enableDevTools);
         webView.CoreWebView2.NavigationStarting += (_, args) =>
         {
+            Interlocked.Exchange(ref _microphoneGestureExpiresAt, 0);
             if (WebViewSecurityPolicy.IsAllowedVirtualHostNavigation(args.Uri, UiHostName))
             {
                 return;
@@ -742,6 +746,26 @@ internal sealed class PanelWindow : NoActivateWindow
             args.Handled = true;
             WebViewSecurityPolicy.TryOpenExternalBrowser(args.Uri, UiHostName);
         };
+        webView.CoreWebView2.PermissionRequested += (_, args) =>
+        {
+            var gestureActive = PeekVoiceMicrophoneGesture();
+            var allow = IsVoiceMicrophonePermissionAllowedForVerify(
+                args.Uri,
+                args.PermissionKind,
+                _bridgeController.CurrentSettings.VoiceEnabled,
+                IsVisible && !_closed,
+                gestureActive,
+                args.IsUserInitiated);
+            if (allow)
+            {
+                allow = ConsumeVoiceMicrophoneGesture();
+            }
+            args.State = allow
+                ? CoreWebView2PermissionState.Allow
+                : CoreWebView2PermissionState.Deny;
+            args.SavesInProfile = false;
+            args.Handled = true;
+        };
         webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
             UiHostName,
             uiFolder,
@@ -753,7 +777,9 @@ internal sealed class PanelWindow : NoActivateWindow
             ScheduleSnapshotRefresh();
             return Task.CompletedTask;
         });
-        _bridgeAttachment = _bridgeController.Attach(dispatcher);
+        _bridgeAttachment = _bridgeController.Attach(
+            dispatcher,
+            voiceMicrophoneGesture: RegisterVoiceMicrophoneGesture);
         dispatcher.Register("panel.beginTextInput", (_, _) =>
             Task.FromResult<object?>(BeginKeyboardInteraction()));
         dispatcher.Register("panel.endTextInput", (_, _) =>
@@ -793,11 +819,61 @@ internal sealed class PanelWindow : NoActivateWindow
     protected override void OnClosed(EventArgs e)
     {
         _closed = true;
+        Interlocked.Exchange(ref _microphoneGestureExpiresAt, 0);
         EndKeyboardInteraction();
         ReleaseBridgeAttachment();
         _webView?.Dispose();
         _webView = null;
         base.OnClosed(e);
+    }
+
+    private bool RegisterVoiceMicrophoneGesture()
+    {
+        if (_closed
+            || !IsVisible
+            || !_bridgeController.CurrentSettings.VoiceEnabled)
+        {
+            return false;
+        }
+        Interlocked.Exchange(
+            ref _microphoneGestureExpiresAt,
+            Stopwatch.GetTimestamp() + MicrophoneGestureLifetimeTicks);
+        return true;
+    }
+
+    private bool PeekVoiceMicrophoneGesture()
+    {
+        var expiresAt = Volatile.Read(ref _microphoneGestureExpiresAt);
+        return expiresAt > 0 && Stopwatch.GetTimestamp() <= expiresAt;
+    }
+
+    private bool ConsumeVoiceMicrophoneGesture()
+    {
+        var expiresAt = Interlocked.Exchange(ref _microphoneGestureExpiresAt, 0);
+        return expiresAt > 0 && Stopwatch.GetTimestamp() <= expiresAt;
+    }
+
+    internal static bool IsVoiceMicrophonePermissionAllowedForVerify(
+        string? uri,
+        CoreWebView2PermissionKind permissionKind,
+        bool featureEnabled,
+        bool panelVisible,
+        bool recentExplicitGesture,
+        bool browserUserInitiated)
+    {
+        if (!featureEnabled
+            || !panelVisible
+            || !recentExplicitGesture
+            || !browserUserInitiated
+            || permissionKind != CoreWebView2PermissionKind.Microphone
+            || !Uri.TryCreate(uri, UriKind.Absolute, out var parsed))
+        {
+            return false;
+        }
+        return parsed.Scheme == Uri.UriSchemeHttps
+            && parsed.IsDefaultPort
+            && string.IsNullOrEmpty(parsed.UserInfo)
+            && string.Equals(parsed.Host, UiHostName, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ResolveUiFolder()
@@ -884,6 +960,8 @@ internal sealed record UiWebVerifyResult(
     bool VoiceDefaultOffOk,
     bool VoiceTeardownVisibleOk,
     bool VoiceLocalizationOk,
+    bool VoiceTransportContractOk,
+    bool VoiceWebRtcHarnessOk,
     bool ControlsRenderedOk,
     bool ControlsLayoutOk,
     bool ControlsHitAreasOk,

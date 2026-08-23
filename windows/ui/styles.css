@@ -331,6 +331,17 @@ input {
   border-bottom: 1px solid var(--hp-line);
 }
 
+.hp-voice-toolbar .hp-voice-waveform {
+  flex: 0 0 44px;
+}
+
+.hp-voice-toolbar .hp-voice-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .hp-voice-spacer {
   flex: 1 1 auto;
 }

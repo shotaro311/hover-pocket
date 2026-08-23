@@ -501,6 +501,10 @@ Planned Must:
 - `calendar.event.create`は毎回書き込み前承認を求め、作成後にevent IDを取得してGETまたは同等queryでreadbackする。
 - Voice、Text、生成Surface、macOS SwiftUIとWindows Calendar WebView双方の「選択予定から集中を開始」は同じcanonical workflow planをBrokerへ送る。
 - current rootとそのchild / descendant session cardだけを表示する。全履歴browser、new / delete / archive管理は初回対象外とする。
+- WindowsのCodex Voice runtimeは既定OFFとし、Settingsで明示enableした後も、Panelのマイクbuttonを実際に操作した1回限りのuser activationと`https://app.hoverpocket.local`のexact originが一致した場合だけMicrophoneを許可する。Settings、非表示Panel、background script、別origin、Cameraは拒否し、permissionをprofileへ保存しない。
+- Windowsは起動するCodex実体を絶対path、ファイル同一性、experimental schemaで検証し、`initialize.experimentalApi`、`account/read`、`thread/realtime/listVoices`がすべて成功した後だけReadyにする。Codex processと子processはHost終了・Voice無効化・crash時に残さない。
+- AN3-B1のVoice root threadは`read-only` sandbox、`approvalPolicy=never`、tool / shell / file / MCP / connector禁止のinstructionsで開始する。この段階ではVoiceからCapability Brokerを呼ばず、Calendar / Timer接続はAN3-B2で別途承認・readback付きで有効化する。
+- WebRTC SDPはUTF-8で262,144 bytes以下、`v=0`、NULなしとし、current root threadとconnection generationの両方へ束縛する。raw SDPはPanel transportだけへ返し、Settings、監査、diskへ保存しない。remote audioはWebRTC media trackで再生し、raw audio payloadをBridge、監査、diskへ渡さない。
 - Pocket Appはmanifest、data schema、layout、workflow、permissions、testsをユーザーが確認・変更・削除・rollbackできるファイルとして保持する。
 - 生成UIはauthoritative data、secret、重要処理を所有せず、削除・再生成してもユーザーの意図とデータが残る。
 - Pocket Appのinstall / update / enable / disable / remove / rollbackは、Lifecycleの保存状態だけで成功にしない。Hostが検証済みimmutable packageを`PocketSurfaceRegistry`と実行runtimeへ反映し、同じapp ID、version、package digest、permission grantが描画・実行側でも観測できた後だけ成功receiptを返す。
@@ -516,6 +520,7 @@ Planned Must:
 - Codex、MCP、生成UIからProvider StoreまたはBridgeDispatcherへ直接到達できない。
 - raw transcript、Calendar / Sticky本文、Clipboard本文、token、filesystem pathを監査ログへ残さない。
 - Voice機能を無効にした場合、Codex process、microphone、WebRTC、追加レイアウトが起動せず、既存パネル寸法とProvider体験が変わらない。
+- hover close / panel hideでは入力trackとremote audioを即時muteしてUIをdetachするがroot threadを停止しない。明示終了ではRealtime stop、peer connection、data channel、local media track、remote audioを閉じ、再開時に古いSDP / generationを受理しない。
 
 ## 5. Settings 要件
 
