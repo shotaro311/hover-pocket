@@ -55,6 +55,7 @@ internal sealed class VoiceFoundationVerifier
         await RunCaseAsync("initialize-request", VerifyInitializeRequestCannotBePromotedAsync, timeout.Token);
         await RunCaseAsync("disconnect-before-promotion", VerifyDisconnectBeforePromotionAsync, timeout.Token);
         await RunCaseAsync("disconnect-during-promotion", VerifyDisconnectDuringPromotionAsync, timeout.Token);
+        await RunCaseAsync("stale-disconnect-teardown", VerifyStaleDisconnectTeardownBlocksReenableAsync, timeout.Token);
         await RunCaseAsync("restart", VerifyRestartIsBoundedAsync, timeout.Token);
         await RunCaseAsync("failed-initialize-cleanup", VerifyFailedInitializeDisposesCandidateAsync, timeout.Token);
         await RunCaseAsync("disable-inflight-cleanup", VerifyDisableDisposesInFlightCandidateAsync, timeout.Token);
@@ -179,10 +180,15 @@ internal sealed class VoiceFoundationVerifier
 
     private async Task VerifyUnexpectedRequestFailsClosedAsync(CancellationToken cancellationToken)
     {
-        var harness = new AppServerHarness();
+        var factoryCalls = 0;
+        var harness = new GatedDisposeHarness();
+        var replacementHarness = new AppServerHarness();
         using var coordinator = new CodexVoiceCoordinator(
             featureEnabled: true,
-            clientFactory: _ => Task.FromResult(harness.CreateClient()),
+            clientFactory: _ => Task.FromResult(
+                Interlocked.Increment(ref factoryCalls) == 1
+                    ? harness.CreateClient()
+                    : replacementHarness.CreateClient()),
             compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
             restartDelays: []);
 
@@ -198,15 +204,50 @@ internal sealed class VoiceFoundationVerifier
             _failures.Add("app-server transport unmuted before a verified Realtime connection");
         }
 
-        harness.PushServerRequest(9001, "unknown/request");
-        await WaitUntilAsync(
-            () => coordinator.Snapshot.LastErrorCode == "unexpected_server_request",
-            cancellationToken);
-
-        if (coordinator.Snapshot.Availability != CodexVoiceAvailability.CapabilityBlocked
-            || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure)
+        Task? disable = null;
+        Task? enable = null;
+        try
         {
-            _failures.Add("unexpected app-server request was not fail-closed");
+            harness.PushServerRequest(9001, "unknown/request");
+            await WaitUntilAsync(
+                () => coordinator.Snapshot.LastErrorCode == "unexpected_server_request",
+                cancellationToken);
+            await harness.DisposeStarted.WaitAsync(cancellationToken);
+            if (coordinator.Snapshot.Availability != CodexVoiceAvailability.CapabilityBlocked
+                || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.BlockedFailure)
+            {
+                _failures.Add("unexpected app-server request was not fail-closed");
+            }
+
+            disable = coordinator.SetFeatureEnabledAsync(false, cancellationToken);
+            enable = coordinator.SetFeatureEnabledAsync(true, cancellationToken);
+            await Task.Delay(50, cancellationToken);
+            if (disable.IsCompleted
+                || enable.IsCompleted
+                || Volatile.Read(ref factoryCalls) != 1)
+            {
+                _failures.Add("unexpected-request teardown did not block disable and replacement startup");
+            }
+        }
+        finally
+        {
+            harness.ReleaseDispose();
+        }
+
+        if (disable is not null)
+        {
+            await disable;
+        }
+        if (enable is not null)
+        {
+            await enable;
+        }
+
+        if (coordinator.Snapshot.Availability != CodexVoiceAvailability.Ready
+            || !coordinator.Snapshot.TransportAttached
+            || Volatile.Read(ref factoryCalls) != 2)
+        {
+            _failures.Add("unexpected app-server request was not fail-closed through teardown and replacement");
         }
     }
 
@@ -707,23 +748,88 @@ internal sealed class VoiceFoundationVerifier
         }
     }
 
-    private async Task VerifyTransportCrashDisposesCandidateAsync(CancellationToken cancellationToken)
+    private async Task VerifyStaleDisconnectTeardownBlocksReenableAsync(
+        CancellationToken cancellationToken)
     {
-        var disposeCount = 0;
-        var harness = new AppServerHarness(() => Interlocked.Increment(ref disposeCount));
+        var staleHarness = new DeferredInitializeGatedDisposeHarness();
+        var replacementHarness = new AppServerHarness();
+        var factoryCalls = 0;
         using var coordinator = new CodexVoiceCoordinator(
             featureEnabled: true,
-            clientFactory: _ => Task.FromResult(harness.CreateClient()),
+            clientFactory: _ => Task.FromResult(
+                Interlocked.Increment(ref factoryCalls) == 1
+                    ? staleHarness.CreateClient()
+                    : replacementHarness.CreateClient()),
             compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
             restartDelays: []);
 
-        await coordinator.InitializeAsync(cancellationToken);
-        harness.Close();
-        await WaitUntilAsync(() => Volatile.Read(ref disposeCount) == 1, cancellationToken);
-        if (coordinator.Snapshot.TransportAttached
-            || coordinator.Snapshot.AppServerProcessId is not null)
+        var startup = coordinator.InitializeAsync(cancellationToken);
+        await staleHarness.InitializationRequested.WaitAsync(cancellationToken);
+        coordinator.SnapshotChanged += (_, snapshot) =>
         {
-            _failures.Add("transport crash did not dispose and detach the app-server client");
+            if (snapshot.SessionStatus != CodexVoiceSessionStatus.Stopping)
+            {
+                return;
+            }
+            staleHarness.Close();
+            staleHarness.DisposeStarted.GetAwaiter().GetResult();
+        };
+
+        var disable = coordinator.SetFeatureEnabledAsync(false, cancellationToken);
+        await staleHarness.DisposeStarted.WaitAsync(cancellationToken);
+        var enable = coordinator.SetFeatureEnabledAsync(true, cancellationToken);
+        await Task.Yield();
+        if (disable.IsCompleted || enable.IsCompleted || Volatile.Read(ref factoryCalls) != 1)
+        {
+            _failures.Add("stale startup disconnect released Voice before owner teardown completed");
+        }
+
+        staleHarness.ReleaseDispose();
+        await startup;
+        await disable;
+        await enable;
+        if (coordinator.Snapshot.Availability != CodexVoiceAvailability.Ready
+            || !coordinator.Snapshot.TransportAttached
+            || Volatile.Read(ref factoryCalls) != 2)
+        {
+            _failures.Add("stale startup disconnect did not allow one ready replacement after teardown");
+        }
+    }
+
+    private async Task VerifyTransportCrashDisposesCandidateAsync(CancellationToken cancellationToken)
+    {
+        var factoryCalls = 0;
+        var crashedHarness = new GatedDisposeHarness();
+        var replacementHarness = new AppServerHarness();
+        using var coordinator = new CodexVoiceCoordinator(
+            featureEnabled: true,
+            clientFactory: _ => Task.FromResult(
+                Interlocked.Increment(ref factoryCalls) == 1
+                    ? crashedHarness.CreateClient()
+                    : replacementHarness.CreateClient()),
+            compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
+            restartDelays: [TimeSpan.Zero]);
+
+        await coordinator.InitializeAsync(cancellationToken);
+        crashedHarness.Close();
+        await crashedHarness.DisposeStarted.WaitAsync(cancellationToken);
+        await WaitUntilAsync(() => coordinator.Snapshot.RestartAttempt == 1, cancellationToken);
+        await Task.Yield();
+        if (Volatile.Read(ref factoryCalls) != 1
+            || coordinator.Snapshot.TransportAttached
+            || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.RecoverableFailure)
+        {
+            _failures.Add("transport crash restarted before the detached client finished disposal");
+        }
+
+        crashedHarness.ReleaseDispose();
+        await WaitUntilAsync(
+            () => Volatile.Read(ref factoryCalls) == 2
+                && coordinator.Snapshot.Availability == CodexVoiceAvailability.Ready,
+            cancellationToken);
+        if (!coordinator.Snapshot.TransportAttached)
+        {
+            _failures.Add("transport crash did not restart after detached client disposal completed");
         }
     }
 
@@ -1080,22 +1186,34 @@ internal sealed class VoiceFoundationVerifier
             _failures.Add("delayed transcript crossed roots or a transcript revision duplicated its event ID");
         }
 
-        var absolutePaths = new[]
+        var redactionSamples = new[]
         {
             "/tmp/private.txt",
             "/Volumes/work/secret.mov",
             @"C:\work\secret.txt",
             "[/Users/alice/private]",
-            @"[C:\Users\alice\private]"
+            @"[C:\Users\alice\private]",
+            "Sources/HoverPocket/App.swift",
+            @"Sources\HoverPocket\App.swift",
+            "Bearer sk-proj-secret",
+            "sk-proj-abcdefghijklmnopqrstuvwxyz",
+            """{"access_token":"abcdefghijklmnopqrstuvwxyz"}""",
+            """{"client_secret" : "abcdefghijklmnopqrstuvwxyz"}"""
         };
-        if (absolutePaths.Any(path => VoiceTextSafety.SanitizeVisibleText(path, 200) != "[redacted]"))
+        if (redactionSamples.Any(value => VoiceTextSafety.SanitizeVisibleText(value, 200) != "[redacted]"))
         {
-            _failures.Add("absolute filesystem path redaction was incomplete");
+            _failures.Add("visible Voice text redaction was incomplete");
         }
-        var nonPathText = new[] { "https://example.com/path", "and/or" };
+        var nonPathText = new[]
+        {
+            "https://example.com/Sources/HoverPocket/App.swift",
+            "and/or",
+            "input/output",
+            @"input\output"
+        };
         if (nonPathText.Any(value => VoiceTextSafety.SanitizeVisibleText(value, 200) != value))
         {
-            _failures.Add("absolute path redaction treated ordinary text as a filesystem path");
+            _failures.Add("filesystem path redaction treated ordinary text or a URL as a path");
         }
         var bidiSamples = new[]
         {
@@ -1277,6 +1395,35 @@ internal sealed class VoiceFoundationVerifier
         }
     }
 
+    private sealed class DeferredInitializeGatedDisposeHarness
+    {
+        private readonly ChannelLineReader _reader = new();
+        private readonly TaskCompletionSource<bool> _initializationRequested = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _disposeStarted = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _releaseDispose = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task InitializationRequested => _initializationRequested.Task;
+        public Task DisposeStarted => _disposeStarted.Task;
+
+        public CodexAppServerClient CreateClient() =>
+            CodexAppServerClient.AttachForTesting(
+                _reader,
+                new DeferredInitializeWriter(_initializationRequested),
+                TimeSpan.FromSeconds(1),
+                async () =>
+                {
+                    _disposeStarted.TrySetResult(true);
+                    await _releaseDispose.Task.ConfigureAwait(false);
+                    _reader.Dispose();
+                });
+
+        public void Close() => _reader.Dispose();
+        public void ReleaseDispose() => _releaseDispose.TrySetResult(true);
+    }
+
     private sealed class AppServerHarness
     {
         private readonly ChannelLineReader _reader = new();
@@ -1389,6 +1536,18 @@ internal sealed class VoiceFoundationVerifier
                 });
 
         public void ReleaseDispose() => _releaseDispose.TrySetResult(true);
+
+        public void Close() => _reader.Dispose();
+
+        public void PushServerRequest(long id, string method)
+        {
+            _reader.Push(JsonSerializer.Serialize(new
+            {
+                id,
+                method,
+                @params = new { }
+            }));
+        }
     }
 
     private sealed class ChannelLineReader : TextReader
