@@ -282,6 +282,42 @@ PUBLISH_DRY_RUN=1 PUBLISH_REQUIRE_NOTARIZED=0 ./script/publish_github_release.sh
 
 通常の一般配布では `PUBLISH_REQUIRE_NOTARIZED=0` は使わないでください。
 
+### 公開成果物のOS別readback
+
+公開後は、macOSの`macos-latest`とversioned release、Windowsの最新`win-v...` releaseを同じ`latest`扱いにせず、次のコマンドで別々に検証します。
+
+```bash
+python3 script/verify_release_readback.py --windows-signing-gate beta
+```
+
+この検証は公開URLから成果物を再取得し、macOS appcast、versioned ZIP、手動インストールZIP、GitHub SHA-256、公開鍵によるSparkle Ed25519署名、Windows feed、manifest、全公開assetの実測SHA-256、Velopack packageのSHA-1を照合します。Windows成果物を合計約270MB再取得するため、公開後または週次監視で使います。
+
+Windows正式版の受入時は、共通readbackに加えてWindows runner上でSetup、Portable版アプリ、Velopack full package内アプリの実Authenticode署名、タイムスタンプ、3成果物の署名証明書一致、repository variableへ固定した正規証明書SHA-256との一致を確認します。manifest内の文字列だけでは正式版の署名証拠にしません。
+
+```bash
+python3 script/verify_release_readback.py --windows-signing-gate formal
+```
+
+Windows 0.2.xの未署名公開ベータは`beta` gateには合格しますが、`formal` gateには合格しません。週次の公開readbackは`beta`で監視し、正式版候補はworkflowを`formal`で手動実行します。PRでは外部ネットワークに依存しない署名ベクトル・metadata試験とPowerShell構文検証だけを実行します。
+
+### install・rollback遷移の実機CI
+
+`Verify Release Install and Rollback Transitions` workflowは手動実行専用です。明示した旧版と新版をGitHubの使い捨てmacOS / Windows runnerへ取得し、次の順序を検証します。
+
+1. 旧版を一時install先へ導入
+2. 新版へupgrade
+3. 旧版packageへrollback
+4. 新版へ再upgrade
+5. uninstall
+6. 新版をreinstall
+7. install先と分離したuser data sentinelが保持されることをreadback
+
+macOSは一時Applications領域で署名・公証・Gatekeeper・Sparkle署名済みbundleの置換を検証します。WindowsはVelopack Setupの`--silent --installto`と`Update.exe apply --package`を使い、一時install rootだけを変更します。OSごとに`execute_macos_release_code`または`execute_windows_release_code`を明示した場合だけ公開release codeを実行します。未署名Windows betaは追加で`allow_unsigned_beta`を明示する必要があります。正式署名Windows版の遷移は、Setupだけでなくfull package内アプリまでを独立した正式署名readback snapshotへ固定できるまで失敗側に閉じます。
+
+両OSとも開始時にtag、draft / prerelease状態、全assetの名前・size・GitHub SHA-256・download URLを固定し、合格証跡を書く直前に公開releaseを再取得して完全一致を確認します。途中でrelease assetが差し替わった場合は遷移自体が成功しても合格にしません。
+
+このCIは使い捨てrunner上のpackage lifecycle gateです。日常利用中の端末でのSparkle / Velopack UI、自動更新、実データmigration、sleep-wakeは別のrelease-candidate実機gateとして残します。
+
 ## 自動アップデート
 
 自動アップデートは Sparkle 2 を使います。ローカル開発ビルドでは、未公開の更新フィードを見に行かないよう `SPARKLE_FEED_URL` を明示した場合だけ Settings の `Check for Updates` が有効になります。
