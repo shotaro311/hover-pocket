@@ -7,7 +7,8 @@ enum CodexCredentialBrokerError: Error {
 }
 
 enum CodexCredentialBrokerPeerIdentity {
-    static func isAuthorizedClient(socketFD: Int32) -> Bool {
+    static func isAuthorizedPeer(socketFD: Int32, expectedProcessID: pid_t) -> Bool {
+        guard expectedProcessID > 0 else { return false }
         var peerUserID: uid_t = 0
         var peerGroupID: gid_t = 0
         guard getpeereid(socketFD, &peerUserID, &peerGroupID) == 0,
@@ -25,6 +26,7 @@ enum CodexCredentialBrokerPeerIdentity {
             &peerProcessIDSize
         ) == 0,
               peerProcessID > 0,
+              peerProcessID == expectedProcessID,
               peerProcessIDSize == MemoryLayout<pid_t>.size else {
             return false
         }
@@ -139,7 +141,7 @@ final class CodexCredentialBrokerLease: @unchecked Sendable {
             .replacingOccurrences(of: "=", with: "")
     }
 
-    private static func isValidCapability(_ value: String) -> Bool {
+    fileprivate static func isValidCapability(_ value: String) -> Bool {
         value.utf8.count >= 32
             && value.utf8.count <= 128
             && value.utf8.allSatisfy {
@@ -151,7 +153,7 @@ final class CodexCredentialBrokerLease: @unchecked Sendable {
             }
     }
 
-    private static func isValidSecret(_ value: String) -> Bool {
+    fileprivate static func isValidSecret(_ value: String) -> Bool {
         !value.isEmpty
             && value.utf8.count <= 8_192
             && value.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) }
@@ -238,10 +240,19 @@ final class CodexCredentialBrokerServer: @unchecked Sendable {
 
     init(
         lifetime: TimeInterval = 30,
+        expectedClientProcessID: pid_t,
         peerAuthorizer: (@Sendable (Int32) -> Bool)? = nil,
         secretProvider: @escaping @Sendable () throws -> String
     ) throws {
-        self.peerAuthorizer = peerAuthorizer ?? CodexCredentialBrokerPeerIdentity.isAuthorizedClient
+        guard expectedClientProcessID > 0 else {
+            throw CodexCredentialBrokerError.unavailable
+        }
+        self.peerAuthorizer = peerAuthorizer ?? { socketFD in
+            CodexCredentialBrokerPeerIdentity.isAuthorizedPeer(
+                socketFD: socketFD,
+                expectedProcessID: expectedClientProcessID
+            )
+        }
         lease = try CodexCredentialBrokerLease(
             lifetime: lifetime,
             secretProvider: secretProvider
@@ -474,7 +485,10 @@ enum CodexCredentialBrokerDeinitProbe {
 
     static func run() -> Int32 {
         do {
-            var server: CodexCredentialBrokerServer? = try CodexCredentialBrokerServer(lifetime: 5) {
+            var server: CodexCredentialBrokerServer? = try CodexCredentialBrokerServer(
+                lifetime: 5,
+                expectedClientProcessID: getpid()
+            ) {
                 "deinit-probe-secret"
             }
             guard let rootPath = server?.rootDirectory.path else { return 1 }
@@ -487,10 +501,15 @@ enum CodexCredentialBrokerDeinitProbe {
 }
 
 enum CodexCredentialBrokerClient {
-    static func fetchSecret(endpoint: URL, capability: String) throws -> String {
+    static func fetchSecret(
+        endpoint: URL,
+        capability: String,
+        expectedServerProcessID: pid_t
+    ) throws -> String {
         guard endpoint.isFileURL,
               endpoint.path.hasPrefix("/private/tmp/hoverpocket-codex-broker-"),
-              capability.utf8.count <= 128 else {
+              CodexCredentialBrokerLease.isValidCapability(capability),
+              expectedServerProcessID > 0 else {
             throw CodexCredentialBrokerError.unavailable
         }
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -500,6 +519,12 @@ enum CodexCredentialBrokerClient {
         defer { close(fd) }
         CodexCredentialBrokerServer.applyTimeouts(to: fd)
         try CodexCredentialBrokerServer.connect(fd: fd, path: endpoint.path)
+        guard CodexCredentialBrokerPeerIdentity.isAuthorizedPeer(
+            socketFD: fd,
+            expectedProcessID: expectedServerProcessID
+        ) else {
+            throw CodexCredentialBrokerError.unavailable
+        }
         CodexCredentialBrokerServer.writeLine("HP-CODEX-BROKER/1 \(capability)", to: fd)
         guard let response = CodexCredentialBrokerServer.readLine(from: fd, maximumBytes: 12_000),
               response.hasPrefix("OK "),
@@ -516,18 +541,56 @@ enum CodexCredentialBrokerClient {
 
 enum CodexCredentialBrokerHelper {
     static let argument = "--codex-credential-helper"
-    static let endpointEnvironmentKey = "HOVERPOCKET_CODEX_BROKER_ENDPOINT"
-    static let capabilityEnvironmentKey = "HOVERPOCKET_CODEX_BROKER_CAPABILITY"
 
-    static func run(environment: [String: String] = ProcessInfo.processInfo.environment) -> Int32 {
-        guard let endpoint = environment[endpointEnvironmentKey],
-              let capability = environment[capabilityEnvironmentKey] else {
+    private struct Bootstrap: Codable {
+        let version: Int
+        let endpoint: String
+        let capability: String
+        let serverProcessID: Int32
+    }
+
+    static func makeBootstrapData(
+        endpoint: URL,
+        capability: String,
+        serverProcessID: pid_t
+    ) throws -> Data {
+        guard endpoint.isFileURL,
+              CodexCredentialBrokerLease.isValidCapability(capability),
+              serverProcessID > 0 else {
+            throw CodexCredentialBrokerError.unavailable
+        }
+        let bootstrap = Bootstrap(
+            version: 1,
+            endpoint: endpoint.path,
+            capability: capability,
+            serverProcessID: serverProcessID
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        var data = try encoder.encode(bootstrap)
+        guard data.count <= 2_047 else {
+            throw CodexCredentialBrokerError.unavailable
+        }
+        data.append(10)
+        return data
+    }
+
+    static func run(input: FileHandle = .standardInput) -> Int32 {
+        guard let line = CodexCredentialBrokerServer.readLine(
+            from: input.fileDescriptor,
+            maximumBytes: 2_048
+        ),
+              let data = line.data(using: .utf8),
+              let bootstrap = try? JSONDecoder().decode(Bootstrap.self, from: data),
+              bootstrap.version == 1,
+              bootstrap.serverProcessID > 0 else {
             return 1
         }
         do {
             let secret = try CodexCredentialBrokerClient.fetchSecret(
-                endpoint: URL(fileURLWithPath: endpoint),
-                capability: capability
+                endpoint: URL(fileURLWithPath: bootstrap.endpoint),
+                capability: bootstrap.capability,
+                expectedServerProcessID: bootstrap.serverProcessID
             )
             try FileHandle.standardOutput.write(contentsOf: Data(secret.utf8))
             return 0

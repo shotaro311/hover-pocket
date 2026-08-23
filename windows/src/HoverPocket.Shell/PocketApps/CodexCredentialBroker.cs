@@ -3,6 +3,7 @@ using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 
 namespace HoverPocket.Shell.PocketApps;
@@ -104,7 +105,7 @@ internal sealed class CodexCredentialBrokerLease
         return value.TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
-    private static bool IsValidCapability(string? value) =>
+    internal static bool IsValidCapability(string? value) =>
         value is not null
         && value.Length is >= 32 and <= 128
         && value.All(character =>
@@ -138,15 +139,19 @@ internal sealed class CodexCredentialBrokerServer : IDisposable
 
     public CodexCredentialBrokerServer(
         TimeSpan lifetime,
+        int expectedClientProcessId,
         Func<string> secretProvider,
         Func<NamedPipeServerStream, bool>? peerAuthorizer = null)
     {
-        if (lifetime <= TimeSpan.Zero || lifetime > TimeSpan.FromSeconds(60))
+        if (lifetime <= TimeSpan.Zero
+            || lifetime > TimeSpan.FromSeconds(60)
+            || expectedClientProcessId <= 0)
         {
             throw new CodexCredentialBrokerException();
         }
         _lease = new CodexCredentialBrokerLease(lifetime, secretProvider);
-        _peerAuthorizer = peerAuthorizer ?? CodexCredentialBrokerPeerIdentity.IsAuthorizedClient;
+        _peerAuthorizer = peerAuthorizer ?? (pipe =>
+            CodexCredentialBrokerPeerIdentity.IsAuthorizedClient(pipe, expectedClientProcessId));
         PipeName = $"hoverpocket-codex-broker-{Guid.NewGuid():N}";
         _pipe = new NamedPipeServerStream(
             PipeName,
@@ -267,34 +272,65 @@ internal static class CodexCredentialBrokerPeerIdentity
         SafePipeHandle pipe,
         out uint clientProcessId);
 
-    internal static bool IsAuthorizedClient(NamedPipeServerStream pipe)
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetNamedPipeServerProcessId(
+        SafePipeHandle pipe,
+        out uint serverProcessId);
+
+    internal static bool IsAuthorizedClient(
+        NamedPipeServerStream pipe,
+        int expectedClientProcessId)
     {
         try
         {
             if (!GetNamedPipeClientProcessId(pipe.SafePipeHandle, out var clientProcessId)
                 || clientProcessId == 0
-                || clientProcessId > int.MaxValue
-                || string.IsNullOrWhiteSpace(Environment.ProcessPath))
+                || clientProcessId > int.MaxValue)
             {
                 return false;
             }
-
-            using var clientProcess = Process.GetProcessById((int)clientProcessId);
-            var clientPath = clientProcess.MainModule?.FileName;
-            if (string.IsNullOrWhiteSpace(clientPath))
-            {
-                return false;
-            }
-
-            return string.Equals(
-                Path.GetFullPath(clientPath),
-                Path.GetFullPath(Environment.ProcessPath),
-                StringComparison.OrdinalIgnoreCase);
+            return IsExpectedHoverPocketProcess((int)clientProcessId, expectedClientProcessId);
         }
         catch
         {
             return false;
         }
+    }
+
+    internal static bool IsAuthorizedServer(
+        NamedPipeClientStream pipe,
+        int expectedServerProcessId)
+    {
+        try
+        {
+            if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle, out var serverProcessId)
+                || serverProcessId == 0
+                || serverProcessId > int.MaxValue)
+            {
+                return false;
+            }
+            return IsExpectedHoverPocketProcess((int)serverProcessId, expectedServerProcessId);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsExpectedHoverPocketProcess(int processId, int expectedProcessId)
+    {
+        if (processId != expectedProcessId || string.IsNullOrWhiteSpace(Environment.ProcessPath))
+        {
+            return false;
+        }
+        using var process = Process.GetProcessById(processId);
+        var processPath = process.MainModule?.FileName;
+        return !string.IsNullOrWhiteSpace(processPath)
+            && string.Equals(
+                Path.GetFullPath(processPath),
+                Path.GetFullPath(Environment.ProcessPath),
+                StringComparison.OrdinalIgnoreCase);
     }
 }
 
@@ -303,13 +339,15 @@ internal static class CodexCredentialBrokerClient
     public static async Task<string> FetchSecretAsync(
         string pipeName,
         string capability,
+        int expectedServerProcessId,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
         var operationTimeout = timeout ?? TimeSpan.FromSeconds(2);
         if (!pipeName.StartsWith("hoverpocket-codex-broker-", StringComparison.Ordinal)
             || pipeName.Length > 96
-            || capability.Length > 128
+            || !CodexCredentialBrokerLease.IsValidCapability(capability)
+            || expectedServerProcessId <= 0
             || operationTimeout <= TimeSpan.Zero
             || operationTimeout > TimeSpan.FromSeconds(60))
         {
@@ -326,6 +364,10 @@ internal static class CodexCredentialBrokerClient
         try
         {
             await pipe.ConnectAsync(operationTimeout, timeoutCancellation.Token).ConfigureAwait(false);
+            if (!CodexCredentialBrokerPeerIdentity.IsAuthorizedServer(pipe, expectedServerProcessId))
+            {
+                throw new CodexCredentialBrokerException();
+            }
             await CodexCredentialBrokerServer.WriteLineAsync(
                 pipe,
                 $"HP-CODEX-BROKER/1 {capability}",
@@ -360,32 +402,62 @@ internal static class CodexCredentialBrokerClient
 internal static class CodexCredentialBrokerHelper
 {
     public const string Argument = "--codex-credential-helper";
-    public const string EndpointEnvironmentKey = "HOVERPOCKET_CODEX_BROKER_ENDPOINT";
-    public const string CapabilityEnvironmentKey = "HOVERPOCKET_CODEX_BROKER_CAPABILITY";
+
+    private sealed record Bootstrap(
+        int Version,
+        string PipeName,
+        string Capability,
+        int ServerProcessId);
 
     public static int Run() => RunAsync(
-        Environment.GetEnvironmentVariable(EndpointEnvironmentKey),
-        Environment.GetEnvironmentVariable(CapabilityEnvironmentKey),
+        Console.In,
         Console.Out,
         Console.Error,
         CancellationToken.None).GetAwaiter().GetResult();
 
+    internal static string CreateBootstrapLine(
+        string pipeName,
+        string capability,
+        int serverProcessId)
+    {
+        if (!pipeName.StartsWith("hoverpocket-codex-broker-", StringComparison.Ordinal)
+            || pipeName.Length > 96
+            || !CodexCredentialBrokerLease.IsValidCapability(capability)
+            || serverProcessId <= 0)
+        {
+            throw new CodexCredentialBrokerException();
+        }
+        var line = JsonSerializer.Serialize(new Bootstrap(1, pipeName, capability, serverProcessId));
+        if (line.Length > 2_047 || line.Any(character => character is '\0' or '\r' or '\n'))
+        {
+            throw new CodexCredentialBrokerException();
+        }
+        return line;
+    }
+
     internal static async Task<int> RunAsync(
-        string? pipeName,
-        string? capability,
+        TextReader standardInput,
         TextWriter standardOutput,
         TextWriter standardError,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(pipeName) || string.IsNullOrWhiteSpace(capability))
+        var line = await ReadLineAsync(standardInput, 2_048, cancellationToken).ConfigureAwait(false);
+        if (line is null)
         {
             return 1;
         }
         try
         {
+            var bootstrap = JsonSerializer.Deserialize<Bootstrap>(line)
+                ?? throw new CodexCredentialBrokerException();
+            if (bootstrap.Version != 1)
+            {
+                throw new CodexCredentialBrokerException();
+            }
             var secret = await CodexCredentialBrokerClient.FetchSecretAsync(
-                pipeName,
-                capability,
+                bootstrap.PipeName,
+                bootstrap.Capability,
+                bootstrap.ServerProcessId,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
             await standardOutput.WriteAsync(secret).ConfigureAwait(false);
             await standardOutput.FlushAsync().ConfigureAwait(false);
@@ -397,5 +469,33 @@ internal static class CodexCredentialBrokerHelper
             await standardError.FlushAsync().ConfigureAwait(false);
             return 1;
         }
+    }
+
+    private static async Task<string?> ReadLineAsync(
+        TextReader reader,
+        int maximumCharacters,
+        CancellationToken cancellationToken)
+    {
+        var value = new StringBuilder(Math.Min(maximumCharacters, 512));
+        var buffer = new char[1];
+        while (value.Length < maximumCharacters)
+        {
+            var count = await reader.ReadAsync(buffer.AsMemory(0, 1), cancellationToken)
+                .ConfigureAwait(false);
+            if (count != 1)
+            {
+                return null;
+            }
+            if (buffer[0] == '\n')
+            {
+                return value.ToString();
+            }
+            if (buffer[0] is '\0' or '\r')
+            {
+                return null;
+            }
+            value.Append(buffer[0]);
+        }
+        return null;
     }
 }
