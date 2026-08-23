@@ -152,7 +152,15 @@ final class PocketAppHealthStore {
         guard Self.validPackageID(packageID) else { throw PocketAppHealthError.invalid }
         try requireSafeRoot()
         let url = recordURL(packageID: packageID)
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        var metadata = stat()
+        let status = url.path.withCString { lstat($0, &metadata) }
+        if status != 0 {
+            if errno == ENOENT { return nil }
+            throw PocketAppHealthError.invalid
+        }
+        guard (metadata.st_mode & S_IFMT) == S_IFREG else {
+            throw PocketAppHealthError.invalid
+        }
         do {
             let data = try PocketAppFileSnapshot.readFileNoFollow(
                 rootDirectory: rootDirectory,

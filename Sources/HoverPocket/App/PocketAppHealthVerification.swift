@@ -124,6 +124,22 @@ enum PocketAppHealthVerification {
                 "health_symlink_fail_safe",
                 failures: &failures
             )
+
+            let danglingID = "local.generated.dangling"
+            try FileManager.default.createSymbolicLink(
+                atPath: root.appendingPathComponent("\(danglingID).json").path,
+                withDestinationPath: root.appendingPathComponent("missing.json").path
+            )
+            snapshot = store.snapshots(
+                packages: [package(appID: danglingID, state: .enabled)],
+                issues: [],
+                now: recoveredAt
+            ).first
+            require(
+                snapshot?.status == .attention && snapshot?.disableSuggested == false,
+                "health_dangling_symlink_fail_safe",
+                failures: &failures
+            )
         } catch {
             failures.append("health_verification:\(error)")
         }

@@ -173,7 +173,24 @@ internal sealed class PocketAppHealthStore
         if (!ValidPackageId(packageId)) { throw Failure("HEALTH_INVALID"); }
         RequireSafeRoot();
         var path = RecordPath(packageId);
-        if (!File.Exists(path)) { return null; }
+        FileAttributes attributes;
+        try
+        {
+            attributes = File.GetAttributes(path);
+        }
+        catch (FileNotFoundException)
+        {
+            return null;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return null;
+        }
+        if (attributes.HasFlag(FileAttributes.ReparsePoint)
+            || attributes.HasFlag(FileAttributes.Directory))
+        {
+            throw Failure("HEALTH_INVALID");
+        }
         try
         {
             var data = PocketAppFileSnapshot.ReadFileNoFollow(

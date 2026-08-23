@@ -123,6 +123,18 @@ internal sealed class PocketAppHealthVerifier
             Require(
                 snapshot is { Status: PocketAppHealthStatus.Attention, DisableSuggested: false },
                 "health_symlink_fail_safe");
+
+            const string danglingId = "local.generated.dangling";
+            _ = File.CreateSymbolicLink(
+                Path.Combine(root, $"{danglingId}.json"),
+                Path.Combine(root, "missing.json"));
+            snapshot = store.Snapshots(
+                [Package(danglingId, PocketAppLifecycleState.Enabled)],
+                [],
+                now).FirstOrDefault();
+            Require(
+                snapshot is { Status: PocketAppHealthStatus.Attention, DisableSuggested: false },
+                "health_dangling_symlink_fail_safe");
         }
         catch (UnauthorizedAccessException)
         {

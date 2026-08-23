@@ -18,7 +18,7 @@ AN8の長期運用条件として、ユーザー所有の生成Pocket Appが現�
 
 - 固定日時から30日と1秒進めて未使用提案を確認した。
 - 利用記録後にhealthyへ戻ること、activation失敗3回でattention、次の成功で失敗数0へ戻ることを確認した。
-- disabled Appへ提案を出さないこと、破損JSONとsymlinkをattentionへ倒して提案を出さないことを確認した。
+- disabled Appへ提案を出さないこと、破損JSON、通常symlink、dangling symlinkをattentionへ倒して提案を出さないことを確認した。
 - 5分以内の利用記録512回でrecord bytesが変わらず、一時fileが残らないことを確認した。
 - system transition相当の再activationを64回反復し、Registry / Surfaceのactive App集合が増減しないことを確認した。
 
