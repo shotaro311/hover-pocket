@@ -217,6 +217,19 @@ select {
   margin-top: 12px;
 }
 
+.pocket-workspace-backup {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.pocket-workspace-backup .settings-note {
+  margin-top: 0;
+}
+
 .pocket-generation[hidden] {
   display: none;
 }

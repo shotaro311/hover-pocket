@@ -514,6 +514,10 @@ Planned Must:
 - Pocket Appのinstall / update / enable / disable / remove / rollbackは、Lifecycleの保存状態だけで成功にしない。Hostが検証済みimmutable packageを`PocketSurfaceRegistry`と実行runtimeへ反映し、同じapp ID、version、package digest、permission grantが描画・実行側でも観測できた後だけ成功receiptを返す。
 - 生成Pocket Appはapp IDごとに独立したSurface / runtime entryとして登録する。任意の生成Appを組み込みToday Focusの固定slotへ差し替えない。
 - 実Codex生成とactivationは、ローカルファイル読取り隔離と上記runtime activation readbackをmacOS / Windows双方で満たすまでfail closedとする。
+- Pocket App workspace backupはmacOS / Windows共通のversion付きcanonical JSONとし、Host検証済みimmutable packageの全version、active version / digest、enabled / disabled、effective permission、state schema digest、ユーザーの`state.json`だけを含める。OAuth、credential、Capability監査 / receipt、Codex生成workspace、外部pathは含めない。
+- backup exportはHostが固定境界から収集し、全fileの安全な相対path、decoded size、SHA-256、base64 bytesを記録する。restoreは最大64 App、2,048 files、1 MiB / file、64 MiB decoded、96 MiB encodedを上限とし、traversal、absolute path、symlink / reparse point、case-insensitive path衝突、未参照file、hash / schema / package不一致を副作用前に拒否する。
+- restoreは追加 / 置換、version、enabled / disabled、permission差分、data変更をpreviewし、backup digestとpreview digestへ束縛した5分以内・1回限りの承認をネイティブUIで既定`No`として求める。WebView、生成UI、Codexへfilesystem pathまたは直接restore権限を渡さない。
+- restore前に対象Surfaceの未保存stateをflushし、commit後はLifecycle、PocketSurface / runtime、permission、data digestを別経路でreadbackする。commitまたはreadbackが失敗した場合は復元前snapshotへ補償rollbackし、rollback自体に失敗した場合は成功表示せず固定error codeでfail closedにする。
 - AI生成した任意native codeの即時hot installは本番要件にしない。native権限追加はworktree、review、署名、通常releaseを必須にする。
 
 受け入れ条件:
@@ -521,6 +525,7 @@ Planned Must:
 - Voice、Text、既存UI、PocketSurfaceの同一要求が同じCapability ID、canonical plan digest、effect、承認判断、readback semanticsになる。receipt固有のID、時刻、originは入力ごとに異なってよい。
 - 書き込み前は副作用がなく、成功表示は実行後readback一致を根拠にする。
 - Pocket App lifecycleの成功receiptと、`PocketSurfaceRegistry` / execution runtimeが観測するapp ID、version、digest、permission grantが一致する。再起動後も一致し、disable / remove時は対象entryが実行不能、rollback / enable時は選択した検証済みentryが実行可能である。
+- 同じworkspaceを同じ時刻でexportすると同一bytesになり、macOS出力をWindows、Windows出力をmacOSでpreview / restoreできる。正常roundtrip、取消、tamper、traversal、case衝突、oversize、commit失敗、runtime readback不一致をdeterministic verifierで検証し、失敗ケースでは復元前package / dataが維持される。
 - Codex、MCP、生成UIからProvider StoreまたはBridgeDispatcherへ直接到達できない。
 - raw transcript、Calendar / Sticky本文、Clipboard本文、token、filesystem pathを監査ログへ残さない。
 - SettingsからCapability監査ログと保存済みreceiptの保持期間を`7日 / 30日 / 90日 / 無期限`で変更でき、既定は90日とする。変更後はHostが実ファイルと台帳を再読込した件数を返す。

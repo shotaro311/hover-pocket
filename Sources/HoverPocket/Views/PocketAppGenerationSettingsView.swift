@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -7,6 +8,7 @@ struct PocketAppGenerationSettingsView: View {
 
     @State private var requestText = ""
     @State private var updateTarget: String?
+    @State private var showRestoreConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -17,6 +19,8 @@ struct PocketAppGenerationSettingsView: View {
             .font(.system(size: 10))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+
+            workspaceBackupControls
 
             TextEditor(text: $requestText)
                 .font(.system(size: 11))
@@ -55,6 +59,7 @@ struct PocketAppGenerationSettingsView: View {
                         requestText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             || !controller.isGeneratorAvailable
                             || controller.pendingProposal != nil
+                            || controller.pendingWorkspaceRestore != nil
                     )
                 }
             }
@@ -122,6 +127,7 @@ struct PocketAppGenerationSettingsView: View {
                                 )
                             }
                             .font(.system(size: 9))
+                            .disabled(controller.pendingWorkspaceRestore != nil)
                         }
                         Button(
                             localized(japanese: "削除（データ保持）", english: "Remove, preserve data"),
@@ -130,7 +136,7 @@ struct PocketAppGenerationSettingsView: View {
                             controller.removePreservingData(packageID: issue.packageID)
                         }
                         .font(.system(size: 9))
-                        .disabled(!issue.removalAllowed)
+                        .disabled(!issue.removalAllowed || controller.pendingWorkspaceRestore != nil)
                     }
                     .padding(9)
                     .background(.orange.opacity(0.08))
@@ -138,6 +144,109 @@ struct PocketAppGenerationSettingsView: View {
                 }
             }
         }
+        .alert(
+            localized(japanese: "Pocket App workspaceを復元", english: "Restore Pocket App workspace"),
+            isPresented: $showRestoreConfirmation,
+            presenting: controller.pendingWorkspaceRestore
+        ) { _ in
+            Button(localized(japanese: "キャンセル", english: "Cancel"), role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
+            Button(localized(japanese: "復元", english: "Restore"), role: .destructive) {
+                controller.approveWorkspaceRestore()
+            }
+        } message: { proposal in
+            Text(localized(
+                japanese: "検証済みの\(proposal.changes.count)件を置き換えます。失敗時は事前snapshotへ戻します。",
+                english: "Replace \(proposal.changes.count) validated app(s). Failure restores the pre-restore snapshot."
+            ))
+        }
+    }
+
+    @ViewBuilder
+    private var workspaceBackupControls: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 8) {
+                Button(localized(japanese: "workspaceを書き出す", english: "Export workspace")) {
+                    let panel = NSSavePanel()
+                    panel.canCreateDirectories = true
+                    panel.nameFieldStringValue = "HoverPocket-PocketApps.hoverpocket-backup.json"
+                    if panel.runModal() == .OK, let url = panel.url {
+                        controller.exportWorkspace(to: url)
+                    }
+                }
+                Button(localized(japanese: "backupから復元", english: "Restore from backup")) {
+                    let panel = NSOpenPanel()
+                    panel.canChooseFiles = true
+                    panel.canChooseDirectories = false
+                    panel.allowsMultipleSelection = false
+                    if panel.runModal() == .OK, let url = panel.url {
+                        controller.prepareWorkspaceRestore(from: url)
+                    }
+                }
+            }
+
+            if let proposal = controller.pendingWorkspaceRestore {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(localized(japanese: "復元preview", english: "Restore preview"))
+                        .font(.system(size: 10, weight: .bold))
+                    ForEach(proposal.changes, id: \.appID) { change in
+                        Text(
+                            "\(change.action) · \(change.appID) · \(change.fromVersion ?? "-") → \(change.toVersion) · state \(change.fromLifecycleState ?? "-") → \(change.toLifecycleState) · permissions +\(change.addedPermissions.count)/-\(change.removedPermissions.count) · data \(change.dataChanged ? "changed" : "same")"
+                        )
+                        .font(.system(size: 8, design: .monospaced))
+                        .textSelection(.enabled)
+                    }
+                    HStack {
+                        Button(localized(japanese: "取消", english: "Cancel"), role: .cancel) {
+                            controller.rejectWorkspaceRestore()
+                        }
+                        Spacer()
+                        Button(localized(japanese: "復元内容を確認", english: "Review restore")) {
+                            showRestoreConfirmation = true
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(8)
+                .background(.blue.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            }
+
+            if let receipt = controller.lastWorkspaceRestoreReceipt, receipt.readbackVerified {
+                Label(
+                    localized(
+                        japanese: "復元後readback確認済み: \(receipt.restoredApps.count)件",
+                        english: "Post-restore readback verified: \(receipt.restoredApps.count) app(s)"
+                    ),
+                    systemImage: "checkmark.shield.fill"
+                )
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.green)
+            } else if let digest = controller.lastWorkspaceBackupDigest {
+                Text(localized(
+                    japanese: "backup readback確認済み: \(shortDigest(digest))",
+                    english: "Backup readback verified: \(shortDigest(digest))"
+                ))
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.secondary)
+            }
+
+            if let error = controller.workspaceBackupErrorCode {
+                Text(error)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.red)
+            }
+
+            Text(localized(
+                japanese: "OAuth、credential、監査ログ、Codex workspaceは含みません。復元は全hash・schema・権限・dataを再検証します。",
+                english: "OAuth, credentials, audit logs, and Codex workspaces are excluded. Restore revalidates every hash, schema, permission, and data entry."
+            ))
+            .font(.system(size: 9))
+            .foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(.quaternary.opacity(0.18))
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 
     @ViewBuilder
@@ -256,6 +365,7 @@ struct PocketAppGenerationSettingsView: View {
                 }
             }
             .font(.system(size: 9))
+            .disabled(controller.pendingWorkspaceRestore != nil)
         }
         .padding(9)
         .background(.quaternary.opacity(0.18))

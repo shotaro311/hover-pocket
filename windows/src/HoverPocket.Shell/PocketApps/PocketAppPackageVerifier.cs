@@ -233,6 +233,7 @@ internal sealed class PocketAppPackageVerifier
         VerifyLifecycle();
         _failures.AddRange(new PocketAppCapabilityMigrationVerifier().Run());
         _failures.AddRange(new PocketAppGenerationVerifier().Run());
+        _failures.AddRange(new PocketAppWorkspaceBackupVerifier().Run());
         _failures.AddRange(new PocketAppHealthVerifier().Run());
 
         if (_failures.Count > 0)
@@ -251,6 +252,7 @@ internal sealed class PocketAppPackageVerifier
         VerifyConsole.WriteLine("pocket_app_package_negative_cases=17");
         VerifyConsole.WriteLine("pocket_app_lifecycle_verify=ok");
         VerifyConsole.WriteLine("pocket_app_generation_verify=ok");
+        VerifyConsole.WriteLine("pocket_app_workspace_backup_verify=ok");
         VerifyConsole.WriteLine("pocket_app_health_verify=ok");
         return 0;
     }
