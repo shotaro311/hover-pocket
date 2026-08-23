@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
@@ -178,6 +179,39 @@ internal static class CapabilityJson
         return builder.ToString();
     }
 
+    public static string SanitizeVisibleText(string value, int maxLength)
+    {
+        var builder = new StringBuilder();
+        var count = 0;
+        var pendingSpace = false;
+        foreach (var rune in value.EnumerateRunes())
+        {
+            var category = Rune.GetUnicodeCategory(rune);
+            if (Rune.IsWhiteSpace(rune)
+                || category is UnicodeCategory.Control
+                    or UnicodeCategory.Format
+                    or UnicodeCategory.LineSeparator
+                    or UnicodeCategory.ParagraphSeparator)
+            {
+                pendingSpace = builder.Length > 0;
+                continue;
+            }
+            if (pendingSpace && count < maxLength)
+            {
+                builder.Append(' ');
+                count++;
+                pendingSpace = false;
+            }
+            if (count >= maxLength)
+            {
+                break;
+            }
+            builder.Append(rune.ToString());
+            count++;
+        }
+        return builder.ToString().Trim();
+    }
+
     public static string OutputString(
         string value,
         int maxLength,
@@ -197,6 +231,21 @@ internal static class CapabilityJson
             || !arguments.TryGetProperty(name, out var property)
             || property.ValueKind != JsonValueKind.Number
             || !property.TryGetInt32(out var value)
+            || value < minimum
+            || value > maximum)
+        {
+            throw Invalid(name);
+        }
+        return value;
+    }
+
+    public static double RequiredNumber(JsonElement arguments, string name, double minimum, double maximum)
+    {
+        if (arguments.ValueKind != JsonValueKind.Object
+            || !arguments.TryGetProperty(name, out var property)
+            || property.ValueKind != JsonValueKind.Number
+            || !property.TryGetDouble(out var value)
+            || !double.IsFinite(value)
             || value < minimum
             || value > maximum)
         {

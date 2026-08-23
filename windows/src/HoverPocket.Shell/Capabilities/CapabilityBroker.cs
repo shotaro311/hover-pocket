@@ -33,6 +33,7 @@ internal sealed class CapabilityBroker
     private readonly CapabilityBrokerLedger _ledger;
     private readonly CapabilityApprovalStore _approvalStore;
     private readonly CapabilityBrokerAuditLog _auditLog;
+    private readonly ICapabilityApprovalPresentationResolver _approvalPresentationResolver;
     private readonly SemaphoreSlim _executionGate = new(1, 1);
     private readonly Dictionary<string, List<DateTimeOffset>> _callHistory = new(StringComparer.Ordinal);
 
@@ -40,12 +41,14 @@ internal sealed class CapabilityBroker
         CapabilityRegistry registry,
         CapabilityBrokerLedger ledger,
         CapabilityBrokerAuditLog auditLog,
-        CapabilityApprovalStore? approvalStore = null)
+        CapabilityApprovalStore? approvalStore = null,
+        ICapabilityApprovalPresentationResolver? approvalPresentationResolver = null)
     {
         _registry = registry;
         _ledger = ledger;
         _auditLog = auditLog;
         _approvalStore = approvalStore ?? new CapabilityApprovalStore();
+        _approvalPresentationResolver = approvalPresentationResolver ?? new EmptyCapabilityApprovalPresentationResolver();
     }
 
     public CapabilityBrokerPreparation Prepare(
@@ -58,14 +61,62 @@ internal sealed class CapabilityBroker
         {
             var descriptors = Validate(plan, permissions);
             digest = CapabilityCanonicalJson.PlanDigest(plan);
-            return new CapabilityBrokerPreparation(
-                digest,
-                _approvalStore.Request(plan, digest, descriptors, now));
+            var request = _approvalStore.Request(plan, digest, descriptors, now);
+            IReadOnlyList<CapabilityApprovalPresentation> presentations = [];
+            if (request is not null)
+            {
+                try
+                {
+                    presentations = _approvalPresentationResolver.Resolve(plan, descriptors, request);
+                    ValidateApprovalPresentations(presentations, plan, descriptors, request);
+                }
+                catch
+                {
+                    _approvalStore.DiscardPending(request.Id);
+                    throw;
+                }
+            }
+            return new CapabilityBrokerPreparation(digest, request, presentations);
         }
         catch (Exception ex)
         {
             AppendAuthorizationAudit(plan, digest, "denied", ex, now);
             throw;
+        }
+    }
+
+    private static void ValidateApprovalPresentations(
+        IReadOnlyList<CapabilityApprovalPresentation> presentations,
+        CapabilityExecutionPlan plan,
+        IReadOnlyList<PocketCapabilityDescriptor> descriptors,
+        CapabilityApprovalRequest request)
+    {
+        var effects = request.Effects.ToDictionary(item => item.StepId, StringComparer.Ordinal);
+        if (effects.Count != request.Effects.Count
+            || presentations.Select(item => item.StepId).Distinct(StringComparer.Ordinal).Count() != presentations.Count)
+        {
+            throw InvalidPlan("approval_presentation");
+        }
+        foreach (var presentation in presentations)
+        {
+            if (!effects.TryGetValue(presentation.StepId, out var effect)
+                || presentation.RequestId != request.Id
+                || presentation.PlanDigest != request.PlanDigest
+                || presentation.ArgumentDigest != effect.ArgumentDigest
+                || presentation.Destructive != (effect.Effect == CapabilityEffect.DestructiveSensitive)
+                || presentation.RollbackAvailable != effect.RollbackAvailable
+                || (presentation.TargetDisplayLabel?.EnumerateRunes().Count() ?? 0) > 80)
+            {
+                throw InvalidPlan("approval_presentation");
+            }
+        }
+        foreach (var pair in plan.Steps.Zip(descriptors)
+                     .Where(pair => pair.Second.ApprovalPolicy == CapabilityApprovalPolicy.StrongPerCall))
+        {
+            if (!presentations.Any(item => item.StepId == pair.First.Id))
+            {
+                throw InvalidPlan("approval_presentation");
+            }
         }
     }
 

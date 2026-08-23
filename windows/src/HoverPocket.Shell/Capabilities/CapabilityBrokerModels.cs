@@ -180,7 +180,8 @@ internal readonly record struct CapabilityApprovalGrant(string Token);
 
 internal sealed record CapabilityBrokerPreparation(
     string PlanDigest,
-    CapabilityApprovalRequest? ApprovalRequest);
+    CapabilityApprovalRequest? ApprovalRequest,
+    IReadOnlyList<CapabilityApprovalPresentation> ApprovalPresentations);
 
 internal enum CapabilityReceiptStatus
 {
