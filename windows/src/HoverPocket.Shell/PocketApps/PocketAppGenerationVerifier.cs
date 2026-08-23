@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HoverPocket.Shell.Verification;
@@ -132,6 +133,80 @@ internal sealed class PocketAppGenerationVerifier
                 }
             }
             VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END wrong-capability");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN foreign-peer");
+            using (var foreignPeerServer = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(5),
+                () => fixtureSecret))
+            {
+                var powershellPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.System),
+                    "WindowsPowerShell",
+                    "v1.0",
+                    "powershell.exe");
+                var foreignPeerInfo = new ProcessStartInfo(powershellPath)
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+                foreignPeerInfo.ArgumentList.Add("-NoLogo");
+                foreignPeerInfo.ArgumentList.Add("-NoProfile");
+                foreignPeerInfo.ArgumentList.Add("-NonInteractive");
+                foreignPeerInfo.ArgumentList.Add("-Command");
+                foreignPeerInfo.ArgumentList.Add(
+                    "$accepted=$false;"
+                    + "$pipe=[IO.Pipes.NamedPipeClientStream]::new('.',"
+                    + "$env:HOVERPOCKET_CODEX_BROKER_ENDPOINT,"
+                    + "[IO.Pipes.PipeDirection]::InOut,[IO.Pipes.PipeOptions]::Asynchronous);"
+                    + "try{$pipe.Connect(2000);"
+                    + "$writer=[IO.StreamWriter]::new($pipe);$writer.AutoFlush=$true;"
+                    + "$writer.WriteLine('HP-CODEX-BROKER/1 '+$env:HOVERPOCKET_CODEX_BROKER_CAPABILITY);"
+                    + "$reader=[IO.StreamReader]::new($pipe);$response=$reader.ReadLine();"
+                    + "$accepted=$response -like 'OK *'}catch{}finally{$pipe.Dispose()};"
+                    + "if($accepted){exit 1}else{exit 0}");
+                foreignPeerInfo.Environment[CodexCredentialBrokerHelper.EndpointEnvironmentKey] =
+                    foreignPeerServer.PipeName;
+                foreignPeerInfo.Environment[CodexCredentialBrokerHelper.CapabilityEnvironmentKey] =
+                    foreignPeerServer.Capability;
+                using var foreignPeer = Process.Start(foreignPeerInfo)
+                    ?? throw new CodexCredentialBrokerException();
+                var foreignPeerStdoutTask = foreignPeer.StandardOutput.ReadToEndAsync();
+                var foreignPeerStderrTask = foreignPeer.StandardError.ReadToEndAsync();
+                await foreignPeer.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                await foreignPeerServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(
+                    foreignPeer.ExitCode == 0
+                        && foreignPeerServer.IsConsumed
+                        && string.IsNullOrEmpty(await foreignPeerStdoutTask)
+                        && string.IsNullOrEmpty(await foreignPeerStderrTask),
+                    "generation_credential_broker_foreign_peer_rejected");
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END foreign-peer");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN unauthorized-peer");
+            using (var unauthorizedPeerServer = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(5),
+                () => fixtureSecret,
+                _ => false))
+            {
+                try
+                {
+                    _ = await CodexCredentialBrokerClient.FetchSecretAsync(
+                        unauthorizedPeerServer.PipeName,
+                        unauthorizedPeerServer.Capability);
+                    _failures.Add("generation_credential_broker_unauthorized_peer");
+                }
+                catch (CodexCredentialBrokerException)
+                {
+                }
+                await unauthorizedPeerServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(
+                    unauthorizedPeerServer.IsConsumed,
+                    "generation_credential_broker_unauthorized_peer_consumed");
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END unauthorized-peer");
 
             VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN helper");
             using (var helperServer = new CodexCredentialBrokerServer(

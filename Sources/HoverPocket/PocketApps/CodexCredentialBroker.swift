@@ -6,6 +6,56 @@ enum CodexCredentialBrokerError: Error {
     case unavailable
 }
 
+enum CodexCredentialBrokerPeerIdentity {
+    static func isAuthorizedClient(socketFD: Int32) -> Bool {
+        var peerUserID: uid_t = 0
+        var peerGroupID: gid_t = 0
+        guard getpeereid(socketFD, &peerUserID, &peerGroupID) == 0,
+              peerUserID == geteuid() else {
+            return false
+        }
+
+        var peerProcessID: pid_t = 0
+        var peerProcessIDSize = socklen_t(MemoryLayout<pid_t>.size)
+        guard getsockopt(
+            socketFD,
+            SOL_LOCAL,
+            LOCAL_PEERPID,
+            &peerProcessID,
+            &peerProcessIDSize
+        ) == 0,
+              peerProcessID > 0,
+              peerProcessIDSize == MemoryLayout<pid_t>.size else {
+            return false
+        }
+
+        return hasSameDesignatedRequirement(processID: peerProcessID)
+    }
+
+    private static func hasSameDesignatedRequirement(processID: pid_t) -> Bool {
+        var currentCode: SecCode?
+        var peerCode: SecCode?
+        let attributes = [kSecGuestAttributePid: NSNumber(value: processID)] as CFDictionary
+        guard SecCodeCopySelf([], &currentCode) == errSecSuccess,
+              let currentCode,
+              SecCodeCopyGuestWithAttributes(nil, attributes, [], &peerCode) == errSecSuccess,
+              let peerCode else {
+            return false
+        }
+
+        var currentStaticCode: SecStaticCode?
+        var requirement: SecRequirement?
+        guard SecCodeCopyStaticCode(currentCode, [], &currentStaticCode) == errSecSuccess,
+              let currentStaticCode,
+              SecCodeCopyDesignatedRequirement(currentStaticCode, [], &requirement) == errSecSuccess,
+              let requirement else {
+            return false
+        }
+
+        return SecCodeCheckValidity(peerCode, [], requirement) == errSecSuccess
+    }
+}
+
 final class CodexCredentialBrokerLease: @unchecked Sendable {
     private let lock = NSLock()
     private let expectedCapability: String
@@ -175,6 +225,7 @@ final class CodexCredentialBrokerServer: @unchecked Sendable {
     private let queueKey = DispatchSpecificKey<UInt8>()
     private let socketFD: Int32
     private let lease: CodexCredentialBrokerLease
+    private let peerAuthorizer: @Sendable (Int32) -> Bool
     private let cleanupState: CodexCredentialBrokerCleanupState
     private var source: DispatchSourceRead?
     private var timer: DispatchSourceTimer?
@@ -183,11 +234,14 @@ final class CodexCredentialBrokerServer: @unchecked Sendable {
     let rootDirectory: URL
     let endpoint: URL
     var capability: String { lease.capability }
+    var isConsumed: Bool { lease.isConsumed }
 
     init(
         lifetime: TimeInterval = 30,
+        peerAuthorizer: (@Sendable (Int32) -> Bool)? = nil,
         secretProvider: @escaping @Sendable () throws -> String
     ) throws {
+        self.peerAuthorizer = peerAuthorizer ?? CodexCredentialBrokerPeerIdentity.isAuthorizedClient
         lease = try CodexCredentialBrokerLease(
             lifetime: lifetime,
             secretProvider: secretProvider
@@ -276,6 +330,12 @@ final class CodexCredentialBrokerServer: @unchecked Sendable {
         defer {
             close(clientFD)
             finish()
+        }
+
+        guard peerAuthorizer(clientFD) else {
+            Self.writeLine("ERR", to: clientFD)
+            lease.cancel()
+            return
         }
 
         guard let request = Self.readLine(from: clientFD, maximumBytes: 512),

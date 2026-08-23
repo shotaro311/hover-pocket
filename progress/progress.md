@@ -2,8 +2,17 @@
 project_slug: hover-menu-preview
 updated: 2026-08-24
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-pro-running; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; an5-credential-broker-draft-pr-ci-green; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-pro-running; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; an5-credential-broker-draft-pr-ci-green; an5-credential-peer-identity-security-reviewed-pr-pending; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
 ---
+
+## 2026-08-24 AI-native AN5 credential broker peer identity
+
+- PR #33 head `7447e329`からstack branch `codex/ai-native-an5-credential-broker-identity`を分離し、credential値やAN3-B3AのKeychain / Credential Manager契約を変更せず、broker接続元のidentity gateだけを追加した。
+- macOSはUnix socketのpeer UIDと`LOCAL_PEERPID`を取得し、実行中peer codeが現在のHoverPocketと同じdesignated requirementを満たす場合だけrequestを読む。別実行体へ正しいfixture capabilityを渡す先着canaryはsecretを取得できず、leaseを消費してfail closedになった。同じHoverPocket helper subprocessは成功した。
+- Windowsは`GetNamedPipeClientProcessId`でclient PIDを取得し、現在のHoverPocket executableと同じ正規化pathのprocessだけを許可する。PowerShell別processの先着canaryと注入authorizerのnegative caseを追加した。正式releaseでのAuthenticode signer bindingは別gateとして残す。
+- `swift build -Xswiftc -warnings-as-errors`、Pocket App package / lifecycle / generation / migration / health / workspace backup、Pocket Surface、Capability、Broker、Voice、15 schema / 71 fixture、Voice contract 42件、`git diff --check`が成功した。このMacに.NET SDKはないためWindows Release buildとforeign-peer verifierはstacked Draft PR CIで確認する。
+- Codex Security diff scan `efe77173-169f-402b-a202-85475b321270`はreportable finding 0件で封印・再読込した。coverageはpartialで、production有効化前にmacOS helper側server identity pinningと、両OSexpected helper PID bindingを必須gateとして残す。先行不正接続によるlease消費はcredential漏えいなし・単一ローカル生成のfail-closed失敗に限定されるためsecurity findingから除外した。
+- 正本AN3-B3A Pro runは同一sessionで`inProgress`、bridgeはsignal未着のままであり、新規送信・再送・成果物先読みをしていない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an5-credential-broker-identity.md`。
 
 ## 2026-08-24 AI-native AN5 Host-owned credential broker foundation
 
