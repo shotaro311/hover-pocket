@@ -42,6 +42,7 @@ Pocket App生成用Codex processへAPI keyを広い環境変数、引数、auth 
 - randomなNamed Pipeを`PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly`、1 instanceで作る。
 - lifetimeとrequest timeoutを別CancellationTokenで管理する。
 - client接続はCancellationTokenだけへ依存せず、`.NET 10`の明示`TimeSpan` timeout付き`ConnectAsync`で有限化する。
+- WindowsのPocket Surface / Package / Generation縦断stepはCIでも2分上限にし、brokerのlease / pipe / wrong capability / helper各段階をverification logへ残す。
 - `Program.Main`はVelopack / WPF初期化より前にhelperを処理する。
 - helper、client、lease、serverを通常のPocket App generation verifierから検証する。
 
