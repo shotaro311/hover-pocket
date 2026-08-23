@@ -242,34 +242,36 @@ function Assert-AssemblyReleaseVersion {
     }
 }
 
-function Assert-DirectoryPayloadMatches {
-    param([string]$LeftRoot, [string]$RightRoot)
+function Assert-SetupEmbedsFullPackage {
+    param([string]$SetupPath, [string]$PackagePath)
 
-    $leftFiles = @(Get-ChildItem -LiteralPath $LeftRoot -Recurse -File | ForEach-Object {
-        [pscustomobject]@{
-            Name = [IO.Path]::GetRelativePath($LeftRoot, $_.FullName).Replace('\', '/')
-            Size = $_.Length
-            Sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    $setupStream = [IO.File]::OpenRead($SetupPath)
+    $packageStream = [IO.File]::OpenRead($PackagePath)
+    try {
+        if ($setupStream.Length -le $packageStream.Length) {
+            throw "Setup does not contain an executable prefix before the full update package."
         }
-    } | Sort-Object Name)
-    $rightFiles = @(Get-ChildItem -LiteralPath $RightRoot -Recurse -File | ForEach-Object {
-        [pscustomobject]@{
-            Name = [IO.Path]::GetRelativePath($RightRoot, $_.FullName).Replace('\', '/')
-            Size = $_.Length
-            Sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        $payloadOffset = $setupStream.Length - $packageStream.Length
+        if ($setupStream.Seek($payloadOffset, [IO.SeekOrigin]::Begin) -ne $payloadOffset) {
+            throw "Setup embedded package offset could not be reached."
         }
-    } | Sort-Object Name)
-    if ($leftFiles.Count -ne $rightFiles.Count -or $leftFiles.Count -eq 0) {
-        throw "Setup payload and published full package contain different file sets."
+        $setupHashAlgorithm = [Security.Cryptography.SHA256]::Create()
+        $packageHashAlgorithm = [Security.Cryptography.SHA256]::Create()
+        try {
+            $setupPayloadHash = [Convert]::ToHexString($setupHashAlgorithm.ComputeHash($setupStream))
+            $packageHash = [Convert]::ToHexString($packageHashAlgorithm.ComputeHash($packageStream))
+        }
+        finally {
+            $setupHashAlgorithm.Dispose()
+            $packageHashAlgorithm.Dispose()
+        }
+        if ($setupPayloadHash -cne $packageHash) {
+            throw "Setup embedded payload differs from the published full update package."
+        }
     }
-    for ($index = 0; $index -lt $leftFiles.Count; $index++) {
-        if (
-            $leftFiles[$index].Name -cne $rightFiles[$index].Name -or
-            $leftFiles[$index].Size -ne $rightFiles[$index].Size -or
-            $leftFiles[$index].Sha256 -cne $rightFiles[$index].Sha256
-        ) {
-            throw "Setup payload differs from the published full package."
-        }
+    finally {
+        $setupStream.Dispose()
+        $packageStream.Dispose()
     }
 }
 
@@ -514,22 +516,7 @@ try {
     Assert-ExecutableReleaseVersion -Path $packageExecutables[0].FullName -ExpectedVersion $manifest.version -Label "Full package HoverPocket.Shell.exe"
     Assert-AssemblyReleaseVersion -PackageRoot $packageExtractPath -ExpectedVersion $manifest.version
 
-    $setupExtractPath = Join-Path $temporaryRoot "setup-payload"
-    Expand-ZipArchiveSafely -ArchivePath $setupPath -Destination $setupExtractPath
-    Assert-NupkgReleaseIdentity `
-        -PackageRoot $setupExtractPath `
-        -ExpectedPackageId $manifest.packageId `
-        -ExpectedVersion $manifest.version `
-        -ExpectedChannel $manifest.updateChannel `
-        -ExpectedRuntime $manifest.runtime `
-        -Label "Setup payload"
-    $setupPayloadExecutables = @(Get-ChildItem -LiteralPath $setupExtractPath -Recurse -File -Filter "HoverPocket.Shell.exe")
-    if ($setupPayloadExecutables.Count -ne 1) {
-        throw "Setup payload does not contain exactly one HoverPocket.Shell.exe."
-    }
-    Assert-ExecutableReleaseVersion -Path $setupPayloadExecutables[0].FullName -ExpectedVersion $manifest.version -Label "Setup payload HoverPocket.Shell.exe"
-    Assert-AssemblyReleaseVersion -PackageRoot $setupExtractPath -ExpectedVersion $manifest.version
-    Assert-DirectoryPayloadMatches -LeftRoot $setupExtractPath -RightRoot $packageExtractPath
+    Assert-SetupEmbedsFullPackage -SetupPath $setupPath -PackagePath $packagePath
     if (-not $IdentityOnly) {
         $signerThumbprints = @(@(
                 $setupSignature.SignerCertificate.Thumbprint
