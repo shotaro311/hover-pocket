@@ -180,6 +180,14 @@ def main() -> None:
         / "Verification"
         / "VoiceFoundationVerifier.cs"
     ).read_text(encoding="utf-8")
+    windows_legacy_verifier = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Verification"
+        / "LegacyAiLaneVerifier.cs"
+    ).read_text(encoding="utf-8")
     windows_ui_verifier = (
         ROOT
         / "windows"
@@ -328,8 +336,27 @@ def main() -> None:
     if calendar_response_start < 0 or calendar_response_end <= calendar_response_start \
             or "eventRef =" in calendar_response:
         fail("Windows Voice Calendar response exposes a Provider identifier to Codex")
-    if "new AiLaneVerifier().Run()" not in windows_app or "new VoiceFoundationVerifier().Run()" not in windows_app:
-        fail("Windows legacy and Voice verifiers are not separate")
+    removed_legacy_paths = (
+        ROOT / "Sources" / "HoverPocket" / "State" / "AICommandStore.swift",
+        ROOT / "Sources" / "HoverPocket" / "Services" / "CalendarPocketTool.swift",
+        ROOT / "Sources" / "HoverPocket" / "Views" / "AICommandPaletteView.swift",
+        ROOT / "windows" / "src" / "HoverPocket.Shell" / "Providers" / "AiLane",
+        ROOT / "windows" / "src" / "HoverPocket.Shell" / "Providers" / "Calendar" / "CalendarAiLaneConnector.cs",
+        ROOT / "windows" / "ui" / "ailane",
+    )
+    if any(path.exists() for path in removed_legacy_paths):
+        fail("legacy AI command implementation remains in the product source tree")
+    if "new LegacyAiLaneVerifier().Run()" not in windows_app \
+            or "new AiLaneVerifier().Run()" in windows_app \
+            or "new VoiceFoundationVerifier().Run()" not in windows_app:
+        fail("Windows legacy absence and Voice verifiers are not separate")
+    if not all(route in windows_legacy_verifier for route in (
+            '"ailane.submit"',
+            '"ailane.approve"',
+            '"ailane.reject"',
+            '"unknown_method"',
+    )):
+        fail("Windows legacy absence verifier does not reject every old bridge route")
     if 'verifyTarget, "voice"' not in windows_options:
         fail("Windows Voice verifier command is not independently addressable")
     if "voiceLane = surface == BridgeSurface.Panel" not in bridge:

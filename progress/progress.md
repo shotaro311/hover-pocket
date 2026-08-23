@@ -2,8 +2,15 @@
 project_slug: hover-menu-preview
 updated: 2026-08-24
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-pro-running; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-pro-running; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
 ---
+
+## 2026-08-24 AI-native Core GA旧AI直結経路の除去
+
+- `codex/ai-native-an8-windows-signing-pipeline` head `3448eda`からstack branch `codex/ai-native-core-ga-legacy-path-removal`を分離し、UI非表示だけで残っていたmacOSの`AICommandStore -> CalendarPocketTool(approved: Bool)`と、Windowsの`AiLaneController -> CalendarStore`を製品sourceから除去した。Voice / Text / Native UI / PocketSurfaceの実行正本はCapability Registry / Brokerだけに限定する。
+- Windowsの既存`--verify ailane`は互換名を維持しつつ、旧`aiLane` state、`ailane.submit / approve / reject` bridge route、旧AI Providerがすべて存在しないことを検証するnegative verifierへ置換した。共通Voice contractも旧実装ファイルの再混入を拒否する。
+- macOS warnings-as-errors build、Panel layout 128件、Capability 20 handler、Broker 21 descriptor / 20 handler、Pocket App / Surface / Voice / Timer、Pocket contract `14 schema / 69 fixture`、Voice contract、Windows JavaScript構文、`git diff --check`が成功した。Draft PR [#30](https://github.com/shotaro311/hover-pocket/pull/30)のcode head `1874daa`で、Windows [32659682483](https://github.com/shotaro311/hover-pocket/actions/runs/32659682483)はRelease build、旧AI lane不在、Voice、Broker、rendered UIを含め全成功し、macOS [32659682571](https://github.com/shotaro311/hover-pocket/actions/runs/32659682571)もwarnings-as-errors buildと全AI-native verifierに成功した。
+- Core GA全体は未完了である。残りはAN8-C backup / export / restore正式回収、両OSproduction Voiceと実音声E2E、VoiceからPocket App生成・導入する実Codex confinement E2E、Windows正式署名済み配布とrollback、stack PRの人手mergeである。AN6 / AN7は計画どおりCore GAを塞がない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-core-ga-legacy-removal.md`。
 
 ## 2026-08-24 AI-native AN8 Windows正式署名生成経路
 

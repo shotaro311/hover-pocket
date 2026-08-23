@@ -2,7 +2,6 @@ using System.Windows;
 using HoverPocket.Shell.Capabilities;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Providers;
-using HoverPocket.Shell.Providers.AiLane;
 using HoverPocket.Shell.Providers.Calculator;
 using HoverPocket.Shell.Providers.Calendar;
 using HoverPocket.Shell.Providers.Clipboard;
@@ -48,7 +47,7 @@ public partial class App : System.Windows.Application
         if (options.VerifyAiLane)
         {
             VerifyConsole.AttachParent();
-            Environment.ExitCode = new AiLaneVerifier().Run();
+            Environment.ExitCode = new LegacyAiLaneVerifier().Run();
             Shutdown();
             return;
         }
