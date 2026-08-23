@@ -312,7 +312,9 @@ Windows 0.2.xの未署名公開ベータは`beta` gateには合格しますが�
 6. 新版をreinstall
 7. install先と分離したuser data sentinelが保持されることをreadback
 
-macOSは一時Applications領域で署名・公証・Gatekeeper・Sparkle署名済みbundleの置換を検証します。WindowsはVelopack Setupの`--silent --installto`と`Update.exe apply --package`を使い、一時install rootだけを変更します。公開release codeを実行するため、workflow input `execute_release_code`を明示的に有効にした場合だけ実行します。未署名betaは追加で`allow_unsigned_beta`を明示し、formalでは許可しません。
+macOSは一時Applications領域で署名・公証・Gatekeeper・Sparkle署名済みbundleの置換を検証します。WindowsはVelopack Setupの`--silent --installto`と`Update.exe apply --package`を使い、一時install rootだけを変更します。OSごとに`execute_macos_release_code`または`execute_windows_release_code`を明示した場合だけ公開release codeを実行します。未署名Windows betaは追加で`allow_unsigned_beta`を明示する必要があります。正式署名Windows版の遷移は、Setupだけでなくfull package内アプリまでを独立した正式署名readback snapshotへ固定できるまで失敗側に閉じます。
+
+両OSとも開始時にtag、draft / prerelease状態、全assetの名前・size・GitHub SHA-256・download URLを固定し、合格証跡を書く直前に公開releaseを再取得して完全一致を確認します。途中でrelease assetが差し替わった場合は遷移自体が成功しても合格にしません。
 
 このCIは使い捨てrunner上のpackage lifecycle gateです。日常利用中の端末でのSparkle / Velopack UI、自動更新、実データmigration、sleep-wakeは別のrelease-candidate実機gateとして残します。
 

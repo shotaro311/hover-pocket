@@ -3,7 +3,8 @@ param(
     [string]$Repository = "shotaro311/hover-pocket",
     [Parameter(Mandatory = $true)][string]$PreviousTag,
     [Parameter(Mandatory = $true)][string]$CurrentTag,
-    [switch]$AllowUnsignedBeta
+    [switch]$AllowUnsignedBeta,
+    [switch]$SnapshotContractTest
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,6 +33,65 @@ function Get-Release {
         throw "Release $Tag is not a matching published release."
     }
     return $release
+}
+
+function Get-ReleaseAssetSnapshot {
+    param($Release)
+
+    $assets = [System.Collections.Generic.SortedDictionary[string, object]]::new([StringComparer]::Ordinal)
+    foreach ($asset in @($Release.assets)) {
+        $name = [string]$asset.name
+        if ($name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+            throw "Release contains an unsafe asset name."
+        }
+        if ($assets.ContainsKey($name)) {
+            throw "Release asset $name is duplicated."
+        }
+        $size = [long]$asset.size
+        if ($size -lt 0) {
+            throw "Release asset $name has an invalid size."
+        }
+        $digest = [string]$asset.digest
+        if ($digest -cnotmatch '^sha256:[0-9a-f]{64}$') {
+            throw "Release asset $name has an invalid digest."
+        }
+        $url = [string]$asset.browser_download_url
+        $expectedUrl = "https://github.com/$Repository/releases/download/$($Release.tag_name)/$name"
+        if ($url -cne $expectedUrl) {
+            throw "Release asset $name has an unexpected download URL."
+        }
+        $assets.Add($name, [pscustomobject]@{
+            Size = $size
+            Digest = $digest
+            Url = $url
+        })
+    }
+    return [pscustomobject]@{
+        Tag = [string]$Release.tag_name
+        Assets = $assets
+    }
+}
+
+function Assert-ReleaseMatchesSnapshot {
+    param($Release, $Expected)
+
+    $actual = Get-ReleaseAssetSnapshot -Release $Release
+    if ($actual.Tag -cne $Expected.Tag -or $actual.Assets.Count -ne $Expected.Assets.Count) {
+        throw "Release snapshot identity or asset count changed during transition verification."
+    }
+    foreach ($entry in $Expected.Assets.GetEnumerator()) {
+        if (-not $actual.Assets.ContainsKey($entry.Key)) {
+            throw "Release asset $($entry.Key) disappeared during transition verification."
+        }
+        $actualAsset = $actual.Assets[$entry.Key]
+        if (
+            $actualAsset.Size -ne $entry.Value.Size -or
+            $actualAsset.Digest -cne $entry.Value.Digest -or
+            $actualAsset.Url -cne $entry.Value.Url
+        ) {
+            throw "Release asset $($entry.Key) changed during transition verification."
+        }
+    }
 }
 
 function Get-ReleaseAssetRecord {
@@ -98,7 +158,7 @@ function Assert-Checksum {
 }
 
 function Get-ReleasePackage {
-    param($Release, [string]$Directory)
+    param($Release, $Snapshot, [string]$Directory)
 
     $manifestPath = Save-ReleaseAsset -Release $Release -Name "release-manifest.win.json" -Directory $Directory
     $checksumPath = Save-ReleaseAsset -Release $Release -Name "SHA256SUMS-win.txt" -Directory $Directory
@@ -115,7 +175,10 @@ function Get-ReleasePackage {
     if ($isUnsignedBeta) {
         if (-not $AllowUnsignedBeta) { throw "Unsigned release execution requires AllowUnsignedBeta." }
     }
-    elseif ($manifest.authenticode -ne "signed-timestamped-verified") {
+    elseif ($manifest.authenticode -eq "signed-timestamped-verified") {
+        throw "Formal signed transition is blocked until the package and embedded application signatures are bound to an independently verified release snapshot."
+    }
+    else {
         throw "Release manifest contains an unknown Authenticode state."
     }
 
@@ -151,18 +214,13 @@ function Get-ReleasePackage {
         throw "Downloaded full package differs from its feed metadata."
     }
 
-    if (-not $isUnsignedBeta) {
-        $signature = Get-AuthenticodeSignature -LiteralPath $setupPath
-        if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or $null -eq $signature.TimeStamperCertificate) {
-            throw "Setup does not have a valid timestamped Authenticode signature."
-        }
-    }
     return [pscustomobject]@{
         Version = [string]$manifest.version
         SetupPath = $setupPath
         PackagePath = $packagePath
         Authenticode = [string]$manifest.authenticode
-        SigningMode = if ($isUnsignedBeta) { "explicit-beta" } else { "formal" }
+        SigningMode = "explicit-beta"
+        Snapshot = $Snapshot
     }
 }
 
@@ -223,6 +281,44 @@ function Apply-Package {
     ) -Label $Label
 }
 
+if ($SnapshotContractTest) {
+    $assetName = "HoverPocketWin-0.2.7-full.nupkg"
+    $assetUrl = "https://github.com/$Repository/releases/download/$CurrentTag/$assetName"
+    $release = [pscustomobject]@{
+        tag_name = $CurrentTag
+        assets = @([pscustomobject]@{
+            name = $assetName
+            size = 123
+            digest = "sha256:" + ("a" * 64)
+            browser_download_url = $assetUrl
+        })
+    }
+    $snapshot = Get-ReleaseAssetSnapshot -Release $release
+    Assert-ReleaseMatchesSnapshot -Release $release -Expected $snapshot
+
+    $changedRelease = [pscustomobject]@{
+        tag_name = $CurrentTag
+        assets = @([pscustomobject]@{
+            name = $assetName
+            size = 123
+            digest = "sha256:" + ("b" * 64)
+            browser_download_url = $assetUrl
+        })
+    }
+    $mutationRejected = $false
+    try {
+        Assert-ReleaseMatchesSnapshot -Release $changedRelease -Expected $snapshot
+    }
+    catch {
+        $mutationRejected = $true
+    }
+    if (-not $mutationRejected) {
+        throw "Release snapshot mutation contract was not rejected."
+    }
+    '{"status":"passed","snapshotMutationRejected":true}'
+    return
+}
+
 if ($PreviousTag -eq $CurrentTag) {
     throw "PreviousTag and CurrentTag must differ."
 }
@@ -244,8 +340,12 @@ $sentinelPath = Join-Path $env:APPDATA ("HoverPocket\an8-transition-" + [Guid]::
 [IO.File]::WriteAllText($sentinelPath, '{"owner":"an8-transition"}', [Text.UTF8Encoding]::new($false))
 
 try {
-    $previous = Get-ReleasePackage -Release (Get-Release -Tag $PreviousTag) -Directory $previousRoot
-    $current = Get-ReleasePackage -Release (Get-Release -Tag $CurrentTag) -Directory $currentRoot
+    $previousRelease = Get-Release -Tag $PreviousTag
+    $currentRelease = Get-Release -Tag $CurrentTag
+    $previousSnapshot = Get-ReleaseAssetSnapshot -Release $previousRelease
+    $currentSnapshot = Get-ReleaseAssetSnapshot -Release $currentRelease
+    $previous = Get-ReleasePackage -Release $previousRelease -Snapshot $previousSnapshot -Directory $previousRoot
+    $current = Get-ReleasePackage -Release $currentRelease -Snapshot $currentSnapshot -Directory $currentRoot
 
     Install-Release -SetupPath $previous.SetupPath -InstallRoot $installRoot -Label "Previous release install"
     $updater = Assert-InstalledVersion -InstallRoot $installRoot -ExpectedVersion $previous.Version
@@ -272,6 +372,9 @@ try {
     if (-not [IO.File]::Exists($sentinelPath)) {
         throw "Reinstall did not preserve user data."
     }
+
+    Assert-ReleaseMatchesSnapshot -Release (Get-Release -Tag $PreviousTag) -Expected $previous.Snapshot
+    Assert-ReleaseMatchesSnapshot -Release (Get-Release -Tag $CurrentTag) -Expected $current.Snapshot
 
     [ordered]@{
         status = "passed"

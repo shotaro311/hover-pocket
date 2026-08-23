@@ -60,33 +60,89 @@ move_temporary_root_to_trash() {
 }
 trap move_temporary_root_to_trash EXIT
 
-release_asset_field() {
+capture_release_snapshot() {
   local tag="$1"
+  local destination="$2"
+  local response="$destination.response.json"
+  gh api "repos/$REPOSITORY/releases/tags/$tag" > "$response"
+  python3 - "$REPOSITORY" "$tag" "$response" "$destination" <<'PY'
+import json
+import pathlib
+import re
+import sys
+
+repository, expected_tag, response_path, destination_path = sys.argv[1:]
+release = json.loads(pathlib.Path(response_path).read_text(encoding="utf-8"))
+if (
+    release.get("tag_name") != expected_tag
+    or release.get("draft") is not False
+    or release.get("prerelease") is not False
+):
+    raise SystemExit(f"release {expected_tag} is not a matching published release")
+
+assets = []
+seen_names: set[str] = set()
+for asset in release.get("assets", []):
+    name = asset.get("name")
+    size = asset.get("size")
+    digest = asset.get("digest")
+    url = asset.get("browser_download_url")
+    if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name) is None:
+        raise SystemExit("release contains an unsafe asset name")
+    if name in seen_names:
+        raise SystemExit(f"release asset {name} is duplicated")
+    if not isinstance(size, int) or size < 0:
+        raise SystemExit(f"release asset {name} has an invalid size")
+    if not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
+        raise SystemExit(f"release asset {name} has an invalid digest")
+    expected_url = f"https://github.com/{repository}/releases/download/{expected_tag}/{name}"
+    if url != expected_url:
+        raise SystemExit(f"release asset {name} has an unexpected download URL")
+    seen_names.add(name)
+    assets.append({"name": name, "size": size, "digest": digest, "url": url})
+
+snapshot = {"tag": expected_tag, "assets": sorted(assets, key=lambda item: item["name"])}
+pathlib.Path(destination_path).write_text(
+    json.dumps(snapshot, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n",
+    encoding="utf-8",
+)
+PY
+}
+
+release_asset_field() {
+  local snapshot_path="$1"
   local asset_name="$2"
   local field="$3"
-  local result
-  result="$(gh api "repos/$REPOSITORY/releases/tags/$tag" \
-    --jq "[.assets[] | select(.name == \"$asset_name\") | .$field] | if length == 1 then .[0] else error(\"asset missing or duplicated\") end")"
-  if [[ -z "$result" || "$result" == "null" ]]; then
-    echo "error=missing $field for $asset_name" >&2
-    exit 1
-  fi
-  printf '%s' "$result"
+  python3 - "$snapshot_path" "$asset_name" "$field" <<'PY'
+import json
+import pathlib
+import sys
+
+snapshot_path, asset_name, field = sys.argv[1:]
+if field not in {"url", "size", "digest"}:
+    raise SystemExit("unsupported release asset field")
+snapshot = json.loads(pathlib.Path(snapshot_path).read_text(encoding="utf-8"))
+matches = [asset for asset in snapshot["assets"] if asset["name"] == asset_name]
+if len(matches) != 1:
+    raise SystemExit(f"release asset {asset_name} is missing or duplicated")
+print(matches[0][field], end="")
+PY
 }
 
 download_asset() {
-  local tag="$1"
-  local asset_name="$2"
-  local destination="$3"
+  local snapshot_path="$1"
+  local tag="$2"
+  local asset_name="$3"
+  local destination="$4"
   local url
-  url="$(release_asset_field "$tag" "$asset_name" browser_download_url)"
+  url="$(release_asset_field "$snapshot_path" "$asset_name" url)"
   if [[ "$url" != "https://github.com/$REPOSITORY/releases/download/$tag/$asset_name" ]]; then
     echo "error=unexpected download URL for $asset_name" >&2
     exit 1
   fi
   curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 "$url" --output "$destination"
   local expected_size
-  expected_size="$(release_asset_field "$tag" "$asset_name" size)"
+  expected_size="$(release_asset_field "$snapshot_path" "$asset_name" size)"
   local actual_size
   actual_size="$(stat -f '%z' "$destination")"
   if [[ "$actual_size" != "$expected_size" ]]; then
@@ -94,7 +150,7 @@ download_asset() {
     exit 1
   fi
   local expected_digest
-  expected_digest="$(release_asset_field "$tag" "$asset_name" digest)"
+  expected_digest="$(release_asset_field "$snapshot_path" "$asset_name" digest)"
   local actual_digest
   actual_digest="sha256:$(shasum -a 256 "$destination" | awk '{print $1}')"
   if [[ "$actual_digest" != "$expected_digest" ]]; then
@@ -106,6 +162,7 @@ download_asset() {
 prepare_release() {
   local tag="$1"
   local label="$2"
+  local snapshot_path="$3"
   local version_build="${tag#v}"
   local version="${version_build%-*}"
   local build="${version_build##*-}"
@@ -117,9 +174,9 @@ prepare_release() {
   local extract_root="$release_dir/extracted"
   mkdir -p "$release_dir" "$extract_root"
 
-  download_asset "$tag" "$asset_name" "$archive_path"
-  download_asset "$tag" "$asset_name.sha256" "$checksum_path"
-  download_asset "$tag" "appcast.xml" "$appcast_path"
+  download_asset "$snapshot_path" "$tag" "$asset_name" "$archive_path"
+  download_asset "$snapshot_path" "$tag" "$asset_name.sha256" "$checksum_path"
+  download_asset "$snapshot_path" "$tag" "appcast.xml" "$appcast_path"
   local checksum_digest
   checksum_digest="$(awk 'NF { print tolower($1); exit }' "$checksum_path")"
   if [[ ! "$checksum_digest" =~ ^[0-9a-f]{64}$ ]]; then
@@ -209,8 +266,13 @@ replace_installed_app() {
   ditto "$source_app" "$installed_app"
 }
 
-PREVIOUS_APP="$(prepare_release "$PREVIOUS_TAG" previous)"
-CURRENT_APP="$(prepare_release "$CURRENT_TAG" current)"
+PREVIOUS_SNAPSHOT="$DOWNLOAD_ROOT/previous.snapshot.json"
+CURRENT_SNAPSHOT="$DOWNLOAD_ROOT/current.snapshot.json"
+capture_release_snapshot "$PREVIOUS_TAG" "$PREVIOUS_SNAPSHOT"
+capture_release_snapshot "$CURRENT_TAG" "$CURRENT_SNAPSHOT"
+
+PREVIOUS_APP="$(prepare_release "$PREVIOUS_TAG" previous "$PREVIOUS_SNAPSHOT")"
+CURRENT_APP="$(prepare_release "$CURRENT_TAG" current "$CURRENT_SNAPSHOT")"
 
 replace_installed_app "$PREVIOUS_APP" install
 assert_installed "$PREVIOUS_TAG"
@@ -235,6 +297,19 @@ ditto "$CURRENT_APP" "$INSTALL_ROOT/HoverPocket.app"
 assert_installed "$CURRENT_TAG"
 if [[ ! -f "$USER_DATA_ROOT/sentinel.json" ]]; then
   echo "error=reinstall transition did not preserve user data" >&2
+  exit 1
+fi
+
+PREVIOUS_FINAL_SNAPSHOT="$DOWNLOAD_ROOT/previous.final.snapshot.json"
+CURRENT_FINAL_SNAPSHOT="$DOWNLOAD_ROOT/current.final.snapshot.json"
+capture_release_snapshot "$PREVIOUS_TAG" "$PREVIOUS_FINAL_SNAPSHOT"
+capture_release_snapshot "$CURRENT_TAG" "$CURRENT_FINAL_SNAPSHOT"
+if ! cmp -s "$PREVIOUS_SNAPSHOT" "$PREVIOUS_FINAL_SNAPSHOT"; then
+  echo "error=previous release changed during transition verification" >&2
+  exit 1
+fi
+if ! cmp -s "$CURRENT_SNAPSHOT" "$CURRENT_FINAL_SNAPSHOT"; then
+  echo "error=current release changed during transition verification" >&2
   exit 1
 fi
 
