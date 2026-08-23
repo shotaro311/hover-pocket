@@ -43,6 +43,8 @@ AN8のうち、macOS / Windows別の公開release、feed、署名、assetを公�
   - 現行Windows `0.2.7`は`authenticode=unsigned`のためexit 1。
   - errorは`windows.authenticode_formal`で、正式版を誤って通さない。
 
+2026-08-21のCodex review follow-upで、Windows full update package内アプリのAuthenticodeとversioned release側の手動macOS ZIP実downloadを追加した。最新の検証は`progress/2026-08/2026-08-21_hover-pocket-ai-native-an8-review-followup.md`を参照する。
+
 ## Git分離
 
 - base: `origin/main` `a35b0ea8c224809ad4ff1bf1dc466882fc70169b`

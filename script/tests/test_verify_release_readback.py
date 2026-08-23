@@ -6,9 +6,13 @@ import pathlib
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 
 SCRIPT = pathlib.Path(__file__).parents[1] / "verify_release_readback.py"
+WORKFLOW = pathlib.Path(__file__).parents[2] / ".github/workflows/release-readback-verify.yml"
+AUTHENTICODE_SCRIPT = pathlib.Path(__file__).parents[2] / "windows/script/verify_published_authenticode.ps1"
+MACOS_READBACK_SCRIPT = pathlib.Path(__file__).parents[1] / "verify_published_macos.sh"
 SPEC = importlib.util.spec_from_file_location("verify_release_readback", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -106,6 +110,39 @@ class ReleaseReadbackTests(unittest.TestCase):
         self.assertEqual(parsed.release_tag, "v1.2.3-456")
         self.assertIn("macos.sparkle_signature_format", verifier.checks)
 
+    def test_macos_rejects_multiple_appcast_items_or_enclosures(self):
+        appcast, _, _, _ = self.mac_fixture()
+
+        non_rss = ET.fromstring(appcast)
+        non_rss.tag = "feed"
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.parse_appcast(ET.tostring(non_rss), "shotaro311/hover-pocket")
+
+        multiple_channels = ET.fromstring(appcast)
+        channel = multiple_channels.find("channel")
+        self.assertIsNotNone(channel)
+        multiple_channels.append(ET.fromstring(ET.tostring(channel)))
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.parse_appcast(ET.tostring(multiple_channels), "shotaro311/hover-pocket")
+
+        multiple_items = ET.fromstring(appcast)
+        channel = multiple_items.find("channel")
+        item = multiple_items.find("channel/item")
+        self.assertIsNotNone(channel)
+        self.assertIsNotNone(item)
+        channel.append(ET.fromstring(ET.tostring(item)))
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.parse_appcast(ET.tostring(multiple_items), "shotaro311/hover-pocket")
+
+        multiple_enclosures = ET.fromstring(appcast)
+        item = multiple_enclosures.find("./channel/item")
+        enclosure = multiple_enclosures.find("./channel/item/enclosure")
+        self.assertIsNotNone(item)
+        self.assertIsNotNone(enclosure)
+        item.append(ET.fromstring(ET.tostring(enclosure)))
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.parse_appcast(ET.tostring(multiple_enclosures), "shotaro311/hover-pocket")
+
     def test_sparkle_signature_verifies_exact_downloaded_bytes(self):
         public_key = base64.b64encode(bytes.fromhex(
             "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"
@@ -143,6 +180,50 @@ class ReleaseReadbackTests(unittest.TestCase):
             verifier, release_value, feed, manifest, checksums, "beta"
         )
         self.assertEqual((version, signing), ("1.2.3", "unsigned"))
+
+    def test_windows_beta_rejects_non_nupkg_full_feed_target(self):
+        release_value, feed, manifest, checksums = self.windows_fixture()
+        feed_value = json.loads(feed)
+        wrong_name = "HoverPocketWin-win-Setup.exe"
+        wrong_bytes = b"setup"
+        package = feed_value["Assets"][0]
+        package["FileName"] = wrong_name
+        package["SHA1"] = hashlib.sha1(wrong_bytes).hexdigest().upper()
+        package["SHA256"] = MODULE.sha256(wrong_bytes).upper()
+        package["Size"] = len(wrong_bytes)
+
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.validate_windows(
+                MODULE.Verifier(),
+                release_value,
+                json.dumps(feed_value, separators=(",", ":")).encode(),
+                manifest,
+                checksums,
+                "beta",
+            )
+
+    def test_windows_beta_requires_canonical_download_asset_names(self):
+        release_value, feed, manifest, checksums = self.windows_fixture()
+        renamed = {
+            MODULE.WINDOWS_SETUP_ASSET: "Old-Setup.exe",
+            MODULE.WINDOWS_PORTABLE_ASSET: "Old-Portable.zip",
+        }
+        for asset in release_value["assets"]:
+            if asset["name"] in renamed:
+                asset["name"] = renamed[asset["name"]]
+        checksum_text = checksums.decode("ascii")
+        for canonical, stale in renamed.items():
+            checksum_text = checksum_text.replace(canonical, stale)
+
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.validate_windows(
+                MODULE.Verifier(),
+                release_value,
+                feed,
+                manifest,
+                checksum_text.encode("ascii"),
+                "beta",
+            )
 
     def test_windows_formal_rejects_unsigned_release(self):
         release_value, feed, manifest, checksums = self.windows_fixture()
@@ -196,6 +277,76 @@ class ReleaseReadbackTests(unittest.TestCase):
         verifier = MODULE.Verifier()
         MODULE.require_windows_downloads(verifier, release_value, checksums, feed, downloads)
         self.assertIn("windows.feed_sha1", verifier.checks)
+        snapshot = MODULE.build_windows_asset_snapshot("win-v1.2.3", downloads)
+        self.assertEqual(snapshot["releaseTag"], "win-v1.2.3")
+        self.assertEqual(
+            [item["name"] for item in snapshot["assets"]],
+            sorted(downloads),
+        )
+
+        mac_snapshot = MODULE.build_macos_asset_snapshot(
+            "v1.2.3-456",
+            "macos-latest",
+            MODULE.DownloadedAsset(
+                name="HoverPocket-1.2.3-456.zip",
+                path=pathlib.Path("HoverPocket-1.2.3-456.zip"),
+                size=17,
+                sha256="a" * 64,
+                sha1="",
+            ),
+            MODULE.DownloadedAsset(
+                name="HoverPocket-macOS-app.zip",
+                path=pathlib.Path("feed/HoverPocket-macOS-app.zip"),
+                size=17,
+                sha256="a" * 64,
+                sha1="",
+            ),
+            MODULE.DownloadedAsset(
+                name="HoverPocket-macOS-app.zip",
+                path=pathlib.Path("versioned/HoverPocket-macOS-app.zip"),
+                size=17,
+                sha256="a" * 64,
+                sha1="",
+            ),
+            MODULE.DownloadedAsset(
+                name="appcast.xml",
+                path=pathlib.Path("feed/appcast.xml"),
+                size=19,
+                sha256="b" * 64,
+                sha1="",
+            ),
+            MODULE.DownloadedAsset(
+                name="appcast.xml",
+                path=pathlib.Path("versioned/appcast.xml"),
+                size=19,
+                sha256="b" * 64,
+                sha1="",
+            ),
+            MODULE.DownloadedAsset(
+                name="HoverPocket-1.2.3-456.zip.sha256",
+                path=pathlib.Path("versioned/HoverPocket-1.2.3-456.zip.sha256"),
+                size=21,
+                sha256="c" * 64,
+                sha1="",
+            ),
+        )
+        self.assertEqual(mac_snapshot["versionedReleaseTag"], "v1.2.3-456")
+        self.assertEqual(mac_snapshot["feedReleaseTag"], "macos-latest")
+        self.assertEqual(
+            [asset["role"] for asset in mac_snapshot["assets"]],
+            [
+                "versionedSparkle",
+                "feedManual",
+                "versionedManual",
+                "feedAppcast",
+                "versionedAppcast",
+                "versionedChecksum",
+            ],
+        )
+        self.assertEqual(
+            [asset["sha256"] for asset in mac_snapshot["assets"]],
+            ["a" * 64, "a" * 64, "a" * 64, "b" * 64, "b" * 64, "c" * 64],
+        )
 
         downloads[package_name] = MODULE.DownloadedAsset(
             name=package_name,
@@ -209,16 +360,182 @@ class ReleaseReadbackTests(unittest.TestCase):
                 MODULE.Verifier(), release_value, checksums, feed, downloads
             )
 
+    def test_macos_download_readback_requires_both_manual_zip_copies(self):
+        appcast_data, checksum, feed_release, version_release = self.mac_fixture()
+        appcast = MODULE.parse_appcast(appcast_data, "shotaro311/hover-pocket")
+        zip_data = b"signed-notarized-app"
+
+        def downloaded(name):
+            return MODULE.DownloadedAsset(
+                name=name,
+                path=pathlib.Path(name),
+                size=len(zip_data),
+                sha256=MODULE.sha256(zip_data),
+                sha1=hashlib.sha1(zip_data).hexdigest(),
+            )
+
+        version_zip = downloaded(appcast.asset_name)
+        stable_manual_zip = downloaded("HoverPocket-macOS-app.zip")
+        version_manual_zip = downloaded("HoverPocket-macOS-app.zip")
+        verifier = MODULE.Verifier()
+        MODULE.require_macos_downloads(
+            verifier,
+            feed_release,
+            version_release,
+            appcast,
+            checksum,
+            version_zip,
+            stable_manual_zip,
+            version_manual_zip,
+        )
+        self.assertIn("macos.download.version_manual_zip.sha256", verifier.checks)
+        self.assertIn("macos.download.version_manual_zip_parity", verifier.checks)
+
+        mismatched_version_manual = MODULE.DownloadedAsset(
+            name="HoverPocket-macOS-app.zip",
+            path=pathlib.Path("HoverPocket-macOS-app.zip"),
+            size=len(zip_data),
+            sha256="0" * 64,
+            sha1=hashlib.sha1(zip_data).hexdigest(),
+        )
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.require_macos_downloads(
+                MODULE.Verifier(),
+                feed_release,
+                version_release,
+                appcast,
+                checksum,
+                version_zip,
+                stable_manual_zip,
+                mismatched_version_manual,
+            )
+
     def test_windows_release_discovery_uses_numeric_version_and_ignores_drafts(self):
         releases = [
-            {"tag_name": "v9.0.0", "draft": False},
-            {"tag_name": "win-v0.2.9", "draft": False},
-            {"tag_name": "win-v0.2.10", "draft": False},
-            {"tag_name": "win-v9.0.0", "draft": True},
+            {"tag_name": "v9.0.0", "draft": False, "prerelease": False},
+            {"tag_name": "win-v0.2.9", "draft": False, "prerelease": False},
+            {"tag_name": "win-v0.2.10", "draft": False, "prerelease": False},
+            {"tag_name": "win-v8.0.0", "draft": False, "prerelease": True},
+            {"tag_name": "win-v9.0.0", "draft": True, "prerelease": False},
         ]
         reader = MODULE.GitHubReader("shotaro311/hover-pocket")
         reader.bytes = lambda _url: json.dumps(releases).encode()
         self.assertEqual(reader.latest_windows_release()["tag_name"], "win-v0.2.10")
+
+    def test_windows_release_resolution_rejects_unpublished_explicit_tag(self):
+        reader = MODULE.GitHubReader("shotaro311/hover-pocket")
+        reader.release = lambda _tag: {
+            "tag_name": "win-v1.2.3",
+            "draft": False,
+            "prerelease": True,
+        }
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.resolve_windows_release(reader, "win-v1.2.3")
+
+    def test_workflow_pins_one_windows_tag_for_all_readbacks(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        pinned = "WINDOWS_TAG: ${{ needs.resolve-windows-release.outputs.windows_tag }}"
+        self.assertEqual(workflow.count(pinned), 3)
+        self.assertIn("needs: [resolve-windows-release]", workflow)
+        self.assertNotIn("WINDOWS_TAG: ${{ inputs.windows_tag }}", workflow)
+        upload_artifact_sha = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+        self.assertEqual(workflow.count(f"actions/upload-artifact@{upload_artifact_sha}"), 4)
+        self.assertIn("- name: Verify published release surfaces\n        shell: bash", workflow)
+
+    def test_macos_workflow_verifies_the_public_app_with_gatekeeper(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        script = MACOS_READBACK_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("macos-gatekeeper-readback:", workflow)
+        self.assertEqual(workflow.count('"script/verify_published_macos.sh"'), 2)
+        self.assertIn("runs-on: macos-15", workflow)
+        self.assertIn("needs: [published-readback]", workflow)
+        self.assertIn("published-release-readback/release-readback-report.json", workflow)
+        self.assertIn("codesign --verify --deep --strict", script)
+        self.assertIn("xcrun stapler validate", script)
+        self.assertIn("spctl --assess --type execute", script)
+        self.assertIn("CFBundleIdentifier", script)
+        self.assertIn("CFBundleShortVersionString", script)
+        self.assertIn("CFBundleVersion", script)
+        self.assertIn("SUFeedURL", script)
+        self.assertIn("SUPublicEDKey", script)
+        self.assertIn('EXPECTED_TEAM_IDENTIFIER="N7VVPW44ZA"', script)
+        self.assertIn("TeamIdentifier", script)
+        self.assertIn('"feedAppcast"', script)
+        self.assertIn('"versionedAppcast"', script)
+        self.assertIn('"versionedChecksum"', script)
+        self.assertIn('"appcastParity": "byte-identical"', script)
+        self.assertIn("macos-gatekeeper-readback-report.json", script)
+
+    def test_formal_workflow_pins_one_verified_asset_snapshot(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        script = AUTHENTICODE_SCRIPT.read_text(encoding="utf-8")
+        download_artifact_sha = "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+        self.assertIn("needs: [resolve-windows-release, published-readback]", workflow)
+        self.assertIn(f"actions/download-artifact@{download_artifact_sha}", workflow)
+        self.assertIn("name: published-release-readback", workflow)
+        self.assertIn("-ExpectedSnapshotPath", workflow)
+        self.assertEqual(script.count("Assert-ReleaseMatchesSnapshot -Release"), 2)
+        self.assertIn('Get-ReleaseAsset -Release $release -Name "RELEASES"', script)
+        self.assertIn('Get-ReleaseAsset -Release $release -Name "assets.win.json"', script)
+        self.assertIn("Assert-DownloadedSnapshot", script)
+        self.assertIn("Assert-NupkgReleaseIdentity", script)
+        self.assertIn("[IO.Directory]::EnumerateFiles", script)
+        self.assertIn('$expectedNuspecName = "$ExpectedPackageId.nuspec"', script)
+        self.assertIn("[IO.SearchOption]::TopDirectoryOnly", script)
+        self.assertIn("Assert-ExecutableReleaseVersion", script)
+        self.assertIn("Assert-AssemblyReleaseVersion", script)
+        self.assertIn("Assert-SetupEmbedsFullPackage", script)
+        self.assertIn("Assert-PortablePayloadMatchesFullPackage", script)
+        self.assertIn('Join-Path $PortableRoot "current"', script)
+        self.assertIn('Join-Path $PackageRoot "lib/app"', script)
+        self.assertIn('"HoverPocket.Shell_ExecutionStub.exe", "Squirrel.exe"', script)
+        self.assertIn("HoverPocket.ReleaseReadback.VelopackBundleReader", script)
+        self.assertIn("0x94, 0xf0, 0xb1, 0x7b", script)
+        self.assertIn("long bundleOffset = reader.ReadInt64()", script)
+        self.assertIn("long bundleLength = reader.ReadInt64()", script)
+        self.assertIn("Get-RangeSha256 -Stream $setupStream -Offset $bundle.Offset -Length $bundle.Length", script)
+        self.assertNotIn("$setupStream.Length - $packageStream.Length", script)
+        self.assertNotIn('Expand-ZipArchiveSafely -ArchivePath $setupPath', script)
+        self.assertIn("$item.Entry.Open()", script)
+        self.assertNotIn("[IO.Compression.ZipFile]::ExtractToDirectory", script)
+        self.assertIn("[switch]$IdentityOnly", script)
+        self.assertIn("verificationMode = if ($IdentityOnly)", script)
+        self.assertIn("windows-package-identity-readback:", workflow)
+        self.assertIn("published-windows-package-identity-readback", workflow)
+        self.assertIn("-IdentityOnly", workflow)
+        self.assertIn('portablePayload = "full-package-application-byte-equivalent"', script)
+        self.assertIn("EXPECTED_WINDOWS_SIGNER_CERT_SHA256: ${{ vars.WINDOWS_SIGNER_CERT_SHA256 }}", workflow)
+        self.assertIn('-ExpectedSignerCertificateSha256 "$env:EXPECTED_WINDOWS_SIGNER_CERT_SHA256"', workflow)
+        self.assertIn("Expected Windows signer certificate SHA-256 must be configured", script)
+        self.assertIn("Get-CertificateSha256", script)
+        self.assertIn("ComputeHash($Certificate.RawData)", script)
+        self.assertIn("-cne $canonicalSignerCertificateSha256", script)
+        self.assertIn('publisherIdentity = if ($IdentityOnly) { "not-evaluated" } else { "verified" }', script)
+
+    def test_github_latest_must_remain_the_macos_release(self):
+        verifier = MODULE.Verifier()
+        MODULE.validate_cross_platform_release_policy(
+            verifier,
+            "v1.2.3-456",
+            "win-v1.2.3",
+            {"tag_name": "v1.2.3-456", "draft": False, "prerelease": False},
+        )
+        self.assertIn("cross_platform.github_latest_is_macos", verifier.checks)
+
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.validate_cross_platform_release_policy(
+                MODULE.Verifier(),
+                "v1.2.3-456",
+                "win-v1.2.4",
+                {"tag_name": "win-v1.2.4", "draft": False, "prerelease": False},
+            )
+
+        run_source = SCRIPT.read_text(encoding="utf-8").split("def run(", 1)[1]
+        downloads_index = run_source.index("verify_downloaded_releases(")
+        latest_index = run_source.index("github_latest_release = reader.latest_release()")
+        policy_index = run_source.index("validate_cross_platform_release_policy(")
+        self.assertLess(downloads_index, latest_index)
+        self.assertLess(latest_index, policy_index)
 
 
 if __name__ == "__main__":

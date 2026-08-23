@@ -4,12 +4,14 @@ on:
   push:
     paths:
       - "script/verify_release_readback.py"
+      - "script/verify_published_macos.sh"
       - "script/tests/test_verify_release_readback.py"
       - "windows/script/verify_published_authenticode.ps1"
       - ".github/workflows/release-readback-verify.yml"
   pull_request:
     paths:
       - "script/verify_release_readback.py"
+      - "script/verify_published_macos.sh"
       - "script/tests/test_verify_release_readback.py"
       - "windows/script/verify_published_authenticode.ps1"
       - ".github/workflows/release-readback-verify.yml"
@@ -52,6 +54,9 @@ jobs:
       - name: Run deterministic tests
         run: python -m unittest script/tests/test_verify_release_readback.py
 
+      - name: Verify macOS Gatekeeper readback script syntax
+        run: bash -n script/verify_published_macos.sh
+
   powershell-contract:
     name: Windows Authenticode verifier syntax
     runs-on: windows-2025
@@ -73,10 +78,39 @@ jobs:
             exit 1
           }
 
+  resolve-windows-release:
+    name: Pin one Windows release tag
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: [deterministic-unit, powershell-contract]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      windows_tag: ${{ steps.resolve.outputs.windows_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13.7"
+          check-latest: false
+
+      - name: Resolve published Windows tag once
+        id: resolve
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          WINDOWS_TAG: ${{ inputs.windows_tag || 'auto' }}
+        run: |
+          resolved_tag=$(python script/verify_release_readback.py \
+            --windows-tag "$WINDOWS_TAG" \
+            --resolve-windows-tag-only)
+          echo "windows_tag=$resolved_tag" >> "$GITHUB_OUTPUT"
+
   published-readback:
     name: Read back macOS and Windows public releases
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    needs: [deterministic-unit, powershell-contract]
+    needs: [resolve-windows-release]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -90,9 +124,10 @@ jobs:
           check-latest: false
 
       - name: Verify published release surfaces
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          WINDOWS_TAG: ${{ inputs.windows_tag || 'auto' }}
+          WINDOWS_TAG: ${{ needs.resolve-windows-release.outputs.windows_tag }}
           WINDOWS_SIGNING_GATE: ${{ inputs.windows_signing_gate || 'beta' }}
         run: |
           python script/verify_release_readback.py \
@@ -101,7 +136,7 @@ jobs:
             --json | tee release-readback-report.json
 
       - name: Upload readback report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: published-release-readback
           path: release-readback-report.json
@@ -111,26 +146,101 @@ jobs:
   formal-authenticode-readback:
     name: Read back timestamped Windows Authenticode
     if: github.event_name == 'workflow_dispatch' && inputs.windows_signing_gate == 'formal'
-    needs: [deterministic-unit, powershell-contract]
+    needs: [resolve-windows-release, published-readback]
     runs-on: windows-2025
     timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Verify public Setup and application signatures
+      - name: Download verified asset snapshot
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: published-release-readback
+          path: published-release-readback
+
+      - name: Verify public Setup, Portable, and update package signatures
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          WINDOWS_TAG: ${{ inputs.windows_tag }}
+          WINDOWS_TAG: ${{ needs.resolve-windows-release.outputs.windows_tag }}
+          EXPECTED_WINDOWS_SIGNER_CERT_SHA256: ${{ vars.WINDOWS_SIGNER_CERT_SHA256 }}
         run: |
           windows/script/verify_published_authenticode.ps1 `
-            -Tag "$env:WINDOWS_TAG" | Tee-Object -FilePath authenticode-readback-report.json
+            -Tag "$env:WINDOWS_TAG" `
+            -ExpectedSnapshotPath "published-release-readback/release-readback-report.json" `
+            -ExpectedSignerCertificateSha256 "$env:EXPECTED_WINDOWS_SIGNER_CERT_SHA256" |
+            Tee-Object -FilePath authenticode-readback-report.json
 
       - name: Upload Authenticode readback report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: published-authenticode-readback
           path: authenticode-readback-report.json
+          if-no-files-found: error
+          retention-days: 30
+
+  windows-package-identity-readback:
+    name: Read back Windows package identity
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.windows_signing_gate == 'beta')
+    needs: [resolve-windows-release, published-readback]
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download verified asset snapshot
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: published-release-readback
+          path: published-release-readback
+
+      - name: Verify public Setup, Portable, and update package identity
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          WINDOWS_TAG: ${{ needs.resolve-windows-release.outputs.windows_tag }}
+        run: |
+          windows/script/verify_published_authenticode.ps1 `
+            -Tag "$env:WINDOWS_TAG" `
+            -ExpectedSnapshotPath "published-release-readback/release-readback-report.json" `
+            -IdentityOnly |
+            Tee-Object -FilePath windows-package-identity-readback-report.json
+
+      - name: Upload Windows package identity report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: published-windows-package-identity-readback
+          path: windows-package-identity-readback-report.json
+          if-no-files-found: error
+          retention-days: 30
+
+  macos-gatekeeper-readback:
+    name: Read back macOS signature, notarization, and Gatekeeper
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: [published-readback]
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download verified macOS asset snapshot
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: published-release-readback
+          path: published-release-readback
+
+      - name: Verify the downloaded public app
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: script/verify_published_macos.sh published-release-readback/release-readback-report.json
+
+      - name: Upload macOS Gatekeeper readback report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: published-macos-gatekeeper-readback
+          path: macos-gatekeeper-readback-report.json
           if-no-files-found: error
           retention-days: 30

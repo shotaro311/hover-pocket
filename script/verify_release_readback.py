@@ -2,7 +2,9 @@
 """Verify HoverPocket's published macOS and Windows release surfaces.
 
 The verifier intentionally reads the two operating-system release channels
-independently. It never uses GitHub's generic ``latest`` endpoint.
+independently. GitHub's generic ``latest`` endpoint is read only to assert that
+Windows publication did not replace the macOS release; it is never used for
+release selection.
 """
 
 from __future__ import annotations
@@ -36,6 +38,8 @@ WINDOWS_REQUIRED_STATIC_ASSETS = {
     "releases.win.json",
     "SHA256SUMS-win.txt",
 }
+WINDOWS_SETUP_ASSET = "HoverPocketWin-win-Setup.exe"
+WINDOWS_PORTABLE_ASSET = "HoverPocketWin-win-Portable.zip"
 WINDOWS_TAG_RE = re.compile(r"^win-v(\d+)\.(\d+)\.(\d+)$")
 MAX_RELEASE_ASSET_BYTES = 512 * 1024 * 1024
 
@@ -138,10 +142,19 @@ def parse_appcast(data: bytes, repository: str) -> MacAppcast:
         root = ET.fromstring(data)
     except ET.ParseError as error:
         raise VerificationError("macos.appcast: invalid XML") from error
-    item = root.find("./channel/item")
-    enclosure = root.find("./channel/item/enclosure")
-    if item is None or enclosure is None:
-        raise VerificationError("macos.appcast: missing enclosure")
+    if root.tag != "rss":
+        raise VerificationError("macos.appcast: expected rss root")
+    channels = root.findall("channel")
+    if len(channels) != 1:
+        raise VerificationError("macos.appcast: expected exactly one channel")
+    items = channels[0].findall("item")
+    if len(items) != 1:
+        raise VerificationError("macos.appcast: expected exactly one item")
+    item = items[0]
+    enclosures = item.findall("enclosure")
+    if len(enclosures) != 1:
+        raise VerificationError("macos.appcast: expected exactly one enclosure")
+    enclosure = enclosures[0]
     asset_url = enclosure.get("url") or ""
     parsed = urllib.parse.urlparse(asset_url)
     expected_prefix = f"/{repository}/releases/download/"
@@ -342,6 +355,11 @@ def validate_windows(
     tag = release.get("tag_name")
     if not isinstance(tag, str) or not tag.startswith("win-v"):
         raise VerificationError("windows.release_tag: expected win-v... tag")
+    verifier.require(
+        release.get("draft") is not True and release.get("prerelease") is not True,
+        "windows.published_release",
+        "Windows client channel excludes draft and prerelease releases",
+    )
     assets = asset_map(release)
     verifier.require(WINDOWS_REQUIRED_STATIC_ASSETS.issubset(assets), "windows.static_assets", "release metadata is incomplete")
     checksums = parse_sha256_sums(checksum_data)
@@ -375,6 +393,11 @@ def validate_windows(
     verifier.require(package.get("Version") == version, "windows.feed_version", "feed and manifest versions differ")
     verifier.require(package.get("PackageId") == "HoverPocketWin", "windows.feed_package", "feed package ID differs")
     verifier.require(package.get("Type") == "Full", "windows.feed_type", "feed is not a full package")
+    verifier.require(
+        isinstance(package_name, str) and package_name == f"HoverPocketWin-{version}-full.nupkg",
+        "windows.feed_full_package_name",
+        "feed target is not the versioned full update package",
+    )
     verifier.require(isinstance(package_name, str) and package_name in assets, "windows.feed_asset", "feed package asset is missing")
     verifier.require(
         isinstance(package.get("SHA256"), str)
@@ -388,8 +411,8 @@ def validate_windows(
         "windows.feed_sha1_format",
         "feed package SHA-1 is missing or malformed",
     )
-    verifier.require(any(name.endswith("-Setup.exe") for name in assets), "windows.setup_asset", "Setup executable is missing")
-    verifier.require(any(name.endswith("-Portable.zip") for name in assets), "windows.portable_asset", "Portable ZIP is missing")
+    verifier.require(WINDOWS_SETUP_ASSET in assets, "windows.setup_asset", "canonical Setup executable is missing")
+    verifier.require(WINDOWS_PORTABLE_ASSET in assets, "windows.portable_asset", "canonical Portable ZIP is missing")
     authenticode = manifest.get("authenticode")
     if signing_gate == "formal":
         verifier.require(
@@ -452,6 +475,9 @@ class GitHubReader:
         encoded_tag = urllib.parse.quote(tag, safe="")
         return self.json(f"https://api.github.com/repos/{self.repository}/releases/tags/{encoded_tag}")
 
+    def latest_release(self) -> dict[str, Any]:
+        return self.json(f"https://api.github.com/repos/{self.repository}/releases/latest")
+
     def latest_windows_release(self) -> dict[str, Any]:
         candidates: list[tuple[tuple[int, int, int], dict[str, Any]]] = []
         for page in range(1, 11):
@@ -463,7 +489,11 @@ class GitHubReader:
             if not isinstance(value, list):
                 raise VerificationError("windows.release_discovery: expected an array")
             for item in value:
-                if not isinstance(item, dict) or item.get("draft") is True:
+                if (
+                    not isinstance(item, dict)
+                    or item.get("draft") is True
+                    or item.get("prerelease") is True
+                ):
                     continue
                 tag = item.get("tag_name")
                 match = WINDOWS_TAG_RE.fullmatch(tag) if isinstance(tag, str) else None
@@ -536,6 +566,25 @@ class GitHubReader:
         )
 
 
+def resolve_windows_release(
+    reader: GitHubReader,
+    requested_tag: str,
+) -> dict[str, Any]:
+    if requested_tag == "auto":
+        release = reader.latest_windows_release()
+    else:
+        if WINDOWS_TAG_RE.fullmatch(requested_tag) is None:
+            raise VerificationError("windows.release_tag: expected win-vMAJOR.MINOR.PATCH")
+        release = reader.release(requested_tag)
+
+    tag = release.get("tag_name")
+    if not isinstance(tag, str) or WINDOWS_TAG_RE.fullmatch(tag) is None:
+        raise VerificationError("windows.release_tag: expected win-vMAJOR.MINOR.PATCH")
+    if release.get("draft") is True or release.get("prerelease") is True:
+        raise VerificationError("windows.published_release: release must be published and non-prerelease")
+    return release
+
+
 def require_download_matches_release(
     verifier: Verifier,
     release: dict[str, Any],
@@ -595,18 +644,147 @@ def require_windows_downloads(
     )
 
 
+def build_windows_asset_snapshot(
+    release_tag: str,
+    downloads: dict[str, DownloadedAsset],
+) -> dict[str, Any]:
+    return {
+        "releaseTag": release_tag,
+        "assets": [
+            {
+                "name": name,
+                "size": downloads[name].size,
+                "sha256": downloads[name].sha256,
+            }
+            for name in sorted(downloads)
+        ],
+    }
+
+
+def build_macos_asset_snapshot(
+    versioned_release_tag: str,
+    feed_release_tag: str,
+    versioned_sparkle: DownloadedAsset,
+    feed_manual: DownloadedAsset,
+    versioned_manual: DownloadedAsset,
+    feed_appcast: DownloadedAsset,
+    versioned_appcast: DownloadedAsset,
+    versioned_checksum: DownloadedAsset,
+) -> dict[str, Any]:
+    return {
+        "versionedReleaseTag": versioned_release_tag,
+        "feedReleaseTag": feed_release_tag,
+        "assets": [
+            {
+                "role": role,
+                "releaseTag": release_tag,
+                "name": download.name,
+                "size": download.size,
+                "sha256": download.sha256,
+            }
+            for role, release_tag, download in (
+                ("versionedSparkle", versioned_release_tag, versioned_sparkle),
+                ("feedManual", feed_release_tag, feed_manual),
+                ("versionedManual", versioned_release_tag, versioned_manual),
+                ("feedAppcast", feed_release_tag, feed_appcast),
+                ("versionedAppcast", versioned_release_tag, versioned_appcast),
+                ("versionedChecksum", versioned_release_tag, versioned_checksum),
+            )
+        ],
+    }
+
+
+def require_macos_downloads(
+    verifier: Verifier,
+    mac_feed_release: dict[str, Any],
+    mac_version_release: dict[str, Any],
+    appcast: MacAppcast,
+    checksum_data: bytes,
+    version_zip: DownloadedAsset,
+    stable_manual_zip: DownloadedAsset,
+    version_manual_zip: DownloadedAsset,
+) -> None:
+    require_download_matches_release(
+        verifier,
+        mac_version_release,
+        version_zip,
+        "macos.download.version_zip",
+    )
+    require_download_matches_release(
+        verifier,
+        mac_feed_release,
+        stable_manual_zip,
+        "macos.download.stable_manual_zip",
+    )
+    require_download_matches_release(
+        verifier,
+        mac_version_release,
+        version_manual_zip,
+        "macos.download.version_manual_zip",
+    )
+    mac_checksums = parse_sha256_sums(checksum_data, allow_path_basename=True)
+    verifier.require(
+        version_zip.sha256 == mac_checksums.get(appcast.asset_name),
+        "macos.download.zip_checksum",
+        "downloaded ZIP differs from checksum file",
+    )
+    verifier.require(
+        version_zip.size == appcast.asset_length,
+        "macos.download.zip_length",
+        "downloaded ZIP length differs from appcast",
+    )
+    verifier.require(
+        (stable_manual_zip.sha256, stable_manual_zip.size)
+        == (version_zip.sha256, version_zip.size),
+        "macos.download.stable_manual_zip_parity",
+        "stable manual ZIP differs from versioned Sparkle ZIP",
+    )
+    verifier.require(
+        (version_manual_zip.sha256, version_manual_zip.size)
+        == (version_zip.sha256, version_zip.size),
+        "macos.download.version_manual_zip_parity",
+        "versioned manual ZIP differs from versioned Sparkle ZIP",
+    )
+
+
+def validate_cross_platform_release_policy(
+    verifier: Verifier,
+    macos_release_tag: str,
+    windows_release_tag: str,
+    github_latest_release: dict[str, Any],
+) -> None:
+    verifier.require(
+        macos_release_tag != windows_release_tag,
+        "cross_platform.release_tags_separate",
+        "macOS and Windows release tags must be separate",
+    )
+    verifier.require(
+        github_latest_release.get("draft") is not True
+        and github_latest_release.get("prerelease") is not True,
+        "cross_platform.github_latest_published",
+        "GitHub Latest must be a published non-prerelease",
+    )
+    verifier.require(
+        github_latest_release.get("tag_name") == macos_release_tag,
+        "cross_platform.github_latest_is_macos",
+        "Windows release replaced the expected macOS GitHub Latest release",
+    )
+
+
 def verify_downloaded_releases(
     verifier: Verifier,
     reader: GitHubReader,
     mac_feed_release: dict[str, Any],
     mac_version_release: dict[str, Any],
     appcast: MacAppcast,
+    mac_feed_appcast_data: bytes,
+    mac_version_appcast_data: bytes,
     mac_checksum_data: bytes,
     windows_release: dict[str, Any],
     windows_feed_data: bytes,
     windows_checksum_data: bytes,
     sparkle_public_key: str,
-) -> None:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     with tempfile.TemporaryDirectory(prefix="hoverpocket-release-readback-") as directory:
         root = pathlib.Path(directory)
         mac_version_zip = reader.download_asset(
@@ -619,34 +797,56 @@ def verify_downloaded_releases(
             "HoverPocket-macOS-app.zip",
             root / "mac-feed",
         )
-        require_download_matches_release(
-            verifier,
+        mac_version_manual_zip = reader.download_asset(
             mac_version_release,
-            mac_version_zip,
-            "macos.download.version_zip",
+            "HoverPocket-macOS-app.zip",
+            root / "mac-version-manual",
         )
-        require_download_matches_release(
+        mac_feed_appcast = reader.download_asset(
+            mac_feed_release,
+            "appcast.xml",
+            root / "mac-feed-appcast",
+        )
+        mac_version_appcast = reader.download_asset(
+            mac_version_release,
+            "appcast.xml",
+            root / "mac-version-appcast",
+        )
+        mac_version_checksum = reader.download_asset(
+            mac_version_release,
+            f"{appcast.asset_name}.sha256",
+            root / "mac-version-checksum",
+        )
+        require_macos_downloads(
             verifier,
             mac_feed_release,
+            mac_version_release,
+            appcast,
+            mac_checksum_data,
+            mac_version_zip,
             mac_manual_zip,
-            "macos.download.manual_zip",
+            mac_version_manual_zip,
         )
-        mac_checksums = parse_sha256_sums(mac_checksum_data, allow_path_basename=True)
+        for release, download, label in (
+            (mac_feed_release, mac_feed_appcast, "macos.download.feed_appcast"),
+            (mac_version_release, mac_version_appcast, "macos.download.version_appcast"),
+            (mac_version_release, mac_version_checksum, "macos.download.version_checksum"),
+        ):
+            require_download_matches_release(verifier, release, download, label)
         verifier.require(
-            mac_version_zip.sha256 == mac_checksums.get(appcast.asset_name),
-            "macos.download.zip_checksum",
-            "downloaded ZIP differs from checksum file",
+            mac_feed_appcast.path.read_bytes() == mac_feed_appcast_data,
+            "macos.download.feed_appcast_stable",
+            "stable appcast changed during readback",
         )
         verifier.require(
-            mac_version_zip.size == appcast.asset_length,
-            "macos.download.zip_length",
-            "downloaded ZIP length differs from appcast",
+            mac_version_appcast.path.read_bytes() == mac_version_appcast_data,
+            "macos.download.version_appcast_stable",
+            "versioned appcast changed during readback",
         )
         verifier.require(
-            (mac_manual_zip.sha256, mac_manual_zip.size)
-            == (mac_version_zip.sha256, mac_version_zip.size),
-            "macos.download.manual_zip_parity",
-            "stable manual ZIP differs from versioned ZIP",
+            mac_version_checksum.path.read_bytes() == mac_checksum_data,
+            "macos.download.version_checksum_stable",
+            "versioned checksum changed during readback",
         )
         verify_ed25519_signature(
             sparkle_public_key,
@@ -665,6 +865,26 @@ def verify_downloaded_releases(
             windows_checksum_data,
             windows_feed_data,
             windows_downloads,
+        )
+        release_tag = windows_release.get("tag_name")
+        if not isinstance(release_tag, str):
+            raise VerificationError("windows.release_tag: missing tag")
+        mac_feed_tag = mac_feed_release.get("tag_name")
+        mac_version_tag = mac_version_release.get("tag_name")
+        if not isinstance(mac_feed_tag, str) or not isinstance(mac_version_tag, str):
+            raise VerificationError("macos.release_tag: missing tag")
+        return (
+            build_macos_asset_snapshot(
+                mac_version_tag,
+                mac_feed_tag,
+                mac_version_zip,
+                mac_manual_zip,
+                mac_version_manual_zip,
+                mac_feed_appcast,
+                mac_version_appcast,
+                mac_version_checksum,
+            ),
+            build_windows_asset_snapshot(release_tag, windows_downloads),
         )
 
 
@@ -689,11 +909,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         mac_checksum,
     )
 
-    windows_release = (
-        reader.latest_windows_release()
-        if args.windows_tag == "auto"
-        else reader.release(args.windows_tag)
-    )
+    windows_release = resolve_windows_release(reader, args.windows_tag)
     windows_tag = windows_release.get("tag_name")
     if not isinstance(windows_tag, str):
         raise VerificationError("windows.release_tag: missing tag")
@@ -708,22 +924,26 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         windows_checksums,
         args.windows_signing_gate,
     )
-    verify_downloaded_releases(
+    macos_asset_snapshot, windows_asset_snapshot = verify_downloaded_releases(
         verifier,
         reader,
         mac_feed_release,
         mac_version_release,
         appcast,
+        mac_feed_appcast,
+        mac_version_appcast,
         mac_checksum,
         windows_release,
         windows_feed,
         windows_checksums,
         args.sparkle_public_key,
     )
-    verifier.require(
-        appcast.release_tag != windows_tag,
-        "cross_platform.release_tags_separate",
-        "macOS and Windows release tags must be separate",
+    github_latest_release = reader.latest_release()
+    validate_cross_platform_release_policy(
+        verifier,
+        appcast.release_tag,
+        windows_tag,
+        github_latest_release,
     )
     return {
         "status": "passed",
@@ -736,6 +956,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "asset": appcast.asset_name,
             "signature": "sparkle-ed25519-verified",
             "assetReadback": "downloaded-and-hashed",
+            "assetSnapshot": macos_asset_snapshot,
         },
         "windows": {
             "releaseTag": windows_tag,
@@ -744,6 +965,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "signingGate": args.windows_signing_gate,
             "assetReadback": "all-assets-downloaded-and-hashed",
             "authenticodeEvidence": "manifest-declared",
+            "assetSnapshot": windows_asset_snapshot,
         },
         "checks": verifier.checks,
     }
@@ -758,6 +980,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default="auto",
         help="Windows release tag, or auto to select the greatest semantic win-v... tag without using GitHub latest",
     )
+    parser.add_argument(
+        "--resolve-windows-tag-only",
+        action="store_true",
+        help="resolve and print one published Windows tag without downloading release assets",
+    )
     parser.add_argument("--windows-signing-gate", choices=("beta", "formal"), default="formal")
     parser.add_argument(
         "--sparkle-public-key",
@@ -771,6 +998,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     try:
+        if args.resolve_windows_tag_only:
+            release = resolve_windows_release(GitHubReader(args.repository), args.windows_tag)
+            print(release["tag_name"])
+            return 0
         report = run(args)
     except VerificationError as error:
         if args.json_output:
