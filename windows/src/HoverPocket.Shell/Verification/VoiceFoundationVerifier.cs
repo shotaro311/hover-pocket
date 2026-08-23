@@ -968,7 +968,7 @@ internal sealed class VoiceFoundationVerifier
             _failures.Add("delayed transcript crossed roots or a transcript revision duplicated its event ID");
         }
 
-        var filesystemPaths = new[]
+        var redactionSamples = new[]
         {
             "/tmp/private.txt",
             "/Volumes/work/secret.mov",
@@ -977,11 +977,13 @@ internal sealed class VoiceFoundationVerifier
             @"[C:\Users\alice\private]",
             "Sources/HoverPocket/App.swift",
             "Bearer sk-proj-secret",
-            "sk-proj-abcdefghijklmnopqrstuvwxyz"
+            "sk-proj-abcdefghijklmnopqrstuvwxyz",
+            """{"access_token":"abcdefghijklmnopqrstuvwxyz"}""",
+            """{"client_secret" : "abcdefghijklmnopqrstuvwxyz"}"""
         };
-        if (filesystemPaths.Any(path => VoiceTextSafety.SanitizeVisibleText(path, 200) != "[redacted]"))
+        if (redactionSamples.Any(value => VoiceTextSafety.SanitizeVisibleText(value, 200) != "[redacted]"))
         {
-            _failures.Add("filesystem path redaction was incomplete");
+            _failures.Add("visible Voice text redaction was incomplete");
         }
         var nonPathText = new[]
         {

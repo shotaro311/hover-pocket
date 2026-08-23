@@ -209,7 +209,7 @@ enum VoiceFoundationVerificationCommand {
             isFinal: true,
             timestamp: now
         )
-        let pathSamples = [
+        let redactionSamples = [
             "/tmp/private.txt",
             "/Volumes/work/secret.mov",
             #"C:\work\secret.txt"#,
@@ -217,7 +217,9 @@ enum VoiceFoundationVerificationCommand {
             #"[C:\Users\alice\private]"#,
             "Sources/HoverPocket/App.swift",
             "Bearer sk-proj-secret",
-            "sk-proj-abcdefghijklmnopqrstuvwxyz"
+            "sk-proj-abcdefghijklmnopqrstuvwxyz",
+            #"{"access_token":"abcdefghijklmnopqrstuvwxyz"}"#,
+            #"{"client_secret" : "abcdefghijklmnopqrstuvwxyz"}"#
         ]
         let bidiSamples = [
             "trusted\u{202E}detadpu",
@@ -229,7 +231,7 @@ enum VoiceFoundationVerificationCommand {
             "input/output"
         ]
         guard combining.text.unicodeScalars.count <= 1_024,
-              pathSamples.allSatisfy({ VoiceTextSafety.sanitizeVisibleText($0, limit: 200) == "[redacted]" }),
+              redactionSamples.allSatisfy({ VoiceTextSafety.sanitizeVisibleText($0, limit: 200) == "[redacted]" }),
               nonPathSamples.allSatisfy({ VoiceTextSafety.sanitizeVisibleText($0, limit: 200) == $0 }),
               bidiSamples.allSatisfy({ sample in
                   let sanitized = VoiceTextSafety.sanitizeVisibleText(sample, limit: 200)

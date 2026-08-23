@@ -170,6 +170,10 @@ internal static class VoiceTextSafety
         """(?:^|[^\p{L}\p{N}_])sk-(?:proj-|svcacct-)?[a-zA-Z0-9_-]{16,}""",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
+    private static readonly Regex JsonCredentialFieldPattern = new(
+        "\"(?:access[_-]?token|refresh[_-]?token|token|api[_-]?key|apikey|client[_-]?secret|secret)\"[\\t\\r\\n ]*:[\\t\\r\\n ]*\"[^\"\\r\\n]+\"",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
     public static string SanitizeVisibleText(string? value, int maxRunes)
     {
         if (string.IsNullOrEmpty(value) || maxRunes <= 0)
@@ -199,7 +203,8 @@ internal static class VoiceTextSafety
             || AbsolutePathPattern.IsMatch(normalized)
             || RelativePathPattern.IsMatch(normalized)
             || BearerCredentialPattern.IsMatch(normalized)
-            || OpenAiCredentialPattern.IsMatch(normalized))
+            || OpenAiCredentialPattern.IsMatch(normalized)
+            || JsonCredentialFieldPattern.IsMatch(normalized))
         {
             return "[redacted]";
         }
