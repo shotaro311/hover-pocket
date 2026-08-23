@@ -1,6 +1,9 @@
+using System.Diagnostics;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Win32.SafeHandles;
 
 namespace HoverPocket.Shell.PocketApps;
 
@@ -129,18 +132,21 @@ internal sealed class CodexCredentialBrokerServer : IDisposable
     private const string RequestPrefix = "HP-CODEX-BROKER/1 ";
     private readonly CodexCredentialBrokerLease _lease;
     private readonly NamedPipeServerStream _pipe;
+    private readonly Func<NamedPipeServerStream, bool> _peerAuthorizer;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private int _disposed;
 
     public CodexCredentialBrokerServer(
         TimeSpan lifetime,
-        Func<string> secretProvider)
+        Func<string> secretProvider,
+        Func<NamedPipeServerStream, bool>? peerAuthorizer = null)
     {
         if (lifetime <= TimeSpan.Zero || lifetime > TimeSpan.FromSeconds(60))
         {
             throw new CodexCredentialBrokerException();
         }
         _lease = new CodexCredentialBrokerLease(lifetime, secretProvider);
+        _peerAuthorizer = peerAuthorizer ?? CodexCredentialBrokerPeerIdentity.IsAuthorizedClient;
         PipeName = $"hoverpocket-codex-broker-{Guid.NewGuid():N}";
         _pipe = new NamedPipeServerStream(
             PipeName,
@@ -156,6 +162,7 @@ internal sealed class CodexCredentialBrokerServer : IDisposable
 
     public string PipeName { get; }
     public string Capability => _lease.Capability;
+    internal bool IsConsumed => _lease.IsConsumed;
     public Task Completion { get; }
 
     public void Dispose()
@@ -178,6 +185,12 @@ internal sealed class CodexCredentialBrokerServer : IDisposable
             using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(
                 _lifetimeCancellation.Token);
             requestCancellation.CancelAfter(TimeSpan.FromSeconds(2));
+            if (!_peerAuthorizer(_pipe))
+            {
+                _lease.Cancel();
+                await WriteLineAsync(_pipe, "ERR", requestCancellation.Token).ConfigureAwait(false);
+                return;
+            }
             var request = await ReadLineAsync(_pipe, 512, requestCancellation.Token).ConfigureAwait(false);
             if (request is null || !request.StartsWith(RequestPrefix, StringComparison.Ordinal))
             {
@@ -243,6 +256,45 @@ internal sealed class CodexCredentialBrokerServer : IDisposable
         var bytes = Encoding.UTF8.GetBytes(value + "\n");
         await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+}
+
+internal static class CodexCredentialBrokerPeerIdentity
+{
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetNamedPipeClientProcessId(
+        SafePipeHandle pipe,
+        out uint clientProcessId);
+
+    internal static bool IsAuthorizedClient(NamedPipeServerStream pipe)
+    {
+        try
+        {
+            if (!GetNamedPipeClientProcessId(pipe.SafePipeHandle, out var clientProcessId)
+                || clientProcessId == 0
+                || clientProcessId > int.MaxValue
+                || string.IsNullOrWhiteSpace(Environment.ProcessPath))
+            {
+                return false;
+            }
+
+            using var clientProcess = Process.GetProcessById((int)clientProcessId);
+            var clientPath = clientProcess.MainModule?.FileName;
+            if (string.IsNullOrWhiteSpace(clientPath))
+            {
+                return false;
+            }
+
+            return string.Equals(
+                Path.GetFullPath(clientPath),
+                Path.GetFullPath(Environment.ProcessPath),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
 

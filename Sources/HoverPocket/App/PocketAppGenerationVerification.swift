@@ -595,6 +595,68 @@ enum PocketAppGenerationVerification {
             } catch {
             }
 
+            let foreignPeerServer = try CodexCredentialBrokerServer(lifetime: 5) { fixtureSecret }
+            defer { foreignPeerServer.cancel() }
+            let foreignPeer = Process()
+            let foreignPeerOutput = Pipe()
+            let foreignPeerError = Pipe()
+            foreignPeer.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            foreignPeer.arguments = [
+                "-c",
+                """
+                import os, socket
+                client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                client.settimeout(2)
+                client.connect(os.environ["HOVERPOCKET_CODEX_BROKER_ENDPOINT"])
+                try:
+                    request = "HP-CODEX-BROKER/1 " + os.environ["HOVERPOCKET_CODEX_BROKER_CAPABILITY"] + "\\n"
+                    client.sendall(request.encode("utf-8"))
+                    response = client.recv(512)
+                    raise SystemExit(1 if response.startswith(b"OK ") else 0)
+                except OSError:
+                    raise SystemExit(0)
+                finally:
+                    client.close()
+                """,
+            ]
+            foreignPeer.environment = [
+                CodexCredentialBrokerHelper.endpointEnvironmentKey: foreignPeerServer.endpoint.path,
+                CodexCredentialBrokerHelper.capabilityEnvironmentKey: foreignPeerServer.capability,
+            ]
+            foreignPeer.standardOutput = foreignPeerOutput
+            foreignPeer.standardError = foreignPeerError
+            try foreignPeer.run()
+            foreignPeer.waitUntilExit()
+            let foreignPeerStdout = foreignPeerOutput.fileHandleForReading.readDataToEndOfFile()
+            let foreignPeerStderr = foreignPeerError.fileHandleForReading.readDataToEndOfFile()
+            require(
+                foreignPeer.terminationStatus == 0
+                    && foreignPeerServer.isConsumed
+                    && foreignPeerStdout.isEmpty
+                    && foreignPeerStderr.isEmpty,
+                "generation_credential_broker_foreign_peer_rejected",
+                failures: &failures
+            )
+
+            let unauthorizedPeerServer = try CodexCredentialBrokerServer(
+                lifetime: 5,
+                peerAuthorizer: { _ in false }
+            ) { fixtureSecret }
+            defer { unauthorizedPeerServer.cancel() }
+            do {
+                _ = try CodexCredentialBrokerClient.fetchSecret(
+                    endpoint: unauthorizedPeerServer.endpoint,
+                    capability: unauthorizedPeerServer.capability
+                )
+                failures.append("generation_credential_broker_unauthorized_peer")
+            } catch {
+                require(
+                    unauthorizedPeerServer.isConsumed,
+                    "generation_credential_broker_unauthorized_peer_consumed",
+                    failures: &failures
+                )
+            }
+
             let helperServer = try CodexCredentialBrokerServer(lifetime: 5) { fixtureSecret }
             defer { helperServer.cancel() }
             let helper = Process()
