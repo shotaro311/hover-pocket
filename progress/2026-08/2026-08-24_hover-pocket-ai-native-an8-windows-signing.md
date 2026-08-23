@@ -67,3 +67,11 @@
 3. formal modeで署名済みWindows release候補を生成し、ローカル3成果物readbackを通す。
 4. Windows専用tagへ`--latest=false`で公開し、formal readback workflowで公開3成果物の署名・timestamp・publisher一致を再検証する。
 5. 署名済み旧版 / 新版が揃った後、Windows install / update / rollback / re-upgrade / uninstall / reinstall transitionを実行する。
+
+## macOS release transition readback
+
+- stack exact head `b95ef1681510781a38ccbb0b95cbf51384faa594`から`Verify Release Install and Rollback Transitions`を手動実行した。macOS実行だけを有効化し、Windows実行と未署名beta許可は無効のままにした。
+- run [32664697767](https://github.com/shotaro311/hover-pocket/actions/runs/32664697767)は、macOS / Windows script contractとmacOS実transitionが成功し、Windows実transitionは指定どおりskipされた。
+- `macos-release-transition` artifactを別経路で取得し、receipt SHA-256 `7d72c7221dc7dc6ca9dcb8df1f22ee60817fab5e353f201c036ee8a25d4080ea`を固定した。
+- receiptは`status=passed`、`v0.1.0-161 -> v0.1.0-168`のinstall、upgrade、rollback、uninstall、reinstallがすべて`verified`、`userDataPreserved=true`を示した。
+- これによりmacOSの公開済み署名・公証版transition gateは完了した。Windowsは正式署名済みの旧版 / 新版が存在しないため、正式transition gateを未完了として維持する。
