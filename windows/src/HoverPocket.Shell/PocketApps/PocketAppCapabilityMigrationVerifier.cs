@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json.Nodes;
 using HoverPocket.Shell.Capabilities;
+using HoverPocket.Shell.Verification;
 
 namespace HoverPocket.Shell.PocketApps;
 
