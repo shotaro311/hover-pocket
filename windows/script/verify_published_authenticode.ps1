@@ -87,25 +87,76 @@ function Expand-ZipArchiveSafely {
     try {
         [long]$totalLength = 0
         [int]$entryCount = 0
+        $validatedEntries = [Collections.Generic.List[object]]::new()
+        $seenTargets = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($entry in $archive.Entries) {
             $entryCount++
             if ($entryCount -gt 10000) {
                 throw "Archive contains too many entries."
             }
+            $entryName = ([string]$entry.FullName).Replace('\', '/')
+            $segments = @($entryName.Split('/', [StringSplitOptions]::RemoveEmptyEntries))
+            if (
+                [string]::IsNullOrWhiteSpace($entryName) -or
+                $segments.Count -eq 0 -or
+                @($segments | Where-Object { $_ -in @('.', '..') -or $_.Contains(':') }).Count -ne 0
+            ) {
+                throw "Archive contains an unsafe entry name."
+            }
             $target = [IO.Path]::GetFullPath((Join-Path $Destination $entry.FullName))
             if (-not $target.StartsWith($destinationRoot, [StringComparison]::OrdinalIgnoreCase)) {
                 throw "Archive contains a path outside its extraction root."
             }
+            if (-not $seenTargets.Add($target)) {
+                throw "Archive contains duplicate or case-colliding entries."
+            }
             $totalLength += $entry.Length
             if ($entry.Length -gt 536870912 -or $totalLength -gt 1073741824) {
                 throw "Archive exceeds extraction limits."
+            }
+            $isDirectory = [string]::IsNullOrEmpty($entry.Name)
+            if ($isDirectory -and $entry.Length -ne 0) {
+                throw "Archive contains a malformed directory entry."
+            }
+            $validatedEntries.Add([pscustomobject]@{
+                    Entry = $entry
+                    Target = $target
+                    IsDirectory = $isDirectory
+                })
+        }
+
+        [IO.Directory]::CreateDirectory($Destination) | Out-Null
+        foreach ($item in $validatedEntries) {
+            if ($item.IsDirectory) {
+                [IO.Directory]::CreateDirectory($item.Target) | Out-Null
+                continue
+            }
+            $parent = [IO.Path]::GetDirectoryName($item.Target)
+            if ([string]::IsNullOrEmpty($parent)) {
+                throw "Archive entry has no extraction parent."
+            }
+            [IO.Directory]::CreateDirectory($parent) | Out-Null
+            $inputStream = $item.Entry.Open()
+            try {
+                $outputStream = [IO.File]::Open($item.Target, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+                try {
+                    $inputStream.CopyTo($outputStream)
+                    if ($outputStream.Length -ne $item.Entry.Length) {
+                        throw "Archive entry length changed during extraction."
+                    }
+                }
+                finally {
+                    $outputStream.Dispose()
+                }
+            }
+            finally {
+                $inputStream.Dispose()
             }
         }
     }
     finally {
         $archive.Dispose()
     }
-    [IO.Compression.ZipFile]::ExtractToDirectory($ArchivePath, $Destination)
 }
 
 function Assert-NupkgReleaseIdentity {

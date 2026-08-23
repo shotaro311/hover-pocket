@@ -432,6 +432,8 @@ class ReleaseReadbackTests(unittest.TestCase):
         self.assertIn("Assert-AssemblyReleaseVersion", script)
         self.assertIn("Assert-DirectoryPayloadMatches", script)
         self.assertIn('Expand-ZipArchiveSafely -ArchivePath $setupPath', script)
+        self.assertIn("$item.Entry.Open()", script)
+        self.assertNotIn("[IO.Compression.ZipFile]::ExtractToDirectory", script)
         self.assertIn("[switch]$IdentityOnly", script)
         self.assertIn("verificationMode = if ($IdentityOnly)", script)
         self.assertIn("windows-package-identity-readback:", workflow)
