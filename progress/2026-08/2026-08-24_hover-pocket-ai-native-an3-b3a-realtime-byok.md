@@ -30,6 +30,17 @@ Codex app-serverに正のtool allowlistがない現状でも、一般配布で�
 - transport: GPT-5.6 Sol / Node 24.19.0 / ChatGPT Pro Orchestrator Project / required-return bridge
 - dry-runでbase、source hash、Project、Node、bridgeを確認し、送信後status `running`をreadbackした。
 
+## 受入前baseline
+
+| 検証 | 結果 |
+|---|---|
+| `swift build -Xswiftc -warnings-as-errors` | 成功。初回依存buildを含め580.25秒 |
+| `python3 script/verify_voice_foundation.py` | Voice geometry / state / root scope / default-off / legacy negative / Windows origin / AN3-B2 Broker slice、42件成功 |
+| `python3 script/verify_pocket_contracts.py` | 15 schema / 71 fixture、全一致 |
+| `node --check windows/ui/js/app.js` | 成功 |
+| `node --check windows/ui/settings/settings.js` | 成功 |
+| `git diff --check b95ef168...HEAD` | 成功。差分は進捗記録だけ |
+
 ## 次の受入gate
 
 1. bridge通知をdelivery ID / state hashでclaimする。
