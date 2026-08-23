@@ -73,7 +73,7 @@
       "path": "golden/capability-registry.json",
       "kind": "capability-registry",
       "expected": "pass",
-      "expectedDigest": "sha256:6cd59a3683d65b05a4bfb441357fbc3a86b4c56303df9890ce6be5153776a944"
+      "expectedDigest": "sha256:c7d84c45feb2e68794389bc73afc3bbf609f11580ed32fd31db992ae82a8c787"
     },
     {
       "id": "golden-error-codes",
@@ -256,6 +256,16 @@
       "expectedDigest": "sha256:9e034e6f577d4fb32c3c4b1bd4f749e9584eed4592c19ab32b985562815cb185"
     },
     {
+      "id": "invalid-pocket-surface-unsupported-query-shape",
+      "path": "invalid/pocket-surface.unsupported-query-shape.json",
+      "kind": "schema-mutation",
+      "expected": "reject",
+      "schema": "pocket-surface.schema.json",
+      "errorCode": "APP_REFERENCE_INVALID",
+      "errorLocation": "$.root.children[1].items.query",
+      "expectedDigest": "sha256:23c5552eb3613e9483e3eed41e69a5a2949580a1ba2ada649ecb7e401ec337c3"
+    },
+    {
       "id": "invalid-pocket-workflow-native-authority",
       "path": "invalid/pocket-workflow.native-authority.json",
       "kind": "schema-mutation",
@@ -294,6 +304,16 @@
       "errorCode": "WORKFLOW_REFERENCE_INVALID",
       "errorLocation": "$.steps[0].use",
       "expectedDigest": "sha256:539635adb3c0f0c3839e352b8333ae2ddcf0b05b71639927e6da9e3fba3eef34"
+    },
+    {
+      "id": "invalid-pocket-workflow-unsupported-presentation",
+      "path": "invalid/pocket-workflow.unsupported-presentation.json",
+      "kind": "schema",
+      "expected": "reject",
+      "schema": "pocket-workflow.schema.json",
+      "errorCode": "WORKFLOW_REFERENCE_INVALID",
+      "errorLocation": "$.steps[0].use",
+      "expectedDigest": "sha256:f9f2b84285266c90d413b132d2dac7ab06d4ab924d2a7ea0a9ac1d6ed33d53ea"
     },
     {
       "id": "invalid-receipt-readback",
@@ -391,6 +411,48 @@
     {
       "id": "valid-capability-descriptor.calendar-events-list",
       "path": "valid/capability-descriptor.calendar-events-list.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.controls-availability-get",
+      "path": "valid/capability-descriptor.controls-availability-get.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.controls-brightness-set",
+      "path": "valid/capability-descriptor.controls-brightness-set.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.controls-media-command",
+      "path": "valid/capability-descriptor.controls-media-command.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.controls-mute-set",
+      "path": "valid/capability-descriptor.controls-mute-set.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.controls-volume-get",
+      "path": "valid/capability-descriptor.controls-volume-get.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.controls-volume-set",
+      "path": "valid/capability-descriptor.controls-volume-set.json",
       "kind": "schema",
       "expected": "pass",
       "schema": "capability-descriptor.schema.json"

@@ -5,7 +5,6 @@ using System.Text.Json;
 using HoverPocket.Shell.Capabilities;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Providers;
-using HoverPocket.Shell.Providers.AiLane;
 using HoverPocket.Shell.Providers.Calculator;
 using HoverPocket.Shell.Providers.Calendar;
 using HoverPocket.Shell.Providers.Clipboard;
@@ -15,6 +14,7 @@ using HoverPocket.Shell.Providers.Timer;
 using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Services;
 using HoverPocket.Shell.Settings;
+using HoverPocket.Shell.Voice;
 
 namespace HoverPocket.Shell.Bridge;
 
@@ -30,7 +30,6 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly UserSettingsStore _settingsStore;
     private readonly IStartupRegistrationService _startupRegistration;
     private readonly UpdaterService _updaterService;
-    private readonly AiLaneController _aiLaneController;
     private readonly CalculatorBridgeHandlers _calculatorBridgeHandlers = new();
     private readonly CalendarBridgeController _calendarBridgeController;
     private readonly ClipboardBridgeController _clipboardBridgeController;
@@ -41,13 +40,24 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly CapabilityBroker? _capabilityBroker;
     private readonly TodayFocusTextAdapter? _todayFocusTextAdapter;
     private readonly PocketAppHostController? _pocketAppHostController;
+    private readonly PocketAppActivationLease? _aiNativeExecutionLease;
     private readonly PocketAppGenerationController? _pocketAppGenerationController;
+    private readonly PocketAppRuntimeActivationRegistry? _generatedPocketApps;
+    private readonly CodexVoiceCoordinator _voiceCoordinator;
+    private readonly VoiceTimerApprovalCoordinator _voiceTimerApprovalCoordinator = new();
+    private readonly SemaphoreSlim _voiceSettingsTransitionGate = new(1, 1);
     private readonly Dictionary<BridgeDispatcher, BridgeSurface> _dispatchers = [];
+    private readonly AsyncLocal<BridgeSurface?> _requestSurface = new();
     private readonly object _previewFrameSync = new();
+    private Func<string, CancellationToken, Task<PocketAppStateTransitionLease>>? _pocketAppStateTransitionBegin;
+    private Func<PocketAppStateTransitionLease, Task>? _pocketAppStateTransitionComplete;
+    private Func<System.Windows.Window?>? _voiceApprovalOwner;
     private string _selectedProviderId;
     private MediaPreviewFrame? _pendingPreviewFrame;
     private bool _previewPostScheduled;
     private bool _panelOpen;
+    private VoiceLaneMode _resolvedVoiceLaneMode;
+    private volatile bool _voiceRuntimeActive;
     private bool _disposed;
 
     public PanelBridgeController(
@@ -55,17 +65,16 @@ internal sealed class PanelBridgeController : IDisposable
         UserSettingsStore settingsStore,
         UserSettings settings,
         IStartupRegistrationService? startupRegistration = null,
-        AiLaneController? aiLaneController = null,
-        UpdaterService? updaterService = null)
+        object? aiLaneController = null,
+        UpdaterService? updaterService = null,
+        CodexVoiceCoordinator? voiceCoordinator = null)
     {
         _providerRegistry = providerRegistry;
         _settingsStore = settingsStore;
         _startupRegistration = startupRegistration ?? new RunKeyStartupRegistrationService();
         _updaterService = updaterService ?? new UpdaterService();
         _calendarBridgeController = new CalendarBridgeController();
-        _aiLaneController = aiLaneController ?? new AiLaneController(
-            new AiLaneAuditLog(settingsStore.RootDirectory),
-            new CalendarAiLaneConnector(_calendarBridgeController.Store));
+        _ = aiLaneController; // Compatibility-only: the legacy AI command lane is intentionally not mounted.
         var stickyStore = new StickyNotesStore(Path.Combine(settingsStore.RootDirectory, "sticky"));
         var timerStore = new TimerStore(Path.Combine(settingsStore.RootDirectory, "timer"));
         _stickyBridgeController = new StickyBridgeController(stickyStore);
@@ -73,20 +82,53 @@ internal sealed class PanelBridgeController : IDisposable
         _capabilityHandlers = ProviderCapabilityCompositionRoot.Create(
             new GoogleCalendarCapabilityDataSource(_calendarBridgeController.Store),
             timerStore,
-            stickyStore);
+            stickyStore,
+            new LiveControlsCapabilityDataSource(_controlsBridgeController));
         _timerBridgeHandlers.AlertFired += OnTimerAlertFired;
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
-        CurrentSettings = UserSettingsStore.Normalize(settings, providerRegistry.ProviderIds);
+        CurrentSettings = UserSettingsStore.NormalizeForBootstrap(settings, providerRegistry.ProviderIds);
+        try
+        {
+            var brokerRoot = Path.Combine(settingsStore.RootDirectory, "CapabilityBroker");
+            _capabilityBroker = new CapabilityBroker(
+                new CapabilityRegistry(_capabilityHandlers),
+                new CapabilityBrokerLedger(brokerRoot),
+                new CapabilityBrokerAuditLog(brokerRoot),
+                approvalPresentationResolver: new HostCapabilityApprovalPresentationResolver(stickyStore));
+            _todayFocusTextAdapter = new TodayFocusTextAdapter(_capabilityBroker);
+        }
+        catch (Exception ex) when (ex is CapabilityBrokerException
+            or IOException
+            or UnauthorizedAccessException)
+        {
+            _capabilityBroker = null;
+            _todayFocusTextAdapter = null;
+        }
+        var voiceTools = _capabilityBroker is null
+            ? null
+            : new CodexVoiceCapabilityRuntime(
+                _capabilityBroker,
+                RequestVoiceTimerApprovalAsync,
+                () => CurrentSettings.VoiceCalendarAccessGranted,
+                CapabilityTimeZoneId);
+        _voiceCoordinator = voiceCoordinator ?? CodexVoiceRuntimeComposition.Create(
+            CurrentSettings.VoiceEnabled,
+            voiceTools);
+        _voiceRuntimeActive = _voiceCoordinator.Snapshot.Availability != CodexVoiceAvailability.Disabled;
+        _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(CurrentSettings);
+        _voiceCoordinator.SnapshotChanged += OnVoiceSnapshotChanged;
+        _voiceCoordinator.TransportSignal += OnVoiceTransportSignal;
+        _aiNativeExecutionLease = CurrentSettings.AiNativeEnabled
+            ? new PocketAppActivationLease()
+            : null;
         if (CurrentSettings.AiNativeEnabled)
         {
             try
             {
-                var brokerRoot = Path.Combine(settingsStore.RootDirectory, "CapabilityBroker");
-                _capabilityBroker = new CapabilityBroker(
-                    new CapabilityRegistry(_capabilityHandlers),
-                    new CapabilityBrokerLedger(brokerRoot),
-                    new CapabilityBrokerAuditLog(brokerRoot));
-                _todayFocusTextAdapter = new TodayFocusTextAdapter(_capabilityBroker);
+                if (_capabilityBroker is null)
+                {
+                    throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "broker");
+                }
                 var packageRoot = Path.Combine(
                     AppContext.BaseDirectory,
                     "PocketApps",
@@ -94,7 +136,7 @@ internal sealed class PanelBridgeController : IDisposable
                 var package = new PocketAppPackageRuntime().Load(packageRoot);
                 var userStateStore = new PocketAppUserStateStore(
                     package.Manifest.Id,
-                    package.StatePropertyNames,
+                    package.StateProperties,
                     Path.Combine(settingsStore.RootDirectory, "PocketApps", "UserData"));
                 _pocketAppHostController = new PocketAppHostController(
                     new PocketAppExecutionRuntime(
@@ -104,7 +146,8 @@ internal sealed class PanelBridgeController : IDisposable
                         new HashSet<string>(
                             ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"],
                             StringComparer.Ordinal),
-                        userStateStore: userStateStore),
+                        userStateStore: userStateStore,
+                        activationLease: _aiNativeExecutionLease),
                     () => CurrentSettings);
             }
             catch (Exception ex) when (ex is CapabilityBrokerException
@@ -113,17 +156,27 @@ internal sealed class PanelBridgeController : IDisposable
                 or IOException
                 or UnauthorizedAccessException)
             {
-                _capabilityBroker = null;
-                _todayFocusTextAdapter = null;
                 _pocketAppHostController = null;
             }
         }
         if (CurrentSettings.AiNativeEnabled)
         {
+            PocketAppRuntimeActivationRegistry? activationRegistry = null;
             try
             {
                 var pocketAppsRoot = Path.Combine(settingsStore.RootDirectory, "PocketApps");
+                var generatedHostRoot = Path.Combine(pocketAppsRoot, "GeneratedHost");
                 var generationRoot = Path.Combine(pocketAppsRoot, "Generation");
+                if (_capabilityBroker is not null)
+                {
+                    activationRegistry = new PocketAppRuntimeActivationRegistry(
+                        generatedHostRoot,
+                        Path.Combine(pocketAppsRoot, "UserData"),
+                        _capabilityBroker,
+                        "local-user",
+                        () => CurrentSettings);
+                    _ = activationRegistry.RestoreEnabledApps();
+                }
                 IPocketAppGenerationAdapter? generator = null;
                 if (CodexPocketAppGenerationAdapter.ResolveExecutable() is { } executable)
                 {
@@ -134,25 +187,33 @@ internal sealed class PanelBridgeController : IDisposable
                 try
                 {
                     _pocketAppGenerationController = new PocketAppGenerationController(
-                        Path.Combine(pocketAppsRoot, "GeneratedHost"),
+                        generatedHostRoot,
                         Path.Combine(pocketAppsRoot, "UserData"),
                         Path.Combine(generationRoot, "Drafts"),
-                        generator);
+                        generator,
+                        runtimeActivationReadback: receipt => activationRegistry?.Synchronize(receipt)
+                            ?? throw new PocketAppRuntimeActivationException("RUNTIME_ACTIVATION_UNAVAILABLE"),
+                        postRefreshHook: OnGeneratedPocketAppsRefreshed);
+                    _generatedPocketApps = activationRegistry;
                 }
                 catch
                 {
                     if (generator is IDisposable disposable) { disposable.Dispose(); }
+                    activationRegistry?.Dispose();
                     throw;
                 }
             }
             catch (Exception ex) when (ex is PocketAppGenerationException
                 or PocketAppLifecycleException
+                or PocketAppRuntimeActivationException
                 or IOException
                 or UnauthorizedAccessException)
             {
                 _pocketAppGenerationController = null;
+                _generatedPocketApps = null;
             }
         }
+        CurrentSettings = NormalizeSettings(CurrentSettings);
         _clipboardBridgeController = new ClipboardBridgeController(
             new ClipboardHistoryStore(Path.Combine(settingsStore.RootDirectory, "clipboard")),
             new ClipboardNativeListener(System.Windows.Application.Current?.Dispatcher ?? System.Windows.Threading.Dispatcher.CurrentDispatcher),
@@ -166,6 +227,10 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.PreviewStateChanged += OnControlsPreviewStateChanged;
         _controlsBridgeController.PreviewFrameArrived += OnControlsPreviewFrameArrived;
         _controlsBridgeController.MediaSourceOpened += OnControlsMediaSourceOpened;
+        if (CurrentSettings.VoiceEnabled)
+        {
+            _ = _voiceCoordinator.InitializeAsync();
+        }
     }
 
     public event EventHandler<UserSettings>? SettingsChanged;
@@ -190,50 +255,111 @@ internal sealed class PanelBridgeController : IDisposable
 
     public TodayFocusTextAdapter? TodayFocusTextAdapter => _todayFocusTextAdapter;
 
+    public VoiceLaneMode ResolvedVoiceLaneMode => _resolvedVoiceLaneMode;
+
+    public VoiceLaneMode PreferredRuntimeVoiceLaneMode => !_voiceRuntimeActive
+        ? VoiceLaneMode.Disabled
+        : CurrentSettings.VoiceLaneLayout == VoiceLaneLayoutPreference.Expanded
+            ? VoiceLaneMode.Expanded
+            : VoiceLaneMode.Compact;
+
+    public CodexVoiceSnapshot VoiceSnapshot => _voiceCoordinator.Snapshot;
+
     public IDisposable Attach(
         BridgeDispatcher dispatcher,
         BridgeSurface surface = BridgeSurface.Panel,
         Func<System.Windows.Window?>? approvalOwner = null,
-        Func<bool>? aiNativeEnableDecision = null)
+        Func<bool>? aiNativeEnableDecision = null,
+        Func<bool>? voiceCalendarAccessDecision = null,
+        Func<bool>? voiceMicrophoneGesture = null)
     {
         _dispatchers[dispatcher] = surface;
-        dispatcher.Register(
+        if (surface == BridgeSurface.Panel && approvalOwner is not null)
+        {
+            _voiceApprovalOwner = approvalOwner;
+        }
+        void Register(
+            string method,
+            Func<JsonElement?, CancellationToken, Task<object?>> handler)
+        {
+            dispatcher.Register(method, async (parameters, cancellationToken) =>
+            {
+                var previous = _requestSurface.Value;
+                _requestSurface.Value = surface;
+                try
+                {
+                    return await handler(parameters, cancellationToken);
+                }
+                finally
+                {
+                    _requestSurface.Value = previous;
+                }
+            });
+        }
+
+        Register(
             "app.getState",
-            (_, _) => Task.FromResult<object?>(BuildState(includeGeneration: surface == BridgeSurface.Settings)));
-        dispatcher.Register("app.ready", (_, _) => Task.FromResult<object?>(new { ok = true }));
-        dispatcher.Register("diagnostics.echo", (parameters, _) => Task.FromResult<object?>(DeserializeObject(parameters)));
-        dispatcher.Register("provider.select", SelectProviderAsync);
-        dispatcher.Register("provider.refreshPlaceholder", RefreshPlaceholderAsync);
-        dispatcher.Register("settings.setPanelSize", SetPanelSizeAsync);
-        dispatcher.Register("settings.setDisplayPlacement", SetDisplayPlacementAsync);
-        dispatcher.Register("settings.setTextSize", SetTextSizeAsync);
-        dispatcher.Register("settings.setSwitchingMode", SetSwitchingModeAsync);
-        dispatcher.Register("settings.setLanguage", SetLanguageAsync);
-        dispatcher.Register("settings.setProviderVisibility", SetProviderVisibilityAsync);
-        dispatcher.Register("settings.moveProvider", MoveProviderAsync);
-        dispatcher.Register("settings.setProviderOrder", SetProviderOrderAsync);
-        dispatcher.Register("settings.setProviderSelection", SetProviderSelectionAsync);
-        dispatcher.Register("settings.setPreferredProvider", SetPreferredProviderAsync);
-        dispatcher.Register("settings.setHandleIcon", SetHandleIconAsync);
-        dispatcher.Register("settings.setShowTopHandleSideArea", SetShowTopHandleSideAreaAsync);
-        dispatcher.Register("settings.setDisableTopEdgeInFullscreen", SetDisableTopEdgeInFullscreenAsync);
-        dispatcher.Register("settings.setStartWithWindows", SetStartWithWindowsAsync);
-        dispatcher.Register("settings.setAutoCheckForUpdates", SetAutoCheckForUpdatesAsync);
-        dispatcher.Register("settings.setClipboardPrivateMode", SetClipboardPrivateModeAsync);
-        dispatcher.Register("settings.resetDefaults", ResetDefaultsAsync);
-        dispatcher.Register("settings.resetPanelBinding", ResetPanelBindingAsync);
-        dispatcher.Register("settings.openDataFolder", OpenDataFolderAsync);
-        dispatcher.Register("settings.open", OpenSettingsAsync);
-        dispatcher.Register("settings.openPlaceholder", OpenSettingsAsync);
-        dispatcher.Register("updates.check", CheckForUpdatesAsync);
-        dispatcher.Register("ailane.submit", SubmitAiLaneAsync);
-        dispatcher.Register("ailane.approve", ApproveAiLaneAsync);
-        dispatcher.Register("ailane.reject", RejectAiLaneAsync);
-        dispatcher.Register("todayFocus.startFromCalendar", StartTodayFocusFromCalendarAsync);
-        _pocketAppHostController?.Attach(dispatcher);
+            (_, _) => Task.FromResult<object?>(BuildState(surface)));
+        Register("app.ready", (_, _) => Task.FromResult<object?>(new { ok = true }));
+        Register("diagnostics.echo", (parameters, _) => Task.FromResult<object?>(DeserializeObject(parameters)));
+        Register("settings.setPanelSize", SetPanelSizeAsync);
+        Register("settings.setDisplayPlacement", SetDisplayPlacementAsync);
+        Register("settings.setTextSize", SetTextSizeAsync);
+        Register("settings.setSwitchingMode", SetSwitchingModeAsync);
+        Register("settings.setLanguage", SetLanguageAsync);
+        Register("settings.setProviderVisibility", SetProviderVisibilityAsync);
+        Register("settings.moveProvider", MoveProviderAsync);
+        Register("settings.setProviderOrder", SetProviderOrderAsync);
+        Register("settings.setProviderSelection", SetProviderSelectionAsync);
+        Register("settings.setPreferredProvider", SetPreferredProviderAsync);
+        Register("settings.setHandleIcon", SetHandleIconAsync);
+        Register("settings.setShowTopHandleSideArea", SetShowTopHandleSideAreaAsync);
+        Register("settings.setDisableTopEdgeInFullscreen", SetDisableTopEdgeInFullscreenAsync);
+        Register("settings.setStartWithWindows", SetStartWithWindowsAsync);
+        Register("settings.setAutoCheckForUpdates", SetAutoCheckForUpdatesAsync);
+        Register("settings.setClipboardPrivateMode", SetClipboardPrivateModeAsync);
+        Register("settings.resetDefaults", ResetDefaultsAsync);
+        Register("settings.resetPanelBinding", ResetPanelBindingAsync);
+        Register("settings.openDataFolder", OpenDataFolderAsync);
+        Register("settings.open", OpenSettingsAsync);
+        Register("settings.openPlaceholder", OpenSettingsAsync);
+        Register("updates.check", CheckForUpdatesAsync);
+        if (surface == BridgeSurface.Panel)
+        {
+            Register("provider.select", SelectProviderAsync);
+            Register(
+                "voice.requestMicrophone",
+                (parameters, cancellationToken) => RequestVoiceMicrophoneAsync(
+                    parameters,
+                    voiceMicrophoneGesture,
+                    cancellationToken));
+            Register("voice.startRealtime", StartVoiceRealtimeAsync);
+            Register("voice.confirmRealtime", ConfirmVoiceRealtimeAsync);
+            Register("voice.abortRealtime", AbortVoiceRealtimeAsync);
+            Register("voice.setMuted", SetVoiceMutedAsync);
+            Register("voice.setLayout", SetVoiceLayoutAsync);
+            Register("voice.endSession", EndVoiceSessionAsync);
+            Register("provider.refreshPlaceholder", RefreshPlaceholderAsync);
+            Register("todayFocus.startFromCalendar", StartTodayFocusFromCalendarAsync);
+            if (_pocketAppHostController is not null || _generatedPocketApps is not null)
+            {
+                Register("pocketApp.load", RoutePocketAppLoadAsync);
+                Register("pocketApp.invokeWorkflow", RoutePocketAppInvokeWorkflowAsync);
+                Register("pocketApp.updateState", RoutePocketAppUpdateStateAsync);
+            }
+        }
         if (surface == BridgeSurface.Settings)
         {
-            dispatcher.Register(
+            Register("settings.setVoiceEnabled", SetVoiceEnabledAsync);
+            Register("settings.setVoiceLayout", SetVoiceLayoutAsync);
+            Register(
+                "settings.setVoiceCalendarAccess",
+                (parameters, cancellationToken) => SetVoiceCalendarAccessAsync(
+                    parameters,
+                    approvalOwner,
+                    voiceCalendarAccessDecision,
+                    cancellationToken));
+            Register(
                 "settings.setAiNativeEnabled",
                 (parameters, cancellationToken) => SetAiNativeEnabledAsync(
                     parameters,
@@ -248,7 +374,16 @@ internal sealed class PanelBridgeController : IDisposable
         _clipboardBridgeController.Attach(dispatcher);
         _stickyBridgeController.Attach(dispatcher);
         _timerBridgeHandlers.Register(dispatcher);
-        return new BridgeAttachment(() => _dispatchers.Remove(dispatcher));
+        return new BridgeAttachment(() =>
+        {
+            _dispatchers.Remove(dispatcher);
+            if (surface == BridgeSurface.Panel
+                && approvalOwner is not null
+                && ReferenceEquals(_voiceApprovalOwner, approvalOwner))
+            {
+                _voiceApprovalOwner = null;
+            }
+        });
     }
 
     public void Dispose()
@@ -269,11 +404,19 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.PreviewFrameArrived -= OnControlsPreviewFrameArrived;
         _controlsBridgeController.MediaSourceOpened -= OnControlsMediaSourceOpened;
         _controlsBridgeController.Dispose();
+        _voiceCoordinator.SnapshotChanged -= OnVoiceSnapshotChanged;
+        _voiceCoordinator.TransportSignal -= OnVoiceTransportSignal;
+        _voiceCoordinator.Dispose();
+        _aiNativeExecutionLease?.Invalidate();
+        _pocketAppHostController?.Dispose();
         _pocketAppGenerationController?.Dispose();
+        _generatedPocketApps?.Dispose();
     }
 
-    public object BuildState(bool includeGeneration = false)
+    public object BuildState(BridgeSurface surface = BridgeSurface.Panel)
     {
+        var includeGeneration = surface == BridgeSurface.Settings;
+        var includePocketSurface = surface == BridgeSurface.Panel;
         var orderedProviders = OrderedProviders().ToArray();
         var selected = orderedProviders.FirstOrDefault(provider => string.Equals(provider.Id, _selectedProviderId, StringComparison.OrdinalIgnoreCase))
             ?? orderedProviders.FirstOrDefault();
@@ -284,6 +427,21 @@ internal sealed class PanelBridgeController : IDisposable
         }
 
         var metrics = PanelSizeCatalog.Get(CurrentSettings.PanelSize);
+        var voiceSnapshot = _voiceCoordinator.Snapshot;
+        var voiceLaneHeight = VoicePanelGeometry.Height(CurrentSettings.PanelSize, _resolvedVoiceLaneMode);
+        var builtInPocketAppAvailable = CurrentSettings.AiNativeEnabled
+            && _pocketAppHostController?.IsActivationActive == true;
+        var generatedRoute = SelectedGeneratedRoute();
+        var selectedPocketSurface = includePocketSurface
+            ? selected?.Id == "today-focus" && builtInPocketAppAvailable
+                ? _pocketAppHostController?.BuildSurfaceState()
+                : generatedRoute is null
+                    ? null
+                    : _generatedPocketApps?.SurfaceRegistry
+                        .HostController(generatedRoute.AppId, generatedRoute.SurfaceId)?
+                        .BuildSurfaceState(generatedRoute.SurfaceId)
+            : null;
+        var allProviders = AvailableProviders().ToArray();
         return new
         {
             settings = new
@@ -297,6 +455,9 @@ internal sealed class PanelBridgeController : IDisposable
                 startWithWindowsRegistered = IsStartupRegistered(),
                 autoCheckForUpdates = CurrentSettings.AutoCheckForUpdates,
                 aiNativeEnabled = CurrentSettings.AiNativeEnabled,
+                voiceEnabled = CurrentSettings.VoiceEnabled,
+                voiceCalendarAccessGranted = CurrentSettings.VoiceCalendarAccessGranted,
+                voiceLaneLayout = ToWireValue(CurrentSettings.VoiceLaneLayout),
                 clipboardPrivateMode = CurrentSettings.ClipboardPrivateMode,
                 rememberLastSelectedProvider = CurrentSettings.RememberLastSelectedProvider,
                 preferredProviderId = CurrentSettings.PreferredProviderId,
@@ -304,7 +465,7 @@ internal sealed class PanelBridgeController : IDisposable
                 handleIcon = ToWireValue(CurrentSettings.HandleIconStyle),
                 showTopHandleSideArea = CurrentSettings.ShowTopHandleSideArea,
                 disableTopEdgeInFullscreen = CurrentSettings.DisableTopEdgeInFullscreen,
-                providerOrder = CurrentSettings.ProviderOrder,
+                providerOrder = EffectiveProviderOrder(),
                 providerVisibility = CurrentSettings.ProviderVisibility
             },
             updater = _updaterService.Snapshot,
@@ -312,9 +473,12 @@ internal sealed class PanelBridgeController : IDisposable
             {
                 headerHeight = PanelSizeCatalog.HeaderHeight,
                 aiLaneHeight = PanelSizeCatalog.AiLaneHeight,
+                voiceLaneHeight,
+                voiceLaneMode = ToWireValue(_resolvedVoiceLaneMode),
                 width = metrics.Width,
                 providerHeight = metrics.ProviderHeight,
-                totalHeight = metrics.TotalHeight,
+                baselineHeight = metrics.TotalHeight,
+                totalHeight = metrics.TotalHeight + voiceLaneHeight,
                 sizes = PanelSizeCatalog.All.Select(size => new
                 {
                     id = size.Id,
@@ -333,7 +497,7 @@ internal sealed class PanelBridgeController : IDisposable
                 body = ProviderText(provider, ProviderTextKind.Body),
                 selected = selected is not null && string.Equals(provider.Id, selected.Id, StringComparison.OrdinalIgnoreCase)
             }),
-            allProviders = _providerRegistry.Providers.Select(provider => new
+            allProviders = allProviders.Select(provider => new
             {
                 id = provider.Id,
                 title = ProviderText(provider, ProviderTextKind.Title),
@@ -352,9 +516,49 @@ internal sealed class PanelBridgeController : IDisposable
                     body = ProviderText(selected, ProviderTextKind.Body)
                 }
             ,
-            aiLane = _aiLaneController.CurrentState,
-            pocketSurface = CurrentSettings.AiNativeEnabled ? _pocketAppHostController?.BuildSurfaceState() : null,
-            pocketApps = !CurrentSettings.AiNativeEnabled || _pocketAppHostController is null
+            voiceLane = surface == BridgeSurface.Panel
+                ? (object)new
+                {
+                    mode = ToWireValue(_resolvedVoiceLaneMode),
+                    preferredLayout = ToWireValue(CurrentSettings.VoiceLaneLayout),
+                    expansionBlocked = CurrentSettings.VoiceEnabled
+                        && CurrentSettings.VoiceLaneLayout == VoiceLaneLayoutPreference.Expanded
+                        && _resolvedVoiceLaneMode != VoiceLaneMode.Expanded,
+                    availability = ToVoiceAvailabilityWireValue(voiceSnapshot.Availability),
+                    sessionStatus = ToWireValue(voiceSnapshot.SessionStatus),
+                    activity = ToWireValue(voiceSnapshot.Activity),
+                    muted = voiceSnapshot.Muted,
+                    uiAttached = voiceSnapshot.UiAttached,
+                    transportAttached = voiceSnapshot.TransportAttached,
+                    realtimeAttached = voiceSnapshot.RealtimeAttached,
+                    rootSessionId = voiceSnapshot.RootSessionId,
+                    visibleSessionCount = voiceSnapshot.VisibleSessionCount,
+                    transcriptPreview = voiceSnapshot.TranscriptPreview,
+                    transcript = voiceSnapshot.Transcript.Select(item => new
+                    {
+                        id = item.Id,
+                        role = item.Role,
+                        text = item.Text,
+                        isFinal = item.IsFinal,
+                        timestamp = item.Timestamp
+                    }),
+                    sessions = voiceSnapshot.Sessions.Select(item => new
+                    {
+                        sessionId = item.SessionId,
+                        rootSessionId = item.RootSessionId,
+                        parentSessionId = item.ParentSessionId,
+                        title = item.Title,
+                        status = ToWireValue(item.Status),
+                        safeSummary = item.SafeSummary,
+                        progress = item.Progress,
+                        updatedAt = item.UpdatedAt,
+                        navigation = "lane_detail"
+                    }),
+                    safeErrorCode = voiceSnapshot.LastErrorCode
+                }
+                : null,
+            pocketSurface = selectedPocketSurface,
+            pocketApps = !builtInPocketAppAvailable || _pocketAppHostController is null
                 ? Array.Empty<object>()
                 : new[] { _pocketAppHostController.BuildManagerState() },
             pocketAppGeneration = includeGeneration && CurrentSettings.AiNativeEnabled
@@ -363,10 +567,55 @@ internal sealed class PanelBridgeController : IDisposable
         };
     }
 
+    public void SetPocketAppStateFlush(
+        Func<string, CancellationToken, Task<PocketAppStateTransitionLease>>? begin,
+        Func<PocketAppStateTransitionLease, Task>? complete = null)
+    {
+        _pocketAppStateTransitionBegin = begin;
+        _pocketAppStateTransitionComplete = complete;
+        _pocketAppGenerationController?.SetBeforeDeactivate(begin, complete);
+    }
+
+    private Task<object?> RoutePocketAppLoadAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken) =>
+        ResolveSelectedPocketAppHost(parameters).LoadAsync(parameters, cancellationToken);
+
+    private Task<object?> RoutePocketAppInvokeWorkflowAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken) =>
+        ResolveSelectedPocketAppHost(parameters).InvokeWorkflowAsync(parameters, cancellationToken);
+
+    private Task<object?> RoutePocketAppUpdateStateAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken) =>
+        ResolveSelectedPocketAppHost(parameters).UpdateStateAsync(parameters, cancellationToken);
+
+    private PocketAppHostController ResolveSelectedPocketAppHost(JsonElement? parameters)
+    {
+        var appId = ReadRequiredString(parameters, "appId");
+        if (_pocketAppHostController is not null
+            && string.Equals(_selectedProviderId, "today-focus", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(_pocketAppHostController.AppId, appId, StringComparison.Ordinal))
+        {
+            return _pocketAppHostController;
+        }
+
+        var route = SelectedGeneratedRoute();
+        if (route is not null
+            && string.Equals(route.AppId, appId, StringComparison.Ordinal)
+            && _generatedPocketApps?.SurfaceRegistry.HostController(appId, route.SurfaceId) is { } generatedHost)
+        {
+            return generatedHost;
+        }
+
+        throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "pocket_app_route");
+    }
+
     private async Task<object?> SelectProviderAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         var providerId = ReadRequiredString(parameters, "id");
-        var provider = _providerRegistry.Find(providerId);
+        var provider = FindProvider(providerId);
         if (provider is null || !IsVisible(provider.Id))
         {
             throw new InvalidOperationException($"Provider is not visible: {providerId}");
@@ -452,7 +701,7 @@ internal sealed class PanelBridgeController : IDisposable
     {
         var providerId = ReadRequiredString(parameters, "id");
         var visible = ReadRequiredBool(parameters, "visible");
-        if (_providerRegistry.Find(providerId) is null)
+        if (FindProvider(providerId) is null)
         {
             throw new InvalidOperationException($"Unknown provider: {providerId}");
         }
@@ -522,7 +771,7 @@ internal sealed class PanelBridgeController : IDisposable
     private async Task<object?> SetPreferredProviderAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         var providerId = ReadRequiredString(parameters, "id");
-        var provider = _providerRegistry.Find(providerId);
+        var provider = FindProvider(providerId);
         if (provider is null || !IsVisible(provider.Id))
         {
             throw new InvalidOperationException($"Provider is not visible: {providerId}");
@@ -612,6 +861,7 @@ internal sealed class PanelBridgeController : IDisposable
         CancellationToken cancellationToken)
     {
         var enabled = ReadRequiredBool(parameters, "enabled");
+        PocketAppStateTransitionLease? stateTransition = null;
         if (enabled && !CurrentSettings.AiNativeEnabled)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -624,17 +874,48 @@ internal sealed class PanelBridgeController : IDisposable
                 return await PublishStateAsync(cancellationToken);
             }
         }
-        if (CurrentSettings.AiNativeEnabled != enabled)
+        if (!enabled)
         {
-            var updated = CurrentSettings.Clone();
-            updated.AiNativeEnabled = enabled;
-            SaveSettings(updated);
+            stateTransition = await BeginSelectedPocketAppStateTransitionAsync(cancellationToken);
+            if (!stateTransition.Saved)
+            {
+                await CompletePocketAppStateTransitionAsync(stateTransition);
+                stateTransition = null;
+                return await PublishStateAsync(cancellationToken);
+            }
         }
+        try
+        {
+            if (!enabled)
+            {
+                _aiNativeExecutionLease?.Invalidate();
+                _pocketAppGenerationController?.SetEnabled(false);
+                _generatedPocketApps?.SetEnabled(false);
+            }
+            if (CurrentSettings.AiNativeEnabled != enabled)
+            {
+                var updated = CurrentSettings.Clone();
+                updated.AiNativeEnabled = enabled;
+                SaveSettings(updated);
+            }
 
-        // Never hot-create a generation composition root. If one exists from startup, disabling
-        // cancels an in-flight Codex process immediately and gates every generation bridge route.
-        _pocketAppGenerationController?.SetEnabled(enabled);
-        return await PublishStateAsync(cancellationToken);
+            // Never hot-create a generation composition root. If one exists from startup, disabling
+            // cancels an in-flight Codex process immediately and gates every generation bridge route.
+            if (enabled && _aiNativeExecutionLease?.IsActive == true)
+            {
+                _generatedPocketApps?.SetEnabled(true);
+                _pocketAppGenerationController?.SetEnabled(true);
+            }
+            var published = await PublishStateAsync(cancellationToken);
+            await CompletePocketAppStateTransitionAsync(stateTransition);
+            stateTransition = null;
+            return published;
+        }
+        catch
+        {
+            await CompletePocketAppStateTransitionAsync(stateTransition);
+            throw;
+        }
     }
 
     private bool ShowAiNativeEnableApproval(System.Windows.Window? owner)
@@ -681,10 +962,31 @@ internal sealed class PanelBridgeController : IDisposable
     private async Task<object?> ResetDefaultsAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         _ = parameters;
-        _startupRegistration.SetRegistered(false);
-        _pocketAppGenerationController?.SetEnabled(false);
-        SaveSettings(UserSettingsStore.CreateDefault(_providerRegistry.ProviderIds));
-        return await PublishStateAsync(cancellationToken);
+        var stateTransition = await BeginSelectedPocketAppStateTransitionAsync(cancellationToken);
+        if (!stateTransition.Saved)
+        {
+            await CompletePocketAppStateTransitionAsync(stateTransition);
+            return await PublishStateAsync(cancellationToken);
+        }
+        try
+        {
+            _startupRegistration.SetRegistered(false);
+            _aiNativeExecutionLease?.Invalidate();
+            _pocketAppGenerationController?.SetEnabled(false);
+            _generatedPocketApps?.SetEnabled(false);
+            SaveSettings(UserSettingsStore.CreateDefault(_providerRegistry.ProviderIds));
+            await _voiceCoordinator.SetFeatureEnabledAsync(false, cancellationToken);
+            _resolvedVoiceLaneMode = VoiceLaneMode.Disabled;
+            var published = await PublishStateAsync(cancellationToken);
+            await CompletePocketAppStateTransitionAsync(stateTransition);
+            stateTransition = null;
+            return published;
+        }
+        catch
+        {
+            await CompletePocketAppStateTransitionAsync(stateTransition);
+            throw;
+        }
     }
 
     private async Task<object?> ResetPanelBindingAsync(JsonElement? parameters, CancellationToken cancellationToken)
@@ -723,22 +1025,208 @@ internal sealed class PanelBridgeController : IDisposable
         return await _updaterService.CheckWithPromptsAsync(cancellationToken: cancellationToken);
     }
 
-    private async Task<object?> SubmitAiLaneAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    private async Task<object?> SetVoiceEnabledAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
-        await _aiLaneController.SubmitAsync(ReadRequiredString(parameters, "text"), cancellationToken);
+        await _voiceSettingsTransitionGate.WaitAsync(cancellationToken);
+        try
+        {
+            var enabled = ReadRequiredBool(parameters, "enabled");
+            if (CurrentSettings.VoiceEnabled != enabled)
+            {
+                var updated = CurrentSettings.Clone();
+                updated.VoiceEnabled = enabled;
+                if (enabled)
+                {
+                    _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(updated);
+                }
+                SaveSettings(updated);
+            }
+            await _voiceCoordinator.SetFeatureEnabledAsync(
+                enabled,
+                enabled ? cancellationToken : CancellationToken.None);
+            return await PublishStateAsync(cancellationToken);
+        }
+        finally
+        {
+            _voiceSettingsTransitionGate.Release();
+        }
+    }
+
+    private async Task<object?> SetVoiceLayoutAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var layout = ParseVoiceLaneLayout(ReadRequiredString(parameters, "layout"));
+        if (CurrentSettings.VoiceLaneLayout != layout)
+        {
+            var updated = CurrentSettings.Clone();
+            updated.VoiceLaneLayout = layout;
+            _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(updated);
+            SaveSettings(updated);
+        }
         return await PublishStateAsync(cancellationToken);
     }
 
-    private async Task<object?> ApproveAiLaneAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    private async Task<object?> SetVoiceCalendarAccessAsync(
+        JsonElement? parameters,
+        Func<System.Windows.Window?>? approvalOwner,
+        Func<bool>? approvalDecision,
+        CancellationToken cancellationToken)
     {
-        await _aiLaneController.ApproveAsync(ReadRequiredString(parameters, "actionId"), cancellationToken);
+        await _voiceSettingsTransitionGate.WaitAsync(cancellationToken);
+        try
+        {
+            var enabled = ReadRequiredBool(parameters, "enabled");
+            cancellationToken.ThrowIfCancellationRequested();
+            if (enabled
+                && !CurrentSettings.VoiceCalendarAccessGranted
+                && !ApproveVoiceCalendarAccess(approvalOwner, approvalDecision))
+            {
+                return await PublishStateAsync(cancellationToken);
+            }
+            if (CurrentSettings.VoiceCalendarAccessGranted == enabled)
+            {
+                return await PublishStateAsync(cancellationToken);
+            }
+
+            var voiceWasEnabled = CurrentSettings.VoiceEnabled;
+            var stoppedForRevocation = false;
+            if (!enabled && voiceWasEnabled)
+            {
+                await _voiceCoordinator.SetFeatureEnabledAsync(false, CancellationToken.None);
+                stoppedForRevocation = true;
+            }
+
+            var updated = CurrentSettings.Clone();
+            updated.VoiceCalendarAccessGranted = enabled;
+            SaveSettings(updated);
+            if (voiceWasEnabled)
+            {
+                if (!stoppedForRevocation)
+                {
+                    await _voiceCoordinator.SetFeatureEnabledAsync(false, cancellationToken);
+                }
+                await _voiceCoordinator.SetFeatureEnabledAsync(true, cancellationToken);
+            }
+            return await PublishStateAsync(cancellationToken);
+        }
+        finally
+        {
+            _voiceSettingsTransitionGate.Release();
+        }
+    }
+
+    private bool ApproveVoiceCalendarAccess(
+        Func<System.Windows.Window?>? approvalOwner,
+        Func<bool>? approvalDecision)
+    {
+        if (approvalDecision is not null)
+        {
+            return approvalDecision();
+        }
+        var owner = approvalOwner?.Invoke();
+        if (owner is null || !owner.IsVisible)
+        {
+            return false;
+        }
+        var english = CurrentSettings.Language == AppLanguage.English;
+        var result = System.Windows.MessageBox.Show(
+            owner,
+            english
+                ? "Voice Lane may send today's Calendar event titles and times to Codex.\n\nAllow Calendar access for Voice Lane?"
+                : "Voice Laneは今日のCalendar予定名と時刻をCodexへ送信する場合があります。\n\nVoice LaneのCalendarアクセスを許可しますか？",
+            english ? "Allow Voice Calendar access" : "VoiceのCalendarアクセスを許可",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Warning,
+            System.Windows.MessageBoxResult.No);
+        return result == System.Windows.MessageBoxResult.Yes;
+    }
+
+    private async Task<object?> SetVoiceMutedAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _voiceCoordinator.SetMuted(ReadRequiredBool(parameters, "muted"));
         return await PublishStateAsync(cancellationToken);
     }
 
-    private async Task<object?> RejectAiLaneAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    private Task<object?> RequestVoiceMicrophoneAsync(
+        JsonElement? parameters,
+        Func<bool>? registerGesture,
+        CancellationToken cancellationToken)
     {
-        _aiLaneController.Reject(ReadRequiredString(parameters, "actionId"));
+        _ = parameters;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!CurrentSettings.VoiceEnabled
+            || !_panelOpen
+            || _voiceCoordinator.Snapshot.Availability != CodexVoiceAvailability.Ready
+            || registerGesture?.Invoke() != true)
+        {
+            throw new CodexAppServerProtocolException("microphone_request_not_allowed");
+        }
+        _voiceCoordinator.BeginMicrophonePermissionRequest();
+        return Task.FromResult<object?>(new { allowedForPrompt = true });
+    }
+
+    private async Task<object?> StartVoiceRealtimeAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        var sdp = ReadRequiredString(parameters, "sdp");
+        var result = await _voiceCoordinator.StartRealtimeAsync(sdp, cancellationToken);
+        return new { generation = result.Generation, threadId = result.ThreadId };
+    }
+
+    private Task<object?> ConfirmVoiceRealtimeAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _voiceCoordinator.ConfirmRealtimeConnected(
+            ReadRequiredInt(parameters, "generation"),
+            ReadRequiredString(parameters, "threadId"));
+        return Task.FromResult<object?>(new { connected = true });
+    }
+
+    private async Task<object?> AbortVoiceRealtimeAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        await _voiceCoordinator.AbortRealtimeStartAsync(
+            ReadRequiredString(parameters, "reason"),
+            cancellationToken);
+        return new { aborted = true };
+    }
+
+    private async Task<object?> EndVoiceSessionAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        await _voiceCoordinator.StopRealtimeAsync(cancellationToken);
         return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<bool> RequestVoiceTimerApprovalAsync(
+        VoiceTimerApprovalRequest request,
+        CancellationToken cancellationToken)
+    {
+        return await _voiceTimerApprovalCoordinator.RequestAsync(
+            request,
+            PresentVoiceTimerApprovalAsync,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<bool> PresentVoiceTimerApprovalAsync(
+        VoiceTimerApprovalRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var owner = _voiceApprovalOwner?.Invoke();
+        if (owner is null)
+        {
+            return false;
+        }
+        return await VoiceTimerApprovalDialog.ShowAsync(
+            owner,
+            request,
+            CurrentSettings.Language == AppLanguage.English,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<object?> StartTodayFocusFromCalendarAsync(
@@ -748,10 +1236,17 @@ internal sealed class PanelBridgeController : IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         if (!CurrentSettings.AiNativeEnabled
             || _capabilityBroker is null
-            || _todayFocusTextAdapter is null)
+            || _todayFocusTextAdapter is null
+            || _aiNativeExecutionLease is null)
         {
             throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "today_focus");
         }
+        _aiNativeExecutionLease.RequireActive();
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _aiNativeExecutionLease.CancellationToken);
+        var effectiveCancellation = linkedCancellation.Token;
+        effectiveCancellation.ThrowIfCancellationRequested();
 
         var eventRef = ReadRequiredString(parameters, "eventRef");
         if (string.IsNullOrEmpty(eventRef) || eventRef.EnumerateRunes().Count() > 256)
@@ -771,7 +1266,7 @@ internal sealed class PanelBridgeController : IDisposable
             principal,
             permissions,
             now,
-            cancellationToken);
+            effectiveCancellation);
         var selected = events.FirstOrDefault(item => item.EventRef == eventRef)
             ?? throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "calendar_event");
         var purpose = string.IsNullOrEmpty(selected.SafeTitle) ? "今日の予定" : selected.SafeTitle;
@@ -794,7 +1289,7 @@ internal sealed class PanelBridgeController : IDisposable
             System.Windows.MessageBoxButton.YesNo,
             System.Windows.MessageBoxImage.Question,
             System.Windows.MessageBoxResult.No);
-        cancellationToken.ThrowIfCancellationRequested();
+        effectiveCancellation.ThrowIfCancellationRequested();
         if (result != System.Windows.MessageBoxResult.Yes)
         {
             try
@@ -815,7 +1310,7 @@ internal sealed class PanelBridgeController : IDisposable
             draft,
             permissions,
             DateTimeOffset.Now,
-            cancellationToken);
+            effectiveCancellation);
         return new
         {
             status = receipt.Status.WireValue(),
@@ -843,6 +1338,7 @@ internal sealed class PanelBridgeController : IDisposable
     public async Task NotifyPanelOpenedAsync()
     {
         _panelOpen = true;
+        _voiceCoordinator.SetUiAttached(true);
         if (!CurrentSettings.RememberLastSelectedProvider)
         {
             _selectedProviderId = ResolvePreferredProviderId();
@@ -855,13 +1351,15 @@ internal sealed class PanelBridgeController : IDisposable
     public async Task NotifyPanelClosedAsync()
     {
         _panelOpen = false;
+        _voiceCoordinator.SetMuted(true);
+        _voiceCoordinator.SetUiAttached(false);
         await SynchronizeControlsLifecycleAsync();
         await PostEventAsync("panel.closed", new { closed = true });
     }
 
     public async Task SelectProviderFromShellAsync(string providerId, CancellationToken cancellationToken = default)
     {
-        var provider = _providerRegistry.Find(providerId);
+        var provider = FindProvider(providerId);
         if (provider is null || !IsVisible(provider.Id))
         {
             return;
@@ -872,9 +1370,55 @@ internal sealed class PanelBridgeController : IDisposable
         await PublishStateAsync(cancellationToken);
     }
 
+    public void SetResolvedVoiceLaneMode(VoiceLaneMode mode)
+    {
+        if (_resolvedVoiceLaneMode == mode)
+        {
+            return;
+        }
+        _resolvedVoiceLaneMode = mode;
+        _ = PostStateEventOnUiThreadAsync("state.changed");
+    }
+
+    public Task NotifySystemTransitionAsync(CancellationToken cancellationToken = default)
+    {
+        return _voiceCoordinator.NotifySystemTransitionAsync(cancellationToken);
+    }
+
+    private void OnVoiceSnapshotChanged(object? sender, CodexVoiceSnapshot snapshot)
+    {
+        _ = sender;
+        var runtimeActive = snapshot.Availability != CodexVoiceAvailability.Disabled;
+        if (_voiceRuntimeActive != runtimeActive)
+        {
+            _voiceRuntimeActive = runtimeActive;
+            _resolvedVoiceLaneMode = runtimeActive
+                ? CurrentSettings.VoiceLaneLayout == VoiceLaneLayoutPreference.Expanded
+                    ? VoiceLaneMode.Expanded
+                    : VoiceLaneMode.Compact
+                : VoiceLaneMode.Disabled;
+            SettingsChanged?.Invoke(this, CurrentSettings);
+        }
+        _ = PostStateEventOnUiThreadAsync("voice.stateChanged");
+    }
+
+    private void OnVoiceTransportSignal(object? sender, VoiceTransportSignal signal)
+    {
+        _ = sender;
+        _ = PostPanelEventOnUiThreadAsync(
+            "voice.transportSignal",
+            new
+            {
+                generation = signal.Generation,
+                threadId = signal.ThreadId,
+                type = "answer",
+                sdp = signal.Sdp
+            });
+    }
+
     private void SaveSettings(UserSettings settings)
     {
-        CurrentSettings = UserSettingsStore.Normalize(settings, _providerRegistry.ProviderIds);
+        CurrentSettings = NormalizeSettings(settings);
         _clipboardBridgeController.ApplySettings(CurrentSettings, IsVisible("clipboard"));
         _settingsStore.Save(CurrentSettings);
         SettingsChanged?.Invoke(this, CurrentSettings);
@@ -883,7 +1427,7 @@ internal sealed class PanelBridgeController : IDisposable
     private async Task<object> PublishStateAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var state = BuildState();
+        var state = BuildState(_requestSurface.Value ?? BridgeSurface.Panel);
         await SynchronizeControlsLifecycleAsync(cancellationToken);
         await PostStateEventAsync("state.changed");
         return state;
@@ -975,11 +1519,43 @@ internal sealed class PanelBridgeController : IDisposable
         return dispatcher.InvokeAsync(() => PostEventAsync(eventName, payload)).Task.Unwrap();
     }
 
+    private Task PostPanelEventOnUiThreadAsync(string eventName, object? payload)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            return PostPanelEventAsync(eventName, payload);
+        }
+        return dispatcher.InvokeAsync(() => PostPanelEventAsync(eventName, payload)).Task.Unwrap();
+    }
+
+    private Task PostStateEventOnUiThreadAsync(string eventName)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            return PostStateEventAsync(eventName);
+        }
+
+        return dispatcher.InvokeAsync(() => PostStateEventAsync(eventName)).Task.Unwrap();
+    }
+
     private async Task PostEventAsync(string eventName, object? payload)
     {
         foreach (var dispatcher in _dispatchers.Keys.ToArray())
         {
             await dispatcher.PostEventAsync(eventName, payload);
+        }
+    }
+
+    private async Task PostPanelEventAsync(string eventName, object? payload)
+    {
+        foreach (var item in _dispatchers.ToArray())
+        {
+            if (item.Value == BridgeSurface.Panel)
+            {
+                await item.Key.PostEventAsync(eventName, payload);
+            }
         }
     }
 
@@ -989,7 +1565,7 @@ internal sealed class PanelBridgeController : IDisposable
         {
             await item.Key.PostEventAsync(
                 eventName,
-                BuildState(includeGeneration: item.Value == BridgeSurface.Settings));
+                BuildState(item.Value));
         }
     }
 
@@ -1013,10 +1589,19 @@ internal sealed class PanelBridgeController : IDisposable
 
     private IEnumerable<ProviderDescriptor> OrderedProviders()
     {
+        var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var providerId in CurrentSettings.ProviderOrder)
         {
-            var provider = _providerRegistry.Find(providerId);
+            var provider = FindProvider(providerId);
             if (provider is not null && IsVisible(provider.Id))
+            {
+                yielded.Add(provider.Id);
+                yield return provider;
+            }
+        }
+        foreach (var provider in AvailableProviders())
+        {
+            if (yielded.Add(provider.Id) && IsVisible(provider.Id))
             {
                 yield return provider;
             }
@@ -1025,7 +1610,7 @@ internal sealed class PanelBridgeController : IDisposable
 
     private bool IsVisible(string providerId)
     {
-        var provider = _providerRegistry.Find(providerId);
+        var provider = FindProvider(providerId);
         if (provider is null
             || (!provider.DefaultVisible && !CurrentSettings.AiNativeEnabled))
         {
@@ -1044,7 +1629,7 @@ internal sealed class PanelBridgeController : IDisposable
     private bool IsSelectableProvider(string? providerId)
     {
         return !string.IsNullOrWhiteSpace(providerId)
-            && _providerRegistry.Find(providerId) is not null
+            && FindProvider(providerId) is not null
             && IsVisible(providerId);
     }
 
@@ -1058,8 +1643,115 @@ internal sealed class PanelBridgeController : IDisposable
 
         var updated = CurrentSettings.Clone();
         updated.LastSelectedProviderId = providerId;
-        CurrentSettings = UserSettingsStore.Normalize(updated, _providerRegistry.ProviderIds);
+        CurrentSettings = NormalizeSettings(updated);
         _settingsStore.Save(CurrentSettings);
+    }
+
+    private void OnGeneratedPocketAppsRefreshed()
+    {
+        CurrentSettings = NormalizeSettings(CurrentSettings.Clone());
+        if (!IsSelectableProvider(_selectedProviderId))
+        {
+            _selectedProviderId = ResolveInitialProviderId();
+        }
+        _settingsStore.Save(CurrentSettings);
+        SettingsChanged?.Invoke(this, CurrentSettings);
+        _ = PostStateEventOnUiThreadAsync("state.changed");
+    }
+
+    private UserSettings NormalizeSettings(UserSettings settings)
+    {
+        var activeProviderIds = AvailableProviderIds();
+        if (_generatedPocketApps is null
+            || !_generatedPocketApps.TryGetManagedAppIds(out var managedAppIds))
+        {
+            return UserSettingsStore.NormalizeForBootstrap(settings, activeProviderIds);
+        }
+        var knownProviderIds = activeProviderIds
+            .Concat(managedAppIds.Select(PocketSurfaceRegistry.GeneratedProviderId))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return UserSettingsStore.Normalize(settings, knownProviderIds);
+    }
+
+    private IReadOnlyList<ProviderDescriptor> AvailableProviders()
+    {
+        var generated = _generatedPocketApps?.SurfaceRegistry.Routes
+            .Select(route => new ProviderDescriptor(
+                route.ProviderId,
+                route.Title,
+                "target",
+                "Personal Pocket App",
+                "A generated Pocket App running through the shared Capability Broker."))
+            ?? Enumerable.Empty<ProviderDescriptor>();
+        return _providerRegistry.Providers
+            .Concat(generated)
+            .GroupBy(provider => provider.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+    }
+
+    private IReadOnlyList<string> AvailableProviderIds() =>
+        AvailableProviders().Select(provider => provider.Id).ToArray();
+
+    private IReadOnlyList<string> EffectiveProviderOrder()
+    {
+        var available = AvailableProviderIds();
+        var availableSet = available.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var ordered = CurrentSettings.ProviderOrder
+            .Where(availableSet.Contains)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var orderedSet = ordered.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        ordered.AddRange(available.Where(orderedSet.Add));
+        return ordered;
+    }
+
+    private ProviderDescriptor? FindProvider(string id) =>
+        AvailableProviders().FirstOrDefault(
+            provider => string.Equals(provider.Id, id, StringComparison.OrdinalIgnoreCase));
+
+    private PocketSurfaceRegistry.Route? SelectedGeneratedRoute() =>
+        _generatedPocketApps?.SurfaceRegistry.Routes.FirstOrDefault(
+            route => string.Equals(route.ProviderId, _selectedProviderId, StringComparison.OrdinalIgnoreCase));
+
+    private string? SelectedPocketSurfaceAppId() =>
+        string.Equals(_selectedProviderId, "today-focus", StringComparison.OrdinalIgnoreCase)
+            ? _pocketAppHostController?.AppId
+            : SelectedGeneratedRoute()?.AppId;
+
+    private async Task<PocketAppStateTransitionLease> BeginSelectedPocketAppStateTransitionAsync(
+        CancellationToken cancellationToken)
+    {
+        var appId = SelectedPocketSurfaceAppId();
+        if (appId is null) { return PocketAppStateTransitionLease.Noop(string.Empty); }
+        var begin = _pocketAppStateTransitionBegin;
+        if (begin is null) { return PocketAppStateTransitionLease.Noop(appId); }
+        try
+        {
+            return await begin(appId, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PocketAppStateTransitionLease.Failed(appId);
+        }
+    }
+
+    private async Task CompletePocketAppStateTransitionAsync(PocketAppStateTransitionLease? lease)
+    {
+        var complete = _pocketAppStateTransitionComplete;
+        if (lease is null || complete is null) { return; }
+        try
+        {
+            await complete(lease);
+        }
+        catch
+        {
+        }
     }
 
     private static object? DeserializeObject(JsonElement? parameters)
@@ -1094,6 +1786,19 @@ internal sealed class PanelBridgeController : IDisposable
         }
 
         return property.GetBoolean();
+    }
+
+    private static int ReadRequiredInt(JsonElement? parameters, string propertyName)
+    {
+        if (parameters is null
+            || !parameters.Value.TryGetProperty(propertyName, out var property)
+            || property.ValueKind != JsonValueKind.Number
+            || !property.TryGetInt32(out var value)
+            || value <= 0)
+        {
+            throw new InvalidOperationException($"Missing integer parameter: {propertyName}");
+        }
+        return value;
     }
 
     private static List<string> ReadRequiredStringArray(JsonElement? parameters, string propertyName)
@@ -1164,6 +1869,13 @@ internal sealed class PanelBridgeController : IDisposable
         return value.Equals("en", StringComparison.OrdinalIgnoreCase)
             ? AppLanguage.English
             : AppLanguage.Japanese;
+    }
+
+    private static VoiceLaneLayoutPreference ParseVoiceLaneLayout(string value)
+    {
+        return value.Equals("expanded", StringComparison.OrdinalIgnoreCase)
+            ? VoiceLaneLayoutPreference.Expanded
+            : VoiceLaneLayoutPreference.Compact;
     }
 
     private bool IsStartupRegistered()
@@ -1250,6 +1962,52 @@ internal sealed class PanelBridgeController : IDisposable
     {
         return language == AppLanguage.English ? "en" : "ja";
     }
+
+    private static string ToWireValue(VoiceLaneLayoutPreference layout)
+    {
+        return layout == VoiceLaneLayoutPreference.Expanded ? "expanded" : "compact";
+    }
+
+    private static string ToWireValue(VoiceLaneMode mode)
+    {
+        return mode switch
+        {
+            VoiceLaneMode.Compact => "compact",
+            VoiceLaneMode.Expanded => "expanded",
+            _ => "disabled"
+        };
+    }
+
+    internal static string ToVoiceAvailabilityWireValue(CodexVoiceAvailability availability) =>
+        availability switch
+        {
+            CodexVoiceAvailability.Disabled => "disabled",
+            CodexVoiceAvailability.Ready => "ready",
+            CodexVoiceAvailability.Unavailable => "unavailable",
+            CodexVoiceAvailability.SignedOut => "signedOut",
+            CodexVoiceAvailability.SchemaMismatch => "schemaMismatch",
+            CodexVoiceAvailability.CapabilityBlocked => "capabilityBlocked",
+            _ => "unavailable"
+        };
+
+    private static string ToWireValue(CodexVoiceSessionStatus status) =>
+        status switch
+        {
+            CodexVoiceSessionStatus.RequestingPermission => "requesting_permission",
+            CodexVoiceSessionStatus.RecoverableFailure => "recoverable_failure",
+            CodexVoiceSessionStatus.BlockedFailure => "blocked_failure",
+            _ => status.ToString().ToLowerInvariant()
+        };
+
+    private static string ToWireValue(VoiceActivity activity) =>
+        activity == VoiceActivity.WaitingForApproval
+            ? "waiting_for_approval"
+            : activity.ToString().ToLowerInvariant();
+
+    private static string ToWireValue(AgentSessionStatus status) =>
+        status == AgentSessionStatus.WaitingForUser
+            ? "waiting_for_user"
+            : status.ToString().ToLowerInvariant();
 
     private string ProviderText(ProviderDescriptor provider, ProviderTextKind kind)
     {

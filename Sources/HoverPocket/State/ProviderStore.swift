@@ -13,6 +13,7 @@ final class ProviderStore: ObservableObject {
 
     private let settings: AppSettings
     private var settingsCancellables = Set<AnyCancellable>()
+    private var generatedSurfaceCancellable: AnyCancellable?
     private var refreshTask: Task<Void, Never>?
 
     init(registry: ProviderRegistry = .empty, settings: AppSettings = AppSettings()) {
@@ -24,13 +25,14 @@ final class ProviderStore: ObservableObject {
         )
         self.mirrorAvailability = MirrorCameraAvailability.currentSnapshot()
         observeSettings()
+        observeGeneratedSurfaces()
         observeMirrorAvailability()
         syncSelectionWithSettings()
         syncProviderSideEffects()
     }
 
     var visibleManifests: [PluginManifest] {
-        let eligibleManifests = registry.manifests.filter { manifest in
+        let eligibleManifests = availableManifests.filter { manifest in
             manifest.defaultEnabled
                 || (manifest.id == TodayFocusPocketProvider.pluginID && settings.aiNativeEnabled)
         }
@@ -48,9 +50,25 @@ final class ProviderStore: ObservableObject {
         guard let selectedPluginID,
               visibleManifests.contains(where: { $0.id == selectedPluginID })
         else {
-            return registry.provider(for: visibleManifests.first?.id)
+            return provider(for: visibleManifests.first?.id)
         }
-        return registry.provider(for: selectedPluginID)
+        return provider(for: selectedPluginID)
+    }
+
+    var availableManifests: [PluginManifest] {
+        availableProviders.map(\.manifest)
+    }
+
+    private var availableProviders: [any PocketProvider] {
+        let generated = AINativeRuntime.shared.generatedSurfaceRegistry?.routes.map {
+            GeneratedPocketAppProvider(appID: $0.appID, surfaceID: $0.surfaceID, title: $0.title)
+        } ?? []
+        return registry.providers + generated
+    }
+
+    private func provider(for id: PluginID?) -> (any PocketProvider)? {
+        guard let id else { return availableProviders.first }
+        return availableProviders.first { $0.manifest.id == id }
     }
 
     func select(_ id: PluginID) {
@@ -83,11 +101,30 @@ final class ProviderStore: ObservableObject {
     }
 
     func moveProvider(_ id: PluginID, by offset: Int) {
-        settings.moveProvider(id, by: offset, manifests: registry.manifests)
+        settings.moveProvider(
+            id,
+            by: offset,
+            manifests: availableManifests,
+            preservingProviderIDs: AINativeRuntime.shared.managedGeneratedProviderIDs
+        )
     }
 
     func moveProvider(_ id: PluginID, to targetID: PluginID) {
-        settings.moveProvider(id, to: targetID, manifests: registry.manifests)
+        settings.moveProvider(
+            id,
+            to: targetID,
+            manifests: availableManifests,
+            preservingProviderIDs: AINativeRuntime.shared.managedGeneratedProviderIDs
+        )
+    }
+
+    func setProvider(_ id: PluginID, isVisible: Bool) {
+        settings.setProvider(
+            id,
+            isVisible: isVisible,
+            manifests: availableManifests,
+            preservingProviderIDs: AINativeRuntime.shared.managedGeneratedProviderIDs
+        )
     }
 
     func canMoveProvider(_ id: PluginID, by offset: Int) -> Bool {
@@ -167,6 +204,17 @@ final class ProviderStore: ObservableObject {
             .store(in: &settingsCancellables)
     }
 
+    private func observeGeneratedSurfaces() {
+        AINativeRuntime.shared.$generatedSurfaceRegistry
+            .sink { [weak self] registry in
+                self?.generatedSurfaceCancellable = registry?.$revision
+                    .dropFirst()
+                    .sink { [weak self] _ in self?.scheduleSettingsDidChange() }
+                self?.scheduleSettingsDidChange()
+            }
+            .store(in: &settingsCancellables)
+    }
+
     private func observeMirrorAvailability() {
         let publishers: [AnyPublisher<Void, Never>] = [
             NotificationCenter.default.publisher(for: AVCaptureDevice.wasConnectedNotification)
@@ -198,6 +246,11 @@ final class ProviderStore: ObservableObject {
     }
 
     private func settingsDidChange() {
+        let availableIDs = Set(availableManifests.map(\.id))
+        states = states.filter { availableIDs.contains($0.key) }
+        for id in availableIDs where states[id] == nil {
+            states[id] = .idle
+        }
         syncSelectionWithSettings()
         syncProviderSideEffects()
         objectWillChange.send()

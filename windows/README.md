@@ -80,6 +80,7 @@ Windows は macOS Sparkle の `https://github.com/shotaro311/hover-pocket/releas
 - Windows 0.2.xは、コード署名証明書を取得するまでAuthenticode未署名の公開ベータとして配布します。
 - Setup.exeの初回実行時にMicrosoft Defender SmartScreenの警告が出る可能性があることを、ダウンロード導線とRelease notesに明記します。
 - 1.0またはmacOS版と同等の正式版では、タイムスタンプ付きAuthenticode署名と公開成果物の署名readbackを必須gateにします。
+- 正式版のworkflow実行前に、正規コード署名証明書raw byteのSHA-256 fingerprintをGitHub Actions repository variable `WINDOWS_SIGNER_CERT_SHA256`へ64文字の16進数で設定します。値が未設定・不正・公開3成果物の署名証明書と不一致ならformal gateはfail closedにします。証明書更新時は公開前レビューでこのvariableも明示更新します。
 - 署名証明書やsigning credentialsはGit、ログ、README、progressに記録しません。
 
 Release assetはmacOS Sparkle資産と衝突しない`HoverPocketWin-*`系です。`publish_release.ps1`は、OAuth環境変数が未設定の場合に停止し、Release成果物内のmetadata一致を確認してからVelopack package、`release-manifest.win.json`、`SHA256SUMS-win.txt`を生成します。GitHub Releaseの作成・アップロードはこのスクリプトでは実行しません。
@@ -97,6 +98,16 @@ gh release view win-v0.2.7 --repo shotaro311/hover-pocket --json tagName,assets,
 Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.7/releases.win.json
 Invoke-WebRequest -UseBasicParsing -Uri https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/appcast.xml
 ```
+
+MacまたはCIからは、Windows releaseだけでなくmacOS appcastが変わっていないことも同時に機械検証できます。`auto`はdraft / prereleaseを除外した公開済み`win-v...`タグの最大semantic versionを選びます。公開された全Windows assetを再取得し、実測hashをfeed、checksum、GitHub metadataと照合します。GitHubの汎用Latestはrelease選択には使わず、期待するmacOS versioned releaseのままであることの確認にだけ使います。
+
+```bash
+python3 script/verify_release_readback.py --windows-tag auto --windows-signing-gate beta
+```
+
+1.0正式版では`Verify Published Release Readback` workflowを`formal`で手動実行します。`release-manifest.win.json`の`authenticode=signed-timestamped-verified`に加え、Windows上で公開Setup、Portable内`HoverPocket.Shell.exe`、Velopack full update package内`HoverPocket.Shell.exe`の実Authenticode署名、タイムスタンプ、3成果物の署名者一致、repository variableへ固定した正規publisher証明書との一致が揃わない限り配布完了にしません。Setupのpackage同一性は、Velopack 1.2.0のbundle headerに埋め込まれたoffset / lengthを使い、署名時に末尾へ追加されるPE証明書表をpackage byteとして扱わずに検証します。
+
+公開済み2version間の実installer / updater遷移は`Verify Release Install and Rollback Transitions` workflowで確認します。GitHub hosted Windows runnerの一時install rootに旧Setupをsilent installし、新full package適用、旧full packageへの明示rollback、再upgrade、uninstall、reinstall、user data保持までをreadbackします。自動更新はdowngradeしないため、rollbackは`Update.exe apply --package`で旧packageを明示します。開始時と合格証跡の直前で公開releaseの全asset snapshotが一致することも必須です。未署名0.2.x betaを実行する場合は、`execute_windows_release_code`とunsigned beta許可を手動workflowで明示する必要があります。正式署名版は、full package内アプリまでを独立した正式署名readback snapshotへ固定する連携が入るまで、この遷移workflowでは実行を拒否します。
 
 ## Local privacy notes
 

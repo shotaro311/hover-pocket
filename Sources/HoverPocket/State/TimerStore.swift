@@ -123,6 +123,7 @@ final class TimerStore: ObservableObject {
         at date: Date
     ) async throws -> RunningTimer? {
         await pendingWriteTask?.value
+        try Task.checkCancellation()
         guard canStartTimer else { return nil }
         let phaseDuration = preset.isPomodoro ? preset.workDuration : preset.duration
         guard phaseDuration > 0 else { return nil }

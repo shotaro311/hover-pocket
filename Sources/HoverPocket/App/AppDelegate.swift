@@ -7,11 +7,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hoverWindowController = HoverWindowController()
     private var statusBarMenuController: StatusBarMenuController?
     private var settingsCancellables = Set<AnyCancellable>()
+    private var voiceConfigurationTask: Task<Void, Never>?
+    private var voiceTerminationTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         configureAINativeRuntimeIfEnabled()
         observeAINativeRuntimeSetting()
+        configureVoiceRuntime()
+        observeVoiceRuntimeSettings()
         installMainMenu()
         registerURLSchemeCallbackHandler()
         statusBarMenuController = StatusBarMenuController(
@@ -61,8 +65,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureAINativeRuntimeIfEnabled() {
+        let savedGeneratedProviderIDs = hoverWindowController.appSettings.savedGeneratedProviderIDs
         guard hoverWindowController.appSettings.aiNativeEnabled else {
-            AINativeRuntime.shared.configure(adapter: nil)
+            AINativeRuntime.shared.configure(
+                adapter: nil,
+                preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
+            )
             return
         }
         do {
@@ -82,7 +90,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let broker = CapabilityBroker(
                 registry: registry,
                 ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
-                auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+                auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot),
+                approvalPresentationResolver: HostCapabilityApprovalPresentationResolver(
+                    stickyStore: .shared
+                )
             )
             guard let resources = Bundle.module.resourceURL else {
                 throw PocketAppPackageError.invalid("$:resources")
@@ -97,9 +108,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let userDataRoot = pocketAppsRoot.appendingPathComponent("UserData", isDirectory: true)
             let userStateStore = try PocketAppUserStateStore(
                 packageID: package.manifest.id,
-                allowedKeys: package.statePropertyNames,
+                stateProperties: package.stateProperties,
                 rootDirectory: userDataRoot
             )
+            let builtInActivationLease = PocketAppActivationLease()
             let pocketAppRuntime = PocketAppExecutionRuntime(
                 package: package,
                 broker: broker,
@@ -111,11 +123,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     "timer.read",
                     "timer.write"
                 ],
-                userStateStore: userStateStore
+                userStateStore: userStateStore,
+                activationLease: builtInActivationLease
             )
             let generationController: PocketAppGenerationController?
+            let generatedActivationRegistry: PocketAppRuntimeActivationRegistry?
             do {
                 let generationRoot = pocketAppsRoot.appendingPathComponent("Generation", isDirectory: true)
+                let generatedHostRoot = pocketAppsRoot.appendingPathComponent("GeneratedHost", isDirectory: true)
+                let activationRegistry = try PocketAppRuntimeActivationRegistry(
+                    rootDirectory: generatedHostRoot,
+                    userDataRoot: userDataRoot,
+                    broker: broker,
+                    userID: "local-user"
+                )
+                _ = activationRegistry.restoreEnabledApps()
                 let generator: (any PocketAppGenerationAdapter)?
                 if let executableURL = CodexPocketAppGenerationAdapter.resolveExecutable() {
                     generator = try? CodexPocketAppGenerationAdapter(
@@ -125,22 +147,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     generator = nil
                 }
+                let appSettings = hoverWindowController.appSettings
                 generationController = try PocketAppGenerationController(
-                    rootDirectory: pocketAppsRoot.appendingPathComponent("GeneratedHost", isDirectory: true),
+                    rootDirectory: generatedHostRoot,
                     userDataRoot: userDataRoot,
                     generationRoot: generationRoot.appendingPathComponent("Drafts", isDirectory: true),
-                    generator: generator
+                    generator: generator,
+                    runtimeActivationReadback: { receipt in
+                        let readback = try activationRegistry.synchronize(receipt)
+                        if receipt.state == .removed {
+                            let providerID = PocketSurfaceRegistry.generatedProviderID(
+                                appID: receipt.packageID
+                            )
+                            appSettings.pruneProviderConfiguration(PluginID(rawValue: providerID))
+                            AINativeRuntime.shared.forgetManagedGeneratedProviderID(providerID)
+                        }
+                        return readback
+                    }
                 )
+                generatedActivationRegistry = activationRegistry
             } catch {
                 generationController = nil
+                generatedActivationRegistry = nil
             }
             AINativeRuntime.shared.configure(
-                adapter: TodayFocusTextAdapter(broker: broker),
+                adapter: TodayFocusTextAdapter(
+                    broker: broker,
+                    activationLease: builtInActivationLease
+                ),
                 pocketAppExecutionRuntime: pocketAppRuntime,
-                pocketAppGenerationController: generationController
+                pocketAppGenerationController: generationController,
+                generatedActivationRegistry: generatedActivationRegistry,
+                builtInActivationLease: builtInActivationLease,
+                preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
             )
         } catch {
-            AINativeRuntime.shared.configure(adapter: nil)
+            AINativeRuntime.shared.configure(
+                adapter: nil,
+                preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
+            )
         }
     }
 
@@ -150,6 +195,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .removeDuplicates()
             .sink { [weak self] _ in
                 self?.configureAINativeRuntimeIfEnabled()
+            }
+            .store(in: &settingsCancellables)
+    }
+
+    private func configureVoiceRuntime() {
+        let settings = hoverWindowController.appSettings
+        voiceConfigurationTask = VoiceLaneRuntime.shared.configure(
+            featureEnabled: settings.voiceEnabled,
+            preferredLayout: settings.voiceLaneLayoutPreference,
+            adapterFactory: nil
+        )
+    }
+
+    private func observeVoiceRuntimeSettings() {
+        let settings = hoverWindowController.appSettings
+        settings.$voiceEnabled
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                self?.configureVoiceRuntime()
             }
             .store(in: &settingsCancellables)
     }
@@ -164,11 +229,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func workspaceDidWake() {
+        VoiceLaneRuntime.shared.recoverAfterSystemTransition()
         hoverWindowController.recoverAfterSystemTransition()
     }
 
     @objc private func workspaceSessionDidBecomeActive() {
+        VoiceLaneRuntime.shared.recoverAfterSystemTransition()
         hoverWindowController.recoverAfterSystemTransition()
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard voiceTerminationTask == nil else { return .terminateLater }
+        voiceTerminationTask = Task { @MainActor [weak self] in
+            await self?.voiceConfigurationTask?.value
+            await VoiceLaneRuntime.shared.shutdown()
+            self?.voiceTerminationTask = nil
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     private func registerURLSchemeCallbackHandler() {

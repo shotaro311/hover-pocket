@@ -94,7 +94,20 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
             {
             }
 
-            var annotated = AnnotateWrite(displayId, normalized, commandAccepted);
+            DisplayBrightnessState? fresh = null;
+            if (commandAccepted)
+            {
+                await Task.Delay(DdcCommandSpacing, cancellationToken);
+                try
+                {
+                    fresh = await ReadTargetFreshAsync(displayId, cancellationToken);
+                }
+                catch (Exception ex) when (ex is TimeoutException or ManagementException or COMException)
+                {
+                }
+            }
+
+            var annotated = AnnotateWrite(displayId, normalized, commandAccepted, fresh);
             StoreSnapshot(annotated);
             return annotated;
         }
@@ -180,18 +193,56 @@ internal sealed class MonitorBrightnessService : IMonitorBrightnessService, IDis
         return task;
     }
 
-    private IReadOnlyList<DisplayBrightnessState> AnnotateWrite(string displayId, int value, bool accepted)
+    private IReadOnlyList<DisplayBrightnessState> AnnotateWrite(
+        string displayId,
+        int value,
+        bool accepted,
+        DisplayBrightnessState? fresh)
     {
         var current = LastSnapshot() ?? FallbackStates("Brightness state is still loading.");
-        return current.Select(display => string.Equals(display.Id, displayId, StringComparison.OrdinalIgnoreCase)
-            ? display with
+        var matched = false;
+        var result = current.Select(display =>
+        {
+            if (!string.Equals(display.Id, displayId, StringComparison.OrdinalIgnoreCase))
             {
-                Value = accepted ? value : display.Value,
-                Error = accepted ? null : $"Brightness command failed for {value}%.",
-                WriteVerified = accepted
+                return display;
             }
-            : display).ToArray();
+
+            matched = true;
+            var observed = fresh ?? display;
+            var verified = WriteMatches(accepted, fresh, value);
+            return observed with
+            {
+                Name = string.IsNullOrWhiteSpace(observed.Name) ? display.Name : observed.Name,
+                Error = verified
+                    ? null
+                    : accepted
+                        ? $"Brightness readback did not match {value}%."
+                        : $"Brightness command failed for {value}%.",
+                WriteVerified = verified
+            };
+        }).ToList();
+        if (!matched)
+        {
+            var verified = WriteMatches(accepted, fresh, value);
+            result.Add((fresh ?? new DisplayBrightnessState(displayId, "Display", false, null)) with
+            {
+                Error = verified
+                    ? null
+                    : accepted
+                        ? $"Brightness readback did not match {value}%."
+                        : $"Brightness command failed for {value}%.",
+                WriteVerified = verified
+            });
+        }
+        return result;
     }
+
+    internal static bool WriteMatches(bool accepted, DisplayBrightnessState? fresh, int requested) =>
+        accepted
+        && fresh is { Supported: true, Value: int observed }
+        && string.IsNullOrWhiteSpace(fresh.Error)
+        && Math.Abs(observed - requested) <= 3;
 
     private IReadOnlyList<DisplayBrightnessState>? LastSnapshot()
     {

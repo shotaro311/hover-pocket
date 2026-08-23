@@ -311,6 +311,7 @@ internal sealed class ShellVerifier
     private async Task VerifyStagedRecoverySchedulerAsync()
     {
         var initialStageCount = _controller.RecoveryStageCountForVerify;
+        var initialVoiceTransitionCount = _controller.VoiceTransitionCountForVerify;
         _controller.ScheduleStagedRecoveryForVerify();
         var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(3);
         while (DateTimeOffset.UtcNow < deadline
@@ -322,6 +323,10 @@ internal sealed class ShellVerifier
         if (_controller.RecoveryStageCountForVerify < initialStageCount + HoverShellController.RecoveryDelays.Length)
         {
             _failures.Add("staged recovery: immediate/450ms/1400ms stages did not all execute");
+        }
+        if (_controller.VoiceTransitionCountForVerify != initialVoiceTransitionCount + 1)
+        {
+            _failures.Add("staged recovery: Voice transition was not notified exactly once");
         }
 
         if (!_controller.PollingEnabledForVerify || !_controller.HealthTimerEnabledForVerify)
