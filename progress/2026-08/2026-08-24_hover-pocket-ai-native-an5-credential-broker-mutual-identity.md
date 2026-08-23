@@ -72,6 +72,14 @@ AN5 credential brokerのproduction有効化前gateとして残っていた、接
 - Windows正式署名済みbinaryではexpected PIDに加えてAuthenticode signerを固定する。
 - AN3-B3A credential store統合後に、実store → broker → confined generatorの値非露出E2Eを別gateで行う。
 
+## Draft PR / Windows初回readback
+
+- stacked Draft PR [#35](https://github.com/shotaro311/hover-pocket/pull/35)をbase `codex/ai-native-an5-credential-broker-identity`で作成した。
+- 初回Windows run [32672078767](https://github.com/shotaro311/hover-pocket/actions/runs/32672078767)はRelease build、Settings、Capability、Brokerまで成功した。Pocket Surface内のcredential brokerは`helper`開始後に10秒でtimeoutし、同caseのENDへ到達しなかった。
+- .NET公式契約を再確認し、child側は`Console.OpenStandardInput()`から標準入力streamを明示取得するよう変更した。Host側はOS依存の`WriteLine`を使わず、UTF-8 JSONとLFを明示的に書く。
+- `Environment.ProcessPath`がapphostではなく`dotnet` hostを指す実行形態にも対応し、その場合だけentry assembly pathを先頭argumentへ追加する。launch modeはsecretを含まない固定markerだけをverification logへ残す。
+- 修正後Windows CIは未readbackである。
+
 ## Pro run状態
 
 - 正本run: `20260824-051101-hoverpocket-an3-b3a-realtime-byok-windows-vertical-slice-patch`

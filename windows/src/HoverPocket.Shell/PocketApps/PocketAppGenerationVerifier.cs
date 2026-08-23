@@ -307,7 +307,22 @@ internal sealed class PocketAppGenerationVerifier
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
+        var launchMode = "apphost";
+        if (string.Equals(
+            Path.GetFileNameWithoutExtension(processPath),
+            "dotnet",
+            StringComparison.OrdinalIgnoreCase))
+        {
+            var entryAssemblyPath = typeof(PocketAppGenerationVerifier).Assembly.Location;
+            if (string.IsNullOrWhiteSpace(entryAssemblyPath))
+            {
+                throw new CodexCredentialBrokerException();
+            }
+            startInfo.ArgumentList.Add(entryAssemblyPath);
+            launchMode = "dotnet-host";
+        }
         startInfo.ArgumentList.Add(CodexCredentialBrokerHelper.Argument);
+        VerifyConsole.WriteLine($"CREDENTIAL_BROKER_HELPER_LAUNCH_MODE {launchMode}");
         return Process.Start(startInfo) ?? throw new CodexCredentialBrokerException();
     }
 
@@ -318,7 +333,8 @@ internal sealed class PocketAppGenerationVerifier
         var standardErrorTask = process.StandardError.ReadToEndAsync();
         try
         {
-            await process.StandardInput.WriteLineAsync(bootstrapLine);
+            await process.StandardInput.WriteAsync(bootstrapLine);
+            await process.StandardInput.WriteAsync("\n");
             await process.StandardInput.FlushAsync();
             process.StandardInput.Close();
             await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));

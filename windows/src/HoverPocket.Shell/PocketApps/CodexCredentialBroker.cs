@@ -409,11 +409,20 @@ internal static class CodexCredentialBrokerHelper
         string Capability,
         int ServerProcessId);
 
-    public static int Run() => RunAsync(
-        Console.In,
-        Console.Out,
-        Console.Error,
-        CancellationToken.None).GetAwaiter().GetResult();
+    public static int Run()
+    {
+        using var standardInput = new StreamReader(
+            Console.OpenStandardInput(),
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true),
+            detectEncodingFromByteOrderMarks: false,
+            bufferSize: 512,
+            leaveOpen: false);
+        return RunAsync(
+            standardInput,
+            Console.Out,
+            Console.Error,
+            CancellationToken.None).GetAwaiter().GetResult();
+    }
 
     internal static string CreateBootstrapLine(
         string pipeName,
@@ -444,6 +453,8 @@ internal static class CodexCredentialBrokerHelper
         var line = await ReadLineAsync(standardInput, 2_048, cancellationToken).ConfigureAwait(false);
         if (line is null)
         {
+            await standardError.WriteLineAsync("credential unavailable").ConfigureAwait(false);
+            await standardError.FlushAsync().ConfigureAwait(false);
             return 1;
         }
         try
