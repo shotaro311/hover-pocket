@@ -1,7 +1,7 @@
 ---
 project_slug: hover-menu-preview
 date: 2026-08-21
-status: implemented; local-verified; public-beta-readback-passed; pr-ci-green; security-scan-green; review-followup-pending; formal-signing-pending
+status: implemented; local-verified; public-beta-readback-passed; pr-ci-green; security-scan-green; review-resolved; formal-signing-pending
 updated_by: codex
 ---
 
@@ -109,7 +109,7 @@ updated_by: codex
 - 未確認:
   - ローカルMacにはPowerShellがないため、PowerShell parseはPRのWindows CIで確認する。
   - 現行Windows `0.2.7`は未署名betaであり、3点の実Authenticode検証は正式署名済みreleaseでのみ完了できる。
-- Codex reviewの最終返信・解決は、進捗正本commitと最新head CIのreadback後に行う。
+- Codex review 14件へcommit / CI / artifact / scanの根拠を返信して解決し、fresh GraphQL readbackで未解決thread 0件を確認した。
 
 ## 完了境界
 

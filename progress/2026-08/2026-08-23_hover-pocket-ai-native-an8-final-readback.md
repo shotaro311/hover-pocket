@@ -1,7 +1,7 @@
 ---
 project_slug: hover-menu-preview
 date: 2026-08-23
-status: an8-a-final-readback-passed; pr-review-followup-in-progress; formal-windows-signing-pending
+status: an8-a-final-readback-passed; pr-review-resolved; formal-windows-signing-pending
 updated_by: codex
 ---
 
@@ -38,6 +38,7 @@ updated_by: codex
 - security diff scan `f436ab83-bc71-4ab6-b104-d49738aeeb45`: exact range `59cd53a...da75587`の5 / 5 file、coverage complete、reportable finding 0件、sealed complete。
 - final workflow run [32638515063](https://github.com/shotaro311/hover-pocket/actions/runs/32638515063): exact head `e2e6a4a4f7de80c9dd40578cf138e89a858aa5f3`、全job成功。3 report artifactを`/tmp/hoverpocket-run32638515063.k2JOcU`へ別経路downloadし、macOS 6資産、RSS / Latestを含む公開readback、Windows 8資産、Setup / Portable payload、署名 / 公証 / Gatekeeper、beta publisher分離を確認した。
 - security diff scan `ce3db805-6663-48a6-aad0-c650efc9be0f`: exact range `f6f24f6...e2e6a4a`、2 / 2 surface、coverage complete、reportable finding 0件、sealed complete。
+- PR #20のreview 14件へ検証根拠を返信して解決し、fresh GraphQL readbackで未解決thread 0件を確認した。PRはReadyのまま、人間mergeを維持する。
 
 ## 失敗からの修正
 

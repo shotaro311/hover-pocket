@@ -2,7 +2,7 @@
 project_slug: hover-menu-preview
 updated: 2026-08-23
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-pr-ready-ci-green; an5-c-runtime-activation-pending; capability-expansion-merged; an8-a-review-fixes-ci-security-green
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-pr-ready-ci-green; an5-c-runtime-activation-pending; capability-expansion-merged; an8-a-pr-ready-review-resolved
 ---
 
 ## 2026-08-21 AI-native AN8-A Codex Review Follow-up
@@ -24,6 +24,7 @@ status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; a
 - 追加review 2件を`da75587`で修正した。Setup payloadは末尾推測を撤回し、Velopack 1.2.0の固定marker直前にあるlittle-endian offset / lengthをstreaming KMPで一意に解決するため、AuthenticodeのPE証明書表をpackageと誤認しない。formalでは3成果物のSignerCertificate raw byte SHA-256が同一で、repository variable `WINDOWS_SIGNER_CERT_SHA256`の正規64桁値と一致することも必須にした。betaのIdentityOnlyは署名評価を行わず`publisherIdentity=not-evaluated`を返す。
 - exact scan `f436ab83-bc71-4ab6-b104-d49738aeeb45`はrange `59cd53a...da75587`の5 / 5 fileを確認し、coverage complete、finding 0件、sealed complete。Windows native beta run [32638170997](https://github.com/shotaro311/hover-pocket/actions/runs/32638170997)はexact head `da75587759959f5760eedb9a59b153d5971fc786`で全job成功した。3 report artifactの別経路readbackでも、Setup / Portable payload、macOS 6資産、署名 / 公証 / Gatekeeper、beta publisher分離が一致した。
 - 最終review 2件を`e2e6a4a`で修正した。appcastはnamespaceなし`rss` root、direct childの`channel` 1件、`item` 1件、`enclosure` 1件を順に必須化し、非RSS rootと複数channelを拒否する。GitHub汎用Latestは約270 MBの公開asset検証後に再取得してからmacOS releaseとの一致を判定する。unit 19件とexact scan `ce3db805-6663-48a6-aad0-c650efc9be0f`は成功。最終run [32638515063](https://github.com/shotaro311/hover-pocket/actions/runs/32638515063)はexact head `e2e6a4a4f7de80c9dd40578cf138e89a858aa5f3`で全job成功し、3 report artifactの別経路readbackでもmacOS 6資産、Windows 8資産、Setup / Portable payload、署名 / 公証 / Gatekeeper、beta publisher分離が一致した。
+- PR #20のreview 14件へcommit / CI / artifact / scanの根拠を返信して解決し、fresh GraphQL readbackで未解決thread 0件を確認した。PRはReadyを維持し、人間mergeの境界を変更しない。
 
 ## 2026-08-20 AI-native AN8-A Public Release Readback
 
