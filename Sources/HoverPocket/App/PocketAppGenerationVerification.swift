@@ -550,11 +550,15 @@ enum PocketAppGenerationVerification {
                 require(expired.isConsumed, "generation_credential_broker_expired_consumed", failures: &failures)
             }
 
-            let server = try CodexCredentialBrokerServer(lifetime: 5) { fixtureSecret }
+            let server = try CodexCredentialBrokerServer(
+                lifetime: 5,
+                expectedClientProcessID: getpid()
+            ) { fixtureSecret }
             let endpoint = server.endpoint
             let brokerSecret = try CodexCredentialBrokerClient.fetchSecret(
                 endpoint: endpoint,
-                capability: server.capability
+                capability: server.capability,
+                expectedServerProcessID: getpid()
             )
             require(
                 brokerSecret == fixtureSecret,
@@ -564,7 +568,8 @@ enum PocketAppGenerationVerification {
             do {
                 _ = try CodexCredentialBrokerClient.fetchSecret(
                     endpoint: endpoint,
-                    capability: server.capability
+                    capability: server.capability,
+                    expectedServerProcessID: getpid()
                 )
                 failures.append("generation_credential_broker_socket_replay")
             } catch {
@@ -576,12 +581,16 @@ enum PocketAppGenerationVerification {
                 failures: &failures
             )
 
-            let wrongCapabilityServer = try CodexCredentialBrokerServer(lifetime: 5) { fixtureSecret }
+            let wrongCapabilityServer = try CodexCredentialBrokerServer(
+                lifetime: 5,
+                expectedClientProcessID: getpid()
+            ) { fixtureSecret }
             defer { wrongCapabilityServer.cancel() }
             do {
                 _ = try CodexCredentialBrokerClient.fetchSecret(
                     endpoint: wrongCapabilityServer.endpoint,
-                    capability: String(repeating: "c", count: 43)
+                    capability: String(repeating: "c", count: 43),
+                    expectedServerProcessID: getpid()
                 )
                 failures.append("generation_credential_broker_wrong_capability")
             } catch {
@@ -589,13 +598,17 @@ enum PocketAppGenerationVerification {
             do {
                 _ = try CodexCredentialBrokerClient.fetchSecret(
                     endpoint: wrongCapabilityServer.endpoint,
-                    capability: wrongCapabilityServer.capability
+                    capability: wrongCapabilityServer.capability,
+                    expectedServerProcessID: getpid()
                 )
                 failures.append("generation_credential_broker_wrong_capability_replay")
             } catch {
             }
 
-            let foreignPeerServer = try CodexCredentialBrokerServer(lifetime: 5) { fixtureSecret }
+            let foreignPeerServer = try CodexCredentialBrokerServer(
+                lifetime: 5,
+                expectedClientProcessID: getpid()
+            ) { fixtureSecret }
             defer { foreignPeerServer.cancel() }
             let foreignPeer = Process()
             let foreignPeerOutput = Pipe()
@@ -607,9 +620,9 @@ enum PocketAppGenerationVerification {
                 import os, socket
                 client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 client.settimeout(2)
-                client.connect(os.environ["HOVERPOCKET_CODEX_BROKER_ENDPOINT"])
+                client.connect(os.environ["HOVERPOCKET_TEST_BROKER_ENDPOINT"])
                 try:
-                    request = "HP-CODEX-BROKER/1 " + os.environ["HOVERPOCKET_CODEX_BROKER_CAPABILITY"] + "\\n"
+                    request = "HP-CODEX-BROKER/1 " + os.environ["HOVERPOCKET_TEST_BROKER_CAPABILITY"] + "\\n"
                     client.sendall(request.encode("utf-8"))
                     response = client.recv(512)
                     raise SystemExit(1 if response.startswith(b"OK ") else 0)
@@ -620,8 +633,8 @@ enum PocketAppGenerationVerification {
                 """,
             ]
             foreignPeer.environment = [
-                CodexCredentialBrokerHelper.endpointEnvironmentKey: foreignPeerServer.endpoint.path,
-                CodexCredentialBrokerHelper.capabilityEnvironmentKey: foreignPeerServer.capability,
+                "HOVERPOCKET_TEST_BROKER_ENDPOINT": foreignPeerServer.endpoint.path,
+                "HOVERPOCKET_TEST_BROKER_CAPABILITY": foreignPeerServer.capability,
             ]
             foreignPeer.standardOutput = foreignPeerOutput
             foreignPeer.standardError = foreignPeerError
@@ -640,13 +653,15 @@ enum PocketAppGenerationVerification {
 
             let unauthorizedPeerServer = try CodexCredentialBrokerServer(
                 lifetime: 5,
+                expectedClientProcessID: getpid(),
                 peerAuthorizer: { _ in false }
             ) { fixtureSecret }
             defer { unauthorizedPeerServer.cancel() }
             do {
                 _ = try CodexCredentialBrokerClient.fetchSecret(
                     endpoint: unauthorizedPeerServer.endpoint,
-                    capability: unauthorizedPeerServer.capability
+                    capability: unauthorizedPeerServer.capability,
+                    expectedServerProcessID: getpid()
                 )
                 failures.append("generation_credential_broker_unauthorized_peer")
             } catch {
@@ -657,20 +672,30 @@ enum PocketAppGenerationVerification {
                 )
             }
 
-            let helperServer = try CodexCredentialBrokerServer(lifetime: 5) { fixtureSecret }
-            defer { helperServer.cancel() }
             let helper = Process()
+            let helperInput = Pipe()
             let helperOutput = Pipe()
             let helperError = Pipe()
             helper.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
             helper.arguments = [CodexCredentialBrokerHelper.argument]
-            helper.environment = [
-                CodexCredentialBrokerHelper.endpointEnvironmentKey: helperServer.endpoint.path,
-                CodexCredentialBrokerHelper.capabilityEnvironmentKey: helperServer.capability,
-            ]
+            helper.environment = [:]
+            helper.standardInput = helperInput
             helper.standardOutput = helperOutput
             helper.standardError = helperError
             try helper.run()
+            defer { try? helperInput.fileHandleForWriting.close() }
+            let helperServer = try CodexCredentialBrokerServer(
+                lifetime: 5,
+                expectedClientProcessID: helper.processIdentifier
+            ) { fixtureSecret }
+            defer { helperServer.cancel() }
+            let helperBootstrap = try CodexCredentialBrokerHelper.makeBootstrapData(
+                endpoint: helperServer.endpoint,
+                capability: helperServer.capability,
+                serverProcessID: getpid()
+            )
+            try helperInput.fileHandleForWriting.write(contentsOf: helperBootstrap)
+            try helperInput.fileHandleForWriting.close()
             helper.waitUntilExit()
             let output = helperOutput.fileHandleForReading.readDataToEndOfFile()
             let error = helperError.fileHandleForReading.readDataToEndOfFile()
@@ -681,6 +706,66 @@ enum PocketAppGenerationVerification {
                 "generation_credential_broker_helper_stdout_only",
                 failures: &failures
             )
+
+            let impostorServer = try CodexCredentialBrokerServer(
+                lifetime: 5,
+                expectedClientProcessID: getpid()
+            ) { fixtureSecret }
+            defer { impostorServer.cancel() }
+            let impostor = Process()
+            let impostorInput = Pipe()
+            let impostorOutput = Pipe()
+            let impostorError = Pipe()
+            impostor.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+            impostor.arguments = [CodexCredentialBrokerHelper.argument]
+            impostor.environment = [:]
+            impostor.standardInput = impostorInput
+            impostor.standardOutput = impostorOutput
+            impostor.standardError = impostorError
+            try impostor.run()
+            defer { try? impostorInput.fileHandleForWriting.close() }
+            let impostorBootstrap = try CodexCredentialBrokerHelper.makeBootstrapData(
+                endpoint: impostorServer.endpoint,
+                capability: impostorServer.capability,
+                serverProcessID: getpid()
+            )
+            try impostorInput.fileHandleForWriting.write(contentsOf: impostorBootstrap)
+            try impostorInput.fileHandleForWriting.close()
+            impostor.waitUntilExit()
+            let impostorStdout = impostorOutput.fileHandleForReading.readDataToEndOfFile()
+            let impostorStderr = impostorError.fileHandleForReading.readDataToEndOfFile()
+            require(
+                impostor.terminationStatus == 1
+                    && impostorServer.isConsumed
+                    && impostorStdout.isEmpty
+                    && impostorStderr == Data("credential unavailable\n".utf8),
+                "generation_credential_broker_same_binary_wrong_pid_rejected",
+                failures: &failures
+            )
+
+            let serverIdentityServer = try CodexCredentialBrokerServer(
+                lifetime: 5,
+                expectedClientProcessID: getpid()
+            ) { fixtureSecret }
+            defer { serverIdentityServer.cancel() }
+            do {
+                _ = try CodexCredentialBrokerClient.fetchSecret(
+                    endpoint: serverIdentityServer.endpoint,
+                    capability: serverIdentityServer.capability,
+                    expectedServerProcessID: getpid() + 1
+                )
+                failures.append("generation_credential_broker_wrong_server_pid")
+            } catch {
+                let consumedDeadline = Date().addingTimeInterval(2)
+                while !serverIdentityServer.isConsumed, Date() < consumedDeadline {
+                    Thread.sleep(forTimeInterval: 0.01)
+                }
+                require(
+                    serverIdentityServer.isConsumed,
+                    "generation_credential_broker_wrong_server_pid_consumed",
+                    failures: &failures
+                )
+            }
 
             let deinitProbe = Process()
             let deinitOutput = Pipe()
