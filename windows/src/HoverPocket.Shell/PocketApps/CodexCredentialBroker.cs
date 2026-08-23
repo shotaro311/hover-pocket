@@ -254,15 +254,18 @@ internal static class CodexCredentialBrokerClient
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
+        var operationTimeout = timeout ?? TimeSpan.FromSeconds(2);
         if (!pipeName.StartsWith("hoverpocket-codex-broker-", StringComparison.Ordinal)
             || pipeName.Length > 96
-            || capability.Length > 128)
+            || capability.Length > 128
+            || operationTimeout <= TimeSpan.Zero
+            || operationTimeout > TimeSpan.FromSeconds(60))
         {
             throw new CodexCredentialBrokerException();
         }
 
         using var timeoutCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCancellation.CancelAfter(timeout ?? TimeSpan.FromSeconds(2));
+        timeoutCancellation.CancelAfter(operationTimeout);
         await using var pipe = new NamedPipeClientStream(
             ".",
             pipeName,
@@ -270,7 +273,7 @@ internal static class CodexCredentialBrokerClient
             PipeOptions.Asynchronous);
         try
         {
-            await pipe.ConnectAsync(timeoutCancellation.Token).ConfigureAwait(false);
+            await pipe.ConnectAsync(operationTimeout, timeoutCancellation.Token).ConfigureAwait(false);
             await CodexCredentialBrokerServer.WriteLineAsync(
                 pipe,
                 $"HP-CODEX-BROKER/1 {capability}",
