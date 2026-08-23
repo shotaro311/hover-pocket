@@ -57,7 +57,7 @@
 
 ## PR readback
 
-- Draft PR [#31](https://github.com/shotaro311/hover-pocket/pull/31)のexact headは`d00de9b3f38c104a6d3048acdd493ec945a2de5c`。
+- Draft PR [#31](https://github.com/shotaro311/hover-pocket/pull/31)の実装exact headは`d00de9b3f38c104a6d3048acdd493ec945a2de5c`。進捗同期後のdocs-only headでも同じ全checkが再成功した。
 - 全7 checkが成功し、失敗0、pending 0。PRは`Draft / OPEN / MERGEABLE / CLEAN`である。
 - review / comment / unresolved threadは0件。local / remote parityは`0 / 0`、worktreeはcleanである。
 - 自動mergeは行わず、stack base `codex/ai-native-core-ga-legacy-path-removal`への人手review gateを維持する。
