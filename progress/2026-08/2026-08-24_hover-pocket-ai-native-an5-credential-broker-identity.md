@@ -70,6 +70,17 @@ Windowsの正式releaseでは、path一致に加えてtimestamped Authenticode s
 - unauthorized first connectionがleaseを消費する挙動は動的に確認した。credential漏えいはなく、同一ユーザー自身の単一ローカル生成失敗に限定されるため、security findingからは除外した。
 - Windows timestamped Authenticode signer bindingは、この開発・CI向けprocess identity branchではなく正式release gateで確認する。
 
+最終code head `cd3be0d5470d12b8e5e66797d667673e16b426cc`をbase `7447e3294dadc6f454d78888571ef1b03cc01792`から再走査したCodex Security diff scan `63f51914-16de-4553-b765-bd3119ac2086`も、reportable finding 0件で封印・再読込した。snapshot digestは`codex-security-snapshot/v1:sha256:40827c3008d55d7d8abd24e3a09d14328c2f3820693ccef02fb662f798433f04`である。coverageは同じ2件をproduction前deferred gateとして保持し、修正後Windows CIの実process結果もvalidationへ反映した。
+
+## Draft PR / CI readback
+
+- stacked Draft PR: [#34](https://github.com/shotaro311/hover-pocket/pull/34)
+- base: `codex/ai-native-an5-credential-broker-foundation`
+- code head: `cd3be0d5470d12b8e5e66797d667673e16b426cc`
+- Windows run [32670574517](https://github.com/shotaro311/hover-pocket/actions/runs/32670574517)はRelease build warning 0 / error 0、`foreign-peer` / `unauthorized-peer` / `helper`の全BEGIN / END、Pocket App generation終端、Capability、Broker、Pocket Surface、Timer、Settings、旧AI lane不在、Voice、Updater、signing contract、rendered WebView UIまで成功した。
+- macOS run [32670574498](https://github.com/shotaro311/hover-pocket/actions/runs/32670574498)はwarnings-as-errors build、Voice contract 42件、Voice foundation、Capability、Broker、Pocket Surface、Pocket App package / generation、Timerまで成功した。
+- Router run [32670573186](https://github.com/shotaro311/hover-pocket/actions/runs/32670573186)も成功した。
+
 ## Pro run状態
 
 - 正本run: `20260824-051101-hoverpocket-an3-b3a-realtime-byok-windows-vertical-slice-patch`
@@ -80,9 +91,6 @@ Windowsの正式releaseでは、path一致に加えてtimestamped Authenticode s
 
 ## 次のgate
 
-1. コード差分をcommit / pushし、PR #33上のstacked Draft PRを作る。
-2. Windows Release build、warning 0 / error 0、`foreign-peer` / `unauthorized-peer`のbegin / end、後続全verifierをCI logからreadbackする。
-3. macOS CIでwarnings-as-errors、Pocket App generation、Voice / Capability / Broker回帰をreadbackする。
-4. 正本AN3-B3A delivery到着後、state hashをclaimしてcredential store境界だけを統合する。
-5. helper側server identity pinningとexpected helper PID bindingを別stack branchで実装し、same-user race canaryを再実行する。
-6. Windows formal signer bindingと両OSの実配布binary canaryはproduction flag前の別gateとする。
+1. 正本AN3-B3A delivery到着後、state hashをclaimしてcredential store境界だけを統合する。
+2. helper側server identity pinningとexpected helper PID bindingを別stack branchで実装し、same-user race canaryを再実行する。
+3. Windows formal signer bindingと両OSの実配布binary canaryはproduction flag前の別gateとする。
