@@ -498,21 +498,38 @@ internal sealed class VoiceFoundationVerifier
 
     private async Task VerifyTransportCrashDisposesCandidateAsync(CancellationToken cancellationToken)
     {
-        var disposeCount = 0;
-        var harness = new AppServerHarness(() => Interlocked.Increment(ref disposeCount));
+        var factoryCalls = 0;
+        var crashedHarness = new GatedDisposeHarness();
+        var replacementHarness = new AppServerHarness();
         using var coordinator = new CodexVoiceCoordinator(
             featureEnabled: true,
-            clientFactory: _ => Task.FromResult(harness.CreateClient()),
+            clientFactory: _ => Task.FromResult(
+                Interlocked.Increment(ref factoryCalls) == 1
+                    ? crashedHarness.CreateClient()
+                    : replacementHarness.CreateClient()),
             compatibilityProbe: new FixedProbe(CodexVoiceGate.Ready),
-            restartDelays: []);
+            restartDelays: [TimeSpan.Zero]);
 
         await coordinator.InitializeAsync(cancellationToken);
-        harness.Close();
-        await WaitUntilAsync(() => Volatile.Read(ref disposeCount) == 1, cancellationToken);
-        if (coordinator.Snapshot.TransportAttached
-            || coordinator.Snapshot.AppServerProcessId is not null)
+        crashedHarness.Close();
+        await crashedHarness.DisposeStarted.WaitAsync(cancellationToken);
+        await WaitUntilAsync(() => coordinator.Snapshot.RestartAttempt == 1, cancellationToken);
+        await Task.Yield();
+        if (Volatile.Read(ref factoryCalls) != 1
+            || coordinator.Snapshot.TransportAttached
+            || coordinator.Snapshot.SessionStatus != CodexVoiceSessionStatus.RecoverableFailure)
         {
-            _failures.Add("transport crash did not dispose and detach the app-server client");
+            _failures.Add("transport crash restarted before the detached client finished disposal");
+        }
+
+        crashedHarness.ReleaseDispose();
+        await WaitUntilAsync(
+            () => Volatile.Read(ref factoryCalls) == 2
+                && coordinator.Snapshot.Availability == CodexVoiceAvailability.Ready,
+            cancellationToken);
+        if (!coordinator.Snapshot.TransportAttached)
+        {
+            _failures.Add("transport crash did not restart after detached client disposal completed");
         }
     }
 
@@ -862,22 +879,28 @@ internal sealed class VoiceFoundationVerifier
             _failures.Add("delayed transcript crossed roots or a transcript revision duplicated its event ID");
         }
 
-        var absolutePaths = new[]
+        var filesystemPaths = new[]
         {
             "/tmp/private.txt",
             "/Volumes/work/secret.mov",
             @"C:\work\secret.txt",
             "[/Users/alice/private]",
-            @"[C:\Users\alice\private]"
+            @"[C:\Users\alice\private]",
+            "Sources/HoverPocket/App.swift"
         };
-        if (absolutePaths.Any(path => VoiceTextSafety.SanitizeVisibleText(path, 200) != "[redacted]"))
+        if (filesystemPaths.Any(path => VoiceTextSafety.SanitizeVisibleText(path, 200) != "[redacted]"))
         {
-            _failures.Add("absolute filesystem path redaction was incomplete");
+            _failures.Add("filesystem path redaction was incomplete");
         }
-        var nonPathText = new[] { "https://example.com/path", "and/or" };
+        var nonPathText = new[]
+        {
+            "https://example.com/Sources/HoverPocket/App.swift",
+            "and/or",
+            "input/output"
+        };
         if (nonPathText.Any(value => VoiceTextSafety.SanitizeVisibleText(value, 200) != value))
         {
-            _failures.Add("absolute path redaction treated ordinary text as a filesystem path");
+            _failures.Add("filesystem path redaction treated ordinary text or a URL as a path");
         }
         var bidiSamples = new[]
         {
@@ -1127,6 +1150,8 @@ internal sealed class VoiceFoundationVerifier
                 });
 
         public void ReleaseDispose() => _releaseDispose.TrySetResult(true);
+
+        public void Close() => _reader.Dispose();
     }
 
     private sealed class ChannelLineReader : TextReader
