@@ -657,17 +657,28 @@ def build_windows_asset_snapshot(
 
 
 def build_macos_asset_snapshot(
-    release_tag: str,
-    download: DownloadedAsset,
+    versioned_release_tag: str,
+    feed_release_tag: str,
+    versioned_sparkle: DownloadedAsset,
+    feed_manual: DownloadedAsset,
+    versioned_manual: DownloadedAsset,
 ) -> dict[str, Any]:
     return {
-        "releaseTag": release_tag,
+        "versionedReleaseTag": versioned_release_tag,
+        "feedReleaseTag": feed_release_tag,
         "assets": [
             {
+                "role": role,
+                "releaseTag": release_tag,
                 "name": download.name,
                 "size": download.size,
                 "sha256": download.sha256,
             }
+            for role, release_tag, download in (
+                ("versionedSparkle", versioned_release_tag, versioned_sparkle),
+                ("feedManual", feed_release_tag, feed_manual),
+                ("versionedManual", versioned_release_tag, versioned_manual),
+            )
         ],
     }
 
@@ -809,8 +820,18 @@ def verify_downloaded_releases(
         release_tag = windows_release.get("tag_name")
         if not isinstance(release_tag, str):
             raise VerificationError("windows.release_tag: missing tag")
+        mac_feed_tag = mac_feed_release.get("tag_name")
+        mac_version_tag = mac_version_release.get("tag_name")
+        if not isinstance(mac_feed_tag, str) or not isinstance(mac_version_tag, str):
+            raise VerificationError("macos.release_tag: missing tag")
         return (
-            build_macos_asset_snapshot(appcast.release_tag, mac_version_zip),
+            build_macos_asset_snapshot(
+                mac_version_tag,
+                mac_feed_tag,
+                mac_version_zip,
+                mac_manual_zip,
+                mac_version_manual_zip,
+            ),
             build_windows_asset_snapshot(release_tag, windows_downloads),
         )
 

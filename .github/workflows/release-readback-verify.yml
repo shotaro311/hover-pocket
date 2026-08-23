@@ -4,12 +4,14 @@ on:
   push:
     paths:
       - "script/verify_release_readback.py"
+      - "script/verify_published_macos.sh"
       - "script/tests/test_verify_release_readback.py"
       - "windows/script/verify_published_authenticode.ps1"
       - ".github/workflows/release-readback-verify.yml"
   pull_request:
     paths:
       - "script/verify_release_readback.py"
+      - "script/verify_published_macos.sh"
       - "script/tests/test_verify_release_readback.py"
       - "windows/script/verify_published_authenticode.ps1"
       - ".github/workflows/release-readback-verify.yml"
@@ -173,6 +175,42 @@ jobs:
         with:
           name: published-authenticode-readback
           path: authenticode-readback-report.json
+          if-no-files-found: error
+          retention-days: 30
+
+  windows-package-identity-readback:
+    name: Read back Windows package identity
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.windows_signing_gate == 'beta')
+    needs: [resolve-windows-release, published-readback]
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download verified asset snapshot
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: published-release-readback
+          path: published-release-readback
+
+      - name: Verify public Setup, Portable, and update package identity
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          WINDOWS_TAG: ${{ needs.resolve-windows-release.outputs.windows_tag }}
+        run: |
+          windows/script/verify_published_authenticode.ps1 `
+            -Tag "$env:WINDOWS_TAG" `
+            -ExpectedSnapshotPath "published-release-readback/release-readback-report.json" `
+            -IdentityOnly |
+            Tee-Object -FilePath windows-package-identity-readback-report.json
+
+      - name: Upload Windows package identity report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: published-windows-package-identity-readback
+          path: windows-package-identity-readback-report.json
           if-no-files-found: error
           retention-days: 30
 

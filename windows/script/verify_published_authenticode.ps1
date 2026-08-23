@@ -3,7 +3,8 @@ param(
     [string]$Repository = "shotaro311/hover-pocket",
     [string]$Tag = "auto",
     [Parameter(Mandatory = $true)]
-    [string]$ExpectedSnapshotPath
+    [string]$ExpectedSnapshotPath,
+    [switch]$IdentityOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -181,6 +182,37 @@ function Assert-AssemblyReleaseVersion {
     }
 }
 
+function Assert-DirectoryPayloadMatches {
+    param([string]$LeftRoot, [string]$RightRoot)
+
+    $leftFiles = @(Get-ChildItem -LiteralPath $LeftRoot -Recurse -File | ForEach-Object {
+        [pscustomobject]@{
+            Name = [IO.Path]::GetRelativePath($LeftRoot, $_.FullName).Replace('\', '/')
+            Size = $_.Length
+            Sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    } | Sort-Object Name)
+    $rightFiles = @(Get-ChildItem -LiteralPath $RightRoot -Recurse -File | ForEach-Object {
+        [pscustomobject]@{
+            Name = [IO.Path]::GetRelativePath($RightRoot, $_.FullName).Replace('\', '/')
+            Size = $_.Length
+            Sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    } | Sort-Object Name)
+    if ($leftFiles.Count -ne $rightFiles.Count -or $leftFiles.Count -eq 0) {
+        throw "Setup payload and published full package contain different file sets."
+    }
+    for ($index = 0; $index -lt $leftFiles.Count; $index++) {
+        if (
+            $leftFiles[$index].Name -cne $rightFiles[$index].Name -or
+            $leftFiles[$index].Size -ne $rightFiles[$index].Size -or
+            $leftFiles[$index].Sha256 -cne $rightFiles[$index].Sha256
+        ) {
+            throw "Setup payload differs from the published full package."
+        }
+    }
+}
+
 function Read-Checksums {
     param([string]$Path)
 
@@ -318,7 +350,12 @@ try {
     Get-ReleaseAsset -Release $release -Name "assets.win.json" -Destination $assetsPath
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     $feed = Get-Content -LiteralPath $feedPath -Raw | ConvertFrom-Json
-    if ($manifest.authenticode -ne "signed-timestamped-verified") {
+    if ($IdentityOnly) {
+        if ($manifest.authenticode -notin @("unsigned", "signed-timestamped-verified")) {
+            throw "Release manifest contains an unknown Authenticode state."
+        }
+    }
+    elseif ($manifest.authenticode -ne "signed-timestamped-verified") {
         throw "Release manifest is not marked signed-timestamped-verified."
     }
     if ($releaseTag -ne "win-v$($manifest.version)") {
@@ -379,7 +416,11 @@ try {
     ) {
         throw "Downloaded full update package differs from its feed metadata."
     }
-    $setupSignature = Assert-TimestampedAuthenticode -Path $setupPath -Label "Setup"
+    $setupSignature = $null
+    if (-not $IdentityOnly) {
+        $setupSignature = Assert-TimestampedAuthenticode -Path $setupPath -Label "Setup"
+    }
+    Assert-ExecutableReleaseVersion -Path $setupPath -ExpectedVersion $manifest.version -Label "Setup"
 
     $extractPath = Join-Path $temporaryRoot "portable"
     Expand-ZipArchiveSafely -ArchivePath $portablePath -Destination $extractPath
@@ -387,7 +428,10 @@ try {
     if ($mainExecutables.Count -ne 1) {
         throw "Portable ZIP does not contain exactly one HoverPocket.Shell.exe."
     }
-    $mainSignature = Assert-TimestampedAuthenticode -Path $mainExecutables[0].FullName -Label "HoverPocket.Shell.exe"
+    $mainSignature = $null
+    if (-not $IdentityOnly) {
+        $mainSignature = Assert-TimestampedAuthenticode -Path $mainExecutables[0].FullName -Label "HoverPocket.Shell.exe"
+    }
     Assert-ExecutableReleaseVersion -Path $mainExecutables[0].FullName -ExpectedVersion $manifest.version -Label "Portable HoverPocket.Shell.exe"
 
     $packageExtractPath = Join-Path $temporaryRoot "update-package"
@@ -402,16 +446,37 @@ try {
     if ($packageExecutables.Count -ne 1) {
         throw "Full update package does not contain exactly one HoverPocket.Shell.exe."
     }
-    $packageSignature = Assert-TimestampedAuthenticode -Path $packageExecutables[0].FullName -Label "Full package HoverPocket.Shell.exe"
+    $packageSignature = $null
+    if (-not $IdentityOnly) {
+        $packageSignature = Assert-TimestampedAuthenticode -Path $packageExecutables[0].FullName -Label "Full package HoverPocket.Shell.exe"
+    }
     Assert-ExecutableReleaseVersion -Path $packageExecutables[0].FullName -ExpectedVersion $manifest.version -Label "Full package HoverPocket.Shell.exe"
     Assert-AssemblyReleaseVersion -PackageRoot $packageExtractPath -ExpectedVersion $manifest.version
-    $signerThumbprints = @(@(
-            $setupSignature.SignerCertificate.Thumbprint
-            $mainSignature.SignerCertificate.Thumbprint
-            $packageSignature.SignerCertificate.Thumbprint
-        ) | Select-Object -Unique)
-    if ($signerThumbprints.Count -ne 1) {
-        throw "Setup, Portable application, and full update package application are signed by different certificates."
+
+    $setupExtractPath = Join-Path $temporaryRoot "setup-payload"
+    Expand-ZipArchiveSafely -ArchivePath $setupPath -Destination $setupExtractPath
+    Assert-NupkgReleaseIdentity `
+        -PackageRoot $setupExtractPath `
+        -ExpectedPackageId $manifest.packageId `
+        -ExpectedVersion $manifest.version `
+        -ExpectedChannel $manifest.updateChannel `
+        -ExpectedRuntime $manifest.runtime
+    $setupPayloadExecutables = @(Get-ChildItem -LiteralPath $setupExtractPath -Recurse -File -Filter "HoverPocket.Shell.exe")
+    if ($setupPayloadExecutables.Count -ne 1) {
+        throw "Setup payload does not contain exactly one HoverPocket.Shell.exe."
+    }
+    Assert-ExecutableReleaseVersion -Path $setupPayloadExecutables[0].FullName -ExpectedVersion $manifest.version -Label "Setup payload HoverPocket.Shell.exe"
+    Assert-AssemblyReleaseVersion -PackageRoot $setupExtractPath -ExpectedVersion $manifest.version
+    Assert-DirectoryPayloadMatches -LeftRoot $setupExtractPath -RightRoot $packageExtractPath
+    if (-not $IdentityOnly) {
+        $signerThumbprints = @(@(
+                $setupSignature.SignerCertificate.Thumbprint
+                $mainSignature.SignerCertificate.Thumbprint
+                $packageSignature.SignerCertificate.Thumbprint
+            ) | Select-Object -Unique)
+        if ($signerThumbprints.Count -ne 1) {
+            throw "Setup, Portable application, and full update package application are signed by different certificates."
+        }
     }
     $finalRelease = Resolve-WindowsRelease -RequestedTag $releaseTag
     Assert-ReleaseMatchesSnapshot -Release $finalRelease -ExpectedAssets $expectedAssets
@@ -419,12 +484,14 @@ try {
     [ordered]@{
         status = "passed"
         releaseTag = $releaseTag
-        setup = "signed-timestamped-verified"
-        portableApplication = "signed-timestamped-verified"
-        updatePackageApplication = "signed-timestamped-verified"
+        verificationMode = if ($IdentityOnly) { "package-identity" } else { "formal-authenticode" }
+        setup = if ($IdentityOnly) { "release-version-verified" } else { "signed-timestamped-verified" }
+        portableApplication = if ($IdentityOnly) { "release-version-verified" } else { "signed-timestamped-verified" }
+        updatePackageApplication = if ($IdentityOnly) { "release-version-verified" } else { "signed-timestamped-verified" }
         packageIdentity = "manifest-version-and-runtime-verified"
         embeddedApplicationVersion = "verified"
-        signerAgreement = "verified"
+        setupPayload = "full-package-byte-equivalent"
+        signerAgreement = if ($IdentityOnly) { "not-evaluated" } else { "verified" }
         artifactSnapshot = "verified"
     } | ConvertTo-Json -Compress
 }

@@ -274,6 +274,7 @@ class ReleaseReadbackTests(unittest.TestCase):
 
         mac_snapshot = MODULE.build_macos_asset_snapshot(
             "v1.2.3-456",
+            "macos-latest",
             MODULE.DownloadedAsset(
                 name="HoverPocket-1.2.3-456.zip",
                 path=pathlib.Path("HoverPocket-1.2.3-456.zip"),
@@ -281,13 +282,28 @@ class ReleaseReadbackTests(unittest.TestCase):
                 sha256="a" * 64,
                 sha1="",
             ),
+            MODULE.DownloadedAsset(
+                name="HoverPocket-macOS-app.zip",
+                path=pathlib.Path("feed/HoverPocket-macOS-app.zip"),
+                size=17,
+                sha256="a" * 64,
+                sha1="",
+            ),
+            MODULE.DownloadedAsset(
+                name="HoverPocket-macOS-app.zip",
+                path=pathlib.Path("versioned/HoverPocket-macOS-app.zip"),
+                size=17,
+                sha256="a" * 64,
+                sha1="",
+            ),
         )
-        self.assertEqual(mac_snapshot["releaseTag"], "v1.2.3-456")
-        self.assertEqual(mac_snapshot["assets"], [{
-            "name": "HoverPocket-1.2.3-456.zip",
-            "size": 17,
-            "sha256": "a" * 64,
-        }])
+        self.assertEqual(mac_snapshot["versionedReleaseTag"], "v1.2.3-456")
+        self.assertEqual(mac_snapshot["feedReleaseTag"], "macos-latest")
+        self.assertEqual(
+            [asset["role"] for asset in mac_snapshot["assets"]],
+            ["versionedSparkle", "feedManual", "versionedManual"],
+        )
+        self.assertTrue(all(asset["sha256"] == "a" * 64 for asset in mac_snapshot["assets"]))
 
         downloads[package_name] = MODULE.DownloadedAsset(
             name=package_name,
@@ -373,20 +389,21 @@ class ReleaseReadbackTests(unittest.TestCase):
         with self.assertRaises(MODULE.VerificationError):
             MODULE.resolve_windows_release(reader, "win-v1.2.3")
 
-    def test_formal_workflow_pins_one_windows_tag_for_both_readbacks(self):
+    def test_workflow_pins_one_windows_tag_for_all_readbacks(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         pinned = "WINDOWS_TAG: ${{ needs.resolve-windows-release.outputs.windows_tag }}"
-        self.assertEqual(workflow.count(pinned), 2)
+        self.assertEqual(workflow.count(pinned), 3)
         self.assertIn("needs: [resolve-windows-release]", workflow)
         self.assertNotIn("WINDOWS_TAG: ${{ inputs.windows_tag }}", workflow)
         upload_artifact_sha = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
-        self.assertEqual(workflow.count(f"actions/upload-artifact@{upload_artifact_sha}"), 3)
+        self.assertEqual(workflow.count(f"actions/upload-artifact@{upload_artifact_sha}"), 4)
         self.assertIn("- name: Verify published release surfaces\n        shell: bash", workflow)
 
     def test_macos_workflow_verifies_the_public_app_with_gatekeeper(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         script = MACOS_READBACK_SCRIPT.read_text(encoding="utf-8")
         self.assertIn("macos-gatekeeper-readback:", workflow)
+        self.assertEqual(workflow.count('"script/verify_published_macos.sh"'), 2)
         self.assertIn("runs-on: macos-15", workflow)
         self.assertIn("needs: [published-readback]", workflow)
         self.assertIn("published-release-readback/release-readback-report.json", workflow)
@@ -413,6 +430,13 @@ class ReleaseReadbackTests(unittest.TestCase):
         self.assertIn("Assert-NupkgReleaseIdentity", script)
         self.assertIn("Assert-ExecutableReleaseVersion", script)
         self.assertIn("Assert-AssemblyReleaseVersion", script)
+        self.assertIn("Assert-DirectoryPayloadMatches", script)
+        self.assertIn('Expand-ZipArchiveSafely -ArchivePath $setupPath', script)
+        self.assertIn("[switch]$IdentityOnly", script)
+        self.assertIn("verificationMode = if ($IdentityOnly)", script)
+        self.assertIn("windows-package-identity-readback:", workflow)
+        self.assertIn("published-windows-package-identity-readback", workflow)
+        self.assertIn("-IdentityOnly", workflow)
 
     def test_github_latest_must_remain_the_macos_release(self):
         verifier = MODULE.Verifier()

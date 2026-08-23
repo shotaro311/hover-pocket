@@ -37,64 +37,111 @@ macos = report.get("macos")
 if not isinstance(macos, dict):
     raise SystemExit("macOS readback is missing")
 snapshot = macos.get("assetSnapshot")
-if not isinstance(snapshot, dict) or snapshot.get("releaseTag") != macos.get("releaseTag"):
+if (
+    not isinstance(snapshot, dict)
+    or snapshot.get("versionedReleaseTag") != macos.get("releaseTag")
+    or snapshot.get("feedReleaseTag") != macos.get("feedTag")
+):
     raise SystemExit("macOS snapshot release tag mismatch")
 assets = snapshot.get("assets")
-if not isinstance(assets, list) or len(assets) != 1 or not isinstance(assets[0], dict):
-    raise SystemExit("macOS snapshot must contain exactly one asset")
-asset = assets[0]
-tag = snapshot["releaseTag"]
-name = asset.get("name")
-size = asset.get("size")
-digest = asset.get("sha256")
+if not isinstance(assets, list) or len(assets) != 3 or not all(isinstance(asset, dict) for asset in assets):
+    raise SystemExit("macOS snapshot must contain exactly three assets")
+by_role = {asset.get("role"): asset for asset in assets}
+if set(by_role) != {"versionedSparkle", "feedManual", "versionedManual"}:
+    raise SystemExit("macOS snapshot roles are missing or duplicated")
+versioned_tag = snapshot["versionedReleaseTag"]
+feed_tag = snapshot["feedReleaseTag"]
 version = macos.get("version")
 build = macos.get("build")
-if not isinstance(tag, str) or not re.fullmatch(r"v[0-9A-Za-z][0-9A-Za-z._+-]*", tag):
+if not isinstance(versioned_tag, str) or not re.fullmatch(r"v[0-9A-Za-z][0-9A-Za-z._+-]*", versioned_tag):
     raise SystemExit("invalid macOS release tag")
-if not isinstance(name, str) or not re.fullmatch(r"HoverPocket-[0-9A-Za-z][0-9A-Za-z._+-]*\.zip", name):
-    raise SystemExit("invalid macOS archive name")
-if name != macos.get("asset"):
-    raise SystemExit("macOS snapshot asset mismatch")
-if not isinstance(size, int) or size <= 0 or size > 2 * 1024 * 1024 * 1024:
-    raise SystemExit("invalid macOS archive size")
-if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
-    raise SystemExit("invalid macOS archive digest")
+if not isinstance(feed_tag, str) or not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._+-]*", feed_tag):
+    raise SystemExit("invalid macOS feed tag")
+expected = {
+    "versionedSparkle": (versioned_tag, macos.get("asset")),
+    "feedManual": (feed_tag, "HoverPocket-macOS-app.zip"),
+    "versionedManual": (versioned_tag, "HoverPocket-macOS-app.zip"),
+}
+for role, (release_tag, expected_name) in expected.items():
+    asset = by_role[role]
+    if asset.get("releaseTag") != release_tag or asset.get("name") != expected_name:
+        raise SystemExit(f"macOS {role} snapshot identity mismatch")
+    size = asset.get("size")
+    digest = asset.get("sha256")
+    if not isinstance(size, int) or size <= 0 or size > 2 * 1024 * 1024 * 1024:
+        raise SystemExit(f"invalid macOS {role} archive size")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise SystemExit(f"invalid macOS {role} archive digest")
+if len({(asset["size"], asset["sha256"]) for asset in assets}) != 1:
+    raise SystemExit("macOS manual and Sparkle archives differ")
 if not isinstance(version, str) or not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._+-]*", version):
     raise SystemExit("invalid macOS version")
 if not isinstance(build, str) or not re.fullmatch(r"[0-9]+", build):
     raise SystemExit("invalid macOS build")
-print(tag)
-print(name)
-print(size)
-print(digest)
+print(versioned_tag)
+print(feed_tag)
+for role in ("versionedSparkle", "feedManual", "versionedManual"):
+    asset = by_role[role]
+    print(asset["name"])
+    print(asset["size"])
+    print(asset["sha256"])
 print(version)
 print(build)
 PY
 
-IFS= read -r release_tag < "$metadata_path"
-IFS= read -r asset_name < <(sed -n '2p' "$metadata_path")
-IFS= read -r expected_size < <(sed -n '3p' "$metadata_path")
-IFS= read -r expected_sha256 < <(sed -n '4p' "$metadata_path")
-IFS= read -r expected_version < <(sed -n '5p' "$metadata_path")
-IFS= read -r expected_build < <(sed -n '6p' "$metadata_path")
+IFS= read -r versioned_release_tag < "$metadata_path"
+IFS= read -r feed_release_tag < <(sed -n '2p' "$metadata_path")
+IFS= read -r asset_name < <(sed -n '3p' "$metadata_path")
+IFS= read -r expected_size < <(sed -n '4p' "$metadata_path")
+IFS= read -r expected_sha256 < <(sed -n '5p' "$metadata_path")
+IFS= read -r feed_manual_name < <(sed -n '6p' "$metadata_path")
+IFS= read -r feed_manual_size < <(sed -n '7p' "$metadata_path")
+IFS= read -r feed_manual_sha256 < <(sed -n '8p' "$metadata_path")
+IFS= read -r versioned_manual_name < <(sed -n '9p' "$metadata_path")
+IFS= read -r versioned_manual_size < <(sed -n '10p' "$metadata_path")
+IFS= read -r versioned_manual_sha256 < <(sed -n '11p' "$metadata_path")
+IFS= read -r expected_version < <(sed -n '12p' "$metadata_path")
+IFS= read -r expected_build < <(sed -n '13p' "$metadata_path")
 
 download_dir="$work_dir/download"
 extract_dir="$work_dir/extracted"
 mkdir -m 700 "$download_dir" "$extract_dir"
-gh release download "$release_tag" \
-  --repo "$REPOSITORY" \
-  --pattern "$asset_name" \
-  --dir "$download_dir"
+downloaded_path=""
+download_and_verify() {
+  local release_tag="$1"
+  local name="$2"
+  local size="$3"
+  local digest="$4"
+  local role="$5"
+  local role_dir="$download_dir/$role"
+  mkdir -m 700 "$role_dir"
+  gh release download "$release_tag" \
+    --repo "$REPOSITORY" \
+    --pattern "$name" \
+    --dir "$role_dir"
+  downloaded_path="$role_dir/$name"
+  if [[ ! -f "$downloaded_path" ]]; then
+    echo "error=published macOS $role archive was not downloaded" >&2
+    exit 1
+  fi
+  local actual_size
+  local actual_sha256
+  actual_size="$(stat -f '%z' "$downloaded_path")"
+  actual_sha256="$(shasum -a 256 "$downloaded_path" | awk '{print $1}')"
+  if [[ "$actual_size" != "$size" || "$actual_sha256" != "$digest" ]]; then
+    echo "error=published macOS $role archive differs from verified snapshot" >&2
+    exit 1
+  fi
+}
 
-archive_path="$download_dir/$asset_name"
-if [[ ! -f "$archive_path" ]]; then
-  echo "error=published macOS archive was not downloaded" >&2
-  exit 1
-fi
-actual_size="$(stat -f '%z' "$archive_path")"
-actual_sha256="$(shasum -a 256 "$archive_path" | awk '{print $1}')"
-if [[ "$actual_size" != "$expected_size" || "$actual_sha256" != "$expected_sha256" ]]; then
-  echo "error=published macOS archive differs from verified snapshot" >&2
+download_and_verify "$versioned_release_tag" "$asset_name" "$expected_size" "$expected_sha256" "versioned-sparkle"
+archive_path="$downloaded_path"
+download_and_verify "$feed_release_tag" "$feed_manual_name" "$feed_manual_size" "$feed_manual_sha256" "feed-manual"
+feed_manual_path="$downloaded_path"
+download_and_verify "$versioned_release_tag" "$versioned_manual_name" "$versioned_manual_size" "$versioned_manual_sha256" "versioned-manual"
+versioned_manual_path="$downloaded_path"
+if ! cmp -s "$archive_path" "$feed_manual_path" || ! cmp -s "$archive_path" "$versioned_manual_path"; then
+  echo "error=public macOS manual and Sparkle archives are not byte-identical" >&2
   exit 1
 fi
 
@@ -130,44 +177,53 @@ codesign --verify --deep --strict --verbose=2 "$app_path"
 xcrun stapler validate "$app_path"
 spctl --assess --type execute --verbose=2 "$app_path"
 
-release_json="$work_dir/release.json"
-gh api "repos/$REPOSITORY/releases/tags/$release_tag" > "$release_json"
-python3 - "$release_json" "$asset_name" "$expected_size" "$expected_sha256" <<'PY'
+versioned_release_json="$work_dir/versioned-release.json"
+feed_release_json="$work_dir/feed-release.json"
+gh api "repos/$REPOSITORY/releases/tags/$versioned_release_tag" > "$versioned_release_json"
+gh api "repos/$REPOSITORY/releases/tags/$feed_release_tag" > "$feed_release_json"
+python3 - "$EXPECTED_REPORT" "$versioned_release_json" "$feed_release_json" <<'PY'
 import json
 import pathlib
 import sys
 
-release = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-name, expected_size, expected_sha256 = sys.argv[2], int(sys.argv[3]), sys.argv[4]
-matches = [asset for asset in release.get("assets", []) if asset.get("name") == name]
-if len(matches) != 1:
-    raise SystemExit("published macOS asset cardinality changed")
-asset = matches[0]
-if asset.get("size") != expected_size or asset.get("digest") != f"sha256:{expected_sha256}":
-    raise SystemExit("published macOS asset metadata changed during verification")
+report = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+versioned_release = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
+feed_release = json.loads(pathlib.Path(sys.argv[3]).read_text(encoding="utf-8"))
+snapshot = report["macos"]["assetSnapshot"]
+releases = {
+    snapshot["versionedReleaseTag"]: versioned_release,
+    snapshot["feedReleaseTag"]: feed_release,
+}
+for expected in snapshot["assets"]:
+    release = releases[expected["releaseTag"]]
+    matches = [asset for asset in release.get("assets", []) if asset.get("name") == expected["name"]]
+    if len(matches) != 1:
+        raise SystemExit(f"published macOS {expected['role']} asset cardinality changed")
+    asset = matches[0]
+    if asset.get("size") != expected["size"] or asset.get("digest") != f"sha256:{expected['sha256']}":
+        raise SystemExit(f"published macOS {expected['role']} metadata changed during verification")
 PY
 
-python3 - "$OUTPUT_PATH" "$release_tag" "$asset_name" "$actual_size" "$actual_sha256" "$actual_bundle_identifier" "$actual_version" "$actual_build" <<'PY'
+python3 - "$OUTPUT_PATH" "$EXPECTED_REPORT" "$actual_bundle_identifier" "$actual_version" "$actual_build" <<'PY'
 import json
 import pathlib
 import sys
 
 path = pathlib.Path(sys.argv[1])
+source = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))["macos"]
 report = {
     "status": "passed",
-    "releaseTag": sys.argv[2],
-    "asset": {
-        "name": sys.argv[3],
-        "size": int(sys.argv[4]),
-        "sha256": sys.argv[5],
-    },
+    "versionedReleaseTag": source["assetSnapshot"]["versionedReleaseTag"],
+    "feedReleaseTag": source["assetSnapshot"]["feedReleaseTag"],
+    "assets": source["assetSnapshot"]["assets"],
     "codesign": "verified-deep-strict",
     "notarization": "stapled-ticket-validated",
     "gatekeeper": "accepted",
-    "bundleIdentifier": sys.argv[6],
-    "version": sys.argv[7],
-    "build": sys.argv[8],
-    "snapshotReadback": "release-metadata-rechecked",
+    "bundleIdentifier": sys.argv[3],
+    "version": sys.argv[4],
+    "build": sys.argv[5],
+    "manualArchiveParity": "byte-identical",
+    "snapshotReadback": "all-release-metadata-rechecked",
 }
 path.write_text(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
 PY
