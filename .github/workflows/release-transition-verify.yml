@@ -93,11 +93,13 @@ jobs:
       - name: Verify version transitions in a temporary Applications root
         env:
           GH_TOKEN: ${{ github.token }}
+          HOVERPOCKET_MACOS_PREVIOUS_TAG: ${{ inputs.macos_previous_tag }}
+          HOVERPOCKET_MACOS_CURRENT_TAG: ${{ inputs.macos_current_tag }}
         run: |
           set -o pipefail
           bash script/verify_macos_release_transition.sh \
-            "${{ inputs.macos_previous_tag }}" \
-            "${{ inputs.macos_current_tag }}" | tee macos-transition-report.json
+            "$HOVERPOCKET_MACOS_PREVIOUS_TAG" \
+            "$HOVERPOCKET_MACOS_CURRENT_TAG" | tee macos-transition-report.json
 
       - name: Upload transition receipt
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
@@ -121,11 +123,14 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          HOVERPOCKET_ALLOW_UNSIGNED_BETA: ${{ inputs.allow_unsigned_beta }}
+          HOVERPOCKET_WINDOWS_PREVIOUS_TAG: ${{ inputs.windows_previous_tag }}
+          HOVERPOCKET_WINDOWS_CURRENT_TAG: ${{ inputs.windows_current_tag }}
         run: |
-          $allowUnsigned = [bool]::Parse("${{ inputs.allow_unsigned_beta }}")
+          $allowUnsigned = [bool]::Parse($env:HOVERPOCKET_ALLOW_UNSIGNED_BETA)
           windows/script/verify_release_transition.ps1 `
-            -PreviousTag "${{ inputs.windows_previous_tag }}" `
-            -CurrentTag "${{ inputs.windows_current_tag }}" `
+            -PreviousTag $env:HOVERPOCKET_WINDOWS_PREVIOUS_TAG `
+            -CurrentTag $env:HOVERPOCKET_WINDOWS_CURRENT_TAG `
             -AllowUnsignedBeta:$allowUnsigned | Tee-Object -FilePath windows-transition-report.json
 
       - name: Upload transition receipt
