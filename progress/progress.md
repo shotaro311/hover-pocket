@@ -2,8 +2,15 @@
 project_slug: hover-menu-preview
 updated: 2026-08-24
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-pro-running; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
 ---
+
+## 2026-08-24 AI-native AN3-B3A Realtime BYOK provider
+
+- 現行Codex app-server `0.145.0`の生成schemaを再監査し、`dynamicTools`は存在するが、ambient built-in toolを0へ固定できるpositive policyを確認できなかった。既存Codex providerはproduction開始前のfail-closedを維持する。
+- 承認済み代替案として、OpenAI Realtime BYOK providerのAN3-B3Aを隔離branch `codex/ai-native-an3b3-realtime-provider`、exact base `b95ef1681510781a38ccbb0b95cbf51384faa594`で開始した。Windowsは既存WebView WebRTCを再利用し、Host-only credential、Registry由来toolだけ、Capability Broker承認/readbackへ接続する。macOS実音声transportはAN3-B3Bの明示gateに残す。
+- 最初のPro runはsource添付が1MB上限を超え、外部送信前に停止した。通知時state hashと再生成後stateが不一致だったためclaimをfail-closedし、成果物適用・`mark-done`・同run再利用を行っていない。
+- 新run `20260824-051101-hoverpocket-an3-b3a-realtime-byok-windows-vertical-slice-patch`は、47ではなく45ファイル、974,060文字、source SHA-256 `f1a51b24...ba9063`へ絞った。GPT-5.6 Sol、Node 24.19.0、専用ChatGPT Project、required-return bridgeをdry-runで確認後、status `running`をreadbackした。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an3-b3a-realtime-byok.md`。
 
 ## 2026-08-24 AI-native AN8-C workspace backup / restore
 
