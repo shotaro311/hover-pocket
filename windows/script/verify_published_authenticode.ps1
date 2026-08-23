@@ -165,14 +165,23 @@ function Assert-NupkgReleaseIdentity {
         [string]$ExpectedPackageId,
         [string]$ExpectedVersion,
         [string]$ExpectedChannel,
-        [string]$ExpectedRuntime
+        [string]$ExpectedRuntime,
+        [string]$Label
     )
 
-    $nuspecFiles = @(Get-ChildItem -LiteralPath $PackageRoot -File -Filter "*.nuspec")
-    if ($nuspecFiles.Count -ne 1) {
-        throw "Full update package must contain exactly one root nuspec."
+    $nuspecFiles = @([IO.Directory]::EnumerateFiles(
+            $PackageRoot,
+            "*.nuspec",
+            [IO.SearchOption]::TopDirectoryOnly
+        ))
+    $expectedNuspecName = "$ExpectedPackageId.nuspec"
+    if (
+        $nuspecFiles.Count -ne 1 -or
+        [IO.Path]::GetFileName($nuspecFiles[0]) -cne $expectedNuspecName
+    ) {
+        throw "$Label must contain exactly one root $expectedNuspecName."
     }
-    [xml]$nuspec = Get-Content -LiteralPath $nuspecFiles[0].FullName -Raw
+    [xml]$nuspec = Get-Content -LiteralPath $nuspecFiles[0] -Raw
     $metadata = $nuspec.SelectSingleNode("/*[local-name()='package']/*[local-name()='metadata']")
     if ($null -eq $metadata) {
         throw "Full update package nuspec metadata is missing."
@@ -492,7 +501,8 @@ try {
         -ExpectedPackageId $manifest.packageId `
         -ExpectedVersion $manifest.version `
         -ExpectedChannel $manifest.updateChannel `
-        -ExpectedRuntime $manifest.runtime
+        -ExpectedRuntime $manifest.runtime `
+        -Label "Full update package"
     $packageExecutables = @(Get-ChildItem -LiteralPath $packageExtractPath -Recurse -File -Filter "HoverPocket.Shell.exe")
     if ($packageExecutables.Count -ne 1) {
         throw "Full update package does not contain exactly one HoverPocket.Shell.exe."
@@ -511,7 +521,8 @@ try {
         -ExpectedPackageId $manifest.packageId `
         -ExpectedVersion $manifest.version `
         -ExpectedChannel $manifest.updateChannel `
-        -ExpectedRuntime $manifest.runtime
+        -ExpectedRuntime $manifest.runtime `
+        -Label "Setup payload"
     $setupPayloadExecutables = @(Get-ChildItem -LiteralPath $setupExtractPath -Recurse -File -Filter "HoverPocket.Shell.exe")
     if ($setupPayloadExecutables.Count -ne 1) {
         throw "Setup payload does not contain exactly one HoverPocket.Shell.exe."
