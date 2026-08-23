@@ -215,7 +215,8 @@ enum VoiceFoundationVerificationCommand {
             #"C:\work\secret.txt"#,
             "[/Users/alice/private]",
             #"[C:\Users\alice\private]"#,
-            "Sources/HoverPocket/App.swift"
+            "Sources/HoverPocket/App.swift",
+            "Bearer sk-proj-secret"
         ]
         let bidiSamples = [
             "trusted\u{202E}detadpu",

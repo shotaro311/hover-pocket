@@ -926,7 +926,8 @@ internal sealed class VoiceFoundationVerifier
             @"C:\work\secret.txt",
             "[/Users/alice/private]",
             @"[C:\Users\alice\private]",
-            "Sources/HoverPocket/App.swift"
+            "Sources/HoverPocket/App.swift",
+            "Bearer sk-proj-secret"
         };
         if (filesystemPaths.Any(path => VoiceTextSafety.SanitizeVisibleText(path, 200) != "[redacted]"))
         {

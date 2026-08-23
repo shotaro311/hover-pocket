@@ -162,6 +162,10 @@ internal static class VoiceTextSafety
         """(?:^|[^\p{L}\p{N}_./:\\])(?:\.{1,2}/(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*/)*[\p{L}\p{N}_-][\p{L}\p{N}._-]*|(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*/)+[\p{L}\p{N}_-][\p{L}\p{N}._-]*\.[\p{L}\p{N}]{1,16}|(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*/){2,}[\p{L}\p{N}_-][\p{L}\p{N}._-]*)""",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
+    private static readonly Regex BearerCredentialPattern = new(
+        """(?:^|[^\p{L}\p{N}_])bearer[ \t]+[a-zA-Z0-9._~+/\-=]{8,}""",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
     public static string SanitizeVisibleText(string? value, int maxRunes)
     {
         if (string.IsNullOrEmpty(value) || maxRunes <= 0)
@@ -189,7 +193,8 @@ internal static class VoiceTextSafety
         var lowered = normalized.ToLowerInvariant();
         if (SensitiveMarkers.Any(lowered.Contains)
             || AbsolutePathPattern.IsMatch(normalized)
-            || RelativePathPattern.IsMatch(normalized))
+            || RelativePathPattern.IsMatch(normalized)
+            || BearerCredentialPattern.IsMatch(normalized))
         {
             return "[redacted]";
         }
