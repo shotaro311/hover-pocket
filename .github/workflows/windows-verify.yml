@@ -52,6 +52,7 @@ jobs:
         run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify broker
 
       - name: Verify Pocket Surface
+        timeout-minutes: 2
         run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify pocket-surface
 
       - name: Verify timer

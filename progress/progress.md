@@ -2,8 +2,20 @@
 project_slug: hover-menu-preview
 updated: 2026-08-24
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-pro-running; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-pro-running; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; an5-credential-broker-draft-pr-ci-green; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
 ---
+
+## 2026-08-24 AI-native AN5 Host-owned credential broker foundation
+
+- `codex/ai-native-an5-codex-confinement` head `e6747898`からstack branch `codex/ai-native-an5-credential-broker-foundation`を分離し、macOSのprivate Unix socketとWindowsの`CurrentUserOnly` Named Pipeへ、最大60秒・256 bit・一度だけ使えるcapability leaseを実装した。secretは最大8 KiB、制御文字禁止、request / response上限と2秒timeoutを持つ。
+- 両OSのHost executableへ`--codex-credential-helper`入口を追加した。helperはendpointとcapabilityだけを環境から受け、secretを成功時の標準出力だけへ返す。API keyの値を引数、ファイル、ログ、UI、fixtureへ置かない。実credential storeとproduction generatorはまだ接続せず、fail-closedを維持する。
+- Windows clientはCancellationTokenだけでなく、`.NET 10`の明示`TimeSpan` timeout付き`NamedPipeClientStream.ConnectAsync`を使い、server不在時も接続待ちを有限化した。
+- Windows CIの停止位置を段階ログで`named-pipe`の最初の`await`へ絞り、WPF UI threadでasync verifierを同期待ちしていたdeadlockを修正した。broker verifierはthread pool上で開始し、CI stepにも2分上限を設けた。
+- 修正後head `143ed3f`のDraft PR [#33](https://github.com/shotaro311/hover-pocket/pull/33)で、Windows [32668817459](https://github.com/shotaro311/hover-pocket/actions/runs/32668817459)はRelease build warning 0 / error 0、lease / Named Pipe / wrong capability / helperの全broker段階、Pocket App generation、Settings、Voice、rendered UIまで成功した。macOS [32668817516](https://github.com/shotaro311/hover-pocket/actions/runs/32668817516)とRouter [32668816613](https://github.com/shotaro311/hover-pocket/actions/runs/32668816613)も成功した。
+- macOSでone-shot、expiry、replay、wrong capability、socket権限、helper child process、明示cancel cleanupを検証した。セキュリティ監査でdeinit-only deadlockを再現したため、FD / socket / directoryのcleanup stateをserver objectから分離し、明示cancelなしの子process probeを追加した。修正後probeはexit 0、新規一時socket残留0件である。
+- Codex Security diff scan `cc22a511-9d5a-4052-a3ea-7097aa17dd3f`はreportable finding 0件で封印・再読込した。coverageはpartialで、production接続前にhelper peer identity、macOS socket identity、両OSのsame-user first-client raceを実機canaryで再検証する5項目を残す。manifest SHA-256は`090a54f6df21106c35ba76fd9cc96ae30a37010da2e954084503682c200f0e42`。
+- macOS warnings-as-errors build、Pocket App package / lifecycle / generation / migration / health / workspace backup、Pocket Surface、Capability、Broker、Voice、15 schema / 71 fixture、Voice contract 42件、`git diff --check`が成功した。このMacには.NET SDKがないため、Windows Release buildとnative broker verifierはDraft PR CIを必須gateにする。
+- 不一致だった旧Pro deliveryはreceipt / artifactを読まず、適用・`mark-done`・再利用をしていない。正本AN3-B3A bridgeは`running`のままで、新しいsignalを待つ。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an5-credential-broker.md`。
 
 ## 2026-08-24 AI-native AN5 Codex confinement audit
 
