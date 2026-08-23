@@ -13,6 +13,7 @@ status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-gr
 - 新run `20260824-051101-hoverpocket-an3-b3a-realtime-byok-windows-vertical-slice-patch`は、47ではなく45ファイル、974,060文字、source SHA-256 `f1a51b24...ba9063`へ絞った。GPT-5.6 Sol、Node 24.19.0、専用ChatGPT Project、required-return bridgeをdry-runで確認後、status `running`をreadbackした。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an3-b3a-realtime-byok.md`。
 - exact baseの受入前baselineとして、Swift warnings-as-errors build、Voice契約42件、共通契約15 schema / 71 fixture、Windows Panel / Settings JavaScript構文、`git diff --check`が成功した。Pro patch適用後は同じ検証を再実行し、差分で回帰を判定する。
 - OpenAI公式Realtime契約を受入条件へ追加した。Hostがmultipart `sdp / session`で`/v1/realtime/calls`を呼び、標準API keyをWebViewへ渡さない。Registry descriptorはRealtime functionの`parameters`へ有限変換し、Broker結果は同じ`call_id`の`function_call_output`後に`response.create`する。model IDはapp-owned allowlistだけを許可する。
+- GitHub再確認では、stack最上段Draft PR #31はhead `b95ef168`、7チェック成功、`MERGEABLE / CLEAN`、PR #25〜#31の未解決review threadは0件だった。ただし正式release readback、timestamped Windows署名、package identity、macOS署名・notarization・Gatekeeper、両OSinstall/update/rollback transitionの実行ジョブは`SKIPPED`であり、AN8配布完了の証拠にはしていない。
 
 ## 2026-08-24 AI-native AN8-C workspace backup / restore
 

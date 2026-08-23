@@ -78,3 +78,11 @@ Codex app-serverに正のtool allowlistがない現状でも、一般配布で�
 5. API key秘匿、正のtool surface、OFF/no-key fail-closed、承認/readbackを独立reviewする。
 
 AN3-B3Aの合格後も、macOS実音声transport、両OS実端末の音声一往復、正式Windows署名release/rollback、人手stack mergeは未完了gateとして残る。
+
+## GitHub stack readback
+
+- 2026-08-24の再確認で、Draft PR #31はhead `b95ef1681510781a38ccbb0b95cbf51384faa594`、base `codex/ai-native-core-ga-legacy-path-removal`、`MERGEABLE / CLEAN`を維持していた。
+- PR #31のWindows、macOS、Ubuntu / macOS / Windows contract、cross-OS比較、PR Routerの7チェックはすべて成功していた。stack PR #25〜#31の未解決review threadは0件だった。
+- PR #29の公開release readbackでは、deterministic metadataとWindows Authenticode verifier syntaxは成功しているが、実際の公開release取得、timestamped Authenticode、Windows package identity、macOS署名・notarization・Gatekeeperは`SKIPPED`である。
+- PR #25のinstall/update/rollback transitionも、macOS package transitionとWindows install/update/rollback/reinstallが`SKIPPED`である。したがってstackの緑色はAN8の正式配布・rollback完了を証明しない。
+- AN3-B3Aのローカルbranchにはremote/upstreamがなく、Pro patch適用・ローカル受入後までDraft PRを作成しない。
