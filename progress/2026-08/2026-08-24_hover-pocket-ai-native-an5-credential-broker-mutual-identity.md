@@ -57,9 +57,17 @@ AN5 credential brokerのproduction有効化前gateとして残っていた、接
 
 このMacには.NET SDKがないため、Windows Release buildと実Named Pipe child process verifierはstacked Draft PR CIを必須gateとする。
 
+## セキュリティ差分レビュー
+
+- exact range `81cf0eee2a3ba85fd4b746b10b6d0e7584b35aa7..12434877e821773f902a27d43799ceb60c787867`をCodex Security diff scan `1bdca291-89df-4e9c-87d4-b5be9de5dc2e`で完了・封印・再読込した。
+- reportable findingは0件である。snapshot digestは`codex-security-snapshot/v1:sha256:c02e6a4b3d1f5c9d507872944faf096a0d982bd299ff26324022e9d0fccca152`。
+- macOS mutual peer identity、stdin bootstrap、failure / denial処理は`no_issue_found`。Windows source traceとverifier定義も確認した。
+- coverageはpartial。ローカルに.NET SDKがないためWindows exact-head dynamic validationをDraft PR CIへ、正式配布binaryのtimestamped Authenticode signer bindingをproduction有効化前gateへ残した。
+- production credential store / confined generator E2Eはこの差分に含まれず、production confidential generationは引き続きOFFである。
+- scan使用量はtotal 2,292,338 tokens、input 2,286,313、cached input 2,252,288、output 6,025でreadbackした。
+
 ## 未完了gate
 
-- exact branch差分のCodex Security scanを実施し、reportable findingとcoverageを封印・再読込する。
 - stacked Draft PRでWindows Release warning 0 / error 0、`helper`、`same-binary-wrong-pid`、`wrong-server-pid`、`foreign-peer`の全case終端をreadbackする。
 - Windows正式署名済みbinaryではexpected PIDに加えてAuthenticode signerを固定する。
 - AN3-B3A credential store統合後に、実store → broker → confined generatorの値非露出E2Eを別gateで行う。

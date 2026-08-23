@@ -2,7 +2,7 @@
 project_slug: hover-menu-preview
 updated: 2026-08-24
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-pro-running; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; an5-credential-broker-draft-pr-ci-green; an5-credential-peer-identity-draft-pr-ci-green-security-clean; an5-credential-mutual-identity-local-verified-security-ci-pending; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-pro-running; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; an5-credential-broker-draft-pr-ci-green; an5-credential-peer-identity-draft-pr-ci-green-security-clean; an5-credential-mutual-identity-local-verified-security-clean-ci-pending; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
 ---
 
 ## 2026-08-24 AI-native AN5 credential broker mutual process identity
@@ -10,7 +10,7 @@ status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-gr
 - PR #34 final head `81cf0eee`からstack branch `codex/ai-native-an5-credential-broker-mutual-identity`を分離し、Hostが実helperを起動してPIDを取得してからbrokerを作り、version付きbounded JSONを専用stdin pipeへ渡す起動順序へ変更した。endpoint / capabilityを環境変数やprocess argumentへ置かない。
 - macOSはclient / server双方でpeer UID、exact PID、designated requirementを確認する。Windowsは`GetNamedPipeClientProcessId` / `GetNamedPipeServerProcessId`のexact PIDとHoverPocket executable pathを双方で確認する。同じHoverPocket binaryでもHostが起動した対象PIDと異なるprocessは拒否する。
 - macOS verifierは実helper child成功、同一binary誤PID、誤server PID、Python foreign peer拒否を含むPocket App verificationを3回連続で成功した。warnings-as-errors build、Voice契約42件、Panel 128件、Capability / Broker / Surface / Timer、15 schema / 71 fixture、Windows JavaScript構文、`git diff --check`も成功した。
-- このMacには.NET SDKがない。exact差分のCodex Security scanとstacked Draft PRのWindows Release build / Named Pipe verifierを次の必須gateとする。production generatorは未接続でfail-closedを維持する。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an5-credential-broker-mutual-identity.md`。
+- exact code head `12434877`のCodex Security diff scan `1bdca291-89df-4e9c-87d4-b5be9de5dc2e`はreportable finding 0件で封印・再読込した。snapshot digestは`codex-security-snapshot/v1:sha256:c02e6a4b3d1f5c9d507872944faf096a0d982bd299ff26324022e9d0fccca152`。このMacには.NET SDKがないため、coverageはWindows exact-head dynamic validationと正式Authenticode signer bindingをdeferred gateにした。次はstacked Draft PRのWindows Release build / Named Pipe verifierを確認する。production generatorは未接続でfail-closedを維持する。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an5-credential-broker-mutual-identity.md`。
 
 ## 2026-08-24 AI-native AN5 credential broker peer identity
 
