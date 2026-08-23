@@ -30,6 +30,17 @@ Codex app-serverに正のtool allowlistがない現状でも、一般配布で�
 - transport: GPT-5.6 Sol / Node 24.19.0 / ChatGPT Pro Orchestrator Project / required-return bridge
 - dry-runでbase、source hash、Project、Node、bridgeを確認し、送信後status `running`をreadbackした。
 
+## 公式Realtime契約
+
+- Windows WebViewは既存WebRTC peer、microphone、remote audio、`oai-events` data channelだけを所有する。標準OpenAI API keyを受け取らない。
+- Windows HostがWebViewのSDP offerとHost所有session設定をmultipartの`sdp` / `session`として`POST /v1/realtime/calls`へ送り、返却SDP answerだけをWebViewへ渡す。
+- Realtimeへ公開するfunction schemaは`type / name / description / parameters`で構成する。Codex app-server向けの`inputSchema`をそのまま送らず、Registry descriptorからRealtime用の有限schemaへ変換する。
+- sessionのtoolはHostが許可したfunctionだけに固定する。Realtime側で実行されるMCP / Connectorをsessionへ追加せず、shell、filesystem、任意native codeも公開しない。
+- function callは`call_id`、tool name、JSON arguments、provider generation、conversation rootをHostで束縛する。引数と出力に上限を設け、未知tool、重複call、stale generation、別rootからの応答をfail closedにする。
+- Broker receiptは同じ`call_id`の`conversation.item.create`へ`function_call_output`として返し、その後に`response.create`を送る。失敗時も内部エラーやcredentialを露出しない有限なHost-owned出力へ正規化する。
+- `OpenAI-Safety-Identifier`を採用する場合は、Hostだけが生成するプライバシー保護済みの安定識別子とし、メールアドレス等の直接識別子やWebView由来の任意値を送らない。
+- model IDはUI入力をそのまま受理せず、アプリ所有のallowlistから選択する。deprecated aliasは採用しない。初期候補は費用とtool reasoningを優先して`gpt-realtime-2.1-mini`とし、AN3-B3Bの実機比較で音声品質重視の`gpt-realtime-1.5`も評価する。
+
 ## 受入前baseline
 
 | 検証 | 結果 |
@@ -50,6 +61,10 @@ Codex app-serverに正のtool allowlistがない現状でも、一般配布で�
 | Calendar create | Registry / Broker handlerは存在するがVoice runtimeには未接続 | Host-owned承認、plan digest binding、`calendar.events.write`、実行後`eventRef / eventId` readbackまでを一つのreceiptで確認する |
 | Timer start | VoiceからBroker、native承認、timer ID/state readbackまで実装済み | Realtime providerでも同じruntimeを再利用し、承認・取消・idempotencyを迂回しない |
 | WebRTC data channel | WebViewが`oai-events`を作成するが、Realtime function eventの処理は未実装 | call ID / name / arguments / generationを検証してHostへ中継し、Broker結果だけを`function_call_output`として同じcallへ返す |
+| Realtime session creation | Host-owned `/v1/realtime/calls`交換は未実装 | WebViewのSDP offerとHost-owned sessionをmultipart `sdp / session`で送信し、標準API keyと任意のsafety identifierをHostから外へ出さず、SDP answerだけをWebViewへ返す |
+| Realtime schema変換 | Codex dynamic toolは`inputSchema`を使う | Registryの有限descriptorからRealtime functionの`parameters`へ明示変換し、unknown keyword、過大schema、任意tool injectionを拒否する |
+| function result | Realtime call outputのHost relayは未実装 | 同じ`call_id`へ`conversation.item.create(function_call_output)`を返した後だけ`response.create`し、重複、別root、stale generation、過大outputを拒否する |
+| model policy | Realtime model設定は未実装 | app-owned allowlistだけを使用し、任意UI値とdeprecated aliasを拒否する。初期候補をoffline verifierへ固定する |
 | credential | Realtime API key用storeは未実装 | keyはKeychain / Credential Managerだけに保存し、WebView、state、log、error、fixtureへ値を返さない。UI readbackは有無だけ |
 | lifecycle | Voice OFF、hide、stop、crash、restartのCodex transport teardown verifierは成功 | Realtime peer / data channel / local track / remote audio / pending callを同じgenerationで閉じ、stale eventを受理しない |
 | macOS | provider-neutral adapterとfake verifierだけでproduction audioなし | provider ID、Keychain、adapter seam、未実装時fail-closedを追加し、実音声transportはAN3-B3Bと明示する |
