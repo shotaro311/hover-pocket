@@ -6,7 +6,8 @@
 - Branch: `codex/ai-native-an3-voice-foundation`
 - PR: [#19](https://github.com/shotaro311/hover-pocket/pull/19)
 - 修正base: `b506557e13b45bd13d1f4a774a60a8a2314bfa33`
-- source head: `5170115b7d1f3afcfaef1e38e643bce0b8c3a641`
+- Pro patch head: `5170115b7d1f3afcfaef1e38e643bce0b8c3a641`
+- 最終code head: `330c331d30525d2aa1b94fd7ff41e834d03cf4df`
 
 ## ChatGPT Pro Orchestrator回収
 
@@ -55,6 +56,13 @@
 - Initialize、Voice OFF、system transition、application disposeも保留teardownをdrainする。
 - gated dispose fixtureで、破棄が保留中はfactory callが1回のまま、解放後に2回目のclientだけがReadyになることを確認する。
 
+### 追加review follow-up
+
+- 進捗同期headで新規P2 review 1件を検出した。active clientが想定外requestを送った経路だけ`DisposeDetachedClientAsync`がfire-and-forgetのままで、Voice OFF / coordinator dispose /再有効化が旧process cleanupを待たない可能性があった。
+- active unexpected-request経路も`TrackTransportTeardown`へ統一した。
+- `GatedDisposeHarness`を使い、旧client破棄保留中はVoice OFF / ONが完了せずreplacement factoryも呼ばれないこと、解放後に一つのreplacementだけがReadyになることを確認する。
+- review threadへcommit `330c331`の根拠を返信して解決した。
+
 ## ローカル検証
 
 成功:
@@ -71,12 +79,12 @@
 
 ## PR CI / review readback
 
-- Router: [32639816930](https://github.com/shotaro311/hover-pocket/actions/runs/32639816930) 成功。
-- 3OS deterministic contract / compare: [32639818928](https://github.com/shotaro311/hover-pocket/actions/runs/32639818928) 成功。
-- Windows Verify: [32639818937](https://github.com/shotaro311/hover-pocket/actions/runs/32639818937) 成功。
-- macOS Verify: [32639818967](https://github.com/shotaro311/hover-pocket/actions/runs/32639818967) 成功。
-- GitHub review 2件へ修正根拠を返信して解決した。
-- 全review thread: 60件。未解決: 0件。
+- Router: [32640770019](https://github.com/shotaro311/hover-pocket/actions/runs/32640770019) 成功。
+- 3OS deterministic contract / compare: [32640771703](https://github.com/shotaro311/hover-pocket/actions/runs/32640771703) 成功。
+- Windows Verify: [32640771705](https://github.com/shotaro311/hover-pocket/actions/runs/32640771705) 成功。
+- macOS Verify: [32640771713](https://github.com/shotaro311/hover-pocket/actions/runs/32640771713) 成功。
+- GitHub review 3件へ修正根拠を返信して解決した。
+- 全review thread: 61件。未解決: 0件。
 - PR #19: Open / Ready、`CLEAN / MERGEABLE`。
 - local / remote parity: `0 / 0`、worktree clean。
 
@@ -92,6 +100,18 @@
 - measured token usage: total 2,401,293 / input 2,387,043 / cached input 2,305,024。coverageはcomplete。
 - TAC advisory statusはコネクター未接続で取得不能だった。これは認可gateではなく、scanは通常どおり完了した。
 - report: `/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/codex-security-scans-0JCxLg/hover-menu-preview-ai-native-an3a/5170115b7d1f3afcfaef1e38e643bce0b8c3a641_20260823T124142Z_zr2cbcyw/report.md`
+
+追加review follow-up:
+
+- scan ID: `ff122990-cb48-4e3d-a051-3a7ccb43e192`
+- exact range: `e933f708713ee00f2a8be1bb7c01dbd00f1e1eac...330c331d30525d2aa1b94fd7ff41e834d03cf4df`
+- changed file: 2 / 2 review完了。
+- coverage surface: 2 / 2 closed。
+- completeness: complete。
+- reportable finding: 0。
+- status: sealed complete。
+- measured token usage: total 2,796,744 / input 2,791,032 / cached input 2,774,272。coverageはcomplete。
+- report: `/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/codex-security-scans-0JCxLg/hover-menu-preview-ai-native-an3a/330c331d30525d2aa1b94fd7ff41e834d03cf4df_20260823T125543Z_a6b36i5m/report.md`
 
 ## 残るgate
 
