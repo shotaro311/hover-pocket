@@ -33,6 +33,11 @@ const pocketCancelEl = document.querySelector("[data-pocket-cancel]");
 const pocketGenerationStatusEl = document.querySelector("[data-pocket-generation-status]");
 const pocketGenerationProposalEl = document.querySelector("[data-pocket-generation-proposal]");
 const pocketGenerationManagedEl = document.querySelector("[data-pocket-generation-managed]");
+const capabilityHistoryHeadingEl = document.querySelector("[data-capability-history-heading]");
+const capabilityRetentionEl = document.querySelector("[data-capability-retention]");
+const capabilityHistorySummaryEl = document.querySelector("[data-capability-history-summary]");
+const capabilityHistoryClearEl = document.querySelector("[data-capability-history-clear]");
+const capabilityHistoryNoteEl = document.querySelector("[data-capability-history-note]");
 const handleIconEl = document.querySelector("[data-handle-icon]");
 const handleSideAreaEl = document.querySelector("[data-handle-side-area]");
 const disableFullscreenEl = document.querySelector("[data-disable-fullscreen]");
@@ -130,6 +135,7 @@ function render(state) {
   renderPocketApps(state);
   generationState = state.pocketAppGeneration ?? generationState;
   renderPocketGeneration(generationState, state.settings.language);
+  renderCapabilityHistory(state);
   renderSegment(handleIconEl, [
     { id: "b", label: "B" },
     { id: "c", label: "C" },
@@ -143,6 +149,32 @@ function render(state) {
   startupStatusEl.textContent = state.settings.startWithWindowsRegistered ? t("registered") : t("off");
   autoUpdatesEl.checked = state.settings.autoCheckForUpdates !== false;
   updateStatusEl.textContent = state.updater?.message ?? "";
+}
+
+function renderCapabilityHistory(state) {
+  const english = state.settings.language === "en";
+  const governance = state.capabilityDataGovernance;
+  capabilityHistoryHeadingEl.textContent = english ? "Audit logs and execution history" : "監査ログと実行履歴";
+  capabilityHistoryClearEl.textContent = english ? "Delete history" : "履歴を削除";
+  capabilityHistoryClearEl.disabled = governance?.available !== true;
+  capabilityHistoryNoteEl.textContent = english
+    ? "Deleting removes receipt content and audit logs. Minimal completion tombstones remain to prevent duplicate execution."
+    : "削除後も重複実行を防ぐ最小限の実行済み情報は残ります。";
+  renderSegment(capabilityRetentionEl, [
+    { id: "sevenDays", label: english ? "7 days" : "7日" },
+    { id: "thirtyDays", label: english ? "30 days" : "30日" },
+    { id: "ninetyDays", label: english ? "90 days" : "90日" },
+    { id: "forever", label: english ? "Forever" : "無期限" },
+  ], state.settings.capabilityDataRetentionPeriod ?? "ninetyDays", (period) => {
+    update("settings.setCapabilityRetention", { period });
+  }, governance?.available !== true);
+  capabilityHistorySummaryEl.textContent = governance?.available === true
+    ? english
+      ? `${governance.auditFileCount} audit files · ${governance.storedReceiptCount} stored receipts · ${governance.redactedTombstoneCount} redacted tombstones`
+      : `監査ファイル ${governance.auditFileCount}件・保存済み履歴 ${governance.storedReceiptCount}件・削除済み墓標 ${governance.redactedTombstoneCount}件`
+    : english
+      ? "History storage is unavailable."
+      : "履歴ストレージを利用できません。";
 }
 
 function renderPocketApps(state) {
@@ -494,6 +526,10 @@ voiceEnabledEl.addEventListener("change", () => {
 
 voiceCalendarAccessEl.addEventListener("change", () => {
   update("settings.setVoiceCalendarAccess", { enabled: voiceCalendarAccessEl.checked });
+});
+
+capabilityHistoryClearEl.addEventListener("click", () => {
+  update("settings.clearCapabilityHistory");
 });
 
 handleSideAreaEl.addEventListener("change", () => {

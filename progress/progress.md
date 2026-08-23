@@ -5,6 +5,13 @@ updated_by: codex
 status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-pro-running
 ---
 
+## 2026-08-24 AI-native AN8 Capability履歴保持・削除
+
+- `codex/ai-native-an8-core-integration-candidate` head `a330099`からstack branch `codex/ai-native-an8-retention-governance`を作り、macOS / WindowsへCapability監査ログとreceiptの`7日 / 30日 / 90日 / 無期限`保持、既定90日、Settings専用の確認付き全削除を実装した。
+- 完了receipt内容を削除してもplan / argument / capability digestとcompleted stateの墓標を残し、同じidempotency key / plan IDは`unknown`で停止する。audit fileはstrict filename regular fileだけを対象とし、malformed / symlink / reparseをfail closedにする。
+- macOS warnings-as-errors build、Broker retention / migration / symlink回帰、Capability、Pocket App、Pocket Surface、Voice、Panel layout 128件、Timer、13 schema / 66 fixture、Windows Settings JavaScript構文が成功した。このMacに.NET SDKがないためWindows build / Broker / Settings / rendered UIはstacked Draft PR CIを最終gateとする。
+- AN8-C Pro backup / export / restore runは正式delivery待ちであり、成果物を先読み・再送していない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an8-retention-governance.md`。
+
 ## 2026-08-24 AI-native Core Integration Candidate
 
 - 分岐していたAN5-C + AN3 Voice / Calendar / Timer stack、Controls / approval presentation再統合、AN8 release transition / readbackを通常mergeだけで`codex/ai-native-an8-core-integration-candidate`へ集約した。統合候補headは`4e297b7`で、各exact headのancestryをreadbackした。

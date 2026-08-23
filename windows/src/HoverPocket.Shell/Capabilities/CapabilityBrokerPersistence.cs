@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace HoverPocket.Shell.Capabilities;
 
@@ -27,16 +28,18 @@ internal sealed class CapabilityBrokerLedger
         string ArgumentDigest,
         PocketCapabilityKey Capability,
         RecordState State,
-        CapabilityReceipt? Receipt);
+        CapabilityReceipt? Receipt,
+        DateTimeOffset? CompletedAt);
 
     private sealed record WorkflowRecord(
         string PlanDigest,
         RecordState State,
-        CapabilityWorkflowReceipt? Receipt);
+        CapabilityWorkflowReceipt? Receipt,
+        DateTimeOffset? CompletedAt);
 
     private sealed class LedgerState
     {
-        public int Version { get; set; } = 1;
+        public int Version { get; set; } = 2;
         public Dictionary<string, InvocationRecord> Invocations { get; set; } = new(StringComparer.Ordinal);
         public Dictionary<string, WorkflowRecord> Workflows { get; set; } = new(StringComparer.Ordinal);
     }
@@ -62,9 +65,24 @@ internal sealed class CapabilityBrokerLedger
                 ? JsonSerializer.Deserialize<LedgerState>(File.ReadAllBytes(_filePath), Options)
                     ?? throw Unavailable()
                 : new LedgerState();
-            if (_state.Version != 1)
+            if (_state.Version is not 1 and not 2)
             {
                 throw Unavailable();
+            }
+            if (_state.Version == 1)
+            {
+                foreach (var key in _state.Invocations.Keys.ToArray())
+                {
+                    var record = _state.Invocations[key];
+                    _state.Invocations[key] = record with { CompletedAt = record.Receipt?.CompletedAt };
+                }
+                foreach (var key in _state.Workflows.Keys.ToArray())
+                {
+                    var record = _state.Workflows[key];
+                    _state.Workflows[key] = record with { CompletedAt = record.Receipt?.CompletedAt };
+                }
+                _state.Version = 2;
+                Persist();
             }
         }
         catch (CapabilityBrokerException)
@@ -102,6 +120,7 @@ internal sealed class CapabilityBrokerLedger
                 argumentDigest,
                 capability,
                 RecordState.Pending,
+                null,
                 null);
             Persist();
             return new CapabilityLedgerStart<CapabilityReceipt>(CapabilityLedgerStartKind.Execute);
@@ -121,7 +140,8 @@ internal sealed class CapabilityBrokerLedger
             _state.Invocations[idempotencyKey] = existing with
             {
                 State = RecordState.Completed,
-                Receipt = receipt.DurableCopy()
+                Receipt = receipt.DurableCopy(),
+                CompletedAt = receipt.CompletedAt
             };
             Persist();
         }
@@ -149,7 +169,7 @@ internal sealed class CapabilityBrokerLedger
     {
         lock (_sync)
         {
-            if (!_state.Workflows.TryAdd(planId, new WorkflowRecord(planDigest, RecordState.Pending, null)))
+            if (!_state.Workflows.TryAdd(planId, new WorkflowRecord(planDigest, RecordState.Pending, null, null)))
             {
                 throw new CapabilityBrokerException("CAPABILITY_IDEMPOTENCY_CONFLICT", planId);
             }
@@ -169,9 +189,62 @@ internal sealed class CapabilityBrokerLedger
             _state.Workflows[receipt.PlanId] = existing with
             {
                 State = RecordState.Completed,
-                Receipt = receipt.DurableCopy()
+                Receipt = receipt.DurableCopy(),
+                CompletedAt = receipt.CompletedAt
             };
             Persist();
+        }
+    }
+
+    public int RedactCompletedReceipts(DateTimeOffset? olderThan, bool redactAll = false)
+    {
+        lock (_sync)
+        {
+            var redacted = 0;
+            foreach (var key in _state.Invocations.Keys.ToArray())
+            {
+                var record = _state.Invocations[key];
+                if (record.State != RecordState.Completed
+                    || record.Receipt is null
+                    || (!redactAll && (olderThan is null || (record.CompletedAt ?? DateTimeOffset.MinValue) >= olderThan.Value)))
+                {
+                    continue;
+                }
+                _state.Invocations[key] = record with { Receipt = null, CompletedAt = null };
+                redacted += 1;
+            }
+            foreach (var key in _state.Workflows.Keys.ToArray())
+            {
+                var record = _state.Workflows[key];
+                if (record.State != RecordState.Completed
+                    || record.Receipt is null
+                    || (!redactAll && (olderThan is null || (record.CompletedAt ?? DateTimeOffset.MinValue) >= olderThan.Value)))
+                {
+                    continue;
+                }
+                _state.Workflows[key] = record with { Receipt = null, CompletedAt = null };
+                redacted += 1;
+            }
+            if (redacted > 0)
+            {
+                Persist();
+            }
+            return redacted;
+        }
+    }
+
+    public CapabilityLedgerRetentionSnapshot RetentionSnapshot()
+    {
+        lock (_sync)
+        {
+            var records = _state.Invocations.Values
+                .Select(record => (record.State, HasReceipt: record.Receipt is not null))
+                .Concat(_state.Workflows.Values.Select(record => (record.State, HasReceipt: record.Receipt is not null)))
+                .ToArray();
+            return new CapabilityLedgerRetentionSnapshot(
+                records.Count(record => record.State == RecordState.Completed && record.HasReceipt),
+                records.Count(record => record.State == RecordState.Completed && !record.HasReceipt),
+                records.Count(record => record.State == RecordState.Pending));
         }
     }
 
@@ -383,6 +456,11 @@ internal sealed record CapabilityAuthorizationAuditEntry(
 
 internal sealed class CapabilityBrokerAuditLog
 {
+    private sealed record AuditFile(string Path, DateOnly Day, long ByteCount);
+
+    private static readonly Regex AuditFilePattern = new(
+        "^capability-(?<day>[0-9]{8})\\.jsonl$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private static readonly JsonSerializerOptions Options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -398,6 +476,10 @@ internal sealed class CapabilityBrokerAuditLog
         {
             _directory = Path.Combine(rootDirectory, "audit");
             Directory.CreateDirectory(_directory);
+            if ((File.GetAttributes(_directory) & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new CapabilityBrokerException("CAPABILITY_AUDIT_UNAVAILABLE", "audit");
+            }
         }
         catch
         {
@@ -422,6 +504,20 @@ internal sealed class CapabilityBrokerAuditLog
             try
             {
                 var path = Path.Combine(_directory, $"capability-{timestamp.UtcDateTime:yyyyMMdd}.jsonl");
+                try
+                {
+                    var attributes = File.GetAttributes(path);
+                    if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+                    {
+                        throw new CapabilityBrokerException("CAPABILITY_AUDIT_UNAVAILABLE", "audit");
+                    }
+                }
+                catch (FileNotFoundException)
+                {
+                }
+                catch (DirectoryNotFoundException)
+                {
+                }
                 var data = JsonSerializer.SerializeToUtf8Bytes(entry, Options);
                 using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
                 stream.Write(data);
@@ -437,13 +533,78 @@ internal sealed class CapabilityBrokerAuditLog
 
     public byte[] CombinedData()
     {
-        using var result = new MemoryStream();
-        foreach (var file in Directory.EnumerateFiles(_directory, "capability-*.jsonl").Order(StringComparer.Ordinal))
+        lock (_sync)
         {
-            var data = File.ReadAllBytes(file);
-            result.Write(data);
+            using var result = new MemoryStream();
+            foreach (var file in StrictAuditFiles())
+            {
+                var data = File.ReadAllBytes(file.Path);
+                result.Write(data);
+            }
+            return result.ToArray();
         }
-        return result.ToArray();
+    }
+
+    public int RemoveEntries(DateTimeOffset? olderThan)
+    {
+        if (olderThan is null)
+        {
+            return 0;
+        }
+        lock (_sync)
+        {
+            try
+            {
+                var cutoffDay = DateOnly.FromDateTime(olderThan.Value.UtcDateTime);
+                var targets = StrictAuditFiles().Where(file => file.Day < cutoffDay).ToArray();
+                foreach (var target in targets)
+                {
+                    File.Delete(target.Path);
+                }
+                return targets.Length;
+            }
+            catch (CapabilityBrokerException)
+            {
+                throw;
+            }
+            catch
+            {
+                throw new CapabilityBrokerException("CAPABILITY_AUDIT_UNAVAILABLE", "audit");
+            }
+        }
+    }
+
+    public int RemoveAllEntries()
+    {
+        lock (_sync)
+        {
+            try
+            {
+                var targets = StrictAuditFiles();
+                foreach (var target in targets)
+                {
+                    File.Delete(target.Path);
+                }
+                return targets.Count;
+            }
+            catch (CapabilityBrokerException)
+            {
+                throw;
+            }
+            catch
+            {
+                throw new CapabilityBrokerException("CAPABILITY_AUDIT_UNAVAILABLE", "audit");
+            }
+        }
+    }
+
+    public CapabilityAuditRetentionSnapshot RetentionSnapshot()
+    {
+        lock (_sync)
+        {
+            var files = StrictAuditFiles();
+            return new CapabilityAuditRetentionSnapshot(files.Count, files.Sum(file => file.ByteCount));
+        }
     }
 
     public static string PrincipalPseudonym(CapabilityPrincipal principal)
@@ -455,5 +616,48 @@ internal sealed class CapabilityBrokerAuditLog
             principal.AgentSessionId ?? string.Empty
         });
         return "principal:sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
+    }
+
+    private List<AuditFile> StrictAuditFiles()
+    {
+        try
+        {
+            var files = new List<AuditFile>();
+            foreach (var path in Directory.EnumerateFileSystemEntries(_directory))
+            {
+                var name = Path.GetFileName(path);
+                if (!name.StartsWith("capability-", StringComparison.Ordinal)
+                    && !name.EndsWith(".jsonl", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                var match = AuditFilePattern.Match(name);
+                if (!match.Success
+                    || !DateOnly.TryParseExact(
+                        match.Groups["day"].Value,
+                        "yyyyMMdd",
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None,
+                        out var day))
+                {
+                    throw new CapabilityBrokerException("CAPABILITY_AUDIT_UNAVAILABLE", "audit");
+                }
+                var attributes = File.GetAttributes(path);
+                if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+                {
+                    throw new CapabilityBrokerException("CAPABILITY_AUDIT_UNAVAILABLE", "audit");
+                }
+                files.Add(new AuditFile(path, day, new FileInfo(path).Length));
+            }
+            return files.OrderBy(file => file.Path, StringComparer.Ordinal).ToList();
+        }
+        catch (CapabilityBrokerException)
+        {
+            throw;
+        }
+        catch
+        {
+            throw new CapabilityBrokerException("CAPABILITY_AUDIT_UNAVAILABLE", "audit");
+        }
     }
 }

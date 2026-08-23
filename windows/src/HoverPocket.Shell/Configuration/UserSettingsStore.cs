@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using HoverPocket.Shell.Capabilities;
 using HoverPocket.Shell.Voice;
 
 namespace HoverPocket.Shell.Configuration;
@@ -128,6 +129,7 @@ internal sealed class UserSettingsStore
             StartWithWindows = false,
             AutoCheckForUpdates = true,
             AiNativeEnabled = false,
+            CapabilityDataRetentionPeriod = CapabilityDataRetentionPeriod.NinetyDays,
             VoiceEnabled = false,
             VoiceCalendarAccessGranted = false,
             VoiceLaneLayout = VoiceLaneLayoutPreference.Compact,
@@ -144,6 +146,10 @@ internal sealed class UserSettingsStore
 
     public static UserSettings Normalize(UserSettings settings, IReadOnlyList<string> providerIds)
     {
+        if (!Enum.IsDefined(settings.CapabilityDataRetentionPeriod))
+        {
+            settings.CapabilityDataRetentionPeriod = CapabilityDataRetentionPeriod.NinetyDays;
+        }
         var known = providerIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var order = settings.ProviderOrder
             .Where(id => known.Contains(id))

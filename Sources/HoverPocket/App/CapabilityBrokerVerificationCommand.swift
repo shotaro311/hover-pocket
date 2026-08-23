@@ -24,6 +24,7 @@ enum CapabilityBrokerVerificationCommand {
                 print("broker_pocket_app_declared_tests=4")
                 print("broker_pocket_app_layout_cases=16")
                 print("broker_concurrent_duplicate=ok")
+                print("broker_retention_governance=ok")
                 print("broker_negative_cases=12")
                 print("broker_golden_plan_digest=\(goldenPlanDigest)")
                 Darwin.exit(0)
@@ -51,6 +52,10 @@ enum CapabilityBrokerVerificationCommand {
         defaults.removePersistentDomain(forName: defaultsSuite)
         defer { defaults.removePersistentDomain(forName: defaultsSuite) }
         try require(!AppSettings(defaults: defaults).aiNativeEnabled, "feature_default_off")
+        try require(
+            AppSettings(defaults: defaults).capabilityDataRetentionPeriod == .ninetyDays,
+            "capability_retention_default"
+        )
         let noteID = UUID(uuidString: "44444444-4444-4444-8444-444444444444")!
         let timerStore = TimerStore(
             storageDirectory: root.appendingPathComponent("timer", isDirectory: true),
@@ -503,6 +508,12 @@ enum CapabilityBrokerVerificationCommand {
             try require(!durableLedgerText.contains(forbidden), "ledger_redaction_\(forbidden)")
         }
 
+        try verifyCapabilityDataGovernance(
+            brokerRoot: brokerRoot,
+            approvedPlan: approved.plan,
+            now: now
+        )
+
         try await verifyPocketAppExecution(root: root, calendar: calendar, now: now)
         try await verifyTodayFocusActivationRevocation(
             root: root,
@@ -513,6 +524,63 @@ enum CapabilityBrokerVerificationCommand {
         try await verifyCurrentStepRollback(root: root, now: now, principal: principal)
         try await verifyCancellationAfterSuccessfulStep(root: root, now: now, principal: principal)
         try await verifyTimeout(root: root, now: now, principal: principal)
+    }
+
+    private static func verifyCapabilityDataGovernance(
+        brokerRoot: URL,
+        approvedPlan: CapabilityExecutionPlan,
+        now: Date
+    ) throws {
+        let ledger = try CapabilityBrokerLedger(rootDirectory: brokerRoot)
+        let audit = try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+        let governance = CapabilityDataGovernanceController(ledger: ledger, auditLog: audit)
+        let before = try governance.snapshot()
+        try require(before.auditFileCount > 0, "retention_audit_before")
+        try require(before.storedReceiptCount > 0, "retention_receipts_before")
+
+        let afterRetention = try governance.applyRetention(
+            .sevenDays,
+            now: now.addingTimeInterval(8 * 24 * 60 * 60)
+        )
+        try require(afterRetention.auditFileCount == 0, "retention_audit_removed")
+        try require(afterRetention.storedReceiptCount == 0, "retention_receipts_redacted")
+        try require(afterRetention.redactedTombstoneCount > 0, "retention_tombstones_preserved")
+        switch try ledger.lookupWorkflow(
+            planID: approvedPlan.id,
+            planDigest: CapabilityCanonicalJSON.planDigest(approvedPlan)
+        ) {
+        case .unknown:
+            break
+        case .execute, .replay:
+            throw BrokerVerificationFailure("retention_tombstone_reexecution_allowed")
+        }
+
+        let auditDirectory = brokerRoot.appendingPathComponent("audit", isDirectory: true)
+        let currentAudit = auditDirectory.appendingPathComponent("capability-20990101.jsonl")
+        try Data("{}\n".utf8).write(to: currentAudit, options: .atomic)
+        let afterClear = try governance.clearHistory(now: now)
+        try require(afterClear.auditFileCount == 0, "retention_explicit_clear")
+        try require(afterClear.redactedTombstoneCount > 0, "retention_clear_tombstones_preserved")
+
+        let outside = brokerRoot.appendingPathComponent("outside-audit.jsonl")
+        try Data("{}\n".utf8).write(to: outside, options: .atomic)
+        let link = auditDirectory.appendingPathComponent("capability-20990102.jsonl")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside)
+        do {
+            _ = try governance.snapshot()
+            throw BrokerVerificationFailure("retention_symlink_accepted")
+        } catch CapabilityBrokerError.ledgerUnavailable {
+        }
+        try FileManager.default.removeItem(at: link)
+
+        let migrationRoot = brokerRoot.appendingPathComponent("v1-migration", isDirectory: true)
+        try FileManager.default.createDirectory(at: migrationRoot, withIntermediateDirectories: true)
+        let migrationURL = migrationRoot.appendingPathComponent("capability-broker-ledger.json")
+        try Data("{\"invocations\":{},\"version\":1,\"workflows\":{}}".utf8)
+            .write(to: migrationURL, options: .atomic)
+        _ = try CapabilityBrokerLedger(rootDirectory: migrationRoot)
+        let migrated = String(data: try Data(contentsOf: migrationURL), encoding: .utf8) ?? ""
+        try require(migrated.contains("\"version\":2"), "retention_v1_migrated")
     }
 
     @MainActor

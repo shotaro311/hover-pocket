@@ -18,16 +18,18 @@ final class CapabilityBrokerLedger {
         let capability: PocketCapabilityKey
         var state: RecordState
         var receipt: CapabilityReceipt?
+        var completedAt: Date?
     }
 
     private struct WorkflowRecord: Codable {
         let planDigest: String
         var state: RecordState
         var receipt: CapabilityWorkflowReceipt?
+        var completedAt: Date?
     }
 
     private struct State: Codable {
-        var version = 1
+        var version = 2
         var invocations: [String: InvocationRecord] = [:]
         var workflows: [String: WorkflowRecord] = [:]
     }
@@ -36,6 +38,7 @@ final class CapabilityBrokerLedger {
     private var state: State
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let lock = NSLock()
 
     init(rootDirectory: URL) throws {
         self.fileURL = rootDirectory.appendingPathComponent("capability-broker-ledger.json", isDirectory: false)
@@ -54,8 +57,22 @@ final class CapabilityBrokerLedger {
             if FileManager.default.fileExists(atPath: fileURL.path) {
                 let data = try Data(contentsOf: fileURL)
                 state = try decoder.decode(State.self, from: data)
-                guard state.version == 1 else {
+                guard state.version == 1 || state.version == 2 else {
                     throw CapabilityBrokerError.ledgerUnavailable
+                }
+                if state.version == 1 {
+                    for key in state.invocations.keys {
+                        guard var record = state.invocations[key] else { continue }
+                        record.completedAt = record.receipt?.completedAt
+                        state.invocations[key] = record
+                    }
+                    for key in state.workflows.keys {
+                        guard var record = state.workflows[key] else { continue }
+                        record.completedAt = record.receipt?.completedAt
+                        state.workflows[key] = record
+                    }
+                    state.version = 2
+                    try persistUnlocked()
                 }
             } else {
                 state = State()
@@ -73,75 +90,144 @@ final class CapabilityBrokerLedger {
         argumentDigest: String,
         capability: PocketCapabilityKey
     ) throws -> CapabilityLedgerStart<CapabilityReceipt> {
-        if let existing = state.invocations[idempotencyKey] {
-            guard existing.planDigest == planDigest,
-                  existing.argumentDigest == argumentDigest,
-                  existing.capability == capability else {
-                throw CapabilityBrokerError.idempotencyConflict(idempotencyKey)
+        try synchronized {
+            if let existing = state.invocations[idempotencyKey] {
+                guard existing.planDigest == planDigest,
+                      existing.argumentDigest == argumentDigest,
+                      existing.capability == capability else {
+                    throw CapabilityBrokerError.idempotencyConflict(idempotencyKey)
+                }
+                if existing.state == .completed, let receipt = existing.receipt {
+                    return .replay(receipt.replayCopy())
+                }
+                return .unknown
             }
-            if existing.state == .completed, let receipt = existing.receipt {
-                return .replay(receipt.replayCopy())
-            }
-            return .unknown
-        }
 
-        state.invocations[idempotencyKey] = InvocationRecord(
-            planDigest: planDigest,
-            argumentDigest: argumentDigest,
-            capability: capability,
-            state: .pending,
-            receipt: nil
-        )
-        try persist()
-        return .execute
+            state.invocations[idempotencyKey] = InvocationRecord(
+                planDigest: planDigest,
+                argumentDigest: argumentDigest,
+                capability: capability,
+                state: .pending,
+                receipt: nil,
+                completedAt: nil
+            )
+            try persistUnlocked()
+            return .execute
+        }
     }
 
     func completeInvocation(idempotencyKey: String, receipt: CapabilityReceipt) throws {
-        guard var record = state.invocations[idempotencyKey],
-              record.planDigest == receipt.planDigest,
-              record.capability == receipt.capability else {
-            throw CapabilityBrokerError.ledgerUnavailable
+        try synchronized {
+            guard var record = state.invocations[idempotencyKey],
+                  record.planDigest == receipt.planDigest,
+                  record.capability == receipt.capability else {
+                throw CapabilityBrokerError.ledgerUnavailable
+            }
+            record.state = .completed
+            record.receipt = receipt.durableCopy()
+            record.completedAt = receipt.completedAt
+            state.invocations[idempotencyKey] = record
+            try persistUnlocked()
         }
-        record.state = .completed
-        record.receipt = receipt.durableCopy()
-        state.invocations[idempotencyKey] = record
-        try persist()
     }
 
     func lookupWorkflow(planID: String, planDigest: String) throws -> CapabilityLedgerStart<CapabilityWorkflowReceipt> {
-        if let existing = state.workflows[planID] {
-            guard existing.planDigest == planDigest else {
-                throw CapabilityBrokerError.idempotencyConflict(planID)
+        try synchronized {
+            if let existing = state.workflows[planID] {
+                guard existing.planDigest == planDigest else {
+                    throw CapabilityBrokerError.idempotencyConflict(planID)
+                }
+                if existing.state == .completed, let receipt = existing.receipt {
+                    return .replay(receipt.replayCopy())
+                }
+                return .unknown
             }
-            if existing.state == .completed, let receipt = existing.receipt {
-                return .replay(receipt.replayCopy())
-            }
-            return .unknown
+            return .execute
         }
-
-        return .execute
     }
 
     func startWorkflow(planID: String, planDigest: String) throws {
-        guard state.workflows[planID] == nil else {
-            throw CapabilityBrokerError.idempotencyConflict(planID)
+        try synchronized {
+            guard state.workflows[planID] == nil else {
+                throw CapabilityBrokerError.idempotencyConflict(planID)
+            }
+            state.workflows[planID] = WorkflowRecord(
+                planDigest: planDigest,
+                state: .pending,
+                receipt: nil,
+                completedAt: nil
+            )
+            try persistUnlocked()
         }
-        state.workflows[planID] = WorkflowRecord(planDigest: planDigest, state: .pending, receipt: nil)
-        try persist()
     }
 
     func completeWorkflow(_ receipt: CapabilityWorkflowReceipt) throws {
-        guard var record = state.workflows[receipt.planID],
-              record.planDigest == receipt.planDigest else {
-            throw CapabilityBrokerError.ledgerUnavailable
+        try synchronized {
+            guard var record = state.workflows[receipt.planID],
+                  record.planDigest == receipt.planDigest else {
+                throw CapabilityBrokerError.ledgerUnavailable
+            }
+            record.state = .completed
+            record.receipt = receipt.durableCopy()
+            record.completedAt = receipt.completedAt
+            state.workflows[receipt.planID] = record
+            try persistUnlocked()
         }
-        record.state = .completed
-        record.receipt = receipt.durableCopy()
-        state.workflows[receipt.planID] = record
-        try persist()
     }
 
-    private func persist() throws {
+    @discardableResult
+    func redactCompletedReceipts(
+        olderThan cutoff: Date?,
+        redactAll: Bool = false
+    ) throws -> Int {
+        try synchronized {
+            var redacted = 0
+            for key in state.invocations.keys {
+                guard var record = state.invocations[key],
+                      record.state == .completed,
+                      record.receipt != nil,
+                      redactAll || cutoff.map({ (record.completedAt ?? .distantPast) < $0 }) == true else {
+                    continue
+                }
+                record.receipt = nil
+                record.completedAt = nil
+                state.invocations[key] = record
+                redacted += 1
+            }
+            for key in state.workflows.keys {
+                guard var record = state.workflows[key],
+                      record.state == .completed,
+                      record.receipt != nil,
+                      redactAll || cutoff.map({ (record.completedAt ?? .distantPast) < $0 }) == true else {
+                    continue
+                }
+                record.receipt = nil
+                record.completedAt = nil
+                state.workflows[key] = record
+                redacted += 1
+            }
+            if redacted > 0 {
+                try persistUnlocked()
+            }
+            return redacted
+        }
+    }
+
+    func retentionSnapshot() -> CapabilityLedgerRetentionSnapshot {
+        synchronized {
+            let invocationRecords = Array(state.invocations.values)
+            let workflowRecords = Array(state.workflows.values)
+            let completedRecords = invocationRecords.map { ($0.state, $0.receipt != nil) }
+                + workflowRecords.map { ($0.state, $0.receipt != nil) }
+            return CapabilityLedgerRetentionSnapshot(
+                storedReceiptCount: completedRecords.filter { $0.0 == .completed && $0.1 }.count,
+                redactedTombstoneCount: completedRecords.filter { $0.0 == .completed && !$0.1 }.count,
+                pendingCount: completedRecords.filter { $0.0 == .pending }.count
+            )
+        }
+    }
+
+    private func persistUnlocked() throws {
         do {
             let data = try encoder.encode(state)
             try data.write(to: fileURL, options: .atomic)
@@ -149,6 +235,12 @@ final class CapabilityBrokerLedger {
         } catch {
             throw CapabilityBrokerError.ledgerUnavailable
         }
+    }
+
+    private func synchronized<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
     }
 }
 
