@@ -976,6 +976,7 @@ internal sealed class VoiceFoundationVerifier
             "[/Users/alice/private]",
             @"[C:\Users\alice\private]",
             "Sources/HoverPocket/App.swift",
+            @"Sources\HoverPocket\App.swift",
             "Bearer sk-proj-secret",
             "sk-proj-abcdefghijklmnopqrstuvwxyz",
             """{"access_token":"abcdefghijklmnopqrstuvwxyz"}""",
@@ -989,7 +990,8 @@ internal sealed class VoiceFoundationVerifier
         {
             "https://example.com/Sources/HoverPocket/App.swift",
             "and/or",
-            "input/output"
+            "input/output",
+            @"input\output"
         };
         if (nonPathText.Any(value => VoiceTextSafety.SanitizeVisibleText(value, 200) != value))
         {

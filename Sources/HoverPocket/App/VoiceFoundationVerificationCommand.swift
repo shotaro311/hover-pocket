@@ -216,6 +216,7 @@ enum VoiceFoundationVerificationCommand {
             "[/Users/alice/private]",
             #"[C:\Users\alice\private]"#,
             "Sources/HoverPocket/App.swift",
+            #"Sources\HoverPocket\App.swift"#,
             "Bearer sk-proj-secret",
             "sk-proj-abcdefghijklmnopqrstuvwxyz",
             #"{"access_token":"abcdefghijklmnopqrstuvwxyz"}"#,
@@ -228,7 +229,8 @@ enum VoiceFoundationVerificationCommand {
         let nonPathSamples = [
             "https://example.com/Sources/HoverPocket/App.swift",
             "and/or",
-            "input/output"
+            "input/output",
+            #"input\output"#
         ]
         guard combining.text.unicodeScalars.count <= 1_024,
               redactionSamples.allSatisfy({ VoiceTextSafety.sanitizeVisibleText($0, limit: 200) == "[redacted]" }),

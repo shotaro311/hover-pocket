@@ -210,7 +210,7 @@ struct VoiceLaneSnapshot: Equatable, Sendable {
 enum VoiceTextSafety {
     private static let sensitiveMarkers = ["authorization:", "token=", "api_key=", "apikey="]
     private static let absolutePathPattern = #"(?i)(?:^|[^\p{L}\p{N}_/])(?:file://|/(?!/)(?:[^/\s]+/)*[^/\s]+|[a-z]:\\[^\s]+|\\\\[^\s]+)"#
-    private static let relativePathPattern = #"(?i)(?:^|[^\p{L}\p{N}_./:\\])(?:\.{1,2}/(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*/)*[\p{L}\p{N}_-][\p{L}\p{N}._-]*|(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*/)+[\p{L}\p{N}_-][\p{L}\p{N}._-]*\.[\p{L}\p{N}]{1,16}|(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*/){2,}[\p{L}\p{N}_-][\p{L}\p{N}._-]*)"#
+    private static let relativePathPattern = #"(?i)(?:^|[^\p{L}\p{N}_./:\\])(?:\.{1,2}[/\\](?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*[/\\])*[\p{L}\p{N}_-][\p{L}\p{N}._-]*|(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*[/\\])+[\p{L}\p{N}_-][\p{L}\p{N}._-]*\.[\p{L}\p{N}]{1,16}|(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*[/\\]){2,}[\p{L}\p{N}_-][\p{L}\p{N}._-]*)"#
     private static let bearerCredentialPattern = #"(?i)(?:^|[^\p{L}\p{N}_])bearer[ \t]+[a-z0-9._~+/\-=]{8,}"#
     private static let openAICredentialPattern = #"(?i)(?:^|[^\p{L}\p{N}_])sk-(?:proj-|svcacct-)?[a-z0-9_-]{16,}"#
     private static let jsonCredentialFieldPattern = #"(?i)"(?:access[_-]?token|refresh[_-]?token|token|api[_-]?key|apikey|client[_-]?secret|secret)"[ \t\r\n]*:[ \t\r\n]*"[^"\r\n]+""#

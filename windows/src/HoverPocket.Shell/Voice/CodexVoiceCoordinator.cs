@@ -159,7 +159,7 @@ internal static class VoiceTextSafety
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     private static readonly Regex RelativePathPattern = new(
-        """(?:^|[^\p{L}\p{N}_./:\\])(?:\.{1,2}/(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*/)*[\p{L}\p{N}_-][\p{L}\p{N}._-]*|(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*/)+[\p{L}\p{N}_-][\p{L}\p{N}._-]*\.[\p{L}\p{N}]{1,16}|(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*/){2,}[\p{L}\p{N}_-][\p{L}\p{N}._-]*)""",
+        """(?:^|[^\p{L}\p{N}_./:\\])(?:\.{1,2}[/\\](?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*[/\\])*[\p{L}\p{N}_-][\p{L}\p{N}._-]*|(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*[/\\])+[\p{L}\p{N}_-][\p{L}\p{N}._-]*\.[\p{L}\p{N}]{1,16}|(?:[\p{L}\p{N}_-][\p{L}\p{N}._-]*[/\\]){2,}[\p{L}\p{N}_-][\p{L}\p{N}._-]*)""",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     private static readonly Regex BearerCredentialPattern = new(
