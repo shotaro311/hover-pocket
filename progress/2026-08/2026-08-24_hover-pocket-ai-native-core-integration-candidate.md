@@ -51,16 +51,23 @@
 - 旧`20260823-235944-...` runは送信前にsource context上限で失敗しており、成果物として扱わない。
 - 正しいrunの自動回収通知を受信した場合だけ、delivery IDとstate hashを`claim-synthesis`で検証し、receipt、base、allowed path、artifact hashを確認してから隔離worktreeへ適用する。同一通知を再適用しない。
 
+## Draft PR / CI readback
+
+- Draft PR [#25](https://github.com/shotaro311/hover-pocket/pull/25)を作成した。検証対象headは`32b316f70442c95aab18c35158d614d6b8f15dd4`、baseは`a35b0ea8c224809ad4ff1bf1dc466882fc70169b`である。
+- GitHub readbackは`Draft / MERGEABLE / CLEAN`、remote parity `0 / 0`である。
+- Windows Release / native / rendered UI、macOS Capability、3 OS deterministic contract / cross-OS byte比較、release metadata、transition syntax、Routerを含む19 checkが成功し、失敗0、pending 0だった。
+- run IDは`32651381574`、`32651381593`、`32651381602`、`32651393071`、`32651393075`、`32651393076`、`32651393081`、`32651393086`、`32651393105`である。
+- 署名済み公開成果物が必要なrelease readback / install transition 14件は、PRでは意図どおりskipされた。成功扱いへ読み替えない。
+
 ## 未完了ゲート
 
 1. 正しいAN8-C Pro成果物のclaim、receipt検証、隔離適用、両OS contract検証
-2. 統合候補Draft PRのWindows Release / native / rendered UI / contract byte比較CI
-3. 実Windows端末でCodex、microphone、remote audio、Calendar / Timer Broker往復
-4. Codex production VoiceでBrokerだけを許可する正のtool allowlist、または専用最小runtimeの採用
-5. workspace backup / export / restore、旧workspace migration、破損・offline回帰
-6. macOS notarization / SparkleとWindows Authenticode / Velopackの署名済み成果物readback
-7. clean install、upgrade、downgrade、uninstall / reinstall、sleep / wake、長時間soak
-8. deprecation window、migration tool、監査・receipt retention、ユーザーによる変更・削除
+2. 実Windows端末でCodex、microphone、remote audio、Calendar / Timer Broker往復
+3. Codex production VoiceでBrokerだけを許可する正のtool allowlist、または専用最小runtimeの採用
+4. workspace backup / export / restore、旧workspace migration、破損・offline回帰
+5. macOS notarization / SparkleとWindows Authenticode / Velopackの署名済み成果物readback
+6. clean install、upgrade、downgrade、uninstall / reinstall、sleep / wake、長時間soak
+7. deprecation window、migration tool、監査・receipt retention、ユーザーによる変更・削除
 
 ## 運用判断
 

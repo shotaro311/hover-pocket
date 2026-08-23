@@ -10,6 +10,7 @@ status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-gr
 - 分岐していたAN5-C + AN3 Voice / Calendar / Timer stack、Controls / approval presentation再統合、AN8 release transition / readbackを通常mergeだけで`codex/ai-native-an8-core-integration-candidate`へ集約した。統合候補headは`4e297b7`で、各exact headのancestryをreadbackした。
 - 競合は進捗正本とWindows Host composition / verifierに限定された。共有BrokerへVoice runtimeとControls、Sticky Notesに結び付くHost承認表示を同時接続し、21 descriptor / 20 handlerの構成を維持した。
 - macOSでwarnings-as-errors build、13 schema / 66 fixture、Voice contract 42件、release readback unit 19件、Capability、Broker、Pocket App、Pocket Surface、Voice、Timer、Panel layout 128件、Windows JavaScript構文、shell構文、`git diff --check`が成功した。このMacには.NET SDKがないためWindowsはDraft PR CIを受入gateにする。
+- Draft PR [#25](https://github.com/shotaro311/hover-pocket/pull/25)のhead `32b316f`で、Windows Release / native / rendered UI、macOS Capability、3 OS deterministic contract / cross-OS byte比較、release metadata、transition syntax、Routerを含む19 checkが成功し、失敗0、pending 0だった。公開署名成果物が必要な14 checkはPRでは意図どおりskipであり、未完了gateとして維持する。PRは`Draft / MERGEABLE / CLEAN`、remote parity `0 / 0`である。
 - 正しいAN8-C Pro runは継続回収中であり、旧oversize runは成果物なしとして再利用しない。統合候補はDraft、人手merge gate、AI / Voice default-off、未署名Windows beta自動実行なしを維持する。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-core-integration-candidate.md`。
 
 ## 2026-08-23 AI-native AN3-B2 Final Safety Integration
