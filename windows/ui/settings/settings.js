@@ -306,6 +306,7 @@ function renderPocketGeneration(generation, language) {
   }
 
   pocketGenerationManagedEl.replaceChildren();
+  const healthByApp = new Map((generation.appHealth ?? []).map((item) => [item.appId, item]));
   for (const app of generation.managedApps ?? []) {
     const card = document.createElement("article");
     card.className = "pocket-app-card";
@@ -318,6 +319,22 @@ function renderPocketGeneration(generation, language) {
     heading.append(name, version);
     const digest = document.createElement("code");
     digest.textContent = shortDigest(app.packageDigest);
+    const health = healthByApp.get(app.appId);
+    const healthLine = document.createElement("p");
+    healthLine.className = "settings-note";
+    if (health?.status === "unused") {
+      healthLine.textContent = language === "en"
+        ? "Unused for 30+ days. You can disable it if no longer needed."
+        : "30日以上未使用です。必要なければ無効化できます。";
+    } else if (health?.status === "attention") {
+      healthLine.textContent = language === "en"
+        ? `Needs attention: ${health.reasonCode}`
+        : `要確認: ${health.reasonCode}`;
+    } else if (health?.status === "disabled") {
+      healthLine.textContent = language === "en" ? "Disabled" : "無効化済み";
+    } else {
+      healthLine.textContent = language === "en" ? "Healthy" : "正常";
+    }
     const actions = document.createElement("div");
     actions.className = "settings-button-row";
 
@@ -363,7 +380,7 @@ function renderPocketGeneration(generation, language) {
     removeButton.addEventListener("click", () => runGenerationAction("pocketApps.removePreservingData", { appId: app.appId }));
     actions.append(removeButton);
 
-    card.append(heading, digest, actions);
+    card.append(heading, digest, healthLine, actions);
     pocketGenerationManagedEl.append(card);
   }
 

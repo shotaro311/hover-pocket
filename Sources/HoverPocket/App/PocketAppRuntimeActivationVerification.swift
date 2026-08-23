@@ -165,7 +165,12 @@ enum PocketAppRuntimeActivationVerification {
 
             let restarted = PocketAppRuntimeActivationRegistry(
                 managedPackagesSource: { Array(managed.values) },
-                candidateSource: { candidates[$0] }
+                candidateSource: { appID in
+                    guard let package = managed[appID],
+                          let version = package.version,
+                          let digest = package.packageDigest else { return nil }
+                    return candidate(appID: appID, version: version, digest: digest)
+                }
             )
             let restartFailures = restarted.restoreEnabledApps()
             require(
@@ -173,6 +178,17 @@ enum PocketAppRuntimeActivationVerification {
                     && restarted.executionRegistry.activeAppIDs == [appA, appB]
                     && restarted.surfaceRegistry.activeAppIDs == [appA, appB],
                 "activation_restart_restore",
+                failures: &failures
+            )
+            var transitionFailures: [String] = []
+            for _ in 0..<64 {
+                transitionFailures.append(contentsOf: restarted.recoverAfterSystemTransition())
+            }
+            require(
+                transitionFailures.isEmpty
+                    && restarted.executionRegistry.activeAppIDs == [appA, appB]
+                    && restarted.surfaceRegistry.activeAppIDs == [appA, appB],
+                "activation_system_transition_soak",
                 failures: &failures
             )
 

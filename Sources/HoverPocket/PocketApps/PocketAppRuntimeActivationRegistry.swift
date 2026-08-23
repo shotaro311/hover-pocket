@@ -253,6 +253,7 @@ final class PocketAppRuntimeActivationRegistry {
     private let restoreFailurePersistence: RestoreFailurePersistence
     private let failureInjection: ((String) -> Bool)?
     private let reservedAppIDs: Set<String>
+    private var lastUseRecordedAt: [String: Date] = [:]
 
     init(
         rootDirectory: URL,
@@ -350,12 +351,19 @@ final class PocketAppRuntimeActivationRegistry {
 
         switch receipt.state {
         case .enabled:
-            guard let candidate = try candidateSource(receipt.packageID),
-                  candidate.readback.matches(receipt) else {
+            do {
+                guard let candidate = try candidateSource(receipt.packageID),
+                      candidate.readback.matches(receipt) else {
+                    throw PocketAppRuntimeActivationError.readbackMismatch
+                }
+                let readback = try activate(candidate, expected: candidate.readback)
+                try? sourceLifecycle?.recordHealthActivationSuccess(packageID: receipt.packageID)
+                return readback
+            } catch {
                 failClosed(appID: receipt.packageID)
-                throw PocketAppRuntimeActivationError.readbackMismatch
+                try? sourceLifecycle?.recordHealthActivationFailure(packageID: receipt.packageID)
+                throw error
             }
-            return try activate(candidate, expected: candidate.readback)
 
         case .disabled, .removed:
             guard receipt.effectivePermissions.isEmpty else {
@@ -404,13 +412,36 @@ final class PocketAppRuntimeActivationRegistry {
                     throw PocketAppRuntimeActivationError.readbackMismatch
                 }
                 _ = try activate(candidate, expected: candidate.readback)
+                try? sourceLifecycle?.recordHealthActivationSuccess(packageID: package.packageID)
             } catch {
                 failClosed(appID: package.packageID)
+                try? sourceLifecycle?.recordHealthActivationFailure(packageID: package.packageID)
                 _ = restoreFailurePersistence(package.packageID)
                 failures.append(package.packageID)
             }
         }
         return Array(Set(failures)).sorted()
+    }
+
+    func recordUse(appID: String, now: Date = Date()) {
+        guard !reservedAppIDs.contains(appID),
+              executionRegistry.readback(appID: appID) != nil,
+              surfaceRegistry.readback(appID: appID) != nil else { return }
+        if let previous = lastUseRecordedAt[appID],
+           now.timeIntervalSince(previous) >= 0,
+           now.timeIntervalSince(previous) < 5 * 60 {
+            return
+        }
+        do {
+            try sourceLifecycle?.recordHealthUse(packageID: appID, now: now)
+            lastUseRecordedAt[appID] = now
+        } catch {
+        }
+    }
+
+    @discardableResult
+    func recoverAfterSystemTransition() -> [String] {
+        restoreEnabledApps()
     }
 
     func managedAppIDs() throws -> Set<String> {
@@ -426,6 +457,7 @@ final class PocketAppRuntimeActivationRegistry {
         for appID in appIDs {
             failClosed(appID: appID)
         }
+        lastUseRecordedAt.removeAll()
     }
 
     private func activate(

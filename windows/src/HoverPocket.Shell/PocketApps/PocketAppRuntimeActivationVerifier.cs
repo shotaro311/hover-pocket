@@ -130,7 +130,11 @@ internal static class PocketAppRuntimeActivationVerifier
 
             using (var restarted = new PocketAppRuntimeActivationRegistry(
                 () => managed.Values.ToArray(),
-                appId => candidates.GetValueOrDefault(appId)))
+                appId => managed.TryGetValue(appId, out var package)
+                    && package.Version is { } version
+                    && package.PackageDigest is { } digest
+                        ? Candidate(appId, version, digest)
+                        : null))
             {
                 var restartFailures = restarted.RestoreEnabledApps();
                 Require(
@@ -138,6 +142,17 @@ internal static class PocketAppRuntimeActivationVerifier
                     && restarted.ExecutionRegistry.ActiveAppIds.SequenceEqual([appA, appB], StringComparer.Ordinal)
                     && restarted.SurfaceRegistry.ActiveAppIds.SequenceEqual([appA, appB], StringComparer.Ordinal),
                     "activation_restart_restore",
+                    failures);
+                var transitionFailures = new List<string>();
+                for (var index = 0; index < 64; index++)
+                {
+                    transitionFailures.AddRange(restarted.RecoverAfterSystemTransition());
+                }
+                Require(
+                    transitionFailures.Count == 0
+                        && restarted.ExecutionRegistry.ActiveAppIds.SequenceEqual([appA, appB], StringComparer.Ordinal)
+                        && restarted.SurfaceRegistry.ActiveAppIds.SequenceEqual([appA, appB], StringComparer.Ordinal),
+                    "activation_system_transition_soak",
                     failures);
             }
 

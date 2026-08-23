@@ -209,6 +209,7 @@ struct PocketAppGenerationSettingsView: View {
             installedVersions: package.installedVersions,
             currentVersion: package.version
         )
+        let health = controller.appHealth.first { $0.packageID == package.packageID }
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(package.packageID)
@@ -221,6 +222,14 @@ struct PocketAppGenerationSettingsView: View {
             Text(shortDigest(package.packageDigest))
                 .font(.system(size: 8, design: .monospaced))
                 .foregroundStyle(.secondary)
+            if let health {
+                HStack(spacing: 5) {
+                    Image(systemName: health.status == .attention ? "exclamationmark.triangle.fill" : "heart.text.square")
+                    Text(healthText(health))
+                }
+                .font(.system(size: 9, weight: health.disableSuggested ? .semibold : .regular))
+                .foregroundStyle(health.disableSuggested || health.status == .attention ? .orange : .secondary)
+            }
             HStack(spacing: 7) {
                 Button(localized(japanese: "更新", english: "Update")) {
                     updateTarget = package.packageID
@@ -266,6 +275,25 @@ struct PocketAppGenerationSettingsView: View {
     private func shortDigest(_ digest: String?) -> String {
         guard let digest else { return "-" }
         return digest.count > 22 ? String(digest.prefix(22)) + "…" : digest
+    }
+
+    private func healthText(_ health: PocketAppHealthSnapshot) -> String {
+        switch health.status {
+        case .healthy:
+            return localized(japanese: "正常", english: "Healthy")
+        case .disabled:
+            return localized(japanese: "無効化済み", english: "Disabled")
+        case .unused:
+            return localized(
+                japanese: "30日以上未使用です。必要なければ無効化できます。",
+                english: "Unused for 30+ days. You can disable it if no longer needed."
+            )
+        case .attention:
+            return localized(
+                japanese: "要確認: \(health.reasonCode)",
+                english: "Needs attention: \(health.reasonCode)"
+            )
+        }
     }
 
     private func localized(japanese: String, english: String) -> String {

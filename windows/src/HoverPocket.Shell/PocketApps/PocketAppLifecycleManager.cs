@@ -140,6 +140,7 @@ internal sealed class PocketAppLifecycleManager : IDisposable
     private readonly string _userDataRoot;
     private readonly PocketAppPackageRuntime _runtime;
     private readonly PocketAppCapabilityMigrator _capabilityMigrator;
+    private readonly PocketAppHealthStore? _healthStore;
     private readonly PocketAppStagingTestRunner _stagingTestRunner;
     private readonly string _hostVersion;
     private readonly Func<string, bool>? _failureInjection;
@@ -172,12 +173,20 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         _hostVersion = hostVersion;
         _failureInjection = failureInjection;
         _activationReadback = activationReadback;
+        PocketAppHealthStore? healthStore = null;
         try
         {
             lock (LifecycleGate)
             {
                 Directory.CreateDirectory(_rootDirectory);
                 Directory.CreateDirectory(_userDataRoot);
+                try
+                {
+                    healthStore = new PocketAppHealthStore(Path.Combine(_rootDirectory, "Health"));
+                }
+                catch (PocketAppHealthException)
+                {
+                }
                 if (performStartupRecovery)
                 {
                     RecoverInterruptedTransactions();
@@ -192,6 +201,7 @@ internal sealed class PocketAppLifecycleManager : IDisposable
         {
             throw Failure("LIFECYCLE_STORAGE_FAILED");
         }
+        _healthStore = healthStore;
     }
 
     ~PocketAppLifecycleManager() => Dispose(disposing: false);
@@ -723,6 +733,51 @@ internal sealed class PocketAppLifecycleManager : IDisposable
 
     public PocketAppManagementSnapshot ManagementSnapshot() =>
         WithLifecycleLock(ManagementSnapshotCore);
+
+    public IReadOnlyList<PocketAppHealthSnapshot> HealthSnapshots(DateTimeOffset? now = null) =>
+        WithLifecycleLock(() =>
+        {
+            var management = ManagementSnapshotCore();
+            return _healthStore?.Snapshots(management.Packages, management.Issues, now)
+                ?? UnavailableHealthSnapshots(management);
+        });
+
+    public void RecordHealthActivationSuccess(string packageId, DateTimeOffset? now = null) =>
+        WithLifecycleLock(() => _healthStore?.RecordActivationSuccess(packageId, now));
+
+    public void RecordHealthActivationFailure(string packageId, DateTimeOffset? now = null) =>
+        WithLifecycleLock(() => _healthStore?.RecordActivationFailure(packageId, now));
+
+    public void RecordHealthUse(string packageId, DateTimeOffset? now = null) =>
+        WithLifecycleLock(() => _healthStore?.RecordUse(packageId, now));
+
+    private static IReadOnlyList<PocketAppHealthSnapshot> UnavailableHealthSnapshots(
+        PocketAppManagementSnapshot management)
+    {
+        var packages = management.Packages
+            .Where(package => package.State != PocketAppLifecycleState.Removed)
+            .Select(package => new PocketAppHealthSnapshot(
+                package.PackageId,
+                package.State == PocketAppLifecycleState.Disabled
+                    ? PocketAppHealthStatus.Disabled
+                    : PocketAppHealthStatus.Attention,
+                package.State == PocketAppLifecycleState.Disabled
+                    ? "APP_DISABLED"
+                    : "HEALTH_STORAGE_UNAVAILABLE",
+                null,
+                null,
+                0,
+                false));
+        var issues = management.Issues.Select(issue => new PocketAppHealthSnapshot(
+            issue.PackageId,
+            PocketAppHealthStatus.Attention,
+            issue.ErrorCode,
+            null,
+            null,
+            0,
+            false));
+        return packages.Concat(issues).OrderBy(item => item.PackageId, StringComparer.Ordinal).ToArray();
+    }
 
     private PocketAppManagementSnapshot ManagementSnapshotCore()
     {

@@ -194,6 +194,7 @@ final class PocketAppLifecycleManager {
     private let userDataRoot: URL
     private let runtime: PocketAppPackageRuntime
     private let capabilityMigrator: PocketAppCapabilityMigrator
+    private let healthStore: PocketAppHealthStore?
     private let stagingTestRunner: PocketAppStagingTestRunner
     private let hostVersion: String
     private let failureInjection: ((String) -> Bool)?
@@ -220,6 +221,9 @@ final class PocketAppLifecycleManager {
         self.userDataRoot = userDataRoot.standardizedFileURL
         self.runtime = runtime ?? PocketAppPackageRuntime(compatibilityCatalog: compatibilityCatalog)
         self.capabilityMigrator = PocketAppCapabilityMigrator(catalog: compatibilityCatalog)
+        self.healthStore = try? PocketAppHealthStore(
+            rootDirectory: self.rootDirectory.appendingPathComponent("Health", isDirectory: true)
+        )
         self.stagingTestRunner = PocketAppStagingTestRunner()
         self.hostVersion = hostVersion
         self.failureInjection = failureInjection
@@ -753,6 +757,60 @@ final class PocketAppLifecycleManager {
             packages: packages.sorted { $0.packageID < $1.packageID },
             issues: issues.sorted { $0.packageID < $1.packageID }
         )
+    }
+
+    func healthSnapshots(now: Date = Date()) throws -> [PocketAppHealthSnapshot] {
+        let management = try managementSnapshot()
+        guard let healthStore else {
+            return Self.unavailableHealthSnapshots(management)
+        }
+        return healthStore.snapshots(
+            packages: management.packages,
+            issues: management.issues,
+            now: now
+        )
+    }
+
+    func recordHealthActivationSuccess(packageID: String, now: Date = Date()) throws {
+        try healthStore?.recordActivationSuccess(packageID: packageID, now: now)
+    }
+
+    func recordHealthActivationFailure(packageID: String, now: Date = Date()) throws {
+        try healthStore?.recordActivationFailure(packageID: packageID, now: now)
+    }
+
+    func recordHealthUse(packageID: String, now: Date = Date()) throws {
+        try healthStore?.recordUse(packageID: packageID, now: now)
+    }
+
+    private static func unavailableHealthSnapshots(
+        _ management: PocketAppManagementSnapshot
+    ) -> [PocketAppHealthSnapshot] {
+        let packages = management.packages
+            .filter { $0.state != .removed }
+            .map { package in
+                PocketAppHealthSnapshot(
+                    packageID: package.packageID,
+                    status: package.state == .disabled ? .disabled : .attention,
+                    reasonCode: package.state == .disabled ? "APP_DISABLED" : "HEALTH_STORAGE_UNAVAILABLE",
+                    lastUsedAt: nil,
+                    lastSuccessfulActivationAt: nil,
+                    consecutiveActivationFailures: 0,
+                    disableSuggested: false
+                )
+            }
+        let issues = management.issues.map { issue in
+            PocketAppHealthSnapshot(
+                packageID: issue.packageID,
+                status: .attention,
+                reasonCode: issue.errorCode,
+                lastUsedAt: nil,
+                lastSuccessfulActivationAt: nil,
+                consecutiveActivationFailures: 0,
+                disableSuggested: false
+            )
+        }
+        return (packages + issues).sorted { $0.packageID < $1.packageID }
     }
 
     func managedPackage(packageID: String) throws -> PocketAppManagedPackage? {

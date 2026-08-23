@@ -223,6 +223,7 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
     private readonly Func<string, bool> _restoreFailurePersistence;
     private readonly Func<string, bool>? _failureInjection;
     private readonly object _activationSync = new();
+    private readonly Dictionary<string, DateTimeOffset> _lastUseRecordedAt = new(StringComparer.Ordinal);
     private bool _enabled = true;
     private bool _disposed;
 
@@ -382,24 +383,32 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
 
         if (receipt.State == PocketAppLifecycleState.Enabled)
         {
-            if (!_enabled)
+            try
+            {
+                if (!_enabled)
+                {
+                    throw Failure("RUNTIME_ACTIVATION_UNAVAILABLE");
+                }
+                var candidate = _candidateSource(receipt.PackageId);
+                if (candidate is null)
+                {
+                    throw Failure("RUNTIME_ACTIVATION_READBACK_MISMATCH");
+                }
+                if (!candidate.Readback.Matches(receipt))
+                {
+                    DisposeCandidate(candidate);
+                    throw Failure("RUNTIME_ACTIVATION_READBACK_MISMATCH");
+                }
+                var readback = Activate(candidate);
+                try { _sourceLifecycle?.RecordHealthActivationSuccess(receipt.PackageId); } catch { }
+                return readback;
+            }
+            catch
             {
                 FailClosed(receipt.PackageId);
-                throw Failure("RUNTIME_ACTIVATION_UNAVAILABLE");
+                try { _sourceLifecycle?.RecordHealthActivationFailure(receipt.PackageId); } catch { }
+                throw;
             }
-            var candidate = _candidateSource(receipt.PackageId);
-            if (candidate is null)
-            {
-                FailClosed(receipt.PackageId);
-                throw Failure("RUNTIME_ACTIVATION_READBACK_MISMATCH");
-            }
-            if (!candidate.Readback.Matches(receipt))
-            {
-                DisposeCandidate(candidate);
-                FailClosed(receipt.PackageId);
-                throw Failure("RUNTIME_ACTIVATION_READBACK_MISMATCH");
-            }
-            return Activate(candidate);
         }
 
         if (receipt.EffectivePermissions.Count != 0)
@@ -471,15 +480,51 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
                     throw Failure("RUNTIME_ACTIVATION_READBACK_MISMATCH");
                 }
                 _ = Activate(candidate);
+                try { _sourceLifecycle?.RecordHealthActivationSuccess(package.PackageId); } catch { }
             }
             catch
             {
                 FailClosed(package.PackageId);
+                try { _sourceLifecycle?.RecordHealthActivationFailure(package.PackageId); } catch { }
                 _ = _restoreFailurePersistence(package.PackageId);
                 failures.Add(package.PackageId);
             }
         }
         return failures.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+    }
+
+    public void RecordUse(string appId, DateTimeOffset? now = null)
+    {
+        lock (_activationSync)
+        {
+            ThrowIfDisposed();
+            if (ReservedAppIds.Contains(appId)
+                || ExecutionRegistry.Readback(appId) is null
+                || SurfaceRegistry.Readback(appId) is null)
+            {
+                return;
+            }
+            var timestamp = now ?? DateTimeOffset.UtcNow;
+            if (_lastUseRecordedAt.TryGetValue(appId, out var previous)
+                && timestamp >= previous
+                && timestamp - previous < TimeSpan.FromMinutes(5))
+            {
+                return;
+            }
+            try
+            {
+                _sourceLifecycle?.RecordHealthUse(appId, timestamp);
+                _lastUseRecordedAt[appId] = timestamp;
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    public IReadOnlyList<string> RecoverAfterSystemTransition()
+    {
+        lock (_activationSync) { return RestoreEnabledAppsLocked(); }
     }
 
     public void Dispose()
@@ -489,6 +534,7 @@ internal sealed class PocketAppRuntimeActivationRegistry : IDisposable
             if (_disposed) { return; }
             _enabled = false;
             RevokeAllLocked();
+            _lastUseRecordedAt.Clear();
             _sourceLifecycle?.Dispose();
             _disposed = true;
         }

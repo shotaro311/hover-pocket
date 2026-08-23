@@ -51,6 +51,7 @@ struct GeneratedPocketAppProvider: PocketProvider {
         _ = snapshot
         _ = state
         _ = actions
+        AINativeRuntime.shared.recordGeneratedAppUse(appID: appID)
         guard let registry = AINativeRuntime.shared.generatedSurfaceRegistry,
               let model = try? registry.model(appID: appID, surfaceID: surfaceID) else {
             return AnyView(GeneratedPocketAppUnavailableView())
