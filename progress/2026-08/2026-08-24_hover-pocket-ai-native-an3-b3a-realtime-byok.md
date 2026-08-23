@@ -41,6 +41,19 @@ Codex app-serverに正のtool allowlistがない現状でも、一般配布で�
 | `node --check windows/ui/settings/settings.js` | 成功 |
 | `git diff --check b95ef168...HEAD` | 成功。差分は進捗記録だけ |
 
+## patch受入マトリクス
+
+| 境界 | exact baseの状態 | AN3-B3Aで必要な証拠 |
+|---|---|---|
+| provider | production compositionはCodex app-serverだけ。正のtool policy不在時はfail closed | Realtime BYOKを明示選択でき、既定OFF。provider切替は旧transport停止完了後だけ新transportを開始する |
+| tool surface | `CodexVoiceCapabilityRuntime`はCalendar listとTimer startだけを明示公開 | Realtime sessionのfunction定義がRegistry内の許可済みCalendar list/create・Timer startと一致し、未知tool、MCP、shell、filesystemを拒否する |
+| Calendar create | Registry / Broker handlerは存在するがVoice runtimeには未接続 | Host-owned承認、plan digest binding、`calendar.events.write`、実行後`eventRef / eventId` readbackまでを一つのreceiptで確認する |
+| Timer start | VoiceからBroker、native承認、timer ID/state readbackまで実装済み | Realtime providerでも同じruntimeを再利用し、承認・取消・idempotencyを迂回しない |
+| WebRTC data channel | WebViewが`oai-events`を作成するが、Realtime function eventの処理は未実装 | call ID / name / arguments / generationを検証してHostへ中継し、Broker結果だけを`function_call_output`として同じcallへ返す |
+| credential | Realtime API key用storeは未実装 | keyはKeychain / Credential Managerだけに保存し、WebView、state、log、error、fixtureへ値を返さない。UI readbackは有無だけ |
+| lifecycle | Voice OFF、hide、stop、crash、restartのCodex transport teardown verifierは成功 | Realtime peer / data channel / local track / remote audio / pending callを同じgenerationで閉じ、stale eventを受理しない |
+| macOS | provider-neutral adapterとfake verifierだけでproduction audioなし | provider ID、Keychain、adapter seam、未実装時fail-closedを追加し、実音声transportはAN3-B3Bと明示する |
+
 ## 次の受入gate
 
 1. bridge通知をdelivery ID / state hashでclaimする。
