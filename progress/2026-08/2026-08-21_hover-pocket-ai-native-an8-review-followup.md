@@ -10,7 +10,7 @@ updated_by: codex
 ## 対象
 
 - PR: [#20 AN8-A 公開成果物のreadback検証](https://github.com/shotaro311/hover-pocket/pull/20)
-- reviewed code head: `3e8b79f217d2052a17b6acc101e320456ccb5d62`
+- reviewed code head: `da75587759959f5760eedb9a59b153d5971fc786`
 - Codex review:
   - P1: Velopack full update package内アプリのAuthenticodeを検証する。
   - P2: versioned release側の`HoverPocket-macOS-app.zip`も実際にdownloadしてhashを照合する。
@@ -26,6 +26,8 @@ updated_by: codex
   - P2: Portableの実アプリpayloadをfull `.nupkg`とbyte単位で照合する。
   - P2: macOS署名の`TeamIdentifier`を期待値へ固定する。
   - P2: 両appcastとchecksumも最初のsnapshotから最後のmetadata再確認まで固定する。
+  - P1: 署名済みSetupのPE証明書表をpackage末尾と誤認せず、Velopack bundle headerからoffset / lengthを解決する。
+  - P2: Windowsの3署名が互いに一致するだけでなく、正規HoverPocket publisher証明書へ固定する。
 
 ## 修正
 
@@ -34,8 +36,10 @@ updated_by: codex
   - checksum、feed size、SHA-1、SHA-256を実download byteと照合する。
   - ZIP path traversal、1ファイル512 MiB、合計1 GiB、10,000 entry超を拒否して展開する。
   - Setup、Portable内`HoverPocket.Shell.exe`、full package内`HoverPocket.Shell.exe`のtimestamped Authenticodeと署名者一致を必須にする。
-  - betaでもSetupのSFX末尾がfull `.nupkg`全byteと一致することをsize / SHA-256で検証する。
+  - betaでもSetupのVelopack bundle headerが示すexact rangeとfull `.nupkg`全byteが一致することをsize / SHA-256で検証する。
+  - Setup payloadはファイル末尾から推測せず、Velopack 1.2.0の固定marker直前16 byteにあるlittle-endian offset / lengthをstreaming KMPで一意に解決する。署名時に追加されるPE証明書表をpackage byteへ含めない。
   - Portable `current/`の506ファイルをfull `.nupkg`の`lib/app/`と相対path / size / SHA-256で照合し、package専用の2ファイルだけを明示除外する。
+  - formalではSetup、Portable、full package内アプリのSignerCertificate raw byteをSHA-256化し、3点一致とrepository variable `WINDOWS_SIGNER_CERT_SHA256`の64桁正規値への一致を必須にする。値はreport / errorへ出さない。
 - `script/verify_release_readback.py`
   - versioned Sparkle ZIP、stable手動ZIP、versioned手動ZIPを別directoryへ取得する。
   - 3コピーのsize / SHA-256とGitHub metadata、checksum、appcast lengthを照合する。
@@ -79,6 +83,7 @@ updated_by: codex
 - cross-job asset snapshot固定のincremental scan `0de1ebe2-4950-49ea-be21-f884bb4bd5f1`: 1 / 1 production sourceと3 supporting surfaceを確認、reportable finding 0件、sealed complete。
 - exact diff scan `56fce146-0912-464c-9dfa-2be4262fd400`とincremental scan `44ccf6fa-b72b-495a-a731-757b87abd78e`: coverage complete、reportable finding 0件、sealed complete。
 - Setup / Portable / macOS固定を段階確認したscan `1889e238-6153-4579-8ea6-d7801b6d2351`、`7291eb3a-5841-4176-942a-66f4ae39f02b`、`84906546-9cf0-472f-9e08-a33d5b3da72a`: いずれもcoverage complete、reportable finding 0件、sealed complete。最終scanは`1e6a8c8...3e8b79f`の4 surfaceを確認した。
+- Velopack bundle headerとWindows publisher固定のexact scan `f436ab83-bc71-4ab6-b104-d49738aeeb45`: range `59cd53a...da75587`の5 / 5 fileを確認し、coverage complete、reportable finding 0件、sealed complete。
 - live beta readback:
   - macOS `v0.1.0-168`: versioned Sparkle ZIP、stable手動ZIP、versioned手動ZIPの実測size / SHA-256一致、Sparkle Ed25519署名成功。
   - Windows `win-v0.2.7`: 公開全assetのsize / SHA-256、checksum、full package SHA-1一致。
@@ -90,9 +95,10 @@ updated_by: codex
   - formal run [32422832966](https://github.com/shotaro311/hover-pocket/actions/runs/32422832966): deterministic / PowerShell parse / tag固定は成功し、published formal gateが現行未署名manifestを拒否した。正式署名済みasset snapshotの署名検証は引き続きAN8の実機gateである。
   - run [32627459690](https://github.com/shotaro311/hover-pocket/actions/runs/32627459690): .NETの一括SFX展開がcentral directory不一致で失敗し、安全なentry単位展開へ変更した。
   - run [32627869765](https://github.com/shotaro311/hover-pocket/actions/runs/32627869765): root nuspec探索の前提不一致を検出し、full package rootのexact nuspecへ固定した。
-  - run [32628233979](https://github.com/shotaro311/hover-pocket/actions/runs/32628233979): Setup SFXを通常ZIPとして展開できない実形式を確認し、SFX末尾とfull `.nupkg`全byteの直接照合へ変更した。
+  - run [32628233979](https://github.com/shotaro311/hover-pocket/actions/runs/32628233979): Setup SFXを通常ZIPとして展開できない実形式を確認し、いったんSFX末尾とfull `.nupkg`全byteの直接照合へ変更した。この末尾推測は後続reviewでVelopack bundle header解析へ置換した。
   - run [32628492824](https://github.com/shotaro311/hover-pocket/actions/runs/32628492824): Setup payload同一性を含む全job成功。3 artifactを別経路downloadして内容を確認した。
   - 最終run [32629166708](https://github.com/shotaro311/hover-pocket/actions/runs/32629166708): exact head `3e8b79f217d2052a17b6acc101e320456ccb5d62`で全job成功。3 report artifactを新しい一時directoryへ別経路downloadし、macOS 6資産、3 ZIP / 2 appcastのbyte同一性、Sparkle設定、Team ID、codesign / notarization / Gatekeeper、Windows Setup全payload、Portable 506ファイル、release tagとsnapshotの一致を確認した。
+  - publisher follow-up run [32638170997](https://github.com/shotaro311/hover-pocket/actions/runs/32638170997): exact head `da75587759959f5760eedb9a59b153d5971fc786`で全job成功。Windows native jobでVelopack marker / offset / lengthによる公開Setup payload解析を実行した。3 artifactを別経路downloadし、macOS 6資産、Windows 8資産、`setupPayload=full-package-byte-equivalent`、`portablePayload=full-package-application-byte-equivalent`、betaの`publisherIdentity=not-evaluated`を確認した。
 - 未確認:
   - ローカルMacにはPowerShellがないため、PowerShell parseはPRのWindows CIで確認する。
   - 現行Windows `0.2.7`は未署名betaであり、3点の実Authenticode検証は正式署名済みreleaseでのみ完了できる。
