@@ -83,11 +83,23 @@ Windows は macOS Sparkle の `https://github.com/shotaro311/hover-pocket/releas
 - 正式版のworkflow実行前に、正規コード署名証明書raw byteのSHA-256 fingerprintをGitHub Actions repository variable `WINDOWS_SIGNER_CERT_SHA256`へ64文字の16進数で設定します。値が未設定・不正・公開3成果物の署名証明書と不一致ならformal gateはfail closedにします。証明書更新時は公開前レビューでこのvariableも明示更新します。
 - 署名証明書やsigning credentialsはGit、ログ、README、progressに記録しません。
 
-Release assetはmacOS Sparkle資産と衝突しない`HoverPocketWin-*`系です。`publish_release.ps1`は、OAuth環境変数が未設定の場合に停止し、Release成果物内のmetadata一致を確認してからVelopack package、`release-manifest.win.json`、`SHA256SUMS-win.txt`を生成します。GitHub Releaseの作成・アップロードはこのスクリプトでは実行しません。
+Release assetはmacOS Sparkle資産と衝突しない`HoverPocketWin-*`系です。`publish_release.ps1`は、OAuth環境変数が未設定の場合に停止し、Release成果物内のmetadata一致を確認してからVelopack package、`release-manifest.win.json`、`SHA256SUMS-win.txt`を生成します。GitHub Releaseの作成・アップロードはこのスクリプトでは実行しません。既定の`beta` gateは未署名成果物だけを生成し、署名引数を混在させると停止します。publish / release出力は毎回空の通常directoryである必要があり、既存payload、file、reparse pointを検出した場合は削除や上書きを行わず停止します。再実行時は新しい`-OutputRoot`を指定します。
 
 ```powershell
 .\windows\script\publish_release.ps1
 ```
+
+正式版は、パスワードやPFXをコマンドラインへ渡さず、Windows証明書ストアに導入済みのコード署名証明書をSHA-1 thumbprintで選びます。RFC 3161 timestamp URL、readback用のpublisher証明書SHA-256、必要な場合だけmachine store指定を明示します。Velopackへ`/fd sha256 /td sha256 /tr`を渡した後、生成したSetup、Portable内アプリ、full package内アプリの3点を展開して、署名の有効性、timestamp、署名者一致、期待publisher一致をローカルで再検証できた場合だけmanifestを`signed-timestamped-verified`にします。値はログへ出力しません。
+
+```powershell
+.\windows\script\publish_release.ps1 `
+  -WindowsSigningGate formal `
+  -SigningCertificateSha1 $env:HOVERPOCKET_SIGNING_CERT_SHA1 `
+  -ExpectedSignerCertificateSha256 $env:HOVERPOCKET_SIGNER_CERT_SHA256 `
+  -TimestampServer $env:HOVERPOCKET_TIMESTAMP_SERVER
+```
+
+証明書をLocalMachine storeへ導入した運用だけ`-SigningCertificateInMachineStore`を追加します。どのformal引数も空、不正形式、HTTP timestamp、credential入りURL、署名不一致の場合は成果物manifestを確定せず停止します。秘密値をGit、README、progress、GitHub repository variableへ保存しません。`WINDOWS_SIGNER_CERT_SHA256`は秘密値ではなく公開後readback用fingerprintですが、設定値そのものはログへ出しません。
 
 NuGet TLS 問題がある環境では、一時ローカル NuGet ソースと `-NuGetSource` / `-VpkPath` を指定して実行します。workspace に nupkg を残さないでください。
 

@@ -73,6 +73,10 @@ jobs:
       - name: Verify updater
         run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify updater
 
+      - name: Verify release signing contract
+        shell: pwsh
+        run: .\windows\script\publish_release.ps1 -SigningContractTest
+
       - name: Verify rendered WebView UI
         run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify ui
 

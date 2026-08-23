@@ -2,8 +2,15 @@
 project_slug: hover-menu-preview
 updated: 2026-08-24
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-pro-running; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-pro-running; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
 ---
+
+## 2026-08-24 AI-native AN8 Windows正式署名生成経路
+
+- 現行stack head `c8366b0`から公開release readback [32657994406](https://github.com/shotaro311/hover-pocket/actions/runs/32657994406)をbeta modeで実行し、macOS signature / notarization / Gatekeeper / Sparkleと、Windows 0.2.7 Setup / Portable / full package identityを再確認した。3 artifactを別経路で取得し、report hashも固定した。
+- Windows公開版は引き続き未署名betaで、repository variable `WINDOWS_SIGNER_CERT_SHA256`とActions secretは未登録である。formal Authenticodeは未完了のままbeta identityと分離した。
+- `codex/ai-native-an8-windows-signing-pipeline`で、Windows certificate store選択、HTTPS RFC 3161 timestamp、Velopack `--signParams`、pack後のSetup / Portable / full package 3点署名readbackを追加した。全検証成功後だけmanifestを`signed-timestamped-verified`にし、betaへの署名引数混在、不正fingerprint、HTTP / credential入りtimestamp URLは停止する。既存publish / release outputの余剰payload混入を防ぐため、空でないdirectory、file、reparse pointも削除・上書きせず停止する。
+- Python release readback 19件、py_compile、shell構文、YAML、JavaScript、`git diff --check`が成功した。Draft PR [#29](https://github.com/shotaro311/hover-pocket/pull/29)のcode head `397b52f`で、Windows [32658702169](https://github.com/shotaro311/hover-pocket/actions/runs/32658702169)はRelease build warning 0 / error 0、署名contract、Capabilities / Broker / Pocket Surface / Voice / Updater / rendered UIを含め全成功した。release readbackのpush / PR両runもdeterministic testsとPowerShell contractが成功した。PRは`Draft / MERGEABLE / CLEAN`、remote parity `0 / 0`である。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an8-windows-signing.md`。
 
 ## 2026-08-24 AI-native AN8 Pocket App健全性・復帰耐性
 
