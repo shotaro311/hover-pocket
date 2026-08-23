@@ -33,6 +33,13 @@ AN8の長期運用条件として、ユーザー所有の生成Pocket Appが現�
 - `git diff --check`: 成功。
 - このMacには.NET SDKがないため、Windows C# Release build、native verifier、Settings bridge、rendered WebViewはDraft PR CIを受入gateにする。
 
+## Draft PR readback
+
+- Draft PR [#28](https://github.com/shotaro311/hover-pocket/pull/28)を`codex/ai-native-an8-compatibility-migration`へstackした。code headは`3b12a8a`である。
+- Windows [32657261437](https://github.com/shotaro311/hover-pocket/actions/runs/32657261437)はRelease build警告0・エラー0、`pocket_app_health_verify=ok`、`pocket_app_runtime_activation_verify=ok`、Settings bridge、rendered WebView UIを確認して成功した。
+- macOS [32657261433](https://github.com/shotaro311/hover-pocket/actions/runs/32657261433)はwarnings-as-errors buildと`pocket_app_health_verify=ok`を含む既存verifier一式が成功した。Router [32657261441](https://github.com/shotaro311/hover-pocket/actions/runs/32657261441)も成功した。
+- PRは`Draft / MERGEABLE / CLEAN`、review / comment 0件、code head時点のremote parity `0 / 0`である。
+
 ## 安全境界
 
 - health保存失敗は生成App本体の実行を止めず、Settings表示だけを保守的に維持する。

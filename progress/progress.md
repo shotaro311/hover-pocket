@@ -11,6 +11,7 @@ status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-gr
 - 生成パネルの表示・選択・Host操作を実利用として記録し、5分間はdisk writeを抑制する。3回連続の起動失敗または破損メタデータは要確認、無効Appは無効化済みと表示する。破損・symlinkはfail-safeで提案を出さない。
 - macOS / Windowsのsystem transitionはVoice復帰に加えて、enabled Pocket Appの再activation、Registry / Surface readback、Settings health再読込を行う。64回の復帰反復、512回の利用記録、30日判定、破損・symlink、atomic temporary cleanupを決定論的verifierへ固定した。
 - macOS warnings-as-errors build、Pocket App package / lifecycle / generation / migration / health、Voice foundation、Panel layout 128件、共有contract `14 schema / 69 fixture`、report 2回byte一致、Windows Settings JavaScript構文、`git diff --check`が成功した。このMacには.NET SDKがないためWindows C#とrendered SettingsはDraft PR CIを受入gateにする。
+- Draft PR [#28](https://github.com/shotaro311/hover-pocket/pull/28)のcode head `3b12a8a`でWindows [32657261437](https://github.com/shotaro311/hover-pocket/actions/runs/32657261437)、macOS [32657261433](https://github.com/shotaro311/hover-pocket/actions/runs/32657261433)、Router [32657261441](https://github.com/shotaro311/hover-pocket/actions/runs/32657261441)が成功した。WindowsはRelease build警告0・エラー0、Health / runtime activation、Settings、rendered WebView UIまで成功した。PRは`Draft / MERGEABLE / CLEAN`、review / comment 0件、remote parity `0 / 0`である。
 - AN8-C Pro backup / export / restore正本runは`monitoring / pending / unclaimed`であり、未claim成果物を先読みしていない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an8-app-health.md`。
 
 ## 2026-08-24 AI-native AN8 Capability互換・移行
