@@ -39,6 +39,7 @@ AN8の長期運用条件として、ユーザー所有の生成Pocket Appが現�
 - Windows [32657261437](https://github.com/shotaro311/hover-pocket/actions/runs/32657261437)はRelease build警告0・エラー0、`pocket_app_health_verify=ok`、`pocket_app_runtime_activation_verify=ok`、Settings bridge、rendered WebView UIを確認して成功した。
 - macOS [32657261433](https://github.com/shotaro311/hover-pocket/actions/runs/32657261433)はwarnings-as-errors buildと`pocket_app_health_verify=ok`を含む既存verifier一式が成功した。Router [32657261441](https://github.com/shotaro311/hover-pocket/actions/runs/32657261441)も成功した。
 - PRは`Draft / MERGEABLE / CLEAN`、review / comment 0件、code head時点のremote parity `0 / 0`である。
+- 追加レビューでdangling symlinkを記録なしと誤認し得る境界を修正した。macOSは`lstat`、Windowsはreparse属性を先に確認し、`1854d72`のWindows [32657525511](https://github.com/shotaro311/hover-pocket/actions/runs/32657525511)、macOS [32657525510](https://github.com/shotaro311/hover-pocket/actions/runs/32657525510)、Router [32657524602](https://github.com/shotaro311/hover-pocket/actions/runs/32657524602)が再成功した。
 
 ## 安全境界
 
