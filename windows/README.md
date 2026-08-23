@@ -106,6 +106,8 @@ python3 script/verify_release_readback.py --windows-tag auto --windows-signing-g
 
 1.0正式版では`Verify Published Release Readback` workflowを`formal`で手動実行します。`release-manifest.win.json`の`authenticode=signed-timestamped-verified`に加え、Windows上で公開SetupとPortable内`HoverPocket.Shell.exe`の実Authenticode署名、タイムスタンプ、署名者一致が揃わない限り配布完了にしません。
 
+公開済み2version間の実installer / updater遷移は`Verify Release Install and Rollback Transitions` workflowで確認します。GitHub hosted Windows runnerの一時install rootに旧Setupをsilent installし、新full package適用、旧full packageへの明示rollback、再upgrade、uninstall、reinstall、user data保持までをreadbackします。自動更新はdowngradeしないため、rollbackは`Update.exe apply --package`で旧packageを明示します。未署名0.2.x betaを実行する場合は、手動workflowでunsigned beta許可を明示する必要があります。
+
 ## Local privacy notes
 
 AI command lane の audit log は `%APPDATA%\HoverPocket\auditlog\ailane-YYYYMMDD.jsonl` に保存します。

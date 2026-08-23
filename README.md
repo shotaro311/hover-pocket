@@ -300,6 +300,22 @@ python3 script/verify_release_readback.py --windows-signing-gate formal
 
 Windows 0.2.xの未署名公開ベータは`beta` gateには合格しますが、`formal` gateには合格しません。週次の公開readbackは`beta`で監視し、正式版候補はworkflowを`formal`で手動実行します。PRでは外部ネットワークに依存しない署名ベクトル・metadata試験とPowerShell構文検証だけを実行します。
 
+### install・rollback遷移の実機CI
+
+`Verify Release Install and Rollback Transitions` workflowは手動実行専用です。明示した旧版と新版をGitHubの使い捨てmacOS / Windows runnerへ取得し、次の順序を検証します。
+
+1. 旧版を一時install先へ導入
+2. 新版へupgrade
+3. 旧版packageへrollback
+4. 新版へ再upgrade
+5. uninstall
+6. 新版をreinstall
+7. install先と分離したuser data sentinelが保持されることをreadback
+
+macOSは一時Applications領域で署名・公証・Gatekeeper・Sparkle署名済みbundleの置換を検証します。WindowsはVelopack Setupの`--silent --installto`と`Update.exe apply --package`を使い、一時install rootだけを変更します。公開release codeを実行するため、workflow input `execute_release_code`を明示的に有効にした場合だけ実行します。未署名betaは追加で`allow_unsigned_beta`を明示し、formalでは許可しません。
+
+このCIは使い捨てrunner上のpackage lifecycle gateです。日常利用中の端末でのSparkle / Velopack UI、自動更新、実データmigration、sleep-wakeは別のrelease-candidate実機gateとして残します。
+
 ## 自動アップデート
 
 自動アップデートは Sparkle 2 を使います。ローカル開発ビルドでは、未公開の更新フィードを見に行かないよう `SPARKLE_FEED_URL` を明示した場合だけ Settings の `Check for Updates` が有効になります。
