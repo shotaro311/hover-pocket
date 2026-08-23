@@ -5,11 +5,15 @@ on:
     branches: ["main"]
     paths:
       - "windows/**"
+      - "contracts/voice/**"
+      - "script/verify_voice_foundation.py"
       - ".github/workflows/windows-verify.yml"
   pull_request:
     paths:
       - "windows/**"
       - "contracts/pocket/v1/**"
+      - "contracts/voice/**"
+      - "script/verify_voice_foundation.py"
       - ".github/workflows/windows-verify.yml"
   workflow_dispatch:
 
@@ -36,8 +40,10 @@ jobs:
 
       - name: Verify settings UI modules
         run: |
+          node --check .\windows\ui\js\app.js
           node --check .\windows\ui\settings\settings.js
           node .\windows\script\verify_settings_generation_target.mjs
+          python .\script\verify_voice_foundation.py
 
       - name: Verify capabilities
         run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify capabilities
@@ -53,6 +59,16 @@ jobs:
 
       - name: Verify UI model
         run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify ui-model
+
+      - name: Verify settings
+        run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify settings
+
+      - name: Verify legacy AI lane absence
+        run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify ailane
+
+      - name: Verify Voice foundation
+        timeout-minutes: 2
+        run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify voice
 
       - name: Verify updater
         run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify updater

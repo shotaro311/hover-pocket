@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using HoverPocket.Shell.Voice;
 
 namespace HoverPocket.Shell.Configuration;
 
@@ -127,6 +128,8 @@ internal sealed class UserSettingsStore
             StartWithWindows = false,
             AutoCheckForUpdates = true,
             AiNativeEnabled = false,
+            VoiceEnabled = false,
+            VoiceLaneLayout = VoiceLaneLayoutPreference.Compact,
             RememberLastSelectedProvider = true,
             PreferredProviderId = providerIds.FirstOrDefault(),
             HandleIconStyle = HandleIconStyle.B,

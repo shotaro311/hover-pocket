@@ -10,6 +10,7 @@ using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Display;
 using HoverPocket.Shell.Interop;
 using HoverPocket.Shell.PocketApps;
+using HoverPocket.Shell.Voice;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
@@ -59,11 +60,13 @@ internal sealed class PanelWindow : NoActivateWindow
 
         var metrics = PanelSizeCatalog.Get(_bridgeController.CurrentSettings.PanelSize);
         Width = metrics.Width;
-        Height = metrics.TotalHeight;
+        Height = metrics.TotalHeight
+            + VoicePanelGeometry.Height(_bridgeController.CurrentSettings.PanelSize, _bridgeController.ResolvedVoiceLaneMode);
         MinWidth = PanelSizeCatalog.Get(PanelSize.Small).Width;
         MinHeight = PanelSizeCatalog.Get(PanelSize.Small).TotalHeight;
         MaxWidth = PanelSizeCatalog.Get(PanelSize.Large).Width;
-        MaxHeight = PanelSizeCatalog.Get(PanelSize.Large).TotalHeight;
+        MaxHeight = PanelSizeCatalog.Get(PanelSize.Large).TotalHeight
+            + VoicePanelGeometry.ExpandedHeight(PanelSize.Large);
         Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(4, 4, 6));
 
         _fallbackVisual = new Border
@@ -324,11 +327,15 @@ internal sealed class PanelWindow : NoActivateWindow
     {
         var metrics = PanelSizeCatalog.Get(panelSize);
         Width = metrics.Width;
-        Height = metrics.TotalHeight;
+        Height = metrics.TotalHeight
+            + VoicePanelGeometry.Height(panelSize, _bridgeController.ResolvedVoiceLaneMode);
         ApplyRoundedRegion();
     }
 
-    public async Task OpenAsync(DisplaySurfaceLayout layout)
+    public Task OpenAsync(DisplaySurfaceLayout layout) =>
+        OpenAsync(layout, layout.PanelTarget);
+
+    public async Task OpenAsync(DisplaySurfaceLayout layout, WindowPlacement target)
     {
         var generation = ++_animationGeneration;
         WindowPlacement from;
@@ -353,14 +360,14 @@ internal sealed class PanelWindow : NoActivateWindow
 
         await AnimateToAsync(
             from,
-            layout.PanelTarget,
+            target,
             1,
             generation,
             AnimationDuration,
             MorphDirection.Open);
         if (generation == _animationGeneration)
         {
-            ApplyPlacement(layout.PanelTarget, show: true);
+            ApplyPlacement(target, show: true);
             Opacity = 1;
             ResetMorphState();
             ScheduleSnapshotRefresh();
@@ -873,6 +880,10 @@ internal sealed record AnimationDiagnostics(
 
 internal sealed record UiWebVerifyResult(
     bool EchoOk,
+    bool LegacyAiLaneNotMountedOk,
+    bool VoiceDefaultOffOk,
+    bool VoiceTeardownVisibleOk,
+    bool VoiceLocalizationOk,
     bool ControlsRenderedOk,
     bool ControlsLayoutOk,
     bool ControlsHitAreasOk,

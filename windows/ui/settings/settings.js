@@ -14,6 +14,11 @@ const pocketAppListEl = document.querySelector("[data-pocket-app-list]");
 const aiNativeEl = document.querySelector("[data-ai-native]");
 const aiNativeLabelEl = document.querySelector("[data-ai-native-label]");
 const aiNativeNoteEl = document.querySelector("[data-ai-native-note]");
+const voiceHeadingEl = document.querySelector("[data-voice-heading]");
+const voiceEnabledEl = document.querySelector("[data-voice-enabled]");
+const voiceEnabledLabelEl = document.querySelector("[data-voice-enabled-label]");
+const voiceLayoutEl = document.querySelector("[data-voice-layout]");
+const voiceNoteEl = document.querySelector("[data-voice-note]");
 const pocketGenerationEl = document.querySelector("[data-pocket-generation]");
 const pocketGenerationNoteEl = document.querySelector("[data-pocket-generation-note]");
 const pocketGenerationRequestEl = document.querySelector("[data-pocket-generation-request]");
@@ -99,6 +104,19 @@ function render(state) {
   aiNativeNoteEl.textContent = state.settings.language === "en"
     ? "Off by default. Disabling cancels generation immediately; enabling after an OFF startup requires a HoverPocket restart and never hot-starts Codex."
     : "既定ではオフです。OFFは生成を即時停止します。OFFで起動した後のONはHoverPocket再起動後に有効となり、Codexをhot-startしません。";
+  const voiceEnabled = Boolean(state.settings.voiceEnabled);
+  voiceHeadingEl.textContent = "Voice Lane";
+  voiceEnabledEl.checked = voiceEnabled;
+  voiceEnabledLabelEl.textContent = state.settings.language === "en"
+    ? "Enable Voice Lane"
+    : "Voice Laneを有効化";
+  voiceNoteEl.textContent = state.settings.language === "en"
+    ? "Off by default. AN3-A enables only the Host-owned layout and state foundation; microphone, WebRTC, and tool execution remain unavailable."
+    : "既定はオフです。AN3-AではHost所有の表示・状態基盤だけを有効化し、マイク、WebRTC、Tool実行は使用しません。";
+  renderSegment(voiceLayoutEl, [
+    { id: "compact", label: state.settings.language === "en" ? "Compact" : "コンパクト" },
+    { id: "expanded", label: state.settings.language === "en" ? "Expanded" : "展開" },
+  ], state.settings.voiceLaneLayout ?? "compact", (layout) => update("settings.setVoiceLayout", { layout }), !voiceEnabled);
   renderPocketApps(state);
   generationState = state.pocketAppGeneration ?? generationState;
   renderPocketGeneration(generationState, state.settings.language);
@@ -385,12 +403,13 @@ function renderProviderSelection(state) {
   preferredProviderEl.disabled = state.settings.rememberLastSelectedProvider !== false;
 }
 
-function renderSegment(root, options, selectedId, onSelect) {
+function renderSegment(root, options, selectedId, onSelect, disabled = false) {
   root.replaceChildren();
   for (const option of options) {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = option.label;
+    button.disabled = disabled;
     button.setAttribute("aria-pressed", String(option.id === selectedId));
     button.addEventListener("click", () => onSelect(option.id));
     root.append(button);
@@ -457,6 +476,10 @@ preferredProviderEl.addEventListener("change", () => {
 
 aiNativeEl.addEventListener("change", () => {
   update("settings.setAiNativeEnabled", { enabled: aiNativeEl.checked });
+});
+
+voiceEnabledEl.addEventListener("change", () => {
+  update("settings.setVoiceEnabled", { enabled: voiceEnabledEl.checked });
 });
 
 handleSideAreaEl.addEventListener("change", () => {
