@@ -461,6 +461,8 @@ final class CodexCredentialBrokerServer: @unchecked Sendable {
     }
 
     fileprivate static func applyTimeouts(to fd: Int32) {
+        var noSignal: Int32 = 1
+        _ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
         var timeout = timeval(tv_sec: 2, tv_usec: 0)
         _ = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         _ = setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))

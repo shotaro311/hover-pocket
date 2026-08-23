@@ -136,7 +136,7 @@ internal sealed class PocketAppGenerationVerifier
 
             VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN foreign-peer");
             using (var foreignPeerServer = new CodexCredentialBrokerServer(
-                TimeSpan.FromSeconds(5),
+                TimeSpan.FromSeconds(20),
                 () => fixtureSecret))
             {
                 var powershellPath = Path.Combine(
@@ -174,7 +174,7 @@ internal sealed class PocketAppGenerationVerifier
                     ?? throw new CodexCredentialBrokerException();
                 var foreignPeerStdoutTask = foreignPeer.StandardOutput.ReadToEndAsync();
                 var foreignPeerStderrTask = foreignPeer.StandardError.ReadToEndAsync();
-                await foreignPeer.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                await foreignPeer.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
                 await foreignPeerServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
                 Require(
                     foreignPeer.ExitCode == 0

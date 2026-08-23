@@ -56,6 +56,10 @@ Windowsの正式releaseでは、path一致に加えてtimestamped Authenticode s
 
 このMacには.NET SDKがないため、Windows C#のRelease build、warning 0 / error 0、Named Pipe foreign-peer / unauthorized-peer verifierはstacked Draft PR CIを必須gateとする。
 
+初回PR #34 Windows CI `32670323133`はRelease build、Settings UI、Capability、Brokerまで成功したが、cold PowerShell起動を含むforeign-peer canaryが5秒上限に達し、`generation_credential_broker_contract:TimeoutException`でPocket Surface stepを停止した。server lifetimeを20秒、foreign process waitを15秒へ分離し、server自身の5秒expiryで誤って拒否成功と判定しないまま、CI cold startを許容するbounded timeoutへ修正した。
+
+同じ修正後のmacOS回帰では、foreign peerが拒否応答より先にsocketを閉じた場合に`write`が`SIGPIPE`を発生させ、verifier processがexit 141になる非決定的失敗を1回再現した。server/client socketへ`SO_NOSIGPIPE`を設定し、相手が先に閉じてもprocess signal終了せず、通常のwrite失敗としてfail closedになるよう修正した。
+
 ## セキュリティ差分レビュー
 
 - Codex Security diff scan `efe77173-169f-402b-a202-85475b321270`をworking tree base `7447e3294dadc6f454d78888571ef1b03cc01792`、snapshot digest `codex-security-snapshot/v1:sha256:4713f4e97da5de8e7131367be3663ef5544eb1c7e7118cc9c2c56416111b68d9`で完了・封印・再読込した。
