@@ -421,7 +421,10 @@ internal sealed class PocketAppWorkspaceBackupManager
         using (document)
         {
             var root = document.RootElement;
-            RequireObjectKeys(root, ["schema", "createdAt", "sourcePlatform", "hostVersion", "apps", "files"], "RESTORE_DOCUMENT_INVALID");
+            RequireObjectKeys(
+                root,
+                new HashSet<string>(new[] { "schema", "createdAt", "sourcePlatform", "hostVersion", "apps", "files" }, StringComparer.Ordinal),
+                "RESTORE_DOCUMENT_INVALID");
             if (root.GetProperty("schema").GetString() != PocketAppWorkspaceBackupArchive.Schema
                 || !DateTimeOffset.TryParseExact(
                     root.GetProperty("createdAt").GetString(),
@@ -446,7 +449,10 @@ internal sealed class PocketAppWorkspaceBackupManager
             var decodedTotal = 0;
             foreach (var element in root.GetProperty("files").EnumerateArray())
             {
-                RequireObjectKeys(element, ["path", "size", "sha256", "contentBase64"], "RESTORE_FILE_INVALID");
+                RequireObjectKeys(
+                    element,
+                    new HashSet<string>(new[] { "path", "size", "sha256", "contentBase64" }, StringComparer.Ordinal),
+                    "RESTORE_FILE_INVALID");
                 try
                 {
                     var path = element.GetProperty("path").GetString() ?? throw Failure("RESTORE_FILE_INVALID");
@@ -491,10 +497,13 @@ internal sealed class PocketAppWorkspaceBackupManager
             {
                 RequireObjectKeys(
                     element,
-                    [
-                        "appId", "activeVersion", "activePackageDigest", "stateSchemaDigest",
-                        "lifecycleState", "effectivePermissions", "installedVersions", "dataVersion", "dataDigest"
-                    ],
+                    new HashSet<string>(
+                        new[]
+                        {
+                            "appId", "activeVersion", "activePackageDigest", "stateSchemaDigest",
+                            "lifecycleState", "effectivePermissions", "installedVersions", "dataVersion", "dataDigest"
+                        },
+                        StringComparer.Ordinal),
                     "RESTORE_APP_INVALID");
                 try
                 {
@@ -534,7 +543,10 @@ internal sealed class PocketAppWorkspaceBackupManager
                     var versionNames = new HashSet<string>(StringComparer.Ordinal);
                     foreach (var versionElement in element.GetProperty("installedVersions").EnumerateArray())
                     {
-                        RequireObjectKeys(versionElement, ["version", "packageDigest"], "RESTORE_VERSION_INVALID");
+                        RequireObjectKeys(
+                            versionElement,
+                            new HashSet<string>(new[] { "version", "packageDigest" }, StringComparer.Ordinal),
+                            "RESTORE_VERSION_INVALID");
                         var version = versionElement.GetProperty("version").GetString() ?? throw Failure("RESTORE_VERSION_INVALID");
                         var digest = versionElement.GetProperty("packageDigest").GetString() ?? throw Failure("RESTORE_VERSION_INVALID");
                         if (!ValidVersion(version) || !versionNames.Add(version) || !ValidDigest(digest))
@@ -795,7 +807,8 @@ internal sealed class PocketAppWorkspaceBackupManager
 
     private void RemoveResidualApp(string appId)
     {
-        foreach (var path in [Path.Combine(_definitionRoot, "Apps", appId), Path.Combine(_userDataRoot, appId)])
+        string[] paths = [Path.Combine(_definitionRoot, "Apps", appId), Path.Combine(_userDataRoot, appId)];
+        foreach (var path in paths)
         {
             if (!Directory.Exists(path)) { continue; }
             if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
@@ -1094,7 +1107,7 @@ internal sealed class PocketAppWorkspaceBackupManager
         if (string.IsNullOrEmpty(value)
             || value.Length > 1024
             || !value.IsNormalized(NormalizationForm.FormC)
-            || value.StartsWith('/', StringComparison.Ordinal)
+            || value.StartsWith("/", StringComparison.Ordinal)
             || value.Contains('\\')
             || value.Contains(':')
             || value.Contains('\0'))
