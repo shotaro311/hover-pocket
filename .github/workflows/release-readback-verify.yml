@@ -7,6 +7,7 @@ on:
       - "script/verify_published_macos.sh"
       - "script/tests/test_verify_release_readback.py"
       - "windows/script/verify_published_authenticode.ps1"
+      - "windows/script/publish_release.ps1"
       - ".github/workflows/release-readback-verify.yml"
   pull_request:
     paths:
@@ -14,6 +15,7 @@ on:
       - "script/verify_published_macos.sh"
       - "script/tests/test_verify_release_readback.py"
       - "windows/script/verify_published_authenticode.ps1"
+      - "windows/script/publish_release.ps1"
       - ".github/workflows/release-readback-verify.yml"
   schedule:
     - cron: "37 18 * * 1"
@@ -65,18 +67,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Parse PowerShell verifier
+      - name: Parse PowerShell verifier and publisher
         shell: pwsh
         run: |
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path "windows/script/verify_published_authenticode.ps1"),
-            [ref]$null,
-            [ref]$errors)
-          if ($errors.Count -ne 0) {
-            $errors | ForEach-Object { Write-Error $_.Message }
-            exit 1
+          foreach ($path in @(
+            "windows/script/verify_published_authenticode.ps1",
+            "windows/script/publish_release.ps1")) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path),
+              [ref]$null,
+              [ref]$errors)
+            if ($errors.Count -ne 0) {
+              $errors | ForEach-Object { Write-Error "${path}: $($_.Message)" }
+              exit 1
+            }
           }
+
+      - name: Verify fail-closed release signing contract
+        shell: pwsh
+        run: windows/script/publish_release.ps1 -SigningContractTest
 
   resolve-windows-release:
     name: Pin one Windows release tag
