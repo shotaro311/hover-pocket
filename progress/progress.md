@@ -5,6 +5,13 @@ updated_by: codex
 status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-pro-running; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
 ---
 
+## 2026-08-24 AI-native AN5 Codex confinement audit
+
+- 通知された旧AN3-B3A Pro deliveryは、delivery ID / expected state hash付き`claim-synthesis`が`run state hash does not match the completion signal`で失敗した。receipt・成果物を読まず、適用・`mark-done`・同run再利用を行っていない。正本runのrequired-return bridgeは同一runの通知待ちを継続する。
+- Codex CLI 0.145.0のnamed permission profileを実コードから確認し、`:minimal`と生成workspaceだけをread、network無効、shell environment継承なしにした。直接sandboxとGPT-5.6 Solの実`codex exec` canaryで、workspaceだけがreadable、兄弟worktree・`~/.codex/auth.json`・Obsidian Vaultはunreadableになった。
+- ファイル隔離はmacOSで成立したが、API keyを環境変数・引数・auth fileへ置かないHost-owned credential brokerとWindows実機canaryは未実装である。現行macOS / Windows production generatorのfail-closedを維持する。
+- 採用案はKeychain / Credential Manager、one-time capability、private Unix socket / named pipe、isolated `CODEX_HOME` / `HOME`、command-backed bearer auth、helper path denyを組み合わせる。AN3-B3Aのcredential store exact diff確定後、別の小さいstacked branchで実装する。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an5-codex-confinement-audit.md`。
+
 ## 2026-08-24 AI-native AN3-B3A Realtime BYOK provider
 
 - 現行Codex app-server `0.145.0`の生成schemaを再監査し、`dynamicTools`は存在するが、ambient built-in toolを0へ固定できるpositive policyを確認できなかった。既存Codex providerはproduction開始前のfail-closedを維持する。
