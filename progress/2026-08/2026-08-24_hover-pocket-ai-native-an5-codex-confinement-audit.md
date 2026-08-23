@@ -98,3 +98,14 @@ process exit codeは0だった。models cacheの旧形式warningは出たが、c
 - `verify_pocket_contracts.py`: 15 schema / 71 fixture全一致。
 - Windows Settings / Panel / Pocket Surface JavaScript構文と`git diff --check`: 成功。
 - このMacには.NET SDKがないため、Windows C# Release build、native verifier、実restricted-token canaryはDraft PR CIとWindows実機を必須gateにする。
+
+### Draft PR CI readback
+
+- Draft PR: [#32](https://github.com/shotaro311/hover-pocket/pull/32)
+- code head: `4a38a9ffdda8a43d652a79ba0d0b643086006559`
+- base: `codex/ai-native-an3b3-realtime-provider`
+- Windows [32666112335](https://github.com/shotaro311/hover-pocket/actions/runs/32666112335): Release build成功、warning 0、error 0、`pocket_app_generation_verify=ok`、Voice、Settings、rendered UIを含むnative verifier成功。
+- macOS [32666112324](https://github.com/shotaro311/hover-pocket/actions/runs/32666112324): warnings-as-errors buildとVoice / Pocket App package・Surface contract成功。
+- Router [32666112338](https://github.com/shotaro311/hover-pocket/actions/runs/32666112338): 成功。
+- PR readback: Draft、OPEN、MERGEABLE / CLEAN、review / comment 0件。mainへmergeしていない。
+- CIは引数・環境contractを検証した。Windows restricted-token / AppContainerでoutside-root、Credential Manager、helper、networkが拒否される実機canaryは未完了であり、production有効化の根拠にはしていない。
