@@ -504,6 +504,10 @@ Planned Must:
 - WindowsのCodex Voice runtimeは既定OFFとし、Settingsで明示enableした後も、Panelのマイクbuttonを実際に操作した1回限りのuser activationと`https://app.hoverpocket.local`のexact originが一致した場合だけMicrophoneを許可する。Settings、非表示Panel、background script、別origin、Cameraは拒否し、permissionをprofileへ保存しない。
 - Windowsは起動するCodex実体を絶対path、ファイル同一性、experimental schemaで検証し、`initialize.experimentalApi`、`account/read`、`thread/realtime/listVoices`がすべて成功した後だけReadyにする。Codex processと子processはHost終了・Voice無効化・crash時に残さない。
 - AN3-B1のVoice root threadは`read-only` sandbox、`approvalPolicy=never`、tool / shell / file / MCP / connector禁止のinstructionsで開始する。この段階ではVoiceからCapability Brokerを呼ばず、Calendar / Timer接続はAN3-B2で別途承認・readback付きで有効化する。
+- AN3-B2以降は、Voiceのモデル可視toolをHostが許可したdynamic toolだけへ制限する正のtool policyを必須にする。`dynamicTools`の追加、`read-only`、`approvalPolicy=never`、system prompt、`environments=[]`は単独ではBroker迂回を防ぐ安全境界として扱わない。
+- installed Codexの生成schemaと実際のdelegated tool routerで、shell、MCP、app、plugin、extension、web、imageなどのambient toolが0件であることを独立readbackできない場合、Codex processを開始する前にVoiceをfail closedにする。Codex 0.145.0には正のtool allowlist契約がないため、AN3-B2のproduction activation対象外とする。
+- VoiceのCalendar readはGoogle接続やMicrophoneとは別のHost permission grantを既定OFFで保存する。許可前はCalendar toolをモデルへ公開せずProviderへ到達させない。取り消し時はactive tool requestを停止し、新しいtool定義でVoice sessionを再構成する。
+- VoiceのTimer startはexact title / durationをHost native UIへ表示して毎回承認する。同時に表示する承認は1件だけ、開始済み承認promptは1分あたり3件までとし、拒否も上限に含める。Voice停止、root変更、取消では待機中dialogと未使用Broker approvalを破棄する。
 - WebRTC SDPはUTF-8で262,144 bytes以下、`v=0`、NULなしとし、current root threadとconnection generationの両方へ束縛する。raw SDPはPanel transportだけへ返し、Settings、監査、diskへ保存しない。remote audioはWebRTC media trackで再生し、raw audio payloadをBridge、監査、diskへ渡さない。
 - Pocket Appはmanifest、data schema、layout、workflow、permissions、testsをユーザーが確認・変更・削除・rollbackできるファイルとして保持する。
 - 生成UIはauthoritative data、secret、重要処理を所有せず、削除・再生成してもユーザーの意図とデータが残る。
@@ -520,6 +524,8 @@ Planned Must:
 - Codex、MCP、生成UIからProvider StoreまたはBridgeDispatcherへ直接到達できない。
 - raw transcript、Calendar / Sticky本文、Clipboard本文、token、filesystem pathを監査ログへ残さない。
 - Voice機能を無効にした場合、Codex process、microphone、WebRTC、追加レイアウトが起動せず、既存パネル寸法とProvider体験が変わらない。
+- installed runtimeがHost検証済みのBroker限定tool policyを持たない場合、Voiceは`SchemaMismatch / BlockedFailure`で停止し、app-server、microphone、Calendar read、Timer approvalを開始しない。表示理由は秘密情報を含まない固定codeから日本語 / 英語へ変換する。
+- Calendar grantの許可、拒否、取り消し、再起動後復元を検証し、許可前 / 取り消し後のProvider呼出し数が0であることを確認する。Timerは同時2件目と1分内4件目がnative dialog表示前に拒否され、session取消で表示中dialogが閉じる。
 - hover close / panel hideでは入力trackとremote audioを即時muteしてUIをdetachするがroot threadを停止しない。明示終了ではRealtime stop、peer connection、data channel、local media track、remote audioを閉じ、再開時に古いSDP / generationを受理しない。
 
 ## 5. Settings 要件
@@ -543,6 +549,7 @@ Must:
 - Calendar weather temperature unit: Auto / Celsius / Fahrenheit。
 - Codex Voice Lane: OFF / ON。既定はOFF。
 - Codex Voice Lane layout: Compact / Expanded。機能を有効にした直後の既定はCompact。
+- Codex Voice Calendar access: OFF / ON。既定はOFFとし、Google接続、Voice有効化、Microphoneとは別のHost承認を必要とする。
 - Auto listen: OFF / ON。既定はOFFとし、Voice Lane有効化とは別に承認する。
 - Check for Updates。
 

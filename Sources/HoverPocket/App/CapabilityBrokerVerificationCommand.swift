@@ -1455,7 +1455,8 @@ enum CapabilityBrokerVerificationCommand {
         )
         try require(receipt.status == .unknown, "timeout_status")
         try require(receipt.steps.first?.safeError?.code == "CAPABILITY_TIMEOUT", "timeout_safe_error")
-        try require(slowHandler.wasCancelled, "timeout_handler_cancelled")
+        try require(!slowHandler.didReturn, "timeout_handler_no_late_result")
+        try require(!slowHandler.entered || slowHandler.wasCancelled, "timeout_started_handler_cancelled")
     }
 
     @MainActor
@@ -1715,7 +1716,9 @@ private final class BrokerCountingStickyHandler: PocketCapabilityHandler {
 @MainActor
 private final class BrokerSlowReadHandler: PocketCapabilityHandler {
     let key: PocketCapabilityKey
+    private(set) var entered = false
     private(set) var wasCancelled = false
+    private(set) var didReturn = false
 
     init(key: PocketCapabilityKey) {
         self.key = key
@@ -1724,12 +1727,14 @@ private final class BrokerSlowReadHandler: PocketCapabilityHandler {
     func handle(arguments: CapabilityObject, context: CapabilityHandlerContext) async throws -> CapabilityObject {
         _ = arguments
         _ = context
+        entered = true
         do {
             try await Task.sleep(for: .milliseconds(100))
         } catch is CancellationError {
             wasCancelled = true
             throw CancellationError()
         }
+        didReturn = true
         return ["value": .string("late")]
     }
 }
