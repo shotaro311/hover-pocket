@@ -47,6 +47,7 @@ internal sealed class PocketAppGenerationVerifier
         const string fixtureSecret = "fixture-token-not-a-real-credential";
         try
         {
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN lease");
             var lease = new CodexCredentialBrokerLease(
                 new string('a', 43),
                 DateTimeOffset.UtcNow.AddSeconds(5),
@@ -76,7 +77,9 @@ internal sealed class PocketAppGenerationVerifier
             {
                 Require(expired.IsConsumed, "generation_credential_broker_expired_consumed");
             }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END lease");
 
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN named-pipe");
             using (var server = new CodexCredentialBrokerServer(
                 TimeSpan.FromSeconds(5),
                 () => fixtureSecret))
@@ -98,7 +101,9 @@ internal sealed class PocketAppGenerationVerifier
                 {
                 }
             }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END named-pipe");
 
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN wrong-capability");
             using (var wrongCapabilityServer = new CodexCredentialBrokerServer(
                 TimeSpan.FromSeconds(5),
                 () => fixtureSecret))
@@ -126,7 +131,9 @@ internal sealed class PocketAppGenerationVerifier
                 {
                 }
             }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END wrong-capability");
 
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN helper");
             using (var helperServer = new CodexCredentialBrokerServer(
                 TimeSpan.FromSeconds(5),
                 () => fixtureSecret))
@@ -146,6 +153,7 @@ internal sealed class PocketAppGenerationVerifier
                         && string.IsNullOrEmpty(error.ToString()),
                     "generation_credential_broker_helper_stdout_only");
             }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END helper");
         }
         catch (Exception ex)
         {
