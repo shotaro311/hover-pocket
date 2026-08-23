@@ -32,7 +32,7 @@
 | Windows `app.js` / `settings.js` syntax | 成功 |
 | `git diff --check` | 成功 |
 
-ローカルMacには.NET SDKがないため、Windows Release build、`--verify ailane` negative runtime、rendered UIはPR CIを受入gateにする。
+ローカルMacには.NET SDKがないため、Windows Release build、`--verify ailane` negative runtime、rendered UIはPR CIを受入gateにした。Draft PR [#30](https://github.com/shotaro311/hover-pocket/pull/30)のcode head `1874daa`で、Windows [32659682483](https://github.com/shotaro311/hover-pocket/actions/runs/32659682483)とmacOS [32659682571](https://github.com/shotaro311/hover-pocket/actions/runs/32659682571)が成功した。WindowsはRelease build、Capability、Broker、Pocket Surface、旧AI lane不在、Voice、署名contract、rendered WebView UIをすべて通過した。
 
 ## AN1〜AN8完了監査
 
