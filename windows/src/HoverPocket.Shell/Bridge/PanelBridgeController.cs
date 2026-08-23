@@ -66,7 +66,6 @@ internal sealed class PanelBridgeController : IDisposable
         UserSettingsStore settingsStore,
         UserSettings settings,
         IStartupRegistrationService? startupRegistration = null,
-        object? aiLaneController = null,
         UpdaterService? updaterService = null,
         CodexVoiceCoordinator? voiceCoordinator = null)
     {
@@ -75,7 +74,6 @@ internal sealed class PanelBridgeController : IDisposable
         _startupRegistration = startupRegistration ?? new RunKeyStartupRegistrationService();
         _updaterService = updaterService ?? new UpdaterService();
         _calendarBridgeController = new CalendarBridgeController();
-        _ = aiLaneController; // Compatibility-only: the legacy AI command lane is intentionally not mounted.
         var stickyStore = new StickyNotesStore(Path.Combine(settingsStore.RootDirectory, "sticky"));
         var timerStore = new TimerStore(Path.Combine(settingsStore.RootDirectory, "timer"));
         _stickyBridgeController = new StickyBridgeController(stickyStore);
