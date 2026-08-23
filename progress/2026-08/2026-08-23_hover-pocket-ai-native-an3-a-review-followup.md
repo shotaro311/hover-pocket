@@ -7,7 +7,7 @@
 - PR: [#19](https://github.com/shotaro311/hover-pocket/pull/19)
 - 修正base: `b506557e13b45bd13d1f4a774a60a8a2314bfa33`
 - Pro patch head: `5170115b7d1f3afcfaef1e38e643bce0b8c3a641`
-- 最終code head: `330c331d30525d2aa1b94fd7ff41e834d03cf4df`
+- 最終code head: `cebfc7435005f7f8ed02bf62c3c95151c976d647`
 
 ## ChatGPT Pro Orchestrator回収
 
@@ -63,6 +63,17 @@
 - `GatedDisposeHarness`を使い、旧client破棄保留中はVoice OFF / ONが完了せずreplacement factoryも呼ばれないこと、解放後に一つのreplacementだけがReadyになることを確認する。
 - review threadへcommit `330c331`の根拠を返信して解決した。
 
+### 認証情報の表示前秘匿
+
+- macOS / Windowsのホスト側可視テキスト境界へ、standalone Bearer credential、裸のOpenAI key（`sk-` / `sk-proj-` / `sk-svcacct-`）、JSON形式のtoken / API key / client secretフィールドを検出する同等の処理を追加した。
+- `access_token` / `refresh_token` / `token` / `api_key` / `apikey` / `client_secret` / `secret`は、大文字小文字、underscore / hyphen、JSONの空白差を許容しつつ、値をUIへ渡す前に全文を`[redacted]`へ置換する。
+- macOS / Windowsへ`Bearer sk-proj-secret`、`sk-proj-abcdefghijklmnopqrstuvwxyz`、JSONの`access_token` / `client_secret`を追加し、通常URL・`and/or`・`input/output`を維持する回帰を追加した。
+
+### Windows stale disconnect / teardown登録競合
+
+- 起動途中の旧clientがgeneration更新後に切断する経路もteardown追跡へ統一した。owner disposalを保留している間、Voice OFF、再有効化、replacement factoryを完了させず、解放後だけ一つのreplacementをReadyへ昇格する。
+- 最初のWindows CIは、Dispose task開始から追跡登録までの短い競合を新しい決定論的回帰で検出した。追跡用completionをlock内で先に登録してからowner disposalを開始する形へ修正し、同時進行の停止・終了が未登録状態を読む窓を閉じた。
+
 ## ローカル検証
 
 成功:
@@ -71,6 +82,9 @@
 - `dist/HoverPocket.app/Contents/MacOS/HoverPocket --verify-voice-foundation`
   - `PASS voice-foundation verify: default-off inert, root scope, bounded redacted transcript, app-lifetime UI detach, compact/expanded geometry`
 - `swift build -Xswiftc -warnings-as-errors`
+- `python3 script/verify_voice_foundation.py`
+  - `PASS voice-foundation contract: 42 geometry/state cases, root scope, default-off, legacy lane negative regression, internal scroll, accessibility`
+- `codesign --verify --deep --strict dist/HoverPocket.app`
 - `git diff --check`
 
 制約:
@@ -79,12 +93,12 @@
 
 ## PR CI / review readback
 
-- Router: [32640770019](https://github.com/shotaro311/hover-pocket/actions/runs/32640770019) 成功。
-- 3OS deterministic contract / compare: [32640771703](https://github.com/shotaro311/hover-pocket/actions/runs/32640771703) 成功。
-- Windows Verify: [32640771705](https://github.com/shotaro311/hover-pocket/actions/runs/32640771705) 成功。
-- macOS Verify: [32640771713](https://github.com/shotaro311/hover-pocket/actions/runs/32640771713) 成功。
-- GitHub review 3件へ修正根拠を返信して解決した。
-- 全review thread: 61件。未解決: 0件。
+- Router: [32642933396](https://github.com/shotaro311/hover-pocket/actions/runs/32642933396) 成功。
+- 3OS deterministic contract / compare: [32642934795](https://github.com/shotaro311/hover-pocket/actions/runs/32642934795) 成功。
+- Windows Verify: [32642934699](https://github.com/shotaro311/hover-pocket/actions/runs/32642934699) 成功。
+- macOS Verify: [32642934731](https://github.com/shotaro311/hover-pocket/actions/runs/32642934731) 成功。
+- 最終review follow-upを含む全threadへ修正根拠を返信して解決した。
+- 全review thread: 65件。未解決: 0件。
 - PR #19: Open / Ready、`CLEAN / MERGEABLE`。
 - local / remote parity: `0 / 0`、worktree clean。
 
@@ -112,6 +126,15 @@
 - status: sealed complete。
 - measured token usage: total 2,796,744 / input 2,791,032 / cached input 2,774,272。coverageはcomplete。
 - report: `/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/codex-security-scans-0JCxLg/hover-menu-preview-ai-native-an3a/330c331d30525d2aa1b94fd7ff41e834d03cf4df_20260823T125543Z_a6b36i5m/report.md`
+
+追加された安全境界ごとのexact scan:
+
+- `6240afee`（Bearer credential）: 4 / 4 closed、finding 0、sealed complete。
+- `c4ca161f`（stale disconnect teardown）: 2 / 2 closed、finding 0、sealed complete。
+- `3cb362a2`（teardown事前登録）: 1 / 1 closed、finding 0、sealed complete。
+- `aedc405e-14c1-41c0-b721-fc0217df2721`（`385ad688...f504c3c`、裸のOpenAI key）: 4 / 4 closed、finding 0、sealed complete。
+- `86297e47-699f-4d42-a7a2-09200ccda4b2`（`f504c3c...cebfc74`、JSON credential field）: 4 / 4 closed、finding 0、sealed complete。
+- 最終scan report: `/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/codex-security-scans-0JCxLg/hover-menu-preview-ai-native-an3a/cebfc7435005f7f8ed02bf62c3c95151c976d647_20260823T133829Z_dckkdq5q/report.md`
 
 ## 残るgate
 
