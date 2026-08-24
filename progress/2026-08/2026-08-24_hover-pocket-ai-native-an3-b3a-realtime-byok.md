@@ -93,10 +93,10 @@ Codex app-serverに正のtool allowlistがない現状でも、一般配布で�
 
 ## GitHub readback
 
-- Draft PR [#36](https://github.com/shotaro311/hover-pocket/pull/36): head `16cc7a00071921b45a020a9fe9a6dc2004fc55b3`、base `codex/ai-native-an8-backup-restore-core`。
+- Draft PR [#36](https://github.com/shotaro311/hover-pocket/pull/36): code head `16cc7a00071921b45a020a9fe9a6dc2004fc55b3`、base `codex/ai-native-an8-backup-restore-core`。最新headは受入記録だけを追加したdocs-only commitである。
 - Windows [32717846919](https://github.com/shotaro311/hover-pocket/actions/runs/32717846919)でRelease build、Settings surface isolation、Voice foundation、Realtime BYOK offline verifierが成功した。
 - macOS [32717846913](https://github.com/shotaro311/hover-pocket/actions/runs/32717846913)、3 OS contract / byte比較 [32717847153](https://github.com/shotaro311/hover-pocket/actions/runs/32717847153)、Router [32717844455](https://github.com/shotaro311/hover-pocket/actions/runs/32717844455)も成功し、7/7 greenである。
-- `MERGEABLE / CLEAN`、review / comment / unresolved thread 0件、remote parity `0 / 0`を別経路で確認した。
+- code headと進捗同期後のdocs-only headで7/7 check成功を確認した。`MERGEABLE / CLEAN`、review / comment / unresolved thread 0件、remote parity `0 / 0`も別経路で確認した。
 
 ## Pro terminal receipt
 
