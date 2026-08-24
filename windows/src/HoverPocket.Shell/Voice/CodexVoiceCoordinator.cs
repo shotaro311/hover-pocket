@@ -359,7 +359,7 @@ internal sealed class VoiceTranscriptBuffer
     }
 }
 
-internal sealed class CodexVoiceCoordinator : IDisposable
+internal sealed class CodexVoiceCoordinator : IVoiceRuntimeCoordinator
 {
     public const int MaxRetainedSessions = 64;
     public const int MaxSdpBytes = 262_144;
@@ -424,6 +424,8 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             };
         }
     }
+
+    public string ProviderId => VoiceProviderIds.CodexAppServer;
 
     public event EventHandler<CodexVoiceSnapshot>? SnapshotChanged;
 
@@ -872,6 +874,19 @@ internal sealed class CodexVoiceCoordinator : IDisposable
             }
             PublishLocked();
         }
+    }
+
+    public Task<VoiceRealtimeFunctionResult> HandleRealtimeFunctionEventAsync(
+        int generation,
+        string threadId,
+        JsonElement eventPayload,
+        CancellationToken cancellationToken = default)
+    {
+        _ = generation;
+        _ = threadId;
+        _ = eventPayload;
+        cancellationToken.ThrowIfCancellationRequested();
+        throw new CodexAppServerProtocolException("voice_realtime_event_not_supported");
     }
 
     public async Task NotifySystemTransitionAsync(CancellationToken cancellationToken = default)

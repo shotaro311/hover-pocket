@@ -10,6 +10,10 @@ struct SettingsView: View {
     @State private var capabilityDataSnapshot: CapabilityDataGovernanceSnapshot?
     @State private var capabilityDataError: String?
     @State private var isShowingCapabilityHistoryDeleteConfirmation = false
+    @State private var openAIRealtimeKeyDraft = ""
+    @State private var openAIRealtimeKeyConfigured = false
+    @State private var voiceCredentialError: String?
+    private let openAIRealtimeKeychain = OpenAIRealtimeKeychainStore()
 
     var body: some View {
         ScrollView {
@@ -65,6 +69,17 @@ struct SettingsView: View {
         .frame(width: 460, height: 500)
         .onAppear {
             refreshCapabilityDataSnapshot()
+            refreshVoiceCredentialState()
+        }
+        .onChange(of: settings.voiceProvider) { _, provider in
+            openAIRealtimeKeyDraft = ""
+            voiceCredentialError = nil
+            if provider == .off {
+                settings.voiceEnabled = false
+                openAIRealtimeKeyConfigured = false
+            } else {
+                refreshVoiceCredentialState()
+            }
         }
         .onChange(of: settings.capabilityDataRetentionPeriod) { _, period in
             applyCapabilityDataRetention(period)
@@ -426,10 +441,66 @@ struct SettingsView: View {
             Text(localized(japanese: "Voice Lane", english: "Voice Lane"))
                 .font(.system(size: 13, weight: .bold))
 
+            Picker(
+                localized(japanese: "音声Provider", english: "Voice provider"),
+                selection: $settings.voiceProvider
+            ) {
+                Text(localized(japanese: "オフ", english: "Off")).tag(VoiceProviderID.off)
+                Text("OpenAI Realtime BYOK").tag(VoiceProviderID.openAIRealtimeBYOK)
+                Text("Codex app-server").tag(VoiceProviderID.codexAppServer)
+            }
+            .pickerStyle(.segmented)
+
             Toggle(
                 localized(japanese: "Voice Laneを有効化", english: "Enable Voice Lane"),
                 isOn: $settings.voiceEnabled
             )
+            .disabled(settings.voiceProvider == .off)
+
+            if settings.voiceProvider == .openAIRealtimeBYOK {
+                VStack(alignment: .leading, spacing: 8) {
+                    SecureField(
+                        localized(japanese: "OpenAI APIキー", english: "OpenAI API key"),
+                        text: $openAIRealtimeKeyDraft
+                    )
+                    .textFieldStyle(.roundedBorder)
+
+                    HStack(spacing: 8) {
+                        Button(localized(japanese: "Keychainへ保存", english: "Save to Keychain")) {
+                            saveOpenAIRealtimeKey()
+                        }
+                        .disabled(openAIRealtimeKeyDraft.isEmpty)
+
+                        Button(localized(japanese: "APIキーを削除", english: "Delete API key"), role: .destructive) {
+                            deleteOpenAIRealtimeKey()
+                        }
+                        .disabled(!openAIRealtimeKeyConfigured)
+                    }
+
+                    Text(openAIRealtimeKeyConfigured
+                        ? localized(japanese: "APIキーはmacOS Keychainに保存済みです。", english: "API key is stored in macOS Keychain.")
+                        : localized(japanese: "APIキーは未設定です。", english: "API key is not configured."))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+
+                    Text(localized(
+                        japanese: "AN3-B3AではmacOS音声transportはまだ利用できません。Keychainを含むProvider seamは用意しますが、credential/networkを使う前にAN3-B3B gateでfail-closedします。",
+                        english: "macOS audio transport is not available in AN3-B3A. The provider/Keychain seam is present, but it fails closed at the AN3-B3B gate before credential or network use."
+                    ))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(10)
+                .background(.quaternary.opacity(0.22))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+
+            if let voiceCredentialError {
+                Text(voiceCredentialError)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
+            }
 
             Picker(
                 localized(japanese: "表示", english: "Layout"),
@@ -443,13 +514,76 @@ struct SettingsView: View {
             .pickerStyle(.segmented)
             .disabled(!settings.voiceEnabled)
 
-            Text(localized(
-                japanese: "既定はオフです。AN3-AではHost所有の表示・状態基盤だけを有効化し、マイク、WebRTC、Tool実行は使用しません。",
-                english: "Off by default. AN3-A enables only the Host-owned layout/state foundation; microphone, WebRTC, and tool execution remain unavailable."
-            ))
+            Text(settings.voiceProvider == .codexAppServer
+                ? localized(
+                    japanese: "Codex app-serverは現在のcompatibility gateを維持し、Broker限定ツールを正に証明できない環境ではfail-closedします。自動fallbackはありません。",
+                    english: "Codex app-server keeps its existing compatibility gate and fails closed where Broker-only tools cannot be positively proven. There is no automatic fallback."
+                )
+                : settings.voiceProvider == .off
+                    ? localized(
+                        japanese: "Providerは既定でオフです。オフではcredential・network・transport処理を行いません。",
+                        english: "The provider is Off by default. Off performs no credential, network, or transport work."
+                    )
+                    : localized(
+                        japanese: "WindowsではOpenAI Realtime BYOKを利用できます。macOSの実音声transportはAN3-B3Bで有効化します。",
+                        english: "OpenAI Realtime BYOK is available on Windows. The real macOS audio transport remains gated to AN3-B3B."
+                    ))
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func refreshVoiceCredentialState() {
+        guard settings.voiceProvider == .openAIRealtimeBYOK else {
+            openAIRealtimeKeyConfigured = false
+            return
+        }
+        do {
+            openAIRealtimeKeyConfigured = try openAIRealtimeKeychain.hasCredential()
+            voiceCredentialError = nil
+        } catch {
+            openAIRealtimeKeyConfigured = false
+            voiceCredentialError = localized(
+                japanese: "Keychainの状態を確認できませんでした。",
+                english: "Could not read Keychain status."
+            )
+        }
+    }
+
+    private func saveOpenAIRealtimeKey() {
+        do {
+            let key = try OpenAIRealtimeAPIKey(openAIRealtimeKeyDraft)
+            try openAIRealtimeKeychain.save(key)
+            openAIRealtimeKeyDraft = ""
+            openAIRealtimeKeyConfigured = true
+            voiceCredentialError = nil
+        } catch {
+            openAIRealtimeKeyDraft = ""
+            openAIRealtimeKeyConfigured = false
+            voiceCredentialError = localized(
+                japanese: "APIキーをKeychainへ保存できませんでした。",
+                english: "Could not save the API key to Keychain."
+            )
+        }
+    }
+
+    private func deleteOpenAIRealtimeKey() {
+        do {
+            try openAIRealtimeKeychain.delete()
+            guard try !openAIRealtimeKeychain.hasCredential() else {
+                throw OpenAIRealtimeKeychainError.deletionNotConfirmed
+            }
+            openAIRealtimeKeyConfigured = false
+            openAIRealtimeKeyDraft = ""
+            voiceCredentialError = nil
+        } catch {
+            openAIRealtimeKeyDraft = ""
+            openAIRealtimeKeyConfigured = true
+            voiceCredentialError = localized(
+                japanese: "APIキーの削除をKeychainから確認できませんでした。",
+                english: "Could not verify API key removal from Keychain."
+            )
         }
     }
 

@@ -243,10 +243,20 @@ struct VoiceLaneHostView: View {
     }
 
     private var conversationPlaceholder: String {
-        localized(
-            japanese: "音声接続はAN3-Aではまだ利用できません。",
-            english: "Voice transport is unavailable in AN3-A."
-        )
+        switch runtime.snapshot.providerID {
+        case .off:
+            localized(japanese: "音声Providerはオフです。", english: "Voice provider is Off.")
+        case .openAIRealtimeBYOK:
+            localized(
+                japanese: "macOSのOpenAI Realtime音声transportはAN3-B3Bまで利用できません。",
+                english: "OpenAI Realtime audio transport on macOS remains unavailable until AN3-B3B."
+            )
+        case .codexAppServer:
+            localized(
+                japanese: "Codex Voiceはcompatibility gateを通過した環境でのみ利用できます。",
+                english: "Codex Voice is available only after its compatibility gate passes."
+            )
+        }
     }
 
     private var sessionCountAccessibilityLabel: String {
@@ -362,6 +372,16 @@ enum VoiceLaneLocalization {
             return text(japanese: "現在の環境では音声機能を利用できません", english: "Voice is unavailable in this environment", language: language)
         case "voice_start_failed":
             return text(japanese: "音声接続を開始できませんでした", english: "Voice transport could not start", language: language)
+        case "openai_realtime_macos_transport_an3_b3b":
+            return text(
+                japanese: "macOSのOpenAI Realtime音声transportはAN3-B3Bまで利用できません",
+                english: "OpenAI Realtime audio transport on macOS remains gated to AN3-B3B",
+                language: language
+            )
+        case "openai_realtime_key_missing":
+            return text(japanese: "OpenAI APIキーが未設定です", english: "OpenAI API key is not configured", language: language)
+        case "codex_voice_compatibility_blocked":
+            return text(japanese: "Codex Voiceの互換性確認を通過していません", english: "Codex Voice compatibility is blocked", language: language)
         default:
             return text(japanese: "音声機能を利用できません", english: "Voice is unavailable", language: language)
         }

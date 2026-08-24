@@ -176,6 +176,7 @@ protocol VoiceSessionAdapter: AnyObject {
 }
 
 struct VoiceLaneSnapshot: Equatable, Sendable {
+    let providerID: VoiceProviderID
     let mode: VoiceLaneMode
     let connection: VoiceLaneConnection
     let activity: VoiceLaneActivity
@@ -191,6 +192,7 @@ struct VoiceLaneSnapshot: Equatable, Sendable {
     let restartAttempt: Int
 
     static let disabled = VoiceLaneSnapshot(
+        providerID: .off,
         mode: .disabled,
         connection: .disconnected,
         activity: .idle,
@@ -362,6 +364,7 @@ final class VoiceLaneRuntime: ObservableObject {
     @Published private(set) var snapshot: VoiceLaneSnapshot = .disabled
 
     private var featureEnabled = false
+    private var providerID: VoiceProviderID = .off
     private var preferredLayout: VoiceLaneLayoutPreference = .compact
     private var adapterFactory: AdapterFactory?
     private var adapter: (any VoiceSessionAdapter)?
@@ -384,6 +387,7 @@ final class VoiceLaneRuntime: ObservableObject {
     func configure(
         featureEnabled: Bool,
         preferredLayout: VoiceLaneLayoutPreference,
+        providerID: VoiceProviderID = .off,
         adapterFactory: AdapterFactory?
     ) -> Task<Void, Never> {
         let previousTask = configurationTask
@@ -393,6 +397,7 @@ final class VoiceLaneRuntime: ObservableObject {
             await self.applyConfiguration(
                 featureEnabled: featureEnabled,
                 preferredLayout: preferredLayout,
+                providerID: providerID,
                 adapterFactory: adapterFactory
             )
         }
@@ -403,12 +408,15 @@ final class VoiceLaneRuntime: ObservableObject {
     private func applyConfiguration(
         featureEnabled: Bool,
         preferredLayout: VoiceLaneLayoutPreference,
+        providerID: VoiceProviderID,
         adapterFactory: AdapterFactory?
     ) async {
         let wasEnabled = self.featureEnabled
+        let providerChanged = self.providerID != providerID
+        self.providerID = providerID
         self.preferredLayout = preferredLayout
         self.adapterFactory = adapterFactory
-        if wasEnabled, featureEnabled {
+        if wasEnabled, featureEnabled, !providerChanged, providerID != .off {
             setPreferredLayout(preferredLayout)
             return
         }
@@ -423,7 +431,19 @@ final class VoiceLaneRuntime: ObservableObject {
         audioCommandTask = nil
         restartAttempt = 0
 
-        guard featureEnabled else {
+        if providerChanged, wasEnabled {
+            self.featureEnabled = false
+            let previousAdapter = adapter
+            adapter = nil
+            await pendingAudioCommand?.value
+            if let previousAdapter {
+                await previousAdapter.stop()
+            }
+            await pendingRestart?.value
+            await pendingRecovery?.value
+        }
+
+        guard featureEnabled, providerID != .off else {
             if wasEnabled {
                 publish(connection: .recovering, activity: .reconnecting, muted: true)
             }
@@ -834,6 +854,7 @@ final class VoiceLaneRuntime: ObservableObject {
         let transcript = transcriptBuffer.events
         let preview = transcript.last.map { VoiceTextSafety.sanitizeVisibleText($0.text, limit: 240) }
         snapshot = VoiceLaneSnapshot(
+            providerID: providerID,
             mode: mode ?? (snapshot.mode == .disabled
                 ? (preferredLayout == .expanded ? .expanded : .compact)
                 : snapshot.mode),

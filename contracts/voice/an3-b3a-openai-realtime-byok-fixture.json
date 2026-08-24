@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "phase": "AN3-B3A",
+  "model": "gpt-realtime-2.1",
+  "providerSelection": {
+    "default": "off",
+    "ids": [
+      "off",
+      "openai_realtime_byok",
+      "codex_app_server"
+    ],
+    "silentFallback": false,
+    "stopOldBeforeStartNew": true
+  },
+  "openAIRealtime": {
+    "endpoint": "https://api.openai.com/v1/realtime/calls",
+    "transport": "webrtc",
+    "hostOwnsCredential": true,
+    "maximumSdpBytes": 262144,
+    "maximumEventBytes": 65536,
+    "maximumFunctionOutputBytes": 32768,
+    "maximumActiveLeases": 1,
+    "tools": [
+      {
+        "name": "calendar_events_list",
+        "capabilityId": "calendar.events.list",
+        "capabilityVersion": 1,
+        "approval": "permission_grant",
+        "readback": "verified"
+      },
+      {
+        "name": "calendar_event_create",
+        "capabilityId": "calendar.event.create",
+        "capabilityVersion": 1,
+        "approval": "per_call",
+        "readback": "verified"
+      },
+      {
+        "name": "timer_countdown_start",
+        "capabilityId": "timer.countdown.start",
+        "capabilityVersion": 1,
+        "approval": "broker_policy",
+        "readback": "verified"
+      }
+    ],
+    "ambientTools": {
+      "codex": false,
+      "mcp": false,
+      "shell": false,
+      "filesystem": false,
+      "arbitraryNative": false
+    }
+  },
+  "windows": {
+    "credentialStore": "windows_credential_manager",
+    "webViewReceivesCredential": false,
+    "hostExchangesSdp": true,
+    "functionCallEvent": "response.function_call_arguments.done",
+    "functionOutputEvent": "conversation.item.create/function_call_output",
+    "continueEvent": "response.create",
+    "brokerOnlyExecution": true,
+    "deterministicTests": [
+      "credential_redaction",
+      "exact_tool_surface",
+      "missing_key_fail_closed",
+      "malformed_event_fail_closed",
+      "one_active_lease",
+      "stop_mute_restart",
+      "broker_denial",
+      "post_execution_readback",
+      "repeated_call_executes_once",
+      "calendar_create_native_approval"
+    ]
+  },
+  "macos": {
+    "credentialStore": "keychain",
+    "providerAndCredentialSeam": true,
+    "audioTransportAvailable": false,
+    "residualGate": "AN3-B3B",
+    "failsBeforeCredentialRead": true,
+    "failsBeforeNetwork": true
+  },
+  "codexAppServer": {
+    "installedVersion": "0.145.0",
+    "compatibilityGateUnchanged": true,
+    "brokerOnlyPositiveControlVerified": false,
+    "productionActivation": false,
+    "silentFallback": false
+  }
+}

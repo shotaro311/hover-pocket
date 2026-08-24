@@ -701,11 +701,15 @@ async function startVoiceRealtime(dependencies = {}) {
       audio,
       generation: null,
       threadId: null,
+      providerId: null,
       requestBridge,
       disposed: false,
     };
     voiceTransport = transport;
     acquiredStream = null;
+    dataChannel.addEventListener?.("message", (event) => {
+      void handleVoiceRealtimeDataMessage(transport, event?.data);
+    });
     for (const track of stream.getAudioTracks()) {
       peer.addTrack(track, stream);
       track.enabled = false;
@@ -736,11 +740,13 @@ async function startVoiceRealtime(dependencies = {}) {
     if (!Number.isInteger(result?.generation)
       || typeof result?.threadId !== "string"
       || result.threadId.length === 0
-      || result.threadId.length > 160) {
+      || result.threadId.length > 160
+      || !["openai_realtime_byok", "codex_app_server"].includes(result?.providerId)) {
       throw Object.assign(new Error("voice_transport_signal_invalid"), { voiceReason: "webrtc_offer_failed" });
     }
     transport.generation = result.generation;
     transport.threadId = result.threadId;
+    transport.providerId = result.providerId;
     if (pendingVoiceTransportSignal) {
       const pending = pendingVoiceTransportSignal;
       pendingVoiceTransportSignal = null;
@@ -757,6 +763,56 @@ async function startVoiceRealtime(dependencies = {}) {
     }
   } finally {
     voiceTransportStarting = false;
+  }
+}
+
+async function handleVoiceRealtimeDataMessage(transport, rawData) {
+  if (transport?.disposed
+    || transport?.providerId !== "openai_realtime_byok"
+    || !Number.isInteger(transport.generation)
+    || typeof transport.threadId !== "string"
+    || typeof rawData !== "string"
+    || new TextEncoder().encode(rawData).byteLength > 65_536) {
+    return;
+  }
+  let event;
+  try {
+    event = JSON.parse(rawData);
+  } catch {
+    return;
+  }
+  if (!event || event.type !== "response.function_call_arguments.done") {
+    return;
+  }
+  try {
+    const result = await transport.requestBridge("voice.handleRealtimeEvent", {
+      generation: transport.generation,
+      threadId: transport.threadId,
+      event,
+    });
+    if (transport.disposed
+      || result?.handled !== true
+      || typeof result.callId !== "string"
+      || result.callId !== event.call_id
+      || result.callId.length < 1
+      || result.callId.length > 160
+      || typeof result.output !== "string"
+      || new TextEncoder().encode(result.output).byteLength > 32_768
+      || transport.dataChannel?.readyState === "closed") {
+      return;
+    }
+    transport.dataChannel.send(JSON.stringify({
+      type: "conversation.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: result.callId,
+        output: result.output,
+      },
+    }));
+    transport.dataChannel.send(JSON.stringify({ type: "response.create" }));
+  } catch {
+    // Host remains the authority. Malformed/stale/denied calls produce no browser-side
+    // fallback and cannot reach native APIs directly.
   }
 }
 
@@ -934,7 +990,15 @@ async function verifyVoiceTransportHarness() {
       this.localDescription = null;
       this.remoteDescription = null;
       this.listeners = new Map();
-      this.dataChannel = { closed: false, close() { this.closed = true; } };
+      this.dataChannel = {
+        closed: false,
+        readyState: "open",
+        listeners: new Map(),
+        sent: [],
+        addEventListener(name, handler) { this.listeners.set(name, handler); },
+        send(value) { this.sent.push(value); },
+        close() { this.closed = true; this.readyState = "closed"; },
+      };
       this.closed = false;
       peerInstance = this;
     }
@@ -950,10 +1014,13 @@ async function verifyVoiceTransportHarness() {
   const requestBridge = async (method) => {
     calls.push(method);
     if (method === "voice.startRealtime") {
-      return { generation: 7, threadId: "root-ui-verify" };
+      return { generation: 7, threadId: "root-ui-verify", providerId: "openai_realtime_byok" };
     }
     if (method === "voice.confirmRealtime") {
       return { connected: true };
+    }
+    if (method === "voice.handleRealtimeEvent") {
+      return { handled: true, callId: "call-verify", output: "{\"status\":\"succeeded\"}" };
     }
     return { allowedForPrompt: true };
   };
@@ -971,8 +1038,18 @@ async function verifyVoiceTransportHarness() {
     threadId: "root-ui-verify",
     sdp: "v=0\r\no=fake-answer\r\n",
   });
-  const connected = calls.join(",") === "voice.requestMicrophone,voice.startRealtime,voice.confirmRealtime"
+  await handleVoiceRealtimeDataMessage(voiceTransport, JSON.stringify({
+    type: "response.function_call_arguments.done",
+    call_id: "call-verify",
+    name: "timer_countdown_start",
+    arguments: "{\"durationSeconds\":60}",
+  }));
+  const sentFunctionOutput = peerInstance?.dataChannel.sent?.map((item) => JSON.parse(item));
+  const connected = calls.join(",") === "voice.requestMicrophone,voice.startRealtime,voice.confirmRealtime,voice.handleRealtimeEvent"
     && peerInstance?.dataChannel.label === "oai-events"
+    && sentFunctionOutput?.[0]?.item?.type === "function_call_output"
+    && sentFunctionOutput?.[0]?.item?.call_id === "call-verify"
+    && sentFunctionOutput?.[1]?.type === "response.create"
     && peerInstance?.remoteDescription?.type === "answer"
     && inputTrack.enabled
     && audio.muted === false;
@@ -1149,6 +1226,9 @@ function voiceErrorText(value) {
     voice_realtime_error: "voiceErrorRealtimeStopped",
     installed_broker_only_tool_policy_missing: "voiceErrorBrokerOnlyPolicyMissing",
     installed_broker_only_tool_policy_not_approved: "voiceErrorBrokerOnlyPolicyMissing",
+    openai_realtime_key_missing: "voiceErrorRealtimeFailed",
+    openai_realtime_unavailable: "voiceErrorRealtimeFailed",
+    openai_realtime_start_failed: "voiceErrorRealtimeFailed",
   };
   const key = keys[value];
   return key ? t(key) : null;
@@ -1556,6 +1636,7 @@ window.__hoverPocketVerify = {
       && englishExpandedOk
       && englishAvailabilityFallbackOk;
     const voiceTransportContractOk = typeof startVoiceRealtime === "function"
+      && typeof handleVoiceRealtimeDataMessage === "function"
       && typeof applyVoiceTransportSignal === "function"
       && typeof disposeLocalVoiceTransport === "function"
       && voiceErrorText("microphone_denied") === "Microphone access was not allowed"

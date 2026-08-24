@@ -44,8 +44,10 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly PocketAppActivationLease? _aiNativeExecutionLease;
     private readonly PocketAppGenerationController? _pocketAppGenerationController;
     private readonly PocketAppRuntimeActivationRegistry? _generatedPocketApps;
-    private readonly CodexVoiceCoordinator _voiceCoordinator;
+    private readonly VoiceProviderCoordinator _voiceCoordinator;
+    private readonly OpenAIRealtimeCredentialStore _openAIRealtimeCredentialStore = new();
     private readonly VoiceTimerApprovalCoordinator _voiceTimerApprovalCoordinator = new();
+    private readonly VoiceCalendarCreateApprovalCoordinator _voiceCalendarCreateApprovalCoordinator = new();
     private readonly SemaphoreSlim _voiceSettingsTransitionGate = new(1, 1);
     private readonly Dictionary<BridgeDispatcher, BridgeSurface> _dispatchers = [];
     private readonly AsyncLocal<BridgeSurface?> _requestSurface = new();
@@ -87,6 +89,7 @@ internal sealed class PanelBridgeController : IDisposable
         _timerBridgeHandlers.AlertChanged += OnTimerAlertChanged;
         CurrentSettings = UserSettingsStore.NormalizeForBootstrap(settings, providerRegistry.ProviderIds);
         CapabilityDataGovernanceController? capabilityDataGovernance = null;
+        CapabilityRegistry? capabilityRegistry = null;
         try
         {
             var brokerRoot = Path.Combine(settingsStore.RootDirectory, "CapabilityBroker");
@@ -94,8 +97,9 @@ internal sealed class PanelBridgeController : IDisposable
             var auditLog = new CapabilityBrokerAuditLog(brokerRoot);
             capabilityDataGovernance = new CapabilityDataGovernanceController(ledger, auditLog);
             _ = capabilityDataGovernance.ApplyRetention(CurrentSettings.CapabilityDataRetentionPeriod);
+            capabilityRegistry = new CapabilityRegistry(_capabilityHandlers);
             _capabilityBroker = new CapabilityBroker(
-                new CapabilityRegistry(_capabilityHandlers),
+                capabilityRegistry,
                 ledger,
                 auditLog,
                 approvalPresentationResolver: new HostCapabilityApprovalPresentationResolver(stickyStore));
@@ -117,9 +121,23 @@ internal sealed class PanelBridgeController : IDisposable
                 RequestVoiceTimerApprovalAsync,
                 () => CurrentSettings.VoiceCalendarAccessGranted,
                 CapabilityTimeZoneId);
-        _voiceCoordinator = voiceCoordinator ?? CodexVoiceRuntimeComposition.Create(
+        IOpenAIRealtimeCapabilityRuntime openAIRealtimeTools = capabilityRegistry is null || _capabilityBroker is null
+            ? new UnavailableOpenAIRealtimeCapabilityRuntime()
+            : new OpenAIRealtimeCapabilityRuntime(
+                new BrokerOpenAIRealtimeCapabilityAuthority(capabilityRegistry, _capabilityBroker),
+                RequestVoiceTimerApprovalAsync,
+                RequestVoiceCalendarCreateApprovalAsync,
+                () => CurrentSettings.VoiceCalendarAccessGranted,
+                CapabilityTimeZoneId);
+        _voiceCoordinator = new VoiceProviderCoordinator(
             CurrentSettings.VoiceEnabled,
-            voiceTools);
+            CurrentSettings.VoiceProviderId,
+            () => voiceCoordinator ?? CodexVoiceRuntimeComposition.Create(false, voiceTools),
+            () => new OpenAIRealtimeVoiceCoordinator(
+                false,
+                _openAIRealtimeCredentialStore,
+                new OpenAIRealtimeCallsClient(),
+                openAIRealtimeTools));
         _voiceRuntimeActive = _voiceCoordinator.Snapshot.Availability != CodexVoiceAvailability.Disabled;
         _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(CurrentSettings);
         _voiceCoordinator.SnapshotChanged += OnVoiceSnapshotChanged;
@@ -278,7 +296,9 @@ internal sealed class PanelBridgeController : IDisposable
         Func<bool>? aiNativeEnableDecision = null,
         Func<bool>? voiceCalendarAccessDecision = null,
         Func<bool>? voiceMicrophoneGesture = null,
-        Func<bool>? capabilityHistoryDeleteDecision = null)
+        Func<bool>? capabilityHistoryDeleteDecision = null,
+        Func<OpenAIRealtimeApiKey?>? voiceOpenAIKeyPrompt = null,
+        Func<bool>? voiceOpenAIKeyDeleteDecision = null)
     {
         _dispatchers[dispatcher] = surface;
         if (surface == BridgeSurface.Panel && approvalOwner is not null)
@@ -343,6 +363,7 @@ internal sealed class PanelBridgeController : IDisposable
             Register("voice.startRealtime", StartVoiceRealtimeAsync);
             Register("voice.confirmRealtime", ConfirmVoiceRealtimeAsync);
             Register("voice.abortRealtime", AbortVoiceRealtimeAsync);
+            Register("voice.handleRealtimeEvent", HandleVoiceRealtimeEventAsync);
             Register("voice.setMuted", SetVoiceMutedAsync);
             Register("voice.setLayout", SetVoiceLayoutAsync);
             Register("voice.endSession", EndVoiceSessionAsync);
@@ -358,6 +379,20 @@ internal sealed class PanelBridgeController : IDisposable
         if (surface == BridgeSurface.Settings)
         {
             Register("settings.setVoiceEnabled", SetVoiceEnabledAsync);
+            Register("settings.setVoiceProvider", SetVoiceProviderAsync);
+            Register(
+                "settings.configureVoiceOpenAIKey",
+                (parameters, cancellationToken) => ConfigureVoiceOpenAIKeyAsync(
+                    parameters,
+                    voiceOpenAIKeyPrompt,
+                    cancellationToken));
+            Register(
+                "settings.deleteVoiceOpenAIKey",
+                (parameters, cancellationToken) => DeleteVoiceOpenAIKeyAsync(
+                    parameters,
+                    approvalOwner,
+                    voiceOpenAIKeyDeleteDecision,
+                    cancellationToken));
             Register("settings.setVoiceLayout", SetVoiceLayoutAsync);
             Register(
                 "settings.setVoiceCalendarAccess",
@@ -477,6 +512,8 @@ internal sealed class PanelBridgeController : IDisposable
                 aiNativeEnabled = CurrentSettings.AiNativeEnabled,
                 capabilityDataRetentionPeriod = ToWireValue(CurrentSettings.CapabilityDataRetentionPeriod),
                 voiceEnabled = CurrentSettings.VoiceEnabled,
+                voiceProviderId = CurrentSettings.VoiceProviderId,
+                voiceOpenAIKeyConfigured = VoiceOpenAIKeyConfiguredForPublicState(),
                 voiceCalendarAccessGranted = CurrentSettings.VoiceCalendarAccessGranted,
                 voiceLaneLayout = ToWireValue(CurrentSettings.VoiceLaneLayout),
                 clipboardPrivateMode = CurrentSettings.ClipboardPrivateMode,
@@ -575,7 +612,8 @@ internal sealed class PanelBridgeController : IDisposable
                         updatedAt = item.UpdatedAt,
                         navigation = "lane_detail"
                     }),
-                    safeErrorCode = voiceSnapshot.LastErrorCode
+                    safeErrorCode = voiceSnapshot.LastErrorCode,
+                    providerId = _voiceCoordinator.ProviderId
                 }
                 : null,
             pocketSurface = selectedPocketSurface,
@@ -653,6 +691,22 @@ internal sealed class PanelBridgeController : IDisposable
                 System.Windows.MessageBoxImage.Warning,
                 System.Windows.MessageBoxResult.No);
         return result == System.Windows.MessageBoxResult.Yes;
+    }
+
+    private bool VoiceOpenAIKeyConfiguredForPublicState()
+    {
+        if (CurrentSettings.VoiceProviderId != VoiceProviderIds.OpenAIRealtimeByok)
+        {
+            return false;
+        }
+        try
+        {
+            return _openAIRealtimeCredentialStore.HasCredential();
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     private object BuildCapabilityDataGovernanceState()
@@ -1094,7 +1148,8 @@ internal sealed class PanelBridgeController : IDisposable
             _pocketAppGenerationController?.SetEnabled(false);
             _generatedPocketApps?.SetEnabled(false);
             SaveSettings(UserSettingsStore.CreateDefault(_providerRegistry.ProviderIds));
-            await _voiceCoordinator.SetFeatureEnabledAsync(false, cancellationToken);
+            await _voiceCoordinator.SetFeatureEnabledAsync(false, CancellationToken.None);
+            await _voiceCoordinator.SetProviderAsync(VoiceProviderIds.Off, CancellationToken.None);
             _resolvedVoiceLaneMode = VoiceLaneMode.Disabled;
             var published = await PublishStateAsync(cancellationToken);
             await CompletePocketAppStateTransitionAsync(stateTransition);
@@ -1150,25 +1205,277 @@ internal sealed class PanelBridgeController : IDisposable
         try
         {
             var enabled = ReadRequiredBool(parameters, "enabled");
-            if (CurrentSettings.VoiceEnabled != enabled)
+            if (enabled && CurrentSettings.VoiceProviderId == VoiceProviderIds.Off)
             {
-                var updated = CurrentSettings.Clone();
-                updated.VoiceEnabled = enabled;
-                if (enabled)
+                return await PublishStateAsync(cancellationToken);
+            }
+            var previousSettings = CurrentSettings.Clone();
+            var previousResolvedMode = _resolvedVoiceLaneMode;
+            var updated = CurrentSettings.Clone();
+            updated.VoiceEnabled = enabled;
+            if (enabled)
+            {
+                _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(updated);
+            }
+            else
+            {
+                _resolvedVoiceLaneMode = VoiceLaneMode.Disabled;
+            }
+            try
+            {
+                await _voiceCoordinator.SetFeatureEnabledAsync(
+                    enabled,
+                    enabled ? cancellationToken : CancellationToken.None);
+                if (enabled
+                    && _voiceCoordinator.Snapshot.Availability != CodexVoiceAvailability.Ready)
                 {
-                    _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(updated);
+                    throw new CodexAppServerProtocolException("voice_provider_unavailable");
                 }
                 SaveSettings(updated);
             }
-            await _voiceCoordinator.SetFeatureEnabledAsync(
-                enabled,
-                enabled ? cancellationToken : CancellationToken.None);
+            catch
+            {
+                if (!await RollbackVoiceProviderTransitionAsync(previousSettings, previousResolvedMode))
+                {
+                    throw new CodexAppServerProtocolException("voice_enabled_transition_failed_closed");
+                }
+                throw;
+            }
             return await PublishStateAsync(cancellationToken);
         }
         finally
         {
             _voiceSettingsTransitionGate.Release();
         }
+    }
+
+    private async Task<object?> SetVoiceProviderAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var rawProvider = ReadRequiredString(parameters, "providerId");
+        var providerId = VoiceProviderIds.Normalize(rawProvider);
+        if (!string.Equals(rawProvider, providerId, StringComparison.Ordinal))
+        {
+            throw new CodexAppServerProtocolException("voice_provider_invalid");
+        }
+        await _voiceSettingsTransitionGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (string.Equals(CurrentSettings.VoiceProviderId, providerId, StringComparison.Ordinal))
+            {
+                return await PublishStateAsync(cancellationToken);
+            }
+            var previousSettings = CurrentSettings.Clone();
+            var previousResolvedMode = _resolvedVoiceLaneMode;
+            var updated = CurrentSettings.Clone();
+            updated.VoiceProviderId = providerId;
+            try
+            {
+                await _voiceCoordinator.SetProviderAsync(providerId, CancellationToken.None);
+                if (providerId == VoiceProviderIds.Off)
+                {
+                    updated.VoiceEnabled = false;
+                    await _voiceCoordinator.SetFeatureEnabledAsync(false, CancellationToken.None);
+                    _resolvedVoiceLaneMode = VoiceLaneMode.Disabled;
+                }
+                else if (updated.VoiceEnabled
+                    && _voiceCoordinator.Snapshot.Availability != CodexVoiceAvailability.Ready)
+                {
+                    throw new CodexAppServerProtocolException("voice_provider_unavailable");
+                }
+                SaveSettings(updated);
+            }
+            catch
+            {
+                if (!await RollbackVoiceProviderTransitionAsync(previousSettings, previousResolvedMode))
+                {
+                    throw new CodexAppServerProtocolException("voice_provider_transition_failed_closed");
+                }
+                throw;
+            }
+            return await PublishStateAsync(cancellationToken);
+        }
+        finally
+        {
+            _voiceSettingsTransitionGate.Release();
+        }
+    }
+
+    private async Task<bool> RollbackVoiceProviderTransitionAsync(
+        UserSettings previousSettings,
+        VoiceLaneMode previousResolvedMode)
+    {
+        try
+        {
+            await _voiceCoordinator.SetProviderAsync(
+                previousSettings.VoiceProviderId,
+                CancellationToken.None);
+            await _voiceCoordinator.SetFeatureEnabledAsync(
+                previousSettings.VoiceEnabled,
+                CancellationToken.None);
+            _resolvedVoiceLaneMode = previousResolvedMode;
+            return true;
+        }
+        catch
+        {
+            await ForceVoiceRuntimeOffAsync();
+
+            var failClosedSettings = previousSettings.Clone();
+            failClosedSettings.VoiceProviderId = VoiceProviderIds.Off;
+            failClosedSettings.VoiceEnabled = false;
+            var normalized = NormalizeSettings(failClosedSettings);
+            try
+            {
+                _settingsStore.Save(normalized);
+            }
+            catch
+            {
+                // Runtime remains OFF even if durable storage is unavailable.
+            }
+            CurrentSettings = normalized;
+            _resolvedVoiceLaneMode = VoiceLaneMode.Disabled;
+            SettingsChanged?.Invoke(this, CurrentSettings);
+            return false;
+        }
+    }
+
+    private async Task ForceVoiceRuntimeOffAsync()
+    {
+        try
+        {
+            await _voiceCoordinator.SetFeatureEnabledAsync(false, CancellationToken.None);
+        }
+        catch
+        {
+        }
+        try
+        {
+            await _voiceCoordinator.SetProviderAsync(VoiceProviderIds.Off, CancellationToken.None);
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task<object?> ConfigureVoiceOpenAIKeyAsync(
+        JsonElement? parameters,
+        Func<OpenAIRealtimeApiKey?>? keyPrompt,
+        CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (keyPrompt is null)
+        {
+            throw new CodexAppServerProtocolException("voice_key_prompt_unavailable");
+        }
+        using var apiKey = keyPrompt();
+        if (apiKey is null)
+        {
+            return await PublishStateAsync(cancellationToken);
+        }
+        await _voiceSettingsTransitionGate.WaitAsync(cancellationToken);
+        try
+        {
+            _openAIRealtimeCredentialStore.Save(apiKey);
+            if (CurrentSettings.VoiceEnabled
+                && CurrentSettings.VoiceProviderId == VoiceProviderIds.OpenAIRealtimeByok)
+            {
+                await _voiceCoordinator.RestartSelectedProviderAsync(CancellationToken.None);
+            }
+            return await PublishStateAsync(cancellationToken);
+        }
+        finally
+        {
+            _voiceSettingsTransitionGate.Release();
+        }
+    }
+
+    private async Task<object?> DeleteVoiceOpenAIKeyAsync(
+        JsonElement? parameters,
+        Func<System.Windows.Window?>? approvalOwner,
+        Func<bool>? approvalDecision,
+        CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!ApproveVoiceOpenAIKeyDeletion(approvalOwner, approvalDecision))
+        {
+            return await PublishStateAsync(cancellationToken);
+        }
+        await _voiceSettingsTransitionGate.WaitAsync(cancellationToken);
+        try
+        {
+            var restart = CurrentSettings.VoiceEnabled
+                && CurrentSettings.VoiceProviderId == VoiceProviderIds.OpenAIRealtimeByok;
+            var credentialDeleted = false;
+            if (restart)
+            {
+                await _voiceCoordinator.SetFeatureEnabledAsync(false, CancellationToken.None);
+            }
+            try
+            {
+                _openAIRealtimeCredentialStore.Delete();
+                credentialDeleted = true;
+                if (_openAIRealtimeCredentialStore.HasCredential())
+                {
+                    throw new CodexAppServerProtocolException("voice_key_delete_unverified");
+                }
+                if (restart)
+                {
+                    var disabled = CurrentSettings.Clone();
+                    disabled.VoiceEnabled = false;
+                    _resolvedVoiceLaneMode = VoiceLaneMode.Disabled;
+                    SaveSettings(disabled);
+                }
+            }
+            catch
+            {
+                if (restart && !credentialDeleted)
+                {
+                    try
+                    {
+                        await _voiceCoordinator.SetFeatureEnabledAsync(true, CancellationToken.None);
+                    }
+                    catch
+                    {
+                        await ForceVoiceRuntimeOffAsync();
+                        var failClosed = CurrentSettings.Clone();
+                        failClosed.VoiceProviderId = VoiceProviderIds.Off;
+                        failClosed.VoiceEnabled = false;
+                        SaveFailClosedVoiceSettings(failClosed);
+                    }
+                }
+                else if (restart)
+                {
+                    await ForceVoiceRuntimeOffAsync();
+                    var failClosed = CurrentSettings.Clone();
+                    failClosed.VoiceProviderId = VoiceProviderIds.Off;
+                    failClosed.VoiceEnabled = false;
+                    SaveFailClosedVoiceSettings(failClosed);
+                }
+                throw;
+            }
+            return await PublishStateAsync(cancellationToken);
+        }
+        finally
+        {
+            _voiceSettingsTransitionGate.Release();
+        }
+    }
+
+    private void SaveFailClosedVoiceSettings(UserSettings settings)
+    {
+        var normalized = NormalizeSettings(settings);
+        try
+        {
+            _settingsStore.Save(normalized);
+        }
+        catch
+        {
+            // Keep the current process fail-closed even when disk persistence fails.
+        }
+        CurrentSettings = normalized;
+        _resolvedVoiceLaneMode = VoiceLaneMode.Disabled;
+        SettingsChanged?.Invoke(this, CurrentSettings);
     }
 
     private async Task<object?> SetVoiceLayoutAsync(JsonElement? parameters, CancellationToken cancellationToken)
@@ -1233,6 +1540,32 @@ internal sealed class PanelBridgeController : IDisposable
         }
     }
 
+    private bool ApproveVoiceOpenAIKeyDeletion(
+        Func<System.Windows.Window?>? approvalOwner,
+        Func<bool>? approvalDecision)
+    {
+        if (approvalDecision is not null)
+        {
+            return approvalDecision();
+        }
+        var owner = approvalOwner?.Invoke();
+        if (owner is null || !owner.IsVisible)
+        {
+            return false;
+        }
+        var english = CurrentSettings.Language == AppLanguage.English;
+        var result = System.Windows.MessageBox.Show(
+            owner,
+            english
+                ? "Delete the OpenAI Realtime API key from Windows Credential Manager? Voice will stop until a key is configured again."
+                : "OpenAI Realtime APIキーをWindows Credential Managerから削除しますか？再設定するまでVoiceは停止します。",
+            english ? "Delete OpenAI API key" : "OpenAI APIキーを削除",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Warning,
+            System.Windows.MessageBoxResult.No);
+        return result == System.Windows.MessageBoxResult.Yes;
+    }
+
     private bool ApproveVoiceCalendarAccess(
         Func<System.Windows.Window?>? approvalOwner,
         Func<bool>? approvalDecision)
@@ -1250,8 +1583,8 @@ internal sealed class PanelBridgeController : IDisposable
         var result = System.Windows.MessageBox.Show(
             owner,
             english
-                ? "Voice Lane may send today's Calendar event titles and times to Codex.\n\nAllow Calendar access for Voice Lane?"
-                : "Voice Laneは今日のCalendar予定名と時刻をCodexへ送信する場合があります。\n\nVoice LaneのCalendarアクセスを許可しますか？",
+                ? "Voice Lane may send today's Calendar event titles and times to the selected Voice provider and may request approved Calendar creation.\n\nAllow Calendar access for Voice Lane?"
+                : "Voice Laneは今日のCalendar予定名と時刻を選択中のVoice Providerへ送信し、承認付きの予定作成を要求する場合があります。\n\nVoice LaneのCalendarアクセスを許可しますか？",
             english ? "Allow Voice Calendar access" : "VoiceのCalendarアクセスを許可",
             System.Windows.MessageBoxButton.YesNo,
             System.Windows.MessageBoxImage.Warning,
@@ -1290,7 +1623,12 @@ internal sealed class PanelBridgeController : IDisposable
     {
         var sdp = ReadRequiredString(parameters, "sdp");
         var result = await _voiceCoordinator.StartRealtimeAsync(sdp, cancellationToken);
-        return new { generation = result.Generation, threadId = result.ThreadId };
+        return new
+        {
+            generation = result.Generation,
+            threadId = result.ThreadId,
+            providerId = _voiceCoordinator.ProviderId
+        };
     }
 
     private Task<object?> ConfirmVoiceRealtimeAsync(
@@ -1314,6 +1652,23 @@ internal sealed class PanelBridgeController : IDisposable
         return new { aborted = true };
     }
 
+    private async Task<object?> HandleVoiceRealtimeEventAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        var result = await _voiceCoordinator.HandleRealtimeFunctionEventAsync(
+            ReadRequiredInt(parameters, "generation"),
+            ReadRequiredString(parameters, "threadId"),
+            ReadRequiredObject(parameters, "event"),
+            cancellationToken);
+        return new
+        {
+            handled = result.Handled,
+            callId = result.CallId,
+            output = result.Output
+        };
+    }
+
     private async Task<object?> EndVoiceSessionAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         _ = parameters;
@@ -1328,6 +1683,33 @@ internal sealed class PanelBridgeController : IDisposable
         return await _voiceTimerApprovalCoordinator.RequestAsync(
             request,
             PresentVoiceTimerApprovalAsync,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<bool> RequestVoiceCalendarCreateApprovalAsync(
+        VoiceCalendarCreateApprovalRequest request,
+        CancellationToken cancellationToken)
+    {
+        return await _voiceCalendarCreateApprovalCoordinator.RequestAsync(
+            request,
+            PresentVoiceCalendarCreateApprovalAsync,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<bool> PresentVoiceCalendarCreateApprovalAsync(
+        VoiceCalendarCreateApprovalRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var owner = _voiceApprovalOwner?.Invoke();
+        if (owner is null)
+        {
+            return false;
+        }
+        return await VoiceCalendarCreateApprovalDialog.ShowAsync(
+            owner,
+            request,
+            CurrentSettings.Language == AppLanguage.English,
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -1545,9 +1927,10 @@ internal sealed class PanelBridgeController : IDisposable
 
     private void SaveSettings(UserSettings settings)
     {
-        CurrentSettings = NormalizeSettings(settings);
+        var normalized = NormalizeSettings(settings);
+        _settingsStore.Save(normalized);
+        CurrentSettings = normalized;
         _clipboardBridgeController.ApplySettings(CurrentSettings, IsVisible("clipboard"));
-        _settingsStore.Save(CurrentSettings);
         SettingsChanged?.Invoke(this, CurrentSettings);
     }
 
@@ -1889,6 +2272,18 @@ internal sealed class PanelBridgeController : IDisposable
         }
 
         return JsonSerializer.Deserialize<object>(parameters.Value.GetRawText(), BridgeJson.Options);
+    }
+
+    private static JsonElement ReadRequiredObject(JsonElement? parameters, string propertyName)
+    {
+        if (parameters is null
+            || parameters.Value.ValueKind != JsonValueKind.Object
+            || !parameters.Value.TryGetProperty(propertyName, out var value)
+            || value.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException($"Missing object parameter: {propertyName}");
+        }
+        return value.Clone();
     }
 
     private static string ReadRequiredString(JsonElement? parameters, string propertyName)

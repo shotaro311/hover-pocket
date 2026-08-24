@@ -55,7 +55,9 @@ public partial class App : System.Windows.Application
         if (options.VerifyVoice)
         {
             VerifyConsole.AttachParent();
-            Environment.ExitCode = new VoiceFoundationVerifier().Run();
+            var foundationResult = new VoiceFoundationVerifier().Run();
+            var realtimeResult = new OpenAIRealtimeVoiceVerifier().Run();
+            Environment.ExitCode = foundationResult == 0 && realtimeResult == 0 ? 0 : 1;
             Shutdown();
             return;
         }

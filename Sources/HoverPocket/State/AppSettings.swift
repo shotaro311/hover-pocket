@@ -128,6 +128,15 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var voiceProvider: VoiceProviderID {
+        didSet {
+            defaults.set(voiceProvider.rawValue, forKey: Self.voiceProviderKey)
+            if voiceProvider == .off, voiceEnabled {
+                voiceEnabled = false
+            }
+        }
+    }
+
     @Published var voiceEnabled: Bool {
         didSet {
             defaults.set(voiceEnabled, forKey: Self.voiceEnabledKey)
@@ -162,6 +171,7 @@ final class AppSettings: ObservableObject {
     private static let stickyNoteGridSizeKey = "stickyNoteGridSize"
     private static let aiNativeEnabledKey = "aiNativeEnabled"
     private static let capabilityDataRetentionPeriodKey = "capabilityDataRetentionPeriod"
+    private static let voiceProviderKey = "voiceProvider"
     private static let voiceEnabledKey = "voiceEnabled"
     private static let voiceLaneLayoutPreferenceKey = "voiceLaneLayoutPreference"
 
@@ -233,9 +243,14 @@ final class AppSettings: ObservableObject {
             : defaults.bool(forKey: Self.aiNativeEnabledKey)
         self.capabilityDataRetentionPeriod = defaults.string(forKey: Self.capabilityDataRetentionPeriodKey)
             .flatMap(CapabilityDataRetentionPeriod.init(rawValue:)) ?? .ninetyDays
-        self.voiceEnabled = defaults.object(forKey: Self.voiceEnabledKey) == nil
+        let storedVoiceProvider = defaults.string(forKey: Self.voiceProviderKey)
+            .flatMap(VoiceProviderID.init(rawValue:)) ?? .off
+        self.voiceProvider = storedVoiceProvider
+        self.voiceEnabled = storedVoiceProvider == .off
             ? false
-            : defaults.bool(forKey: Self.voiceEnabledKey)
+            : defaults.object(forKey: Self.voiceEnabledKey) == nil
+                ? false
+                : defaults.bool(forKey: Self.voiceEnabledKey)
         self.voiceLaneLayoutPreference = defaults.string(forKey: Self.voiceLaneLayoutPreferenceKey)
             .flatMap(VoiceLaneLayoutPreference.init(rawValue:)) ?? .compact
 

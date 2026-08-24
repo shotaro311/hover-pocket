@@ -95,7 +95,25 @@ internal sealed class UserSettingsStore
     {
         Directory.CreateDirectory(RootDirectory);
         var json = JsonSerializer.Serialize(settings, JsonOptions);
-        File.WriteAllText(SettingsPath, json);
+        var temporaryPath = $"{SettingsPath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(temporaryPath, json);
+            File.Move(temporaryPath, SettingsPath, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+            catch
+            {
+            }
+        }
     }
 
     private void TrySave(UserSettings settings)
@@ -131,6 +149,7 @@ internal sealed class UserSettingsStore
             AiNativeEnabled = false,
             CapabilityDataRetentionPeriod = CapabilityDataRetentionPeriod.NinetyDays,
             VoiceEnabled = false,
+            VoiceProviderId = VoiceProviderIds.Off,
             VoiceCalendarAccessGranted = false,
             VoiceLaneLayout = VoiceLaneLayoutPreference.Compact,
             RememberLastSelectedProvider = true,
@@ -149,6 +168,11 @@ internal sealed class UserSettingsStore
         if (!Enum.IsDefined(settings.CapabilityDataRetentionPeriod))
         {
             settings.CapabilityDataRetentionPeriod = CapabilityDataRetentionPeriod.NinetyDays;
+        }
+        settings.VoiceProviderId = VoiceProviderIds.Normalize(settings.VoiceProviderId);
+        if (settings.VoiceProviderId == VoiceProviderIds.Off)
+        {
+            settings.VoiceEnabled = false;
         }
         var known = providerIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var order = settings.ProviderOrder

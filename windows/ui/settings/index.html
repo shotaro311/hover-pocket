@@ -86,10 +86,16 @@
     </section>
     <section class="settings-section">
       <h2 data-voice-heading>Voice Lane</h2>
-      <label class="toggle-row">
+      <div class="segmented" data-voice-provider></div>
+      <label class="toggle-row settings-spaced-row">
         <span data-voice-enabled-label>Voice Laneを有効化</span>
         <input type="checkbox" data-voice-enabled>
       </label>
+      <div class="settings-button-row settings-spaced-row" data-voice-openai-key-row hidden>
+        <span class="settings-status" data-voice-openai-key-status></span>
+        <button type="button" data-voice-openai-key-configure>APIキーを設定</button>
+        <button type="button" data-voice-openai-key-delete>APIキーを削除</button>
+      </div>
       <div class="segmented settings-spaced-row" data-voice-layout></div>
       <label class="toggle-row settings-spaced-row">
         <span data-voice-calendar-label>今日の予定名と時刻をCodexへ共有</span>
