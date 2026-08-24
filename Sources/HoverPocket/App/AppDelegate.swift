@@ -212,18 +212,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func configureVoiceRuntime() {
         let settings = hoverWindowController.appSettings
+        let providerID = settings.voiceProvider
         voiceConfigurationTask = VoiceLaneRuntime.shared.configure(
             featureEnabled: settings.voiceEnabled,
             preferredLayout: settings.voiceLaneLayoutPreference,
-            adapterFactory: nil
+            providerID: providerID,
+            adapterFactory: VoiceProviderAdapterFactory.factory(providerID: providerID)
         )
     }
 
     private func observeVoiceRuntimeSettings() {
         let settings = hoverWindowController.appSettings
-        settings.$voiceEnabled
+        Publishers.CombineLatest3(
+            settings.$voiceEnabled.removeDuplicates(),
+            settings.$voiceLaneLayoutPreference.removeDuplicates(),
+            settings.$voiceProvider.removeDuplicates()
+        )
             .dropFirst()
-            .removeDuplicates()
             .sink { [weak self] _ in
                 self?.configureVoiceRuntime()
             }

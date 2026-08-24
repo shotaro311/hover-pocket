@@ -6,6 +6,7 @@
   "required": [
     "$schema",
     "stateVersion",
+    "providerId",
     "mode",
     "connection",
     "activity",
@@ -20,6 +21,14 @@
     },
     "stateVersion": {
       "const": 1
+    },
+    "providerId": {
+      "type": "string",
+      "enum": [
+        "off",
+        "openai_realtime_byok",
+        "codex_app_server"
+      ]
     },
     "mode": {
       "type": "string",

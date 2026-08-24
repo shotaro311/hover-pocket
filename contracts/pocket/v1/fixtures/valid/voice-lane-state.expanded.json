@@ -1,6 +1,7 @@
 {
   "$schema": "hoverpocket://schemas/voice-lane-state/v1",
   "stateVersion": 1,
+  "providerId": "openai_realtime_byok",
   "mode": "expanded",
   "connection": "connected",
   "activity": "thinking",

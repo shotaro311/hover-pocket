@@ -15,7 +15,12 @@ const aiNativeEl = document.querySelector("[data-ai-native]");
 const aiNativeLabelEl = document.querySelector("[data-ai-native-label]");
 const aiNativeNoteEl = document.querySelector("[data-ai-native-note]");
 const voiceHeadingEl = document.querySelector("[data-voice-heading]");
+const voiceProviderEl = document.querySelector("[data-voice-provider]");
 const voiceEnabledEl = document.querySelector("[data-voice-enabled]");
+const voiceOpenAIKeyRowEl = document.querySelector("[data-voice-openai-key-row]");
+const voiceOpenAIKeyStatusEl = document.querySelector("[data-voice-openai-key-status]");
+const voiceOpenAIKeyConfigureEl = document.querySelector("[data-voice-openai-key-configure]");
+const voiceOpenAIKeyDeleteEl = document.querySelector("[data-voice-openai-key-delete]");
 const voiceEnabledLabelEl = document.querySelector("[data-voice-enabled-label]");
 const voiceLayoutEl = document.querySelector("[data-voice-layout]");
 const voiceNoteEl = document.querySelector("[data-voice-note]");
@@ -117,22 +122,41 @@ function render(state) {
   aiNativeNoteEl.textContent = state.settings.language === "en"
     ? "Off by default. Disabling cancels generation immediately; enabling after an OFF startup requires a HoverPocket restart and never hot-starts Codex."
     : "既定ではオフです。OFFは生成を即時停止します。OFFで起動した後のONはHoverPocket再起動後に有効となり、Codexをhot-startしません。";
+  const voiceProviderId = state.settings.voiceProviderId ?? "off";
   const voiceEnabled = Boolean(state.settings.voiceEnabled);
+  const englishVoice = state.settings.language === "en";
   voiceHeadingEl.textContent = "Voice Lane";
+  renderSegment(voiceProviderEl, [
+    { id: "off", label: englishVoice ? "Off" : "オフ" },
+    { id: "openai_realtime_byok", label: "OpenAI Realtime BYOK" },
+    { id: "codex_app_server", label: "Codex app-server" },
+  ], voiceProviderId, (providerId) => update("settings.setVoiceProvider", { providerId }));
   voiceEnabledEl.checked = voiceEnabled;
-  voiceEnabledLabelEl.textContent = state.settings.language === "en"
-    ? "Enable Voice Lane"
-    : "Voice Laneを有効化";
-  voiceNoteEl.textContent = state.settings.language === "en"
-    ? "Off by default. Voice starts only when Codex exposes a Host-verified Broker-only tool policy. Unsupported versions stay safely stopped. Timer requests require native approval every time."
-    : "既定はオフです。CodexがHost検証済みのBroker限定ツール方針に対応する場合だけ音声会話を開始します。未対応版では安全に停止します。Timerは毎回ネイティブ承認を求めます。";
+  voiceEnabledEl.disabled = voiceProviderId === "off";
+  voiceEnabledLabelEl.textContent = englishVoice ? "Enable Voice Lane" : "Voice Laneを有効化";
+  voiceOpenAIKeyRowEl.hidden = voiceProviderId !== "openai_realtime_byok";
+  voiceOpenAIKeyStatusEl.textContent = state.settings.voiceOpenAIKeyConfigured
+    ? (englishVoice ? "API key saved in Credential Manager" : "APIキーはCredential Managerに保存済み")
+    : (englishVoice ? "API key not configured" : "APIキー未設定");
+  voiceOpenAIKeyConfigureEl.textContent = englishVoice ? "Configure API key" : "APIキーを設定";
+  voiceOpenAIKeyDeleteEl.textContent = englishVoice ? "Delete API key" : "APIキーを削除";
+  voiceOpenAIKeyDeleteEl.disabled = !state.settings.voiceOpenAIKeyConfigured;
+  voiceNoteEl.textContent = voiceProviderId === "codex_app_server"
+    ? (englishVoice
+      ? "Codex app-server remains fail-closed until its installed version can positively prove Broker-only tools. There is no fallback to OpenAI Realtime."
+      : "Codex app-serverは、導入済み版がBroker限定ツールを正に証明できるまでfail-closedのままです。OpenAI Realtimeへの自動fallbackはありません。")
+    : voiceProviderId === "openai_realtime_byok"
+      ? (englishVoice
+        ? "The API key stays Host-only. Windows exchanges SDP with /v1/realtime/calls and exposes only Registry-derived Calendar/Timer functions through CapabilityBroker."
+        : "APIキーはHostだけが保持します。Windowsは/v1/realtime/callsでSDPを交換し、CapabilityBroker経由のRegistry由来Calendar/Timer関数だけを公開します。")
+      : (englishVoice ? "Provider is explicitly Off. No credential, network, or transport work occurs." : "Providerは明示的にオフです。credential・network・transport処理は行いません。");
   voiceCalendarAccessEl.checked = Boolean(state.settings.voiceCalendarAccessGranted);
-  voiceCalendarLabelEl.textContent = state.settings.language === "en"
-    ? "Share today's event titles and times with Codex"
-    : "今日の予定名と時刻をCodexへ共有";
-  voiceCalendarNoteEl.textContent = state.settings.language === "en"
-    ? "Separate from Google sign-in and microphone access. You can revoke this permission at any time."
-    : "Googleログインやマイク権限とは別の許可です。いつでも取り消せます。";
+  voiceCalendarLabelEl.textContent = englishVoice
+    ? "Allow Voice Lane to use today's Calendar and create approved events"
+    : "Voice Laneに今日のCalendar参照と承認済み予定作成を許可";
+  voiceCalendarNoteEl.textContent = englishVoice
+    ? "Separate from Google sign-in and microphone access. Calendar create requires native per-call approval and Broker readback."
+    : "Googleログインやマイク権限とは別の許可です。Calendar作成は毎回ネイティブ承認とBroker readbackを要求します。";
   renderSegment(voiceLayoutEl, [
     { id: "compact", label: state.settings.language === "en" ? "Compact" : "コンパクト" },
     { id: "expanded", label: state.settings.language === "en" ? "Expanded" : "展開" },
@@ -621,6 +645,14 @@ aiNativeEl.addEventListener("change", () => {
 
 voiceEnabledEl.addEventListener("change", () => {
   update("settings.setVoiceEnabled", { enabled: voiceEnabledEl.checked });
+});
+
+voiceOpenAIKeyConfigureEl.addEventListener("click", () => {
+  update("settings.configureVoiceOpenAIKey");
+});
+
+voiceOpenAIKeyDeleteEl.addEventListener("click", () => {
+  update("settings.deleteVoiceOpenAIKey");
 });
 
 voiceCalendarAccessEl.addEventListener("change", () => {

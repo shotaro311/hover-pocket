@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
+using HoverPocket.Shell.Services;
 using HoverPocket.Shell.Windows;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
@@ -101,12 +102,108 @@ internal sealed class SettingsWindow : Window
         _bridgeAttachment = _bridgeController.Attach(
             dispatcher,
             BridgeSurface.Settings,
-            () => this);
+            () => this,
+            voiceOpenAIKeyPrompt: PromptOpenAIRealtimeKey,
+            voiceOpenAIKeyDeleteDecision: ConfirmOpenAIRealtimeKeyDeletion);
         webView.CoreWebView2.WebMessageReceived += async (_, args) =>
         {
             await dispatcher.HandleRawMessageAsync(args.TryGetWebMessageAsString());
         };
         webView.CoreWebView2.Navigate(SettingsUrl);
+    }
+
+    private OpenAIRealtimeApiKey? PromptOpenAIRealtimeKey()
+    {
+        var english = _bridgeController.CurrentSettings.Language == AppLanguage.English;
+        var dialog = new Window
+        {
+            Owner = this,
+            Title = english ? "OpenAI Realtime API key" : "OpenAI Realtime APIキー",
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            WindowStyle = WindowStyle.ToolWindow,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            MinWidth = 460
+        };
+        var stack = new StackPanel { Margin = new Thickness(24) };
+        stack.Children.Add(new TextBlock
+        {
+            Text = english
+                ? "The key is stored only in Windows Credential Manager. It is never sent to this Settings WebView."
+                : "APIキーはWindows Credential Managerだけに保存され、この設定WebViewには返されません。",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 12)
+        });
+        var password = new PasswordBox
+        {
+            MinWidth = 390,
+            MaxLength = 512
+        };
+        stack.Children.Add(password);
+        var actions = new StackPanel
+        {
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Right,
+            Margin = new Thickness(0, 16, 0, 0)
+        };
+        var cancel = new System.Windows.Controls.Button
+        {
+            Content = english ? "Cancel" : "キャンセル",
+            IsCancel = true,
+            MinWidth = 96,
+            Padding = new Thickness(12, 7, 12, 7)
+        };
+        var save = new System.Windows.Controls.Button
+        {
+            Content = english ? "Save" : "保存",
+            MinWidth = 96,
+            Margin = new Thickness(10, 0, 0, 0),
+            Padding = new Thickness(12, 7, 12, 7),
+            IsDefault = true
+        };
+        save.Click += (_, _) => dialog.DialogResult = true;
+        actions.Children.Add(cancel);
+        actions.Children.Add(save);
+        stack.Children.Add(actions);
+        dialog.Content = stack;
+        if (dialog.ShowDialog() != true)
+        {
+            password.Clear();
+            return null;
+        }
+        try
+        {
+            return new OpenAIRealtimeApiKey(password.Password);
+        }
+        catch (InvalidOperationException)
+        {
+            System.Windows.MessageBox.Show(
+                this,
+                english ? "The API key format is invalid." : "APIキーの形式が正しくありません。",
+                dialog.Title,
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return null;
+        }
+        finally
+        {
+            password.Clear();
+        }
+    }
+
+    private bool ConfirmOpenAIRealtimeKeyDeletion()
+    {
+        var english = _bridgeController.CurrentSettings.Language == AppLanguage.English;
+        return System.Windows.MessageBox.Show(
+            this,
+            english
+                ? "Delete the OpenAI Realtime API key from Windows Credential Manager? Voice will stop until a key is configured again."
+                : "OpenAI Realtime APIキーをWindows Credential Managerから削除しますか？再設定するまでVoiceは停止します。",
+            english ? "Delete OpenAI API key" : "OpenAI APIキーを削除",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No) == MessageBoxResult.Yes;
     }
 
     private static string ResolveUiFolder()

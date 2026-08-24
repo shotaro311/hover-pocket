@@ -37,6 +37,7 @@ enum VoiceFoundationVerificationCommand {
         try await verifyDecodedModelsAreResanitized()
         try verifyLocalization()
         try await verifyDefaultOffAndFakeAdapter()
+        try await verifyRealtimeProviderAndMacOSResidualGate()
         try await verifyAppLifetimeDetachAndRestart()
         try await verifyStaleAdapterFailureDoesNotReplaceReadyAdapter()
         try await verifyRecoveryWaitsForCancelledStartup()
@@ -343,6 +344,7 @@ enum VoiceFoundationVerificationCommand {
         await runtime.configure(
             featureEnabled: true,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: nil
         ).value
         runtime.setRootSessionID("root-a")
@@ -366,6 +368,7 @@ enum VoiceFoundationVerificationCommand {
         await runtime.configure(
             featureEnabled: false,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: {
                 factoryCalled = true
                 return FakeVoiceSessionAdapter()
@@ -378,6 +381,7 @@ enum VoiceFoundationVerificationCommand {
         await runtime.configure(
             featureEnabled: true,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: nil
         ).value
         guard runtime.snapshot.mode == .compact,
@@ -414,6 +418,7 @@ enum VoiceFoundationVerificationCommand {
         unsafeGateRuntime.configure(
             featureEnabled: true,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: { unsafeGateAdapter }
         )
         try await waitUntil {
@@ -426,12 +431,88 @@ enum VoiceFoundationVerificationCommand {
         await unsafeGateRuntime.shutdown()
     }
 
+    private static func verifyRealtimeProviderAndMacOSResidualGate() async throws {
+        let suiteName = "hover-pocket-voice-provider-verify-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            throw VoiceFoundationVerificationError.failed("provider_defaults_unavailable")
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = AppSettings(defaults: defaults)
+        guard settings.voiceProvider == .off,
+              !settings.voiceEnabled,
+              OpenAIRealtimeFoundation.modelID == "gpt-realtime-2.1",
+              OpenAIRealtimeFoundation.callsEndpoint.path == "/v1/realtime/calls",
+              !OpenAIRealtimeFoundation.macOSAudioTransportAvailable else {
+            throw VoiceFoundationVerificationError.failed("realtime_provider_defaults")
+        }
+
+        let key = try OpenAIRealtimeAPIKey(String(repeating: "x", count: 32))
+        guard key.description == "[redacted]", key.debugDescription == "[redacted]" else {
+            throw VoiceFoundationVerificationError.failed("realtime_key_redaction")
+        }
+
+        let credentialStore = CountingOpenAIRealtimeCredentialStore()
+        let adapter = OpenAIRealtimeMacOSVoiceSessionAdapter(credentialStore: credentialStore)
+        let gate = await adapter.probeCompatibility()
+        guard !gate.isReady,
+              gate.safeErrorCode == "openai_realtime_macos_transport_an3_b3b",
+              credentialStore.hasCredentialCount == 0,
+              credentialStore.loadCount == 0 else {
+            throw VoiceFoundationVerificationError.failed("macos_an3_b3b_gate_touched_credential")
+        }
+
+        let offRuntime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        var offFactoryCalled = false
+        await offRuntime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            providerID: .off,
+            adapterFactory: {
+                offFactoryCalled = true
+                return FakeVoiceSessionAdapter()
+            }
+        ).value
+        guard !offFactoryCalled, offRuntime.snapshot == .disabled else {
+            throw VoiceFoundationVerificationError.failed("provider_off_side_effect")
+        }
+
+        let oldAdapter = GatedStopVoiceSessionAdapter()
+        let replacement = FakeVoiceSessionAdapter()
+        let switchRuntime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        await switchRuntime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            providerID: .codexAppServer,
+            adapterFactory: { oldAdapter }
+        ).value
+        try await waitUntil { switchRuntime.snapshot.connection == .connected }
+        let switchTask = switchRuntime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            providerID: .openAIRealtimeBYOK,
+            adapterFactory: { replacement }
+        )
+        try await waitUntil { oldAdapter.stopCount == 1 }
+        guard replacement.startCount == 0 else {
+            throw VoiceFoundationVerificationError.failed("provider_switch_started_before_teardown")
+        }
+        oldAdapter.finishStop()
+        await switchTask.value
+        try await waitUntil { switchRuntime.snapshot.connection == .connected }
+        guard replacement.startCount == 1,
+              switchRuntime.snapshot.providerID == .openAIRealtimeBYOK else {
+            throw VoiceFoundationVerificationError.failed("provider_switch_readback")
+        }
+        await switchRuntime.shutdown()
+    }
+
     private static func verifyAppLifetimeDetachAndRestart() async throws {
         let adapter = FakeVoiceSessionAdapter(startFailuresRemaining: 1)
         let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0, 0])
         await runtime.configure(
             featureEnabled: true,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: { adapter }
         ).value
         try await waitUntil {
@@ -561,17 +642,20 @@ enum VoiceFoundationVerificationCommand {
         runtime.configure(
             featureEnabled: true,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: factory
         )
         try await waitUntil { stale.startCount == 1 }
         let disableTask = runtime.configure(
             featureEnabled: false,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: nil
         )
         let replacementTask = runtime.configure(
             featureEnabled: true,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: factory
         )
         stale.failStart()
@@ -597,6 +681,7 @@ enum VoiceFoundationVerificationCommand {
         await runtime.configure(
             featureEnabled: true,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: { oldAdapter }
         ).value
         try await waitUntil { runtime.snapshot.connection == .connected }
@@ -604,6 +689,7 @@ enum VoiceFoundationVerificationCommand {
         let disableTask = runtime.configure(
             featureEnabled: false,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: nil
         )
         try await waitUntil { oldAdapter.stopCount == 1 }
@@ -617,6 +703,7 @@ enum VoiceFoundationVerificationCommand {
         let replacementTask = runtime.configure(
             featureEnabled: true,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: { replacementAdapter }
         )
         await Task.yield()
@@ -646,6 +733,7 @@ enum VoiceFoundationVerificationCommand {
         runtime.configure(
             featureEnabled: true,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: factory
         )
         try await waitUntil { stale.startCount == 1 }
@@ -674,6 +762,7 @@ enum VoiceFoundationVerificationCommand {
         runtime.configure(
             featureEnabled: true,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: { adapter }
         )
         try await waitUntil { runtime.snapshot.connection == .connected }
@@ -702,6 +791,7 @@ enum VoiceFoundationVerificationCommand {
         await runtime.configure(
             featureEnabled: true,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: { oldAdapter }
         ).value
         try await waitUntil { runtime.snapshot.connection == .connected }
@@ -711,11 +801,13 @@ enum VoiceFoundationVerificationCommand {
         let disableTask = runtime.configure(
             featureEnabled: false,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: nil
         )
         let replacementTask = runtime.configure(
             featureEnabled: true,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: { replacementAdapter }
         )
         await Task.yield()
@@ -739,6 +831,7 @@ enum VoiceFoundationVerificationCommand {
         await runtime.configure(
             featureEnabled: true,
             preferredLayout: .compact,
+            providerID: .codexAppServer,
             adapterFactory: { adapter }
         ).value
         try await waitUntil { runtime.snapshot.connection == .connected }
@@ -770,6 +863,24 @@ enum VoiceFoundationVerificationCommand {
         }
         throw VoiceFoundationVerificationError.failed("timeout")
     }
+}
+
+private final class CountingOpenAIRealtimeCredentialStore: OpenAIRealtimeCredentialStoring, @unchecked Sendable {
+    private(set) var hasCredentialCount = 0
+    private(set) var loadCount = 0
+
+    func hasCredential() throws -> Bool {
+        hasCredentialCount += 1
+        return false
+    }
+
+    func load() throws -> OpenAIRealtimeAPIKey? {
+        loadCount += 1
+        return nil
+    }
+
+    func save(_ apiKey: OpenAIRealtimeAPIKey) throws { _ = apiKey }
+    func delete() throws { }
 }
 
 @MainActor

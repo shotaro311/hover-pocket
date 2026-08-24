@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FOUNDATION_FIXTURE = ROOT / "contracts" / "voice" / "an3-a-foundation-fixture.json"
 WINDOWS_RUNTIME_FIXTURE = ROOT / "contracts" / "voice" / "an3-b1-windows-runtime-fixture.json"
 WINDOWS_CAPABILITY_FIXTURE = ROOT / "contracts" / "voice" / "an3-b2-windows-capability-fixture.json"
+OPENAI_REALTIME_FIXTURE = ROOT / "contracts" / "voice" / "an3-b3a-openai-realtime-byok-fixture.json"
 
 
 def fail(message: str) -> None:
@@ -20,6 +21,7 @@ def main() -> None:
     fixture = json.loads(FOUNDATION_FIXTURE.read_text(encoding="utf-8"))
     runtime_fixture = json.loads(WINDOWS_RUNTIME_FIXTURE.read_text(encoding="utf-8"))
     capability_fixture = json.loads(WINDOWS_CAPABILITY_FIXTURE.read_text(encoding="utf-8"))
+    realtime_fixture = json.loads(OPENAI_REALTIME_FIXTURE.read_text(encoding="utf-8"))
     compact_height = fixture["designTokens"]["compactHeight"]
     provider_kinds = fixture["providerKinds"]
     modes = fixture["modes"]
@@ -108,6 +110,15 @@ def main() -> None:
     ).read_text(encoding="utf-8")
     mac_runtime = (
         ROOT / "Sources" / "HoverPocket" / "Voice" / "VoiceFoundation.swift"
+    ).read_text(encoding="utf-8")
+    mac_realtime_provider = (
+        ROOT / "Sources" / "HoverPocket" / "Voice" / "OpenAIRealtimeProvider.swift"
+    ).read_text(encoding="utf-8")
+    mac_keychain = (
+        ROOT / "Sources" / "HoverPocket" / "Services" / "GoogleOAuthKeychainStore.swift"
+    ).read_text(encoding="utf-8")
+    mac_settings = (
+        ROOT / "Sources" / "HoverPocket" / "Views" / "SettingsView.swift"
     ).read_text(encoding="utf-8")
     mac_window = (
         ROOT / "Sources" / "HoverPocket" / "Windowing" / "HoverWindowController.swift"
@@ -234,6 +245,54 @@ def main() -> None:
     windows_settings_js = (
         ROOT / "windows" / "ui" / "settings" / "settings.js"
     ).read_text(encoding="utf-8")
+    windows_settings_window = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Settings"
+        / "SettingsWindow.cs"
+    ).read_text(encoding="utf-8")
+    windows_realtime_capabilities = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Voice"
+        / "OpenAIRealtimeCapabilityRuntime.cs"
+    ).read_text(encoding="utf-8")
+    windows_realtime_coordinator = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Voice"
+        / "OpenAIRealtimeVoiceCoordinator.cs"
+    ).read_text(encoding="utf-8")
+    windows_realtime_verifier = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Voice"
+        / "OpenAIRealtimeVoiceVerifier.cs"
+    ).read_text(encoding="utf-8")
+    windows_voice_provider_runtime = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Voice"
+        / "VoiceProviderRuntime.cs"
+    ).read_text(encoding="utf-8")
+    windows_credentials = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Services"
+        / "GoogleOAuthCredentialStore.cs"
+    ).read_text(encoding="utf-8")
 
     provider_pos = index_html.find('data-provider-container')
     voice_pos = index_html.find('data-voice-lane')
@@ -263,7 +322,8 @@ def main() -> None:
     if "accessibilityLabel(\"Voice Lane\")" not in mac_voice:
         if "localized(japanese: \"音声レーン\", english: \"Voice Lane\")" not in mac_voice:
             fail("macOS Voice accessibility region missing")
-    if "VoiceLaneLocalization" not in mac_voice or "音声接続はAN3-Aではまだ利用できません。" not in mac_voice:
+    if "VoiceLaneLocalization" not in mac_voice \
+            or "macOSのOpenAI Realtime音声transportはAN3-B3Bまで利用できません" not in mac_voice:
         fail("macOS Voice Japanese/English localization missing")
     if "ScrollView" not in mac_voice:
         fail("macOS Voice internal scroll missing")
@@ -317,9 +377,22 @@ def main() -> None:
             or 'settings.setVoiceCalendarAccess' not in windows_settings_js \
             or 'voiceCalendarAccessGranted' not in bridge:
         fail("Windows Voice Calendar Host grant controls missing")
-    if 'private readonly SemaphoreSlim _voiceSettingsTransitionGate = new(1, 1);' not in bridge \
-            or bridge.count('await _voiceSettingsTransitionGate.WaitAsync') != 2:
-        fail("Windows Voice enable and Calendar grant transitions are not serialized by the Host")
+    if 'private readonly SemaphoreSlim _voiceSettingsTransitionGate = new(1, 1);' not in bridge:
+        fail("Windows Voice settings transition gate is missing")
+    for transition_method in (
+        "SetVoiceEnabledAsync",
+        "SetVoiceProviderAsync",
+        "ConfigureVoiceOpenAIKeyAsync",
+        "DeleteVoiceOpenAIKeyAsync",
+        "SetVoiceCalendarAccessAsync",
+    ):
+        transition_start = bridge.find(f"private async Task<object?> {transition_method}")
+        transition_end = bridge.find("\n    private ", transition_start + 1)
+        transition_body = bridge[transition_start:transition_end]
+        if transition_start < 0 \
+                or "await _voiceSettingsTransitionGate.WaitAsync" not in transition_body \
+                or "_voiceSettingsTransitionGate.Release();" not in transition_body:
+            fail(f"Windows Voice transition is not serialized: {transition_method}")
     calendar_transition = bridge[
         bridge.find("private async Task<object?> SetVoiceCalendarAccessAsync"):
         bridge.find("private bool ApproveVoiceCalendarAccess")
@@ -697,12 +770,166 @@ def main() -> None:
             or 'RunCaseAsync("dynamic-tool-roundtrip"' not in windows_verifier:
         fail("AN3-B1 deterministic transport regressions are incomplete")
 
+    if realtime_fixture["phase"] != "AN3-B3A" \
+            or realtime_fixture["model"] != "gpt-realtime-2.1":
+        fail("AN3-B3A fixture identity/model mismatch")
+    if realtime_fixture["providerSelection"] != {
+        "default": "off",
+        "ids": ["off", "openai_realtime_byok", "codex_app_server"],
+        "silentFallback": False,
+        "stopOldBeforeStartNew": True,
+    }:
+        fail("AN3-B3A provider selection contract mismatch")
+    realtime_contract = realtime_fixture["openAIRealtime"]
+    if realtime_contract["endpoint"] != "https://api.openai.com/v1/realtime/calls" \
+            or realtime_contract["transport"] != "webrtc" \
+            or not realtime_contract["hostOwnsCredential"] \
+            or realtime_contract["maximumSdpBytes"] != 262_144 \
+            or realtime_contract["maximumEventBytes"] != 65_536 \
+            or realtime_contract["maximumFunctionOutputBytes"] != 32_768 \
+            or realtime_contract["maximumActiveLeases"] != 1:
+        fail("AN3-B3A Realtime endpoint/bounds contract mismatch")
+    expected_realtime_tools = {
+        ("calendar_events_list", "calendar.events.list", 1, "permission_grant", "verified"),
+        ("calendar_event_create", "calendar.event.create", 1, "per_call", "verified"),
+        ("timer_countdown_start", "timer.countdown.start", 1, "broker_policy", "verified"),
+    }
+    actual_realtime_tools = {
+        (
+            item["name"],
+            item["capabilityId"],
+            item["capabilityVersion"],
+            item["approval"],
+            item["readback"],
+        )
+        for item in realtime_contract["tools"]
+    }
+    if actual_realtime_tools != expected_realtime_tools \
+            or any(realtime_contract["ambientTools"].values()):
+        fail("AN3-B3A exact Capability tool surface drifted")
+    macos_realtime = realtime_fixture["macos"]
+    if macos_realtime != {
+        "credentialStore": "keychain",
+        "providerAndCredentialSeam": True,
+        "audioTransportAvailable": False,
+        "residualGate": "AN3-B3B",
+        "failsBeforeCredentialRead": True,
+        "failsBeforeNetwork": True,
+    }:
+        fail("macOS AN3-B3B residual gate contract mismatch")
+    mac_realtime_adapter = mac_realtime_provider[
+        mac_realtime_provider.find("final class OpenAIRealtimeMacOSVoiceSessionAdapter"):
+        mac_realtime_provider.find("final class FailClosedVoiceProviderAdapter")
+    ]
+    if 'static let modelID = "gpt-realtime-2.1"' not in mac_realtime_provider \
+            or 'https://api.openai.com/v1/realtime/calls' not in mac_realtime_provider \
+            or "static let macOSAudioTransportAvailable = false" not in mac_realtime_provider \
+            or "credentialStore.load" in mac_realtime_adapter \
+            or "URLSession" in mac_realtime_adapter \
+            or "throw OpenAIRealtimeMacOSTransportError.unavailableUntilAN3B3B" not in mac_realtime_adapter:
+        fail("macOS OpenAI Realtime seam crossed the AN3-B3B residual gate")
+    if "providerID: providerID" not in mac_app \
+            or "VoiceProviderAdapterFactory.factory(providerID: providerID)" not in mac_app \
+            or "Publishers.CombineLatest3" not in mac_app \
+            or "settings.$voiceProvider.removeDuplicates()" not in mac_app:
+        fail("macOS Voice provider/settings are not composed into the Host runtime")
+    if "func delete() throws" not in mac_realtime_provider \
+            or "let status = SecItemDelete(baseQuery() as CFDictionary)" not in mac_keychain \
+            or "status == errSecSuccess || status == errSecItemNotFound" not in mac_keychain \
+            or "guard try !openAIRealtimeKeychain.hasCredential()" not in mac_settings:
+        fail("macOS OpenAI Keychain deletion lacks result propagation or readback")
+    if 'public const string ModelId = "gpt-realtime-2.1";' not in windows_realtime_coordinator \
+            or 'public const string CallsEndpoint = "https://api.openai.com/v1/realtime/calls";' not in windows_realtime_coordinator \
+            or "MaximumFunctionOutputBytes = 32_768" not in windows_realtime_coordinator \
+            or '"gpt-realtime"' in windows_realtime_coordinator:
+        fail("Windows OpenAI Realtime model/endpoint/output bounds regressed")
+    if not all(value in windows_realtime_capabilities for value in (
+        'CalendarListTool = "calendar_events_list"',
+        'CalendarCreateTool = "calendar_event_create"',
+        'TimerStartTool = "timer_countdown_start"',
+        "CapabilityIds.CalendarList",
+        "CapabilityIds.CalendarCreate",
+        "CapabilityIds.TimerStart",
+        "CapabilityOrigin.Voice",
+        "CapabilityReadbackStatus.Verified",
+        '"idempotency_conflict"',
+        "Correlation(sessionId, callId)",
+    )):
+        fail("Windows Realtime functions bypass Registry/Broker, readback, or call-id idempotency")
+    if "OpenAIRealtimeContract.MaximumFunctionOutputBytes" not in windows_realtime_coordinator \
+            or "OpenAIRealtimeVoiceVerifier().Run()" not in windows_app \
+            or "repeated_call_executed_more_than_once" not in windows_realtime_verifier \
+            or "tool_surface_not_exact" not in windows_realtime_verifier \
+            or "provider_switch_overlapped_transport" not in windows_realtime_verifier \
+            or "oversized_sdp_content_length_not_rejected" not in windows_realtime_verifier:
+        fail("Windows AN3-B3A deterministic verifier is incomplete")
+    if "ReadBoundedRemoteSdpAsync" not in windows_realtime_coordinator \
+            or "ReadAsStreamAsync(cancellationToken)" not in windows_realtime_coordinator \
+            or "MaximumSdpBytes + 1" not in windows_realtime_coordinator \
+            or "ReadAsStringAsync" in windows_realtime_coordinator:
+        fail("Windows Realtime SDP answer is not bounded before allocation")
+    if "VoiceProviderIds.OpenAIRealtimeByok" not in windows_voice_provider_runtime \
+            or "StopAndDisposeActiveAsync(CancellationToken.None)" not in windows_voice_provider_runtime \
+            or 'data-voice-provider' not in windows_settings_html \
+            or 'settings.setVoiceProvider' not in windows_settings_js \
+            or 'settings.configureVoiceOpenAIKey' not in windows_settings_js \
+            or 'settings.deleteVoiceOpenAIKey' not in windows_settings_js:
+        fail("Windows explicit provider selection or Host-owned credential UI is incomplete")
+    provider_transition = bridge[
+        bridge.find("private async Task<object?> SetVoiceProviderAsync"):
+        bridge.find("private async Task<object?> ConfigureVoiceOpenAIKeyAsync")
+    ]
+    if "RollbackVoiceProviderTransitionAsync" not in provider_transition \
+            or "previousSettings" not in provider_transition \
+            or 'voice_provider_transition_failed_closed' not in provider_transition:
+        fail("Windows provider/settings transition does not roll back or fail closed")
+    enabled_transition = bridge[
+        bridge.find("private async Task<object?> SetVoiceEnabledAsync"):
+        bridge.find("private async Task<object?> SetVoiceProviderAsync")
+    ]
+    if "RollbackVoiceProviderTransitionAsync" not in enabled_transition \
+            or 'voice_enabled_transition_failed_closed' not in enabled_transition \
+            or enabled_transition.find("SetFeatureEnabledAsync") > enabled_transition.find("SaveSettings(updated)"):
+        fail("Windows Voice enabled/runtime transition is not transactional")
+    rollback_transition = bridge[
+        bridge.find("private async Task<bool> RollbackVoiceProviderTransitionAsync"):
+        bridge.find("private async Task<object?> ConfigureVoiceOpenAIKeyAsync")
+    ]
+    if "await ForceVoiceRuntimeOffAsync();" not in rollback_transition \
+            or "_settingsStore.Save(normalized);" not in rollback_transition \
+            or rollback_transition.find("_settingsStore.Save(normalized);") > rollback_transition.find("CurrentSettings = normalized;"):
+        fail("Windows terminal Voice rollback is not durably fail-closed")
+    delete_key_transition = bridge[
+        bridge.find("private async Task<object?> DeleteVoiceOpenAIKeyAsync"):
+        bridge.find("private async Task<object?> SetVoiceLayoutAsync")
+    ]
+    if "ApproveVoiceOpenAIKeyDeletion" not in delete_key_transition \
+            or "_openAIRealtimeCredentialStore.HasCredential()" not in delete_key_transition \
+            or "voice_key_delete_unverified" not in delete_key_transition \
+            or "voiceOpenAIKeyDeleteDecision: ConfirmOpenAIRealtimeKeyDeletion" not in windows_settings_window \
+            or "MessageBoxResult.No" not in windows_settings_window:
+        fail("Windows OpenAI key deletion lacks Host-owned confirmation or readback")
+    save_settings = bridge[
+        bridge.find("private void SaveSettings"):
+        bridge.find("private async Task<object> PublishStateAsync")
+    ]
+    if save_settings.find("_settingsStore.Save(normalized)") > save_settings.find("CurrentSettings = normalized"):
+        fail("Windows in-memory settings mutate before durable persistence")
+    if 'File.Move(temporaryPath, SettingsPath, overwrite: true);' not in (
+        ROOT / "windows" / "src" / "HoverPocket.Shell" / "Configuration" / "UserSettingsStore.cs"
+    ).read_text(encoding="utf-8"):
+        fail("Windows settings persistence is not replace-on-success")
+    if "OpenAIRealtimeCredentialStore" not in windows_credentials \
+            or "CryptographicOperations.ZeroMemory(bytes);" not in windows_credentials \
+            or "Marshal.Copy(bytes, 0, blob, bytes.Length);" not in windows_credentials:
+        fail("Windows OpenAI credential material is not zeroed before unmanaged release")
+
     print(
         "PASS voice-foundation contract: "
         f"{matrix_cases} geometry/state cases, root scope, default-off, "
         "legacy lane negative regression, internal scroll, accessibility, "
         "Windows explicit-origin microphone, fenced Realtime transport, "
-        "and AN3-B2 Calendar/Timer Broker slice"
+        "AN3-B2 Calendar/Timer Broker slice, and AN3-B3A OpenAI Realtime BYOK gates"
     )
 
 

@@ -183,3 +183,168 @@ internal static class VoiceTimerApprovalDialog
         return dialog;
     }
 }
+
+internal sealed class VoiceCalendarCreateApprovalCoordinator
+{
+    private readonly object _sync = new();
+    private readonly Queue<DateTimeOffset> _promptStarts = new();
+    private readonly Func<DateTimeOffset> _now;
+    private bool _active;
+
+    public VoiceCalendarCreateApprovalCoordinator(Func<DateTimeOffset>? now = null)
+    {
+        _now = now ?? (() => DateTimeOffset.UtcNow);
+    }
+
+    public async Task<bool> RequestAsync(
+        VoiceCalendarCreateApprovalRequest request,
+        Func<VoiceCalendarCreateApprovalRequest, CancellationToken, Task<bool>> present,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(present);
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            var now = _now();
+            while (_promptStarts.TryPeek(out var started)
+                && now - started >= VoiceTimerApprovalCoordinator.PromptWindow)
+            {
+                _promptStarts.Dequeue();
+            }
+            if (_active || _promptStarts.Count >= VoiceTimerApprovalCoordinator.MaximumPromptsPerWindow)
+            {
+                throw new CapabilityBrokerException("CAPABILITY_RATE_LIMITED", "voice_calendar_approval");
+            }
+            _active = true;
+            _promptStarts.Enqueue(now);
+        }
+
+        try
+        {
+            return await present(request, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_sync)
+            {
+                _active = false;
+            }
+        }
+    }
+}
+
+internal static class VoiceCalendarCreateApprovalDialog
+{
+    public static async Task<bool> ShowAsync(
+        Wpf.Window owner,
+        VoiceCalendarCreateApprovalRequest request,
+        bool english,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var dispatcher = owner.Dispatcher;
+        if (dispatcher.HasShutdownStarted)
+        {
+            return false;
+        }
+
+        Wpf.Window? dialog = null;
+        var operation = dispatcher.InvokeAsync(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!owner.IsVisible)
+            {
+                return false;
+            }
+            dialog = Build(owner, request, english);
+            return dialog.ShowDialog() == true;
+        });
+        try
+        {
+            return await operation.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _ = operation.Abort();
+            try
+            {
+                await dispatcher.InvokeAsync(() =>
+                {
+                    if (dialog?.IsVisible == true)
+                    {
+                        dialog.Close();
+                    }
+                }).Task.ConfigureAwait(false);
+            }
+            catch (TaskCanceledException)
+            {
+            }
+            throw;
+        }
+    }
+
+    private static Wpf.Window Build(
+        Wpf.Window owner,
+        VoiceCalendarCreateApprovalRequest request,
+        bool english)
+    {
+        var dialog = new Wpf.Window
+        {
+            Owner = owner,
+            Title = english ? "Approve Calendar event" : "Calendar予定を承認",
+            WindowStartupLocation = Wpf.WindowStartupLocation.CenterOwner,
+            WindowStyle = Wpf.WindowStyle.ToolWindow,
+            ResizeMode = Wpf.ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            SizeToContent = Wpf.SizeToContent.WidthAndHeight,
+            MinWidth = 440,
+            MaxWidth = 620,
+            Background = new WpfMedia.SolidColorBrush(WpfMedia.Color.FromRgb(24, 24, 24)),
+            Foreground = WpfMedia.Brushes.White
+        };
+        var content = new WpfControls.StackPanel
+        {
+            Margin = new Wpf.Thickness(24),
+            Orientation = WpfControls.Orientation.Vertical
+        };
+        content.Children.Add(new WpfControls.TextBlock
+        {
+            Text = english
+                ? $"Title: {request.Title}\nStart: {request.Start}\nEnd: {request.End}\nAll day: {request.IsAllDay}\n\nCreate this Calendar event?"
+                : $"予定名: {request.Title}\n開始: {request.Start}\n終了: {request.End}\n終日: {(request.IsAllDay ? "はい" : "いいえ")}\n\nこの予定をCalendarに作成しますか？",
+            TextWrapping = Wpf.TextWrapping.Wrap,
+            FontSize = 15,
+            MaxWidth = 560
+        });
+        var actions = new WpfControls.StackPanel
+        {
+            Margin = new Wpf.Thickness(0, 20, 0, 0),
+            HorizontalAlignment = Wpf.HorizontalAlignment.Right,
+            Orientation = WpfControls.Orientation.Horizontal
+        };
+        var reject = new WpfControls.Button
+        {
+            Content = english ? "Cancel" : "キャンセル",
+            IsCancel = true,
+            IsDefault = true,
+            MinWidth = 104,
+            Padding = new Wpf.Thickness(14, 8, 14, 8)
+        };
+        var approve = new WpfControls.Button
+        {
+            Content = english ? "Create" : "作成",
+            MinWidth = 104,
+            Margin = new Wpf.Thickness(12, 0, 0, 0),
+            Padding = new Wpf.Thickness(14, 8, 14, 8)
+        };
+        WpfAutomationProperties.SetName(reject, english ? "Reject Calendar event" : "Calendar予定を拒否");
+        WpfAutomationProperties.SetName(approve, english ? "Approve Calendar event" : "Calendar予定を承認");
+        approve.Click += (_, _) => dialog.DialogResult = true;
+        reject.Click += (_, _) => dialog.DialogResult = false;
+        actions.Children.Add(reject);
+        actions.Children.Add(approve);
+        content.Children.Add(actions);
+        dialog.Content = content;
+        return dialog;
+    }
+}

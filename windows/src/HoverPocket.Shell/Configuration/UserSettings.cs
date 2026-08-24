@@ -25,6 +25,8 @@ internal sealed class UserSettings
 
     public bool VoiceEnabled { get; set; }
 
+    public string VoiceProviderId { get; set; } = VoiceProviderIds.Off;
+
     public bool VoiceCalendarAccessGranted { get; set; }
 
     public VoiceLaneLayoutPreference VoiceLaneLayout { get; set; } = VoiceLaneLayoutPreference.Compact;
@@ -61,6 +63,7 @@ internal sealed class UserSettings
             AiNativeEnabled = AiNativeEnabled,
             CapabilityDataRetentionPeriod = CapabilityDataRetentionPeriod,
             VoiceEnabled = VoiceEnabled,
+            VoiceProviderId = VoiceProviderId,
             VoiceCalendarAccessGranted = VoiceCalendarAccessGranted,
             VoiceLaneLayout = VoiceLaneLayout,
             ClipboardPrivateMode = ClipboardPrivateMode,

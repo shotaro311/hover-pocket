@@ -391,7 +391,7 @@
       "schema": "voice-lane-state.schema.json",
       "errorCode": "VOICE_ROOT_SCOPE_VIOLATION",
       "errorLocation": "$.sessions[2].rootSessionId",
-      "expectedDigest": "sha256:b1bb187e5d4b3f8e4900f908151e772992de26dc409695f51d2dbd7a43b3bda3"
+      "expectedDigest": "sha256:c6b1d29f761bfc6a301b402d4ba137d53117ac23ade125acb778a3f9afe4e7c2"
     },
     {
       "id": "invalid-voice-fullscreen",
@@ -401,7 +401,7 @@
       "schema": "voice-lane-state.schema.json",
       "errorCode": "SCHEMA_CONST_MISMATCH",
       "errorLocation": "$.ui.fullscreen",
-      "expectedDigest": "sha256:399bd1d2e6c193f48e947d0b300af2b622dabedcf62f90c8c7c47564f34a2f75"
+      "expectedDigest": "sha256:b39ba2c2efd2c5e48c640d92265378f3f1c2416e6dee82a535b44c17330e58af"
     },
     {
       "id": "valid-agent-session-summary-root",

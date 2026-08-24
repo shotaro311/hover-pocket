@@ -12,6 +12,7 @@ using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Services;
 using HoverPocket.Shell.Settings;
 using HoverPocket.Shell.Verification;
+using HoverPocket.Shell.Voice;
 using HoverPocket.Shell.Windows;
 
 namespace HoverPocket.Shell;
@@ -55,7 +56,9 @@ public partial class App : System.Windows.Application
         if (options.VerifyVoice)
         {
             VerifyConsole.AttachParent();
-            Environment.ExitCode = new VoiceFoundationVerifier().Run();
+            var foundationResult = new VoiceFoundationVerifier().Run();
+            var realtimeResult = new OpenAIRealtimeVoiceVerifier().Run();
+            Environment.ExitCode = foundationResult == 0 && realtimeResult == 0 ? 0 : 1;
             Shutdown();
             return;
         }

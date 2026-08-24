@@ -175,7 +175,8 @@ internal sealed class SettingsVerifier
             || !written.StartWithWindows
             || written.AutoCheckForUpdates
             || !written.AiNativeEnabled
-            || !written.VoiceEnabled
+            || written.VoiceEnabled
+            || written.VoiceProviderId != VoiceProviderIds.Off
             || !written.VoiceCalendarAccessGranted
             || written.VoiceLaneLayout != VoiceLaneLayoutPreference.Expanded
             || written.CapabilityDataRetentionPeriod != CapabilityDataRetentionPeriod.SevenDays)
@@ -254,6 +255,8 @@ internal sealed class SettingsVerifier
         var store = UserSettingsStore.CreateTemporary("SettingsResetGenerationVerify");
         var enabled = UserSettingsStore.CreateDefault(registry.ProviderIds);
         enabled.AiNativeEnabled = true;
+        enabled.VoiceProviderId = VoiceProviderIds.CodexAppServer;
+        enabled.VoiceEnabled = true;
         store.Save(enabled);
         using var controller = new PanelBridgeController(
             registry,
@@ -332,6 +335,8 @@ internal sealed class SettingsVerifier
         var store = UserSettingsStore.CreateTemporary("SettingsPocketBridgeVerify");
         var enabled = UserSettingsStore.CreateDefault(registry.ProviderIds);
         enabled.AiNativeEnabled = true;
+        enabled.VoiceProviderId = VoiceProviderIds.CodexAppServer;
+        enabled.VoiceEnabled = true;
         store.Save(enabled);
         var voiceCoordinator = new CodexVoiceCoordinator(featureEnabled: true);
         voiceCoordinator.SetRootSessionId("root-private");
@@ -577,6 +582,7 @@ internal sealed class SettingsVerifier
             || defaults.AiNativeEnabled
             || defaults.CapabilityDataRetentionPeriod != CapabilityDataRetentionPeriod.NinetyDays
             || defaults.VoiceEnabled
+            || defaults.VoiceProviderId != VoiceProviderIds.Off
             || defaults.VoiceCalendarAccessGranted
             || defaults.VoiceLaneLayout != VoiceLaneLayoutPreference.Compact
             || !defaults.RememberLastSelectedProvider
