@@ -34,3 +34,4 @@
 
 - Draft PR #37の初回Windows run `32722365200`はRelease / Debug build、Voice foundation、Voice E2E isolation、PowerShell構文まで成功した。rendered UIだけ、通常のUI verifier用temporary rootまでexternal integration無効として扱い、`clipboard.getState`を登録しなかったため失敗した。
 - external integrationを無効化する境界を`IsIsolatedVoiceE2E`だけへ戻し、既存UI verifierのbridge surfaceを維持した。E2E専用rootのfail-closedは変更していない。
+- 修正後run `32722634593`はRelease / Debug build、Settings、Voice foundation、Voice E2E isolation、PowerShell構文、Updater、署名contract、rendered WebView UIを含む全stepが成功した。Draft PR #37はcode head `b8b1a912d9f657fd0792740c39b39c66d127fac3`で`MERGEABLE / CLEAN`、review / comment 0件、remote parity `0 / 0`をreadbackした。

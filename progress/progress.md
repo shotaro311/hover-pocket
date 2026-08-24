@@ -12,7 +12,7 @@ status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-gr
 - WebRTCのmicrophone、remote audio track / playback、teardownをHostへsafe eventとして返し、transcript本文・音声・SDP・API key・path・PIDを含まないallowlist receiptへatomic保存する。Timer Capability Brokerの実行後readbackもbooleanで記録する。
 - `voice_e2e_windows.ps1`へBuild / Run / Readback / Stopを追加した。ローカルではWindows UI JavaScript構文と`git diff --check`が成功した。このMacに.NET SDK / PowerShellがないため、C# warnings-as-errors、Debug verifier、PowerShell、rendered WebView2はDraft PR Windows CIを必須gateとする。
 - 現行OpenAI coordinatorはtranscript eventをsnapshotへ反映しないため、ProのmacOS artifactで共通event契約を確定してからWindowsへ統合する。実API keyを使うWindows物理E2EはCI後のWindows実機gateであり、秘密値・transcript・音声・SDPをartifactへ残さない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an3-b3b-windows-e2e.md`。
-- Draft PR #37の初回Windows run `32722365200`は新規Release / Debug build、Voice E2E isolation、PowerShell構文まで成功した。rendered UIだけ、通常UI verifierのtemporary rootへE2E用integration無効化を誤適用して`clipboard.getState`が未登録となったため失敗した。`IsIsolatedVoiceE2E`境界へ限定する修正を追加し、再CIをgateとする。
+- Draft PR #37の初回Windows run `32722365200`で検出した通常UI verifierの`clipboard.getState`未登録を、E2E隔離境界を`IsIsolatedVoiceE2E`へ限定して修正した。修正後run `32722634593`はRelease / Debug build、Voice E2E isolation、PowerShell構文、rendered WebView UIを含む全stepが成功した。code head `b8b1a912d9f657fd0792740c39b39c66d127fac3`は`Draft / MERGEABLE / CLEAN`、review / comment 0件、remote parity `0 / 0`である。
 
 ## 2026-08-24 AI-native AN5 Codex confinement audit
 
