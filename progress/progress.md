@@ -5,6 +5,14 @@ updated_by: codex
 status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-draft-pr-ci-green; an3-b3b-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
 ---
 
+## 2026-08-24 AI-native AN3-B3B Windows実音声E2E隔離基盤
+
+- `codex/ai-native-an3b3b-windows-e2e`をAN3-B3A exact head `16090d7`から分離し、Pro担当中のmacOS Realtime transportと重ならないWindows実機E2E基盤を実装した。
+- Debug専用fresh temp rootへ設定、WebView2、Provider data、Capability Broker、receiptを閉じ、本番と別のCredential Manager targetとIPCを使う。ReleaseはE2E flagsを拒否し、Updater / startup / Google Calendar / Controls / Clipboard / Codex app-server / AI-nativeはfail closedにした。
+- WebRTCのmicrophone、remote audio track / playback、teardownをHostへsafe eventとして返し、transcript本文・音声・SDP・API key・path・PIDを含まないallowlist receiptへatomic保存する。Timer Capability Brokerの実行後readbackもbooleanで記録する。
+- `voice_e2e_windows.ps1`へBuild / Run / Readback / Stopを追加した。ローカルではWindows UI JavaScript構文と`git diff --check`が成功した。このMacに.NET SDK / PowerShellがないため、C# warnings-as-errors、Debug verifier、PowerShell、rendered WebView2はDraft PR Windows CIを必須gateとする。
+- 現行OpenAI coordinatorはtranscript eventをsnapshotへ反映しないため、ProのmacOS artifactで共通event契約を確定してからWindowsへ統合する。実API keyを使うWindows物理E2EはCI後のWindows実機gateであり、秘密値・transcript・音声・SDPをartifactへ残さない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an3-b3b-windows-e2e.md`。
+
 ## 2026-08-24 AI-native AN5 Codex confinement audit
 
 - 通知された旧AN3-B3A Pro deliveryは、delivery ID / expected state hash付き`claim-synthesis`が`run state hash does not match the completion signal`で失敗した。receipt・成果物を読まず、適用・`mark-done`・同run再利用を行っていない。後続の正本runは別deliveryとして検証・terminal化済みである。

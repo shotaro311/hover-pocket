@@ -45,7 +45,10 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly PocketAppGenerationController? _pocketAppGenerationController;
     private readonly PocketAppRuntimeActivationRegistry? _generatedPocketApps;
     private readonly VoiceProviderCoordinator _voiceCoordinator;
-    private readonly OpenAIRealtimeCredentialStore _openAIRealtimeCredentialStore = new();
+    private readonly IOpenAIRealtimeCredentialStore _openAIRealtimeCredentialStore;
+    private readonly bool _externalIntegrationsEnabled;
+    private readonly VoiceE2EReceiptStore? _voiceE2EReceiptStore;
+    private readonly UserSettings? _isolatedVoiceE2EDefaults;
     private readonly VoiceTimerApprovalCoordinator _voiceTimerApprovalCoordinator = new();
     private readonly VoiceCalendarCreateApprovalCoordinator _voiceCalendarCreateApprovalCoordinator = new();
     private readonly SemaphoreSlim _voiceSettingsTransitionGate = new(1, 1);
@@ -69,13 +72,25 @@ internal sealed class PanelBridgeController : IDisposable
         UserSettings settings,
         IStartupRegistrationService? startupRegistration = null,
         UpdaterService? updaterService = null,
-        CodexVoiceCoordinator? voiceCoordinator = null)
+        CodexVoiceCoordinator? voiceCoordinator = null,
+        IOpenAIRealtimeCredentialStore? openAIRealtimeCredentialStore = null,
+        CalendarStore? calendarStore = null,
+        bool externalIntegrationsEnabled = true,
+        VoiceE2EReceiptStore? voiceE2EReceiptStore = null,
+        UserSettings? isolatedVoiceE2EDefaults = null)
     {
         _providerRegistry = providerRegistry;
         _settingsStore = settingsStore;
         _startupRegistration = startupRegistration ?? new RunKeyStartupRegistrationService();
         _updaterService = updaterService ?? new UpdaterService();
-        _calendarBridgeController = new CalendarBridgeController();
+        _openAIRealtimeCredentialStore = openAIRealtimeCredentialStore
+            ?? new OpenAIRealtimeCredentialStore();
+        _externalIntegrationsEnabled = externalIntegrationsEnabled;
+        _voiceE2EReceiptStore = voiceE2EReceiptStore;
+        _isolatedVoiceE2EDefaults = isolatedVoiceE2EDefaults?.Clone();
+        _calendarBridgeController = new CalendarBridgeController(
+            calendarStore,
+            externalIntegrationsEnabled);
         var stickyStore = new StickyNotesStore(Path.Combine(settingsStore.RootDirectory, "sticky"));
         var timerStore = new TimerStore(Path.Combine(settingsStore.RootDirectory, "timer"));
         _stickyBridgeController = new StickyBridgeController(stickyStore);
@@ -142,6 +157,7 @@ internal sealed class PanelBridgeController : IDisposable
         _resolvedVoiceLaneMode = VoicePanelGeometry.PreferredMode(CurrentSettings);
         _voiceCoordinator.SnapshotChanged += OnVoiceSnapshotChanged;
         _voiceCoordinator.TransportSignal += OnVoiceTransportSignal;
+        RecordVoiceE2EReceipt(_voiceCoordinator.Snapshot);
         _aiNativeExecutionLease = CurrentSettings.AiNativeEnabled
             ? new PocketAppActivationLease()
             : null;
@@ -364,6 +380,10 @@ internal sealed class PanelBridgeController : IDisposable
             Register("voice.confirmRealtime", ConfirmVoiceRealtimeAsync);
             Register("voice.abortRealtime", AbortVoiceRealtimeAsync);
             Register("voice.handleRealtimeEvent", HandleVoiceRealtimeEventAsync);
+            if (_voiceE2EReceiptStore is not null)
+            {
+                Register("voice.mediaEvent", RecordVoiceMediaEventAsync);
+            }
             Register("voice.setMuted", SetVoiceMutedAsync);
             Register("voice.setLayout", SetVoiceLayoutAsync);
             Register("voice.endSession", EndVoiceSessionAsync);
@@ -419,9 +439,12 @@ internal sealed class PanelBridgeController : IDisposable
             _pocketAppGenerationController?.AttachSettings(dispatcher, approvalOwner);
         }
         _calculatorBridgeHandlers.Register(dispatcher);
-        _controlsBridgeController.Attach(dispatcher);
-        _calendarBridgeController.Attach(dispatcher);
-        _clipboardBridgeController.Attach(dispatcher);
+        if (_externalIntegrationsEnabled)
+        {
+            _controlsBridgeController.Attach(dispatcher);
+            _calendarBridgeController.Attach(dispatcher);
+            _clipboardBridgeController.Attach(dispatcher);
+        }
         _stickyBridgeController.Attach(dispatcher);
         _timerBridgeHandlers.Register(dispatcher);
         return new BridgeAttachment(() =>
@@ -456,6 +479,7 @@ internal sealed class PanelBridgeController : IDisposable
         _controlsBridgeController.Dispose();
         _voiceCoordinator.SnapshotChanged -= OnVoiceSnapshotChanged;
         _voiceCoordinator.TransportSignal -= OnVoiceTransportSignal;
+        _voiceE2EReceiptStore?.RecordMediaEvent(VoiceE2EMediaEventKind.SafeClose);
         _voiceCoordinator.Dispose();
         _aiNativeExecutionLease?.Invalidate();
         _pocketAppHostController?.Dispose();
@@ -874,6 +898,11 @@ internal sealed class PanelBridgeController : IDisposable
     {
         var providerId = ReadRequiredString(parameters, "id");
         var visible = ReadRequiredBool(parameters, "visible");
+        if (_isolatedVoiceE2EDefaults is not null
+            && (!string.Equals(providerId, "timer", StringComparison.OrdinalIgnoreCase) || !visible))
+        {
+            return await PublishStateAsync(cancellationToken);
+        }
         if (FindProvider(providerId) is null)
         {
             throw new InvalidOperationException($"Unknown provider: {providerId}");
@@ -1003,6 +1032,10 @@ internal sealed class PanelBridgeController : IDisposable
     private async Task<object?> SetStartWithWindowsAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         var enabled = ReadRequiredBool(parameters, "enabled");
+        if (enabled && !_externalIntegrationsEnabled)
+        {
+            return await PublishStateAsync(cancellationToken);
+        }
         if (CurrentSettings.StartWithWindows != enabled || IsStartupRegistered() != enabled)
         {
             _startupRegistration.SetRegistered(enabled);
@@ -1017,6 +1050,10 @@ internal sealed class PanelBridgeController : IDisposable
     private async Task<object?> SetAutoCheckForUpdatesAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         var enabled = ReadRequiredBool(parameters, "enabled");
+        if (enabled && !_externalIntegrationsEnabled)
+        {
+            return await PublishStateAsync(cancellationToken);
+        }
         if (CurrentSettings.AutoCheckForUpdates != enabled)
         {
             var updated = CurrentSettings.Clone();
@@ -1034,6 +1071,10 @@ internal sealed class PanelBridgeController : IDisposable
         CancellationToken cancellationToken)
     {
         var enabled = ReadRequiredBool(parameters, "enabled");
+        if (enabled && _isolatedVoiceE2EDefaults is not null)
+        {
+            return await PublishStateAsync(cancellationToken);
+        }
         PocketAppStateTransitionLease? stateTransition = null;
         if (enabled && !CurrentSettings.AiNativeEnabled)
         {
@@ -1122,6 +1163,10 @@ internal sealed class PanelBridgeController : IDisposable
 
     private async Task<object?> SetClipboardPrivateModeAsync(bool enabled, CancellationToken cancellationToken)
     {
+        if (!enabled && !_externalIntegrationsEnabled)
+        {
+            return await PublishStateAsync(cancellationToken);
+        }
         if (CurrentSettings.ClipboardPrivateMode != enabled)
         {
             var updated = CurrentSettings.Clone();
@@ -1147,7 +1192,9 @@ internal sealed class PanelBridgeController : IDisposable
             _aiNativeExecutionLease?.Invalidate();
             _pocketAppGenerationController?.SetEnabled(false);
             _generatedPocketApps?.SetEnabled(false);
-            SaveSettings(UserSettingsStore.CreateDefault(_providerRegistry.ProviderIds));
+            SaveSettings(
+                _isolatedVoiceE2EDefaults?.Clone()
+                ?? UserSettingsStore.CreateDefault(_providerRegistry.ProviderIds));
             await _voiceCoordinator.SetFeatureEnabledAsync(false, CancellationToken.None);
             await _voiceCoordinator.SetProviderAsync(VoiceProviderIds.Off, CancellationToken.None);
             _resolvedVoiceLaneMode = VoiceLaneMode.Disabled;
@@ -1196,6 +1243,15 @@ internal sealed class PanelBridgeController : IDisposable
     {
         _ = parameters;
         cancellationToken.ThrowIfCancellationRequested();
+        if (!_externalIntegrationsEnabled)
+        {
+            return new
+            {
+                status = "disabled",
+                updateAvailable = false,
+                message = "Update checks are disabled in isolated Voice E2E mode."
+            };
+        }
         return await _updaterService.CheckWithPromptsAsync(cancellationToken: cancellationToken);
     }
 
@@ -1256,6 +1312,12 @@ internal sealed class PanelBridgeController : IDisposable
         if (!string.Equals(rawProvider, providerId, StringComparison.Ordinal))
         {
             throw new CodexAppServerProtocolException("voice_provider_invalid");
+        }
+        if (_isolatedVoiceE2EDefaults is not null
+            && providerId != VoiceProviderIds.OpenAIRealtimeByok
+            && providerId != VoiceProviderIds.Off)
+        {
+            return await PublishStateAsync(cancellationToken);
         }
         await _voiceSettingsTransitionGate.WaitAsync(cancellationToken);
         try
@@ -1376,6 +1438,7 @@ internal sealed class PanelBridgeController : IDisposable
         try
         {
             _openAIRealtimeCredentialStore.Save(apiKey);
+            _voiceE2EReceiptStore?.RecordCredentialState(credentialCurrent: true);
             if (CurrentSettings.VoiceEnabled
                 && CurrentSettings.VoiceProviderId == VoiceProviderIds.OpenAIRealtimeByok)
             {
@@ -1419,6 +1482,7 @@ internal sealed class PanelBridgeController : IDisposable
                 {
                     throw new CodexAppServerProtocolException("voice_key_delete_unverified");
                 }
+                _voiceE2EReceiptStore?.RecordCredentialState(credentialCurrent: false);
                 if (restart)
                 {
                     var disabled = CurrentSettings.Clone();
@@ -1502,6 +1566,10 @@ internal sealed class PanelBridgeController : IDisposable
         {
             var enabled = ReadRequiredBool(parameters, "enabled");
             cancellationToken.ThrowIfCancellationRequested();
+            if (enabled && !_externalIntegrationsEnabled)
+            {
+                return await PublishStateAsync(cancellationToken);
+            }
             if (enabled
                 && !CurrentSettings.VoiceCalendarAccessGranted
                 && !ApproveVoiceCalendarAccess(approvalOwner, approvalDecision))
@@ -1639,6 +1707,7 @@ internal sealed class PanelBridgeController : IDisposable
         _voiceCoordinator.ConfirmRealtimeConnected(
             ReadRequiredInt(parameters, "generation"),
             ReadRequiredString(parameters, "threadId"));
+        _voiceE2EReceiptStore?.RecordMediaEvent(VoiceE2EMediaEventKind.TransportAttached);
         return Task.FromResult<object?>(new { connected = true });
     }
 
@@ -1649,18 +1718,38 @@ internal sealed class PanelBridgeController : IDisposable
         await _voiceCoordinator.AbortRealtimeStartAsync(
             ReadRequiredString(parameters, "reason"),
             cancellationToken);
+        _voiceE2EReceiptStore?.RecordMediaEvent(VoiceE2EMediaEventKind.TransportDetached);
         return new { aborted = true };
+    }
+
+    private Task<object?> RecordVoiceMediaEventAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var value = ReadRequiredString(parameters, "kind");
+        if (!VoiceE2EReceiptStore.TryParseMediaEvent(value, out var eventKind))
+        {
+            throw new InvalidOperationException("Unknown Voice E2E media event.");
+        }
+        _voiceE2EReceiptStore?.RecordMediaEvent(eventKind);
+        return Task.FromResult<object?>(new { recorded = true });
     }
 
     private async Task<object?> HandleVoiceRealtimeEventAsync(
         JsonElement? parameters,
         CancellationToken cancellationToken)
     {
+        var eventPayload = ReadRequiredObject(parameters, "event");
         var result = await _voiceCoordinator.HandleRealtimeFunctionEventAsync(
             ReadRequiredInt(parameters, "generation"),
             ReadRequiredString(parameters, "threadId"),
-            ReadRequiredObject(parameters, "event"),
+            eventPayload,
             cancellationToken);
+        if (IsVerifiedTimerCapabilityReadback(eventPayload, result))
+        {
+            _voiceE2EReceiptStore?.RecordTimerCapabilityReadback();
+        }
         return new
         {
             handled = result.Handled,
@@ -1669,10 +1758,40 @@ internal sealed class PanelBridgeController : IDisposable
         };
     }
 
+    private static bool IsVerifiedTimerCapabilityReadback(
+        JsonElement eventPayload,
+        VoiceRealtimeFunctionResult result)
+    {
+        if (!result.Handled
+            || string.IsNullOrWhiteSpace(result.Output)
+            || !eventPayload.TryGetProperty("name", out var name)
+            || name.ValueKind != JsonValueKind.String
+            || name.GetString() != OpenAIRealtimeCapabilityRuntime.TimerStartTool)
+        {
+            return false;
+        }
+        try
+        {
+            using var document = JsonDocument.Parse(result.Output);
+            var root = document.RootElement;
+            return root.TryGetProperty("status", out var status)
+                && status.ValueKind == JsonValueKind.String
+                && status.GetString() == "succeeded"
+                && root.TryGetProperty("readback", out var readback)
+                && readback.ValueKind == JsonValueKind.String
+                && readback.GetString() == "verified";
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     private async Task<object?> EndVoiceSessionAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         _ = parameters;
         await _voiceCoordinator.StopRealtimeAsync(cancellationToken);
+        _voiceE2EReceiptStore?.RecordMediaEvent(VoiceE2EMediaEventKind.TransportDetached);
         return await PublishStateAsync(cancellationToken);
     }
 
@@ -1908,7 +2027,29 @@ internal sealed class PanelBridgeController : IDisposable
                 : VoiceLaneMode.Disabled;
             SettingsChanged?.Invoke(this, CurrentSettings);
         }
+        RecordVoiceE2EReceipt(snapshot);
         _ = PostStateEventOnUiThreadAsync("voice.stateChanged");
+    }
+
+    private void RecordVoiceE2EReceipt(CodexVoiceSnapshot snapshot)
+    {
+        if (_voiceE2EReceiptStore is null)
+        {
+            return;
+        }
+        var credentialCurrent = false;
+        try
+        {
+            credentialCurrent = _openAIRealtimeCredentialStore.HasCredential();
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        _voiceE2EReceiptStore.RecordSnapshot(
+            snapshot,
+            CurrentSettings.VoiceEnabled,
+            CurrentSettings.VoiceProviderId,
+            credentialCurrent);
     }
 
     private void OnVoiceTransportSignal(object? sender, VoiceTransportSignal signal)

@@ -17,15 +17,20 @@ internal sealed class SettingsWindow : Window
 
     private readonly PanelBridgeController _bridgeController;
     private readonly bool _enableDevTools;
+    private readonly string _webViewDataDirectory;
     private readonly Grid _root = new();
     private IDisposable? _bridgeAttachment;
     private WebView2? _webView;
     private Task? _initializationTask;
 
-    public SettingsWindow(PanelBridgeController bridgeController, bool enableDevTools)
+    public SettingsWindow(
+        PanelBridgeController bridgeController,
+        bool enableDevTools,
+        string webViewDataDirectory)
     {
         _bridgeController = bridgeController;
         _enableDevTools = enableDevTools;
+        _webViewDataDirectory = webViewDataDirectory;
         ApplyLanguage(_bridgeController.CurrentSettings.Language);
         Width = 620;
         Height = 720;
@@ -61,10 +66,7 @@ internal sealed class SettingsWindow : Window
         {
             CreationProperties = new CoreWebView2CreationProperties
             {
-                UserDataFolder = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "HoverPocket",
-                    "SettingsWebView2")
+                UserDataFolder = _webViewDataDirectory
             },
             DefaultBackgroundColor = System.Drawing.Color.FromArgb(255, 8, 10, 13)
         };

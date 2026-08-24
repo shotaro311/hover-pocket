@@ -7,7 +7,9 @@ using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Display;
 using HoverPocket.Shell.Interop;
 using HoverPocket.Shell.Providers;
+using HoverPocket.Shell.Providers.Calendar;
 using HoverPocket.Shell.Providers.Timer;
+using HoverPocket.Shell.Services;
 using HoverPocket.Shell.Settings;
 using HoverPocket.Shell.Voice;
 using Microsoft.Win32;
@@ -33,6 +35,7 @@ internal sealed class HoverShellController : IDisposable
     private readonly Dispatcher _dispatcher;
     private readonly bool _enablePanelWebView;
     private readonly bool _enableDevTools;
+    private readonly HoverPocketApplicationData _applicationData;
     private readonly PanelBridgeController _panelBridgeController;
     private readonly DisplayLayoutService _displayLayoutService = new();
     private readonly List<AccessSurfaceWindow> _accessSurfaces = [];
@@ -63,14 +66,21 @@ internal sealed class HoverShellController : IDisposable
         Dispatcher dispatcher,
         ShellSettings settings,
         ProviderRegistry providerRegistry,
+        HoverPocketApplicationData applicationData,
         UserSettingsStore userSettingsStore,
         bool enablePanelWebView,
         bool enableDevTools,
-        Services.UpdaterService? updaterService = null)
+        UpdaterService? updaterService = null,
+        IOpenAIRealtimeCredentialStore? openAIRealtimeCredentialStore = null,
+        CalendarStore? calendarStore = null,
+        IStartupRegistrationService? startupRegistration = null,
+        VoiceE2EReceiptStore? voiceE2EReceiptStore = null,
+        UserSettings? isolatedVoiceE2EDefaults = null)
     {
         _dispatcher = dispatcher;
         _enablePanelWebView = enablePanelWebView;
         _enableDevTools = enableDevTools;
+        _applicationData = applicationData;
         var userSettings = userSettingsStore.LoadForBootstrap(providerRegistry.ProviderIds);
         if (settings.DisplayPlacementOverride is { } displayPlacementOverride)
         {
@@ -82,7 +92,13 @@ internal sealed class HoverShellController : IDisposable
             providerRegistry,
             userSettingsStore,
             userSettings,
-            updaterService: updaterService);
+            startupRegistration: startupRegistration,
+            updaterService: updaterService,
+            openAIRealtimeCredentialStore: openAIRealtimeCredentialStore,
+            calendarStore: calendarStore,
+            externalIntegrationsEnabled: applicationData.ExternalIntegrationsEnabled,
+            voiceE2EReceiptStore: voiceE2EReceiptStore,
+            isolatedVoiceE2EDefaults: isolatedVoiceE2EDefaults);
         _panelBridgeController.SettingsChanged += OnPanelSettingsChanged;
         _panelBridgeController.SettingsOpenRequested += OnSettingsOpenRequested;
         _panelBridgeController.TimerAlertFired += OnTimerAlertFired;
@@ -390,7 +406,10 @@ internal sealed class HoverShellController : IDisposable
             return;
         }
 
-        _settingsWindow = new SettingsWindow(_panelBridgeController, _enableDevTools);
+        _settingsWindow = new SettingsWindow(
+            _panelBridgeController,
+            _enableDevTools,
+            _applicationData.SettingsWebViewDataDirectory);
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         _settingsWindow.Show();
         _settingsWindow.Activate();
@@ -598,7 +617,11 @@ internal sealed class HoverShellController : IDisposable
 
     private PanelWindow CreatePanelWindow()
     {
-        return new PanelWindow(_panelBridgeController, _enablePanelWebView, _enableDevTools);
+        return new PanelWindow(
+            _panelBridgeController,
+            _enablePanelWebView,
+            _enableDevTools,
+            _applicationData.PanelWebViewDataDirectory);
     }
 
     private void AttachPanelWindow(PanelWindow panel)

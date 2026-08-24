@@ -31,6 +31,7 @@ internal sealed class PanelWindow : NoActivateWindow
     private readonly PanelBridgeController _bridgeController;
     private readonly bool _enableWebView;
     private readonly bool _enableDevTools;
+    private readonly string _webViewDataDirectory;
     private readonly Grid _root = new();
     private readonly Border _fallbackVisual;
     private readonly System.Windows.Controls.Image _morphImage = new()
@@ -54,12 +55,17 @@ internal sealed class PanelWindow : NoActivateWindow
 
     public AnimationDiagnostics LastAnimationDiagnostics { get; private set; } = AnimationDiagnostics.Empty;
 
-    public PanelWindow(PanelBridgeController bridgeController, bool enableWebView, bool enableDevTools)
+    public PanelWindow(
+        PanelBridgeController bridgeController,
+        bool enableWebView,
+        bool enableDevTools,
+        string webViewDataDirectory)
         : base(allowsTransparency: false)
     {
         _bridgeController = bridgeController;
         _enableWebView = enableWebView;
         _enableDevTools = enableDevTools;
+        _webViewDataDirectory = webViewDataDirectory;
 
         var metrics = PanelSizeCatalog.Get(_bridgeController.CurrentSettings.PanelSize);
         Width = metrics.Width;
@@ -704,10 +710,7 @@ internal sealed class PanelWindow : NoActivateWindow
             CreationProperties = new CoreWebView2CreationProperties
             {
                 AdditionalBrowserArguments = DisableGpuRequested() ? "--disable-gpu" : string.Empty,
-                UserDataFolder = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "HoverPocket",
-                    "WebView2")
+                UserDataFolder = _webViewDataDirectory
             },
             DefaultBackgroundColor = System.Drawing.Color.Transparent
         };
