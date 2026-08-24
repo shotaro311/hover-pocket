@@ -29,3 +29,8 @@
 - macOSとWindowsで同じtranscript event / session model契約を確定する。Windows receiptは件数を受け取れるが、現headのOpenAI coordinatorはまだtranscript eventをsnapshotへ反映しない。
 - Windows実機で実API keyをE2E専用Credential Manager targetへ保存し、mic入力、remote audio一往復、Timer承認、Broker readback、Stop後のcredential削除をreadbackする。
 - 実API key、transcript本文、音声、SDPはGit、progress、CI artifactへ保存しない。
+
+## Draft PR CI follow-up
+
+- Draft PR #37の初回Windows run `32722365200`はRelease / Debug build、Voice foundation、Voice E2E isolation、PowerShell構文まで成功した。rendered UIだけ、通常のUI verifier用temporary rootまでexternal integration無効として扱い、`clipboard.getState`を登録しなかったため失敗した。
+- external integrationを無効化する境界を`IsIsolatedVoiceE2E`だけへ戻し、既存UI verifierのbridge surfaceを維持した。E2E専用rootのfail-closedは変更していない。

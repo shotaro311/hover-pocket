@@ -119,7 +119,7 @@ internal sealed class HoverPocketApplicationData
             safeName,
             Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        return new HoverPocketApplicationData(root, false, false);
+        return new HoverPocketApplicationData(root, false, true);
     }
 
     internal static HoverPocketApplicationData ProductionDefault() => Production();
