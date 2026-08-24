@@ -335,6 +335,8 @@ internal sealed class SettingsVerifier
         var store = UserSettingsStore.CreateTemporary("SettingsPocketBridgeVerify");
         var enabled = UserSettingsStore.CreateDefault(registry.ProviderIds);
         enabled.AiNativeEnabled = true;
+        enabled.VoiceProviderId = VoiceProviderIds.CodexAppServer;
+        enabled.VoiceEnabled = true;
         store.Save(enabled);
         var voiceCoordinator = new CodexVoiceCoordinator(featureEnabled: true);
         voiceCoordinator.SetRootSessionId("root-private");
