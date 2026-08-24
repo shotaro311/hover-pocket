@@ -2,25 +2,24 @@
 project_slug: hover-menu-preview
 updated: 2026-08-24
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-pro-running; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-draft-pr-ci-green; an3-b3b-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
 ---
 
 ## 2026-08-24 AI-native AN5 Codex confinement audit
 
-- 通知された旧AN3-B3A Pro deliveryは、delivery ID / expected state hash付き`claim-synthesis`が`run state hash does not match the completion signal`で失敗した。receipt・成果物を読まず、適用・`mark-done`・同run再利用を行っていない。正本runのrequired-return bridgeは同一runの通知待ちを継続する。
+- 通知された旧AN3-B3A Pro deliveryは、delivery ID / expected state hash付き`claim-synthesis`が`run state hash does not match the completion signal`で失敗した。receipt・成果物を読まず、適用・`mark-done`・同run再利用を行っていない。後続の正本runは別deliveryとして検証・terminal化済みである。
 - Codex CLI 0.145.0のnamed permission profileを実コードから確認し、`:minimal`と生成workspaceだけをread、network無効、shell environment継承なしにした。直接sandboxとGPT-5.6 Solの実`codex exec` canaryで、workspaceだけがreadable、兄弟worktree・`~/.codex/auth.json`・Obsidian Vaultはunreadableになった。
 - ファイル隔離はmacOSで成立したが、API keyを環境変数・引数・auth fileへ置かないHost-owned credential brokerとWindows実機canaryは未実装である。現行macOS / Windows production generatorのfail-closedを維持する。
-- 採用案はKeychain / Credential Manager、one-time capability、private Unix socket / named pipe、isolated `CODEX_HOME` / `HOME`、command-backed bearer auth、helper path denyを組み合わせる。AN3-B3Aのcredential store exact diff確定後、別の小さいstacked branchで実装する。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an5-codex-confinement-audit.md`。
+- 採用案はKeychain / Credential Manager、one-time capability、private Unix socket / named pipe、isolated `CODEX_HOME` / `HOME`、command-backed bearer auth、helper path denyを組み合わせる。AN3-B3Aのcredential store exact diffは確定したため、次は別の小さいstacked branchで実装する。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an5-codex-confinement-audit.md`。
 
 ## 2026-08-24 AI-native AN3-B3A Realtime BYOK provider
 
-- 現行Codex app-server `0.145.0`の生成schemaを再監査し、`dynamicTools`は存在するが、ambient built-in toolを0へ固定できるpositive policyを確認できなかった。既存Codex providerはproduction開始前のfail-closedを維持する。
-- 承認済み代替案として、OpenAI Realtime BYOK providerのAN3-B3Aを隔離branch `codex/ai-native-an3b3-realtime-provider`、exact base `b95ef1681510781a38ccbb0b95cbf51384faa594`で開始した。Windowsは既存WebView WebRTCを再利用し、Host-only credential、Registry由来toolだけ、Capability Broker承認/readbackへ接続する。macOS実音声transportはAN3-B3Bの明示gateに残す。
-- 最初のPro runはsource添付が1MB上限を超え、外部送信前に停止した。通知時state hashと再生成後stateが不一致だったためclaimをfail-closedし、成果物適用・`mark-done`・同run再利用を行っていない。
-- 新run `20260824-051101-hoverpocket-an3-b3a-realtime-byok-windows-vertical-slice-patch`は、47ではなく45ファイル、974,060文字、source SHA-256 `f1a51b24...ba9063`へ絞った。GPT-5.6 Sol、Node 24.19.0、専用ChatGPT Project、required-return bridgeをdry-runで確認後、status `running`をreadbackした。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an3-b3a-realtime-byok.md`。
-- exact baseの受入前baselineとして、Swift warnings-as-errors build、Voice契約42件、共通契約15 schema / 71 fixture、Windows Panel / Settings JavaScript構文、`git diff --check`が成功した。Pro patch適用後は同じ検証を再実行し、差分で回帰を判定する。
-- OpenAI公式Realtime契約を受入条件へ追加した。Hostがmultipart `sdp / session`で`/v1/realtime/calls`を呼び、標準API keyをWebViewへ渡さない。Registry descriptorはRealtime functionの`parameters`へ有限変換し、Broker結果は同じ`call_id`の`function_call_output`後に`response.create`する。model IDはapp-owned allowlistだけを許可する。
-- GitHub再確認では、stack最上段Draft PR #31はhead `b95ef168`、7チェック成功、`MERGEABLE / CLEAN`、PR #25〜#31の未解決review threadは0件だった。ただし正式release readback、timestamped Windows署名、package identity、macOS署名・notarization・Gatekeeper、両OSinstall/update/rollback transitionの実行ジョブは`SKIPPED`であり、AN8配布完了の証拠にはしていない。
+- GPT-5.6 SolのPro artifact `changes.patch`を、delivery ID / state hashの一意claim後にexact base `b95ef1681510781a38ccbb0b95cbf51384faa594`へ適用した。artifactは187,716 bytes、SHA-256 `0b089aee...c952`、standalone検証済みである。CodexはWindows build、Settings fixture、API key削除readback、Voice transition rollback、SDP応答上限の局所修正だけを追加した。
+- Windowsへ明示provider選択、既定OFF、Credential Manager、Host-owned `/v1/realtime/calls` SDP交換、`gpt-realtime-2.1`、Registry由来Calendar list/create・Timer startだけのfunction surface、Capability Broker承認/readback、call ID / generation / root / size fenceを実装した。既存Codex app-server providerの互換gateは弱めていない。
+- macOSへ同じprovider設定、Keychain、adapter seamを追加した。production audio adapterはAN3-B3Bまで明示的にunavailableであり、実音声transportへ暗黙fallbackしない。
+- ローカルではSwift warnings-as-errors、Voice runtime / 静的42件、Capability 20 handler、Broker 21 descriptor / 20 handler、Pocket Surface、Panel layout 128件、Timer、共通contract 15 schema / 71 fixture、Windows UI構文、Settings生成先、`git diff --check`が成功した。
+- Draft PR [#36](https://github.com/shotaro311/hover-pocket/pull/36) head `16cc7a0`で、Windows [32717846919](https://github.com/shotaro311/hover-pocket/actions/runs/32717846919)、macOS [32717846913](https://github.com/shotaro311/hover-pocket/actions/runs/32717846913)、3 OS contract / byte比較 [32717847153](https://github.com/shotaro311/hover-pocket/actions/runs/32717847153)、Router [32717844455](https://github.com/shotaro311/hover-pocket/actions/runs/32717844455)を含む7/7 checkが成功した。PRは`Draft / MERGEABLE / CLEAN`、review / comment / unresolved thread 0件、remote parity `0 / 0`である。
+- Pro run `20260824-144554-hoverpocket-an3-b3a-realtime-byok-windows-vertical-slice-patch`はlocal verification `PASS`、受入7/7 `PASS`、release gate readyをreadback後に`done`へfinalizeした。bridge terminal receipt SHA-256は`6404ac9f...f9c`で、同deliveryの再適用を禁止した。AN3-B3BにはmacOS実transport、Windows実機microphone / remote audio一往復、native-owned media isolationを残す。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an3-b3a-realtime-byok.md`。
 
 ## 2026-08-24 AI-native AN8-C workspace backup / restore
 

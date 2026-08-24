@@ -69,15 +69,47 @@ Codex app-serverに正のtool allowlistがない現状でも、一般配布で�
 | lifecycle | Voice OFF、hide、stop、crash、restartのCodex transport teardown verifierは成功 | Realtime peer / data channel / local track / remote audio / pending callを同じgenerationで閉じ、stale eventを受理しない |
 | macOS | provider-neutral adapterとfake verifierだけでproduction audioなし | provider ID、Keychain、adapter seam、未実装時fail-closedを追加し、実音声transportはAN3-B3Bと明示する |
 
-## 次の受入gate
+## 実装と受入結果
 
-1. bridge通知をdelivery ID / state hashでclaimする。
-2. receipt、exact base、patch hash、allowed pathを検証する。
-3. patch適用後、Swift warnings-as-errors、Voice contract、Broker/Capability、JavaScript構文をローカル検証する。
-4. Draft PRでWindows Release buildとoffline Realtime verifierを通す。
-5. API key秘匿、正のtool surface、OFF/no-key fail-closed、承認/readbackを独立reviewする。
+- 正本run: `20260824-144554-hoverpocket-an3-b3a-realtime-byok-windows-vertical-slice-patch`
+- Pro route: GPT-5.6 Sol / Pro / builder。開始 `2026-08-24T14:48:39+09:00`、terminal化 `2026-08-24T19:45:02+09:00`。
+- artifact: `changes.patch`、187,716 bytes、SHA-256 `0b089aee0c4ebaab7e37274befe9fb99f3e2047137f9271cb7368313076ec952`。responseとの対応、standalone性、envelope除外を検証した。
+- 適用先: recovery worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an3b3-realtime-byok-recovered`。original dirty worktreeには触れていない。
+- 実装commit: `c702627`。Windows build修正 `6e5226f`、設定契約更新 `44c6f67`、境界fixture修正 `16cc7a0`を積み、remote branch `codex/ai-native-an3b3-realtime-provider`へ反映した。
+- 5件のlow security findingは局所修正した。Keychain削除readback、Windows Voice transition rollback、bounded SDP response、key削除のnative承認/readback、設定保存失敗時のfail-closed rollbackである。生成renderer侵害時のrevocation / media isolationはAN3-B3Bの設計課題として残す。
 
-AN3-B3Aの合格後も、macOS実音声transport、両OS実端末の音声一往復、正式Windows署名release/rollback、人手stack mergeは未完了gateとして残る。
+## ローカル検証
+
+| 検証 | 結果 |
+|---|---|
+| `swift build -Xswiftc -warnings-as-errors` | 成功 |
+| `swift run HoverPocket --verify-voice-foundation` | 成功 |
+| `python3 script/verify_voice_foundation.py` | 42件成功 |
+| `python3 script/verify_pocket_contracts.py` | 15 schema / 71 fixture成功 |
+| `.build/debug/HoverPocket --verify-capabilities` | 20 handler成功 |
+| `.build/debug/HoverPocket --verify-broker` | 21 descriptor / 20 handler、negative 12件成功 |
+| Pocket Surface / Panel layout / Timer | Surface negative 15件、layout 128件、Timer全件成功 |
+| Windows settings target / UI JavaScript / `git diff --check` | 成功 |
+
+## GitHub readback
+
+- Draft PR [#36](https://github.com/shotaro311/hover-pocket/pull/36): head `16cc7a00071921b45a020a9fe9a6dc2004fc55b3`、base `codex/ai-native-an8-backup-restore-core`。
+- Windows [32717846919](https://github.com/shotaro311/hover-pocket/actions/runs/32717846919)でRelease build、Settings surface isolation、Voice foundation、Realtime BYOK offline verifierが成功した。
+- macOS [32717846913](https://github.com/shotaro311/hover-pocket/actions/runs/32717846913)、3 OS contract / byte比較 [32717847153](https://github.com/shotaro311/hover-pocket/actions/runs/32717847153)、Router [32717844455](https://github.com/shotaro311/hover-pocket/actions/runs/32717844455)も成功し、7/7 greenである。
+- `MERGEABLE / CLEAN`、review / comment / unresolved thread 0件、remote parity `0 / 0`を別経路で確認した。
+
+## Pro terminal receipt
+
+- local verification `PASS`、受入条件7/7 `PASS`、release gate `ready_for_publish=true`をreadbackした。
+- runを`done`へfinalizeし、delivery `return-db1915c1a504b221cd25feef9992e237`を`mark-done`した。
+- terminal receiptはgeneration 1 / status `complete`、state SHA-256 `1f0721da...5770`、return bridge SHA-256 `d08b169c...0b23`、receipt SHA-256 `6404ac9f...f9c`である。
+
+## AN3-B3Bへ残すgate
+
+1. macOS production audio transportを実装し、既存のfail-closed adapter seamから置換する。
+2. Windows実機でmicrophone permission、WebRTC接続、remote audio、Calendar read/create、Timer start、承認拒否、stop/restartを一往復検証する。
+3. custom / generated rendererからmedia ownershipを分離し、native-owned audio transport、revocation、disposable isolated WebViewを確認する。
+4. その後も正式Windows署名release / rollbackとstack PRの人手mergeはAN8の別gateとして維持する。
 
 ## GitHub stack readback
 
@@ -85,4 +117,4 @@ AN3-B3Aの合格後も、macOS実音声transport、両OS実端末の音声一往
 - PR #31のWindows、macOS、Ubuntu / macOS / Windows contract、cross-OS比較、PR Routerの7チェックはすべて成功していた。stack PR #25〜#31の未解決review threadは0件だった。
 - PR #29の公開release readbackでは、deterministic metadataとWindows Authenticode verifier syntaxは成功しているが、実際の公開release取得、timestamped Authenticode、Windows package identity、macOS署名・notarization・Gatekeeperは`SKIPPED`である。
 - PR #25のinstall/update/rollback transitionも、macOS package transitionとWindows install/update/rollback/reinstallが`SKIPPED`である。したがってstackの緑色はAN8の正式配布・rollback完了を証明しない。
-- AN3-B3Aのローカルbranchにはremote/upstreamがなく、Pro patch適用・ローカル受入後までDraft PRを作成しない。
+- AN3-B3AはDraft PR #36へ反映済みである。stackの正式merge、署名release、実機音声は上記の未完了gateを満たすまで行わない。
