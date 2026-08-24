@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using HoverPocket.Shell.Capabilities;
 using HoverPocket.Shell.Services;
 
 namespace HoverPocket.Shell.Voice;
@@ -601,8 +602,13 @@ internal sealed class OpenAIRealtimeVoiceCoordinator : IVoiceRuntimeCoordinator
         identifier = string.Empty;
         if (!value.TryGetProperty(name, out var property)
             || property.ValueKind != JsonValueKind.String
-            || property.GetString() is not { } candidate
-            || candidate.EnumerateRunes().Count() is < 1 or > maximumScalars
+            || property.GetString() is not { } candidate)
+        {
+            return false;
+        }
+        var scalarCount = candidate.EnumerateRunes().Count();
+        if (scalarCount < 1
+            || scalarCount > maximumScalars
             || !string.Equals(candidate, VoiceTextSafety.SanitizeIdentifier(candidate), StringComparison.Ordinal))
         {
             return false;

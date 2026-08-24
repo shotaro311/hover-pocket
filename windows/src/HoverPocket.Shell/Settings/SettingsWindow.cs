@@ -143,18 +143,18 @@ internal sealed class SettingsWindow : Window
         stack.Children.Add(password);
         var actions = new StackPanel
         {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Right,
             Margin = new Thickness(0, 16, 0, 0)
         };
-        var cancel = new Button
+        var cancel = new System.Windows.Controls.Button
         {
             Content = english ? "Cancel" : "キャンセル",
             IsCancel = true,
             MinWidth = 96,
             Padding = new Thickness(12, 7, 12, 7)
         };
-        var save = new Button
+        var save = new System.Windows.Controls.Button
         {
             Content = english ? "Save" : "保存",
             MinWidth = 96,
@@ -178,7 +178,7 @@ internal sealed class SettingsWindow : Window
         }
         catch (InvalidOperationException)
         {
-            MessageBox.Show(
+            System.Windows.MessageBox.Show(
                 this,
                 english ? "The API key format is invalid." : "APIキーの形式が正しくありません。",
                 dialog.Title,
@@ -195,7 +195,7 @@ internal sealed class SettingsWindow : Window
     private bool ConfirmOpenAIRealtimeKeyDeletion()
     {
         var english = _bridgeController.CurrentSettings.Language == AppLanguage.English;
-        return MessageBox.Show(
+        return System.Windows.MessageBox.Show(
             this,
             english
                 ? "Delete the OpenAI Realtime API key from Windows Credential Manager? Voice will stop until a key is configured again."

@@ -12,6 +12,7 @@ using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Services;
 using HoverPocket.Shell.Settings;
 using HoverPocket.Shell.Verification;
+using HoverPocket.Shell.Voice;
 using HoverPocket.Shell.Windows;
 
 namespace HoverPocket.Shell;

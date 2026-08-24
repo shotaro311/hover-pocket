@@ -487,7 +487,11 @@ internal sealed class OpenAIRealtimeVoiceVerifier
 
         public string ProviderId { get; } = providerId;
         public event EventHandler<CodexVoiceSnapshot>? SnapshotChanged;
-        public event EventHandler<VoiceTransportSignal>? TransportSignal;
+        public event EventHandler<VoiceTransportSignal>? TransportSignal
+        {
+            add { }
+            remove { }
+        }
         public CodexVoiceSnapshot Snapshot => _snapshot;
 
         public Task InitializeAsync(CancellationToken cancellationToken = default)
