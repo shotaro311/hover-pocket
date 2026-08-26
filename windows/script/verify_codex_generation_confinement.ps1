@@ -5,7 +5,7 @@ param(
 
     [Parameter(ParameterSetName = "Canary")]
     [ValidateSet("elevated", "unelevated")]
-    [string]$SandboxImplementation = "unelevated",
+    [string]$SandboxImplementation = "elevated",
 
     [Parameter(Mandatory = $true, ParameterSetName = "SelfTest")]
     [switch]$SelfTest
@@ -433,7 +433,7 @@ function Invoke-Canary {
             -FilePath $codex `
             -Arguments $arguments `
             -Environment $environment `
-            -TimeoutSeconds 20
+            -TimeoutSeconds 45
         $listenerReached = $acceptTask.Wait(0)
         if ($listenerReached) {
             $acceptTask.Result.Dispose()

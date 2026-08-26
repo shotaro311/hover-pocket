@@ -73,10 +73,10 @@ jobs:
           }
           .\windows\script\verify_codex_generation_confinement.ps1 -SelfTest
 
-      - name: Verify Codex generation confinement in elevated Windows sandbox
+      - name: Verify Codex generation confinement in unelevated Windows fallback
         shell: pwsh
         timeout-minutes: 2
-        run: .\windows\script\verify_codex_generation_confinement.ps1 -CodexBin $env:HOVERPOCKET_CODEX_BIN -SandboxImplementation elevated
+        run: .\windows\script\verify_codex_generation_confinement.ps1 -CodexBin $env:HOVERPOCKET_CODEX_BIN -SandboxImplementation unelevated
 
       - name: Build Release
         run: dotnet build .\windows\HoverPocket.Windows.sln --configuration Release --nologo -p:NuGetAudit=false
