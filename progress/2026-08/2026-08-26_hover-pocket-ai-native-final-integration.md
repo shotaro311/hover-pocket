@@ -48,14 +48,24 @@ AN3-B3BのWindows Voice E2E、macOS Realtime Voice、AN5 Codex credential confin
 - Windows panel / i18n / settings JavaScript構文: PASS
 - `node windows/script/verify_settings_generation_target.mjs`: PASS
 
+## Draft PR / CI readback
+
+- Draft PR: [#39](https://github.com/shotaro311/hover-pocket/pull/39)
+- code head: `43d821702c00e32ebd25068ec9478c59f22d5574`
+- base: PR #36 head `16090d7a86c81ab19d85018462814c7279bb8801`
+- Windows run [32937212403](https://github.com/shotaro311/hover-pocket/actions/runs/32937212403): SUCCESS。Release build、Debug Voice E2E host、Settings、Capabilities、Broker、Pocket Surface、Timer、旧AI lane不在、Voice Foundation、Voice E2E isolation、PowerShell構文、Updater、signing contract、rendered WebView2の全stepが成功した。
+- macOS run [32937212399](https://github.com/shotaro311/hover-pocket/actions/runs/32937212399): SUCCESS。build、Host-owned Voice Lane、Capabilities、Broker / Today Focus、Pocket App / Surface、Timerが成功した。
+- Router run [32937212453](https://github.com/shotaro311/hover-pocket/actions/runs/32937212453): SUCCESS。
+- GitHub readback: `Draft / OPEN / MERGEABLE / CLEAN`、review 0、comment 0、unresolved thread 0、remote parity `0 / 0`。
+- CI成功は自動検証の証拠であり、実マイク、可聴remote audio、署名済み配布の証拠には使わない。
+
 ## 未完了gate
 
-1. final headのWindows Release / Debug build、credential broker、Voice E2E isolation、PowerShell構文、rendered WebView2。ローカルMacに.NET SDK / PowerShellがないためDraft PR CIで検証する。
-2. Windows実機で、default-off、明示enable、実マイク、可聴remote audio、Timer承認/readback、native physical confirmation、Stop後resource 0を確認する。
-3. macOS実機で、default-off、明示マイク操作、実発話 / 可聴remote audio、Calendar grant off、Calendar / Timer承認とreadback、mute / end / WebContent異常時の物理track停止を確認する。
-4. macOS Developer ID / notarization / staple / Gatekeeper / Sparkleと、Windows timestamped Authenticode / Velopack / feedをfinal source artifactで別々に確認する。
-5. install、upgrade、rollback、uninstall、reinstall、user data保持を両OSでreadbackする。
-6. Draft PRをReady、merge、releaseへ進める判断は上記gate完了後に行う。
+1. Windows実機で、default-off、明示enable、実マイク、可聴remote audio、Timer承認/readback、native physical confirmation、Stop後resource 0を確認する。
+2. macOS実機で、default-off、明示マイク操作、実発話 / 可聴remote audio、Calendar grant off、Calendar / Timer承認とreadback、mute / end / WebContent異常時の物理track停止を確認する。
+3. macOS Developer ID / notarization / staple / Gatekeeper / Sparkleと、Windows timestamped Authenticode / Velopack / feedをfinal source artifactで別々に確認する。
+4. install、upgrade、rollback、uninstall、reinstall、user data保持を両OSでreadbackする。
+5. Draft PRをReady、merge、releaseへ進める判断は上記gate完了後に行う。
 
 ## rollback単位
 
