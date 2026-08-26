@@ -790,12 +790,16 @@ internal sealed class PocketAppGenerationVerifier
             !confinementArguments.Contains("--sandbox", StringComparer.Ordinal)
                 && confinementArguments.Contains("--ignore-user-config", StringComparer.Ordinal)
                 && confinementArguments.Contains("--ignore-rules", StringComparer.Ordinal)
+                && confinementJoined.Contains("windows.sandbox=\"elevated\"", StringComparison.Ordinal)
                 && confinementJoined.Contains("default_permissions=\"hoverpocket-generation\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementWorkspace)}=\"read\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementCodexHome)}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementUserHome)}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains("network.enabled=false", StringComparison.Ordinal)
                 && confinementJoined.Contains("shell_environment_policy.inherit=\"none\"", StringComparison.Ordinal)
+                && confinementJoined.Contains("SYSTEMROOT=", StringComparison.Ordinal)
+                && confinementJoined.Contains("WINDIR=", StringComparison.Ordinal)
+                && confinementJoined.Contains("COMSPEC=", StringComparison.Ordinal)
                 && confinementArguments.TakeLast(3).SequenceEqual(["--output-schema", confinementSchema, "-"], StringComparer.Ordinal),
             "generation_codex_named_permission_profile");
         var confinementEnvironment = CodexPocketAppGenerationAdapter.ConfinementEnvironment(

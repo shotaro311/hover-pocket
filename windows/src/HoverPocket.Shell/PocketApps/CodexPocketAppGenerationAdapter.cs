@@ -229,7 +229,7 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
     {
         // The named profile and isolated process environment are prepared below, but
         // production remains disconnected until Host-brokered credentials and a
-        // restricted-token/AppContainer outside-root canary pass on Windows.
+        // native elevated-sandbox outside-root canary pass on a supported Windows host.
         return null;
     }
 
@@ -396,6 +396,13 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             + $"{JsonSerializer.Serialize(normalizedWorkspace)}=\"read\","
             + $"{JsonSerializer.Serialize(normalizedCodexHome)}=\"deny\","
             + $"{JsonSerializer.Serialize(normalizedUserHome)}=\"deny\"}}";
+        var windows = WindowsDirectory();
+        var shellEnvironment = "shell_environment_policy.set={"
+            + $"PATH={JsonSerializer.Serialize(SystemPath())},"
+            + "LANG=\"C\","
+            + $"SYSTEMROOT={JsonSerializer.Serialize(windows)},"
+            + $"WINDIR={JsonSerializer.Serialize(windows)},"
+            + $"COMSPEC={JsonSerializer.Serialize(Path.Combine(windows, "System32", "cmd.exe"))}}}";
         return
         [
             "exec",
@@ -404,11 +411,12 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             "--ignore-rules",
             "--skip-git-repo-check",
             "-c", "approval_policy=\"never\"",
+            "-c", "windows.sandbox=\"elevated\"",
             "-c", "default_permissions=\"hoverpocket-generation\"",
             "-c", filesystem,
             "-c", "permissions.hoverpocket-generation.network.enabled=false",
             "-c", "shell_environment_policy.inherit=\"none\"",
-            "-c", $"shell_environment_policy.set={{PATH={JsonSerializer.Serialize(SystemPath())},LANG=\"C\"}}",
+            "-c", shellEnvironment,
             "--output-schema", normalizedSchema,
             "-"
         ];
