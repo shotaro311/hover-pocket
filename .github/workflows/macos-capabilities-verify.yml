@@ -43,6 +43,7 @@ on:
       - "contracts/pocket/v1/**"
       - "contracts/voice/**"
       - "script/build_and_run.sh"
+      - "script/verify_codex_generation_confinement_macos.py"
       - "script/verify_macos_voice_e2e_receipt.py"
       - "script/verify_macos_realtime_renderer.mjs"
       - "script/verify_voice_foundation.py"
@@ -89,6 +90,7 @@ on:
       - "contracts/pocket/v1/**"
       - "contracts/voice/**"
       - "script/build_and_run.sh"
+      - "script/verify_codex_generation_confinement_macos.py"
       - "script/verify_macos_voice_e2e_receipt.py"
       - "script/verify_macos_realtime_renderer.mjs"
       - "script/verify_voice_foundation.py"
@@ -114,6 +116,8 @@ jobs:
         run: |
           bash -n script/build_and_run.sh
           bash -n script/voice_e2e_macos.sh
+          python3 -m py_compile script/verify_codex_generation_confinement_macos.py
+          python3 script/verify_codex_generation_confinement_macos.py --self-test
           python3 -m py_compile script/verify_macos_voice_e2e_receipt.py
           python3 script/verify_macos_voice_e2e_receipt.py --self-test
           node script/verify_macos_realtime_renderer.mjs

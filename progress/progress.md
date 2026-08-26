@@ -1,9 +1,18 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-08-26
+updated: 2026-08-27
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-draft-pr-ci-green; an3-b3b-windows-security-ci-green-physical-e2e-pending; an3-b3b-macos-draft-pr-ci-green-physical-e2e-pending; macos-voice-e2e-isolation-draft-pr-ci-green-security-clean-physical-e2e-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; an5-credential-broker-draft-pr-ci-green; an5-credential-peer-identity-draft-pr-ci-green-security-clean; an5-credential-mutual-identity-draft-pr-ci-green-security-clean; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; core-ga-final-integration-draft-pr-ci-green-physical-e2e-pending; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-draft-pr-ci-green; an3-b3b-windows-security-ci-green-physical-e2e-pending; an3-b3b-macos-draft-pr-ci-green-physical-e2e-pending; macos-voice-e2e-isolation-draft-pr-ci-green-security-clean-physical-e2e-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; an5-credential-broker-draft-pr-ci-green; an5-credential-peer-identity-draft-pr-ci-green-security-clean; an5-credential-mutual-identity-draft-pr-ci-green-security-clean; macos-codex-confinement-canary-passed-production-off-windows-pending; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; core-ga-final-integration-draft-pr-ci-green-physical-e2e-pending; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
 ---
+
+## 2026-08-27 AI-native AN5 macOS Codex sandbox実行canary
+
+- 本番Pocket App生成の`supportsConfidentialGeneration == false`を維持したまま、固定vendor path、OpenAI Developer ID署名、Team ID、strict codesign、exact `codex-cli 0.145.0`を満たす実行体だけを許可するmacOS verifierを追加した。symlink、非regular file、group / world writable、想定外owner・version・署名は実行前にfail closedで拒否する。
+- fresh temp rootへread-only workspace、deny Codex Home、deny virtual User Home、専用TMPDIRを作り、別sibling rootとloopback listenerを置いた。`codex sandbox -P hoverpocket-generation`でworkspace readのみ成功し、workspace write、Codex Home read、User Home read、outside-root read、loopback接続がすべて拒否されることを実実行でreadbackした。
+- childは10秒上限とprocess group TERM / KILL、stdout / stderr上限、exact JSON結果、stderr canary非露出、validated temp cleanupへ閉じた。receiptはversionとallowlist booleanだけで、秘密値、canary本文、path、PIDを含めない。CIは署名済みCLIの存在へ依存させず、全判定反転とpermission markerを確認する`--self-test`だけを実行する。
+- ローカルでPython self-test、実sandbox canary、symlink CLI拒否、Swift warnings-as-errors build、Pocket App package / lifecycle / generation / migration / health / workspace backup、workflow YAML parse、`git diff --check`が成功した。実canary receiptはsigned executable、workspace read、write denial、両Home / outside-root read denial、network denial、listener未到達、stderr上限をすべてtrueとして返した。
+- exact working-tree Security scan `a020f0d1-bfde-401f-94ab-243146343be9`はsnapshot `codex-security-snapshot/v1:sha256:ff99dad207ee72deafdbf38d21001cb1444b175dfdd61da4a96ee2b4b838ee05`をcoverage complete、reportable finding 0件で封印・再読込した。workflow-only差分とproduction fail-closed root controlも補助surfaceとして確認した。
+- この完了はmacOS Seatbeltのno-secret / no-network境界だけを示す。Host-owned一回限りcredential delivery、実モデル生成、Windows restricted-token / AppContainer canary、実マイク / API Voice E2E、署名、配布は未完了であり、production生成は引き続きoffである。詳細: `progress/2026-08/2026-08-27_hover-pocket-ai-native-final-integration.md`。
 
 ## 2026-08-26 AI-native Core GA final integration candidate
 
