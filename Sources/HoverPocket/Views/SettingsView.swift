@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var openAIRealtimeKeyDraft = ""
     @State private var openAIRealtimeKeyConfigured = false
     @State private var voiceCredentialError: String?
+    @State private var isShowingVoiceCalendarAccessConfirmation = false
     private let openAIRealtimeKeychain = OpenAIRealtimeKeychainStore()
 
     var body: some View {
@@ -102,6 +103,23 @@ struct SettingsView: View {
             Text(localized(
                 japanese: "再実行防止用の実行済み情報は残し、内容と監査ログだけを削除します。",
                 english: "Receipt content and audit logs are deleted. Minimal completion tombstones remain to prevent duplicate execution."
+            ))
+        }
+        .alert(
+            localized(
+                japanese: "Voice Laneにカレンダーアクセスを許可しますか？",
+                english: "Allow Voice Lane to access Calendar?"
+            ),
+            isPresented: $isShowingVoiceCalendarAccessConfirmation
+        ) {
+            Button(localized(japanese: "キャンセル", english: "Cancel"), role: .cancel) {}
+            Button(localized(japanese: "許可", english: "Allow")) {
+                settings.voiceCalendarAccessEnabled = true
+            }
+        } message: {
+            Text(localized(
+                japanese: "今日の予定の読み取りを許可します。予定の作成は、この設定に加えて毎回macOSの確認画面で許可が必要です。",
+                english: "This permits reading today's events. Creating an event still requires approval in a native macOS confirmation every time."
             ))
         }
     }
@@ -484,8 +502,8 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
 
                     Text(localized(
-                        japanese: "AN3-B3AではmacOS音声transportはまだ利用できません。Keychainを含むProvider seamは用意しますが、credential/networkを使う前にAN3-B3B gateでfail-closedします。",
-                        english: "macOS audio transport is not available in AN3-B3A. The provider/Keychain seam is present, but it fails closed at the AN3-B3B gate before credential or network use."
+                        japanese: "APIキーはネイティブ側だけで使用し、音声WebViewには渡しません。Voice Laneを有効にしただけではマイクを開始せず、パネルのマイクボタンを押した時だけ接続します。",
+                        english: "The API key is used only by the native host and is never passed to the audio WebView. Enabling Voice Lane does not start the microphone; connection begins only after pressing the microphone button."
                     ))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
@@ -494,6 +512,24 @@ struct SettingsView: View {
                 .padding(10)
                 .background(.quaternary.opacity(0.22))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                Toggle(
+                    localized(
+                        japanese: "Voice Laneからカレンダーを利用",
+                        english: "Allow Calendar in Voice Lane"
+                    ),
+                    isOn: Binding(
+                        get: { settings.voiceCalendarAccessEnabled },
+                        set: { enabled in
+                            if enabled {
+                                isShowingVoiceCalendarAccessConfirmation = true
+                            } else {
+                                settings.voiceCalendarAccessEnabled = false
+                            }
+                        }
+                    )
+                )
+                .disabled(!settings.voiceEnabled)
             }
 
             if let voiceCredentialError {
@@ -525,8 +561,8 @@ struct SettingsView: View {
                         english: "The provider is Off by default. Off performs no credential, network, or transport work."
                     )
                     : localized(
-                        japanese: "WindowsではOpenAI Realtime BYOKを利用できます。macOSの実音声transportはAN3-B3Bで有効化します。",
-                        english: "OpenAI Realtime BYOK is available on Windows. The real macOS audio transport remains gated to AN3-B3B."
+                        japanese: "OpenAI Realtime BYOKをmacOSで利用できます。CalendarとTimerの操作はCapability Broker、ネイティブ承認、実行後readbackを通ります。",
+                        english: "OpenAI Realtime BYOK is available on macOS. Calendar and Timer actions cross Capability Broker, native approval, and post-execution readback."
                     ))
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
@@ -558,6 +594,7 @@ struct SettingsView: View {
             openAIRealtimeKeyDraft = ""
             openAIRealtimeKeyConfigured = true
             voiceCredentialError = nil
+            VoiceLaneRuntime.shared.credentialsDidChange()
         } catch {
             openAIRealtimeKeyDraft = ""
             openAIRealtimeKeyConfigured = false
@@ -577,6 +614,7 @@ struct SettingsView: View {
             openAIRealtimeKeyConfigured = false
             openAIRealtimeKeyDraft = ""
             voiceCredentialError = nil
+            VoiceLaneRuntime.shared.credentialsDidChange()
         } catch {
             openAIRealtimeKeyDraft = ""
             openAIRealtimeKeyConfigured = true

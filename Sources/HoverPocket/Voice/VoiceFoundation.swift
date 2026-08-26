@@ -168,11 +168,16 @@ struct VoiceAdapterGate: Equatable, Sendable {
 
 @MainActor
 protocol VoiceSessionAdapter: AnyObject {
+    var requiresExplicitStart: Bool { get }
     func probeCompatibility() async -> VoiceAdapterGate
     func start() async throws
     func setMuted(_ muted: Bool) async
     func closeAudioSession() async
     func stop() async
+}
+
+extension VoiceSessionAdapter {
+    var requiresExplicitStart: Bool { false }
 }
 
 struct VoiceLaneSnapshot: Equatable, Sendable {
@@ -375,6 +380,7 @@ final class VoiceLaneRuntime: ObservableObject {
     private var restartTask: Task<Void, Never>?
     private var recoveryTask: Task<Void, Never>?
     private var audioCommandTask: Task<Void, Never>?
+    private var explicitStartTask: Task<Void, Never>?
     private var restartGeneration = 0
     private var restartAttempt = 0
     private let restartDelaysNanoseconds: [UInt64]
@@ -524,15 +530,83 @@ final class VoiceLaneRuntime: ObservableObject {
         }
     }
 
+    func beginAudioSession() {
+        guard featureEnabled,
+              snapshot.uiAttached,
+              snapshot.connection == .disconnected,
+              explicitStartTask == nil,
+              let adapter,
+              adapter.requiresExplicitStart else { return }
+        publish(
+            connection: .connecting,
+            activity: .reconnecting,
+            muted: true,
+            clearSafeError: true
+        )
+        explicitStartTask = Task { @MainActor [weak self, weak adapter] in
+            guard let self, let adapter else { return }
+            defer { self.explicitStartTask = nil }
+            do {
+                try await adapter.start()
+                guard self.featureEnabled, self.adapter === adapter else {
+                    await adapter.stop()
+                    return
+                }
+                self.publish(
+                    connection: .connected,
+                    activity: .listening,
+                    muted: false,
+                    clearSafeError: true
+                )
+            } catch {
+                guard self.featureEnabled, self.adapter === adapter else { return }
+                self.publish(
+                    connection: .disconnected,
+                    activity: .failed,
+                    muted: true,
+                    safeErrorCode: "voice_start_failed"
+                )
+            }
+        }
+    }
+
     func endAudioSession() {
         guard featureEnabled else { return }
+        let explicitlyStarted = adapter?.requiresExplicitStart == true
         publish(
+            connection: explicitlyStarted ? .disconnected : nil,
             activity: .idle,
             muted: true
         )
         if let adapter {
             enqueueAudioCommand(.closeSession, adapter: adapter)
         }
+    }
+
+    func reportTransportActivity(_ activity: VoiceLaneActivity) {
+        guard featureEnabled, adapter != nil else { return }
+        publish(activity: activity)
+    }
+
+    func reportTransportFailure(_ safeErrorCode: String) {
+        guard featureEnabled, let adapter else { return }
+        publish(
+            connection: .disconnected,
+            activity: .failed,
+            muted: true,
+            safeErrorCode: VoiceTextSafety.sanitizeErrorCode(safeErrorCode)
+        )
+        enqueueAudioCommand(.closeSession, adapter: adapter)
+    }
+
+    func capabilityGrantsDidChange() {
+        guard featureEnabled, providerID != .off else { return }
+        recoverAfterSystemTransition()
+    }
+
+    func credentialsDidChange() {
+        guard featureEnabled, providerID != .off else { return }
+        recoverAfterSystemTransition()
     }
 
     func recoverAfterSystemTransition() {
@@ -665,9 +739,13 @@ final class VoiceLaneRuntime: ObservableObject {
         recoveryTask = nil
         let pendingAudioCommand = audioCommandTask
         audioCommandTask = nil
+        let pendingExplicitStart = explicitStartTask
+        explicitStartTask?.cancel()
+        explicitStartTask = nil
         let currentAdapter = adapter
         adapter = nil
         await pendingAudioCommand?.value
+        await pendingExplicitStart?.value
         if let currentAdapter {
             await currentAdapter.stop()
         }
@@ -729,6 +807,19 @@ final class VoiceLaneRuntime: ObservableObject {
                 activity: .failed,
                 muted: true,
                 safeErrorCode: safeErrorCode
+            )
+            return
+        }
+
+        if candidate.requiresExplicitStart {
+            adapter = candidate
+            restartAttempt = 0
+            publish(
+                connection: .disconnected,
+                activity: .idle,
+                muted: true,
+                clearSafeError: true,
+                restartAttempt: 0
             )
             return
         }

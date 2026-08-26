@@ -11,6 +11,7 @@ FOUNDATION_FIXTURE = ROOT / "contracts" / "voice" / "an3-a-foundation-fixture.js
 WINDOWS_RUNTIME_FIXTURE = ROOT / "contracts" / "voice" / "an3-b1-windows-runtime-fixture.json"
 WINDOWS_CAPABILITY_FIXTURE = ROOT / "contracts" / "voice" / "an3-b2-windows-capability-fixture.json"
 OPENAI_REALTIME_FIXTURE = ROOT / "contracts" / "voice" / "an3-b3a-openai-realtime-byok-fixture.json"
+MACOS_REALTIME_FIXTURE = ROOT / "contracts" / "voice" / "an3-b3b-macos-realtime-fixture.json"
 
 
 def fail(message: str) -> None:
@@ -22,6 +23,7 @@ def main() -> None:
     runtime_fixture = json.loads(WINDOWS_RUNTIME_FIXTURE.read_text(encoding="utf-8"))
     capability_fixture = json.loads(WINDOWS_CAPABILITY_FIXTURE.read_text(encoding="utf-8"))
     realtime_fixture = json.loads(OPENAI_REALTIME_FIXTURE.read_text(encoding="utf-8"))
+    macos_realtime_fixture = json.loads(MACOS_REALTIME_FIXTURE.read_text(encoding="utf-8"))
     compact_height = fixture["designTokens"]["compactHeight"]
     provider_kinds = fixture["providerKinds"]
     modes = fixture["modes"]
@@ -114,12 +116,22 @@ def main() -> None:
     mac_realtime_provider = (
         ROOT / "Sources" / "HoverPocket" / "Voice" / "OpenAIRealtimeProvider.swift"
     ).read_text(encoding="utf-8")
+    mac_realtime_transport = (
+        ROOT / "Sources" / "HoverPocket" / "Voice" / "OpenAIRealtimeMacOSTransport.swift"
+    ).read_text(encoding="utf-8")
+    mac_realtime_capabilities = (
+        ROOT / "Sources" / "HoverPocket" / "Voice" / "OpenAIRealtimeCapabilityRuntime.swift"
+    ).read_text(encoding="utf-8")
+    mac_app_settings = (
+        ROOT / "Sources" / "HoverPocket" / "State" / "AppSettings.swift"
+    ).read_text(encoding="utf-8")
     mac_keychain = (
         ROOT / "Sources" / "HoverPocket" / "Services" / "GoogleOAuthKeychainStore.swift"
     ).read_text(encoding="utf-8")
     mac_settings = (
         ROOT / "Sources" / "HoverPocket" / "Views" / "SettingsView.swift"
     ).read_text(encoding="utf-8")
+    mac_build_script = (ROOT / "script" / "build_and_run.sh").read_text(encoding="utf-8")
     mac_window = (
         ROOT / "Sources" / "HoverPocket" / "Windowing" / "HoverWindowController.swift"
     ).read_text(encoding="utf-8")
@@ -323,7 +335,8 @@ def main() -> None:
         if "localized(japanese: \"音声レーン\", english: \"Voice Lane\")" not in mac_voice:
             fail("macOS Voice accessibility region missing")
     if "VoiceLaneLocalization" not in mac_voice \
-            or "macOSのOpenAI Realtime音声transportはAN3-B3Bまで利用できません" not in mac_voice:
+            or "runtime.beginAudioSession()" not in mac_voice \
+            or "OpenAIRealtimeMacOSTransportHostView" not in mac_voice:
         fail("macOS Voice Japanese/English localization missing")
     if "ScrollView" not in mac_voice:
         fail("macOS Voice internal scroll missing")
@@ -816,20 +829,133 @@ def main() -> None:
         "failsBeforeCredentialRead": True,
         "failsBeforeNetwork": True,
     }:
-        fail("macOS AN3-B3B residual gate contract mismatch")
+        fail("historical AN3-B3A macOS residual gate contract mismatch")
+    if macos_realtime_fixture["phase"] != "AN3-B3B" \
+            or macos_realtime_fixture["operatingSystem"] != "macos" \
+            or macos_realtime_fixture["provider"] != "openai_realtime_byok" \
+            or macos_realtime_fixture["model"] != "gpt-realtime-2.1" \
+            or macos_realtime_fixture["endpoint"] != "https://api.openai.com/v1/realtime/calls":
+        fail("macOS AN3-B3B Realtime fixture identity drifted")
+    macos_activation = macos_realtime_fixture["activation"]
+    if macos_activation != {
+        "defaultOff": True,
+        "explicitMicrophoneClick": True,
+        "panelAttachedRequired": True,
+        "backgroundStart": False,
+        "trustedOrigin": "https://voice.hoverpocket.local/",
+    }:
+        fail("macOS Realtime explicit activation contract drifted")
+    macos_isolation = macos_realtime_fixture["isolation"]
+    if macos_isolation != {
+        "credentialStore": "keychain",
+        "webViewReceivesCredential": False,
+        "websiteDataStore": "non_persistent",
+        "externalNavigation": False,
+        "newWindows": False,
+        "inspectable": False,
+        "rawAudioPersistence": False,
+        "rawSdpLogging": False,
+    }:
+        fail("macOS Realtime isolation contract drifted")
+    if macos_realtime_fixture["bounds"] != {
+        "maximumSdpBytes": 262144,
+        "maximumEventBytes": 65536,
+        "maximumFunctionOutputBytes": 32768,
+        "maximumArgumentsBytes": 16384,
+        "maximumRememberedCalls": 512,
+    }:
+        fail("macOS Realtime allocation bounds drifted")
     mac_realtime_adapter = mac_realtime_provider[
         mac_realtime_provider.find("final class OpenAIRealtimeMacOSVoiceSessionAdapter"):
         mac_realtime_provider.find("final class FailClosedVoiceProviderAdapter")
     ]
     if 'static let modelID = "gpt-realtime-2.1"' not in mac_realtime_provider \
             or 'https://api.openai.com/v1/realtime/calls' not in mac_realtime_provider \
-            or "static let macOSAudioTransportAvailable = false" not in mac_realtime_provider \
-            or "credentialStore.load" in mac_realtime_adapter \
-            or "URLSession" in mac_realtime_adapter \
-            or "throw OpenAIRealtimeMacOSTransportError.unavailableUntilAN3B3B" not in mac_realtime_adapter:
-        fail("macOS OpenAI Realtime seam crossed the AN3-B3B residual gate")
+            or "static let macOSAudioTransportAvailable = true" not in mac_realtime_provider \
+            or "var requiresExplicitStart: Bool { true }" not in mac_realtime_adapter \
+            or "try credentialStore.hasCredential()" not in mac_realtime_adapter \
+            or "transport.start(" not in mac_realtime_adapter:
+        fail("macOS OpenAI Realtime provider is not explicit-start and fail-closed")
+    if not all(value in mac_realtime_transport for value in (
+        "static let maximumSDPBytes = 262_144",
+        "static let maximumEventBytes = 65_536",
+        "static let maximumFunctionOutputBytes = 32_768",
+        'https://voice.hoverpocket.local/',
+        "URLSessionConfiguration.ephemeral",
+        "websiteDataStore = .nonPersistent()",
+        "webView.isInspectable = false",
+        "requestMediaCapturePermissionFor origin",
+        "type == .microphone",
+        "captureAuthorizationGeneration == generation",
+        "decisionHandler(allowed ? .allow : .cancel)",
+        "createWebViewWith configuration",
+        "try apiKey.withUTF8Bytes",
+        "response.function_call_arguments.done",
+        "conversation.item.create",
+        "function_call_output",
+        "response.create",
+        "failTransport",
+        "await self?.close()",
+        'failTransport("voice_realtime_event_invalid")',
+        'failTransport("voice_realtime_tool_result_invalid")',
+        "closingCapabilities?.cancelSession(closingSessionID)",
+        "javascriptBoolean(readback)",
+        "forcePageReset()",
+        "Content-Security-Policy",
+        "localTracks.every(track => track.readyState === 'ended')",
+    )):
+        fail("macOS native credential, media isolation, or bounded WebRTC contract is incomplete")
+    continuation_position = mac_realtime_transport.find("startContinuation = continuation")
+    javascript_start_position = mac_realtime_transport.find("window.hoverPocketVoice.start", continuation_position)
+    if continuation_position < 0 or javascript_start_position < continuation_position \
+            or "withTaskCancellationHandler" not in mac_realtime_transport \
+            or "try Task.checkCancellation()" not in mac_realtime_transport:
+        fail("macOS Realtime startup can lose connection completion or cancellation")
+    if not all(value in mac_realtime_capabilities for value in (
+        'calendarListTool = "calendar_events_list"',
+        'calendarCreateTool = "calendar_event_create"',
+        'timerStartTool = "timer_countdown_start"',
+        "context.registry.resolve",
+        "context.broker.prepare",
+        "context.broker.execute",
+        "NSAlert()",
+        "readback.status == .verified",
+        "maximumArgumentsBytes = 16_384",
+        "maximumRememberedCalls = 512",
+        "DuplicateKeyValidator",
+        "VoiceApprovalCoordinator",
+        "maximumStartsPerWindow = 3",
+        "beginSheetModal",
+        "func cancelSession(_ sessionID: String)",
+        "VoiceApprovalText.singleLine",
+        '"approval_rate_limited"',
+    )):
+        fail("macOS Realtime tools bypass the exact Registry/Broker/readback boundary")
+    if "settings.$voiceCalendarAccessEnabled" not in mac_app \
+            or "VoiceLaneRuntime.shared.capabilityGrantsDidChange()" not in mac_app \
+            or "func capabilityGrantsDidChange()" not in mac_runtime \
+            or "enqueueAudioCommand(.closeSession, adapter: adapter)" not in mac_runtime:
+        fail("macOS Voice permission revocation or terminal failure does not close/rebuild the session")
+    if mac_settings.count("VoiceLaneRuntime.shared.credentialsDidChange()") != 2 \
+            or "func credentialsDidChange()" not in mac_runtime \
+            or "voiceStartBlockedByConfiguration" not in mac_voice \
+            or "&& runtime.snapshot.safeErrorCode == nil" in mac_voice:
+        fail("macOS Voice credential refresh or transient retry contract is incomplete")
+    if "Voice conversations with OpenAI Realtime" not in mac_build_script:
+        fail("macOS microphone purpose string omits the OpenAI Realtime destination")
+    calendar_default = mac_app_settings[
+        mac_app_settings.find("self.voiceCalendarAccessEnabled ="):
+        mac_app_settings.find("if defaults.data", mac_app_settings.find("self.voiceCalendarAccessEnabled ="))
+    ]
+    if "? false" not in calendar_default \
+            or "isShowingVoiceCalendarAccessConfirmation = true" not in mac_settings \
+            or "APIキーはネイティブ側だけで使用" not in mac_settings:
+        fail("macOS Voice Calendar or native credential consent does not default closed")
     if "providerID: providerID" not in mac_app \
-            or "VoiceProviderAdapterFactory.factory(providerID: providerID)" not in mac_app \
+            or "VoiceProviderAdapterFactory.factory(" not in mac_app \
+            or "settings: settings" not in mac_app \
+            or "VoiceCapabilityContext(" not in mac_app \
+            or "voiceCapabilityContext: voiceCapabilityContext" not in mac_app \
             or "Publishers.CombineLatest3" not in mac_app \
             or "settings.$voiceProvider.removeDuplicates()" not in mac_app:
         fail("macOS Voice provider/settings are not composed into the Host runtime")
@@ -929,7 +1055,8 @@ def main() -> None:
         f"{matrix_cases} geometry/state cases, root scope, default-off, "
         "legacy lane negative regression, internal scroll, accessibility, "
         "Windows explicit-origin microphone, fenced Realtime transport, "
-        "AN3-B2 Calendar/Timer Broker slice, and AN3-B3A OpenAI Realtime BYOK gates"
+        "AN3-B2 Calendar/Timer Broker slice, AN3-B3A OpenAI Realtime BYOK gates, "
+        "and AN3-B3B macOS Realtime security gates"
     )
 
 
