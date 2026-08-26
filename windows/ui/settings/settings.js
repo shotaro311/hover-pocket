@@ -136,7 +136,7 @@ function render(state) {
   voiceEnabledLabelEl.textContent = englishVoice ? "Enable Voice Lane" : "Voice Laneを有効化";
   voiceOpenAIKeyRowEl.hidden = voiceProviderId !== "openai_realtime_byok";
   voiceOpenAIKeyStatusEl.textContent = state.settings.voiceOpenAIKeyConfigured
-    ? (englishVoice ? "API key saved in Credential Manager" : "APIキーはCredential Managerに保存済み")
+    ? (englishVoice ? "API key saved securely" : "APIキーは安全に保存済み")
     : (englishVoice ? "API key not configured" : "APIキー未設定");
   voiceOpenAIKeyConfigureEl.textContent = englishVoice ? "Configure API key" : "APIキーを設定";
   voiceOpenAIKeyDeleteEl.textContent = englishVoice ? "Delete API key" : "APIキーを削除";

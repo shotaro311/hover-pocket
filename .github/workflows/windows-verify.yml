@@ -38,6 +38,9 @@ jobs:
       - name: Build Release
         run: dotnet build .\windows\HoverPocket.Windows.sln --configuration Release --nologo -p:NuGetAudit=false
 
+      - name: Build Debug Voice E2E host
+        run: dotnet build .\windows\HoverPocket.Windows.sln --configuration Debug --nologo --no-restore -p:NuGetAudit=false -p:TreatWarningsAsErrors=true
+
       - name: Verify settings UI modules
         run: |
           node --check .\windows\ui\js\app.js
@@ -69,6 +72,23 @@ jobs:
       - name: Verify Voice foundation
         timeout-minutes: 2
         run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify voice
+
+      - name: Verify Voice E2E isolation
+        run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Debug --no-build -- --verify voice-e2e-isolation
+
+      - name: Verify Voice E2E PowerShell syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path .\windows\script\voice_e2e_windows.ps1),
+            [ref]$tokens,
+            [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
 
       - name: Verify updater
         run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify updater
