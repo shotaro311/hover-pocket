@@ -302,6 +302,30 @@ function Invoke-BoundedProcess {
     }
 }
 
+function Get-SanitizedDiagnostic {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
+        [Parameter(Mandatory = $true)][string[]]$SensitiveValues
+    )
+
+    $sanitized = $Text
+    foreach ($value in $SensitiveValues) {
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            $sanitized = $sanitized.Replace($value, "<path>", [StringComparison]::OrdinalIgnoreCase)
+        }
+    }
+    foreach ($marker in @("allowed-canary", "codex-home-canary", "outside-root-canary", "write-canary")) {
+        $sanitized = $sanitized.Replace($marker, "<canary>", [StringComparison]::Ordinal)
+    }
+    $sanitized = [Text.RegularExpressions.Regex]::Replace($sanitized, '(?i)\b[0-9a-f]{32}\b', '<id>')
+    $sanitized = [Text.RegularExpressions.Regex]::Replace($sanitized, '[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '')
+    if ($sanitized.Length -gt 1600) {
+        $sanitized = $sanitized.Substring(0, 1600) + "<truncated>"
+    }
+    if ([string]::IsNullOrWhiteSpace($sanitized)) { return "<empty>" }
+    return $sanitized.Trim()
+}
+
 function Remove-ValidatedTemporaryRoot {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -439,6 +463,23 @@ function Invoke-Canary {
             $acceptTask.Result.Dispose()
         }
         if ($result.ExitCode -ne 0) {
+            $sensitiveValues = @(
+                $codex,
+                $root,
+                $workspace,
+                $codexHome,
+                $userHome,
+                $foreignRoot,
+                $probePath,
+                $temporaryRoot,
+                $env:USERPROFILE,
+                $env:RUNNER_TEMP,
+                $env:GITHUB_WORKSPACE
+            )
+            $stderrDiagnostic = Get-SanitizedDiagnostic -Text $result.Stderr -SensitiveValues $sensitiveValues
+            $stdoutDiagnostic = Get-SanitizedDiagnostic -Text $result.Stdout -SensitiveValues $sensitiveValues
+            Write-Warning "Codex sandbox stderr: $stderrDiagnostic"
+            Write-Warning "Codex sandbox stdout: $stdoutDiagnostic"
             throw "Sandbox probe process failed."
         }
         if ($result.Stderr.Length -gt $MaximumStderrCharacters) {
