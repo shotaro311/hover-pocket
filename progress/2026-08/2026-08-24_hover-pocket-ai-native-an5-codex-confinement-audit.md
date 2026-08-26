@@ -77,3 +77,35 @@ process exit codeは0だった。models cacheの旧形式warningは出たが、c
 - macOS実アプリ署名後のKeychain broker、cancel / timeout / crash cleanup。
 - Voice生成、承認、install、runtime / Surface readback、rollbackの両OS E2E。
 
+## Confinement foundation実装
+
+- branch: `codex/ai-native-an5-codex-confinement`
+- base: `bf0bac156e836e7685e094b01fe218a8b94239c9`
+- macOS / Windowsの実Codex adapterを、ユーザーHOMEと`--sandbox read-only`へ依存する構成から、runごとの`workspace / codex-home / user-home / tmp`へ分離した構成へ変更した。
+- CLIは`--ignore-user-config`、`--ignore-rules`、ephemeral、approval neverを強制する。named permission profileは`:minimal`と生成workspaceだけをread、isolated homeをdeny、networkをdisabledにする。
+- Codex process環境はallowlistを親環境からコピーせず、隔離HOME、isolated `CODEX_HOME`、isolated temp、固定system PATH / localeだけをHostが構築する。Windowsだけはprocess起動に必要な固定`SYSTEMROOT / WINDIR / COMSPEC`もHostが導出する。
+- filesystem TOML pathは引数連結ではなくquoted literalへ変換し、workspace / homeの重複とworkspace外schemaを拒否する。model-requested toolへは`inherit = none`と固定`PATH / LANG`だけを渡す。
+- credential brokerはまだ接続していない。macOSの`supportsConfidentialGeneration = false`とWindowsの`ResolveExecutable() = null`を維持し、誤って現行認証へfallbackしない。
+
+### ローカル検証
+
+- `swift build -Xswiftc -warnings-as-errors`: 成功。
+- `--verify-pocket-app`: package / lifecycle / generation / capability migration / health / workspace backup成功。
+- `--verify-pocket-surface`: 6 node、negative 15件成功。
+- `--verify-capabilities`: 20 handler成功。
+- `--verify-broker`: 21 descriptor / 20 handler、retention governanceを含め成功。
+- `--verify-voice-foundation`: default-off、root scope、bounded transcript、compact / expanded geometry成功。
+- `verify_pocket_contracts.py`: 15 schema / 71 fixture全一致。
+- Windows Settings / Panel / Pocket Surface JavaScript構文と`git diff --check`: 成功。
+- このMacには.NET SDKがないため、Windows C# Release build、native verifier、実restricted-token canaryはDraft PR CIとWindows実機を必須gateにする。
+
+### Draft PR CI readback
+
+- Draft PR: [#32](https://github.com/shotaro311/hover-pocket/pull/32)
+- code head: `4a38a9ffdda8a43d652a79ba0d0b643086006559`
+- base: `codex/ai-native-an3b3-realtime-provider`
+- Windows [32666112335](https://github.com/shotaro311/hover-pocket/actions/runs/32666112335): Release build成功、warning 0、error 0、`pocket_app_generation_verify=ok`、Voice、Settings、rendered UIを含むnative verifier成功。
+- macOS [32666112324](https://github.com/shotaro311/hover-pocket/actions/runs/32666112324): warnings-as-errors buildとVoice / Pocket App package・Surface contract成功。
+- Router [32666112338](https://github.com/shotaro311/hover-pocket/actions/runs/32666112338): 成功。
+- PR readback: Draft、OPEN、MERGEABLE / CLEAN、review / comment 0件。mainへmergeしていない。
+- CIは引数・環境contractを検証した。Windows restricted-token / AppContainerでoutside-root、Credential Manager、helper、networkが拒否される実機canaryは未完了であり、production有効化の根拠にはしていない。

@@ -1,5 +1,16 @@
 import AppKit
+import Darwin
 import Foundation
+
+_ = signal(SIGPIPE, SIG_IGN)
+
+if CommandLine.arguments.contains(CodexCredentialBrokerDeinitProbe.argument) {
+    exit(CodexCredentialBrokerDeinitProbe.run())
+}
+
+if CommandLine.arguments.contains(CodexCredentialBrokerHelper.argument) {
+    exit(CodexCredentialBrokerHelper.run())
+}
 
 if CommandLine.arguments.contains("--verify-google-calendar") {
     GoogleCalendarVerificationCommand.run()

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HoverPocket.Shell.Verification;
@@ -16,6 +17,9 @@ internal sealed class PocketAppGenerationVerifier
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN e2e");
         VerifyE2E();
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END e2e");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN credential-broker");
+        Task.Run(VerifyCredentialBrokerAsync).GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END credential-broker");
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN settings-approval");
         VerifySettingsApprovalBoundary().GetAwaiter().GetResult();
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END settings-approval");
@@ -37,6 +41,320 @@ internal sealed class PocketAppGenerationVerifier
         VerifyApprovalTextSanitization();
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END approval-text");
         return _failures;
+    }
+
+    private async Task VerifyCredentialBrokerAsync()
+    {
+        const string fixtureSecret = "fixture-token-not-a-real-credential";
+        try
+        {
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN lease");
+            var lease = new CodexCredentialBrokerLease(
+                new string('a', 43),
+                DateTimeOffset.UtcNow.AddSeconds(5),
+                () => fixtureSecret);
+            Require(
+                lease.Redeem(new string('a', 43)) == fixtureSecret && lease.IsConsumed,
+                "generation_credential_broker_one_time_lease");
+            try
+            {
+                _ = lease.Redeem(new string('a', 43));
+                _failures.Add("generation_credential_broker_replay");
+            }
+            catch (CodexCredentialBrokerException)
+            {
+            }
+
+            var expired = new CodexCredentialBrokerLease(
+                new string('b', 43),
+                DateTimeOffset.UtcNow.AddSeconds(-1),
+                () => fixtureSecret);
+            try
+            {
+                _ = expired.Redeem(new string('b', 43));
+                _failures.Add("generation_credential_broker_expired");
+            }
+            catch (CodexCredentialBrokerException)
+            {
+                Require(expired.IsConsumed, "generation_credential_broker_expired_consumed");
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END lease");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN named-pipe");
+            using (var server = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(5),
+                Environment.ProcessId,
+                () => fixtureSecret))
+            {
+                var secret = await CodexCredentialBrokerClient.FetchSecretAsync(
+                    server.PipeName,
+                    server.Capability,
+                    Environment.ProcessId);
+                await server.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(secret == fixtureSecret, "generation_credential_broker_named_pipe");
+                try
+                {
+                    _ = await CodexCredentialBrokerClient.FetchSecretAsync(
+                        server.PipeName,
+                        server.Capability,
+                        Environment.ProcessId,
+                        TimeSpan.FromMilliseconds(250));
+                    _failures.Add("generation_credential_broker_pipe_replay");
+                }
+                catch (CodexCredentialBrokerException)
+                {
+                }
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END named-pipe");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN wrong-capability");
+            using (var wrongCapabilityServer = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(5),
+                Environment.ProcessId,
+                () => fixtureSecret))
+            {
+                try
+                {
+                    _ = await CodexCredentialBrokerClient.FetchSecretAsync(
+                        wrongCapabilityServer.PipeName,
+                        new string('c', 43),
+                        Environment.ProcessId);
+                    _failures.Add("generation_credential_broker_wrong_capability");
+                }
+                catch (CodexCredentialBrokerException)
+                {
+                }
+                await wrongCapabilityServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                try
+                {
+                    _ = await CodexCredentialBrokerClient.FetchSecretAsync(
+                        wrongCapabilityServer.PipeName,
+                        wrongCapabilityServer.Capability,
+                        Environment.ProcessId,
+                        TimeSpan.FromMilliseconds(250));
+                    _failures.Add("generation_credential_broker_wrong_capability_replay");
+                }
+                catch (CodexCredentialBrokerException)
+                {
+                }
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END wrong-capability");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN foreign-peer");
+            using (var foreignPeerServer = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(20),
+                Environment.ProcessId,
+                () => fixtureSecret))
+            {
+                var powershellPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.System),
+                    "WindowsPowerShell",
+                    "v1.0",
+                    "powershell.exe");
+                var foreignPeerInfo = new ProcessStartInfo(powershellPath)
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+                foreignPeerInfo.ArgumentList.Add("-NoLogo");
+                foreignPeerInfo.ArgumentList.Add("-NoProfile");
+                foreignPeerInfo.ArgumentList.Add("-NonInteractive");
+                foreignPeerInfo.ArgumentList.Add("-Command");
+                foreignPeerInfo.ArgumentList.Add(
+                    "$accepted=$false;"
+                    + "$pipe=[IO.Pipes.NamedPipeClientStream]::new('.',"
+                    + "$env:HOVERPOCKET_TEST_BROKER_ENDPOINT,"
+                    + "[IO.Pipes.PipeDirection]::InOut,[IO.Pipes.PipeOptions]::Asynchronous);"
+                    + "try{$pipe.Connect(2000);"
+                    + "$writer=[IO.StreamWriter]::new($pipe);$writer.AutoFlush=$true;"
+                    + "$writer.WriteLine('HP-CODEX-BROKER/1 '+$env:HOVERPOCKET_TEST_BROKER_CAPABILITY);"
+                    + "$reader=[IO.StreamReader]::new($pipe);$response=$reader.ReadLine();"
+                    + "$accepted=$response -like 'OK *'}catch{}finally{$pipe.Dispose()};"
+                    + "if($accepted){exit 1}else{exit 0}");
+                foreignPeerInfo.Environment["HOVERPOCKET_TEST_BROKER_ENDPOINT"] =
+                    foreignPeerServer.PipeName;
+                foreignPeerInfo.Environment["HOVERPOCKET_TEST_BROKER_CAPABILITY"] =
+                    foreignPeerServer.Capability;
+                using var foreignPeer = Process.Start(foreignPeerInfo)
+                    ?? throw new CodexCredentialBrokerException();
+                var foreignPeerStdoutTask = foreignPeer.StandardOutput.ReadToEndAsync();
+                var foreignPeerStderrTask = foreignPeer.StandardError.ReadToEndAsync();
+                await foreignPeer.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+                await foreignPeerServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(
+                    foreignPeer.ExitCode == 0
+                        && foreignPeerServer.IsConsumed
+                        && string.IsNullOrEmpty(await foreignPeerStdoutTask)
+                        && string.IsNullOrEmpty(await foreignPeerStderrTask),
+                    "generation_credential_broker_foreign_peer_rejected");
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END foreign-peer");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN unauthorized-peer");
+            using (var unauthorizedPeerServer = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(5),
+                Environment.ProcessId,
+                () => fixtureSecret,
+                _ => false))
+            {
+                try
+                {
+                    _ = await CodexCredentialBrokerClient.FetchSecretAsync(
+                        unauthorizedPeerServer.PipeName,
+                        unauthorizedPeerServer.Capability,
+                        Environment.ProcessId);
+                    _failures.Add("generation_credential_broker_unauthorized_peer");
+                }
+                catch (CodexCredentialBrokerException)
+                {
+                }
+                await unauthorizedPeerServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(
+                    unauthorizedPeerServer.IsConsumed,
+                    "generation_credential_broker_unauthorized_peer_consumed");
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END unauthorized-peer");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN helper");
+            using (var helper = StartCredentialHelperProcess())
+            using (var helperServer = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(10),
+                helper.Id,
+                () => fixtureSecret))
+            {
+                var result = await CompleteCredentialHelperAsync(
+                    helper,
+                    CodexCredentialBrokerHelper.CreateBootstrapLine(
+                        helperServer.PipeName,
+                        helperServer.Capability,
+                        Environment.ProcessId));
+                await helperServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(
+                    result.ExitCode == 0
+                        && result.StandardOutput == fixtureSecret
+                        && string.IsNullOrEmpty(result.StandardError),
+                    "generation_credential_broker_helper_stdout_only");
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END helper");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN same-binary-wrong-pid");
+            using (var impostor = StartCredentialHelperProcess())
+            using (var wrongProcessServer = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(10),
+                Environment.ProcessId,
+                () => fixtureSecret))
+            {
+                var result = await CompleteCredentialHelperAsync(
+                    impostor,
+                    CodexCredentialBrokerHelper.CreateBootstrapLine(
+                        wrongProcessServer.PipeName,
+                        wrongProcessServer.Capability,
+                        Environment.ProcessId));
+                await wrongProcessServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(
+                    result.ExitCode == 1
+                        && wrongProcessServer.IsConsumed
+                        && string.IsNullOrEmpty(result.StandardOutput)
+                        && result.StandardError.Trim() == "credential unavailable",
+                    "generation_credential_broker_same_binary_wrong_pid_rejected");
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END same-binary-wrong-pid");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN wrong-server-pid");
+            using (var wrongServerProcess = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(5),
+                Environment.ProcessId,
+                () => fixtureSecret))
+            {
+                try
+                {
+                    _ = await CodexCredentialBrokerClient.FetchSecretAsync(
+                        wrongServerProcess.PipeName,
+                        wrongServerProcess.Capability,
+                        checked(Environment.ProcessId + 1));
+                    _failures.Add("generation_credential_broker_wrong_server_pid");
+                }
+                catch (CodexCredentialBrokerException)
+                {
+                }
+                await wrongServerProcess.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(
+                    wrongServerProcess.IsConsumed,
+                    "generation_credential_broker_wrong_server_pid_consumed");
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END wrong-server-pid");
+        }
+        catch (Exception ex)
+        {
+            _failures.Add($"generation_credential_broker_contract:{ex.GetType().Name}:{ex.Message}");
+        }
+    }
+
+    private static Process StartCredentialHelperProcess()
+    {
+        var processPath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(processPath))
+        {
+            throw new CodexCredentialBrokerException();
+        }
+        var startInfo = new ProcessStartInfo(processPath)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        var launchMode = "apphost";
+        if (string.Equals(
+            Path.GetFileNameWithoutExtension(processPath),
+            "dotnet",
+            StringComparison.OrdinalIgnoreCase))
+        {
+            var entryAssemblyPath = typeof(PocketAppGenerationVerifier).Assembly.Location;
+            if (string.IsNullOrWhiteSpace(entryAssemblyPath))
+            {
+                throw new CodexCredentialBrokerException();
+            }
+            startInfo.ArgumentList.Add(entryAssemblyPath);
+            launchMode = "dotnet-host";
+        }
+        startInfo.ArgumentList.Add(CodexCredentialBrokerHelper.Argument);
+        VerifyConsole.WriteLine($"CREDENTIAL_BROKER_HELPER_LAUNCH_MODE {launchMode}");
+        return Process.Start(startInfo) ?? throw new CodexCredentialBrokerException();
+    }
+
+    private static async Task<(int ExitCode, string StandardOutput, string StandardError)>
+        CompleteCredentialHelperAsync(Process process, string bootstrapLine)
+    {
+        var standardOutputTask = process.StandardOutput.ReadToEndAsync();
+        var standardErrorTask = process.StandardError.ReadToEndAsync();
+        try
+        {
+            await process.StandardInput.WriteAsync(bootstrapLine);
+            await process.StandardInput.WriteAsync("\n");
+            await process.StandardInput.FlushAsync();
+            process.StandardInput.Close();
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        catch
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2));
+                }
+            }
+            catch
+            {
+            }
+            throw;
+        }
+        return (process.ExitCode, await standardOutputTask, await standardErrorTask);
     }
 
     private void VerifyE2E()
@@ -457,6 +775,44 @@ internal sealed class PocketAppGenerationVerifier
                     "^local\\.generated\\.a[0-9a-f]{32}$",
                     System.Text.RegularExpressions.RegexOptions.CultureInvariant),
             "generation_untargeted_request_gets_fresh_app_id");
+        var confinementRoot = Path.Combine(Path.GetTempPath(), "hover-pocket-codex-confinement");
+        var confinementWorkspace = Path.Combine(confinementRoot, "workspace");
+        var confinementCodexHome = Path.Combine(confinementRoot, "codex-home");
+        var confinementUserHome = Path.Combine(confinementRoot, "user-home");
+        var confinementSchema = Path.Combine(confinementWorkspace, "generation-output.schema.json");
+        var confinementArguments = CodexPocketAppGenerationAdapter.ConfinementArguments(
+            confinementWorkspace,
+            confinementCodexHome,
+            confinementUserHome,
+            confinementSchema);
+        var confinementJoined = string.Join('\n', confinementArguments);
+        Require(
+            !confinementArguments.Contains("--sandbox", StringComparer.Ordinal)
+                && confinementArguments.Contains("--ignore-user-config", StringComparer.Ordinal)
+                && confinementArguments.Contains("--ignore-rules", StringComparer.Ordinal)
+                && confinementJoined.Contains("default_permissions=\"hoverpocket-generation\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementWorkspace)}=\"read\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementCodexHome)}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementUserHome)}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains("network.enabled=false", StringComparison.Ordinal)
+                && confinementJoined.Contains("shell_environment_policy.inherit=\"none\"", StringComparison.Ordinal)
+                && confinementArguments.TakeLast(3).SequenceEqual(["--output-schema", confinementSchema, "-"], StringComparer.Ordinal),
+            "generation_codex_named_permission_profile");
+        var confinementEnvironment = CodexPocketAppGenerationAdapter.ConfinementEnvironment(
+            confinementCodexHome,
+            confinementUserHome,
+            Path.Combine(confinementUserHome, "AppData", "Local"),
+            Path.Combine(confinementUserHome, "AppData", "Roaming"),
+            Path.Combine(confinementRoot, "tmp"));
+        Require(
+            confinementEnvironment.Count == 12
+                && confinementEnvironment["CODEX_HOME"] == confinementCodexHome
+                && confinementEnvironment["HOME"] == confinementUserHome
+                && confinementEnvironment["USERPROFILE"] == confinementUserHome
+                && confinementEnvironment["SYSTEMROOT"] == confinementEnvironment["WINDIR"]
+                && confinementEnvironment["COMSPEC"].EndsWith("cmd.exe", StringComparison.OrdinalIgnoreCase)
+                && confinementEnvironment["LANG"] == "C",
+            "generation_codex_isolated_environment");
         Require(
             CodexPocketAppGenerationAdapter.ResolveExecutable() is null,
             "generation_real_codex_confidentiality_gate");

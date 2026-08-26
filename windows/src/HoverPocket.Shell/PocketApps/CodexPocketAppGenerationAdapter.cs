@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 
 namespace HoverPocket.Shell.PocketApps;
@@ -226,17 +227,11 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
 
     public static string? ResolveExecutable()
     {
-        // AN5-B intentionally keeps the Windows production generator disconnected.
-        // Enablement requires a restricted-token/AppContainer canary that proves
-        // repository, profile, and system-file reads fail from the Codex process.
+        // The named profile and isolated process environment are prepared below, but
+        // production remains disconnected until Host-brokered credentials and a
+        // restricted-token/AppContainer outside-root canary pass on Windows.
         return null;
     }
-
-    private static readonly string[] AllowedEnvironmentKeys =
-    [
-        "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "LOCALAPPDATA", "APPDATA",
-        "PATH", "TEMP", "TMP", "LANG"
-    ];
 
     private readonly string _executable;
     private readonly PocketAppPinnedDirectory _workspaceRoot;
@@ -267,8 +262,17 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         _workspaceRoot.Validate();
         cancellationToken.ThrowIfCancellationRequested();
 
-        var workspace = Path.Combine(_workspaceRoot.FullPath, $"codex-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(workspace);
+        var runRoot = Path.Combine(_workspaceRoot.FullPath, $"codex-{Guid.NewGuid():N}");
+        var workspace = Path.Combine(runRoot, "workspace");
+        var codexHome = Path.Combine(runRoot, "codex-home");
+        var userHome = Path.Combine(runRoot, "user-home");
+        var localAppData = Path.Combine(userHome, "AppData", "Local");
+        var roamingAppData = Path.Combine(userHome, "AppData", "Roaming");
+        var temporaryDirectory = Path.Combine(runRoot, "tmp");
+        foreach (var directory in new[] { workspace, codexHome, userHome, localAppData, roamingAppData, temporaryDirectory })
+        {
+            Directory.CreateDirectory(directory);
+        }
         try
         {
             _workspaceRoot.Validate();
@@ -286,20 +290,19 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
-            start.ArgumentList.Add("exec");
-            start.ArgumentList.Add("--sandbox");
-            start.ArgumentList.Add("read-only");
-            start.ArgumentList.Add("--ephemeral");
-            start.ArgumentList.Add("--ignore-user-config");
-            start.ArgumentList.Add("--skip-git-repo-check");
-            start.ArgumentList.Add("--output-schema");
-            start.ArgumentList.Add(schemaPath);
-            start.ArgumentList.Add("-");
-            start.Environment.Clear();
-            foreach (var key in AllowedEnvironmentKeys)
+            foreach (var argument in ConfinementArguments(workspace, codexHome, userHome, schemaPath))
             {
-                var value = Environment.GetEnvironmentVariable(key);
-                if (!string.IsNullOrEmpty(value)) { start.Environment[key] = value; }
+                start.ArgumentList.Add(argument);
+            }
+            start.Environment.Clear();
+            foreach (var (key, value) in ConfinementEnvironment(
+                codexHome,
+                userHome,
+                localAppData,
+                roamingAppData,
+                temporaryDirectory))
+            {
+                start.Environment[key] = value;
             }
 
             using var process = new Process { StartInfo = start };
@@ -361,9 +364,92 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         }
         finally
         {
-            MakeMutable(workspace);
-            try { if (Directory.Exists(workspace)) { Directory.Delete(workspace, true); } } catch { }
+            MakeMutable(runRoot);
+            try { if (Directory.Exists(runRoot)) { Directory.Delete(runRoot, true); } } catch { }
         }
+    }
+
+    internal static IReadOnlyList<string> ConfinementArguments(
+        string workspace,
+        string codexHome,
+        string userHome,
+        string schemaPath)
+    {
+        var normalizedWorkspace = Path.GetFullPath(workspace);
+        var normalizedCodexHome = Path.GetFullPath(codexHome);
+        var normalizedUserHome = Path.GetFullPath(userHome);
+        var normalizedSchema = Path.GetFullPath(schemaPath);
+        var directories = new[] { normalizedWorkspace, normalizedCodexHome, normalizedUserHome };
+        if (directories
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count() != 3
+            || directories.Select(Path.GetDirectoryName)
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count() != 1
+            || !string.Equals(
+                Path.GetDirectoryName(normalizedSchema),
+                normalizedWorkspace,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw Failure("GENERATOR_UNAVAILABLE");
+        }
+        var filesystem = "permissions.hoverpocket-generation.filesystem={"
+            + $"{JsonSerializer.Serialize(":minimal")}=\"read\","
+            + $"{JsonSerializer.Serialize(normalizedWorkspace)}=\"read\","
+            + $"{JsonSerializer.Serialize(normalizedCodexHome)}=\"deny\","
+            + $"{JsonSerializer.Serialize(normalizedUserHome)}=\"deny\"}}";
+        return
+        [
+            "exec",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--skip-git-repo-check",
+            "-c", "approval_policy=\"never\"",
+            "-c", "default_permissions=\"hoverpocket-generation\"",
+            "-c", filesystem,
+            "-c", "permissions.hoverpocket-generation.network.enabled=false",
+            "-c", "shell_environment_policy.inherit=\"none\"",
+            "-c", $"shell_environment_policy.set={{PATH={JsonSerializer.Serialize(SystemPath())},LANG=\"C\"}}",
+            "--output-schema", normalizedSchema,
+            "-"
+        ];
+    }
+
+    internal static IReadOnlyDictionary<string, string> ConfinementEnvironment(
+        string codexHome,
+        string userHome,
+        string localAppData,
+        string roamingAppData,
+        string temporaryDirectory)
+    {
+        var windows = WindowsDirectory();
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["CODEX_HOME"] = Path.GetFullPath(codexHome),
+            ["HOME"] = Path.GetFullPath(userHome),
+            ["USERPROFILE"] = Path.GetFullPath(userHome),
+            ["LOCALAPPDATA"] = Path.GetFullPath(localAppData),
+            ["APPDATA"] = Path.GetFullPath(roamingAppData),
+            ["TEMP"] = Path.GetFullPath(temporaryDirectory),
+            ["TMP"] = Path.GetFullPath(temporaryDirectory),
+            ["PATH"] = SystemPath(),
+            ["SYSTEMROOT"] = windows,
+            ["WINDIR"] = windows,
+            ["COMSPEC"] = Path.Combine(windows, "System32", "cmd.exe"),
+            ["LANG"] = "C"
+        };
+    }
+
+    private static string SystemPath()
+    {
+        var windows = WindowsDirectory();
+        return string.Join(Path.PathSeparator, Path.Combine(windows, "System32"), windows);
+    }
+
+    private static string WindowsDirectory()
+    {
+        var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        if (string.IsNullOrWhiteSpace(windows)) { throw Failure("GENERATOR_UNAVAILABLE"); }
+        return Path.GetFullPath(windows);
     }
 
     public void Dispose()
