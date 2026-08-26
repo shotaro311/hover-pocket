@@ -60,10 +60,22 @@ AN5のproduction Codex Pocket App生成を有効化せず、macOSで実Codex CLI
   - CIはdeterministic self-testのみ。
   - credential delivery、実モデル生成、Windows confinement、Voice物理E2E、署名、releaseは対象外。
 
+## Draft PR / CI readback
+
+- code head: `8cd445bdf6ebf6fe7c3150aea877be7c459fd035`
+- remote parity: `0 / 0`
+- Router [33022367720](https://github.com/shotaro311/hover-pocket/actions/runs/33022367720): SUCCESS
+- macOS [33022481993](https://github.com/shotaro311/hover-pocket/actions/runs/33022481993): SUCCESS。Swift build、Codex confinement self-test、Voice、Capability、Broker、Pocket App / Surface、Timerが成功し、logで`PASS Codex generation confinement verifier self-test`と`pocket_app_generation_verify=ok`をreadbackした。
+- Windows [33022484529](https://github.com/shotaro311/hover-pocket/actions/runs/33022484529): SUCCESS。Release / Debug Voice E2E build、Settings、Capability、Broker、Pocket Surface、Timer、Voice Foundation / E2E isolation、Updater、signing contract、rendered WebView2が成功した。
+- 3OS Pocket contract [33022486583](https://github.com/shotaro311/hover-pocket/actions/runs/33022486583): SUCCESS。Ubuntu / macOS / Windows verifierとreport比較の4 jobが成功し、3 reportのbyte一致をlogでreadbackした。
+- PR同期時はRouterだけが自動起動し、通常の`pull_request` workflow runが作成されなかった。上記3本は同じexact headを手動dispatchした証拠であり、PR required checkへの接続を代替しない。
+- Draft PR #39は`OPEN / MERGEABLE`、review 0、comment 0、unresolved thread 0だが、`mergeStateStatus=UNSTABLE`である。自動check欠落を解消するまでReady / mergeへ進めない。
+
 ## 未完了gate
 
-1. Windowsでequivalentなrestricted-token / AppContainerのoutside-root、write、network canaryを実装・readbackする。
-2. macOS / Windows双方でHost-owned一回限りcredential deliveryを隔離generatorへ接続し、秘密値をargument、environment、disk、logへ残さないことを確認する。
-3. 同じ隔離境界でPocket App DSLを1件生成し、schema検証、preview、install、activation、readback、remove / rollbackまで確認する。
-4. 両OSの実API key / microphone Voice E2E、正式署名、配布、rollbackを別々に完了する。
-5. 上記が完了するまでproduction generatorを有効化しない。
+1. Draft PR #39で通常の`pull_request` workflow runが作成されない原因を切り分け、required checkを更新headへ結び付ける。
+2. Windowsでequivalentなrestricted-token / AppContainerのoutside-root、write、network canaryを実装・readbackする。
+3. macOS / Windows双方でHost-owned一回限りcredential deliveryを隔離generatorへ接続し、秘密値をargument、environment、disk、logへ残さないことを確認する。
+4. 同じ隔離境界でPocket App DSLを1件生成し、schema検証、preview、install、activation、readback、remove / rollbackまで確認する。
+5. 両OSの実API key / microphone Voice E2E、正式署名、配布、rollbackを別々に完了する。
+6. 上記が完了するまでproduction generatorを有効化しない。
