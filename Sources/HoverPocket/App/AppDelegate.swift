@@ -85,14 +85,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = try governanceController.applyRetention(
                 hoverWindowController.appSettings.capabilityDataRetentionPeriod
             )
-            guard hoverWindowController.appSettings.aiNativeEnabled else {
-                AINativeRuntime.shared.configure(
-                    adapter: nil,
-                    capabilityDataGovernanceController: governanceController,
-                    preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
-                )
-                return
-            }
             let handlers = try ProviderCapabilityCompositionRoot.live(
                 calendarDataSource: GoogleCalendarCapabilityDataSource()
             )
@@ -105,6 +97,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     stickyStore: .shared
                 )
             )
+            let voiceCapabilityContext = VoiceCapabilityContext(
+                registry: registry,
+                broker: broker
+            )
+            guard hoverWindowController.appSettings.aiNativeEnabled else {
+                AINativeRuntime.shared.configure(
+                    adapter: nil,
+                    capabilityDataGovernanceController: governanceController,
+                    voiceCapabilityContext: voiceCapabilityContext,
+                    preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
+                )
+                return
+            }
             guard let resources = Bundle.module.resourceURL else {
                 throw PocketAppPackageError.invalid("$:resources")
             }
@@ -190,6 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 generatedActivationRegistry: generatedActivationRegistry,
                 builtInActivationLease: builtInActivationLease,
                 capabilityDataGovernanceController: governanceController,
+                voiceCapabilityContext: voiceCapabilityContext,
                 preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
             )
         } catch {
@@ -217,7 +223,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             featureEnabled: settings.voiceEnabled,
             preferredLayout: settings.voiceLaneLayoutPreference,
             providerID: providerID,
-            adapterFactory: VoiceProviderAdapterFactory.factory(providerID: providerID)
+            adapterFactory: VoiceProviderAdapterFactory.factory(
+                providerID: providerID,
+                settings: settings
+            )
         )
     }
 
@@ -231,6 +240,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .dropFirst()
             .sink { [weak self] _ in
                 self?.configureVoiceRuntime()
+            }
+            .store(in: &settingsCancellables)
+        settings.$voiceCalendarAccessEnabled
+            .dropFirst()
+            .removeDuplicates()
+            .sink { _ in
+                VoiceLaneRuntime.shared.capabilityGrantsDidChange()
             }
             .store(in: &settingsCancellables)
     }

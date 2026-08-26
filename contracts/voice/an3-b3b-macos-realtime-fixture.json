@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "phase": "AN3-B3B",
+  "operatingSystem": "macos",
+  "provider": "openai_realtime_byok",
+  "model": "gpt-realtime-2.1",
+  "endpoint": "https://api.openai.com/v1/realtime/calls",
+  "activation": {
+    "defaultOff": true,
+    "explicitMicrophoneClick": true,
+    "panelAttachedRequired": true,
+    "backgroundStart": false,
+    "trustedOrigin": "https://voice.hoverpocket.local/"
+  },
+  "isolation": {
+    "credentialStore": "keychain",
+    "webViewReceivesCredential": false,
+    "websiteDataStore": "non_persistent",
+    "externalNavigation": false,
+    "newWindows": false,
+    "inspectable": false,
+    "rawAudioPersistence": false,
+    "rawSdpLogging": false
+  },
+  "bounds": {
+    "maximumSdpBytes": 262144,
+    "maximumEventBytes": 65536,
+    "maximumFunctionOutputBytes": 32768,
+    "maximumArgumentsBytes": 16384,
+    "maximumRememberedCalls": 512
+  },
+  "tools": [
+    {
+      "name": "calendar_events_list",
+      "capabilityId": "calendar.events.list",
+      "approval": "permission_grant",
+      "readback": "verified"
+    },
+    {
+      "name": "calendar_event_create",
+      "capabilityId": "calendar.event.create",
+      "approval": "per_call",
+      "readback": "verified"
+    },
+    {
+      "name": "timer_countdown_start",
+      "capabilityId": "timer.countdown.start",
+      "approval": "native_per_call",
+      "readback": "verified"
+    }
+  ],
+  "ambientTools": {
+    "codex": false,
+    "mcp": false,
+    "shell": false,
+    "filesystem": false,
+    "arbitraryNative": false
+  },
+  "localVerification": [
+    "default_off",
+    "explicit_start_requires_attached_panel",
+    "restart_after_end",
+    "calendar_permission_default_off",
+    "exact_tool_surface",
+    "native_write_approval",
+    "single_active_approval",
+    "three_approval_starts_per_minute_including_rejections",
+    "session_cancellation_closes_approval",
+    "approval_text_single_line",
+    "broker_only_execution",
+    "verified_readback",
+    "idempotent_replay",
+    "duplicate_json_key_rejected",
+    "bounded_sdp_and_events",
+    "transport_failure_closes_media",
+    "calendar_grant_revocation_rebuilds_session",
+    "microphone_purpose_mentions_openai_realtime"
+  ],
+  "physicalGate": [
+    "microphone_permission",
+    "remote_audio_round_trip",
+    "calendar_read_create",
+    "timer_start",
+    "mute_end_cleanup"
+  ]
+}

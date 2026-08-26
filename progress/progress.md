@@ -2,8 +2,18 @@
 project_slug: hover-menu-preview
 updated: 2026-08-26
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-draft-pr-ci-green; an3-b3b-windows-security-ci-green-physical-e2e-pending; an3-b3b-macos-pro-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-draft-pr-ci-green; an3-b3b-windows-security-ci-green-physical-e2e-pending; an3-b3b-macos-draft-pr-ci-green-physical-e2e-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
 ---
+
+## 2026-08-26 AI-native AN3-B3B macOS Realtime Voice
+
+- AN3-B3A exact head `16090d7`から隔離worktreeとbranch `codex/ai-native-an3b3b-macos-realtime`を作り、macOSのOpenAI Realtime BYOK実音声transportを実装した。Voice Laneを有効にしただけではマイクを開始せず、パネルのマイク操作後だけ接続する。
+- API keyはKeychainからnative ephemeral `URLSession`へだけ渡し、非永続・非inspectable WebViewはmicrophone / WebRTC / remote audio / data channelだけを所有する。Calendar list/createとTimer startは共有Capability Registry / Broker、native承認、実行後readbackを経由する。
+- Voice承認を同時1件、拒否を含め60秒3件へ制限し、セッション終了・Calendar grant取消・credential変更で承認と処理を取消してadapterを再構築する。承認文面の単一行化、function異常時のmedia close、JavaScript mute / teardown readbackとfail-closed page resetも追加した。
+- Codex Security差分scan `5670016c-fea6-463c-a42b-6e9aea700b55`の5件のLowをすべて局所修正し、元の攻撃経路と対応回帰を再照合した。WebContent異常時の物理microphone停止は、静的fallbackだけでなく実機fault-injectionを最終gateとして残す。
+- ローカルではSwift warnings-as-errors build、Voice Foundation、Capability 20 handler、Broker 21 descriptor / 20 handler、Pocket App、Pocket Surface、Panel layout 128件、Timer、共通contract 15 schema / 71 fixture、Voice静的契約、`git diff --check`が成功した。SwiftPMにはTests targetがないため`swift test`は`no tests found`であり、製品内の決定論的verifierを正本とした。
+- Draft PR [#38](https://github.com/shotaro311/hover-pocket/pull/38) code head `a0140fa`で、Windows [32919662223](https://github.com/shotaro311/hover-pocket/actions/runs/32919662223)、macOS [32919662200](https://github.com/shotaro311/hover-pocket/actions/runs/32919662200)、Router [32919662240](https://github.com/shotaro311/hover-pocket/actions/runs/32919662240)が3/3成功した。PRは`Draft / MERGEABLE / CLEAN`、review / comment 0件、remote parity `0 / 0`である。
+- 未完了gateは、実API keyと実マイクによる発話・remote audio一往復、Calendar read/createとTimer startの実データ承認/readback、mute/end/WebContent異常時の物理track停止、stack PRの人手mergeである。詳細: `progress/2026-08/2026-08-26_hover-pocket-ai-native-an3-b3b-macos-realtime.md`。
 
 ## 2026-08-26 AI-native AN3-B3B Windows実音声E2E security follow-up
 
