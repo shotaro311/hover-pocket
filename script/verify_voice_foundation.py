@@ -147,6 +147,14 @@ def main() -> None:
     windows_options = (
         ROOT / "windows" / "src" / "HoverPocket.Shell" / "StartupOptions.cs"
     ).read_text(encoding="utf-8")
+    windows_application_data = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Configuration"
+        / "HoverPocketApplicationData.cs"
+    ).read_text(encoding="utf-8")
     windows_client = (
         ROOT
         / "windows"
@@ -903,8 +911,47 @@ def main() -> None:
         "forcePageReset()",
         "Content-Security-Policy",
         "localTracks.every(track => track.readyState === 'ended')",
+        "let captureEpoch = 0;",
+        "const startEpoch = ++captureEpoch;",
+        "if (startEpoch !== captureEpoch)",
+        "stale_microphone_capture",
     )):
         fail("macOS native credential, media isolation, or bounded WebRTC contract is incomplete")
+    macos_start_position = mac_realtime_transport.find("async start(generation, sessionID)")
+    macos_epoch_position = mac_realtime_transport.find(
+        "const startEpoch = ++captureEpoch;",
+        macos_start_position,
+    )
+    macos_get_user_media_position = mac_realtime_transport.find(
+        "navigator.mediaDevices.getUserMedia",
+        macos_epoch_position,
+    )
+    macos_stale_position = mac_realtime_transport.find(
+        "if (startEpoch !== captureEpoch)",
+        macos_get_user_media_position,
+    )
+    macos_stale_stop_position = mac_realtime_transport.find(
+        "stream.getTracks().forEach(track => track.stop());",
+        macos_stale_position,
+    )
+    macos_close_position = mac_realtime_transport.find("close() {", macos_stale_stop_position)
+    macos_close_epoch_position = mac_realtime_transport.find(
+        "captureEpoch += 1;",
+        macos_close_position,
+    )
+    macos_empty_close_position = mac_realtime_transport.find(
+        "if (!state) return true;",
+        macos_close_epoch_position,
+    )
+    if not (
+        0 <= macos_start_position < macos_epoch_position < macos_get_user_media_position
+        < macos_stale_position < macos_stale_stop_position < macos_close_position
+        < macos_close_epoch_position < macos_empty_close_position
+    ):
+        fail("macOS pending microphone capture is not invalidated and stopped before empty close")
+    if "if (options.IsVerify)" not in windows_application_data \
+            or "Debug Voice E2E mode cannot be combined with --verify." not in windows_application_data:
+        fail("Windows Voice E2E can still collide with a verifier application-data override")
     continuation_position = mac_realtime_transport.find("startContinuation = continuation")
     javascript_start_position = mac_realtime_transport.find("window.hoverPocketVoice.start", continuation_position)
     if continuation_position < 0 or javascript_start_position < continuation_position \

@@ -71,7 +71,7 @@ internal sealed class VoiceE2EIsolationVerifier
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
-                "PASS voice-e2e-isolation verify: Debug-only fresh temp root, Release rejection, isolated IPC/storage/credentials/WebView2, safe defaults, external integration denial, allowlist-only atomic receipt and explicit media teardown");
+                "PASS voice-e2e-isolation verify: Debug-only fresh temp root, verifier mutual exclusion, Release rejection, isolated IPC/storage/credentials/WebView2, safe defaults, external integration denial, allowlist-only atomic receipt and explicit media teardown");
             return 0;
         }
         VerifyConsole.WriteLine("FAIL voice-e2e-isolation verify:");
@@ -103,6 +103,20 @@ internal sealed class VoiceE2EIsolationVerifier
             StartupOptions.Parse([HoverPocketApplicationData.VoiceE2ERootFlag, root]),
             debugBuild: true,
             "E2E root without explicit mode was accepted");
+        foreach (var verifier in new[] { "shell", "display", "ui" })
+        {
+            CheckRejected(
+                StartupOptions.Parse(
+                [
+                    HoverPocketApplicationData.VoiceE2EFlag,
+                    HoverPocketApplicationData.VoiceE2ERootFlag,
+                    root,
+                    "--verify",
+                    verifier
+                ]),
+                debugBuild: true,
+                $"Voice E2E was accepted together with the {verifier} verifier");
+        }
 
         var occupied = Path.Combine(
             Path.GetTempPath(),

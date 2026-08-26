@@ -637,6 +637,7 @@ private extension OpenAIRealtimeMacOSTransport {
       const bridge = window.webkit.messageHandlers.voice;
       const encoder = new TextEncoder();
       let state = null;
+      let captureEpoch = 0;
       const post = (payload) => bridge.postMessage(payload);
       const current = (generation) => state && state.generation === generation;
       const send = (payload) => {
@@ -696,8 +697,16 @@ private extension OpenAIRealtimeMacOSTransport {
       window.hoverPocketVoice = {
         async start(generation, sessionID) {
           if (state) throw new Error('session_active');
+          const startEpoch = ++captureEpoch;
           const stream = await navigator.mediaDevices.getUserMedia({audio:true, video:false});
-          if (!stream || stream.getAudioTracks().length !== 1) throw new Error('microphone_unavailable');
+          if (!stream || stream.getAudioTracks().length !== 1) {
+            if (stream) stream.getTracks().forEach(track => track.stop());
+            throw new Error('microphone_unavailable');
+          }
+          if (startEpoch !== captureEpoch) {
+            stream.getTracks().forEach(track => track.stop());
+            throw new Error('stale_microphone_capture');
+          }
           const peer = new RTCPeerConnection();
           const audio = document.createElement('audio');
           audio.autoplay = true;
@@ -750,6 +759,7 @@ private extension OpenAIRealtimeMacOSTransport {
           return state.stream.getAudioTracks().every(track => track.enabled === !muted);
         },
         close() {
+          captureEpoch += 1;
           if (!state) return true;
           const closing = state;
           state = null;

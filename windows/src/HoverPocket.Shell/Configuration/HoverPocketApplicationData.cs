@@ -94,6 +94,12 @@ internal sealed class HoverPocketApplicationData
             return Production();
         }
 
+        if (options.IsVerify)
+        {
+            throw new VoiceE2EConfigurationException(
+                "Debug Voice E2E mode cannot be combined with --verify.");
+        }
+
         if (string.IsNullOrWhiteSpace(options.VoiceE2ERoot))
         {
             throw new VoiceE2EConfigurationException(

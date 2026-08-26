@@ -48,6 +48,13 @@ AN3-B3BのWindows Voice E2E、macOS Realtime Voice、AN5 Codex credential confin
 - Windows panel / i18n / settings JavaScript構文: PASS
 - `node windows/script/verify_settings_generation_target.mjs`: PASS
 
+## release hardening follow-up
+
+- exact `16090d7...e1753616`のSecurity scan `23c25e97-43eb-45c0-80a1-0682722024d4`は変更source 39 / 39を確認し、sealed complete、reportable finding 0件だった。attack-path policy上のreport対象外だった2件を、初回実用リリース前の安全性・privacy correctness問題として修正した。
+- Windows Debug Voice E2Eは`--verify shell|display|ui`との併用を明示拒否する。これにより、E2E専用rootをVerifierのApplicationDataで上書きし、本番Google credential targetやCalendarへ再接続する設定衝突を防ぐ。`VoiceE2EIsolationVerifier`へ3経路のnegative回帰を追加した。
+- macOS embedded Realtime rendererはmicrophone captureの世代を管理する。許可待ち中にcloseされたcaptureは、遅れて`getUserMedia`が返ってもtrackを即停止し、peer、SDP offer、session stateを作らない。実際のembedded JavaScriptをNode VMで動かす`verify_macos_realtime_renderer.mjs`を追加し、macOS CIへ組み込んだ。
+- `codex-security:verify-fix`で元のsource / control / sinkを再追跡し、Windows設定衝突とmacOS遅延captureを`fixed / fixed`と判定した。ローカルで新renderer回帰、Voice静的42件、Swift warnings-as-errors build、Voice Foundation、Panel layout 128件、Capability 20 handler、Broker 21 descriptor / 20 handler、Pocket Surface、Pocket App、Timer、Pocket contract 15 schema / 71 fixtureの2回byte一致、Windows JavaScript / Settings生成先、`git diff --check`が成功した。このMacには.NET SDK / PowerShellがないため、Windows C# buildと`voice-e2e-isolation`実行は更新headのGitHub Actionsを必須gateとする。
+
 ## Draft PR / CI readback
 
 - Draft PR: [#39](https://github.com/shotaro311/hover-pocket/pull/39)

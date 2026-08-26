@@ -37,6 +37,7 @@ on:
       - "Package.resolved"
       - "contracts/pocket/v1/**"
       - "contracts/voice/**"
+      - "script/verify_macos_realtime_renderer.mjs"
       - "script/verify_voice_foundation.py"
       - ".github/workflows/macos-capabilities-verify.yml"
   pull_request:
@@ -74,6 +75,7 @@ on:
       - "Package.resolved"
       - "contracts/pocket/v1/**"
       - "contracts/voice/**"
+      - "script/verify_macos_realtime_renderer.mjs"
       - "script/verify_voice_foundation.py"
       - ".github/workflows/macos-capabilities-verify.yml"
   workflow_dispatch:
@@ -94,6 +96,7 @@ jobs:
 
       - name: Verify Host-owned Voice Lane foundation
         run: |
+          node script/verify_macos_realtime_renderer.mjs
           python3 script/verify_voice_foundation.py
           .build/debug/HoverPocket --verify-voice-foundation
           .build/debug/HoverPocket --verify-panel-layout
