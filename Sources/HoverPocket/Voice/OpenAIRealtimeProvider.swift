@@ -21,6 +21,66 @@ protocol OpenAIRealtimeCredentialStoring: Sendable {
     func delete() throws
 }
 
+final class OpenAIRealtimeEphemeralCredentialStore: OpenAIRealtimeCredentialStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var bytes: Data?
+
+    func hasCredential() throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return bytes != nil
+    }
+
+    func load() throws -> OpenAIRealtimeAPIKey? {
+        let snapshot: Data?
+        lock.lock()
+        snapshot = bytes
+        lock.unlock()
+        guard let snapshot,
+              let value = String(data: snapshot, encoding: .utf8) else {
+            return nil
+        }
+        return try OpenAIRealtimeAPIKey(value)
+    }
+
+    func save(_ apiKey: OpenAIRealtimeAPIKey) throws {
+        let replacement = apiKey.withUTF8Bytes { Data($0) }
+        lock.lock()
+        clearBytesLocked()
+        bytes = replacement
+        lock.unlock()
+    }
+
+    func delete() throws {
+        lock.lock()
+        clearBytesLocked()
+        lock.unlock()
+    }
+
+    deinit {
+        clearBytesLocked()
+    }
+
+    private func clearBytesLocked() {
+        let count = bytes?.count ?? 0
+        if count > 0 {
+            bytes?.resetBytes(in: 0..<count)
+        }
+        bytes = nil
+    }
+}
+
+enum OpenAIRealtimeCredentialStoreFactory {
+    static let shared: any OpenAIRealtimeCredentialStoring =
+        make(isolatedVoiceE2E: HoverPocketRuntimeEnvironment.shared.isIsolatedVoiceE2E)
+
+    static func make(isolatedVoiceE2E: Bool) -> any OpenAIRealtimeCredentialStoring {
+        isolatedVoiceE2E
+            ? OpenAIRealtimeEphemeralCredentialStore()
+            : OpenAIRealtimeKeychainStore()
+    }
+}
+
 @MainActor
 final class OpenAIRealtimeMacOSVoiceSessionAdapter: VoiceSessionAdapter {
     private let credentialStore: any OpenAIRealtimeCredentialStoring
@@ -31,7 +91,7 @@ final class OpenAIRealtimeMacOSVoiceSessionAdapter: VoiceSessionAdapter {
     var requiresExplicitStart: Bool { true }
 
     init(
-        credentialStore: any OpenAIRealtimeCredentialStoring = OpenAIRealtimeKeychainStore(),
+        credentialStore: any OpenAIRealtimeCredentialStoring = OpenAIRealtimeCredentialStoreFactory.shared,
         context: VoiceCapabilityContext? = nil,
         calendarAccessGranted: @escaping () -> Bool = { false },
         voiceRuntime: VoiceLaneRuntime = .shared,
@@ -118,7 +178,7 @@ enum VoiceProviderAdapterFactory {
     @MainActor
     static func factory(
         providerID: VoiceProviderID,
-        credentialStore: any OpenAIRealtimeCredentialStoring = OpenAIRealtimeKeychainStore(),
+        credentialStore: any OpenAIRealtimeCredentialStoring = OpenAIRealtimeCredentialStoreFactory.shared,
         settings: AppSettings,
         voiceRuntime: VoiceLaneRuntime = .shared
     ) -> VoiceLaneRuntime.AdapterFactory? {
@@ -130,7 +190,10 @@ enum VoiceProviderAdapterFactory {
                 OpenAIRealtimeMacOSVoiceSessionAdapter(
                     credentialStore: credentialStore,
                     context: AINativeRuntime.shared.voiceCapabilityContext,
-                    calendarAccessGranted: { settings.voiceCalendarAccessEnabled },
+                    calendarAccessGranted: {
+                        settings.voiceCalendarAccessEnabled
+                            && HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled
+                    },
                     voiceRuntime: voiceRuntime
                 )
             }

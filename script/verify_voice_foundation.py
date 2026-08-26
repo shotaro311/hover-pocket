@@ -132,6 +132,25 @@ def main() -> None:
         ROOT / "Sources" / "HoverPocket" / "Views" / "SettingsView.swift"
     ).read_text(encoding="utf-8")
     mac_build_script = (ROOT / "script" / "build_and_run.sh").read_text(encoding="utf-8")
+    mac_voice_e2e_harness = (
+        ROOT / "script" / "voice_e2e_macos.sh"
+    ).read_text(encoding="utf-8")
+    mac_voice_e2e_receipt_verifier = (
+        ROOT / "script" / "verify_macos_voice_e2e_receipt.py"
+    ).read_text(encoding="utf-8")
+    mac_runtime_environment = (
+        ROOT / "Sources" / "HoverPocket" / "Support" / "HoverPocketRuntimeEnvironment.swift"
+    ).read_text(encoding="utf-8")
+    mac_voice_e2e_receipt = (
+        ROOT / "Sources" / "HoverPocket" / "Voice" / "MacOSVoiceE2EReceiptStore.swift"
+    ).read_text(encoding="utf-8")
+    mac_voice_e2e_verifier = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "App"
+        / "MacOSVoiceE2EIsolationVerificationCommand.swift"
+    ).read_text(encoding="utf-8")
     mac_window = (
         ROOT / "Sources" / "HoverPocket" / "Windowing" / "HoverWindowController.swift"
     ).read_text(encoding="utf-8")
@@ -990,6 +1009,126 @@ def main() -> None:
         fail("macOS Voice credential refresh or transient retry contract is incomplete")
     if "Voice conversations with OpenAI Realtime" not in mac_build_script:
         fail("macOS microphone purpose string omits the OpenAI Realtime destination")
+    if not all(value in mac_runtime_environment for value in (
+        'static let voiceE2EFlag = "--voice-e2e"',
+        'static let voiceE2ERootFlag = "--voice-e2e-root"',
+        'static let voiceE2EBundleIdentifier = "local.codex.hover-pocket.voice-e2e"',
+        'static let voiceE2EBuildInfoKey = "HoverPocketVoiceE2EBuild"',
+        "guard debugBuild else",
+        '"voice_e2e_release_rejected"',
+        '$0.hasPrefix("--verify")',
+        '"voice_e2e_verifier_combination_rejected"',
+        "root.deletingLastPathComponent() == temporaryRoot",
+        "externalIntegrationsEnabled: false",
+        '"voice_e2e_arguments_required"',
+        "settingsDefaults: EphemeralAppSettingsDefaults()",
+        "ProviderRegistry(providers: [TimerProvider()])",
+    )):
+        fail("macOS Voice E2E is not a Debug-only isolated runtime")
+    if not all(value in mac_build_script for value in (
+        'HOVERPOCKET_VOICE_E2E_BUILD',
+        'HoverPocketVoiceE2EBuild-*',
+        'HoverPocketVoiceE2E.app',
+        'local.codex.hover-pocket.voice-e2e',
+        '<key>HoverPocketVoiceE2EBuild</key>',
+        'CODESIGN_IDENTITY="-"',
+        'ENTITLEMENTS_PATH="$ROOT_DIR/Resources/HoverPocket.entitlements"',
+    )):
+        fail("macOS Voice E2E bundle build contract is incomplete")
+    if not all(value in mac_voice_e2e_receipt for value in (
+        "static let allowedKeys: Set<String>",
+        "$0.role == .user && $0.isFinal",
+        "$0.role == .assistant && $0.isFinal",
+        'lastSafeEvent = "safe_close"',
+        "physicalConfirmationRequested",
+        "mediaAttemptID",
+        "attemptID == mediaAttemptID",
+        "recordPhysicalMediaUserConfirmation",
+        "microphoneAcquired = false",
+        "remoteAudioTrackEver = false",
+        "remoteAudioPlaybackEver = false",
+        "userTranscriptCount = 0",
+        "assistantTranscriptCount = 0",
+        "timerCapabilityReadbackVerified = false",
+        "physicalMediaUserConfirmed = false",
+        "data.write(to: receiptURL, options: .atomic)",
+    )) or "snapshot.transcript.map" in mac_voice_e2e_receipt:
+        fail("macOS Voice E2E receipt is not allowlisted, count-only, or atomic")
+    mac_realtime_page = mac_realtime_transport[
+        mac_realtime_transport.find("static let page ="):
+    ]
+    if not all(value in mac_realtime_transport for value in (
+        "MacOSVoiceE2EReceiptStore.shared?.beginMediaSession()",
+        "receiptStore.recordMediaEvent(event)",
+        "guard let attemptID = receiptStore.claimPhysicalConfirmationRequest()",
+        "MacOSVoiceE2EPhysicalMediaConfirmation.present()",
+        "attemptID: attemptID",
+        "MacOSVoiceE2EReceiptStore.shared?.recordSafeClose()",
+        "event:'microphoneAcquired'",
+        "event:'remoteAudioTrackReceived'",
+        "event:'remoteAudioPlaybackSucceeded'",
+    )) or "physicalMediaUserConfirmed" in mac_realtime_page \
+            or "recordPhysicalMediaUserConfirmation" in mac_realtime_page:
+        fail("macOS Voice E2E media receipt or Host-owned physical confirmation drifted")
+    if "recordTimerCapabilityReadbackVerified()" not in mac_realtime_capabilities:
+        fail("macOS Voice E2E lacks Timer Broker readback evidence")
+    if not all(value in mac_voice_e2e_harness for value in (
+        "Build",
+        "Run",
+        "Readback",
+        "ValidateIsolation",
+        "Validate",
+        "Stop",
+        "Cleanup",
+        "Build and Run never read an API key from arguments or environment",
+        "validate_owned_process",
+        '[[ "$command" == "$executable --voice-e2e --voice-e2e-root $runtime_root" ]]',
+        "find_exact_process",
+        '/usr/bin/open -n "$app_path" --args',
+        "acquire_session_operation_lock",
+        ".voice-e2e-operation-lock",
+        '[[ ! -L "$entry_path" ]]',
+        'matching_pids="$(find_exact_process "$expected_command")"',
+        "E2E bundle must use an ad-hoc signature",
+        "E2E bundle must not use a certificate identity",
+        "--stage stopped",
+    )):
+        fail("macOS Voice E2E operational harness is incomplete")
+    stopped_receipt_pos = mac_voice_e2e_harness.find('--stage stopped')
+    stopped_lifecycle_pos = mac_voice_e2e_harness.find(
+        'plutil -replace lifecycle -string stopped'
+    )
+    if stopped_receipt_pos < 0 or stopped_lifecycle_pos <= stopped_receipt_pos:
+        fail("macOS Voice E2E commits stopped state before receipt validation")
+    if not all(value in mac_voice_e2e_receipt_verifier for value in (
+        "ALLOWED_KEYS",
+        "set(payload) != ALLOWED_KEYS",
+        'parser.add_argument("--self-test", action="store_true")',
+        'validate_stage(rejected, "physical")',
+        'choices=("summary", "isolation", "physical", "stopped")',
+        '"physicalMediaUserConfirmed": True',
+        'payload["lastSafeEvent"] != "safe_close"',
+    )):
+        fail("macOS Voice E2E receipt validator is incomplete")
+    if not all(value in mac_voice_e2e_verifier for value in (
+        "debugBuild: false",
+        'code: "voice_e2e_release_rejected"',
+        'code: "voice_e2e_verifier_combination_rejected"',
+        'code: "voice_e2e_arguments_required"',
+        '"voice_e2e_root_not_fresh"',
+        '"voice_e2e_root_type_rejected"',
+        "MacOSVoiceE2EReceiptStore.allowedKeys",
+        '"receipt_attempt_microphone_stale"',
+        '"receipt_attempt_user_transcript_stale"',
+        '"receipt_attempt_timer_stale"',
+        '"receipt_attempt_confirmation_stale"',
+        '"receipt_stale_confirmation_accepted"',
+        'stopped.lastSafeEvent == "safe_close"',
+    )):
+        fail("macOS Voice E2E deterministic verifier is incomplete")
+    if "if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled" not in mac_settings \
+            or mac_app.count("HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled") < 4:
+        fail("macOS Voice E2E external Settings and lifecycle actions are not gated")
     calendar_default = mac_app_settings[
         mac_app_settings.find("self.voiceCalendarAccessEnabled ="):
         mac_app_settings.find("if defaults.data", mac_app_settings.find("self.voiceCalendarAccessEnabled ="))

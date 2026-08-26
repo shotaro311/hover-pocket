@@ -3,6 +3,7 @@ import Darwin
 import Foundation
 
 _ = signal(SIGPIPE, SIG_IGN)
+_ = HoverPocketRuntimeEnvironment.shared
 
 if CommandLine.arguments.contains(CodexCredentialBrokerDeinitProbe.argument) {
     exit(CodexCredentialBrokerDeinitProbe.run())
@@ -62,6 +63,9 @@ if CommandLine.arguments.contains("--verify-voice-foundation") {
     }
     app.run()
     exit(1)
+}
+if CommandLine.arguments.contains("--verify-voice-e2e-isolation") {
+    MacOSVoiceE2EIsolationVerificationCommand.run()
 }
 
 let app = NSApplication.shared

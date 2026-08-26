@@ -508,6 +508,9 @@ Planned Must:
 - installed Codexの生成schemaと実際のdelegated tool routerで、shell、MCP、app、plugin、extension、web、imageなどのambient toolが0件であることを独立readbackできない場合、Codex processを開始する前にVoiceをfail closedにする。Codex 0.145.0には正のtool allowlist契約がないため、AN3-B2のproduction activation対象外とする。
 - VoiceのCalendar readはGoogle接続やMicrophoneとは別のHost permission grantを既定OFFで保存する。許可前はCalendar toolをモデルへ公開せずProviderへ到達させない。取り消し時はactive tool requestを停止し、新しいtool定義でVoice sessionを再構成する。
 - VoiceのTimer startはexact title / durationをHost native UIへ表示して毎回承認する。同時に表示する承認は1件だけ、開始済み承認promptは1分あたり3件までとし、拒否も上限に含める。Voice停止、root変更、取消では待機中dialogと未使用Broker approvalを破棄する。
+- macOSの実音声E2Eは、exact bundle IDとbuild markerを持つDebug専用app、system temp直下のfresh root、process専用credential storeを使う。Release、通常bundle、Verifierとの併用、引数なしのE2E bundle起動は開始前に拒否する。
+- macOS実音声E2Eでは設定をprocess内メモリへ閉じ、Provider UIをTimerだけに限定する。Updater、Google OAuth callback、Camera準備、Clipboard移行、生成Pocket Appを起動せず、本番のApplication Support、UserDefaults、Keychainへ接続しない。SettingsではMirror、Weather、Calendar、Updateを表示せず、status menuの更新確認とapp再active時のCamera権限再確認も実行しない。Calendar実データ確認は通常の署名済み候補で、Calendar grantと書き込み承認を別途明示した場合だけ行う。
+- macOS実音声E2EのAPI keyは引数、環境変数、session state、receipt、logへ渡さず、隔離appのSettingsへユーザーが入力した現在process内だけで保持し、Stop時に消去する。
 - WebRTC SDPはUTF-8で262,144 bytes以下、`v=0`、NULなしとし、current root threadとconnection generationの両方へ束縛する。raw SDPはPanel transportだけへ返し、Settings、監査、diskへ保存しない。remote audioはWebRTC media trackで再生し、raw audio payloadをBridge、監査、diskへ渡さない。
 - Pocket Appはmanifest、data schema、layout、workflow、permissions、testsをユーザーが確認・変更・削除・rollbackできるファイルとして保持する。
 - 生成UIはauthoritative data、secret、重要処理を所有せず、削除・再生成してもユーザーの意図とデータが残る。
@@ -536,6 +539,7 @@ Planned Must:
 - installed runtimeがHost検証済みのBroker限定tool policyを持たない場合、Voiceは`SchemaMismatch / BlockedFailure`で停止し、app-server、microphone、Calendar read、Timer approvalを開始しない。表示理由は秘密情報を含まない固定codeから日本語 / 英語へ変換する。
 - Calendar grantの許可、拒否、取り消し、再起動後復元を検証し、許可前 / 取り消し後のProvider呼出し数が0であることを確認する。Timerは同時2件目と1分内4件目がnative dialog表示前に拒否され、session取消で表示中dialogが閉じる。
 - hover close / panel hideでは入力trackとremote audioを即時muteしてUIをdetachするがroot threadを停止しない。明示終了ではRealtime stop、peer connection、data channel、local media track、remote audioを閉じ、再開時に古いSDP / generationを受理しない。
+- macOS実音声E2E receiptはexact allowlistのboolean、enum、最終transcript件数だけをatomic保存し、API key、transcript本文、音声、SDP、PID、filesystem pathを含めない。各media attemptの開始時に、前回attemptのmic、remote audio、transcript件数、Timer readback、Host native確認をすべて消去し、現在attemptだけで合格を判定する。Host native確認は非永続のattempt IDへ束縛し、古い確認sheetの完了を後続attemptへ記録しない。合格には実マイク取得、remote audio trackと再生、ユーザー／assistantの最終transcript各1件以上、Timer Broker readback、Host nativeの「話せた・聞こえた」確認を必要とし、Stop後はmic / remote track / playback / credentialが0で`safe_close`になったことを別経路で読む。
 
 ## 5. Settings 要件
 
@@ -771,6 +775,7 @@ Must:
 - Compactから明示controlでExpandedへ切り替えると、Provider矩形を変えずパネル下端だけが下へ伸びる。
 - macOSのSmall / Medium / Large / Extra LargeとWindowsのSmall / Medium / Largeで、off / compact / expandedのgeometry fixtureが通る。
 - `OS × size × built-in Provider / generated PocketSurface fixture × off/compact/expanded`の直積でShell contractを検査する。
+- macOS Voice E2Eは`Build → Run → ValidateIsolation → Validate → Stop → Readback → Cleanup`を別操作にし、CIは秘密値やマイクを使わない隔離契約まで、実機gateはユーザーがAPI keyとマイクを明示操作した物理receiptまでを確認する。Run / Stop / Cleanupはsession単位のatomic lockで直列化し、ValidateIsolationはallowlist名だけでなくtop-level symlink、型、canonical root containmentを検査する。Stopはprocess不在とstopped receiptが両方通った後だけlifecycleを`stopped`へ確定し、Cleanupは記録PIDに加えてexact commandのprocess不在を再確認する。
 
 ### 10.2 Provider E2E
 

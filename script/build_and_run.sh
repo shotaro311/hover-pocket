@@ -6,6 +6,8 @@ APP_NAME="HoverPocket"
 DISPLAY_NAME="ホバーポケット"
 PRODUCT_NAME="HoverPocket"
 LEGACY_PROCESS_NAMES=("NotchPocket" "NotchPokke" "HoverMenuPreview")
+VOICE_E2E_BUILD="${HOVERPOCKET_VOICE_E2E_BUILD:-0}"
+VOICE_E2E_BUILD_ROOT="${HOVERPOCKET_VOICE_E2E_BUILD_ROOT:-}"
 BUNDLE_DIR="$ROOT_DIR/dist/$APP_NAME.app"
 EXECUTABLE_PATH="$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
 APP_ICON_NAME="AppIcon"
@@ -17,6 +19,37 @@ DEFAULT_SPARKLE_FEED_URL="${DEFAULT_SPARKLE_FEED_URL:-}"
 DEFAULT_SPARKLE_PUBLIC_ED_KEY="J2afuh/KnvOiS3eoNrMJoCyldAXL+Oku9scoSS5OUJE="
 
 cd "$ROOT_DIR"
+
+validate_voice_e2e_build_root() {
+  local configured_root="$1"
+  local temporary_root
+  local resolved_root
+  [[ -n "$configured_root" && -d "$configured_root" && ! -L "$configured_root" ]] || {
+    echo "error: E2E build root must be an existing directory" >&2
+    return 1
+  }
+  temporary_root="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
+  resolved_root="$(cd "$configured_root" && pwd -P)"
+  [[ "$(dirname "$resolved_root")" == "$temporary_root" ]] || {
+    echo "error: E2E build root must be a direct child of the system temp directory" >&2
+    return 1
+  }
+  [[ "$(basename "$resolved_root")" == HoverPocketVoiceE2EBuild-* ]] || {
+    echo "error: E2E build root name is invalid" >&2
+    return 1
+  }
+  [[ -z "$(find "$resolved_root" -mindepth 1 -maxdepth 1 -print -quit)" ]] || {
+    echo "error: E2E build root must be fresh" >&2
+    return 1
+  }
+  printf '%s' "$resolved_root"
+}
+
+if [[ "$VOICE_E2E_BUILD" == "1" || "$VOICE_E2E_BUILD" == "true" ]]; then
+  VOICE_E2E_BUILD_ROOT="$(validate_voice_e2e_build_root "$VOICE_E2E_BUILD_ROOT")"
+  BUNDLE_DIR="$VOICE_E2E_BUILD_ROOT/HoverPocketVoiceE2E.app"
+  EXECUTABLE_PATH="$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
+fi
 
 read_env_key() {
   local key="$1"
@@ -51,20 +84,43 @@ xml_escape() {
   printf '%s' "$value"
 }
 
-BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-$(read_env_key BUNDLE_IDENTIFIER)}"
-BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-local.codex.hover-pocket}"
-GOOGLE_SIGN_IN_CLIENT_ID="${GOOGLE_SIGN_IN_CLIENT_ID:-$(read_env_key GOOGLE_SIGN_IN_CLIENT_ID)}"
-GOOGLE_SIGN_IN_REVERSED_CLIENT_ID="${GOOGLE_SIGN_IN_REVERSED_CLIENT_ID:-$(read_env_key GOOGLE_SIGN_IN_REVERSED_CLIENT_ID)}"
-GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-$(read_env_key GOOGLE_CLIENT_ID)}"
-GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-$(read_env_key GOOGLE_CLIENT_SECRET)}"
-GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK="${GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK:-$(read_env_key GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK)}"
-CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-$(read_env_key CODESIGN_IDENTITY)}"
-CODESIGN_HARDENED_RUNTIME="${CODESIGN_HARDENED_RUNTIME:-$(read_env_key CODESIGN_HARDENED_RUNTIME)}"
-HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX="${HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX:-$(read_env_key HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX)}"
-SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-$(read_env_key SPARKLE_FEED_URL)}"
-SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-$(read_env_key SPARKLE_PUBLIC_ED_KEY)}"
-SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-$DEFAULT_SPARKLE_FEED_URL}"
-SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-$DEFAULT_SPARKLE_PUBLIC_ED_KEY}"
+VOICE_E2E_PLIST=""
+if [[ "$VOICE_E2E_BUILD" == "1" || "$VOICE_E2E_BUILD" == "true" ]]; then
+  BUNDLE_IDENTIFIER="local.codex.hover-pocket.voice-e2e"
+  GOOGLE_SIGN_IN_CLIENT_ID=""
+  GOOGLE_SIGN_IN_REVERSED_CLIENT_ID=""
+  GOOGLE_CLIENT_ID=""
+  GOOGLE_CLIENT_SECRET=""
+  GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK=""
+  CODESIGN_IDENTITY="-"
+  CODESIGN_HARDENED_RUNTIME=""
+  HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX="${HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX:-}"
+  SPARKLE_FEED_URL=""
+  SPARKLE_PUBLIC_ED_KEY=""
+  ENTITLEMENTS_PATH="$ROOT_DIR/Resources/HoverPocket.entitlements"
+  [[ "$HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX" == voice-e2e-* ]] || {
+    echo "error: E2E build requires a unique voice-e2e-* Keychain suffix" >&2
+    exit 1
+  }
+  VOICE_E2E_PLIST="  <key>HoverPocketVoiceE2EBuild</key>
+  <true/>
+"
+else
+  BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-$(read_env_key BUNDLE_IDENTIFIER)}"
+  BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-local.codex.hover-pocket}"
+  GOOGLE_SIGN_IN_CLIENT_ID="${GOOGLE_SIGN_IN_CLIENT_ID:-$(read_env_key GOOGLE_SIGN_IN_CLIENT_ID)}"
+  GOOGLE_SIGN_IN_REVERSED_CLIENT_ID="${GOOGLE_SIGN_IN_REVERSED_CLIENT_ID:-$(read_env_key GOOGLE_SIGN_IN_REVERSED_CLIENT_ID)}"
+  GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-$(read_env_key GOOGLE_CLIENT_ID)}"
+  GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-$(read_env_key GOOGLE_CLIENT_SECRET)}"
+  GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK="${GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK:-$(read_env_key GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK)}"
+  CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-$(read_env_key CODESIGN_IDENTITY)}"
+  CODESIGN_HARDENED_RUNTIME="${CODESIGN_HARDENED_RUNTIME:-$(read_env_key CODESIGN_HARDENED_RUNTIME)}"
+  HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX="${HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX:-$(read_env_key HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX)}"
+  SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-$(read_env_key SPARKLE_FEED_URL)}"
+  SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-$(read_env_key SPARKLE_PUBLIC_ED_KEY)}"
+  SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-$DEFAULT_SPARKLE_FEED_URL}"
+  SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-$DEFAULT_SPARKLE_PUBLIC_ED_KEY}"
+fi
 if [[ -z "$HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX" ]]; then
   if [[ "$CODESIGN_IDENTITY" == Developer\ ID\ Application:* ]]; then
     HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX="release"
@@ -144,16 +200,25 @@ install_app_icon() {
   rm -rf "$(dirname "$iconset_dir")"
 }
 
-for process_name in "$APP_NAME" "${LEGACY_PROCESS_NAMES[@]}"; do
-  if pgrep -x "$process_name" >/dev/null 2>&1; then
-    pkill -x "$process_name" || true
-    sleep 0.2
-  fi
-done
+if [[ "$VOICE_E2E_BUILD" != "1" && "$VOICE_E2E_BUILD" != "true" ]]; then
+  for process_name in "$APP_NAME" "${LEGACY_PROCESS_NAMES[@]}"; do
+    if pgrep -x "$process_name" >/dev/null 2>&1; then
+      pkill -x "$process_name" || true
+      sleep 0.2
+    fi
+  done
+fi
 
 swift build
 
-rm -rf "$BUNDLE_DIR"
+if [[ "$VOICE_E2E_BUILD" == "1" || "$VOICE_E2E_BUILD" == "true" ]]; then
+  [[ ! -e "$BUNDLE_DIR" ]] || {
+    echo "error: refusing to overwrite an existing E2E app bundle" >&2
+    exit 1
+  }
+else
+  rm -rf "$BUNDLE_DIR"
+fi
 mkdir -p "$BUNDLE_DIR/Contents/MacOS" "$BUNDLE_DIR/Contents/Frameworks" "$BUNDLE_DIR/Contents/Resources"
 cp ".build/debug/$PRODUCT_NAME" "$EXECUTABLE_PATH"
 chmod +x "$EXECUTABLE_PATH"
@@ -208,7 +273,7 @@ cat > "$BUNDLE_DIR/Contents/Info.plist" <<PLIST
   <true/>
   <key>HoverPocketKeychainServiceSuffix</key>
   <string>$(xml_escape "$HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX")</string>
-${GOOGLE_SIGN_IN_PLIST}${GOOGLE_OAUTH_PLIST}  <key>NSAppTransportSecurity</key>
+${VOICE_E2E_PLIST}${GOOGLE_SIGN_IN_PLIST}${GOOGLE_OAUTH_PLIST}  <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsLocalNetworking</key>
     <true/>

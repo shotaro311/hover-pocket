@@ -25,6 +25,7 @@ let resolveMicrophone;
 const microphonePromise = new Promise((resolve) => {
   resolveMicrophone = resolve;
 });
+let getMicrophone = () => microphonePromise;
 const localTrack = {
   enabled: true,
   readyState: "live",
@@ -56,6 +57,7 @@ class FakePeerConnection {
     this.connectionState = "new";
     this.iceGatheringState = "complete";
     this.localDescription = null;
+    lastPeer = this;
   }
 
   addTrack() {}
@@ -76,13 +78,15 @@ class FakePeerConnection {
 }
 
 const posted = [];
+let lastPeer = null;
+let lastAudio = null;
 const sandbox = {
   TextEncoder,
   setTimeout,
   clearTimeout,
   navigator: {
     mediaDevices: {
-      getUserMedia: () => microphonePromise,
+      getUserMedia: () => getMicrophone(),
     },
   },
   RTCPeerConnection: FakePeerConnection,
@@ -91,7 +95,7 @@ const sandbox = {
     body: {
       replaceChildren() {},
     },
-    createElement: () => ({
+    createElement: () => (lastAudio = {
       autoplay: false,
       playsInline: false,
       muted: false,
@@ -141,6 +145,58 @@ if (sandbox.window.hoverPocketVoice.setMuted(false) !== false) {
   throw new Error("The stale capture installed renderer session state");
 }
 
+const secondLocalTrack = {
+  enabled: true,
+  readyState: "live",
+  stopCount: 0,
+  addEventListener() {},
+  stop() {
+    this.stopCount += 1;
+    this.readyState = "ended";
+  },
+};
+const secondStream = {
+  getAudioTracks: () => [secondLocalTrack],
+  getTracks: () => [secondLocalTrack],
+};
+const remoteTrack = {
+  readyState: "live",
+  stopCount: 0,
+  addEventListener() {},
+  stop() {
+    this.stopCount += 1;
+    this.readyState = "ended";
+  },
+};
+const remoteStream = { getTracks: () => [remoteTrack] };
+getMicrophone = async () => secondStream;
+posted.length = 0;
+await sandbox.window.hoverPocketVoice.start(2, "session-2");
+lastPeer.ontrack({ streams: [remoteStream], track: remoteTrack });
+await Promise.resolve();
+
+const mediaEvents = posted
+  .filter((event) => event && event.type === "media")
+  .map((event) => event.event);
+for (const expected of [
+  "microphoneAcquired",
+  "remoteAudioTrackReceived",
+  "remoteAudioPlaybackSucceeded",
+]) {
+  if (!mediaEvents.includes(expected)) {
+    throw new Error(`Missing sanitized media event: ${expected}`);
+  }
+}
+if (!sandbox.window.hoverPocketVoice.close()) {
+  throw new Error("Active close did not confirm media teardown");
+}
+if (secondLocalTrack.readyState !== "ended" || remoteTrack.readyState !== "ended") {
+  throw new Error("Active close did not stop local and remote tracks");
+}
+if (lastAudio.srcObject !== null) {
+  throw new Error("Active close retained the remote media stream");
+}
+
 process.stdout.write(
-  "PASS macOS Realtime renderer verify: close invalidates pending microphone capture, stops the late track, and prevents stale state or SDP offer\n",
+  "PASS macOS Realtime renderer verify: close invalidates late capture, sanitized media telemetry is emitted, and active local/remote tracks are stopped\n",
 );

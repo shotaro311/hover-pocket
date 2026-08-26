@@ -189,6 +189,7 @@ final class OpenAIRealtimeMacOSTransport: NSObject {
         captureAuthorizationGeneration = currentGeneration
         self.credentialStore = credentialStore
         capabilityRuntime = capabilities
+        MacOSVoiceE2EReceiptStore.shared?.beginMediaSession()
         onRootSession?(sessionID)
         do {
             try await withTaskCancellationHandler {
@@ -285,6 +286,7 @@ final class OpenAIRealtimeMacOSTransport: NSObject {
             forcePageReset()
             onFailure?("voice_media_teardown_failed")
         }
+        MacOSVoiceE2EReceiptStore.shared?.recordSafeClose()
     }
 
     func clearCallbacks() {
@@ -481,6 +483,22 @@ final class OpenAIRealtimeMacOSTransport: NSObject {
         ))
     }
 
+    private func handleMediaEvent(_ body: [String: Any]) {
+        guard Set(body.keys) == ["type", "generation", "sessionID", "event"],
+              let rawEvent = body["event"] as? String,
+              let event = MacOSVoiceE2EMediaEvent(rawValue: rawEvent),
+              let receiptStore = MacOSVoiceE2EReceiptStore.shared else { return }
+        receiptStore.recordMediaEvent(event)
+        guard let attemptID = receiptStore.claimPhysicalConfirmationRequest() else { return }
+        Task { @MainActor in
+            let confirmed = await MacOSVoiceE2EPhysicalMediaConfirmation.present()
+            receiptStore.recordPhysicalMediaUserConfirmation(
+                confirmed,
+                attemptID: attemptID
+            )
+        }
+    }
+
     private static func safeCode(_ error: Error) -> String {
         switch error {
         case OpenAIRealtimeMacOSTransportError.keyMissing:
@@ -538,6 +556,8 @@ extension OpenAIRealtimeMacOSTransport: WKScriptMessageHandler {
             handleFunction(body, generation: eventGeneration, sessionID: sessionID)
         case "transcript":
             handleTranscript(body, sessionID: sessionID)
+        case "media":
+            handleMediaEvent(body)
         case "activity":
             guard let raw = body["activity"] as? String,
                   let activity = VoiceLaneActivity(rawValue: raw) else { return }
@@ -713,11 +733,25 @@ private extension OpenAIRealtimeMacOSTransport {
           audio.playsInline = true;
           document.body.replaceChildren(audio);
           state = {generation, sessionID, stream, peer, audio, channel:null};
+          const microphoneTrack = stream.getAudioTracks()[0];
+          if (microphoneTrack && typeof microphoneTrack.addEventListener === 'function') {
+            microphoneTrack.addEventListener('ended', () => post({type:'media', generation, sessionID, event:'microphoneStopped'}));
+          }
           stream.getTracks().forEach(track => peer.addTrack(track, stream));
+          post({type:'media', generation, sessionID, event:'microphoneAcquired'});
           peer.ontrack = (event) => {
             const remote = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
+            post({type:'media', generation, sessionID, event:'remoteAudioTrackReceived'});
+            if (event.track && typeof event.track.addEventListener === 'function') {
+              event.track.addEventListener('ended', () => post({type:'media', generation, sessionID, event:'remoteAudioTrackStopped'}));
+            }
             audio.srcObject = remote;
-            audio.play().catch(() => post({type:'error', generation, sessionID, code:'remote_audio_playback_failed'}));
+            audio.play()
+              .then(() => post({type:'media', generation, sessionID, event:'remoteAudioPlaybackSucceeded'}))
+              .catch(() => {
+                post({type:'media', generation, sessionID, event:'remoteAudioPlaybackFailed'});
+                post({type:'error', generation, sessionID, code:'remote_audio_playback_failed'});
+              });
           };
           peer.onconnectionstatechange = () => {
             if (!current(generation)) return;
@@ -769,6 +803,9 @@ private extension OpenAIRealtimeMacOSTransport {
           try { closing.peer.close(); } catch {}
           localTracks.forEach(track => track.stop());
           remoteTracks.forEach(track => track.stop());
+          if (localTracks.length > 0) post({type:'media', generation:closing.generation, sessionID:closing.sessionID, event:'microphoneStopped'});
+          if (remoteTracks.length > 0) post({type:'media', generation:closing.generation, sessionID:closing.sessionID, event:'remoteAudioTrackStopped'});
+          if (closing.audio.srcObject) post({type:'media', generation:closing.generation, sessionID:closing.sessionID, event:'remoteAudioPlaybackStopped'});
           closing.audio.srcObject = null;
           document.body.replaceChildren();
           return localTracks.every(track => track.readyState === 'ended')

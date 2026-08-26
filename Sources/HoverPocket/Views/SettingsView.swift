@@ -14,7 +14,7 @@ struct SettingsView: View {
     @State private var openAIRealtimeKeyConfigured = false
     @State private var voiceCredentialError: String?
     @State private var isShowingVoiceCalendarAccessConfirmation = false
-    private let openAIRealtimeKeychain = OpenAIRealtimeKeychainStore()
+    private let openAIRealtimeKeychain = OpenAIRealtimeCredentialStoreFactory.shared
 
     var body: some View {
         ScrollView {
@@ -49,21 +49,23 @@ struct SettingsView: View {
 
                 stickyNotesSection
 
-                Divider()
+                if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
+                    Divider()
 
-                mirrorSection
+                    mirrorSection
 
-                Divider()
+                    Divider()
 
-                weatherSection
+                    weatherSection
 
-                Divider()
+                    Divider()
 
-                googleCalendarSection
+                    googleCalendarSection
 
-                Divider()
+                    Divider()
 
-                updatesSection
+                    updatesSection
+                }
             }
             .padding(20)
         }
@@ -484,7 +486,9 @@ struct SettingsView: View {
                     .textFieldStyle(.roundedBorder)
 
                     HStack(spacing: 8) {
-                        Button(localized(japanese: "Keychainへ保存", english: "Save to Keychain")) {
+                        Button(HoverPocketRuntimeEnvironment.shared.isIsolatedVoiceE2E
+                            ? localized(japanese: "このテスト起動に保存", english: "Save for this test run")
+                            : localized(japanese: "Keychainへ保存", english: "Save to Keychain")) {
                             saveOpenAIRealtimeKey()
                         }
                         .disabled(openAIRealtimeKeyDraft.isEmpty)
@@ -496,7 +500,9 @@ struct SettingsView: View {
                     }
 
                     Text(openAIRealtimeKeyConfigured
-                        ? localized(japanese: "APIキーはmacOS Keychainに保存済みです。", english: "API key is stored in macOS Keychain.")
+                        ? HoverPocketRuntimeEnvironment.shared.isIsolatedVoiceE2E
+                            ? localized(japanese: "APIキーはこのテストprocessのメモリだけに保持されています。", english: "The API key is held only in memory for this test process.")
+                            : localized(japanese: "APIキーはmacOS Keychainに保存済みです。", english: "API key is stored in macOS Keychain.")
                         : localized(japanese: "APIキーは未設定です。", english: "API key is not configured."))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
@@ -594,6 +600,7 @@ struct SettingsView: View {
             openAIRealtimeKeyDraft = ""
             openAIRealtimeKeyConfigured = true
             voiceCredentialError = nil
+            MacOSVoiceE2EReceiptStore.shared?.recordCredentialCurrent(true)
             VoiceLaneRuntime.shared.credentialsDidChange()
         } catch {
             openAIRealtimeKeyDraft = ""
@@ -614,6 +621,7 @@ struct SettingsView: View {
             openAIRealtimeKeyConfigured = false
             openAIRealtimeKeyDraft = ""
             voiceCredentialError = nil
+            MacOSVoiceE2EReceiptStore.shared?.recordCredentialCurrent(false)
             VoiceLaneRuntime.shared.credentialsDidChange()
         } catch {
             openAIRealtimeKeyDraft = ""

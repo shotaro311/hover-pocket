@@ -59,11 +59,8 @@ final class TimerStore: ObservableObject {
     }
 
     private static func defaultStorageDirectory(fileManager: FileManager) -> URL {
-        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        return base
-            .appendingPathComponent("HoverPocket", isDirectory: true)
-            .appendingPathComponent("Timer", isDirectory: true)
+        _ = fileManager
+        return HoverPocketRuntimeEnvironment.shared.storageDirectory("Timer")
     }
 
     var canStartTimer: Bool {

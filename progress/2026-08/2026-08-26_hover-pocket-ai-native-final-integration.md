@@ -55,6 +55,17 @@ AN3-B3BのWindows Voice E2E、macOS Realtime Voice、AN5 Codex credential confin
 - macOS embedded Realtime rendererはmicrophone captureの世代を管理する。許可待ち中にcloseされたcaptureは、遅れて`getUserMedia`が返ってもtrackを即停止し、peer、SDP offer、session stateを作らない。実際のembedded JavaScriptをNode VMで動かす`verify_macos_realtime_renderer.mjs`を追加し、macOS CIへ組み込んだ。
 - `codex-security:verify-fix`で元のsource / control / sinkを再追跡し、Windows設定衝突とmacOS遅延captureを`fixed / fixed`と判定した。ローカルで新renderer回帰、Voice静的42件、Swift warnings-as-errors build、Voice Foundation、Panel layout 128件、Capability 20 handler、Broker 21 descriptor / 20 handler、Pocket Surface、Pocket App、Timer、Pocket contract 15 schema / 71 fixtureの2回byte一致、Windows JavaScript / Settings生成先、`git diff --check`が成功した。このMacには.NET SDK / PowerShellがないため、Windows C# buildと`voice-e2e-isolation`実行は更新headのGitHub Actionsを必須gateとする。
 
+## macOS実音声E2E隔離harness
+
+- `b51e7f0`をbaseに、Debug専用marker、専用bundle ID、freshなsystem temp直下root、ephemeral settings、process-memory credential、Timer-only Provider Registryを持つ隔離起動を実装した。Release build、通常bundle、E2E引数不足、verifier併用、nested / occupied / symlink rootは起動前に拒否する。
+- E2EではGoogle OAuth callback、Calendar、Weather、Camera、Updater、Clipboard legacy migration、生成Pocket Appを起動せず、本番Application Support、UserDefaults、Keychainへ接続しない。SettingsからAPI keyを入力した場合も現在processのメモリだけで保持し、Stop時にzeroing storeから消去する。
+- receiptはexact allowlistのboolean、enum、最終transcript件数だけをatomic保存し、API key、transcript本文、音声、SDP、PID、filesystem pathを保存しない。各media attemptでmic、remote audio、transcript件数、Timer readback、native確認をresetし、Hostの確認sheetを非永続attempt IDへ結合して古い完了通知を拒否する。
+- `script/voice_e2e_macos.sh`は`Build → Run → Readback → ValidateIsolation → Validate → Stop → Cleanup`を分離した。Run / Stop / Cleanupはsession単位lockで直列化し、exact command / PID、bundle identity、ad-hoc署名、top-level symlink・型・canonical containment、stopped receipt後のlifecycle確定、exact process不在後のTrash cleanupを確認する。
+- 秘密値・マイクなしの実ライフサイクルでは、事前lockによるRun拒否とlifecycle不変、Run成功、receipt存在、credential 0 / media 0、隔離検証、allowlist名`PocketApps` symlink拒否、symlinkをTrash後の再検証、Stop後`safe_close` / credential 0、Cleanup後のsession / build / runtime source不在、exact process不在を別経路で確認した。
+- `bash -n`、receipt self-test、embedded renderer、Voice静的契約、Voice Foundation、E2E isolation、Panel layout 128件、Capability 20 handler、Broker 21 descriptor / 20 handler、Pocket Surface、Pocket App package / lifecycle / generation / migration / health / workspace backup、Timer、Swift debug / release warnings-as-errors、Windows JavaScript / Settings生成先、15 schema / 71 fixtureの2回byte一致、`git diff --check`が成功した。
+- 最終Security scan `710a8647-1d45-4f45-98dc-56d0b66a5909`はimmutable snapshot `codex-security-snapshot/v1:sha256:ad8cb7efaf599d7e27e9a9512c46448e00ae083b82f2d6459524b96897a96f7a`の20 / 20 changed code / script fileをcoverage complete、reportable finding 0件で封印した。CI workflowとrequirements差分も手動で確認した。
+- 実API key、実マイク、可聴remote audio、ユーザー / assistant transcript、Timer native approval、Hostの「話せた・聞こえた」確認は未実施である。Developer ID署名候補のTCC、notarization、配布、rollback、mergeも別gateのままにする。
+
 ## Draft PR / CI readback
 
 - Draft PR: [#39](https://github.com/shotaro311/hover-pocket/pull/39)
@@ -69,7 +80,7 @@ AN3-B3BのWindows Voice E2E、macOS Realtime Voice、AN5 Codex credential confin
 ## 未完了gate
 
 1. Windows実機で、default-off、明示enable、実マイク、可聴remote audio、Timer承認/readback、native physical confirmation、Stop後resource 0を確認する。
-2. macOS実機で、default-off、明示マイク操作、実発話 / 可聴remote audio、Calendar grant off、Calendar / Timer承認とreadback、mute / end / WebContent異常時の物理track停止を確認する。
+2. macOS実機で、隔離harnessへユーザーがAPI keyを入力し、default-off、明示マイク操作、実発話 / 可聴remote audio、最終transcript、Timer承認/readback、Host native確認、`Validate`、Stop後resource 0を確認する。通常の署名済み候補ではCalendar grant off / on、Calendar承認/readback、mute / end / WebContent異常時の物理track停止を別途確認する。
 3. macOS Developer ID / notarization / staple / Gatekeeper / Sparkleと、Windows timestamped Authenticode / Velopack / feedをfinal source artifactで別々に確認する。
 4. install、upgrade、rollback、uninstall、reinstall、user data保持を両OSでreadbackする。
 5. Draft PRをReady、merge、releaseへ進める判断は上記gate完了後に行う。

@@ -41,9 +41,16 @@ final class HoverWindowController {
         settings
     }
 
-    init() {
-        let settings = AppSettings()
-        let menuStore = HoverMenuStore(settings: settings)
+    init(
+        settingsDefaults: any AppSettingsDefaultsStoring = HoverPocketRuntimeEnvironment.shared.settingsDefaults
+    ) {
+        let settings = AppSettings(defaults: settingsDefaults)
+        HoverPocketRuntimeEnvironment.shared.applyVoiceE2EDefaults(to: settings)
+        let providerStore = ProviderStore(
+            registry: HoverPocketRuntimeEnvironment.shared.providerRegistry,
+            settings: settings
+        )
+        let menuStore = HoverMenuStore(settings: settings, providerStore: providerStore)
         self.settings = settings
         self.menuStore = menuStore
         self.settingsWindowController = SettingsWindowController(

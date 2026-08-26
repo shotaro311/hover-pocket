@@ -601,6 +601,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         } else {
             payload["endAt"] = NSNull()
         }
+        MacOSVoiceE2EReceiptStore.shared?.recordTimerCapabilityReadbackVerified()
         return try json(payload)
     }
 

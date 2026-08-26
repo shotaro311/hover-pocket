@@ -16,8 +16,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeAINativeRuntimeSetting()
         configureVoiceRuntime()
         observeVoiceRuntimeSettings()
+        observeVoiceE2EReceipt()
         installMainMenu()
-        registerURLSchemeCallbackHandler()
+        if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
+            registerURLSchemeCallbackHandler()
+        }
         statusBarMenuController = StatusBarMenuController(
             settings: hoverWindowController.appSettings,
             onOpenPanel: { [weak self] in
@@ -27,14 +30,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.hoverWindowController.openSettingsFromMenu()
             },
             onCheckForUpdates: {
+                guard HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled else {
+                    return
+                }
                 AppUpdater.shared.checkForUpdates()
             },
             onQuit: {
                 NSApp.terminate(nil)
             }
         )
-        MirrorCameraModel.shared.prepareIfAuthorized()
-        _ = AppUpdater.shared
+        if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
+            MirrorCameraModel.shared.prepareIfAuthorized()
+            _ = AppUpdater.shared
+        }
         hoverWindowController.positionWindows()
         hoverWindowController.showPill()
 
@@ -65,17 +73,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureAINativeRuntimeIfEnabled() {
+        let runtimeEnvironment = HoverPocketRuntimeEnvironment.shared
         let savedGeneratedProviderIDs = hoverWindowController.appSettings.savedGeneratedProviderIDs
         do {
-            let applicationSupport = try FileManager.default.url(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask,
-                appropriateFor: nil,
-                create: true
-            )
-            let brokerRoot = applicationSupport
-                .appendingPathComponent("HoverPocket", isDirectory: true)
-                .appendingPathComponent("CapabilityBroker", isDirectory: true)
+            let brokerRoot = runtimeEnvironment.storageDirectory("CapabilityBroker")
             let ledger = try CapabilityBrokerLedger(rootDirectory: brokerRoot)
             let auditLog = try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
             let governanceController = CapabilityDataGovernanceController(
@@ -101,7 +102,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 registry: registry,
                 broker: broker
             )
-            guard hoverWindowController.appSettings.aiNativeEnabled else {
+            guard hoverWindowController.appSettings.aiNativeEnabled,
+                  runtimeEnvironment.externalIntegrationsEnabled else {
                 AINativeRuntime.shared.configure(
                     adapter: nil,
                     capabilityDataGovernanceController: governanceController,
@@ -117,9 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .appendingPathComponent("PocketApps", isDirectory: true)
                 .appendingPathComponent("local.example.today-focus", isDirectory: true)
             let package = try PocketAppPackageRuntime().load(directory: packageRoot)
-            let pocketAppsRoot = applicationSupport
-                .appendingPathComponent("HoverPocket", isDirectory: true)
-                .appendingPathComponent("PocketApps", isDirectory: true)
+            let pocketAppsRoot = runtimeEnvironment.storageDirectory("PocketApps")
             let userDataRoot = pocketAppsRoot.appendingPathComponent("UserData", isDirectory: true)
             let userStateStore = try PocketAppUserStateStore(
                 packageID: package.manifest.id,
@@ -251,12 +251,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &settingsCancellables)
     }
 
+    private func observeVoiceE2EReceipt() {
+        guard let receiptStore = MacOSVoiceE2EReceiptStore.shared else { return }
+        VoiceLaneRuntime.shared.$snapshot
+            .sink { snapshot in
+                let credentialCurrent = (
+                    try? OpenAIRealtimeCredentialStoreFactory.shared.hasCredential()
+                ) ?? false
+                receiptStore.recordVoiceSnapshot(
+                    snapshot,
+                    credentialCurrent: credentialCurrent
+                )
+            }
+            .store(in: &settingsCancellables)
+    }
+
     @objc private func screenParametersChanged() {
         hoverWindowController.recoverAfterSystemTransition()
     }
 
     @objc private func applicationBecameActive() {
-        MirrorCameraModel.shared.recheckPermissionAfterExternalChange()
+        if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
+            MirrorCameraModel.shared.recheckPermissionAfterExternalChange()
+        }
         hoverWindowController.ensureAccessWindowsAvailable()
     }
 
@@ -277,6 +294,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         voiceTerminationTask = Task { @MainActor [weak self] in
             await self?.voiceConfigurationTask?.value
             await VoiceLaneRuntime.shared.shutdown()
+            if HoverPocketRuntimeEnvironment.shared.isIsolatedVoiceE2E {
+                try? OpenAIRealtimeCredentialStoreFactory.shared.delete()
+                MacOSVoiceE2EReceiptStore.shared?.recordCredentialCurrent(false)
+                MacOSVoiceE2EReceiptStore.shared?.recordSafeClose()
+            }
             self?.voiceTerminationTask = nil
             sender.reply(toApplicationShouldTerminate: true)
         }
