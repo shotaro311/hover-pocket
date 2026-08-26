@@ -58,11 +58,11 @@ AN3-B3BのWindows Voice E2E、macOS Realtime Voice、AN5 Codex credential confin
 ## Draft PR / CI readback
 
 - Draft PR: [#39](https://github.com/shotaro311/hover-pocket/pull/39)
-- code head: `43d821702c00e32ebd25068ec9478c59f22d5574`
+- hardening code head: `b32824399a6f63ef012a5ffacddb76de4c3ccc2e`
 - base: PR #36 head `16090d7a86c81ab19d85018462814c7279bb8801`
-- Windows run [32937212403](https://github.com/shotaro311/hover-pocket/actions/runs/32937212403): SUCCESS。Release build、Debug Voice E2E host、Settings、Capabilities、Broker、Pocket Surface、Timer、旧AI lane不在、Voice Foundation、Voice E2E isolation、PowerShell構文、Updater、signing contract、rendered WebView2の全stepが成功した。
-- macOS run [32937212399](https://github.com/shotaro311/hover-pocket/actions/runs/32937212399): SUCCESS。build、Host-owned Voice Lane、Capabilities、Broker / Today Focus、Pocket App / Surface、Timerが成功した。
-- Router run [32937212453](https://github.com/shotaro311/hover-pocket/actions/runs/32937212453): SUCCESS。
+- Windows run [32941881191](https://github.com/shotaro311/hover-pocket/actions/runs/32941881191): SUCCESS。Release / Debug Voice E2E hostの両buildが警告0・エラー0で、Settings、Capabilities、Broker、Pocket Surface、Timer、旧AI lane不在、Voice Foundation、Voice E2E verifier mutual exclusion、PowerShell構文、Updater、signing contract、rendered WebView2の全stepが成功した。
+- macOS run [32941881164](https://github.com/shotaro311/hover-pocket/actions/runs/32941881164): SUCCESS。build、late microphone captureのtrack停止 / stale state / SDP offer不在を含むHost-owned Voice Lane、Capabilities、Broker / Today Focus、Pocket App / Surface、Timerが成功した。
+- Router run [32941879235](https://github.com/shotaro311/hover-pocket/actions/runs/32941879235): SUCCESS。
 - GitHub readback: `Draft / OPEN / MERGEABLE / CLEAN`、review 0、comment 0、unresolved thread 0、remote parity `0 / 0`。
 - CI成功は自動検証の証拠であり、実マイク、可聴remote audio、署名済み配布の証拠には使わない。
 
