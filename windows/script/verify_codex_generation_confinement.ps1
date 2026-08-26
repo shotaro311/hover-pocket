@@ -7,6 +7,9 @@ param(
     [ValidateSet("elevated", "unelevated")]
     [string]$SandboxImplementation = "elevated",
 
+    [Parameter(ParameterSetName = "Canary")]
+    [switch]$ExpectUnelevatedReadOnlyRejection,
+
     [Parameter(Mandatory = $true, ParameterSetName = "SelfTest")]
     [switch]$SelfTest
 )
@@ -21,6 +24,7 @@ $RootPrefix = "HoverPocketCodexConfinement-"
 $ForeignPrefix = "HoverPocketCodexForeign-"
 $MaximumStdoutCharacters = 16384
 $MaximumStderrCharacters = 32768
+$UnelevatedReadOnlyRejection = "windows sandbox failed: Restricted read-only access requires the elevated Windows sandbox backend"
 $ExpectedProbe = [ordered]@{
     codex_home_read = $false
     foreign_read = $false
@@ -249,6 +253,15 @@ function ConvertFrom-ProbeOutput {
     return $payload
 }
 
+function Test-ExpectedUnelevatedRejection {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Stdout,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Stderr
+    )
+
+    return [string]::IsNullOrWhiteSpace($Stdout) -and $Stderr.Trim() -ceq $UnelevatedReadOnlyRejection
+}
+
 function Invoke-BoundedProcess {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
@@ -362,6 +375,13 @@ function Invoke-SelfTest {
             if ($_.Exception.Message -like "Self-test accepted*") { throw }
         }
     }
+    if (
+        -not (Test-ExpectedUnelevatedRejection -Stdout "" -Stderr ($UnelevatedReadOnlyRejection + "`r`n")) -or
+        (Test-ExpectedUnelevatedRejection -Stdout "unexpected" -Stderr $UnelevatedReadOnlyRejection) -or
+        (Test-ExpectedUnelevatedRejection -Stdout "" -Stderr "another failure")
+    ) {
+        throw "Self-test unelevated rejection contract failed."
+    }
 
     $oldSystemRoot = $env:SystemRoot
     try {
@@ -399,6 +419,9 @@ function Invoke-SelfTest {
 }
 
 function Invoke-Canary {
+    if ($ExpectUnelevatedReadOnlyRejection -and $SandboxImplementation -cne "unelevated") {
+        throw "The unelevated rejection expectation requires the unelevated implementation."
+    }
     $codex = Resolve-TrustedCodexExecutable -Path $CodexBin
     $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
         [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
@@ -463,6 +486,28 @@ function Invoke-Canary {
             $acceptTask.Result.Dispose()
         }
         if ($result.ExitCode -ne 0) {
+            if (
+                $ExpectUnelevatedReadOnlyRejection -and
+                (Test-ExpectedUnelevatedRejection -Stdout $result.Stdout -Stderr $result.Stderr)
+            ) {
+                $receipt = [ordered]@{
+                    schemaVersion = 1
+                    status = "passed"
+                    codexVersion = $SupportedVersion
+                    sandboxImplementation = $SandboxImplementation
+                    mode = "negative-control"
+                    checks = [ordered]@{
+                        pinnedExecutable = $true
+                        validAuthenticode = $true
+                        readOnlyFallbackRejected = $true
+                        elevatedRequired = $true
+                        diagnosticBounded = $true
+                    }
+                }
+                Write-Host "PASS unelevated Codex sandbox rejected the read-only generation profile"
+                Write-Output ($receipt | ConvertTo-Json -Compress -Depth 4)
+                return
+            }
             $sensitiveValues = @(
                 $codex,
                 $root,
@@ -481,6 +526,9 @@ function Invoke-Canary {
             Write-Warning "Codex sandbox stderr: $stderrDiagnostic"
             Write-Warning "Codex sandbox stdout: $stdoutDiagnostic"
             throw "Sandbox probe process failed."
+        }
+        if ($ExpectUnelevatedReadOnlyRejection) {
+            throw "The unelevated sandbox unexpectedly accepted the read-only generation profile."
         }
         if ($result.Stderr.Length -gt $MaximumStderrCharacters) {
             throw "Sandbox probe stderr exceeded its limit."

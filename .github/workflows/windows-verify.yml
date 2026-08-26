@@ -73,10 +73,10 @@ jobs:
           }
           .\windows\script\verify_codex_generation_confinement.ps1 -SelfTest
 
-      - name: Verify Codex generation confinement in unelevated Windows fallback
+      - name: Verify unelevated sandbox cannot replace the elevated boundary
         shell: pwsh
         timeout-minutes: 2
-        run: .\windows\script\verify_codex_generation_confinement.ps1 -CodexBin $env:HOVERPOCKET_CODEX_BIN -SandboxImplementation unelevated
+        run: .\windows\script\verify_codex_generation_confinement.ps1 -CodexBin $env:HOVERPOCKET_CODEX_BIN -SandboxImplementation unelevated -ExpectUnelevatedReadOnlyRejection
 
       - name: Build Release
         run: dotnet build .\windows\HoverPocket.Windows.sln --configuration Release --nologo -p:NuGetAudit=false
