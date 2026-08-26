@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using HoverPocket.Shell.Configuration;
 
 namespace HoverPocket.Shell.Services;
 
@@ -169,6 +170,80 @@ internal interface IOpenAIRealtimeCredentialStore
     OpenAIRealtimeApiKey? Load();
     void Save(OpenAIRealtimeApiKey apiKey);
     void Delete();
+}
+
+internal static class OpenAIRealtimeCredentialStoreFactory
+{
+    public static IOpenAIRealtimeCredentialStore Create(HoverPocketApplicationData applicationData)
+    {
+        ArgumentNullException.ThrowIfNull(applicationData);
+        return applicationData.IsIsolatedVoiceE2E
+            ? new EphemeralOpenAIRealtimeCredentialStore()
+            : new OpenAIRealtimeCredentialStore(applicationData.OpenAIRealtimeCredentialTarget);
+    }
+}
+
+internal sealed class EphemeralOpenAIRealtimeCredentialStore : IOpenAIRealtimeCredentialStore
+{
+    private readonly object _sync = new();
+    private byte[]? _secret;
+
+    public bool HasCredential()
+    {
+        lock (_sync)
+        {
+            return _secret is { Length: > 0 };
+        }
+    }
+
+    public OpenAIRealtimeApiKey? Load()
+    {
+        lock (_sync)
+        {
+            if (_secret is not { Length: > 0 })
+            {
+                return null;
+            }
+            var copy = _secret.ToArray();
+            try
+            {
+                return new OpenAIRealtimeApiKey(Encoding.UTF8.GetString(copy));
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(copy);
+            }
+        }
+    }
+
+    public void Save(OpenAIRealtimeApiKey apiKey)
+    {
+        ArgumentNullException.ThrowIfNull(apiKey);
+        var replacement = apiKey.CopyUtf8Bytes();
+        lock (_sync)
+        {
+            ClearLocked();
+            _secret = replacement;
+        }
+    }
+
+    public void Delete()
+    {
+        lock (_sync)
+        {
+            ClearLocked();
+        }
+    }
+
+    private void ClearLocked()
+    {
+        if (_secret is null)
+        {
+            return;
+        }
+        CryptographicOperations.ZeroMemory(_secret);
+        _secret = null;
+    }
 }
 
 /// <summary>

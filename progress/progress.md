@@ -1,9 +1,28 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-08-24
+updated: 2026-08-26
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-draft-pr-ci-green; an3-b3b-real-voice-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
+status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-draft-pr-ci-green; an3-b3b-windows-security-ci-green-physical-e2e-pending; an3-b3b-macos-pro-pending; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-approval-pending; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-draft-pr-ci-green
 ---
+
+## 2026-08-26 AI-native AN3-B3B Windows実音声E2E security follow-up
+
+- exact base `16090d7a86c81ab19d85018462814c7279bb8801`からcode head `276e5eb57b06e45c0cc8f8a5ffe064b46040eeca`までをCodex Security scan `32812599-f0a7-4397-af98-fcce4a65990f`で確認し、Low 4件を検出した。coverageはchanged source 13 / 13である。
+- E2E receiptへHost発行media leaseと順序検証を追加し、rendererがHost-ownedのtransport detach / safe closeを記録する経路を除去した。さらにrenderer診断だけでは合格にせず、WPFのネイティブ確認ダイアログでユーザーが実マイク入力とremote audioを確認した場合だけ`physicalMediaUserConfirmed=true`を記録する。receipt schemaはv2とし、PowerShell `Validate`は実音声確認、Timer Capability readback、接続状態を必須にした。
+- media receipt telemetryはfire-and-forgetにし、未完了Promiseでもmicrophone / WebRTC cleanupが先に完了するharnessへ固定した。E2E API keyはCredential Managerへ永続化せずzeroing process-memory storeだけを使い、Productionは従来どおりCredential Managerを使う。E2E Panel / Settingsからの外部browser起動もHost policyで拒否する。
+- verify-fixでは、telemetry cleanup、credential persistence、external browserの3件をfixedと判定した。最初のrenderer receipt findingも、active rendererがleaseを知るだけではHost-owned user confirmationを作れず、最終`Validate`がその確認を必須にする現headでfixedと再判定した。renderer由来のmedia fieldsは診断情報であり、単独では合格証跡にしない。
+- ローカルで`node --check`（panel / i18n / settings）と`git diff --check`が成功した。このMacには.NET SDK / PowerShellがないため、Windows CIを必須gateにした。
+- Draft PR [#37](https://github.com/shotaro311/hover-pocket/pull/37) code head `ba1273fb832463307d4a41de3e0b769607d4677c`で、Windows [32914420289](https://github.com/shotaro311/hover-pocket/actions/runs/32914420289)はRelease / Debug build、Voice foundation、Voice E2E isolation、PowerShell構文、rendered WebView2を含む全stepが成功した。Router [32914419440](https://github.com/shotaro311/hover-pocket/actions/runs/32914419440)も成功し、PRは`Draft / MERGEABLE / CLEAN`、review / comment 0件である。
+- 未完了はWindows実機でのAPI key入力、実マイク、remote audio、Timer承認、ネイティブ実音声確認、`Validate`、Stop後cleanupのreadbackである。macOS AN3-B3Bは既存のChatGPT Pro runの正本delivery待ちで、重複promptは送らない。詳細: `progress/2026-08/2026-08-26_hover-pocket-ai-native-an3-b3b-windows-security.md`。
+
+## 2026-08-24 AI-native AN3-B3B Windows実音声E2E隔離基盤
+
+- `codex/ai-native-an3b3b-windows-e2e`をAN3-B3A exact head `16090d7`から分離し、Pro担当中のmacOS Realtime transportと重ならないWindows実機E2E基盤を実装した。
+- Debug専用fresh temp rootへ設定、WebView2、Provider data、Capability Broker、receiptを閉じ、本番と別のCredential Manager targetとIPCを使う。ReleaseはE2E flagsを拒否し、Updater / startup / Google Calendar / Controls / Clipboard / Codex app-server / AI-nativeはfail closedにした。
+- WebRTCのmicrophone、remote audio track / playback、teardownをHostへsafe eventとして返し、transcript本文・音声・SDP・API key・path・PIDを含まないallowlist receiptへatomic保存する。Timer Capability Brokerの実行後readbackもbooleanで記録する。
+- `voice_e2e_windows.ps1`へBuild / Run / Readback / Stopを追加した。ローカルではWindows UI JavaScript構文と`git diff --check`が成功した。このMacに.NET SDK / PowerShellがないため、C# warnings-as-errors、Debug verifier、PowerShell、rendered WebView2はDraft PR Windows CIを必須gateとする。
+- 現行OpenAI coordinatorはtranscript eventをsnapshotへ反映しないため、ProのmacOS artifactで共通event契約を確定してからWindowsへ統合する。実API keyを使うWindows物理E2EはCI後のWindows実機gateであり、秘密値・transcript・音声・SDPをartifactへ残さない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an3-b3b-windows-e2e.md`。
+- Draft PR #37の初回Windows run `32722365200`で検出した通常UI verifierの`clipboard.getState`未登録を、E2E隔離境界を`IsIsolatedVoiceE2E`へ限定して修正した。修正後run `32722634593`はRelease / Debug build、Voice E2E isolation、PowerShell構文、rendered WebView UIを含む全stepが成功した。code head `b8b1a912d9f657fd0792740c39b39c66d127fac3`は`Draft / MERGEABLE / CLEAN`、review / comment 0件、remote parity `0 / 0`である。
 
 ## 2026-08-24 AI-native AN5 Codex confinement audit
 

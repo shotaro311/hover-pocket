@@ -559,6 +559,10 @@ internal sealed class SettingsVerifier
                 "https://example.com/",
                 WebViewSecurityPolicy.PanelHostName)
             || WebViewSecurityPolicy.ShouldOpenExternalBrowser(
+                "https://example.com/",
+                WebViewSecurityPolicy.PanelHostName,
+                externalIntegrationsEnabled: false)
+            || WebViewSecurityPolicy.ShouldOpenExternalBrowser(
                 "https://app.hoverpocket.local/index.html",
                 WebViewSecurityPolicy.PanelHostName)
             || WebViewSecurityPolicy.ShouldOpenExternalBrowser(

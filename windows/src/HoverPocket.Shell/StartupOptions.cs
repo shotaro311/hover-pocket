@@ -20,9 +20,12 @@ internal sealed record StartupOptions(
     bool VerifySettings,
     bool VerifyAiLane,
     bool VerifyVoice,
+    bool VerifyVoiceE2EIsolation,
     bool VerifyUpdater,
     bool VerifyReleaseConfig,
     bool SecondInstanceProbe,
+    bool VoiceE2ERequested,
+    string? VoiceE2ERoot,
     bool EnableDevTools,
     bool ChangeBrightnessForVerify,
     bool TogglePlaybackForVerify,
@@ -48,6 +51,7 @@ internal sealed record StartupOptions(
         || VerifySettings
         || VerifyAiLane
         || VerifyVoice
+        || VerifyVoiceE2EIsolation
         || VerifyUpdater
         || VerifyReleaseConfig;
 
@@ -70,9 +74,12 @@ internal sealed record StartupOptions(
         var verifySettings = false;
         var verifyAiLane = false;
         var verifyVoice = false;
+        var verifyVoiceE2EIsolation = false;
         var verifyUpdater = false;
         var verifyReleaseConfig = false;
         var secondInstanceProbe = false;
+        var voiceE2ERequested = false;
+        string? voiceE2ERoot = null;
         var enableDevTools = false;
         var changeBrightnessForVerify = false;
         var togglePlaybackForVerify = false;
@@ -103,6 +110,10 @@ internal sealed record StartupOptions(
                 verifySettings = string.Equals(verifyTarget, "settings", StringComparison.OrdinalIgnoreCase);
                 verifyAiLane = string.Equals(verifyTarget, "ailane", StringComparison.OrdinalIgnoreCase);
                 verifyVoice = string.Equals(verifyTarget, "voice", StringComparison.OrdinalIgnoreCase);
+                verifyVoiceE2EIsolation = string.Equals(
+                    verifyTarget,
+                    "voice-e2e-isolation",
+                    StringComparison.OrdinalIgnoreCase);
                 verifyUpdater = string.Equals(verifyTarget, "updater", StringComparison.OrdinalIgnoreCase);
                 verifyReleaseConfig = string.Equals(verifyTarget, "release-config", StringComparison.OrdinalIgnoreCase);
                 continue;
@@ -111,6 +122,24 @@ internal sealed record StartupOptions(
             if (string.Equals(args[index], "--second-instance-probe", StringComparison.OrdinalIgnoreCase))
             {
                 secondInstanceProbe = true;
+                continue;
+            }
+
+            if (string.Equals(
+                args[index],
+                HoverPocketApplicationData.VoiceE2EFlag,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                voiceE2ERequested = true;
+                continue;
+            }
+
+            if (string.Equals(
+                args[index],
+                HoverPocketApplicationData.VoiceE2ERootFlag,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                voiceE2ERoot = index + 1 < args.Length ? args[++index] : string.Empty;
                 continue;
             }
 
@@ -170,9 +199,12 @@ internal sealed record StartupOptions(
             verifySettings,
             verifyAiLane,
             verifyVoice,
+            verifyVoiceE2EIsolation,
             verifyUpdater,
             verifyReleaseConfig,
             secondInstanceProbe,
+            voiceE2ERequested,
+            voiceE2ERoot,
             enableDevTools,
             changeBrightnessForVerify,
             togglePlaybackForVerify,
