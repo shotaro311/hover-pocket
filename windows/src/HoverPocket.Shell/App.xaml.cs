@@ -201,8 +201,8 @@ public partial class App : System.Windows.Application
             : null;
         var updaterService = new UpdaterService();
         _updaterService = updaterService;
-        _openAIRealtimeCredentialStore = new OpenAIRealtimeCredentialStore(
-            effectiveApplicationData.OpenAIRealtimeCredentialTarget);
+        _openAIRealtimeCredentialStore = OpenAIRealtimeCredentialStoreFactory.Create(
+            effectiveApplicationData);
         _googleOAuthCredentialStore = new GoogleOAuthCredentialStore(
             effectiveApplicationData.GoogleOAuthCredentialTarget);
         _voiceE2EReceiptStore = effectiveApplicationData.IsIsolatedVoiceE2E

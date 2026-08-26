@@ -30,6 +30,7 @@ internal sealed class VoiceE2EIsolationVerifier
         "assistantTranscriptCount",
         "completeTranscriptCount",
         "timerCapabilityReadbackVerified",
+        "physicalMediaUserConfirmed",
         "credentialCurrent",
         "lastTransportEvent"
     };
@@ -46,6 +47,7 @@ internal sealed class VoiceE2EIsolationVerifier
         {
             var data = VerifyIsolation(root);
             VerifyPathsAndDefaults(data);
+            VerifyCredentialStore(data);
             VerifySingleInstanceNames();
             VerifyReceipt(data);
             VerifyWebRuntimeContract();
@@ -193,6 +195,31 @@ internal sealed class VoiceE2EIsolationVerifier
             "Voice E2E stop event was not isolated");
     }
 
+    private void VerifyCredentialStore(HoverPocketApplicationData data)
+    {
+        var store = OpenAIRealtimeCredentialStoreFactory.Create(data);
+        Check(
+            store is EphemeralOpenAIRealtimeCredentialStore,
+            "Voice E2E did not select the process-memory credential store");
+        using (var input = new OpenAIRealtimeApiKey("sk-e2e-verifier-0123456789abcdef"))
+        {
+            store.Save(input);
+        }
+        Check(store.HasCredential(), "ephemeral credential save was not readable");
+        using (var loaded = store.Load())
+        {
+            Check(
+                loaded?.Reveal() == "sk-e2e-verifier-0123456789abcdef",
+                "ephemeral credential readback did not match");
+        }
+        store.Delete();
+        Check(!store.HasCredential(), "ephemeral credential delete did not clear memory");
+        Check(
+            OpenAIRealtimeCredentialStoreFactory.Create(
+                HoverPocketApplicationData.ProductionDefault()) is OpenAIRealtimeCredentialStore,
+            "production stopped using Windows Credential Manager");
+    }
+
     private void VerifyReceipt(HoverPocketApplicationData data)
     {
         var store = new VoiceE2EReceiptStore(data.VoiceE2EReceiptPath);
@@ -245,9 +272,46 @@ internal sealed class VoiceE2EIsolationVerifier
             featureEnabled: true,
             providerId: VoiceProviderIds.OpenAIRealtimeByok,
             credentialCurrent: true);
-        store.RecordMediaEvent(VoiceE2EMediaEventKind.MicrophoneAcquired);
-        store.RecordMediaEvent(VoiceE2EMediaEventKind.RemoteAudioTrackReceived);
-        store.RecordMediaEvent(VoiceE2EMediaEventKind.RemoteAudioPlaybackSucceeded);
+        var firstLease = store.BeginMediaAttempt();
+        Check(
+            !store.RecordRendererMediaEvent(
+                "stale-media-lease",
+                VoiceE2EMediaEventKind.MicrophoneAcquired),
+            "receipt accepted an unknown media lease");
+        var activeLease = store.BeginMediaAttempt();
+        Check(
+            !store.RecordRendererMediaEvent(
+                firstLease,
+                VoiceE2EMediaEventKind.MicrophoneAcquired),
+            "receipt accepted a previous-attempt media lease");
+        Check(
+            !store.RecordRendererMediaEvent(
+                activeLease,
+                VoiceE2EMediaEventKind.RemoteAudioPlaybackSucceeded),
+            "receipt accepted playback before a remote track");
+        Check(
+            store.RecordRendererMediaEvent(
+                activeLease,
+                VoiceE2EMediaEventKind.MicrophoneAcquired),
+            "receipt rejected a correlated microphone event");
+        Check(
+            store.RecordRendererMediaEvent(
+                activeLease,
+                VoiceE2EMediaEventKind.RemoteAudioTrackReceived),
+            "receipt rejected a correlated remote track event");
+        Check(
+            store.RecordRendererMediaEvent(
+                activeLease,
+                VoiceE2EMediaEventKind.RemoteAudioPlaybackSucceeded),
+            "receipt rejected a correlated remote playback event");
+        Check(!store.PhysicalMediaUserConfirmed, "renderer diagnostics forged physical confirmation");
+        Check(
+            !VoiceE2EReceiptStore.TryParseMediaEvent("physicalMediaUserConfirmed", out _),
+            "renderer event parser accepted host-owned physical confirmation");
+        store.RecordMediaEvent(VoiceE2EMediaEventKind.TransportAttached);
+        Check(store.CanRequestPhysicalMediaConfirmation, "physical media confirmation was not host-gated");
+        Check(store.RecordPhysicalMediaUserConfirmation(), "host-owned physical media confirmation failed");
+        Check(!store.CanRequestPhysicalMediaConfirmation, "physical media confirmation remained replayable");
         store.RecordTimerCapabilityReadback();
 
         using (var document = JsonDocument.Parse(File.ReadAllText(data.VoiceE2EReceiptPath)))
@@ -262,10 +326,21 @@ internal sealed class VoiceE2EIsolationVerifier
             Check(document.RootElement.GetProperty("userTranscriptCount").GetInt32() == 1, "receipt user transcript count was wrong");
             Check(document.RootElement.GetProperty("assistantTranscriptCount").GetInt32() == 1, "receipt assistant transcript count was wrong");
             Check(document.RootElement.GetProperty("timerCapabilityReadbackVerified").GetBoolean(), "receipt missed verified Timer capability readback");
+            Check(document.RootElement.GetProperty("physicalMediaUserConfirmed").GetBoolean(), "receipt missed host-owned physical media confirmation");
         }
         var payload = File.ReadAllText(data.VoiceE2EReceiptPath);
         Check(!payload.Contains("SECRET_", StringComparison.Ordinal), "receipt leaked transcript/session/error content");
         Check(!File.Exists(data.VoiceE2EReceiptPath + ".tmp"), "receipt left a partial file");
+
+        store.RecordMediaEvent(VoiceE2EMediaEventKind.TransportDetached);
+        Check(
+            !store.RecordRendererMediaEvent(
+                activeLease,
+                VoiceE2EMediaEventKind.MicrophoneAcquired),
+            "receipt accepted a media event after host teardown");
+        Check(
+            !VoiceE2EReceiptStore.TryParseMediaEvent("safeClose", out _),
+            "renderer event parser accepted a host-owned safe-close transition");
 
         store.RecordShutdown(credentialCurrent: false);
         using var closed = JsonDocument.Parse(File.ReadAllText(data.VoiceE2EReceiptPath));
@@ -296,8 +371,8 @@ internal sealed class VoiceE2EIsolationVerifier
             "remoteAudioPlaybackSucceeded",
             "remoteAudioPlaybackFailed",
             "remoteAudioPlaybackStopped",
-            "transportDetached",
-            "safeClose"
+            "mediaLease",
+            "voice.confirmPhysicalMedia"
         })
         {
             Check(script.Contains(fragment, StringComparison.Ordinal), $"WebRTC receipt contract was missing: {fragment}");

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet("Build", "Run", "Readback", "Stop")]
+    [ValidateSet("Build", "Run", "Readback", "Validate", "Stop")]
     [string]$Action,
 
     [string]$Root
@@ -96,6 +96,7 @@ function Import-SanitizedReceipt {
         "assistantTranscriptCount",
         "completeTranscriptCount",
         "timerCapabilityReadbackVerified",
+        "physicalMediaUserConfirmed",
         "credentialCurrent",
         "lastTransportEvent"
     )
@@ -104,6 +105,9 @@ function Import-SanitizedReceipt {
     $missing = @($allowed | Where-Object { $_ -notin $actual })
     if ($unexpected.Count -gt 0 -or $missing.Count -gt 0) {
         throw "The Voice E2E receipt did not match the sanitized allowlist."
+    }
+    if ($receipt.schemaVersion -ne 2) {
+        throw "The Voice E2E receipt schema version is unsupported."
     }
     return $receipt | Select-Object $allowed
 }
@@ -157,7 +161,7 @@ switch ($Action) {
         Write-Output "voice_e2e_root=$createdRoot"
         Write-Output "voice_e2e_executable=$executable"
         Write-Output "voice_e2e_receipt=$(Join-Path $createdRoot $receiptName)"
-        Write-Output "voice_e2e_next=Open Settings, save a test OpenAI Realtime API key, enable Voice, close Settings, then click the microphone button explicitly."
+        Write-Output "voice_e2e_next=Open Settings, save a test OpenAI Realtime API key, enable Voice, close Settings, click the microphone button explicitly, complete a Timer request, confirm physical media in the Voice lane, then run Validate."
     }
     "Readback" {
         if (-not $Root) {
@@ -167,6 +171,27 @@ switch ($Action) {
         $receipt = Import-SanitizedReceipt -IsolatedRoot $isolatedRoot
         Write-Output "voice_e2e_receipt=$(Join-Path $isolatedRoot $receiptName)"
         $receipt
+    }
+    "Validate" {
+        if (-not $Root) {
+            throw "Validate requires -Root from the Run output."
+        }
+        $isolatedRoot = Resolve-IsolatedRoot -Candidate $Root
+        $receipt = Import-SanitizedReceipt -IsolatedRoot $isolatedRoot
+        if ($receipt.providerId -ne "openai_realtime_byok" -or
+            -not $receipt.featureEnabled -or
+            -not $receipt.rootSessionPresent -or
+            -not $receipt.transportAttached -or
+            -not $receipt.realtimeAttached -or
+            -not $receipt.microphoneAcquired -or
+            -not $receipt.remoteAudioTrackEver -or
+            -not $receipt.remoteAudioPlaybackEver -or
+            -not $receipt.timerCapabilityReadbackVerified -or
+            -not $receipt.physicalMediaUserConfirmed) {
+            throw "The sanitized receipt did not confirm the complete physical Voice and Timer E2E path."
+        }
+        Write-Output "voice_e2e_physical_validation=verified"
+        Write-Output "voice_e2e_receipt=$(Join-Path $isolatedRoot $receiptName)"
     }
     "Stop" {
         if (-not $Root) {

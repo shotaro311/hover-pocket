@@ -17,6 +17,7 @@ internal sealed class SettingsWindow : Window
 
     private readonly PanelBridgeController _bridgeController;
     private readonly bool _enableDevTools;
+    private readonly bool _externalIntegrationsEnabled;
     private readonly string _webViewDataDirectory;
     private readonly Grid _root = new();
     private IDisposable? _bridgeAttachment;
@@ -26,10 +27,12 @@ internal sealed class SettingsWindow : Window
     public SettingsWindow(
         PanelBridgeController bridgeController,
         bool enableDevTools,
-        string webViewDataDirectory)
+        string webViewDataDirectory,
+        bool externalIntegrationsEnabled = true)
     {
         _bridgeController = bridgeController;
         _enableDevTools = enableDevTools;
+        _externalIntegrationsEnabled = externalIntegrationsEnabled;
         _webViewDataDirectory = webViewDataDirectory;
         ApplyLanguage(_bridgeController.CurrentSettings.Language);
         Width = 620;
@@ -84,12 +87,18 @@ internal sealed class SettingsWindow : Window
             }
 
             args.Cancel = true;
-            WebViewSecurityPolicy.TryOpenExternalBrowser(args.Uri, UiHostName);
+            WebViewSecurityPolicy.TryOpenExternalBrowser(
+                args.Uri,
+                UiHostName,
+                _externalIntegrationsEnabled);
         };
         webView.CoreWebView2.NewWindowRequested += (_, args) =>
         {
             args.Handled = true;
-            WebViewSecurityPolicy.TryOpenExternalBrowser(args.Uri, UiHostName);
+            WebViewSecurityPolicy.TryOpenExternalBrowser(
+                args.Uri,
+                UiHostName,
+                _externalIntegrationsEnabled);
         };
         webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
             UiHostName,
@@ -131,9 +140,13 @@ internal sealed class SettingsWindow : Window
         var stack = new StackPanel { Margin = new Thickness(24) };
         stack.Children.Add(new TextBlock
         {
-            Text = english
-                ? "The key is stored only in Windows Credential Manager. It is never sent to this Settings WebView."
-                : "APIキーはWindows Credential Managerだけに保存され、この設定WebViewには返されません。",
+            Text = !_externalIntegrationsEnabled
+                ? english
+                    ? "For this isolated E2E run, the key stays only in process memory. It is never sent to this Settings WebView."
+                    : "この隔離E2E実行では、APIキーはプロセス内メモリだけに保持され、この設定WebViewには返されません。"
+                : english
+                    ? "The key is stored only in Windows Credential Manager. It is never sent to this Settings WebView."
+                    : "APIキーはWindows Credential Managerだけに保存され、この設定WebViewには返されません。",
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 12)
         });
@@ -199,9 +212,13 @@ internal sealed class SettingsWindow : Window
         var english = _bridgeController.CurrentSettings.Language == AppLanguage.English;
         return System.Windows.MessageBox.Show(
             this,
-            english
-                ? "Delete the OpenAI Realtime API key from Windows Credential Manager? Voice will stop until a key is configured again."
-                : "OpenAI Realtime APIキーをWindows Credential Managerから削除しますか？再設定するまでVoiceは停止します。",
+            !_externalIntegrationsEnabled
+                ? english
+                    ? "Delete the OpenAI Realtime API key from this isolated E2E process? Voice will stop until a key is configured again."
+                    : "この隔離E2EプロセスからOpenAI Realtime APIキーを削除しますか？再設定するまでVoiceは停止します。"
+                : english
+                    ? "Delete the OpenAI Realtime API key from Windows Credential Manager? Voice will stop until a key is configured again."
+                    : "OpenAI Realtime APIキーをWindows Credential Managerから削除しますか？再設定するまでVoiceは停止します。",
             english ? "Delete OpenAI API key" : "OpenAI APIキーを削除",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,

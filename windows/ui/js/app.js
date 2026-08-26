@@ -511,6 +511,21 @@ function createVoiceMuteButton(lane) {
   return mute;
 }
 
+function createVoicePhysicalMediaConfirmationButton(lane) {
+  if (!lane.e2ePhysicalConfirmationEnabled) {
+    return null;
+  }
+  const confirmed = Boolean(lane.physicalMediaUserConfirmed);
+  const button = voiceButton(
+    confirmed ? t("voicePhysicalMediaConfirmed") : t("voiceConfirmPhysicalMedia"),
+    "✓",
+    () => { void request("voice.confirmPhysicalMedia").then(render); },
+  );
+  button.classList.add("hp-voice-physical-confirmation");
+  button.disabled = confirmed || !lane.physicalMediaConfirmationAvailable;
+  return button;
+}
+
 function voiceButton(label, text, action, expanded) {
   const button = document.createElement("button");
   button.type = "button";
@@ -549,6 +564,8 @@ function renderCompactVoiceLane(lane) {
   }));
 
   const mute = createVoiceMuteButton(lane);
+  const physicalConfirmation = createVoicePhysicalMediaConfirmationButton(lane);
+  root.classList.toggle("hp-voice-has-physical-confirmation", physicalConfirmation !== null);
   const expand = voiceButton(
     t("voiceExpand"),
     "⌄",
@@ -561,7 +578,11 @@ function renderCompactVoiceLane(lane) {
     () => { void endVoiceRealtime(); },
   );
 
-  root.append(microphone, waveform, conversation, count, mute, expand, end);
+  root.append(microphone, waveform, conversation, count, mute);
+  if (physicalConfirmation) {
+    root.append(physicalConfirmation);
+  }
+  root.append(expand, end);
   voiceLaneEl.append(root);
 }
 
@@ -585,6 +606,7 @@ function renderExpandedVoiceLane(lane) {
     count: lane.visibleSessionCount ?? 0,
   }));
   const mute = createVoiceMuteButton(lane);
+  const physicalConfirmation = createVoicePhysicalMediaConfirmationButton(lane);
   const collapse = voiceButton(
     t("voiceCollapse"),
     "⌃",
@@ -596,7 +618,11 @@ function renderExpandedVoiceLane(lane) {
     "×",
     () => { void endVoiceRealtime(); },
   );
-  toolbar.append(microphone, waveform, status, spacer, count, mute, collapse, end);
+  toolbar.append(microphone, waveform, status, spacer, count, mute);
+  if (physicalConfirmation) {
+    toolbar.append(physicalConfirmation);
+  }
+  toolbar.append(collapse, end);
 
   const grid = document.createElement("div");
   grid.className = "hp-voice-expanded-grid";
@@ -673,8 +699,16 @@ async function startVoiceRealtime(dependencies = {}) {
   let transport = null;
   let acquiredStream = null;
   let hostRealtimeRequestIssued = false;
+  let mediaLease = null;
   try {
-    await requestBridge("voice.requestMicrophone");
+    const microphoneRequest = await requestBridge("voice.requestMicrophone");
+    if (microphoneRequest?.mediaLease != null) {
+      if (typeof microphoneRequest.mediaLease !== "string"
+        || !/^[0-9a-f]{32}$/.test(microphoneRequest.mediaLease)) {
+        throw Object.assign(new Error("voice_media_lease_invalid"), { voiceReason: "webrtc_offer_failed" });
+      }
+      mediaLease = microphoneRequest.mediaLease;
+    }
     if (!mediaDevices?.getUserMedia || typeof PeerConnection !== "function") {
       throw Object.assign(new Error("webrtc_unavailable"), { voiceReason: "webrtc_unavailable" });
     }
@@ -689,7 +723,10 @@ async function startVoiceRealtime(dependencies = {}) {
       video: false,
     });
     acquiredStream = stream;
-    await notifyVoiceMediaEvent({ requestBridge }, "microphoneAcquired");
+    for (const track of stream.getAudioTracks()) {
+      track.enabled = false;
+    }
+    void notifyVoiceMediaEvent({ requestBridge, mediaLease }, "microphoneAcquired");
     const peer = new PeerConnection();
     const dataChannel = peer.createDataChannel("oai-events");
     const audio = createAudio();
@@ -703,6 +740,7 @@ async function startVoiceRealtime(dependencies = {}) {
       generation: null,
       threadId: null,
       providerId: null,
+      mediaLease,
       requestBridge,
       disposed: false,
       muted: true,
@@ -717,7 +755,6 @@ async function startVoiceRealtime(dependencies = {}) {
     });
     for (const track of stream.getAudioTracks()) {
       peer.addTrack(track, stream);
-      track.enabled = false;
       track.addEventListener?.("ended", () => {
         if (!transport.disposed && transport.microphoneCurrent) {
           transport.microphoneCurrent = false;
@@ -778,10 +815,10 @@ async function startVoiceRealtime(dependencies = {}) {
     const reason = voiceStartFailureReason(error, hostRealtimeRequestIssued);
     disposeLocalVoiceTransport();
     if (acquiredStream) {
-      await notifyVoiceMediaEvent({ requestBridge }, "microphoneStopped");
+      stopVoiceMediaStream(acquiredStream);
+      acquiredStream = null;
+      void notifyVoiceMediaEvent({ requestBridge, mediaLease }, "microphoneStopped");
     }
-    stopVoiceMediaStream(acquiredStream);
-    acquiredStream = null;
     try {
       await requestBridge("voice.abortRealtime", { reason });
     } catch {
@@ -942,17 +979,23 @@ async function playVoiceRemoteAudio(transport) {
       && transport.remoteAudioTrackCurrent
       && transport.audio.srcObject) {
       transport.remoteAudioPlaybackCurrent = true;
-      await notifyVoiceMediaEvent(transport, "remoteAudioPlaybackSucceeded");
+      void notifyVoiceMediaEvent(transport, "remoteAudioPlaybackSucceeded");
     }
   } catch {
     transport.remoteAudioPlaybackCurrent = false;
-    await notifyVoiceMediaEvent(transport, "remoteAudioPlaybackFailed");
+    void notifyVoiceMediaEvent(transport, "remoteAudioPlaybackFailed");
   }
 }
 
 async function notifyVoiceMediaEvent(transport, kind) {
+  if (typeof transport?.mediaLease !== "string") {
+    return;
+  }
   try {
-    await transport?.requestBridge?.("voice.mediaEvent", { kind });
+    await transport?.requestBridge?.("voice.mediaEvent", {
+      kind,
+      mediaLease: transport.mediaLease,
+    });
   } catch {
     // The receipt lane is Debug E2E-only and never owns media cleanup.
   }
@@ -978,8 +1021,6 @@ function disposeLocalVoiceTransport() {
     transport.remoteAudioPlaybackCurrent = false;
     void notifyVoiceMediaEvent(transport, "remoteAudioPlaybackStopped");
   }
-  void notifyVoiceMediaEvent(transport, "transportDetached");
-  void notifyVoiceMediaEvent(transport, "safeClose");
   stopVoiceMediaStream(transport.stream);
   try {
     transport.dataChannel.close();
@@ -1087,6 +1128,15 @@ async function verifyVoiceTransportHarness() {
   }
   const requestBridge = async (method) => {
     calls.push(method);
+    if (method === "voice.requestMicrophone") {
+      return {
+        allowedForPrompt: true,
+        mediaLease: "0123456789abcdef0123456789abcdef",
+      };
+    }
+    if (method === "voice.mediaEvent") {
+      return await new Promise(() => undefined);
+    }
     if (method === "voice.startRealtime") {
       return { generation: 7, threadId: "root-ui-verify", providerId: "openai_realtime_byok" };
     }
@@ -1096,7 +1146,7 @@ async function verifyVoiceTransportHarness() {
     if (method === "voice.handleRealtimeEvent") {
       return { handled: true, callId: "call-verify", output: "{\"status\":\"succeeded\"}" };
     }
-    return { allowedForPrompt: true };
+    return {};
   };
 
   await startVoiceRealtime({

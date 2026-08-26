@@ -39,6 +39,7 @@ internal sealed class VoiceE2EReceiptStore
         int AssistantTranscriptCount,
         int CompleteTranscriptCount,
         bool TimerCapabilityReadbackVerified,
+        bool PhysicalMediaUserConfirmed,
         bool CredentialCurrent,
         string LastTransportEvent);
 
@@ -57,13 +58,17 @@ internal sealed class VoiceE2EReceiptStore
     private bool _timerCapabilityReadbackVerified;
     private bool _microphoneAcquired;
     private bool _microphoneCurrent;
+    private bool _activeAttemptMicrophoneAcquired;
     private bool _remoteAudioTrackReceived;
     private bool _remoteAudioTrackCurrent;
     private bool _remoteAudioTrackEver;
     private bool _remoteAudioPlaybackReceived;
     private bool _remoteAudioPlaybackCurrent;
     private bool _remoteAudioPlaybackEver;
+    private bool _hostTransportAttached;
+    private bool _physicalMediaUserConfirmed;
     private string _lastTransportEvent = "idle";
+    private string? _activeMediaLease;
 
     public VoiceE2EReceiptStore(string receiptPath)
     {
@@ -112,8 +117,80 @@ internal sealed class VoiceE2EReceiptStore
             _featureEnabled = false;
             _credentialCurrent = credentialCurrent;
             ClearCurrentMediaLocked();
+            _activeMediaLease = null;
+            _activeAttemptMicrophoneAcquired = false;
+            _hostTransportAttached = false;
             _lastTransportEvent = "safe_close";
             WriteLocked();
+        }
+    }
+
+    public string BeginMediaAttempt()
+    {
+        lock (_sync)
+        {
+            _activeMediaLease = Guid.NewGuid().ToString("N");
+            ClearCurrentMediaLocked();
+            _activeAttemptMicrophoneAcquired = false;
+            _physicalMediaUserConfirmed = false;
+            _lastTransportEvent = "media_attempt_started";
+            WriteLocked();
+            return _activeMediaLease;
+        }
+    }
+
+    public bool PhysicalMediaUserConfirmed
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _physicalMediaUserConfirmed;
+            }
+        }
+    }
+
+    public bool CanRequestPhysicalMediaConfirmation
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return CanRequestPhysicalMediaConfirmationLocked();
+            }
+        }
+    }
+
+    public bool RecordPhysicalMediaUserConfirmation()
+    {
+        lock (_sync)
+        {
+            if (!CanRequestPhysicalMediaConfirmationLocked())
+            {
+                return false;
+            }
+            _physicalMediaUserConfirmed = true;
+            _lastTransportEvent = "physical_media_user_confirmed";
+            WriteLocked();
+            return true;
+        }
+    }
+
+    public bool RecordRendererMediaEvent(
+        string? mediaLease,
+        VoiceE2EMediaEventKind eventKind)
+    {
+        lock (_sync)
+        {
+            if (_activeMediaLease is null
+                || !string.Equals(_activeMediaLease, mediaLease, StringComparison.Ordinal)
+                || !IsLegalRendererTransitionLocked(eventKind))
+            {
+                return false;
+            }
+            ApplyMediaEventLocked(eventKind);
+            WriteLocked();
+            return true;
         }
     }
 
@@ -121,55 +198,13 @@ internal sealed class VoiceE2EReceiptStore
     {
         lock (_sync)
         {
-            switch (eventKind)
+            ApplyMediaEventLocked(eventKind);
+            if (eventKind is VoiceE2EMediaEventKind.TransportDetached
+                or VoiceE2EMediaEventKind.SafeClose)
             {
-                case VoiceE2EMediaEventKind.MicrophoneAcquired:
-                    _microphoneAcquired = true;
-                    _microphoneCurrent = true;
-                    _lastTransportEvent = "microphone_acquired";
-                    break;
-                case VoiceE2EMediaEventKind.MicrophoneStopped:
-                    _microphoneCurrent = false;
-                    _lastTransportEvent = "microphone_stopped";
-                    break;
-                case VoiceE2EMediaEventKind.RemoteAudioTrackReceived:
-                    _remoteAudioTrackReceived = true;
-                    _remoteAudioTrackCurrent = true;
-                    _remoteAudioTrackEver = true;
-                    _lastTransportEvent = "remote_audio_track_received";
-                    break;
-                case VoiceE2EMediaEventKind.RemoteAudioTrackStopped:
-                    _remoteAudioTrackCurrent = false;
-                    _lastTransportEvent = "remote_audio_track_stopped";
-                    break;
-                case VoiceE2EMediaEventKind.RemoteAudioPlaybackSucceeded:
-                    _remoteAudioPlaybackReceived = true;
-                    _remoteAudioPlaybackCurrent = true;
-                    _remoteAudioPlaybackEver = true;
-                    _lastTransportEvent = "remote_audio_playback_succeeded";
-                    break;
-                case VoiceE2EMediaEventKind.RemoteAudioPlaybackFailed:
-                    _remoteAudioPlaybackReceived = true;
-                    _remoteAudioPlaybackCurrent = false;
-                    _lastTransportEvent = "remote_audio_playback_failed";
-                    break;
-                case VoiceE2EMediaEventKind.RemoteAudioPlaybackStopped:
-                    _remoteAudioPlaybackCurrent = false;
-                    _lastTransportEvent = "remote_audio_playback_stopped";
-                    break;
-                case VoiceE2EMediaEventKind.TransportAttached:
-                    _lastTransportEvent = "transport_attached";
-                    break;
-                case VoiceE2EMediaEventKind.TransportDetached:
-                    ClearCurrentMediaLocked();
-                    _lastTransportEvent = "transport_detached";
-                    break;
-                case VoiceE2EMediaEventKind.SafeClose:
-                    ClearCurrentMediaLocked();
-                    _lastTransportEvent = "safe_close";
-                    break;
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(eventKind));
+                _activeMediaLease = null;
+                _activeAttemptMicrophoneAcquired = false;
+                _hostTransportAttached = false;
             }
             WriteLocked();
         }
@@ -188,9 +223,6 @@ internal sealed class VoiceE2EReceiptStore
             "remoteAudioPlaybackSucceeded" => VoiceE2EMediaEventKind.RemoteAudioPlaybackSucceeded,
             "remoteAudioPlaybackFailed" => VoiceE2EMediaEventKind.RemoteAudioPlaybackFailed,
             "remoteAudioPlaybackStopped" => VoiceE2EMediaEventKind.RemoteAudioPlaybackStopped,
-            "transportAttached" => VoiceE2EMediaEventKind.TransportAttached,
-            "transportDetached" => VoiceE2EMediaEventKind.TransportDetached,
-            "safeClose" => VoiceE2EMediaEventKind.SafeClose,
             _ => default
         };
         return value is "microphoneAcquired"
@@ -199,10 +231,7 @@ internal sealed class VoiceE2EReceiptStore
             or "remoteAudioTrackStopped"
             or "remoteAudioPlaybackSucceeded"
             or "remoteAudioPlaybackFailed"
-            or "remoteAudioPlaybackStopped"
-            or "transportAttached"
-            or "transportDetached"
-            or "safeClose";
+            or "remoteAudioPlaybackStopped";
     }
 
     private void ClearCurrentMediaLocked()
@@ -212,13 +241,101 @@ internal sealed class VoiceE2EReceiptStore
         _remoteAudioPlaybackCurrent = false;
     }
 
+    private bool IsLegalRendererTransitionLocked(VoiceE2EMediaEventKind eventKind)
+    {
+        return eventKind switch
+        {
+            VoiceE2EMediaEventKind.MicrophoneAcquired => !_activeAttemptMicrophoneAcquired,
+            VoiceE2EMediaEventKind.MicrophoneStopped =>
+                _activeAttemptMicrophoneAcquired && _microphoneCurrent,
+            VoiceE2EMediaEventKind.RemoteAudioTrackReceived =>
+                _activeAttemptMicrophoneAcquired && !_remoteAudioTrackCurrent,
+            VoiceE2EMediaEventKind.RemoteAudioTrackStopped => _remoteAudioTrackCurrent,
+            VoiceE2EMediaEventKind.RemoteAudioPlaybackSucceeded =>
+                _remoteAudioTrackCurrent && !_remoteAudioPlaybackCurrent,
+            VoiceE2EMediaEventKind.RemoteAudioPlaybackFailed =>
+                _remoteAudioTrackCurrent && !_remoteAudioPlaybackCurrent,
+            VoiceE2EMediaEventKind.RemoteAudioPlaybackStopped => _remoteAudioPlaybackCurrent,
+            _ => false
+        };
+    }
+
+    private bool CanRequestPhysicalMediaConfirmationLocked()
+    {
+        return !_physicalMediaUserConfirmed
+            && _activeMediaLease is not null
+            && _hostTransportAttached
+            && _activeAttemptMicrophoneAcquired
+            && _microphoneCurrent
+            && _remoteAudioTrackCurrent
+            && _remoteAudioPlaybackCurrent;
+    }
+
+    private void ApplyMediaEventLocked(VoiceE2EMediaEventKind eventKind)
+    {
+        switch (eventKind)
+        {
+            case VoiceE2EMediaEventKind.MicrophoneAcquired:
+                _microphoneAcquired = true;
+                _microphoneCurrent = true;
+                _activeAttemptMicrophoneAcquired = true;
+                _lastTransportEvent = "microphone_acquired";
+                break;
+            case VoiceE2EMediaEventKind.MicrophoneStopped:
+                _microphoneCurrent = false;
+                _lastTransportEvent = "microphone_stopped";
+                break;
+            case VoiceE2EMediaEventKind.RemoteAudioTrackReceived:
+                _remoteAudioTrackReceived = true;
+                _remoteAudioTrackCurrent = true;
+                _remoteAudioTrackEver = true;
+                _lastTransportEvent = "remote_audio_track_received";
+                break;
+            case VoiceE2EMediaEventKind.RemoteAudioTrackStopped:
+                _remoteAudioTrackCurrent = false;
+                _lastTransportEvent = "remote_audio_track_stopped";
+                break;
+            case VoiceE2EMediaEventKind.RemoteAudioPlaybackSucceeded:
+                _remoteAudioPlaybackReceived = true;
+                _remoteAudioPlaybackCurrent = true;
+                _remoteAudioPlaybackEver = true;
+                _lastTransportEvent = "remote_audio_playback_succeeded";
+                break;
+            case VoiceE2EMediaEventKind.RemoteAudioPlaybackFailed:
+                _remoteAudioPlaybackReceived = true;
+                _remoteAudioPlaybackCurrent = false;
+                _lastTransportEvent = "remote_audio_playback_failed";
+                break;
+            case VoiceE2EMediaEventKind.RemoteAudioPlaybackStopped:
+                _remoteAudioPlaybackCurrent = false;
+                _lastTransportEvent = "remote_audio_playback_stopped";
+                break;
+            case VoiceE2EMediaEventKind.TransportAttached:
+                _hostTransportAttached = true;
+                _lastTransportEvent = "transport_attached";
+                break;
+            case VoiceE2EMediaEventKind.TransportDetached:
+                _hostTransportAttached = false;
+                ClearCurrentMediaLocked();
+                _lastTransportEvent = "transport_detached";
+                break;
+            case VoiceE2EMediaEventKind.SafeClose:
+                _hostTransportAttached = false;
+                ClearCurrentMediaLocked();
+                _lastTransportEvent = "safe_close";
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(eventKind));
+        }
+    }
+
     private void WriteLocked()
     {
         try
         {
             var transcript = _snapshot.Transcript;
             var receipt = new Receipt(
-                SchemaVersion: 1,
+                SchemaVersion: 2,
                 ProviderId: _providerId,
                 Availability: WireValue(_snapshot.Availability),
                 FeatureEnabled: _featureEnabled,
@@ -240,6 +357,7 @@ internal sealed class VoiceE2EReceiptStore
                     string.Equals(item.Role, "assistant", StringComparison.OrdinalIgnoreCase)),
                 CompleteTranscriptCount: transcript.Count(item => item.IsFinal),
                 TimerCapabilityReadbackVerified: _timerCapabilityReadbackVerified,
+                PhysicalMediaUserConfirmed: _physicalMediaUserConfirmed,
                 CredentialCurrent: _credentialCurrent,
                 LastTransportEvent: _lastTransportEvent);
 

@@ -383,6 +383,7 @@ internal sealed class PanelBridgeController : IDisposable
             if (_voiceE2EReceiptStore is not null)
             {
                 Register("voice.mediaEvent", RecordVoiceMediaEventAsync);
+                Register("voice.confirmPhysicalMedia", ConfirmVoicePhysicalMediaAsync);
             }
             Register("voice.setMuted", SetVoiceMutedAsync);
             Register("voice.setLayout", SetVoiceLayoutAsync);
@@ -637,7 +638,12 @@ internal sealed class PanelBridgeController : IDisposable
                         navigation = "lane_detail"
                     }),
                     safeErrorCode = voiceSnapshot.LastErrorCode,
-                    providerId = _voiceCoordinator.ProviderId
+                    providerId = _voiceCoordinator.ProviderId,
+                    e2ePhysicalConfirmationEnabled = _voiceE2EReceiptStore is not null,
+                    physicalMediaConfirmationAvailable =
+                        _voiceE2EReceiptStore?.CanRequestPhysicalMediaConfirmation == true,
+                    physicalMediaUserConfirmed =
+                        _voiceE2EReceiptStore?.PhysicalMediaUserConfirmed == true
                 }
                 : null,
             pocketSurface = selectedPocketSurface,
@@ -1624,9 +1630,13 @@ internal sealed class PanelBridgeController : IDisposable
         var english = CurrentSettings.Language == AppLanguage.English;
         var result = System.Windows.MessageBox.Show(
             owner,
-            english
-                ? "Delete the OpenAI Realtime API key from Windows Credential Manager? Voice will stop until a key is configured again."
-                : "OpenAI Realtime APIキーをWindows Credential Managerから削除しますか？再設定するまでVoiceは停止します。",
+            !_externalIntegrationsEnabled
+                ? english
+                    ? "Delete the OpenAI Realtime API key from this isolated E2E process? Voice will stop until a key is configured again."
+                    : "この隔離E2EプロセスからOpenAI Realtime APIキーを削除しますか？再設定するまでVoiceは停止します。"
+                : english
+                    ? "Delete the OpenAI Realtime API key from Windows Credential Manager? Voice will stop until a key is configured again."
+                    : "OpenAI Realtime APIキーをWindows Credential Managerから削除しますか？再設定するまでVoiceは停止します。",
             english ? "Delete OpenAI API key" : "OpenAI APIキーを削除",
             System.Windows.MessageBoxButton.YesNo,
             System.Windows.MessageBoxImage.Warning,
@@ -1682,7 +1692,12 @@ internal sealed class PanelBridgeController : IDisposable
             throw new CodexAppServerProtocolException("microphone_request_not_allowed");
         }
         _voiceCoordinator.BeginMicrophonePermissionRequest();
-        return Task.FromResult<object?>(new { allowedForPrompt = true });
+        var mediaLease = _voiceE2EReceiptStore?.BeginMediaAttempt();
+        return Task.FromResult<object?>(new
+        {
+            allowedForPrompt = true,
+            mediaLease
+        });
     }
 
     private async Task<object?> StartVoiceRealtimeAsync(
@@ -1708,6 +1723,7 @@ internal sealed class PanelBridgeController : IDisposable
             ReadRequiredInt(parameters, "generation"),
             ReadRequiredString(parameters, "threadId"));
         _voiceE2EReceiptStore?.RecordMediaEvent(VoiceE2EMediaEventKind.TransportAttached);
+        _ = PostStateEventOnUiThreadAsync("voice.stateChanged");
         return Task.FromResult<object?>(new { connected = true });
     }
 
@@ -1732,8 +1748,55 @@ internal sealed class PanelBridgeController : IDisposable
         {
             throw new InvalidOperationException("Unknown Voice E2E media event.");
         }
-        _voiceE2EReceiptStore?.RecordMediaEvent(eventKind);
+        var mediaLease = ReadRequiredString(parameters, "mediaLease");
+        if (_voiceE2EReceiptStore?.RecordRendererMediaEvent(mediaLease, eventKind) != true)
+        {
+            throw new InvalidOperationException("Voice E2E media event was stale or out of sequence.");
+        }
+        _ = PostStateEventOnUiThreadAsync("voice.stateChanged");
         return Task.FromResult<object?>(new { recorded = true });
+    }
+
+    private async Task<object?> ConfirmVoicePhysicalMediaAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        cancellationToken.ThrowIfCancellationRequested();
+        var store = _voiceE2EReceiptStore
+            ?? throw new InvalidOperationException("Voice E2E confirmation is unavailable.");
+        if (!store.CanRequestPhysicalMediaConfirmation)
+        {
+            throw new InvalidOperationException("Voice E2E media diagnostics are not ready for confirmation.");
+        }
+
+        var english = CurrentSettings.Language == AppLanguage.English;
+        var message = english
+            ? "Did you personally speak through the microphone and hear the remote assistant audio in this Voice E2E session?"
+            : "このVoice E2Eセッションで、実際にマイクへ話し、相手の応答音声が聞こえたことを確認しましたか？";
+        var title = english ? "Confirm physical Voice media" : "実音声の確認";
+        var owner = _voiceApprovalOwner?.Invoke();
+        var result = owner is null
+            ? System.Windows.MessageBox.Show(
+                message,
+                title,
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Question,
+                System.Windows.MessageBoxResult.No)
+            : System.Windows.MessageBox.Show(
+                owner,
+                message,
+                title,
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Question,
+                System.Windows.MessageBoxResult.No);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (result == System.Windows.MessageBoxResult.Yes
+            && !store.RecordPhysicalMediaUserConfirmation())
+        {
+            throw new InvalidOperationException("Voice E2E media state changed before confirmation.");
+        }
+        return await PublishStateAsync(cancellationToken);
     }
 
     private async Task<object?> HandleVoiceRealtimeEventAsync(

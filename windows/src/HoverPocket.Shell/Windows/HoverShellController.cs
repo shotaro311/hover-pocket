@@ -409,7 +409,8 @@ internal sealed class HoverShellController : IDisposable
         _settingsWindow = new SettingsWindow(
             _panelBridgeController,
             _enableDevTools,
-            _applicationData.SettingsWebViewDataDirectory);
+            _applicationData.SettingsWebViewDataDirectory,
+            _applicationData.ExternalIntegrationsEnabled);
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         _settingsWindow.Show();
         _settingsWindow.Activate();
@@ -621,7 +622,8 @@ internal sealed class HoverShellController : IDisposable
             _panelBridgeController,
             _enablePanelWebView,
             _enableDevTools,
-            _applicationData.PanelWebViewDataDirectory);
+            _applicationData.PanelWebViewDataDirectory,
+            _applicationData.ExternalIntegrationsEnabled);
     }
 
     private void AttachPanelWindow(PanelWindow panel)

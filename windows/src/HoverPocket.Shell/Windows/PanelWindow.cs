@@ -31,6 +31,7 @@ internal sealed class PanelWindow : NoActivateWindow
     private readonly PanelBridgeController _bridgeController;
     private readonly bool _enableWebView;
     private readonly bool _enableDevTools;
+    private readonly bool _externalIntegrationsEnabled;
     private readonly string _webViewDataDirectory;
     private readonly Grid _root = new();
     private readonly Border _fallbackVisual;
@@ -59,12 +60,14 @@ internal sealed class PanelWindow : NoActivateWindow
         PanelBridgeController bridgeController,
         bool enableWebView,
         bool enableDevTools,
-        string webViewDataDirectory)
+        string webViewDataDirectory,
+        bool externalIntegrationsEnabled = true)
         : base(allowsTransparency: false)
     {
         _bridgeController = bridgeController;
         _enableWebView = enableWebView;
         _enableDevTools = enableDevTools;
+        _externalIntegrationsEnabled = externalIntegrationsEnabled;
         _webViewDataDirectory = webViewDataDirectory;
 
         var metrics = PanelSizeCatalog.Get(_bridgeController.CurrentSettings.PanelSize);
@@ -742,12 +745,18 @@ internal sealed class PanelWindow : NoActivateWindow
             }
 
             args.Cancel = true;
-            WebViewSecurityPolicy.TryOpenExternalBrowser(args.Uri, UiHostName);
+            WebViewSecurityPolicy.TryOpenExternalBrowser(
+                args.Uri,
+                UiHostName,
+                _externalIntegrationsEnabled);
         };
         webView.CoreWebView2.NewWindowRequested += (_, args) =>
         {
             args.Handled = true;
-            WebViewSecurityPolicy.TryOpenExternalBrowser(args.Uri, UiHostName);
+            WebViewSecurityPolicy.TryOpenExternalBrowser(
+                args.Uri,
+                UiHostName,
+                _externalIntegrationsEnabled);
         };
         webView.CoreWebView2.PermissionRequested += (_, args) =>
         {
@@ -1053,17 +1062,24 @@ internal static class WebViewSecurityPolicy
             && parsed.Host.Equals(hostName, StringComparison.OrdinalIgnoreCase);
     }
 
-    public static bool ShouldOpenExternalBrowser(string? uri, string hostName)
+    public static bool ShouldOpenExternalBrowser(
+        string? uri,
+        string hostName,
+        bool externalIntegrationsEnabled = true)
     {
-        return Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
+        return externalIntegrationsEnabled
+            && Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
             && (parsed.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
                 || parsed.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
             && !IsAllowedVirtualHostNavigation(parsed.AbsoluteUri, hostName);
     }
 
-    public static void TryOpenExternalBrowser(string? uri, string hostName)
+    public static void TryOpenExternalBrowser(
+        string? uri,
+        string hostName,
+        bool externalIntegrationsEnabled = true)
     {
-        if (!ShouldOpenExternalBrowser(uri, hostName)
+        if (!ShouldOpenExternalBrowser(uri, hostName, externalIntegrationsEnabled)
             || !Uri.TryCreate(uri, UriKind.Absolute, out var parsed))
         {
             return;
