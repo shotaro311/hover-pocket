@@ -218,7 +218,7 @@ ${SPARKLE_PLIST}  <key>SUEnableInstallerLauncherService</key>
   <key>NSCameraUsageDescription</key>
   <string>ホバーポケット uses the Mac camera to show a mirror preview while the hover panel is open.</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>ホバーポケット uses the microphone only for the mirror microphone check.</string>
+  <string>ホバーポケット uses the microphone for Voice conversations with OpenAI Realtime and for the mirror microphone check.</string>
   <key>NSLocationUsageDescription</key>
   <string>ホバーポケット uses your location only when you choose Current Location for the weather forecast.</string>
   <key>NSLocationWhenInUseUsageDescription</key>

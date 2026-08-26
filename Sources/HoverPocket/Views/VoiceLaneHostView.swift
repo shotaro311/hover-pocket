@@ -17,19 +17,27 @@ struct VoiceLaneHostView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(localized(japanese: "音声レーン", english: "Voice Lane"))
+        .background(alignment: .bottomLeading) {
+            if runtime.snapshot.providerID == .openAIRealtimeBYOK {
+                OpenAIRealtimeMacOSTransportHostView()
+                    .frame(width: 1, height: 1)
+                    .opacity(0.001)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
     }
 
     private var compact: some View {
         HStack(spacing: 10) {
-            Button(action: {}) {
-                Image(systemName: "mic.slash")
+            Button {
+                runtime.beginAudioSession()
+            } label: {
+                Image(systemName: canBeginAudioSession ? "mic.fill" : "mic.slash")
             }
             .buttonStyle(.plain)
-            .disabled(true)
-            .accessibilityLabel(localized(
-                japanese: "音声機能の有効化まではマイクを利用できません",
-                english: "Microphone unavailable until Voice runtime activation"
-            ))
+            .disabled(!canBeginAudioSession)
+            .accessibilityLabel(microphoneAccessibilityLabel)
 
             waveform
 
@@ -89,6 +97,17 @@ struct VoiceLaneHostView: View {
     private var expanded: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
+                Button {
+                    runtime.beginAudioSession()
+                } label: {
+                    Image(systemName: canBeginAudioSession ? "mic.fill" : "mic.slash")
+                }
+                .buttonStyle(.plain)
+                .disabled(!canBeginAudioSession)
+                .accessibilityLabel(microphoneAccessibilityLabel)
+
+                waveform
+
                 Text(statusText)
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -98,6 +117,16 @@ struct VoiceLaneHostView: View {
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .accessibilityLabel(sessionCountAccessibilityLabel)
+                Button {
+                    runtime.setMuted(!runtime.snapshot.muted)
+                } label: {
+                    Image(systemName: runtime.snapshot.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                }
+                .buttonStyle(.plain)
+                .disabled(runtime.snapshot.muted && runtime.snapshot.connection != .connected)
+                .accessibilityLabel(runtime.snapshot.muted
+                    ? localized(japanese: "音声レーンのミュートを解除", english: "Unmute Voice Lane")
+                    : localized(japanese: "音声レーンをミュート", english: "Mute Voice Lane"))
                 Button {
                     settings.voiceLaneLayoutPreference = .compact
                 } label: {
@@ -248,8 +277,8 @@ struct VoiceLaneHostView: View {
             localized(japanese: "音声Providerはオフです。", english: "Voice provider is Off.")
         case .openAIRealtimeBYOK:
             localized(
-                japanese: "macOSのOpenAI Realtime音声transportはAN3-B3Bまで利用できません。",
-                english: "OpenAI Realtime audio transport on macOS remains unavailable until AN3-B3B."
+                japanese: "マイクを押すとOpenAI Realtimeとの音声セッションを開始します。",
+                english: "Press the microphone to start an OpenAI Realtime voice session."
             )
         case .codexAppServer:
             localized(
@@ -264,6 +293,27 @@ struct VoiceLaneHostView: View {
             japanese: "セッション \(runtime.snapshot.visibleSessionCount)件",
             english: "\(runtime.snapshot.visibleSessionCount) sessions"
         )
+    }
+
+    private var canBeginAudioSession: Bool {
+        runtime.snapshot.providerID == .openAIRealtimeBYOK
+            && runtime.snapshot.connection == .disconnected
+            && runtime.snapshot.uiAttached
+            && !voiceStartBlockedByConfiguration
+    }
+
+    private var voiceStartBlockedByConfiguration: Bool {
+        [
+            "openai_realtime_key_missing",
+            "openai_realtime_key_unavailable",
+            "openai_realtime_macos_transport_unavailable"
+        ].contains(runtime.snapshot.safeErrorCode)
+    }
+
+    private var microphoneAccessibilityLabel: String {
+        canBeginAudioSession
+            ? localized(japanese: "音声セッションを開始", english: "Start Voice session")
+            : localized(japanese: "マイクは現在利用できません", english: "Microphone is currently unavailable")
     }
 
     private func localized(japanese: String, english: String) -> String {
@@ -372,14 +422,12 @@ enum VoiceLaneLocalization {
             return text(japanese: "現在の環境では音声機能を利用できません", english: "Voice is unavailable in this environment", language: language)
         case "voice_start_failed":
             return text(japanese: "音声接続を開始できませんでした", english: "Voice transport could not start", language: language)
-        case "openai_realtime_macos_transport_an3_b3b":
-            return text(
-                japanese: "macOSのOpenAI Realtime音声transportはAN3-B3Bまで利用できません",
-                english: "OpenAI Realtime audio transport on macOS remains gated to AN3-B3B",
-                language: language
-            )
         case "openai_realtime_key_missing":
             return text(japanese: "OpenAI APIキーが未設定です", english: "OpenAI API key is not configured", language: language)
+        case "openai_realtime_timeout":
+            return text(japanese: "音声接続がタイムアウトしました", english: "Voice connection timed out", language: language)
+        case "openai_realtime_remote_error", "openai_realtime_answer_invalid":
+            return text(japanese: "音声サービスとの接続に失敗しました", english: "Voice service connection failed", language: language)
         case "codex_voice_compatibility_blocked":
             return text(japanese: "Codex Voiceの互換性確認を通過していません", english: "Codex Voice compatibility is blocked", language: language)
         default:

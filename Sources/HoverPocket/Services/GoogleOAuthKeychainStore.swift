@@ -171,7 +171,7 @@ final class OpenAIRealtimeAPIKey: @unchecked Sendable, CustomStringConvertible, 
         bytes = Data(value.utf8)
     }
 
-    fileprivate func withUTF8Bytes<T>(_ body: (Data) throws -> T) rethrows -> T {
+    func withUTF8Bytes<T>(_ body: (Data) throws -> T) rethrows -> T {
         try body(bytes)
     }
 

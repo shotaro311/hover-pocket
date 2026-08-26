@@ -149,6 +149,12 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var voiceCalendarAccessEnabled: Bool {
+        didSet {
+            defaults.set(voiceCalendarAccessEnabled, forKey: Self.voiceCalendarAccessEnabledKey)
+        }
+    }
+
     private let defaults: UserDefaults
     private static let appLanguageKey = "appLanguage"
     private static let displayPlacementModeKey = "displayPlacementMode"
@@ -174,6 +180,7 @@ final class AppSettings: ObservableObject {
     private static let voiceProviderKey = "voiceProvider"
     private static let voiceEnabledKey = "voiceEnabled"
     private static let voiceLaneLayoutPreferenceKey = "voiceLaneLayoutPreference"
+    private static let voiceCalendarAccessEnabledKey = "voiceCalendarAccessEnabled"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -253,6 +260,9 @@ final class AppSettings: ObservableObject {
                 : defaults.bool(forKey: Self.voiceEnabledKey)
         self.voiceLaneLayoutPreference = defaults.string(forKey: Self.voiceLaneLayoutPreferenceKey)
             .flatMap(VoiceLaneLayoutPreference.init(rawValue:)) ?? .compact
+        self.voiceCalendarAccessEnabled = defaults.object(forKey: Self.voiceCalendarAccessEnabledKey) == nil
+            ? false
+            : defaults.bool(forKey: Self.voiceCalendarAccessEnabledKey)
 
         if defaults.data(forKey: Self.weatherLocationKey) == nil,
            let weatherLocationData = try? JSONEncoder().encode(weatherLocation) {

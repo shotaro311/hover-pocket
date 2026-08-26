@@ -11,7 +11,7 @@ enum VoiceProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
 enum OpenAIRealtimeFoundation {
     static let modelID = "gpt-realtime-2.1"
     static let callsEndpoint = URL(string: "https://api.openai.com/v1/realtime/calls")!
-    static let macOSAudioTransportAvailable = false
+    static let macOSAudioTransportAvailable = true
 }
 
 protocol OpenAIRealtimeCredentialStoring: Sendable {
@@ -21,36 +21,82 @@ protocol OpenAIRealtimeCredentialStoring: Sendable {
     func delete() throws
 }
 
-enum OpenAIRealtimeMacOSTransportError: Error {
-    case unavailableUntilAN3B3B
-}
-
-/// AN3-B3A intentionally stops before credential access. The provider/settings/keychain
-/// seam is shared now; macOS capture/WebRTC transport remains the explicit AN3-B3B gate.
 @MainActor
 final class OpenAIRealtimeMacOSVoiceSessionAdapter: VoiceSessionAdapter {
     private let credentialStore: any OpenAIRealtimeCredentialStoring
+    private let capabilityRuntime: OpenAIRealtimeMacOSCapabilityRuntime?
+    private let transport: OpenAIRealtimeMacOSTransport
+    private weak var voiceRuntime: VoiceLaneRuntime?
 
-    init(credentialStore: any OpenAIRealtimeCredentialStoring = OpenAIRealtimeKeychainStore()) {
+    var requiresExplicitStart: Bool { true }
+
+    init(
+        credentialStore: any OpenAIRealtimeCredentialStoring = OpenAIRealtimeKeychainStore(),
+        context: VoiceCapabilityContext? = nil,
+        calendarAccessGranted: @escaping () -> Bool = { false },
+        voiceRuntime: VoiceLaneRuntime = .shared,
+        transport: OpenAIRealtimeMacOSTransport = .shared
+    ) {
         self.credentialStore = credentialStore
+        self.capabilityRuntime = context.flatMap {
+            try? OpenAIRealtimeMacOSCapabilityRuntime(
+                context: $0,
+                calendarAccessGranted: calendarAccessGranted
+            )
+        }
+        self.voiceRuntime = voiceRuntime
+        self.transport = transport
     }
 
     func probeCompatibility() async -> VoiceAdapterGate {
-        _ = credentialStore // Keep the seam injected without reading the credential.
-        guard OpenAIRealtimeFoundation.macOSAudioTransportAvailable else {
-            return .blocked("openai_realtime_macos_transport_an3_b3b")
+        guard OpenAIRealtimeFoundation.macOSAudioTransportAvailable,
+              capabilityRuntime != nil else {
+            return .blocked("openai_realtime_macos_transport_unavailable")
         }
-        return .blocked("openai_realtime_macos_transport_an3_b3b")
+        do {
+            guard try credentialStore.hasCredential() else {
+                return .blocked("openai_realtime_key_missing")
+            }
+        } catch {
+            return .blocked("openai_realtime_key_unavailable")
+        }
+        return .ready
     }
 
     func start() async throws {
-        // Fail before any Keychain read or network request in AN3-B3A.
-        throw OpenAIRealtimeMacOSTransportError.unavailableUntilAN3B3B
+        guard let capabilityRuntime else {
+            throw OpenAIRealtimeMacOSTransportError.unavailable
+        }
+        transport.onRootSession = { [weak voiceRuntime] sessionID in
+            voiceRuntime?.setRootSessionID(sessionID)
+        }
+        transport.onTranscript = { [weak voiceRuntime] event in
+            voiceRuntime?.appendTranscript(event)
+        }
+        transport.onActivity = { [weak voiceRuntime] activity in
+            voiceRuntime?.reportTransportActivity(activity)
+        }
+        transport.onFailure = { [weak voiceRuntime] code in
+            voiceRuntime?.reportTransportFailure(code)
+        }
+        _ = try await transport.start(
+            credentialStore: credentialStore,
+            capabilities: capabilityRuntime
+        )
     }
 
-    func setMuted(_ muted: Bool) async { _ = muted }
-    func closeAudioSession() async { }
-    func stop() async { }
+    func setMuted(_ muted: Bool) async {
+        await transport.setMuted(muted)
+    }
+
+    func closeAudioSession() async {
+        await transport.close()
+    }
+
+    func stop() async {
+        await transport.close()
+        transport.clearCallbacks()
+    }
 }
 
 @MainActor
@@ -62,7 +108,7 @@ final class FailClosedVoiceProviderAdapter: VoiceSessionAdapter {
     }
 
     func probeCompatibility() async -> VoiceAdapterGate { .blocked(code) }
-    func start() async throws { throw OpenAIRealtimeMacOSTransportError.unavailableUntilAN3B3B }
+    func start() async throws { throw OpenAIRealtimeMacOSTransportError.unavailable }
     func setMuted(_ muted: Bool) async { _ = muted }
     func closeAudioSession() async { }
     func stop() async { }
@@ -72,13 +118,22 @@ enum VoiceProviderAdapterFactory {
     @MainActor
     static func factory(
         providerID: VoiceProviderID,
-        credentialStore: any OpenAIRealtimeCredentialStoring = OpenAIRealtimeKeychainStore()
+        credentialStore: any OpenAIRealtimeCredentialStoring = OpenAIRealtimeKeychainStore(),
+        settings: AppSettings,
+        voiceRuntime: VoiceLaneRuntime = .shared
     ) -> VoiceLaneRuntime.AdapterFactory? {
         switch providerID {
         case .off:
             nil
         case .openAIRealtimeBYOK:
-            { OpenAIRealtimeMacOSVoiceSessionAdapter(credentialStore: credentialStore) }
+            {
+                OpenAIRealtimeMacOSVoiceSessionAdapter(
+                    credentialStore: credentialStore,
+                    context: AINativeRuntime.shared.voiceCapabilityContext,
+                    calendarAccessGranted: { settings.voiceCalendarAccessEnabled },
+                    voiceRuntime: voiceRuntime
+                )
+            }
         case .codexAppServer:
             { FailClosedVoiceProviderAdapter(code: "codex_voice_compatibility_blocked") }
         }
