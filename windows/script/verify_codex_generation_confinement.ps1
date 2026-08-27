@@ -240,27 +240,27 @@ function ConvertFrom-ProbeOutput {
     param([Parameter(Mandatory = $true)][string]$Output)
 
     if ($Output.Length -gt $MaximumStdoutCharacters) {
-        throw "Sandbox probe stdout exceeded its limit."
+        throw "HP_CANARY_PROBE_STDOUT_LIMIT"
     }
     $lines = @($Output -split "`r?`n" | Where-Object { $_.Length -gt 0 })
     if ($lines.Count -ne 1) {
-        throw "Sandbox probe emitted unexpected additional output."
+        throw "HP_CANARY_PROBE_OUTPUT_SHAPE"
     }
     try {
         $payload = $lines[0] | ConvertFrom-Json
     }
     catch {
-        throw "Sandbox probe output could not be decoded."
+        throw "HP_CANARY_PROBE_OUTPUT_JSON"
     }
     $actualNames = @($payload.PSObject.Properties.Name | Sort-Object)
     $expectedNames = @($ExpectedProbe.Keys | Sort-Object)
     if ([string]::Join("`n", $actualNames) -cne [string]::Join("`n", $expectedNames)) {
-        throw "Sandbox probe output keys differ from the contract."
+        throw "HP_CANARY_PROBE_OUTPUT_KEYS"
     }
     foreach ($entry in $ExpectedProbe.GetEnumerator()) {
         $value = $payload.PSObject.Properties[$entry.Key].Value
         if ($value -isnot [bool] -or $value -ne $entry.Value) {
-            throw "Sandbox probe did not enforce the exact file and network boundary."
+            throw "HP_CANARY_PROBE_RESULT_$($entry.Key.ToUpperInvariant())"
         }
     }
     return $payload
@@ -302,7 +302,7 @@ function Invoke-BoundedProcess {
     $process.StartInfo = $start
     try {
         if (-not $process.Start()) {
-            throw "Sandbox probe process did not start."
+            throw "HP_CANARY_PROCESS_START_FAILED"
         }
         $process.StandardInput.Close()
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
@@ -313,7 +313,7 @@ function Invoke-BoundedProcess {
         }
         if (-not $process.HasExited) {
             try { $process.Kill($true) } catch { }
-            throw "Sandbox probe timed out."
+            throw "HP_CANARY_PROCESS_TIMEOUT"
         }
         $stdout = $stdoutTask.GetAwaiter().GetResult()
         $stderr = $stderrTask.GetAwaiter().GetResult()
@@ -367,7 +367,7 @@ function Remove-ValidatedTemporaryRoot {
         -not [IO.Path]::GetFileName($fullPath).StartsWith($ExpectedPrefix, [StringComparison]::Ordinal) -or
         ((Get-Item -LiteralPath $fullPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
     ) {
-        throw "Temporary confinement root failed cleanup validation."
+        throw "HP_CANARY_CLEANUP_VALIDATION_FAILED"
     }
     Remove-Item -LiteralPath $fullPath -Recurse -Force
 }
@@ -386,6 +386,10 @@ function Invoke-SelfTest {
         }
         catch {
             if ($_.Exception.Message -like "Self-test accepted*") { throw }
+            $expectedFailure = "HP_CANARY_PROBE_RESULT_$($key.ToUpperInvariant())"
+            if ($_.Exception.Message -cne $expectedFailure) {
+                throw "Self-test observed an unexpected probe failure code."
+            }
         }
     }
     if (
@@ -545,25 +549,25 @@ function Invoke-Canary {
             $stdoutDiagnostic = Get-SanitizedDiagnostic -Text $result.Stdout -SensitiveValues $sensitiveValues
             Write-Warning "Codex sandbox stderr: $stderrDiagnostic"
             Write-Warning "Codex sandbox stdout: $stdoutDiagnostic"
-            throw "Sandbox probe process failed."
+            throw "HP_CANARY_PROCESS_FAILED"
         }
         if ($ExpectUnelevatedReadOnlyRejection) {
-            throw "The unelevated sandbox unexpectedly accepted the read-only generation profile."
+            throw "HP_CANARY_UNELEVATED_UNEXPECTED_SUCCESS"
         }
         if ($result.Stderr.Length -gt $MaximumStderrCharacters) {
-            throw "Sandbox probe stderr exceeded its limit."
+            throw "HP_CANARY_PROBE_STDERR_LIMIT"
         }
         foreach ($marker in @("allowed-canary", "codex-home-canary", "outside-root-canary")) {
             if ($result.Stderr.Contains($marker, [StringComparison]::Ordinal)) {
-                throw "Sandbox probe stderr disclosed a canary value."
+                throw "HP_CANARY_STDERR_CANARY_DISCLOSURE"
             }
         }
         [void](ConvertFrom-ProbeOutput -Output $result.Stdout)
         if ($listenerReached) {
-            throw "Sandbox probe reached the loopback listener."
+            throw "HP_CANARY_NETWORK_LISTENER_REACHED"
         }
         if (Test-Path -LiteralPath (Join-Path $workspace "write-attempt.txt")) {
-            throw "Sandbox probe wrote inside its read-only workspace."
+            throw "HP_CANARY_WORKSPACE_WRITE_OBSERVED"
         }
         $receipt = [ordered]@{
             schemaVersion = 1
