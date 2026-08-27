@@ -307,6 +307,7 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
                 workspace,
                 codexHome,
                 userHome,
+                HostUserProfile(),
                 schemaPath,
                 modelCatalogPath,
                 helperExecutable))
@@ -394,6 +395,7 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         string workspace,
         string codexHome,
         string userHome,
+        string hostUserProfile,
         string schemaPath,
         string modelCatalogPath,
         string credentialHelperExecutable)
@@ -401,6 +403,7 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         var normalizedWorkspace = Path.GetFullPath(workspace);
         var normalizedCodexHome = Path.GetFullPath(codexHome);
         var normalizedUserHome = Path.GetFullPath(userHome);
+        var normalizedHostUserProfile = Path.TrimEndingDirectorySeparator(Path.GetFullPath(hostUserProfile));
         var normalizedSchema = Path.GetFullPath(schemaPath);
         var normalizedModelCatalog = Path.GetFullPath(modelCatalogPath);
         var normalizedHelper = Path.GetFullPath(credentialHelperExecutable);
@@ -409,6 +412,12 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count() != 3
             || directories.Select(Path.GetDirectoryName)
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count() != 1
+            || normalizedHostUserProfile.StartsWith("\\\\", StringComparison.Ordinal)
+            || string.Equals(
+                normalizedHostUserProfile,
+                Path.TrimEndingDirectorySeparator(Path.GetPathRoot(normalizedHostUserProfile) ?? string.Empty),
+                StringComparison.OrdinalIgnoreCase)
+            || !IsStrictDescendant(normalizedWorkspace, normalizedHostUserProfile)
             || !string.Equals(
                 Path.GetDirectoryName(normalizedSchema),
                 normalizedWorkspace,
@@ -423,8 +432,11 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         {
             throw Failure("GENERATOR_UNAVAILABLE");
         }
+        // The elevated sandbox identity may otherwise inherit broad Users-group read ACLs.
+        // Deny the real Host profile and reopen only the isolated generation workspace.
         var filesystem = "permissions.hoverpocket-generation.filesystem={"
             + $"{JsonSerializer.Serialize(":minimal")}=\"read\","
+            + $"{JsonSerializer.Serialize(normalizedHostUserProfile)}=\"deny\","
             + $"{JsonSerializer.Serialize(normalizedWorkspace)}=\"read\","
             + $"{JsonSerializer.Serialize(normalizedUserHome)}=\"deny\","
             + $"{JsonSerializer.Serialize(normalizedHelper)}=\"deny\"}}";
@@ -506,6 +518,26 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             throw Failure("GENERATOR_UNAVAILABLE");
         }
         return userName;
+    }
+
+    internal static string HostUserProfile()
+    {
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(profile)) { throw Failure("GENERATOR_UNAVAILABLE"); }
+        var normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(profile));
+        if (normalized.StartsWith("\\\\", StringComparison.Ordinal)
+            || string.Equals(normalized, Path.GetPathRoot(normalized), StringComparison.OrdinalIgnoreCase))
+        {
+            throw Failure("GENERATOR_UNAVAILABLE");
+        }
+        return normalized;
+    }
+
+    private static bool IsStrictDescendant(string candidate, string ancestor)
+    {
+        if (string.Equals(candidate, ancestor, StringComparison.OrdinalIgnoreCase)) { return false; }
+        var prefix = Path.TrimEndingDirectorySeparator(ancestor) + Path.DirectorySeparatorChar;
+        return candidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string SystemPath()

@@ -827,7 +827,13 @@ internal sealed class PocketAppGenerationVerifier
                     "^local\\.generated\\.a[0-9a-f]{32}$",
                     System.Text.RegularExpressions.RegexOptions.CultureInvariant),
             "generation_untargeted_request_gets_fresh_app_id");
-        var confinementRoot = Path.Combine(Path.GetTempPath(), "hover-pocket-codex-confinement");
+        var confinementHostUserProfile = CodexPocketAppGenerationAdapter.HostUserProfile();
+        var confinementRoot = Path.Combine(
+            confinementHostUserProfile,
+            "AppData",
+            "Local",
+            "Temp",
+            "hover-pocket-codex-confinement");
         var confinementWorkspace = Path.Combine(confinementRoot, "workspace");
         var confinementCodexHome = Path.Combine(confinementRoot, "codex-home");
         var confinementUserHome = Path.Combine(confinementRoot, "user-home");
@@ -852,6 +858,7 @@ internal sealed class PocketAppGenerationVerifier
             confinementWorkspace,
             confinementCodexHome,
             confinementUserHome,
+            confinementHostUserProfile,
             confinementSchema,
             confinementModelCatalog,
             confinementHelper);
@@ -862,6 +869,7 @@ internal sealed class PocketAppGenerationVerifier
                 && confinementArguments.Contains("--ignore-rules", StringComparer.Ordinal)
                 && confinementJoined.Contains("windows.sandbox=\"elevated\"", StringComparison.Ordinal)
                 && confinementJoined.Contains("default_permissions=\"hoverpocket-generation\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementHostUserProfile)}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementWorkspace)}=\"read\"", StringComparison.Ordinal)
                 && !confinementJoined.Contains($"{JsonSerializer.Serialize(confinementCodexHome)}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementUserHome)}=\"deny\"", StringComparison.Ordinal)

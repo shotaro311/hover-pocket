@@ -144,6 +144,7 @@ function Get-ConfinementArguments {
         [Parameter(Mandatory = $true)][string]$CodexHome,
         [Parameter(Mandatory = $true)][string]$HostCodexHome,
         [Parameter(Mandatory = $true)][string]$UserHome,
+        [Parameter(Mandatory = $true)][string]$HostUserProfile,
         [Parameter(Mandatory = $true)][string]$Implementation,
         [Parameter(Mandatory = $true)][string]$PowerShellPath,
         [Parameter(Mandatory = $true)][string]$ProbePath,
@@ -155,6 +156,8 @@ function Get-ConfinementArguments {
     $codexHomePath = [IO.Path]::GetFullPath($CodexHome)
     $hostCodexHomePath = [IO.Path]::GetFullPath($HostCodexHome)
     $userHomePath = [IO.Path]::GetFullPath($UserHome)
+    $hostUserProfilePath = [IO.Path]::GetFullPath($HostUserProfile).TrimEnd(
+        [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
     $parentPaths = @(
         [IO.Path]::GetDirectoryName($workspacePath)
         [IO.Path]::GetDirectoryName($codexHomePath)
@@ -164,17 +167,31 @@ function Get-ConfinementArguments {
     $runRootPath = [IO.Path]::GetDirectoryName($workspacePath).TrimEnd(
         [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
     $runRootPrefix = $runRootPath + [IO.Path]::DirectorySeparatorChar
+    $hostUserProfilePrefix = $hostUserProfilePath + [IO.Path]::DirectorySeparatorChar
+    $foreignRootPath = [IO.Path]::GetFullPath($ForeignRoot)
+    $hostUserProfileRoot = [IO.Path]::GetPathRoot($hostUserProfilePath).TrimEnd(
+        [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
     if (
         @($parentPaths).Count -ne 1 -or
         @($rootPaths).Count -ne 3 -or
+        $hostUserProfilePath.StartsWith("\\", [StringComparison]::Ordinal) -or
+        $hostUserProfilePath.Equals($hostUserProfileRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        -not $workspacePath.StartsWith($hostUserProfilePrefix, [StringComparison]::OrdinalIgnoreCase) -or
         $hostCodexHomePath.Equals($runRootPath, [StringComparison]::OrdinalIgnoreCase) -or
-        $hostCodexHomePath.StartsWith($runRootPrefix, [StringComparison]::OrdinalIgnoreCase)
+        $hostCodexHomePath.StartsWith($runRootPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+        -not $hostCodexHomePath.StartsWith($hostUserProfilePrefix, [StringComparison]::OrdinalIgnoreCase) -or
+        $foreignRootPath.Equals($runRootPath, [StringComparison]::OrdinalIgnoreCase) -or
+        $foreignRootPath.StartsWith($runRootPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+        -not $foreignRootPath.StartsWith($hostUserProfilePrefix, [StringComparison]::OrdinalIgnoreCase)
     ) {
-        throw "Confinement roots must be distinct siblings."
+        throw "Confinement roots must use a Host user-profile deny with an isolated workspace carveout."
     }
 
+    # An omitted path may still be readable through inherited Users-group ACLs.
+    # Deny the real Host profile and reopen only this run's workspace.
     $filesystem = "permissions.hoverpocket-generation.filesystem={" +
         "$(ConvertTo-TomlString ':minimal')=`"read`"," +
+        "$(ConvertTo-TomlString $hostUserProfilePath)=`"deny`"," +
         "$(ConvertTo-TomlString $workspacePath)=`"read`"," +
         "$(ConvertTo-TomlString $userHomePath)=`"deny`"}"
     $windowsDirectory = [IO.Path]::GetFullPath($env:SystemRoot)
@@ -213,7 +230,7 @@ function Get-ConfinementArguments {
         "-RuntimeCodexHome", $codexHomePath
         "-HostCodexHome", $hostCodexHomePath
         "-UserHome", $userHomePath
-        "-ForeignRoot", [IO.Path]::GetFullPath($ForeignRoot)
+        "-ForeignRoot", $foreignRootPath
         "-Port", [string]$Port
     )
 }
@@ -514,22 +531,24 @@ function Invoke-SelfTest {
     try {
         $env:SystemRoot = "C:\Windows"
         $arguments = Get-ConfinementArguments `
-            -Workspace "C:\fixture\workspace" `
-            -CodexHome "C:\fixture\codex-home" `
-            -HostCodexHome "C:\host-codex-home" `
-            -UserHome "C:\fixture\user-home" `
+            -Workspace "C:\fixture-host\temp\run\workspace" `
+            -CodexHome "C:\fixture-host\temp\run\codex-home" `
+            -HostCodexHome "C:\fixture-host\temp\host-codex-home" `
+            -UserHome "C:\fixture-host\temp\run\user-home" `
+            -HostUserProfile "C:\fixture-host" `
             -Implementation "unelevated" `
             -PowerShellPath "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" `
-            -ProbePath "C:\fixture\workspace\probe.ps1" `
-            -ForeignRoot "C:\foreign" `
+            -ProbePath "C:\fixture-host\temp\run\workspace\probe.ps1" `
+            -ForeignRoot "C:\fixture-host\temp\foreign" `
             -Port 12345
         $joined = [string]::Join("`n", $arguments)
         $required = @(
             'windows.sandbox="unelevated"'
             'default_permissions="hoverpocket-generation"'
-            '"C:\\fixture\\workspace"="read"'
-            '"C:\\fixture\\user-home"="deny"'
-            'C:\host-codex-home'
+            '"C:\\fixture-host"="deny"'
+            '"C:\\fixture-host\\temp\\run\\workspace"="read"'
+            '"C:\\fixture-host\\temp\\run\\user-home"="deny"'
+            'C:\fixture-host\temp\host-codex-home'
             'network.enabled=false'
             'shell_environment_policy.inherit="none"'
             'SYSTEMDRIVE="C:"'
@@ -540,11 +559,14 @@ function Invoke-SelfTest {
                 throw "Self-test confinement arguments differ from the expected contract."
             }
         }
-        if ($joined.Contains('"C:\\fixture\\codex-home"="deny"', [StringComparison]::Ordinal)) {
+        if ($joined.Contains('"C:\\fixture-host\\temp\\run\\codex-home"="deny"', [StringComparison]::Ordinal)) {
             throw "Self-test must leave Codex Home to the native sandbox control-plane ACLs."
         }
-        if ($joined.Contains('"C:\\host-codex-home"=', [StringComparison]::Ordinal)) {
+        if ($joined.Contains('"C:\\fixture-host\\temp\\host-codex-home"=', [StringComparison]::Ordinal)) {
             throw "Self-test must not add the Host Codex Home to the sandbox permission profile."
+        }
+        if ($joined.Contains('"C:\\fixture-host\\temp\\foreign"=', [StringComparison]::Ordinal)) {
+            throw "Self-test must prove the Host user-profile deny instead of adding a foreign-root exception."
         }
     }
     finally {
@@ -648,6 +670,7 @@ function Invoke-Canary {
             -CodexHome $codexHome `
             -HostCodexHome $hostCodexHome `
             -UserHome $userHome `
+            -HostUserProfile ([IO.Path]::GetFullPath($env:USERPROFILE)) `
             -Implementation $SandboxImplementation `
             -PowerShellPath $powerShellPath `
             -ProbePath $probePath `
