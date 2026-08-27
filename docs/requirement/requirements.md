@@ -2,7 +2,7 @@
 project_slug: hover-pocket
 target: Windows version requirements
 created: 2026-07-05
-updated: 2026-08-13
+updated: 2026-08-27
 updated_by: codex
 status: draft-integrated
 source_app_release: v0.1.0-98
@@ -517,6 +517,9 @@ Planned Must:
 - Pocket Appのinstall / update / enable / disable / remove / rollbackは、Lifecycleの保存状態だけで成功にしない。Hostが検証済みimmutable packageを`PocketSurfaceRegistry`と実行runtimeへ反映し、同じapp ID、version、package digest、permission grantが描画・実行側でも観測できた後だけ成功receiptを返す。
 - 生成Pocket Appはapp IDごとに独立したSurface / runtime entryとして登録する。任意の生成Appを組み込みToday Focusの固定slotへ差し替えない。
 - 実Codex生成とactivationは、ローカルファイル読取り隔離と上記runtime activation readbackをmacOS / Windows双方で満たすまでfail closedとする。
+- Windowsの実Codex生成templateはCodex CLIのnative `elevated` sandboxを明示し、`unelevated`へ自動降格しない。`unelevated`がread-only permission profileを拒否するnegative-controlはdowngrade拒否の証拠であり、`elevated`境界の成功証拠として扱わない。
+- Windowsのproduction有効化前canaryは、固定version・archive hash・executable hash・有効なOpenAI Authenticode signerを持つlocal executableだけを使う。fresh rootでworkspace read、workspace write拒否、isolated Codex Home / User Home / root外sibling read拒否、network拒否、listener未到達、bounded非秘匿diagnostic、validated cleanupを実行後readbackする。
+- CIでnative `elevated` sandboxを利用できない場合は、self-testと`unelevated` rejectionだけを自動化し、通常Windows hostのpositive canaryを独立した必須gateとして残す。positive canary、Host-owned credential delivery、trusted executable resolverの全てが揃うまで`ResolveExecutable()`とactivationをfail closedにする。
 - Pocket App workspace backupはmacOS / Windows共通のversion付きcanonical JSONとし、Host検証済みimmutable packageの全version、active version / digest、enabled / disabled、effective permission、state schema digest、ユーザーの`state.json`だけを含める。OAuth、credential、Capability監査 / receipt、Codex生成workspace、外部pathは含めない。
 - backup exportはHostが固定境界から収集し、全fileの安全な相対path、decoded size、SHA-256、base64 bytesを記録する。restoreは最大64 App、2,048 files、1 MiB / file、64 MiB decoded、96 MiB encodedを上限とし、traversal、absolute path、symlink / reparse point、case-insensitive path衝突、未参照file、hash / schema / package不一致を副作用前に拒否する。
 - restoreは追加 / 置換、version、enabled / disabled、permission差分、data変更をpreviewし、backup digestとpreview digestへ束縛した5分以内・1回限りの承認をネイティブUIで既定`No`として求める。WebView、生成UI、Codexへfilesystem pathまたは直接restore権限を渡さない。
