@@ -121,7 +121,9 @@ AN5のproduction Codex Pocket App生成を有効化せず、macOSで実Codex CLI
 - exact signed `codex-cli 0.145.0`を非機密surrogateとlocal mock Responses endpointで実行し、2回のResponses request、remote model catalog access 0、auth helper起動1回をreadbackした。モデル要求の`exec_command`からhelper read / executeは双方拒否され、surrogateはrequest body、stdout、stderr、temp diskに残らなかった。
 - `python3 script/verify_codex_auth_control_plane_macos.py --self-test`と実canary、Swift warnings-as-errors build、Pocket App / Surface / Capability / Broker / Voice / Panel / Timer、15 schema / 71 fixtureの2回byte一致、workflow YAML、`git diff --check`はすべてPASSした。
 - Security scan `d01e40c3-9ea3-47d7-875b-c0dd6e3fff3b`はsnapshot `codex-security-snapshot/v1:sha256:26f7188cdd471fd51706f8e9cb48e83e286607f49675836f6f941bdb522a9929`、changed source 8 / 8、coverage complete、reportable finding 0件で封印・再読込した。
-- productionはmacOS `supportsConfidentialGeneration == false`、Windows `ResolveExecutable() == null`、activation falseを維持する。Windows compile / Verifierは新headのCI、native elevated positive canaryは通常Windows hostの独立gateとして残す。
+- code head `57583fcdfc8c98e01199fdc2c032a35b3b2e7d41`でRouter [33030770632](https://github.com/shotaro311/hover-pocket/actions/runs/33030770632)、Windows [33030771489](https://github.com/shotaro311/hover-pocket/actions/runs/33030771489)、macOS [33030771502](https://github.com/shotaro311/hover-pocket/actions/runs/33030771502)、3OS Pocket contract [33030771516](https://github.com/shotaro311/hover-pocket/actions/runs/33030771516)がすべてSUCCESSとなった。macOS logで`PASS Codex auth control-plane verifier self-test`、Windows logでRelease / Debug build warning 0 / error 0、`generation-parent-chain`、`pocket_app_generation_verify=ok`、3OS contractのbyte一致をreadbackした。
+- Draft PR #39は同headで`Draft / OPEN / MERGEABLE / CLEAN`、review / comment 0件である。
+- productionはmacOS `supportsConfidentialGeneration == false`、Windows `ResolveExecutable() == null`、activation falseを維持する。Windows compile / Verifierは新headのCIで確認済みだが、native elevated positive canaryは通常Windows hostの独立gateとして残す。
 
 ## Draft PR / CI readback
 
