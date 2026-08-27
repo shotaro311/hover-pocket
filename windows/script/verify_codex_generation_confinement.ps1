@@ -270,12 +270,12 @@ function Get-ConfinementArguments {
         -HostUserProfile $hostUserProfilePath `
         -RunRoot $runRootPath)
     $filesystemEntries = [Collections.Generic.List[string]]::new()
-    [void]$filesystemEntries.Add("$(ConvertTo-TomlString ':minimal')=`"read`")
+    [void]$filesystemEntries.Add("$(ConvertTo-TomlString ':minimal')=`"read`"")
     foreach ($denyPath in $denyFrontier) {
-        [void]$filesystemEntries.Add("$(ConvertTo-TomlString $denyPath)=`"deny`")
+        [void]$filesystemEntries.Add("$(ConvertTo-TomlString $denyPath)=`"deny`"")
     }
-    [void]$filesystemEntries.Add("$(ConvertTo-TomlString $workspacePath)=`"read`")
-    [void]$filesystemEntries.Add("$(ConvertTo-TomlString $userHomePath)=`"deny`")
+    [void]$filesystemEntries.Add("$(ConvertTo-TomlString $workspacePath)=`"read`"")
+    [void]$filesystemEntries.Add("$(ConvertTo-TomlString $userHomePath)=`"deny`"")
     $filesystem = "permissions.hoverpocket-generation.filesystem={" +
         [string]::Join(",", $filesystemEntries) + "}"
     $windowsDirectory = [IO.Path]::GetFullPath($env:SystemRoot)
