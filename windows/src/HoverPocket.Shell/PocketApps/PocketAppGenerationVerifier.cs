@@ -827,16 +827,47 @@ internal sealed class PocketAppGenerationVerifier
                     "^local\\.generated\\.a[0-9a-f]{32}$",
                     System.Text.RegularExpressions.RegexOptions.CultureInvariant),
             "generation_untargeted_request_gets_fresh_app_id");
-        var confinementHostUserProfile = CodexPocketAppGenerationAdapter.HostUserProfile();
+        var confinementHostUserProfile = Path.Combine(
+            Path.GetTempPath(),
+            $"hover-pocket-codex-frontier-profile-{Guid.NewGuid():N}");
+        try
+        {
         var confinementRoot = Path.Combine(
             confinementHostUserProfile,
             "AppData",
             "Local",
             "Temp",
-            "hover-pocket-codex-confinement");
+            "run");
         var confinementWorkspace = Path.Combine(confinementRoot, "workspace");
         var confinementCodexHome = Path.Combine(confinementRoot, "codex-home");
         var confinementUserHome = Path.Combine(confinementRoot, "user-home");
+        var confinementHostCodexHome = Path.Combine(
+            confinementHostUserProfile,
+            "AppData",
+            "Local",
+            "Temp",
+            "host-codex-home");
+        var confinementForeign = Path.Combine(
+            confinementHostUserProfile,
+            "AppData",
+            "Local",
+            "Temp",
+            "foreign");
+        var confinementTemp = Path.GetDirectoryName(confinementRoot)
+            ?? throw new CodexCredentialBrokerException();
+        var confinementDocuments = Path.Combine(confinementHostUserProfile, "Documents");
+        foreach (var directory in new[]
+        {
+            confinementWorkspace,
+            confinementCodexHome,
+            confinementUserHome,
+            confinementHostCodexHome,
+            confinementForeign,
+            confinementDocuments
+        })
+        {
+            Directory.CreateDirectory(directory);
+        }
         var confinementSchema = Path.Combine(confinementWorkspace, "generation-output.schema.json");
         var confinementModelCatalog = Path.Combine(confinementWorkspace, "model-catalog.json");
         var modelCatalog = CodexPocketAppGenerationModelCatalog.Load();
@@ -870,7 +901,12 @@ internal sealed class PocketAppGenerationVerifier
                 && confinementJoined.Contains("windows.sandbox=\"elevated\"", StringComparison.Ordinal)
                 && confinementJoined.Contains("default_permissions=\"hoverpocket-generation\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementHostUserProfile)}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementDocuments)}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementTemp)}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementHostCodexHome)}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementForeign)}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementWorkspace)}=\"read\"", StringComparison.Ordinal)
+                && !confinementJoined.Contains($"{JsonSerializer.Serialize(confinementRoot)}=\"deny\"", StringComparison.Ordinal)
                 && !confinementJoined.Contains($"{JsonSerializer.Serialize(confinementCodexHome)}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementUserHome)}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(Path.GetFullPath(confinementHelper))}=\"deny\"", StringComparison.Ordinal)
@@ -914,9 +950,38 @@ internal sealed class PocketAppGenerationVerifier
                     !key.StartsWith("HOVERPOCKET_CODEX_BROKER", StringComparison.OrdinalIgnoreCase)
                         && !string.Equals(key, "OPENAI_API_KEY", StringComparison.OrdinalIgnoreCase)),
             "generation_codex_isolated_environment");
+        for (var index = 0; index <= 256; index += 1)
+        {
+            Directory.CreateDirectory(Path.Combine(
+                confinementHostUserProfile,
+                $"overflow-{index:D3}"));
+        }
+        try
+        {
+            _ = CodexPocketAppGenerationAdapter.ConfinementDenyFrontier(
+                confinementHostUserProfile,
+                confinementRoot);
+            _failures.Add("generation_codex_frontier_bound_accepted");
+        }
+        catch (PocketAppGenerationException)
+        {
+        }
         Require(
             CodexPocketAppGenerationAdapter.ResolveExecutable() is null,
             "generation_real_codex_confidentiality_gate");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(confinementHostUserProfile))
+                {
+                    PocketAppVerifierFileSystem.MakeTreeMutable(confinementHostUserProfile);
+                    Directory.Delete(confinementHostUserProfile, true);
+                }
+            }
+            catch { }
+        }
     }
 
     private void VerifyRootPin()

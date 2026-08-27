@@ -223,6 +223,9 @@ internal sealed class PocketAppPinnedDirectory : IDisposable
 
 internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdapter, IDisposable
 {
+    private const int MaximumConfinementDenyEntries = 256;
+    private const int MaximumConfinementDenyCharacters = 16384;
+
     public bool AllowsActivation => false;
 
     public static string? ResolveExecutable()
@@ -274,6 +277,7 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         var localAppData = Path.Combine(userHome, "AppData", "Local");
         var roamingAppData = Path.Combine(userHome, "AppData", "Roaming");
         var temporaryDirectory = Path.Combine(runRoot, "tmp");
+        using var runRootPin = new PocketAppPinnedDirectory(runRoot);
         foreach (var directory in new[] { workspace, codexHome, userHome, localAppData, roamingAppData, temporaryDirectory })
         {
             Directory.CreateDirectory(directory);
@@ -281,6 +285,7 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         try
         {
             _workspaceRoot.Validate();
+            runRootPin.Validate();
             var schemaPath = Path.Combine(workspace, "generation-output.schema.json");
             await File.WriteAllTextAsync(schemaPath, PocketAppGenerationContract.OutputSchemaJson, cancellationToken);
             File.SetAttributes(schemaPath, File.GetAttributes(schemaPath) | FileAttributes.ReadOnly);
@@ -382,10 +387,12 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
                 throw Failure("GENERATOR_PROCESS_FAILED");
             }
             _workspaceRoot.Validate();
+            runRootPin.Validate();
             return PocketAppGenerationContract.DecodeEnvelope(stdout.Data);
         }
         finally
         {
+            runRootPin.Dispose();
             MakeMutable(runRoot);
             try { if (Directory.Exists(runRoot)) { Directory.Delete(runRoot, true); } } catch { }
         }
@@ -432,14 +439,21 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         {
             throw Failure("GENERATOR_UNAVAILABLE");
         }
-        // The elevated sandbox identity may otherwise inherit broad Users-group read ACLs.
-        // Deny the real Host profile and reopen only the isolated generation workspace.
+        var runRoot = Path.GetDirectoryName(normalizedWorkspace)
+            ?? throw Failure("GENERATOR_UNAVAILABLE");
+        var filesystemEntries = new List<string>
+        {
+            $"{JsonSerializer.Serialize(":minimal")}=\"read\""
+        };
+        filesystemEntries.AddRange(ConfinementDenyFrontier(
+            normalizedHostUserProfile,
+            runRoot).Select(path => $"{JsonSerializer.Serialize(path)}=\"deny\""));
+        filesystemEntries.Add($"{JsonSerializer.Serialize(normalizedWorkspace)}=\"read\"");
+        filesystemEntries.Add($"{JsonSerializer.Serialize(normalizedUserHome)}=\"deny\"");
+        filesystemEntries.Add($"{JsonSerializer.Serialize(normalizedHelper)}=\"deny\"");
         var filesystem = "permissions.hoverpocket-generation.filesystem={"
-            + $"{JsonSerializer.Serialize(":minimal")}=\"read\","
-            + $"{JsonSerializer.Serialize(normalizedHostUserProfile)}=\"deny\","
-            + $"{JsonSerializer.Serialize(normalizedWorkspace)}=\"read\","
-            + $"{JsonSerializer.Serialize(normalizedUserHome)}=\"deny\","
-            + $"{JsonSerializer.Serialize(normalizedHelper)}=\"deny\"}}";
+            + string.Join(',', filesystemEntries)
+            + "}";
         var windows = WindowsDirectory();
         var systemDrive = SystemDrive(windows);
         var shellEnvironment = "shell_environment_policy.set={"
@@ -531,6 +545,91 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             throw Failure("GENERATOR_UNAVAILABLE");
         }
         return normalized;
+    }
+
+    internal static IReadOnlyList<string> ConfinementDenyFrontier(
+        string hostUserProfile,
+        string runRoot)
+    {
+        var normalizedHostUserProfile = Path.TrimEndingDirectorySeparator(
+            Path.GetFullPath(hostUserProfile));
+        var normalizedRunRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(runRoot));
+        if (normalizedHostUserProfile.StartsWith("\\\\", StringComparison.Ordinal)
+            || string.Equals(
+                normalizedHostUserProfile,
+                Path.TrimEndingDirectorySeparator(
+                    Path.GetPathRoot(normalizedHostUserProfile) ?? string.Empty),
+                StringComparison.OrdinalIgnoreCase)
+            || !IsStrictDescendant(normalizedRunRoot, normalizedHostUserProfile)
+            || !Directory.Exists(normalizedHostUserProfile)
+            || !Directory.Exists(normalizedRunRoot))
+        {
+            throw Failure("GENERATOR_UNAVAILABLE");
+        }
+
+        var frontier = new List<string> { normalizedHostUserProfile };
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            normalizedHostUserProfile
+        };
+        var characterCount = normalizedHostUserProfile.Length;
+        var current = normalizedHostUserProfile;
+        try
+        {
+            while (!string.Equals(current, normalizedRunRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                var relative = Path.GetRelativePath(current, normalizedRunRoot);
+                var nextComponent = relative.Split(
+                    [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                    StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+                if (string.IsNullOrWhiteSpace(nextComponent))
+                {
+                    throw Failure("GENERATOR_UNAVAILABLE");
+                }
+                var next = Path.GetFullPath(Path.Combine(current, nextComponent));
+                if (!Directory.Exists(next)
+                    || !IsStrictDescendant(next, current)
+                    || (!string.Equals(next, normalizedRunRoot, StringComparison.OrdinalIgnoreCase)
+                        && !IsStrictDescendant(normalizedRunRoot, next)))
+                {
+                    throw Failure("GENERATOR_UNAVAILABLE");
+                }
+
+                if (!string.Equals(next, normalizedRunRoot, StringComparison.OrdinalIgnoreCase)
+                    && seen.Add(next))
+                {
+                    frontier.Add(next);
+                    characterCount += next.Length;
+                }
+
+                foreach (var sibling in Directory
+                    .EnumerateFileSystemEntries(current)
+                    .Select(Path.GetFullPath)
+                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (string.Equals(sibling, next, StringComparison.OrdinalIgnoreCase)
+                        || !seen.Add(sibling))
+                    {
+                        continue;
+                    }
+                    frontier.Add(sibling);
+                    characterCount += sibling.Length;
+                }
+                if (frontier.Count > MaximumConfinementDenyEntries
+                    || characterCount > MaximumConfinementDenyCharacters)
+                {
+                    throw Failure("GENERATOR_UNAVAILABLE");
+                }
+                current = next;
+            }
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or System.Security.SecurityException)
+        {
+            throw Failure("GENERATOR_UNAVAILABLE");
+        }
+        return frontier;
     }
 
     private static bool IsStrictDescendant(string candidate, string ancestor)

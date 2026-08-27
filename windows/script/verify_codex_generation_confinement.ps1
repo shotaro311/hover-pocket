@@ -27,8 +27,11 @@ $RootPrefix = "HoverPocketCodexConfinement-"
 $ForeignPrefix = "HoverPocketCodexForeign-"
 $HostCodexHomePrefix = "HoverPocketCodexHostHome-"
 $ResultPrefix = "HoverPocketCodexConfinementResult-"
+$SelfTestProfilePrefix = "HoverPocketCodexFrontierSelfTest-"
 $MaximumStdoutCharacters = 16384
 $MaximumStderrCharacters = 32768
+$MaximumConfinementDenyEntries = 256
+$MaximumConfinementDenyCharacters = 16384
 $ProcessTimeoutSeconds = 90
 $UnelevatedReadOnlyRejection = "windows sandbox failed: Restricted read-only access requires the elevated Windows sandbox backend"
 $ExpectedProbe = [ordered]@{
@@ -138,6 +141,82 @@ function Get-TrustedWindowsUserName {
     return $userName
 }
 
+function Get-ConfinementDenyFrontier {
+    param(
+        [Parameter(Mandatory = $true)][string]$HostUserProfile,
+        [Parameter(Mandatory = $true)][string]$RunRoot
+    )
+
+    $hostUserProfilePath = [IO.Path]::GetFullPath($HostUserProfile).TrimEnd(
+        [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+    $runRootPath = [IO.Path]::GetFullPath($RunRoot).TrimEnd(
+        [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+    $hostUserProfileRoot = [IO.Path]::GetPathRoot($hostUserProfilePath).TrimEnd(
+        [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+    $hostUserProfilePrefix = $hostUserProfilePath + [IO.Path]::DirectorySeparatorChar
+    if (
+        $hostUserProfilePath.StartsWith("\\", [StringComparison]::Ordinal) -or
+        $hostUserProfilePath.Equals($hostUserProfileRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        -not $runRootPath.StartsWith($hostUserProfilePrefix, [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $hostUserProfilePath -PathType Container) -or
+        -not (Test-Path -LiteralPath $runRootPath -PathType Container)
+    ) {
+        throw "Confinement deny frontier roots are invalid."
+    }
+
+    $frontier = [Collections.Generic.List[string]]::new()
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    [void]$frontier.Add($hostUserProfilePath)
+    [void]$seen.Add($hostUserProfilePath)
+    $characterCount = $hostUserProfilePath.Length
+    $current = $hostUserProfilePath
+    $separators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    while (-not $current.Equals($runRootPath, [StringComparison]::OrdinalIgnoreCase)) {
+        $relative = [IO.Path]::GetRelativePath($current, $runRootPath)
+        $components = @($relative.Split($separators, [StringSplitOptions]::RemoveEmptyEntries))
+        if ($components.Count -eq 0) {
+            throw "Confinement deny frontier could not resolve the run root."
+        }
+        $next = [IO.Path]::GetFullPath((Join-Path $current $components[0]))
+        $currentPrefix = $current.TrimEnd($separators) + [IO.Path]::DirectorySeparatorChar
+        $nextPrefix = $next.TrimEnd($separators) + [IO.Path]::DirectorySeparatorChar
+        if (
+            -not (Test-Path -LiteralPath $next -PathType Container) -or
+            -not $next.StartsWith($currentPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+            (-not $next.Equals($runRootPath, [StringComparison]::OrdinalIgnoreCase) -and
+                -not $runRootPath.StartsWith($nextPrefix, [StringComparison]::OrdinalIgnoreCase))
+        ) {
+            throw "Confinement deny frontier left the Host profile."
+        }
+        if (
+            -not $next.Equals($runRootPath, [StringComparison]::OrdinalIgnoreCase) -and
+            $seen.Add($next)
+        ) {
+            [void]$frontier.Add($next)
+            $characterCount += $next.Length
+        }
+        foreach ($item in @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop | Sort-Object FullName)) {
+            $sibling = [IO.Path]::GetFullPath($item.FullName)
+            if (
+                $sibling.Equals($next, [StringComparison]::OrdinalIgnoreCase) -or
+                -not $seen.Add($sibling)
+            ) {
+                continue
+            }
+            [void]$frontier.Add($sibling)
+            $characterCount += $sibling.Length
+        }
+        if (
+            $frontier.Count -gt $MaximumConfinementDenyEntries -or
+            $characterCount -gt $MaximumConfinementDenyCharacters
+        ) {
+            throw "Confinement deny frontier exceeds the bounded permission profile."
+        }
+        $current = $next
+    }
+    return $frontier.ToArray()
+}
+
 function Get-ConfinementArguments {
     param(
         [Parameter(Mandatory = $true)][string]$Workspace,
@@ -187,13 +266,18 @@ function Get-ConfinementArguments {
         throw "Confinement roots must use a Host user-profile deny with an isolated workspace carveout."
     }
 
-    # An omitted path may still be readable through inherited Users-group ACLs.
-    # Deny the real Host profile and reopen only this run's workspace.
+    $denyFrontier = @(Get-ConfinementDenyFrontier `
+        -HostUserProfile $hostUserProfilePath `
+        -RunRoot $runRootPath)
+    $filesystemEntries = [Collections.Generic.List[string]]::new()
+    [void]$filesystemEntries.Add("$(ConvertTo-TomlString ':minimal')=`"read`")
+    foreach ($denyPath in $denyFrontier) {
+        [void]$filesystemEntries.Add("$(ConvertTo-TomlString $denyPath)=`"deny`")
+    }
+    [void]$filesystemEntries.Add("$(ConvertTo-TomlString $workspacePath)=`"read`")
+    [void]$filesystemEntries.Add("$(ConvertTo-TomlString $userHomePath)=`"deny`")
     $filesystem = "permissions.hoverpocket-generation.filesystem={" +
-        "$(ConvertTo-TomlString ':minimal')=`"read`"," +
-        "$(ConvertTo-TomlString $hostUserProfilePath)=`"deny`"," +
-        "$(ConvertTo-TomlString $workspacePath)=`"read`"," +
-        "$(ConvertTo-TomlString $userHomePath)=`"deny`"}"
+        [string]::Join(",", $filesystemEntries) + "}"
     $windowsDirectory = [IO.Path]::GetFullPath($env:SystemRoot)
     $systemDrive = [IO.Path]::GetPathRoot($windowsDirectory).TrimEnd(
         [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
@@ -527,28 +611,52 @@ function Invoke-SelfTest {
         throw "Self-test unelevated rejection contract failed."
     }
 
+    $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+        [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+    $selfTestProfile = Join-Path $temporaryRoot ($SelfTestProfilePrefix + [Guid]::NewGuid().ToString("N"))
+    $selfTestRunRoot = Join-Path $selfTestProfile "temp\run"
+    $selfTestWorkspace = Join-Path $selfTestRunRoot "workspace"
+    $selfTestCodexHome = Join-Path $selfTestRunRoot "codex-home"
+    $selfTestUserHome = Join-Path $selfTestRunRoot "user-home"
+    $selfTestHostCodexHome = Join-Path $selfTestProfile "temp\host-codex-home"
+    $selfTestForeign = Join-Path $selfTestProfile "temp\foreign"
+    $selfTestTemp = Join-Path $selfTestProfile "temp"
+    $selfTestDocuments = Join-Path $selfTestProfile "Documents"
+    foreach ($directory in @(
+        $selfTestWorkspace,
+        $selfTestCodexHome,
+        $selfTestUserHome,
+        $selfTestHostCodexHome,
+        $selfTestForeign,
+        $selfTestDocuments
+    )) {
+        [void](New-Item -ItemType Directory -Path $directory)
+    }
     $oldSystemRoot = $env:SystemRoot
     try {
         $env:SystemRoot = "C:\Windows"
         $arguments = Get-ConfinementArguments `
-            -Workspace "C:\fixture-host\temp\run\workspace" `
-            -CodexHome "C:\fixture-host\temp\run\codex-home" `
-            -HostCodexHome "C:\fixture-host\temp\host-codex-home" `
-            -UserHome "C:\fixture-host\temp\run\user-home" `
-            -HostUserProfile "C:\fixture-host" `
+            -Workspace $selfTestWorkspace `
+            -CodexHome $selfTestCodexHome `
+            -HostCodexHome $selfTestHostCodexHome `
+            -UserHome $selfTestUserHome `
+            -HostUserProfile $selfTestProfile `
             -Implementation "unelevated" `
             -PowerShellPath "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" `
-            -ProbePath "C:\fixture-host\temp\run\workspace\probe.ps1" `
-            -ForeignRoot "C:\fixture-host\temp\foreign" `
+            -ProbePath (Join-Path $selfTestWorkspace "probe.ps1") `
+            -ForeignRoot $selfTestForeign `
             -Port 12345
         $joined = [string]::Join("`n", $arguments)
         $required = @(
             'windows.sandbox="unelevated"'
             'default_permissions="hoverpocket-generation"'
-            '"C:\\fixture-host"="deny"'
-            '"C:\\fixture-host\\temp\\run\\workspace"="read"'
-            '"C:\\fixture-host\\temp\\run\\user-home"="deny"'
-            'C:\fixture-host\temp\host-codex-home'
+            "$(ConvertTo-TomlString $selfTestProfile)=`"deny`""
+            "$(ConvertTo-TomlString $selfTestDocuments)=`"deny`""
+            "$(ConvertTo-TomlString $selfTestTemp)=`"deny`""
+            "$(ConvertTo-TomlString $selfTestHostCodexHome)=`"deny`""
+            "$(ConvertTo-TomlString $selfTestForeign)=`"deny`""
+            "$(ConvertTo-TomlString $selfTestWorkspace)=`"read`""
+            "$(ConvertTo-TomlString $selfTestUserHome)=`"deny`""
             'network.enabled=false'
             'shell_environment_policy.inherit="none"'
             'SYSTEMDRIVE="C:"'
@@ -559,18 +667,39 @@ function Invoke-SelfTest {
                 throw "Self-test confinement arguments differ from the expected contract."
             }
         }
-        if ($joined.Contains('"C:\\fixture-host\\temp\\run\\codex-home"="deny"', [StringComparison]::Ordinal)) {
+        if ($joined.Contains(
+            "$(ConvertTo-TomlString $selfTestCodexHome)=`"deny`"",
+            [StringComparison]::Ordinal)) {
             throw "Self-test must leave Codex Home to the native sandbox control-plane ACLs."
         }
-        if ($joined.Contains('"C:\\fixture-host\\temp\\host-codex-home"=', [StringComparison]::Ordinal)) {
-            throw "Self-test must not add the Host Codex Home to the sandbox permission profile."
+        if ($joined.Contains(
+            "$(ConvertTo-TomlString $selfTestRunRoot)=`"deny`"",
+            [StringComparison]::Ordinal)) {
+            throw "Self-test must preserve the isolated run-root carveout."
         }
-        if ($joined.Contains('"C:\\fixture-host\\temp\\foreign"=', [StringComparison]::Ordinal)) {
-            throw "Self-test must prove the Host user-profile deny instead of adding a foreign-root exception."
+        foreach ($index in 0..256) {
+            [void](New-Item -ItemType Directory -Path (
+                Join-Path $selfTestProfile ("overflow-{0:D3}" -f $index)))
+        }
+        try {
+            [void](Get-ConfinementDenyFrontier `
+                -HostUserProfile $selfTestProfile `
+                -RunRoot $selfTestRunRoot)
+            throw "Self-test accepted an unbounded confinement deny frontier."
+        }
+        catch {
+            if ($_.Exception.Message -like "Self-test accepted*") { throw }
+            if ($_.Exception.Message -cne "Confinement deny frontier exceeds the bounded permission profile.") {
+                throw "Self-test observed an unexpected confinement frontier failure."
+            }
         }
     }
     finally {
         $env:SystemRoot = $oldSystemRoot
+        Remove-ValidatedTemporaryRoot `
+            -Path $selfTestProfile `
+            -TemporaryRoot $temporaryRoot `
+            -ExpectedPrefix $SelfTestProfilePrefix
     }
 
     $selfTestResultPath = Join-Path (
