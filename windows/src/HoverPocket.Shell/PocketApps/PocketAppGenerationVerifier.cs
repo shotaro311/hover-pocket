@@ -877,6 +877,7 @@ internal sealed class PocketAppGenerationVerifier
                 && confinementJoined.Contains("model_providers.hoverpocket.request_max_retries=0", StringComparison.Ordinal)
                 && confinementJoined.Contains("network.enabled=false", StringComparison.Ordinal)
                 && confinementJoined.Contains("shell_environment_policy.inherit=\"none\"", StringComparison.Ordinal)
+                && confinementJoined.Contains("SYSTEMDRIVE=", StringComparison.Ordinal)
                 && confinementJoined.Contains("SYSTEMROOT=", StringComparison.Ordinal)
                 && confinementJoined.Contains("WINDIR=", StringComparison.Ordinal)
                 && confinementJoined.Contains("COMSPEC=", StringComparison.Ordinal)
@@ -889,10 +890,14 @@ internal sealed class PocketAppGenerationVerifier
             Path.Combine(confinementUserHome, "AppData", "Roaming"),
             Path.Combine(confinementRoot, "tmp"));
         Require(
-            confinementEnvironment.Count == 12
+            confinementEnvironment.Count == 13
                 && confinementEnvironment["CODEX_HOME"] == confinementCodexHome
                 && confinementEnvironment["HOME"] == confinementUserHome
                 && confinementEnvironment["USERPROFILE"] == confinementUserHome
+                && confinementEnvironment["SYSTEMDRIVE"]
+                    == Path.GetPathRoot(confinementEnvironment["SYSTEMROOT"])?.TrimEnd(
+                        Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar)
                 && confinementEnvironment["SYSTEMROOT"] == confinementEnvironment["WINDIR"]
                 && confinementEnvironment["COMSPEC"].EndsWith("cmd.exe", StringComparison.OrdinalIgnoreCase)
                 && confinementEnvironment["LANG"] == "C"

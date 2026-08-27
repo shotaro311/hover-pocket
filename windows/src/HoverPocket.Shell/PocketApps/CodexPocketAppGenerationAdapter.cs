@@ -429,9 +429,11 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             + $"{JsonSerializer.Serialize(normalizedUserHome)}=\"deny\","
             + $"{JsonSerializer.Serialize(normalizedHelper)}=\"deny\"}}";
         var windows = WindowsDirectory();
+        var systemDrive = SystemDrive(windows);
         var shellEnvironment = "shell_environment_policy.set={"
             + $"PATH={JsonSerializer.Serialize(SystemPath())},"
             + "LANG=\"C\","
+            + $"SYSTEMDRIVE={JsonSerializer.Serialize(systemDrive)},"
             + $"SYSTEMROOT={JsonSerializer.Serialize(windows)},"
             + $"WINDIR={JsonSerializer.Serialize(windows)},"
             + $"COMSPEC={JsonSerializer.Serialize(Path.Combine(windows, "System32", "cmd.exe"))}}}";
@@ -476,6 +478,7 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         string temporaryDirectory)
     {
         var windows = WindowsDirectory();
+        var systemDrive = SystemDrive(windows);
         return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["CODEX_HOME"] = Path.GetFullPath(codexHome),
@@ -486,6 +489,7 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             ["TEMP"] = Path.GetFullPath(temporaryDirectory),
             ["TMP"] = Path.GetFullPath(temporaryDirectory),
             ["PATH"] = SystemPath(),
+            ["SYSTEMDRIVE"] = systemDrive,
             ["SYSTEMROOT"] = windows,
             ["WINDIR"] = windows,
             ["COMSPEC"] = Path.Combine(windows, "System32", "cmd.exe"),
@@ -497,6 +501,15 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
     {
         var windows = WindowsDirectory();
         return string.Join(Path.PathSeparator, Path.Combine(windows, "System32"), windows);
+    }
+
+    private static string SystemDrive(string windowsDirectory)
+    {
+        var root = Path.GetPathRoot(windowsDirectory);
+        if (string.IsNullOrWhiteSpace(root)) { throw Failure("GENERATOR_UNAVAILABLE"); }
+        var drive = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (drive.Length != 2 || drive[1] != ':') { throw Failure("GENERATOR_UNAVAILABLE"); }
+        return drive;
     }
 
     private static string WindowsDirectory()

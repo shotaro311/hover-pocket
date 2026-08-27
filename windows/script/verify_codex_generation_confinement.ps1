@@ -132,6 +132,8 @@ function Get-ConfinementArguments {
         "$(ConvertTo-TomlString $workspacePath)=`"read`"," +
         "$(ConvertTo-TomlString $userHomePath)=`"deny`"}"
     $windowsDirectory = [IO.Path]::GetFullPath($env:SystemRoot)
+    $systemDrive = [IO.Path]::GetPathRoot($windowsDirectory).TrimEnd(
+        [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
     $systemPath = [string]::Join(
         [IO.Path]::PathSeparator,
         @((Join-Path $windowsDirectory "System32"), $windowsDirectory))
@@ -139,6 +141,7 @@ function Get-ConfinementArguments {
     $shellEnvironment = "shell_environment_policy.set={" +
         "PATH=$(ConvertTo-TomlString $systemPath)," +
         "LANG=`"C`"," +
+        "SYSTEMDRIVE=$(ConvertTo-TomlString $systemDrive)," +
         "SYSTEMROOT=$(ConvertTo-TomlString $windowsDirectory)," +
         "WINDIR=$(ConvertTo-TomlString $windowsDirectory)," +
         "COMSPEC=$(ConvertTo-TomlString $commandShell)}"
@@ -402,6 +405,7 @@ function Invoke-SelfTest {
             '"C:\\fixture\\user-home"="deny"'
             'network.enabled=false'
             'shell_environment_policy.inherit="none"'
+            'SYSTEMDRIVE="C:"'
             'SYSTEMROOT="C:\\Windows"'
         )
         foreach ($marker in $required) {
@@ -451,6 +455,8 @@ function Invoke-Canary {
         $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port
         $acceptTask = $listener.AcceptTcpClientAsync()
         $windowsDirectory = [IO.Path]::GetFullPath($env:SystemRoot)
+        $systemDrive = [IO.Path]::GetPathRoot($windowsDirectory).TrimEnd(
+            [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
         $powerShellPath = Join-Path $windowsDirectory "System32\WindowsPowerShell\v1.0\powershell.exe"
         $systemPath = [string]::Join(
             [IO.Path]::PathSeparator,
@@ -464,6 +470,7 @@ function Invoke-Canary {
         $environment["TEMP"] = $processTemp
         $environment["TMP"] = $processTemp
         $environment["PATH"] = $systemPath
+        $environment["SYSTEMDRIVE"] = $systemDrive
         $environment["SYSTEMROOT"] = $windowsDirectory
         $environment["WINDIR"] = $windowsDirectory
         $environment["COMSPEC"] = Join-Path $windowsDirectory "System32\cmd.exe"
