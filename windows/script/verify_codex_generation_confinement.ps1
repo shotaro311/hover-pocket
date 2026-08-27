@@ -499,7 +499,27 @@ function Invoke-BoundedProcess {
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $start
     try {
-        if (-not $process.Start()) {
+        try {
+            $started = $process.Start()
+        }
+        catch {
+            $argumentCharacters = 0
+            $maximumArgumentCharacters = 0
+            foreach ($argument in $Arguments) {
+                $argumentCharacters += $argument.Length
+                $maximumArgumentCharacters = [Math]::Max($maximumArgumentCharacters, $argument.Length)
+            }
+            $script:CanaryFailureContext = [ordered]@{
+                processExitCode = $null
+                stage = "process_start"
+                exceptionType = $_.Exception.GetType().FullName
+                argumentCount = $Arguments.Count
+                argumentCharacters = $argumentCharacters
+                maximumArgumentCharacters = $maximumArgumentCharacters
+            }
+            throw "HP_CANARY_PROCESS_START_EXCEPTION"
+        }
+        if (-not $started) {
             throw "HP_CANARY_PROCESS_START_FAILED"
         }
         $process.StandardInput.Close()
@@ -768,7 +788,15 @@ function Invoke-Canary {
     if ($ExpectUnelevatedReadOnlyRejection -and $SandboxImplementation -cne "unelevated") {
         throw "The unelevated rejection expectation requires the unelevated implementation."
     }
+    $script:CanaryFailureContext = [ordered]@{
+        processExitCode = $null
+        stage = "trusted_executable"
+    }
     $codex = Resolve-TrustedCodexExecutable -Path $CodexBin
+    $script:CanaryFailureContext = [ordered]@{
+        processExitCode = $null
+        stage = "root_validation"
+    }
     $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
         [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
     $hostUserProfileValue = $env:USERPROFILE
@@ -799,6 +827,7 @@ function Invoke-Canary {
     $hostCodexHome = Join-Path $canaryBase ($HostCodexHomePrefix + [Guid]::NewGuid().ToString("N"))
     $listener = $null
     try {
+        $script:CanaryFailureContext.stage = "base_creation"
         [void](New-Item -ItemType Directory -Path $canaryBase)
         Assert-NoReparsePath -Path $canaryBase
         $workspace = Join-Path $root "workspace"
@@ -818,6 +847,7 @@ function Invoke-Canary {
         $probePath = Join-Path $workspace "probe.ps1"
         [IO.File]::WriteAllText($probePath, $ProbeScript, [Text.UTF8Encoding]::new($false))
 
+        $script:CanaryFailureContext.stage = "listener_creation"
         $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
         $listener.Start(1)
         $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port
@@ -844,6 +874,7 @@ function Invoke-Canary {
         $environment["WINDIR"] = $windowsDirectory
         $environment["COMSPEC"] = Join-Path $windowsDirectory "System32\cmd.exe"
         $environment["LANG"] = "C"
+        $script:CanaryFailureContext.stage = "argument_construction"
         $arguments = Get-ConfinementArguments `
             -Workspace $workspace `
             -CodexHome $codexHome `
@@ -855,6 +886,7 @@ function Invoke-Canary {
             -ProbePath $probePath `
             -ForeignRoot $foreignRoot `
             -Port $port
+        $script:CanaryFailureContext.stage = "process_execution"
         $result = Invoke-BoundedProcess `
             -FilePath $codex `
             -Arguments $arguments `
@@ -994,6 +1026,10 @@ function Invoke-Canary {
             $listener.Stop()
             $listener = $null
         }
+        $script:CanaryFailureContext = [ordered]@{
+            processExitCode = 0
+            stage = "validated_cleanup"
+        }
         Remove-ValidatedTemporaryRoot -Path $foreignRoot -TemporaryRoot $canaryBase -ExpectedPrefix $ForeignPrefix
         Remove-ValidatedTemporaryRoot -Path $hostCodexHome -TemporaryRoot $canaryBase -ExpectedPrefix $HostCodexHomePrefix
         Remove-ValidatedTemporaryRoot -Path $root -TemporaryRoot $canaryBase -ExpectedPrefix $RootPrefix
@@ -1022,6 +1058,17 @@ try {
 catch {
     $message = $_.Exception.Message
     $failureCode = Get-CanaryFailureCode -Message $message
+    if ($failureCode -ceq "HP_CANARY_UNCLASSIFIED") {
+        if ($null -eq $script:CanaryFailureContext) {
+            $script:CanaryFailureContext = [ordered]@{
+                processExitCode = $null
+                stage = "unknown"
+            }
+        }
+        if (-not $script:CanaryFailureContext.Contains("exceptionType")) {
+            $script:CanaryFailureContext["exceptionType"] = $_.Exception.GetType().FullName
+        }
+    }
     if (-not [string]::IsNullOrWhiteSpace($ResultPath)) {
         $failureReceipt = [ordered]@{
             schemaVersion = 1
