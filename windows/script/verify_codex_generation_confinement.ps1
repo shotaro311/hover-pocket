@@ -569,10 +569,13 @@ function Invoke-BoundedProcess {
 
 function Get-SanitizedDiagnostic {
     param(
-        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
+        [Parameter(Mandatory = $true)][AllowNull()][AllowEmptyString()][string]$Text,
         [Parameter(Mandatory = $true)][string[]]$SensitiveValues
     )
 
+    if ($null -eq $Text) {
+        $Text = ""
+    }
     $sanitized = $Text
     foreach ($value in $SensitiveValues) {
         if (-not [string]::IsNullOrWhiteSpace($value)) {
@@ -619,6 +622,9 @@ function Remove-ValidatedTemporaryRoot {
 }
 
 function Invoke-SelfTest {
+    if ((Get-SanitizedDiagnostic -Text $null -SensitiveValues @("sensitive")) -cne "") {
+        throw "Self-test null process diagnostic normalization failed."
+    }
     $valid = [ordered]@{}
     foreach ($entry in $ExpectedProbe.GetEnumerator()) { $valid[$entry.Key] = $entry.Value }
     [void](ConvertFrom-ProbeOutput (($valid | ConvertTo-Json -Compress) + "`n"))
@@ -939,10 +945,12 @@ function Invoke-Canary {
                 $env:RUNNER_TEMP,
                 $env:GITHUB_WORKSPACE
             )
+            $script:CanaryFailureContext.stage = "process_timeout"
             $script:CanaryFailureContext = [ordered]@{
                 processExitCode = $null
-                stderr = Get-SanitizedDiagnostic -Text $result.Stderr -SensitiveValues $sensitiveValues
-                stdout = Get-SanitizedDiagnostic -Text $result.Stdout -SensitiveValues $sensitiveValues
+                stage = "process_timeout"
+                stderr = Get-SanitizedDiagnostic -Text ([string]$result.Stderr) -SensitiveValues $sensitiveValues
+                stdout = Get-SanitizedDiagnostic -Text ([string]$result.Stdout) -SensitiveValues $sensitiveValues
             }
             throw "HP_CANARY_PROCESS_TIMEOUT"
         }
