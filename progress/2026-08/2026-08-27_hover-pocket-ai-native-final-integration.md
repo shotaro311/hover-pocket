@@ -117,6 +117,13 @@ AN5のproduction Codex Pocket App生成を有効化せず、macOSで実Codex CLI
 
 ## Draft PR / CI readback
 
+- credential delivery code head `ab7fcc8dd75c97f4bcd59aa7d8cf1061c9296991`はremote parity `0 / 0`である。
+- Router [33028857939](https://github.com/shotaro311/hover-pocket/actions/runs/33028857939): SUCCESS。
+- Windows [33028858902](https://github.com/shotaro311/hover-pocket/actions/runs/33028858902): SUCCESS。`generation-parent-chain`の開始・終了、`pocket_app_generation_verify=ok`、Release / Debug Voice E2E buildのwarning 0 / error 0をlogでreadbackした。
+- macOS [33028858917](https://github.com/shotaro311/hover-pocket/actions/runs/33028858917): SUCCESS。Swift build、Voice、Capability、Broker、Pocket App / Surface、Timerが成功し、`pocket_app_generation_verify=ok`をlogでreadbackした。
+- 3OS Pocket contract [33028858939](https://github.com/shotaro311/hover-pocket/actions/runs/33028858939): SUCCESS。Ubuntu / macOS / Windows verifierとreport比較の4 jobが成功した。重複push run [33028856731](https://github.com/shotaro311/hover-pocket/actions/runs/33028856731)も同じ4 jobが成功した。
+- Draft PR #39は`Draft / OPEN / MERGEABLE / CLEAN`、review 0、comment 0である。production generatorはOFFのままであり、CI greenを実モデル・実credential・物理Voice・署名・配布の証拠には使わない。
+
 - code head: `8cd445bdf6ebf6fe7c3150aea877be7c459fd035`
 - remote parity: `0 / 0`
 - Router [33022367720](https://github.com/shotaro311/hover-pocket/actions/runs/33022367720): SUCCESS
@@ -129,9 +136,8 @@ AN5のproduction Codex Pocket App生成を有効化せず、macOSで実Codex CLI
 
 ## 未完了gate
 
-1. 新headのWindows CIでC# buildとv2 named-pipe parent-chain verifierをreadbackする。
-2. 通常Windows hostでnative elevated sandboxのpositive canaryを実行し、workspace read、write拒否、両isolated Home / outside-root read拒否、network拒否、listener未到達をreadbackする。CIのunelevated rejectionは代替にしない。
-3. 実モデルを使う隔離generatorで、auth helperは起動できるがmodel toolから同じhelper pathを読取り・実行できないこと、credentialがargument、environment、Codex Home、disk、logへ残らないことをreadbackする。
-4. 同じ隔離境界でPocket App DSLを1件生成し、schema検証、preview、install、activation、readback、remove / rollbackまで確認する。
-5. 両OSの実API key / microphone Voice E2E、正式署名、配布、rollbackを別々に完了する。
-6. 上記が完了するまでproduction generatorを有効化しない。
+1. 通常Windows hostでnative elevated sandboxのpositive canaryを実行し、workspace read、write拒否、両isolated Home / outside-root read拒否、network拒否、listener未到達をreadbackする。CIのunelevated rejectionは代替にしない。
+2. 実モデルを使う隔離generatorで、auth helperは起動できるがmodel toolから同じhelper pathを読取り・実行できないこと、credentialがargument、environment、Codex Home、disk、logへ残らないことをreadbackする。
+3. 同じ隔離境界でPocket App DSLを1件生成し、schema検証、preview、install、activation、readback、remove / rollbackまで確認する。
+4. 両OSの実API key / microphone Voice E2E、正式署名、配布、rollbackを別々に完了する。
+5. 上記が完了するまでproduction generatorを有効化しない。
