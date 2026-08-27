@@ -263,6 +263,7 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         request.Validate();
+        var modelCatalog = CodexPocketAppGenerationModelCatalog.Load();
         _workspaceRoot.Validate();
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -283,6 +284,9 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             var schemaPath = Path.Combine(workspace, "generation-output.schema.json");
             await File.WriteAllTextAsync(schemaPath, PocketAppGenerationContract.OutputSchemaJson, cancellationToken);
             File.SetAttributes(schemaPath, File.GetAttributes(schemaPath) | FileAttributes.ReadOnly);
+            var modelCatalogPath = Path.Combine(workspace, "model-catalog.json");
+            await File.WriteAllBytesAsync(modelCatalogPath, modelCatalog, cancellationToken);
+            File.SetAttributes(modelCatalogPath, File.GetAttributes(modelCatalogPath) | FileAttributes.ReadOnly);
 
             var start = new ProcessStartInfo
             {
@@ -304,6 +308,7 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
                 codexHome,
                 userHome,
                 schemaPath,
+                modelCatalogPath,
                 helperExecutable))
             {
                 start.ArgumentList.Add(argument);
@@ -390,12 +395,14 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         string codexHome,
         string userHome,
         string schemaPath,
+        string modelCatalogPath,
         string credentialHelperExecutable)
     {
         var normalizedWorkspace = Path.GetFullPath(workspace);
         var normalizedCodexHome = Path.GetFullPath(codexHome);
         var normalizedUserHome = Path.GetFullPath(userHome);
         var normalizedSchema = Path.GetFullPath(schemaPath);
+        var normalizedModelCatalog = Path.GetFullPath(modelCatalogPath);
         var normalizedHelper = Path.GetFullPath(credentialHelperExecutable);
         var directories = new[] { normalizedWorkspace, normalizedCodexHome, normalizedUserHome };
         if (directories
@@ -406,6 +413,11 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
                 Path.GetDirectoryName(normalizedSchema),
                 normalizedWorkspace,
                 StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(
+                Path.GetDirectoryName(normalizedModelCatalog),
+                normalizedWorkspace,
+                StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedModelCatalog, normalizedSchema, StringComparison.OrdinalIgnoreCase)
             || string.IsNullOrWhiteSpace(normalizedHelper)
             || normalizedHelper.StartsWith("\\\\", StringComparison.Ordinal))
         {
@@ -432,6 +444,9 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             "--ignore-rules",
             "--skip-git-repo-check",
             "-c", "approval_policy=\"never\"",
+            "-c", $"model={JsonSerializer.Serialize(CodexPocketAppGenerationModelCatalog.ModelId)}",
+            "-c", $"model_reasoning_effort={JsonSerializer.Serialize(CodexPocketAppGenerationModelCatalog.ReasoningEffort)}",
+            "-c", $"model_catalog_json={JsonSerializer.Serialize(normalizedModelCatalog)}",
             "-c", "model_provider=\"hoverpocket\"",
             "-c", "model_providers.hoverpocket.name=\"HoverPocket OpenAI\"",
             "-c", "model_providers.hoverpocket.base_url=\"https://api.openai.com/v1\"",

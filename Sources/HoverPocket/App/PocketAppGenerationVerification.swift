@@ -471,12 +471,28 @@ enum PocketAppGenerationVerification {
         let userHome = root.appendingPathComponent("user-home", isDirectory: true)
         let temporaryDirectory = root.appendingPathComponent("tmp", isDirectory: true)
         let schema = workspace.appendingPathComponent("generation-output.schema.json")
+        let modelCatalog = workspace.appendingPathComponent("model-catalog.json")
         do {
+            let catalogData = try CodexPocketAppGenerationModelCatalog.load()
+            try CodexPocketAppGenerationModelCatalog.validate(catalogData)
+            require(
+                !catalogData.isEmpty,
+                "generation_codex_static_model_catalog",
+                failures: &failures
+            )
+            var tamperedCatalog = catalogData
+            tamperedCatalog[tamperedCatalog.startIndex] ^= 0x01
+            do {
+                try CodexPocketAppGenerationModelCatalog.validate(tamperedCatalog)
+                failures.append("generation_codex_static_model_catalog_tamper")
+            } catch {
+            }
             let arguments = try CodexPocketAppGenerationAdapter.confinementArguments(
                 workspace: workspace,
                 codexHome: codexHome,
                 userHome: userHome,
                 schemaURL: schema,
+                modelCatalogURL: modelCatalog,
                 credentialHelperExecutableURL: URL(
                     fileURLWithPath: CommandLine.arguments[0]
                 ).standardizedFileURL
@@ -490,6 +506,9 @@ enum PocketAppGenerationVerification {
                     && joined.contains("\"\(workspace.path)\"=\"read\"")
                     && joined.contains("\"\(codexHome.path)\"=\"deny\"")
                     && joined.contains("\"\(userHome.path)\"=\"deny\"")
+                    && joined.contains("model=\"\(CodexPocketAppGenerationModelCatalog.modelID)\"")
+                    && joined.contains("model_reasoning_effort=\"\(CodexPocketAppGenerationModelCatalog.reasoningEffort)\"")
+                    && joined.contains("model_catalog_json=\"\(modelCatalog.path)\"")
                     && joined.contains("model_provider=\"hoverpocket\"")
                     && joined.contains("model_providers.hoverpocket.base_url=\"https://api.openai.com/v1\"")
                     && joined.contains("model_providers.hoverpocket.auth.command=")

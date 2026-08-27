@@ -832,6 +832,20 @@ internal sealed class PocketAppGenerationVerifier
         var confinementCodexHome = Path.Combine(confinementRoot, "codex-home");
         var confinementUserHome = Path.Combine(confinementRoot, "user-home");
         var confinementSchema = Path.Combine(confinementWorkspace, "generation-output.schema.json");
+        var confinementModelCatalog = Path.Combine(confinementWorkspace, "model-catalog.json");
+        var modelCatalog = CodexPocketAppGenerationModelCatalog.Load();
+        CodexPocketAppGenerationModelCatalog.Validate(modelCatalog);
+        Require(modelCatalog.Length > 0, "generation_codex_static_model_catalog");
+        var tamperedModelCatalog = (byte[])modelCatalog.Clone();
+        tamperedModelCatalog[0] ^= 0x01;
+        try
+        {
+            CodexPocketAppGenerationModelCatalog.Validate(tamperedModelCatalog);
+            _failures.Add("generation_codex_static_model_catalog_tamper");
+        }
+        catch (PocketAppGenerationException)
+        {
+        }
         var confinementHelper = Environment.ProcessPath
             ?? throw new CodexCredentialBrokerException();
         var confinementArguments = CodexPocketAppGenerationAdapter.ConfinementArguments(
@@ -839,6 +853,7 @@ internal sealed class PocketAppGenerationVerifier
             confinementCodexHome,
             confinementUserHome,
             confinementSchema,
+            confinementModelCatalog,
             confinementHelper);
         var confinementJoined = string.Join('\n', confinementArguments);
         Require(
@@ -851,6 +866,9 @@ internal sealed class PocketAppGenerationVerifier
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementCodexHome)}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementUserHome)}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(Path.GetFullPath(confinementHelper))}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"model={JsonSerializer.Serialize(CodexPocketAppGenerationModelCatalog.ModelId)}", StringComparison.Ordinal)
+                && confinementJoined.Contains($"model_reasoning_effort={JsonSerializer.Serialize(CodexPocketAppGenerationModelCatalog.ReasoningEffort)}", StringComparison.Ordinal)
+                && confinementJoined.Contains($"model_catalog_json={JsonSerializer.Serialize(confinementModelCatalog)}", StringComparison.Ordinal)
                 && confinementJoined.Contains("model_provider=\"hoverpocket\"", StringComparison.Ordinal)
                 && confinementJoined.Contains("model_providers.hoverpocket.base_url=\"https://api.openai.com/v1\"", StringComparison.Ordinal)
                 && confinementJoined.Contains("model_providers.hoverpocket.auth.command=", StringComparison.Ordinal)

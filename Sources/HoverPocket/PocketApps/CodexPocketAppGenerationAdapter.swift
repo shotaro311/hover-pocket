@@ -179,6 +179,7 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
         guard try Self.verifyExecutable(executableURL) == executableIdentity else {
             throw PocketAppGenerationError.generatorUnavailable
         }
+        let modelCatalogData = try CodexPocketAppGenerationModelCatalog.load()
         try workspaceRoot.validate()
         if cancellation.isCancelled { throw PocketAppGenerationError.generatorCancelled }
 
@@ -208,6 +209,9 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
         let schemaURL = workspace.appendingPathComponent("generation-output.schema.json")
         try Data(PocketAppGenerationContract.outputSchemaJSON.utf8).write(to: schemaURL, options: [.withoutOverwriting])
         try FileManager.default.setAttributes([.posixPermissions: 0o400], ofItemAtPath: schemaURL.path)
+        let modelCatalogURL = workspace.appendingPathComponent("model-catalog.json")
+        try modelCatalogData.write(to: modelCatalogURL, options: [.withoutOverwriting])
+        try FileManager.default.setAttributes([.posixPermissions: 0o400], ofItemAtPath: modelCatalogURL.path)
 
         let process = Process()
         let helperExecutableURL = try Self.credentialHelperExecutableURL()
@@ -218,6 +222,7 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
             codexHome: codexHome,
             userHome: userHome,
             schemaURL: schemaURL,
+            modelCatalogURL: modelCatalogURL,
             credentialHelperExecutableURL: helperExecutableURL
         )
         process.environment = Self.confinementEnvironment(
@@ -357,16 +362,21 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
         codexHome: URL,
         userHome: URL,
         schemaURL: URL,
+        modelCatalogURL: URL,
         credentialHelperExecutableURL: URL
     ) throws -> [String] {
         let directories = [workspace, codexHome, userHome].map(\.standardizedFileURL)
         let standardizedSchema = schemaURL.standardizedFileURL
+        let standardizedModelCatalog = modelCatalogURL.standardizedFileURL
         let standardizedHelper = credentialHelperExecutableURL.standardizedFileURL
         guard directories.allSatisfy({ $0.isFileURL && $0.path.hasPrefix("/") }),
               Set(directories.map(\.path)).count == directories.count,
               Set(directories.map { $0.deletingLastPathComponent().path }).count == 1,
               standardizedSchema.isFileURL,
               standardizedSchema.deletingLastPathComponent() == directories[0],
+              standardizedModelCatalog.isFileURL,
+              standardizedModelCatalog.deletingLastPathComponent() == directories[0],
+              standardizedModelCatalog != standardizedSchema,
               standardizedHelper.isFileURL,
               standardizedHelper.path.hasPrefix("/") else {
             throw PocketAppGenerationError.generatorUnavailable
@@ -376,6 +386,9 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
         let codexHomePath = try tomlString(directories[1].path)
         let userHomePath = try tomlString(directories[2].path)
         let helperPath = try tomlString(standardizedHelper.path)
+        let modelCatalogPath = try tomlString(standardizedModelCatalog.path)
+        let modelID = try tomlString(CodexPocketAppGenerationModelCatalog.modelID)
+        let reasoningEffort = try tomlString(CodexPocketAppGenerationModelCatalog.reasoningEffort)
         let providerName = try tomlString("HoverPocket OpenAI")
         let providerBaseURL = try tomlString("https://api.openai.com/v1")
         let providerWireAPI = try tomlString("responses")
@@ -388,6 +401,9 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
             "--ignore-rules",
             "--skip-git-repo-check",
             "-c", "approval_policy=\"never\"",
+            "-c", "model=\(modelID)",
+            "-c", "model_reasoning_effort=\(reasoningEffort)",
+            "-c", "model_catalog_json=\(modelCatalogPath)",
             "-c", "model_provider=\"hoverpocket\"",
             "-c", "model_providers.hoverpocket.name=\(providerName)",
             "-c", "model_providers.hoverpocket.base_url=\(providerBaseURL)",

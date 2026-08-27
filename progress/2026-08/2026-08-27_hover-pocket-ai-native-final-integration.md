@@ -115,6 +115,14 @@ AN5のproduction Codex Pocket App生成を有効化せず、macOSで実Codex CLI
 - reviewed surfaces: Host credential provider、Codex generation process、command-backed auth helper、macOS Unix socket、Windows CurrentUserOnly named pipe、mutual PID / ancestry / executable identity、one-shot lease、cleanup、model-tool helper deny、production reachability / activation
 - open runtime questions: Codex auth stdoutの非保持、auth control-planeとmodel-tool denyの分離、Windows packaged executable path
 
+### Static model catalog / auth control-plane canary
+
+- Host resourceにSHA-256固定のstatic model catalogを追加し、macOS / Windowsとも`gpt-5.6-sol`、reasoning effort `medium`、tool / search / parallel / multi-agent無効の契約を検証してからfresh workspaceへread-onlyでコピーする。これによりcustom providerのremote `/models`取得を除去する。
+- exact signed `codex-cli 0.145.0`を非機密surrogateとlocal mock Responses endpointで実行し、2回のResponses request、remote model catalog access 0、auth helper起動1回をreadbackした。モデル要求の`exec_command`からhelper read / executeは双方拒否され、surrogateはrequest body、stdout、stderr、temp diskに残らなかった。
+- `python3 script/verify_codex_auth_control_plane_macos.py --self-test`と実canary、Swift warnings-as-errors build、Pocket App / Surface / Capability / Broker / Voice / Panel / Timer、15 schema / 71 fixtureの2回byte一致、workflow YAML、`git diff --check`はすべてPASSした。
+- Security scan `d01e40c3-9ea3-47d7-875b-c0dd6e3fff3b`はsnapshot `codex-security-snapshot/v1:sha256:26f7188cdd471fd51706f8e9cb48e83e286607f49675836f6f941bdb522a9929`、changed source 8 / 8、coverage complete、reportable finding 0件で封印・再読込した。
+- productionはmacOS `supportsConfidentialGeneration == false`、Windows `ResolveExecutable() == null`、activation falseを維持する。Windows compile / Verifierは新headのCI、native elevated positive canaryは通常Windows hostの独立gateとして残す。
+
 ## Draft PR / CI readback
 
 - credential delivery code head `ab7fcc8dd75c97f4bcd59aa7d8cf1061c9296991`はremote parity `0 / 0`である。
