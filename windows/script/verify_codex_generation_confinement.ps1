@@ -886,10 +886,36 @@ function Invoke-Canary {
             -ProbePath $probePath `
             -ForeignRoot $foreignRoot `
             -Port $port
-        $script:CanaryFailureContext.stage = "process_execution"
+        [string[]]$processArguments = @($arguments | ForEach-Object { [string]$_ })
+        $nullArgumentCount = @($processArguments | Where-Object { $null -eq $_ }).Count
+        $emptyArgumentCount = @($processArguments | Where-Object { $_.Length -eq 0 }).Count
+        $argumentCharacters = 0
+        $maximumArgumentCharacters = 0
+        foreach ($argument in $processArguments) {
+            $argumentCharacters += $argument.Length
+            $maximumArgumentCharacters = [Math]::Max($maximumArgumentCharacters, $argument.Length)
+        }
+        $script:CanaryFailureContext = [ordered]@{
+            processExitCode = $null
+            stage = "process_execution"
+            argumentCount = $processArguments.Count
+            nullArgumentCount = $nullArgumentCount
+            emptyArgumentCount = $emptyArgumentCount
+            argumentCharacters = $argumentCharacters
+            maximumArgumentCharacters = $maximumArgumentCharacters
+            environmentCount = $environment.Count
+        }
+        if (
+            $processArguments.Count -eq 0 -or
+            $nullArgumentCount -ne 0 -or
+            $emptyArgumentCount -ne 0 -or
+            $environment.Count -eq 0
+        ) {
+            throw "HP_CANARY_PROCESS_ARGUMENTS_INVALID"
+        }
         $result = Invoke-BoundedProcess `
             -FilePath $codex `
-            -Arguments $arguments `
+            -Arguments $processArguments `
             -Environment $environment `
             -TimeoutSeconds $ProcessTimeoutSeconds
         $listenerReached = $acceptTask.Wait(0)
