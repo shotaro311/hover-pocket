@@ -10,6 +10,9 @@ param(
     [Parameter(ParameterSetName = "Canary")]
     [switch]$ExpectUnelevatedReadOnlyRejection,
 
+    [Parameter(ParameterSetName = "Canary")]
+    [string]$ResultPath,
+
     [Parameter(Mandatory = $true, ParameterSetName = "SelfTest")]
     [switch]$SelfTest
 )
@@ -22,6 +25,7 @@ $ExpectedExecutableLength = 359245096L
 $ExpectedExecutableSha256 = "83751f15cb6a0a7b97df67752c001e3fe1c20e18ffbfec3ff63567296205eb6c"
 $RootPrefix = "HoverPocketCodexConfinement-"
 $ForeignPrefix = "HoverPocketCodexForeign-"
+$ResultPrefix = "HoverPocketCodexConfinementResult-"
 $MaximumStdoutCharacters = 16384
 $MaximumStderrCharacters = 32768
 $UnelevatedReadOnlyRejection = "windows sandbox failed: Restricted read-only access requires the elevated Windows sandbox backend"
@@ -33,6 +37,7 @@ $ExpectedProbe = [ordered]@{
     workspace_read = $true
     workspace_write = $false
 }
+$script:CanaryFailureContext = $null
 
 $ProbeScript = @'
 param(
@@ -236,6 +241,53 @@ function Resolve-TrustedCodexExecutable {
     return $fullPath
 }
 
+function Resolve-ValidatedResultPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+        [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+    $parent = [IO.Path]::GetDirectoryName($fullPath)
+    $fileName = [IO.Path]::GetFileName($fullPath)
+    if (
+        -not [IO.Path]::IsPathFullyQualified($fullPath) -or
+        $fullPath.StartsWith("\\", [StringComparison]::Ordinal) -or
+        -not $parent.Equals($temporaryRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        -not $fileName.StartsWith($ResultPrefix, [StringComparison]::Ordinal) -or
+        -not $fileName.EndsWith(".json", [StringComparison]::Ordinal) -or
+        ((Get-Item -LiteralPath $temporaryRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        (Test-Path -LiteralPath $fullPath)
+    ) {
+        throw "HP_CANARY_RESULT_PATH_INVALID"
+    }
+    return $fullPath
+}
+
+function Write-CanaryResult {
+    param(
+        [AllowEmptyString()][string]$Path,
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Receipt
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return }
+    $fullPath = Resolve-ValidatedResultPath -Path $Path
+    $json = ($Receipt | ConvertTo-Json -Compress -Depth 5) + "`n"
+    $encoding = [Text.UTF8Encoding]::new($false)
+    $stream = [IO.FileStream]::new(
+        $fullPath,
+        [IO.FileMode]::CreateNew,
+        [IO.FileAccess]::Write,
+        [IO.FileShare]::None)
+    try {
+        $bytes = $encoding.GetBytes($json)
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush($true)
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
 function ConvertFrom-ProbeOutput {
     param([Parameter(Mandatory = $true)][string]$Output)
 
@@ -435,6 +487,41 @@ function Invoke-SelfTest {
     finally {
         $env:SystemRoot = $oldSystemRoot
     }
+
+    $selfTestResultPath = Join-Path (
+        [IO.Path]::GetFullPath([IO.Path]::GetTempPath())) (
+        $ResultPrefix + [Guid]::NewGuid().ToString("N") + ".json")
+    try {
+        $selfTestReceipt = [ordered]@{
+            schemaVersion = 1
+            status = "passed"
+            mode = "self-test"
+        }
+        Write-CanaryResult -Path $selfTestResultPath -Receipt $selfTestReceipt
+        $readback = Get-Content -LiteralPath $selfTestResultPath -Raw | ConvertFrom-Json
+        if (
+            $readback.schemaVersion -ne 1 -or
+            $readback.status -cne "passed" -or
+            $readback.mode -cne "self-test"
+        ) {
+            throw "Self-test result receipt readback failed."
+        }
+        try {
+            Write-CanaryResult -Path $selfTestResultPath -Receipt $selfTestReceipt
+            throw "Self-test overwrote an existing result receipt."
+        }
+        catch {
+            if ($_.Exception.Message -like "Self-test overwrote*") { throw }
+            if ($_.Exception.Message -cne "HP_CANARY_RESULT_PATH_INVALID") {
+                throw "Self-test observed an unexpected result path failure code."
+            }
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $selfTestResultPath) {
+            Remove-Item -LiteralPath $selfTestResultPath -Force
+        }
+    }
     Write-Host "PASS Codex generation confinement verifier self-test"
 }
 
@@ -528,6 +615,13 @@ function Invoke-Canary {
                         diagnosticBounded = $true
                     }
                 }
+                if ($null -ne $listener) {
+                    $listener.Stop()
+                    $listener = $null
+                }
+                Remove-ValidatedTemporaryRoot -Path $foreignRoot -TemporaryRoot $temporaryRoot -ExpectedPrefix $ForeignPrefix
+                Remove-ValidatedTemporaryRoot -Path $root -TemporaryRoot $temporaryRoot -ExpectedPrefix $RootPrefix
+                Write-CanaryResult -Path $ResultPath -Receipt $receipt
                 Write-Host "PASS unelevated Codex sandbox rejected the read-only generation profile"
                 Write-Output ($receipt | ConvertTo-Json -Compress -Depth 4)
                 return
@@ -547,6 +641,11 @@ function Invoke-Canary {
             )
             $stderrDiagnostic = Get-SanitizedDiagnostic -Text $result.Stderr -SensitiveValues $sensitiveValues
             $stdoutDiagnostic = Get-SanitizedDiagnostic -Text $result.Stdout -SensitiveValues $sensitiveValues
+            $script:CanaryFailureContext = [ordered]@{
+                processExitCode = $result.ExitCode
+                stderr = $stderrDiagnostic
+                stdout = $stdoutDiagnostic
+            }
             Write-Warning "Codex sandbox stderr: $stderrDiagnostic"
             Write-Warning "Codex sandbox stdout: $stdoutDiagnostic"
             throw "HP_CANARY_PROCESS_FAILED"
@@ -587,6 +686,13 @@ function Invoke-Canary {
                 stderrBounded = $true
             }
         }
+        if ($null -ne $listener) {
+            $listener.Stop()
+            $listener = $null
+        }
+        Remove-ValidatedTemporaryRoot -Path $foreignRoot -TemporaryRoot $temporaryRoot -ExpectedPrefix $ForeignPrefix
+        Remove-ValidatedTemporaryRoot -Path $root -TemporaryRoot $temporaryRoot -ExpectedPrefix $RootPrefix
+        Write-CanaryResult -Path $ResultPath -Receipt $receipt
         Write-Host "PASS Codex generation confinement canary"
         Write-Output ($receipt | ConvertTo-Json -Compress -Depth 4)
     }
@@ -606,6 +712,27 @@ try {
     }
 }
 catch {
-    Write-Error "FAIL Codex generation confinement canary: $($_.Exception.Message)"
+    $message = $_.Exception.Message
+    $failureCode = if ($message -cmatch '^HP_CANARY_[A-Z0-9_]+$') {
+        $message
+    }
+    else {
+        "HP_CANARY_UNCLASSIFIED"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ResultPath)) {
+        $failureReceipt = [ordered]@{
+            schemaVersion = 1
+            status = "failed"
+            failureCode = $failureCode
+            diagnostic = $script:CanaryFailureContext
+        }
+        try {
+            Write-CanaryResult -Path $ResultPath -Receipt $failureReceipt
+        }
+        catch {
+            $failureCode = "HP_CANARY_RESULT_WRITE_FAILED"
+        }
+    }
+    Write-Error "FAIL Codex generation confinement canary: $failureCode"
     exit 1
 }
