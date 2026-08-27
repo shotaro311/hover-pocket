@@ -489,12 +489,23 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             ["TEMP"] = Path.GetFullPath(temporaryDirectory),
             ["TMP"] = Path.GetFullPath(temporaryDirectory),
             ["PATH"] = SystemPath(),
+            ["USERNAME"] = WindowsUserName(),
             ["SYSTEMDRIVE"] = systemDrive,
             ["SYSTEMROOT"] = windows,
             ["WINDIR"] = windows,
             ["COMSPEC"] = Path.Combine(windows, "System32", "cmd.exe"),
             ["LANG"] = "C"
         };
+    }
+
+    private static string WindowsUserName()
+    {
+        var userName = Environment.UserName;
+        if (string.IsNullOrWhiteSpace(userName) || userName.Any(char.IsControl))
+        {
+            throw Failure("GENERATOR_UNAVAILABLE");
+        }
+        return userName;
     }
 
     private static string SystemPath()

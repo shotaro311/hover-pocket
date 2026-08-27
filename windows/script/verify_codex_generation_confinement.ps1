@@ -102,6 +102,17 @@ function ConvertTo-TomlString {
     return ($Value | ConvertTo-Json -Compress)
 }
 
+function Get-TrustedWindowsUserName {
+    $userName = [Environment]::UserName
+    if (
+        [string]::IsNullOrWhiteSpace($userName) -or
+        $userName.IndexOfAny([char[]](0..31)) -ge 0
+    ) {
+        throw "The Windows user name is unavailable for sandbox setup."
+    }
+    return $userName
+}
+
 function Get-ConfinementArguments {
     param(
         [Parameter(Mandatory = $true)][string]$Workspace,
@@ -470,6 +481,7 @@ function Invoke-Canary {
         $environment["TEMP"] = $processTemp
         $environment["TMP"] = $processTemp
         $environment["PATH"] = $systemPath
+        $environment["USERNAME"] = Get-TrustedWindowsUserName
         $environment["SYSTEMDRIVE"] = $systemDrive
         $environment["SYSTEMROOT"] = $windowsDirectory
         $environment["WINDIR"] = $windowsDirectory

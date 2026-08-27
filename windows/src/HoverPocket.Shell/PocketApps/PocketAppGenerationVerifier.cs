@@ -890,10 +890,11 @@ internal sealed class PocketAppGenerationVerifier
             Path.Combine(confinementUserHome, "AppData", "Roaming"),
             Path.Combine(confinementRoot, "tmp"));
         Require(
-            confinementEnvironment.Count == 13
+            confinementEnvironment.Count == 14
                 && confinementEnvironment["CODEX_HOME"] == confinementCodexHome
                 && confinementEnvironment["HOME"] == confinementUserHome
                 && confinementEnvironment["USERPROFILE"] == confinementUserHome
+                && confinementEnvironment["USERNAME"] == Environment.UserName
                 && confinementEnvironment["SYSTEMDRIVE"]
                     == Path.GetPathRoot(confinementEnvironment["SYSTEMROOT"])?.TrimEnd(
                         Path.DirectorySeparatorChar,
