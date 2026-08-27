@@ -26,6 +26,7 @@ $ExpectedExecutableSha256 = "83751f15cb6a0a7b97df67752c001e3fe1c20e18ffbfec3ff63
 $RootPrefix = "HoverPocketCodexConfinement-"
 $ForeignPrefix = "HoverPocketCodexForeign-"
 $HostCodexHomePrefix = "HoverPocketCodexHostHome-"
+$CanaryBasePrefix = "HoverPocketCodexConfinementCanary-"
 $ResultPrefix = "HoverPocketCodexConfinementResult-"
 $SelfTestProfilePrefix = "HoverPocketCodexFrontierSelfTest-"
 $MaximumStdoutCharacters = 16384
@@ -128,6 +129,19 @@ function ConvertTo-TomlString {
         throw "A confinement value contains a control character."
     }
     return ($Value | ConvertTo-Json -Compress)
+}
+
+function Get-CanaryFailureCode {
+    param([Parameter(Mandatory = $true)][string]$Message)
+
+    if ($Message -cmatch '^HP_CANARY_[A-Z0-9_]+$') { return $Message }
+    if ($Message -ceq "Confinement deny frontier exceeds the bounded permission profile.") {
+        return "HP_CANARY_CONFINEMENT_FRONTIER_LIMIT"
+    }
+    if ($Message.StartsWith("Confinement deny frontier ", [StringComparison]::Ordinal)) {
+        return "HP_CANARY_CONFINEMENT_FRONTIER_INVALID"
+    }
+    return "HP_CANARY_UNCLASSIFIED"
 }
 
 function Get-TrustedWindowsUserName {
@@ -571,6 +585,7 @@ function Remove-ValidatedTemporaryRoot {
     )
 
     if (-not (Test-Path -LiteralPath $Path)) { return }
+    Assert-NoReparsePath -Path $TemporaryRoot
     $fullPath = [IO.Path]::GetFullPath($Path)
     $parent = [IO.Path]::GetDirectoryName($fullPath)
     if (
@@ -609,6 +624,16 @@ function Invoke-SelfTest {
         (Test-ExpectedUnelevatedRejection -Stdout "" -Stderr "another failure")
     ) {
         throw "Self-test unelevated rejection contract failed."
+    }
+    if (
+        (Get-CanaryFailureCode "HP_CANARY_PROCESS_FAILED") -cne "HP_CANARY_PROCESS_FAILED" -or
+        (Get-CanaryFailureCode "Confinement deny frontier exceeds the bounded permission profile.") -cne
+            "HP_CANARY_CONFINEMENT_FRONTIER_LIMIT" -or
+        (Get-CanaryFailureCode "Confinement deny frontier roots are invalid.") -cne
+            "HP_CANARY_CONFINEMENT_FRONTIER_INVALID" -or
+        (Get-CanaryFailureCode "unexpected") -cne "HP_CANARY_UNCLASSIFIED"
+    ) {
+        throw "Self-test canary failure classification contract failed."
     }
 
     $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
@@ -746,11 +771,36 @@ function Invoke-Canary {
     $codex = Resolve-TrustedCodexExecutable -Path $CodexBin
     $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
         [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
-    $root = Join-Path $temporaryRoot ($RootPrefix + [Guid]::NewGuid().ToString("N"))
-    $foreignRoot = Join-Path $temporaryRoot ($ForeignPrefix + [Guid]::NewGuid().ToString("N"))
-    $hostCodexHome = Join-Path $temporaryRoot ($HostCodexHomePrefix + [Guid]::NewGuid().ToString("N"))
+    $hostUserProfileValue = $env:USERPROFILE
+    $localApplicationDataValue = [Environment]::GetFolderPath(
+        [Environment+SpecialFolder]::LocalApplicationData)
+    if (
+        [string]::IsNullOrWhiteSpace($hostUserProfileValue) -or
+        [string]::IsNullOrWhiteSpace($localApplicationDataValue)
+    ) {
+        throw "HP_CANARY_ROOT_INVALID"
+    }
+    $hostUserProfile = [IO.Path]::GetFullPath($hostUserProfileValue).TrimEnd(
+        [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+    $localApplicationData = [IO.Path]::GetFullPath($localApplicationDataValue).TrimEnd(
+        [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+    $hostUserProfilePrefix = $hostUserProfile + [IO.Path]::DirectorySeparatorChar
+    if (
+        $localApplicationData.StartsWith("\\", [StringComparison]::Ordinal) -or
+        -not $localApplicationData.StartsWith($hostUserProfilePrefix, [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $localApplicationData -PathType Container)
+    ) {
+        throw "HP_CANARY_ROOT_INVALID"
+    }
+    Assert-NoReparsePath -Path $localApplicationData
+    $canaryBase = Join-Path $localApplicationData ($CanaryBasePrefix + [Guid]::NewGuid().ToString("N"))
+    $root = Join-Path $canaryBase ($RootPrefix + [Guid]::NewGuid().ToString("N"))
+    $foreignRoot = Join-Path $canaryBase ($ForeignPrefix + [Guid]::NewGuid().ToString("N"))
+    $hostCodexHome = Join-Path $canaryBase ($HostCodexHomePrefix + [Guid]::NewGuid().ToString("N"))
     $listener = $null
     try {
+        [void](New-Item -ItemType Directory -Path $canaryBase)
+        Assert-NoReparsePath -Path $canaryBase
         $workspace = Join-Path $root "workspace"
         $codexHome = Join-Path $root "codex-home"
         $userHome = Join-Path $root "user-home"
@@ -799,7 +849,7 @@ function Invoke-Canary {
             -CodexHome $codexHome `
             -HostCodexHome $hostCodexHome `
             -UserHome $userHome `
-            -HostUserProfile ([IO.Path]::GetFullPath($env:USERPROFILE)) `
+            -HostUserProfile $hostUserProfile `
             -Implementation $SandboxImplementation `
             -PowerShellPath $powerShellPath `
             -ProbePath $probePath `
@@ -824,6 +874,8 @@ function Invoke-Canary {
                 $userHome,
                 $foreignRoot,
                 $probePath,
+                $canaryBase,
+                $localApplicationData,
                 $temporaryRoot,
                 $env:USERPROFILE,
                 $env:RUNNER_TEMP,
@@ -859,9 +911,10 @@ function Invoke-Canary {
                     $listener.Stop()
                     $listener = $null
                 }
-                Remove-ValidatedTemporaryRoot -Path $foreignRoot -TemporaryRoot $temporaryRoot -ExpectedPrefix $ForeignPrefix
-                Remove-ValidatedTemporaryRoot -Path $hostCodexHome -TemporaryRoot $temporaryRoot -ExpectedPrefix $HostCodexHomePrefix
-                Remove-ValidatedTemporaryRoot -Path $root -TemporaryRoot $temporaryRoot -ExpectedPrefix $RootPrefix
+                Remove-ValidatedTemporaryRoot -Path $foreignRoot -TemporaryRoot $canaryBase -ExpectedPrefix $ForeignPrefix
+                Remove-ValidatedTemporaryRoot -Path $hostCodexHome -TemporaryRoot $canaryBase -ExpectedPrefix $HostCodexHomePrefix
+                Remove-ValidatedTemporaryRoot -Path $root -TemporaryRoot $canaryBase -ExpectedPrefix $RootPrefix
+                Remove-ValidatedTemporaryRoot -Path $canaryBase -TemporaryRoot $localApplicationData -ExpectedPrefix $CanaryBasePrefix
                 Write-CanaryResult -Path $ResultPath -Receipt $receipt
                 Write-Host "PASS unelevated Codex sandbox rejected the read-only generation profile"
                 Write-Output ($receipt | ConvertTo-Json -Compress -Depth 4)
@@ -876,6 +929,8 @@ function Invoke-Canary {
                 $userHome,
                 $foreignRoot,
                 $probePath,
+                $canaryBase,
+                $localApplicationData,
                 $temporaryRoot,
                 $env:USERPROFILE,
                 $env:RUNNER_TEMP,
@@ -939,18 +994,20 @@ function Invoke-Canary {
             $listener.Stop()
             $listener = $null
         }
-        Remove-ValidatedTemporaryRoot -Path $foreignRoot -TemporaryRoot $temporaryRoot -ExpectedPrefix $ForeignPrefix
-        Remove-ValidatedTemporaryRoot -Path $hostCodexHome -TemporaryRoot $temporaryRoot -ExpectedPrefix $HostCodexHomePrefix
-        Remove-ValidatedTemporaryRoot -Path $root -TemporaryRoot $temporaryRoot -ExpectedPrefix $RootPrefix
+        Remove-ValidatedTemporaryRoot -Path $foreignRoot -TemporaryRoot $canaryBase -ExpectedPrefix $ForeignPrefix
+        Remove-ValidatedTemporaryRoot -Path $hostCodexHome -TemporaryRoot $canaryBase -ExpectedPrefix $HostCodexHomePrefix
+        Remove-ValidatedTemporaryRoot -Path $root -TemporaryRoot $canaryBase -ExpectedPrefix $RootPrefix
+        Remove-ValidatedTemporaryRoot -Path $canaryBase -TemporaryRoot $localApplicationData -ExpectedPrefix $CanaryBasePrefix
         Write-CanaryResult -Path $ResultPath -Receipt $receipt
         Write-Host "PASS Codex generation confinement canary"
         Write-Output ($receipt | ConvertTo-Json -Compress -Depth 4)
     }
     finally {
         if ($null -ne $listener) { $listener.Stop() }
-        Remove-ValidatedTemporaryRoot -Path $foreignRoot -TemporaryRoot $temporaryRoot -ExpectedPrefix $ForeignPrefix
-        Remove-ValidatedTemporaryRoot -Path $hostCodexHome -TemporaryRoot $temporaryRoot -ExpectedPrefix $HostCodexHomePrefix
-        Remove-ValidatedTemporaryRoot -Path $root -TemporaryRoot $temporaryRoot -ExpectedPrefix $RootPrefix
+        Remove-ValidatedTemporaryRoot -Path $foreignRoot -TemporaryRoot $canaryBase -ExpectedPrefix $ForeignPrefix
+        Remove-ValidatedTemporaryRoot -Path $hostCodexHome -TemporaryRoot $canaryBase -ExpectedPrefix $HostCodexHomePrefix
+        Remove-ValidatedTemporaryRoot -Path $root -TemporaryRoot $canaryBase -ExpectedPrefix $RootPrefix
+        Remove-ValidatedTemporaryRoot -Path $canaryBase -TemporaryRoot $localApplicationData -ExpectedPrefix $CanaryBasePrefix
     }
 }
 
@@ -964,12 +1021,7 @@ try {
 }
 catch {
     $message = $_.Exception.Message
-    $failureCode = if ($message -cmatch '^HP_CANARY_[A-Z0-9_]+$') {
-        $message
-    }
-    else {
-        "HP_CANARY_UNCLASSIFIED"
-    }
+    $failureCode = Get-CanaryFailureCode -Message $message
     if (-not [string]::IsNullOrWhiteSpace($ResultPath)) {
         $failureReceipt = [ordered]@{
             schemaVersion = 1
