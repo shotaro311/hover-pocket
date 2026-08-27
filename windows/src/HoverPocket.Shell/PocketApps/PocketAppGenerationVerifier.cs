@@ -863,7 +863,7 @@ internal sealed class PocketAppGenerationVerifier
                 && confinementJoined.Contains("windows.sandbox=\"elevated\"", StringComparison.Ordinal)
                 && confinementJoined.Contains("default_permissions=\"hoverpocket-generation\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementWorkspace)}=\"read\"", StringComparison.Ordinal)
-                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementCodexHome)}=\"deny\"", StringComparison.Ordinal)
+                && !confinementJoined.Contains($"{JsonSerializer.Serialize(confinementCodexHome)}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementUserHome)}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(Path.GetFullPath(confinementHelper))}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"model={JsonSerializer.Serialize(CodexPocketAppGenerationModelCatalog.ModelId)}", StringComparison.Ordinal)

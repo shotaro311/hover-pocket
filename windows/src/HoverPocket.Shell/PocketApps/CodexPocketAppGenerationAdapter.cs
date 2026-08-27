@@ -426,7 +426,6 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         var filesystem = "permissions.hoverpocket-generation.filesystem={"
             + $"{JsonSerializer.Serialize(":minimal")}=\"read\","
             + $"{JsonSerializer.Serialize(normalizedWorkspace)}=\"read\","
-            + $"{JsonSerializer.Serialize(normalizedCodexHome)}=\"deny\","
             + $"{JsonSerializer.Serialize(normalizedUserHome)}=\"deny\","
             + $"{JsonSerializer.Serialize(normalizedHelper)}=\"deny\"}}";
         var windows = WindowsDirectory();

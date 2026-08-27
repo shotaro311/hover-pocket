@@ -130,7 +130,6 @@ function Get-ConfinementArguments {
     $filesystem = "permissions.hoverpocket-generation.filesystem={" +
         "$(ConvertTo-TomlString ':minimal')=`"read`"," +
         "$(ConvertTo-TomlString $workspacePath)=`"read`"," +
-        "$(ConvertTo-TomlString $codexHomePath)=`"deny`"," +
         "$(ConvertTo-TomlString $userHomePath)=`"deny`"}"
     $windowsDirectory = [IO.Path]::GetFullPath($env:SystemRoot)
     $systemPath = [string]::Join(
@@ -400,7 +399,6 @@ function Invoke-SelfTest {
             'windows.sandbox="unelevated"'
             'default_permissions="hoverpocket-generation"'
             '"C:\\fixture\\workspace"="read"'
-            '"C:\\fixture\\codex-home"="deny"'
             '"C:\\fixture\\user-home"="deny"'
             'network.enabled=false'
             'shell_environment_policy.inherit="none"'
@@ -410,6 +408,9 @@ function Invoke-SelfTest {
             if (-not $joined.Contains($marker, [StringComparison]::Ordinal)) {
                 throw "Self-test confinement arguments differ from the expected contract."
             }
+        }
+        if ($joined.Contains('"C:\\fixture\\codex-home"="deny"', [StringComparison]::Ordinal)) {
+            throw "Self-test must leave Codex Home to the native sandbox control-plane ACLs."
         }
     }
     finally {
