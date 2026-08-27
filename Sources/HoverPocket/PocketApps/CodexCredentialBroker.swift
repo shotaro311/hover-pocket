@@ -7,13 +7,47 @@ enum CodexCredentialBrokerError: Error {
 }
 
 enum CodexCredentialBrokerPeerIdentity {
+    static func parentProcessID(of processID: pid_t) -> pid_t? {
+        guard processID > 0 else { return nil }
+        var info = proc_bsdinfo()
+        let expectedSize = Int32(MemoryLayout<proc_bsdinfo>.size)
+        let actualSize = proc_pidinfo(
+            processID,
+            PROC_PIDTBSDINFO,
+            0,
+            &info,
+            expectedSize
+        )
+        guard actualSize == expectedSize, info.pbi_ppid > 0 else { return nil }
+        return pid_t(info.pbi_ppid)
+    }
+
     static func isAuthorizedPeer(socketFD: Int32, expectedProcessID: pid_t) -> Bool {
-        guard expectedProcessID > 0 else { return false }
+        guard let peerProcessID = authorizedPeerProcessID(socketFD: socketFD),
+              peerProcessID == expectedProcessID else {
+            return false
+        }
+        return hasSameDesignatedRequirement(processID: peerProcessID)
+    }
+
+    static func isAuthorizedGenerationPeer(
+        socketFD: Int32,
+        expectedParentProcessID: pid_t
+    ) -> Bool {
+        guard expectedParentProcessID > 0,
+              let peerProcessID = authorizedPeerProcessID(socketFD: socketFD),
+              parentProcessID(of: peerProcessID) == expectedParentProcessID else {
+            return false
+        }
+        return hasSameDesignatedRequirement(processID: peerProcessID)
+    }
+
+    private static func authorizedPeerProcessID(socketFD: Int32) -> pid_t? {
         var peerUserID: uid_t = 0
         var peerGroupID: gid_t = 0
         guard getpeereid(socketFD, &peerUserID, &peerGroupID) == 0,
               peerUserID == geteuid() else {
-            return false
+            return nil
         }
 
         var peerProcessID: pid_t = 0
@@ -26,12 +60,10 @@ enum CodexCredentialBrokerPeerIdentity {
             &peerProcessIDSize
         ) == 0,
               peerProcessID > 0,
-              peerProcessID == expectedProcessID,
               peerProcessIDSize == MemoryLayout<pid_t>.size else {
-            return false
+            return nil
         }
-
-        return hasSameDesignatedRequirement(processID: peerProcessID)
+        return peerProcessID
     }
 
     private static func hasSameDesignatedRequirement(processID: pid_t) -> Bool {
@@ -222,12 +254,18 @@ private final class CodexCredentialBrokerCleanupState: @unchecked Sendable {
 
 final class CodexCredentialBrokerServer: @unchecked Sendable {
     private static let requestPrefix = "HP-CODEX-BROKER/1 "
+    private static let generationRequest = "HP-CODEX-BROKER/2"
+    private enum RequestMode {
+        case capability
+        case generation
+    }
     private let lifecycleCondition = NSCondition()
     private let queue = DispatchQueue(label: "local.hoverpocket.codex-credential-broker")
     private let queueKey = DispatchSpecificKey<UInt8>()
     private let socketFD: Int32
     private let lease: CodexCredentialBrokerLease
     private let peerAuthorizer: @Sendable (Int32) -> Bool
+    private let requestMode: RequestMode
     private let cleanupState: CodexCredentialBrokerCleanupState
     private var source: DispatchSourceRead?
     private var timer: DispatchSourceTimer?
@@ -238,10 +276,65 @@ final class CodexCredentialBrokerServer: @unchecked Sendable {
     var capability: String { lease.capability }
     var isConsumed: Bool { lease.isConsumed }
 
-    init(
+    convenience init(
         lifetime: TimeInterval = 30,
         expectedClientProcessID: pid_t,
         peerAuthorizer: (@Sendable (Int32) -> Bool)? = nil,
+        secretProvider: @escaping @Sendable () throws -> String
+    ) throws {
+        try self.init(
+            lifetime: lifetime,
+            expectedClientProcessID: expectedClientProcessID,
+            endpointIdentifier: nil,
+            requestMode: .capability,
+            peerAuthorizer: peerAuthorizer,
+            secretProvider: secretProvider
+        )
+    }
+
+    convenience init(
+        lifetime: TimeInterval = 30,
+        generationProcessID: pid_t,
+        secretProvider: @escaping @Sendable () throws -> String
+    ) throws {
+        let hostProcessID = getpid()
+        guard generationProcessID > 0 else {
+            throw CodexCredentialBrokerError.unavailable
+        }
+        let ancestryDeadline = Date().addingTimeInterval(0.25)
+        while CodexCredentialBrokerPeerIdentity.parentProcessID(of: generationProcessID)
+            != hostProcessID,
+              Date() < ancestryDeadline {
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        guard CodexCredentialBrokerPeerIdentity.parentProcessID(of: generationProcessID)
+            == hostProcessID else {
+            throw CodexCredentialBrokerError.unavailable
+        }
+        try self.init(
+            lifetime: lifetime,
+            expectedClientProcessID: generationProcessID,
+            endpointIdentifier: Self.generationEndpointIdentifier(
+                hostProcessID: hostProcessID,
+                generationProcessID: generationProcessID
+            ),
+            requestMode: .generation,
+            peerAuthorizer: { socketFD in
+                CodexCredentialBrokerPeerIdentity.isAuthorizedGenerationPeer(
+                    socketFD: socketFD,
+                    expectedParentProcessID: generationProcessID
+                )
+            },
+            secretProvider: secretProvider
+        )
+    }
+
+    private init(
+        lifetime: TimeInterval,
+        expectedClientProcessID: pid_t,
+        endpointIdentifier: String?,
+        requestMode: RequestMode,
+        peerAuthorizer: (@Sendable (Int32) -> Bool)?,
         secretProvider: @escaping @Sendable () throws -> String
     ) throws {
         guard expectedClientProcessID > 0 else {
@@ -257,7 +350,9 @@ final class CodexCredentialBrokerServer: @unchecked Sendable {
             lifetime: lifetime,
             secretProvider: secretProvider
         )
-        let identifier = UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "")
+        self.requestMode = requestMode
+        let identifier = endpointIdentifier
+            ?? UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "")
         let requestedRoot = URL(
             fileURLWithPath: "/tmp/hoverpocket-codex-broker-\(identifier)",
             isDirectory: true
@@ -349,13 +444,28 @@ final class CodexCredentialBrokerServer: @unchecked Sendable {
             return
         }
 
-        guard let request = Self.readLine(from: clientFD, maximumBytes: 512),
-              request.hasPrefix(Self.requestPrefix) else {
+        guard let request = Self.readLine(from: clientFD, maximumBytes: 512) else {
             Self.writeLine("ERR", to: clientFD)
             lease.cancel()
             return
         }
-        let presentedCapability = String(request.dropFirst(Self.requestPrefix.count))
+        let presentedCapability: String
+        switch requestMode {
+        case .capability:
+            guard request.hasPrefix(Self.requestPrefix) else {
+                Self.writeLine("ERR", to: clientFD)
+                lease.cancel()
+                return
+            }
+            presentedCapability = String(request.dropFirst(Self.requestPrefix.count))
+        case .generation:
+            guard request == Self.generationRequest else {
+                Self.writeLine("ERR", to: clientFD)
+                lease.cancel()
+                return
+            }
+            presentedCapability = lease.capability
+        }
         do {
             let secret = try lease.redeem(presentedCapability)
             let encoded = Data(secret.utf8).base64EncodedString()
@@ -478,6 +588,28 @@ final class CodexCredentialBrokerServer: @unchecked Sendable {
         _ = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         _ = setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
     }
+
+    fileprivate static func generationEndpoint(
+        hostProcessID: pid_t,
+        generationProcessID: pid_t
+    ) -> URL? {
+        guard hostProcessID > 0, generationProcessID > 0 else { return nil }
+        let identifier = generationEndpointIdentifier(
+            hostProcessID: hostProcessID,
+            generationProcessID: generationProcessID
+        )
+        return URL(
+            fileURLWithPath: "/private/tmp/hoverpocket-codex-broker-\(identifier)",
+            isDirectory: true
+        ).appendingPathComponent("credential.sock")
+    }
+
+    private static func generationEndpointIdentifier(
+        hostProcessID: pid_t,
+        generationProcessID: pid_t
+    ) -> String {
+        "generation-\(hostProcessID)-\(generationProcessID)"
+    }
 }
 
 enum CodexCredentialBrokerDeinitProbe {
@@ -537,10 +669,44 @@ enum CodexCredentialBrokerClient {
         }
         return secret
     }
+
+    static func fetchGenerationSecret(
+        endpoint: URL,
+        expectedServerProcessID: pid_t
+    ) throws -> String {
+        guard endpoint.isFileURL,
+              endpoint.path.hasPrefix("/private/tmp/hoverpocket-codex-broker-generation-"),
+              expectedServerProcessID > 0 else {
+            throw CodexCredentialBrokerError.unavailable
+        }
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else {
+            throw CodexCredentialBrokerError.unavailable
+        }
+        defer { close(fd) }
+        CodexCredentialBrokerServer.applyTimeouts(to: fd)
+        try CodexCredentialBrokerServer.connect(fd: fd, path: endpoint.path)
+        guard CodexCredentialBrokerPeerIdentity.isAuthorizedPeer(
+            socketFD: fd,
+            expectedProcessID: expectedServerProcessID
+        ) else {
+            throw CodexCredentialBrokerError.unavailable
+        }
+        CodexCredentialBrokerServer.writeLine("HP-CODEX-BROKER/2", to: fd)
+        guard let response = CodexCredentialBrokerServer.readLine(from: fd, maximumBytes: 12_000),
+              response.hasPrefix("OK "),
+              let data = Data(base64Encoded: String(response.dropFirst(3))),
+              let secret = String(data: data, encoding: .utf8),
+              CodexCredentialBrokerLease.isValidSecret(secret) else {
+            throw CodexCredentialBrokerError.unavailable
+        }
+        return secret
+    }
 }
 
 enum CodexCredentialBrokerHelper {
     static let argument = "--codex-credential-helper"
+    static let generationArgument = "--codex-generation-credential-helper"
 
     private struct Bootstrap: Codable {
         let version: Int
@@ -594,6 +760,65 @@ enum CodexCredentialBrokerHelper {
             )
             try FileHandle.standardOutput.write(contentsOf: Data(secret.utf8))
             return 0
+        } catch {
+            try? FileHandle.standardError.write(contentsOf: Data("credential unavailable\n".utf8))
+            return 1
+        }
+    }
+
+    static func runForGeneration() -> Int32 {
+        let generationProcessID = getppid()
+        guard generationProcessID > 0,
+              let hostProcessID = CodexCredentialBrokerPeerIdentity.parentProcessID(
+                of: generationProcessID
+              ),
+              let endpoint = CodexCredentialBrokerServer.generationEndpoint(
+                hostProcessID: hostProcessID,
+                generationProcessID: generationProcessID
+              ) else {
+            return 1
+        }
+
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline {
+            do {
+                let secret = try CodexCredentialBrokerClient.fetchGenerationSecret(
+                    endpoint: endpoint,
+                    expectedServerProcessID: hostProcessID
+                )
+                try FileHandle.standardOutput.write(contentsOf: Data(secret.utf8))
+                return 0
+            } catch CodexCredentialBrokerError.unavailable {
+                Thread.sleep(forTimeInterval: 0.025)
+            } catch {
+                break
+            }
+        }
+        try? FileHandle.standardError.write(contentsOf: Data("credential unavailable\n".utf8))
+        return 1
+    }
+}
+
+enum CodexCredentialBrokerGenerationProbe {
+    static let argument = "--verify-codex-generation-credential-parent"
+
+    static func run() -> Int32 {
+        let helper = Process()
+        let output = Pipe()
+        let error = Pipe()
+        helper.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+        helper.arguments = [CodexCredentialBrokerHelper.generationArgument]
+        helper.environment = [:]
+        helper.standardOutput = output
+        helper.standardError = error
+        do {
+            try helper.run()
+            helper.waitUntilExit()
+            let stdout = output.fileHandleForReading.readDataToEndOfFile()
+            let stderr = error.fileHandleForReading.readDataToEndOfFile()
+            try FileHandle.standardOutput.write(contentsOf: stdout)
+            try FileHandle.standardError.write(contentsOf: stderr)
+            return helper.terminationStatus
         } catch {
             try? FileHandle.standardError.write(contentsOf: Data("credential unavailable\n".utf8))
             return 1

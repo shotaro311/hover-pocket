@@ -13,6 +13,14 @@ if CommandLine.arguments.contains(CodexCredentialBrokerHelper.argument) {
     exit(CodexCredentialBrokerHelper.run())
 }
 
+if CommandLine.arguments.contains(CodexCredentialBrokerHelper.generationArgument) {
+    exit(CodexCredentialBrokerHelper.runForGeneration())
+}
+
+if CommandLine.arguments.contains(CodexCredentialBrokerGenerationProbe.argument) {
+    exit(CodexCredentialBrokerGenerationProbe.run())
+}
+
 if CommandLine.arguments.contains("--verify-google-calendar") {
     GoogleCalendarVerificationCommand.run()
 }

@@ -2,7 +2,7 @@
 
 ## 目的
 
-AN5のproduction Codex Pocket App生成を有効化せず、macOSで実Codex CLIのfilesystem / network隔離境界を証明し、Windowsはnative elevated sandboxのproduction templateとpositive canaryを準備する。CIでは再現可能なself-testとunelevated downgrade rejectionを確認し、Windows elevated実行、credential delivery、Voice物理E2E、署名・配布を別gateとして維持する。
+AN5のproduction Codex Pocket App生成を有効化せず、macOSで実Codex CLIのfilesystem / network隔離境界を証明し、macOS / Windows双方でHost-owned一回限りcredential deliveryを隔離generatorへ接続する。CIでは再現可能なself-testとunelevated downgrade rejectionを確認し、Windows elevated実行、実モデル生成、Voice物理E2E、署名・配布を別gateとして維持する。
 
 ## ChatGPT Pro回収状態
 
@@ -11,6 +11,15 @@ AN5のproduction Codex Pocket App生成を有効化せず、macOSで実Codex CLI
 - Pro criticの境界どおり、production生成はoffのまま、macOS隔離canaryだけを独立した次の証拠にした。
 
 ## 実装
+
+### Codex生成command-backed credential delivery
+
+- Codex 0.145.0のcustom model providerは`auth.command`をstdin nullで起動するため、既存v1 helperのHost起動・stdin bootstrapをproduction生成へ直接接続できないことを確認した。v1はexact PID / mutual identityの独立contract testとして維持する。
+- v2はHoverPocket HostがCodex生成processを起動して直接childであることを確認し、Codexがauth helperを直接childとして起動する。helperは自身のparent / grandparent PIDからHost PID、generation PID、決定論的endpointを導出し、endpointやcapabilityをargument、environment、fileへ渡さない。
+- macOSはowner-only Unix socket、same UID、exact Host PID、helperのCodex直接child、HoverPocket designated requirementを相互確認する。Windowsは`CurrentUserOnly` named pipe、OS取得client / server PID、Codex直接child、exact `Environment.ProcessPath`を相互確認する。
+- Hostは認証済みrequest後だけKeychain / Credential ManagerからAPI keyを遅延取得する。leaseは最大30秒・1回限りであり、期限切れ、unauthorized、malformed、provider失敗、取消、process終了で消費・失効する。
+- custom providerは`https://api.openai.com/v1`、Responses wire API、`auth.refresh_interval_ms=0`、request / stream retry 0に固定した。helper executable pathはmodel tool permissionで明示denyし、credential環境変数は設定しない。
+- productionはmacOS `supportsConfidentialGeneration == false`、Windows `ResolveExecutable() == null`、両OS preview-onlyのままである。実API key、実model request、生成package activationは使用していない。
 
 - `script/verify_codex_generation_confinement_macos.py`
   - fixed npm vendor pathだけを候補にする。
@@ -58,6 +67,12 @@ AN5のproduction Codex Pocket App生成を有効化せず、macOSで実Codex CLI
 - `.build/debug/HoverPocket --verify-pocket-app`: PASS。package、lifecycle、generation、migration、health、workspace backupを含む
 - workflow YAML parse: PASS
 - `git diff --check`: PASS
+- `swift build -Xswiftc -warnings-as-errors`: 最新credential delivery差分で再度PASS
+- `.build/debug/HoverPocket --verify-pocket-app`: v2 generation-parent-chain、one-shot lease、replay / expiry / peer rejection、socket cleanupを含めPASS
+- `.build/debug/HoverPocket --verify-capabilities` / `--verify-broker` / `--verify-pocket-surface` / `--verify-voice-foundation` / `--verify-timer`: PASS
+- `python3 script/verify_pocket_contracts.py`: 15 schema / 71 fixture PASS
+- `python3 script/verify_voice_foundation.py`: 42 case PASS
+- Windows panel / Settings / Pocket Surface JavaScriptの`node --check`: PASS
 - Windows code head `12aa70167661f68ea2e5c95f933502154fdd6a6b`のCI [33024514348](https://github.com/shotaro311/hover-pocket/actions/runs/33024514348): SUCCESS
   - `PASS Codex generation confinement verifier self-test`
   - negative receiptは`mode=negative-control`、`readOnlyFallbackRejected=true`、`elevatedRequired=true`
@@ -90,6 +105,16 @@ AN5のproduction Codex Pocket App生成を有効化せず、macOSで実Codex CLI
 - reviewed surfaces: production reachability / activation、elevated argument / environment template、PowerShell positive / negative canary、CI supply-chain / downgrade control、deterministic C# verifier、loopback network probe limitation
 - open gate: normal Windows hostのelevated positive canary、Host-owned credential delivery、trusted executable resolver
 
+### Credential delivery exact working-tree scan
+
+- scan ID: `55b573a8-4b94-4ec0-b077-286887885e00`
+- snapshot: `codex-security-snapshot/v1:sha256:bb7ef31f647030015b83542f5230dbe7dfd08936c7e631c9bb2e835630967ef0`
+- changed source: 10 / 10
+- coverage: complete
+- reportable finding: 0件
+- reviewed surfaces: Host credential provider、Codex generation process、command-backed auth helper、macOS Unix socket、Windows CurrentUserOnly named pipe、mutual PID / ancestry / executable identity、one-shot lease、cleanup、model-tool helper deny、production reachability / activation
+- open runtime questions: Codex auth stdoutの非保持、auth control-planeとmodel-tool denyの分離、Windows packaged executable path
+
 ## Draft PR / CI readback
 
 - code head: `8cd445bdf6ebf6fe7c3150aea877be7c459fd035`
@@ -104,8 +129,9 @@ AN5のproduction Codex Pocket App生成を有効化せず、macOSで実Codex CLI
 
 ## 未完了gate
 
-1. 通常Windows hostでnative elevated sandboxのpositive canaryを実行し、workspace read、write拒否、両isolated Home / outside-root read拒否、network拒否、listener未到達をreadbackする。CIのunelevated rejectionは代替にしない。
-2. macOS / Windows双方でHost-owned一回限りcredential deliveryを隔離generatorへ接続し、秘密値をargument、environment、disk、logへ残さないことを確認する。
-3. 同じ隔離境界でPocket App DSLを1件生成し、schema検証、preview、install、activation、readback、remove / rollbackまで確認する。
-4. 両OSの実API key / microphone Voice E2E、正式署名、配布、rollbackを別々に完了する。
-5. 上記が完了するまでproduction generatorを有効化しない。
+1. 新headのWindows CIでC# buildとv2 named-pipe parent-chain verifierをreadbackする。
+2. 通常Windows hostでnative elevated sandboxのpositive canaryを実行し、workspace read、write拒否、両isolated Home / outside-root read拒否、network拒否、listener未到達をreadbackする。CIのunelevated rejectionは代替にしない。
+3. 実モデルを使う隔離generatorで、auth helperは起動できるがmodel toolから同じhelper pathを読取り・実行できないこと、credentialがargument、environment、Codex Home、disk、logへ残らないことをreadbackする。
+4. 同じ隔離境界でPocket App DSLを1件生成し、schema検証、preview、install、activation、readback、remove / rollbackまで確認する。
+5. 両OSの実API key / microphone Voice E2E、正式署名、配布、rollbackを別々に完了する。
+6. 上記が完了するまでproduction generatorを有効化しない。

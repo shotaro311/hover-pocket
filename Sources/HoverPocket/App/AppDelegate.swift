@@ -155,9 +155,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 _ = activationRegistry.restoreEnabledApps()
                 let generator: (any PocketAppGenerationAdapter)?
                 if let executableURL = CodexPocketAppGenerationAdapter.resolveExecutable() {
+                    let credentialStore = OpenAIRealtimeKeychainStore()
                     generator = try? CodexPocketAppGenerationAdapter(
                         executableURL: executableURL,
-                        workspaceRoot: generationRoot.appendingPathComponent("CodexWorkspaces", isDirectory: true)
+                        workspaceRoot: generationRoot.appendingPathComponent("CodexWorkspaces", isDirectory: true),
+                        credentialProvider: {
+                            guard let apiKey = try credentialStore.load() else {
+                                throw PocketAppGenerationError.generatorUnavailable
+                            }
+                            return try apiKey.withUTF8Bytes { bytes in
+                                guard let value = String(data: bytes, encoding: .utf8) else {
+                                    throw PocketAppGenerationError.generatorUnavailable
+                                }
+                                return value
+                            }
+                        }
                     )
                 } else {
                     generator = nil

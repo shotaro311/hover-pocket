@@ -239,6 +239,28 @@ internal sealed class PocketAppGenerationVerifier
             }
             VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END helper");
 
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN generation-parent-chain");
+            using (var generationProbe = StartCredentialGenerationProbeProcess())
+            using (var generationServer = CodexCredentialBrokerServer.CreateForGeneration(
+                TimeSpan.FromSeconds(10),
+                generationProbe.Id,
+                () => fixtureSecret))
+            {
+                var standardOutputTask = generationProbe.StandardOutput.ReadToEndAsync();
+                var standardErrorTask = generationProbe.StandardError.ReadToEndAsync();
+                await generationProbe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                var standardOutput = await standardOutputTask;
+                var standardError = await standardErrorTask;
+                await generationServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(
+                    generationProbe.ExitCode == 0
+                        && generationServer.IsConsumed
+                        && standardOutput == fixtureSecret
+                        && string.IsNullOrEmpty(standardError),
+                    "generation_credential_broker_codex_parent_chain");
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END generation-parent-chain");
+
             VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN same-binary-wrong-pid");
             using (var impostor = StartCredentialHelperProcess())
             using (var wrongProcessServer = new CodexCredentialBrokerServer(
@@ -323,6 +345,36 @@ internal sealed class PocketAppGenerationVerifier
         }
         startInfo.ArgumentList.Add(CodexCredentialBrokerHelper.Argument);
         VerifyConsole.WriteLine($"CREDENTIAL_BROKER_HELPER_LAUNCH_MODE {launchMode}");
+        return Process.Start(startInfo) ?? throw new CodexCredentialBrokerException();
+    }
+
+    private static Process StartCredentialGenerationProbeProcess()
+    {
+        var processPath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(processPath))
+        {
+            throw new CodexCredentialBrokerException();
+        }
+        var startInfo = new ProcessStartInfo(processPath)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        if (string.Equals(
+            Path.GetFileNameWithoutExtension(processPath),
+            "dotnet",
+            StringComparison.OrdinalIgnoreCase))
+        {
+            var entryAssemblyPath = typeof(PocketAppGenerationVerifier).Assembly.Location;
+            if (string.IsNullOrWhiteSpace(entryAssemblyPath))
+            {
+                throw new CodexCredentialBrokerException();
+            }
+            startInfo.ArgumentList.Add(entryAssemblyPath);
+        }
+        startInfo.ArgumentList.Add(CodexCredentialBrokerGenerationProbe.Argument);
         return Process.Start(startInfo) ?? throw new CodexCredentialBrokerException();
     }
 
@@ -780,11 +832,14 @@ internal sealed class PocketAppGenerationVerifier
         var confinementCodexHome = Path.Combine(confinementRoot, "codex-home");
         var confinementUserHome = Path.Combine(confinementRoot, "user-home");
         var confinementSchema = Path.Combine(confinementWorkspace, "generation-output.schema.json");
+        var confinementHelper = Environment.ProcessPath
+            ?? throw new CodexCredentialBrokerException();
         var confinementArguments = CodexPocketAppGenerationAdapter.ConfinementArguments(
             confinementWorkspace,
             confinementCodexHome,
             confinementUserHome,
-            confinementSchema);
+            confinementSchema,
+            confinementHelper);
         var confinementJoined = string.Join('\n', confinementArguments);
         Require(
             !confinementArguments.Contains("--sandbox", StringComparer.Ordinal)
@@ -795,6 +850,13 @@ internal sealed class PocketAppGenerationVerifier
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementWorkspace)}=\"read\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementCodexHome)}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementUserHome)}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(Path.GetFullPath(confinementHelper))}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains("model_provider=\"hoverpocket\"", StringComparison.Ordinal)
+                && confinementJoined.Contains("model_providers.hoverpocket.base_url=\"https://api.openai.com/v1\"", StringComparison.Ordinal)
+                && confinementJoined.Contains("model_providers.hoverpocket.auth.command=", StringComparison.Ordinal)
+                && confinementJoined.Contains($"model_providers.hoverpocket.auth.args=[{JsonSerializer.Serialize(CodexCredentialBrokerHelper.GenerationArgument)}]", StringComparison.Ordinal)
+                && confinementJoined.Contains("model_providers.hoverpocket.auth.refresh_interval_ms=0", StringComparison.Ordinal)
+                && confinementJoined.Contains("model_providers.hoverpocket.request_max_retries=0", StringComparison.Ordinal)
                 && confinementJoined.Contains("network.enabled=false", StringComparison.Ordinal)
                 && confinementJoined.Contains("shell_environment_policy.inherit=\"none\"", StringComparison.Ordinal)
                 && confinementJoined.Contains("SYSTEMROOT=", StringComparison.Ordinal)
@@ -815,7 +877,10 @@ internal sealed class PocketAppGenerationVerifier
                 && confinementEnvironment["USERPROFILE"] == confinementUserHome
                 && confinementEnvironment["SYSTEMROOT"] == confinementEnvironment["WINDIR"]
                 && confinementEnvironment["COMSPEC"].EndsWith("cmd.exe", StringComparison.OrdinalIgnoreCase)
-                && confinementEnvironment["LANG"] == "C",
+                && confinementEnvironment["LANG"] == "C"
+                && confinementEnvironment.Keys.All(key =>
+                    !key.StartsWith("HOVERPOCKET_CODEX_BROKER", StringComparison.OrdinalIgnoreCase)
+                        && !string.Equals(key, "OPENAI_API_KEY", StringComparison.OrdinalIgnoreCase)),
             "generation_codex_isolated_environment");
         Require(
             CodexPocketAppGenerationAdapter.ResolveExecutable() is null,

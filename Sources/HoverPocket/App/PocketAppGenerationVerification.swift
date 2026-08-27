@@ -476,7 +476,10 @@ enum PocketAppGenerationVerification {
                 workspace: workspace,
                 codexHome: codexHome,
                 userHome: userHome,
-                schemaURL: schema
+                schemaURL: schema,
+                credentialHelperExecutableURL: URL(
+                    fileURLWithPath: CommandLine.arguments[0]
+                ).standardizedFileURL
             )
             let joined = arguments.joined(separator: "\n")
             require(
@@ -487,6 +490,12 @@ enum PocketAppGenerationVerification {
                     && joined.contains("\"\(workspace.path)\"=\"read\"")
                     && joined.contains("\"\(codexHome.path)\"=\"deny\"")
                     && joined.contains("\"\(userHome.path)\"=\"deny\"")
+                    && joined.contains("model_provider=\"hoverpocket\"")
+                    && joined.contains("model_providers.hoverpocket.base_url=\"https://api.openai.com/v1\"")
+                    && joined.contains("model_providers.hoverpocket.auth.command=")
+                    && joined.contains("model_providers.hoverpocket.auth.args=[\"\(CodexCredentialBrokerHelper.generationArgument)\"]")
+                    && joined.contains("model_providers.hoverpocket.auth.refresh_interval_ms=0")
+                    && joined.contains("model_providers.hoverpocket.request_max_retries=0")
                     && joined.contains("network.enabled=false")
                     && joined.contains("shell_environment_policy.inherit=\"none\"")
                     && arguments.suffix(3) == ["--output-schema", schema.path, "-"],
@@ -503,7 +512,11 @@ enum PocketAppGenerationVerification {
                     && environment["CODEX_HOME"] == codexHome.path
                     && environment["HOME"] == userHome.path
                     && environment["TMPDIR"] == temporaryDirectory.path
-                    && environment["PATH"] == "/usr/bin:/bin",
+                    && environment["PATH"] == "/usr/bin:/bin"
+                    && environment.keys.allSatisfy({
+                        !$0.hasPrefix("HOVERPOCKET_CODEX_BROKER")
+                            && $0 != "OPENAI_API_KEY"
+                    }),
                 "generation_codex_isolated_environment",
                 failures: &failures
             )
@@ -704,6 +717,40 @@ enum PocketAppGenerationVerification {
                     && output == Data(fixtureSecret.utf8)
                     && error.isEmpty,
                 "generation_credential_broker_helper_stdout_only",
+                failures: &failures
+            )
+
+            let generationProbe = Process()
+            let generationOutput = Pipe()
+            let generationError = Pipe()
+            generationProbe.executableURL = URL(
+                fileURLWithPath: CommandLine.arguments[0]
+            ).standardizedFileURL
+            generationProbe.arguments = [CodexCredentialBrokerGenerationProbe.argument]
+            generationProbe.environment = [:]
+            generationProbe.standardOutput = generationOutput
+            generationProbe.standardError = generationError
+            try generationProbe.run()
+            let generationServer = try CodexCredentialBrokerServer(
+                lifetime: 5,
+                generationProcessID: generationProbe.processIdentifier
+            ) { fixtureSecret }
+            defer { generationServer.cancel() }
+            generationProbe.waitUntilExit()
+            let generationStdout = generationOutput.fileHandleForReading.readDataToEndOfFile()
+            let generationStderr = generationError.fileHandleForReading.readDataToEndOfFile()
+            require(
+                generationProbe.terminationStatus == 0
+                    && generationServer.isConsumed
+                    && generationStdout == Data(fixtureSecret.utf8)
+                    && generationStderr.isEmpty,
+                "generation_credential_broker_codex_parent_chain",
+                failures: &failures
+            )
+            generationServer.cancel()
+            require(
+                !FileManager.default.fileExists(atPath: generationServer.rootDirectory.path),
+                "generation_credential_broker_codex_parent_cleanup",
                 failures: &failures
             )
 

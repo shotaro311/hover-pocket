@@ -16,6 +16,16 @@ internal static class Program
             Environment.ExitCode = CodexCredentialBrokerHelper.Run();
             return;
         }
+        if (args.Contains(CodexCredentialBrokerHelper.GenerationArgument, StringComparer.Ordinal))
+        {
+            Environment.ExitCode = CodexCredentialBrokerHelper.RunForGeneration();
+            return;
+        }
+        if (args.Contains(CodexCredentialBrokerGenerationProbe.Argument, StringComparer.Ordinal))
+        {
+            Environment.ExitCode = CodexCredentialBrokerGenerationProbe.Run();
+            return;
+        }
 
         var options = StartupOptions.Parse(args);
         var applicationData = HoverPocketApplicationData.Resolve(options);

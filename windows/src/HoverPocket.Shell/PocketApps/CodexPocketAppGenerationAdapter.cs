@@ -236,16 +236,20 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
     private readonly string _executable;
     private readonly PocketAppPinnedDirectory _workspaceRoot;
     private readonly TimeSpan _timeout;
+    private readonly Func<string> _credentialProvider;
     private bool _disposed;
 
     public CodexPocketAppGenerationAdapter(
         string executable,
         string workspaceRoot,
+        Func<string> credentialProvider,
         TimeSpan? timeout = null)
     {
         if (string.IsNullOrWhiteSpace(executable)) { throw Failure("GENERATOR_UNAVAILABLE"); }
         _executable = executable;
         _workspaceRoot = new PocketAppPinnedDirectory(workspaceRoot);
+        _credentialProvider = credentialProvider
+            ?? throw Failure("GENERATOR_UNAVAILABLE");
         _timeout = timeout ?? TimeSpan.FromSeconds(60);
         if (_timeout < TimeSpan.FromSeconds(1) || _timeout > TimeSpan.FromMinutes(5))
         {
@@ -290,7 +294,17 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
-            foreach (var argument in ConfinementArguments(workspace, codexHome, userHome, schemaPath))
+            var helperExecutable = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(helperExecutable))
+            {
+                throw Failure("GENERATOR_UNAVAILABLE");
+            }
+            foreach (var argument in ConfinementArguments(
+                workspace,
+                codexHome,
+                userHome,
+                schemaPath,
+                helperExecutable))
             {
                 start.ArgumentList.Add(argument);
             }
@@ -314,6 +328,8 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             {
                 throw Failure("GENERATOR_UNAVAILABLE");
             }
+
+            using var credentialBroker = CreateCredentialBroker(process);
 
             var stdoutTask = ReadBoundedAsync(
                 process.StandardOutput.BaseStream,
@@ -373,12 +389,14 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         string workspace,
         string codexHome,
         string userHome,
-        string schemaPath)
+        string schemaPath,
+        string credentialHelperExecutable)
     {
         var normalizedWorkspace = Path.GetFullPath(workspace);
         var normalizedCodexHome = Path.GetFullPath(codexHome);
         var normalizedUserHome = Path.GetFullPath(userHome);
         var normalizedSchema = Path.GetFullPath(schemaPath);
+        var normalizedHelper = Path.GetFullPath(credentialHelperExecutable);
         var directories = new[] { normalizedWorkspace, normalizedCodexHome, normalizedUserHome };
         if (directories
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count() != 3
@@ -387,7 +405,9 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             || !string.Equals(
                 Path.GetDirectoryName(normalizedSchema),
                 normalizedWorkspace,
-                StringComparison.OrdinalIgnoreCase))
+                StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(normalizedHelper)
+            || normalizedHelper.StartsWith("\\\\", StringComparison.Ordinal))
         {
             throw Failure("GENERATOR_UNAVAILABLE");
         }
@@ -395,7 +415,8 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             + $"{JsonSerializer.Serialize(":minimal")}=\"read\","
             + $"{JsonSerializer.Serialize(normalizedWorkspace)}=\"read\","
             + $"{JsonSerializer.Serialize(normalizedCodexHome)}=\"deny\","
-            + $"{JsonSerializer.Serialize(normalizedUserHome)}=\"deny\"}}";
+            + $"{JsonSerializer.Serialize(normalizedUserHome)}=\"deny\","
+            + $"{JsonSerializer.Serialize(normalizedHelper)}=\"deny\"}}";
         var windows = WindowsDirectory();
         var shellEnvironment = "shell_environment_policy.set={"
             + $"PATH={JsonSerializer.Serialize(SystemPath())},"
@@ -411,6 +432,17 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             "--ignore-rules",
             "--skip-git-repo-check",
             "-c", "approval_policy=\"never\"",
+            "-c", "model_provider=\"hoverpocket\"",
+            "-c", "model_providers.hoverpocket.name=\"HoverPocket OpenAI\"",
+            "-c", "model_providers.hoverpocket.base_url=\"https://api.openai.com/v1\"",
+            "-c", "model_providers.hoverpocket.wire_api=\"responses\"",
+            "-c", $"model_providers.hoverpocket.auth.command={JsonSerializer.Serialize(normalizedHelper)}",
+            "-c", $"model_providers.hoverpocket.auth.args=[{JsonSerializer.Serialize(CodexCredentialBrokerHelper.GenerationArgument)}]",
+            "-c", $"model_providers.hoverpocket.auth.cwd={JsonSerializer.Serialize(normalizedWorkspace)}",
+            "-c", "model_providers.hoverpocket.auth.refresh_interval_ms=0",
+            "-c", "model_providers.hoverpocket.auth.timeout_ms=5000",
+            "-c", "model_providers.hoverpocket.request_max_retries=0",
+            "-c", "model_providers.hoverpocket.stream_max_retries=0",
             "-c", "windows.sandbox=\"elevated\"",
             "-c", "default_permissions=\"hoverpocket-generation\"",
             "-c", filesystem,
@@ -465,6 +497,22 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         if (_disposed) { return; }
         _workspaceRoot.Dispose();
         _disposed = true;
+    }
+
+    private CodexCredentialBrokerServer CreateCredentialBroker(Process process)
+    {
+        try
+        {
+            return CodexCredentialBrokerServer.CreateForGeneration(
+                TimeSpan.FromSeconds(30),
+                process.Id,
+                _credentialProvider);
+        }
+        catch
+        {
+            Kill(process);
+            throw Failure("GENERATOR_UNAVAILABLE");
+        }
     }
 
     private static async Task<(byte[] Data, bool Exceeded)> ReadBoundedAsync(

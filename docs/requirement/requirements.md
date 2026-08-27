@@ -517,6 +517,12 @@ Planned Must:
 - Pocket Appのinstall / update / enable / disable / remove / rollbackは、Lifecycleの保存状態だけで成功にしない。Hostが検証済みimmutable packageを`PocketSurfaceRegistry`と実行runtimeへ反映し、同じapp ID、version、package digest、permission grantが描画・実行側でも観測できた後だけ成功receiptを返す。
 - 生成Pocket Appはapp IDごとに独立したSurface / runtime entryとして登録する。任意の生成Appを組み込みToday Focusの固定slotへ差し替えない。
 - 実Codex生成とactivationは、ローカルファイル読取り隔離と上記runtime activation readbackをmacOS / Windows双方で満たすまでfail closedとする。
+- 実Codex生成のOpenAI API keyは、macOS KeychainまたはWindows Credential Managerを正本とし、Hostが認証済みhelperの1回限りrequestを受けた後だけ遅延取得する。API key、broker endpoint、内部capabilityをCodexのargument、environment、workspace、receipt、監査、固定diagnosticへ置かない。
+- Codex 0.145.0のcustom model providerは`auth.command`のstdinをnullにするため、旧credential helperのstdin bootstrapはproduction生成へ使わない。生成用helperはCodex生成processの直接childとして起動し、helper自身がCodex parent PIDとHoverPocket Host grandparent PIDからbroker endpointを導出する。
+- 生成用brokerはmacOSでowner-only Unix socket、Windowsで`CurrentUserOnly` named pipeを使う。HostはCodex生成processが自身の直接childであることを確認し、brokerはhelperがそのCodex processの直接childかつHoverPocketと同じ実行identityであることを確認する。helper側もserverのexact Host PIDと実行identityを確認する。
+- 生成用brokerのcapabilityはHost内部にだけ保持し、IPCでは固定version requestへ変換する。leaseは最大30秒・1回限りとし、期限切れ、unauthorized、malformed、provider失敗、取消、process終了で再利用不能にする。PID由来の決定論的endpointは秘密として扱わず、先取りや誤接続は生成失敗へfail closedにする。
+- custom providerは`auth.command`と`auth.args`だけで認証し、`env_key`、direct bearer、`requires_openai_auth`を併用しない。`auth.refresh_interval_ms=0`、request / stream retry 0とし、2回目のcredential取得は成功させない。
+- helper executable pathはモデルtoolのfilesystem permissionで明示denyする。production有効化前に、Codex auth control-planeからhelperを起動できる一方、モデル要求toolから同じpathを読取り・実行できないこと、auth stdout・process state・Codex Home・log・diskへcredentialが残らないことを実runtimeでreadbackする。
 - Windowsの実Codex生成templateはCodex CLIのnative `elevated` sandboxを明示し、`unelevated`へ自動降格しない。`unelevated`がread-only permission profileを拒否するnegative-controlはdowngrade拒否の証拠であり、`elevated`境界の成功証拠として扱わない。
 - Windowsのproduction有効化前canaryは、固定version・archive hash・executable hash・有効なOpenAI Authenticode signerを持つlocal executableだけを使う。fresh rootでworkspace read、workspace write拒否、isolated Codex Home / User Home / root外sibling read拒否、network拒否、listener未到達、bounded非秘匿diagnostic、validated cleanupを実行後readbackする。
 - CIでnative `elevated` sandboxを利用できない場合は、self-testと`unelevated` rejectionだけを自動化し、通常Windows hostのpositive canaryを独立した必須gateとして残す。positive canary、Host-owned credential delivery、trusted executable resolverの全てが揃うまで`ResolveExecutable()`とactivationをfail closedにする。

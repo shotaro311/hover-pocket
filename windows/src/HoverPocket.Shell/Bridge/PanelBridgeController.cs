@@ -222,7 +222,13 @@ internal sealed class PanelBridgeController : IDisposable
                 {
                     generator = new CodexPocketAppGenerationAdapter(
                         executable,
-                        Path.Combine(generationRoot, "CodexWorkspaces"));
+                        Path.Combine(generationRoot, "CodexWorkspaces"),
+                        credentialProvider: () =>
+                        {
+                            using var apiKey = _openAIRealtimeCredentialStore.Load()
+                                ?? throw new PocketAppGenerationException("GENERATOR_UNAVAILABLE");
+                            return apiKey.Reveal();
+                        });
                 }
                 try
                 {
