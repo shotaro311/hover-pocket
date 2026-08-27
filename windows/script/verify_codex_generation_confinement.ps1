@@ -25,14 +25,16 @@ $ExpectedExecutableLength = 359245096L
 $ExpectedExecutableSha256 = "83751f15cb6a0a7b97df67752c001e3fe1c20e18ffbfec3ff63567296205eb6c"
 $RootPrefix = "HoverPocketCodexConfinement-"
 $ForeignPrefix = "HoverPocketCodexForeign-"
+$HostCodexHomePrefix = "HoverPocketCodexHostHome-"
 $ResultPrefix = "HoverPocketCodexConfinementResult-"
 $MaximumStdoutCharacters = 16384
 $MaximumStderrCharacters = 32768
 $UnelevatedReadOnlyRejection = "windows sandbox failed: Restricted read-only access requires the elevated Windows sandbox backend"
 $ExpectedProbe = [ordered]@{
-    codex_home_read = $false
     foreign_read = $false
+    host_codex_home_read = $false
     network_connected = $false
+    runtime_codex_home_read = $true
     user_home_read = $false
     workspace_read = $true
     workspace_write = $false
@@ -42,7 +44,8 @@ $script:CanaryFailureContext = $null
 $ProbeScript = @'
 param(
     [Parameter(Mandatory = $true)][string]$Workspace,
-    [Parameter(Mandatory = $true)][string]$CodexHome,
+    [Parameter(Mandatory = $true)][string]$RuntimeCodexHome,
+    [Parameter(Mandatory = $true)][string]$HostCodexHome,
     [Parameter(Mandatory = $true)][string]$UserHome,
     [Parameter(Mandatory = $true)][string]$ForeignRoot,
     [Parameter(Mandatory = $true)][int]$Port
@@ -89,9 +92,10 @@ finally {
 }
 
 [ordered]@{
-    codex_home_read = Test-Readable (Join-Path $CodexHome "denied.txt")
     foreign_read = Test-Readable (Join-Path $ForeignRoot "denied.txt")
+    host_codex_home_read = Test-Readable (Join-Path $HostCodexHome "denied.txt")
     network_connected = $networkConnected
+    runtime_codex_home_read = Test-Readable (Join-Path $RuntimeCodexHome "runtime.txt")
     user_home_read = Test-Readable (Join-Path $UserHome "denied.txt")
     workspace_read = Test-Readable (Join-Path $Workspace "allowed.txt")
     workspace_write = Test-Writable (Join-Path $Workspace "write-attempt.txt")
@@ -122,6 +126,7 @@ function Get-ConfinementArguments {
     param(
         [Parameter(Mandatory = $true)][string]$Workspace,
         [Parameter(Mandatory = $true)][string]$CodexHome,
+        [Parameter(Mandatory = $true)][string]$HostCodexHome,
         [Parameter(Mandatory = $true)][string]$UserHome,
         [Parameter(Mandatory = $true)][string]$Implementation,
         [Parameter(Mandatory = $true)][string]$PowerShellPath,
@@ -132,6 +137,7 @@ function Get-ConfinementArguments {
 
     $workspacePath = [IO.Path]::GetFullPath($Workspace)
     $codexHomePath = [IO.Path]::GetFullPath($CodexHome)
+    $hostCodexHomePath = [IO.Path]::GetFullPath($HostCodexHome)
     $userHomePath = [IO.Path]::GetFullPath($UserHome)
     $parentPaths = @(
         [IO.Path]::GetDirectoryName($workspacePath)
@@ -139,7 +145,15 @@ function Get-ConfinementArguments {
         [IO.Path]::GetDirectoryName($userHomePath)
     ) | Select-Object -Unique
     $rootPaths = @($workspacePath, $codexHomePath, $userHomePath) | Select-Object -Unique
-    if (@($parentPaths).Count -ne 1 -or @($rootPaths).Count -ne 3) {
+    $runRootPath = [IO.Path]::GetDirectoryName($workspacePath).TrimEnd(
+        [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+    $runRootPrefix = $runRootPath + [IO.Path]::DirectorySeparatorChar
+    if (
+        @($parentPaths).Count -ne 1 -or
+        @($rootPaths).Count -ne 3 -or
+        $hostCodexHomePath.Equals($runRootPath, [StringComparison]::OrdinalIgnoreCase) -or
+        $hostCodexHomePath.StartsWith($runRootPrefix, [StringComparison]::OrdinalIgnoreCase)
+    ) {
         throw "Confinement roots must be distinct siblings."
     }
 
@@ -180,7 +194,8 @@ function Get-ConfinementArguments {
         "-ExecutionPolicy", "Bypass"
         "-File", $ProbePath
         "-Workspace", $workspacePath
-        "-CodexHome", $codexHomePath
+        "-RuntimeCodexHome", $codexHomePath
+        "-HostCodexHome", $hostCodexHomePath
         "-UserHome", $userHomePath
         "-ForeignRoot", [IO.Path]::GetFullPath($ForeignRoot)
         "-Port", [string]$Port
@@ -392,7 +407,13 @@ function Get-SanitizedDiagnostic {
             $sanitized = $sanitized.Replace($value, "<path>", [StringComparison]::OrdinalIgnoreCase)
         }
     }
-    foreach ($marker in @("allowed-canary", "codex-home-canary", "outside-root-canary", "write-canary")) {
+    foreach ($marker in @(
+        "allowed-canary",
+        "runtime-codex-home-canary",
+        "host-codex-home-canary",
+        "user-home-canary",
+        "outside-root-canary",
+        "write-canary")) {
         $sanitized = $sanitized.Replace($marker, "<canary>", [StringComparison]::Ordinal)
     }
     $sanitized = [Text.RegularExpressions.Regex]::Replace($sanitized, '(?i)\b[0-9a-f]{32}\b', '<id>')
@@ -458,6 +479,7 @@ function Invoke-SelfTest {
         $arguments = Get-ConfinementArguments `
             -Workspace "C:\fixture\workspace" `
             -CodexHome "C:\fixture\codex-home" `
+            -HostCodexHome "C:\host-codex-home" `
             -UserHome "C:\fixture\user-home" `
             -Implementation "unelevated" `
             -PowerShellPath "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" `
@@ -470,6 +492,7 @@ function Invoke-SelfTest {
             'default_permissions="hoverpocket-generation"'
             '"C:\\fixture\\workspace"="read"'
             '"C:\\fixture\\user-home"="deny"'
+            'C:\host-codex-home'
             'network.enabled=false'
             'shell_environment_policy.inherit="none"'
             'SYSTEMDRIVE="C:"'
@@ -482,6 +505,9 @@ function Invoke-SelfTest {
         }
         if ($joined.Contains('"C:\\fixture\\codex-home"="deny"', [StringComparison]::Ordinal)) {
             throw "Self-test must leave Codex Home to the native sandbox control-plane ACLs."
+        }
+        if ($joined.Contains('"C:\\host-codex-home"=', [StringComparison]::Ordinal)) {
+            throw "Self-test must not add the Host Codex Home to the sandbox permission profile."
         }
     }
     finally {
@@ -534,6 +560,7 @@ function Invoke-Canary {
         [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
     $root = Join-Path $temporaryRoot ($RootPrefix + [Guid]::NewGuid().ToString("N"))
     $foreignRoot = Join-Path $temporaryRoot ($ForeignPrefix + [Guid]::NewGuid().ToString("N"))
+    $hostCodexHome = Join-Path $temporaryRoot ($HostCodexHomePrefix + [Guid]::NewGuid().ToString("N"))
     $listener = $null
     try {
         $workspace = Join-Path $root "workspace"
@@ -542,11 +569,12 @@ function Invoke-Canary {
         $localAppData = Join-Path $userHome "AppData\Local"
         $roamingAppData = Join-Path $userHome "AppData\Roaming"
         $processTemp = Join-Path $root "tmp"
-        foreach ($directory in @($workspace, $codexHome, $userHome, $localAppData, $roamingAppData, $processTemp, $foreignRoot)) {
+        foreach ($directory in @($workspace, $codexHome, $hostCodexHome, $userHome, $localAppData, $roamingAppData, $processTemp, $foreignRoot)) {
             [void](New-Item -ItemType Directory -Path $directory)
         }
         [IO.File]::WriteAllText((Join-Path $workspace "allowed.txt"), "allowed-canary", [Text.Encoding]::UTF8)
-        [IO.File]::WriteAllText((Join-Path $codexHome "denied.txt"), "codex-home-canary", [Text.Encoding]::UTF8)
+        [IO.File]::WriteAllText((Join-Path $codexHome "runtime.txt"), "runtime-codex-home-canary", [Text.Encoding]::UTF8)
+        [IO.File]::WriteAllText((Join-Path $hostCodexHome "denied.txt"), "host-codex-home-canary", [Text.Encoding]::UTF8)
         [IO.File]::WriteAllText((Join-Path $userHome "denied.txt"), "user-home-canary", [Text.Encoding]::UTF8)
         [IO.File]::WriteAllText((Join-Path $foreignRoot "denied.txt"), "outside-root-canary", [Text.Encoding]::UTF8)
         $probePath = Join-Path $workspace "probe.ps1"
@@ -581,6 +609,7 @@ function Invoke-Canary {
         $arguments = Get-ConfinementArguments `
             -Workspace $workspace `
             -CodexHome $codexHome `
+            -HostCodexHome $hostCodexHome `
             -UserHome $userHome `
             -Implementation $SandboxImplementation `
             -PowerShellPath $powerShellPath `
@@ -620,6 +649,7 @@ function Invoke-Canary {
                     $listener = $null
                 }
                 Remove-ValidatedTemporaryRoot -Path $foreignRoot -TemporaryRoot $temporaryRoot -ExpectedPrefix $ForeignPrefix
+                Remove-ValidatedTemporaryRoot -Path $hostCodexHome -TemporaryRoot $temporaryRoot -ExpectedPrefix $HostCodexHomePrefix
                 Remove-ValidatedTemporaryRoot -Path $root -TemporaryRoot $temporaryRoot -ExpectedPrefix $RootPrefix
                 Write-CanaryResult -Path $ResultPath -Receipt $receipt
                 Write-Host "PASS unelevated Codex sandbox rejected the read-only generation profile"
@@ -631,6 +661,7 @@ function Invoke-Canary {
                 $root,
                 $workspace,
                 $codexHome,
+                $hostCodexHome,
                 $userHome,
                 $foreignRoot,
                 $probePath,
@@ -656,7 +687,13 @@ function Invoke-Canary {
         if ($result.Stderr.Length -gt $MaximumStderrCharacters) {
             throw "HP_CANARY_PROBE_STDERR_LIMIT"
         }
-        foreach ($marker in @("allowed-canary", "codex-home-canary", "outside-root-canary")) {
+        foreach ($marker in @(
+            "allowed-canary",
+            "runtime-codex-home-canary",
+            "host-codex-home-canary",
+            "user-home-canary",
+            "outside-root-canary",
+            "write-canary")) {
             if ($result.Stderr.Contains($marker, [StringComparison]::Ordinal)) {
                 throw "HP_CANARY_STDERR_CANARY_DISCLOSURE"
             }
@@ -678,7 +715,8 @@ function Invoke-Canary {
                 validAuthenticode = $true
                 workspaceRead = $true
                 workspaceWriteDenied = $true
-                codexHomeReadDenied = $true
+                isolatedCodexHomeReadable = $true
+                hostCodexHomeReadDenied = $true
                 userHomeReadDenied = $true
                 outsideRootReadDenied = $true
                 networkDenied = $true
@@ -691,6 +729,7 @@ function Invoke-Canary {
             $listener = $null
         }
         Remove-ValidatedTemporaryRoot -Path $foreignRoot -TemporaryRoot $temporaryRoot -ExpectedPrefix $ForeignPrefix
+        Remove-ValidatedTemporaryRoot -Path $hostCodexHome -TemporaryRoot $temporaryRoot -ExpectedPrefix $HostCodexHomePrefix
         Remove-ValidatedTemporaryRoot -Path $root -TemporaryRoot $temporaryRoot -ExpectedPrefix $RootPrefix
         Write-CanaryResult -Path $ResultPath -Receipt $receipt
         Write-Host "PASS Codex generation confinement canary"
@@ -699,6 +738,7 @@ function Invoke-Canary {
     finally {
         if ($null -ne $listener) { $listener.Stop() }
         Remove-ValidatedTemporaryRoot -Path $foreignRoot -TemporaryRoot $temporaryRoot -ExpectedPrefix $ForeignPrefix
+        Remove-ValidatedTemporaryRoot -Path $hostCodexHome -TemporaryRoot $temporaryRoot -ExpectedPrefix $HostCodexHomePrefix
         Remove-ValidatedTemporaryRoot -Path $root -TemporaryRoot $temporaryRoot -ExpectedPrefix $RootPrefix
     }
 }
