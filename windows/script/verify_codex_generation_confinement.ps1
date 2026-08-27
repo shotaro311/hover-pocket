@@ -29,6 +29,7 @@ $HostCodexHomePrefix = "HoverPocketCodexHostHome-"
 $ResultPrefix = "HoverPocketCodexConfinementResult-"
 $MaximumStdoutCharacters = 16384
 $MaximumStderrCharacters = 32768
+$ProcessTimeoutSeconds = 90
 $UnelevatedReadOnlyRejection = "windows sandbox failed: Restricted read-only access requires the elevated Windows sandbox backend"
 $ExpectedProbe = [ordered]@{
     foreign_read = $false
@@ -77,6 +78,7 @@ function Test-Writable {
 }
 
 $networkConnected = $false
+[Console]::Error.WriteLine("HP_PROBE_STAGE_STARTED")
 $client = [Net.Sockets.TcpClient]::new()
 try {
     $connectTask = $client.ConnectAsync("127.0.0.1", $Port)
@@ -90,15 +92,29 @@ catch {
 finally {
     $client.Dispose()
 }
+[Console]::Error.WriteLine("HP_PROBE_STAGE_NETWORK_COMPLETE")
+
+$foreignRead = Test-Readable (Join-Path $ForeignRoot "denied.txt")
+[Console]::Error.WriteLine("HP_PROBE_STAGE_FOREIGN_READ_COMPLETE")
+$hostCodexHomeRead = Test-Readable (Join-Path $HostCodexHome "denied.txt")
+[Console]::Error.WriteLine("HP_PROBE_STAGE_HOST_CODEX_HOME_READ_COMPLETE")
+$runtimeCodexHomeRead = Test-Readable (Join-Path $RuntimeCodexHome "runtime.txt")
+[Console]::Error.WriteLine("HP_PROBE_STAGE_RUNTIME_CODEX_HOME_READ_COMPLETE")
+$userHomeRead = Test-Readable (Join-Path $UserHome "denied.txt")
+[Console]::Error.WriteLine("HP_PROBE_STAGE_USER_HOME_READ_COMPLETE")
+$workspaceRead = Test-Readable (Join-Path $Workspace "allowed.txt")
+[Console]::Error.WriteLine("HP_PROBE_STAGE_WORKSPACE_READ_COMPLETE")
+$workspaceWrite = Test-Writable (Join-Path $Workspace "write-attempt.txt")
+[Console]::Error.WriteLine("HP_PROBE_STAGE_WORKSPACE_WRITE_COMPLETE")
 
 [ordered]@{
-    foreign_read = Test-Readable (Join-Path $ForeignRoot "denied.txt")
-    host_codex_home_read = Test-Readable (Join-Path $HostCodexHome "denied.txt")
+    foreign_read = $foreignRead
+    host_codex_home_read = $hostCodexHomeRead
     network_connected = $networkConnected
-    runtime_codex_home_read = Test-Readable (Join-Path $RuntimeCodexHome "runtime.txt")
-    user_home_read = Test-Readable (Join-Path $UserHome "denied.txt")
-    workspace_read = Test-Readable (Join-Path $Workspace "allowed.txt")
-    workspace_write = Test-Writable (Join-Path $Workspace "write-attempt.txt")
+    runtime_codex_home_read = $runtimeCodexHomeRead
+    user_home_read = $userHomeRead
+    workspace_read = $workspaceRead
+    workspace_write = $workspaceWrite
 } | ConvertTo-Json -Compress
 '@
 
@@ -380,12 +396,33 @@ function Invoke-BoundedProcess {
         }
         if (-not $process.HasExited) {
             try { $process.Kill($true) } catch { }
-            throw "HP_CANARY_PROCESS_TIMEOUT"
+            try { [void]$process.WaitForExit(5000) } catch { }
+            $stdout = ""
+            $stderr = ""
+            try {
+                if ($stdoutTask.Wait(2000)) {
+                    $stdout = $stdoutTask.GetAwaiter().GetResult()
+                }
+            }
+            catch { }
+            try {
+                if ($stderrTask.Wait(2000)) {
+                    $stderr = $stderrTask.GetAwaiter().GetResult()
+                }
+            }
+            catch { }
+            return [pscustomobject]@{
+                ExitCode = $null
+                TimedOut = $true
+                Stdout = $stdout
+                Stderr = $stderr
+            }
         }
         $stdout = $stdoutTask.GetAwaiter().GetResult()
         $stderr = $stderrTask.GetAwaiter().GetResult()
         return [pscustomobject]@{
             ExitCode = $process.ExitCode
+            TimedOut = $false
             Stdout = $stdout
             Stderr = $stderr
         }
@@ -620,10 +657,32 @@ function Invoke-Canary {
             -FilePath $codex `
             -Arguments $arguments `
             -Environment $environment `
-            -TimeoutSeconds 45
+            -TimeoutSeconds $ProcessTimeoutSeconds
         $listenerReached = $acceptTask.Wait(0)
         if ($listenerReached) {
             $acceptTask.Result.Dispose()
+        }
+        if ($result.TimedOut) {
+            $sensitiveValues = @(
+                $codex,
+                $root,
+                $workspace,
+                $codexHome,
+                $hostCodexHome,
+                $userHome,
+                $foreignRoot,
+                $probePath,
+                $temporaryRoot,
+                $env:USERPROFILE,
+                $env:RUNNER_TEMP,
+                $env:GITHUB_WORKSPACE
+            )
+            $script:CanaryFailureContext = [ordered]@{
+                processExitCode = $null
+                stderr = Get-SanitizedDiagnostic -Text $result.Stderr -SensitiveValues $sensitiveValues
+                stdout = Get-SanitizedDiagnostic -Text $result.Stdout -SensitiveValues $sensitiveValues
+            }
+            throw "HP_CANARY_PROCESS_TIMEOUT"
         }
         if ($result.ExitCode -ne 0) {
             if (
