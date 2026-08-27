@@ -30,12 +30,20 @@ CATALOG_RELATIVE_PATH = Path(
     "Sources/HoverPocket/Resources/PocketApps/_Host/codex-model-catalog.v1.json"
 )
 CATALOG_DIGEST = "bc11d3320055b4e235ecefe823fd78017e1a526b893541cc936fa0708d0d515c"
+GENERATION_SCHEMA_RELATIVE_PATH = Path(
+    "contracts/pocket/v1/pocket-app-generation-output.schema.json"
+)
+GENERATION_SCHEMA_DIGEST = "d2e1526590dc17426e529ef4370b1bf8c4f598abb159e3d730c6eb9eda5726a5"
+GENERATION_FIXTURE_RELATIVE_PATH = Path(
+    "contracts/pocket/v1/fixtures/support/pocket-app-generation.real-codex-output.json"
+)
+GENERATION_FIXTURE_DIGEST = "4d2fe7f006ebb1d2d86c283f8bb1dec247f87f80e0e34e83fe5561f8b65f583a"
+GENERATION_SCHEMA_ID = "hoverpocket://schemas/pocket-app-generation-output/v1"
 MODEL_ID = "gpt-5.6-sol"
 REASONING_EFFORT = "medium"
 MAX_REQUEST_BYTES = 4 * 1024 * 1024
 MAX_STDOUT_BYTES = 16_384
 MAX_STDERR_BYTES = 64_000
-FINAL_TEXT = "CANARY_COMPLETE"
 SURROGATE = "fixture-surrogate-not-secret"
 
 
@@ -80,6 +88,41 @@ def load_catalog() -> bytes:
     return data
 
 
+def load_generation_contract() -> tuple[bytes, dict[str, object], str]:
+    root = Path(__file__).resolve().parents[1]
+    schema_path = root / GENERATION_SCHEMA_RELATIVE_PATH
+    fixture_path = root / GENERATION_FIXTURE_RELATIVE_PATH
+    try:
+        schema_data = schema_path.read_bytes()
+        fixture_data = fixture_path.read_bytes()
+        schema = json.loads(schema_data)
+        fixture = json.loads(fixture_data)
+    except (OSError, TypeError, json.JSONDecodeError) as error:
+        raise VerificationError("the generation contract is unavailable") from error
+    if (
+        schema_path.is_symlink()
+        or fixture_path.is_symlink()
+        or hashlib.sha256(schema_data).hexdigest() != GENERATION_SCHEMA_DIGEST
+        or hashlib.sha256(fixture_data).hexdigest() != GENERATION_FIXTURE_DIGEST
+        or schema.get("$id") != GENERATION_SCHEMA_ID
+        or fixture.get("$schema") != GENERATION_SCHEMA_ID
+        or set(fixture) != {
+            "$schema",
+            "requestId",
+            "requestDigest",
+            "appId",
+            "version",
+            "namespace",
+            "files",
+        }
+        or not isinstance(fixture.get("files"), list)
+        or not 3 <= len(fixture["files"]) <= 128
+    ):
+        fail("the generation contract failed integrity validation")
+    output = json.dumps(fixture, sort_keys=True, separators=(",", ":"))
+    return schema_data, schema, output
+
+
 def response_object(output: list[dict[str, object]]) -> dict[str, object]:
     return {
         "id": "resp_hoverpocket_canary",
@@ -103,15 +146,24 @@ def encode_event_stream(events: list[dict[str, object]]) -> bytes:
 
 
 class CanaryState:
-    def __init__(self, helper: Path, marker: Path) -> None:
+    def __init__(
+        self,
+        helper: Path,
+        marker: Path,
+        expected_schema: dict[str, object],
+        final_text: str,
+    ) -> None:
         self.lock = threading.Lock()
         self.helper = helper
         self.marker = marker
         self.requests = 0
         self.authenticated = True
         self.request_bodies_clean = True
+        self.output_schema_bound = True
         self.unexpected_get = False
         self.tool_output: str | None = None
+        self.expected_schema = expected_schema
+        self.final_text = final_text
 
     def command(self) -> str:
         helper = shlex.quote(str(self.helper))
@@ -164,6 +216,12 @@ def handler_type(state: CanaryState) -> type[BaseHTTPRequestHandler]:
                     self.headers.get("authorization") == f"Bearer {SURROGATE}"
                 )
                 state.request_bodies_clean = state.request_bodies_clean and SURROGATE.encode() not in body
+                text_format = payload.get("text", {}).get("format", {})
+                state.output_schema_bound = state.output_schema_bound and (
+                    text_format.get("type") == "json_schema"
+                    and text_format.get("strict") is True
+                    and text_format.get("schema") == state.expected_schema
+                )
             if self.path != "/v1/responses" or request_number > 2:
                 self.send_response(400)
                 self.send_header("content-length", "0")
@@ -204,7 +262,7 @@ def handler_type(state: CanaryState) -> type[BaseHTTPRequestHandler]:
                     "type": "message",
                     "status": "completed",
                     "role": "assistant",
-                    "content": [{"type": "output_text", "text": FINAL_TEXT, "annotations": []}],
+                    "content": [{"type": "output_text", "text": state.final_text, "annotations": []}],
                 }
                 response = response_object([message])
                 events = [
@@ -226,14 +284,14 @@ def handler_type(state: CanaryState) -> type[BaseHTTPRequestHandler]:
                         "item_id": message["id"],
                         "output_index": 0,
                         "content_index": 0,
-                        "delta": FINAL_TEXT,
+                        "delta": state.final_text,
                     },
                     {
                         "type": "response.output_text.done",
                         "item_id": message["id"],
                         "output_index": 0,
                         "content_index": 0,
-                        "text": FINAL_TEXT,
+                        "text": state.final_text,
                     },
                     {
                         "type": "response.content_part.done",
@@ -313,6 +371,7 @@ def run_canary(explicit_codex: Path | None) -> dict[str, object]:
         fail("the auth control-plane canary requires macOS")
     codex = resolve_executable(explicit_codex)
     catalog = load_catalog()
+    generation_schema_data, generation_schema, generation_output = load_generation_contract()
     temporary_root = Path(os.path.realpath(os.environ.get("TMPDIR", "/tmp")))
     root = Path(tempfile.mkdtemp(prefix=ROOT_PREFIX, dir=temporary_root))
     server: ThreadingHTTPServer | None = None
@@ -327,10 +386,13 @@ def run_canary(explicit_codex: Path | None) -> dict[str, object]:
         catalog_file = workspace / "model-catalog.json"
         catalog_file.write_bytes(catalog)
         catalog_file.chmod(0o400)
+        generation_schema_file = workspace / "generation-output.schema.json"
+        generation_schema_file.write_bytes(generation_schema_data)
+        generation_schema_file.chmod(0o400)
         helper = root / "credential-helper"
         marker = root / "helper-count"
         write_helper(helper)
-        state = CanaryState(helper, marker)
+        state = CanaryState(helper, marker, generation_schema, generation_output)
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler_type(state))
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -372,6 +434,7 @@ def run_canary(explicit_codex: Path | None) -> dict[str, object]:
             "-c", 'shell_environment_policy.inherit="none"',
             "-c", 'shell_environment_policy.set={PATH="/usr/bin:/bin",LANG="C"}',
             "-C", str(workspace),
+            "--output-schema", str(generation_schema_file),
             "-",
         ]
         environment = {
@@ -387,7 +450,7 @@ def run_canary(explicit_codex: Path | None) -> dict[str, object]:
         thread.join(timeout=2)
         server = None
         thread = None
-        if return_code != 0 or stdout != f"{FINAL_TEXT}\n".encode():
+        if return_code != 0 or stdout != f"{generation_output}\n".encode():
             fail("the auth control-plane canary process failed")
         if len(stdout) > MAX_STDOUT_BYTES or len(stderr) > MAX_STDERR_BYTES:
             fail("the auth control-plane canary output exceeded its limit")
@@ -397,9 +460,16 @@ def run_canary(explicit_codex: Path | None) -> dict[str, object]:
             requests = state.requests
             authenticated = state.authenticated
             request_bodies_clean = state.request_bodies_clean
+            output_schema_bound = state.output_schema_bound
             unexpected_get = state.unexpected_get
             tool_output = state.tool_output or ""
-        if requests != 2 or not authenticated or not request_bodies_clean or unexpected_get:
+        if (
+            requests != 2
+            or not authenticated
+            or not request_bodies_clean
+            or not output_schema_bound
+            or unexpected_get
+        ):
             fail("the static model catalog did not keep auth within one request client")
         if "helper_read=denied\nhelper_exec=denied\n" not in tool_output:
             fail("the model tool was not denied access to the auth helper")
@@ -422,6 +492,8 @@ def run_canary(explicit_codex: Path | None) -> dict[str, object]:
                 "remoteModelCatalogSkipped": True,
                 "authHelperOneShot": True,
                 "responsesAuthenticated": True,
+                "generationOutputSchemaBound": True,
+                "generationEnvelopeReturned": True,
                 "modelToolHelperReadDenied": True,
                 "modelToolHelperExecuteDenied": True,
                 "surrogateAbsentFromBodies": True,
@@ -441,6 +513,7 @@ def run_canary(explicit_codex: Path | None) -> dict[str, object]:
 
 def run_self_test() -> None:
     load_catalog()
+    load_generation_contract()
     events = encode_event_stream([{"type": "response.completed", "response": {"status": "completed"}}])
     if b"event: response.completed\n" not in events or SURROGATE.encode() in events:
         fail("the event-stream self-test failed")
