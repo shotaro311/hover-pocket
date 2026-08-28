@@ -10,6 +10,7 @@
     <MajorUpgrade Schedule="afterInstallInitialize"
                   DowngradeErrorMessage="A newer HoverPocket Codex Sandbox Setup is already installed." />
     <MediaTemplate EmbedCab="yes" />
+    <Property Id="ALLUSERS" Value="1" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="HoverPocketProgramFilesFolder" Name="HoverPocket">
