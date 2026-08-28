@@ -86,3 +86,42 @@
 - 中間run [33168222594](https://github.com/shotaro311/hover-pocket/actions/runs/33168222594)と[33168369422](https://github.com/shotaro311/hover-pocket/actions/runs/33168369422)はfail-closed verifierの配列bindingとnative nonzero捕捉で失敗した。製品scriptの安全停止ではなくharness側の問題であり、`.NET ProcessStartInfo`でexit code / stdout / stderrを取得する形へ修正して最終runを成功させた。
 - この修正は危険なproduction入口を停止する即時対策である。署名済みnative helperと安全な正規setupの完成をAN8から除外せず、次の実装gateとして維持する。
 - actual UAC、junction PoC、positive elevated confinementはこの修正では実行しない。
+
+## Windows Codex sandbox native helper internal implementation
+
+- ChatGPT Pro Orchestrator run `20260828-205951-...` / delivery `return-e69f9cd7ee0e439785b4ff7a8b365024`は、`sent-state-unknown`として同一sessionのbounded harvestだけを再試行したがartifactを回収できなかった。重複送信せずterminal化し、`mark-done`済みである。
+- `HoverPocket.CodexSandboxSetup`へ以下を実装した。
+  - `%ProgramData%\HoverPocketCodexSandbox\v1`配下の管理者所有・protected ACL root。
+  - 公式Codex 0.145.0の6ファイルclosureを、admission済みの複製handleから空のstagingへcopyし、size / SHA-256 / Authenticodeを再検証して固定packageへ昇格する処理。
+  - 元SIDとnonceから導出するsingle-use Codex Home。既存objectは`HP_CODEX_SANDBOX_TARGET_ALREADY_EXISTS`で拒否する。
+  - 絶対pathの`codex.exe`へ`--user` / `--codex-home`を固定し、環境をclearしたchild process、5分timeout、kill-on-close Job Object。
+  - setup marker / sandbox users regular-file検査、元SIDだけが読めるattestationのdurable writeとequality readback。
+- productionは二重にOFFである。Shell provisionerはsetup入口を閉じ、native helperも`ProductionSetupActivated == false`によりrequest parse前にexit 21 / `HP_CODEX_SANDBOX_HELPER_NOT_ACTIVATED`を返す。Settings、UAC、production generator resolverへは接続していない。
+
+### Security gate
+
+- Codex Security scan `ddedf27f-5261-41f9-8522-1d08412fbc66`を修正前working-tree snapshot `codex-security-snapshot/v1:sha256:a8adc5749b8f661509a2fbb2d099472b5263ff405b422d041ca32a848a08aaad`に対して完了した。5 / 5 review surface、coverage complete、reportable finding 0件である。
+- scanは、同一nonce Homeの再利用とBuiltin Usersから読めるidentity-bearing attestationを、production sinkが到達不能な条件付きgapとして棄却した。この2点はscan後に、create-new限定HomeとSID-specific read ACLへ修正した。したがってscan結果を修正後working tree全体のSecurity scanとしては扱わない。
+- scanが残したproduction受入質問は、固定admin-owned helper origin、全component identity、ACL、Job Object descendant termination、exact marker semantics、`sandbox_users.json`の意味検証である。
+
+### Local verification
+
+- 一時.NET 10 SDKでRelease / Debugの全solution build: どちらも警告0・エラー0。
+- helper `--contract-self-test`: PASS。macOSではWindows専用ACL部分だけskip。
+- helper不正`--setup-request`: exit 21と`HP_CODEX_SANDBOX_HELPER_NOT_ACTIVATED`をreadback。
+- Settings JavaScript構文、Settings generation target verifier、Voice Foundation 42件、workflow YAML parse、`git diff --check`: PASS。
+- helper projectの変更file限定`dotnet format whitespace --verify-no-changes`: PASS。全solution `dotnet format --verify-no-changes`は今回と無関係な既存whitespace差分で不合格のため、既存fileは変更しなかった。
+
+### PR CI readback
+
+- 実装commit `f63e265f91ad1366369dc6a9c39b72c392701368`のWindows run [33175266675](https://github.com/shotaro311/hover-pocket/actions/runs/33175266675)は、Release / Debug build、Windows専用ACLを含むhelper contract、公式6ファイルclosureまで合格した後、native exit 21をPowerShellがassert前にjob失敗として扱うCI harnessだけで失敗した。
+- `.NET ProcessStartInfo`でbuilt helperのstdout / stderr / exit codeを回収するcommit `48933374f8a5c29cc764ad52bce95c09641594f9`へ修正した。
+- Windows run [33175584387](https://github.com/shotaro311/hover-pocket/actions/runs/33175584387)は、production fail-closed、unelevated downgrade拒否、Release / Debug build警告0・エラー0、native helper contract、公式Codex 0.145.0 vendor closure、Settings、Capability、Broker、Pocket Surface、Voice、Updater、signing contract、rendered UIの全stepに合格した。
+- 同headでRouter [33175576923](https://github.com/shotaro311/hover-pocket/actions/runs/33175576923)、macOS Capabilities [33175583944](https://github.com/shotaro311/hover-pocket/actions/runs/33175583944)、3 OS contract / compare [33175584002](https://github.com/shotaro311/hover-pocket/actions/runs/33175584002)も成功した。PR checkは7 / 7、Draft PR #39は`MERGEABLE / CLEAN`である。
+
+### Remaining gates
+
+- helperを署名済みinstallerから固定admin-owned pathへ配置し、そのpathだけをSettingsの明示操作からUAC起動する。
+- 通常Windows hostでwhole-home / nested reparse拒否、target不変、UAC取消、timeout descendant終了、正常setup、marker / attestation / sandbox user readbackをphysical canaryする。
+- `sandbox_users.json`の意味検証、positive elevated confinement、実model generation / credential非残留、physical Voice E2E、正式署名・配布を完了する。
+- 上記が揃うまでproduction setup / generation / activationはOFFを維持する。
