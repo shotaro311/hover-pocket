@@ -1038,13 +1038,18 @@ function Invoke-Canary {
                 $env:RUNNER_TEMP,
                 $env:GITHUB_WORKSPACE
             )
-            $stderrDiagnostic = Get-SanitizedDiagnostic -Text $result.Stderr -SensitiveValues $sensitiveValues
-            $stdoutDiagnostic = Get-SanitizedDiagnostic -Text $result.Stdout -SensitiveValues $sensitiveValues
             $script:CanaryFailureContext = [ordered]@{
                 processExitCode = $result.ExitCode
-                stderr = $stderrDiagnostic
-                stdout = $stdoutDiagnostic
+                stage = "process_failed"
             }
+            $stderrDiagnostic = Get-SanitizedDiagnostic `
+                -Text ([string]$result.Stderr) `
+                -SensitiveValues $sensitiveValues
+            $stdoutDiagnostic = Get-SanitizedDiagnostic `
+                -Text ([string]$result.Stdout) `
+                -SensitiveValues $sensitiveValues
+            $script:CanaryFailureContext["stderr"] = [string]$stderrDiagnostic
+            $script:CanaryFailureContext["stdout"] = [string]$stdoutDiagnostic
             Write-Warning "Codex sandbox stderr: $stderrDiagnostic"
             Write-Warning "Codex sandbox stdout: $stdoutDiagnostic"
             throw "HP_CANARY_PROCESS_FAILED"
