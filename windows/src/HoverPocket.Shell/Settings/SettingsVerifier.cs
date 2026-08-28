@@ -607,6 +607,7 @@ internal sealed class SettingsVerifier
 
     private async Task VerifyCodexSandboxFailClosedAsync(ProviderRegistry registry)
     {
+        VerifyCodexSandboxSetupRequestContract();
         var sandboxRoot = Path.Combine(
             Path.GetTempPath(),
             $"HoverPocketCodexSandboxDisabled-{Guid.NewGuid():N}");
@@ -678,6 +679,31 @@ internal sealed class SettingsVerifier
                 StringComparison.Ordinal))
         {
             _failures.Add("forged Codex sandbox setup reached picker, approval, or filesystem work");
+        }
+    }
+
+    private void VerifyCodexSandboxSetupRequestContract()
+    {
+        var codexExecutable = Environment.GetEnvironmentVariable("HOVERPOCKET_CODEX_BIN");
+        if (string.IsNullOrWhiteSpace(codexExecutable) || !File.Exists(codexExecutable))
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        using var pinned = CodexSandboxSetupRequestBuilder.Create(codexExecutable, now);
+        var decoded = HoverPocket.CodexSandboxSetup.Contracts.SetupRequestContract.DecodeAndValidate(
+            pinned.Encoded.Base64Json,
+            pinned.Encoded.Sha256,
+            pinned.Encoded.Nonce,
+            now.AddSeconds(1));
+        if (decoded.HostProcessId != Environment.ProcessId
+            || decoded.Artifacts.Count
+                != HoverPocket.CodexSandboxSetup.Contracts.CodexVendorClosure.Artifacts.Count
+            || decoded.Artifacts.Select(artifact => artifact.HandleValue).Distinct().Count()
+                != decoded.Artifacts.Count)
+        {
+            _failures.Add("Codex sandbox setup request was not bound to pinned source handles");
         }
     }
 

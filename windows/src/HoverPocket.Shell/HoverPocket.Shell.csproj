@@ -24,7 +24,40 @@
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4022.49" />
     <PackageReference Include="System.Management" Version="10.0.9" />
     <PackageReference Include="Velopack" Version="1.2.0" />
+    <ProjectReference Include="..\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj"
+                      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\HoverPocket.CodexSandboxSetup.Contracts\HoverPocket.CodexSandboxSetup.Contracts.csproj" />
   </ItemGroup>
+
+  <Target Name="CopyCodexSandboxSetupHelper"
+          AfterTargets="Build"
+          Condition="'$(OS)' == 'Windows_NT'">
+    <ItemGroup>
+      <_CodexSandboxSetupHelperFiles Include="$(MSBuildThisFileDirectory)..\HoverPocket.CodexSandboxSetup\bin\$(Configuration)\net10.0-windows10.0.22621.0\HoverPocket.CodexSandboxSetup.exe" />
+      <_CodexSandboxSetupHelperFiles Include="$(MSBuildThisFileDirectory)..\HoverPocket.CodexSandboxSetup\bin\$(Configuration)\net10.0-windows10.0.22621.0\HoverPocket.CodexSandboxSetup.dll" />
+      <_CodexSandboxSetupHelperFiles Include="$(MSBuildThisFileDirectory)..\HoverPocket.CodexSandboxSetup\bin\$(Configuration)\net10.0-windows10.0.22621.0\HoverPocket.CodexSandboxSetup.deps.json" />
+      <_CodexSandboxSetupHelperFiles Include="$(MSBuildThisFileDirectory)..\HoverPocket.CodexSandboxSetup\bin\$(Configuration)\net10.0-windows10.0.22621.0\HoverPocket.CodexSandboxSetup.runtimeconfig.json" />
+      <_CodexSandboxSetupHelperFiles Include="$(MSBuildThisFileDirectory)..\HoverPocket.CodexSandboxSetup\bin\$(Configuration)\net10.0-windows10.0.22621.0\HoverPocket.CodexSandboxSetup.Contracts.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_CodexSandboxSetupHelperFiles)"
+          DestinationFolder="$(TargetDir)tools\codex-sandbox-setup"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="IncludeCodexSandboxSetupHelperInPublish"
+          BeforeTargets="ComputeFilesToPublish"
+          Condition="'$(OS)' == 'Windows_NT'">
+    <ItemGroup>
+      <_CodexSandboxSetupPublishFiles Include="$(MSBuildThisFileDirectory)..\HoverPocket.CodexSandboxSetup\bin\$(Configuration)\net10.0-windows10.0.22621.0\HoverPocket.CodexSandboxSetup.exe" />
+      <_CodexSandboxSetupPublishFiles Include="$(MSBuildThisFileDirectory)..\HoverPocket.CodexSandboxSetup\bin\$(Configuration)\net10.0-windows10.0.22621.0\HoverPocket.CodexSandboxSetup.dll" />
+      <_CodexSandboxSetupPublishFiles Include="$(MSBuildThisFileDirectory)..\HoverPocket.CodexSandboxSetup\bin\$(Configuration)\net10.0-windows10.0.22621.0\HoverPocket.CodexSandboxSetup.deps.json" />
+      <_CodexSandboxSetupPublishFiles Include="$(MSBuildThisFileDirectory)..\HoverPocket.CodexSandboxSetup\bin\$(Configuration)\net10.0-windows10.0.22621.0\HoverPocket.CodexSandboxSetup.runtimeconfig.json" />
+      <_CodexSandboxSetupPublishFiles Include="$(MSBuildThisFileDirectory)..\HoverPocket.CodexSandboxSetup\bin\$(Configuration)\net10.0-windows10.0.22621.0\HoverPocket.CodexSandboxSetup.Contracts.dll" />
+      <ResolvedFileToPublish Include="@(_CodexSandboxSetupPublishFiles)"
+                             RelativePath="tools\codex-sandbox-setup\%(Filename)%(Extension)"
+                             CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup Condition="'$(GoogleOAuthClientId)' != ''">
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">

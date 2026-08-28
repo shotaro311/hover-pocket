@@ -55,8 +55,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Pinned Codex vendor archive extraction failed."
           }
-          $codexBin = Join-Path $vendorRoot "package\vendor\x86_64-pc-windows-msvc\bin\codex.exe"
+          $codexPackageRoot = Join-Path $vendorRoot "package\vendor\x86_64-pc-windows-msvc"
+          $codexBin = Join-Path $codexPackageRoot "bin\codex.exe"
           "HOVERPOCKET_CODEX_BIN=$codexBin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "HOVERPOCKET_CODEX_PACKAGE_ROOT=$codexPackageRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Verify Codex generation confinement verifier
         shell: pwsh
@@ -133,6 +135,11 @@ jobs:
 
       - name: Build Debug Voice E2E host
         run: dotnet build .\windows\HoverPocket.Windows.sln --configuration Debug --nologo --no-restore -p:NuGetAudit=false -p:TreatWarningsAsErrors=true
+
+      - name: Verify native Codex sandbox helper contract
+        run: |
+          dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj --configuration Release --no-build -- --contract-self-test
+          dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj --configuration Release --no-build -- --verify-vendor-closure $env:HOVERPOCKET_CODEX_PACKAGE_ROOT
 
       - name: Verify settings UI modules
         run: |

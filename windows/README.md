@@ -76,6 +76,13 @@ Windowsのsetup / repairは現在、`GENERATOR_SANDBOX_SETUP_UNAVAILABLE`でprod
 
 再有効化には、署名済みnative helper、元ユーザーSID binding、admin-controlled root、全path componentのreparse / identity検査、公式resource closureのexact size・SHA・署名検証、絶対path起動、single-flight、child process所有、実行後readbackが必要です。通常の生成時にUACを出さず、workspace、virtual User Home、Tempを毎回破棄する設計は維持します。
 
+恒久helperの最初の境界として`HoverPocket.CodexSandboxSetup`を追加しています。現段階では昇格処理を常に`HP_CODEX_SANDBOX_HELPER_NOT_ACTIVATED`で拒否し、公式0.145.0配布物の6ファイルclosure、exact size、SHA-256、Authenticode状態と署名者を決定的に検証するモードだけを提供します。CIはnpm archive自体のSHA-512に続けて、このnative verifierで展開後のclosureをreadbackします。Shellとhelperの間には元プロセスID、Windows SID、完全修飾account、nonce、複製対象handleの期限付きcontractと、同一publisher署名を要求する読み取り専用admissionまで実装済みです。SettingsからのUAC、admin-owned root、copy、setup起動は未接続なので、Settingsとproduction resolverのfail-closedは変わりません。
+
+```powershell
+dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj -- --contract-self-test
+dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj -- --verify-vendor-closure <公式package root>
+```
+
 positive confinement canaryは上記helper完成後に準備済みhomeを明示し、生成中にUACを要求しないこと、固定Codex Homeと`.sandbox-secrets`をmodel toolが読めないことを含めて確認します。現在は実行対象外です。
 
 ```powershell
