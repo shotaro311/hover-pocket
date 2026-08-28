@@ -167,6 +167,52 @@ jobs:
             throw "Native Codex sandbox helper did not reject setup before request parsing."
           }
 
+      - name: Build and verify per-machine Codex sandbox installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $publishRoot = Join-Path $env:RUNNER_TEMP "hoverpocket-codex-sandbox-helper-publish"
+          $installerOutput = Join-Path $env:RUNNER_TEMP "hoverpocket-codex-sandbox-installer"
+          [void](New-Item -ItemType Directory -Path $publishRoot)
+          [void](New-Item -ItemType Directory -Path $installerOutput)
+
+          dotnet publish `
+            .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            --output $publishRoot `
+            --nologo `
+            -p:PublishSingleFile=false `
+            -p:DebugSymbols=false `
+            -p:DebugType=None `
+            -p:NuGetAudit=false
+          if ($LASTEXITCODE -ne 0) {
+            throw "Codex sandbox helper self-contained publish failed."
+          }
+
+          dotnet build `
+            .\windows\installer\HoverPocket.CodexSandboxSetup.Installer\HoverPocket.CodexSandboxSetup.Installer.wixproj `
+            --configuration Release `
+            --output $installerOutput `
+            --nologo `
+            -p:InstallerPlatform=x64 `
+            -p:ProductVersion=0.2.7 `
+            -p:HelperPublishDir=$publishRoot `
+            -p:NuGetAudit=false
+          if ($LASTEXITCODE -ne 0) {
+            throw "Codex sandbox per-machine installer build failed."
+          }
+
+          $msiFiles = @(Get-ChildItem -LiteralPath $installerOutput -Filter *.msi -File)
+          if ($msiFiles.Count -ne 1) {
+            throw "Codex sandbox installer output must contain exactly one MSI."
+          }
+          .\windows\script\verify_codex_sandbox_installer.ps1 `
+            -MsiPath $msiFiles[0].FullName `
+            -ExpectedProductVersion "0.2.7" `
+            -ExpectedUpgradeCode "{9E28ABD6-A496-472E-98AB-AE8D70C27B48}"
+
       - name: Verify settings UI modules
         run: |
           node --check .\windows\ui\js\app.js
