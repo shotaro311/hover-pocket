@@ -140,8 +140,30 @@ jobs:
         run: |
           dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj --configuration Release --no-build -- --contract-self-test
           dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj --configuration Release --no-build -- --verify-vendor-closure $env:HOVERPOCKET_CODEX_PACKAGE_ROOT
-          $disabledOutput = & dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj --configuration Release --no-build -- --setup-request "must-not-parse" --request-sha256 ('0' * 64) --nonce ('0' * 64) 2>&1
-          if ($LASTEXITCODE -ne 21 -or "$disabledOutput" -notmatch "HP_CODEX_SANDBOX_HELPER_NOT_ACTIVATED") {
+          $start = [Diagnostics.ProcessStartInfo]::new()
+          $start.FileName = Resolve-Path ".\windows\src\HoverPocket.CodexSandboxSetup\bin\Release\net10.0-windows10.0.22621.0\HoverPocket.CodexSandboxSetup.exe"
+          $start.UseShellExecute = $false
+          $start.CreateNoWindow = $true
+          $start.RedirectStandardOutput = $true
+          $start.RedirectStandardError = $true
+          foreach ($argument in @(
+            "--setup-request",
+            "must-not-parse",
+            "--request-sha256",
+            ('0' * 64),
+            "--nonce",
+            ('0' * 64))) {
+            [void]$start.ArgumentList.Add([string]$argument)
+          }
+          $process = [Diagnostics.Process]::new()
+          $process.StartInfo = $start
+          if (-not $process.Start()) {
+            throw "Native Codex sandbox helper fail-closed verifier did not start."
+          }
+          $stdout = $process.StandardOutput.ReadToEnd()
+          $stderr = $process.StandardError.ReadToEnd()
+          $process.WaitForExit()
+          if ($process.ExitCode -ne 21 -or "$stdout`n$stderr" -notmatch "HP_CODEX_SANDBOX_HELPER_NOT_ACTIVATED") {
             throw "Native Codex sandbox helper did not reject setup before request parsing."
           }
 
