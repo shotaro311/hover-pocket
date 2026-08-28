@@ -79,6 +79,10 @@
 
 ### 受入境界
 
-- CIとSecurity exact diff verifyが完了するまでfindingは`fixed`と報告しない。
+- code head `8658d6cc078287a3ad98fe3b5e6dfef46f727daf`のWindows run [33168494246](https://github.com/shotaro311/hover-pocket/actions/runs/33168494246)で、PowerShell parser / self-test、nonexistent-drive Check / Provisionの固定error、Release / Debug build、Settings / Pocket / Voice / Updater / rendered UI verifierが成功した。両buildは警告0・エラー0である。
+- 同headのmacOS Capabilities [33168494251](https://github.com/shotaro311/hover-pocket/actions/runs/33168494251)、3 OS contract / byte compare、Routerを含むPR checkは7 / 7成功した。PR #39は`MERGEABLE / CLEAN`である。
+- `codex-security:verify-fix`のread-only traceはfinding `csf_3caf7ab99af268f9b88d011e`を`fixed`と判定した。production provisionerと手動scriptから昇格・copy・process sinkを除去し、Settingsはpicker前、runtimeは旧marker評価前に停止する。Windows CIで元入口と既存機能の正常系を確認した。
+- 元scanのcompleted artifactをSecurity MCPで再読込したところ、artifact rootがsafe regular directoryではないとして拒否された。この外部artifact readbackは未確認のため、workbench occurrenceの状態更新は行っていない。修正判定はcurrent source、exact head、Windows CI、独立reviewを根拠にする。
+- 中間run [33168222594](https://github.com/shotaro311/hover-pocket/actions/runs/33168222594)と[33168369422](https://github.com/shotaro311/hover-pocket/actions/runs/33168369422)はfail-closed verifierの配列bindingとnative nonzero捕捉で失敗した。製品scriptの安全停止ではなくharness側の問題であり、`.NET ProcessStartInfo`でexit code / stdout / stderrを取得する形へ修正して最終runを成功させた。
 - この修正は危険なproduction入口を停止する即時対策である。署名済みnative helperと安全な正規setupの完成をAN8から除外せず、次の実装gateとして維持する。
 - actual UAC、junction PoC、positive elevated confinementはこの修正では実行しない。
