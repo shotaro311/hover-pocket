@@ -481,6 +481,7 @@ function Invoke-BoundedProcess {
         [Parameter(Mandatory = $true)][int]$TimeoutSeconds
     )
 
+    $script:CanaryFailureContext.stage = "process_binding_complete"
     $start = [Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $FilePath
     $start.UseShellExecute = $false
@@ -488,9 +489,11 @@ function Invoke-BoundedProcess {
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
     $start.CreateNoWindow = $true
+    $script:CanaryFailureContext.stage = "process_argument_list"
     foreach ($argument in $Arguments) {
         [void]$start.ArgumentList.Add($argument)
     }
+    $script:CanaryFailureContext.stage = "process_environment"
     $start.Environment.Clear()
     foreach ($entry in $Environment.GetEnumerator()) {
         $start.Environment[$entry.Key] = $entry.Value
@@ -500,6 +503,7 @@ function Invoke-BoundedProcess {
     $process.StartInfo = $start
     try {
         try {
+            $script:CanaryFailureContext.stage = "process_start"
             $started = $process.Start()
         }
         catch {
@@ -522,10 +526,12 @@ function Invoke-BoundedProcess {
         if (-not $started) {
             throw "HP_CANARY_PROCESS_START_FAILED"
         }
+        $script:CanaryFailureContext.stage = "process_io"
         $process.StandardInput.Close()
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
         $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+        $script:CanaryFailureContext.stage = "process_wait"
         while (-not $process.HasExited -and $stopwatch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
             Start-Sleep -Milliseconds 50
         }
@@ -553,6 +559,7 @@ function Invoke-BoundedProcess {
                 Stderr = $stderr
             }
         }
+        $script:CanaryFailureContext.stage = "process_readback"
         $stdout = $stdoutTask.GetAwaiter().GetResult()
         $stderr = $stderrTask.GetAwaiter().GetResult()
         return [pscustomobject]@{
@@ -904,21 +911,47 @@ function Invoke-Canary {
             $argumentCharacters += $argument.Length
             $maximumArgumentCharacters = [Math]::Max($maximumArgumentCharacters, $argument.Length)
         }
+        $filePathValues = @($codex)
+        $filePathIsString = $codex -is [string]
+        $filePathCharacters = if ($filePathIsString) { $codex.Length } else { 0 }
+        $filePathFullyQualified = $filePathIsString -and [IO.Path]::IsPathFullyQualified($codex)
+        $environmentNullKeyCount = @($environment.Keys | Where-Object { $null -eq $_ }).Count
+        $environmentEmptyKeyCount = @($environment.Keys | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count
+        $environmentNullValueCount = @($environment.Values | Where-Object { $null -eq $_ }).Count
+        $environmentEmptyValueCount = @($environment.Values | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count
         $script:CanaryFailureContext = [ordered]@{
             processExitCode = $null
             stage = "process_execution"
+            filePathValueCount = $filePathValues.Count
+            filePathIsString = $filePathIsString
+            filePathCharacters = $filePathCharacters
+            filePathFullyQualified = $filePathFullyQualified
             argumentCount = $processArguments.Count
             nullArgumentCount = $nullArgumentCount
             emptyArgumentCount = $emptyArgumentCount
             argumentCharacters = $argumentCharacters
             maximumArgumentCharacters = $maximumArgumentCharacters
             environmentCount = $environment.Count
+            environmentNullKeyCount = $environmentNullKeyCount
+            environmentEmptyKeyCount = $environmentEmptyKeyCount
+            environmentNullValueCount = $environmentNullValueCount
+            environmentEmptyValueCount = $environmentEmptyValueCount
+            timeoutSeconds = $ProcessTimeoutSeconds
         }
         if (
+            $filePathValues.Count -ne 1 -or
+            -not $filePathIsString -or
+            [string]::IsNullOrWhiteSpace($codex) -or
+            -not $filePathFullyQualified -or
             $processArguments.Count -eq 0 -or
             $nullArgumentCount -ne 0 -or
             $emptyArgumentCount -ne 0 -or
-            $environment.Count -eq 0
+            $environment.Count -eq 0 -or
+            $environmentNullKeyCount -ne 0 -or
+            $environmentEmptyKeyCount -ne 0 -or
+            $environmentNullValueCount -ne 0 -or
+            $environmentEmptyValueCount -ne 0 -or
+            $ProcessTimeoutSeconds -le 0
         ) {
             throw "HP_CANARY_PROCESS_ARGUMENTS_INVALID"
         }
@@ -1104,6 +1137,18 @@ catch {
         }
         if (-not $script:CanaryFailureContext.Contains("exceptionType")) {
             $script:CanaryFailureContext["exceptionType"] = $_.Exception.GetType().FullName
+        }
+        $errorId = [string]$_.FullyQualifiedErrorId
+        if ($errorId -cmatch '^[A-Za-z0-9_.-]+(?:,[A-Za-z0-9_.-]+)?$') {
+            $script:CanaryFailureContext["errorId"] = $errorId
+        }
+        $commandName = [string]$_.InvocationInfo.MyCommand.Name
+        if ($commandName -cmatch '^[A-Za-z0-9_.-]+$') {
+            $script:CanaryFailureContext["commandName"] = $commandName
+        }
+        $scriptLineNumber = [int]$_.InvocationInfo.ScriptLineNumber
+        if ($scriptLineNumber -gt 0) {
+            $script:CanaryFailureContext["scriptLineNumber"] = $scriptLineNumber
         }
     }
     if (-not [string]::IsNullOrWhiteSpace($ResultPath)) {
