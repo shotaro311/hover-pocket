@@ -78,7 +78,7 @@ Pocket App生成のnative elevated sandboxは、生成要求のたびにUACを�
 .\windows\script\provision_codex_generation_sandbox.ps1 -CodexBin <固定したcodex.exe>
 ```
 
-SettingsのPocket Apps欄には、準備状態の再確認と「セットアップ／修復」を表示します。ユーザーが公式Codex 0.145.0の`codex.exe`を選び、既定Noのネイティブ確認を承認した場合だけUACを1回表示します。昇格済みスクリプトは署名・version・size・SHA-256を再検証し、exact binaryを固定`%LOCALAPPDATA%\HoverPocket\CodexGenerationSandbox\bin\codex.exe`へ配置してから公式setupを実行します。完了後はcontrol fileと固定binaryを別々にreadbackし、HoverPocket再起動を要求します。管理者credentialやsandbox passwordはHoverPocketへ渡しません。
+SettingsのPocket Apps欄には、準備状態の再確認と「セットアップ／修復」を表示します。ユーザーが公式Codex 0.145.0の`codex.exe`を選び、既定Noのネイティブ確認を承認した場合だけUACを1回表示します。Hostはexact size・SHA-256を検証したbytesを固定`%LOCALAPPDATA%\HoverPocket\CodexGenerationSandbox\bin\codex.exe`へ配置してpinし、UACではそのOpenAI実行ファイル自体の公式setup commandだけを起動します。完了後はcontrol fileと固定binaryを別々にreadbackし、HoverPocket再起動を要求します。管理者credentialやsandbox passwordはHoverPocketへ渡しません。
 
 CLIから初回setupまたはrepairを行う場合は、ユーザーが内容を確認した後に管理者PowerShellから`-Provision`を付けて一度だけ実行します。スクリプト自身は`RunAs`やUACを自動起動せず、非管理者shellでは`HP_CODEX_SANDBOX_ELEVATION_REQUIRED`で停止します。
 

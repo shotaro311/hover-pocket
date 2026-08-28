@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Security.Cryptography;
 
 namespace HoverPocket.Shell.PocketApps;
 
@@ -28,7 +29,7 @@ internal interface ICodexGenerationSandboxProvisioner
 internal sealed class CodexGenerationSandboxProvisioner : ICodexGenerationSandboxProvisioner
 {
     private readonly string _homePath;
-    private readonly string _scriptPath;
+    private readonly string _executablePath;
     private readonly bool _setupAvailable;
     private bool _restartRequired;
     private string? _lastErrorCode;
@@ -37,25 +38,25 @@ internal sealed class CodexGenerationSandboxProvisioner : ICodexGenerationSandbo
     public CodexGenerationSandboxProvisioner(bool setupAvailable = true)
         : this(
             CodexGenerationSandboxLease.DefaultHomePath(),
-            ResolveProvisioningScript(),
+            CodexPocketAppGenerationAdapter.DefaultExecutablePath(),
             setupAvailable)
     {
     }
 
     internal CodexGenerationSandboxProvisioner(
         string homePath,
-        string scriptPath,
+        string executablePath,
         bool setupAvailable)
     {
         _homePath = Path.GetFullPath(homePath);
-        _scriptPath = Path.GetFullPath(scriptPath);
+        _executablePath = Path.GetFullPath(executablePath);
         _setupAvailable = setupAvailable;
     }
 
     public CodexGenerationSandboxProvisioningState Check()
     {
         var executableInstalled = _trustedExecutableInstalled
-            ??= CodexPocketAppGenerationAdapter.ResolveExecutable() is not null;
+            ??= CodexPocketAppGenerationAdapter.IsTrustedExecutable(_executablePath);
         var ready = false;
         try
         {
@@ -79,7 +80,7 @@ internal sealed class CodexGenerationSandboxProvisioner : ICodexGenerationSandbo
                 : "GENERATOR_CODEX_NOT_INSTALLED";
         }
 
-        var setupAvailable = _setupAvailable && File.Exists(_scriptPath);
+        var setupAvailable = _setupAvailable;
         return new CodexGenerationSandboxProvisioningState(
             ready ? "ready" : "not_ready",
             ready,
@@ -103,52 +104,32 @@ internal sealed class CodexGenerationSandboxProvisioner : ICodexGenerationSandbo
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!_setupAvailable || !File.Exists(_scriptPath))
+        if (!_setupAvailable)
         {
             _lastErrorCode = "GENERATOR_SANDBOX_SETUP_UNAVAILABLE";
             return Check();
         }
-        if (!await Task.Run(
-                () => CodexPocketAppGenerationAdapter.IsTrustedExecutable(sourceExecutable),
-                cancellationToken))
+        if (!await InstallTrustedExecutableAsync(sourceExecutable, cancellationToken))
         {
             _lastErrorCode = "GENERATOR_CODEX_UNTRUSTED";
             return Check();
         }
 
-        var systemDirectory = Environment.SystemDirectory;
-        var powershell = Path.Combine(
-            systemDirectory,
-            "WindowsPowerShell",
-            "v1.0",
-            "powershell.exe");
-        if (!File.Exists(powershell))
-        {
-            _lastErrorCode = "GENERATOR_SANDBOX_SETUP_UNAVAILABLE";
-            return Check();
-        }
-
         var start = new ProcessStartInfo
         {
-            FileName = powershell,
+            FileName = _executablePath,
             UseShellExecute = true,
             Verb = "runas",
             WindowStyle = ProcessWindowStyle.Hidden
         };
         foreach (var argument in new[]
         {
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            _scriptPath,
-            "-CodexBin",
-            Path.GetFullPath(sourceExecutable),
-            "-CodexHome",
-            _homePath,
-            "-Provision"
+            "sandbox",
+            "setup",
+            "--elevated",
+            "--current-user",
+            "--codex-home",
+            _homePath
         })
         {
             start.ArgumentList.Add(argument);
@@ -156,6 +137,15 @@ internal sealed class CodexGenerationSandboxProvisioner : ICodexGenerationSandbo
 
         try
         {
+            using var executableDirectory = new PocketAppPinnedDirectory(
+                Path.GetDirectoryName(_executablePath)
+                    ?? throw new PocketAppGenerationException("GENERATOR_CODEX_UNTRUSTED"),
+                allowReplacement: false,
+                createMissing: false);
+            using var executableHandle = executableDirectory.OpenFileForRead(
+                Path.GetFileName(_executablePath))
+                ?? throw new PocketAppGenerationException("GENERATOR_CODEX_UNTRUSTED");
+            executableDirectory.Validate();
             using var process = Process.Start(start);
             if (process is null)
             {
@@ -195,25 +185,87 @@ internal sealed class CodexGenerationSandboxProvisioner : ICodexGenerationSandbo
         return Refresh();
     }
 
-    private static string ResolveProvisioningScript()
+    private async Task<bool> InstallTrustedExecutableAsync(
+        string sourceExecutable,
+        CancellationToken cancellationToken)
     {
-        var packaged = Path.Combine(
-            AppContext.BaseDirectory,
-            "script",
-            "provision_codex_generation_sandbox.ps1");
-        if (File.Exists(packaged)) { return packaged; }
-
-        var current = new DirectoryInfo(Directory.GetCurrentDirectory());
-        while (current is not null)
+        if (string.IsNullOrWhiteSpace(sourceExecutable)) { return false; }
+        var sourcePath = Path.GetFullPath(sourceExecutable);
+        var sourceDirectoryPath = Path.GetDirectoryName(sourcePath);
+        var destinationDirectoryPath = Path.GetDirectoryName(_executablePath);
+        if (string.IsNullOrWhiteSpace(sourceDirectoryPath)
+            || string.IsNullOrWhiteSpace(destinationDirectoryPath))
         {
-            var candidate = Path.Combine(
-                current.FullName,
-                "windows",
-                "script",
-                "provision_codex_generation_sandbox.ps1");
-            if (File.Exists(candidate)) { return candidate; }
-            current = current.Parent;
+            return false;
         }
-        return packaged;
+
+        try
+        {
+            using var sourceDirectory = new PocketAppPinnedDirectory(
+                sourceDirectoryPath,
+                allowReplacement: false,
+                createMissing: false);
+            using var sourceHandle = sourceDirectory.OpenFileForRead(Path.GetFileName(sourcePath));
+            if (sourceHandle is null) { return false; }
+            using var source = new FileStream(sourceHandle, FileAccess.Read, 1024 * 1024, isAsync: false);
+            if (source.Length != CodexPocketAppGenerationAdapter.TrustedExecutableLength)
+            {
+                return false;
+            }
+            var sourceDigest = Convert.ToHexString(SHA256.HashData(source)).ToLowerInvariant();
+            if (!string.Equals(
+                    sourceDigest,
+                    CodexPocketAppGenerationAdapter.TrustedExecutableSha256,
+                    StringComparison.Ordinal))
+            {
+                return false;
+            }
+            source.Position = 0;
+            using var destinationDirectory = new PocketAppPinnedDirectory(
+                destinationDirectoryPath,
+                allowReplacement: false);
+            if (CodexPocketAppGenerationAdapter.IsTrustedExecutable(_executablePath))
+            {
+                destinationDirectory.Validate();
+                return true;
+            }
+            var temporaryPath = Path.Combine(
+                destinationDirectory.FullPath,
+                $"codex.{Guid.NewGuid():N}.tmp");
+            try
+            {
+                await using (var temporary = new FileStream(
+                    temporaryPath,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    1024 * 1024,
+                    FileOptions.SequentialScan | FileOptions.WriteThrough))
+                {
+                    await source.CopyToAsync(temporary, 1024 * 1024, cancellationToken);
+                    await temporary.FlushAsync(cancellationToken);
+                }
+                sourceDirectory.Validate();
+                destinationDirectory.Validate();
+                File.Move(temporaryPath, _executablePath, overwrite: true);
+                destinationDirectory.Validate();
+                return CodexPocketAppGenerationAdapter.IsTrustedExecutable(_executablePath);
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or ArgumentException
+            or NotSupportedException
+            or PocketAppGenerationException)
+        {
+            return false;
+        }
     }
 }

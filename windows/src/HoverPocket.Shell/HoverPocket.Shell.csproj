@@ -49,10 +49,6 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>PocketApps\%(RecursiveDir)%(Filename)%(Extension)</Link>
     </Content>
-    <Content Include="..\..\script\provision_codex_generation_sandbox.ps1">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>script\provision_codex_generation_sandbox.ps1</Link>
-    </Content>
   </ItemGroup>
 
 </Project>
