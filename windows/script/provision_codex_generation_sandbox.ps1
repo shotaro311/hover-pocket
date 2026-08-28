@@ -110,6 +110,18 @@ function Resolve-DedicatedCodexHome {
     return $resolved
 }
 
+function Resolve-DedicatedCodexExecutable {
+    param([Parameter(Mandatory = $true)][string]$DedicatedHome)
+
+    $root = [IO.Path]::GetDirectoryName($DedicatedHome)
+    if ([string]::IsNullOrWhiteSpace($root)) {
+        throw "HP_CODEX_SANDBOX_PATH_INVALID"
+    }
+    $binDirectory = Join-Path $root "bin"
+    Assert-NoReparsePath -Path $binDirectory -AllowMissingLeaf
+    return Join-Path $binDirectory "codex.exe"
+}
+
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -214,6 +226,40 @@ function Invoke-Provisioning {
     }
 }
 
+function Install-TrustedCodexExecutable {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceExecutable,
+        [Parameter(Mandatory = $true)][string]$DedicatedHome
+    )
+
+    $destination = Resolve-DedicatedCodexExecutable -DedicatedHome $DedicatedHome
+    $binDirectory = [IO.Path]::GetDirectoryName($destination)
+    [void](New-Item -ItemType Directory -Path $binDirectory -Force)
+    Assert-NoReparsePath -Path $binDirectory
+
+    if (Test-Path -LiteralPath $destination) {
+        try {
+            return Resolve-TrustedCodexExecutable -Path $destination
+        }
+        catch {
+            if ($_.Exception.Message -cne "HP_CODEX_SANDBOX_CODEX_UNTRUSTED") { throw }
+        }
+    }
+
+    $temporary = Join-Path $binDirectory ("codex." + [Guid]::NewGuid().ToString("N") + ".tmp")
+    try {
+        Copy-Item -LiteralPath $SourceExecutable -Destination $temporary
+        [void](Resolve-TrustedCodexExecutable -Path $temporary)
+        Move-Item -LiteralPath $temporary -Destination $destination -Force
+        return Resolve-TrustedCodexExecutable -Path $destination
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporary) {
+            Remove-Item -LiteralPath $temporary -Force
+        }
+    }
+}
+
 function Invoke-SelfTest {
     $root = Join-Path ([IO.Path]::GetTempPath()) (
         "HoverPocketCodexSandboxProvisionSelfTest-" + [Guid]::NewGuid().ToString("N"))
@@ -271,7 +317,7 @@ try {
         Invoke-SelfTest
         exit 0
     }
-    $codex = Resolve-TrustedCodexExecutable -Path $CodexBin
+    $sourceCodex = Resolve-TrustedCodexExecutable -Path $CodexBin
     $dedicatedHome = Resolve-DedicatedCodexHome -ConfiguredPath $CodexHome
     $ready = $false
     try {
@@ -283,8 +329,16 @@ try {
     }
     if (-not $ready) {
         if (-not $Provision) { throw "HP_CODEX_SANDBOX_NOT_READY" }
-        Invoke-Provisioning -Executable $codex -DedicatedHome $dedicatedHome
+        $installedCodex = Install-TrustedCodexExecutable `
+            -SourceExecutable $sourceCodex `
+            -DedicatedHome $dedicatedHome
+        Invoke-Provisioning -Executable $installedCodex -DedicatedHome $dedicatedHome
         Assert-Ready -DedicatedHome $dedicatedHome
+    }
+    elseif ($Provision) {
+        [void](Install-TrustedCodexExecutable `
+            -SourceExecutable $sourceCodex `
+            -DedicatedHome $dedicatedHome)
     }
 
     [ordered]@{

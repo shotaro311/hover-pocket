@@ -226,6 +226,20 @@ select {
   background: rgba(255, 255, 255, 0.025);
 }
 
+.pocket-sandbox-setup {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.pocket-sandbox-setup .settings-note {
+  margin-top: 0;
+}
+
 .pocket-workspace-backup .settings-note {
   margin-top: 0;
 }

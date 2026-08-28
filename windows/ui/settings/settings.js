@@ -11,6 +11,12 @@ const providerListEl = document.querySelector("[data-provider-list]");
 const providerSelectionEl = document.querySelector("[data-provider-selection]");
 const preferredProviderEl = document.querySelector("[data-preferred-provider]");
 const pocketAppListEl = document.querySelector("[data-pocket-app-list]");
+const codexSandboxHeadingEl = document.querySelector("[data-codex-sandbox-heading]");
+const codexSandboxBadgeEl = document.querySelector("[data-codex-sandbox-badge]");
+const codexSandboxNoteEl = document.querySelector("[data-codex-sandbox-note]");
+const codexSandboxCheckEl = document.querySelector("[data-codex-sandbox-check]");
+const codexSandboxSetupEl = document.querySelector("[data-codex-sandbox-setup]");
+const codexSandboxStatusEl = document.querySelector("[data-codex-sandbox-status]");
 const aiNativeEl = document.querySelector("[data-ai-native]");
 const aiNativeLabelEl = document.querySelector("[data-ai-native-label]");
 const aiNativeNoteEl = document.querySelector("[data-ai-native-note]");
@@ -162,6 +168,7 @@ function render(state) {
     { id: "expanded", label: state.settings.language === "en" ? "Expanded" : "展開" },
   ], state.settings.voiceLaneLayout ?? "compact", (layout) => update("settings.setVoiceLayout", { layout }), !voiceEnabled);
   renderPocketApps(state);
+  renderCodexSandbox(state.codexGenerationSandbox, state.settings.language);
   generationState = state.pocketAppGeneration ?? generationState;
   renderPocketGeneration(generationState, state.settings.language);
   renderCapabilityHistory(state);
@@ -178,6 +185,43 @@ function render(state) {
   startupStatusEl.textContent = state.settings.startWithWindowsRegistered ? t("registered") : t("off");
   autoUpdatesEl.checked = state.settings.autoCheckForUpdates !== false;
   updateStatusEl.textContent = state.updater?.message ?? "";
+}
+
+function renderCodexSandbox(sandbox, language) {
+  const english = language === "en";
+  const ready = sandbox?.ready === true;
+  codexSandboxHeadingEl.textContent = english ? "Codex generation sandbox" : "Codex生成sandbox";
+  codexSandboxBadgeEl.textContent = ready
+    ? (english ? "Ready" : "準備済み")
+    : (english ? "Not ready" : "未準備");
+  codexSandboxCheckEl.textContent = english ? "Check again" : "状態を再確認";
+  codexSandboxSetupEl.textContent = ready
+    ? (english ? "Repair" : "修復")
+    : (english ? "Set up / Repair" : "セットアップ／修復");
+  codexSandboxSetupEl.disabled = sandbox?.setupAvailable !== true;
+  codexSandboxCheckEl.disabled = !sandbox;
+  if (!sandbox) {
+    codexSandboxNoteEl.textContent = english
+      ? "Sandbox readiness is unavailable."
+      : "sandboxの準備状態を確認できません。";
+    codexSandboxStatusEl.textContent = "";
+    return;
+  }
+  codexSandboxNoteEl.textContent = ready
+    ? sandbox.restartRequired
+      ? (english
+        ? "Readback passed. Restart HoverPocket before enabling generation. Runtime generation never requests UAC."
+        : "readbackに合格しました。生成を有効にする前にHoverPocketを再起動してください。通常の生成時にUACは表示しません。")
+      : (english
+        ? "The fixed Codex binary and dedicated control-plane passed readback. Runtime generation never requests UAC."
+        : "固定Codexと専用control-planeのreadbackに合格しています。通常の生成時にUACは表示しません。")
+    : (english
+      ? "Select the official Codex 0.145.0 executable. After native confirmation, Windows shows one UAC prompt only for setup or repair."
+      : "公式Codex 0.145.0の実行ファイルを選択します。ネイティブ確認後、セットアップまたは修復時だけWindowsのUACが1回表示されます。");
+  codexSandboxStatusEl.textContent = [
+    `setup v${sandbox.setupVersion}`,
+    sandbox.errorCode,
+  ].filter(Boolean).join(" · ");
 }
 
 function renderCapabilityHistory(state) {
@@ -661,6 +705,14 @@ voiceCalendarAccessEl.addEventListener("change", () => {
 
 capabilityHistoryClearEl.addEventListener("click", () => {
   update("settings.clearCapabilityHistory");
+});
+
+codexSandboxCheckEl.addEventListener("click", () => {
+  update("settings.checkCodexGenerationSandbox");
+});
+
+codexSandboxSetupEl.addEventListener("click", () => {
+  update("settings.setupCodexGenerationSandbox");
 });
 
 handleSideAreaEl.addEventListener("change", () => {

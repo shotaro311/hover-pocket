@@ -45,14 +45,22 @@ internal sealed class SettingsVerifier
         var registry = ProviderRegistry.CreateDefault();
         var store = UserSettingsStore.CreateTemporary("SettingsVerify");
         var startup = new InMemoryStartupRegistrationService();
-        using var controller = new PanelBridgeController(registry, store, store.Load(registry.ProviderIds), startup);
+        var codexSandbox = new InMemoryCodexGenerationSandboxProvisioner();
+        using var controller = new PanelBridgeController(
+            registry,
+            store,
+            store.Load(registry.ProviderIds),
+            startup,
+            codexGenerationSandboxProvisioner: codexSandbox);
         var dispatcher = new BridgeDispatcher();
         using var _ = controller.Attach(
             dispatcher,
             BridgeSurface.Settings,
             aiNativeEnableDecision: () => true,
             voiceCalendarAccessDecision: () => true,
-            capabilityHistoryDeleteDecision: () => true);
+            capabilityHistoryDeleteDecision: () => true,
+            codexSandboxExecutablePicker: () => @"C:\fixture\codex.exe",
+            codexSandboxProvisionDecision: () => true);
         var deniedSettingsDispatcher = new BridgeDispatcher();
         using var deniedSettingsAttachment = controller.Attach(
             deniedSettingsDispatcher,
@@ -80,6 +88,7 @@ internal sealed class SettingsVerifier
             || !defaultState.Contains("\"capabilityDataRetentionPeriod\":\"ninetyDays\"", StringComparison.Ordinal)
             || !defaultState.Contains("\"capabilityDataGovernance\":{\"available\":true", StringComparison.Ordinal)
             || !defaultState.Contains("\"pocketAppGeneration\":null", StringComparison.Ordinal)
+            || !defaultState.Contains("\"codexGenerationSandbox\":{\"status\":\"not_ready\",\"ready\":false", StringComparison.Ordinal)
             || Directory.Exists(Path.Combine(store.RootDirectory, "PocketApps", "Generation")))
         {
             _failures.Add("AI-native default-off started generation runtime or workspace");
@@ -94,6 +103,8 @@ internal sealed class SettingsVerifier
             """{"id":"0r","method":"settings.setCapabilityRetention","params":{"period":"sevenDays"}}""");
         var panelClearHistory = await panelDispatcher.ProcessRawMessageAsync(
             """{"id":"0h","method":"settings.clearCapabilityHistory"}""");
+        var panelSandboxSetup = await panelDispatcher.ProcessRawMessageAsync(
+            """{"id":"0s","method":"settings.setupCodexGenerationSandbox"}""");
         if (panelEnable?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true)
         {
             _failures.Add("panel bridge exposed the Settings-only AI-native toggle");
@@ -110,6 +121,26 @@ internal sealed class SettingsVerifier
             || panelClearHistory?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true)
         {
             _failures.Add("panel bridge exposed Settings-only capability history controls");
+        }
+        if (panelSandboxSetup?.Contains("\"code\":\"unknown_method\"", StringComparison.Ordinal) != true)
+        {
+            _failures.Add("panel bridge exposed Settings-only Codex sandbox setup");
+        }
+        _ = await Send(
+            deniedSettingsDispatcher,
+            """{"id":"0ds","method":"settings.setupCodexGenerationSandbox"}""");
+        if (codexSandbox.ProvisionCount != 0)
+        {
+            _failures.Add("Codex sandbox setup ran without native picker and approval callbacks");
+        }
+        var sandboxReadyState = await Send(
+            dispatcher,
+            """{"id":"0ss","method":"settings.setupCodexGenerationSandbox"}""");
+        if (codexSandbox.ProvisionCount != 1
+            || !sandboxReadyState.Contains("\"codexGenerationSandbox\":{\"status\":\"ready\",\"ready\":true", StringComparison.Ordinal)
+            || !sandboxReadyState.Contains("\"restartRequired\":true", StringComparison.Ordinal))
+        {
+            _failures.Add("Codex sandbox setup did not return deterministic readiness readback");
         }
         var deniedEnable = await Send(
             deniedSettingsDispatcher,
@@ -637,5 +668,40 @@ internal sealed class SettingsVerifier
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.Copy(file, target, overwrite: false);
         }
+    }
+}
+
+internal sealed class InMemoryCodexGenerationSandboxProvisioner
+    : ICodexGenerationSandboxProvisioner
+{
+    private bool _ready;
+
+    public int ProvisionCount { get; private set; }
+
+    public CodexGenerationSandboxProvisioningState Check() => new(
+        _ready ? "ready" : "not_ready",
+        _ready,
+        TrustedExecutableInstalled: _ready,
+        SetupAvailable: true,
+        RepairAvailable: _ready,
+        RestartRequired: _ready,
+        ErrorCode: _ready ? null : "GENERATOR_CODEX_NOT_INSTALLED",
+        CodexGenerationSandboxLease.SetupVersion,
+        RuntimeElevationRequired: false);
+
+    public CodexGenerationSandboxProvisioningState Refresh() => Check();
+
+    public Task<CodexGenerationSandboxProvisioningState> ProvisionAsync(
+        string sourceExecutable,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!string.Equals(sourceExecutable, @"C:\fixture\codex.exe", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Unexpected Codex fixture path.");
+        }
+        ProvisionCount += 1;
+        _ready = true;
+        return Task.FromResult(Check());
     }
 }

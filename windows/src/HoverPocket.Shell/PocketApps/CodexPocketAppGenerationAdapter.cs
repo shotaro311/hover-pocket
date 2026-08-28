@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 
@@ -451,6 +452,9 @@ internal sealed class CodexGenerationSandboxLease : IDisposable
 
 internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdapter, IDisposable
 {
+    internal const long TrustedExecutableLength = 359245096L;
+    internal const string TrustedExecutableSha256 =
+        "83751f15cb6a0a7b97df67752c001e3fe1c20e18ffbfec3ff63567296205eb6c";
     private const int MaximumConfinementDenyEntries = 256;
     private const int MaximumConfinementDenyCharacters = 16384;
 
@@ -458,14 +462,52 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
 
     public static string? ResolveExecutable()
     {
-        // The named profile and isolated process environment are prepared below, but
-        // production remains disconnected until the explicit one-time sandbox setup,
-        // Host-brokered credentials, and the no-UAC outside-root canary pass on a
-        // supported Windows host.
-        return null;
+        var candidate = DefaultExecutablePath();
+        return IsTrustedExecutable(candidate) ? candidate : null;
+    }
+
+    internal static string DefaultExecutablePath()
+    {
+        var home = CodexGenerationSandboxLease.DefaultHomePath();
+        var root = Directory.GetParent(home)?.FullName
+            ?? throw Failure("GENERATOR_UNAVAILABLE");
+        return Path.Combine(root, "bin", "codex.exe");
+    }
+
+    internal static bool IsTrustedExecutable(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) { return false; }
+        try
+        {
+            var normalized = Path.GetFullPath(path);
+            if (normalized.StartsWith("\\\\", StringComparison.Ordinal)) { return false; }
+            var parent = Path.GetDirectoryName(normalized);
+            if (string.IsNullOrWhiteSpace(parent)) { return false; }
+            using var directory = new PocketAppPinnedDirectory(
+                parent,
+                allowReplacement: false,
+                createMissing: false);
+            using var handle = directory.OpenFileForRead(Path.GetFileName(normalized));
+            if (handle is null) { return false; }
+            using var stream = new FileStream(handle, FileAccess.Read, 1024 * 1024, isAsync: false);
+            if (stream.Length != TrustedExecutableLength) { return false; }
+            var digest = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+            directory.Validate();
+            return string.Equals(digest, TrustedExecutableSha256, StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or ArgumentException
+            or NotSupportedException
+            or PocketAppGenerationException)
+        {
+            return false;
+        }
     }
 
     private readonly string _executable;
+    private readonly PocketAppPinnedDirectory _executableDirectory;
+    private readonly SafeFileHandle _executableHandle;
     private readonly PocketAppPinnedDirectory _workspaceRoot;
     private readonly string _sandboxHome;
     private readonly TimeSpan _timeout;
@@ -484,7 +526,19 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         {
             throw Failure("GENERATOR_UNAVAILABLE");
         }
-        _executable = executable;
+        _executable = Path.GetFullPath(executable);
+        if (!IsTrustedExecutable(_executable))
+        {
+            throw Failure("GENERATOR_UNAVAILABLE");
+        }
+        var executableDirectory = Path.GetDirectoryName(_executable)
+            ?? throw Failure("GENERATOR_UNAVAILABLE");
+        _executableDirectory = new PocketAppPinnedDirectory(
+            executableDirectory,
+            allowReplacement: false,
+            createMissing: false);
+        _executableHandle = _executableDirectory.OpenFileForRead(Path.GetFileName(_executable))
+            ?? throw Failure("GENERATOR_UNAVAILABLE");
         _workspaceRoot = new PocketAppPinnedDirectory(workspaceRoot);
         _sandboxHome = Path.GetFullPath(sandboxHome);
         _credentialProvider = credentialProvider
@@ -504,6 +558,7 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         request.Validate();
         var modelCatalog = CodexPocketAppGenerationModelCatalog.Load();
         _workspaceRoot.Validate();
+        _executableDirectory.Validate();
         cancellationToken.ThrowIfCancellationRequested();
 
         var runRoot = Path.Combine(_workspaceRoot.FullPath, $"codex-{Guid.NewGuid():N}");
@@ -904,6 +959,8 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
     public void Dispose()
     {
         if (_disposed) { return; }
+        _executableHandle.Dispose();
+        _executableDirectory.Dispose();
         _workspaceRoot.Dispose();
         _disposed = true;
     }

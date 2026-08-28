@@ -44,6 +44,7 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly PocketAppActivationLease? _aiNativeExecutionLease;
     private readonly PocketAppGenerationController? _pocketAppGenerationController;
     private readonly PocketAppRuntimeActivationRegistry? _generatedPocketApps;
+    private readonly ICodexGenerationSandboxProvisioner _codexGenerationSandboxProvisioner;
     private readonly VoiceProviderCoordinator _voiceCoordinator;
     private readonly IOpenAIRealtimeCredentialStore _openAIRealtimeCredentialStore;
     private readonly bool _externalIntegrationsEnabled;
@@ -77,7 +78,8 @@ internal sealed class PanelBridgeController : IDisposable
         CalendarStore? calendarStore = null,
         bool externalIntegrationsEnabled = true,
         VoiceE2EReceiptStore? voiceE2EReceiptStore = null,
-        UserSettings? isolatedVoiceE2EDefaults = null)
+        UserSettings? isolatedVoiceE2EDefaults = null,
+        ICodexGenerationSandboxProvisioner? codexGenerationSandboxProvisioner = null)
     {
         _providerRegistry = providerRegistry;
         _settingsStore = settingsStore;
@@ -86,6 +88,8 @@ internal sealed class PanelBridgeController : IDisposable
         _openAIRealtimeCredentialStore = openAIRealtimeCredentialStore
             ?? new OpenAIRealtimeCredentialStore();
         _externalIntegrationsEnabled = externalIntegrationsEnabled;
+        _codexGenerationSandboxProvisioner = codexGenerationSandboxProvisioner
+            ?? new CodexGenerationSandboxProvisioner(externalIntegrationsEnabled);
         _voiceE2EReceiptStore = voiceE2EReceiptStore;
         _isolatedVoiceE2EDefaults = isolatedVoiceE2EDefaults?.Clone();
         _calendarBridgeController = new CalendarBridgeController(
@@ -321,7 +325,9 @@ internal sealed class PanelBridgeController : IDisposable
         Func<bool>? voiceMicrophoneGesture = null,
         Func<bool>? capabilityHistoryDeleteDecision = null,
         Func<OpenAIRealtimeApiKey?>? voiceOpenAIKeyPrompt = null,
-        Func<bool>? voiceOpenAIKeyDeleteDecision = null)
+        Func<bool>? voiceOpenAIKeyDeleteDecision = null,
+        Func<string?>? codexSandboxExecutablePicker = null,
+        Func<bool>? codexSandboxProvisionDecision = null)
     {
         _dispatchers[dispatcher] = surface;
         if (surface == BridgeSurface.Panel && approvalOwner is not null)
@@ -437,6 +443,16 @@ internal sealed class PanelBridgeController : IDisposable
                     aiNativeEnableDecision,
                     cancellationToken));
             Register("settings.setCapabilityRetention", SetCapabilityRetentionAsync);
+            Register(
+                "settings.checkCodexGenerationSandbox",
+                CheckCodexGenerationSandboxAsync);
+            Register(
+                "settings.setupCodexGenerationSandbox",
+                (parameters, cancellationToken) => SetupCodexGenerationSandboxAsync(
+                    parameters,
+                    codexSandboxExecutablePicker,
+                    codexSandboxProvisionDecision,
+                    cancellationToken));
             Register(
                 "settings.clearCapabilityHistory",
                 (parameters, cancellationToken) => ClearCapabilityHistoryAsync(
@@ -660,10 +676,46 @@ internal sealed class PanelBridgeController : IDisposable
             pocketAppGeneration = includeGeneration && CurrentSettings.AiNativeEnabled
                 ? _pocketAppGenerationController?.BuildState()
                 : null,
+            codexGenerationSandbox = includeGeneration
+                ? _codexGenerationSandboxProvisioner.Check()
+                : null,
             capabilityDataGovernance = includeGeneration
                 ? BuildCapabilityDataGovernanceState()
                 : null
         };
+    }
+
+    private async Task<object?> CheckCodexGenerationSandboxAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        cancellationToken.ThrowIfCancellationRequested();
+        _ = _codexGenerationSandboxProvisioner.Refresh();
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetupCodexGenerationSandboxAsync(
+        JsonElement? parameters,
+        Func<string?>? executablePicker,
+        Func<bool>? provisionDecision,
+        CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_externalIntegrationsEnabled || executablePicker is null || provisionDecision is null)
+        {
+            return await PublishStateAsync(cancellationToken);
+        }
+        var sourceExecutable = executablePicker();
+        if (string.IsNullOrWhiteSpace(sourceExecutable) || !provisionDecision())
+        {
+            return await PublishStateAsync(cancellationToken);
+        }
+        _ = await _codexGenerationSandboxProvisioner.ProvisionAsync(
+            sourceExecutable,
+            cancellationToken);
+        return await PublishStateAsync(cancellationToken);
     }
 
     private async Task<object?> SetCapabilityRetentionAsync(

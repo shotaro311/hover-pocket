@@ -115,7 +115,9 @@ internal sealed class SettingsWindow : Window
             BridgeSurface.Settings,
             () => this,
             voiceOpenAIKeyPrompt: PromptOpenAIRealtimeKey,
-            voiceOpenAIKeyDeleteDecision: ConfirmOpenAIRealtimeKeyDeletion);
+            voiceOpenAIKeyDeleteDecision: ConfirmOpenAIRealtimeKeyDeletion,
+            codexSandboxExecutablePicker: SelectCodexSandboxExecutable,
+            codexSandboxProvisionDecision: ConfirmCodexSandboxProvisioning);
         webView.CoreWebView2.WebMessageReceived += async (_, args) =>
         {
             await dispatcher.HandleRawMessageAsync(args.TryGetWebMessageAsString());
@@ -220,6 +222,38 @@ internal sealed class SettingsWindow : Window
                     ? "Delete the OpenAI Realtime API key from Windows Credential Manager? Voice will stop until a key is configured again."
                     : "OpenAI Realtime APIキーをWindows Credential Managerから削除しますか？再設定するまでVoiceは停止します。",
             english ? "Delete OpenAI API key" : "OpenAI APIキーを削除",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No) == MessageBoxResult.Yes;
+    }
+
+    private string? SelectCodexSandboxExecutable()
+    {
+        var english = _bridgeController.CurrentSettings.Language == AppLanguage.English;
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = english
+                ? "Select the official Codex 0.145.0 executable"
+                : "公式Codex 0.145.0の実行ファイルを選択",
+            Filter = "Codex executable (codex.exe)|codex.exe",
+            CheckFileExists = true,
+            CheckPathExists = true,
+            Multiselect = false,
+            DereferenceLinks = false,
+            FileName = "codex.exe"
+        };
+        return dialog.ShowDialog(this) == true ? dialog.FileName : null;
+    }
+
+    private bool ConfirmCodexSandboxProvisioning()
+    {
+        var english = _bridgeController.CurrentSettings.Language == AppLanguage.English;
+        return System.Windows.MessageBox.Show(
+            this,
+            english
+                ? "Set up or repair the dedicated Codex generation sandbox? Windows will show one UAC prompt and Codex will create or refresh two local sandbox accounts. HoverPocket never receives the administrator credential or sandbox passwords. Normal generation will not request elevation."
+                : "Codex生成専用sandboxをセットアップ／修復しますか？ WindowsのUACが1回表示され、Codexがローカルsandboxアカウント2つを作成または更新します。HoverPocketは管理者credentialやsandbox passwordを受け取りません。通常の生成時には昇格を要求しません。",
+            english ? "Set up Codex generation sandbox" : "Codex生成sandboxを準備",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
             MessageBoxResult.No) == MessageBoxResult.Yes;
