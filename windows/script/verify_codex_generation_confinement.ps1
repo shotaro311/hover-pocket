@@ -622,7 +622,7 @@ function Remove-ValidatedTemporaryRoot {
 }
 
 function Invoke-SelfTest {
-    if ((Get-SanitizedDiagnostic -Text $null -SensitiveValues @("sensitive")) -cne "") {
+    if ((Get-SanitizedDiagnostic -Text ([string]$null) -SensitiveValues @("sensitive")) -cne "") {
         throw "Self-test null process diagnostic normalization failed."
     }
     $valid = [ordered]@{}
