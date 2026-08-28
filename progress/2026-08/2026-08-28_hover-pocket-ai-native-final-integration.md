@@ -125,3 +125,39 @@
 - 通常Windows hostでwhole-home / nested reparse拒否、target不変、UAC取消、timeout descendant終了、正常setup、marker / attestation / sandbox user readbackをphysical canaryする。
 - `sandbox_users.json`の意味検証、positive elevated confinement、実model generation / credential非残留、physical Voice E2E、正式署名・配布を完了する。
 - 上記が揃うまでproduction setup / generation / activationはOFFを維持する。
+
+## Windows Codex setup semantic readback
+
+### Exact upstream contract
+
+- 公開ドキュメントでは内部file formatを確定できなかったため、OpenAI公式Codex repositoryのexact tag `rust-v0.145.0`、commit `25af12f7e61572b0bc18ddb1008be543b91519b0`を確認した。
+- `SETUP_VERSION = 5`、固定user `CodexSandboxOffline` / `CodexSandboxOnline`、machine-scope DPAPI、24 byte password、marker / users fileの実writerを根拠に実装した。
+- 初期案の英数字限定は、公式writerが`!@#$%^&*()-_=+`も使用するため誤りだった。実ファイル照合で修正し、記号を含む正常caseと許可外記号のnegative caseをcontract testへ追加した。
+
+### Implementation
+
+- `CodexSetupReadbackVerifier`は両readback fileを64 KiB以下のregular non-reparse fileとして読み、JSON comment / trailing comma / depth超過、unknown / duplicate fieldを拒否する。
+- markerはexact 8 field、version 5、固定username、UTC RFC3339 timestamp、空のproxy / read / write roots、`allow_local_binding = false`を要求する。
+- users fileはexact schema、canonical base64、16 KiB以下のciphertext、machine-scope DPAPI unprotect、24 byteの公式文字集合、offline / onlineの異なるpasswordを要求する。
+- managed plaintextとnative DPAPI outputをzero化し、native allocationは`LocalFree`する。任意のreadback failureはuser ACL拡張とattestation完了より前に固定errorへ落ちる。
+
+### Verification and security
+
+- ローカルhelper contract: PASS。
+- .NET 10 cross-target Release / Debug solution build: 警告0・エラー0。
+- Settings generation target、Voice Foundation 42件、workflow YAML parse、変更file限定format、`git diff --check`: PASS。
+- Codex Security scan `b89a6dad-fb92-44f2-b70e-81c931e7b3a1`、snapshot `codex-security-snapshot/v1:sha256:f5246e1fe992305b4426d541c20c5c989fc0a32c019c83b71012ce2771f6f47e`: 3 / 3 changed file、6 surface、coverage complete、finding 0件、sealed complete。
+- `File.GetAttributes` / length checkと`File.ReadAllBytes`は同一handleではない。ただしreadback完了までhomeはadmin-onlyで、通常ユーザーが差し替えるauthorityを持たないため現構成ではfindingにしなかった。ACL適用順を変更する場合はhandle-bound readbackへ変更して再監査する。
+
+### PR readback
+
+- commit: `7f5ab9938057ae9aad92b2519b50ba6d6dd938f3`
+- Windows run [33177820477](https://github.com/shotaro311/hover-pocket/actions/runs/33177820477): `PASS Codex sandbox helper contract`をreadback。Windows専用DPAPI protect / unprotectとACL contractが同self-test内で実行され、vendor closure、Release / Debug build、全既存Verifierも成功した。
+- Router [33177819003](https://github.com/shotaro311/hover-pocket/actions/runs/33177819003)、macOS Capabilities [33177820374](https://github.com/shotaro311/hover-pocket/actions/runs/33177820374)、3 OS contract / compare [33177820470](https://github.com/shotaro311/hover-pocket/actions/runs/33177820470)を含む7 / 7 checkが成功した。
+- Draft PR #39は`MERGEABLE / CLEAN`。Production setup / generationはOFFで、Ready / mergeへは進めていない。
+
+### Next gate
+
+- 現在のVelopack配下helperはper-user originであり、production trusted originではない。
+- 次は署名済みhelperを固定Program Files配下へ配置・更新・削除するper-machine installerを設計し、Settingsがその固定originとpublisherをreadbackしてからだけUAC requestを送る。
+- installer / UAC / helper activationの完成後に、normal setup、UAC cancel、whole-home / nested reparse、timeout descendant、post-readback failure、positive confinementを通常Windows hostでphysical canaryする。
