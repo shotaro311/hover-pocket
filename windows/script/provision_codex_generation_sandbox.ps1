@@ -217,9 +217,9 @@ function Invoke-Provisioning {
 function Invoke-SelfTest {
     $root = Join-Path ([IO.Path]::GetTempPath()) (
         "HoverPocketCodexSandboxProvisionSelfTest-" + [Guid]::NewGuid().ToString("N"))
-    $home = Join-Path $root "codex-home"
-    $sandbox = Join-Path $home ".sandbox"
-    $secrets = Join-Path $home ".sandbox-secrets"
+    $selfTestHome = Join-Path $root "codex-home"
+    $sandbox = Join-Path $selfTestHome ".sandbox"
+    $secrets = Join-Path $selfTestHome ".sandbox-secrets"
     try {
         [void](New-Item -ItemType Directory -Path $sandbox -Force)
         [void](New-Item -ItemType Directory -Path $secrets -Force)
@@ -241,14 +241,14 @@ function Invoke-SelfTest {
                 password = "fixture-dpapi-blob"
             }
         } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $secrets "sandbox_users.json") -Encoding UTF8
-        Assert-Ready -Home $home
+        Assert-Ready -Home $selfTestHome
 
         $markerPath = Join-Path $sandbox "setup_marker.json"
         $marker = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json
         $marker.proxy_ports = @(7890)
         $marker | ConvertTo-Json | Set-Content -LiteralPath $markerPath -Encoding UTF8
         try {
-            Assert-Ready -Home $home
+            Assert-Ready -Home $selfTestHome
             throw "SELF_TEST_ACCEPTED_PROXY_DRIFT"
         }
         catch {
@@ -272,10 +272,10 @@ try {
         exit 0
     }
     $codex = Resolve-TrustedCodexExecutable -Path $CodexBin
-    $home = Resolve-DedicatedCodexHome -ConfiguredPath $CodexHome
+    $dedicatedHome = Resolve-DedicatedCodexHome -ConfiguredPath $CodexHome
     $ready = $false
     try {
-        Assert-Ready -Home $home
+        Assert-Ready -Home $dedicatedHome
         $ready = $true
     }
     catch {
@@ -283,8 +283,8 @@ try {
     }
     if (-not $ready) {
         if (-not $Provision) { throw "HP_CODEX_SANDBOX_NOT_READY" }
-        Invoke-Provisioning -Executable $codex -Home $home
-        Assert-Ready -Home $home
+        Invoke-Provisioning -Executable $codex -Home $dedicatedHome
+        Assert-Ready -Home $dedicatedHome
     }
 
     [ordered]@{

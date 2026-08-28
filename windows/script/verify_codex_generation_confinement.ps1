@@ -402,19 +402,19 @@ function Open-ProvisionedCodexHomeLease {
         $LocalApplicationData `
         "HoverPocket\CodexGenerationSandbox\codex-home")).TrimEnd(
             [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
-    $home = [IO.Path]::GetFullPath($Path).TrimEnd(
+    $dedicatedHome = [IO.Path]::GetFullPath($Path).TrimEnd(
         [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
     if (
-        $home.StartsWith("\\", [StringComparison]::Ordinal) -or
-        -not $home.Equals($expectedHome, [StringComparison]::OrdinalIgnoreCase) -or
-        -not (Test-Path -LiteralPath $home -PathType Container)
+        $dedicatedHome.StartsWith("\\", [StringComparison]::Ordinal) -or
+        -not $dedicatedHome.Equals($expectedHome, [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $dedicatedHome -PathType Container)
     ) {
         throw "HP_CANARY_SANDBOX_NOT_PROVISIONED"
     }
-    Assert-NoReparsePath -Path $home
+    Assert-NoReparsePath -Path $dedicatedHome
 
-    $markerPath = Join-Path $home ".sandbox\setup_marker.json"
-    $usersPath = Join-Path $home ".sandbox-secrets\sandbox_users.json"
+    $markerPath = Join-Path $dedicatedHome ".sandbox\setup_marker.json"
+    $usersPath = Join-Path $dedicatedHome ".sandbox-secrets\sandbox_users.json"
     foreach ($controlPath in @($markerPath, $usersPath)) {
         if (-not (Test-Path -LiteralPath $controlPath -PathType Leaf)) {
             throw "HP_CANARY_SANDBOX_NOT_PROVISIONED"
@@ -476,7 +476,7 @@ function Open-ProvisionedCodexHomeLease {
             throw "HP_CANARY_SANDBOX_NOT_PROVISIONED"
         }
         return [pscustomobject]@{
-            HomePath = $home
+            HomePath = $dedicatedHome
             MarkerStream = $markerStream
             UsersStream = $usersStream
         }
