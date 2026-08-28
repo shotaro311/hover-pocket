@@ -29,6 +29,7 @@ $ExpectedExecutableSha256 = "83751f15cb6a0a7b97df67752c001e3fe1c20e18ffbfec3ff63
 $RootPrefix = "HoverPocketCodexConfinement-"
 $ForeignPrefix = "HoverPocketCodexForeign-"
 $HostCodexHomePrefix = "HoverPocketCodexHostHome-"
+$RuntimeCodexHomePrefix = "HoverPocketCodexRuntimeHome-"
 $CanaryBasePrefix = "HoverPocketCodexConfinementCanary-"
 $ResultPrefix = "HoverPocketCodexConfinementResult-"
 $SelfTestProfilePrefix = "HoverPocketCodexFrontierSelfTest-"
@@ -949,6 +950,7 @@ function Invoke-Canary {
     $hostCodexHome = Join-Path $canaryBase ($HostCodexHomePrefix + [Guid]::NewGuid().ToString("N"))
     $listener = $null
     $provisioningLease = $null
+    $ephemeralCodexHome = $null
     try {
         $script:CanaryFailureContext.stage = "base_creation"
         [void](New-Item -ItemType Directory -Path $canaryBase)
@@ -965,7 +967,9 @@ function Invoke-Canary {
             $codexHome = $provisioningLease.HomePath
         }
         else {
-            $codexHome = Join-Path $root "codex-home"
+            $ephemeralCodexHome = Join-Path $canaryBase (
+                $RuntimeCodexHomePrefix + [Guid]::NewGuid().ToString("N"))
+            $codexHome = $ephemeralCodexHome
         }
         $userHome = Join-Path $root "user-home"
         $localAppData = Join-Path $userHome "AppData\Local"
@@ -1138,6 +1142,10 @@ function Invoke-Canary {
                 Remove-ValidatedTemporaryRoot -Path $foreignRoot -TemporaryRoot $canaryBase -ExpectedPrefix $ForeignPrefix
                 Remove-ValidatedTemporaryRoot -Path $hostCodexHome -TemporaryRoot $canaryBase -ExpectedPrefix $HostCodexHomePrefix
                 Remove-ValidatedTemporaryRoot -Path $root -TemporaryRoot $canaryBase -ExpectedPrefix $RootPrefix
+                if ($null -ne $ephemeralCodexHome) {
+                    Remove-ValidatedTemporaryRoot -Path $ephemeralCodexHome -TemporaryRoot $canaryBase -ExpectedPrefix $RuntimeCodexHomePrefix
+                    $ephemeralCodexHome = $null
+                }
                 Remove-ValidatedTemporaryRoot -Path $canaryBase -TemporaryRoot $localApplicationData -ExpectedPrefix $CanaryBasePrefix
                 Write-CanaryResult -Path $ResultPath -Receipt $receipt
                 Write-Host "PASS unelevated Codex sandbox rejected the read-only generation profile"
@@ -1230,6 +1238,10 @@ function Invoke-Canary {
         Remove-ValidatedTemporaryRoot -Path $foreignRoot -TemporaryRoot $canaryBase -ExpectedPrefix $ForeignPrefix
         Remove-ValidatedTemporaryRoot -Path $hostCodexHome -TemporaryRoot $canaryBase -ExpectedPrefix $HostCodexHomePrefix
         Remove-ValidatedTemporaryRoot -Path $root -TemporaryRoot $canaryBase -ExpectedPrefix $RootPrefix
+        if ($null -ne $ephemeralCodexHome) {
+            Remove-ValidatedTemporaryRoot -Path $ephemeralCodexHome -TemporaryRoot $canaryBase -ExpectedPrefix $RuntimeCodexHomePrefix
+            $ephemeralCodexHome = $null
+        }
         Remove-ValidatedTemporaryRoot -Path $canaryBase -TemporaryRoot $localApplicationData -ExpectedPrefix $CanaryBasePrefix
         Write-CanaryResult -Path $ResultPath -Receipt $receipt
         Write-Host "PASS Codex generation confinement canary"
@@ -1244,6 +1256,9 @@ function Invoke-Canary {
         Remove-ValidatedTemporaryRoot -Path $foreignRoot -TemporaryRoot $canaryBase -ExpectedPrefix $ForeignPrefix
         Remove-ValidatedTemporaryRoot -Path $hostCodexHome -TemporaryRoot $canaryBase -ExpectedPrefix $HostCodexHomePrefix
         Remove-ValidatedTemporaryRoot -Path $root -TemporaryRoot $canaryBase -ExpectedPrefix $RootPrefix
+        if ($null -ne $ephemeralCodexHome) {
+            Remove-ValidatedTemporaryRoot -Path $ephemeralCodexHome -TemporaryRoot $canaryBase -ExpectedPrefix $RuntimeCodexHomePrefix
+        }
         Remove-ValidatedTemporaryRoot -Path $canaryBase -TemporaryRoot $localApplicationData -ExpectedPrefix $CanaryBasePrefix
     }
 }
@@ -1273,13 +1288,17 @@ catch {
         if ($errorId -cmatch '^[A-Za-z0-9_.-]+(?:,[A-Za-z0-9_.-]+)?$') {
             $script:CanaryFailureContext["errorId"] = $errorId
         }
-        $commandName = [string]$_.InvocationInfo.MyCommand.Name
-        if ($commandName -cmatch '^[A-Za-z0-9_.-]+$') {
-            $script:CanaryFailureContext["commandName"] = $commandName
+        if ($null -ne $_.InvocationInfo -and $null -ne $_.InvocationInfo.MyCommand) {
+            $commandName = [string]$_.InvocationInfo.MyCommand.Name
+            if ($commandName -cmatch '^[A-Za-z0-9_.-]+$') {
+                $script:CanaryFailureContext["commandName"] = $commandName
+            }
         }
-        $scriptLineNumber = [int]$_.InvocationInfo.ScriptLineNumber
-        if ($scriptLineNumber -gt 0) {
-            $script:CanaryFailureContext["scriptLineNumber"] = $scriptLineNumber
+        if ($null -ne $_.InvocationInfo) {
+            $scriptLineNumber = [int]$_.InvocationInfo.ScriptLineNumber
+            if ($scriptLineNumber -gt 0) {
+                $script:CanaryFailureContext["scriptLineNumber"] = $scriptLineNumber
+            }
         }
     }
     if (-not [string]::IsNullOrWhiteSpace($ResultPath)) {
