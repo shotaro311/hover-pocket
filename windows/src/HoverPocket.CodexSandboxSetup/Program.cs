@@ -4,6 +4,7 @@ internal static class Program
 {
     private const int ContractFailureExitCode = 20;
     private const int SetupUnavailableExitCode = 21;
+    private static bool ProductionSetupActivated => false;
 
     private static int Main(string[] args)
     {
@@ -36,6 +37,26 @@ internal static class Program
                     args[5],
                     DateTimeOffset.UtcNow);
                 Console.WriteLine("PASS Codex sandbox setup request admission");
+                return 0;
+            }
+
+            if (args.Length == 6
+                && string.Equals(args[0], "--setup-request", StringComparison.Ordinal)
+                && string.Equals(args[2], "--request-sha256", StringComparison.Ordinal)
+                && string.Equals(args[4], "--nonce", StringComparison.Ordinal))
+            {
+                if (!ProductionSetupActivated)
+                {
+                    Console.Error.WriteLine("HP_CODEX_SANDBOX_HELPER_NOT_ACTIVATED");
+                    return SetupUnavailableExitCode;
+                }
+                using var admitted = SetupRequestAdmission.Admit(
+                    args[1],
+                    args[3],
+                    args[5],
+                    DateTimeOffset.UtcNow);
+                CodexSandboxInstaller.InstallAndSetup(admitted);
+                Console.WriteLine("PASS Codex sandbox setup and readback");
                 return 0;
             }
 

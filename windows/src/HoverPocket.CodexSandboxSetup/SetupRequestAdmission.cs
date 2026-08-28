@@ -22,6 +22,7 @@ internal sealed class AdmittedSetupRequest : IDisposable
     }
 
     internal SetupRequest Request { get; }
+    internal IReadOnlyList<FileStream> SourceHandles => _sourceHandles;
 
     public void Dispose()
     {

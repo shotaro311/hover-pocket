@@ -140,6 +140,10 @@ jobs:
         run: |
           dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj --configuration Release --no-build -- --contract-self-test
           dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj --configuration Release --no-build -- --verify-vendor-closure $env:HOVERPOCKET_CODEX_PACKAGE_ROOT
+          $disabledOutput = & dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj --configuration Release --no-build -- --setup-request "must-not-parse" --request-sha256 ('0' * 64) --nonce ('0' * 64) 2>&1
+          if ($LASTEXITCODE -ne 21 -or "$disabledOutput" -notmatch "HP_CODEX_SANDBOX_HELPER_NOT_ACTIVATED") {
+            throw "Native Codex sandbox helper did not reject setup before request parsing."
+          }
 
       - name: Verify settings UI modules
         run: |

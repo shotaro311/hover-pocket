@@ -38,6 +38,10 @@ internal static class ContractSelfTest
         }
 
         VerifyRequestRoundTrip();
+        if (OperatingSystem.IsWindows())
+        {
+            SecureDirectoryTree.VerifyAclContract();
+        }
     }
 
     private static void VerifyRequestRoundTrip()
