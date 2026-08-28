@@ -44,3 +44,41 @@
 - 両OSの物理microphone / OpenAI Realtime round-trip
 - signed macOS / Windows candidate、notarization / Authenticode、installer、OS別feed、rollback readback
 - Draft PR #39をReadyにする判断、merge、初回実用リリース
+
+## production fail-closed remediation
+
+### Pro回収と担当切り替え
+
+- ChatGPT Pro Orchestrator run: `20260828-113152-hoverpocket-windowscodex-generation-sandbox-setupvalidated-reparse-uac-findingproduction-setup-repairchanges-patch`
+- route / role: 通常Pro / builder、local receipt、exact base `978533d57ca31b02b0efd304145e75c8dde9778f`
+- contract SHA-256: `dabf6caf4f17d596436f0737596700744cc92dde40db283277523db00d9dc5fe`
+- 2026-08-28 11:31:52 JSTに開始し、13:27:25 JSTに`oracle-exit-failed` / `sent-state-unknown`でblockedとなった。同一sessionのbounded recoveryは総時間上限に達し、changes patchは回収できなかった。
+- delivery `return-d5f8312874fe6431b14c06511e33aea0`はstate hash照合後に一度だけclaimされ、再開時は`already processed`をreadbackした。新規prompt、replacement run、旧artifactの推測適用は行っていない。
+- Proがblockedでartifactを返せなかったため、Orchestrator Skillの例外規定に従いCodexが修正を再実装した。
+
+### 実装した即時安全境界
+
+- `CodexGenerationSandboxProvisioner`はproductionで`GENERATOR_SANDBOX_SETUP_UNAVAILABLE`を返し、ready / setup / repair / restartをすべてfalseにする。binary検査・copy・UAC・process起動の実装をproduction provisionerから除去した。
+- Settings bridgeは`SetupAvailable`をpickerと承認より先に確認する。forged requestもpicker 0回、承認0回、filesystem変更0回で同じstateを返す。
+- `CodexPocketAppGenerationAdapter.ResolveExecutable()`はproduction policyが閉じている限り`null`を返す。旧setup-v5 marker、既設の固定binary、通常のUI stateからproduction generatorを構成できない。
+- 管理者PowerShellは`-CodexBin`のpath解決、file read、管理者判定、directory作成、copy、process起動より前に`HP_CODEX_SANDBOX_SETUP_UNAVAILABLE`で停止する。`-SelfTest`だけがfail-closed policyを検査する。
+- Settingsのsetup / repairボタンは初期HTMLからdisabledで、Host stateが明示的にsetup可能と返した場合だけ有効化される。現在のproduction stateでは常にdisabledである。
+- 要件とWindows READMEへ、公式Codex resource closure、署名済みhelper、元user SID、admin-owned object identity、PATH非依存、absolute-path起動を再有効化条件として明記した。
+
+### ローカル検証
+
+- `git diff --check`: 成功
+- `node --check windows/ui/settings/settings.js`: 成功
+- `node --check windows/script/verify_settings_generation_target.mjs`: 成功
+- `node windows/script/verify_settings_generation_target.mjs`: 成功。generation targetに加え、初回state readback前のsetup disabledを確認した。
+- `python3 script/verify_voice_foundation.py`: 成功。42 geometry / state caseと既存Voice / Broker契約を確認した。
+- Ruby Psychによる`.github/workflows/windows-verify.yml` parse: 成功
+- production provisionerと手動scriptのsink検索: `runas`、`--elevated`、setup process起動、binary copy、directory作成は0件。generation adapter本体の通常非昇格process起動はruntime resolverがproductionで`null`のため到達不能である。
+- 独立read-only reviewer: server-side bypass 0件。初期HTMLでsetupが有効になる表示回帰1件を検出し、`disabled`属性とNode回帰を追加後に再検証した。
+- Mac環境に`dotnet` / `pwsh`がないため、C# build、Settings verifier、PowerShell parser / self-test / fail-closed実行はPR Windows CI待ちである。
+
+### 受入境界
+
+- CIとSecurity exact diff verifyが完了するまでfindingは`fixed`と報告しない。
+- この修正は危険なproduction入口を停止する即時対策である。署名済みnative helperと安全な正規setupの完成をAN8から除外せず、次の実装gateとして維持する。
+- actual UAC、junction PoC、positive elevated confinementはこの修正では実行しない。

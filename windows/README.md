@@ -70,25 +70,13 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 
 ## Codex Pocket App生成用Windows sandbox
 
-Pocket App生成のnative elevated sandboxは、生成要求のたびにUACを出しません。Codex 0.145.0の公式setup commandを、HoverPocket専用の固定Codex Homeへ一度だけ明示実行します。通常の生成ではこのcontrol-planeだけを再利用し、workspace、virtual User Home、Tempは毎回新しく作って終了時に削除します。
+Windowsのsetup / repairは現在、`GENERATOR_SANDBOX_SETUP_UNAVAILABLE`でproduction fail-closedです。Settingsは状態を表示しますが、実行ボタンを無効化し、forged bridge requestでもpicker、copy、UAC、filesystem変更へ進みません。管理者PowerShellのcheck / `-Provision`もpath検査やdirectory作成より前に`HP_CODEX_SANDBOX_SETUP_UNAVAILABLE`で停止します。
 
-準備状態の確認は非昇格shellから実行できます。未準備なら`HP_CODEX_SANDBOX_NOT_READY`で停止し、変更やUAC表示は行いません。
+公式Codex 0.145.0のWindows配布物は`codex.exe`だけでは完結せず、少なくとも`codex-resources\codex-windows-sandbox-setup.exe`と`codex-command-runner.exe`を別ファイルとして持ちます。現行のpath-based setupは、固定Codex Homeのwhole-home / nested reparseをUAC中に同一objectへ束縛できず、resource不在時にはbare helper名へfallbackします。このため、旧setup-v5 markerや固定`codex.exe`が残っていてもproduction generatorを構成しません。
 
-```powershell
-.\windows\script\provision_codex_generation_sandbox.ps1 -CodexBin <固定したcodex.exe>
-```
+再有効化には、署名済みnative helper、元ユーザーSID binding、admin-controlled root、全path componentのreparse / identity検査、公式resource closureのexact size・SHA・署名検証、絶対path起動、single-flight、child process所有、実行後readbackが必要です。通常の生成時にUACを出さず、workspace、virtual User Home、Tempを毎回破棄する設計は維持します。
 
-SettingsのPocket Apps欄には、準備状態の再確認と「セットアップ／修復」を表示します。ユーザーが公式Codex 0.145.0の`codex.exe`を選び、既定Noのネイティブ確認を承認した場合だけUACを1回表示します。Hostはexact size・SHA-256を検証したbytesを固定`%LOCALAPPDATA%\HoverPocket\CodexGenerationSandbox\bin\codex.exe`へ配置してpinし、UACではそのOpenAI実行ファイル自体の公式setup commandだけを起動します。完了後はcontrol fileと固定binaryを別々にreadbackし、HoverPocket再起動を要求します。管理者credentialやsandbox passwordはHoverPocketへ渡しません。
-
-CLIから初回setupまたはrepairを行う場合は、ユーザーが内容を確認した後に管理者PowerShellから`-Provision`を付けて一度だけ実行します。スクリプト自身は`RunAs`やUACを自動起動せず、非管理者shellでは`HP_CODEX_SANDBOX_ELEVATION_REQUIRED`で停止します。
-
-```powershell
-.\windows\script\provision_codex_generation_sandbox.ps1 `
-  -CodexBin <固定したcodex.exe> `
-  -Provision
-```
-
-positive confinement canaryは準備済みhomeを明示し、生成中にUACを要求しないこと、固定Codex Homeと`.sandbox-secrets`をmodel toolが読めないことを含めて確認します。
+positive confinement canaryは上記helper完成後に準備済みhomeを明示し、生成中にUACを要求しないこと、固定Codex Homeと`.sandbox-secrets`をmodel toolが読めないことを含めて確認します。現在は実行対象外です。
 
 ```powershell
 .\windows\script\verify_codex_generation_confinement.ps1 `

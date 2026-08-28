@@ -73,7 +73,7 @@ internal sealed class SettingsVerifier
 
         VerifyDefaults(store, registry, startup);
         VerifyWebViewSecurityPolicy();
-        VerifyCodexSandboxElevationContract();
+        await VerifyCodexSandboxFailClosedAsync(registry);
         VerifyVoiceAvailabilityWireValues();
         await RunCaseAsync(
             "surface-isolation",
@@ -605,31 +605,79 @@ internal sealed class SettingsVerifier
         }
     }
 
-    private void VerifyCodexSandboxElevationContract()
+    private async Task VerifyCodexSandboxFailClosedAsync(ProviderRegistry registry)
     {
-        var executable = Path.GetFullPath(@"C:\HoverPocket\CodexGenerationSandbox\bin\codex.exe");
-        var home = Path.GetFullPath(@"C:\HoverPocket\CodexGenerationSandbox\codex-home");
-        var start = CodexGenerationSandboxProvisioner.CreateElevatedSetupStartInfo(
+        var sandboxRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"HoverPocketCodexSandboxDisabled-{Guid.NewGuid():N}");
+        var home = Path.Combine(sandboxRoot, "codex-home");
+        var executable = Path.Combine(sandboxRoot, "bin", "codex.exe");
+        var provisioner = new CodexGenerationSandboxProvisioner(
+            home,
             executable,
-            home);
-        var expectedArguments = new[]
+            setupAvailable: true);
+
+        var initial = provisioner.Check();
+        var direct = await provisioner.ProvisionAsync(
+            Path.Combine(sandboxRoot, "untrusted-source", "codex.exe"),
+            CancellationToken.None);
+        if (initial.Ready
+            || initial.SetupAvailable
+            || initial.RepairAvailable
+            || initial.RestartRequired
+            || !string.Equals(
+                initial.ErrorCode,
+                CodexGenerationSandboxSecurityPolicy.SetupUnavailableCode,
+                StringComparison.Ordinal)
+            || direct.Ready
+            || direct.SetupAvailable
+            || !string.Equals(
+                direct.ErrorCode,
+                CodexGenerationSandboxSecurityPolicy.SetupUnavailableCode,
+                StringComparison.Ordinal)
+            || Directory.Exists(sandboxRoot)
+            || CodexPocketAppGenerationAdapter.ResolveExecutable() is not null)
         {
-            "sandbox",
-            "setup",
-            "--elevated",
-            "--current-user",
-            "--codex-home",
-            home
-        };
-        if (!string.Equals(start.FileName, executable, StringComparison.OrdinalIgnoreCase)
-            || !start.UseShellExecute
-            || !string.Equals(start.Verb, "runas", StringComparison.Ordinal)
-            || start.ArgumentList.Count != expectedArguments.Length
-            || !start.ArgumentList.SequenceEqual(expectedArguments, StringComparer.Ordinal)
-            || start.ArgumentList.Any(argument => argument.Contains("powershell", StringComparison.OrdinalIgnoreCase))
-            || start.ArgumentList.Any(argument => argument.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)))
+            _failures.Add("Codex sandbox production setup or legacy runtime was not fail-closed");
+        }
+
+        var store = UserSettingsStore.CreateTemporary("SettingsCodexSandboxDisabled");
+        var pickerCalls = 0;
+        var approvalCalls = 0;
+        using var controller = new PanelBridgeController(
+            registry,
+            store,
+            store.Load(registry.ProviderIds),
+            new InMemoryStartupRegistrationService(),
+            externalIntegrationsEnabled: true,
+            codexGenerationSandboxProvisioner: provisioner);
+        var dispatcher = new BridgeDispatcher();
+        using var attachment = controller.Attach(
+            dispatcher,
+            BridgeSurface.Settings,
+            codexSandboxExecutablePicker: () =>
+            {
+                pickerCalls += 1;
+                return executable;
+            },
+            codexSandboxProvisionDecision: () =>
+            {
+                approvalCalls += 1;
+                return true;
+            });
+        var response = await Send(
+            dispatcher,
+            """{"id":"sandbox-disabled","method":"settings.setupCodexGenerationSandbox"}""");
+        if (pickerCalls != 0
+            || approvalCalls != 0
+            || Directory.Exists(sandboxRoot)
+            || !response.Contains("\"setupAvailable\":false", StringComparison.Ordinal)
+            || !response.Contains("\"repairAvailable\":false", StringComparison.Ordinal)
+            || !response.Contains(
+                $"\"errorCode\":\"{CodexGenerationSandboxSecurityPolicy.SetupUnavailableCode}\"",
+                StringComparison.Ordinal))
         {
-            _failures.Add("Codex sandbox elevation did not target only the exact Codex setup command");
+            _failures.Add("forged Codex sandbox setup reached picker, approval, or filesystem work");
         }
     }
 

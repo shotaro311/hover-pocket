@@ -78,6 +78,19 @@ jobs:
           .\windows\script\verify_codex_generation_confinement.ps1 -SelfTest
           .\windows\script\provision_codex_generation_sandbox.ps1 -SelfTest
 
+      - name: Verify Codex sandbox provisioning is fail-closed
+        shell: pwsh
+        run: |
+          function Assert-ProvisioningFailClosed {
+            param([Parameter(Mandatory = $true)][string[]]$CaseArguments)
+            $output = @(& .\windows\script\provision_codex_generation_sandbox.ps1 @CaseArguments 2>&1)
+            if ($LASTEXITCODE -eq 0 -or ($output -join "`n") -notmatch "HP_CODEX_SANDBOX_SETUP_UNAVAILABLE") {
+              throw "Codex sandbox provisioning did not fail closed before path access."
+            }
+          }
+          Assert-ProvisioningFailClosed -CaseArguments @("-CodexBin", "Z:\\must-not-be-read\\codex.exe")
+          Assert-ProvisioningFailClosed -CaseArguments @("-CodexBin", "Z:\\must-not-be-read\\codex.exe", "-Provision")
+
       - name: Verify unelevated sandbox cannot replace the elevated boundary
         shell: pwsh
         timeout-minutes: 2

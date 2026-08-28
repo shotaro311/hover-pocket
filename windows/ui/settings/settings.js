@@ -207,7 +207,11 @@ function renderCodexSandbox(sandbox, language) {
     codexSandboxStatusEl.textContent = "";
     return;
   }
-  codexSandboxNoteEl.textContent = ready
+  codexSandboxNoteEl.textContent = sandbox.setupAvailable !== true
+    ? (english
+      ? "Setup and repair are disabled until HoverPocket ships a signed, reparse-safe native helper and verifies the complete Codex resource set."
+      : "署名済みでreparse-safeなnative helperとCodexの必要ファイル一式を検証できるまで、セットアップと修復は無効です。")
+    : ready
     ? sandbox.restartRequired
       ? (english
         ? "Readback passed. Restart HoverPocket before enabling generation. Runtime generation never requests UAC."

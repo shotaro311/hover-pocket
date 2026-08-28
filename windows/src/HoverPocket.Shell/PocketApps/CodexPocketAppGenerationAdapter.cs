@@ -462,6 +462,10 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
 
     public static string? ResolveExecutable()
     {
+        if (!CodexGenerationSandboxSecurityPolicy.ProductionRuntimeAvailable)
+        {
+            return null;
+        }
         var candidate = DefaultExecutablePath();
         return IsTrustedExecutable(candidate) ? candidate : null;
     }

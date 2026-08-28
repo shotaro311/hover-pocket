@@ -707,6 +707,10 @@ internal sealed class PanelBridgeController : IDisposable
         {
             return await PublishStateAsync(cancellationToken);
         }
+        if (!_codexGenerationSandboxProvisioner.Check().SetupAvailable)
+        {
+            return await PublishStateAsync(cancellationToken);
+        }
         var sourceExecutable = executablePicker();
         if (string.IsNullOrWhiteSpace(sourceExecutable) || !provisionDecision())
         {
