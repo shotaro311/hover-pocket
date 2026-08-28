@@ -111,6 +111,8 @@ function Test-MsiTableHasRows {
 function Assert-ExactSingleValue {
   param(
     [Parameter(Mandatory = $true)]
+    [AllowNull()]
+    [AllowEmptyCollection()]
     [object[]]$Rows,
 
     [Parameter(Mandatory = $true)]
@@ -123,7 +125,9 @@ function Assert-ExactSingleValue {
     [string]$FailureCode
   )
 
-  if ($Rows.Count -ne 1 -or [string]$Rows[0].$PropertyName -cne $ExpectedValue) {
+  if ($null -eq $Rows `
+      -or $Rows.Count -ne 1 `
+      -or [string]$Rows[0].$PropertyName -cne $ExpectedValue) {
     throw $FailureCode
   }
 }
@@ -187,27 +191,31 @@ try {
     -Database $database `
     -Sql "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='ALLUSERS'" `
     -Columns @("Value"))
-  Assert-ExactSingleValue $allUsers "Value" "1" "HP_CODEX_SANDBOX_MSI_NOT_PER_MACHINE"
+  Assert-ExactSingleValue `
+    -Rows $allUsers `
+    -PropertyName "Value" `
+    -ExpectedValue "1" `
+    -FailureCode "HP_CODEX_SANDBOX_MSI_NOT_PER_MACHINE"
 
   $productVersion = @(Invoke-MsiQuery `
     -Database $database `
     -Sql "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='ProductVersion'" `
     -Columns @("Value"))
   Assert-ExactSingleValue `
-    $productVersion `
-    "Value" `
-    $ExpectedProductVersion `
-    "HP_CODEX_SANDBOX_MSI_VERSION_MISMATCH"
+    -Rows $productVersion `
+    -PropertyName "Value" `
+    -ExpectedValue $ExpectedProductVersion `
+    -FailureCode "HP_CODEX_SANDBOX_MSI_VERSION_MISMATCH"
 
   $upgradeCode = @(Invoke-MsiQuery `
     -Database $database `
     -Sql "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='UpgradeCode'" `
     -Columns @("Value"))
   Assert-ExactSingleValue `
-    $upgradeCode `
-    "Value" `
-    $normalizedExpectedUpgradeCode `
-    "HP_CODEX_SANDBOX_MSI_UPGRADE_CODE_MISMATCH"
+    -Rows $upgradeCode `
+    -PropertyName "Value" `
+    -ExpectedValue $normalizedExpectedUpgradeCode `
+    -FailureCode "HP_CODEX_SANDBOX_MSI_UPGRADE_CODE_MISMATCH"
 
   $directoryRows = @(Invoke-MsiQuery `
     -Database $database `
