@@ -94,9 +94,30 @@ jobs:
             if ($Provision) {
               $caseArguments += "-Provision"
             }
-            $output = @(& $currentPwsh @caseArguments 2>&1)
-            if ($LASTEXITCODE -eq 0 -or ($output -join "`n") -notmatch "HP_CODEX_SANDBOX_SETUP_UNAVAILABLE") {
-              throw "Codex sandbox provisioning did not fail closed before path access."
+            $start = [Diagnostics.ProcessStartInfo]::new()
+            $start.FileName = $currentPwsh
+            $start.UseShellExecute = $false
+            $start.CreateNoWindow = $true
+            $start.RedirectStandardOutput = $true
+            $start.RedirectStandardError = $true
+            foreach ($argument in $caseArguments) {
+              [void]$start.ArgumentList.Add([string]$argument)
+            }
+            $process = [Diagnostics.Process]::new()
+            $process.StartInfo = $start
+            try {
+              if (-not $process.Start()) {
+                throw "Codex sandbox fail-closed verifier did not start."
+              }
+              $stdout = $process.StandardOutput.ReadToEnd()
+              $stderr = $process.StandardError.ReadToEnd()
+              $process.WaitForExit()
+              if ($process.ExitCode -eq 0 -or "$stdout`n$stderr" -notmatch "HP_CODEX_SANDBOX_SETUP_UNAVAILABLE") {
+                throw "Codex sandbox provisioning did not fail closed before path access."
+              }
+            }
+            finally {
+              $process.Dispose()
             }
           }
           Assert-ProvisioningFailClosed
