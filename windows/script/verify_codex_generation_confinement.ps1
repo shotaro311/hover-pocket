@@ -13,6 +13,9 @@ param(
     [Parameter(ParameterSetName = "Canary")]
     [string]$ResultPath,
 
+    [Parameter(ParameterSetName = "Canary")]
+    [string]$ProvisionedCodexHome,
+
     [Parameter(Mandatory = $true, ParameterSetName = "SelfTest")]
     [switch]$SelfTest
 )
@@ -39,7 +42,7 @@ $ExpectedProbe = [ordered]@{
     foreign_read = $false
     host_codex_home_read = $false
     network_connected = $false
-    runtime_codex_home_read = $true
+    runtime_codex_home_read = $false
     user_home_read = $false
     workspace_read = $true
     workspace_write = $false
@@ -102,7 +105,7 @@ $foreignRead = Test-Readable (Join-Path $ForeignRoot "denied.txt")
 [Console]::Error.WriteLine("HP_PROBE_STAGE_FOREIGN_READ_COMPLETE")
 $hostCodexHomeRead = Test-Readable (Join-Path $HostCodexHome "denied.txt")
 [Console]::Error.WriteLine("HP_PROBE_STAGE_HOST_CODEX_HOME_READ_COMPLETE")
-$runtimeCodexHomeRead = Test-Readable (Join-Path $RuntimeCodexHome "runtime.txt")
+$runtimeCodexHomeRead = Test-Readable (Join-Path $RuntimeCodexHome ".sandbox\setup_marker.json")
 [Console]::Error.WriteLine("HP_PROBE_STAGE_RUNTIME_CODEX_HOME_READ_COMPLETE")
 $userHomeRead = Test-Readable (Join-Path $UserHome "denied.txt")
 [Console]::Error.WriteLine("HP_PROBE_STAGE_USER_HOME_READ_COMPLETE")
@@ -253,7 +256,6 @@ function Get-ConfinementArguments {
         [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
     $parentPaths = @(
         [IO.Path]::GetDirectoryName($workspacePath)
-        [IO.Path]::GetDirectoryName($codexHomePath)
         [IO.Path]::GetDirectoryName($userHomePath)
     ) | Select-Object -Unique
     $rootPaths = @($workspacePath, $codexHomePath, $userHomePath) | Select-Object -Unique
@@ -270,6 +272,9 @@ function Get-ConfinementArguments {
         $hostUserProfilePath.StartsWith("\\", [StringComparison]::Ordinal) -or
         $hostUserProfilePath.Equals($hostUserProfileRoot, [StringComparison]::OrdinalIgnoreCase) -or
         -not $workspacePath.StartsWith($hostUserProfilePrefix, [StringComparison]::OrdinalIgnoreCase) -or
+        -not $codexHomePath.StartsWith($hostUserProfilePrefix, [StringComparison]::OrdinalIgnoreCase) -or
+        $codexHomePath.Equals($runRootPath, [StringComparison]::OrdinalIgnoreCase) -or
+        $codexHomePath.StartsWith($runRootPrefix, [StringComparison]::OrdinalIgnoreCase) -or
         $hostCodexHomePath.Equals($runRootPath, [StringComparison]::OrdinalIgnoreCase) -or
         $hostCodexHomePath.StartsWith($runRootPrefix, [StringComparison]::OrdinalIgnoreCase) -or
         -not $hostCodexHomePath.StartsWith($hostUserProfilePrefix, [StringComparison]::OrdinalIgnoreCase) -or
@@ -385,6 +390,103 @@ function Resolve-TrustedCodexExecutable {
         throw "The pinned Codex executable version is unsupported."
     }
     return $fullPath
+}
+
+function Open-ProvisionedCodexHomeLease {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$LocalApplicationData
+    )
+
+    $expectedHome = [IO.Path]::GetFullPath((Join-Path `
+        $LocalApplicationData `
+        "HoverPocket\CodexGenerationSandbox\codex-home")).TrimEnd(
+            [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+    $home = [IO.Path]::GetFullPath($Path).TrimEnd(
+        [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+    if (
+        $home.StartsWith("\\", [StringComparison]::Ordinal) -or
+        -not $home.Equals($expectedHome, [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $home -PathType Container)
+    ) {
+        throw "HP_CANARY_SANDBOX_NOT_PROVISIONED"
+    }
+    Assert-NoReparsePath -Path $home
+
+    $markerPath = Join-Path $home ".sandbox\setup_marker.json"
+    $usersPath = Join-Path $home ".sandbox-secrets\sandbox_users.json"
+    foreach ($controlPath in @($markerPath, $usersPath)) {
+        if (-not (Test-Path -LiteralPath $controlPath -PathType Leaf)) {
+            throw "HP_CANARY_SANDBOX_NOT_PROVISIONED"
+        }
+        Assert-NoReparsePath -Path $controlPath
+        $controlFile = Get-Item -LiteralPath $controlPath -Force
+        if ($controlFile.Length -le 0 -or $controlFile.Length -gt 65536) {
+            throw "HP_CANARY_SANDBOX_NOT_PROVISIONED"
+        }
+    }
+
+    $markerStream = $null
+    $usersStream = $null
+    try {
+        $markerStream = [IO.FileStream]::new(
+            $markerPath,
+            [IO.FileMode]::Open,
+            [IO.FileAccess]::Read,
+            [IO.FileShare]::Read)
+        $usersStream = [IO.FileStream]::new(
+            $usersPath,
+            [IO.FileMode]::Open,
+            [IO.FileAccess]::Read,
+            [IO.FileShare]::Read)
+        $markerReader = [IO.StreamReader]::new(
+            $markerStream,
+            [Text.Encoding]::UTF8,
+            $true,
+            4096,
+            $true)
+        $usersReader = [IO.StreamReader]::new(
+            $usersStream,
+            [Text.Encoding]::UTF8,
+            $true,
+            4096,
+            $true)
+        try {
+            $marker = $markerReader.ReadToEnd() | ConvertFrom-Json
+            $users = $usersReader.ReadToEnd() | ConvertFrom-Json
+        }
+        finally {
+            $markerReader.Dispose()
+            $usersReader.Dispose()
+        }
+        $markerStream.Position = 0
+        $usersStream.Position = 0
+        if (
+            [int]$marker.version -ne 5 -or
+            [string]$marker.offline_username -cne "CodexSandboxOffline" -or
+            [string]$marker.online_username -cne "CodexSandboxOnline" -or
+            @($marker.proxy_ports).Count -ne 0 -or
+            [bool]$marker.allow_local_binding -or
+            [int]$users.version -ne 5 -or
+            [string]$users.offline.username -cne "CodexSandboxOffline" -or
+            [string]::IsNullOrWhiteSpace([string]$users.offline.password) -or
+            [string]$users.online.username -cne "CodexSandboxOnline" -or
+            [string]::IsNullOrWhiteSpace([string]$users.online.password)
+        ) {
+            throw "HP_CANARY_SANDBOX_NOT_PROVISIONED"
+        }
+        return [pscustomobject]@{
+            HomePath = $home
+            MarkerStream = $markerStream
+            UsersStream = $usersStream
+        }
+    }
+    catch {
+        if ($null -ne $usersStream) { $usersStream.Dispose() }
+        if ($null -ne $markerStream) { $markerStream.Dispose() }
+        if ($_.Exception.Message -ceq "HP_CANARY_SANDBOX_NOT_PROVISIONED") { throw }
+        throw "HP_CANARY_SANDBOX_NOT_PROVISIONED"
+    }
 }
 
 function Resolve-ValidatedResultPath {
@@ -673,6 +775,8 @@ function Invoke-SelfTest {
             "HP_CANARY_CONFINEMENT_FRONTIER_LIMIT" -or
         (Get-CanaryFailureCode "Confinement deny frontier roots are invalid.") -cne
             "HP_CANARY_CONFINEMENT_FRONTIER_INVALID" -or
+        (Get-CanaryFailureCode "HP_CANARY_SANDBOX_NOT_PROVISIONED") -cne
+            "HP_CANARY_SANDBOX_NOT_PROVISIONED" -or
         (Get-CanaryFailureCode "unexpected") -cne "HP_CANARY_UNCLASSIFIED"
     ) {
         throw "Self-test canary failure classification contract failed."
@@ -683,7 +787,7 @@ function Invoke-SelfTest {
     $selfTestProfile = Join-Path $temporaryRoot ($SelfTestProfilePrefix + [Guid]::NewGuid().ToString("N"))
     $selfTestRunRoot = Join-Path $selfTestProfile "temp\run"
     $selfTestWorkspace = Join-Path $selfTestRunRoot "workspace"
-    $selfTestCodexHome = Join-Path $selfTestRunRoot "codex-home"
+    $selfTestCodexHome = Join-Path $selfTestProfile "codex-sandbox-home"
     $selfTestUserHome = Join-Path $selfTestRunRoot "user-home"
     $selfTestHostCodexHome = Join-Path $selfTestProfile "temp\host-codex-home"
     $selfTestForeign = Join-Path $selfTestProfile "temp\foreign"
@@ -722,6 +826,7 @@ function Invoke-SelfTest {
             "$(ConvertTo-TomlString $selfTestTemp)=`"deny`""
             "$(ConvertTo-TomlString $selfTestHostCodexHome)=`"deny`""
             "$(ConvertTo-TomlString $selfTestForeign)=`"deny`""
+            "$(ConvertTo-TomlString $selfTestCodexHome)=`"deny`""
             "$(ConvertTo-TomlString $selfTestWorkspace)=`"read`""
             "$(ConvertTo-TomlString $selfTestUserHome)=`"deny`""
             'network.enabled=false'
@@ -733,11 +838,6 @@ function Invoke-SelfTest {
             if (-not $joined.Contains($marker, [StringComparison]::Ordinal)) {
                 throw "Self-test confinement arguments differ from the expected contract."
             }
-        }
-        if ($joined.Contains(
-            "$(ConvertTo-TomlString $selfTestCodexHome)=`"deny`"",
-            [StringComparison]::Ordinal)) {
-            throw "Self-test must leave Codex Home to the native sandbox control-plane ACLs."
         }
         if ($joined.Contains(
             "$(ConvertTo-TomlString $selfTestRunRoot)=`"deny`"",
@@ -848,21 +948,37 @@ function Invoke-Canary {
     $foreignRoot = Join-Path $canaryBase ($ForeignPrefix + [Guid]::NewGuid().ToString("N"))
     $hostCodexHome = Join-Path $canaryBase ($HostCodexHomePrefix + [Guid]::NewGuid().ToString("N"))
     $listener = $null
+    $provisioningLease = $null
     try {
         $script:CanaryFailureContext.stage = "base_creation"
         [void](New-Item -ItemType Directory -Path $canaryBase)
         Assert-NoReparsePath -Path $canaryBase
         $workspace = Join-Path $root "workspace"
-        $codexHome = Join-Path $root "codex-home"
+        if ($SandboxImplementation -ceq "elevated") {
+            if ([string]::IsNullOrWhiteSpace($ProvisionedCodexHome)) {
+                throw "HP_CANARY_SANDBOX_NOT_PROVISIONED"
+            }
+            $script:CanaryFailureContext.stage = "sandbox_readiness"
+            $provisioningLease = Open-ProvisionedCodexHomeLease `
+                -Path $ProvisionedCodexHome `
+                -LocalApplicationData $localApplicationData
+            $codexHome = $provisioningLease.HomePath
+        }
+        else {
+            $codexHome = Join-Path $root "codex-home"
+        }
         $userHome = Join-Path $root "user-home"
         $localAppData = Join-Path $userHome "AppData\Local"
         $roamingAppData = Join-Path $userHome "AppData\Roaming"
         $processTemp = Join-Path $root "tmp"
-        foreach ($directory in @($workspace, $codexHome, $hostCodexHome, $userHome, $localAppData, $roamingAppData, $processTemp, $foreignRoot)) {
+        $runDirectories = @($workspace, $hostCodexHome, $userHome, $localAppData, $roamingAppData, $processTemp, $foreignRoot)
+        if ($SandboxImplementation -cne "elevated") {
+            $runDirectories += $codexHome
+        }
+        foreach ($directory in $runDirectories) {
             [void](New-Item -ItemType Directory -Path $directory)
         }
         [IO.File]::WriteAllText((Join-Path $workspace "allowed.txt"), "allowed-canary", [Text.Encoding]::UTF8)
-        [IO.File]::WriteAllText((Join-Path $codexHome "runtime.txt"), "runtime-codex-home-canary", [Text.Encoding]::UTF8)
         [IO.File]::WriteAllText((Join-Path $hostCodexHome "denied.txt"), "host-codex-home-canary", [Text.Encoding]::UTF8)
         [IO.File]::WriteAllText((Join-Path $userHome "denied.txt"), "user-home-canary", [Text.Encoding]::UTF8)
         [IO.File]::WriteAllText((Join-Path $foreignRoot "denied.txt"), "outside-root-canary", [Text.Encoding]::UTF8)
@@ -1094,7 +1210,7 @@ function Invoke-Canary {
                 validAuthenticode = $true
                 workspaceRead = $true
                 workspaceWriteDenied = $true
-                isolatedCodexHomeReadable = $true
+                isolatedCodexHomeReadDenied = $true
                 hostCodexHomeReadDenied = $true
                 userHomeReadDenied = $true
                 outsideRootReadDenied = $true
@@ -1121,6 +1237,10 @@ function Invoke-Canary {
     }
     finally {
         if ($null -ne $listener) { $listener.Stop() }
+        if ($null -ne $provisioningLease) {
+            $provisioningLease.UsersStream.Dispose()
+            $provisioningLease.MarkerStream.Dispose()
+        }
         Remove-ValidatedTemporaryRoot -Path $foreignRoot -TemporaryRoot $canaryBase -ExpectedPrefix $ForeignPrefix
         Remove-ValidatedTemporaryRoot -Path $hostCodexHome -TemporaryRoot $canaryBase -ExpectedPrefix $HostCodexHomePrefix
         Remove-ValidatedTemporaryRoot -Path $root -TemporaryRoot $canaryBase -ExpectedPrefix $RootPrefix

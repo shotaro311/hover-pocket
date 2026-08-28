@@ -223,6 +223,7 @@ internal sealed class PanelBridgeController : IDisposable
                     generator = new CodexPocketAppGenerationAdapter(
                         executable,
                         Path.Combine(generationRoot, "CodexWorkspaces"),
+                        CodexGenerationSandboxLease.DefaultHomePath(),
                         credentialProvider: () =>
                         {
                             using var apiKey = _openAIRealtimeCredentialStore.Load()

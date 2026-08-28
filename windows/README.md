@@ -68,6 +68,35 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 
 `--verify capabilities` はCalendar / Timer / Sticky NotesのProvider Capability handlerを検証します。`--verify broker` はRegistry、権限、承認の改変・期限切れ・再利用拒否、永続idempotency、実行後readback、監査ログの本文非保存、Today Focus、部分失敗時のTimer補償、timeout、macOSと共通のplan digestを検証します。
 
+## Codex Pocket App生成用Windows sandbox
+
+Pocket App生成のnative elevated sandboxは、生成要求のたびにUACを出しません。Codex 0.145.0の公式setup commandを、HoverPocket専用の固定Codex Homeへ一度だけ明示実行します。通常の生成ではこのcontrol-planeだけを再利用し、workspace、virtual User Home、Tempは毎回新しく作って終了時に削除します。
+
+準備状態の確認は非昇格shellから実行できます。未準備なら`HP_CODEX_SANDBOX_NOT_READY`で停止し、変更やUAC表示は行いません。
+
+```powershell
+.\windows\script\provision_codex_generation_sandbox.ps1 -CodexBin <固定したcodex.exe>
+```
+
+初回setupまたはrepairは、ユーザーが内容を確認した後に管理者PowerShellから`-Provision`を付けて一度だけ実行します。スクリプト自身は`RunAs`やUACを自動起動せず、非管理者shellでは`HP_CODEX_SANDBOX_ELEVATION_REQUIRED`で停止します。管理者credentialやsandbox passwordはHoverPocketへ渡しません。
+
+```powershell
+.\windows\script\provision_codex_generation_sandbox.ps1 `
+  -CodexBin <固定したcodex.exe> `
+  -Provision
+```
+
+positive confinement canaryは準備済みhomeを明示し、生成中にUACを要求しないこと、固定Codex Homeと`.sandbox-secrets`をmodel toolが読めないことを含めて確認します。
+
+```powershell
+.\windows\script\verify_codex_generation_confinement.ps1 `
+  -CodexBin <固定したcodex.exe> `
+  -SandboxImplementation elevated `
+  -ProvisionedCodexHome "$env:LOCALAPPDATA\HoverPocket\CodexGenerationSandbox\codex-home"
+```
+
+現時点のproduction resolverとactivationはOFFです。上記canary、Settingsの明示setup / repair UI、credential delivery、実モデル生成readbackが揃う前に有効化しません。
+
 ## Windows updates and release packaging
 
 Windows 版の更新確認は Velopack と GitHub Releases (`shotaro311/hover-pocket`) を使います。トレイと Settings の `Check for Updates` は Windows channel `win` の feed (`releases.win.json`) へ接続し、更新が見つかった場合はダウンロード前と適用/再起動前に確認します。起動時の自動チェックは既定オンで、失敗しても起動を止めません。

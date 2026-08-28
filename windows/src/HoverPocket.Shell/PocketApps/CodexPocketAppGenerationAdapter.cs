@@ -12,7 +12,10 @@ internal sealed class PocketAppPinnedDirectory : IDisposable
     private readonly bool _allowReplacement;
     private bool _disposed;
 
-    public PocketAppPinnedDirectory(string path, bool allowReplacement = true)
+    public PocketAppPinnedDirectory(
+        string path,
+        bool allowReplacement = true,
+        bool createMissing = true)
     {
         FullPath = Path.GetFullPath(path);
         _allowReplacement = allowReplacement;
@@ -20,7 +23,7 @@ internal sealed class PocketAppPinnedDirectory : IDisposable
         {
             throw Failure("GENERATION_ROOT_UNSAFE");
         }
-        EnsureNoReparsePath(FullPath, createMissing: true);
+        EnsureNoReparsePath(FullPath, createMissing);
         _handle = OpenDirectory(FullPath, _allowReplacement);
         _identity = Identity(_handle);
         Validate();
@@ -221,6 +224,231 @@ internal sealed class PocketAppPinnedDirectory : IDisposable
     private static PocketAppGenerationException Failure(string code) => new(code);
 }
 
+internal sealed class CodexGenerationSandboxLease : IDisposable
+{
+    internal const int SetupVersion = 5;
+    internal const string OfflineUserName = "CodexSandboxOffline";
+    internal const string OnlineUserName = "CodexSandboxOnline";
+
+    private const long MaximumControlFileBytes = 64 * 1024;
+    private readonly PocketAppPinnedDirectory _home;
+    private readonly PocketAppPinnedDirectory _sandboxDirectory;
+    private readonly PocketAppPinnedDirectory _secretsDirectory;
+    private readonly FileStream _marker;
+    private readonly FileStream _users;
+    private bool _disposed;
+
+    private CodexGenerationSandboxLease(
+        string homePath,
+        PocketAppPinnedDirectory home,
+        PocketAppPinnedDirectory sandboxDirectory,
+        PocketAppPinnedDirectory secretsDirectory,
+        FileStream marker,
+        FileStream users)
+    {
+        HomePath = homePath;
+        _home = home;
+        _sandboxDirectory = sandboxDirectory;
+        _secretsDirectory = secretsDirectory;
+        _marker = marker;
+        _users = users;
+    }
+
+    public string HomePath { get; }
+
+    public static string DefaultHomePath()
+    {
+        var localApplicationData = Environment.GetFolderPath(
+            Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(localApplicationData))
+        {
+            throw Failure();
+        }
+        return Path.Combine(
+            Path.GetFullPath(localApplicationData),
+            "HoverPocket",
+            "CodexGenerationSandbox",
+            "codex-home");
+    }
+
+    public static CodexGenerationSandboxLease Open(string homePath)
+    {
+        if (string.IsNullOrWhiteSpace(homePath)) { throw Failure(); }
+        var normalizedHome = Path.TrimEndingDirectorySeparator(Path.GetFullPath(homePath));
+        var root = Path.TrimEndingDirectorySeparator(
+            Path.GetPathRoot(normalizedHome) ?? string.Empty);
+        if (normalizedHome.StartsWith("\\\\", StringComparison.Ordinal)
+            || string.Equals(normalizedHome, root, StringComparison.OrdinalIgnoreCase))
+        {
+            throw Failure();
+        }
+
+        PocketAppPinnedDirectory? home = null;
+        PocketAppPinnedDirectory? sandboxDirectory = null;
+        PocketAppPinnedDirectory? secretsDirectory = null;
+        FileStream? marker = null;
+        FileStream? users = null;
+        try
+        {
+            home = new PocketAppPinnedDirectory(
+                normalizedHome,
+                allowReplacement: false,
+                createMissing: false);
+            sandboxDirectory = new PocketAppPinnedDirectory(
+                Path.Combine(normalizedHome, ".sandbox"),
+                allowReplacement: false,
+                createMissing: false);
+            secretsDirectory = new PocketAppPinnedDirectory(
+                Path.Combine(normalizedHome, ".sandbox-secrets"),
+                allowReplacement: false,
+                createMissing: false);
+            marker = OpenControlFile(sandboxDirectory, "setup_marker.json");
+            users = OpenControlFile(secretsDirectory, "sandbox_users.json");
+            ValidateMarker(marker);
+            ValidateUsers(users);
+            home.Validate();
+            sandboxDirectory.Validate();
+            secretsDirectory.Validate();
+            return new CodexGenerationSandboxLease(
+                normalizedHome,
+                home,
+                sandboxDirectory,
+                secretsDirectory,
+                marker,
+                users);
+        }
+        catch
+        {
+            users?.Dispose();
+            marker?.Dispose();
+            secretsDirectory?.Dispose();
+            sandboxDirectory?.Dispose();
+            home?.Dispose();
+            throw Failure();
+        }
+    }
+
+    public void Validate()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _home.Validate();
+        _sandboxDirectory.Validate();
+        _secretsDirectory.Validate();
+        ValidateMarker(_marker);
+        ValidateUsers(_users);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) { return; }
+        _users.Dispose();
+        _marker.Dispose();
+        _secretsDirectory.Dispose();
+        _sandboxDirectory.Dispose();
+        _home.Dispose();
+        _disposed = true;
+    }
+
+    private static FileStream OpenControlFile(PocketAppPinnedDirectory directory, string fileName)
+    {
+        var handle = directory.OpenFileForRead(fileName) ?? throw Failure();
+        try
+        {
+            var stream = new FileStream(handle, FileAccess.Read, bufferSize: 4096, isAsync: false);
+            if (stream.Length is <= 0 or > MaximumControlFileBytes)
+            {
+                stream.Dispose();
+                throw Failure();
+            }
+            return stream;
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
+    }
+
+    private static void ValidateMarker(FileStream stream)
+    {
+        using var document = Parse(stream);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object
+            || !TryReadInt(root, "version", out var version)
+            || version != SetupVersion
+            || !TryReadString(root, "offline_username", OfflineUserName)
+            || !TryReadString(root, "online_username", OnlineUserName)
+            || !root.TryGetProperty("proxy_ports", out var proxyPorts)
+            || proxyPorts.ValueKind != JsonValueKind.Array
+            || proxyPorts.GetArrayLength() != 0
+            || (root.TryGetProperty("allow_local_binding", out var localBinding)
+                && (localBinding.ValueKind is not JsonValueKind.False)))
+        {
+            throw Failure();
+        }
+    }
+
+    private static void ValidateUsers(FileStream stream)
+    {
+        using var document = Parse(stream);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object
+            || !TryReadInt(root, "version", out var version)
+            || version != SetupVersion
+            || !TryReadUser(root, "offline", OfflineUserName)
+            || !TryReadUser(root, "online", OnlineUserName))
+        {
+            throw Failure();
+        }
+    }
+
+    private static JsonDocument Parse(FileStream stream)
+    {
+        stream.Position = 0;
+        try
+        {
+            return JsonDocument.Parse(stream, new JsonDocumentOptions
+            {
+                AllowTrailingCommas = false,
+                CommentHandling = JsonCommentHandling.Disallow,
+                MaxDepth = 8
+            });
+        }
+        finally
+        {
+            stream.Position = 0;
+        }
+    }
+
+    private static bool TryReadInt(JsonElement root, string name, out int value)
+    {
+        value = 0;
+        return root.TryGetProperty(name, out var element)
+            && element.ValueKind == JsonValueKind.Number
+            && element.TryGetInt32(out value);
+    }
+
+    private static bool TryReadString(JsonElement root, string name, string expected)
+    {
+        return root.TryGetProperty(name, out var element)
+            && element.ValueKind == JsonValueKind.String
+            && element.ValueEquals(expected);
+    }
+
+    private static bool TryReadUser(JsonElement root, string name, string expectedUserName)
+    {
+        return root.TryGetProperty(name, out var user)
+            && user.ValueKind == JsonValueKind.Object
+            && TryReadString(user, "username", expectedUserName)
+            && user.TryGetProperty("password", out var password)
+            && password.ValueKind == JsonValueKind.String
+            && !password.ValueEquals(string.Empty);
+    }
+
+    private static PocketAppGenerationException Failure() =>
+        new("GENERATOR_SANDBOX_NOT_READY");
+}
+
 internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdapter, IDisposable
 {
     private const int MaximumConfinementDenyEntries = 256;
@@ -231,13 +459,15 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
     public static string? ResolveExecutable()
     {
         // The named profile and isolated process environment are prepared below, but
-        // production remains disconnected until Host-brokered credentials and a
-        // native elevated-sandbox outside-root canary pass on a supported Windows host.
+        // production remains disconnected until the explicit one-time sandbox setup,
+        // Host-brokered credentials, and the no-UAC outside-root canary pass on a
+        // supported Windows host.
         return null;
     }
 
     private readonly string _executable;
     private readonly PocketAppPinnedDirectory _workspaceRoot;
+    private readonly string _sandboxHome;
     private readonly TimeSpan _timeout;
     private readonly Func<string> _credentialProvider;
     private bool _disposed;
@@ -245,12 +475,18 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
     public CodexPocketAppGenerationAdapter(
         string executable,
         string workspaceRoot,
+        string sandboxHome,
         Func<string> credentialProvider,
         TimeSpan? timeout = null)
     {
-        if (string.IsNullOrWhiteSpace(executable)) { throw Failure("GENERATOR_UNAVAILABLE"); }
+        if (string.IsNullOrWhiteSpace(executable)
+            || string.IsNullOrWhiteSpace(sandboxHome))
+        {
+            throw Failure("GENERATOR_UNAVAILABLE");
+        }
         _executable = executable;
         _workspaceRoot = new PocketAppPinnedDirectory(workspaceRoot);
+        _sandboxHome = Path.GetFullPath(sandboxHome);
         _credentialProvider = credentialProvider
             ?? throw Failure("GENERATOR_UNAVAILABLE");
         _timeout = timeout ?? TimeSpan.FromSeconds(60);
@@ -272,18 +508,18 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
 
         var runRoot = Path.Combine(_workspaceRoot.FullPath, $"codex-{Guid.NewGuid():N}");
         var workspace = Path.Combine(runRoot, "workspace");
-        var codexHome = Path.Combine(runRoot, "codex-home");
         var userHome = Path.Combine(runRoot, "user-home");
         var localAppData = Path.Combine(userHome, "AppData", "Local");
         var roamingAppData = Path.Combine(userHome, "AppData", "Roaming");
         var temporaryDirectory = Path.Combine(runRoot, "tmp");
         using var runRootPin = new PocketAppPinnedDirectory(runRoot);
-        foreach (var directory in new[] { workspace, codexHome, userHome, localAppData, roamingAppData, temporaryDirectory })
+        foreach (var directory in new[] { workspace, userHome, localAppData, roamingAppData, temporaryDirectory })
         {
             Directory.CreateDirectory(directory);
         }
         try
         {
+            using var sandboxLease = CodexGenerationSandboxLease.Open(_sandboxHome);
             _workspaceRoot.Validate();
             runRootPin.Validate();
             var schemaPath = Path.Combine(workspace, "generation-output.schema.json");
@@ -310,7 +546,7 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             }
             foreach (var argument in ConfinementArguments(
                 workspace,
-                codexHome,
+                sandboxLease.HomePath,
                 userHome,
                 HostUserProfile(),
                 schemaPath,
@@ -321,7 +557,7 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             }
             start.Environment.Clear();
             foreach (var (key, value) in ConfinementEnvironment(
-                codexHome,
+                sandboxLease.HomePath,
                 userHome,
                 localAppData,
                 roamingAppData,
@@ -331,6 +567,7 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
             }
 
             using var process = new Process { StartInfo = start };
+            sandboxLease.Validate();
             try
             {
                 if (!process.Start()) { throw Failure("GENERATOR_UNAVAILABLE"); }
@@ -414,10 +651,12 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         var normalizedSchema = Path.GetFullPath(schemaPath);
         var normalizedModelCatalog = Path.GetFullPath(modelCatalogPath);
         var normalizedHelper = Path.GetFullPath(credentialHelperExecutable);
-        var directories = new[] { normalizedWorkspace, normalizedCodexHome, normalizedUserHome };
-        if (directories
-                .Distinct(StringComparer.OrdinalIgnoreCase).Count() != 3
-            || directories.Select(Path.GetDirectoryName)
+        var runDirectories = new[] { normalizedWorkspace, normalizedUserHome };
+        var runRoot = Path.GetDirectoryName(normalizedWorkspace)
+            ?? throw Failure("GENERATOR_UNAVAILABLE");
+        if (runDirectories
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count() != 2
+            || runDirectories.Select(Path.GetDirectoryName)
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count() != 1
             || normalizedHostUserProfile.StartsWith("\\\\", StringComparison.Ordinal)
             || string.Equals(
@@ -425,6 +664,9 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
                 Path.TrimEndingDirectorySeparator(Path.GetPathRoot(normalizedHostUserProfile) ?? string.Empty),
                 StringComparison.OrdinalIgnoreCase)
             || !IsStrictDescendant(normalizedWorkspace, normalizedHostUserProfile)
+            || !IsStrictDescendant(normalizedCodexHome, normalizedHostUserProfile)
+            || string.Equals(normalizedCodexHome, runRoot, StringComparison.OrdinalIgnoreCase)
+            || IsStrictDescendant(normalizedCodexHome, runRoot)
             || !string.Equals(
                 Path.GetDirectoryName(normalizedSchema),
                 normalizedWorkspace,
@@ -439,8 +681,6 @@ internal sealed class CodexPocketAppGenerationAdapter : IPocketAppGenerationAdap
         {
             throw Failure("GENERATOR_UNAVAILABLE");
         }
-        var runRoot = Path.GetDirectoryName(normalizedWorkspace)
-            ?? throw Failure("GENERATOR_UNAVAILABLE");
         var filesystemEntries = new List<string>
         {
             $"{JsonSerializer.Serialize(":minimal")}=\"read\""

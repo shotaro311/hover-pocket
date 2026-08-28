@@ -61,17 +61,22 @@ jobs:
       - name: Verify Codex generation confinement verifier
         shell: pwsh
         run: |
-          $tokens = $null
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path .\windows\script\verify_codex_generation_confinement.ps1),
-            [ref]$tokens,
-            [ref]$errors)
-          if ($errors.Count -gt 0) {
-            $errors | ForEach-Object { Write-Error $_.Message }
-            exit 1
+          foreach ($scriptPath in @(
+            ".\windows\script\verify_codex_generation_confinement.ps1",
+            ".\windows\script\provision_codex_generation_sandbox.ps1")) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $scriptPath),
+              [ref]$tokens,
+              [ref]$errors)
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error $_.Message }
+              exit 1
+            }
           }
           .\windows\script\verify_codex_generation_confinement.ps1 -SelfTest
+          .\windows\script\provision_codex_generation_sandbox.ps1 -SelfTest
 
       - name: Verify unelevated sandbox cannot replace the elevated boundary
         shell: pwsh

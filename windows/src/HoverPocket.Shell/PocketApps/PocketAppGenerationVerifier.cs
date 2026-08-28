@@ -20,6 +20,9 @@ internal sealed class PocketAppGenerationVerifier
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN credential-broker");
         Task.Run(VerifyCredentialBrokerAsync).GetAwaiter().GetResult();
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END credential-broker");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN sandbox-readiness");
+        VerifyCodexSandboxReadiness();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END sandbox-readiness");
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN settings-approval");
         VerifySettingsApprovalBoundary().GetAwaiter().GetResult();
         VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END settings-approval");
@@ -839,7 +842,13 @@ internal sealed class PocketAppGenerationVerifier
             "Temp",
             "run");
         var confinementWorkspace = Path.Combine(confinementRoot, "workspace");
-        var confinementCodexHome = Path.Combine(confinementRoot, "codex-home");
+        var confinementCodexHome = Path.Combine(
+            confinementHostUserProfile,
+            "AppData",
+            "Local",
+            "HoverPocket",
+            "CodexGenerationSandbox",
+            "codex-home");
         var confinementUserHome = Path.Combine(confinementRoot, "user-home");
         var confinementHostCodexHome = Path.Combine(
             confinementHostUserProfile,
@@ -907,7 +916,6 @@ internal sealed class PocketAppGenerationVerifier
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementForeign)}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementWorkspace)}=\"read\"", StringComparison.Ordinal)
                 && !confinementJoined.Contains($"{JsonSerializer.Serialize(confinementRoot)}=\"deny\"", StringComparison.Ordinal)
-                && !confinementJoined.Contains($"{JsonSerializer.Serialize(confinementCodexHome)}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementUserHome)}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"{JsonSerializer.Serialize(Path.GetFullPath(confinementHelper))}=\"deny\"", StringComparison.Ordinal)
                 && confinementJoined.Contains($"model={JsonSerializer.Serialize(CodexPocketAppGenerationModelCatalog.ModelId)}", StringComparison.Ordinal)
@@ -978,6 +986,100 @@ internal sealed class PocketAppGenerationVerifier
                 {
                     PocketAppVerifierFileSystem.MakeTreeMutable(confinementHostUserProfile);
                     Directory.Delete(confinementHostUserProfile, true);
+                }
+            }
+            catch { }
+        }
+    }
+
+    private void VerifyCodexSandboxReadiness()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            $"hover-pocket-codex-sandbox-readiness-{Guid.NewGuid():N}");
+        var home = Path.Combine(root, "codex-home");
+        var sandbox = Path.Combine(home, ".sandbox");
+        var secrets = Path.Combine(home, ".sandbox-secrets");
+        try
+        {
+            Directory.CreateDirectory(sandbox);
+            Directory.CreateDirectory(secrets);
+            File.WriteAllText(
+                Path.Combine(sandbox, "setup_marker.json"),
+                JsonSerializer.Serialize(new
+                {
+                    version = CodexGenerationSandboxLease.SetupVersion,
+                    offline_username = CodexGenerationSandboxLease.OfflineUserName,
+                    online_username = CodexGenerationSandboxLease.OnlineUserName,
+                    proxy_ports = Array.Empty<int>(),
+                    allow_local_binding = false
+                }));
+            File.WriteAllText(
+                Path.Combine(secrets, "sandbox_users.json"),
+                JsonSerializer.Serialize(new
+                {
+                    version = CodexGenerationSandboxLease.SetupVersion,
+                    offline = new
+                    {
+                        username = CodexGenerationSandboxLease.OfflineUserName,
+                        password = "fixture-dpapi-blob"
+                    },
+                    online = new
+                    {
+                        username = CodexGenerationSandboxLease.OnlineUserName,
+                        password = "fixture-dpapi-blob"
+                    }
+                }));
+
+            using (var lease = CodexGenerationSandboxLease.Open(home))
+            {
+                lease.Validate();
+                Require(
+                    string.Equals(lease.HomePath, Path.GetFullPath(home), StringComparison.OrdinalIgnoreCase),
+                    "generation_codex_sandbox_ready");
+                try
+                {
+                    File.Delete(Path.Combine(secrets, "sandbox_users.json"));
+                    _failures.Add("generation_codex_sandbox_users_not_pinned");
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+
+            File.WriteAllText(
+                Path.Combine(sandbox, "setup_marker.json"),
+                JsonSerializer.Serialize(new
+                {
+                    version = CodexGenerationSandboxLease.SetupVersion,
+                    offline_username = CodexGenerationSandboxLease.OfflineUserName,
+                    online_username = CodexGenerationSandboxLease.OnlineUserName,
+                    proxy_ports = new[] { 7890 },
+                    allow_local_binding = false
+                }));
+            try
+            {
+                using var _ = CodexGenerationSandboxLease.Open(home);
+                _failures.Add("generation_codex_sandbox_proxy_drift_accepted");
+            }
+            catch (PocketAppGenerationException exception)
+            {
+                Require(
+                    exception.Code == "GENERATOR_SANDBOX_NOT_READY",
+                    "generation_codex_sandbox_failure_code");
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    PocketAppVerifierFileSystem.MakeTreeMutable(root);
+                    Directory.Delete(root, true);
                 }
             }
             catch { }
