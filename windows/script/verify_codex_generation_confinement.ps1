@@ -577,7 +577,11 @@ function Invoke-BoundedProcess {
 function Get-SanitizedDiagnostic {
     param(
         [Parameter(Mandatory = $true)][AllowNull()][AllowEmptyString()][string]$Text,
-        [Parameter(Mandatory = $true)][string[]]$SensitiveValues
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [AllowEmptyCollection()]
+        [AllowEmptyString()]
+        [string[]]$SensitiveValues
     )
 
     if ($null -eq $Text) {
@@ -630,7 +634,9 @@ function Remove-ValidatedTemporaryRoot {
 
 function Invoke-SelfTest {
     try {
-        [void](Get-SanitizedDiagnostic -Text ([string]$null) -SensitiveValues @("sensitive"))
+        [void](Get-SanitizedDiagnostic `
+            -Text ([string]$null) `
+            -SensitiveValues @("sensitive", $null, ""))
     }
     catch {
         throw "Self-test null process diagnostic normalization failed."
