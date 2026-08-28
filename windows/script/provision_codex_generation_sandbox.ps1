@@ -144,11 +144,11 @@ function Read-ControlJson {
 }
 
 function Assert-Ready {
-    param([Parameter(Mandatory = $true)][string]$Home)
+    param([Parameter(Mandatory = $true)][string]$DedicatedHome)
 
-    Assert-NoReparsePath -Path $Home
-    $marker = Read-ControlJson -Path (Join-Path $Home ".sandbox\setup_marker.json")
-    $users = Read-ControlJson -Path (Join-Path $Home ".sandbox-secrets\sandbox_users.json")
+    Assert-NoReparsePath -Path $DedicatedHome
+    $marker = Read-ControlJson -Path (Join-Path $DedicatedHome ".sandbox\setup_marker.json")
+    $users = Read-ControlJson -Path (Join-Path $DedicatedHome ".sandbox-secrets\sandbox_users.json")
     if (
         [int]$marker.version -ne $ExpectedSetupVersion -or
         [string]$marker.offline_username -cne "CodexSandboxOffline" -or
@@ -168,13 +168,13 @@ function Assert-Ready {
 function Invoke-Provisioning {
     param(
         [Parameter(Mandatory = $true)][string]$Executable,
-        [Parameter(Mandatory = $true)][string]$Home
+        [Parameter(Mandatory = $true)][string]$DedicatedHome
     )
 
     if (-not (Test-IsAdministrator)) {
         throw "HP_CODEX_SANDBOX_ELEVATION_REQUIRED"
     }
-    $parent = [IO.Path]::GetDirectoryName($Home)
+    $parent = [IO.Path]::GetDirectoryName($DedicatedHome)
     [void](New-Item -ItemType Directory -Path $parent -Force)
     Assert-NoReparsePath -Path $parent
 
@@ -190,7 +190,7 @@ function Invoke-Provisioning {
         "--elevated",
         "--current-user",
         "--codex-home",
-        $Home)) {
+        $DedicatedHome)) {
         [void]$start.ArgumentList.Add($argument)
     }
     $process = [Diagnostics.Process]::new()
@@ -241,14 +241,14 @@ function Invoke-SelfTest {
                 password = "fixture-dpapi-blob"
             }
         } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $secrets "sandbox_users.json") -Encoding UTF8
-        Assert-Ready -Home $selfTestHome
+        Assert-Ready -DedicatedHome $selfTestHome
 
         $markerPath = Join-Path $sandbox "setup_marker.json"
         $marker = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json
         $marker.proxy_ports = @(7890)
         $marker | ConvertTo-Json | Set-Content -LiteralPath $markerPath -Encoding UTF8
         try {
-            Assert-Ready -Home $selfTestHome
+            Assert-Ready -DedicatedHome $selfTestHome
             throw "SELF_TEST_ACCEPTED_PROXY_DRIFT"
         }
         catch {
@@ -275,7 +275,7 @@ try {
     $dedicatedHome = Resolve-DedicatedCodexHome -ConfiguredPath $CodexHome
     $ready = $false
     try {
-        Assert-Ready -Home $dedicatedHome
+        Assert-Ready -DedicatedHome $dedicatedHome
         $ready = $true
     }
     catch {
@@ -283,8 +283,8 @@ try {
     }
     if (-not $ready) {
         if (-not $Provision) { throw "HP_CODEX_SANDBOX_NOT_READY" }
-        Invoke-Provisioning -Executable $codex -Home $dedicatedHome
-        Assert-Ready -Home $dedicatedHome
+        Invoke-Provisioning -Executable $codex -DedicatedHome $dedicatedHome
+        Assert-Ready -DedicatedHome $dedicatedHome
     }
 
     [ordered]@{
