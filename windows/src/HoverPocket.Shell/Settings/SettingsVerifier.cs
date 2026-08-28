@@ -53,7 +53,7 @@ internal sealed class SettingsVerifier
             startup,
             codexGenerationSandboxProvisioner: codexSandbox);
         var dispatcher = new BridgeDispatcher();
-        using var _ = controller.Attach(
+        using var settingsAttachment = controller.Attach(
             dispatcher,
             BridgeSurface.Settings,
             aiNativeEnableDecision: () => true,
