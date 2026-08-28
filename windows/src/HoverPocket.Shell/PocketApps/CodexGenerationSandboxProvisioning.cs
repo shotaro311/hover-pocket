@@ -115,25 +115,7 @@ internal sealed class CodexGenerationSandboxProvisioner : ICodexGenerationSandbo
             return Check();
         }
 
-        var start = new ProcessStartInfo
-        {
-            FileName = _executablePath,
-            UseShellExecute = true,
-            Verb = "runas",
-            WindowStyle = ProcessWindowStyle.Hidden
-        };
-        foreach (var argument in new[]
-        {
-            "sandbox",
-            "setup",
-            "--elevated",
-            "--current-user",
-            "--codex-home",
-            _homePath
-        })
-        {
-            start.ArgumentList.Add(argument);
-        }
+        var start = CreateElevatedSetupStartInfo(_executablePath, _homePath);
 
         try
         {
@@ -183,6 +165,32 @@ internal sealed class CodexGenerationSandboxProvisioner : ICodexGenerationSandbo
         _restartRequired = true;
         _lastErrorCode = null;
         return Refresh();
+    }
+
+    internal static ProcessStartInfo CreateElevatedSetupStartInfo(
+        string executablePath,
+        string homePath)
+    {
+        var start = new ProcessStartInfo
+        {
+            FileName = Path.GetFullPath(executablePath),
+            UseShellExecute = true,
+            Verb = "runas",
+            WindowStyle = ProcessWindowStyle.Hidden
+        };
+        foreach (var argument in new[]
+        {
+            "sandbox",
+            "setup",
+            "--elevated",
+            "--current-user",
+            "--codex-home",
+            Path.GetFullPath(homePath)
+        })
+        {
+            start.ArgumentList.Add(argument);
+        }
+        return start;
     }
 
     private async Task<bool> InstallTrustedExecutableAsync(

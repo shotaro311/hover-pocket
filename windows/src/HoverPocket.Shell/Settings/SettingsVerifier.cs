@@ -73,6 +73,7 @@ internal sealed class SettingsVerifier
 
         VerifyDefaults(store, registry, startup);
         VerifyWebViewSecurityPolicy();
+        VerifyCodexSandboxElevationContract();
         VerifyVoiceAvailabilityWireValues();
         await RunCaseAsync(
             "surface-isolation",
@@ -601,6 +602,34 @@ internal sealed class SettingsVerifier
                 WebViewSecurityPolicy.PanelHostName))
         {
             _failures.Add("webview security: external browser routing did not match policy");
+        }
+    }
+
+    private void VerifyCodexSandboxElevationContract()
+    {
+        var executable = Path.GetFullPath(@"C:\HoverPocket\CodexGenerationSandbox\bin\codex.exe");
+        var home = Path.GetFullPath(@"C:\HoverPocket\CodexGenerationSandbox\codex-home");
+        var start = CodexGenerationSandboxProvisioner.CreateElevatedSetupStartInfo(
+            executable,
+            home);
+        var expectedArguments = new[]
+        {
+            "sandbox",
+            "setup",
+            "--elevated",
+            "--current-user",
+            "--codex-home",
+            home
+        };
+        if (!string.Equals(start.FileName, executable, StringComparison.OrdinalIgnoreCase)
+            || !start.UseShellExecute
+            || !string.Equals(start.Verb, "runas", StringComparison.Ordinal)
+            || start.ArgumentList.Count != expectedArguments.Length
+            || !start.ArgumentList.SequenceEqual(expectedArguments, StringComparer.Ordinal)
+            || start.ArgumentList.Any(argument => argument.Contains("powershell", StringComparison.OrdinalIgnoreCase))
+            || start.ArgumentList.Any(argument => argument.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)))
+        {
+            _failures.Add("Codex sandbox elevation did not target only the exact Codex setup command");
         }
     }
 
