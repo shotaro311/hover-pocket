@@ -38,10 +38,102 @@ internal static class ContractSelfTest
         }
 
         VerifyRequestRoundTrip();
+        VerifySetupReadbackContract();
         if (OperatingSystem.IsWindows())
         {
             SecureDirectoryTree.VerifyAclContract();
+            CodexSetupReadbackVerifier.VerifyMachineScopeDpapiContractForSelfTest();
         }
+    }
+
+    private static void VerifySetupReadbackContract()
+    {
+        var marker = """
+            {
+              "version": 5,
+              "offline_username": "CodexSandboxOffline",
+              "online_username": "CodexSandboxOnline",
+              "created_at": "2026-08-28T00:00:00Z",
+              "proxy_ports": [],
+              "allow_local_binding": false,
+              "read_roots": [],
+              "write_roots": []
+            }
+            """;
+        CodexSetupReadbackVerifier.VerifyMarkerDocument(
+            System.Text.Encoding.UTF8.GetBytes(marker));
+        ExpectFailure(
+            () => CodexSetupReadbackVerifier.VerifyMarkerDocument(
+                System.Text.Encoding.UTF8.GetBytes(marker.Replace(
+                    "\"proxy_ports\": []",
+                    "\"proxy_ports\": [8080]",
+                    StringComparison.Ordinal))),
+            "HP_CODEX_SANDBOX_SETUP_MARKER_MISMATCH");
+
+        var offlinePassword = System.Text.Encoding.ASCII.GetBytes(
+            "Abcdefghijklmnop!@#$%^01");
+        var onlinePassword = System.Text.Encoding.ASCII.GetBytes(
+            "Zyxwvutsrqponmlkjihgfe98");
+        var users = $$"""
+            {
+              "version": 5,
+              "offline": {
+                "username": "CodexSandboxOffline",
+                "password": "{{Convert.ToBase64String(offlinePassword)}}"
+              },
+              "online": {
+                "username": "CodexSandboxOnline",
+                "password": "{{Convert.ToBase64String(onlinePassword)}}"
+              }
+            }
+            """;
+        var usersBytes = System.Text.Encoding.UTF8.GetBytes(users);
+        CodexSetupReadbackVerifier.VerifySandboxUsersDocument(
+            usersBytes,
+            encrypted => encrypted.ToArray());
+
+        ExpectFailure(
+            () => CodexSetupReadbackVerifier.VerifySandboxUsersDocument(
+                System.Text.Encoding.UTF8.GetBytes(users.Replace(
+                    "CodexSandboxOffline",
+                    "Administrators",
+                    StringComparison.Ordinal)),
+                encrypted => encrypted.ToArray()),
+            "HP_CODEX_SANDBOX_USERS_MISMATCH");
+        ExpectFailure(
+            () => CodexSetupReadbackVerifier.VerifySandboxUsersDocument(
+                System.Text.Encoding.UTF8.GetBytes(users.Replace(
+                    Convert.ToBase64String(offlinePassword),
+                    Convert.ToBase64String(
+                        System.Text.Encoding.ASCII.GetBytes(
+                            "Abcdefghijklmnop[]{}<>01")),
+                    StringComparison.Ordinal)),
+                encrypted => encrypted.ToArray()),
+            "HP_CODEX_SANDBOX_USERS_MISMATCH");
+        ExpectFailure(
+            () => CodexSetupReadbackVerifier.VerifySandboxUsersDocument(
+                System.Text.Encoding.UTF8.GetBytes(users.Replace(
+                    "\"version\": 5",
+                    "\"version\": 4",
+                    StringComparison.Ordinal)),
+                encrypted => encrypted.ToArray()),
+            "HP_CODEX_SANDBOX_USERS_MISMATCH");
+        ExpectFailure(
+            () => CodexSetupReadbackVerifier.VerifySandboxUsersDocument(
+                System.Text.Encoding.UTF8.GetBytes(users.Replace(
+                    "\"online\": {",
+                    "\"unexpected\": true, \"online\": {",
+                    StringComparison.Ordinal)),
+                encrypted => encrypted.ToArray()),
+            "HP_CODEX_SANDBOX_USERS_MISMATCH");
+        ExpectFailure(
+            () => CodexSetupReadbackVerifier.VerifySandboxUsersDocument(
+                System.Text.Encoding.UTF8.GetBytes(users.Replace(
+                    Convert.ToBase64String(onlinePassword),
+                    Convert.ToBase64String(offlinePassword),
+                    StringComparison.Ordinal)),
+                encrypted => encrypted.ToArray()),
+            "HP_CODEX_SANDBOX_USERS_MISMATCH");
     }
 
     private static void VerifyRequestRoundTrip()

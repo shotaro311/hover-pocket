@@ -307,39 +307,8 @@ internal static class CodexSandboxInstaller
         }
     }
 
-    private static void VerifySetupReadback(string codexHome)
-    {
-        var markerPath = Path.Combine(codexHome, ".sandbox", "setup_marker.json");
-        var usersPath = Path.Combine(codexHome, ".sandbox-secrets", "sandbox_users.json");
-        VerifyRegularReadbackFile(markerPath);
-        VerifyRegularReadbackFile(usersPath);
-        using var marker = JsonDocument.Parse(File.ReadAllBytes(markerPath));
-        var root = marker.RootElement;
-        if (!root.TryGetProperty("version", out var version)
-            || version.GetInt32() != CodexSetupVersion
-            || !root.TryGetProperty("offline_username", out var offlineUser)
-            || !string.Equals(
-                offlineUser.GetString(),
-                "CodexSandboxOffline",
-                StringComparison.Ordinal)
-            || !root.TryGetProperty("online_username", out var onlineUser)
-            || !string.Equals(
-                onlineUser.GetString(),
-                "CodexSandboxOnline",
-                StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("HP_CODEX_SANDBOX_SETUP_MARKER_MISMATCH");
-        }
-    }
-
-    private static void VerifyRegularReadbackFile(string path)
-    {
-        var attributes = File.GetAttributes(path);
-        if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
-        {
-            throw new InvalidOperationException("HP_CODEX_SANDBOX_SETUP_READBACK_INVALID");
-        }
-    }
+    private static void VerifySetupReadback(string codexHome) =>
+        CodexSetupReadbackVerifier.Verify(codexHome);
 
     private static void ApplyUserHomeSecurity(
         string homeRoot,
