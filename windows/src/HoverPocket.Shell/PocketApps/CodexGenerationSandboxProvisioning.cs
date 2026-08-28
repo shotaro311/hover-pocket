@@ -109,7 +109,9 @@ internal sealed class CodexGenerationSandboxProvisioner : ICodexGenerationSandbo
             _lastErrorCode = "GENERATOR_SANDBOX_SETUP_UNAVAILABLE";
             return Check();
         }
-        if (!await InstallTrustedExecutableAsync(sourceExecutable, cancellationToken))
+        if (!await Task.Run(
+                () => InstallTrustedExecutable(sourceExecutable),
+                cancellationToken))
         {
             _lastErrorCode = "GENERATOR_CODEX_UNTRUSTED";
             return Check();
@@ -193,9 +195,7 @@ internal sealed class CodexGenerationSandboxProvisioner : ICodexGenerationSandbo
         return start;
     }
 
-    private async Task<bool> InstallTrustedExecutableAsync(
-        string sourceExecutable,
-        CancellationToken cancellationToken)
+    private bool InstallTrustedExecutable(string sourceExecutable)
     {
         if (string.IsNullOrWhiteSpace(sourceExecutable)) { return false; }
         var sourcePath = Path.GetFullPath(sourceExecutable);
@@ -242,7 +242,7 @@ internal sealed class CodexGenerationSandboxProvisioner : ICodexGenerationSandbo
                 $"codex.{Guid.NewGuid():N}.tmp");
             try
             {
-                await using (var temporary = new FileStream(
+                using (var temporary = new FileStream(
                     temporaryPath,
                     FileMode.CreateNew,
                     FileAccess.Write,
@@ -250,8 +250,8 @@ internal sealed class CodexGenerationSandboxProvisioner : ICodexGenerationSandbo
                     1024 * 1024,
                     FileOptions.SequentialScan | FileOptions.WriteThrough))
                 {
-                    await source.CopyToAsync(temporary, 1024 * 1024, cancellationToken);
-                    await temporary.FlushAsync(cancellationToken);
+                    source.CopyTo(temporary, 1024 * 1024);
+                    temporary.Flush(flushToDisk: true);
                 }
                 sourceDirectory.Validate();
                 destinationDirectory.Validate();
