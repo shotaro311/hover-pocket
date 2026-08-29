@@ -475,6 +475,43 @@ function Invoke-NativeProcess {
     }
 }
 
+function Invoke-NativeProcessWithOutput {
+    param([string]$Path, [string[]]$Arguments, [string]$Label)
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $Path
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+    foreach ($argument in $Arguments) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            throw "$Label failed to start."
+        }
+        $standardOutput = $process.StandardOutput.ReadToEndAsync()
+        $standardError = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $output = $standardOutput.GetAwaiter().GetResult()
+        [void]$standardError.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) {
+            throw "$Label failed with exit code $($process.ExitCode)."
+        }
+        if (-not [string]::IsNullOrEmpty($output)) {
+            return @($output -split "`r?`n" | Where-Object { $_.Length -gt 0 })
+        }
+        return @()
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
 function Assert-InstalledVersion {
     param([string]$InstallRoot, [string]$ExpectedVersion)
 
@@ -490,10 +527,10 @@ function Assert-InstalledVersion {
     $previousExpected = $env:HOVERPOCKET_RELEASE_EXPECTED_VERSION
     $env:HOVERPOCKET_RELEASE_EXPECTED_VERSION = $ExpectedVersion
     try {
-        $verificationOutput = @(& $applicationPath --verify release-config)
-        if ($LASTEXITCODE -ne 0) {
-            throw "Installed release-config verifier failed."
-        }
+        $verificationOutput = @(Invoke-NativeProcessWithOutput `
+            -Path $applicationPath `
+            -Arguments @("--verify", "release-config") `
+            -Label "Installed release-config verifier")
         $verificationOutput | ForEach-Object { Write-Host $_ }
     }
     finally {
@@ -660,7 +697,28 @@ if ($SnapshotContractTest) {
     if (-not $mutationRejected) {
         throw "Release snapshot mutation contract was not rejected."
     }
-    '{"status":"passed","snapshotMutationRejected":true}'
+
+    $nativeOutput = @(Invoke-NativeProcessWithOutput `
+        -Path $env:ComSpec `
+        -Arguments @("/d", "/c", "echo HP_NATIVE_PROCESS_CAPTURE_OK") `
+        -Label "Native process capture contract")
+    if ($nativeOutput -cnotcontains "HP_NATIVE_PROCESS_CAPTURE_OK") {
+        throw "Native process output was not captured."
+    }
+    $nativeFailureRejected = $false
+    try {
+        Invoke-NativeProcessWithOutput `
+            -Path $env:ComSpec `
+            -Arguments @("/d", "/c", "exit /b 7") `
+            -Label "Native process failure contract" | Out-Null
+    }
+    catch {
+        $nativeFailureRejected = $_.Exception.Message -ceq "Native process failure contract failed with exit code 7."
+    }
+    if (-not $nativeFailureRejected) {
+        throw "Native process failure exit code was not rejected."
+    }
+    '{"status":"passed","snapshotMutationRejected":true,"nativeProcessOutputCaptured":true,"nativeProcessFailureRejected":true}'
     return
 }
 
