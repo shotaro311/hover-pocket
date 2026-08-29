@@ -330,8 +330,12 @@ internal sealed class CodexSandboxSetupHelperResolver : ICodexSandboxSetupHelper
 
 internal sealed class CodexSandboxSetupHelperLease : ICodexSandboxSetupHelperLease
 {
-    private const FileOptions BackupSemantics = (FileOptions)0x02000000;
-    private const FileOptions OpenReparsePoint = (FileOptions)0x00200000;
+    private const uint GenericRead = 0x80000000;
+    private const uint FileShareRead = 0x00000001;
+    private const uint FileShareWrite = 0x00000002;
+    private const uint OpenExisting = 3;
+    private const uint FileFlagBackupSemantics = 0x02000000;
+    private const uint FileFlagOpenReparsePoint = 0x00200000;
     private const uint FileTypeDisk = 0x0001;
 
     private readonly IReadOnlyList<PinnedDirectory> _directories;
@@ -554,19 +558,35 @@ internal sealed class CodexSandboxSetupHelperLease : ICodexSandboxSetupHelperLea
         }
     }
 
-    private static SafeFileHandle OpenDirectory(string path) => File.OpenHandle(
+    private static SafeFileHandle OpenDirectory(string path) => OpenHandle(
         path,
-        FileMode.Open,
-        FileAccess.Read,
-        FileShare.Read | FileShare.Write,
-        BackupSemantics | OpenReparsePoint);
+        FileShareRead | FileShareWrite,
+        FileFlagBackupSemantics | FileFlagOpenReparsePoint);
 
-    private static SafeFileHandle OpenRegularFile(string path) => File.OpenHandle(
+    private static SafeFileHandle OpenRegularFile(string path) => OpenHandle(
         path,
-        FileMode.Open,
-        FileAccess.Read,
-        FileShare.Read,
-        OpenReparsePoint);
+        FileShareRead,
+        FileFlagOpenReparsePoint);
+
+    private static SafeFileHandle OpenHandle(string path, uint shareMode, uint flags)
+    {
+        var handle = CreateFileW(
+            path,
+            GenericRead,
+            shareMode,
+            IntPtr.Zero,
+            OpenExisting,
+            flags,
+            IntPtr.Zero);
+        if (!handle.IsInvalid)
+        {
+            return handle;
+        }
+
+        var error = Marshal.GetLastWin32Error();
+        handle.Dispose();
+        throw new System.ComponentModel.Win32Exception(error);
+    }
 
     private static ByHandleFileInformation ReadInformation(SafeFileHandle handle)
     {
@@ -641,6 +661,16 @@ internal sealed class CodexSandboxSetupHelperLease : ICodexSandboxSetupHelperLea
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern uint GetFileType(SafeFileHandle fileHandle);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFileW(
+        string fileName,
+        uint desiredAccess,
+        uint shareMode,
+        IntPtr securityAttributes,
+        uint creationDisposition,
+        uint flagsAndAttributes,
+        IntPtr templateFile);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct ByHandleFileInformation
