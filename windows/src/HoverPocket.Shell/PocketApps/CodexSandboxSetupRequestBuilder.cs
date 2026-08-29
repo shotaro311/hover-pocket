@@ -15,9 +15,20 @@ internal sealed class PinnedCodexSandboxSetupRequest : IDisposable
     {
         Encoded = encoded;
         _sourceHandles = sourceHandles;
+        HelperArguments =
+        [
+            "--setup-request",
+            encoded.Base64Json,
+            "--request-sha256",
+            encoded.Sha256,
+            "--nonce",
+            encoded.Nonce,
+        ];
     }
 
     internal EncodedSetupRequest Encoded { get; }
+
+    internal IReadOnlyList<string> HelperArguments { get; }
 
     public void Dispose()
     {

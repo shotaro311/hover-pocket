@@ -4,8 +4,8 @@ internal static class CodexGenerationSandboxSecurityPolicy
 {
     internal const string SetupUnavailableCode = "GENERATOR_SANDBOX_SETUP_UNAVAILABLE";
 
-    // Provisioning remains disabled until a signed native helper binds the original user SID,
-    // the complete pinned Codex resource closure, and the admin-owned target object identities.
+    // Provisioning remains disabled until the physical signing/UAC canary independently proves
+    // the fixed installed helper boundary and the existing helper production switch is enabled.
     internal static bool ProvisioningAvailable => false;
 
     // A legacy setup-v5 directory has no HoverPocket helper attestation and must not enable
@@ -37,8 +37,16 @@ internal interface ICodexGenerationSandboxProvisioner
 
 internal sealed class CodexGenerationSandboxProvisioner : ICodexGenerationSandboxProvisioner
 {
+    internal const string SetupRequiredCode = "GENERATOR_SANDBOX_SETUP_REQUIRED";
+    internal const string RequestRejectedCode = "GENERATOR_SANDBOX_SETUP_REQUEST_REJECTED";
+    internal const string HelperRejectedCode = "GENERATOR_SANDBOX_HELPER_NOT_TRUSTED";
+
     private readonly bool _setupAvailable;
+    private readonly ICodexSandboxSetupHelperResolver _helperResolver;
+    private readonly ICodexSandboxSetupProcessLauncher _processLauncher;
+    private readonly Func<string, DateTimeOffset, PinnedCodexSandboxSetupRequest> _requestFactory;
     private string? _lastErrorCode;
+    private bool _restartRequired;
 
     public CodexGenerationSandboxProvisioner(bool setupAvailable = true)
         : this(
@@ -52,16 +60,52 @@ internal sealed class CodexGenerationSandboxProvisioner : ICodexGenerationSandbo
         string homePath,
         string executablePath,
         bool setupAvailable)
+        : this(
+            homePath,
+            executablePath,
+            setupAvailable,
+            new CodexSandboxSetupHelperResolver(),
+            new CodexSandboxSetupProcessLauncher(),
+            CodexSandboxSetupRequestBuilder.Create)
+    {
+    }
+
+    internal CodexGenerationSandboxProvisioner(
+        string homePath,
+        string executablePath,
+        bool setupAvailable,
+        ICodexSandboxSetupHelperResolver helperResolver,
+        ICodexSandboxSetupProcessLauncher processLauncher,
+        Func<string, DateTimeOffset, PinnedCodexSandboxSetupRequest> requestFactory)
     {
         _ = Path.GetFullPath(homePath);
         _ = Path.GetFullPath(executablePath);
+        _helperResolver = helperResolver;
+        _processLauncher = processLauncher;
+        _requestFactory = requestFactory;
         _setupAvailable = setupAvailable
             && CodexGenerationSandboxSecurityPolicy.ProvisioningAvailable;
     }
 
     public CodexGenerationSandboxProvisioningState Check()
     {
-        _lastErrorCode ??= CodexGenerationSandboxSecurityPolicy.SetupUnavailableCode;
+        if (_restartRequired)
+        {
+            return new CodexGenerationSandboxProvisioningState(
+                "restart_required",
+                Ready: false,
+                TrustedExecutableInstalled: true,
+                SetupAvailable: _setupAvailable,
+                RepairAvailable: _setupAvailable,
+                RestartRequired: true,
+                ErrorCode: null,
+                SetupVersion: CodexGenerationSandboxLease.SetupVersion,
+                RuntimeElevationRequired: false);
+        }
+
+        var errorCode = _setupAvailable
+            ? _lastErrorCode ?? SetupRequiredCode
+            : CodexGenerationSandboxSecurityPolicy.SetupUnavailableCode;
         return new CodexGenerationSandboxProvisioningState(
             "not_ready",
             Ready: false,
@@ -69,20 +113,84 @@ internal sealed class CodexGenerationSandboxProvisioner : ICodexGenerationSandbo
             SetupAvailable: _setupAvailable,
             RepairAvailable: false,
             RestartRequired: false,
-            ErrorCode: _lastErrorCode,
+            ErrorCode: errorCode,
             SetupVersion: CodexGenerationSandboxLease.SetupVersion,
             RuntimeElevationRequired: false);
     }
 
     public CodexGenerationSandboxProvisioningState Refresh() => Check();
 
-    public Task<CodexGenerationSandboxProvisioningState> ProvisionAsync(
+    public async Task<CodexGenerationSandboxProvisioningState> ProvisionAsync(
         string sourceExecutable,
         CancellationToken cancellationToken)
     {
-        _ = sourceExecutable;
-        cancellationToken.ThrowIfCancellationRequested();
-        _lastErrorCode = CodexGenerationSandboxSecurityPolicy.SetupUnavailableCode;
-        return Task.FromResult(Check());
+        if (!_setupAvailable)
+        {
+            _lastErrorCode = CodexGenerationSandboxSecurityPolicy.SetupUnavailableCode;
+            return Check();
+        }
+        if (cancellationToken.IsCancellationRequested)
+        {
+            _lastErrorCode = CodexSandboxSetupProcessLauncher.CancelledCode;
+            return Check();
+        }
+
+        PinnedCodexSandboxSetupRequest? request = null;
+        try
+        {
+            request = _requestFactory(sourceExecutable, DateTimeOffset.UtcNow);
+        }
+        catch (OperationCanceledException)
+        {
+            _lastErrorCode = CodexSandboxSetupProcessLauncher.CancelledCode;
+            return Check();
+        }
+        catch
+        {
+            _lastErrorCode = RequestRejectedCode;
+            return Check();
+        }
+
+        using (request)
+        {
+            ICodexSandboxSetupHelperLease? helper = null;
+            try
+            {
+                helper = _helperResolver.Resolve();
+            }
+            catch
+            {
+                _lastErrorCode = HelperRejectedCode;
+                return Check();
+            }
+
+            using (helper)
+            {
+                CodexSandboxSetupLaunchResult launch;
+                try
+                {
+                    launch = await _processLauncher.LaunchAsync(
+                        helper,
+                        request,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    _lastErrorCode = CodexSandboxSetupProcessLauncher.StartFailedCode;
+                    return Check();
+                }
+
+                if (!launch.Succeeded)
+                {
+                    _lastErrorCode = launch.ErrorCode
+                        ?? CodexSandboxSetupProcessLauncher.StartFailedCode;
+                    return Check();
+                }
+            }
+        }
+
+        _lastErrorCode = null;
+        _restartRequired = true;
+        return Check();
     }
 }

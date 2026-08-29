@@ -1,5 +1,35 @@
 # HoverPocket AI-native final integration — 2026-08-29
 
+## Windows Settings fixed-helper UAC boundary
+
+- ChatGPT Pro Orchestrator run `20260829-195325-hoverpocket-windows-settings-fixed-helper-uac-boundary-patch`のdelivery `return-ef597cc5f3b9dee4a03b6d500d8a06f2`をclaim-synthesisで検証した。
+- receipt、base `cc70c140cfccf28551a67b2dd775233240de1fc8`、artifact SHA-256 `a675afd34a5b4483e9c68db3d45d2308d5a9eeed7a35b0f1752c0659ec2309a0`、変更対象7ファイルを照合し、`changes.patch`を適用した。
+- app-local helper copy / publishを削除し、Settingsから将来利用するhelperを固定`ProgramFilesX64` originだけに限定した。各path component、final file object、UAC後のprocess image identityを比較し、reparse /置換をUAC前後で拒否する。
+- publisher metadata、WinVerifyTrust、certificate SHA pinを組み合わせ、native確認はdefault-No、requestはexact serialized arguments、elevationは単一`runas`、結果は固定errorとreadbackで扱う。
+- production switchはShell / helperともにOFFである。Voice、Pocket App生成、startup、backgroundからこの境界へ到達するrouteは追加していない。
+
+## Security remediationと差分スキャン
+
+- 独立したresolverレビューで、初期案がWinVerifyTrustをrevocation無効かつcache-onlyにしており、将来の有効化時に失効済みsignerを受け入れる可能性を検出した。
+- Shellとhelperの両方をwhole-chain revocation、root除外、cache-only fallbackなしへ変更した。revocation情報を取得できない場合もUAC前に停止する。Settings verifierとhelper self-testへ同じpolicy contractを固定した。
+- Codex Security scan `55bf2157-67e0-4142-9276-cdc0202a96f5`をworking-tree snapshot `codex-security-snapshot/v1:sha256:187323dab31e51980e559c4b7edc214cff276efa6f4cd855d107c46b845e2eb7`でsealed完了した。対象9ファイル、6 surface、reportable findingは0件、coverageはpartialである。
+- sealed reportは`/private/tmp/hoverpocket-security-uac.KPLhKe/report.md`、canonical manifest / findings / coverageも同directoryにあり、JSON parseとartifact SHA-256を別経路で再確認した。
+- Windows Release / Debug compile、実署名helper、physical UAC、cancel / timeout後のelevated process-tree cleanup、post-start identity readbackはscanのfollow-upへ残した。medium-integrity ShellがUAC後のelevated process treeを確実に終了できるかは物理canaryで確認する。
+
+## ローカル検証
+
+- `swift build -Xswiftc -warnings-as-errors`: 成功。
+- `python3 script/verify_pocket_contracts.py`: `PASS hoverpocket.pocket/v1: schemas=15 fixtures=71 matched=71`。
+- Codex auth control-plane、Codex confinement、macOS Voice E2E receipt、macOS realtime renderer、Voice foundation 42件、app Voice foundation / E2E isolation / panel layout、Capability、Broker、Pocket Surface、Pocket App package / lifecycle / generation / migration / health / workspace backup、Timer verifier: すべて成功。
+- Shell project XML parseと`git diff --check`: 成功。
+- ローカルMacに.NET SDKがないため、C# compileの成否をローカル結果から推測しない。Windows CIでRelease / Debug、`--verify settings`、helper contractを確認する。
+
+## この境界の完了条件
+
+- 更新headのWindows CIで警告0・エラー0、Settings verifier、helper contract、既存Voice / Broker / Pocket App契約が成功する。
+- 正式publisherで署名したhelperを固定Program Filesへ配置し、通常Windows hostでnormal consent、UAC cancel、timeout、process-tree cleanup、署名 / origin / object / process identity、実行後readbackを保存する。
+- これらが揃うまでproduction setup / generation / activationはOFF、Draft PR #39はReady / mergeへ進めない。
+
 ## 対象
 
 - Draft PR #39のWindows Codex sandbox helperを、ユーザー書き込み可能なアプリ配置から分離し、固定Program Files originへ置くper-machine installer契約を実装した。

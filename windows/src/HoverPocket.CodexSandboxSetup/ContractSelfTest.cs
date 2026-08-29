@@ -39,6 +39,13 @@ internal static class ContractSelfTest
 
         VerifyRequestRoundTrip();
         VerifySetupReadbackContract();
+        var trustPolicy = AuthenticodeVerifier.TrustPolicyForVerify;
+        if (trustPolicy.RevocationChecks != 1
+            || (trustPolicy.ProviderFlags & 0x00000080) == 0
+            || (trustPolicy.ProviderFlags & 0x00001000) != 0)
+        {
+            throw new InvalidOperationException("HP_CODEX_SANDBOX_TRUST_POLICY_INVALID");
+        }
         if (OperatingSystem.IsWindows())
         {
             SecureDirectoryTree.VerifyAclContract();

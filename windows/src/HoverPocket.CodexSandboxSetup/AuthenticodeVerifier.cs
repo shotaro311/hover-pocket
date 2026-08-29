@@ -12,8 +12,16 @@ internal sealed record AuthenticodeReadback(
 
 internal static class AuthenticodeVerifier
 {
+    private const uint WtdRevokeWholeChain = 1;
+    private const uint WtdRevocationCheckChainExcludeRoot = 0x00000080;
+    private const uint WtdDisableMd2Md4 = 0x00002000;
+
     private static readonly Guid GenericVerifyV2 = new(
         "00AAC56B-CD44-11D0-8CC2-00C04FC295EE");
+
+    internal static (uint RevocationChecks, uint ProviderFlags) TrustPolicyForVerify => (
+        WtdRevokeWholeChain,
+        WtdRevocationCheckChainExcludeRoot | WtdDisableMd2Md4);
 
     internal static AuthenticodeReadback Read(string path)
     {
@@ -70,15 +78,16 @@ internal static class AuthenticodeVerifier
             fileInfoPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<WinTrustFileInfo>());
             Marshal.StructureToPtr(fileInfo, fileInfoPointer, false);
 
+            var trustPolicy = TrustPolicyForVerify;
             var trustData = new WinTrustData
             {
                 StructSize = (uint)Marshal.SizeOf<WinTrustData>(),
                 UiChoice = 2,
-                RevocationChecks = 0,
+                RevocationChecks = trustPolicy.RevocationChecks,
                 UnionChoice = 1,
                 FileInfo = fileInfoPointer,
                 StateAction = 0,
-                ProviderFlags = 0x00001000,
+                ProviderFlags = trustPolicy.ProviderFlags,
                 UiContext = 0,
             };
             return WinVerifyTrust(new IntPtr(-1), GenericVerifyV2, ref trustData) == 0;

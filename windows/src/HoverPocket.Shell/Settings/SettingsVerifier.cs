@@ -1,4 +1,7 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json;
+using HoverPocket.CodexSandboxSetup.Contracts;
 using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Capabilities;
 using HoverPocket.Shell.Configuration;
@@ -133,6 +136,31 @@ internal sealed class SettingsVerifier
         if (codexSandbox.ProvisionCount != 0)
         {
             _failures.Add("Codex sandbox setup ran without native picker and approval callbacks");
+        }
+        var deniedSandboxPickerCalls = 0;
+        var deniedSandboxApprovalCalls = 0;
+        var deniedSandboxDispatcher = new BridgeDispatcher();
+        using var deniedSandboxAttachment = controller.Attach(
+            deniedSandboxDispatcher,
+            BridgeSurface.Settings,
+            codexSandboxExecutablePicker: () =>
+            {
+                deniedSandboxPickerCalls += 1;
+                return @"C:\fixture\codex.exe";
+            },
+            codexSandboxProvisionDecision: () =>
+            {
+                deniedSandboxApprovalCalls += 1;
+                return false;
+            });
+        _ = await Send(
+            deniedSandboxDispatcher,
+            """{"id":"0dns","method":"settings.setupCodexGenerationSandbox"}""");
+        if (deniedSandboxPickerCalls != 1
+            || deniedSandboxApprovalCalls != 1
+            || codexSandbox.ProvisionCount != 0)
+        {
+            _failures.Add("Codex sandbox native approval did not stop before the launch boundary");
         }
         var sandboxReadyState = await Send(
             dispatcher,
@@ -607,7 +635,16 @@ internal sealed class SettingsVerifier
 
     private async Task VerifyCodexSandboxFailClosedAsync(ProviderRegistry registry)
     {
+        await VerifyCodexSandboxHelperBoundaryAsync();
         VerifyCodexSandboxSetupRequestContract();
+        if (File.Exists(Path.Combine(
+            AppContext.BaseDirectory,
+            "tools",
+            "codex-sandbox-setup",
+            "HoverPocket.CodexSandboxSetup.exe")))
+        {
+            _failures.Add("Shell still contains an app-local Codex sandbox setup helper");
+        }
         var sandboxRoot = Path.Combine(
             Path.GetTempPath(),
             $"HoverPocketCodexSandboxDisabled-{Guid.NewGuid():N}");
@@ -622,7 +659,27 @@ internal sealed class SettingsVerifier
         var direct = await provisioner.ProvisionAsync(
             Path.Combine(sandboxRoot, "untrusted-source", "codex.exe"),
             CancellationToken.None);
-        if (initial.Ready
+        var dormantRequestCount = 0;
+        var guardedProvisioner = new CodexGenerationSandboxProvisioner(
+            home,
+            executable,
+            true,
+            new CodexSandboxSetupHelperResolver(
+                () => throw new InvalidOperationException("dormant helper resolver was reached"),
+                () => null,
+                _ => new CodexSandboxSetupPublisherReadback(false, null)),
+            new CodexSandboxSetupProcessLauncher(),
+            (_, _) =>
+            {
+                dormantRequestCount += 1;
+                throw new InvalidOperationException("dormant request factory was reached");
+            });
+        var guarded = await guardedProvisioner.ProvisionAsync(
+            executable,
+            CancellationToken.None);
+        if (CodexGenerationSandboxSecurityPolicy.ProvisioningAvailable
+            || CodexGenerationSandboxSecurityPolicy.ProductionRuntimeAvailable
+            || initial.Ready
             || initial.SetupAvailable
             || initial.RepairAvailable
             || initial.RestartRequired
@@ -632,8 +689,15 @@ internal sealed class SettingsVerifier
                 StringComparison.Ordinal)
             || direct.Ready
             || direct.SetupAvailable
+            || guarded.Ready
+            || guarded.SetupAvailable
+            || dormantRequestCount != 0
             || !string.Equals(
                 direct.ErrorCode,
+                CodexGenerationSandboxSecurityPolicy.SetupUnavailableCode,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                guarded.ErrorCode,
                 CodexGenerationSandboxSecurityPolicy.SetupUnavailableCode,
                 StringComparison.Ordinal)
             || Directory.Exists(sandboxRoot)
@@ -682,6 +746,302 @@ internal sealed class SettingsVerifier
         }
     }
 
+    private async Task VerifyCodexSandboxHelperBoundaryAsync()
+    {
+        var trustPolicy = CodexSandboxSetupHelperResolver.TrustPolicyForVerify;
+        if (trustPolicy.RevocationChecks != 1
+            || (trustPolicy.ProviderFlags & 0x00000080) == 0
+            || (trustPolicy.ProviderFlags & 0x00001000) != 0)
+        {
+            _failures.Add("Codex sandbox helper trust policy did not require online chain revocation checks");
+        }
+
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            $"HoverPocketSettingsHelperBoundary-{Guid.NewGuid():N}");
+        var programFilesRoot = Path.Combine(root, "Program Files");
+        var helperPath = CodexSandboxSetupHelperResolver.ResolveFixedPath(programFilesRoot);
+        if (!string.Equals(
+            Path.GetRelativePath(programFilesRoot, helperPath),
+            CodexSandboxSetupHelperResolver.FixedRelativePath,
+            StringComparison.OrdinalIgnoreCase))
+        {
+            _failures.Add("Codex sandbox helper fixed path contract drifted");
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(helperPath)!);
+        File.WriteAllBytes(helperPath, [0x48, 0x50]);
+        var expectedCertificate = new string('a', 64);
+        try
+        {
+            var publisherReadCount = 0;
+            var resolver = new CodexSandboxSetupHelperResolver(
+                () => programFilesRoot,
+                () => expectedCertificate,
+                path =>
+                {
+                    publisherReadCount += 1;
+                    return string.Equals(path, helperPath, StringComparison.OrdinalIgnoreCase)
+                        ? new CodexSandboxSetupPublisherReadback(true, expectedCertificate)
+                        : new CodexSandboxSetupPublisherReadback(false, null);
+                });
+            using (var lease = resolver.Resolve())
+            {
+                lease.ValidateIdentity();
+                lease.ValidateProcessImage(helperPath);
+                if (!string.Equals(lease.FullPath, helperPath, StringComparison.OrdinalIgnoreCase)
+                    || publisherReadCount != 1)
+                {
+                    _failures.Add("fixed Codex sandbox helper origin or identity lease was not deterministic");
+                }
+            }
+
+            ExpectHelperResolverFailure(
+                new CodexSandboxSetupHelperResolver(
+                    () => programFilesRoot,
+                    () => null,
+                    _ => new CodexSandboxSetupPublisherReadback(true, expectedCertificate)),
+                CodexSandboxSetupHelperResolver.MetadataInvalidCode);
+            ExpectHelperResolverFailure(
+                new CodexSandboxSetupHelperResolver(
+                    () => programFilesRoot,
+                    () => "invalid",
+                    _ => new CodexSandboxSetupPublisherReadback(true, expectedCertificate)),
+                CodexSandboxSetupHelperResolver.MetadataInvalidCode);
+            ExpectHelperResolverFailure(
+                new CodexSandboxSetupHelperResolver(
+                    () => programFilesRoot,
+                    () => expectedCertificate,
+                    _ => new CodexSandboxSetupPublisherReadback(false, null)),
+                CodexSandboxSetupHelperResolver.PublisherInvalidCode);
+            ExpectHelperResolverFailure(
+                new CodexSandboxSetupHelperResolver(
+                    () => programFilesRoot,
+                    () => expectedCertificate,
+                    _ => new CodexSandboxSetupPublisherReadback(true, new string('b', 64))),
+                CodexSandboxSetupHelperResolver.PublisherInvalidCode);
+
+            using var request = new PinnedCodexSandboxSetupRequest(
+                new EncodedSetupRequest(
+                    "fixture-request",
+                    new string('c', 64),
+                    new string('d', 64)),
+                Array.Empty<FileStream>());
+            var expectedArguments = new[]
+            {
+                "--setup-request",
+                request.Encoded.Base64Json,
+                "--request-sha256",
+                request.Encoded.Sha256,
+                "--nonce",
+                request.Encoded.Nonce,
+            };
+
+            var successLease = new RecordingCodexSandboxSetupHelperLease(helperPath);
+            var successFactory = new RecordingCodexSandboxSetupProcessFactory(
+                RecordingCodexSandboxSetupProcessMode.Success);
+            var successLauncher = CreateRecordingLauncher(successFactory, helperPath);
+            var success = await successLauncher.LaunchAsync(
+                successLease,
+                request,
+                CancellationToken.None);
+            if (!success.Succeeded
+                || success.ErrorCode is not null
+                || successFactory.StartCount != 1
+                || successFactory.LastStartInfo is null
+                || !string.Equals(successFactory.LastStartInfo.FileName, helperPath, StringComparison.Ordinal)
+                || !string.Equals(successFactory.LastStartInfo.Verb, "runas", StringComparison.Ordinal)
+                || !successFactory.LastStartInfo.UseShellExecute
+                || !successFactory.LastStartInfo.ArgumentList.SequenceEqual(expectedArguments, StringComparer.Ordinal)
+                || successLease.ValidateCount != 3
+                || successLease.ProcessImageValidationCount != 1)
+            {
+                _failures.Add("Codex sandbox helper launch did not use one exact runas dispatch");
+            }
+
+            await VerifyLauncherFailureAsync(
+                helperPath,
+                request,
+                RecordingCodexSandboxSetupProcessMode.UacCancelled,
+                CodexSandboxSetupProcessLauncher.UacCancelledCode);
+            await VerifyLauncherFailureAsync(
+                helperPath,
+                request,
+                RecordingCodexSandboxSetupProcessMode.StartFailure,
+                CodexSandboxSetupProcessLauncher.StartFailedCode);
+            await VerifyLauncherFailureAsync(
+                helperPath,
+                request,
+                RecordingCodexSandboxSetupProcessMode.NonzeroExit,
+                CodexSandboxSetupProcessLauncher.NonzeroExitCode);
+
+            var timeoutFactory = new RecordingCodexSandboxSetupProcessFactory(
+                RecordingCodexSandboxSetupProcessMode.NeverExits);
+            var timeoutLauncher = CreateRecordingLauncher(
+                timeoutFactory,
+                helperPath,
+                TimeSpan.FromMilliseconds(20));
+            var timeout = await timeoutLauncher.LaunchAsync(
+                new RecordingCodexSandboxSetupHelperLease(helperPath),
+                request,
+                CancellationToken.None);
+            if (timeout.Succeeded
+                || timeout.ErrorCode != CodexSandboxSetupProcessLauncher.TimeoutCode
+                || timeoutFactory.StartCount != 1
+                || timeoutFactory.LastProcess?.KillCount != 1)
+            {
+                _failures.Add("Codex sandbox helper timeout was not bounded and cleaned up");
+            }
+
+            var cancellationFactory = new RecordingCodexSandboxSetupProcessFactory(
+                RecordingCodexSandboxSetupProcessMode.NeverExits);
+            var cancellationLauncher = CreateRecordingLauncher(
+                cancellationFactory,
+                helperPath,
+                TimeSpan.FromSeconds(1));
+            using (var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(20)))
+            {
+                var cancelled = await cancellationLauncher.LaunchAsync(
+                    new RecordingCodexSandboxSetupHelperLease(helperPath),
+                    request,
+                    cancellation.Token);
+                if (cancelled.Succeeded
+                    || cancelled.ErrorCode != CodexSandboxSetupProcessLauncher.CancelledCode
+                    || cancellationFactory.LastProcess?.KillCount != 1)
+                {
+                    _failures.Add("Codex sandbox helper cancellation was not bounded and cleaned up");
+                }
+            }
+
+            var preStartFactory = new RecordingCodexSandboxSetupProcessFactory(
+                RecordingCodexSandboxSetupProcessMode.Success);
+            var preStartLease = new RecordingCodexSandboxSetupHelperLease(
+                helperPath,
+                failValidationCall: 1);
+            var preStart = await CreateRecordingLauncher(preStartFactory, helperPath).LaunchAsync(
+                preStartLease,
+                request,
+                CancellationToken.None);
+            if (preStart.Succeeded
+                || preStart.ErrorCode != CodexSandboxSetupProcessLauncher.IdentityChangedCode
+                || preStartFactory.StartCount != 0)
+            {
+                _failures.Add("Codex sandbox helper identity drift did not fail before UAC");
+            }
+
+            var postStartFactory = new RecordingCodexSandboxSetupProcessFactory(
+                RecordingCodexSandboxSetupProcessMode.NeverExits);
+            var postStartLease = new RecordingCodexSandboxSetupHelperLease(
+                helperPath,
+                failValidationCall: 2);
+            var postStart = await CreateRecordingLauncher(postStartFactory, helperPath).LaunchAsync(
+                postStartLease,
+                request,
+                CancellationToken.None);
+            if (postStart.Succeeded
+                || postStart.ErrorCode != CodexSandboxSetupProcessLauncher.IdentityChangedCode
+                || postStartFactory.StartCount != 1
+                || postStartFactory.LastProcess?.KillCount != 1)
+            {
+                _failures.Add("post-start Codex sandbox helper identity drift was not cleaned up");
+            }
+
+            var imageFactory = new RecordingCodexSandboxSetupProcessFactory(
+                RecordingCodexSandboxSetupProcessMode.NeverExits);
+            var imageLease = new RecordingCodexSandboxSetupHelperLease(
+                helperPath,
+                rejectProcessImage: true);
+            var imageMismatch = await CreateRecordingLauncher(imageFactory, helperPath).LaunchAsync(
+                imageLease,
+                request,
+                CancellationToken.None);
+            if (imageMismatch.Succeeded
+                || imageMismatch.ErrorCode != CodexSandboxSetupProcessLauncher.IdentityChangedCode
+                || imageFactory.LastProcess?.KillCount != 1)
+            {
+                _failures.Add("Codex sandbox process image identity mismatch was not fail-closed");
+            }
+
+            var readbackFactory = new RecordingCodexSandboxSetupProcessFactory(
+                RecordingCodexSandboxSetupProcessMode.ReadbackFailure);
+            var readbackLauncher = CreateRecordingLauncher(
+                readbackFactory,
+                helperPath);
+            var readback = await readbackLauncher.LaunchAsync(
+                new RecordingCodexSandboxSetupHelperLease(helperPath),
+                request,
+                CancellationToken.None);
+            if (readback.Succeeded
+                || readback.ErrorCode != CodexSandboxSetupProcessLauncher.ReadbackFailedCode
+                || readbackFactory.LastProcess?.KillCount != 1)
+            {
+                _failures.Add("Codex sandbox post-start readback did not fail closed");
+            }
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(root, recursive: true);
+            }
+            catch (DirectoryNotFoundException)
+            {
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+    }
+
+    private void ExpectHelperResolverFailure(
+        ICodexSandboxSetupHelperResolver resolver,
+        string expectedCode)
+    {
+        try
+        {
+            using var lease = resolver.Resolve();
+        }
+        catch (InvalidOperationException exception)
+            when (string.Equals(exception.Message, expectedCode, StringComparison.Ordinal))
+        {
+            return;
+        }
+        _failures.Add("Codex sandbox helper resolver negative case did not fail closed");
+    }
+
+    private async Task VerifyLauncherFailureAsync(
+        string helperPath,
+        PinnedCodexSandboxSetupRequest request,
+        RecordingCodexSandboxSetupProcessMode mode,
+        string expectedCode)
+    {
+        var factory = new RecordingCodexSandboxSetupProcessFactory(mode);
+        var result = await CreateRecordingLauncher(factory, helperPath).LaunchAsync(
+            new RecordingCodexSandboxSetupHelperLease(helperPath),
+            request,
+            CancellationToken.None);
+        if (result.Succeeded
+            || !string.Equals(result.ErrorCode, expectedCode, StringComparison.Ordinal)
+            || factory.StartCount != 1)
+        {
+            _failures.Add("Codex sandbox helper launch failure mapping was not deterministic");
+        }
+    }
+
+    private static CodexSandboxSetupProcessLauncher CreateRecordingLauncher(
+        RecordingCodexSandboxSetupProcessFactory factory,
+        string helperPath,
+        TimeSpan? timeout = null)
+    {
+        _ = helperPath;
+        return new CodexSandboxSetupProcessLauncher(
+            factory,
+            timeout ?? TimeSpan.FromSeconds(1),
+            TimeSpan.FromMilliseconds(100));
+    }
+
     private void VerifyCodexSandboxSetupRequestContract()
     {
         var codexExecutable = Environment.GetEnvironmentVariable("HOVERPOCKET_CODEX_BIN");
@@ -698,6 +1058,17 @@ internal sealed class SettingsVerifier
             pinned.Encoded.Nonce,
             now.AddSeconds(1));
         if (decoded.HostProcessId != Environment.ProcessId
+            || !pinned.HelperArguments.SequenceEqual(
+                new[]
+                {
+                    "--setup-request",
+                    pinned.Encoded.Base64Json,
+                    "--request-sha256",
+                    pinned.Encoded.Sha256,
+                    "--nonce",
+                    pinned.Encoded.Nonce,
+                },
+                StringComparer.Ordinal)
             || decoded.Artifacts.Count
                 != HoverPocket.CodexSandboxSetup.Contracts.CodexVendorClosure.Artifacts.Count
             || decoded.Artifacts.Select(artifact => artifact.HandleValue).Distinct().Count()
@@ -771,6 +1142,150 @@ internal sealed class SettingsVerifier
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.Copy(file, target, overwrite: false);
         }
+    }
+}
+
+internal enum RecordingCodexSandboxSetupProcessMode
+{
+    Success,
+    NonzeroExit,
+    NeverExits,
+    ReadbackFailure,
+    UacCancelled,
+    StartFailure,
+}
+
+internal sealed class RecordingCodexSandboxSetupHelperLease : ICodexSandboxSetupHelperLease
+{
+    private readonly int? _failValidationCall;
+    private readonly bool _rejectProcessImage;
+
+    internal RecordingCodexSandboxSetupHelperLease(
+        string fullPath,
+        int? failValidationCall = null,
+        bool rejectProcessImage = false)
+    {
+        FullPath = fullPath;
+        _failValidationCall = failValidationCall;
+        _rejectProcessImage = rejectProcessImage;
+    }
+
+    public string FullPath { get; }
+
+    public CodexSandboxSetupFileIdentity Identity => new(1, 1);
+
+    internal int ValidateCount { get; private set; }
+
+    internal int ProcessImageValidationCount { get; private set; }
+
+    public void ValidateIdentity()
+    {
+        ValidateCount += 1;
+        if (_failValidationCall == ValidateCount)
+        {
+            throw new InvalidOperationException(CodexSandboxSetupHelperResolver.IdentityChangedCode);
+        }
+    }
+
+    public void ValidateProcessImage(string processImagePath)
+    {
+        ProcessImageValidationCount += 1;
+        if (_rejectProcessImage
+            || !string.Equals(processImagePath, FullPath, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(CodexSandboxSetupHelperResolver.IdentityChangedCode);
+        }
+    }
+
+    public void Dispose()
+    {
+    }
+}
+
+internal sealed class RecordingCodexSandboxSetupProcessFactory : ICodexSandboxSetupProcessFactory
+{
+    private readonly RecordingCodexSandboxSetupProcessMode _mode;
+
+    internal RecordingCodexSandboxSetupProcessFactory(
+        RecordingCodexSandboxSetupProcessMode mode)
+    {
+        _mode = mode;
+    }
+
+    internal int StartCount { get; private set; }
+
+    internal ProcessStartInfo? LastStartInfo { get; private set; }
+
+    internal RecordingCodexSandboxSetupProcess? LastProcess { get; private set; }
+
+    public ICodexSandboxSetupProcess Start(ProcessStartInfo startInfo)
+    {
+        StartCount += 1;
+        LastStartInfo = startInfo;
+        if (_mode == RecordingCodexSandboxSetupProcessMode.UacCancelled)
+        {
+            throw new Win32Exception(1223);
+        }
+        if (_mode == RecordingCodexSandboxSetupProcessMode.StartFailure)
+        {
+            throw new Win32Exception(5);
+        }
+
+        LastProcess = new RecordingCodexSandboxSetupProcess(
+            _mode,
+            startInfo.FileName);
+        return LastProcess;
+    }
+}
+
+internal sealed class RecordingCodexSandboxSetupProcess : ICodexSandboxSetupProcess
+{
+    private readonly RecordingCodexSandboxSetupProcessMode _mode;
+    private readonly string _imagePath;
+
+    internal RecordingCodexSandboxSetupProcess(
+        RecordingCodexSandboxSetupProcessMode mode,
+        string imagePath)
+    {
+        _mode = mode;
+        _imagePath = imagePath;
+    }
+
+    public bool HasExited { get; private set; }
+
+    public int ExitCode => _mode == RecordingCodexSandboxSetupProcessMode.NonzeroExit ? 17 : 0;
+
+    internal int KillCount { get; private set; }
+
+    public async Task WaitForExitAsync(CancellationToken cancellationToken)
+    {
+        if (HasExited)
+        {
+            return;
+        }
+        if (_mode is RecordingCodexSandboxSetupProcessMode.NeverExits
+            or RecordingCodexSandboxSetupProcessMode.ReadbackFailure)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return;
+        }
+        HasExited = true;
+    }
+
+    public string? ReadImagePath() =>
+        _mode == RecordingCodexSandboxSetupProcessMode.ReadbackFailure
+            ? null
+            : _imagePath;
+
+    public bool TryKill()
+    {
+        KillCount += 1;
+        HasExited = true;
+        return true;
+    }
+
+    public void Dispose()
+    {
     }
 }
 
