@@ -524,18 +524,11 @@ function Assert-InstalledVersion {
     if (-not $productVersion.StartsWith("$ExpectedVersion+", [StringComparison]::Ordinal)) {
         throw "Installed ProductVersion $productVersion does not match $ExpectedVersion."
     }
-    $previousExpected = $env:HOVERPOCKET_RELEASE_EXPECTED_VERSION
-    $env:HOVERPOCKET_RELEASE_EXPECTED_VERSION = $ExpectedVersion
-    try {
-        $verificationOutput = @(Invoke-NativeProcessWithOutput `
-            -Path $applicationPath `
-            -Arguments @("--verify", "release-config") `
-            -Label "Installed release-config verifier")
-        $verificationOutput | ForEach-Object { Write-Host $_ }
-    }
-    finally {
-        $env:HOVERPOCKET_RELEASE_EXPECTED_VERSION = $previousExpected
-    }
+    $verificationOutput = @(Invoke-NativeProcessWithOutput `
+        -Path $applicationPath `
+        -Arguments @("--verify", "updater") `
+        -Label "Installed updater verifier")
+    $verificationOutput | ForEach-Object { Write-Host $_ }
     return [string]$updaterPath
 }
 
