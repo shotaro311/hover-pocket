@@ -1,5 +1,16 @@
 # HoverPocket AI-native final integration — 2026-08-29
 
+## AN8 Windows署名配布・readback・transition契約
+
+- ChatGPT Pro Orchestrator generation 2 delivery `return-1e6256872e7bbbcef22f6e3a91b220ac`をclaim-synthesisで検証し、base `a1e5cae22ebee464a0d83355226fb0b452c518d4`、artifact SHA-256 `cd195792670ac0947e73d5281a254a79733c8b92e66c75983e6b40ac1bfd3e23`、対象9ファイルを照合して適用した。
+- formal Windows releaseへ、helper署名後のMSI build、MSI署名、同一publisher照合、schema 2 manifest、public asset snapshot、Windows Authenticode readback、manual install / upgrade / rollback / uninstall transitionを追加した。betaは専用MSIを公開せず、production setup / generation / activationの4フラグをOFFで固定した。
+- Codex Security scan `1ec70480-7f56-464b-8cb7-86a85e4731cf`で、scheduled `-IdentityOnly`がpublisher確認前にMSI DBと`msiexec /a`へ到達するlow finding `csf_e7d87707f7a44496d2c2d690`を検出した。ユーザー承認後、IdentityOnlyをchecksum / manifest / snapshot束縛までに限定し、formalはtimestamped MSI署名とcanonical certificate SHA-256 pinを両sinkより前へ移した。
+- 独立した読み取り専用の事前調査と修正後reviewを行った。reviewで文字列ベース回帰だけでは将来の別sinkを検出できないと判明したため、PowerShell ASTで全call site、formal guard、署名→publisher pin→DB→展開の順序を検査する`verify_published_authenticode_contract.ps1`を追加し、Windows PR CIへ接続した。
+- ローカルではPython compile、23件のrelease readback test、全workflow YAML parse、IdentityOnly到達順序の静的proof、`git diff --check`、`swift build -Xswiftc -warnings-as-errors`が成功した。ローカルMacに`pwsh`がないため、PowerShell parser / AST実行はWindows CIを正本とした。
+- code head `7b0dd71725d6dd18648c79823ef0cda99122d870`のPR #39は19 check成功・16 gate skip・失敗0・pending 0、`MERGEABLE / CLEAN`である。Windows [33256015304](https://github.com/shotaro311/hover-pocket/actions/runs/33256015304)はRelease / Debug / MSI buildが警告0・エラー0、`windows_release_signing_contract_verify=ok`、`published_authenticode_identity_boundary_contract_verify=ok`、Voice 42件、Broker、Settings、WebView UIを成功した。
+- release readback [33256015332](https://github.com/shotaro311/hover-pocket/actions/runs/33256015332)はPython 23件とWindows Authenticode syntax、transition [33256015311](https://github.com/shotaro311/hover-pocket/actions/runs/33256015311)はmacOS / Windows syntax、macOS [33256015287](https://github.com/shotaro311/hover-pocket/actions/runs/33256015287)はbuild、Voice、Capability、Broker、3 OS contract [33256015280](https://github.com/shotaro311/hover-pocket/actions/runs/33256015280)は全OSとbyte比較に成功した。
+- PRでは外部release、署名、インストールを行わないため、public release readback、formal Authenticode、実transitionは意図どおりskipした。正式publisherで署名したMSI/helperの公開、通常Windows hostのUAC、install / upgrade / rollback / uninstall、公開後readback、macOS正式配布は未完了であり、Draft PR #39をReady / mergeにせずproduction機能をOFFで維持する。
+
 ## Windows Settings fixed-helper UAC boundary
 
 - ChatGPT Pro Orchestrator run `20260829-195325-hoverpocket-windows-settings-fixed-helper-uac-boundary-patch`のdelivery `return-ef597cc5f3b9dee4a03b6d500d8a06f2`をclaim-synthesisで検証した。
