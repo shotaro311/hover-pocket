@@ -108,15 +108,13 @@ function Test-MsiTableHasRows {
   }
 }
 
-function Assert-ExactSingleValue {
+function Assert-ExactProperty {
   param(
     [Parameter(Mandatory = $true)]
-    [AllowNull()]
-    [AllowEmptyCollection()]
-    [object[]]$Rows,
+    [Collections.Generic.Dictionary[string, string]]$Properties,
 
     [Parameter(Mandatory = $true)]
-    [string]$PropertyName,
+    [string]$Name,
 
     [Parameter(Mandatory = $true)]
     [string]$ExpectedValue,
@@ -125,9 +123,8 @@ function Assert-ExactSingleValue {
     [string]$FailureCode
   )
 
-  if ($null -eq $Rows `
-      -or $Rows.Count -ne 1 `
-      -or [string]$Rows[0].$PropertyName -cne $ExpectedValue) {
+  if (-not $Properties.ContainsKey($Name) `
+      -or $Properties[$Name] -cne $ExpectedValue) {
     throw $FailureCode
   }
 }
@@ -187,33 +184,29 @@ try {
   $installer = New-Object -ComObject WindowsInstaller.Installer
   $database = $installer.OpenDatabase($resolvedMsiPath, 0)
 
-  $allUsers = @(Invoke-MsiQuery `
+  $propertyRows = @(Invoke-MsiQuery `
     -Database $database `
-    -Sql "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='ALLUSERS'" `
-    -Columns @("Value"))
-  Assert-ExactSingleValue `
-    -Rows $allUsers `
-    -PropertyName "Value" `
+    -Sql "SELECT ``Property``, ``Value`` FROM ``Property``" `
+    -Columns @("Property", "Value"))
+  $properties = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+  foreach ($row in $propertyRows) {
+    if (-not $properties.TryAdd($row.Property, $row.Value)) {
+      throw "HP_CODEX_SANDBOX_MSI_PROPERTY_DUPLICATE"
+    }
+  }
+  Assert-ExactProperty `
+    -Properties $properties `
+    -Name "ALLUSERS" `
     -ExpectedValue "1" `
     -FailureCode "HP_CODEX_SANDBOX_MSI_NOT_PER_MACHINE"
-
-  $productVersion = @(Invoke-MsiQuery `
-    -Database $database `
-    -Sql "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='ProductVersion'" `
-    -Columns @("Value"))
-  Assert-ExactSingleValue `
-    -Rows $productVersion `
-    -PropertyName "Value" `
+  Assert-ExactProperty `
+    -Properties $properties `
+    -Name "ProductVersion" `
     -ExpectedValue $ExpectedProductVersion `
     -FailureCode "HP_CODEX_SANDBOX_MSI_VERSION_MISMATCH"
-
-  $upgradeCode = @(Invoke-MsiQuery `
-    -Database $database `
-    -Sql "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='UpgradeCode'" `
-    -Columns @("Value"))
-  Assert-ExactSingleValue `
-    -Rows $upgradeCode `
-    -PropertyName "Value" `
+  Assert-ExactProperty `
+    -Properties $properties `
+    -Name "UpgradeCode" `
     -ExpectedValue $normalizedExpectedUpgradeCode `
     -FailureCode "HP_CODEX_SANDBOX_MSI_UPGRADE_CODE_MISMATCH"
 
