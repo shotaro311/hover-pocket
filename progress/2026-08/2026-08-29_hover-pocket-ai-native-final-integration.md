@@ -12,9 +12,9 @@
 
 - 独立したresolverレビューで、初期案がWinVerifyTrustをrevocation無効かつcache-onlyにしており、将来の有効化時に失効済みsignerを受け入れる可能性を検出した。
 - Shellとhelperの両方をwhole-chain revocation、root除外、cache-only fallbackなしへ変更した。revocation情報を取得できない場合もUAC前に停止する。Settings verifierとhelper self-testへ同じpolicy contractを固定した。
-- Codex Security scan `55bf2157-67e0-4142-9276-cdc0202a96f5`をworking-tree snapshot `codex-security-snapshot/v1:sha256:187323dab31e51980e559c4b7edc214cff276efa6f4cd855d107c46b845e2eb7`でsealed完了した。対象9ファイル、6 surface、reportable findingは0件、coverageはpartialである。
-- sealed reportは`/private/tmp/hoverpocket-security-uac.KPLhKe/report.md`、canonical manifest / findings / coverageも同directoryにあり、JSON parseとartifact SHA-256を別経路で再確認した。
-- Windows Release / Debug compile、実署名helper、physical UAC、cancel / timeout後のelevated process-tree cleanup、post-start identity readbackはscanのfollow-upへ残した。medium-integrity ShellがUAC後のelevated process treeを確実に終了できるかは物理canaryで確認する。
+- Codex Security scan `92657ca5-0536-4875-8ad7-c45d2920458b`をexact range `cc70c140cfccf28551a67b2dd775233240de1fc8..82da1b7c110087b926010556869f6d8f63088d00`、snapshot `codex-security-snapshot/v1:sha256:5c94d0b10292c8061dbe33398491463ee47d826dd4f1458e7af02f430e9c5c29`でsealed完了した。対象9ファイル、6 surface、reportable findingは0件、coverageはpartialである。
+- sealed reportは`/private/tmp/hoverpocket-security-uac-final.WmMDlf/report.md`、canonical manifest / findings / coverageも同directoryにあり、JSON parseとartifact SHA-256を別経路で再確認した。
+- 実署名helper、physical UAC、cancel / timeout後のelevated process-tree cleanup、post-start identity readbackはscanのfollow-upへ残した。medium-integrity ShellがUAC後のelevated process treeを確実に終了できるかは物理canaryで確認する。
 
 ## ローカル検証
 
@@ -24,9 +24,16 @@
 - Shell project XML parseと`git diff --check`: 成功。
 - ローカルMacに.NET SDKがないため、C# compileの成否をローカル結果から推測しない。Windows CIでRelease / Debug、`--verify settings`、helper contractを確認する。
 
+## PR CIと修正readback
+
+- 初回code head `efc3044eb6266e9c1082cd1b6eeee539e8f0fff0`のWindows run [33251115377](https://github.com/shotaro311/hover-pocket/actions/runs/33251115377)はRelease / Debug build、native helper contract、per-machine MSI contractまで成功し、Settings verifierだけが`ArgumentOutOfRangeException`で失敗した。
+- 原因はWin32専用`FILE_FLAG_BACKUP_SEMANTICS` / `FILE_FLAG_OPEN_REPARSE_POINT`を.NET `FileOptions`へキャストしたことだった。`CreateFileW`でdirectory / regular file handleを明示的に開く形へ修正し、reparse拒否、share mode、handle identity pinを維持した。
+- 修正code head `82da1b7c110087b926010556869f6d8f63088d00`のWindows run [33251291505](https://github.com/shotaro311/hover-pocket/actions/runs/33251291505)はRelease / Debug build警告0・エラー0、`PASS Codex sandbox helper contract`、`PASS Codex sandbox per-machine installer contract`、`PASS settings verify`、Voice 42件、`broker_verify=ok`、Pocket App generationに成功した。
+- macOS [33251291487](https://github.com/shotaro311/hover-pocket/actions/runs/33251291487)、3 OS contract / compare [33251291502](https://github.com/shotaro311/hover-pocket/actions/runs/33251291502)、Router [33251290676](https://github.com/shotaro311/hover-pocket/actions/runs/33251290676)も成功し、Draft PR #39のcheckは7 / 7成功した。
+
 ## この境界の完了条件
 
-- 更新headのWindows CIで警告0・エラー0、Settings verifier、helper contract、既存Voice / Broker / Pocket App契約が成功する。
+- 更新headのWindows CIで警告0・エラー0、Settings verifier、helper contract、既存Voice / Broker / Pocket App契約が成功する。code head `82da1b7c110087b926010556869f6d8f63088d00`で達成済み。
 - 正式publisherで署名したhelperを固定Program Filesへ配置し、通常Windows hostでnormal consent、UAC cancel、timeout、process-tree cleanup、署名 / origin / object / process identity、実行後readbackを保存する。
 - これらが揃うまでproduction setup / generation / activationはOFF、Draft PR #39はReady / mergeへ進めない。
 
