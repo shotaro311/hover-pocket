@@ -21,6 +21,8 @@
 - macOS Capabilities [33228860545](https://github.com/shotaro311/hover-pocket/actions/runs/33228860545): buildとVoice / Capability handlerは成功後、既存timeout fixtureの`timeout_status`だけで失敗。
 - timeout fixtureをmacOS / Windows双方で30秒のcancellable waitへ変更した。ローカル`swift build`と修正後Broker verifier 50回連続、`git diff --check`は成功した。
 - このMacには.NET SDKがないため、更新したC# fixtureのcompile / formatとMSI再検証は更新headのWindows CIを正本にする。
+- 修正head `6c9e4708a8cf0dcc1b24107c2f4cf8d8665656e4`のWindows [33248167930](https://github.com/shotaro311/hover-pocket/actions/runs/33248167930)はRelease / Debug build警告0・エラー0、`PASS Codex sandbox helper contract`、`PASS Codex sandbox per-machine installer contract`、`broker_verify=ok`、Voice 42件に成功した。
+- 同headのmacOS [33248167915](https://github.com/shotaro311/hover-pocket/actions/runs/33248167915)はbuild、Voice 42件、`broker_verify=ok`に成功し、元の`timeout_status`失敗を解消した。Router [33248166883](https://github.com/shotaro311/hover-pocket/actions/runs/33248166883)、push / PR起点の3 OS contract [33248165880](https://github.com/shotaro311/hover-pocket/actions/runs/33248165880) / [33248167921](https://github.com/shotaro311/hover-pocket/actions/runs/33248167921)も含め11 / 11 checkが成功した。
 
 ## セキュリティ差分レビュー
 
