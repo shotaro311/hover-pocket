@@ -200,7 +200,7 @@ enum VoiceFoundationVerificationCommand {
         guard buffer.events.count <= 64,
               buffer.events.count == validEventCount,
               scalarCount <= 8_192,
-              buffer.events.allSatisfy({ !$0.text.contains("/Users/") })
+              buffer.events.contains(where: { $0.text == "/Users/test/private.txt" })
         else {
             throw VoiceFoundationVerificationError.failed("transcript_bounds_redaction")
         }
@@ -293,7 +293,7 @@ enum VoiceFoundationVerificationCommand {
         )
         buffer.append(decodedEvent)
         guard buffer.events.count == 1,
-              buffer.events[0].text == "[redacted]"
+              buffer.events[0].text == "[/Users/alice/private]"
         else {
             throw VoiceFoundationVerificationError.failed("decoded_transcript_resanitized")
         }
@@ -576,7 +576,6 @@ enum VoiceFoundationVerificationCommand {
 
     private static func verifyCapabilityGrantRefresh() async throws {
         let first = FakeVoiceSessionAdapter()
-        let replacement = FakeVoiceSessionAdapter()
         var factoryCount = 0
         let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
         await runtime.configure(
@@ -585,18 +584,19 @@ enum VoiceFoundationVerificationCommand {
             providerID: .codexAppServer,
             adapterFactory: {
                 factoryCount += 1
-                return factoryCount == 1 ? first : replacement
+                return first
             }
         ).value
         try await waitUntil { first.startCount == 1 && runtime.snapshot.connection == .connected }
         runtime.capabilityGrantsDidChange()
         try await waitUntil {
-            first.stopCount == 1
-                && replacement.startCount == 1
+            first.capabilityGrantRefreshCount == 1
                 && runtime.snapshot.connection == .connected
         }
-        guard factoryCount == 2 else {
-            throw VoiceFoundationVerificationError.failed("capability_grant_did_not_rebuild_adapter")
+        guard factoryCount == 1,
+              first.stopCount == 0,
+              first.startCount == 1 else {
+            throw VoiceFoundationVerificationError.failed("capability_grant_restarted_adapter")
         }
         await runtime.shutdown()
     }

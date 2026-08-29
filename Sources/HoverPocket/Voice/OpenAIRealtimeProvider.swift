@@ -153,9 +153,108 @@ final class OpenAIRealtimeMacOSVoiceSessionAdapter: VoiceSessionAdapter {
         await transport.close()
     }
 
+    func capabilityGrantsDidChange() async {
+        await transport.close()
+    }
+
     func stop() async {
         await transport.close()
         transport.clearCallbacks()
+    }
+}
+
+@MainActor
+final class CodexAppServerMacOSVoiceSessionAdapter: VoiceSessionAdapter {
+    private let compatibilityProbe: CodexAppServerCompatibilityProbe
+    private let capabilityBridge: CodexAppServerCapabilityBridge?
+    private let runtimeHost: CodexVoiceRuntimeHost
+    private let driver: CodexVoiceWebRTCDriver
+    private weak var voiceRuntime: VoiceLaneRuntime?
+    private var compatibilityResult: CodexAppServerCompatibilityResult?
+
+    var requiresExplicitStart: Bool { true }
+
+    init(
+        context: VoiceCapabilityContext?,
+        calendarAccessGranted: @escaping () -> Bool,
+        voiceRuntime: VoiceLaneRuntime = .shared,
+        compatibilityProbe: CodexAppServerCompatibilityProbe = .shared,
+        runtimeHost: CodexVoiceRuntimeHost = CodexAppServerMacOSRuntime.host,
+        driver: CodexVoiceWebRTCDriver = CodexAppServerMacOSRuntime.driver
+    ) {
+        self.compatibilityProbe = compatibilityProbe
+        self.capabilityBridge = context.flatMap {
+            guard let runtime = try? OpenAIRealtimeMacOSCapabilityRuntime(
+                context: $0,
+                calendarAccessGranted: calendarAccessGranted
+            ) else { return nil }
+            return CodexAppServerCapabilityBridge(runtime: runtime)
+        }
+        self.runtimeHost = runtimeHost
+        self.driver = driver
+        self.voiceRuntime = voiceRuntime
+    }
+
+    func probeCompatibility() async -> VoiceAdapterGate {
+        guard capabilityBridge != nil else {
+            return .blocked("codex_capability_runtime_unavailable")
+        }
+        let result = await compatibilityProbe.probe()
+        compatibilityResult = result
+        return result.gate
+    }
+
+    func start() async throws {
+        guard let capabilityBridge else {
+            throw CodexVoiceRuntimeError.compatibility("codex_capability_runtime_unavailable")
+        }
+        guard let compatibilityResult,
+              compatibilityResult.gate.isReady,
+              let executableURL = compatibilityResult.executableURL,
+              let executableIdentity = compatibilityResult.executableIdentity else {
+            throw CodexVoiceRuntimeError.compatibility("codex_compatibility_not_ready")
+        }
+        guard await compatibilityProbe.isCurrent(compatibilityResult) else {
+            throw CodexVoiceRuntimeError.compatibility("codex_executable_changed")
+        }
+        guard runtimeHost.configureExecutable(
+            executableURL,
+            expectedIdentity: executableIdentity
+        ) else {
+            throw CodexVoiceRuntimeError.compatibility("codex_executable_configuration_conflict")
+        }
+        runtimeHost.configureToolAdapter(capabilityBridge)
+        runtimeHost.setPanelVisible(voiceRuntime?.snapshot.uiAttached == true)
+        runtimeHost.setSessionsVisible(voiceRuntime?.snapshot.mode == .expanded)
+        await runtimeHost.setEnabled(true)
+        guard runtimeHost.snapshot.availability == .ready else {
+            throw CodexVoiceRuntimeError.compatibility(
+                runtimeHost.snapshot.lastErrorCode ?? "codex_app_server_unavailable"
+            )
+        }
+        try await driver.startSession()
+    }
+
+    func setMuted(_ muted: Bool) async {
+        driver.setMuted(muted)
+    }
+
+    func setPresentationMode(_ mode: VoiceLaneMode) async {
+        runtimeHost.setSessionsVisible(mode == .expanded)
+    }
+
+    func capabilityGrantsDidChange() async {
+        await driver.stopSession()
+        await runtimeHost.resetRealtimeForCapabilityChange(alreadyStopped: true)
+    }
+
+    func closeAudioSession() async {
+        await driver.stopSession()
+    }
+
+    func stop() async {
+        await driver.stopSession()
+        await runtimeHost.setEnabled(false)
     }
 }
 
@@ -198,7 +297,16 @@ enum VoiceProviderAdapterFactory {
                 )
             }
         case .codexAppServer:
-            { FailClosedVoiceProviderAdapter(code: "codex_voice_compatibility_blocked") }
+            {
+                CodexAppServerMacOSVoiceSessionAdapter(
+                    context: AINativeRuntime.shared.voiceCapabilityContext,
+                    calendarAccessGranted: {
+                        settings.voiceCalendarAccessEnabled
+                            && HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled
+                    },
+                    voiceRuntime: voiceRuntime
+                )
+            }
         }
     }
 }

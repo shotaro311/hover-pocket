@@ -113,6 +113,19 @@ def main() -> None:
     mac_runtime = (
         ROOT / "Sources" / "HoverPocket" / "Voice" / "VoiceFoundation.swift"
     ).read_text(encoding="utf-8")
+    mac_codex_client = (
+        ROOT / "Sources" / "HoverPocket" / "Voice" / "CodexAppServerClient.swift"
+    ).read_text(encoding="utf-8")
+    mac_codex_coordinator = (
+        ROOT / "Sources" / "HoverPocket" / "Voice" / "CodexVoiceCoordinator.swift"
+    ).read_text(encoding="utf-8")
+    mac_codex_probe = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "Voice"
+        / "CodexAppServerCompatibilityProbe.swift"
+    ).read_text(encoding="utf-8")
     mac_realtime_provider = (
         ROOT / "Sources" / "HoverPocket" / "Voice" / "OpenAIRealtimeProvider.swift"
     ).read_text(encoding="utf-8")
@@ -892,6 +905,45 @@ def main() -> None:
         "maximumRememberedCalls": 512,
     }:
         fail("macOS Realtime allocation bounds drifted")
+    if not all(value in mac_codex_client for value in (
+        "typealias ServerRequestAdmissionHandler",
+        "serverRequestAdmissionHandler",
+        "maximumProtocolLineBytes",
+        "maximumErrorBufferBytes",
+    )):
+        fail("macOS Codex app-server input admission or allocation bounds are incomplete")
+    request_parse_position = mac_codex_client.find(
+        "let request = CodexAppServerRequest"
+    )
+    admission_position = mac_codex_client.find(
+        "await serverRequestAdmissionHandler(request)",
+        request_parse_position,
+    )
+    request_task_position = mac_codex_client.find(
+        "Task { await self.handleServerRequest(request) }",
+        admission_position,
+    )
+    if not (
+        0 <= request_parse_position < admission_position < request_task_position
+    ):
+        fail("macOS Codex ambient admission can be reordered behind tool execution")
+    if not all(value in mac_codex_coordinator for value in (
+        "initializingClientGeneration",
+        "quarantinedClientGenerations",
+        "isKnownClient",
+        "!quarantinedClientGenerations.contains(generation)",
+        "let wasQuarantined = quarantinedClientGenerations.contains(generation)",
+        "if wasQuarantined",
+        "verifyRealtimeLifecyclePolicy",
+    )):
+        fail("macOS Codex client quarantine, lifecycle, or generation isolation is incomplete")
+    if not all(value in mac_codex_probe for value in (
+        "timeout: 5",
+        "timeout: 15",
+        ".posixPermissions: 0o700",
+        "executableIdentity",
+    )):
+        fail("macOS Codex compatibility probe is not bounded or executable-pinned")
     mac_realtime_adapter = mac_realtime_provider[
         mac_realtime_provider.find("final class OpenAIRealtimeMacOSVoiceSessionAdapter"):
         mac_realtime_provider.find("final class FailClosedVoiceProviderAdapter")

@@ -24,6 +24,12 @@ struct VoiceLaneHostView: View {
                     .opacity(0.001)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
+            } else if runtime.snapshot.providerID == .codexAppServer {
+                CodexVoiceWebRTCTransportView(driver: CodexAppServerMacOSRuntime.driver)
+                    .frame(width: 1, height: 1)
+                    .opacity(0.001)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
         }
     }
@@ -296,7 +302,7 @@ struct VoiceLaneHostView: View {
     }
 
     private var canBeginAudioSession: Bool {
-        runtime.snapshot.providerID == .openAIRealtimeBYOK
+        runtime.snapshot.providerID != .off
             && runtime.snapshot.connection == .disconnected
             && runtime.snapshot.uiAttached
             && !voiceStartBlockedByConfiguration
@@ -306,7 +312,14 @@ struct VoiceLaneHostView: View {
         [
             "openai_realtime_key_missing",
             "openai_realtime_key_unavailable",
-            "openai_realtime_macos_transport_unavailable"
+            "openai_realtime_macos_transport_unavailable",
+            "codex_not_found",
+            "codex_identity_unavailable",
+            "codex_schema_probe_failed",
+            "codex_schema_incomplete",
+            "codex_realtime_schema_missing",
+            "codex_broker_only_tool_policy_missing",
+            "codex_capability_runtime_unavailable"
         ].contains(runtime.snapshot.safeErrorCode)
     }
 

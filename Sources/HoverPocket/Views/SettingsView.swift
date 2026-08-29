@@ -466,8 +466,9 @@ struct SettingsView: View {
                 selection: $settings.voiceProvider
             ) {
                 Text(localized(japanese: "オフ", english: "Off")).tag(VoiceProviderID.off)
-                Text("OpenAI Realtime BYOK").tag(VoiceProviderID.openAIRealtimeBYOK)
-                Text("Codex app-server").tag(VoiceProviderID.codexAppServer)
+                Text(localized(japanese: "Codex app-server（推奨）", english: "Codex app-server (Recommended)"))
+                    .tag(VoiceProviderID.codexAppServer)
+                Text("Realtime BYOK").tag(VoiceProviderID.openAIRealtimeBYOK)
             }
             .pickerStyle(.segmented)
 
@@ -519,6 +520,9 @@ struct SettingsView: View {
                 .background(.quaternary.opacity(0.22))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
+            }
+
+            if settings.voiceProvider != .off {
                 Toggle(
                     localized(
                         japanese: "Voice Laneからカレンダーを利用",
@@ -558,8 +562,8 @@ struct SettingsView: View {
 
             Text(settings.voiceProvider == .codexAppServer
                 ? localized(
-                    japanese: "Codex app-serverは現在のcompatibility gateを維持し、Broker限定ツールを正に証明できない環境ではfail-closedします。自動fallbackはありません。",
-                    english: "Codex app-server keeps its existing compatibility gate and fails closed where Broker-only tools cannot be positively proven. There is no automatic fallback."
+                    japanese: "Codexアプリのログインを使う標準経路です。APIキーは不要です。現在のCodexがBroker限定ツールを保証できない場合だけ開始を止め、BYOKへ自動切替はしません。",
+                    english: "This is the primary path and uses your Codex app login without an API key. It starts only when Codex can guarantee Broker-only tools and never falls back to BYOK automatically."
                 )
                 : settings.voiceProvider == .off
                     ? localized(
@@ -567,8 +571,8 @@ struct SettingsView: View {
                         english: "The provider is Off by default. Off performs no credential, network, or transport work."
                     )
                     : localized(
-                        japanese: "OpenAI Realtime BYOKをmacOSで利用できます。CalendarとTimerの操作はCapability Broker、ネイティブ承認、実行後readbackを通ります。",
-                        english: "OpenAI Realtime BYOK is available on macOS. Calendar and Timer actions cross Capability Broker, native approval, and post-execution readback."
+                        japanese: "OpenAI Realtime BYOKは任意の代替経路です。利用時だけAPI料金が発生します。CalendarとTimerはCapability Broker、ネイティブ承認、実行後readbackを通ります。",
+                        english: "OpenAI Realtime BYOK is an optional alternative and incurs API charges only when used. Calendar and Timer cross Capability Broker, native approval, and post-execution readback."
                     ))
             .font(.system(size: 11))
             .foregroundStyle(.secondary)

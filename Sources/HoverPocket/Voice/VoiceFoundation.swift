@@ -122,7 +122,7 @@ struct VoiceTranscriptEvent: Identifiable, Equatable, Codable, Sendable {
         self.id = VoiceTextSafety.sanitizeIdentifier(id)
         self.rootSessionID = VoiceTextSafety.sanitizeIdentifier(rootSessionID)
         self.role = role
-        self.text = VoiceTextSafety.sanitizeVisibleText(text, limit: 1_024)
+        self.text = VoiceTextSafety.sanitizeTranscriptText(text, limit: 1_024)
         self.isFinal = isFinal
         self.timestamp = timestamp
     }
@@ -172,12 +172,16 @@ protocol VoiceSessionAdapter: AnyObject {
     func probeCompatibility() async -> VoiceAdapterGate
     func start() async throws
     func setMuted(_ muted: Bool) async
+    func setPresentationMode(_ mode: VoiceLaneMode) async
+    func capabilityGrantsDidChange() async
     func closeAudioSession() async
     func stop() async
 }
 
 extension VoiceSessionAdapter {
     var requiresExplicitStart: Bool { false }
+    func setPresentationMode(_ mode: VoiceLaneMode) async { _ = mode }
+    func capabilityGrantsDidChange() async { }
 }
 
 struct VoiceLaneSnapshot: Equatable, Sendable {
@@ -223,6 +227,14 @@ enum VoiceTextSafety {
     private static let jsonCredentialFieldPattern = #"(?i)"(?:access[_-]?token|refresh[_-]?token|token|api[_-]?key|apikey|client[_-]?secret|secret)"[ \t\r\n]*:[ \t\r\n]*"[^"\r\n]+""#
 
     static func sanitizeVisibleText(_ value: String, limit: Int) -> String {
+        sanitize(value, limit: limit, redactPaths: true)
+    }
+
+    static func sanitizeTranscriptText(_ value: String, limit: Int) -> String {
+        sanitize(value, limit: limit, redactPaths: false)
+    }
+
+    private static func sanitize(_ value: String, limit: Int, redactPaths: Bool) -> String {
         let collapsed = value.unicodeScalars.compactMap { scalar -> Unicode.Scalar? in
             if scalar.properties.generalCategory == .format {
                 return nil
@@ -234,8 +246,8 @@ enum VoiceTextSafety {
         }
         var text = String(String.UnicodeScalarView(collapsed))
         let lowered = text.lowercased()
-        if text.range(of: absolutePathPattern, options: .regularExpression) != nil
-            || text.range(of: relativePathPattern, options: .regularExpression) != nil
+        if (redactPaths && text.range(of: absolutePathPattern, options: .regularExpression) != nil)
+            || (redactPaths && text.range(of: relativePathPattern, options: .regularExpression) != nil)
             || text.range(of: bearerCredentialPattern, options: .regularExpression) != nil
             || text.range(of: openAICredentialPattern, options: .regularExpression) != nil
             || text.range(of: jsonCredentialFieldPattern, options: .regularExpression) != nil
@@ -484,10 +496,14 @@ final class VoiceLaneRuntime: ObservableObject {
     func setPreferredLayout(_ preference: VoiceLaneLayoutPreference) {
         preferredLayout = preference
         guard featureEnabled else { return }
+        let mode: VoiceLaneMode = preference == .expanded ? .expanded : .compact
         publish(
-            mode: preference == .expanded ? .expanded : .compact,
+            mode: mode,
             clearLayoutBlockedReason: true
         )
+        if let adapter {
+            enqueueAudioCommand(.setPresentationMode(mode), adapter: adapter)
+        }
     }
 
     func setResolvedLayout(
@@ -503,6 +519,12 @@ final class VoiceLaneRuntime: ObservableObject {
                 : nil,
             clearLayoutBlockedReason: requested != .expanded || resolved == .expanded
         )
+        if let adapter {
+            enqueueAudioCommand(
+                .setPresentationMode(resolved == .expanded ? .expanded : .compact),
+                adapter: adapter
+            )
+        }
     }
 
     func attachPanel() {
@@ -601,7 +623,8 @@ final class VoiceLaneRuntime: ObservableObject {
 
     func capabilityGrantsDidChange() {
         guard featureEnabled, providerID != .off else { return }
-        recoverAfterSystemTransition()
+        guard let adapter else { return }
+        enqueueAudioCommand(.capabilityGrantsDidChange, adapter: adapter)
     }
 
     func credentialsDidChange() {
@@ -812,6 +835,7 @@ final class VoiceLaneRuntime: ObservableObject {
         }
 
         if candidate.requiresExplicitStart {
+            await candidate.setPresentationMode(snapshot.mode)
             adapter = candidate
             restartAttempt = 0
             publish(
@@ -902,6 +926,8 @@ final class VoiceLaneRuntime: ObservableObject {
 
     private enum AudioCommand {
         case setMuted(Bool)
+        case setPresentationMode(VoiceLaneMode)
+        case capabilityGrantsDidChange
         case closeSession
     }
 
@@ -915,6 +941,10 @@ final class VoiceLaneRuntime: ObservableObject {
             switch command {
             case .setMuted(let muted):
                 await targetAdapter.setMuted(muted)
+            case .setPresentationMode(let mode):
+                await targetAdapter.setPresentationMode(mode)
+            case .capabilityGrantsDidChange:
+                await targetAdapter.capabilityGrantsDidChange()
             case .closeSession:
                 await targetAdapter.closeAudioSession()
             }
@@ -943,7 +973,7 @@ final class VoiceLaneRuntime: ObservableObject {
             sessions: Array(allSessions.values)
         )
         let transcript = transcriptBuffer.events
-        let preview = transcript.last.map { VoiceTextSafety.sanitizeVisibleText($0.text, limit: 240) }
+        let preview = transcript.last.map { VoiceTextSafety.sanitizeTranscriptText($0.text, limit: 240) }
         snapshot = VoiceLaneSnapshot(
             providerID: providerID,
             mode: mode ?? (snapshot.mode == .disabled
@@ -974,6 +1004,7 @@ final class FakeVoiceSessionAdapter: VoiceSessionAdapter {
     private(set) var startCount = 0
     private(set) var stopCount = 0
     private(set) var closeAudioSessionCount = 0
+    private(set) var capabilityGrantRefreshCount = 0
     private(set) var muted = true
 
     init(gate: VoiceAdapterGate = .ready, startFailuresRemaining: Int = 0) {
@@ -1000,6 +1031,10 @@ final class FakeVoiceSessionAdapter: VoiceSessionAdapter {
     func closeAudioSession() async {
         closeAudioSessionCount += 1
         muted = true
+    }
+
+    func capabilityGrantsDidChange() async {
+        capabilityGrantRefreshCount += 1
     }
 
     func stop() async {

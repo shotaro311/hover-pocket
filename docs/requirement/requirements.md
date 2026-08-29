@@ -880,7 +880,7 @@ Must:
 - Windows 10 対応を必須にするか、Windows 11 専用でよいか。
 - Clipboard private mode を Windows 初回 MVP の Must に含めるか。
 - Controls の display brightness をどこまで保証するか。DDC/CI は機種差が大きい。
-- Codex Voice Laneの標準runtime providerをCodex app-serverのpower-user mode、OpenAI Realtime / BYOK、別providerのどれにするか。Capability契約はruntimeから独立させる。
+- Codex Voice Laneの標準runtime providerはCodex app-serverとする。Codex導入済み・ログイン済み環境でAPIキーなしに使い、Voice Lane自体は既定OFF、マイクは明示操作後だけ開始する。OpenAI Realtime BYOKはユーザーが明示選択する任意の代替経路とし、自動fallbackしない。Capability契約は両runtimeから独立させ、いずれも同じCapability Registry / Broker / 承認 / readbackを通す。Codex app-serverはBroker限定tool policyをschemaで正に確認できるversionだけを開始し、現行0.145.0のように証明できないversionはapp-server process開始前に停止する。
 - session cardから別アプリへ移動する方式。対応APIを実測できるまでLane内詳細を既定にし、必要時の`codex resume <threadId>`は明示承認付き代替候補とする。
 - user-owned Pocket App workspaceの既定場所。初回に可視folderを選択できる方針を第一候補にする。
 - 配布方式を MSIX、winget、installer、portable のどれにするか。
