@@ -87,7 +87,7 @@ dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.Cod
 dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj -- --verify-vendor-closure <公式package root>
 ```
 
-installerはWiX SDK 5.0.2で決定論的にbuildします。正式有効化前には、MSIとhelperの双方へ同じ信頼済みpublisherのAuthenticode署名を付け、Settings側でregular / non-reparse file、固定Program Files origin、publisher、object identityを再検証する必要があります。Shellとhelperのbuildには同じ公開publisher certificate SHA-256 referenceを`HoverPocketPublisherCertificateSha256` MSBuild propertyで埋め込み、未設定・不正形式・実署名不一致はUAC前に拒否します。
+installerはWiX SDK 5.0.2で決定論的にbuildします。formal releaseでは`publish_release.ps1`がShellとhelperの双方へ同じ公開publisher certificate SHA-256 referenceを`HoverPocketPublisherCertificateSha256` MSBuild propertyで渡し、helper EXEをtimestamp付きで署名してからWiX harvestし、MSI build後に同じ証明書でMSI自体もtimestamp付き署名します。未設定・不正形式・signing tool不在・署名/timestamp/publisher不一致はmanifest確定前にfail closedです。Settings側のregular / non-reparse file、固定Program Files origin、publisher、object identityの再検証は維持します。
 
 ```powershell
 dotnet publish `
@@ -130,23 +130,24 @@ Windows は macOS Sparkle の `https://github.com/shotaro311/hover-pocket/releas
 - Windows 0.2.xは、コード署名証明書を取得するまでAuthenticode未署名の公開ベータとして配布します。
 - Setup.exeの初回実行時にMicrosoft Defender SmartScreenの警告が出る可能性があることを、ダウンロード導線とRelease notesに明記します。
 - 1.0またはmacOS版と同等の正式版では、タイムスタンプ付きAuthenticode署名と公開成果物の署名readbackを必須gateにします。
-- 正式版のworkflow実行前に、正規コード署名証明書raw byteのSHA-256 fingerprintをGitHub Actions repository variable `WINDOWS_SIGNER_CERT_SHA256`へ64文字の16進数で設定します。値が未設定・不正・公開3成果物の署名証明書と不一致ならformal gateはfail closedにします。証明書更新時は公開前レビューでこのvariableも明示更新します。
+- 正式版のworkflow実行前に、正規コード署名証明書raw byteのSHA-256 fingerprintをGitHub Actions repository variable `WINDOWS_SIGNER_CERT_SHA256`へ64文字の16進数で設定します。値が未設定・不正、またはSetup / Portable内Shell / full package内Shell / helper MSI / embedded helperの署名証明書と不一致ならformal gateはfail closedにします。証明書更新時は公開前レビューでこのvariableも明示更新します。
 - 署名証明書やsigning credentialsはGit、ログ、README、progressに記録しません。
 
-Release assetはmacOS Sparkle資産と衝突しない`HoverPocketWin-*`系です。`publish_release.ps1`は、OAuth環境変数が未設定の場合に停止し、Release成果物内のmetadata一致を確認してからVelopack package、`release-manifest.win.json`、`SHA256SUMS-win.txt`を生成します。GitHub Releaseの作成・アップロードはこのスクリプトでは実行しません。既定の`beta` gateは未署名成果物だけを生成し、署名引数を混在させると停止します。publish / release出力は毎回空の通常directoryである必要があり、既存payload、file、reparse pointを検出した場合は削除や上書きを行わず停止します。再実行時は新しい`-OutputRoot`を指定します。
+Release assetはmacOS Sparkle資産と衝突しない`HoverPocketWin-*`系です。`publish_release.ps1`は、OAuth環境変数が未設定の場合に停止し、Release成果物内のmetadata一致を確認してからVelopack package、`release-manifest.win.json`、`SHA256SUMS-win.txt`を生成します。GitHub Releaseの作成・アップロードはこのスクリプトでは実行しません。manifest schema 2は`codexSandboxSetup`を追加し、formalだけがversion固定名の専用MSI、実測size/SHA-256、MSI/helperのtimestamped Authenticode、同一publisher agreementを記録します。一方、既定の`beta` gateは未署名成果物だけを生成し、専用helper MSIをpublishせず、`trustedProductionSetupBoundary`、`productionSetupAvailable`、`productionGenerationAvailable`、`productionActivationAvailable`をすべてfalseに固定します。署名引数をbetaへ混在させると停止します。publish / release出力は毎回空の通常directoryである必要があり、既存payload、file、reparse pointを検出した場合は削除や上書きを行わず停止します。再実行時は新しい`-OutputRoot`を指定します。
 
 ```powershell
 .\windows\script\publish_release.ps1
 ```
 
-正式版は、パスワードやPFXをコマンドラインへ渡さず、Windows証明書ストアに導入済みのコード署名証明書をSHA-1 thumbprintで選びます。RFC 3161 timestamp URL、readback用のpublisher証明書SHA-256、必要な場合だけmachine store指定を明示します。Velopackへ`/fd sha256 /td sha256 /tr`を渡した後、生成したSetup、Portable内アプリ、full package内アプリの3点を展開して、署名の有効性、timestamp、署名者一致、期待publisher一致をローカルで再検証できた場合だけmanifestを`signed-timestamped-verified`にします。値はログへ出力しません。
+正式版は、パスワードやPFXをコマンドラインへ渡さず、Windows証明書ストアに導入済みのコード署名証明書をSHA-1 thumbprintで選びます。RFC 3161 timestamp URL、readback用のpublisher証明書SHA-256、必要な場合だけmachine store指定を明示します。formalではまずShellへpublisher SHA-256 metadataを埋め込み、helperをself-contained publishして直接署名し、その署名済みhelperを専用per-machine MSIへharvestしてからMSIを署名します。その後Velopackへ`/fd sha256 /td sha256 /tr`を渡し、生成したSetup、Portable内アプリ、full package内アプリ、helper、MSIの5点について署名の有効性、timestamp、同一publisher一致をローカルで再検証できた場合だけmanifestを`signed-timestamped-verified`にします。値はログへ出力しません。
 
 ```powershell
 .\windows\script\publish_release.ps1 `
   -WindowsSigningGate formal `
   -SigningCertificateSha1 $env:HOVERPOCKET_SIGNING_CERT_SHA1 `
   -ExpectedSignerCertificateSha256 $env:HOVERPOCKET_SIGNER_CERT_SHA256 `
-  -TimestampServer $env:HOVERPOCKET_TIMESTAMP_SERVER
+  -TimestampServer $env:HOVERPOCKET_TIMESTAMP_SERVER `
+  -SignToolPath $env:HOVERPOCKET_SIGNTOOL_PATH
 ```
 
 証明書をLocalMachine storeへ導入した運用だけ`-SigningCertificateInMachineStore`を追加します。どのformal引数も空、不正形式、HTTP timestamp、credential入りURL、署名不一致の場合は成果物manifestを確定せず停止します。秘密値をGit、README、progress、GitHub repository variableへ保存しません。`WINDOWS_SIGNER_CERT_SHA256`は秘密値ではなく公開後readback用fingerprintですが、設定値そのものはログへ出しません。
@@ -167,9 +168,13 @@ MacまたはCIからは、Windows releaseだけでなくmacOS appcastが変わ�
 python3 script/verify_release_readback.py --windows-tag auto --windows-signing-gate beta
 ```
 
-1.0正式版では`Verify Published Release Readback` workflowを`formal`で手動実行します。`release-manifest.win.json`の`authenticode=signed-timestamped-verified`に加え、Windows上で公開Setup、Portable内`HoverPocket.Shell.exe`、Velopack full update package内`HoverPocket.Shell.exe`の実Authenticode署名、タイムスタンプ、3成果物の署名者一致、repository variableへ固定した正規publisher証明書との一致が揃わない限り配布完了にしません。Setupのpackage同一性は、Velopack 1.2.0のbundle headerに埋め込まれたoffset / lengthを使い、署名時に末尾へ追加されるPE証明書表をpackage byteとして扱わずに検証します。
+1.0正式版では`Verify Published Release Readback` workflowを`formal`で手動実行します。`release-manifest.win.json`の`authenticode=signed-timestamped-verified`だけを信用せず、immutable asset snapshotから全assetを再downloadしてhashを取り直し、Windows上で公開Setup、Portable内`HoverPocket.Shell.exe`、Velopack full update package内`HoverPocket.Shell.exe`、専用MSI、MSI administrative imageから取り出した`HoverPocket.CodexSandboxSetup.exe`の実Authenticode署名とtimestampを検証します。さらに公開MSIを`verify_codex_sandbox_installer.ps1`で再読込し、MSI/helperの実測size/SHA-256がmanifestと一致し、5成果物がrepository variableへ固定した同一publisher certificate SHA-256へ収束する場合だけformal readbackを合格にします。Setupのpackage同一性は、Velopack 1.2.0のbundle headerに埋め込まれたoffset / lengthを使い、署名時に末尾へ追加されるPE証明書表をpackage byteとして扱わずに検証します。
 
-公開済み2version間の実installer / updater遷移は`Verify Release Install and Rollback Transitions` workflowで確認します。GitHub hosted Windows runnerの一時install rootに旧Setupをsilent installし、新full package適用、旧full packageへの明示rollback、再upgrade、uninstall、reinstall、user data保持までをreadbackします。自動更新はdowngradeしないため、rollbackは`Update.exe apply --package`で旧packageを明示します。開始時と合格証跡の直前で公開releaseの全asset snapshotが一致することも必須です。未署名0.2.x betaを実行する場合は、`execute_windows_release_code`とunsigned beta許可を手動workflowで明示する必要があります。正式署名版は、full package内アプリまでを独立した正式署名readback snapshotへ固定する連携が入るまで、この遷移workflowでは実行を拒否します。
+公開済み2version間の実installer / updater遷移は`Verify Release Install and Rollback Transitions` workflowで確認します。既存Velopack遷移はGitHub hosted Windows runnerの一時install rootに旧Setupをsilent installし、新full package適用、旧full packageへの明示rollback、再upgrade、uninstall、reinstall、user data保持までをreadbackします。自動更新はdowngradeしないため、rollbackは`Update.exe apply --package`で旧packageを明示します。未署名0.2.x betaを実行する場合は、`execute_windows_release_code`とunsigned beta許可を手動workflowで明示する必要があり、formal Velopack遷移の既存fail-closed拒否は維持します。
+
+専用helper MSIには別の`execute_codex_sandbox_installer_transition` gateを追加します。このgateはschema 2 formal manifest、公開snapshot、MSI hash、timestamped Authenticode、期待publisherを再検証した後だけ、disposable Windows runnerの固定Program Files先へ旧MSI install → 新MSI major upgrade → 新MSI uninstall + 旧MSI reinstallによる明示rollback → uninstallを実行し、各段階でinstalled helperのhashと署名をreadbackします。このgateはsetup/generation/activationを有効化せず、helper自体を起動しません。開始時と合格直前のrelease asset snapshot一致も必須です。
+
+残る物理gateは別です。通常ユーザーのWindows実機で、署名済みShell + signed per-machine MSIを使ったSettingsの明示操作からだけUAC secure desktopへ1回到達すること、固定Program Files helper/object identity/publisher readback、UAC取消・tamper時の副作用0、setup完了後のno-UAC positive confinement canary、Host-owned credential delivery、実モデル生成readbackを確認する必要があります。これらのphysical UAC / signed-host canaryが完了するまではproduction setup/generation/activation flagsをfalseのまま維持し、完了したとは扱いません。
 
 ## Local privacy notes
 

@@ -7,7 +7,9 @@ on:
       - "script/verify_published_macos.sh"
       - "script/tests/test_verify_release_readback.py"
       - "windows/script/verify_published_authenticode.ps1"
+      - "windows/script/verify_codex_sandbox_installer.ps1"
       - "windows/script/publish_release.ps1"
+      - "windows/installer/HoverPocket.CodexSandboxSetup.Installer/**"
       - ".github/workflows/release-readback-verify.yml"
   pull_request:
     paths:
@@ -15,7 +17,9 @@ on:
       - "script/verify_published_macos.sh"
       - "script/tests/test_verify_release_readback.py"
       - "windows/script/verify_published_authenticode.ps1"
+      - "windows/script/verify_codex_sandbox_installer.ps1"
       - "windows/script/publish_release.ps1"
+      - "windows/installer/HoverPocket.CodexSandboxSetup.Installer/**"
       - ".github/workflows/release-readback-verify.yml"
   schedule:
     - cron: "37 18 * * 1"
@@ -72,6 +76,7 @@ jobs:
         run: |
           foreach ($path in @(
             "windows/script/verify_published_authenticode.ps1",
+            "windows/script/verify_codex_sandbox_installer.ps1",
             "windows/script/publish_release.ps1")) {
             $errors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile(
@@ -169,7 +174,7 @@ jobs:
           name: published-release-readback
           path: published-release-readback
 
-      - name: Verify public Setup, Portable, and update package signatures
+      - name: Verify public Setup, Portable, update package, and Codex helper MSI signatures
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}

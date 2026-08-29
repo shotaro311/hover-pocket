@@ -11,7 +11,11 @@ import xml.etree.ElementTree as ET
 
 SCRIPT = pathlib.Path(__file__).parents[1] / "verify_release_readback.py"
 WORKFLOW = pathlib.Path(__file__).parents[2] / ".github/workflows/release-readback-verify.yml"
+WINDOWS_VERIFY_WORKFLOW = pathlib.Path(__file__).parents[2] / ".github/workflows/windows-verify.yml"
 AUTHENTICODE_SCRIPT = pathlib.Path(__file__).parents[2] / "windows/script/verify_published_authenticode.ps1"
+PUBLISH_SCRIPT = pathlib.Path(__file__).parents[2] / "windows/script/publish_release.ps1"
+TRANSITION_SCRIPT = pathlib.Path(__file__).parents[2] / "windows/script/verify_release_transition.ps1"
+TRANSITION_WORKFLOW = pathlib.Path(__file__).parents[2] / ".github/workflows/release-transition-verify.yml"
 MACOS_READBACK_SCRIPT = pathlib.Path(__file__).parents[1] / "verify_published_macos.sh"
 SPEC = importlib.util.spec_from_file_location("verify_release_readback", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -57,7 +61,7 @@ class ReleaseReadbackTests(unittest.TestCase):
         }
         return appcast, checksum, release("macos-latest", feed_assets), release("v1.2.3-456", version_assets)
 
-    def windows_fixture(self, authenticode="unsigned"):
+    def windows_fixture(self, authenticode="unsigned", *, schema_version=1, include_codex_sandbox=False):
         version = "1.2.3"
         package_name = f"HoverPocketWin-{version}-full.nupkg"
         assets = {
@@ -67,6 +71,10 @@ class ReleaseReadbackTests(unittest.TestCase):
             "RELEASES": b"releases",
             "assets.win.json": b"assets",
         }
+        helper_data = b"signed-helper"
+        msi_name = f"HoverPocket.CodexSandboxSetup-{version}-win-x64.msi"
+        if include_codex_sandbox:
+            assets[msi_name] = b"signed-msi-with-helper"
         feed = json.dumps({
             "Assets": [{
                 "PackageId": "HoverPocketWin",
@@ -78,8 +86,8 @@ class ReleaseReadbackTests(unittest.TestCase):
                 "Size": len(assets[package_name]),
             }]
         }, separators=(",", ":")).encode()
-        manifest = json.dumps({
-            "schemaVersion": 1,
+        manifest_value = {
+            "schemaVersion": schema_version,
             "product": "HoverPocket",
             "packageId": "HoverPocketWin",
             "version": version,
@@ -88,7 +96,34 @@ class ReleaseReadbackTests(unittest.TestCase):
             "updateFeed": "releases.win.json",
             "oauthMetadata": "embedded-and-verified",
             "authenticode": authenticode,
-        }, separators=(",", ":")).encode()
+        }
+        if schema_version == 2:
+            codex_sandbox = {
+                "published": include_codex_sandbox,
+                "trustedProductionSetupBoundary": False,
+                "productionSetupAvailable": False,
+                "productionGenerationAvailable": False,
+                "productionActivationAvailable": False,
+            }
+            if include_codex_sandbox:
+                codex_sandbox.update({
+                    "assetName": msi_name,
+                    "assetSize": len(assets[msi_name]),
+                    "assetSha256": MODULE.sha256(assets[msi_name]),
+                    "msiAuthenticode": "signed-timestamped-verified",
+                    "msiTimestamp": "verified",
+                    "publisherAgreement": "shell-helper-msi-same-certificate",
+                    "signerCertificateSha256": "a" * 64,
+                    "embeddedHelper": {
+                        "fileName": "HoverPocket.CodexSandboxSetup.exe",
+                        "size": len(helper_data),
+                        "sha256": MODULE.sha256(helper_data),
+                        "authenticode": "signed-timestamped-verified",
+                        "timestamp": "verified",
+                    },
+                })
+            manifest_value["codexSandboxSetup"] = codex_sandbox
+        manifest = json.dumps(manifest_value, separators=(",", ":")).encode()
         assets["releases.win.json"] = feed
         assets["release-manifest.win.json"] = manifest
         checksums = "".join(f"{MODULE.sha256(data)}  {name}\n" for name, data in sorted(assets.items())).encode("ascii")
@@ -234,13 +269,53 @@ class ReleaseReadbackTests(unittest.TestCase):
 
     def test_windows_formal_accepts_timestamped_signature_readback(self):
         release_value, feed, manifest, checksums = self.windows_fixture(
-            authenticode="signed-timestamped-verified"
+            authenticode="signed-timestamped-verified", schema_version=2, include_codex_sandbox=True
         )
         verifier = MODULE.Verifier()
         _, signing = MODULE.validate_windows(
             verifier, release_value, feed, manifest, checksums, "formal"
         )
         self.assertEqual(signing, "signed-timestamped-verified")
+
+    def test_windows_beta_gate_can_read_signed_schema2_release(self):
+        release_value, feed, manifest, checksums = self.windows_fixture(
+            authenticode="signed-timestamped-verified", schema_version=2, include_codex_sandbox=True
+        )
+        verifier = MODULE.Verifier()
+        _, signing = MODULE.validate_windows(
+            verifier, release_value, feed, manifest, checksums, "beta"
+        )
+        self.assertEqual(signing, "signed-timestamped-verified")
+        self.assertIn("windows.codex_sandbox_published", verifier.checks)
+
+    def test_windows_beta_schema2_keeps_codex_sandbox_boundary_unpublished(self):
+        release_value, feed, manifest, checksums = self.windows_fixture(schema_version=2)
+        verifier = MODULE.Verifier()
+        MODULE.validate_windows(verifier, release_value, feed, manifest, checksums, "beta")
+        self.assertIn("windows.codex_sandbox_beta_unpublished", verifier.checks)
+
+    def test_windows_formal_requires_schema2_codex_sandbox_contract(self):
+        release_value, feed, manifest, checksums = self.windows_fixture(
+            authenticode="signed-timestamped-verified"
+        )
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.validate_windows(MODULE.Verifier(), release_value, feed, manifest, checksums, "formal")
+
+    def test_windows_formal_rejects_codex_sandbox_manifest_tamper(self):
+        release_value, feed, manifest, checksums = self.windows_fixture(
+            authenticode="signed-timestamped-verified", schema_version=2, include_codex_sandbox=True
+        )
+        manifest_value = json.loads(manifest)
+        manifest_value["codexSandboxSetup"]["assetSha256"] = "0" * 64
+        with self.assertRaises(MODULE.VerificationError):
+            MODULE.validate_windows(
+                MODULE.Verifier(),
+                release_value,
+                feed,
+                json.dumps(manifest_value, separators=(",", ":")).encode(),
+                checksums,
+                "formal",
+            )
 
     def test_checksum_parser_rejects_paths_and_duplicates(self):
         with self.assertRaises(MODULE.VerificationError):
@@ -511,6 +586,53 @@ class ReleaseReadbackTests(unittest.TestCase):
         self.assertIn("ComputeHash($Certificate.RawData)", script)
         self.assertIn("-cne $canonicalSignerCertificateSha256", script)
         self.assertIn('publisherIdentity = if ($IdentityOnly) { "not-evaluated" } else { "verified" }', script)
+        self.assertIn("HoverPocket.CodexSandboxSetup.exe", script)
+        self.assertIn("verify_codex_sandbox_installer.ps1", script)
+        self.assertIn('$null -ne $codexSandboxContract -and -not $IdentityOnly', script)
+        self.assertIn(
+            'codexSandboxEmbeddedHelper = if ($null -eq $codexSandboxContract) { "not-published" } elseif ($IdentityOnly) { "manifest-bound-not-extracted" }',
+            script,
+        )
+        formal_msi_block = script.split("$codexSandboxMsiSignature = $null", 1)[1].split(
+            "Assert-SetupEmbedsFullPackage", 1
+        )[0]
+        msi_signature_index = formal_msi_block.index(
+            "Assert-TimestampedAuthenticode -Path $codexSandboxMsiPath"
+        )
+        publisher_pin_index = formal_msi_block.index(
+            "$codexSandboxMsiSignerCertificateSha256 -cne $canonicalSignerCertificateSha256"
+        )
+        installer_verifier_index = formal_msi_block.index("& $installerVerifierPath")
+        administrative_image_index = formal_msi_block.index(
+            "Expand-CodexSandboxMsiAdministrativeImage"
+        )
+        helper_signature_index = formal_msi_block.index(
+            "Assert-TimestampedAuthenticode -Path $embeddedHelperPath"
+        )
+        self.assertLess(msi_signature_index, publisher_pin_index)
+        self.assertLess(publisher_pin_index, installer_verifier_index)
+        self.assertLess(installer_verifier_index, administrative_image_index)
+        self.assertLess(administrative_image_index, helper_signature_index)
+        self.assertNotIn("if (-not $IdentityOnly)", formal_msi_block)
+        self.assertIn("msiexec.exe", script)
+        windows_verify_workflow = WINDOWS_VERIFY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("verify_published_authenticode_contract.ps1", windows_verify_workflow)
+        publish_script = PUBLISH_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("HoverPocketPublisherCertificateSha256", publish_script)
+        self.assertIn("Invoke-AuthenticodeSign", publish_script)
+        self.assertIn("HoverPocket.CodexSandboxSetup-$Version-win-x64.msi", publish_script)
+        transition_script = TRANSITION_SCRIPT.read_text(encoding="utf-8")
+        transition_workflow = TRANSITION_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("CodexSandboxInstallerTransition", transition_script)
+        self.assertIn("Expand-CodexSandboxInstallerPayload", transition_script)
+        self.assertIn("HP_CODEX_SANDBOX_TRANSITION_EMBEDDED_HELPER_READBACK_MISMATCH", transition_script)
+        self.assertIn("Assert-ApplicationTransitionManifestContract", transition_script)
+        self.assertIn("schema2BetaApplicationTransitionAccepted", transition_script)
+        self.assertIn("HP_CODEX_SANDBOX_TRANSITION_BETA_TRUST_BOUNDARY_PUBLISHED", transition_script)
+        self.assertIn("HP_CODEX_SANDBOX_TRANSITION_EMBEDDED_HELPER_REPARSE_REJECTED", transition_script)
+        self.assertIn("HP_CODEX_SANDBOX_MSI_EMBEDDED_HELPER_REPARSE_REJECTED", script)
+        self.assertIn("codex-sandbox-installer-transition:", transition_workflow)
+        self.assertIn("execute_codex_sandbox_installer_transition", transition_workflow)
 
     def test_github_latest_must_remain_the_macos_release(self):
         verifier = MODULE.Verifier()

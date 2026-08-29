@@ -40,6 +40,8 @@ WINDOWS_REQUIRED_STATIC_ASSETS = {
 }
 WINDOWS_SETUP_ASSET = "HoverPocketWin-win-Setup.exe"
 WINDOWS_PORTABLE_ASSET = "HoverPocketWin-win-Portable.zip"
+WINDOWS_CODEX_SANDBOX_HELPER = "HoverPocket.CodexSandboxSetup.exe"
+WINDOWS_CODEX_SANDBOX_MSI_RE = re.compile(r"^HoverPocket\.CodexSandboxSetup-(\d+\.\d+\.\d+)-win-x64\.msi$")
 WINDOWS_TAG_RE = re.compile(r"^win-v(\d+)\.(\d+)\.(\d+)$")
 MAX_RELEASE_ASSET_BYTES = 512 * 1024 * 1024
 
@@ -379,10 +381,15 @@ def validate_windows(
     feed_assets = feed.get("Assets") if isinstance(feed, dict) else None
     if not isinstance(feed_assets, list) or len(feed_assets) != 1 or not isinstance(feed_assets[0], dict):
         raise VerificationError("windows.feed: expected one full package")
+    if not isinstance(manifest, dict):
+        raise VerificationError("windows.manifest: expected an object")
     package = feed_assets[0]
-    version = manifest.get("version") if isinstance(manifest, dict) else None
+    version = manifest.get("version")
     package_name = package.get("FileName")
-    verifier.require(manifest.get("schemaVersion") == 1, "windows.manifest_schema", "unsupported manifest schema")
+    schema_version = manifest.get("schemaVersion")
+    verifier.require(schema_version in {1, 2}, "windows.manifest_schema", "unsupported manifest schema")
+    if signing_gate == "formal":
+        verifier.require(schema_version == 2, "windows.manifest_formal_schema", "formal release requires manifest schema 2")
     verifier.require(manifest.get("product") == "HoverPocket", "windows.product", "unexpected product")
     verifier.require(manifest.get("packageId") == "HoverPocketWin", "windows.package_id", "unexpected package ID")
     verifier.require(manifest.get("runtime") == "win-x64", "windows.runtime", "unexpected runtime")
@@ -413,7 +420,84 @@ def validate_windows(
     )
     verifier.require(WINDOWS_SETUP_ASSET in assets, "windows.setup_asset", "canonical Setup executable is missing")
     verifier.require(WINDOWS_PORTABLE_ASSET in assets, "windows.portable_asset", "canonical Portable ZIP is missing")
+
     authenticode = manifest.get("authenticode")
+    codex_contract = manifest.get("codexSandboxSetup")
+    codex_msi_assets = [name for name in assets if WINDOWS_CODEX_SANDBOX_MSI_RE.fullmatch(name)]
+    if schema_version == 1:
+        verifier.require(
+            not codex_msi_assets,
+            "windows.codex_sandbox_legacy_absent",
+            "legacy manifest cannot publish the dedicated Codex sandbox MSI",
+        )
+    else:
+        verifier.require(isinstance(codex_contract, dict), "windows.codex_sandbox_contract", "schema 2 requires codexSandboxSetup")
+        assert isinstance(codex_contract, dict)
+        for field in (
+            "trustedProductionSetupBoundary",
+            "productionSetupAvailable",
+            "productionGenerationAvailable",
+            "productionActivationAvailable",
+        ):
+            verifier.require(
+                codex_contract.get(field) is False,
+                f"windows.codex_sandbox_{field}",
+                f"{field} must remain false",
+            )
+        if authenticode == "signed-timestamped-verified":
+            verifier.require(codex_contract.get("published") is True, "windows.codex_sandbox_published", "signed formal release must publish the dedicated helper MSI")
+            expected_msi_name = f"HoverPocket.CodexSandboxSetup-{version}-win-x64.msi"
+            msi_name = codex_contract.get("assetName")
+            verifier.require(msi_name == expected_msi_name, "windows.codex_sandbox_asset_name", "helper MSI asset name is not canonical")
+            verifier.require(codex_msi_assets == [expected_msi_name], "windows.codex_sandbox_asset_unique", "formal release must contain exactly one dedicated helper MSI")
+            verifier.require(
+                codex_contract.get("assetSize") == assets[expected_msi_name].get("size"),
+                "windows.codex_sandbox_asset_size",
+                "helper MSI manifest size differs from release metadata",
+            )
+            msi_sha256 = codex_contract.get("assetSha256")
+            verifier.require(
+                isinstance(msi_sha256, str)
+                and SHA256_RE.fullmatch(msi_sha256) is not None
+                and msi_sha256 == checksums.get(expected_msi_name),
+                "windows.codex_sandbox_asset_sha256",
+                "helper MSI manifest SHA-256 differs from downloaded release metadata",
+            )
+            verifier.require(
+                codex_contract.get("msiAuthenticode") == "signed-timestamped-verified",
+                "windows.codex_sandbox_msi_authenticode",
+                "formal helper MSI must declare timestamped Authenticode",
+            )
+            verifier.require(codex_contract.get("msiTimestamp") == "verified", "windows.codex_sandbox_msi_timestamp", "formal helper MSI timestamp declaration is missing")
+            verifier.require(
+                codex_contract.get("publisherAgreement") == "shell-helper-msi-same-certificate",
+                "windows.codex_sandbox_publisher_agreement",
+                "formal helper publisher agreement is missing",
+            )
+            signer_sha256 = codex_contract.get("signerCertificateSha256")
+            verifier.require(
+                isinstance(signer_sha256, str) and SHA256_RE.fullmatch(signer_sha256) is not None,
+                "windows.codex_sandbox_signer_sha256",
+                "formal helper signer certificate SHA-256 is missing or malformed",
+            )
+            embedded_helper = codex_contract.get("embeddedHelper")
+            verifier.require(isinstance(embedded_helper, dict), "windows.codex_sandbox_embedded_helper", "formal helper metadata is missing")
+            assert isinstance(embedded_helper, dict)
+            verifier.require(embedded_helper.get("fileName") == WINDOWS_CODEX_SANDBOX_HELPER, "windows.codex_sandbox_helper_name", "embedded helper name differs")
+            verifier.require(isinstance(embedded_helper.get("size"), int) and embedded_helper["size"] > 0, "windows.codex_sandbox_helper_size", "embedded helper size is invalid")
+            verifier.require(
+                isinstance(embedded_helper.get("sha256"), str) and SHA256_RE.fullmatch(embedded_helper["sha256"]) is not None,
+                "windows.codex_sandbox_helper_sha256",
+                "embedded helper SHA-256 is missing or malformed",
+            )
+            verifier.require(embedded_helper.get("authenticode") == "signed-timestamped-verified", "windows.codex_sandbox_helper_authenticode", "embedded helper must declare timestamped Authenticode")
+            verifier.require(embedded_helper.get("timestamp") == "verified", "windows.codex_sandbox_helper_timestamp", "embedded helper timestamp declaration is missing")
+        elif authenticode == "unsigned":
+            verifier.require(codex_contract.get("published") is False, "windows.codex_sandbox_beta_unpublished", "beta must not publish the trusted helper MSI boundary")
+            verifier.require(not codex_msi_assets, "windows.codex_sandbox_beta_asset_absent", "beta must not publish a dedicated helper MSI")
+        else:
+            raise VerificationError("windows.authenticode: unknown signing state")
+
     if signing_gate == "formal":
         verifier.require(
             authenticode == "signed-timestamped-verified",
@@ -964,7 +1048,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "authenticode": windows_authenticode,
             "signingGate": args.windows_signing_gate,
             "assetReadback": "all-assets-downloaded-and-hashed",
-            "authenticodeEvidence": "manifest-declared",
+            "authenticodeEvidence": "pending-windows-independent-readback",
             "assetSnapshot": windows_asset_snapshot,
         },
         "checks": verifier.checks,
