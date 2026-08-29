@@ -2070,7 +2070,7 @@ private final class BrokerSlowReadHandler: PocketCapabilityHandler {
         _ = context
         entered = true
         do {
-            try await Task.sleep(for: .milliseconds(100))
+            try await Task.sleep(for: .seconds(30))
         } catch is CancellationError {
             wasCancelled = true
             throw CancellationError()

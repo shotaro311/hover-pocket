@@ -78,9 +78,31 @@ Windowsのsetup / repairは現在、`GENERATOR_SANDBOX_SETUP_UNAVAILABLE`でprod
 
 恒久helperの最初の境界として`HoverPocket.CodexSandboxSetup`を追加しています。現段階ではproduction dispatchを常に`HP_CODEX_SANDBOX_HELPER_NOT_ACTIVATED`で拒否し、公式0.145.0配布物の6ファイルclosure、exact size、SHA-256、Authenticode状態と署名者を決定的に検証するモードだけを提供します。CIはnpm archive自体のSHA-512に続けて、このnative verifierで展開後のclosureをreadbackします。Shellとhelperの間には元プロセスID、Windows SID、完全修飾account、nonce、複製対象handleの期限付きcontractと、同一publisher署名を要求する読み取り専用admissionまで実装済みです。helper内部にはProgramData配下の固定root、管理者ACL、同一handleからのcopy、nonceごとのsingle-use Home、`--user` / `--codex-home`による固定環境setup、Job Object、元SIDだけが読めるattestation readbackも実装していますが、production switchとSettingsからのUAC呼び出しは未接続です。このためproduction resolverのfail-closedは変わりません。
 
+helperの固定originは、専用のper-machine MSIが`%ProgramFiles%\HoverPocket\CodexSandboxSetup`へself-containedな`win-x64` publish一式を配置する契約です。MSIは埋め込みcabinet、固定UpgradeCode、64-bit component、major upgradeとuninstallを持ち、CustomAction、service、registry、environment、shortcutを追加しません。CIはMSI databaseを別経路で読み、`ALLUSERS=1`、配置先のdirectory ancestry、helperが1本だけ含まれること、禁止tableが空であることを検証します。現段階のMSIとhelperは署名済み配布物ではなく、Settingsもこのoriginを起動しないため、production setupを有効化する根拠にはなりません。
+
 ```powershell
 dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj -- --contract-self-test
 dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj -- --verify-vendor-closure <公式package root>
+```
+
+installerはWiX SDK 5.0.2で決定論的にbuildします。正式有効化前には、MSIとhelperの双方へ同じ信頼済みpublisherのAuthenticode署名を付け、Settings側でregular / non-reparse file、固定Program Files origin、publisher、object identityを再検証する必要があります。
+
+```powershell
+dotnet publish `
+  .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj `
+  --configuration Release --runtime win-x64 --self-contained true `
+  -p:PublishSingleFile=false -p:DebugSymbols=false -p:DebugType=None `
+  --output <空のhelper-publish-directory>
+
+dotnet build `
+  .\windows\installer\HoverPocket.CodexSandboxSetup.Installer\HoverPocket.CodexSandboxSetup.Installer.wixproj `
+  --configuration Release --output <空のinstaller-output-directory> `
+  -p:ProductVersion=0.2.7 -p:HelperPublishDir=<helper-publish-directory>
+
+.\windows\script\verify_codex_sandbox_installer.ps1 `
+  -MsiPath <HoverPocket.CodexSandboxSetup.msi> `
+  -ExpectedProductVersion "0.2.7" `
+  -ExpectedUpgradeCode "{9E28ABD6-A496-472E-98AB-AE8D70C27B48}"
 ```
 
 positive confinement canaryは上記helper完成後に準備済みhomeを明示し、生成中にUACを要求しないこと、固定Codex Homeと`.sandbox-secrets`をmodel toolが読めないことを含めて確認します。現在は実行対象外です。

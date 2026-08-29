@@ -1573,7 +1573,7 @@ internal sealed class CapabilityBrokerVerifier
             _ = context;
             try
             {
-                await Task.Delay(100, cancellationToken);
+                await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
             }
             catch (OperationCanceledException)
             {
