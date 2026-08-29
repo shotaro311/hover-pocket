@@ -38,7 +38,7 @@ function Invoke-MsiQuery {
   $rows = [Collections.Generic.List[object]]::new()
   try {
     $view = $Database.OpenView($Sql)
-    $view.Execute()
+    [void]$view.Execute()
     while ($null -ne ($record = $view.Fetch())) {
       $row = [ordered]@{}
       for ($index = 0; $index -lt $Columns.Count; $index++) {
@@ -52,7 +52,7 @@ function Invoke-MsiQuery {
   finally {
     Release-ComObject $record
     if ($null -ne $view) {
-      $view.Close()
+      [void]$view.Close()
     }
     Release-ComObject $view
   }
@@ -95,14 +95,14 @@ function Test-MsiTableHasRows {
   $record = $null
   try {
     $view = $Database.OpenView("SELECT * FROM ``$TableName``")
-    $view.Execute()
+    [void]$view.Execute()
     $record = $view.Fetch()
     return $null -ne $record
   }
   finally {
     Release-ComObject $record
     if ($null -ne $view) {
-      $view.Close()
+      [void]$view.Close()
     }
     Release-ComObject $view
   }
