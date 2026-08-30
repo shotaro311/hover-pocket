@@ -3,6 +3,20 @@ import Foundation
 
 @MainActor
 enum CalendarCapabilityLiveVerificationCommand {
+    private enum HandlerFailure: String {
+        case notConnected = "calendar_not_connected"
+        case authorizationNeedsReconnect = "calendar_authorization_needs_reconnect"
+        case requestFailed = "calendar_request_failed"
+        case invalidResponse = "calendar_response_invalid"
+        case oauthFailed = "calendar_oauth_failed"
+        case networkOffline = "calendar_network_offline"
+        case networkTimedOut = "calendar_network_timed_out"
+        case endpointUnavailable = "calendar_endpoint_unavailable"
+        case secureConnectionFailed = "calendar_secure_connection_failed"
+        case networkFailed = "calendar_network_failed"
+        case unknown = "calendar_handler_failed"
+    }
+
     private enum VerificationError: Error {
         case externalIntegrationsDisabled
         case calendarReadGrantRequired
@@ -10,6 +24,11 @@ enum CalendarCapabilityLiveVerificationCommand {
         case credentialCheckTimedOut
         case existingCredentialRequired
         case approvalUnexpected
+        case handlerFailure(HandlerFailure, networkCode: Int?)
+        case brokerTimedOut
+        case brokerReceiptFailed
+        case readbackInvalid
+        case outputInvalid
         case receiptInvalid
         case auditContainsPrivateOutput
     }
@@ -38,6 +57,95 @@ enum CalendarCapabilityLiveVerificationCommand {
             finished = true
             lock.unlock()
             continuation.resume(returning: result)
+        }
+    }
+
+    @MainActor
+    private final class LiveCalendarCapabilityDataSource: CalendarCapabilityDataSource {
+        private let base: any CalendarCapabilityDataSource
+        private(set) var lastSafeFailure: HandlerFailure?
+        private(set) var lastNetworkErrorCode: Int?
+
+        init(base: any CalendarCapabilityDataSource) {
+            self.base = base
+        }
+
+        func listEvents(from start: Date, to end: Date) async throws -> [CalendarCapabilityEvent] {
+            do {
+                return try await base.listEvents(from: start, to: end)
+            } catch {
+                record(error)
+                throw error
+            }
+        }
+
+        func getEvent(eventRef: String) async throws -> CalendarCapabilityEvent? {
+            do {
+                return try await base.getEvent(eventRef: eventRef)
+            } catch {
+                record(error)
+                throw error
+            }
+        }
+
+        func createEvent(
+            _ request: CalendarCapabilityCreateRequest,
+            idempotencyKey: String
+        ) async throws -> CalendarCapabilityEvent {
+            do {
+                return try await base.createEvent(request, idempotencyKey: idempotencyKey)
+            } catch {
+                record(error)
+                throw error
+            }
+        }
+
+        private func record(_ error: Error) {
+            let result = Self.classify(error)
+            lastSafeFailure = result.failure
+            lastNetworkErrorCode = result.networkCode
+        }
+
+        private static func classify(_ error: Error) -> (failure: HandlerFailure, networkCode: Int?) {
+            if error is GoogleCalendarToolError {
+                return (.notConnected, nil)
+            }
+            if let apiError = error as? GoogleCalendarAPIError {
+                let failure: HandlerFailure = switch apiError {
+                case .authorizationExpired, .authorizationNeedsReconnect:
+                    .authorizationNeedsReconnect
+                case .requestFailed, .conflict:
+                    .requestFailed
+                case .invalidResponse:
+                    .invalidResponse
+                }
+                return (failure, nil)
+            }
+            if let oauthError = error as? GoogleOAuthError {
+                return (
+                    oauthError.requiresReconnect ? .authorizationNeedsReconnect : .oauthFailed,
+                    nil
+                )
+            }
+            if let urlError = error as? URLError {
+                let failure: HandlerFailure = switch urlError.code {
+                case .notConnectedToInternet, .networkConnectionLost:
+                    .networkOffline
+                case .timedOut:
+                    .networkTimedOut
+                case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+                    .endpointUnavailable
+                case .secureConnectionFailed, .serverCertificateHasBadDate,
+                     .serverCertificateUntrusted, .serverCertificateHasUnknownRoot,
+                     .serverCertificateNotYetValid, .clientCertificateRejected,
+                     .clientCertificateRequired:
+                    .secureConnectionFailed
+                default:
+                    .networkFailed
+                }
+                return (failure, urlError.code.rawValue)
+            }
+            return (.unknown, nil)
         }
     }
 
@@ -105,8 +213,10 @@ enum CalendarCapabilityLiveVerificationCommand {
         )
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let calendarDataSource = GoogleCalendarCapabilityDataSource(
-            store: GoogleCalendarStore(oauth: oauth)
+        let calendarDataSource = LiveCalendarCapabilityDataSource(
+            base: GoogleCalendarCapabilityDataSource(
+                store: GoogleCalendarStore(oauth: oauth)
+            )
         )
         let handlers = try PocketCapabilityHandlerSet(handlers: [
             CalendarListCapabilityHandler(dataSource: calendarDataSource)
@@ -156,15 +266,30 @@ enum CalendarCapabilityLiveVerificationCommand {
             approvalGrant: nil,
             now: now
         )
-        guard receipt.status == .succeeded,
-              receipt.steps.count == 1,
-              receipt.steps[0].capability == PocketCapabilityKeys.calendarList,
-              receipt.steps[0].status == .succeeded,
-              receipt.steps[0].readback.status == .verified,
-              let output = receipt.steps[0].output,
+        guard receipt.steps.count == 1,
+              receipt.steps[0].capability == PocketCapabilityKeys.calendarList else {
+            throw VerificationError.receiptInvalid
+        }
+        let step = receipt.steps[0]
+        guard receipt.status == .succeeded, step.status == .succeeded else {
+            if step.safeError?.code == "CAPABILITY_TIMEOUT" {
+                throw VerificationError.brokerTimedOut
+            }
+            if let failure = calendarDataSource.lastSafeFailure {
+                throw VerificationError.handlerFailure(
+                    failure,
+                    networkCode: calendarDataSource.lastNetworkErrorCode
+                )
+            }
+            throw VerificationError.brokerReceiptFailed
+        }
+        guard step.readback.status == .verified else {
+            throw VerificationError.readbackInvalid
+        }
+        guard let output = step.output,
               case .array(let events)? = output["events"],
               events.count <= 128 else {
-            throw VerificationError.receiptInvalid
+            throw VerificationError.outputInvalid
         }
         let auditData = try auditLog.combinedData()
         let auditText = String(decoding: auditData, as: UTF8.self)
@@ -207,6 +332,20 @@ enum CalendarCapabilityLiveVerificationCommand {
             "calendar_existing_credential_required"
         case VerificationError.approvalUnexpected:
             "calendar_read_approval_unexpected"
+        case VerificationError.handlerFailure(let failure, let networkCode):
+            if failure == .networkFailed, let networkCode {
+                "calendar_network_failed_code_\(networkCode)"
+            } else {
+                failure.rawValue
+            }
+        case VerificationError.brokerTimedOut:
+            "calendar_capability_timed_out"
+        case VerificationError.brokerReceiptFailed:
+            "calendar_broker_receipt_failed"
+        case VerificationError.readbackInvalid:
+            "calendar_readback_invalid"
+        case VerificationError.outputInvalid:
+            "calendar_output_invalid"
         case VerificationError.receiptInvalid:
             "calendar_read_receipt_invalid"
         case VerificationError.auditContainsPrivateOutput:

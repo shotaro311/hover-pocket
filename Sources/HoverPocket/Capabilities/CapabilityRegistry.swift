@@ -157,6 +157,11 @@ enum PocketCapabilityDescriptors {
         maximumPayloadBytes: 4_096,
         maximumCallsPerMinute: 120
     )
+    private static let calendarReadLimits = CapabilityLimits(
+        timeoutMilliseconds: 15_000,
+        maximumPayloadBytes: 4_096,
+        maximumCallsPerMinute: 30
+    )
     private static let localWriteLimits = CapabilityLimits(
         timeoutMilliseconds: 3_000,
         maximumPayloadBytes: 4_096,
@@ -194,7 +199,7 @@ enum PocketCapabilityDescriptors {
             permissions: ["calendar.events.read"],
             approval: .permissionGrant,
             idempotency: .optional,
-            limits: readLimits,
+            limits: calendarReadLimits,
             readback: CapabilityReadbackPolicy(strategy: .sameStoreSnapshot, query: nil, matchFields: ["eventRef", "eventId", "start", "end", "safeTitle"]),
             rollback: false,
             input: CapabilitySchemaValidation.calendarGetInput,
@@ -206,7 +211,7 @@ enum PocketCapabilityDescriptors {
             permissions: ["calendar.events.read"],
             approval: .permissionGrant,
             idempotency: .optional,
-            limits: readLimits,
+            limits: calendarReadLimits,
             readback: CapabilityReadbackPolicy(strategy: .sameStoreSnapshot, query: nil, matchFields: ["events"]),
             rollback: false,
             input: CapabilitySchemaValidation.calendarListInput,

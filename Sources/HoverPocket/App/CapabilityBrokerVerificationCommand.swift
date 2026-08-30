@@ -90,6 +90,15 @@ enum CapabilityBrokerVerificationCommand {
             registry.descriptor(PocketCapabilityKeys.stickyDelete)?.approvalPolicy == .strongPerCall,
             "sticky_delete_strong_approval"
         )
+        try require(
+            registry.descriptor(PocketCapabilityKeys.calendarGet)?.limits.timeoutMilliseconds == 15_000
+                && registry.descriptor(PocketCapabilityKeys.calendarList)?.limits.timeoutMilliseconds == 15_000,
+            "calendar_network_read_timeout"
+        )
+        try require(
+            registry.descriptor(PocketCapabilityKeys.timerGet)?.limits.timeoutMilliseconds == 3_000,
+            "local_read_timeout_unchanged"
+        )
         try verifyStrongPerCallIsolation(broker: broker, noteID: noteID, now: now)
         try verifyStrongApprovalPresentationRequired(
             registry: registry,
