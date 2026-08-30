@@ -120,6 +120,7 @@ keyring-only Codex loginの実装制約は、Voice専用profileでChatGPT manage
 - 独立エージェントは初回から候補fallback、MainActor待機、終了再入、timeout持越し、managed不可時のprocess ownershipを段階的に検出した。全修正後のexact diffはP0 / P1 / P2すべて0件。先頭正常candidateは再起動せず、通常起動、Hover、マイク、remote audioのhot pathへ新しい処理は入らない。
 - `swift build -Xswiftc -warnings-as-errors`、`swift build -c release -Xswiftc -warnings-as-errors`、Voice静的42件、`--verify-codex-app-server`、`git diff --check`はPASSした。local build 600はApple Development署名のstrict codesign、起動、graceful quitをreadbackした。隔離物理Voice E2E PID 70741は約1時間稼働後も生存し、停止・再起動していない。
 - 実ChatGPT browser loginはユーザーのアカウント操作を伴うため、この実装ターンでは開始していない。従ってmanaged loginの実アカウント完了、cancel、更新後のcredential再利用は未完了gateであり、公開可能とは扱わない。
+- 実装commit `4ed69eff3023d44b2452ee5d9772eef16d26ed73`のDraft PR #39は15 SUCCESS / 8 expected SKIPPED / failure 0 / pending 0だった。PRはDraft / OPEN / MERGEABLE / CLEAN、未解決review thread 0、remote parity 0 / 0。merge、release、Draft解除は行っていない。
 
 ## build 599 最終成果物readback
 
