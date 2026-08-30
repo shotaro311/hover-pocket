@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 enum CodexAppServerVerificationError: Error {
@@ -8,8 +9,20 @@ struct CodexAppServerVerificationResult {
     let installedCompatibility: CodexAppServerCompatibilityResult
 }
 
+struct CodexAppServerModelToolVerificationResult {
+    let requestedModel: String
+    let requestedEffort: String
+    let toolName: String
+    let approvalCount: Int
+    let processClosed: Bool
+}
+
 @MainActor
 enum CodexAppServerVerificationCommand {
+    private static let modelToolVerificationModel = "gpt-5.6-sol"
+    private static let modelToolVerificationEffort = "medium"
+    private static let modelToolVerificationTitle = "HoverPocket model verification"
+
     static func run() async throws -> CodexAppServerVerificationResult {
         try verifySchemaContract()
         try verifyChatGPTAccountPolicy()
@@ -29,6 +42,280 @@ enum CodexAppServerVerificationCommand {
         return CodexAppServerVerificationResult(
             installedCompatibility: installedCompatibility
         )
+    }
+
+    static func runModelToolVerification() async throws
+        -> CodexAppServerModelToolVerificationResult {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hoverpocket-codex-model-tool-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        do {
+            try FileManager.default.createDirectory(
+                at: root,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
+        } catch {
+            throw CodexAppServerVerificationError.failed("model_tool_workspace_failed")
+        }
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let calendar = CodexAppServerVerificationCalendarDataSource(now: now)
+        let timerStore = TimerStore(
+            storageDirectory: root.appendingPathComponent("timer", isDirectory: true),
+            observesWake: false,
+            persistenceEnabled: true
+        )
+        let handlers = try PocketCapabilityHandlerSet(handlers: [
+            CalendarListCapabilityHandler(dataSource: calendar),
+            CalendarGetCapabilityHandler(dataSource: calendar),
+            CalendarCreateCapabilityHandler(dataSource: calendar),
+            TimerCapabilityHandler(operation: .start, store: timerStore),
+            TimerCapabilityHandler(operation: .get, store: timerStore),
+            TimerCapabilityHandler(operation: .stop, store: timerStore)
+        ])
+        let registry = try CapabilityRegistry(handlers: handlers)
+        let brokerRoot = root.appendingPathComponent("broker", isDirectory: true)
+        var approvalCount = 0
+        let runtime = try OpenAIRealtimeMacOSCapabilityRuntime(
+            context: VoiceCapabilityContext(
+                registry: registry,
+                broker: CapabilityBroker(
+                    registry: registry,
+                    ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
+                    auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+                )
+            ),
+            calendarAccessGranted: { false },
+            timeZoneID: { "Asia/Tokyo" },
+            now: { now },
+            approvalHandler: { _ in
+                approvalCount += 1
+                return true
+            }
+        )
+        let bridge = CodexAppServerCapabilityBridge(runtime: runtime)
+        let expectedToolName = OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool
+        guard bridge.dynamicTools.count == 1,
+              bridge.dynamicTools.first?.objectValue?["name"]?.stringValue
+                == expectedToolName else {
+            try? FileManager.default.removeItem(at: root)
+            throw CodexAppServerVerificationError.failed("model_tool_surface_invalid")
+        }
+
+        let compatibility = await CodexAppServerCompatibilityProbe.shared.probe(
+            dynamicTools: bridge.dynamicTools
+        )
+        guard compatibility.gate.isReady,
+              await CodexAppServerCompatibilityProbe.shared.isCurrent(compatibility),
+              let executableURL = compatibility.executableURL,
+              let profile = compatibility.appServerProfile else {
+            try? FileManager.default.removeItem(at: root)
+            throw CodexAppServerVerificationError.failed(
+                compatibility.gate.safeErrorCode ?? "codex_app_server_not_ready"
+            )
+        }
+
+        let client: CodexAppServerClient
+        do {
+            client = try await CodexAppServerClient.start(
+                options: CodexAppServerClientOptions(
+                    executableURL: executableURL,
+                    launchArguments: CodexVoiceAppServerLaunchPolicy.arguments,
+                    processEnvironment: profile.processEnvironment,
+                    workingDirectoryURL: profile.codexHomeURL,
+                    requestTimeout: 60,
+                    clientName: "hover_pocket_model_tool_verifier",
+                    clientTitle: "HoverPocket Model Tool Verifier",
+                    clientVersion: "1",
+                    experimentalAPI: true
+                )
+            )
+        } catch {
+            try? FileManager.default.removeItem(at: root)
+            throw error
+        }
+        let processID = await client.processIdentifier
+        let toolCapture = CodexAppServerModelVerificationOneShot<
+            CodexAppServerToolRouteProbeInvocationResult
+        >()
+        let turnCapture = CodexAppServerModelVerificationOneShot<
+            CodexAppServerModelTurnCompletion
+        >()
+        let admission = CodexAppServerModelToolAdmission()
+
+        do {
+            let account = try await client.sendRequest(
+                "account/read",
+                params: .object(["refreshToken": .bool(false)])
+            )
+            guard CodexVoiceCoordinator.accountAdmissionCode(account) == nil else {
+                throw CodexAppServerVerificationError.failed("model_tool_chatgpt_account_required")
+            }
+
+            let threadResponse = try await client.sendRequest(
+                "thread/start",
+                params: .object(CodexVoiceThreadContract.startParameters(
+                    workspaceDirectory: root,
+                    dynamicTools: bridge.dynamicTools,
+                    ephemeral: true
+                ))
+            )
+            guard let threadID = threadResponse.objectValue?["thread"]?
+                    .objectValue?["id"]?.stringValue,
+                  VoiceTextSafety.sanitizeIdentifier(threadID) == threadID else {
+                throw CodexAppServerVerificationError.failed("model_tool_thread_invalid")
+            }
+
+            await client.setNotificationHandler { notification in
+                guard notification.method == "turn/completed",
+                      let params = notification.params?.objectValue,
+                      let completedThreadID = params["threadId"]?.stringValue,
+                      let turn = params["turn"]?.objectValue,
+                      let turnID = turn["id"]?.stringValue,
+                      let status = turn["status"]?.stringValue else { return }
+                turnCapture.succeed(CodexAppServerModelTurnCompletion(
+                    threadID: completedThreadID,
+                    turnID: turnID,
+                    status: status
+                ))
+            }
+            await client.setServerRequestHandler { request in
+                guard request.method == "item/tool/call",
+                      request.params?.objectValue?["threadId"]?.stringValue == threadID,
+                      request.params?.objectValue?["tool"]?.stringValue
+                        == expectedToolName,
+                      admission.admitToolCall() else {
+                    admission.recordRejectedRequest()
+                    return .failure(
+                        code: -32600,
+                        message: "HoverPocket model verification rejected an unexpected request."
+                    )
+                }
+                let reply = await bridge.handle(
+                    request: request,
+                    context: CodexVoiceToolRequestContext(
+                        rootThreadID: threadID,
+                        clientGeneration: 1
+                    )
+                )
+                return CodexAppServerReply(
+                    result: reply.result,
+                    error: reply.error,
+                    afterWrite: {
+                        if let afterWrite = reply.afterWrite {
+                            await afterWrite()
+                        }
+                        toolCapture.succeed(CodexAppServerToolRouteProbeInvocationResult(
+                            request: request,
+                            reply: reply
+                        ))
+                    }
+                )
+            }
+
+            async let capturedTool = toolCapture.wait(timeout: 60)
+            async let completedTurn = turnCapture.wait(timeout: 60)
+            let turnResponse = try await client.sendRequest(
+                "turn/start",
+                params: .object([
+                    "threadId": .string(threadID),
+                    "model": .string(modelToolVerificationModel),
+                    "effort": .string(modelToolVerificationEffort),
+                    "input": .array([
+                        .object([
+                            "type": .string("text"),
+                            "text": .string(
+                                "Call timer_countdown_start exactly once with "
+                                    + "durationSeconds 60 and title \""
+                                    + modelToolVerificationTitle
+                                    + "\". Do not call any other tool. After the tool result, "
+                                    + "reply with one short confirmation."
+                            ),
+                            "textElements": .array([])
+                        ])
+                    ])
+                ])
+            )
+            guard let startedTurnID = turnResponse.objectValue?["turn"]?
+                    .objectValue?["id"]?.stringValue,
+                  VoiceTextSafety.sanitizeIdentifier(startedTurnID) == startedTurnID else {
+                throw CodexAppServerVerificationError.failed("model_tool_turn_invalid")
+            }
+
+            let (toolResult, turnCompletion) = try await (capturedTool, completedTurn)
+            let output = try toolOutput(toolResult.reply, expectedSuccess: true)
+            let arguments = toolResult.request.params?.objectValue?["arguments"]?.objectValue
+            let admissionSnapshot = admission.snapshot()
+            let metrics = await client.metrics()
+            guard toolResult.request.params?.objectValue?["threadId"]?.stringValue == threadID,
+                  toolResult.request.params?.objectValue?["turnId"]?.stringValue == startedTurnID,
+                  arguments?["durationSeconds"]?.integerValue == 60,
+                  arguments?["title"]?.stringValue == modelToolVerificationTitle,
+                  output["status"] as? String == "succeeded",
+                  output["state"] as? String == "running",
+                  output["readback"] as? String == "verified",
+                  turnCompletion.threadID == threadID,
+                  turnCompletion.turnID == startedTurnID,
+                  turnCompletion.status == "completed",
+                  approvalCount == 1,
+                  calendar.createdCount == 0,
+                  timerStore.runningTimers.count == 1,
+                  timerStore.runningTimers.first?.title == modelToolVerificationTitle,
+                  timerStore.runningTimers.first?.phaseDuration == 60,
+                  admissionSnapshot.admitted == 1,
+                  admissionSnapshot.rejected == 0,
+                  metrics.malformedOutputLines == 0,
+                  metrics.unknownResponses == 0,
+                  metrics.unhandledServerRequests == 0 else {
+                throw CodexAppServerVerificationError.failed("model_tool_readback_failed")
+            }
+
+            await client.setNotificationHandler(nil)
+            await client.setServerRequestHandler(nil)
+            await client.close()
+            let processClosed = await waitForProcessExit(processID)
+            guard processClosed else {
+                throw CodexAppServerVerificationError.failed("model_tool_process_leaked")
+            }
+            try FileManager.default.removeItem(at: root)
+            guard !FileManager.default.fileExists(atPath: root.path) else {
+                throw CodexAppServerVerificationError.failed("model_tool_workspace_leaked")
+            }
+            return CodexAppServerModelToolVerificationResult(
+                requestedModel: modelToolVerificationModel,
+                requestedEffort: modelToolVerificationEffort,
+                toolName: expectedToolName,
+                approvalCount: approvalCount,
+                processClosed: true
+            )
+        } catch {
+            await client.setNotificationHandler(nil)
+            await client.setServerRequestHandler(nil)
+            await client.close()
+            let processClosed = await waitForProcessExit(processID)
+            try? FileManager.default.removeItem(at: root)
+            guard processClosed else {
+                throw CodexAppServerVerificationError.failed("model_tool_process_leaked")
+            }
+            guard !FileManager.default.fileExists(atPath: root.path) else {
+                throw CodexAppServerVerificationError.failed("model_tool_workspace_leaked")
+            }
+            throw error
+        }
+    }
+
+    private static func waitForProcessExit(_ processID: Int32?) async -> Bool {
+        guard let processID else { return false }
+        for _ in 0..<40 {
+            if Darwin.kill(processID, 0) != 0, Darwin.errno == ESRCH {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return Darwin.kill(processID, 0) != 0 && Darwin.errno == ESRCH
     }
 
     private static func verifyChatGPTAccountPolicy() throws {
@@ -547,5 +834,99 @@ private final class CodexAppServerVerificationCalendarDataSource: CalendarCapabi
         events[event.eventRef] = event
         _ = idempotencyKey
         return event
+    }
+}
+
+private struct CodexAppServerModelTurnCompletion: Sendable {
+    let threadID: String
+    let turnID: String
+    let status: String
+}
+
+private final class CodexAppServerModelVerificationOneShot<Value: Sendable>:
+    @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value, Error>?
+    private var pendingResult: Result<Value, Error>?
+    private var completed = false
+
+    func wait(timeout: TimeInterval) async throws -> Value {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                lock.lock()
+                if let pendingResult {
+                    self.pendingResult = nil
+                    lock.unlock()
+                    continuation.resume(with: pendingResult)
+                    return
+                }
+                self.continuation = continuation
+                lock.unlock()
+                DispatchQueue.global(qos: .userInitiated).asyncAfter(
+                    deadline: .now() + timeout
+                ) { [weak self] in
+                    self?.failIfPending()
+                }
+            }
+        } onCancel: { [weak self] in
+            self?.resolve(.failure(CancellationError()))
+        }
+    }
+
+    func succeed(_ value: Value) {
+        resolve(.success(value))
+    }
+
+    private func resolve(_ result: Result<Value, Error>) {
+        lock.lock()
+        guard !completed else {
+            lock.unlock()
+            return
+        }
+        completed = true
+        let continuation = continuation
+        self.continuation = nil
+        if continuation == nil {
+            pendingResult = result
+        }
+        lock.unlock()
+        continuation?.resume(with: result)
+    }
+
+    private func failIfPending() {
+        resolve(.failure(CodexAppServerVerificationError.failed(
+            "model_tool_request_timed_out"
+        )))
+    }
+}
+
+private final class CodexAppServerModelToolAdmission: @unchecked Sendable {
+    struct Snapshot {
+        let admitted: Int
+        let rejected: Int
+    }
+
+    private let lock = NSLock()
+    private var admitted = 0
+    private var rejected = 0
+
+    func admitToolCall() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard admitted == 0 else { return false }
+        admitted = 1
+        return true
+    }
+
+    func recordRejectedRequest() {
+        lock.lock()
+        rejected += 1
+        lock.unlock()
+    }
+
+    func snapshot() -> Snapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        return Snapshot(admitted: admitted, rejected: rejected)
     }
 }

@@ -1003,6 +1003,41 @@ def main() -> None:
         "timerStore.runningTimers.count == 1",
     )):
         fail("macOS Codex app-server tool call is not bound to Broker approval and readback")
+    model_verifier_start = mac_codex_foundation_verifier.find(
+        "static func runModelToolVerification()"
+    )
+    model_verifier_end = mac_codex_foundation_verifier.find(
+        "private static func waitForProcessExit",
+        model_verifier_start,
+    )
+    model_verifier = mac_codex_foundation_verifier[
+        model_verifier_start:model_verifier_end
+    ]
+    if model_verifier_start < 0 or model_verifier_end <= model_verifier_start \
+            or '--verify-codex-app-server-model-tool' not in mac_main \
+            or 'codex_app_server_requested_model=' not in mac_main \
+            or 'codex_app_server_requested_effort=' not in mac_main \
+            or 'modelToolVerificationModel = "gpt-5.6-sol"' not in mac_codex_foundation_verifier \
+            or 'modelToolVerificationEffort = "medium"' not in mac_codex_foundation_verifier \
+            or not all(value in model_verifier for value in (
+                "calendarAccessGranted: { false }",
+                "defer { try? FileManager.default.removeItem(at: root) }",
+                "bridge.dynamicTools.count == 1",
+                '"account/read"',
+                '"thread/start"',
+                '"turn/start"',
+                'notification.method == "turn/completed"',
+                'request.method == "item/tool/call"',
+                "afterWrite:",
+                "approvalCount == 1",
+                "calendar.createdCount == 0",
+                "timerStore.runningTimers.count == 1",
+                "admissionSnapshot.rejected == 0",
+                "waitForProcessExit(processID)",
+                "model_tool_workspace_leaked",
+            )) \
+            or "OPENAI_API_KEY" in model_verifier:
+        fail("macOS live Codex model tool verifier bypasses the bounded Timer-only contract")
     if not all(value in mac_codex_realtime_verifier for value in (
         "CodexAppServerCompatibilityProbe.shared.isCurrent",
         "rootThreadEphemeral: true",
@@ -1424,7 +1459,7 @@ def main() -> None:
         "legacy lane negative regression, internal scroll, accessibility, "
         "Windows explicit-origin microphone, fenced Realtime transport, "
         "AN3-B2 Calendar/Timer Broker slice, AN3-B3A OpenAI Realtime BYOK gates, "
-        "and AN3-B3B macOS Realtime security gates"
+        "AN3-B3B macOS Realtime security gates, and explicit Codex model tool readback"
     )
 
 

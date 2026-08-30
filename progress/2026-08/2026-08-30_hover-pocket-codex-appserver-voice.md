@@ -4,7 +4,7 @@
 
 macOS Voice Laneの標準providerをCodex app-serverへ接続した。これはOpenAI APIキーを使うRealtime BYOK経路ではなく、ローカルCodexのログイン状態とapp-serverを使う経路である。Capabilityの正本は引き続きHoverPocketのRegistry / Brokerで、CodexはCalendar read/createとTimer startだけを同じBroker経由で実行する。
 
-実装基盤と決定論的検証に加え、ChatGPT.app同梱Codex app-server `0.150.0-alpha.12.2`でChatGPT account、19 voices、ephemeral root thread、SDP answer、WebRTC接続、process teardownまで実接続した。OpenAI APIキーと物理マイクは使用していない。Homebrew Codex `0.145.0`はtool route不一致、隔離した公式`0.149.0`は現行backendとのRealtime session契約差で停止するため、通常解決順は互換性を実証したChatGPT同梱Codexを優先する。さらに製品と同じDeveloper ID要件の隔離candidateから、既存Google credentialと実Calendarを使ったVoice origin Calendar readをBroker / readback込みで成功確認した。
+実装基盤と決定論的検証に加え、ChatGPT.app同梱Codex app-server `0.150.0-alpha.12.2`でChatGPT account、19 voices、ephemeral root thread、SDP answer、WebRTC接続、process teardownまで実接続した。さらにChatGPTログインの実CodexターンがTimer toolを選び、Broker承認、一時Timer、readbackまで完了することも確認した。OpenAI APIキーと物理マイクは使用していない。Homebrew Codex `0.145.0`はtool route不一致、隔離した公式`0.149.0`は現行backendとのRealtime session契約差で停止するため、通常解決順は互換性を実証したChatGPT同梱Codexを優先する。さらに製品と同じDeveloper ID要件の隔離candidateから、既存Google credentialと実Calendarを使ったVoice origin Calendar readをBroker / readback込みで成功確認した。
 
 ## 実装
 
@@ -26,6 +26,7 @@ macOS Voice Laneの標準providerをCodex app-serverへ接続した。これはO
 - Codex WebRTCのmic取得、remote audio track、remote audio playbackをreceiptへ接続し、mic取得と実再生の両方が揃ったattemptだけHost所有の確認sheetを一度表示する。旧attemptのsheet応答はattempt IDで拒否し、通常版ではreceipt storeが`nil`のため追加処理は即時終了する。
 - E2E harnessの案内をCodex app-serverへ更新した。API keyを引数・環境変数・設定へ要求せず、Voiceは隔離設定画面で明示的に有効化する。
 - `--verify-codex-app-server`を拡張し、local loopback Responses providerが決定論的なTimer function callを返す。実Codex app-serverから届いた`item/tool/call`を同じBridge、Capability Runtime、Registry / Broker、承認、Timer実行、readbackへ通し、replyをapp-server pipeへ書いた後にだけ成功とする。Calendar read/create、Timer approval / reject / replayは外部データを使わない一時fixtureでも縦断確認する。
+- `--verify-codex-app-server-model-tool`を追加した。ChatGPT accountを`account/read`で確認し、指定値`gpt-5.6-sol / medium`のephemeral turnを実Codex app-serverへ送り、Timer-only dynamic tool、単一tool call、Host承認1回、Bridge、Registry / Broker、readback、`turn/completed`、process終了、一時workspace消滅を確認する。実採用model / effortはapp-server protocolからreadbackできないため、出力は`requested_model / requested_effort`と明記する。明示CLI以外から呼ばれず、Calendar access、API key、既存Timerは使用しない。
 
 ## 独立レビュー
 
@@ -45,6 +46,8 @@ Calendar読み取り専用gateも同じエージェントが独立レビュー�
 
 実app-server tool call検証も別エージェントが独立レビューした。初回はBridgeへ直接生成requestを渡すだけでapp-server本体のrequest shape driftを検出できないP2が1件あった。公式Responses streaming eventに沿うfunction callをloopback providerから返し、実Codex app-server発の`item/tool/call`、Bridge、Broker承認、Timer単一効果、readback、reply書込みを確認するよう修正した。通常compatibility probeはfunction callを発生させず、追加縦断は明示CLIだけで約1.02秒だった。再レビューはP0 / P1 / P2すべて0件である。
 
+実モデルtool選択検証も同じ別エージェントがread-onlyレビューした。初回P2は、指定model / effortを実採用値のように表示する点と、app-server起動前の初期化失敗だけ一時workspaceが共通cleanup外になる点だった。出力を`requested_model / requested_effort`へ変更し、root作成直後のunconditional cleanupと成功後の不存在readbackを併用した。最終P0 / P1 / P2は0件で、完全一致の明示CLI分岐だけに存在するため通常起動、Hover、Voice開始hot pathの性能影響は実質0と評価された。
+
 残るP2既知制約はkeyring-only Codex loginである。初回実装はowner-onlyのfile-backed `auth.json`を専用profileへsymlinkするため、元`CODEX_HOME`にfileがない環境ではroute canary通過後もproduction `account/read`がsigned-outになる。現在の環境は`~/.codex/auth.json` 0600、symlink先一致、`account.type=chatgpt`をreadback済みで、当面の動作阻害ではない。一般公開対応には専用profileの`account/login/start`または同等のChatGPT login flowが必要である。
 
 ## 検証とreadback
@@ -53,6 +56,7 @@ Calendar読み取り専用gateも同じエージェントが独立レビュー�
 - `swift run --skip-build HoverPocket --verify-voice-foundation`: PASS
 - `swift run --skip-build HoverPocket --verify-codex-app-server`: foundationとinstalled readinessがともにPASS
 - `--verify-codex-app-server`: 実Codex app-server発の`item/tool/call`からTimerのBroker承認・実行・readback・reply書込みまで`codex_app_server_broker_invocation=verified`。外部Calendar / 既存Timer / API keyは未使用、明示CLI実測1.02秒
+- `--verify-codex-app-server-model-tool`: ChatGPT account、requested `gpt-5.6-sol / medium`、`timer_countdown_start`、承認1回、一時Timer単一効果、Broker readback verified、turn completed、process closed、一時workspace残存0でPASS。最終実測8.03秒。実採用model / effortは未readbackのためrequested値としてのみ記録
 - 環境変数なしの`--require-codex-app-server-ready`: ChatGPT.app同梱Codexを解決しPASS
 - 環境変数なしの`--verify-codex-app-server-realtime`: `account=chatgpt`、voices 19、ephemeral thread、SDP / WebRTC connected、process closedでPASS。最終修正後の独立process 3回は2.171 / 2.312 / 2.224秒、失敗0、一時workspace残存0
 - ChatGPT.app同梱Codex `0.150.0-alpha.12.2`: live verifier PASS。OpenAI API keyと物理マイクは未使用

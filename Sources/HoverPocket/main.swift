@@ -123,6 +123,27 @@ if CommandLine.arguments.contains("--verify-codex-app-server-realtime") {
     app.run()
     exit(1)
 }
+if CommandLine.arguments.contains("--verify-codex-app-server-model-tool") {
+    Task { @MainActor in
+        do {
+            let result = try await CodexAppServerVerificationCommand
+                .runModelToolVerification()
+            print("codex_app_server_requested_model=\(result.requestedModel)")
+            print("codex_app_server_requested_effort=\(result.requestedEffort)")
+            print("codex_app_server_model_account=chatgpt")
+            print("codex_app_server_model_tool=\(result.toolName)")
+            print("codex_app_server_model_approval_count=\(result.approvalCount)")
+            print("codex_app_server_model_readback=verified")
+            print("codex_app_server_model_process=\(result.processClosed ? "closed" : "open")")
+            print("PASS codex app-server model tool: ChatGPT account, requested model and effort, Broker approval, temporary Timer, readback, teardown")
+            exit(0)
+        } catch {
+            print("FAIL codex app-server model tool: \(error)")
+            exit(1)
+        }
+    }
+    RunLoop.main.run()
+}
 if CommandLine.arguments.contains("--verify-voice-e2e-isolation") {
     MacOSVoiceE2EIsolationVerificationCommand.run()
 }
