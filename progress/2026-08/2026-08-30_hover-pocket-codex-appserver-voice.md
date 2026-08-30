@@ -38,6 +38,8 @@ ChatGPT.app同梱Codexのlive接続差分を同じ別エージェントが再度
 
 物理E2EのCodex統一差分も別エージェントが独立レビューした。通常版ではreceipt storeが`nil`で、追加したfile writeと確認sheetは実行されない。E2E内もmedia event単位であり毎フレーム処理ではなく、operation IDとattempt IDでstale event / 旧sheet応答を拒否する。warnings-as-errors build、Voice Foundation、E2E isolation、receipt self-testを再実行し、P0 / P1 / P2すべて0件だった。
 
+Calendar読み取り専用gateも同じエージェントが独立レビューした。初回は、Calendar検証が全Providerを組み立ててTimer singletonへ触れる点、Keychain preflight後にCalendar storeが資格情報を再読する点、token refresh失敗時に保存credentialを削除し得る点をP1として検出した。CalendarList handlerだけのRegistry、5秒上限で一度だけ読み込むpreloaded credential、credential mutationを無効にしたOAuth serviceへ修正し、最終P0 / P1 / P2は0件となった。通常経路は既定値が従来どおりで、新しい分岐は明示CLI flag時だけ実行する。
+
 残るP2既知制約はkeyring-only Codex loginである。初回実装はowner-onlyのfile-backed `auth.json`を専用profileへsymlinkするため、元`CODEX_HOME`にfileがない環境ではroute canary通過後もproduction `account/read`がsigned-outになる。現在の環境は`~/.codex/auth.json` 0600、symlink先一致、`account.type=chatgpt`をreadback済みで、当面の動作阻害ではない。一般公開対応には専用profileの`account/login/start`または同等のChatGPT login flowが必要である。
 
 ## 検証とreadback
@@ -62,6 +64,8 @@ ChatGPT.app同梱Codexのlive接続差分を同じ別エージェントが再度
 - `python3 script/verify_macos_voice_e2e_receipt.py --self-test`: PASS。Codex providerのphysical / stopped gateを確認
 - 修正後の環境変数なしlive verifier 3回: 2.86 / 2.24 / 2.19秒、3回ともChatGPT account、19 voices、ephemeral thread、SDP / WebRTC connected、process closed
 - ad-hoc署名の隔離E2Eアプリを実起動し、process所有、fresh temp runtime root、receipt存在、Codex app-server選択済み、Voice opt-in前の`featureEnabled=false / disconnected`、mic / remote audio / Timer readback / confirmationが未実行であることをreadback。Settingsの表示も「Codex app-server（推奨）」「APIキーは不要」を確認
+- `--verify-calendar-capability-read-only`: grantなしは`calendar_read_grant_required`、bundle設定なしは`calendar_configuration_missing`でCalendar / browserへ到達せず停止。通常署名設定を複製した署名済み一時candidateは既存Keychain itemへのアクセスを5秒で`calendar_credential_check_timed_out`として停止し、Calendar API未到達、broker root残存0、一時candidate Trash移動をreadback
+- Calendar verifierのCalendar-only Registry、Broker、readback、audit redaction、5秒Keychain上限、credential mutation禁止をVoice静的42件へ追加。Debug / Release warnings-as-errors、Capability 20 handler、Broker 21 descriptor / 20 handler、15 schema / 71 fixture、`git diff --check`が成功
 - 実装commit `dc734a95f30e847cb70c705df8d67728178a578f`のDraft PR #39: Router [33289398813](https://github.com/shotaro311/hover-pocket/actions/runs/33289398813)、macOS [33289399447](https://github.com/shotaro311/hover-pocket/actions/runs/33289399447)、Windows [33289399448](https://github.com/shotaro311/hover-pocket/actions/runs/33289399448)、3OS contract / compare [33289399439](https://github.com/shotaro311/hover-pocket/actions/runs/33289399439)、transition [33289399443](https://github.com/shotaro311/hover-pocket/actions/runs/33289399443)、release readback [33289399458](https://github.com/shotaro311/hover-pocket/actions/runs/33289399458)が成功。公開成果物を必要とする8 gateは意図どおりskip、失敗0・pending 0。PRはDraft / OPEN / MERGEABLE。
 
 ## 未完了gate
@@ -70,6 +74,7 @@ ChatGPT.app同梱Codexのlive接続差分を同じ別エージェントが再度
 - transcriptの実受信とroot-scoped session cardのlive readback。
 - 起動中の隔離E2EアプリでVoiceを明示ONにし、物理マイク取得、remote audio再生、transcript、Timer start、承認、実行後readbackを人手確認する。人の発話と「話せた・聞こえた」確認は自動化・偽装しない。
 - Calendar read/createは隔離E2EがTimer-onlyかつ外部integration disabledのため別gateとする。隔離境界を緩めず、production accountのread-only確認と明示承認付きcreateを分離する。
+- Calendar read-onlyのコード、fail-close、Broker契約は完了したが、実データ成功readbackは新しいnormally installed candidateへ既存Keychainアクセスが正規に移行した後の別gateとして残る。再認証、Keychain ACL変更、ブラウザ起動は今回実施していない。
 - 上記の実音声往復とCalendar / Timerを10回反復する。
 - CPU / RSS、mic clickからattachedまでのp95、snapshot publishes/sec、Expanded RPC/sec、stop RPC/session=1の計測。
 - keyring-only Codex login向けの専用ChatGPT login flowと、file-backed loginからの移行readback。

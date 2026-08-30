@@ -24,6 +24,9 @@ if CommandLine.arguments.contains(CodexCredentialBrokerGenerationProbe.argument)
 if CommandLine.arguments.contains("--verify-google-calendar") {
     GoogleCalendarVerificationCommand.run()
 }
+if CommandLine.arguments.contains("--verify-calendar-capability-read-only") {
+    CalendarCapabilityLiveVerificationCommand.run()
+}
 if CommandLine.arguments.contains("--verify-camera") {
     CameraVerificationCommand.run()
 }

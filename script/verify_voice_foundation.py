@@ -140,6 +140,13 @@ def main() -> None:
         / "Voice"
         / "CodexVoiceWebRTCTransport.swift"
     ).read_text(encoding="utf-8")
+    mac_calendar_live_verifier = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "App"
+        / "CalendarCapabilityLiveVerificationCommand.swift"
+    ).read_text(encoding="utf-8")
     mac_main = (
         ROOT / "Sources" / "HoverPocket" / "main.swift"
     ).read_text(encoding="utf-8")
@@ -1260,6 +1267,32 @@ def main() -> None:
     if "switch snapshot.providerID" not in mac_app \
             or "CodexAppServerMacOSRuntime.host.snapshot.availability == .ready" not in mac_app:
         fail("macOS Voice E2E provider readiness readback bypasses the selected provider")
+    if '--verify-calendar-capability-read-only' not in mac_main \
+            or not all(value in mac_calendar_live_verifier for value in (
+                'CommandLine.arguments.contains("--grant-calendar-read")',
+                "HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled",
+                "GoogleOAuthKeychainStore().load()",
+                "Task.sleep(for: .seconds(5))",
+                "allowsStoredCredentialMutation: false",
+                "GoogleCalendarStore(oauth: oauth)",
+                "PocketCapabilityHandlerSet(handlers: [",
+                "CalendarListCapabilityHandler(dataSource: calendarDataSource)",
+                "CapabilityRegistry(handlers: handlers)",
+                "CapabilityBroker(",
+                "PocketCapabilityKeys.calendarList",
+                'permissions: ["calendar.events.read"]',
+                "preparation.approvalRequest == nil",
+                "receipt.steps[0].readback.status == .verified",
+                'calendar_capability_audit=redacted',
+                'auditText.contains("\\\"safeTitle\\\"")',
+                'auditText.contains("\\\"eventRef\\\"")',
+                'auditText.contains("\\\"calendarId\\\"")',
+                '"calendar_credential_check_timed_out"',
+            )) or "ProviderCapabilityCompositionRoot.live" in mac_calendar_live_verifier \
+            or "TimerStore.shared" in mac_calendar_live_verifier \
+            or "StickyNotesStore.shared" in mac_calendar_live_verifier \
+            or "signIn(" in mac_calendar_live_verifier:
+        fail("macOS live Calendar read verifier bypasses grant, Broker, readback, redaction, or bounded credential access")
     if "func delete() throws" not in mac_realtime_provider \
             or "let status = SecItemDelete(baseQuery() as CFDictionary)" not in mac_keychain \
             or "status == errSecSuccess || status == errSecItemNotFound" not in mac_keychain \
