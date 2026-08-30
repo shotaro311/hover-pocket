@@ -64,7 +64,7 @@ enum MacOSVoiceE2EIsolationVerificationCommand {
 
             let settings = AppSettings(defaults: environment.settingsDefaults)
             environment.applyVoiceE2EDefaults(to: settings)
-            check(settings.voiceProvider == .openAIRealtimeBYOK, "voice_provider_default", &failures)
+            check(settings.voiceProvider == .codexAppServer, "voice_provider_default", &failures)
             check(!settings.voiceEnabled, "voice_started_without_opt_in", &failures)
             check(!settings.voiceCalendarAccessEnabled, "calendar_grant_default", &failures)
             check(!settings.aiNativeEnabled, "ai_native_default", &failures)
@@ -211,7 +211,7 @@ enum MacOSVoiceE2EIsolationVerificationCommand {
         }
 
         if failures.isEmpty {
-            print("PASS voice-e2e-isolation verify: Debug-only marked bundle, fresh direct temp root, verifier and Release rejection, isolated storage/defaults, external integration denial, process-memory credential")
+            print("PASS voice-e2e-isolation verify: Debug-only marked bundle, fresh direct temp root, verifier and Release rejection, isolated storage/defaults, external integration denial, Codex default, optional BYOK process-memory credential")
             exit(0)
         }
         print("FAIL voice-e2e-isolation verify:")
@@ -311,7 +311,7 @@ enum MacOSVoiceE2EIsolationVerificationCommand {
             store.beginMediaSession()
             store.recordVoiceSnapshot(
                 VoiceLaneSnapshot(
-                    providerID: .openAIRealtimeBYOK,
+                    providerID: .codexAppServer,
                     mode: .compact,
                     connection: .connected,
                     activity: .listening,

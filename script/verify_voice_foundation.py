@@ -133,6 +133,13 @@ def main() -> None:
         / "App"
         / "CodexAppServerRealtimeVerificationCommand.swift"
     ).read_text(encoding="utf-8")
+    mac_codex_transport = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "Voice"
+        / "CodexVoiceWebRTCTransport.swift"
+    ).read_text(encoding="utf-8")
     mac_main = (
         ROOT / "Sources" / "HoverPocket" / "main.swift"
     ).read_text(encoding="utf-8")
@@ -1112,6 +1119,7 @@ def main() -> None:
         '"voice_e2e_arguments_required"',
         "settingsDefaults: EphemeralAppSettingsDefaults()",
         "ProviderRegistry(providers: [TimerProvider()])",
+        "settings.voiceProvider = .codexAppServer",
     )):
         fail("macOS Voice E2E is not a Debug-only isolated runtime")
     if not all(value in mac_build_script for value in (
@@ -1159,6 +1167,19 @@ def main() -> None:
     )) or "physicalMediaUserConfirmed" in mac_realtime_page \
             or "recordPhysicalMediaUserConfirmation" in mac_realtime_page:
         fail("macOS Voice E2E media receipt or Host-owned physical confirmation drifted")
+    if not all(value in mac_codex_transport for value in (
+        "MacOSVoiceE2EReceiptStore.shared?.beginMediaSession()",
+        "private func recordE2EMediaEvent(_ event: MacOSVoiceE2EMediaEvent)",
+        "receiptStore.recordMediaEvent(event)",
+        "guard let attemptID = receiptStore.claimPhysicalConfirmationRequest()",
+        "MacOSVoiceE2EPhysicalMediaConfirmation.present()",
+        "attemptID: attemptID",
+        "MacOSVoiceE2EReceiptStore.shared?.recordSafeClose()",
+        'case "microphone_acquired"',
+        'case "remote_audio_track"',
+        'case "remote_audio_playing"',
+    )):
+        fail("macOS Codex Voice E2E media receipt or physical confirmation drifted")
     if "recordTimerCapabilityReadbackVerified()" not in mac_realtime_capabilities:
         fail("macOS Voice E2E lacks Timer Broker readback evidence")
     if not all(value in mac_voice_e2e_harness for value in (
@@ -1169,7 +1190,8 @@ def main() -> None:
         "Validate",
         "Stop",
         "Cleanup",
-        "Build and Run never read an API key from arguments or environment",
+        "Build and Run use the logged-in Codex app-server account",
+        "never read an API",
         "validate_owned_process",
         '[[ "$command" == "$executable --voice-e2e --voice-e2e-root $runtime_root" ]]',
         "find_exact_process",
@@ -1195,6 +1217,7 @@ def main() -> None:
         'parser.add_argument("--self-test", action="store_true")',
         'validate_stage(rejected, "physical")',
         'choices=("summary", "isolation", "physical", "stopped")',
+        '"codex_app_server"',
         '"physicalMediaUserConfirmed": True',
         'payload["lastSafeEvent"] != "safe_close"',
     )):
@@ -1234,6 +1257,9 @@ def main() -> None:
             or "Publishers.CombineLatest3" not in mac_app \
             or "settings.$voiceProvider.removeDuplicates()" not in mac_app:
         fail("macOS Voice provider/settings are not composed into the Host runtime")
+    if "switch snapshot.providerID" not in mac_app \
+            or "CodexAppServerMacOSRuntime.host.snapshot.availability == .ready" not in mac_app:
+        fail("macOS Voice E2E provider readiness readback bypasses the selected provider")
     if "func delete() throws" not in mac_realtime_provider \
             or "let status = SecItemDelete(baseQuery() as CFDictionary)" not in mac_keychain \
             or "status == errSecSuccess || status == errSecItemNotFound" not in mac_keychain \

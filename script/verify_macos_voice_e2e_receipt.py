@@ -86,7 +86,7 @@ def load_receipt(runtime_root: Path) -> dict[str, object]:
         fail("receipt keys differ from the exact allowlist")
     if payload["schemaVersion"] != 1:
         fail("receipt schema is unsupported")
-    if payload["providerId"] not in {"off", "openai_realtime_byok"}:
+    if payload["providerId"] not in {"off", "openai_realtime_byok", "codex_app_server"}:
         fail("provider identifier is invalid")
     if payload["connection"] not in {
         "disconnected",
@@ -145,7 +145,7 @@ def validate_stage(payload: dict[str, object], stage: str) -> None:
 def run_self_test() -> None:
     payload: dict[str, object] = {
         "schemaVersion": 1,
-        "providerId": "openai_realtime_byok",
+        "providerId": "codex_app_server",
         "featureEnabled": True,
         "connection": "connected",
         "rootSessionPresent": True,

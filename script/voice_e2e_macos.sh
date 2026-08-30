@@ -17,8 +17,9 @@ Usage:
   ./script/voice_e2e_macos.sh Stop --session-dir <directory>
   ./script/voice_e2e_macos.sh Cleanup --session-dir <directory>
 
-Build and Run never read an API key from arguments or environment. Enter the key
-only in the isolated app Settings UI; it remains in that process's memory.
+Build and Run use the logged-in Codex app-server account and never read an API
+key from arguments or environment. Voice still requires explicit opt-in in the
+isolated app Settings UI.
 USAGE
 }
 

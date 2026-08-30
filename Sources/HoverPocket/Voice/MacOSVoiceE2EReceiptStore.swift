@@ -61,7 +61,7 @@ final class MacOSVoiceE2EReceiptStore {
     }()
 
     private let receiptURL: URL
-    private var providerID = VoiceProviderID.openAIRealtimeBYOK.rawValue
+    private var providerID = VoiceProviderID.codexAppServer.rawValue
     private var featureEnabled = false
     private var connection = VoiceLaneConnection.disconnected.rawValue
     private var rootSessionPresent = false
@@ -240,7 +240,7 @@ enum MacOSVoiceE2EPhysicalMediaConfirmation {
         let alert = NSAlert()
         alert.alertStyle = .informational
         alert.messageText = "実音声E2Eを確認"
-        alert.informativeText = "マイクで話した内容が認識され、OpenAIの音声が実際に聞こえた場合だけ確認してください。"
+        alert.informativeText = "マイクで話した内容が認識され、Codexの音声が実際に聞こえた場合だけ確認してください。"
         alert.addButton(withTitle: "話せた・聞こえた")
         alert.addButton(withTitle: "未確認")
         NSApp.activate(ignoringOtherApps: true)

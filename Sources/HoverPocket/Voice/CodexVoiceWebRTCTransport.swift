@@ -192,16 +192,16 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
             negotiate(sdpOffer: sdp, operationID: operationID)
         case "microphone_acquired":
             guard object["operationId"] as? String == activeOperationID else { return }
-            MacOSVoiceE2EReceiptStore.shared?.recordMediaEvent(.microphoneAcquired)
+            recordE2EMediaEvent(.microphoneAcquired)
         case "remote_audio_track":
             guard object["operationId"] as? String == activeOperationID else { return }
-            MacOSVoiceE2EReceiptStore.shared?.recordMediaEvent(.remoteAudioTrackReceived)
+            recordE2EMediaEvent(.remoteAudioTrackReceived)
         case "remote_audio_playing":
             guard object["operationId"] as? String == activeOperationID else { return }
-            MacOSVoiceE2EReceiptStore.shared?.recordMediaEvent(.remoteAudioPlaybackSucceeded)
+            recordE2EMediaEvent(.remoteAudioPlaybackSucceeded)
         case "remote_audio_playback_failed":
             guard object["operationId"] as? String == activeOperationID else { return }
-            MacOSVoiceE2EReceiptStore.shared?.recordMediaEvent(.remoteAudioPlaybackFailed)
+            recordE2EMediaEvent(.remoteAudioPlaybackFailed)
         case "attached":
             guard object["operationId"] as? String == activeOperationID else { return }
             sessionStarting = false
@@ -231,6 +231,19 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
 
     func consumeMicrophonePermission() -> Bool {
         runtimeHost?.consumeMicrophonePermission() ?? false
+    }
+
+    private func recordE2EMediaEvent(_ event: MacOSVoiceE2EMediaEvent) {
+        guard let receiptStore = MacOSVoiceE2EReceiptStore.shared else { return }
+        receiptStore.recordMediaEvent(event)
+        guard let attemptID = receiptStore.claimPhysicalConfirmationRequest() else { return }
+        Task { @MainActor in
+            let confirmed = await MacOSVoiceE2EPhysicalMediaConfirmation.present()
+            receiptStore.recordPhysicalMediaUserConfirmation(
+                confirmed,
+                attemptID: attemptID
+            )
+        }
     }
 
     private func negotiate(sdpOffer: String, operationID: String) {

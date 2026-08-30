@@ -267,9 +267,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let receiptStore = MacOSVoiceE2EReceiptStore.shared else { return }
         VoiceLaneRuntime.shared.$snapshot
             .sink { snapshot in
-                let credentialCurrent = (
-                    try? OpenAIRealtimeCredentialStoreFactory.shared.hasCredential()
-                ) ?? false
+                let credentialCurrent = switch snapshot.providerID {
+                case .off:
+                    false
+                case .openAIRealtimeBYOK:
+                    (try? OpenAIRealtimeCredentialStoreFactory.shared.hasCredential()) ?? false
+                case .codexAppServer:
+                    CodexAppServerMacOSRuntime.host.snapshot.availability == .ready
+                }
                 receiptStore.recordVoiceSnapshot(
                     snapshot,
                     credentialCurrent: credentialCurrent

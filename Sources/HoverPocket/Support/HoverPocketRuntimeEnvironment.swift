@@ -105,7 +105,7 @@ final class HoverPocketRuntimeEnvironment: @unchecked Sendable {
         settings.showMirrorMicrophoneCheck = false
         settings.showMirrorOnSecondaryDisplays = false
         settings.aiNativeEnabled = false
-        settings.voiceProvider = .openAIRealtimeBYOK
+        settings.voiceProvider = .codexAppServer
         settings.voiceEnabled = false
         settings.voiceLaneLayoutPreference = .compact
         settings.voiceCalendarAccessEnabled = false
