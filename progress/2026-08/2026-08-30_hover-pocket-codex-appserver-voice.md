@@ -209,3 +209,12 @@ keyring-only Codex loginの実装制約は、Voice専用profileでChatGPT manage
 - Voiceは既定OFF、connection disconnected、provider未要求、microphone / remote audio / Timer readback / 物理確認なしである。120秒235 sampleのidle soakはCPU平均`0.113%`、p95`0.1%`、最大`2.7%`、RSS平均`100.988 MiB`、最大`101.609 MiB`だった。開始前後とも子processとnetwork socketは0で、media attempt、snapshot publish、Expanded RPC、Realtime stop RPCも0だった。計測後も同じPIDで10分超の生存をreadbackした。
 - 最初のfresh候補PID `7291`と旧PID `619` / `70741` / `86913`は同時刻帯にAppKitの`terminate`から正常終了し、各receiptは`safe_close`だった。Harness Stopや強制signalによる停止は実行しておらず、発火元は断定しない。crashやruntime leakの証拠にはせず、staleになった最初のfresh sessionだけをHarnessで停止確定後にTrashへ移し、新候補を作り直した。
 - この候補はcurrent runtime sourceへ置き換え済みで、人手gate前のsource replacementは不要になった。次はユーザーが`ホバーポケット Voice E2E 615`を確認し、SettingsからVoiceを明示ON、物理マイク、可聴remote audio、user / assistant transcript、Timer承認 / readbackを実行する。Calendar create、Draft解除、merge、release、公開は別の明示承認gateとして残す。
+
+## 設定画面の見切れ修正とbuild 617
+
+- build 615の設定画面を実表示し、本文とwindowが`460 x 500`固定、window frameが`460 x 532`、リサイズ不可であることを確認した。Voice Lane付近では長いsegmented pickerが本文の理想幅を押し広げ、左端の見出し・説明・buttonがclipしていた。
+- `SettingsWindowLayout`へpreferred本文`620 x 700`、minimum本文`520 x 480`、visible frameから24pt余白を取るclampを追加した。`SettingsView`の固定frameを削除して本文を利用可能幅へleading配置し、windowをresizableへ変更した。再表示時は毎回centerへ戻さず、既存frameが画面外にある場合だけ現在screenへconstrainする。
+- 初回build 616の実画面で左端clip解消を確認したが、`NSHostingController`接続時にminimumへ縮むことをCGWindowの`520 x 512`で検出した。hosting controller接続後にpreferred content sizeを設定するよう修正し、build 617ではwindow frame `620 x 732`をreadbackした。
+- `swift build -Xswiftc -warnings-as-errors`、`.build/debug/HoverPocket --verify-panel-layout`（128 cases + settings window contract）、`.build/debug/HoverPocket --verify-voice-foundation`、`python3 script/verify_voice_foundation.py`（42 cases）、`git diff --check`はすべてPASSした。
+- fresh E2E build 617はsession `HoverPocketVoiceE2ESession-1B3yId`、runtime `HoverPocketVoiceE2E-snVEbU`、PID `19758`で起動中。Harness ValidateIsolation / ReadbackはPASSし、Voice OFF、disconnected、provider未要求、mic / remote audio / Timer / physical confirmationなしである。設定windowはAccessibility screenshotで左端欠落なし、zoom button有効を確認した。
+- 比較用build 615 PID `10329`とbuild 616 PID `19279`はHarness Stopの`safe_close`とprocess停止をreadbackし、一時領域をTrashへ移した。人手物理Voice gateは一意表示名`ホバーポケット Voice E2E 617`へ引き継ぐ。

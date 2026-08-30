@@ -69,8 +69,9 @@ struct SettingsView: View {
                 }
             }
             .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(width: 460, height: 500)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             refreshCapabilityDataSnapshot()
             refreshVoiceCredentialState()
