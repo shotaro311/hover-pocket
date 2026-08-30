@@ -27,6 +27,7 @@ mkdir -p "$RELEASE_DIR"
 if [[ -n "$CODESIGN_IDENTITY" ]]; then
   APP_VERSION="$APP_VERSION" \
   APP_BUILD="$APP_BUILD" \
+  HOVERPOCKET_SWIFT_CONFIGURATION=release \
   CODESIGN_IDENTITY="$CODESIGN_IDENTITY" \
   CODESIGN_HARDENED_RUNTIME=1 \
   HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX=release \
@@ -36,6 +37,7 @@ if [[ -n "$CODESIGN_IDENTITY" ]]; then
 else
   APP_VERSION="$APP_VERSION" \
   APP_BUILD="$APP_BUILD" \
+  HOVERPOCKET_SWIFT_CONFIGURATION=release \
   HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX=release \
   SPARKLE_FEED_URL="$SPARKLE_FEED_URL" \
   SPARKLE_PUBLIC_ED_KEY="$SPARKLE_PUBLIC_ED_KEY" \
@@ -43,6 +45,28 @@ else
 fi
 
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+APP_EXECUTABLE="$APP_PATH/Contents/MacOS/$APP_NAME"
+[[ -d "$APP_PATH/Contents/Frameworks/Sparkle.framework" ]] || {
+  echo "error=Release Sparkle framework is missing" >&2
+  exit 1
+}
+[[ -f "$APP_PATH/Contents/Frameworks/libMediaRemoteAdapter.dylib" ]] || {
+  echo "error=Release mediaremote adapter is missing" >&2
+  exit 1
+}
+[[ -f "$APP_PATH/Contents/Resources/mediaremote-adapter.pl" ]] || {
+  echo "error=Release mediaremote adapter script is missing" >&2
+  exit 1
+}
+otool -L "$APP_EXECUTABLE" | grep -Fq '@rpath/Sparkle.framework/' || {
+  echo "error=Release executable is not linked to bundled Sparkle" >&2
+  exit 1
+}
+otool -L "$APP_EXECUTABLE" | grep -Fq '@rpath/libMediaRemoteAdapter.dylib' || {
+  echo "error=Release executable is not linked to bundled mediaremote adapter" >&2
+  exit 1
+}
 
 ZIP_PATH="$RELEASE_DIR/${APP_NAME}-${APP_VERSION}-${APP_BUILD}.zip"
 rm -f "$ZIP_PATH" "$ZIP_PATH.sha256"

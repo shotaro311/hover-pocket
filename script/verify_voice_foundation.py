@@ -204,6 +204,7 @@ def main() -> None:
         ROOT / "Sources" / "HoverPocket" / "Views" / "SettingsView.swift"
     ).read_text(encoding="utf-8")
     mac_build_script = (ROOT / "script" / "build_and_run.sh").read_text(encoding="utf-8")
+    mac_package_script = (ROOT / "script" / "package_zip.sh").read_text(encoding="utf-8")
     mac_voice_e2e_harness = (
         ROOT / "script" / "voice_e2e_macos.sh"
     ).read_text(encoding="utf-8")
@@ -1283,6 +1284,23 @@ def main() -> None:
         '*" --voice-e2e --voice-e2e-root "*',
     )):
         fail("macOS package runtime boundary or local network purpose string regressed")
+    if not all(value in mac_build_script for value in (
+        'HOVERPOCKET_SWIFT_CONFIGURATION="${HOVERPOCKET_SWIFT_CONFIGURATION:-debug}"',
+        'swift build -c "$HOVERPOCKET_SWIFT_CONFIGURATION"',
+        '.build/$HOVERPOCKET_SWIFT_CONFIGURATION/$PRODUCT_NAME',
+        '.build/$HOVERPOCKET_SWIFT_CONFIGURATION/Sparkle.framework',
+        '.build/$HOVERPOCKET_SWIFT_CONFIGURATION/libMediaRemoteAdapter.dylib',
+        'E2E bundle requires the debug Swift configuration',
+        'Release Sparkle framework not found',
+        'Release mediaremote-adapter artifacts not found',
+    )) or mac_package_script.count("HOVERPOCKET_SWIFT_CONFIGURATION=release") != 2 \
+            or not all(value in mac_package_script for value in (
+                'Release Sparkle framework is missing',
+                'Release mediaremote adapter is missing',
+                "grep -Fq '@rpath/Sparkle.framework/'",
+                "grep -Fq '@rpath/libMediaRemoteAdapter.dylib'",
+            )):
+        fail("macOS distribution package is not pinned to a Release Swift build")
     if not all(value in mac_runtime_environment for value in (
         'static let voiceE2EFlag = "--voice-e2e"',
         'static let voiceE2ERootFlag = "--voice-e2e-root"',

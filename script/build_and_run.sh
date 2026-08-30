@@ -8,6 +8,7 @@ PRODUCT_NAME="HoverPocket"
 LEGACY_PROCESS_NAMES=("NotchPocket" "NotchPokke" "HoverMenuPreview")
 VOICE_E2E_BUILD="${HOVERPOCKET_VOICE_E2E_BUILD:-0}"
 VOICE_E2E_BUILD_ROOT="${HOVERPOCKET_VOICE_E2E_BUILD_ROOT:-}"
+HOVERPOCKET_SWIFT_CONFIGURATION="${HOVERPOCKET_SWIFT_CONFIGURATION:-debug}"
 BUNDLE_DIR="$ROOT_DIR/dist/$APP_NAME.app"
 EXECUTABLE_PATH="$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
 APP_ICON_NAME="AppIcon"
@@ -19,6 +20,15 @@ DEFAULT_SPARKLE_FEED_URL="${DEFAULT_SPARKLE_FEED_URL:-}"
 DEFAULT_SPARKLE_PUBLIC_ED_KEY="J2afuh/KnvOiS3eoNrMJoCyldAXL+Oku9scoSS5OUJE="
 
 cd "$ROOT_DIR"
+
+case "$HOVERPOCKET_SWIFT_CONFIGURATION" in
+  debug|release)
+    ;;
+  *)
+    echo "error: Swift configuration must be debug or release" >&2
+    exit 1
+    ;;
+esac
 
 validate_voice_e2e_build_root() {
   local configured_root="$1"
@@ -46,6 +56,10 @@ validate_voice_e2e_build_root() {
 }
 
 if [[ "$VOICE_E2E_BUILD" == "1" || "$VOICE_E2E_BUILD" == "true" ]]; then
+  [[ "$HOVERPOCKET_SWIFT_CONFIGURATION" == "debug" ]] || {
+    echo "error: E2E bundle requires the debug Swift configuration" >&2
+    exit 1
+  }
   VOICE_E2E_BUILD_ROOT="$(validate_voice_e2e_build_root "$VOICE_E2E_BUILD_ROOT")"
   BUNDLE_DIR="$VOICE_E2E_BUILD_ROOT/HoverPocketVoiceE2E.app"
   EXECUTABLE_PATH="$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
@@ -218,7 +232,7 @@ if [[ "$VOICE_E2E_BUILD" != "1" && "$VOICE_E2E_BUILD" != "true" ]]; then
   fi
 fi
 
-swift build
+swift build -c "$HOVERPOCKET_SWIFT_CONFIGURATION"
 
 if [[ "$VOICE_E2E_BUILD" == "1" || "$VOICE_E2E_BUILD" == "true" ]]; then
   [[ ! -e "$BUNDLE_DIR" ]] || {
@@ -229,28 +243,34 @@ else
   rm -rf "$BUNDLE_DIR"
 fi
 mkdir -p "$BUNDLE_DIR/Contents/MacOS" "$BUNDLE_DIR/Contents/Frameworks" "$BUNDLE_DIR/Contents/Resources"
-cp ".build/debug/$PRODUCT_NAME" "$EXECUTABLE_PATH"
+cp ".build/$HOVERPOCKET_SWIFT_CONFIGURATION/$PRODUCT_NAME" "$EXECUTABLE_PATH"
 chmod +x "$EXECUTABLE_PATH"
 install_app_icon
 
-SPARKLE_FRAMEWORK_PATH="$(find "$ROOT_DIR/.build" -maxdepth 5 -path '*/debug/Sparkle.framework' -type d 2>/dev/null | head -1)"
-if [[ -n "$SPARKLE_FRAMEWORK_PATH" ]]; then
+SPARKLE_FRAMEWORK_PATH="$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/Sparkle.framework"
+if [[ -d "$SPARKLE_FRAMEWORK_PATH" ]]; then
   ditto "$SPARKLE_FRAMEWORK_PATH" "$BUNDLE_DIR/Contents/Frameworks/Sparkle.framework"
   if ! otool -l "$EXECUTABLE_PATH" | grep -q '@executable_path/../Frameworks'; then
     install_name_tool -add_rpath "@executable_path/../Frameworks" "$EXECUTABLE_PATH"
   fi
+elif [[ "$HOVERPOCKET_SWIFT_CONFIGURATION" == "release" ]]; then
+  echo "error: Release Sparkle framework not found: $SPARKLE_FRAMEWORK_PATH" >&2
+  exit 1
 fi
 
 # mediaremote-adapter: メディア操作コマンドを Apple 署名の perl 経由で送るための dylib と
 # スクリプト。macOS 15.4+ ではこれがないと再生/停止・シークが効かない。
-ADAPTER_DYLIB_PATH="$(find "$ROOT_DIR/.build" -maxdepth 3 -path '*/debug/libMediaRemoteAdapter.dylib' -type f 2>/dev/null | head -1)"
-ADAPTER_RUN_SCRIPT="$(find "$ROOT_DIR/.build" -maxdepth 4 -path '*/debug/MediaRemoteAdapter_MediaRemoteAdapter.bundle/run.pl' -type f 2>/dev/null | head -1)"
-if [[ -n "$ADAPTER_DYLIB_PATH" && -n "$ADAPTER_RUN_SCRIPT" ]]; then
+ADAPTER_DYLIB_PATH="$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/libMediaRemoteAdapter.dylib"
+ADAPTER_RUN_SCRIPT="$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/MediaRemoteAdapter_MediaRemoteAdapter.bundle/run.pl"
+if [[ -f "$ADAPTER_DYLIB_PATH" && -f "$ADAPTER_RUN_SCRIPT" ]]; then
   cp "$ADAPTER_DYLIB_PATH" "$BUNDLE_DIR/Contents/Frameworks/libMediaRemoteAdapter.dylib"
   cp "$ADAPTER_RUN_SCRIPT" "$BUNDLE_DIR/Contents/Resources/mediaremote-adapter.pl"
   if ! otool -l "$EXECUTABLE_PATH" | grep -q '@executable_path/../Frameworks'; then
     install_name_tool -add_rpath "@executable_path/../Frameworks" "$EXECUTABLE_PATH"
   fi
+elif [[ "$HOVERPOCKET_SWIFT_CONFIGURATION" == "release" ]]; then
+  echo "error: Release mediaremote-adapter artifacts not found" >&2
+  exit 1
 else
   echo "warning: mediaremote-adapter artifacts not found; media commands will not work" >&2
 fi
