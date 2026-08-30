@@ -11,6 +11,8 @@ struct CodexAppServerClientOptions: Sendable {
 
     var executableURL: URL?
     var launchArguments: [String]?
+    var processEnvironment: [String: String]?
+    var workingDirectoryURL: URL?
     var requestTimeout: TimeInterval
     var clientName: String
     var clientTitle: String
@@ -20,6 +22,8 @@ struct CodexAppServerClientOptions: Sendable {
     init(
         executableURL: URL? = nil,
         launchArguments: [String]? = nil,
+        processEnvironment: [String: String]? = nil,
+        workingDirectoryURL: URL? = nil,
         requestTimeout: TimeInterval = 15,
         clientName: String = "hover_pocket",
         clientTitle: String = "HoverPocket",
@@ -28,6 +32,8 @@ struct CodexAppServerClientOptions: Sendable {
     ) {
         self.executableURL = executableURL
         self.launchArguments = launchArguments
+        self.processEnvironment = processEnvironment
+        self.workingDirectoryURL = workingDirectoryURL
         self.requestTimeout = requestTimeout
         self.clientName = clientName
         self.clientTitle = clientTitle
@@ -170,6 +176,10 @@ actor CodexAppServerClient {
         process.executableURL = executableURL
         process.arguments = options.launchArguments
             ?? CodexAppServerClientOptions.defaultLaunchArguments
+        if let processEnvironment = options.processEnvironment {
+            process.environment = processEnvironment
+        }
+        process.currentDirectoryURL = options.workingDirectoryURL
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
         process.standardError = errorPipe

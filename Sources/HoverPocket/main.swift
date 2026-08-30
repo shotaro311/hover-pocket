@@ -81,7 +81,7 @@ if CommandLine.arguments.contains("--verify-codex-app-server")
     Task { @MainActor in
         do {
             let result = try await CodexAppServerVerificationCommand.run()
-            print("PASS codex app-server foundation: schema contract, cached probe, Broker bridge, WebRTC contract")
+            print("PASS codex app-server foundation: schema and exact tool route, ChatGPT account policy, cached probe, Broker bridge, WebRTC contract")
             if !result.installedCompatibility.gate.isReady {
                 let code = result.installedCompatibility.gate.safeErrorCode
                     ?? "codex_app_server_not_ready"

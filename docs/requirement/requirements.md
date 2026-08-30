@@ -505,7 +505,10 @@ Planned Must:
 - Windowsは起動するCodex実体を絶対path、ファイル同一性、experimental schemaで検証し、`initialize.experimentalApi`、`account/read`、`thread/realtime/listVoices`がすべて成功した後だけReadyにする。Codex processと子processはHost終了・Voice無効化・crash時に残さない。
 - AN3-B1のVoice root threadは`read-only` sandbox、`approvalPolicy=never`、tool / shell / file / MCP / connector禁止のinstructionsで開始する。この段階ではVoiceからCapability Brokerを呼ばず、Calendar / Timer接続はAN3-B2で別途承認・readback付きで有効化する。
 - AN3-B2以降は、Voiceのモデル可視toolをHostが許可したdynamic toolだけへ制限する正のtool policyを必須にする。`dynamicTools`の追加、`read-only`、`approvalPolicy=never`、system prompt、`environments=[]`は単独ではBroker迂回を防ぐ安全境界として扱わない。
-- installed Codexの生成schemaと実際のdelegated tool routerで、shell、MCP、app、plugin、extension、web、imageなどのambient toolが0件であることを独立readbackできない場合、Codex processを開始する前にVoiceをfail closedにする。Codex 0.145.0には正のtool allowlist契約がないため、AN3-B2のproduction activation対象外とする。
+- macOSはVoice専用`CODEX_HOME`でshell、MCP、app、plugin、web、image、multi-agentなどを無効化し、認証情報だけを既存Codexから参照する。さらにinstalled Codexの生成schemaと、ローカルloopback providerへ実際に送られるResponses requestを起動前canaryで検査し、outbound `tools`がHost指定dynamic toolと件数・名前とも完全一致しない場合はfail closedにする。`dynamicTools`自体をallowlistと見なさない。
+- macOSのCodex app-server Voiceは`account/read`が`requiresOpenaiAuth=true`かつ`account.type=chatgpt`を返した場合だけReadyにする。API key、Amazon Bedrock、custom provider、signed-out状態はVoiceを開始せず、Realtime BYOKへ自動fallbackしない。
+- 初回実装が既存Codexログインを継承できるのは、current user所有かつgroup / other権限0のfile-backed `auth.json`がある場合に限る。Codexがkeyringだけへcredentialを保存している環境は、専用profile上の`account/login/start`または同等のChatGPT login flowを実装・検証するまで公開対応済みと扱わない。
+- Codex 0.145.0は実canaryでHost指定tool以外の`update_plan`をoutbound requestへ含めるため、AN3-B2のproduction activation対象外とする。別versionもschema fieldの有無だけで自動承認せず、同じ専用profileと実route canaryを通過したexact executable identityだけを当該process内で許可する。
 - VoiceのCalendar readはGoogle接続やMicrophoneとは別のHost permission grantを既定OFFで保存する。許可前はCalendar toolをモデルへ公開せずProviderへ到達させない。取り消し時はactive tool requestを停止し、新しいtool定義でVoice sessionを再構成する。
 - VoiceのTimer startはexact title / durationをHost native UIへ表示して毎回承認する。同時に表示する承認は1件だけ、開始済み承認promptは1分あたり3件までとし、拒否も上限に含める。Voice停止、root変更、取消では待機中dialogと未使用Broker approvalを破棄する。
 - macOSの実音声E2Eは、exact bundle IDとbuild markerを持つDebug専用app、system temp直下のfresh root、process専用credential storeを使う。Release、通常bundle、Verifierとの併用、引数なしのE2E bundle起動は開始前に拒否する。

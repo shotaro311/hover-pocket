@@ -199,7 +199,9 @@ final class CodexAppServerMacOSVoiceSessionAdapter: VoiceSessionAdapter {
         guard capabilityBridge != nil else {
             return .blocked("codex_capability_runtime_unavailable")
         }
-        let result = await compatibilityProbe.probe()
+        let result = await compatibilityProbe.probe(
+            dynamicTools: capabilityBridge?.dynamicTools ?? []
+        )
         compatibilityResult = result
         return result.gate
     }
@@ -211,7 +213,8 @@ final class CodexAppServerMacOSVoiceSessionAdapter: VoiceSessionAdapter {
         guard let compatibilityResult,
               compatibilityResult.gate.isReady,
               let executableURL = compatibilityResult.executableURL,
-              let executableIdentity = compatibilityResult.executableIdentity else {
+              let executableIdentity = compatibilityResult.executableIdentity,
+              let profile = compatibilityResult.appServerProfile else {
             throw CodexVoiceRuntimeError.compatibility("codex_compatibility_not_ready")
         }
         guard await compatibilityProbe.isCurrent(compatibilityResult) else {
@@ -219,7 +222,8 @@ final class CodexAppServerMacOSVoiceSessionAdapter: VoiceSessionAdapter {
         }
         guard runtimeHost.configureExecutable(
             executableURL,
-            expectedIdentity: executableIdentity
+            expectedIdentity: executableIdentity,
+            profile: profile
         ) else {
             throw CodexVoiceRuntimeError.compatibility("codex_executable_configuration_conflict")
         }

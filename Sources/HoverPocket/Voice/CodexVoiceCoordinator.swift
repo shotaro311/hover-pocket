@@ -8,15 +8,6 @@ enum CodexVoiceRuntimeError: Error, Equatable, Sendable {
     case disposed
 }
 
-enum CodexVoiceAppServerLaunchPolicy {
-    static let arguments = [
-        "-c",
-        "features.realtime_conversation=true",
-        "app-server",
-        "--stdio"
-    ]
-}
-
 @MainActor
 final class CodexVoiceCoordinator {
     typealias ClientFactory = @Sendable () async throws -> CodexAppServerClient
@@ -142,9 +133,16 @@ final class CodexVoiceCoordinator {
         self.sdpTimeoutNanoseconds = sdpTimeoutNanoseconds
         self.toolAdapter = toolAdapter
         self.clientFactory = clientFactory ?? {
-            try await CodexAppServerClient.start(
+            let executableURL = try CodexExecutableResolver.resolve(nil)
+            let profile = try CodexVoiceAppServerProfile.prepare(
+                executableURL: executableURL
+            )
+            return try await CodexAppServerClient.start(
                 options: CodexAppServerClientOptions(
+                    executableURL: executableURL,
                     launchArguments: CodexVoiceAppServerLaunchPolicy.arguments,
+                    processEnvironment: profile.processEnvironment,
+                    workingDirectoryURL: profile.codexHomeURL,
                     clientTitle: "HoverPocket Voice Lane",
                     clientVersion: Bundle.main.object(
                         forInfoDictionaryKey: "CFBundleShortVersionString"
@@ -560,24 +558,11 @@ final class CodexVoiceCoordinator {
             at: workspaceDirectory,
             withIntermediateDirectories: true
         )
-        let threadStartParams: [String: CodexJSONValue] = [
-            "cwd": .string(workspaceDirectory.path),
-            "sandbox": .string("read-only"),
-            "approvalPolicy": .string("never"),
-            "approvalsReviewer": .string("user"),
-            "ephemeral": .bool(false),
-            "runtimeWorkspaceRoots": .array([]),
-            "selectedCapabilityRoots": .array([]),
-            "dynamicTools": .array(toolAdapter?.dynamicTools ?? []),
-            "dynamicToolsOnly": .bool(true),
-            "threadSource": .string("hoverpocket_voice"),
-            "sessionStartSource": .string("startup"),
-            "baseInstructions": .string(
-                "You are the HoverPocket Voice Lane. Do not use shell, filesystem, "
-                    + "network, or arbitrary code tools. Only invoke explicitly provided "
-                    + "HoverPocket capabilities. Keep spoken replies concise."
-            )
-        ]
+        let threadStartParams = CodexVoiceThreadContract.startParameters(
+            workspaceDirectory: workspaceDirectory,
+            dynamicTools: toolAdapter?.dynamicTools ?? [],
+            ephemeral: false
+        )
         let response = try await client.sendRequest(
             "thread/start",
             params: .object(threadStartParams)
@@ -1468,13 +1453,31 @@ final class CodexVoiceCoordinator {
     }
 
     private func validateAccount(_ response: CodexJSONValue) throws {
+        switch Self.accountAdmissionCode(response) {
+        case nil:
+            return
+        case "signed_out":
+            throw CodexVoiceRuntimeError.signedOut
+        case let code?:
+            throw CodexVoiceRuntimeError.compatibility(code)
+        }
+    }
+
+    nonisolated static func accountAdmissionCode(_ response: CodexJSONValue) -> String? {
         guard let object = response.objectValue,
               let requiresAuth = object["requiresOpenaiAuth"]?.boolValue else {
-            throw CodexVoiceRuntimeError.compatibility("account_response_invalid")
+            return "account_response_invalid"
         }
-        if requiresAuth && object["account"]?.objectValue == nil {
-            throw CodexVoiceRuntimeError.signedOut
+        guard requiresAuth else {
+            return "codex_chatgpt_account_required"
         }
+        guard let account = object["account"]?.objectValue else {
+            return "signed_out"
+        }
+        guard account["type"]?.stringValue == "chatgpt" else {
+            return "codex_chatgpt_account_required"
+        }
+        return nil
     }
 
     private func parseVoices(_ response: CodexJSONValue) throws -> (count: Int, defaultVoice: String) {

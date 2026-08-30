@@ -8,6 +8,7 @@ struct CodexAppServerCompatibilityResult: Equatable, Sendable {
     let version: String?
     let schemaDigest: String?
     let executableIdentity: String?
+    let appServerProfile: CodexVoiceAppServerProfile?
 }
 
 enum CodexAppServerSchemaContract {
@@ -27,9 +28,13 @@ enum CodexAppServerSchemaContract {
         }
         guard let object = try? JSONSerialization.jsonObject(with: threadStartSchema) as? [String: Any],
               let properties = object["properties"] as? [String: Any],
-              let field = properties["dynamicToolsOnly"] as? [String: Any],
-              field["type"] as? String == "boolean" else {
-            return .blocked("codex_broker_only_tool_policy_missing")
+              [
+                  "dynamicTools",
+                  "environments",
+                  "runtimeWorkspaceRoots",
+                  "selectedCapabilityRoots"
+              ].allSatisfy({ properties[$0] is [String: Any] }) else {
+            return .blocked("codex_thread_tool_contract_missing")
         }
         return .ready
     }
@@ -45,10 +50,20 @@ actor CodexAppServerCompatibilityProbe {
         let fileIdentifier: UInt64
     }
 
-    private var cache: [ExecutableIdentity: CodexAppServerCompatibilityResult] = [:]
+    private struct CacheKey: Hashable {
+        let executable: ExecutableIdentity
+        let version: String
+        let profileIdentity: String
+        let toolDigest: String
+    }
+
+    private var cache: [CacheKey: CodexAppServerCompatibilityResult] = [:]
     private var schemaProbeExecutions = 0
 
-    func probe(explicitURL: URL? = nil) -> CodexAppServerCompatibilityResult {
+    func probe(
+        explicitURL: URL? = nil,
+        dynamicTools: [CodexJSONValue] = CodexAppServerCompatibilityProbe.verificationTools
+    ) async -> CodexAppServerCompatibilityResult {
         let executable: URL
         do {
             executable = try CodexExecutableResolver.resolve(explicitURL)
@@ -58,7 +73,8 @@ actor CodexAppServerCompatibilityProbe {
                 executableURL: nil,
                 version: nil,
                 schemaDigest: nil,
-                executableIdentity: nil
+                executableIdentity: nil,
+                appServerProfile: nil
             )
         }
 
@@ -69,11 +85,9 @@ actor CodexAppServerCompatibilityProbe {
                 executableURL: executable,
                 version: nil,
                 schemaDigest: nil,
-                executableIdentity: nil
+                executableIdentity: nil,
+                appServerProfile: nil
             )
-        }
-        if let cached = cache[identity] {
-            return cached
         }
         guard let version = Self.readVersion(executable) else {
             return CodexAppServerCompatibilityResult(
@@ -81,19 +95,110 @@ actor CodexAppServerCompatibilityProbe {
                 executableURL: executable,
                 version: nil,
                 schemaDigest: nil,
-                executableIdentity: executableIdentity
+                executableIdentity: executableIdentity,
+                appServerProfile: nil
             )
         }
 
+        let profile: CodexVoiceAppServerProfile
+        do {
+            profile = try CodexVoiceAppServerProfile.prepare(executableURL: executable)
+        } catch {
+            return CodexAppServerCompatibilityResult(
+                gate: .blocked("codex_voice_profile_invalid"),
+                executableURL: executable,
+                version: version,
+                schemaDigest: nil,
+                executableIdentity: executableIdentity,
+                appServerProfile: nil
+            )
+        }
+        guard let toolDigest = Self.toolDigest(dynamicTools) else {
+            return CodexAppServerCompatibilityResult(
+                gate: .blocked("codex_dynamic_tools_invalid"),
+                executableURL: executable,
+                version: version,
+                schemaDigest: nil,
+                executableIdentity: executableIdentity,
+                appServerProfile: profile
+            )
+        }
+        let cacheKey = CacheKey(
+            executable: identity,
+            version: version,
+            profileIdentity: profile.identity,
+            toolDigest: toolDigest
+        )
+        if let cached = cache[cacheKey] {
+            return cached
+        }
+
         schemaProbeExecutions += 1
-        let result = Self.generateAndValidateSchema(
+        var result = Self.generateAndValidateSchema(
             executable,
             version: version,
-            executableIdentity: executableIdentity
+            executableIdentity: executableIdentity,
+            profile: profile
         )
-        cache[identity] = result
-        if cache.count > 4 {
-            cache = [identity: result]
+        if result.gate.isReady {
+            do {
+                try await CodexAppServerToolRouteProbe.run(
+                    executableURL: executable,
+                    profile: profile,
+                    dynamicTools: dynamicTools
+                )
+            } catch CodexAppServerToolRouteProbeError.toolRouteMismatch {
+                result = Self.blocked(
+                    "codex_broker_only_tool_route_mismatch",
+                    executable,
+                    version,
+                    executableIdentity,
+                    schemaDigest: result.schemaDigest,
+                    profile: profile
+                )
+            } catch let error as CodexAppServerToolRouteProbeError {
+                result = Self.blocked(
+                    Self.toolRouteProbeFailureCode(error),
+                    executable,
+                    version,
+                    executableIdentity,
+                    schemaDigest: result.schemaDigest,
+                    profile: profile
+                )
+            } catch let error as CodexAppServerClientError {
+                result = Self.blocked(
+                    Self.clientFailureCode(error),
+                    executable,
+                    version,
+                    executableIdentity,
+                    schemaDigest: result.schemaDigest,
+                    profile: profile
+                )
+            } catch is CodexAppServerRPCError {
+                result = Self.blocked(
+                    "codex_tool_route_probe_rpc_failed",
+                    executable,
+                    version,
+                    executableIdentity,
+                    schemaDigest: result.schemaDigest,
+                    profile: profile
+                )
+            } catch {
+                result = Self.blocked(
+                    "codex_tool_route_probe_failed",
+                    executable,
+                    version,
+                    executableIdentity,
+                    schemaDigest: result.schemaDigest,
+                    profile: profile
+                )
+            }
+        }
+        if Self.shouldCache(result) {
+            cache[cacheKey] = result
+            if cache.count > 4 {
+                cache = [cacheKey: result]
+            }
         }
         return result
     }
@@ -109,8 +214,10 @@ actor CodexAppServerCompatibilityProbe {
 
     func isCurrent(_ result: CodexAppServerCompatibilityResult) -> Bool {
         guard let executableURL = result.executableURL,
-              let expected = result.executableIdentity else { return false }
-        return Self.identityToken(executableURL) == expected
+              let expectedIdentity = result.executableIdentity,
+              let expectedVersion = result.version else { return false }
+        return Self.identityToken(executableURL) == expectedIdentity
+            && Self.readVersion(executableURL) == expectedVersion
     }
 
     nonisolated static func identityToken(_ executable: URL) -> String? {
@@ -161,7 +268,8 @@ actor CodexAppServerCompatibilityProbe {
     private static func generateAndValidateSchema(
         _ executable: URL,
         version: String,
-        executableIdentity: String
+        executableIdentity: String,
+        profile: CodexVoiceAppServerProfile
     ) -> CodexAppServerCompatibilityResult {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "HoverPocketCodexSchema-\(UUID().uuidString)",
@@ -175,7 +283,13 @@ actor CodexAppServerCompatibilityProbe {
                 attributes: [.posixPermissions: 0o700]
             )
         } catch {
-            return blocked("codex_schema_directory_failed", executable, version, executableIdentity)
+            return blocked(
+                "codex_schema_directory_failed",
+                executable,
+                version,
+                executableIdentity,
+                profile: profile
+            )
         }
 
         guard runProcess(
@@ -190,7 +304,13 @@ actor CodexAppServerCompatibilityProbe {
             standardOutput: FileHandle.nullDevice,
             timeout: 15
         ) == 0 else {
-            return blocked("codex_schema_probe_failed", executable, version, executableIdentity)
+            return blocked(
+                "codex_schema_probe_failed",
+                executable,
+                version,
+                executableIdentity,
+                profile: profile
+            )
         }
 
         let requiredFiles = [
@@ -206,7 +326,13 @@ actor CodexAppServerCompatibilityProbe {
         for relativePath in requiredFiles {
             let url = root.appendingPathComponent(relativePath)
             guard let data = try? Data(contentsOf: url), data.count <= 12 * 1_024 * 1_024 else {
-                return blocked("codex_schema_incomplete", executable, version, executableIdentity)
+                return blocked(
+                    "codex_schema_incomplete",
+                    executable,
+                    version,
+                    executableIdentity,
+                    profile: profile
+                )
             }
             combined.append(data)
             if relativePath == "v2/ThreadStartParams.json" {
@@ -227,7 +353,8 @@ actor CodexAppServerCompatibilityProbe {
                 executableURL: executable,
                 version: version,
                 schemaDigest: digest,
-                executableIdentity: executableIdentity
+                executableIdentity: executableIdentity,
+                appServerProfile: profile
             )
         }
         return CodexAppServerCompatibilityResult(
@@ -235,7 +362,8 @@ actor CodexAppServerCompatibilityProbe {
             executableURL: executable,
             version: version,
             schemaDigest: digest,
-            executableIdentity: executableIdentity
+            executableIdentity: executableIdentity,
+            appServerProfile: profile
         )
     }
 
@@ -243,15 +371,85 @@ actor CodexAppServerCompatibilityProbe {
         _ code: String,
         _ executable: URL,
         _ version: String,
-        _ executableIdentity: String
+        _ executableIdentity: String,
+        schemaDigest: String? = nil,
+        profile: CodexVoiceAppServerProfile? = nil
     ) -> CodexAppServerCompatibilityResult {
         CodexAppServerCompatibilityResult(
             gate: .blocked(code),
             executableURL: executable,
             version: version,
-            schemaDigest: nil,
-            executableIdentity: executableIdentity
+            schemaDigest: schemaDigest,
+            executableIdentity: executableIdentity,
+            appServerProfile: profile
         )
+    }
+
+    private static func toolDigest(_ tools: [CodexJSONValue]) -> String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(tools) else { return nil }
+        return SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    private static func shouldCache(_ result: CodexAppServerCompatibilityResult) -> Bool {
+        if result.gate.isReady {
+            return true
+        }
+        guard let code = result.gate.safeErrorCode else { return false }
+        return [
+            "codex_realtime_schema_missing",
+            "codex_thread_tool_contract_missing",
+            "codex_broker_only_tool_route_mismatch"
+        ].contains(code)
+    }
+
+    private static let verificationTools: [CodexJSONValue] = [
+        .object([
+            "type": .string("function"),
+            "name": .string("hoverpocket_compatibility_read"),
+            "description": .string("Verify the delegated HoverPocket tool route."),
+            "inputSchema": .object([
+                "type": .string("object"),
+                "properties": .object([:]),
+                "additionalProperties": .bool(false)
+            ]),
+            "deferLoading": .bool(false)
+        ])
+    ]
+
+    private static func toolRouteProbeFailureCode(
+        _ error: CodexAppServerToolRouteProbeError
+    ) -> String {
+        switch error {
+        case .requestTimedOut:
+            return "codex_tool_route_probe_timed_out"
+        case .requestInvalid:
+            return "codex_tool_route_probe_response_invalid"
+        case .socketFailed, .bindFailed, .listenFailed, .missingPort:
+            return "codex_tool_route_probe_loopback_failed"
+        case .toolRouteMismatch:
+            return "codex_broker_only_tool_route_mismatch"
+        }
+    }
+
+    private static func clientFailureCode(_ error: CodexAppServerClientError) -> String {
+        switch error {
+        case .executableNotFound, .executableNotRunnable:
+            return "codex_tool_route_probe_executable_invalid"
+        case .launchFailed:
+            return "codex_tool_route_probe_launch_failed"
+        case .invalidMessage:
+            return "codex_tool_route_probe_response_invalid"
+        case .requestTimedOut:
+            return "codex_tool_route_probe_timed_out"
+        case .transportEnded:
+            return "codex_tool_route_probe_transport_ended"
+        case .closed:
+            return "codex_tool_route_probe_closed"
+        }
     }
 
     private static func runProcess(

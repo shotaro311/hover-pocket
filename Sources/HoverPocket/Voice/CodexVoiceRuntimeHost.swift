@@ -13,6 +13,7 @@ final class CodexVoiceRuntimeHost {
     private let injectedClientFactory: CodexVoiceCoordinator.ClientFactory?
     private var configuredExecutableURL: URL?
     private var configuredExecutableIdentity: String?
+    private var configuredProfile: CodexVoiceAppServerProfile?
     private var toolAdapter: (any CodexVoiceCapabilityToolAdapterProtocol)?
     private var coordinator: CodexVoiceCoordinator?
     private var desiredEnabled = false
@@ -45,15 +46,18 @@ final class CodexVoiceRuntimeHost {
 
     func configureExecutable(
         _ executableURL: URL,
-        expectedIdentity: String
+        expectedIdentity: String,
+        profile: CodexVoiceAppServerProfile
     ) -> Bool {
         let resolved = executableURL.standardizedFileURL.resolvingSymlinksInPath()
         if desiredEnabled || coordinator != nil {
             return configuredExecutableURL == resolved
                 && configuredExecutableIdentity == expectedIdentity
+                && configuredProfile == profile
         }
         configuredExecutableURL = resolved
         configuredExecutableIdentity = expectedIdentity
+        configuredProfile = profile
         return true
     }
 
@@ -84,7 +88,8 @@ final class CodexVoiceRuntimeHost {
         if let injectedClientFactory {
             resolvedClientFactory = injectedClientFactory
         } else if let executableURL = configuredExecutableURL,
-                  let expectedIdentity = configuredExecutableIdentity {
+                  let expectedIdentity = configuredExecutableIdentity,
+                  let profile = configuredProfile {
             resolvedClientFactory = {
                 guard CodexAppServerCompatibilityProbe.identityToken(executableURL)
                         == expectedIdentity else {
@@ -94,6 +99,8 @@ final class CodexVoiceRuntimeHost {
                     options: CodexAppServerClientOptions(
                         executableURL: executableURL,
                         launchArguments: CodexVoiceAppServerLaunchPolicy.arguments,
+                        processEnvironment: profile.processEnvironment,
+                        workingDirectoryURL: profile.codexHomeURL,
                         clientTitle: "HoverPocket Voice Lane",
                         clientVersion: Bundle.main.object(
                             forInfoDictionaryKey: "CFBundleShortVersionString"
