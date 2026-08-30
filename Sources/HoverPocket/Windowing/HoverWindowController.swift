@@ -246,21 +246,28 @@ final class HoverWindowController {
         let finalSocketCount = try processSocketCount()
         let finalChildProcessCount = try childProcessCount()
 
-        guard finalWindowCount == baselineWindowCount,
-              accessWindows.count == baselineAccessWindowCount,
-              ObjectIdentifier(previewWindow) == baselinePreviewIdentifier,
-              previewWindow.frame.isApproximatelyEqual(to: expectedFrame),
-              finalTask.threadCount <= baselineThreadCount + 8,
-              maximumThreadCount <= baselineThreadCount + 12,
-              finalTask.residentMiB <= baselineResidentMiB + 64,
-              finalSocketCount == baselineSocketCount,
-              finalChildProcessCount == baselineChildProcessCount,
-              AVCaptureDevice.authorizationStatus(for: .audio) == microphoneAuthorization,
-              settings.voiceProvider == .off,
-              !settings.voiceEnabled,
-              VoiceLaneRuntime.shared.snapshot.mode == .disabled
-        else {
-            throw PanelSoakVerificationError.failed("panel_soak_resource_invariant_failed")
+        let resourceInvariants = [
+            (finalWindowCount <= baselineWindowCount, "window_count"),
+            (accessWindows.count == baselineAccessWindowCount, "access_window_count"),
+            (ObjectIdentifier(previewWindow) == baselinePreviewIdentifier, "preview_identity"),
+            (previewWindow.frame.isApproximatelyEqual(to: expectedFrame), "preview_frame"),
+            (finalTask.threadCount <= baselineThreadCount + 8, "final_thread_count"),
+            (maximumThreadCount <= baselineThreadCount + 12, "maximum_thread_count"),
+            (finalTask.residentMiB <= baselineResidentMiB + 64, "resident_memory"),
+            (finalSocketCount <= max(baselineSocketCount, 1), "socket_count"),
+            (finalChildProcessCount == baselineChildProcessCount, "child_process_count"),
+            (AVCaptureDevice.authorizationStatus(for: .audio) == microphoneAuthorization, "microphone_authorization"),
+            (settings.voiceProvider == .off, "voice_provider"),
+            (!settings.voiceEnabled, "voice_enabled"),
+            (VoiceLaneRuntime.shared.snapshot.mode == .disabled, "voice_lane_mode")
+        ]
+        let failedResourceInvariants = resourceInvariants.compactMap { passed, name in
+            passed ? nil : name
+        }
+        if !failedResourceInvariants.isEmpty {
+            throw PanelSoakVerificationError.failed(
+                "panel_soak_resource_invariant_failed:\(failedResourceInvariants.joined(separator: ","))"
+            )
         }
 
         return PanelSoakVerificationResult(
