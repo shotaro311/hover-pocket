@@ -44,6 +44,7 @@ Broker限定policy、read-only sandbox、approval never、空workspace roots、r
 - `python3 script/verify_pocket_contracts.py`: PASS、15 schema / 71 fixture
 - `git diff --check`: PASS
 - 隔離E2E app bundle: build PASS、executable存在、`codesign --verify --deep --strict` PASS、microphone purpose stringにCodex app-serverを含むことをreadback。bundleは実行せずTrashへ移動した。
+- code head `0a09b72a7c24baf0034cf26e15bfce5e1e0c276b`のDraft PR #39: Router [33282321608](https://github.com/shotaro311/hover-pocket/actions/runs/33282321608)、macOS [33282323019](https://github.com/shotaro311/hover-pocket/actions/runs/33282323019)、Windows [33282323022](https://github.com/shotaro311/hover-pocket/actions/runs/33282323022)、3OS contract / compare [33282323021](https://github.com/shotaro311/hover-pocket/actions/runs/33282323021)を含む15 check成功・8 gate skip・失敗0・pending 0。PRはDraft / OPEN / MERGEABLE。
 
 ## 未完了gate
 
