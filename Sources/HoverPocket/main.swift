@@ -100,6 +100,26 @@ if CommandLine.arguments.contains("--verify-codex-app-server")
     }
     RunLoop.main.run()
 }
+if CommandLine.arguments.contains("--verify-codex-app-server-realtime") {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do {
+            let result = try await CodexAppServerRealtimeVerificationCommand.run()
+            print("codex_app_server_realtime_account=chatgpt")
+            print("codex_app_server_realtime_voices=\(result.voiceCount)")
+            print("codex_app_server_realtime_thread=ephemeral")
+            print("codex_app_server_realtime_sdp=connected")
+            print("codex_app_server_realtime_process=\(result.processClosed ? "closed" : "open")")
+            print("PASS codex app-server realtime: account, voices, ephemeral thread, SDP, WebRTC, teardown")
+            exit(0)
+        } catch {
+            print("FAIL codex app-server realtime: \(error)")
+            exit(1)
+        }
+    }
+    app.run()
+    exit(1)
+}
 if CommandLine.arguments.contains("--verify-voice-e2e-isolation") {
     MacOSVoiceE2EIsolationVerificationCommand.run()
 }

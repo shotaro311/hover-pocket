@@ -126,6 +126,16 @@ def main() -> None:
         / "Voice"
         / "CodexAppServerCompatibilityProbe.swift"
     ).read_text(encoding="utf-8")
+    mac_codex_realtime_verifier = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "App"
+        / "CodexAppServerRealtimeVerificationCommand.swift"
+    ).read_text(encoding="utf-8")
+    mac_main = (
+        ROOT / "Sources" / "HoverPocket" / "main.swift"
+    ).read_text(encoding="utf-8")
     mac_realtime_provider = (
         ROOT / "Sources" / "HoverPocket" / "Voice" / "OpenAIRealtimeProvider.swift"
     ).read_text(encoding="utf-8")
@@ -910,8 +920,11 @@ def main() -> None:
         "serverRequestAdmissionHandler",
         "maximumProtocolLineBytes",
         "maximumErrorBufferBytes",
+        '"/Applications/ChatGPT.app/Contents/Resources/codex"',
+        "static func candidates",
+        "processStarted",
     )):
-        fail("macOS Codex app-server input admission or allocation bounds are incomplete")
+        fail("macOS Codex app-server discovery, input admission, or allocation bounds are incomplete")
     request_parse_position = mac_codex_client.find(
         "let request = CodexAppServerRequest"
     )
@@ -935,15 +948,39 @@ def main() -> None:
         "let wasQuarantined = quarantinedClientGenerations.contains(generation)",
         "if wasQuarantined",
         "verifyRealtimeLifecyclePolicy",
+        "verifyOneShotResolutionPolicy",
+        "waiterCountForVerification",
     )):
-        fail("macOS Codex client quarantine, lifecycle, or generation isolation is incomplete")
+        fail("macOS Codex fallback, client quarantine, lifecycle, or generation isolation is incomplete")
     if not all(value in mac_codex_probe for value in (
         "timeout: 5",
         "timeout: 15",
         ".posixPermissions: 0o700",
         "executableIdentity",
+        "for executable in candidates",
+        "probeCandidate(executable",
     )):
         fail("macOS Codex compatibility probe is not bounded or executable-pinned")
+    if not all(value in mac_codex_realtime_verifier for value in (
+        "CodexAppServerCompatibilityProbe.shared.isCurrent",
+        "rootThreadEphemeral: true",
+        "websiteDataStore = .nonPersistent()",
+        "new RTCPeerConnection({iceServers: []})",
+        "gain.gain.value = 0",
+        "waitForProcessExit",
+        "CodexRealtimeProbeCloseGate",
+        "processStarted: { processID in",
+        "realtime_app_server_process_leaked",
+    )) or "getUserMedia" in mac_codex_realtime_verifier:
+        fail("macOS Codex live verifier is not identity-pinned, microphone-free, or bounded")
+    if '--verify-codex-app-server-realtime' not in mac_main \
+            or '"version": .string("v3")' not in mac_codex_coordinator \
+            or 'rootThreadEphemeral' not in mac_codex_coordinator \
+            or 'realtime_closed_before_sdp' not in mac_codex_coordinator \
+            or 'pendingSDP.result.fail(.compatibility(errorCode))' not in mac_codex_coordinator \
+            or 'voices["defaultV1"]' in mac_codex_coordinator \
+            or 'voices["defaultV2"]' in mac_codex_coordinator:
+        fail("macOS Codex app-server realtime verifier or immediate SDP failure readback regressed")
     mac_realtime_adapter = mac_realtime_provider[
         mac_realtime_provider.find("final class OpenAIRealtimeMacOSVoiceSessionAdapter"):
         mac_realtime_provider.find("final class FailClosedVoiceProviderAdapter")

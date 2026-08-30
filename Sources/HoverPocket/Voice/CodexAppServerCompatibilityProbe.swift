@@ -64,9 +64,9 @@ actor CodexAppServerCompatibilityProbe {
         explicitURL: URL? = nil,
         dynamicTools: [CodexJSONValue] = CodexAppServerCompatibilityProbe.verificationTools
     ) async -> CodexAppServerCompatibilityResult {
-        let executable: URL
+        let candidates: [URL]
         do {
-            executable = try CodexExecutableResolver.resolve(explicitURL)
+            candidates = try CodexExecutableResolver.candidates(explicitURL)
         } catch {
             return CodexAppServerCompatibilityResult(
                 gate: .blocked("codex_not_found"),
@@ -77,7 +77,30 @@ actor CodexAppServerCompatibilityProbe {
                 appServerProfile: nil
             )
         }
+        var firstBlocked: CodexAppServerCompatibilityResult?
+        for executable in candidates {
+            let result = await probeCandidate(executable, dynamicTools: dynamicTools)
+            if result.gate.isReady {
+                return result
+            }
+            if firstBlocked == nil {
+                firstBlocked = result
+            }
+        }
+        return firstBlocked ?? CodexAppServerCompatibilityResult(
+            gate: .blocked("codex_not_found"),
+            executableURL: nil,
+            version: nil,
+            schemaDigest: nil,
+            executableIdentity: nil,
+            appServerProfile: nil
+        )
+    }
 
+    private func probeCandidate(
+        _ executable: URL,
+        dynamicTools: [CodexJSONValue]
+    ) async -> CodexAppServerCompatibilityResult {
         guard let executableIdentity = Self.identityToken(executable),
               let identity = Self.identity(executable) else {
             return CodexAppServerCompatibilityResult(

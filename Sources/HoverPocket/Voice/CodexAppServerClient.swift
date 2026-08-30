@@ -18,6 +18,7 @@ struct CodexAppServerClientOptions: Sendable {
     var clientTitle: String
     var clientVersion: String
     var experimentalAPI: Bool
+    var processStarted: (@Sendable (Int32) -> Void)?
 
     init(
         executableURL: URL? = nil,
@@ -28,7 +29,8 @@ struct CodexAppServerClientOptions: Sendable {
         clientName: String = "hover_pocket",
         clientTitle: String = "HoverPocket",
         clientVersion: String = "0.0.0",
-        experimentalAPI: Bool = false
+        experimentalAPI: Bool = false,
+        processStarted: (@Sendable (Int32) -> Void)? = nil
     ) {
         self.executableURL = executableURL
         self.launchArguments = launchArguments
@@ -39,6 +41,7 @@ struct CodexAppServerClientOptions: Sendable {
         self.clientTitle = clientTitle
         self.clientVersion = clientVersion
         self.experimentalAPI = experimentalAPI
+        self.processStarted = processStarted
     }
 }
 
@@ -189,6 +192,7 @@ actor CodexAppServerClient {
         } catch {
             throw CodexAppServerClientError.launchFailed
         }
+        options.processStarted?(process.processIdentifier)
 
         let client = CodexAppServerClient(
             options: options,
@@ -573,6 +577,9 @@ actor CodexAppServerClient {
             }
             if process.isRunning {
                 _ = Darwin.kill(process.processIdentifier, SIGKILL)
+                for _ in 0..<20 where process.isRunning {
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                }
             }
         }
     }
@@ -580,22 +587,35 @@ actor CodexAppServerClient {
 
 enum CodexExecutableResolver {
     static func resolve(_ explicitURL: URL?) throws -> URL {
+        guard let candidate = try candidates(explicitURL).first else {
+            throw CodexAppServerClientError.executableNotFound
+        }
+        return candidate
+    }
+
+    static func candidates(_ explicitURL: URL?) throws -> [URL] {
         if let explicitURL {
-            return try validate(explicitURL)
+            return [try validate(explicitURL)]
         }
         if let configured = ProcessInfo.processInfo.environment["HOVERPOCKET_CODEX_EXECUTABLE"],
            !configured.isEmpty {
-            return try validate(URL(fileURLWithPath: configured))
+            return [try validate(URL(fileURLWithPath: configured))]
         }
 
-        let candidates = [
+        let paths = [
+            "/Applications/ChatGPT.app/Contents/Resources/codex",
             "/opt/homebrew/bin/codex",
             "/usr/local/bin/codex",
             FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent(".local/bin/codex").path
         ]
-        for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate) {
-            return try validate(URL(fileURLWithPath: candidate))
+        var candidates: [URL] = []
+        var seenPaths = Set<String>()
+        for path in paths where FileManager.default.isExecutableFile(atPath: path) {
+            let candidate = try validate(URL(fileURLWithPath: path))
+            if seenPaths.insert(candidate.path).inserted {
+                candidates.append(candidate)
+            }
         }
 
         let process = Process()
@@ -608,16 +628,24 @@ enum CodexExecutableResolver {
             try process.run()
             process.waitUntilExit()
         } catch {
-            throw CodexAppServerClientError.executableNotFound
+            if candidates.isEmpty {
+                throw CodexAppServerClientError.executableNotFound
+            }
+            return candidates
         }
         let data = output.fileHandleForReading.readDataToEndOfFile()
-        guard process.terminationStatus == 0,
-              let path = String(data: data, encoding: .utf8)?
+        if process.terminationStatus == 0,
+           let path = String(data: data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
-              !path.isEmpty else {
+           !path.isEmpty,
+           let candidate = try? validate(URL(fileURLWithPath: path)),
+           seenPaths.insert(candidate.path).inserted {
+            candidates.append(candidate)
+        }
+        guard !candidates.isEmpty else {
             throw CodexAppServerClientError.executableNotFound
         }
-        return try validate(URL(fileURLWithPath: path))
+        return candidates
     }
 
     static func validate(_ url: URL) throws -> URL {

@@ -17,6 +17,9 @@ enum CodexAppServerVerificationCommand {
         guard CodexVoiceCoordinator.verifyRealtimeLifecyclePolicy() else {
             throw CodexAppServerVerificationError.failed("realtime_lifecycle_policy")
         }
+        guard await CodexVoiceCoordinator.verifyOneShotResolutionPolicy() else {
+            throw CodexAppServerVerificationError.failed("realtime_one_shot_policy")
+        }
         let installedCompatibility = try await verifyInstalledSchemaCache()
         guard CodexVoiceWebRTCEmbeddedContract.verifyOperationEpoch() else {
             throw CodexAppServerVerificationError.failed("webrtc_contract")
@@ -138,9 +141,12 @@ enum CodexAppServerVerificationCommand {
             ])
         ]
         let first = await probe.probe(dynamicTools: tools)
+        let firstCount = await probe.schemaProbeExecutionCountForVerification()
         let second = await probe.probe(dynamicTools: tools)
-        let count = await probe.schemaProbeExecutionCountForVerification()
-        guard first == second, count == 1 else {
+        let secondCount = await probe.schemaProbeExecutionCountForVerification()
+        guard first == second,
+              firstCount > 0,
+              secondCount == firstCount else {
             throw CodexAppServerVerificationError.failed("schema_probe_cache")
         }
         if first.executableIdentity != nil,
@@ -168,7 +174,7 @@ enum CodexAppServerVerificationCommand {
             )
         }
         print("codex_app_server_installed_gate=\(first.gate.safeErrorCode ?? "ready")")
-        print("codex_app_server_schema_probe_executions=\(count)")
+        print("codex_app_server_schema_probe_executions=\(secondCount)")
         return first
     }
 }

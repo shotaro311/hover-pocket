@@ -70,6 +70,7 @@ final class CodexVoiceCoordinator {
     private let featureEnabled: Bool
     private let clientFactory: ClientFactory
     private let toolAdapter: (any CodexVoiceCapabilityToolAdapterProtocol)?
+    private let rootThreadEphemeral: Bool
     private let workspaceDirectory: URL
     private let restartDelaysNanoseconds: [UInt64]
     private let sdpTimeoutNanoseconds: UInt64
@@ -96,7 +97,6 @@ final class CodexVoiceCoordinator {
     private var appServerProcessID: Int32?
     private var restartAttempt = 0
     private var voiceCount = 0
-    private var defaultVoice: String?
     private var nextClientGeneration: UInt64 = 0
     private var clientGeneration: UInt64 = 0
     private var initializingClient: CodexAppServerClient?
@@ -117,7 +117,8 @@ final class CodexVoiceCoordinator {
         restartDelaysNanoseconds: [UInt64] = [0, 450_000_000, 1_400_000_000],
         sdpTimeoutNanoseconds: UInt64 = 20_000_000_000,
         clientFactory: ClientFactory? = nil,
-        toolAdapter: (any CodexVoiceCapabilityToolAdapterProtocol)? = nil
+        toolAdapter: (any CodexVoiceCapabilityToolAdapterProtocol)? = nil,
+        rootThreadEphemeral: Bool = false
     ) {
         self.featureEnabled = featureEnabled
         self.availability = featureEnabled ? .unavailable : .disabled
@@ -132,6 +133,7 @@ final class CodexVoiceCoordinator {
         self.restartDelaysNanoseconds = restartDelaysNanoseconds
         self.sdpTimeoutNanoseconds = sdpTimeoutNanoseconds
         self.toolAdapter = toolAdapter
+        self.rootThreadEphemeral = rootThreadEphemeral
         self.clientFactory = clientFactory ?? {
             let executableURL = try CodexExecutableResolver.resolve(nil)
             let profile = try CodexVoiceAppServerProfile.prepare(
@@ -282,7 +284,7 @@ final class CodexVoiceCoordinator {
                 "thread/realtime/listVoices",
                 params: .object([:])
             )
-            let voiceSnapshot = try parseVoices(voices)
+            let availableVoiceCount = try parseVoices(voices)
             guard !isDisposed, !Task.isCancelled else {
                 throw CodexVoiceRuntimeError.disposed
             }
@@ -294,8 +296,7 @@ final class CodexVoiceCoordinator {
             initializingClient = nil
             initializingClientGeneration = 0
             appServerProcessID = await candidate.processIdentifier
-            voiceCount = voiceSnapshot.count
-            defaultVoice = voiceSnapshot.defaultVoice
+            voiceCount = availableVoiceCount
         } catch {
             if initializingClient === candidate,
                initializingClientGeneration == generation {
@@ -339,9 +340,6 @@ final class CodexVoiceCoordinator {
               let client,
               clientGeneration > 0 else {
             throw CodexVoiceRuntimeError.compatibility("voice_not_ready")
-        }
-        guard let defaultVoice else {
-            throw CodexVoiceRuntimeError.compatibility("realtime_voice_missing")
         }
         guard pendingSDP == nil, activeNegotiationAttemptID == nil else {
             throw CodexVoiceRuntimeError.compatibility("webrtc_negotiation_in_progress")
@@ -406,24 +404,36 @@ final class CodexVoiceCoordinator {
                 timeoutTask: timeoutTask
             )
             negotiationStage = "realtime_start"
-            _ = try await client.sendRequest(
-                "thread/realtime/start",
-                params: .object([
-                    "threadId": .string(threadID),
-                    "outputModality": .string("audio"),
-                    "version": .string("v3"),
-                    "voice": .string(defaultVoice),
-                    "includeStartupContext": .bool(false),
-                    "prompt": .string(
-                        "Respond concisely for a compact desktop voice interface. "
-                            + "Use only HoverPocket capabilities when they are available."
-                    ),
-                    "transport": .object([
-                        "type": .string("webrtc"),
-                        "sdp": .string(sdpOffer)
+            let requestTask = Task {
+                try await client.sendRequest(
+                    "thread/realtime/start",
+                    params: .object([
+                        "threadId": .string(threadID),
+                        "outputModality": .string("audio"),
+                        "version": .string("v3"),
+                        "includeStartupContext": .bool(false),
+                        "prompt": .string(
+                            "Respond concisely for a compact desktop voice interface. "
+                                + "Use only HoverPocket capabilities when they are available."
+                        ),
+                        "transport": .object([
+                            "type": .string("webrtc"),
+                            "sdp": .string(sdpOffer)
+                        ])
                     ])
-                ])
-            )
+                )
+            }
+            let requestCompletionTask = Task {
+                do {
+                    _ = try await requestTask.value
+                } catch {
+                    await result.fail(Self.realtimeStartRequestError(error))
+                }
+            }
+            defer {
+                requestCompletionTask.cancel()
+                requestTask.cancel()
+            }
             negotiationStage = "sdp_wait"
             let answer = try await result.wait()
             guard availability == .ready,
@@ -454,6 +464,18 @@ final class CodexVoiceCoordinator {
             }
             throw error
         }
+    }
+
+    private static func realtimeStartRequestError(_ error: Error) -> CodexVoiceRuntimeError {
+        if let runtimeError = error as? CodexVoiceRuntimeError {
+            return runtimeError
+        }
+        if error is CancellationError {
+            return .negotiationCancelled
+        }
+        return .compatibility(
+            negotiationErrorCode(error, stage: "realtime_start")
+        )
     }
 
     private static func negotiationErrorCode(_ error: Error, stage: String) -> String {
@@ -489,7 +511,12 @@ final class CodexVoiceCoordinator {
     }
 
     private static func safeRPCMessageCategory(_ message: String) -> String? {
-        let normalized = message.lowercased()
+        let boundedMessage = String(message.unicodeScalars.prefix(4_096))
+        let normalized = String(
+            boundedMessage.lowercased().unicodeScalars.map { scalar in
+                CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : " "
+            }
+        )
         let markers: [(needle: String, code: String)] = [
             ("requires api key", "requires_api_key"),
             ("does not support", "not_supported"),
@@ -502,7 +529,16 @@ final class CodexVoiceCoordinator {
             ("unsupported", "unsupported"),
             ("bad request", "bad_request"),
             ("invalid request", "invalid_request"),
+            ("invalid argument", "invalid_argument"),
+            ("invalid value", "invalid_value"),
             ("failed to start", "start_failed"),
+            ("not found", "not_found"),
+            ("missing", "missing"),
+            ("disabled", "disabled"),
+            ("rejected", "rejected"),
+            ("unexpected", "unexpected"),
+            ("ended", "ended"),
+            ("closed", "closed"),
             ("realtime", "realtime"),
             ("conversation", "conversation"),
             ("websocket", "websocket"),
@@ -513,6 +549,27 @@ final class CodexVoiceCoordinator {
             ("model", "model"),
             ("voice", "voice"),
             ("session", "session"),
+            ("audio", "audio"),
+            ("offer", "offer"),
+            ("media", "media"),
+            ("data channel", "data_channel"),
+            ("peer", "peer"),
+            ("codec", "codec"),
+            ("connection", "connection"),
+            ("call", "call"),
+            ("rate limit", "rate_limit"),
+            ("quota", "quota"),
+            ("entitlement", "entitlement"),
+            ("access", "access"),
+            ("status 400", "http_400"),
+            ("status 401", "http_401"),
+            ("status 403", "http_403"),
+            ("status 404", "http_404"),
+            ("status 409", "http_409"),
+            ("status 429", "http_429"),
+            ("status 500", "http_500"),
+            ("status 502", "http_502"),
+            ("status 503", "http_503"),
             ("internal", "internal")
         ]
         let matched = markers.compactMap { marker in
@@ -561,7 +618,7 @@ final class CodexVoiceCoordinator {
         let threadStartParams = CodexVoiceThreadContract.startParameters(
             workspaceDirectory: workspaceDirectory,
             dynamicTools: toolAdapter?.dynamicTools ?? [],
-            ephemeral: false
+            ephemeral: rootThreadEphemeral
         )
         let response = try await client.sendRequest(
             "thread/start",
@@ -1168,6 +1225,13 @@ final class CodexVoiceCoordinator {
             lastErrorCode = nil
         case "thread/realtime/closed":
             guard isCurrentRoot(params["threadId"]?.stringValue) else { return }
+            if let pendingSDP,
+               pendingSDP.clientGeneration == clientGeneration,
+               params["threadId"]?.stringValue == pendingSDP.threadID {
+                await pendingSDP.result.fail(
+                    .compatibility("realtime_closed_before_sdp")
+                )
+            }
             transportAttached = false
             isMuted = true
             realtimeLifecycle = .stopped
@@ -1179,11 +1243,19 @@ final class CodexVoiceCoordinator {
                 : "realtime_closed"
         case "thread/realtime/error":
             guard params["threadId"]?.stringValue.map(isCurrentRoot) ?? true else { return }
+            let errorCode = params["message"]?.stringValue
+                .flatMap(Self.safeRPCMessageCategory)
+                .map { "realtime_error_\($0)" }
+                ?? "realtime_error"
+            if let pendingSDP,
+               pendingSDP.clientGeneration == clientGeneration {
+                await pendingSDP.result.fail(.compatibility(errorCode))
+            }
             transportAttached = false
             isMuted = true
             realtimeLifecycle = .stopped
             sessionStatus = .recoverableFailure
-            lastErrorCode = "realtime_error"
+            lastErrorCode = errorCode
         default:
             return
         }
@@ -1312,6 +1384,49 @@ final class CodexVoiceCoordinator {
             && ambientServerRequests.contains("openai/form")
             && !ambientServerRequests.contains("currentTime/read")
             && !ambientServerRequests.contains("item/tool/call")
+    }
+
+    static func verifyOneShotResolutionPolicy() async -> Bool {
+        let successFirst = CodexVoiceOneShot<String>()
+        await successFirst.succeed("answer")
+        await successFirst.fail(.sdpTimedOut)
+        guard (try? await successFirst.wait()) == "answer" else { return false }
+
+        let failureFirst = CodexVoiceOneShot<String>()
+        await failureFirst.fail(.compatibility("expected"))
+        await failureFirst.succeed("late")
+        do {
+            _ = try await failureFirst.wait()
+            return false
+        } catch let error as CodexVoiceRuntimeError {
+            guard error == .compatibility("expected") else { return false }
+        } catch {
+            return false
+        }
+
+        let pending = CodexVoiceOneShot<String>()
+        let waiter = Task { try await pending.wait() }
+        var waiterRegistered = false
+        for _ in 0..<20 {
+            if await pending.waiterCountForVerification() == 1 {
+                waiterRegistered = true
+                break
+            }
+            await Task.yield()
+        }
+        guard waiterRegistered else {
+            waiter.cancel()
+            return false
+        }
+        await pending.fail(.sdpTimedOut)
+        do {
+            _ = try await waiter.value
+            return false
+        } catch let error as CodexVoiceRuntimeError {
+            return error == .sdpTimedOut
+        } catch {
+            return false
+        }
     }
 
     private static func canStartRealtime(from lifecycle: RealtimeLifecycle) -> Bool {
@@ -1480,7 +1595,7 @@ final class CodexVoiceCoordinator {
         return nil
     }
 
-    private func parseVoices(_ response: CodexJSONValue) throws -> (count: Int, defaultVoice: String) {
+    private func parseVoices(_ response: CodexJSONValue) throws -> Int {
         guard let voices = response.objectValue?["voices"]?.objectValue else {
             throw CodexVoiceRuntimeError.compatibility("realtime_voices_unavailable")
         }
@@ -1492,13 +1607,10 @@ final class CodexVoiceCoordinator {
                 }
             }
         }
-        guard !unique.isEmpty,
-              let defaultVoice = voices["defaultV1"]?.stringValue
-                ?? voices["defaultV2"]?.stringValue,
-              !defaultVoice.isEmpty else {
+        guard !unique.isEmpty else {
             throw CodexVoiceRuntimeError.compatibility("realtime_voices_unavailable")
         }
-        return (unique.count, defaultVoice)
+        return unique.count
     }
 
     private func update(
@@ -1583,6 +1695,10 @@ private actor CodexVoiceOneShot<Value: Sendable> {
 
     func fail(_ error: CodexVoiceRuntimeError) {
         resolve(.failure(error))
+    }
+
+    func waiterCountForVerification() -> Int {
+        waiters.count
     }
 
     private func resolve(_ result: Result<Value, CodexVoiceRuntimeError>) {

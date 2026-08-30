@@ -164,6 +164,13 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 
 成功すると `HoverPocket launched` と表示されます。
 
+macOSのCodex app-server経路を確認する場合は、次のコマンドを使います。通常の解決順ではChatGPT.app同梱の互換Codexを優先し、OpenAI APIキーは使用しません。2つ目の検証も物理マイクは取得せず、無音トラックでaccount、voices、ephemeral thread、SDP、WebRTC、process終了をreadbackします。
+
+```bash
+.build/debug/HoverPocket --require-codex-app-server-ready
+.build/debug/HoverPocket --verify-codex-app-server-realtime
+```
+
 Small / Medium / Large / Extra Large と文字サイズごとの provider layout を確認する場合は次のコマンドを使います。
 
 ```bash
