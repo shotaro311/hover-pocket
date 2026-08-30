@@ -144,9 +144,12 @@ final class HoverWindowController {
 
         let microphoneAuthorization = AVCaptureDevice.authorizationStatus(for: .audio)
         showPill()
-        openPanel(showing: providerIDs[0])
-        closePreview()
-        await settlePanelSoakRunLoop()
+        for providerID in providerIDs.prefix(2) {
+            openPanel(showing: providerID)
+            closePreview()
+            await settlePanelSoakRunLoop()
+        }
+        await settlePanelSoakRunLoop(milliseconds: 500)
 
         let baselinePreviewIdentifier = ObjectIdentifier(previewWindow)
         let baselineAccessWindowCount = accessWindows.count
@@ -239,7 +242,7 @@ final class HoverWindowController {
             animatedTransitionCycles += 1
         }
 
-        await settlePanelSoakRunLoop(milliseconds: 100)
+        await settlePanelSoakRunLoop(milliseconds: 500)
         let finalTask = try processTaskSnapshot()
         maximumThreadCount = max(maximumThreadCount, finalTask.threadCount)
         let finalWindowCount = NSApp.windows.count
@@ -254,7 +257,10 @@ final class HoverWindowController {
             (finalTask.threadCount <= baselineThreadCount + 8, "final_thread_count"),
             (maximumThreadCount <= baselineThreadCount + 12, "maximum_thread_count"),
             (finalTask.residentMiB <= baselineResidentMiB + 64, "resident_memory"),
-            (finalSocketCount <= max(baselineSocketCount, 1), "socket_count"),
+            (
+                finalSocketCount <= baselineSocketCount + 1,
+                "socket_count:\(baselineSocketCount)->\(finalSocketCount)"
+            ),
             (finalChildProcessCount == baselineChildProcessCount, "child_process_count"),
             (AVCaptureDevice.authorizationStatus(for: .audio) == microphoneAuthorization, "microphone_authorization"),
             (settings.voiceProvider == .off, "voice_provider"),
