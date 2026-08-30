@@ -109,7 +109,6 @@ keyring-only Codex loginの実装制約は、Voice専用profileでChatGPT manage
 - CPU / RSSの自動idle計測は完了した。mic clickからattachedまでのp95、snapshot publishes/sec、Expanded RPC/sec、stop RPC/session=1は、物理音声往復10回の人手gateで最終値を取得する。
 - signed-out / keyring-only環境で、Settingsから実ChatGPT browser loginを完了・取消し、app更新後も専用credentialをreadbackするE2E。file-backed loginからmanaged fileへの移行も別途確認する。
 - Draft PRのCIと人手レビュー。merge、release、既存notarized build 583の差し替えは未実施。
-- macOS署名bundleでSystem SettingsのLocal Network許可を有効にし、`--verify-codex-app-server-realtime`のaccount、19 voices、ephemeral thread、SDP / WebRTC connected、process closedを再readbackする。完了前はbuild 597 / 598をRCと扱わない。
 
 ## Voice専用ChatGPT managed login
 
@@ -143,3 +142,15 @@ keyring-only Codex loginの実装制約は、Voice専用profileでChatGPT manage
 - Debug / Release warnings-as-errors、Voice静的42件、`--verify-codex-app-server`、auth control-plane、Realtime renderer、Voice Foundation、Panel 128、Capability 20、Broker 21 descriptor / 20 handler、Pocket Surface / App、Timer、`git diff --check`がPASSした。Release lifecycle verifierは1.60秒だった。
 - local build 602はApple Development署名の`codesign --deep --strict`、起動、通常processのgraceful終了を確認した。隔離物理Voice E2E PID 70741は2時間超の稼働後も生存し、停止・再起動していない。
 - 実装commitは`3ccf423e9b131f402cf9ba146778479b0a199f0d`。実ChatGPT browser login、物理マイク、remote audio、transcript、Calendar createは引き続き人手gateであり、この検証で完了扱いにしない。merge、release、Draft解除は実施していない。
+
+## build 605 Release配布修正と最終成果物readback
+
+- 配布scriptがSwiftPMのDebug binaryを梱包していることを、build 604の実行ファイルsizeとMach-O UUIDで検出した。build 604はApple公証と配布bundle内Codex app-server Realtimeを通過していたが、Release最適化されていないためRC候補から除外した。
+- `build_and_run.sh`へ`debug / release`の明示configurationを追加した。通常開発はDebug既定、隔離E2EはDebug限定、`package_zip.sh`はRelease固定とし、`.build/$configuration`のmain、Sparkle、MediaRemoteAdapter、`run.pl`だけを直接参照する。Release依存欠落とmainの2つの`@rpath` closure不一致はZIP作成前にfatalとした。
+- Debug / Release warnings-as-errors、shell構文、Voice静的42件、通常DebugのUUID一致、E2EでRelease拒否、Release mainのUUID一致、Capability 20、Broker 21 descriptor / 20 handler、Pocket App、Pocket Surface、Timer、Voice Foundation、managed login 4シナリオ / 6 process、Codex app-server RealtimeをPASSした。
+- 別エージェントは初回にstaleな別target tripleを`find | head -1`で拾えるP2を1件検出した。active configuration直参照とRelease依存fatalへ修正後、最終P0 / P1 / P2は0件。追加処理はbuild / package時だけで通常runtime、Hover、Voice hot pathへの影響はなく、Release binaryはDebug比で約38%小さく性能改善側と判断された。
+- exact code commit `02128284fb5d075b9773f297064440021c42c79e`を`0.1.0 (605)`としてDeveloper ID署名・公証した。Apple submission `73ee5ac8-1e9e-4643-aca4-cf451b4cdf01`は`Accepted`、staple、Gatekeeper、strict codesign、ZIP独立再展開をPASSした。
+- `dist/releases/HoverPocket-0.1.0-605.zip`はSHA-256 `734f1d8ae8af77f253e655be12eaec61a679bd2b7dd425f671176a920085ad26`、size `7495993` bytes。appcastはversion `605`、short version `0.1.0`、同じlengthを持つ。ZIP top-levelは`HoverPocket.app`だけで、bundle ID `local.codex.hover-pocket`、Release sourceと配布mainのUUIDは`F3CFE9E0-17BC-3C73-BC66-114473CE2829`で一致した。
+- 配布binary自身でCapability、Broker、Pocket App、Voice Foundation、managed login、Codex app-server Realtimeを再実行した。Realtimeは`account=chatgpt`、voices 19、ephemeral thread、SDP / WebRTC connected、process closedでPASSした。OpenAI API key、実ブラウザ、物理マイク、remote audio、transcript、Calendar createは使用していない。
+- 公証と全readback後も隔離物理E2E PID 70741は約2時間31分稼働しており、CPU約0.1%、RSSはprocess readback約0.3%、Harnessのidle計測は平均0.114%、p95 / 最大0.2%、RSS平均 / 最大63.031 MiBだった。停止・再起動していない。
+- build 605は未公開のmacOS配布RC候補として受け入れる。GitHub Release、public appcast、merge、Draft解除は実施していない。物理マイク、remote audio、transcript、音声経由Timer、Calendar create、実ChatGPT browser loginは人手gateとして残す。
