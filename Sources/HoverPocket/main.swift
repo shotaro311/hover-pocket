@@ -61,6 +61,33 @@ if CommandLine.arguments.contains("--verify-broker") {
 if CommandLine.arguments.contains("--verify-panel-layout") {
     PanelLayoutVerificationCommand.run()
 }
+if CommandLine.arguments.contains("--verify-panel-soak") {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do {
+            let result = try await PanelSoakVerificationCommand.run()
+            print("panel_soak_verify=ok")
+            print("panel_soak_iterations=\(result.iterations)")
+            print("panel_soak_provider_switches=\(result.providerSwitches)")
+            print("panel_soak_recovery_cycles=\(result.recoveryCycles)")
+            print("panel_soak_animated_transition_cycles=\(result.animatedTransitionCycles)")
+            print(String(format: "panel_soak_warm_open_max_ms=%.3f", result.warmOpenMaximumMilliseconds))
+            print("panel_soak_windows=\(result.baselineWindowCount)->\(result.finalWindowCount)")
+            print("panel_soak_threads=\(result.baselineThreadCount)->\(result.finalThreadCount),max=\(result.maximumThreadCount)")
+            print(String(format: "panel_soak_rss_mib=%.3f->%.3f", result.baselineResidentMiB, result.finalResidentMiB))
+            print("panel_soak_rss_growth_limit_mib=64")
+            print("panel_soak_sockets=\(result.baselineSocketCount)->\(result.finalSocketCount)")
+            print("panel_soak_children=\(result.baselineChildProcessCount)->\(result.finalChildProcessCount)")
+            print("PASS panel soak: Voice OFF, 100 open/close, local provider switching, recovery, and bounded resources")
+            exit(0)
+        } catch {
+            print("FAIL panel soak: \(error)")
+            exit(1)
+        }
+    }
+    app.run()
+    exit(1)
+}
 if CommandLine.arguments.contains("--verify-weather") {
     WeatherVerificationCommand.run()
 }

@@ -10,6 +10,7 @@ on:
       - "Sources/HoverPocket/App/CapabilityBrokerVerificationCommand.swift"
       - "Sources/HoverPocket/App/PocketAppPackageVerificationCommand.swift"
       - "Sources/HoverPocket/App/PocketSurfaceVerificationCommand.swift"
+      - "Sources/HoverPocket/App/PanelSoakVerificationCommand.swift"
       - "Sources/HoverPocket/App/AppDelegate.swift"
       - "Sources/HoverPocket/App/MacOSVoiceE2EIsolationVerificationCommand.swift"
       - "Sources/HoverPocket/App/VoiceFoundationVerificationCommand.swift"
@@ -58,6 +59,7 @@ on:
       - "Sources/HoverPocket/App/CapabilityBrokerVerificationCommand.swift"
       - "Sources/HoverPocket/App/PocketAppPackageVerificationCommand.swift"
       - "Sources/HoverPocket/App/PocketSurfaceVerificationCommand.swift"
+      - "Sources/HoverPocket/App/PanelSoakVerificationCommand.swift"
       - "Sources/HoverPocket/App/AppDelegate.swift"
       - "Sources/HoverPocket/App/MacOSVoiceE2EIsolationVerificationCommand.swift"
       - "Sources/HoverPocket/App/VoiceFoundationVerificationCommand.swift"
@@ -129,6 +131,7 @@ jobs:
           .build/debug/HoverPocket --verify-voice-foundation
           .build/debug/HoverPocket --verify-voice-e2e-isolation
           .build/debug/HoverPocket --verify-panel-layout
+          .build/debug/HoverPocket --verify-panel-soak
 
       - name: Verify capability handlers
         run: .build/debug/HoverPocket --verify-capabilities
