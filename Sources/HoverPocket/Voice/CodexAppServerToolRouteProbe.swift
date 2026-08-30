@@ -11,6 +11,17 @@ enum CodexAppServerToolRouteProbeError: Error, Equatable, Sendable {
     case toolRouteMismatch
 }
 
+struct CodexAppServerToolRouteProbeInvocation: Sendable {
+    let toolName: String
+    let arguments: CodexJSONValue
+    let handler: @Sendable (CodexAppServerRequest, String) async -> CodexAppServerReply
+}
+
+struct CodexAppServerToolRouteProbeInvocationResult: Sendable {
+    let request: CodexAppServerRequest
+    let reply: CodexAppServerReply
+}
+
 enum CodexVoiceAppServerLaunchPolicy {
     private static let baseConfigurationArguments = [
         "-c",
@@ -44,12 +55,47 @@ enum CodexAppServerToolRouteProbe {
         profile: CodexVoiceAppServerProfile,
         dynamicTools: [CodexJSONValue]
     ) async throws {
+        _ = try await runCore(
+            executableURL: executableURL,
+            profile: profile,
+            dynamicTools: dynamicTools,
+            invocation: nil
+        )
+    }
+
+    static func runInvocation(
+        executableURL: URL,
+        profile: CodexVoiceAppServerProfile,
+        dynamicTools: [CodexJSONValue],
+        invocation: CodexAppServerToolRouteProbeInvocation
+    ) async throws -> CodexAppServerToolRouteProbeInvocationResult {
+        guard let result = try await runCore(
+            executableURL: executableURL,
+            profile: profile,
+            dynamicTools: dynamicTools,
+            invocation: invocation
+        ) else {
+            throw CodexAppServerToolRouteProbeError.requestInvalid
+        }
+        return result
+    }
+
+    private static func runCore(
+        executableURL: URL,
+        profile: CodexVoiceAppServerProfile,
+        dynamicTools: [CodexJSONValue],
+        invocation: CodexAppServerToolRouteProbeInvocation?
+    ) async throws -> CodexAppServerToolRouteProbeInvocationResult? {
         guard let expectedNames = CodexVoiceThreadContract.toolNames(dynamicTools),
               !expectedNames.isEmpty else {
             throw CodexAppServerToolRouteProbeError.toolRouteMismatch
         }
+        if let invocation,
+           !expectedNames.contains(invocation.toolName) {
+            throw CodexAppServerToolRouteProbeError.toolRouteMismatch
+        }
 
-        let server = try CodexToolRouteProbeHTTPServer()
+        let server = try CodexToolRouteProbeHTTPServer(invocation: invocation)
         let workspace = FileManager.default.temporaryDirectory.appendingPathComponent(
             "HoverPocketCodexToolRoute-\(UUID().uuidString)",
             isDirectory: true
@@ -111,6 +157,7 @@ enum CodexAppServerToolRouteProbe {
             throw error
         }
 
+        var invocationResult: CodexAppServerToolRouteProbeInvocationResult?
         do {
             let threadResponse = try await client.sendRequest(
                 "thread/start",
@@ -126,6 +173,25 @@ enum CodexAppServerToolRouteProbe {
                   let modelProvider = threadResponse.objectValue?["modelProvider"]?.stringValue,
                   modelProvider == "hoverpocket_probe" else {
                 throw CodexAppServerToolRouteProbeError.requestInvalid
+            }
+
+            let invocationCapture = invocation.map { _ in
+                CodexToolRouteProbeInvocationCapture()
+            }
+            if let invocation, let invocationCapture {
+                await client.setServerRequestHandler { request in
+                    let reply = await invocation.handler(request, threadID)
+                    return CodexAppServerReply(
+                        result: reply.result,
+                        error: reply.error,
+                        afterWrite: {
+                            if let afterWrite = reply.afterWrite {
+                                await afterWrite()
+                            }
+                            invocationCapture.complete(request: request, reply: reply)
+                        }
+                    )
+                }
             }
 
             async let capturedBody = server.waitForResponsesRequest(timeout: 8)
@@ -150,6 +216,9 @@ enum CodexAppServerToolRouteProbe {
                   CodexVoiceThreadContract.toolNames(actualTools) == expectedNames else {
                 throw CodexAppServerToolRouteProbeError.toolRouteMismatch
             }
+            if let invocationCapture {
+                invocationResult = try await invocationCapture.wait(timeout: 8)
+            }
         } catch {
             await client.close()
             server.stop()
@@ -160,6 +229,7 @@ enum CodexAppServerToolRouteProbe {
         await client.close()
         server.stop()
         try? FileManager.default.removeItem(at: workspace)
+        return invocationResult
     }
 }
 
@@ -174,10 +244,13 @@ private final class CodexToolRouteProbeHTTPServer: @unchecked Sendable {
     private var pendingResult: Result<Data, Error>?
     private var didCapture = false
     private var stopped = false
+    private let invocation: CodexAppServerToolRouteProbeInvocation?
+    private var responsesRequestCount = 0
 
     let baseURL: String
 
-    init() throws {
+    init(invocation: CodexAppServerToolRouteProbeInvocation?) throws {
+        self.invocation = invocation
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else {
             throw CodexAppServerToolRouteProbeError.socketFailed
@@ -308,22 +381,157 @@ private final class CodexToolRouteProbeHTTPServer: @unchecked Sendable {
             return
         }
 
-        let response = """
-        event: response.created
-        data: {"type":"response.created","response":{"id":"resp-hoverpocket-probe"}}
-
-        event: response.completed
-        data: {"type":"response.completed","response":{"id":"resp-hoverpocket-probe","usage":{"input_tokens":0,"input_tokens_details":null,"output_tokens":0,"output_tokens_details":null,"total_tokens":0}}}
-
-
-        """
+        responsesRequestCount += 1
+        let response: Data
+        if responsesRequestCount == 1, let invocation {
+            guard let functionCallResponse = Self.functionCallResponse(invocation) else {
+                sendResponse(status: "500 Internal Server Error", contentType: "text/plain", body: Data(), to: clientFD)
+                complete(.failure(CodexAppServerToolRouteProbeError.requestInvalid))
+                return
+            }
+            response = functionCallResponse
+        } else {
+            response = Self.completedResponse()
+        }
         sendResponse(
             status: "200 OK",
             contentType: "text/event-stream",
-            body: Data(response.utf8),
+            body: response,
             to: clientFD
         )
         complete(.success(request.body))
+    }
+
+    private static func functionCallResponse(
+        _ invocation: CodexAppServerToolRouteProbeInvocation
+    ) -> Data? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        guard let argumentsData = try? encoder.encode(invocation.arguments),
+              let arguments = String(data: argumentsData, encoding: .utf8) else {
+            return nil
+        }
+        let itemID = "fc-hoverpocket-probe"
+        let callID = "call-hoverpocket-probe"
+        let pendingItem: CodexJSONValue = .object([
+            "arguments": .string(""),
+            "call_id": .string(callID),
+            "id": .string(itemID),
+            "name": .string(invocation.toolName),
+            "status": .string("in_progress"),
+            "type": .string("function_call")
+        ])
+        let completedItem: CodexJSONValue = .object([
+            "arguments": .string(arguments),
+            "call_id": .string(callID),
+            "id": .string(itemID),
+            "name": .string(invocation.toolName),
+            "status": .string("completed"),
+            "type": .string("function_call")
+        ])
+        return stream([
+            (
+                "response.created",
+                .object([
+                    "type": .string("response.created"),
+                    "response": .object([
+                        "id": .string("resp-hoverpocket-probe"),
+                        "output": .array([]),
+                        "status": .string("in_progress")
+                    ])
+                ])
+            ),
+            (
+                "response.output_item.added",
+                .object([
+                    "type": .string("response.output_item.added"),
+                    "output_index": .integer(0),
+                    "item": pendingItem
+                ])
+            ),
+            (
+                "response.function_call_arguments.done",
+                .object([
+                    "type": .string("response.function_call_arguments.done"),
+                    "arguments": .string(arguments),
+                    "item_id": .string(itemID),
+                    "name": .string(invocation.toolName),
+                    "output_index": .integer(0)
+                ])
+            ),
+            (
+                "response.output_item.done",
+                .object([
+                    "type": .string("response.output_item.done"),
+                    "output_index": .integer(0),
+                    "item": completedItem
+                ])
+            ),
+            (
+                "response.completed",
+                .object([
+                    "type": .string("response.completed"),
+                    "response": .object([
+                        "id": .string("resp-hoverpocket-probe"),
+                        "output": .array([completedItem]),
+                        "status": .string("completed"),
+                        "usage": usage
+                    ])
+                ])
+            )
+        ])
+    }
+
+    private static func completedResponse() -> Data {
+        stream([
+            (
+                "response.created",
+                .object([
+                    "type": .string("response.created"),
+                    "response": .object([
+                        "id": .string("resp-hoverpocket-probe-final"),
+                        "output": .array([]),
+                        "status": .string("in_progress")
+                    ])
+                ])
+            ),
+            (
+                "response.completed",
+                .object([
+                    "type": .string("response.completed"),
+                    "response": .object([
+                        "id": .string("resp-hoverpocket-probe-final"),
+                        "output": .array([]),
+                        "status": .string("completed"),
+                        "usage": usage
+                    ])
+                ])
+            )
+        ]) ?? Data()
+    }
+
+    private static var usage: CodexJSONValue {
+        .object([
+            "input_tokens": .integer(0),
+            "input_tokens_details": .null,
+            "output_tokens": .integer(0),
+            "output_tokens_details": .null,
+            "total_tokens": .integer(0)
+        ])
+    }
+
+    private static func stream(_ events: [(String, CodexJSONValue)]) -> Data? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        var result = Data()
+        for (name, payload) in events {
+            guard let payloadData = try? encoder.encode(payload) else { return nil }
+            result.append(Data("event: \(name)\ndata: ".utf8))
+            result.append(payloadData)
+            result.append(Data("\n\n".utf8))
+        }
+        result.append(Data("\n".utf8))
+        return result
     }
 
     private func readRequest(from clientFD: Int32) -> (method: String, path: String, body: Data)? {
@@ -412,5 +620,59 @@ private final class CodexToolRouteProbeHTTPServer: @unchecked Sendable {
         }
         lock.unlock()
         continuation?.resume(with: result)
+    }
+}
+
+private final class CodexToolRouteProbeInvocationCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<CodexAppServerToolRouteProbeInvocationResult, Error>?
+    private var pendingResult: CodexAppServerToolRouteProbeInvocationResult?
+    private var completed = false
+
+    func wait(timeout: TimeInterval) async throws -> CodexAppServerToolRouteProbeInvocationResult {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            if let pendingResult {
+                self.pendingResult = nil
+                lock.unlock()
+                continuation.resume(returning: pendingResult)
+                return
+            }
+            self.continuation = continuation
+            lock.unlock()
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeout) { [weak self] in
+                self?.failIfPending()
+            }
+        }
+    }
+
+    func complete(request: CodexAppServerRequest, reply: CodexAppServerReply) {
+        let result = CodexAppServerToolRouteProbeInvocationResult(request: request, reply: reply)
+        lock.lock()
+        guard !completed else {
+            lock.unlock()
+            return
+        }
+        completed = true
+        let continuation = continuation
+        self.continuation = nil
+        if continuation == nil {
+            pendingResult = result
+        }
+        lock.unlock()
+        continuation?.resume(returning: result)
+    }
+
+    private func failIfPending() {
+        lock.lock()
+        guard !completed else {
+            lock.unlock()
+            return
+        }
+        completed = true
+        let continuation = continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(throwing: CodexAppServerToolRouteProbeError.requestTimedOut)
     }
 }

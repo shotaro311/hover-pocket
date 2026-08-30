@@ -25,6 +25,7 @@ macOS Voice Laneの標準providerをCodex app-serverへ接続した。これはO
 - 隔離Voice E2Eの既定providerをRealtime BYOKからCodex app-serverへ変更した。receiptの認証状態はOpenAI keyの有無を固定参照せず、選択中providerがBYOKならkey、Codexならapp-server account readinessをreadbackする。
 - Codex WebRTCのmic取得、remote audio track、remote audio playbackをreceiptへ接続し、mic取得と実再生の両方が揃ったattemptだけHost所有の確認sheetを一度表示する。旧attemptのsheet応答はattempt IDで拒否し、通常版ではreceipt storeが`nil`のため追加処理は即時終了する。
 - E2E harnessの案内をCodex app-serverへ更新した。API keyを引数・環境変数・設定へ要求せず、Voiceは隔離設定画面で明示的に有効化する。
+- `--verify-codex-app-server`を拡張し、local loopback Responses providerが決定論的なTimer function callを返す。実Codex app-serverから届いた`item/tool/call`を同じBridge、Capability Runtime、Registry / Broker、承認、Timer実行、readbackへ通し、replyをapp-server pipeへ書いた後にだけ成功とする。Calendar read/create、Timer approval / reject / replayは外部データを使わない一時fixtureでも縦断確認する。
 
 ## 独立レビュー
 
@@ -42,6 +43,8 @@ Calendar読み取り専用gateも同じエージェントが独立レビュー�
 
 実Calendar初回実行で、private read共通3秒timeoutがURLSessionを取消し、Calendar取得を`URLError -999`で失敗させる過剰制限を検出した。Calendar get / listだけ15秒・30 calls/minへ分離し、Timerなどローカルreadは3秒を維持した。別エージェントは15秒上限、非同期待機、固定診断、個人情報非出力、他Capability非波及を再レビューした。Broker timeoutと取消由来`-999`の診断優先順位も修正し、最終P0 / P1 / P2すべて0件となった。
 
+実app-server tool call検証も別エージェントが独立レビューした。初回はBridgeへ直接生成requestを渡すだけでapp-server本体のrequest shape driftを検出できないP2が1件あった。公式Responses streaming eventに沿うfunction callをloopback providerから返し、実Codex app-server発の`item/tool/call`、Bridge、Broker承認、Timer単一効果、readback、reply書込みを確認するよう修正した。通常compatibility probeはfunction callを発生させず、追加縦断は明示CLIだけで約1.02秒だった。再レビューはP0 / P1 / P2すべて0件である。
+
 残るP2既知制約はkeyring-only Codex loginである。初回実装はowner-onlyのfile-backed `auth.json`を専用profileへsymlinkするため、元`CODEX_HOME`にfileがない環境ではroute canary通過後もproduction `account/read`がsigned-outになる。現在の環境は`~/.codex/auth.json` 0600、symlink先一致、`account.type=chatgpt`をreadback済みで、当面の動作阻害ではない。一般公開対応には専用profileの`account/login/start`または同等のChatGPT login flowが必要である。
 
 ## 検証とreadback
@@ -49,6 +52,7 @@ Calendar読み取り専用gateも同じエージェントが独立レビュー�
 - `swift build -Xswiftc -warnings-as-errors`: PASS
 - `swift run --skip-build HoverPocket --verify-voice-foundation`: PASS
 - `swift run --skip-build HoverPocket --verify-codex-app-server`: foundationとinstalled readinessがともにPASS
+- `--verify-codex-app-server`: 実Codex app-server発の`item/tool/call`からTimerのBroker承認・実行・readback・reply書込みまで`codex_app_server_broker_invocation=verified`。外部Calendar / 既存Timer / API keyは未使用、明示CLI実測1.02秒
 - 環境変数なしの`--require-codex-app-server-ready`: ChatGPT.app同梱Codexを解決しPASS
 - 環境変数なしの`--verify-codex-app-server-realtime`: `account=chatgpt`、voices 19、ephemeral thread、SDP / WebRTC connected、process closedでPASS。最終修正後の独立process 3回は2.171 / 2.312 / 2.224秒、失敗0、一時workspace残存0
 - ChatGPT.app同梱Codex `0.150.0-alpha.12.2`: live verifier PASS。OpenAI API keyと物理マイクは未使用

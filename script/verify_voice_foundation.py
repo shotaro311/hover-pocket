@@ -126,6 +126,20 @@ def main() -> None:
         / "Voice"
         / "CodexAppServerCompatibilityProbe.swift"
     ).read_text(encoding="utf-8")
+    mac_codex_tool_route_probe = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "Voice"
+        / "CodexAppServerToolRouteProbe.swift"
+    ).read_text(encoding="utf-8")
+    mac_codex_foundation_verifier = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "App"
+        / "CodexAppServerVerificationCommand.swift"
+    ).read_text(encoding="utf-8")
     mac_codex_realtime_verifier = (
         ROOT
         / "Sources"
@@ -975,6 +989,20 @@ def main() -> None:
         "probeCandidate(executable",
     )):
         fail("macOS Codex compatibility probe is not bounded or executable-pinned")
+    if not all(value in mac_codex_tool_route_probe for value in (
+        "CodexAppServerToolRouteProbeInvocation",
+        "runInvocation(",
+        '"response.function_call_arguments.done"',
+        "invocationCapture.complete",
+        "afterWrite:",
+    )) or not all(value in mac_codex_foundation_verifier for value in (
+        "verifyInstalledAppServerBrokerInvocation",
+        "CodexAppServerToolRouteProbe.runInvocation",
+        'result.request.method == "item/tool/call"',
+        'output["readback"] as? String == "verified"',
+        "timerStore.runningTimers.count == 1",
+    )):
+        fail("macOS Codex app-server tool call is not bound to Broker approval and readback")
     if not all(value in mac_codex_realtime_verifier for value in (
         "CodexAppServerCompatibilityProbe.shared.isCurrent",
         "rootThreadEphemeral: true",
