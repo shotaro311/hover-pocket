@@ -14,6 +14,7 @@ status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-gr
 - fresh候補`ホバーポケット Voice E2E 618`をsession `HoverPocketVoiceE2ESession-1lQSaT` / runtime `HoverPocketVoiceE2E-dSiGNi` / PID `25480`で起動した。設定画面に「HoverPocket専用のCodexプロファイルは未ログインです。」「ChatGPTでログイン」「再確認」が表示されることをAccessibilityでreadbackした。profile / configはcurrent-user所有の`0700 / 0600`、専用`auth.json`はログイン前のため未作成、Voiceは既定OFFでmic / remote audio / Timer / physical confirmationなし。実ブラウザログインはまだ開始していない。
 - 旧build 617はHarness Stopで`safe_close`、process停止、receipt保持を確認して一時session / runtime / buildをTrashへ移した。物理Voiceの人手gateはbuild 618だけへ引き継ぐ。
 - 独立安全・性能レビューはP0 / P1 0件、実装上のP2 0件。Host auth非参照、runtime内`CODEX_HOME / HOME`、credentialの型・owner・mode・hardlink、Cleanup、本番`externalOrManaged`不変、通常起動 / Voice hot pathへの継続負荷なしを確認した。唯一の文書P2だったHarness usageの旧「logged-in Codex account共有」表現は、隔離profile内で個別ログインしHost credentialを共有しない説明へ修正した。
+- 実装commit `c96457c7778a3767da8639d8bf6d0bebf20df3ea`をDraft PR #39へpushした。CIは15 SUCCESS / 8 expected SKIPPED / failure 0 / pending 0で、macOS、Windows、3 OS契約、routerを同一SHAで確認した。PRはDraft / OPEN / MERGEABLE、remote parity 0 / 0で、merge、公開、releaseは行っていない。
 
 ## 2026-08-30 macOS設定画面の見切れ修正
 
