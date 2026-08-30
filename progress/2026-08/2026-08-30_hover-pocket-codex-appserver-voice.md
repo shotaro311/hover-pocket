@@ -52,7 +52,7 @@ ChatGPT.app同梱Codexのlive接続差分を同じ別エージェントが再度
 - `python3 -m unittest script.tests.test_verify_release_readback`: PASS、23 tests
 - `git diff --check`: PASS
 - 隔離E2E app bundle: build PASS、executable存在、`codesign --verify --deep --strict` PASS、microphone purpose stringにCodex app-serverを含むことをreadback。bundleは実行せずTrashへ移動した。
-- code head `0a09b72a7c24baf0034cf26e15bfce5e1e0c276b`のDraft PR #39: Router [33282321608](https://github.com/shotaro311/hover-pocket/actions/runs/33282321608)、macOS [33282323019](https://github.com/shotaro311/hover-pocket/actions/runs/33282323019)、Windows [33282323022](https://github.com/shotaro311/hover-pocket/actions/runs/33282323022)、3OS contract / compare [33282323021](https://github.com/shotaro311/hover-pocket/actions/runs/33282323021)を含む15 check成功・8 gate skip・失敗0・pending 0。PRはDraft / OPEN / MERGEABLE。
+- 実装commit `dc734a95f30e847cb70c705df8d67728178a578f`のDraft PR #39: Router [33289398813](https://github.com/shotaro311/hover-pocket/actions/runs/33289398813)、macOS [33289399447](https://github.com/shotaro311/hover-pocket/actions/runs/33289399447)、Windows [33289399448](https://github.com/shotaro311/hover-pocket/actions/runs/33289399448)、3OS contract / compare [33289399439](https://github.com/shotaro311/hover-pocket/actions/runs/33289399439)、transition [33289399443](https://github.com/shotaro311/hover-pocket/actions/runs/33289399443)、release readback [33289399458](https://github.com/shotaro311/hover-pocket/actions/runs/33289399458)が成功。公開成果物を必要とする8 gateは意図どおりskip、失敗0・pending 0。PRはDraft / OPEN / MERGEABLE。
 
 ## 未完了gate
 
