@@ -200,3 +200,12 @@ keyring-only Codex loginの実装制約は、Voice専用profileでChatGPT manage
 - 独立レビューは初回CIのsocket判定フレークを検出し、`--verify-panel-soak`専用で両Provider warm-up、baseline / final各500ms待機、`baseline + 1`、実数付き失敗ログへ修正した。修正後レビューはP0 / P1 / P2すべて0件。CI実測socket `2->3`と公証済みartifact `0->1`は同じ境界内で、通常起動、Hover、Voice、app-server性能への影響はない。
 - 既存の長時間基準PID `70741`、Provider-bound PID `619`、旧build PID `86913`は停止せず生存を確認した。現Provider-bound候補は旧runtime sourceのため、物理人手gate前にcurrent exact HEADから新しい一意表示candidateを作成する。
 - Pro Critic artifact SHA-256 `12bf991d6b21460641223e29f517ac69a9f6e2c709bcf229c71746fad85908f7`、terminal receipt complete、CI、RC、E2E、production false、残存gateを`progress/evidence/2026-08-30_an8-exact-head-9a110e9.json`へ固定した。物理Voice 10回、Calendar create、Windows正式署名 / UAC / signed transition / 標準Codex物理Voice、明示的なrelease authorityが残るため、NO-GOとDraftを維持する。
+
+## current runtime build 615 provider-bound物理Voice候補
+
+- docs-only HEAD `78bd8888efacad8d6cbf989ec2065a827b1b48ea`のcheckoutで、runtime source HEAD `9a110e9ae260ec65f7c99496baf36ff8c899b250`と同じ実装から`0.1.0 (615)`の隔離E2E bundleをfresh buildした。表示名だけを`ホバーポケット Voice E2E 615`へ変更し、隔離bundle ID `local.codex.hover-pocket.voice-e2e`、一意Keychain suffix、update feed / Google OAuthなしを維持したままad-hoc再署名した。
+- bundle main SHA-256は`ba92f0d91fc655ad4e17177487c3c045384bb7aabcdf3405ff5e3fb5fc30b3e2`、Debug source mainは`71f1e54a599d374ecf706ca7ec3aca7d111b4b808e53b39a5cb9f9ec8f512222`で、署名差分はあるがMach-O UUID `3FA123A2-0564-313B-8780-41017D7B0F7F`は一致した。strict codesign、Signature adhoc、TeamIdentifier not setをreadbackした。
+- fresh session `HoverPocketVoiceE2ESession-myJkzO` / runtime `HoverPocketVoiceE2E-QXqNC6` / PID `10329`で起動し、Harness Readback / ValidateIsolation、process / storage所有、schema 2、expected provider `codex_app_server`を確認した。Info.plistの表示名とbundle IDも別経路で一致した。
+- Voiceは既定OFF、connection disconnected、provider未要求、microphone / remote audio / Timer readback / 物理確認なしである。10秒21 sampleのidle計測はCPU平均`0.105%`、p95`0.1%`、最大`0.2%`、RSS平均`109.740 MiB`、最大`109.750 MiB`だった。
+- 最初のfresh候補PID `7291`と旧PID `619` / `70741` / `86913`は同時刻帯にAppKitの`terminate`から正常終了し、各receiptは`safe_close`だった。Harness Stopや強制signalによる停止は実行しておらず、発火元は断定しない。crashやruntime leakの証拠にはせず、staleになった最初のfresh sessionだけをHarnessで停止確定後にTrashへ移し、新候補を作り直した。
+- この候補はcurrent runtime sourceへ置き換え済みで、人手gate前のsource replacementは不要になった。次はユーザーが`ホバーポケット Voice E2E 615`を確認し、SettingsからVoiceを明示ON、物理マイク、可聴remote audio、user / assistant transcript、Timer承認 / readbackを実行する。Calendar create、Draft解除、merge、release、公開は別の明示承認gateとして残す。

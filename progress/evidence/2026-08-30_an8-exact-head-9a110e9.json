@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-30T11:00:37Z",
+  "generatedAt": "2026-08-30T11:27:33Z",
   "verdict": "NO_GO",
   "releaseAuthorityGranted": false,
   "publicationPerformed": false,
@@ -152,14 +152,15 @@
     "published": false
   },
   "macOSProviderBoundVoiceCandidate": {
-    "displayName": "ホバーポケット Voice E2E 612",
+    "displayName": "ホバーポケット Voice E2E 615",
     "bundleIdentifier": "local.codex.hover-pocket.voice-e2e",
-    "sourceHead": "89669c4d39f6bbf942e9944a32fbf969df7972f2",
+    "buildNumber": 615,
+    "sourceHead": "9a110e9ae260ec65f7c99496baf36ff8c899b250",
     "sessionSchemaVersion": 2,
     "expectedProviderId": "codex_app_server",
-    "signedBinarySha256": "d3fecc9259bd7fc5cac95f5383bfdb9af4317c095d9616ab5c5e6ce2b8603afc",
-    "sourceDebugBinarySha256": "cfe30c9ea89e20a288595bced58f2b22cbe896f866aec883477499842fe867ca",
-    "machOUuid": "AE5C733D-0F70-3B1B-A22D-30462A6DDF5D",
+    "signedBinarySha256": "ba92f0d91fc655ad4e17177487c3c045384bb7aabcdf3405ff5e3fb5fc30b3e2",
+    "sourceDebugBinarySha256": "71f1e54a599d374ecf706ca7ec3aca7d111b4b808e53b39a5cb9f9ec8f512222",
+    "machOUuid": "3FA123A2-0564-313B-8780-41017D7B0F7F",
     "strictCodeSignVerified": true,
     "processOwnershipVerified": true,
     "storageIsolationVerified": true,
@@ -169,14 +170,15 @@
     "remoteAudioPlayed": false,
     "timerReadbackVerified": false,
     "humanPhysicalConfirmation": false,
-    "currentRuntimeSourceReplacementRequiredBeforeHumanGate": true,
+    "currentRuntimeSourceReplacementRequiredBeforeHumanGate": false,
+    "processIdentifierAtReadback": 10329,
     "idleReadback": {
-      "sampleCount": 7,
-      "cpuAveragePercent": 0.1,
+      "sampleCount": 21,
+      "cpuAveragePercent": 0.105,
       "cpuP95Percent": 0.1,
-      "cpuMaximumPercent": 0.1,
-      "rssAverageMiB": 109.578,
-      "rssMaximumMiB": 109.578
+      "cpuMaximumPercent": 0.2,
+      "rssAverageMiB": 109.74,
+      "rssMaximumMiB": 109.75
     },
     "status": "human_physical_gate_pending"
   },
