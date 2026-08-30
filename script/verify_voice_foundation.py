@@ -154,6 +154,13 @@ def main() -> None:
         / "App"
         / "CodexAppServerVerificationCommand.swift"
     ).read_text(encoding="utf-8")
+    mac_codex_login_helper = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "App"
+        / "CodexManagedLoginVerificationHelper.swift"
+    ).read_text(encoding="utf-8")
     mac_codex_realtime_verifier = (
         ROOT
         / "Sources"
@@ -1038,7 +1045,10 @@ def main() -> None:
         '"type": .string("chatgpt")',
         '"useHostedLoginSuccessPage": .bool(true)',
         '"appBrand": .string("chatgpt")',
-        "NSWorkspace.shared.open(login.authURL)",
+        "browserOpener(login.authURL)",
+        "Self.resolveProductionContexts",
+        "private nonisolated static func resolveProductionContexts()",
+        "NSWorkspace.shared.open(url)",
         "CodexVoiceCoordinator.accountAdmissionCode(account) == nil",
         "context.profile.hasValidManagedCredentialFile",
         "loginTimeoutNanoseconds",
@@ -1062,6 +1072,34 @@ def main() -> None:
             or "ChatGPTでログイン" not in mac_settings \
             or "@ObservedObject private var codexVoiceAccount" not in mac_settings:
         fail("macOS Codex managed ChatGPT login is missing, API-key based, or not lifecycle-bounded")
+    if not all(value in mac_codex_foundation_verifier for value in (
+        "verifyManagedChatGPTLoginLifecycle",
+        "CodexManagedLoginPendingAction.allCases",
+        "managed_login_credential_reuse",
+        "managedLoginProcessesClosed",
+        "processCount: 3 + CodexManagedLoginPendingAction.allCases.count",
+        "browserOpenCount: 1 + CodexManagedLoginPendingAction.allCases.count",
+    )) or not all(value in mac_codex_login_helper for value in (
+        '"--verify-codex-managed-login-fake-app-server"',
+        '"account_read:signed_out"',
+        '"account_read:chatgpt"',
+        '"account/login/start"',
+        '"account/login/cancel"',
+        '"account/login/completed"',
+        '"credential_written"',
+        "O_NOFOLLOW",
+        "O_EXCL",
+        "fstat(descriptor, &status)",
+        "status.st_nlink == 1",
+    )) or not all(value in mac_main for value in (
+        "CodexManagedLoginVerificationHelper.argument",
+        "codex_app_server_managed_login_scenarios=",
+        "codex_app_server_managed_login_process_count=",
+        "codex_app_server_managed_login_browser=",
+        "codex_app_server_managed_login_credential_reuse=",
+        "codex_app_server_managed_login_process_state=",
+    )) or '"apiKey"' in mac_codex_login_helper:
+        fail("macOS Codex managed login lifecycle is not process-backed and deterministic")
     model_verifier_start = mac_codex_foundation_verifier.find(
         "static func runModelToolVerification()"
     )

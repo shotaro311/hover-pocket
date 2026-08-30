@@ -21,6 +21,10 @@ if CommandLine.arguments.contains(CodexCredentialBrokerGenerationProbe.argument)
     exit(CodexCredentialBrokerGenerationProbe.run())
 }
 
+if CommandLine.arguments.contains(CodexManagedLoginVerificationHelper.argument) {
+    exit(CodexManagedLoginVerificationHelper.run())
+}
+
 if CommandLine.arguments.contains("--verify-google-calendar") {
     GoogleCalendarVerificationCommand.run()
 }
@@ -84,6 +88,26 @@ if CommandLine.arguments.contains("--verify-codex-app-server")
     Task { @MainActor in
         do {
             let result = try await CodexAppServerVerificationCommand.run()
+            print(
+                "codex_app_server_managed_login_scenarios="
+                    + "\(result.managedLoginLifecycle.scenarioCount)"
+            )
+            print(
+                "codex_app_server_managed_login_process_count="
+                    + "\(result.managedLoginLifecycle.processCount)"
+            )
+            print(
+                "codex_app_server_managed_login_browser="
+                    + "stubbed_\(result.managedLoginLifecycle.browserOpenCount)"
+            )
+            print(
+                "codex_app_server_managed_login_credential_reuse="
+                    + "\(result.managedLoginLifecycle.credentialReuseVerified ? "verified" : "failed")"
+            )
+            print(
+                "codex_app_server_managed_login_process_state="
+                    + "\(result.managedLoginLifecycle.processesClosed ? "closed" : "open")"
+            )
             print("PASS codex app-server foundation: schema and exact tool route, ChatGPT account policy, cached probe, Broker bridge, WebRTC contract")
             if !result.installedCompatibility.gate.isReady {
                 let code = result.installedCompatibility.gate.safeErrorCode

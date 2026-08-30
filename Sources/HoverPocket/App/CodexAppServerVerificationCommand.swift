@@ -7,6 +7,15 @@ enum CodexAppServerVerificationError: Error {
 
 struct CodexAppServerVerificationResult {
     let installedCompatibility: CodexAppServerCompatibilityResult
+    let managedLoginLifecycle: CodexManagedLoginLifecycleVerificationResult
+}
+
+struct CodexManagedLoginLifecycleVerificationResult {
+    let scenarioCount: Int
+    let processCount: Int
+    let browserOpenCount: Int
+    let credentialReuseVerified: Bool
+    let processesClosed: Bool
 }
 
 struct CodexAppServerModelToolVerificationResult {
@@ -15,6 +24,23 @@ struct CodexAppServerModelToolVerificationResult {
     let toolName: String
     let approvalCount: Int
     let processClosed: Bool
+}
+
+private struct CodexManagedLoginVerificationFixture {
+    let context: CodexVoiceManagedLoginContext
+    let receiptURL: URL
+}
+
+private enum CodexManagedLoginPendingAction: String, CaseIterable {
+    case cancel
+    case deactivate
+    case shutdown
+}
+
+@MainActor
+private final class CodexManagedLoginVerificationRecorder {
+    var browserURLs: [URL] = []
+    var credentialChangeCount = 0
 }
 
 @MainActor
@@ -28,6 +54,7 @@ enum CodexAppServerVerificationCommand {
         try verifyChatGPTAccountPolicy()
         try verifyManagedChatGPTLoginContract()
         try verifyVoiceProfileAuthStorage()
+        let managedLoginLifecycle = try await verifyManagedChatGPTLoginLifecycle()
         try await verifyCapabilityBridge()
         try await verifyBrokerCapabilityBridge()
         guard CodexVoiceCoordinator.verifyRealtimeLifecyclePolicy() else {
@@ -42,7 +69,8 @@ enum CodexAppServerVerificationCommand {
             throw CodexAppServerVerificationError.failed("webrtc_contract")
         }
         return CodexAppServerVerificationResult(
-            installedCompatibility: installedCompatibility
+            installedCompatibility: installedCompatibility,
+            managedLoginLifecycle: managedLoginLifecycle
         )
     }
 
@@ -307,6 +335,282 @@ enum CodexAppServerVerificationCommand {
             }
             throw error
         }
+    }
+
+    private static func verifyManagedChatGPTLoginLifecycle() async throws
+        -> CodexManagedLoginLifecycleVerificationResult {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "hoverpocket-managed-login-lifecycle-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        do {
+            try fileManager.createDirectory(
+                at: root,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
+        } catch {
+            throw CodexAppServerVerificationError.failed(
+                "managed_login_lifecycle_workspace"
+            )
+        }
+        defer { try? fileManager.removeItem(at: root) }
+
+        try await verifyManagedLoginSuccess(
+            fixture: try makeManagedLoginFixture(root: root, name: "success", mode: "success")
+        )
+        for action in CodexManagedLoginPendingAction.allCases {
+            try await verifyManagedLoginPendingCleanup(
+                fixture: try makeManagedLoginFixture(
+                    root: root,
+                    name: action.rawValue,
+                    mode: "pending"
+                ),
+                action: action
+            )
+        }
+        return CodexManagedLoginLifecycleVerificationResult(
+            scenarioCount: 1 + CodexManagedLoginPendingAction.allCases.count,
+            processCount: 3 + CodexManagedLoginPendingAction.allCases.count,
+            browserOpenCount: 1 + CodexManagedLoginPendingAction.allCases.count,
+            credentialReuseVerified: true,
+            processesClosed: true
+        )
+    }
+
+    private static func verifyManagedLoginSuccess(
+        fixture: CodexManagedLoginVerificationFixture
+    ) async throws {
+        let recorder = CodexManagedLoginVerificationRecorder()
+        let controller = makeManagedLoginController(fixture: fixture, recorder: recorder)
+        do {
+            controller.refresh()
+            guard await waitForManagedLoginCondition({
+                controller.state == .signedOut(
+                    managedLoginAvailable: true,
+                    reasonCode: "signed_out"
+                )
+            }) else {
+                throw CodexAppServerVerificationError.failed(
+                    "managed_login_refresh_state"
+                )
+            }
+            guard recorder.browserURLs.isEmpty,
+                  recorder.credentialChangeCount == 0 else {
+                throw CodexAppServerVerificationError.failed(
+                    "managed_login_refresh_side_effect"
+                )
+            }
+
+            controller.startLogin()
+            guard await waitForManagedLoginCondition({ controller.state == .signedIn }) else {
+                throw CodexAppServerVerificationError.failed(
+                    "managed_login_success_state"
+                )
+            }
+            guard recorder.browserURLs.count == 1,
+                  recorder.browserURLs[0].absoluteString
+                    == "https://auth.openai.com/hoverpocket-verification",
+                  recorder.credentialChangeCount == 1,
+                  fixture.context.profile.hasValidManagedCredentialFile else {
+                throw CodexAppServerVerificationError.failed(
+                    "managed_login_success_readback"
+                )
+            }
+
+            controller.refresh()
+            guard await waitForManagedLoginCondition({ controller.state == .signedIn }),
+                  recorder.browserURLs.count == 1,
+                  recorder.credentialChangeCount == 1 else {
+                throw CodexAppServerVerificationError.failed(
+                    "managed_login_credential_reuse"
+                )
+            }
+            await controller.shutdown()
+        } catch {
+            await controller.shutdown()
+            throw error
+        }
+
+        let events = try managedLoginReceiptEvents(fixture.receiptURL)
+        guard events.filter({ $0.hasPrefix("process_started:") }).count == 3,
+              events.filter({ $0 == "initialize" }).count == 3,
+              events.filter({ $0 == "account_read:signed_out" }).count == 2,
+              events.filter({ $0 == "account_read:chatgpt" }).count == 2,
+              events.filter({ $0 == "login_start" }).count == 1,
+              events.filter({ $0 == "credential_written" }).count == 1,
+              events.filter({ $0 == "login_completed" }).count == 1,
+              !events.contains("login_cancel"),
+              !events.contains(where: { $0.hasPrefix("unexpected_request:") }),
+              await managedLoginProcessesClosed(events) else {
+            throw CodexAppServerVerificationError.failed(
+                "managed_login_success_process_readback"
+            )
+        }
+    }
+
+    private static func verifyManagedLoginPendingCleanup(
+        fixture: CodexManagedLoginVerificationFixture,
+        action: CodexManagedLoginPendingAction
+    ) async throws {
+        let recorder = CodexManagedLoginVerificationRecorder()
+        let controller = makeManagedLoginController(fixture: fixture, recorder: recorder)
+        do {
+            controller.startLogin()
+            guard await waitForManagedLoginCondition({
+                controller.state == .signingIn && recorder.browserURLs.count == 1
+            }) else {
+                throw CodexAppServerVerificationError.failed(
+                    "managed_login_\(action.rawValue)_not_started"
+                )
+            }
+            switch action {
+            case .cancel:
+                controller.cancelLogin()
+                guard controller.state == .signedOut(
+                    managedLoginAvailable: true,
+                    reasonCode: "signed_out"
+                ) else {
+                    throw CodexAppServerVerificationError.failed(
+                        "managed_login_cancel_state"
+                    )
+                }
+                await controller.shutdown()
+            case .deactivate:
+                controller.deactivate()
+                guard controller.state == .idle else {
+                    throw CodexAppServerVerificationError.failed(
+                        "managed_login_deactivate_state"
+                    )
+                }
+                await controller.shutdown()
+            case .shutdown:
+                await controller.shutdown()
+            }
+            guard controller.state == .idle else {
+                throw CodexAppServerVerificationError.failed(
+                    "managed_login_\(action.rawValue)_shutdown_state"
+                )
+            }
+        } catch {
+            await controller.shutdown()
+            throw error
+        }
+
+        let events = try managedLoginReceiptEvents(fixture.receiptURL)
+        guard recorder.browserURLs.count == 1,
+              recorder.credentialChangeCount == 0,
+              !FileManager.default.fileExists(
+                atPath: fixture.context.profile.codexHomeURL
+                    .appendingPathComponent("auth.json").path
+              ),
+              events.filter({ $0.hasPrefix("process_started:") }).count == 1,
+              events.filter({ $0 == "initialize" }).count == 1,
+              events.filter({ $0 == "account_read:signed_out" }).count == 1,
+              events.filter({ $0 == "login_start" }).count == 1,
+              events.filter({ $0 == "login_cancel" }).count == 1,
+              !events.contains(where: { $0.hasPrefix("unexpected_request:") }),
+              await managedLoginProcessesClosed(events) else {
+            throw CodexAppServerVerificationError.failed(
+                "managed_login_\(action.rawValue)_process_readback"
+            )
+        }
+    }
+
+    private static func makeManagedLoginController(
+        fixture: CodexManagedLoginVerificationFixture,
+        recorder: CodexManagedLoginVerificationRecorder
+    ) -> CodexVoiceAccountLoginController {
+        CodexVoiceAccountLoginController(
+            contextProvider: { [context = fixture.context] in [context] },
+            browserOpener: { [weak recorder] url in
+                recorder?.browserURLs.append(url)
+                return true
+            },
+            credentialChangeHandler: { [weak recorder] in
+                recorder?.credentialChangeCount += 1
+            }
+        )
+    }
+
+    private static func makeManagedLoginFixture(
+        root: URL,
+        name: String,
+        mode: String
+    ) throws -> CodexManagedLoginVerificationFixture {
+        let directory = root.appendingPathComponent(name, isDirectory: true)
+        let codexHome = directory.appendingPathComponent("codex-home", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try FileManager.default.createDirectory(
+            at: codexHome,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        let receiptURL = directory.appendingPathComponent("receipt.log")
+        var environment = ProcessInfo.processInfo.environment
+        environment["CODEX_HOME"] = codexHome.path
+        environment[CodexManagedLoginVerificationHelper.modeEnvironmentKey] = mode
+        environment[CodexManagedLoginVerificationHelper.receiptEnvironmentKey]
+            = receiptURL.path
+        let executableURL = try CodexExecutableResolver.validate(
+            URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+        )
+        let profile = CodexVoiceAppServerProfile(
+            codexHomeURL: codexHome,
+            processEnvironment: environment,
+            identity: "managed-login-verification-\(name)",
+            authStorage: .managedFile
+        )
+        return CodexManagedLoginVerificationFixture(
+            context: CodexVoiceManagedLoginContext(
+                executableURL: executableURL,
+                profile: profile,
+                launchArguments: [CodexManagedLoginVerificationHelper.argument]
+            ),
+            receiptURL: receiptURL
+        )
+    }
+
+    private static func managedLoginReceiptEvents(_ receiptURL: URL) throws -> [String] {
+        let text: String
+        do {
+            text = try String(contentsOf: receiptURL, encoding: .utf8)
+        } catch {
+            throw CodexAppServerVerificationError.failed(
+                "managed_login_receipt_missing"
+            )
+        }
+        return text.split(whereSeparator: \.isNewline).map(String.init)
+    }
+
+    private static func managedLoginProcessesClosed(_ events: [String]) async -> Bool {
+        let processIDs = events.compactMap { event -> Int32? in
+            guard event.hasPrefix("process_started:"),
+                  let value = Int32(event.dropFirst("process_started:".count)) else {
+                return nil
+            }
+            return value
+        }
+        guard !processIDs.isEmpty else { return false }
+        for processID in processIDs where !(await waitForProcessExit(processID)) {
+            return false
+        }
+        return true
+    }
+
+    private static func waitForManagedLoginCondition(
+        _ condition: @escaping @MainActor () -> Bool
+    ) async -> Bool {
+        for _ in 0..<100 {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return condition()
     }
 
     private static func waitForProcessExit(_ processID: Int32?) async -> Bool {

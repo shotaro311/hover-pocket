@@ -34,6 +34,17 @@ enum CodexVoiceAccountLoginError: Error, Equatable, Sendable {
 struct CodexVoiceManagedLoginContext: Equatable, Sendable {
     let executableURL: URL
     let profile: CodexVoiceAppServerProfile
+    let launchArguments: [String]
+
+    init(
+        executableURL: URL,
+        profile: CodexVoiceAppServerProfile,
+        launchArguments: [String] = ["app-server", "--stdio"]
+    ) {
+        self.executableURL = executableURL
+        self.profile = profile
+        self.launchArguments = launchArguments
+    }
 }
 
 actor CodexVoiceAccountContextResolver {
@@ -94,6 +105,42 @@ final class CodexVoiceAccountLoginController: ObservableObject {
     private var activeLoginID: String?
     private var lastManagedLoginAvailable = false
     private var isShuttingDown = false
+    private let contextProvider: @Sendable () async throws
+        -> [CodexVoiceManagedLoginContext]
+    private let browserOpener: @MainActor @Sendable (URL) -> Bool
+    private let credentialChangeHandler: @MainActor @Sendable () -> Void
+
+    convenience init() {
+        self.init(
+            contextProvider: Self.resolveProductionContexts,
+            browserOpener: Self.openProductionBrowser,
+            credentialChangeHandler: Self.publishProductionCredentialChange
+        )
+    }
+
+    init(
+        contextProvider: @escaping @Sendable () async throws
+            -> [CodexVoiceManagedLoginContext],
+        browserOpener: @escaping @MainActor @Sendable (URL) -> Bool,
+        credentialChangeHandler: @escaping @MainActor @Sendable () -> Void
+    ) {
+        self.contextProvider = contextProvider
+        self.browserOpener = browserOpener
+        self.credentialChangeHandler = credentialChangeHandler
+    }
+
+    private nonisolated static func resolveProductionContexts() async throws
+        -> [CodexVoiceManagedLoginContext] {
+        try await CodexVoiceAccountContextResolver.shared.contexts()
+    }
+
+    private static func openProductionBrowser(_ url: URL) -> Bool {
+        NSWorkspace.shared.open(url)
+    }
+
+    private static func publishProductionCredentialChange() {
+        VoiceLaneRuntime.shared.credentialsDidChange()
+    }
 
     func refresh() {
         guard !isShuttingDown,
@@ -275,7 +322,7 @@ final class CodexVoiceAccountLoginController: ObservableObject {
             guard isCurrent(generation) else { return }
             loginID = login.loginID
             activeLoginID = login.loginID
-            guard NSWorkspace.shared.open(login.authURL) else {
+            guard browserOpener(login.authURL) else {
                 throw CodexVoiceAccountLoginError.browserOpenFailed
             }
 
@@ -303,7 +350,7 @@ final class CodexVoiceAccountLoginController: ObservableObject {
             guard isCurrent(generation) else { return }
             state = .signedIn
             finishOperation(generation)
-            VoiceLaneRuntime.shared.credentialsDidChange()
+            credentialChangeHandler()
         } catch is CancellationError {
             streamContinuation?.finish()
             if generation == operationGeneration {
@@ -322,7 +369,7 @@ final class CodexVoiceAccountLoginController: ObservableObject {
     private func selectAccountClient(
         generation: UInt64
     ) async throws -> CodexVoiceAccountClientSelection {
-        let contexts = try await CodexVoiceAccountContextResolver.shared.contexts()
+        let contexts = try await contextProvider()
         let deadline = ProcessInfo.processInfo.systemUptime
             + Self.accountSelectionTimeout
         var lastError: Error = CodexVoiceAccountLoginError.accountReadFailed
@@ -390,7 +437,7 @@ final class CodexVoiceAccountLoginController: ObservableObject {
         try await CodexAppServerClient.start(
             options: CodexAppServerClientOptions(
                 executableURL: context.executableURL,
-                launchArguments: ["app-server", "--stdio"],
+                launchArguments: context.launchArguments,
                 processEnvironment: context.profile.processEnvironment,
                 workingDirectoryURL: context.profile.codexHomeURL,
                 requestTimeout: requestTimeout,
