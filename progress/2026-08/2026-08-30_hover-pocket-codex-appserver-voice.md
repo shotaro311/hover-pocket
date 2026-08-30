@@ -110,3 +110,15 @@ Calendar読み取り専用gateも同じエージェントが独立レビュー�
 - keyring-only Codex login向けの専用ChatGPT login flowと、file-backed loginからの移行readback。
 - Draft PRのCIと人手レビュー。merge、release、既存notarized build 583の差し替えは未実施。
 - macOS署名bundleでSystem SettingsのLocal Network許可を有効にし、`--verify-codex-app-server-realtime`のaccount、19 voices、ephemeral thread、SDP / WebRTC connected、process closedを再readbackする。完了前はbuild 597 / 598をRCと扱わない。
+
+## build 599 最終成果物readback
+
+- product source exact HEAD `9961543db7c6502381830954c738029bf8da4c8d`を`0.1.0 (599)`としてDeveloper ID署名・公証した。Apple notary submission `52ecaaec-4b2c-4d44-97f7-57cb20dce3a2`は`Accepted`、messageは`Processing complete`である。
+- `dist/releases/HoverPocket-0.1.0-599.zip`のSHA-256は`747c4e43cfc65d9cbd0fde5d960834f87f4df7cb41cfab82eb224cd6a10f302d`、sizeは`10138820` bytes。appcastはversion `599`、short version `0.1.0`、versioned URL、同じlength、88文字のSparkle署名を持つ。
+- ZIPを新しい一時directoryへ独立展開し、top-levelが`HoverPocket.app`だけであること、bundle ID `local.codex.hover-pocket`、version `0.1.0`、build `599`、Local Network purpose stringをreadbackした。展開後appの`codesign --verify --deep --strict`、`stapler validate`、`spctl`はPASSし、Gatekeeper sourceは`Notarized Developer ID`、Team IDは`N7VVPW44ZA`だった。一時directoryは検証後Trashへ移した。
+- release entitlementはApple Events、audio-input、cameraの3件だけで、Bonjour browseやmulticast entitlementは追加していない。
+- 配布bundle内のCapability、Broker、Pocket Surface / App、Voice Foundation / E2E isolation、Codex app-server foundation、ChatGPT accountを使う実モデルTimer toolはPASSした。OpenAI API keyは使用していない。
+- 配布bundle内の`--verify-codex-app-server-realtime`はexit 1、stdout `FAIL codex app-server realtime: realtime_probe_connection_unavailable`、stderr空だった。raw WebKit / SDP / ICE値は出力していない。Local Network許可と物理音声を通すまではbuild 599をVoice対応RCとして受け入れない。
+- 独立エージェントによるhybrid 3 / 8秒ICE待機、Local Network purpose、verifier専用window、E2E process保護の再レビューはP0 / P1 / P2すべて0件。通常時の追加は完了時に解除されるtimer最大2個で、CPU / RSS /起動時間に有意な劣化はないと判定した。
+- 公証・独立展開・packaged verifier後も隔離E2E PID `70741`は生存し、CPU `0.2%`、RSS約`82.5 MiB`をreadbackした。停止・再起動はしていない。
+- GitHub Release、macOS public feed、merge、Draft解除は実施していない。
