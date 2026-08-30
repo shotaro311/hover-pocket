@@ -63,6 +63,13 @@ final class HoverPocketRuntimeEnvironment: @unchecked Sendable {
         rootDirectory.appendingPathComponent("voice-e2e-receipt.json", isDirectory: false)
     }
 
+    var voiceE2EPerformanceReceiptURL: URL {
+        rootDirectory.appendingPathComponent(
+            "voice-e2e-performance.json",
+            isDirectory: false
+        )
+    }
+
     var providerRegistry: ProviderRegistry {
         isIsolatedVoiceE2E
             ? ProviderRegistry(providers: [TimerProvider()])

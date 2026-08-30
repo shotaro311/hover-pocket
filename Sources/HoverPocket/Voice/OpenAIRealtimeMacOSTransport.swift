@@ -551,6 +551,7 @@ extension OpenAIRealtimeMacOSTransport: WKScriptMessageHandler {
         case "offer":
             handleOffer(body, generation: eventGeneration, sessionID: sessionID)
         case "connected":
+            MacOSVoiceE2EPerformanceStore.shared?.recordTransportAttached()
             finishStart()
         case "function":
             handleFunction(body, generation: eventGeneration, sessionID: sessionID)

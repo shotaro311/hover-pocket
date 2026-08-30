@@ -58,6 +58,7 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
         transportGeneration &+= 1
         let generation = transportGeneration
         sessionStarting = true
+        _ = MacOSVoiceE2EReceiptStore.shared?.beginMediaSession()
 
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -123,7 +124,6 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
 
         let operationID = String(generation)
         activeOperationID = operationID
-        _ = MacOSVoiceE2EReceiptStore.shared?.beginMediaSession()
         callAsync(
             "return await window.hoverPocketVoice.start(operationId);",
             arguments: ["operationId": operationID]
@@ -205,6 +205,7 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
         case "attached":
             guard object["operationId"] as? String == activeOperationID else { return }
             sessionStarting = false
+            MacOSVoiceE2EPerformanceStore.shared?.recordTransportAttached()
             runtimeHost?.markTransportAttached()
             resolveStart(.success(()))
         case "detached":

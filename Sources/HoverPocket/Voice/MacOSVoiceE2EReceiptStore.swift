@@ -86,6 +86,9 @@ final class MacOSVoiceE2EReceiptStore {
     }
 
     func recordVoiceSnapshot(_ snapshot: VoiceLaneSnapshot, credentialCurrent: Bool) {
+        MacOSVoiceE2EPerformanceStore.shared?.recordSnapshotPublish()
+        let previousUserTranscriptCount = userTranscriptCount
+        let previousAssistantTranscriptCount = assistantTranscriptCount
         providerID = snapshot.providerID.rawValue
         featureEnabled = snapshot.mode != .disabled
         connection = snapshot.connection.rawValue
@@ -99,10 +102,15 @@ final class MacOSVoiceE2EReceiptStore {
         self.credentialCurrent = credentialCurrent
         lastSafeEvent = "voice_snapshot"
         try? write()
+        if userTranscriptCount != previousUserTranscriptCount
+            || assistantTranscriptCount != previousAssistantTranscriptCount {
+            MacOSVoiceE2EPerformanceStore.shared?.flush(event: "transcript_final")
+        }
     }
 
     @discardableResult
     func beginMediaSession() -> UInt64 {
+        MacOSVoiceE2EPerformanceStore.shared?.beginMediaAttempt()
         mediaAttemptID &+= 1
         microphoneAcquired = false
         microphoneCurrent = false
@@ -144,18 +152,26 @@ final class MacOSVoiceE2EReceiptStore {
         try? write()
     }
 
-    func recordSafeClose() {
+    func recordSafeClose(performanceFlushSynchronously: Bool = false) {
         microphoneCurrent = false
         remoteAudioTrackCurrent = false
         remoteAudioPlaybackCurrent = false
         lastSafeEvent = "safe_close"
         try? write()
+        if performanceFlushSynchronously {
+            try? MacOSVoiceE2EPerformanceStore.shared?.flushSynchronously(
+                event: "safe_close"
+            )
+        } else {
+            MacOSVoiceE2EPerformanceStore.shared?.flush(event: "safe_close")
+        }
     }
 
     func recordTimerCapabilityReadbackVerified() {
         timerCapabilityReadbackVerified = true
         lastSafeEvent = "timer_readback_verified"
         try? write()
+        MacOSVoiceE2EPerformanceStore.shared?.flush(event: "timer_readback_verified")
     }
 
     func claimPhysicalConfirmationRequest() -> UInt64? {
@@ -183,6 +199,11 @@ final class MacOSVoiceE2EReceiptStore {
             lastSafeEvent = "physical_media_user_not_confirmed"
         }
         try? write()
+        MacOSVoiceE2EPerformanceStore.shared?.flush(
+            event: confirmed
+                ? "physical_media_user_confirmed"
+                : "physical_media_user_not_confirmed"
+        )
         return true
     }
 

@@ -774,6 +774,9 @@ final class CodexVoiceCoordinator {
         }
         for batchStart in stride(from: 0, to: uncachedThreads.count, by: 4) {
             let batchEnd = min(batchStart + 4, uncachedThreads.count)
+            MacOSVoiceE2EPerformanceStore.shared?.recordExpandedRPC(
+                count: batchEnd - batchStart
+            )
             await withTaskGroup(
                 of: (ThreadReadCacheKey, ThreadReadValidation?).self
             ) { group in
@@ -872,6 +875,7 @@ final class CodexVoiceCoordinator {
         ]
         let response: CodexJSONValue
         do {
+            MacOSVoiceE2EPerformanceStore.shared?.recordExpandedRPC()
             response = try await client.sendRequest(
                 "thread/list",
                 params: .object(params)
@@ -1110,6 +1114,7 @@ final class CodexVoiceCoordinator {
         await cancelPendingSDP(.negotiationCancelled)
         if let targetClient, let targetRootThreadID {
             do {
+                MacOSVoiceE2EPerformanceStore.shared?.recordRealtimeStopRPC()
                 _ = try await targetClient.sendRequest(
                     "thread/realtime/stop",
                     params: .object(["threadId": .string(targetRootThreadID)])

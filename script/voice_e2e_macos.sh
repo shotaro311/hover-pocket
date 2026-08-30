@@ -76,6 +76,13 @@ state_value() {
   /usr/bin/plutil -extract "$2" raw "$(state_path "$1")"
 }
 
+performance_receipt_required() {
+  local session_dir="$1"
+  local state_file
+  state_file="$(state_path "$session_dir")"
+  [[ "$(/usr/bin/plutil -extract performanceReceiptRequired raw "$state_file" 2>/dev/null || true)" == "true" ]]
+}
+
 require_state() {
   local session_dir="$1"
   local state_file
@@ -220,6 +227,7 @@ build_action() {
   /usr/bin/plutil -insert buildRoot -string "$build_root" "$state_file"
   /usr/bin/plutil -insert runtimeRoot -string "" "$state_file"
   /usr/bin/plutil -insert processIdentifier -integer 0 "$state_file"
+  /usr/bin/plutil -insert performanceReceiptRequired -bool true "$state_file"
   /bin/chmod 600 "$state_file"
 
   printf 'voice_e2e_build=ok\n'
@@ -294,6 +302,7 @@ readback_action() {
   local executable
   local process_state="stopped"
   local receipt_state="pending"
+  local performance_state="pending"
 
   require_state "$session_dir"
   app_path="$(state_value "$session_dir" appPath)"
@@ -311,16 +320,34 @@ readback_action() {
   if [[ -n "$runtime_root" && -f "$runtime_root/voice-e2e-receipt.json" ]]; then
     receipt_state="present"
   fi
+  if [[ -n "$runtime_root" && -f "$runtime_root/voice-e2e-performance.json" ]]; then
+    performance_state="present"
+  fi
 
   printf 'voice_e2e_bundle=ok\n'
   printf 'voice_e2e_lifecycle=%s\n' "$(state_value "$session_dir" lifecycle)"
   printf 'voice_e2e_process=%s\n' "$process_state"
   printf 'voice_e2e_runtime_root=%s\n' "$runtime_root"
   printf 'voice_e2e_receipt=%s\n' "$receipt_state"
+  printf 'voice_e2e_performance_receipt=%s\n' "$performance_state"
   if [[ "$receipt_state" == "present" ]]; then
     "$ROOT_DIR/script/verify_macos_voice_e2e_receipt.py" \
       --runtime-root "$runtime_root" \
       --stage summary
+  fi
+  if [[ -n "$runtime_root" ]]; then
+    if performance_receipt_required "$session_dir"; then
+      "$ROOT_DIR/script/verify_macos_voice_e2e_performance.py" \
+        --runtime-root "$runtime_root" \
+        --receipt-only \
+        --require-receipt \
+        --stage idle
+    elif [[ "$performance_state" == "present" ]]; then
+      "$ROOT_DIR/script/verify_macos_voice_e2e_performance.py" \
+        --runtime-root "$runtime_root" \
+        --receipt-only \
+        --stage idle
+    fi
   fi
 }
 
@@ -331,7 +358,7 @@ validate_action() {
   local pid
   local app_path
   local executable
-  local allowed='^(CapabilityBroker|PocketApps|StickyNotes|Timer|Clipboard|voice-e2e-receipt.json)$'
+  local allowed='^(CapabilityBroker|PocketApps|StickyNotes|Timer|Clipboard|voice-e2e-receipt.json|voice-e2e-performance.json)$'
   local entry
   local entry_path
   local resolved_entry
@@ -359,7 +386,7 @@ validate_action() {
       echo "error: top-level E2E data entries must not be symlinks" >&2
       return 1
     }
-    if [[ "$entry" == "voice-e2e-receipt.json" ]]; then
+    if [[ "$entry" == "voice-e2e-receipt.json" || "$entry" == "voice-e2e-performance.json" ]]; then
       [[ -f "$entry_path" ]] || {
         echo "error: E2E receipt must be a regular file" >&2
         return 1
@@ -380,6 +407,16 @@ validate_action() {
   "$ROOT_DIR/script/verify_macos_voice_e2e_receipt.py" \
     --runtime-root "$runtime_root" \
     --stage "$receipt_stage"
+  if performance_receipt_required "$session_dir"; then
+    local performance_stage="idle"
+    [[ "$receipt_stage" == "physical" ]] && performance_stage="active"
+    "$ROOT_DIR/script/verify_macos_voice_e2e_performance.py" \
+      --runtime-root "$runtime_root" \
+      --pid "$pid" \
+      --duration 3 \
+      --require-receipt \
+      --stage "$performance_stage"
+  fi
   printf 'voice_e2e_validate=ok\n'
   printf 'voice_e2e_storage_isolation=ok\n'
   printf 'voice_e2e_process_ownership=ok\n'
@@ -424,6 +461,13 @@ stop_action() {
   "$ROOT_DIR/script/verify_macos_voice_e2e_receipt.py" \
     --runtime-root "$runtime_root" \
     --stage stopped
+  if performance_receipt_required "$session_dir"; then
+    "$ROOT_DIR/script/verify_macos_voice_e2e_performance.py" \
+      --runtime-root "$runtime_root" \
+      --receipt-only \
+      --require-receipt \
+      --stage stopped
+  fi
   /usr/bin/plutil -replace lifecycle -string stopped "$(state_path "$session_dir")"
   printf 'voice_e2e_stop=ok\n'
   printf 'voice_e2e_process=stopped\n'

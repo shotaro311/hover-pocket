@@ -314,7 +314,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if HoverPocketRuntimeEnvironment.shared.isIsolatedVoiceE2E {
                 try? OpenAIRealtimeCredentialStoreFactory.shared.delete()
                 MacOSVoiceE2EReceiptStore.shared?.recordCredentialCurrent(false)
-                MacOSVoiceE2EReceiptStore.shared?.recordSafeClose()
+                MacOSVoiceE2EReceiptStore.shared?.recordSafeClose(
+                    performanceFlushSynchronously: true
+                )
             }
             self?.voiceTerminationTask = nil
             sender.reply(toApplicationShouldTerminate: true)

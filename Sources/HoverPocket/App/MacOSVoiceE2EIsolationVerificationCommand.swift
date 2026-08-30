@@ -61,6 +61,11 @@ enum MacOSVoiceE2EIsolationVerificationCommand {
                 "receipt_path_escaped",
                 &failures
             )
+            check(
+                isDescendant(environment.voiceE2EPerformanceReceiptURL, of: root),
+                "performance_receipt_path_escaped",
+                &failures
+            )
 
             let settings = AppSettings(defaults: environment.settingsDefaults)
             environment.applyVoiceE2EDefaults(to: settings)
@@ -192,6 +197,7 @@ enum MacOSVoiceE2EIsolationVerificationCommand {
                 failures: &failures
             )
             verifyReceipt(root: root, failures: &failures)
+            verifyPerformanceReceipt(root: root, failures: &failures)
 
             let production = try HoverPocketRuntimeEnvironment.resolveForBuild(
                 arguments: ["HoverPocket"],
@@ -400,6 +406,139 @@ enum MacOSVoiceE2EIsolationVerificationCommand {
             check(stopped.lastSafeEvent == "safe_close", "receipt_safe_close", &failures)
         } catch {
             failures.append("receipt_\(error)")
+        }
+    }
+
+    @MainActor
+    private static func verifyPerformanceReceipt(root: URL, failures: inout [String]) {
+        do {
+            let receiptURL = root.appendingPathComponent(
+                "voice-e2e-performance.json",
+                isDirectory: false
+            )
+            var now: UInt64 = 1_000_000_000
+            let store = try MacOSVoiceE2EPerformanceStore(
+                receiptURL: receiptURL,
+                nowNanoseconds: { now }
+            )
+            let initializedData = try Data(contentsOf: receiptURL)
+            let initializedObject = try JSONSerialization.jsonObject(
+                with: initializedData
+            ) as? [String: Any]
+            check(
+                Set(initializedObject?.keys.map { $0 } ?? [])
+                    == MacOSVoiceE2EPerformanceStore.allowedKeys,
+                "performance_initialized_allowlist",
+                &failures
+            )
+            check(
+                initializedObject?["microphoneToAttachedP95Milliseconds"] is NSNull,
+                "performance_initialized_p95_not_null",
+                &failures
+            )
+            check(
+                initializedObject?["currentAttemptAttached"] as? Bool == false,
+                "performance_initialized_attempt_attached",
+                &failures
+            )
+            store.beginMediaAttempt()
+            store.recordSnapshotPublish()
+            store.recordSnapshotPublish()
+            now += 640_000_000
+            store.recordTransportAttached()
+            store.recordExpandedRPC(count: 3)
+            store.recordRealtimeStopRPC()
+            now += 360_000_000
+            store.flush(event: "deterministic_readback")
+
+            let first = try store.readback()
+            check(first.schemaVersion == 1, "performance_schema", &failures)
+            check(first.mediaAttemptCount == 1, "performance_attempt_count", &failures)
+            check(first.currentAttemptAttached, "performance_attempt_attached", &failures)
+            check(
+                first.microphoneToAttachedSamplesMilliseconds == [640],
+                "performance_attach_sample",
+                &failures
+            )
+            check(
+                first.microphoneToAttachedP95Milliseconds == 640,
+                "performance_attach_p95",
+                &failures
+            )
+            check(first.snapshotPublishCount == 2, "performance_snapshot_count", &failures)
+            check(first.expandedRPCCount == 3, "performance_expanded_rpc", &failures)
+            check(first.realtimeStopRPCCount == 1, "performance_stop_rpc", &failures)
+            check(
+                first.maximumRealtimeStopRPCCount == 1,
+                "performance_stop_rpc_maximum",
+                &failures
+            )
+            check(
+                first.measurementDurationMilliseconds == 1_000,
+                "performance_measurement_duration",
+                &failures
+            )
+
+            store.beginMediaAttempt()
+            now += 900_000_000
+            store.recordTransportAttached()
+            let second = try store.readback()
+            check(
+                second.microphoneToAttachedSamplesMilliseconds == [640, 900],
+                "performance_samples_retained",
+                &failures
+            )
+            check(
+                second.microphoneToAttachedP95Milliseconds == 900,
+                "performance_p95_updated",
+                &failures
+            )
+            check(second.currentAttemptAttached, "performance_second_attempt_attached", &failures)
+            check(second.snapshotPublishCount == 0, "performance_attempt_snapshot_stale", &failures)
+            check(second.expandedRPCCount == 0, "performance_attempt_rpc_stale", &failures)
+            check(second.realtimeStopRPCCount == 0, "performance_attempt_stop_stale", &failures)
+            check(
+                second.maximumRealtimeStopRPCCount == 1,
+                "performance_stop_maximum_lost",
+                &failures
+            )
+
+            store.beginMediaAttempt()
+            let failedCurrentAttempt = try store.readback()
+            check(
+                !failedCurrentAttempt.currentAttemptAttached,
+                "performance_failed_attempt_marked_attached",
+                &failures
+            )
+            check(
+                failedCurrentAttempt.microphoneToAttachedSamplesMilliseconds == [640, 900],
+                "performance_failed_attempt_lost_history",
+                &failures
+            )
+            check(
+                failedCurrentAttempt.realtimeStopRPCCount == 0,
+                "performance_failed_attempt_stop_stale",
+                &failures
+            )
+            try store.flushSynchronously(event: "safe_close")
+            let synchronouslyStopped = try store.readback()
+            check(
+                synchronouslyStopped.lastSafeEvent == "safe_close",
+                "performance_synchronous_safe_close",
+                &failures
+            )
+
+            let data = try Data(contentsOf: receiptURL)
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let keys = Set(object?.keys.map { $0 } ?? [])
+            check(
+                keys == MacOSVoiceE2EPerformanceStore.allowedKeys,
+                "performance_receipt_allowlist",
+                &failures
+            )
+            check(data.count <= 4_096, "performance_receipt_size", &failures)
+        } catch {
+            failures.append("performance_receipt_\(error)")
         }
     }
 

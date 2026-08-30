@@ -52,6 +52,12 @@ Calendar読み取り専用gateも同じエージェントが独立レビュー�
 
 ## 検証とreadback
 
+- 隔離E2E専用の`voice-e2e-performance.json`を追加した。固定schemaは現在attemptのattached有無、mic開始意図→attachedの直近10 sample / p95、snapshot publish、Expanded RPC、Realtime stop RPC、最大stop、計測時間、安全なevent名だけを保持し、会話本文、予定、tool引数、認証情報を保存しない。通常版はperformance storeが`nil`で、writer queueとfile I/Oを生成しない。
+- 書込みはutility直列queueへ移し、mic開始と会話中の同期I/Oを避けた。現在attemptのattached状態を履歴sampleから分離し、final transcript、Timer readback、物理確認、safe closeでreadback可能なsnapshotをflushする。E2Eアプリ終了時だけ同期safe closeを行い、stopped receiptが一つ前のeventになる競合を除去した。
+- 独立レビューは初回P1 2件 / P2 2件と、修正後P2 1件を検出した。すべて修正後のexact diffを再レビューし、最終P0 / P1 / P2は0件。通常起動 / Hover / Voiceは小さなnil分岐だけで、追加CPU、I/O、同期待機、Voice開始latencyへの実質的影響なし。E2E内の既存receipt同期書込みによるmic→attached値のごく小さい上振れだけを許容した。
+- 新しい隔離E2EビルドでBuild / Run / Readback / ValidateIsolation / Stop / Cleanupを通過した。安定後10秒の外部process計測は21 sample、CPU平均0.157%、p95 0.2%、最大0.2%、RSS平均109.234 MiB、最大109.281 MiB。opt-in前なのでmedia attempt、snapshot、Expanded RPC、stop RPCは0。停止後はperformance receiptの`safe_close`とno-media stop 0をreadbackし、task生成のruntime / build / sessionをTrashへ移した。物理E2E PID 56971は停止せず稼働継続を確認した。
+- 修正後のDebug / Release warnings-as-errors build、performance / physical receipt self-test、Voice静的42件、Voice E2E isolation、Capability 20 handler、Broker 21 descriptor / 20 handler、Pocket Surface / Pocket App / Timer / Panel 128 cases、Pocket contract 15 schema / 71 fixtureを2回、release readback 23 unit testがPASSした。Codex app-serverはChatGPT account、Timer model tool、承認1回、Broker readback、19 voices、ephemeral thread、SDP / WebRTC、process teardownまで再確認し、OpenAI API keyは使用していない。
+
 - `swift build -Xswiftc -warnings-as-errors`: PASS
 - `swift run --skip-build HoverPocket --verify-voice-foundation`: PASS
 - `swift run --skip-build HoverPocket --verify-codex-app-server`: foundationとinstalled readinessがともにPASS
@@ -89,6 +95,6 @@ Calendar読み取り専用gateも同じエージェントが独立レビュー�
 - 起動中の隔離E2EアプリでVoiceを明示ONにし、物理マイク取得、remote audio再生、transcript、Timer start、承認、実行後readbackを人手確認する。人の発話と「話せた・聞こえた」確認は自動化・偽装しない。
 - Calendar readはproduction accountと同じ署名・Keychain条件の隔離candidateで完了した。Calendar createは外部書き込みのため、予定内容を明示した承認と実行後readbackを別gateとして残す。
 - 上記の実音声往復とCalendar / Timerを10回反復する。
-- CPU / RSS、mic clickからattachedまでのp95、snapshot publishes/sec、Expanded RPC/sec、stop RPC/session=1の計測。
+- CPU / RSSの自動idle計測は完了した。mic clickからattachedまでのp95、snapshot publishes/sec、Expanded RPC/sec、stop RPC/session=1は、物理音声往復10回の人手gateで最終値を取得する。
 - keyring-only Codex login向けの専用ChatGPT login flowと、file-backed loginからの移行readback。
 - Draft PRのCIと人手レビュー。merge、release、既存notarized build 583の差し替えは未実施。

@@ -189,11 +189,21 @@ def main() -> None:
     mac_voice_e2e_receipt_verifier = (
         ROOT / "script" / "verify_macos_voice_e2e_receipt.py"
     ).read_text(encoding="utf-8")
+    mac_voice_e2e_performance_verifier = (
+        ROOT / "script" / "verify_macos_voice_e2e_performance.py"
+    ).read_text(encoding="utf-8")
     mac_runtime_environment = (
         ROOT / "Sources" / "HoverPocket" / "Support" / "HoverPocketRuntimeEnvironment.swift"
     ).read_text(encoding="utf-8")
     mac_voice_e2e_receipt = (
         ROOT / "Sources" / "HoverPocket" / "Voice" / "MacOSVoiceE2EReceiptStore.swift"
+    ).read_text(encoding="utf-8")
+    mac_voice_e2e_performance = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "Voice"
+        / "MacOSVoiceE2EPerformanceStore.swift"
     ).read_text(encoding="utf-8")
     mac_voice_e2e_verifier = (
         ROOT
@@ -1221,11 +1231,36 @@ def main() -> None:
         "data.write(to: receiptURL, options: .atomic)",
     )) or "snapshot.transcript.map" in mac_voice_e2e_receipt:
         fail("macOS Voice E2E receipt is not allowlisted, count-only, or atomic")
+    if not all(value in mac_voice_e2e_performance for value in (
+        "static let allowedKeys: Set<String>",
+        "maximumLatencySamples = 10",
+        "currentAttemptAttached",
+        "microphoneToAttachedSamplesMilliseconds",
+        "microphoneToAttachedP95Milliseconds",
+        "snapshotPublishCount",
+        "expandedRPCCount",
+        "realtimeStopRPCCount",
+        "maximumRealtimeStopRPCCount",
+        "measurementDurationMilliseconds",
+        "writeQueue.async",
+        "scheduleWrite()",
+        "flushSynchronously(event: String)",
+        "data.write(to: receiptURL, options: .atomic)",
+    )):
+        fail("macOS Voice E2E performance receipt is incomplete")
+    if not all(value in mac_codex_coordinator for value in (
+        "MacOSVoiceE2EPerformanceStore.shared?.recordExpandedRPC(",
+        "MacOSVoiceE2EPerformanceStore.shared?.recordRealtimeStopRPC()",
+    )):
+        fail("macOS Codex Voice E2E performance hooks are incomplete")
+    if "performanceFlushSynchronously: true" not in mac_app:
+        fail("macOS Voice E2E termination lacks synchronous performance readback")
     mac_realtime_page = mac_realtime_transport[
         mac_realtime_transport.find("static let page ="):
     ]
     if not all(value in mac_realtime_transport for value in (
         "MacOSVoiceE2EReceiptStore.shared?.beginMediaSession()",
+        "MacOSVoiceE2EPerformanceStore.shared?.recordTransportAttached()",
         "receiptStore.recordMediaEvent(event)",
         "guard let attemptID = receiptStore.claimPhysicalConfirmationRequest()",
         "MacOSVoiceE2EPhysicalMediaConfirmation.present()",
@@ -1239,6 +1274,7 @@ def main() -> None:
         fail("macOS Voice E2E media receipt or Host-owned physical confirmation drifted")
     if not all(value in mac_codex_transport for value in (
         "MacOSVoiceE2EReceiptStore.shared?.beginMediaSession()",
+        "MacOSVoiceE2EPerformanceStore.shared?.recordTransportAttached()",
         "private func recordE2EMediaEvent(_ event: MacOSVoiceE2EMediaEvent)",
         "receiptStore.recordMediaEvent(event)",
         "guard let attemptID = receiptStore.claimPhysicalConfirmationRequest()",
@@ -1250,6 +1286,16 @@ def main() -> None:
         'case "remote_audio_playing"',
     )):
         fail("macOS Codex Voice E2E media receipt or physical confirmation drifted")
+    codex_attempt_pos = mac_codex_transport.find(
+        "MacOSVoiceE2EReceiptStore.shared?.beginMediaSession()"
+    )
+    codex_authorization_pos = mac_codex_transport.find(
+        "CodexVoiceSystemMicrophoneAuthorizationPolicy.decision("
+    )
+    if mac_codex_transport.count(
+        "MacOSVoiceE2EReceiptStore.shared?.beginMediaSession()"
+    ) != 1 or not 0 <= codex_attempt_pos < codex_authorization_pos:
+        fail("macOS Codex Voice latency measurement does not start at user microphone intent")
     if "recordTimerCapabilityReadbackVerified()" not in mac_realtime_capabilities:
         fail("macOS Voice E2E lacks Timer Broker readback evidence")
     if not all(value in mac_voice_e2e_harness for value in (
@@ -1273,6 +1319,9 @@ def main() -> None:
         "E2E bundle must use an ad-hoc signature",
         "E2E bundle must not use a certificate identity",
         "--stage stopped",
+        "voice-e2e-performance.json",
+        "performanceReceiptRequired",
+        "--require-receipt",
     )):
         fail("macOS Voice E2E operational harness is incomplete")
     stopped_receipt_pos = mac_voice_e2e_harness.find('--stage stopped')
@@ -1292,6 +1341,17 @@ def main() -> None:
         'payload["lastSafeEvent"] != "safe_close"',
     )):
         fail("macOS Voice E2E receipt validator is incomplete")
+    if not all(value in mac_voice_e2e_performance_verifier for value in (
+        "ALLOWED_KEYS",
+        "nearest_rank_p95",
+        'choices=("idle", "active", "stopped")',
+        "stop_count > 1 or maximum_stop_count > 1",
+        'payload["currentAttemptAttached"] and stop_count != 1',
+        'parser.add_argument("--require-receipt", action="store_true")',
+        'payload["lastSafeEvent"] != "safe_close"',
+        'parser.add_argument("--self-test", action="store_true")',
+    )):
+        fail("macOS Voice E2E performance validator is incomplete")
     if not all(value in mac_voice_e2e_verifier for value in (
         "debugBuild: false",
         'code: "voice_e2e_release_rejected"',
@@ -1306,6 +1366,8 @@ def main() -> None:
         '"receipt_attempt_confirmation_stale"',
         '"receipt_stale_confirmation_accepted"',
         'stopped.lastSafeEvent == "safe_close"',
+        '"performance_failed_attempt_marked_attached"',
+        '"performance_synchronous_safe_close"',
     )):
         fail("macOS Voice E2E deterministic verifier is incomplete")
     if "if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled" not in mac_settings \
