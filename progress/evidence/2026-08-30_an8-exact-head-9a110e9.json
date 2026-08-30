@@ -1,0 +1,254 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-30T11:00:37Z",
+  "verdict": "NO_GO",
+  "releaseAuthorityGranted": false,
+  "publicationPerformed": false,
+  "draftPullRequest": {
+    "number": 39,
+    "url": "https://github.com/shotaro311/hover-pocket/pull/39",
+    "state": "OPEN",
+    "isDraft": true,
+    "mergeable": "MERGEABLE",
+    "mergeStateStatus": "CLEAN"
+  },
+  "source": {
+    "runtimeSourceHead": "9a110e9ae260ec65f7c99496baf36ff8c899b250",
+    "implementationCommit": "d50bdadb73d10ea4860c2366e76985ff0577280d",
+    "runtimeHardeningCommits": [
+      "584b446e2f41348a7536d73b1f4522f43f44abcd",
+      "507ba3ba8ca00942fda3447227ecd5926837e7db",
+      "9a110e9ae260ec65f7c99496baf36ff8c899b250"
+    ],
+    "remoteAhead": 0,
+    "remoteBehind": 0,
+    "runtimeSourceTrackedChanges": 0,
+    "generatedOutputsIgnored": true
+  },
+  "continuousIntegration": {
+    "headSha": "9a110e9ae260ec65f7c99496baf36ff8c899b250",
+    "successCount": 11,
+    "expectedSkippedCount": 8,
+    "failureCount": 0,
+    "pendingCount": 0,
+    "runs": [
+      {
+        "workflow": "Verify Windows",
+        "runId": 33307549713,
+        "conclusion": "success",
+        "uploadedArtifactCount": 0,
+        "coverage": [
+          "Release and Debug build",
+          "Voice E2E isolation",
+          "PowerShell syntax",
+          "rendered WebView2 verification"
+        ]
+      },
+      {
+        "workflow": "Verify macOS Capabilities",
+        "runId": 33307549728,
+        "conclusion": "success"
+      },
+      {
+        "workflow": "Verify Pocket Contracts",
+        "runId": 33307549725,
+        "conclusion": "success",
+        "coverage": [
+          "macOS deterministic report",
+          "Windows deterministic report",
+          "Ubuntu deterministic report",
+          "cross-OS report comparison"
+        ]
+      },
+      {
+        "workflow": "Verify Published Release Readback",
+        "runId": 33307549681,
+        "conclusion": "success",
+        "note": "deterministic and syntax jobs succeeded; public artifact jobs remained expected skips"
+      },
+      {
+        "workflow": "Verify Release Install and Rollback Transitions",
+        "runId": 33307549721,
+        "conclusion": "success",
+        "note": "script syntax jobs succeeded; physical package transition jobs remained expected skips"
+      }
+    ],
+    "expectedSkippedJobs": [
+      "Pin one Windows release tag",
+      "Read back macOS and Windows public releases",
+      "Read back timestamped Windows Authenticode",
+      "Read back Windows package identity",
+      "Read back macOS signature, notarization, and Gatekeeper",
+      "macOS package install and rollback transition",
+      "Signed Codex sandbox MSI install, upgrade, rollback, uninstall",
+      "Windows install, update, rollback, and reinstall"
+    ]
+  },
+  "macOSReleaseCandidate": {
+    "version": "0.1.0",
+    "build": 615,
+    "bundleIdentifier": "local.codex.hover-pocket",
+    "sourceHead": "9a110e9ae260ec65f7c99496baf36ff8c899b250",
+    "notarySubmissionId": "2f2ead18-b466-4831-844d-3fcffb42ff54",
+    "notaryStatus": "Accepted",
+    "zipAssetName": "HoverPocket-0.1.0-615.zip",
+    "zipSizeBytes": 7511492,
+    "zipSha256": "2901a0136531dff1834dee26c0cf14649e059b4f323e5c3293d37e516b3266d9",
+    "signedAppBinarySha256": "1a16e6b7b049fff89f433087074840014547073e31a586c2b11f9847cba66057",
+    "sourceReleaseBinarySha256": "25fbfd5ec6342042c5b7d2108da92f992ce20e5201372b3541832fa38e1113da",
+    "machOUuid": "45B20385-18C5-30FD-ACCD-04D272923CA3",
+    "signedAppBinarySizeBytes": 17509648,
+    "sourceReleaseBinarySizeBytes": 17592920,
+    "strictCodeSignVerified": true,
+    "staplerVerified": true,
+    "gatekeeperAccepted": true,
+    "gatekeeperSource": "Notarized Developer ID",
+    "dependencies": {
+      "sparkleVersion": "2.9.3",
+      "mediaRemoteAdapterBundled": true
+    },
+    "entitlements": [
+      "com.apple.security.automation.apple-events",
+      "com.apple.security.device.audio-input",
+      "com.apple.security.device.camera"
+    ],
+    "appcast": {
+      "version": 615,
+      "shortVersion": "0.1.0",
+      "lengthMatchesZip": true,
+      "versionedUrl": true,
+      "edDsaSignaturePresent": true,
+      "published": false
+    },
+    "packagedVerification": [
+      "Panel soak: Voice OFF, 100 open-close, 100 provider switches, 5 recovery cycles, 3 animated cycles",
+      "Capability 20",
+      "Broker 21 descriptor and 20 handler",
+      "Pocket Surface",
+      "Pocket App package, lifecycle, generation, migration, health, workspace backup",
+      "Voice Foundation",
+      "Voice E2E isolation",
+      "Codex app-server managed login deterministic lifecycle",
+      "Codex app-server ChatGPT account, 19 voices, ephemeral thread, SDP, WebRTC, teardown",
+      "Codex app-server gpt-5.6-sol medium Timer tool, approval, readback, teardown"
+    ],
+    "panelSoakReadback": {
+      "iterations": 100,
+      "providerSwitches": 100,
+      "recoveryCycles": 5,
+      "animatedTransitionCycles": 3,
+      "warmOpenMaximumMilliseconds": 45.246,
+      "windows": "3->3",
+      "threads": "15->10,max=17",
+      "residentMiB": "115.781->128.250",
+      "residentGrowthLimitMiB": 64,
+      "sockets": "0->1",
+      "ciSockets": "2->3",
+      "children": "0->0"
+    },
+    "physicalMicrophoneUsed": false,
+    "calendarCreateUsed": false,
+    "openAIRealtimeApiKeyUsed": false,
+    "published": false
+  },
+  "macOSProviderBoundVoiceCandidate": {
+    "displayName": "ホバーポケット Voice E2E 612",
+    "bundleIdentifier": "local.codex.hover-pocket.voice-e2e",
+    "sourceHead": "89669c4d39f6bbf942e9944a32fbf969df7972f2",
+    "sessionSchemaVersion": 2,
+    "expectedProviderId": "codex_app_server",
+    "signedBinarySha256": "d3fecc9259bd7fc5cac95f5383bfdb9af4317c095d9616ab5c5e6ce2b8603afc",
+    "sourceDebugBinarySha256": "cfe30c9ea89e20a288595bced58f2b22cbe896f866aec883477499842fe867ca",
+    "machOUuid": "AE5C733D-0F70-3B1B-A22D-30462A6DDF5D",
+    "strictCodeSignVerified": true,
+    "processOwnershipVerified": true,
+    "storageIsolationVerified": true,
+    "voiceFeatureEnabled": false,
+    "connectionState": "disconnected",
+    "microphoneAcquired": false,
+    "remoteAudioPlayed": false,
+    "timerReadbackVerified": false,
+    "humanPhysicalConfirmation": false,
+    "currentRuntimeSourceReplacementRequiredBeforeHumanGate": true,
+    "idleReadback": {
+      "sampleCount": 7,
+      "cpuAveragePercent": 0.1,
+      "cpuP95Percent": 0.1,
+      "cpuMaximumPercent": 0.1,
+      "rssAverageMiB": 109.578,
+      "rssMaximumMiB": 109.578
+    },
+    "status": "human_physical_gate_pending"
+  },
+  "historicalArtifacts": [
+    {
+      "build": 605,
+      "status": "historical_not_current_runtime_source"
+    },
+    {
+      "build": 608,
+      "status": "legacy_nonphysical_only"
+    },
+    {
+      "build": 612,
+      "status": "notarized_replaced_by_exact_runtime_build_615"
+    },
+    {
+      "build": 613,
+      "status": "notarized_but_packaged_soak_rejected"
+    },
+    {
+      "build": 614,
+      "status": "diagnostic_only"
+    }
+  ],
+  "windows": {
+    "exactHeadBuildVerifiedByCi": true,
+    "exactHeadCiRunId": 33307549713,
+    "ciArtifactUploaded": false,
+    "formalTimestampedSigningComplete": false,
+    "formalReleasePublished": false,
+    "signedInstallUpgradeRollbackComplete": false,
+    "settingsUacPhysicalCanaryComplete": false,
+    "codexAppServerPhysicalVoiceComplete": false,
+    "productionSetupAvailable": false,
+    "productionGenerationAvailable": false,
+    "productionActivationAvailable": false
+  },
+  "productionFailClosedEvidence": {
+    "macOSConfidentialPocketAppGeneration": false,
+    "windowsCodexSandboxProvisioning": false,
+    "windowsCodexSandboxProductionRuntime": false,
+    "windowsVoiceBrokerOnlyToolPolicyProductionApproved": false,
+    "windowsReleaseManifestProductionFlags": false,
+    "verification": "exact-head source constants and exact-head CI verifiers"
+  },
+  "independentReview": {
+    "chatGptProRunId": "20260830-175124-hoverpocketdraft-pr-head-e02761ean8voice",
+    "chatGptProArtifact": "an8-gap-audit.md",
+    "chatGptProArtifactSha256": "12bf991d6b21460641223e29f517ac69a9f6e2c709bcf229c71746fad85908f7",
+    "chatGptProTerminalReceipt": "complete",
+    "providerBoundFixReview": {
+      "p0": 0,
+      "p1": 0,
+      "p2": 0
+    },
+    "panelSoakSafetyPerformanceReview": {
+      "p0": 0,
+      "p1": 0,
+      "p2": 0,
+      "normalRuntimePathChanged": false
+    },
+    "normalRuntimePerformanceImpactFound": false,
+    "trackedCompatibilityNote": "keyring-only Codex credential environments require the managed ChatGPT login path"
+  },
+  "remainingGates": [
+    "macOS human physical microphone, audible remote audio, transcript, Timer approval and readback",
+    "macOS ten-attempt physical Voice performance acceptance",
+    "Calendar create with explicit approval and readback",
+    "Windows formal timestamped signing and public artifact readback",
+    "Windows signed install, upgrade, rollback, uninstall and UAC physical canary",
+    "Windows standard Codex app-server physical Voice",
+    "explicit authority for Draft removal, merge, release and publication"
+  ]
+}
