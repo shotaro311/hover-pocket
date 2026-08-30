@@ -119,6 +119,20 @@ def main() -> None:
     mac_codex_coordinator = (
         ROOT / "Sources" / "HoverPocket" / "Voice" / "CodexVoiceCoordinator.swift"
     ).read_text(encoding="utf-8")
+    mac_codex_login = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "Voice"
+        / "CodexVoiceAccountLoginController.swift"
+    ).read_text(encoding="utf-8")
+    mac_codex_profile = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "Voice"
+        / "CodexVoiceAppServerProfile.swift"
+    ).read_text(encoding="utf-8")
     mac_codex_probe = (
         ROOT
         / "Sources"
@@ -960,6 +974,10 @@ def main() -> None:
         "maximumErrorBufferBytes",
         '"/Applications/ChatGPT.app/Contents/Resources/codex"',
         "static func candidates",
+        "includePathLookupWhenFixedCandidatesExist",
+        "DispatchSemaphore(value: 0)",
+        "completion.wait(timeout: .now() + 2)",
+        "Darwin.kill(process.processIdentifier, SIGKILL)",
         "processStarted",
     )):
         fail("macOS Codex app-server discovery, input admission, or allocation bounds are incomplete")
@@ -1013,6 +1031,37 @@ def main() -> None:
         "timerStore.runningTimers.count == 1",
     )):
         fail("macOS Codex app-server tool call is not bound to Broker approval and readback")
+    if not all(value in mac_codex_login for value in (
+        '"account/login/start"',
+        '"account/login/cancel"',
+        '"account/login/completed"',
+        '"type": .string("chatgpt")',
+        '"useHostedLoginSuccessPage": .bool(true)',
+        '"appBrand": .string("chatgpt")',
+        "NSWorkspace.shared.open(login.authURL)",
+        "CodexVoiceCoordinator.accountAdmissionCode(account) == nil",
+        "context.profile.hasValidManagedCredentialFile",
+        "loginTimeoutNanoseconds",
+        "cleanupTask",
+        "await pendingCleanup?.value",
+        "await task?.value",
+        "includePathLookupWhenFixedCandidatesExist: false",
+        "accountSelectionTimeout: TimeInterval = 20",
+        "accountRequestTimeout: TimeInterval = 8",
+        "client = selection.client",
+        "selection.requestTimeout < Self.accountRequestTimeout",
+        "guard !isShuttingDown",
+        "isShuttingDown = true",
+        "VoiceLaneRuntime.shared.credentialsDidChange()",
+    )) or '"apiKey"' in mac_codex_login \
+            or "CodexAppServerCompatibilityProbe.shared.probe" in mac_codex_login \
+            or 'cli_auth_credentials_store = "file"' not in mac_codex_profile \
+            or "case linkedExternalFile" not in mac_codex_profile \
+            or "case managedFile" not in mac_codex_profile \
+            or "CodexVoiceAccountLoginController.shared.shutdown()" not in mac_app \
+            or "ChatGPTでログイン" not in mac_settings \
+            or "@ObservedObject private var codexVoiceAccount" not in mac_settings:
+        fail("macOS Codex managed ChatGPT login is missing, API-key based, or not lifecycle-bounded")
     model_verifier_start = mac_codex_foundation_verifier.find(
         "static func runModelToolVerification()"
     )

@@ -593,7 +593,10 @@ enum CodexExecutableResolver {
         return candidate
     }
 
-    static func candidates(_ explicitURL: URL?) throws -> [URL] {
+    static func candidates(
+        _ explicitURL: URL?,
+        includePathLookupWhenFixedCandidatesExist: Bool = true
+    ) throws -> [URL] {
         if let explicitURL {
             return [try validate(explicitURL)]
         }
@@ -617,22 +620,43 @@ enum CodexExecutableResolver {
                 candidates.append(candidate)
             }
         }
+        if !includePathLookupWhenFixedCandidatesExist, !candidates.isEmpty {
+            return candidates
+        }
 
         let process = Process()
         let output = Pipe()
+        let completion = DispatchSemaphore(value: 0)
         process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
         process.arguments = ["codex"]
         process.standardOutput = output
         process.standardError = Pipe()
+        process.terminationHandler = { _ in completion.signal() }
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
+            process.terminationHandler = nil
             if candidates.isEmpty {
                 throw CodexAppServerClientError.executableNotFound
             }
             return candidates
         }
+        if completion.wait(timeout: .now() + 2) == .timedOut {
+            if process.isRunning {
+                process.terminate()
+            }
+            if completion.wait(timeout: .now() + 0.25) == .timedOut,
+               process.isRunning {
+                _ = Darwin.kill(process.processIdentifier, SIGKILL)
+                _ = completion.wait(timeout: .now() + 0.25)
+            }
+            process.terminationHandler = nil
+            if candidates.isEmpty {
+                throw CodexAppServerClientError.executableNotFound
+            }
+            return candidates
+        }
+        process.terminationHandler = nil
         let data = output.fileHandleForReading.readDataToEndOfFile()
         if process.terminationStatus == 0,
            let path = String(data: data, encoding: .utf8)?

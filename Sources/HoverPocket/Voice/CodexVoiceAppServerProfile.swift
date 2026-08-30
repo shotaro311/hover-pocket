@@ -9,10 +9,19 @@ enum CodexVoiceAppServerProfileError: Error, Equatable, Sendable {
     case authLinkInvalid
 }
 
+enum CodexVoiceAuthStorage: String, Equatable, Sendable {
+    case disabled
+    case linkedExternalFile
+    case managedFile
+
+    var allowsManagedLogin: Bool { self == .managedFile }
+}
+
 struct CodexVoiceAppServerProfile: Equatable, Sendable {
     let codexHomeURL: URL
     let processEnvironment: [String: String]
     let identity: String
+    let authStorage: CodexVoiceAuthStorage
 
     static func prepare(
         executableURL: URL,
@@ -40,8 +49,9 @@ struct CodexVoiceAppServerProfile: Equatable, Sendable {
             throw CodexVoiceAppServerProfileError.configurationWriteFailed
         }
 
-        try prepareAuthLink(
+        let authStorage = try prepareAuthStorage(
             in: codexHome,
+            sourceHome: sourceCodexHome(fileManager: fileManager),
             externalIntegrationsEnabled: runtimeEnvironment.externalIntegrationsEnabled,
             fileManager: fileManager
         )
@@ -63,17 +73,29 @@ struct CodexVoiceAppServerProfile: Equatable, Sendable {
         identityData.append(Data(codexHome.path.utf8))
         identityData.append(Data(executableURL.standardizedFileURL.path.utf8))
         identityData.append(Data(inheritedPath.utf8))
+        identityData.append(Data(authStorage.rawValue.utf8))
         let identity = SHA256.hash(data: identityData)
             .map { String(format: "%02x", $0) }
             .joined()
         return CodexVoiceAppServerProfile(
             codexHomeURL: codexHome,
             processEnvironment: environment,
-            identity: identity
+            identity: identity,
+            authStorage: authStorage
         )
     }
 
-    private static let configurationText = """
+    var hasValidManagedCredentialFile: Bool {
+        guard authStorage == .managedFile else { return false }
+        let file = codexHomeURL.appendingPathComponent("auth.json")
+        return Self.isRegularFile(file)
+            && !Self.isSymbolicLink(file)
+            && Self.isOwnedByCurrentUser(file)
+            && Self.hasPrivatePermissions(file)
+    }
+
+    static let configurationText = """
+    cli_auth_credentials_store = "file"
     approval_policy = "never"
     sandbox_mode = "read-only"
     web_search = "disabled"
@@ -152,27 +174,32 @@ struct CodexVoiceAppServerProfile: Equatable, Sendable {
         }
     }
 
-    private static func prepareAuthLink(
+    static func prepareAuthStorage(
         in codexHome: URL,
+        sourceHome: URL,
         externalIntegrationsEnabled: Bool,
         fileManager: FileManager
-    ) throws {
+    ) throws -> CodexVoiceAuthStorage {
         let link = codexHome.appendingPathComponent("auth.json")
         guard externalIntegrationsEnabled else {
             if isSymbolicLink(link) {
                 try? fileManager.removeItem(at: link)
             }
-            return
+            guard !fileManager.fileExists(atPath: link.path) else {
+                throw CodexVoiceAppServerProfileError.authLinkInvalid
+            }
+            return .disabled
         }
 
-        let sourceHome: URL
-        if let configured = ProcessInfo.processInfo.environment["CODEX_HOME"],
-           !configured.isEmpty {
-            sourceHome = URL(fileURLWithPath: configured, isDirectory: true)
-        } else {
-            sourceHome = fileManager.homeDirectoryForCurrentUser
-                .appendingPathComponent(".codex", isDirectory: true)
+        if fileManager.fileExists(atPath: link.path), !isSymbolicLink(link) {
+            guard isRegularFile(link),
+                  isOwnedByCurrentUser(link),
+                  hasPrivatePermissions(link) else {
+                throw CodexVoiceAppServerProfileError.authLinkInvalid
+            }
+            return .managedFile
         }
+
         let source = sourceHome
             .appendingPathComponent("auth.json")
             .standardizedFileURL
@@ -181,7 +208,7 @@ struct CodexVoiceAppServerProfile: Equatable, Sendable {
             if isSymbolicLink(link) {
                 try? fileManager.removeItem(at: link)
             }
-            return
+            return .managedFile
         }
         guard isRegularFile(source),
               !isSymbolicLink(source),
@@ -194,7 +221,7 @@ struct CodexVoiceAppServerProfile: Equatable, Sendable {
             guard link.resolvingSymlinksInPath() == source else {
                 throw CodexVoiceAppServerProfileError.authLinkInvalid
             }
-            return
+            return .linkedExternalFile
         }
         guard !fileManager.fileExists(atPath: link.path) else {
             throw CodexVoiceAppServerProfileError.authLinkInvalid
@@ -207,6 +234,16 @@ struct CodexVoiceAppServerProfile: Equatable, Sendable {
         guard isSymbolicLink(link), link.resolvingSymlinksInPath() == source else {
             throw CodexVoiceAppServerProfileError.authLinkInvalid
         }
+        return .linkedExternalFile
+    }
+
+    private static func sourceCodexHome(fileManager: FileManager) -> URL {
+        if let configured = ProcessInfo.processInfo.environment["CODEX_HOME"],
+           !configured.isEmpty {
+            return URL(fileURLWithPath: configured, isDirectory: true)
+        }
+        return fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex", isDirectory: true)
     }
 
     private static func fileStatus(_ url: URL) -> stat? {

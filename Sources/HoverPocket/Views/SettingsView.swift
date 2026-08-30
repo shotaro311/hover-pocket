@@ -6,6 +6,7 @@ struct SettingsView: View {
     @ObservedObject private var calendarStore = GoogleCalendarStore.shared
     @ObservedObject private var appUpdater = AppUpdater.shared
     @ObservedObject private var aiNativeRuntime = AINativeRuntime.shared
+    @ObservedObject private var codexVoiceAccount = CodexVoiceAccountLoginController.shared
     @StateObject private var weatherLocationModel = WeatherLocationSettingsModel()
     @State private var capabilityDataSnapshot: CapabilityDataGovernanceSnapshot?
     @State private var capabilityDataError: String?
@@ -77,6 +78,9 @@ struct SettingsView: View {
         .onChange(of: settings.voiceProvider) { _, provider in
             openAIRealtimeKeyDraft = ""
             voiceCredentialError = nil
+            if provider != .codexAppServer {
+                codexVoiceAccount.deactivate()
+            }
             if provider == .off {
                 settings.voiceEnabled = false
                 openAIRealtimeKeyConfigured = false
@@ -478,6 +482,10 @@ struct SettingsView: View {
             )
             .disabled(settings.voiceProvider == .off)
 
+            if settings.voiceProvider == .codexAppServer {
+                codexVoiceAccountSection
+            }
+
             if settings.voiceProvider == .openAIRealtimeBYOK {
                 VStack(alignment: .leading, spacing: 8) {
                     SecureField(
@@ -562,8 +570,8 @@ struct SettingsView: View {
 
             Text(settings.voiceProvider == .codexAppServer
                 ? localized(
-                    japanese: "Codexアプリのログインを使う標準経路です。APIキーは不要です。現在のCodexがBroker限定ツールを保証できない場合だけ開始を止め、BYOKへ自動切替はしません。",
-                    english: "This is the primary path and uses your Codex app login without an API key. It starts only when Codex can guarantee Broker-only tools and never falls back to BYOK automatically."
+                    japanese: "Codex app-serverを使う標準経路です。Codexアプリのログインを安全に共有できない場合は、HoverPocket専用プロファイルからChatGPTへログインできます。APIキーは不要で、BYOKへ自動切替はしません。",
+                    english: "This is the primary Codex app-server path. If the Codex app login cannot be shared safely, you can sign in to ChatGPT with a dedicated HoverPocket profile. No API key is required and it never falls back to BYOK automatically."
                 )
                 : settings.voiceProvider == .off
                     ? localized(
@@ -580,7 +588,95 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var codexVoiceAccountSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            switch codexVoiceAccount.state {
+            case .idle:
+                Text(localized(
+                    japanese: "ChatGPTのログイン状態は未確認です。",
+                    english: "ChatGPT sign-in status has not been checked."
+                ))
+                Button(localized(japanese: "ログイン状態を確認", english: "Check sign-in status")) {
+                    codexVoiceAccount.refresh()
+                }
+            case .checking:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(localized(
+                        japanese: "ChatGPTのログイン状態を確認しています…",
+                        english: "Checking ChatGPT sign-in status…"
+                    ))
+                }
+            case .signedOut(let managedLoginAvailable, _):
+                Text(managedLoginAvailable
+                    ? localized(
+                        japanese: "HoverPocket専用のCodexプロファイルは未ログインです。",
+                        english: "The dedicated HoverPocket Codex profile is signed out."
+                    )
+                    : localized(
+                        japanese: "共有しているCodexログインではChatGPTアカウントを確認できません。Codexアプリでログインしてから再確認してください。",
+                        english: "A ChatGPT account was not found in the shared Codex login. Sign in with the Codex app, then check again."
+                    ))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    if managedLoginAvailable {
+                        Button(localized(japanese: "ChatGPTでログイン", english: "Sign in with ChatGPT")) {
+                            codexVoiceAccount.startLogin()
+                        }
+                    }
+                    Button(localized(japanese: "再確認", english: "Check again")) {
+                        codexVoiceAccount.refresh()
+                    }
+                }
+            case .signingIn:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(localized(
+                        japanese: "ブラウザでChatGPTへログインしてください。",
+                        english: "Complete ChatGPT sign-in in your browser."
+                    ))
+                    Spacer()
+                    Button(localized(japanese: "キャンセル", english: "Cancel")) {
+                        codexVoiceAccount.cancelLogin()
+                    }
+                }
+            case .signedIn:
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text(localized(
+                        japanese: "ChatGPTへログイン済みです。",
+                        english: "Signed in to ChatGPT."
+                    ))
+                    Spacer()
+                    Button(localized(japanese: "再確認", english: "Check again")) {
+                        codexVoiceAccount.refresh()
+                    }
+                }
+            case .failed:
+                Text(localized(
+                    japanese: "ログイン状態を確認できませんでした。Codex app-serverの互換性と接続状態を確認してください。",
+                    english: "Could not check sign-in status. Check Codex app-server compatibility and connectivity."
+                ))
+                    .foregroundStyle(.red)
+                Button(localized(japanese: "再試行", english: "Retry")) {
+                    codexVoiceAccount.refresh()
+                }
+            }
+        }
+        .font(.system(size: 10))
+        .padding(10)
+        .background(.quaternary.opacity(0.22))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
     private func refreshVoiceCredentialState() {
+        if settings.voiceProvider == .codexAppServer {
+            openAIRealtimeKeyConfigured = false
+            codexVoiceAccount.refresh()
+            return
+        }
         guard settings.voiceProvider == .openAIRealtimeBYOK else {
             openAIRealtimeKeyConfigured = false
             return

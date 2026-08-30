@@ -310,6 +310,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard voiceTerminationTask == nil else { return .terminateLater }
         voiceTerminationTask = Task { @MainActor [weak self] in
             await self?.voiceConfigurationTask?.value
+            await CodexVoiceAccountLoginController.shared.shutdown()
             await VoiceLaneRuntime.shared.shutdown()
             if HoverPocketRuntimeEnvironment.shared.isIsolatedVoiceE2E {
                 try? OpenAIRealtimeCredentialStoreFactory.shared.delete()

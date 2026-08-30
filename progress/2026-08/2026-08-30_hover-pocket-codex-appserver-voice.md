@@ -48,7 +48,7 @@ Calendar読み取り専用gateも同じエージェントが独立レビュー�
 
 実モデルtool選択検証も同じ別エージェントがread-onlyレビューした。初回P2は、指定model / effortを実採用値のように表示する点と、app-server起動前の初期化失敗だけ一時workspaceが共通cleanup外になる点だった。出力を`requested_model / requested_effort`へ変更し、root作成直後のunconditional cleanupと成功後の不存在readbackを併用した。最終P0 / P1 / P2は0件で、完全一致の明示CLI分岐だけに存在するため通常起動、Hover、Voice開始hot pathの性能影響は実質0と評価された。
 
-残るP2既知制約はkeyring-only Codex loginである。初回実装はowner-onlyのfile-backed `auth.json`を専用profileへsymlinkするため、元`CODEX_HOME`にfileがない環境ではroute canary通過後もproduction `account/read`がsigned-outになる。現在の環境は`~/.codex/auth.json` 0600、symlink先一致、`account.type=chatgpt`をreadback済みで、当面の動作阻害ではない。一般公開対応には専用profileの`account/login/start`または同等のChatGPT login flowが必要である。
+keyring-only Codex loginの実装制約は、Voice専用profileでChatGPT managed browser loginを開始する経路を追加して解消した。owner-onlyのfile-backed `auth.json`がある場合は従来どおりsymlink参照を優先し、HoverPocketのUIから外部credentialへlogin / cancel / logoutを実行しない。専用managed fileはcurrent-user所有・private permissionをreadbackする。実ブラウザログインとfile-backed認証からの移行はアカウント操作を伴う人手E2E gateとして残す。
 
 ## 検証とreadback
 
@@ -101,15 +101,25 @@ Calendar読み取り専用gateも同じエージェントが独立レビュー�
 
 ## 未完了gate
 
-- 全candidateが非Ready、ChatGPT.app未導入、同梱Codexが将来非互換、keyring-only loginの場合の導入 / 更新 / login UX。
+- 全candidateが非Ready、ChatGPT.app未導入、同梱Codexが将来非互換の場合の導入 / 更新UX。
 - transcriptの実受信とroot-scoped session cardのlive readback。
 - 起動中の隔離E2EアプリでVoiceを明示ONにし、物理マイク取得、remote audio再生、transcript、Timer start、承認、実行後readbackを人手確認する。人の発話と「話せた・聞こえた」確認は自動化・偽装しない。
 - Calendar readはproduction accountと同じ署名・Keychain条件の隔離candidateで完了した。Calendar createは外部書き込みのため、予定内容を明示した承認と実行後readbackを別gateとして残す。
 - 上記の実音声往復とCalendar / Timerを10回反復する。
 - CPU / RSSの自動idle計測は完了した。mic clickからattachedまでのp95、snapshot publishes/sec、Expanded RPC/sec、stop RPC/session=1は、物理音声往復10回の人手gateで最終値を取得する。
-- keyring-only Codex login向けの専用ChatGPT login flowと、file-backed loginからの移行readback。
+- signed-out / keyring-only環境で、Settingsから実ChatGPT browser loginを完了・取消し、app更新後も専用credentialをreadbackするE2E。file-backed loginからmanaged fileへの移行も別途確認する。
 - Draft PRのCIと人手レビュー。merge、release、既存notarized build 583の差し替えは未実施。
 - macOS署名bundleでSystem SettingsのLocal Network許可を有効にし、`--verify-codex-app-server-realtime`のaccount、19 voices、ephemeral thread、SDP / WebRTC connected、process closedを再readbackする。完了前はbuild 597 / 598をRCと扱わない。
+
+## Voice専用ChatGPT managed login
+
+- `CodexVoiceAccountLoginController`を追加し、`account/login/start`へ`type=chatgpt`、hosted success page、ChatGPT brandだけを渡す。API key field、Device Code、external token、Bedrockは持たない。返却URLはHTTPSかつOpenAI / ChatGPT配下だけを許可し、login IDと完了通知を照合する。
+- Voice専用profileは`cli_auth_credentials_store="file"`へ固定した。外部のowner-only file-backed credentialがあればsymlink参照を優先し、外部credentialにはHoverPocketからlogin / cancel / logoutを実行しない。外部fileがない場合だけ専用regular fileをmanaged対象にし、成功後は`account/read`のChatGPT account、current-user所有、group / other権限0をreadbackする。
+- SettingsはCodex app-server選択時だけ状態確認、ChatGPTログイン、取消、再確認を表示する。Realtime BYOKのAPI key UIは明示provider選択時だけで、自動fallbackしない。Provider切替とapp終了は進行中loginを取消し、app-server processをcloseする。
+- app-server候補解決とprofile準備はMainActor外へ移した。固定候補があればPATH探索を省略し、PATH-onlyの`which`は最大約2.5秒、候補選択は20秒、個別requestは最大8秒に制限した。失敗candidateはcloseして次へ進み、明示実行ファイルは単一候補を維持する。fallback終盤の短い選択timeoutは実loginへ持ち越さず、8秒clientへ入れ替える。
+- 独立エージェントは初回から候補fallback、MainActor待機、終了再入、timeout持越し、managed不可時のprocess ownershipを段階的に検出した。全修正後のexact diffはP0 / P1 / P2すべて0件。先頭正常candidateは再起動せず、通常起動、Hover、マイク、remote audioのhot pathへ新しい処理は入らない。
+- `swift build -Xswiftc -warnings-as-errors`、`swift build -c release -Xswiftc -warnings-as-errors`、Voice静的42件、`--verify-codex-app-server`、`git diff --check`はPASSした。local build 600はApple Development署名のstrict codesign、起動、graceful quitをreadbackした。隔離物理Voice E2E PID 70741は約1時間稼働後も生存し、停止・再起動していない。
+- 実ChatGPT browser loginはユーザーのアカウント操作を伴うため、この実装ターンでは開始していない。従ってmanaged loginの実アカウント完了、cancel、更新後のcredential再利用は未完了gateであり、公開可能とは扱わない。
 
 ## build 599 最終成果物readback
 

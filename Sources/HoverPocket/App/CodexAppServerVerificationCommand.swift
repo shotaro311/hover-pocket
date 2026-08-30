@@ -26,6 +26,8 @@ enum CodexAppServerVerificationCommand {
     static func run() async throws -> CodexAppServerVerificationResult {
         try verifySchemaContract()
         try verifyChatGPTAccountPolicy()
+        try verifyManagedChatGPTLoginContract()
+        try verifyVoiceProfileAuthStorage()
         try await verifyCapabilityBridge()
         try await verifyBrokerCapabilityBridge()
         guard CodexVoiceCoordinator.verifyRealtimeLifecyclePolicy() else {
@@ -336,6 +338,186 @@ enum CodexAppServerVerificationCommand {
                 == "codex_chatgpt_account_required",
               CodexVoiceCoordinator.accountAdmissionCode(signedOut) == "signed_out" else {
             throw CodexAppServerVerificationError.failed("chatgpt_account_policy")
+        }
+    }
+
+    private static func verifyManagedChatGPTLoginContract() throws {
+        let parameters = CodexVoiceAccountLoginController.loginStartParameters
+        guard parameters["type"]?.stringValue == "chatgpt",
+              parameters["useHostedLoginSuccessPage"]?.boolValue == true,
+              parameters["appBrand"]?.stringValue == "chatgpt",
+              parameters["apiKey"] == nil,
+              parameters.count == 3 else {
+            throw CodexAppServerVerificationError.failed("managed_login_parameters")
+        }
+
+        let valid = try CodexVoiceAccountLoginController.parseLoginStartResponse(.object([
+            "type": .string("chatgpt"),
+            "loginId": .string("login-123"),
+            "authUrl": .string("https://auth.openai.com/oauth/authorize?client_id=test")
+        ]))
+        guard valid.loginID == "login-123",
+              valid.authURL.host == "auth.openai.com" else {
+            throw CodexAppServerVerificationError.failed("managed_login_response")
+        }
+
+        let rejectedResponses: [CodexJSONValue] = [
+            .object(["type": .string("apiKey")]),
+            .object([
+                "type": .string("chatgpt"),
+                "loginId": .string("login-123"),
+                "authUrl": .string("http://auth.openai.com/oauth/authorize")
+            ]),
+            .object([
+                "type": .string("chatgpt"),
+                "loginId": .string("login-123"),
+                "authUrl": .string("https://openai.com.example.test/oauth/authorize")
+            ]),
+            .object([
+                "type": .string("chatgpt"),
+                "loginId": .string("login id with spaces"),
+                "authUrl": .string("https://auth.openai.com/oauth/authorize")
+            ])
+        ]
+        for response in rejectedResponses {
+            do {
+                _ = try CodexVoiceAccountLoginController.parseLoginStartResponse(response)
+                throw CodexAppServerVerificationError.failed("managed_login_rejection")
+            } catch is CodexVoiceAccountLoginError {
+                continue
+            }
+        }
+
+        let matchingSuccess = CodexAppServerNotification(
+            method: "account/login/completed",
+            params: .object([
+                "loginId": .string("login-123"),
+                "success": .bool(true)
+            ])
+        )
+        let legacySuccess = CodexAppServerNotification(
+            method: "account/login/completed",
+            params: .object([
+                "loginId": .null,
+                "success": .bool(true)
+            ])
+        )
+        let mismatched = CodexAppServerNotification(
+            method: "account/login/completed",
+            params: .object([
+                "loginId": .string("different-login"),
+                "success": .bool(true)
+            ])
+        )
+        let failed = CodexAppServerNotification(
+            method: "account/login/completed",
+            params: .object([
+                "loginId": .string("login-123"),
+                "success": .bool(false)
+            ])
+        )
+        guard CodexVoiceAccountLoginController.parseLoginCompletion(
+            matchingSuccess,
+            expectedLoginID: "login-123"
+        ) == .succeeded,
+        CodexVoiceAccountLoginController.parseLoginCompletion(
+            legacySuccess,
+            expectedLoginID: "login-123"
+        ) == .succeeded,
+        CodexVoiceAccountLoginController.parseLoginCompletion(
+            mismatched,
+            expectedLoginID: "login-123"
+        ) == .ignored,
+        CodexVoiceAccountLoginController.parseLoginCompletion(
+            failed,
+            expectedLoginID: "login-123"
+        ) == .failed,
+        CodexVoiceAccountLoginController.loginCancelParameters(loginID: "login-123")
+            == ["loginId": .string("login-123")] else {
+            throw CodexAppServerVerificationError.failed("managed_login_lifecycle")
+        }
+    }
+
+    private static func verifyVoiceProfileAuthStorage() throws {
+        guard CodexVoiceAppServerProfile.configurationText.contains(
+            "cli_auth_credentials_store = \"file\""
+        ) else {
+            throw CodexAppServerVerificationError.failed("managed_login_file_store")
+        }
+
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "hoverpocket-codex-auth-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: root) }
+        let sourceHome = root.appendingPathComponent("source", isDirectory: true)
+        let managedHome = root.appendingPathComponent("managed", isDirectory: true)
+        let linkedHome = root.appendingPathComponent("linked", isDirectory: true)
+        let retainedHome = root.appendingPathComponent("retained", isDirectory: true)
+        try fileManager.createDirectory(
+            at: sourceHome,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        for directory in [managedHome, linkedHome, retainedHome] {
+            try fileManager.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+        }
+
+        guard try CodexVoiceAppServerProfile.prepareAuthStorage(
+            in: managedHome,
+            sourceHome: sourceHome,
+            externalIntegrationsEnabled: true,
+            fileManager: fileManager
+        ) == .managedFile else {
+            throw CodexAppServerVerificationError.failed("managed_login_empty_profile")
+        }
+
+        let sourceCredential = sourceHome.appendingPathComponent("auth.json")
+        try Data("{}".utf8).write(to: sourceCredential, options: .atomic)
+        guard chmod(sourceCredential.path, 0o600) == 0 else {
+            throw CodexAppServerVerificationError.failed("managed_login_source_mode")
+        }
+        guard try CodexVoiceAppServerProfile.prepareAuthStorage(
+            in: linkedHome,
+            sourceHome: sourceHome,
+            externalIntegrationsEnabled: true,
+            fileManager: fileManager
+        ) == .linkedExternalFile,
+        (try fileManager.attributesOfItem(
+            atPath: linkedHome.appendingPathComponent("auth.json").path
+        )[.type] as? FileAttributeType) == .typeSymbolicLink else {
+            throw CodexAppServerVerificationError.failed("managed_login_external_link")
+        }
+
+        let retainedCredential = retainedHome.appendingPathComponent("auth.json")
+        try Data("{}".utf8).write(to: retainedCredential, options: .atomic)
+        guard chmod(retainedCredential.path, 0o600) == 0,
+              try CodexVoiceAppServerProfile.prepareAuthStorage(
+                in: retainedHome,
+                sourceHome: sourceHome,
+                externalIntegrationsEnabled: true,
+                fileManager: fileManager
+              ) == .managedFile,
+              (try fileManager.attributesOfItem(atPath: retainedCredential.path)[.type]
+                as? FileAttributeType) == .typeRegular else {
+            throw CodexAppServerVerificationError.failed("managed_login_retained_profile")
+        }
+
+        guard try CodexVoiceAppServerProfile.prepareAuthStorage(
+            in: linkedHome,
+            sourceHome: sourceHome,
+            externalIntegrationsEnabled: false,
+            fileManager: fileManager
+        ) == .disabled,
+        !fileManager.fileExists(
+            atPath: linkedHome.appendingPathComponent("auth.json").path
+        ) else {
+            throw CodexAppServerVerificationError.failed("managed_login_disabled_profile")
         }
     }
 
