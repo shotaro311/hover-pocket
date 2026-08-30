@@ -97,6 +97,7 @@ Calendar読み取り専用gateも同じエージェントが独立レビュー�
 - 配布package scriptのprocess名停止が、維持対象だった隔離E2E PID 56971も停止した。同じruntime rootはfresh制約で再利用せず、新しいBuild / Run / Readbackでsession `HoverPocketVoiceE2ESession-4e6lUy`、runtime `HoverPocketVoiceE2E-wevAYd`、PID 70741を作り直した。build scriptはcanonical E2E引数を持つprocessを除外し、修正後のpackage実行前後でPID 70741が生存することをreadbackした。
 - 独立レビューは初回、3秒一律確定が遅い正常candidateを捨てるP1を1件検出した。hybrid 3 / 8秒waitへ修正後はP0 / P1 / P2すべて0件。offscreen windowとsafe codeは明示verifier内だけ、追加purpose stringは起動処理なし、通常Voiceの追加処理は完了時に解除されるtimer最大2個で、CPU / RSS /通常起動への有意な悪化なしと判定された。
 - Debug / Release warnings-as-errors、Voice Foundation、Capability 20、Broker 21 descriptor / 20 handler、Pocket Surface / App、Timer、Panel 128、E2E isolation、Codex foundation / model Timer / CLI Realtime、Voice静的42、Pocket contract 15 schema / 71 fixture、release readback 23 unit、receipt / performance self-test、shell syntax、`git diff --check`はすべてPASSした。
+- commit `248539b05bccc7ece521a3d9c34bad5ae5e2ad7b`をDraft PR #39へpushし、CIは15 SUCCESS / 8 expected SKIPPED / failure 0 / pending 0。PRはDraft / OPEN / MERGEABLE / CLEAN、remote parity 0 / 0と別経路でreadbackした。merge / releaseは実施していない。
 
 ## 未完了gate
 

@@ -45,6 +45,7 @@ status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-gr
 - `NSLocalNetworkUsageDescription`へWebRTC Voice接続だけの用途を明記し、Bonjour browse / advertise、`NSBonjourServices`、multicast entitlementは追加していない。現在の開発Macでは署名bundleが`realtime_probe_connection_unavailable`のままで、System SettingsのLocal Network許可を伴う人手readbackが残る。テスト用build 598は未公証・非RCである。
 - 配布package scriptがprocess名だけで既存HoverPocketを停止し、維持対象だった物理E2E PID 56971も停止する回帰を検出した。同じruntime rootはfresh制約で再利用せず、新しい隔離sessionをBuild / Run / ReadbackしてPID 70741を復旧した。build scriptはcanonicalな`--voice-e2e --voice-e2e-root`引数を持つprocessを停止対象から除外し、その後の配布package実行後もPID 70741が生存することをreadbackした。
 - 独立エージェントは初回、ICEを一律3秒で確定すると3〜8秒にcandidateが出る正常系を落とすP1を1件検出した。上記hybrid waitへ修正後の最終再レビューはP0 / P1 / P2すべて0件。Debug / Release warnings-as-errors、Capability 20、Broker 21 descriptor / 20 handler、Pocket Surface / App、Timer、Panel 128、Voice静的42、Codex実モデルTimer、CLI Realtime、E2E isolation、Pocket contract 15 schema / 71 fixture、release readback 23 test、receipt / performance self-testはすべてPASSした。
+- 修正commit `248539b05bccc7ece521a3d9c34bad5ae5e2ad7b`のDraft PR #39は15成功・公開artifactを要する8 gate skip・失敗0・pending 0、Draft / OPEN / MERGEABLE / CLEAN、remote parity 0 / 0をreadbackした。merge / releaseは実施していない。
 
 ## 2026-08-30 AN8 macOS notarized release candidate build 583
 
