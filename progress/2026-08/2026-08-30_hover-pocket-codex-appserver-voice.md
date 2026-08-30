@@ -163,3 +163,11 @@ keyring-only Codex loginの実装制約は、Voice専用profileでChatGPT manage
 - receipt / performance / process / storage ownershipを検証し、`featureEnabled=false`、`disconnected`、microphoneなし、remote audioなし、Timer readbackなし、物理確認なし、credential currentなしを確認した。Isolation検証はPASSし、idle CPUは平均`0.114%`、p95 / 最大`0.2%`、RSSは平均約`109.650 MiB`、最大約`109.719 MiB`だった。
 - 独立エージェントによる現行差分とbuild 605 Release成果物の安全性・性能レビューはP0 / P1 / P2すべて0件だった。安全検査はbuild / package / 明示Verifierへ限定され、通常起動、Hover、Voice hot pathへの有意な性能低下は確認されていない。
 - desktop automationの登録済みアプリ一覧ではad-hoc E2E appを取得できず、同一表示名 / bundle IDの旧PID `70741`と新PID `85676`を安全に区別できなかった。このため自動クリックは行っていない。build 607のVoice明示ON、macOSマイク許可、物理発話、可聴remote audio、transcript、Timer承認 / readbackはユーザー操作gateのままである。
+
+## 一意表示名のbuild 608物理E2E候補
+
+- Computer Useはフルパス指定のAccessibility tree / screenshot取得ではbuild 607を一意に確認できたが、ad-hoc appへのclick時にnative pipeが閉じ、表示名指定は`/Applications/HoverPocket.app`へ解決された。誤操作を避け、Voice有効化やマイク許可は実行していない。
+- 同じHEADとE2E binary、固定bundle ID `local.codex.hover-pocket.voice-e2e`、一意Keychain suffixを維持したまま、一時bundleの`CFBundleDisplayName` / `CFBundleName`だけを`ホバーポケット Voice E2E 608`へ変更し、既存entitlements付きad-hoc署名を再適用した。製品コード、通常bundle、ユーザーデータは変更していない。
+- fresh session `HoverPocketVoiceE2ESession-Ia7yuR`、runtime `HoverPocketVoiceE2E-9OKeZP`、PID `86913`で起動した。strict codesign、Harness Readback / ValidateIsolation、process / storage ownershipがPASSし、Voice既定OFF、disconnected、mic / remote audio / Timer readback / 物理確認未実行を確認した。idle計測は7 sample、CPU平均 / p95 / 最大`0.1%`、RSS平均約`113.904 MiB`、最大約`113.984 MiB`だった。
+- 同名だった中間build 607 PID `85676`はHarness Stopを使い、`safe_close`、process stopped、receipt / performance保持を別readbackした。長時間基準のPID `70741`は停止せず、一意表示名build 608 PID `86913`と同時に維持している。
+- 次の人手gateは、前面の`ホバーポケット Voice E2E 608`を確認し、SettingsでVoiceを明示ON、macOSマイク許可、物理発話、可聴remote audio、transcript、Timer承認 / readbackを実行することである。人の発話と「話せた・聞こえた」確認は自動化・偽装しない。
