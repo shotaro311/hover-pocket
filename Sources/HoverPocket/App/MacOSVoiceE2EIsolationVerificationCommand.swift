@@ -45,6 +45,7 @@ enum MacOSVoiceE2EIsolationVerificationCommand {
             )
             for component in [
                 "CapabilityBroker",
+                "CodexVoiceAppServer",
                 "PocketApps",
                 "StickyNotes",
                 "Timer",
@@ -66,6 +67,42 @@ enum MacOSVoiceE2EIsolationVerificationCommand {
                 "performance_receipt_path_escaped",
                 &failures
             )
+
+            if let executableURL = Bundle.main.executableURL {
+                let profile = try CodexVoiceAppServerProfile.prepare(
+                    executableURL: executableURL,
+                    runtimeEnvironment: environment
+                )
+                let authURL = profile.codexHomeURL.appendingPathComponent("auth.json")
+                check(profile.authStorage == .managedFile, "managed_login_disabled", &failures)
+                check(
+                    isDescendant(profile.codexHomeURL, of: root),
+                    "managed_login_profile_escaped",
+                    &failures
+                )
+                check(
+                    profile.processEnvironment["CODEX_HOME"] == profile.codexHomeURL.path,
+                    "managed_login_codex_home_mismatch",
+                    &failures
+                )
+                check(
+                    profile.processEnvironment["HOME"] == root.path,
+                    "managed_login_home_not_isolated",
+                    &failures
+                )
+                check(
+                    !fileManager.fileExists(atPath: authURL.path),
+                    "managed_login_inherited_credential",
+                    &failures
+                )
+                check(
+                    (try? fileManager.destinationOfSymbolicLink(atPath: authURL.path)) == nil,
+                    "managed_login_external_link",
+                    &failures
+                )
+            } else {
+                failures.append("managed_login_executable_missing")
+            }
 
             let settings = AppSettings(defaults: environment.settingsDefaults)
             environment.applyVoiceE2EDefaults(to: settings)
@@ -217,7 +254,7 @@ enum MacOSVoiceE2EIsolationVerificationCommand {
         }
 
         if failures.isEmpty {
-            print("PASS voice-e2e-isolation verify: Debug-only marked bundle, fresh direct temp root, verifier and Release rejection, isolated storage/defaults, external integration denial, Codex default, optional BYOK process-memory credential")
+            print("PASS voice-e2e-isolation verify: Debug-only marked bundle, fresh direct temp root, verifier and Release rejection, isolated storage/defaults, external integration denial, isolated Codex managed login, Codex default, optional BYOK process-memory credential")
             exit(0)
         }
         print("FAIL voice-e2e-isolation verify:")

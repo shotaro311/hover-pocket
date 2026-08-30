@@ -18,10 +18,11 @@ Usage:
   ./script/voice_e2e_macos.sh Stop --session-dir <directory>
   ./script/voice_e2e_macos.sh Cleanup --session-dir <directory>
 
-Build and Run use the logged-in Codex app-server account and never read an API
-key from arguments or environment. Voice still requires explicit opt-in in the
-isolated app Settings UI. New physical evidence is bound to codex_app_server;
-Realtime BYOK receipts cannot satisfy Validate.
+Build and Run use a Voice E2E-only Codex app-server profile. Complete ChatGPT
+sign-in from the isolated app. Host Codex credentials and API keys are never
+read or shared. Voice still requires explicit opt-in in the isolated app
+Settings UI. New physical evidence is bound to codex_app_server; Realtime BYOK
+receipts cannot satisfy Validate.
 USAGE
 }
 
@@ -383,10 +384,14 @@ validate_action() {
   local pid
   local app_path
   local executable
-  local allowed='^(CapabilityBroker|PocketApps|StickyNotes|Timer|Clipboard|voice-e2e-receipt.json|voice-e2e-performance.json)$'
+  local allowed='^(CapabilityBroker|CodexVoiceAppServer|PocketApps|StickyNotes|Timer|Clipboard|voice-e2e-receipt.json|voice-e2e-performance.json)$'
   local entry
   local entry_path
   local resolved_entry
+  local codex_profile_root
+  local codex_home
+  local codex_config
+  local codex_auth
 
   require_state "$session_dir"
   if [[ "$receipt_stage" == "physical" ]]; then
@@ -432,6 +437,36 @@ validate_action() {
       return 1
     }
   done < <(find "$runtime_root" -mindepth 1 -maxdepth 1 -print0)
+  codex_profile_root="$runtime_root/CodexVoiceAppServer"
+  codex_home="$codex_profile_root/CodexHome"
+  codex_config="$codex_home/config.toml"
+  codex_auth="$codex_home/auth.json"
+  if [[ -e "$codex_profile_root" ]]; then
+    [[ -d "$codex_profile_root" && ! -L "$codex_profile_root" \
+        && "$(/usr/bin/stat -f '%u' "$codex_profile_root")" == "$(/usr/bin/id -u)" \
+        && "$(/usr/bin/stat -f '%Lp' "$codex_profile_root")" == "700" \
+        && -d "$codex_home" && ! -L "$codex_home" \
+        && "$(/usr/bin/stat -f '%u' "$codex_home")" == "$(/usr/bin/id -u)" \
+        && "$(/usr/bin/stat -f '%Lp' "$codex_home")" == "700" \
+        && -f "$codex_config" && ! -L "$codex_config" \
+        && "$(/usr/bin/stat -f '%u' "$codex_config")" == "$(/usr/bin/id -u)" \
+        && "$(/usr/bin/stat -f '%Lp' "$codex_config")" == "600" ]] || {
+      echo "error: isolated Codex profile ownership or permissions are invalid" >&2
+      return 1
+    }
+  fi
+  if [[ -e "$codex_auth" || -L "$codex_auth" ]]; then
+    [[ -f "$codex_auth" && ! -L "$codex_auth" \
+        && "$(/usr/bin/stat -f '%u' "$codex_auth")" == "$(/usr/bin/id -u)" \
+        && "$(/usr/bin/stat -f '%Lp' "$codex_auth")" == "600" \
+        && "$(/usr/bin/stat -f '%l' "$codex_auth")" == "1" ]] || {
+      echo "error: isolated Codex credential ownership or permissions are invalid" >&2
+      return 1
+    }
+  elif [[ "$receipt_stage" == "physical" ]]; then
+    echo "error: physical Codex Voice E2E requires an isolated managed credential" >&2
+    return 1
+  fi
   if [[ "$receipt_stage" == "physical" ]]; then
     "$ROOT_DIR/script/verify_macos_voice_e2e_receipt.py" \
       --runtime-root "$runtime_root" \
@@ -454,6 +489,7 @@ validate_action() {
   fi
   printf 'voice_e2e_validate=ok\n'
   printf 'voice_e2e_storage_isolation=ok\n'
+  printf 'voice_e2e_codex_profile_isolation=ok\n'
   printf 'voice_e2e_process_ownership=ok\n'
   printf 'voice_e2e_expected_provider=%s\n' "$E2E_EXPECTED_PROVIDER"
 }

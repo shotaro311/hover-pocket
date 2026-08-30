@@ -775,7 +775,7 @@ enum CodexAppServerVerificationCommand {
         guard try CodexVoiceAppServerProfile.prepareAuthStorage(
             in: managedHome,
             sourceHome: sourceHome,
-            externalIntegrationsEnabled: true,
+            policy: .externalOrManaged,
             fileManager: fileManager
         ) == .managedFile else {
             throw CodexAppServerVerificationError.failed("managed_login_empty_profile")
@@ -789,7 +789,7 @@ enum CodexAppServerVerificationCommand {
         guard try CodexVoiceAppServerProfile.prepareAuthStorage(
             in: linkedHome,
             sourceHome: sourceHome,
-            externalIntegrationsEnabled: true,
+            policy: .externalOrManaged,
             fileManager: fileManager
         ) == .linkedExternalFile,
         (try fileManager.attributesOfItem(
@@ -804,7 +804,7 @@ enum CodexAppServerVerificationCommand {
               try CodexVoiceAppServerProfile.prepareAuthStorage(
                 in: retainedHome,
                 sourceHome: sourceHome,
-                externalIntegrationsEnabled: true,
+                policy: .externalOrManaged,
                 fileManager: fileManager
               ) == .managedFile,
               (try fileManager.attributesOfItem(atPath: retainedCredential.path)[.type]
@@ -815,13 +815,36 @@ enum CodexAppServerVerificationCommand {
         guard try CodexVoiceAppServerProfile.prepareAuthStorage(
             in: linkedHome,
             sourceHome: sourceHome,
-            externalIntegrationsEnabled: false,
+            policy: .disabled,
             fileManager: fileManager
         ) == .disabled,
         !fileManager.fileExists(
             atPath: linkedHome.appendingPathComponent("auth.json").path
         ) else {
             throw CodexAppServerVerificationError.failed("managed_login_disabled_profile")
+        }
+
+        let isolatedHome = root.appendingPathComponent("isolated", isDirectory: true)
+        try fileManager.createDirectory(
+            at: isolatedHome,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        guard try CodexVoiceAppServerProfile.prepareAuthStorage(
+            in: isolatedHome,
+            sourceHome: sourceHome,
+            policy: .managedOnly,
+            fileManager: fileManager
+        ) == .managedFile,
+        !fileManager.fileExists(
+            atPath: isolatedHome.appendingPathComponent("auth.json").path
+        ),
+        (try? fileManager.destinationOfSymbolicLink(
+            atPath: isolatedHome.appendingPathComponent("auth.json").path
+        )) == nil else {
+            throw CodexAppServerVerificationError.failed(
+                "managed_login_isolated_profile"
+            )
         }
     }
 

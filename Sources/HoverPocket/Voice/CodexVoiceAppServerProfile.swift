@@ -17,6 +17,12 @@ enum CodexVoiceAuthStorage: String, Equatable, Sendable {
     var allowsManagedLogin: Bool { self == .managedFile }
 }
 
+enum CodexVoiceAuthStoragePolicy: Equatable, Sendable {
+    case disabled
+    case managedOnly
+    case externalOrManaged
+}
+
 struct CodexVoiceAppServerProfile: Equatable, Sendable {
     let codexHomeURL: URL
     let processEnvironment: [String: String]
@@ -49,10 +55,18 @@ struct CodexVoiceAppServerProfile: Equatable, Sendable {
             throw CodexVoiceAppServerProfileError.configurationWriteFailed
         }
 
+        let authStoragePolicy: CodexVoiceAuthStoragePolicy
+        if runtimeEnvironment.isIsolatedVoiceE2E {
+            authStoragePolicy = .managedOnly
+        } else if runtimeEnvironment.externalIntegrationsEnabled {
+            authStoragePolicy = .externalOrManaged
+        } else {
+            authStoragePolicy = .disabled
+        }
         let authStorage = try prepareAuthStorage(
             in: codexHome,
             sourceHome: sourceCodexHome(fileManager: fileManager),
-            externalIntegrationsEnabled: runtimeEnvironment.externalIntegrationsEnabled,
+            policy: authStoragePolicy,
             fileManager: fileManager
         )
 
@@ -177,11 +191,11 @@ struct CodexVoiceAppServerProfile: Equatable, Sendable {
     static func prepareAuthStorage(
         in codexHome: URL,
         sourceHome: URL,
-        externalIntegrationsEnabled: Bool,
+        policy: CodexVoiceAuthStoragePolicy,
         fileManager: FileManager
     ) throws -> CodexVoiceAuthStorage {
         let link = codexHome.appendingPathComponent("auth.json")
-        guard externalIntegrationsEnabled else {
+        guard policy != .disabled else {
             if isSymbolicLink(link) {
                 try? fileManager.removeItem(at: link)
             }
@@ -195,6 +209,17 @@ struct CodexVoiceAppServerProfile: Equatable, Sendable {
             guard isRegularFile(link),
                   isOwnedByCurrentUser(link),
                   hasPrivatePermissions(link) else {
+                throw CodexVoiceAppServerProfileError.authLinkInvalid
+            }
+            return .managedFile
+        }
+
+        if policy == .managedOnly {
+            if isSymbolicLink(link) {
+                try? fileManager.removeItem(at: link)
+            }
+            guard !isSymbolicLink(link),
+                  !fileManager.fileExists(atPath: link.path) else {
                 throw CodexVoiceAppServerProfileError.authLinkInvalid
             }
             return .managedFile

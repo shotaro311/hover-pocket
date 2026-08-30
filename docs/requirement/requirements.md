@@ -804,6 +804,7 @@ Must:
 - macOSのSmall / Medium / Large / Extra LargeとWindowsのSmall / Medium / Largeで、off / compact / expandedのgeometry fixtureが通る。
 - `OS × size × built-in Provider / generated PocketSurface fixture × off/compact/expanded`の直積でShell contractを検査する。
 - macOS Voice E2Eは`Build → Run → ValidateIsolation → Validate → Stop → Readback → Cleanup`を別操作にし、CIは秘密値やマイクを使わない隔離契約まで、実機gateはユーザーがCodex app-serverへのChatGPTログインとマイクを明示操作した物理receiptまでを確認する。新規sessionは期待Providerを`codex_app_server`へ束縛し、BYOKまたは途中でProviderが変わったmedia attemptを物理証拠として受理しない。Run / Stop / Cleanupはsession単位のatomic lockで直列化し、ValidateIsolationはallowlist名だけでなくtop-level symlink、型、canonical root containmentを検査する。Stopはprocess不在とstopped receiptが両方通った後だけlifecycleを`stopped`へ確定し、Cleanupは記録PIDに加えてexact commandのprocess不在を再確認する。
+- macOS Voice E2EのChatGPTログインは、隔離runtime内のVoice専用Codex Homeにあるowner-only regular fileだけへ保存する。Hostの`~/.codex/auth.json`、Keychain、通常版HoverPocketの認証を参照・symlink・変更せず、session Cleanupで専用credentialもruntimeごと回収する。
 
 ### 10.2 Provider E2E
 
