@@ -515,6 +515,8 @@ Planned Must:
 - macOS実音声E2Eでは設定をprocess内メモリへ閉じ、Provider UIをTimerだけに限定する。Updater、Google OAuth callback、Camera準備、Clipboard移行、生成Pocket Appを起動せず、本番のApplication Support、UserDefaults、Keychainへ接続しない。SettingsではMirror、Weather、Calendar、Updateを表示せず、status menuの更新確認とapp再active時のCamera権限再確認も実行しない。Calendar実データ確認は通常の署名済み候補で、Calendar grantと書き込み承認を別途明示した場合だけ行う。
 - macOS実音声E2EのAPI keyは引数、環境変数、session state、receipt、logへ渡さず、隔離appのSettingsへユーザーが入力した現在process内だけで保持し、Stop時に消去する。
 - WebRTC SDPはUTF-8で262,144 bytes以下、`v=0`、NULなしとし、current root threadとconnection generationの両方へ束縛する。raw SDPはPanel transportだけへ返し、Settings、監査、diskへ保存しない。remote audioはWebRTC media trackで再生し、raw audio payloadをBridge、監査、diskへ渡さない。
+- macOSの配布bundleはWebRTC host candidateをmDNSで匿名化するため、`NSLocalNetworkUsageDescription`でVoice接続だけに使うことを明示する。HoverPocket自身はBonjour serviceのbrowse / advertiseを行わず、`NSBonjourServices`やmulticast entitlementを追加しない。権限拒否時はAPIやBYOKへ自動fallbackせず、固定error codeとSystem Settings導線を返す。
+- macOSのICE収集はcandidate取得済みなら3秒でofferを確定し、未取得なら従来上限8秒まで待つ。8秒後は無限待ちや即時rejectにせず、その時点のSDPを接続判定へ渡し、Voice開始全体の30秒上限内で成功または固定error codeへ収束させる。
 - Pocket Appはmanifest、data schema、layout、workflow、permissions、testsをユーザーが確認・変更・削除・rollbackできるファイルとして保持する。
 - 生成UIはauthoritative data、secret、重要処理を所有せず、削除・再生成してもユーザーの意図とデータが残る。
 - Pocket Appのinstall / update / enable / disable / remove / rollbackは、Lifecycleの保存状態だけで成功にしない。Hostが検証済みimmutable packageを`PocketSurfaceRegistry`と実行runtimeへ反映し、同じapp ID、version、package digest、permission grantが描画・実行側でも観測できた後だけ成功receiptを返す。

@@ -1058,6 +1058,10 @@ def main() -> None:
         "CodexRealtimeProbeCloseGate",
         "processStarted: { processID in",
         "realtime_app_server_process_leaked",
+        "CodexAppServerRealtimeVerificationSafeError",
+        '"realtime_probe_page_unavailable"',
+        '"realtime_probe_offer_unavailable"',
+        '"realtime_probe_connection_unavailable"',
     )) or "getUserMedia" in mac_codex_realtime_verifier:
         fail("macOS Codex live verifier is not identity-pinned, microphone-free, or bounded")
     if '--verify-codex-app-server-realtime' not in mac_main \
@@ -1185,6 +1189,13 @@ def main() -> None:
         fail("macOS Voice credential refresh or transient retry contract is incomplete")
     if "Voice conversations with OpenAI Realtime" not in mac_build_script:
         fail("macOS microphone purpose string omits the OpenAI Realtime destination")
+    if not all(value in mac_build_script for value in (
+        "NSLocalNetworkUsageDescription",
+        "establish WebRTC Voice connections",
+        "does not browse for nearby devices",
+        '*" --voice-e2e --voice-e2e-root "*',
+    )):
+        fail("macOS package runtime boundary or local network purpose string regressed")
     if not all(value in mac_runtime_environment for value in (
         'static let voiceE2EFlag = "--voice-e2e"',
         'static let voiceE2ERootFlag = "--voice-e2e-root"',

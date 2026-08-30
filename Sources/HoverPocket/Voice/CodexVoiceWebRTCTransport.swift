@@ -578,16 +578,23 @@ private enum CodexVoiceWebContent {
 
   function waitForIce(connection) {
     if (connection.iceGatheringState === "complete") return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
-        connection.removeEventListener("icegatheringstatechange", onChange);
-        reject(new Error("ice_timeout"));
-      }, 8000);
-      const onChange = () => {
-        if (connection.iceGatheringState !== "complete") return;
-        window.clearTimeout(timeout);
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(earlyTimeout);
+        window.clearTimeout(finalTimeout);
         connection.removeEventListener("icegatheringstatechange", onChange);
         resolve();
+      };
+      const earlyTimeout = window.setTimeout(() => {
+        if (connection.localDescription?.sdp?.includes("a=candidate:")) finish();
+      }, 3000);
+      const finalTimeout = window.setTimeout(finish, 8000);
+      const onChange = () => {
+        if (connection.iceGatheringState !== "complete") return;
+        finish();
       };
       connection.addEventListener("icegatheringstatechange", onChange);
     });
@@ -723,9 +730,13 @@ enum CodexVoiceWebRTCEmbeddedContract {
             "async function acceptAnswer(operationId, sdp)",
             "post({ type: \"remote_audio_track\", operationId });",
             "post({ type: \"remote_audio_playing\", operationId })",
-            "post({ type: \"attached\", operationId });"
+            "post({ type: \"attached\", operationId });",
+            "connection.removeEventListener(\"icegatheringstatechange\", onChange);",
+            "const earlyTimeout = window.setTimeout",
+            "const finalTimeout = window.setTimeout(finish, 8000);"
         ]
         return requiredFragments.allSatisfy(CodexVoiceWebContent.html.contains)
+            && !CodexVoiceWebContent.html.contains("ice_timeout")
     }
 }
 

@@ -1,4 +1,5 @@
 import Darwin
+import AppKit
 import Foundation
 import WebKit
 
@@ -16,6 +17,10 @@ enum CodexAppServerRealtimeVerificationError: Error, CustomStringConvertible {
 struct CodexAppServerRealtimeVerificationResult: Sendable {
     let voiceCount: Int
     let processClosed: Bool
+}
+
+private protocol CodexAppServerRealtimeVerificationSafeError {
+    var safeErrorCode: String { get }
 }
 
 @MainActor
@@ -180,6 +185,11 @@ enum CodexAppServerRealtimeVerificationCommand {
             if let safeError = error as? CodexAppServerRealtimeVerificationError {
                 throw safeError
             }
+            if let safeError = error as? CodexAppServerRealtimeVerificationSafeError {
+                throw CodexAppServerRealtimeVerificationError.failed(
+                    safeError.safeErrorCode
+                )
+            }
             throw CodexAppServerRealtimeVerificationError.failed(
                 "codex_app_server_realtime_verification_failed"
             )
@@ -265,14 +275,29 @@ private final class CodexAppServerRealtimeVerificationToolAdapter:
 
 @MainActor
 private final class CodexRealtimeSDPConnectionProbe: NSObject, WKNavigationDelegate {
-    private enum ProbeError: Error {
+    private enum ProbeError: Error, CodexAppServerRealtimeVerificationSafeError {
         case pageUnavailable
         case offerUnavailable
         case connectionUnavailable
+
+        var safeErrorCode: String {
+            switch self {
+            case .pageUnavailable:
+                "realtime_probe_page_unavailable"
+            case .offerUnavailable:
+                "realtime_probe_offer_unavailable"
+            case .connectionUnavailable:
+                "realtime_probe_connection_unavailable"
+            }
+        }
     }
 
-    private static let origin = URL(string: "https://hoverpocket-realtime.invalid/")!
+    private static let scheme = "hoverpocket-realtime-verifier"
+    private static let host = "local"
+    private static let pageURL = URL(string: "\(scheme)://\(host)/index.html")!
     private let webView: WKWebView
+    private let hostWindow: NSWindow
+    private let schemeHandler: CodexRealtimeProbeSchemeHandler
     private var loadContinuation: CheckedContinuation<Void, Error>?
     private var loadTimeoutTask: Task<Void, Never>?
     private var loaded = false
@@ -283,9 +308,32 @@ private final class CodexRealtimeSDPConnectionProbe: NSObject, WKNavigationDeleg
         configuration.preferences.isElementFullscreenEnabled = false
         configuration.mediaTypesRequiringUserActionForPlayback = .all
         configuration.allowsAirPlayForMediaPlayback = false
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        schemeHandler = CodexRealtimeProbeSchemeHandler(
+            pageURL: Self.pageURL,
+            page: Self.page
+        )
+        configuration.setURLSchemeHandler(
+            schemeHandler,
+            forURLScheme: Self.scheme
+        )
+        webView = WKWebView(
+            frame: NSRect(x: 0, y: 0, width: 1, height: 1),
+            configuration: configuration
+        )
+        hostWindow = NSWindow(
+            contentRect: NSRect(x: -10_000, y: -10_000, width: 1, height: 1),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
         super.init()
         webView.navigationDelegate = self
+        hostWindow.isReleasedWhenClosed = false
+        hostWindow.isOpaque = false
+        hostWindow.alphaValue = 0.01
+        hostWindow.ignoresMouseEvents = true
+        hostWindow.contentView = webView
+        hostWindow.orderBack(nil)
     }
 
     func load() async throws {
@@ -297,17 +345,22 @@ private final class CodexRealtimeSDPConnectionProbe: NSObject, WKNavigationDeleg
                 guard !Task.isCancelled else { return }
                 self?.finishLoad(.failure(ProbeError.pageUnavailable))
             }
-            webView.loadHTMLString(Self.page, baseURL: Self.origin)
+            webView.load(URLRequest(url: Self.pageURL))
         }
     }
 
     func createOffer() async throws -> String {
-        let value = try await webView.callAsyncJavaScript(
-            Self.createOfferScript,
-            arguments: [:],
-            in: nil,
-            contentWorld: .page
-        )
+        let value: Any?
+        do {
+            value = try await webView.callAsyncJavaScript(
+                Self.createOfferScript,
+                arguments: [:],
+                in: nil,
+                contentWorld: .page
+            )
+        } catch {
+            throw ProbeError.offerUnavailable
+        }
         guard let offer = value as? String,
               offer.hasPrefix("v=0"),
               offer.utf8.count <= 131_072 else {
@@ -317,12 +370,17 @@ private final class CodexRealtimeSDPConnectionProbe: NSObject, WKNavigationDeleg
     }
 
     func acceptAnswer(_ answer: String) async throws {
-        let value = try await webView.callAsyncJavaScript(
-            Self.acceptAnswerScript,
-            arguments: ["answer": answer],
-            in: nil,
-            contentWorld: .page
-        )
+        let value: Any?
+        do {
+            value = try await webView.callAsyncJavaScript(
+                Self.acceptAnswerScript,
+                arguments: ["answer": answer],
+                in: nil,
+                contentWorld: .page
+            )
+        } catch {
+            throw ProbeError.connectionUnavailable
+        }
         guard value as? String == "connected" else {
             throw ProbeError.connectionUnavailable
         }
@@ -352,6 +410,8 @@ private final class CodexRealtimeSDPConnectionProbe: NSObject, WKNavigationDeleg
         webView.stopLoading()
         webView.navigationDelegate = nil
         webView.loadHTMLString("", baseURL: nil)
+        hostWindow.orderOut(nil)
+        hostWindow.contentView = nil
         finishLoad(.failure(ProbeError.pageUnavailable))
     }
 
@@ -372,7 +432,7 @@ private final class CodexRealtimeSDPConnectionProbe: NSObject, WKNavigationDeleg
         decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
         let url = navigationAction.request.url
-        let allowed = url == nil || url == Self.origin || url?.absoluteString == "about:blank"
+        let allowed = url == nil || url == Self.pageURL || url?.absoluteString == "about:blank"
         decisionHandler(allowed ? .allow : .cancel)
     }
 
@@ -418,17 +478,24 @@ private final class CodexRealtimeSDPConnectionProbe: NSObject, WKNavigationDeleg
       peer.addTrack(state.silentTrack, destination.stream);
       const offer = await peer.createOffer({offerToReceiveAudio: true});
       await peer.setLocalDescription(offer);
-      await new Promise((resolve, reject) => {
+      await new Promise((resolve) => {
         if (peer.iceGatheringState === "complete") return resolve();
-        const timeout = setTimeout(() => {
-          peer.removeEventListener("icegatheringstatechange", onChange);
-          reject(new Error("ice_timeout"));
-        }, 8000);
-        const onChange = () => {
-          if (peer.iceGatheringState !== "complete") return;
-          clearTimeout(timeout);
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(earlyTimeout);
+          clearTimeout(finalTimeout);
           peer.removeEventListener("icegatheringstatechange", onChange);
           resolve();
+        };
+        const earlyTimeout = setTimeout(() => {
+          if (peer.localDescription?.sdp?.includes("a=candidate:")) finish();
+        }, 3000);
+        const finalTimeout = setTimeout(finish, 8000);
+        const onChange = () => {
+          if (peer.iceGatheringState !== "complete") return;
+          finish();
         };
         peer.addEventListener("icegatheringstatechange", onChange);
       });
@@ -491,6 +558,38 @@ private final class CodexRealtimeSDPConnectionProbe: NSObject, WKNavigationDeleg
     }
     return true;
     """#
+}
+
+private final class CodexRealtimeProbeSchemeHandler: NSObject, WKURLSchemeHandler {
+    private let pageURL: URL
+    private let data: Data
+
+    init(pageURL: URL, page: String) {
+        self.pageURL = pageURL
+        data = Data(page.utf8)
+    }
+
+    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
+        guard urlSchemeTask.request.url == pageURL else {
+            urlSchemeTask.didFailWithError(
+                CodexAppServerRealtimeVerificationError.failed(
+                    "realtime_probe_page_unavailable"
+                )
+            )
+            return
+        }
+        let response = URLResponse(
+            url: pageURL,
+            mimeType: "text/html",
+            expectedContentLength: data.count,
+            textEncodingName: "utf-8"
+        )
+        urlSchemeTask.didReceive(response)
+        urlSchemeTask.didReceive(data)
+        urlSchemeTask.didFinish()
+    }
+
+    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
 }
 
 private actor CodexRealtimeProbeCloseGate {

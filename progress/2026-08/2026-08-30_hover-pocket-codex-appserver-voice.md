@@ -88,6 +88,16 @@ Calendar読み取り専用gateも同じエージェントが独立レビュー�
 - Calendar gate commit `a836856b570e7f949ab9081080c462d1ca6ce326`のDraft PR #39は、Router [33291040507](https://github.com/shotaro311/hover-pocket/actions/runs/33291040507)、macOS [33291041914](https://github.com/shotaro311/hover-pocket/actions/runs/33291041914)、Windows [33291041972](https://github.com/shotaro311/hover-pocket/actions/runs/33291041972)、3OS contract / compare [33291041947](https://github.com/shotaro311/hover-pocket/actions/runs/33291041947)、transition [33291041883](https://github.com/shotaro311/hover-pocket/actions/runs/33291041883)、release readback [33291041901](https://github.com/shotaro311/hover-pocket/actions/runs/33291041901)が成功。11成功・8 gate skip・失敗0・pending 0、Draft / OPEN / MERGEABLE / CLEAN、remote parity 0 / 0をreadback
 - 実装commit `dc734a95f30e847cb70c705df8d67728178a578f`のDraft PR #39: Router [33289398813](https://github.com/shotaro311/hover-pocket/actions/runs/33289398813)、macOS [33289399447](https://github.com/shotaro311/hover-pocket/actions/runs/33289399447)、Windows [33289399448](https://github.com/shotaro311/hover-pocket/actions/runs/33289399448)、3OS contract / compare [33289399439](https://github.com/shotaro311/hover-pocket/actions/runs/33289399439)、transition [33289399443](https://github.com/shotaro311/hover-pocket/actions/runs/33289399443)、release readback [33289399458](https://github.com/shotaro311/hover-pocket/actions/runs/33289399458)が成功。公開成果物を必要とする8 gateは意図どおりskip、失敗0・pending 0。PRはDraft / OPEN / MERGEABLE。
 
+## 配布bundle Realtime回帰と修正
+
+- exact HEAD `9068d9674883a4916787dc62ef64e854dabfd97e`を`0.1.0 (597)`としてDeveloper ID署名・公証した。Apple submission `10bf95ad-0d86-4137-9336-cce2d8922937`は`Accepted`で、staple、Gatekeeper、app / ZIP再展開後のstrict codesign、SHA-256、Sparkle appcast、public dry-runはPASSした。しかし配布bundleの`--verify-codex-app-server-realtime`が失敗したため、build 597はRC不採用とし、公開していない。
+- Debug / Release CLIは同じChatGPT account、19 voices、ephemeral thread、SDP / WebRTC、process teardownまでPASSした。Developer ID署名bundleだけは最初`realtime_probe_offer_unavailable`、ICE timeoutをbounded proceedへ変えた後は`realtime_probe_connection_unavailable`となり、WebKitログでmDNS host candidate登録失敗とcandidate pair未選択を確認した。raw SDP、ICE credential、候補addressは成果物、監査、進捗ログへ保存していない。
+- verifierはWebKit例外を固定3段階codeへ変換し、本番と同じcustom URL scheme、非永続data store、検証中だけの1px offscreen host windowを使う。通常VoiceとverifierのICE収集はcandidateが3秒以内に得られれば早期継続し、未取得なら従来上限8秒まで成功余地を残し、8秒後は全体30秒上限下の接続判定へ進む。
+- Apple TN3179のbundle app / 間接Bonjour境界に合わせ、`NSLocalNetworkUsageDescription`へWebRTC Voice接続だけの用途と周辺機器browseを行わないことを明記した。`NSBonjourServices`、multicast entitlement、外部TURN、API / BYOK fallbackは追加していない。現在の開発Macは署名bundleでLocal Network許可をreadbackできておらず、`realtime_probe_connection_unavailable`のため未完了gateである。
+- 配布package scriptのprocess名停止が、維持対象だった隔離E2E PID 56971も停止した。同じruntime rootはfresh制約で再利用せず、新しいBuild / Run / Readbackでsession `HoverPocketVoiceE2ESession-4e6lUy`、runtime `HoverPocketVoiceE2E-wevAYd`、PID 70741を作り直した。build scriptはcanonical E2E引数を持つprocessを除外し、修正後のpackage実行前後でPID 70741が生存することをreadbackした。
+- 独立レビューは初回、3秒一律確定が遅い正常candidateを捨てるP1を1件検出した。hybrid 3 / 8秒waitへ修正後はP0 / P1 / P2すべて0件。offscreen windowとsafe codeは明示verifier内だけ、追加purpose stringは起動処理なし、通常Voiceの追加処理は完了時に解除されるtimer最大2個で、CPU / RSS /通常起動への有意な悪化なしと判定された。
+- Debug / Release warnings-as-errors、Voice Foundation、Capability 20、Broker 21 descriptor / 20 handler、Pocket Surface / App、Timer、Panel 128、E2E isolation、Codex foundation / model Timer / CLI Realtime、Voice静的42、Pocket contract 15 schema / 71 fixture、release readback 23 unit、receipt / performance self-test、shell syntax、`git diff --check`はすべてPASSした。
+
 ## 未完了gate
 
 - 全candidateが非Ready、ChatGPT.app未導入、同梱Codexが将来非互換、keyring-only loginの場合の導入 / 更新 / login UX。
@@ -98,3 +108,4 @@ Calendar読み取り専用gateも同じエージェントが独立レビュー�
 - CPU / RSSの自動idle計測は完了した。mic clickからattachedまでのp95、snapshot publishes/sec、Expanded RPC/sec、stop RPC/session=1は、物理音声往復10回の人手gateで最終値を取得する。
 - keyring-only Codex login向けの専用ChatGPT login flowと、file-backed loginからの移行readback。
 - Draft PRのCIと人手レビュー。merge、release、既存notarized build 583の差し替えは未実施。
+- macOS署名bundleでSystem SettingsのLocal Network許可を有効にし、`--verify-codex-app-server-realtime`のaccount、19 voices、ephemeral thread、SDP / WebRTC connected、process closedを再readbackする。完了前はbuild 597 / 598をRCと扱わない。

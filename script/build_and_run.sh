@@ -201,12 +201,21 @@ install_app_icon() {
 }
 
 if [[ "$VOICE_E2E_BUILD" != "1" && "$VOICE_E2E_BUILD" != "true" ]]; then
+  stopped_process=false
   for process_name in "$APP_NAME" "${LEGACY_PROCESS_NAMES[@]}"; do
-    if pgrep -x "$process_name" >/dev/null 2>&1; then
-      pkill -x "$process_name" || true
-      sleep 0.2
-    fi
+    while IFS= read -r process_id; do
+      [[ "$process_id" =~ ^[0-9]+$ ]] || continue
+      process_command="$(ps -p "$process_id" -o command= 2>/dev/null || true)"
+      if [[ "$process_command" == *" --voice-e2e --voice-e2e-root "* ]]; then
+        continue
+      fi
+      kill "$process_id" 2>/dev/null || true
+      stopped_process=true
+    done < <(pgrep -x "$process_name" 2>/dev/null || true)
   done
+  if [[ "$stopped_process" == "true" ]]; then
+    sleep 0.2
+  fi
 fi
 
 swift build
@@ -284,6 +293,8 @@ ${SPARKLE_PLIST}  <key>SUEnableInstallerLauncherService</key>
   <string>ホバーポケット uses the Mac camera to show a mirror preview while the hover panel is open.</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>ホバーポケット uses the microphone for Voice conversations with OpenAI Realtime or the local Codex app-server, and for the mirror microphone check.</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>ホバーポケット uses local network access only to establish WebRTC Voice connections. It does not browse for nearby devices.</string>
   <key>NSLocationUsageDescription</key>
   <string>ホバーポケット uses your location only when you choose Current Location for the weather forecast.</string>
   <key>NSLocationWhenInUseUsageDescription</key>
