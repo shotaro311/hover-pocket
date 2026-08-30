@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-30T11:27:33Z",
+  "generatedAt": "2026-08-30T11:39:59Z",
   "verdict": "NO_GO",
   "releaseAuthorityGranted": false,
   "publicationPerformed": false,
@@ -173,12 +173,21 @@
     "currentRuntimeSourceReplacementRequiredBeforeHumanGate": false,
     "processIdentifierAtReadback": 10329,
     "idleReadback": {
-      "sampleCount": 21,
-      "cpuAveragePercent": 0.105,
+      "durationSeconds": 120,
+      "sampleCount": 235,
+      "cpuAveragePercent": 0.113,
       "cpuP95Percent": 0.1,
-      "cpuMaximumPercent": 0.2,
-      "rssAverageMiB": 109.74,
-      "rssMaximumMiB": 109.75
+      "cpuMaximumPercent": 2.7,
+      "rssAverageMiB": 100.988,
+      "rssMaximumMiB": 101.609,
+      "childProcessesBefore": 0,
+      "childProcessesAfter": 0,
+      "networkSocketsBefore": 0,
+      "networkSocketsAfter": 0,
+      "mediaAttemptCount": 0,
+      "snapshotPublishesPerSecond": 0.0,
+      "expandedRPCsPerSecond": 0.0,
+      "realtimeStopRPCCount": 0
     },
     "status": "human_physical_gate_pending"
   },
