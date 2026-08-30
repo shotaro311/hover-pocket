@@ -171,3 +171,10 @@ keyring-only Codex loginの実装制約は、Voice専用profileでChatGPT manage
 - fresh session `HoverPocketVoiceE2ESession-Ia7yuR`、runtime `HoverPocketVoiceE2E-9OKeZP`、PID `86913`で起動した。strict codesign、Harness Readback / ValidateIsolation、process / storage ownershipがPASSし、Voice既定OFF、disconnected、mic / remote audio / Timer readback / 物理確認未実行を確認した。idle計測は7 sample、CPU平均 / p95 / 最大`0.1%`、RSS平均約`113.904 MiB`、最大約`113.984 MiB`だった。
 - 同名だった中間build 607 PID `85676`はHarness Stopを使い、`safe_close`、process stopped、receipt / performance保持を別readbackした。長時間基準のPID `70741`は停止せず、一意表示名build 608 PID `86913`と同時に維持している。
 - 次の人手gateは、前面の`ホバーポケット Voice E2E 608`を確認し、SettingsでVoiceを明示ON、macOSマイク許可、物理発話、可聴remote audio、transcript、Timer承認 / readbackを実行することである。人の発話と「話せた・聞こえた」確認は自動化・偽装しない。
+
+## AN8残存gate独立監査
+
+- 別エージェントはCodex app-server標準Voiceの安全性と性能を独立再レビューし、P0 / P1は0件と判定した。route canaryはVoice設定時の初回だけで同一process内ではcacheされ、通常起動、Hover、マイク開始hot pathへ毎回入らない。P2はkeyring-only環境で外部`auth.json`を継承できない互換性1件で、現在環境はowner-only file-backed credentialをreadbackできるため現行動作を止めない。
+- ChatGPT Pro OrchestratorのCriticへ、exact HEAD `e02761e3c584810b5e66ed90fdcc74804d20b3a5`、要求・進捗・macOS / Windows Voice / 署名 / rollback関連allowlistを渡し、AN8初回実用リリースまでの完了済み・証拠不足・未完了gateを監査させた。runは`20260830-175124-hoverpocketdraft-pr-head-e02761ean8voice`、sessionは`pro-run-a9b6cde0-a`。
+- 送信前にNode `v24.19.0`、Oracle `0.17.2`、request SHA-256 `904350bd45a6fdc0afd792ec66b8119d4720e724020f92cd0e9757cb16aa9be3`、source context SHA-256 `4d33e71405ce38d73438ed1af5ba26d0ec940f8d15ec96b4d2ed2c6b20b7cce8`、Project target、exact send commandをruntime preflightでreadbackした。初回のCodex同梱Nodeはnpm非同梱のため送信前に停止し、npm併設のHomebrew Node 24へ切り替えた。実送信は1回だけで、return bridgeによる自動回収待ちである。
+- Criticはreview-onlyで、コード変更、GitHub書込み、merge、release、公開、外部申請を許可していない。物理マイク、可聴remote audio、transcript、Calendar create、Windows正式署名、公開transitionも自動完了扱いにしない。
