@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 STATE_FILE_NAME="voice-e2e-session.plist"
 E2E_BUNDLE_IDENTIFIER="local.codex.hover-pocket.voice-e2e"
+E2E_EXPECTED_PROVIDER="codex_app_server"
 SESSION_OPERATION_LOCK=""
 
 usage() {
@@ -19,7 +20,8 @@ Usage:
 
 Build and Run use the logged-in Codex app-server account and never read an API
 key from arguments or environment. Voice still requires explicit opt-in in the
-isolated app Settings UI.
+isolated app Settings UI. New physical evidence is bound to codex_app_server;
+Realtime BYOK receipts cannot satisfy Validate.
 USAGE
 }
 
@@ -91,8 +93,24 @@ require_state() {
     echo "error: E2E session state is missing" >&2
     return 1
   }
-  [[ "$(state_value "$session_dir" schemaVersion)" == "1" ]] || {
+  local schema_version
+  schema_version="$(state_value "$session_dir" schemaVersion)"
+  [[ "$schema_version" == "1" || "$schema_version" == "2" ]] || {
     echo "error: E2E session schema is unsupported" >&2
+    return 1
+  }
+  if [[ "$schema_version" == "2" ]]; then
+    [[ "$(state_value "$session_dir" expectedProviderId)" == "$E2E_EXPECTED_PROVIDER" ]] || {
+      echo "error: E2E session provider binding is invalid" >&2
+      return 1
+    }
+  fi
+}
+
+require_provider_bound_session() {
+  local session_dir="$1"
+  [[ "$(state_value "$session_dir" schemaVersion)" == "2" ]] || {
+    echo "error: physical validation requires a provider-bound session created by the current harness" >&2
     return 1
   }
 }
@@ -221,7 +239,8 @@ build_action() {
 
   state_file="$(state_path "$session_dir")"
   /usr/bin/plutil -create xml1 "$state_file"
-  /usr/bin/plutil -insert schemaVersion -integer 1 "$state_file"
+  /usr/bin/plutil -insert schemaVersion -integer 2 "$state_file"
+  /usr/bin/plutil -insert expectedProviderId -string "$E2E_EXPECTED_PROVIDER" "$state_file"
   /usr/bin/plutil -insert lifecycle -string built "$state_file"
   /usr/bin/plutil -insert appPath -string "$app_path" "$state_file"
   /usr/bin/plutil -insert buildRoot -string "$build_root" "$state_file"
@@ -233,6 +252,7 @@ build_action() {
   printf 'voice_e2e_build=ok\n'
   printf 'voice_e2e_session_dir=%s\n' "$session_dir"
   printf 'voice_e2e_app=%s\n' "$app_path"
+  printf 'voice_e2e_expected_provider=%s\n' "$E2E_EXPECTED_PROVIDER"
 }
 
 run_action() {
@@ -330,6 +350,11 @@ readback_action() {
   printf 'voice_e2e_runtime_root=%s\n' "$runtime_root"
   printf 'voice_e2e_receipt=%s\n' "$receipt_state"
   printf 'voice_e2e_performance_receipt=%s\n' "$performance_state"
+  if [[ "$(state_value "$session_dir" schemaVersion)" == "2" ]]; then
+    printf 'voice_e2e_provider_binding=explicit\n'
+  else
+    printf 'voice_e2e_provider_binding=legacy_nonphysical_only\n'
+  fi
   if [[ "$receipt_state" == "present" ]]; then
     "$ROOT_DIR/script/verify_macos_voice_e2e_receipt.py" \
       --runtime-root "$runtime_root" \
@@ -364,6 +389,9 @@ validate_action() {
   local resolved_entry
 
   require_state "$session_dir"
+  if [[ "$receipt_stage" == "physical" ]]; then
+    require_provider_bound_session "$session_dir"
+  fi
   [[ "$(state_value "$session_dir" lifecycle)" == "running" ]] || {
     echo "error: E2E session is not running" >&2
     return 1
@@ -404,9 +432,16 @@ validate_action() {
       return 1
     }
   done < <(find "$runtime_root" -mindepth 1 -maxdepth 1 -print0)
-  "$ROOT_DIR/script/verify_macos_voice_e2e_receipt.py" \
-    --runtime-root "$runtime_root" \
-    --stage "$receipt_stage"
+  if [[ "$receipt_stage" == "physical" ]]; then
+    "$ROOT_DIR/script/verify_macos_voice_e2e_receipt.py" \
+      --runtime-root "$runtime_root" \
+      --expected-provider "$E2E_EXPECTED_PROVIDER" \
+      --stage "$receipt_stage"
+  else
+    "$ROOT_DIR/script/verify_macos_voice_e2e_receipt.py" \
+      --runtime-root "$runtime_root" \
+      --stage "$receipt_stage"
+  fi
   if performance_receipt_required "$session_dir"; then
     local performance_stage="idle"
     [[ "$receipt_stage" == "physical" ]] && performance_stage="active"
@@ -420,6 +455,7 @@ validate_action() {
   printf 'voice_e2e_validate=ok\n'
   printf 'voice_e2e_storage_isolation=ok\n'
   printf 'voice_e2e_process_ownership=ok\n'
+  printf 'voice_e2e_expected_provider=%s\n' "$E2E_EXPECTED_PROVIDER"
 }
 
 stop_action() {

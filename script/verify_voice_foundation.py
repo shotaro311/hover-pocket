@@ -407,6 +407,22 @@ def main() -> None:
         / "Voice"
         / "VoiceProviderRuntime.cs"
     ).read_text(encoding="utf-8")
+    windows_voice_e2e_receipt = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Voice"
+        / "VoiceE2EReceiptStore.cs"
+    ).read_text(encoding="utf-8")
+    windows_voice_e2e_verifier = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Verification"
+        / "VoiceE2EIsolationVerifier.cs"
+    ).read_text(encoding="utf-8")
     windows_credentials = (
         ROOT
         / "windows"
@@ -1239,6 +1255,25 @@ def main() -> None:
     if "if (options.IsVerify)" not in windows_application_data \
             or "Debug Voice E2E mode cannot be combined with --verify." not in windows_application_data:
         fail("Windows Voice E2E can still collide with a verifier application-data override")
+    if not all(value in windows_voice_e2e_receipt for value in (
+        "ExpectedPhysicalProviderId = VoiceProviderIds.CodexAppServer",
+        "InvalidateProviderBoundEvidenceLocked()",
+        "_activeMediaProviderId",
+        "_userTranscriptCount = 0",
+        "_assistantTranscriptCount = 0",
+        "_completeTranscriptCount = 0",
+        "_timerCapabilityReadbackVerified = false",
+        "_physicalMediaUserConfirmed = false",
+    )):
+        fail("Windows Voice E2E provider-bound evidence invalidation is incomplete")
+    if not all(value in windows_voice_e2e_verifier for value in (
+        '"provider switch retained microphone evidence"',
+        '"provider switch retained user transcript evidence"',
+        '"provider roundtrip reused a previous media attempt"',
+        '"provider roundtrip restored stale Timer evidence"',
+        '"fresh provider-bound attempt missed physical confirmation"',
+    )):
+        fail("Windows Voice E2E provider roundtrip negative fixture is incomplete")
     continuation_position = mac_realtime_transport.find("startContinuation = continuation")
     javascript_start_position = mac_realtime_transport.find("window.hoverPocketVoice.start", continuation_position)
     if continuation_position < 0 or javascript_start_position < continuation_position \
@@ -1335,6 +1370,10 @@ def main() -> None:
         'lastSafeEvent = "safe_close"',
         "physicalConfirmationRequested",
         "mediaAttemptID",
+        "mediaAttemptProviderID",
+        "expectedPhysicalProviderID",
+        "invalidateProviderBoundEvidence()",
+        "providerID != nextProviderID",
         "attemptID == mediaAttemptID",
         "recordPhysicalMediaUserConfirmation",
         "microphoneAcquired = false",
@@ -1438,6 +1477,10 @@ def main() -> None:
         "voice-e2e-performance.json",
         "performanceReceiptRequired",
         "--require-receipt",
+        "expectedProviderId",
+        "E2E_EXPECTED_PROVIDER",
+        "require_provider_bound_session",
+        '--expected-provider "$E2E_EXPECTED_PROVIDER"',
     )):
         fail("macOS Voice E2E operational harness is incomplete")
     stopped_receipt_pos = mac_voice_e2e_harness.find('--stage stopped')
@@ -1450,9 +1493,15 @@ def main() -> None:
         "ALLOWED_KEYS",
         "set(payload) != ALLOWED_KEYS",
         'parser.add_argument("--self-test", action="store_true")',
-        'validate_stage(rejected, "physical")',
+        'validate_stage(rejected, "physical", "codex_app_server")',
         'choices=("summary", "isolation", "physical", "stopped")',
+        'parser.add_argument(\n        "--expected-provider"',
         '"codex_app_server"',
+        'receipt provider does not match the session binding',
+        'mismatched_provider in ("openai_realtime_byok", "off")',
+        'expected_provider != "codex_app_server"',
+        'choices=("codex_app_server",)',
+        'validate_stage(byok, "physical", "openai_realtime_byok")',
         '"physicalMediaUserConfirmed": True',
         'payload["lastSafeEvent"] != "safe_close"',
     )):
@@ -1481,6 +1530,11 @@ def main() -> None:
         '"receipt_attempt_timer_stale"',
         '"receipt_attempt_confirmation_stale"',
         '"receipt_stale_confirmation_accepted"',
+        '"physical_confirmation_wrong_provider_claimed"',
+        '"physical_confirmation_cross_provider_attempt_claimed"',
+        '"receipt_provider_roundtrip_reused_attempt"',
+        '"receipt_provider_roundtrip_timer_stale"',
+        '"receipt_provider_roundtrip_fresh_confirmation_failed"',
         'stopped.lastSafeEvent == "safe_close"',
         '"performance_failed_attempt_marked_attached"',
         '"performance_synchronous_safe_close"',

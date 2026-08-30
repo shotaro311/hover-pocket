@@ -173,10 +173,10 @@ internal sealed class VoiceE2EIsolationVerifier
         Check(!settings.StartWithWindows, "isolated default enabled startup registration");
         Check(!settings.AutoCheckForUpdates, "isolated default enabled update checks");
         Check(!settings.AiNativeEnabled, "isolated default enabled AI-native execution");
-        Check(!settings.VoiceEnabled, "isolated default enabled Voice before explicit key setup");
+        Check(!settings.VoiceEnabled, "isolated default enabled Voice before explicit Codex sign-in");
         Check(
-            settings.VoiceProviderId == VoiceProviderIds.OpenAIRealtimeByok,
-            "isolated default did not preselect OpenAI Realtime BYOK");
+            settings.VoiceProviderId == VoiceProviderIds.CodexAppServer,
+            "isolated default did not preselect Codex app-server");
         Check(!settings.VoiceCalendarAccessGranted, "isolated default enabled Calendar access");
         Check(settings.ClipboardPrivateMode, "isolated default enabled Clipboard monitoring");
         Check(
@@ -240,7 +240,7 @@ internal sealed class VoiceE2EIsolationVerifier
         var now = DateTimeOffset.UtcNow;
         var snapshot = new CodexVoiceSnapshot(
             CodexVoiceAvailability.Ready,
-            CodexVoiceSessionStatus.Connecting,
+            CodexVoiceSessionStatus.Idle,
             VoiceActivity.Listening,
             Muted: false,
             UiAttached: true,
@@ -284,8 +284,47 @@ internal sealed class VoiceE2EIsolationVerifier
         store.RecordSnapshot(
             snapshot,
             featureEnabled: true,
+            providerId: VoiceProviderIds.CodexAppServer,
+            credentialCurrent: false);
+
+        var mismatchPath = Path.Combine(data.RootDirectory, "voice-e2e-provider-mismatch.json");
+        var mismatchStore = new VoiceE2EReceiptStore(mismatchPath);
+        mismatchStore.RecordSnapshot(
+            snapshot,
+            featureEnabled: true,
             providerId: VoiceProviderIds.OpenAIRealtimeByok,
             credentialCurrent: true);
+        var mismatchLease = mismatchStore.BeginMediaAttempt();
+        Check(
+            mismatchStore.RecordRendererMediaEvent(
+                mismatchLease,
+                VoiceE2EMediaEventKind.MicrophoneAcquired),
+            "provider mismatch fixture rejected microphone event");
+        Check(
+            mismatchStore.RecordRendererMediaEvent(
+                mismatchLease,
+                VoiceE2EMediaEventKind.RemoteAudioTrackReceived),
+            "provider mismatch fixture rejected remote track event");
+        Check(
+            mismatchStore.RecordRendererMediaEvent(
+                mismatchLease,
+                VoiceE2EMediaEventKind.RemoteAudioPlaybackSucceeded),
+            "provider mismatch fixture rejected remote playback event");
+        mismatchStore.RecordMediaEvent(VoiceE2EMediaEventKind.TransportAttached);
+        Check(
+            !mismatchStore.CanRequestPhysicalMediaConfirmation,
+            "BYOK receipt could request Codex-bound physical confirmation");
+        Check(
+            !mismatchStore.RecordPhysicalMediaUserConfirmation(),
+            "BYOK receipt satisfied Codex-bound physical confirmation");
+        mismatchStore.RecordSnapshot(
+            snapshot,
+            featureEnabled: true,
+            providerId: VoiceProviderIds.CodexAppServer,
+            credentialCurrent: false);
+        Check(
+            !mismatchStore.CanRequestPhysicalMediaConfirmation,
+            "cross-provider media attempt satisfied Codex-bound confirmation");
         var firstLease = store.BeginMediaAttempt();
         Check(
             !store.RecordRendererMediaEvent(
@@ -293,6 +332,11 @@ internal sealed class VoiceE2EIsolationVerifier
                 VoiceE2EMediaEventKind.MicrophoneAcquired),
             "receipt accepted an unknown media lease");
         var activeLease = store.BeginMediaAttempt();
+        store.RecordSnapshot(
+            snapshot,
+            featureEnabled: true,
+            providerId: VoiceProviderIds.CodexAppServer,
+            credentialCurrent: false);
         Check(
             !store.RecordRendererMediaEvent(
                 firstLease,
@@ -341,6 +385,80 @@ internal sealed class VoiceE2EIsolationVerifier
             Check(document.RootElement.GetProperty("assistantTranscriptCount").GetInt32() == 1, "receipt assistant transcript count was wrong");
             Check(document.RootElement.GetProperty("timerCapabilityReadbackVerified").GetBoolean(), "receipt missed verified Timer capability readback");
             Check(document.RootElement.GetProperty("physicalMediaUserConfirmed").GetBoolean(), "receipt missed host-owned physical media confirmation");
+            Check(
+                document.RootElement.GetProperty("providerId").GetString()
+                    == VoiceE2EReceiptStore.ExpectedPhysicalProviderId,
+                "receipt provider was not bound to Codex app-server");
+        }
+
+        store.RecordSnapshot(
+            snapshot,
+            featureEnabled: true,
+            providerId: VoiceProviderIds.OpenAIRealtimeByok,
+            credentialCurrent: true);
+        using (var switchedAway = JsonDocument.Parse(File.ReadAllText(data.VoiceE2EReceiptPath)))
+        {
+            Check(!switchedAway.RootElement.GetProperty("microphoneAcquired").GetBoolean(), "provider switch retained microphone evidence");
+            Check(!switchedAway.RootElement.GetProperty("remoteAudioTrackEver").GetBoolean(), "provider switch retained remote track evidence");
+            Check(!switchedAway.RootElement.GetProperty("remoteAudioPlaybackEver").GetBoolean(), "provider switch retained remote playback evidence");
+            Check(switchedAway.RootElement.GetProperty("userTranscriptCount").GetInt32() == 0, "provider switch retained user transcript evidence");
+            Check(switchedAway.RootElement.GetProperty("assistantTranscriptCount").GetInt32() == 0, "provider switch retained assistant transcript evidence");
+            Check(!switchedAway.RootElement.GetProperty("timerCapabilityReadbackVerified").GetBoolean(), "provider switch retained Timer evidence");
+            Check(!switchedAway.RootElement.GetProperty("physicalMediaUserConfirmed").GetBoolean(), "provider switch retained physical confirmation");
+        }
+        store.RecordSnapshot(
+            snapshot,
+            featureEnabled: true,
+            providerId: VoiceProviderIds.CodexAppServer,
+            credentialCurrent: false);
+        store.RecordTimerCapabilityReadback();
+        Check(
+            !store.CanRequestPhysicalMediaConfirmation,
+            "provider roundtrip reused a previous media attempt");
+        Check(
+            !store.RecordRendererMediaEvent(
+                activeLease,
+                VoiceE2EMediaEventKind.MicrophoneAcquired),
+            "provider roundtrip accepted a previous media lease");
+        using (var switchedBack = JsonDocument.Parse(File.ReadAllText(data.VoiceE2EReceiptPath)))
+        {
+            Check(switchedBack.RootElement.GetProperty("userTranscriptCount").GetInt32() == 0, "provider roundtrip restored stale user transcript evidence");
+            Check(switchedBack.RootElement.GetProperty("assistantTranscriptCount").GetInt32() == 0, "provider roundtrip restored stale assistant transcript evidence");
+            Check(!switchedBack.RootElement.GetProperty("timerCapabilityReadbackVerified").GetBoolean(), "provider roundtrip restored stale Timer evidence");
+        }
+
+        var recoveredLease = store.BeginMediaAttempt();
+        store.RecordSnapshot(
+            snapshot,
+            featureEnabled: true,
+            providerId: VoiceProviderIds.CodexAppServer,
+            credentialCurrent: false);
+        Check(
+            store.RecordRendererMediaEvent(
+                recoveredLease,
+                VoiceE2EMediaEventKind.MicrophoneAcquired),
+            "fresh provider-bound attempt rejected microphone evidence");
+        Check(
+            store.RecordRendererMediaEvent(
+                recoveredLease,
+                VoiceE2EMediaEventKind.RemoteAudioTrackReceived),
+            "fresh provider-bound attempt rejected remote track evidence");
+        Check(
+            store.RecordRendererMediaEvent(
+                recoveredLease,
+                VoiceE2EMediaEventKind.RemoteAudioPlaybackSucceeded),
+            "fresh provider-bound attempt rejected remote playback evidence");
+        store.RecordMediaEvent(VoiceE2EMediaEventKind.TransportAttached);
+        Check(
+            store.RecordPhysicalMediaUserConfirmation(),
+            "fresh provider-bound attempt rejected physical confirmation");
+        store.RecordTimerCapabilityReadback();
+        using (var recovered = JsonDocument.Parse(File.ReadAllText(data.VoiceE2EReceiptPath)))
+        {
+            Check(recovered.RootElement.GetProperty("userTranscriptCount").GetInt32() == 1, "fresh provider-bound attempt missed user transcript evidence");
+            Check(recovered.RootElement.GetProperty("assistantTranscriptCount").GetInt32() == 1, "fresh provider-bound attempt missed assistant transcript evidence");
+            Check(recovered.RootElement.GetProperty("timerCapabilityReadbackVerified").GetBoolean(), "fresh provider-bound attempt missed Timer evidence");
+            Check(recovered.RootElement.GetProperty("physicalMediaUserConfirmed").GetBoolean(), "fresh provider-bound attempt missed physical confirmation");
         }
         var payload = File.ReadAllText(data.VoiceE2EReceiptPath);
         Check(!payload.Contains("SECRET_", StringComparison.Ordinal), "receipt leaked transcript/session/error content");
@@ -349,7 +467,7 @@ internal sealed class VoiceE2EIsolationVerifier
         store.RecordMediaEvent(VoiceE2EMediaEventKind.TransportDetached);
         Check(
             !store.RecordRendererMediaEvent(
-                activeLease,
+                recoveredLease,
                 VoiceE2EMediaEventKind.MicrophoneAcquired),
             "receipt accepted a media event after host teardown");
         Check(

@@ -141,7 +141,7 @@ internal sealed class HoverPocketApplicationData
         settings.AutoCheckForUpdates = false;
         settings.AiNativeEnabled = false;
         settings.VoiceEnabled = false;
-        settings.VoiceProviderId = HoverPocket.Shell.Voice.VoiceProviderIds.OpenAIRealtimeByok;
+        settings.VoiceProviderId = HoverPocket.Shell.Voice.VoiceProviderIds.CodexAppServer;
         settings.VoiceCalendarAccessGranted = false;
         settings.ClipboardPrivateMode = true;
         settings.PreferredProviderId = "timer";

@@ -106,10 +106,20 @@ def load_receipt(runtime_root: Path) -> dict[str, object]:
     return payload
 
 
-def validate_stage(payload: dict[str, object], stage: str) -> None:
+def validate_stage(
+    payload: dict[str, object],
+    stage: str,
+    expected_provider: str | None = None,
+) -> None:
+    if expected_provider is not None and payload["providerId"] != expected_provider:
+        fail("receipt provider does not match the session binding")
     if stage == "isolation" or stage == "summary":
         return
     if stage == "physical":
+        if expected_provider is None:
+            fail("physical gate requires an expected provider binding")
+        if expected_provider != "codex_app_server":
+            fail("physical gate only accepts the Codex app-server provider")
         required = {
             "featureEnabled": True,
             "connection": "connected",
@@ -164,12 +174,31 @@ def run_self_test() -> None:
     }
     if set(payload) != ALLOWED_KEYS:
         fail("self-test fixture keys differ from the exact allowlist")
-    validate_stage(payload, "physical")
+    validate_stage(payload, "physical", "codex_app_server")
+
+    for mismatched_provider in ("openai_realtime_byok", "off"):
+        mismatched = dict(payload)
+        mismatched["providerId"] = mismatched_provider
+        try:
+            validate_stage(mismatched, "physical", "codex_app_server")
+        except SystemExit:
+            pass
+        else:
+            fail(f"self-test accepted mismatched provider {mismatched_provider}")
+
+    byok = dict(payload)
+    byok["providerId"] = "openai_realtime_byok"
+    try:
+        validate_stage(byok, "physical", "openai_realtime_byok")
+    except SystemExit:
+        pass
+    else:
+        fail("self-test accepted BYOK as the expected physical provider")
 
     rejected = dict(payload)
     rejected["physicalMediaUserConfirmed"] = False
     try:
-        validate_stage(rejected, "physical")
+        validate_stage(rejected, "physical", "codex_app_server")
     except SystemExit:
         pass
     else:
@@ -183,8 +212,8 @@ def run_self_test() -> None:
         "credentialCurrent": False,
         "lastSafeEvent": "safe_close",
     })
-    validate_stage(stopped, "stopped")
-    print("PASS macOS Voice E2E receipt self-test: physical, native confirmation, and stopped gates")
+    validate_stage(stopped, "stopped", "codex_app_server")
+    print("PASS macOS Voice E2E receipt self-test: Codex-bound physical, provider mismatch, native confirmation, and stopped gates")
 
 
 def main() -> None:
@@ -196,6 +225,10 @@ def main() -> None:
         choices=("summary", "isolation", "physical", "stopped"),
         default="summary",
     )
+    parser.add_argument(
+        "--expected-provider",
+        choices=("codex_app_server",),
+    )
     args = parser.parse_args()
     if args.self_test:
         if args.runtime_root is not None:
@@ -204,11 +237,15 @@ def main() -> None:
         return
     if args.runtime_root is None:
         parser.error("--runtime-root is required unless --self-test is used")
+    if args.stage == "physical" and args.expected_provider is None:
+        parser.error("--expected-provider is required for the physical stage")
     payload = load_receipt(args.runtime_root)
-    validate_stage(payload, args.stage)
+    validate_stage(payload, args.stage, args.expected_provider)
     print("voice_e2e_receipt=ok")
     print(f"voice_e2e_feature_enabled={str(payload['featureEnabled']).lower()}")
     print(f"voice_e2e_connection={payload['connection']}")
+    print(f"voice_e2e_provider={payload['providerId']}")
+    print(f"voice_e2e_provider_binding={args.expected_provider or 'not_requested'}")
     print(f"voice_e2e_microphone_acquired={str(payload['microphoneAcquired']).lower()}")
     print(f"voice_e2e_remote_audio={str(payload['remoteAudioPlaybackEver']).lower()}")
     print(f"voice_e2e_timer_readback={str(payload['timerCapabilityReadbackVerified']).lower()}")

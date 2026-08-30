@@ -18,6 +18,8 @@ internal enum VoiceE2EMediaEventKind
 
 internal sealed class VoiceE2EReceiptStore
 {
+    internal const string ExpectedPhysicalProviderId = VoiceProviderIds.CodexAppServer;
+
     private sealed record Receipt(
         int SchemaVersion,
         string ProviderId,
@@ -67,8 +69,12 @@ internal sealed class VoiceE2EReceiptStore
     private bool _remoteAudioPlaybackEver;
     private bool _hostTransportAttached;
     private bool _physicalMediaUserConfirmed;
+    private int _userTranscriptCount;
+    private int _assistantTranscriptCount;
+    private int _completeTranscriptCount;
     private string _lastTransportEvent = "idle";
     private string? _activeMediaLease;
+    private string? _activeMediaProviderId;
 
     public VoiceE2EReceiptStore(string receiptPath)
     {
@@ -83,10 +89,31 @@ internal sealed class VoiceE2EReceiptStore
     {
         lock (_sync)
         {
+            var normalizedProviderId = VoiceProviderIds.Normalize(providerId);
+            if (!string.Equals(_providerId, normalizedProviderId, StringComparison.Ordinal))
+            {
+                InvalidateProviderBoundEvidenceLocked();
+            }
             _snapshot = snapshot;
             _featureEnabled = featureEnabled;
-            _providerId = VoiceProviderIds.Normalize(providerId);
+            _providerId = normalizedProviderId;
             _credentialCurrent = credentialCurrent;
+            if (_activeMediaLease is not null
+                && string.Equals(_providerId, ExpectedPhysicalProviderId, StringComparison.Ordinal)
+                && string.Equals(_activeMediaProviderId, ExpectedPhysicalProviderId, StringComparison.Ordinal))
+            {
+                _userTranscriptCount = snapshot.Transcript.Count(item =>
+                    string.Equals(item.Role, "user", StringComparison.OrdinalIgnoreCase));
+                _assistantTranscriptCount = snapshot.Transcript.Count(item =>
+                    string.Equals(item.Role, "assistant", StringComparison.OrdinalIgnoreCase));
+                _completeTranscriptCount = snapshot.Transcript.Count(item => item.IsFinal);
+            }
+            else
+            {
+                _userTranscriptCount = 0;
+                _assistantTranscriptCount = 0;
+                _completeTranscriptCount = 0;
+            }
             WriteLocked();
         }
     }
@@ -104,6 +131,12 @@ internal sealed class VoiceE2EReceiptStore
     {
         lock (_sync)
         {
+            if (_activeMediaLease is null
+                || !string.Equals(_providerId, ExpectedPhysicalProviderId, StringComparison.Ordinal)
+                || !string.Equals(_activeMediaProviderId, ExpectedPhysicalProviderId, StringComparison.Ordinal))
+            {
+                return;
+            }
             _timerCapabilityReadbackVerified = true;
             WriteLocked();
         }
@@ -116,10 +149,7 @@ internal sealed class VoiceE2EReceiptStore
             _snapshot = CodexVoiceSnapshot.Disabled;
             _featureEnabled = false;
             _credentialCurrent = credentialCurrent;
-            ClearCurrentMediaLocked();
-            _activeMediaLease = null;
-            _activeAttemptMicrophoneAcquired = false;
-            _hostTransportAttached = false;
+            InvalidateProviderBoundEvidenceLocked();
             _lastTransportEvent = "safe_close";
             WriteLocked();
         }
@@ -129,10 +159,9 @@ internal sealed class VoiceE2EReceiptStore
     {
         lock (_sync)
         {
+            InvalidateProviderBoundEvidenceLocked();
             _activeMediaLease = Guid.NewGuid().ToString("N");
-            ClearCurrentMediaLocked();
-            _activeAttemptMicrophoneAcquired = false;
-            _physicalMediaUserConfirmed = false;
+            _activeMediaProviderId = _providerId;
             _lastTransportEvent = "media_attempt_started";
             WriteLocked();
             return _activeMediaLease;
@@ -203,6 +232,7 @@ internal sealed class VoiceE2EReceiptStore
                 or VoiceE2EMediaEventKind.SafeClose)
             {
                 _activeMediaLease = null;
+                _activeMediaProviderId = null;
                 _activeAttemptMicrophoneAcquired = false;
                 _hostTransportAttached = false;
             }
@@ -241,6 +271,27 @@ internal sealed class VoiceE2EReceiptStore
         _remoteAudioPlaybackCurrent = false;
     }
 
+    private void InvalidateProviderBoundEvidenceLocked()
+    {
+        _activeMediaLease = null;
+        _activeMediaProviderId = null;
+        _activeAttemptMicrophoneAcquired = false;
+        _hostTransportAttached = false;
+        _microphoneAcquired = false;
+        _microphoneCurrent = false;
+        _remoteAudioTrackReceived = false;
+        _remoteAudioTrackCurrent = false;
+        _remoteAudioTrackEver = false;
+        _remoteAudioPlaybackReceived = false;
+        _remoteAudioPlaybackCurrent = false;
+        _remoteAudioPlaybackEver = false;
+        _userTranscriptCount = 0;
+        _assistantTranscriptCount = 0;
+        _completeTranscriptCount = 0;
+        _timerCapabilityReadbackVerified = false;
+        _physicalMediaUserConfirmed = false;
+    }
+
     private bool IsLegalRendererTransitionLocked(VoiceE2EMediaEventKind eventKind)
     {
         return eventKind switch
@@ -263,6 +314,8 @@ internal sealed class VoiceE2EReceiptStore
     private bool CanRequestPhysicalMediaConfirmationLocked()
     {
         return !_physicalMediaUserConfirmed
+            && string.Equals(_providerId, ExpectedPhysicalProviderId, StringComparison.Ordinal)
+            && string.Equals(_activeMediaProviderId, ExpectedPhysicalProviderId, StringComparison.Ordinal)
             && _activeMediaLease is not null
             && _hostTransportAttached
             && _activeAttemptMicrophoneAcquired
@@ -333,7 +386,6 @@ internal sealed class VoiceE2EReceiptStore
     {
         try
         {
-            var transcript = _snapshot.Transcript;
             var receipt = new Receipt(
                 SchemaVersion: 2,
                 ProviderId: _providerId,
@@ -351,11 +403,9 @@ internal sealed class VoiceE2EReceiptStore
                 RemoteAudioPlaybackReceived: _remoteAudioPlaybackReceived,
                 RemoteAudioPlaybackCurrent: _remoteAudioPlaybackCurrent,
                 RemoteAudioPlaybackEver: _remoteAudioPlaybackEver,
-                UserTranscriptCount: transcript.Count(item =>
-                    string.Equals(item.Role, "user", StringComparison.OrdinalIgnoreCase)),
-                AssistantTranscriptCount: transcript.Count(item =>
-                    string.Equals(item.Role, "assistant", StringComparison.OrdinalIgnoreCase)),
-                CompleteTranscriptCount: transcript.Count(item => item.IsFinal),
+                UserTranscriptCount: _userTranscriptCount,
+                AssistantTranscriptCount: _assistantTranscriptCount,
+                CompleteTranscriptCount: _completeTranscriptCount,
                 TimerCapabilityReadbackVerified: _timerCapabilityReadbackVerified,
                 PhysicalMediaUserConfirmed: _physicalMediaUserConfirmed,
                 CredentialCurrent: _credentialCurrent,

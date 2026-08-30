@@ -512,6 +512,7 @@ Planned Must:
 - VoiceのCalendar readはGoogle接続やMicrophoneとは別のHost permission grantを既定OFFで保存する。許可前はCalendar toolをモデルへ公開せずProviderへ到達させない。取り消し時はactive tool requestを停止し、新しいtool定義でVoice sessionを再構成する。
 - VoiceのTimer startはexact title / durationをHost native UIへ表示して毎回承認する。同時に表示する承認は1件だけ、開始済み承認promptは1分あたり3件までとし、拒否も上限に含める。Voice停止、root変更、取消では待機中dialogと未使用Broker approvalを破棄する。
 - macOSの実音声E2Eは、exact bundle IDとbuild markerを持つDebug専用app、system temp直下のfresh root、process専用credential storeを使う。Release、通常bundle、Verifierとの併用、引数なしのE2E bundle起動は開始前に拒否する。
+- macOS / Windowsの標準物理Voice E2Eは、session開始時のProviderを`codex_app_server`へ束縛する。BYOKで得たreceipt、Provider切替前のmedia event、期待Providerを持たない旧sessionはCodex app-serverの物理受入証拠にしない。負例fixtureでBYOKと途中切替の誤受入れを継続検査する。
 - macOS実音声E2Eでは設定をprocess内メモリへ閉じ、Provider UIをTimerだけに限定する。Updater、Google OAuth callback、Camera準備、Clipboard移行、生成Pocket Appを起動せず、本番のApplication Support、UserDefaults、Keychainへ接続しない。SettingsではMirror、Weather、Calendar、Updateを表示せず、status menuの更新確認とapp再active時のCamera権限再確認も実行しない。Calendar実データ確認は通常の署名済み候補で、Calendar grantと書き込み承認を別途明示した場合だけ行う。
 - macOS実音声E2EのAPI keyは引数、環境変数、session state、receipt、logへ渡さず、隔離appのSettingsへユーザーが入力した現在process内だけで保持し、Stop時に消去する。
 - WebRTC SDPはUTF-8で262,144 bytes以下、`v=0`、NULなしとし、current root threadとconnection generationの両方へ束縛する。raw SDPはPanel transportだけへ返し、Settings、監査、diskへ保存しない。remote audioはWebRTC media trackで再生し、raw audio payloadをBridge、監査、diskへ渡さない。
@@ -802,7 +803,7 @@ Must:
 - Compactから明示controlでExpandedへ切り替えると、Provider矩形を変えずパネル下端だけが下へ伸びる。
 - macOSのSmall / Medium / Large / Extra LargeとWindowsのSmall / Medium / Largeで、off / compact / expandedのgeometry fixtureが通る。
 - `OS × size × built-in Provider / generated PocketSurface fixture × off/compact/expanded`の直積でShell contractを検査する。
-- macOS Voice E2Eは`Build → Run → ValidateIsolation → Validate → Stop → Readback → Cleanup`を別操作にし、CIは秘密値やマイクを使わない隔離契約まで、実機gateはユーザーがAPI keyとマイクを明示操作した物理receiptまでを確認する。Run / Stop / Cleanupはsession単位のatomic lockで直列化し、ValidateIsolationはallowlist名だけでなくtop-level symlink、型、canonical root containmentを検査する。Stopはprocess不在とstopped receiptが両方通った後だけlifecycleを`stopped`へ確定し、Cleanupは記録PIDに加えてexact commandのprocess不在を再確認する。
+- macOS Voice E2Eは`Build → Run → ValidateIsolation → Validate → Stop → Readback → Cleanup`を別操作にし、CIは秘密値やマイクを使わない隔離契約まで、実機gateはユーザーがCodex app-serverへのChatGPTログインとマイクを明示操作した物理receiptまでを確認する。新規sessionは期待Providerを`codex_app_server`へ束縛し、BYOKまたは途中でProviderが変わったmedia attemptを物理証拠として受理しない。Run / Stop / Cleanupはsession単位のatomic lockで直列化し、ValidateIsolationはallowlist名だけでなくtop-level symlink、型、canonical root containmentを検査する。Stopはprocess不在とstopped receiptが両方通った後だけlifecycleを`stopped`へ確定し、Cleanupは記録PIDに加えてexact commandのprocess不在を再確認する。
 
 ### 10.2 Provider E2E
 

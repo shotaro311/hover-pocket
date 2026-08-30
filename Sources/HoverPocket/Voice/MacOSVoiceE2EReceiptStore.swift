@@ -33,6 +33,8 @@ struct MacOSVoiceE2EReceipt: Codable, Equatable, Sendable {
 
 @MainActor
 final class MacOSVoiceE2EReceiptStore {
+    static let expectedPhysicalProviderID = VoiceProviderID.codexAppServer.rawValue
+
     static let allowedKeys: Set<String> = [
         "schemaVersion",
         "providerId",
@@ -77,6 +79,7 @@ final class MacOSVoiceE2EReceiptStore {
     private var physicalMediaUserConfirmed = false
     private var physicalConfirmationRequested = false
     private var mediaAttemptID: UInt64 = 0
+    private var mediaAttemptProviderID = VoiceProviderID.off.rawValue
     private var credentialCurrent = false
     private var lastSafeEvent = "initialized"
 
@@ -89,16 +92,26 @@ final class MacOSVoiceE2EReceiptStore {
         MacOSVoiceE2EPerformanceStore.shared?.recordSnapshotPublish()
         let previousUserTranscriptCount = userTranscriptCount
         let previousAssistantTranscriptCount = assistantTranscriptCount
-        providerID = snapshot.providerID.rawValue
+        let nextProviderID = snapshot.providerID.rawValue
+        if providerID != nextProviderID {
+            invalidateProviderBoundEvidence()
+        }
+        providerID = nextProviderID
         featureEnabled = snapshot.mode != .disabled
         connection = snapshot.connection.rawValue
         rootSessionPresent = snapshot.rootSessionID != nil
-        userTranscriptCount = snapshot.transcript.filter {
-            $0.role == .user && $0.isFinal
-        }.count
-        assistantTranscriptCount = snapshot.transcript.filter {
-            $0.role == .assistant && $0.isFinal
-        }.count
+        if providerID == Self.expectedPhysicalProviderID,
+           mediaAttemptProviderID == Self.expectedPhysicalProviderID {
+            userTranscriptCount = snapshot.transcript.filter {
+                $0.role == .user && $0.isFinal
+            }.count
+            assistantTranscriptCount = snapshot.transcript.filter {
+                $0.role == .assistant && $0.isFinal
+            }.count
+        } else {
+            userTranscriptCount = 0
+            assistantTranscriptCount = 0
+        }
         self.credentialCurrent = credentialCurrent
         lastSafeEvent = "voice_snapshot"
         try? write()
@@ -112,6 +125,7 @@ final class MacOSVoiceE2EReceiptStore {
     func beginMediaSession() -> UInt64 {
         MacOSVoiceE2EPerformanceStore.shared?.beginMediaAttempt()
         mediaAttemptID &+= 1
+        mediaAttemptProviderID = providerID
         microphoneAcquired = false
         microphoneCurrent = false
         remoteAudioTrackEver = false
@@ -168,6 +182,10 @@ final class MacOSVoiceE2EReceiptStore {
     }
 
     func recordTimerCapabilityReadbackVerified() {
+        guard providerID == Self.expectedPhysicalProviderID,
+              mediaAttemptProviderID == Self.expectedPhysicalProviderID else {
+            return
+        }
         timerCapabilityReadbackVerified = true
         lastSafeEvent = "timer_readback_verified"
         try? write()
@@ -175,8 +193,16 @@ final class MacOSVoiceE2EReceiptStore {
     }
 
     func claimPhysicalConfirmationRequest() -> UInt64? {
-        guard microphoneAcquired,
+        guard providerID == Self.expectedPhysicalProviderID,
+              mediaAttemptProviderID == Self.expectedPhysicalProviderID,
+              featureEnabled,
+              connection == VoiceLaneConnection.connected.rawValue,
+              microphoneAcquired,
+              microphoneCurrent,
+              remoteAudioTrackCurrent,
               remoteAudioPlaybackEver,
+              remoteAudioPlaybackCurrent,
+              credentialCurrent,
               !physicalMediaUserConfirmed,
               !physicalConfirmationRequested else { return nil }
         physicalConfirmationRequested = true
@@ -191,6 +217,14 @@ final class MacOSVoiceE2EReceiptStore {
         attemptID: UInt64
     ) -> Bool {
         guard attemptID == mediaAttemptID,
+              providerID == Self.expectedPhysicalProviderID,
+              mediaAttemptProviderID == Self.expectedPhysicalProviderID,
+              featureEnabled,
+              connection == VoiceLaneConnection.connected.rawValue,
+              microphoneCurrent,
+              remoteAudioTrackCurrent,
+              remoteAudioPlaybackCurrent,
+              credentialCurrent,
               physicalConfirmationRequested else { return false }
         if confirmed {
             physicalMediaUserConfirmed = true
@@ -238,6 +272,22 @@ final class MacOSVoiceE2EReceiptStore {
             credentialCurrent: credentialCurrent,
             lastSafeEvent: lastSafeEvent
         )
+    }
+
+    private func invalidateProviderBoundEvidence() {
+        mediaAttemptID &+= 1
+        mediaAttemptProviderID = VoiceProviderID.off.rawValue
+        microphoneAcquired = false
+        microphoneCurrent = false
+        remoteAudioTrackEver = false
+        remoteAudioTrackCurrent = false
+        remoteAudioPlaybackEver = false
+        remoteAudioPlaybackCurrent = false
+        userTranscriptCount = 0
+        assistantTranscriptCount = 0
+        timerCapabilityReadbackVerified = false
+        physicalMediaUserConfirmed = false
+        physicalConfirmationRequested = false
     }
 
     private func write() throws {

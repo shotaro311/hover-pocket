@@ -161,7 +161,8 @@ switch ($Action) {
         Write-Output "voice_e2e_root=$createdRoot"
         Write-Output "voice_e2e_executable=$executable"
         Write-Output "voice_e2e_receipt=$(Join-Path $createdRoot $receiptName)"
-        Write-Output "voice_e2e_next=Open Settings, save a test OpenAI Realtime API key, enable Voice, close Settings, click the microphone button explicitly, complete a Timer request, confirm physical media in the Voice lane, then run Validate."
+        Write-Output "voice_e2e_expected_provider=codex_app_server"
+        Write-Output "voice_e2e_next=Confirm Codex app-server is signed in, enable Voice, close Settings, click the microphone button explicitly, complete a Timer request, confirm physical media in the Voice lane, then run Validate. No OpenAI API key is used."
     }
     "Readback" {
         if (-not $Root) {
@@ -178,7 +179,8 @@ switch ($Action) {
         }
         $isolatedRoot = Resolve-IsolatedRoot -Candidate $Root
         $receipt = Import-SanitizedReceipt -IsolatedRoot $isolatedRoot
-        if ($receipt.providerId -ne "openai_realtime_byok" -or
+        if ($receipt.providerId -ne "codex_app_server" -or
+            $receipt.availability -ne "ready" -or
             -not $receipt.featureEnabled -or
             -not $receipt.rootSessionPresent -or
             -not $receipt.transportAttached -or
@@ -186,11 +188,14 @@ switch ($Action) {
             -not $receipt.microphoneAcquired -or
             -not $receipt.remoteAudioTrackEver -or
             -not $receipt.remoteAudioPlaybackEver -or
+            $receipt.userTranscriptCount -lt 1 -or
+            $receipt.assistantTranscriptCount -lt 1 -or
             -not $receipt.timerCapabilityReadbackVerified -or
             -not $receipt.physicalMediaUserConfirmed) {
             throw "The sanitized receipt did not confirm the complete physical Voice and Timer E2E path."
         }
         Write-Output "voice_e2e_physical_validation=verified"
+        Write-Output "voice_e2e_provider_binding=codex_app_server"
         Write-Output "voice_e2e_receipt=$(Join-Path $isolatedRoot $receiptName)"
     }
     "Stop" {

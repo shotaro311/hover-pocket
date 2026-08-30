@@ -314,10 +314,9 @@ enum MacOSVoiceE2EIsolationVerificationCommand {
                     timestamp: Date(timeIntervalSinceReferenceDate: 2)
                 )
             ]
-            store.beginMediaSession()
-            store.recordVoiceSnapshot(
+            func voiceSnapshot(providerID: VoiceProviderID) -> VoiceLaneSnapshot {
                 VoiceLaneSnapshot(
-                    providerID: .codexAppServer,
+                    providerID: providerID,
                     mode: .compact,
                     connection: .connected,
                     activity: .listening,
@@ -331,7 +330,33 @@ enum MacOSVoiceE2EIsolationVerificationCommand {
                     layoutBlockedReason: nil,
                     uiAttached: true,
                     restartAttempt: 0
-                ),
+                )
+            }
+            store.recordVoiceSnapshot(
+                voiceSnapshot(providerID: .openAIRealtimeBYOK),
+                credentialCurrent: true
+            )
+            store.beginMediaSession()
+            store.recordMediaEvent(.microphoneAcquired)
+            store.recordMediaEvent(.remoteAudioTrackReceived)
+            store.recordMediaEvent(.remoteAudioPlaybackSucceeded)
+            check(
+                store.claimPhysicalConfirmationRequest() == nil,
+                "physical_confirmation_wrong_provider_claimed",
+                &failures
+            )
+            store.recordVoiceSnapshot(
+                voiceSnapshot(providerID: .codexAppServer),
+                credentialCurrent: true
+            )
+            check(
+                store.claimPhysicalConfirmationRequest() == nil,
+                "physical_confirmation_cross_provider_attempt_claimed",
+                &failures
+            )
+            store.beginMediaSession()
+            store.recordVoiceSnapshot(
+                voiceSnapshot(providerID: .codexAppServer),
                 credentialCurrent: true
             )
             store.recordMediaEvent(.microphoneAcquired)
@@ -372,12 +397,81 @@ enum MacOSVoiceE2EIsolationVerificationCommand {
             check(!text.contains("/Users/"), "receipt_contains_path", &failures)
             check(data.count <= 16_384, "receipt_size", &failures)
 
-            store.beginMediaSession()
+            store.recordVoiceSnapshot(
+                voiceSnapshot(providerID: .openAIRealtimeBYOK),
+                credentialCurrent: true
+            )
+            let switchedAway = try store.readback()
+            check(!switchedAway.microphoneAcquired, "receipt_provider_switch_microphone_stale", &failures)
+            check(!switchedAway.remoteAudioTrackEver, "receipt_provider_switch_track_stale", &failures)
+            check(!switchedAway.remoteAudioPlaybackEver, "receipt_provider_switch_playback_stale", &failures)
+            check(switchedAway.userTranscriptCount == 0, "receipt_provider_switch_user_stale", &failures)
+            check(switchedAway.assistantTranscriptCount == 0, "receipt_provider_switch_assistant_stale", &failures)
+            check(!switchedAway.timerCapabilityReadbackVerified, "receipt_provider_switch_timer_stale", &failures)
+            check(!switchedAway.physicalMediaUserConfirmed, "receipt_provider_switch_confirmation_stale", &failures)
+
+            store.recordVoiceSnapshot(
+                voiceSnapshot(providerID: .codexAppServer),
+                credentialCurrent: true
+            )
+            store.recordTimerCapabilityReadbackVerified()
+            check(
+                store.claimPhysicalConfirmationRequest() == nil,
+                "receipt_provider_roundtrip_reused_attempt",
+                &failures
+            )
             if let confirmationAttemptID {
                 check(
                     !store.recordPhysicalMediaUserConfirmation(
                         true,
                         attemptID: confirmationAttemptID
+                    ),
+                    "receipt_provider_roundtrip_accepted_stale_confirmation",
+                    &failures
+                )
+            }
+            let switchedBack = try store.readback()
+            check(switchedBack.userTranscriptCount == 0, "receipt_provider_roundtrip_user_stale", &failures)
+            check(switchedBack.assistantTranscriptCount == 0, "receipt_provider_roundtrip_assistant_stale", &failures)
+            check(!switchedBack.timerCapabilityReadbackVerified, "receipt_provider_roundtrip_timer_stale", &failures)
+
+            store.beginMediaSession()
+            store.recordVoiceSnapshot(
+                voiceSnapshot(providerID: .codexAppServer),
+                credentialCurrent: true
+            )
+            store.recordMediaEvent(.microphoneAcquired)
+            store.recordMediaEvent(.remoteAudioTrackReceived)
+            store.recordMediaEvent(.remoteAudioPlaybackSucceeded)
+            store.recordTimerCapabilityReadbackVerified()
+            let recoveredConfirmationAttemptID = store.claimPhysicalConfirmationRequest()
+            check(
+                recoveredConfirmationAttemptID != nil,
+                "receipt_provider_roundtrip_fresh_attempt_not_claimed",
+                &failures
+            )
+            if let recoveredConfirmationAttemptID {
+                check(
+                    store.recordPhysicalMediaUserConfirmation(
+                        true,
+                        attemptID: recoveredConfirmationAttemptID
+                    ),
+                    "receipt_provider_roundtrip_fresh_confirmation_failed",
+                    &failures
+                )
+            }
+            let recovered = try store.readback()
+            check(recovered.userTranscriptCount == 1, "receipt_provider_roundtrip_user_missing", &failures)
+            check(recovered.assistantTranscriptCount == 1, "receipt_provider_roundtrip_assistant_missing", &failures)
+            check(recovered.timerCapabilityReadbackVerified, "receipt_provider_roundtrip_timer_missing", &failures)
+            check(recovered.physicalMediaUserConfirmed, "receipt_provider_roundtrip_confirmation_missing", &failures)
+
+            store.beginMediaSession()
+            if let recoveredConfirmationAttemptID {
+                check(
+                    !store.recordPhysicalMediaUserConfirmation(
+                        true,
+                        attemptID: recoveredConfirmationAttemptID
                     ),
                     "receipt_stale_confirmation_accepted",
                     &failures

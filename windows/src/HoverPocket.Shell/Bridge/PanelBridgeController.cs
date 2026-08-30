@@ -1383,7 +1383,7 @@ internal sealed class PanelBridgeController : IDisposable
             throw new CodexAppServerProtocolException("voice_provider_invalid");
         }
         if (_isolatedVoiceE2EDefaults is not null
-            && providerId != VoiceProviderIds.OpenAIRealtimeByok
+            && providerId != VoiceProviderIds.CodexAppServer
             && providerId != VoiceProviderIds.Off)
         {
             return await PublishStateAsync(cancellationToken);
