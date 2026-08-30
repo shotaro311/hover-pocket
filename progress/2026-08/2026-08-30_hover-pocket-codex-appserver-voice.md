@@ -155,3 +155,11 @@ keyring-only Codex loginの実装制約は、Voice専用profileでChatGPT manage
 - 公証と全readback後も隔離物理E2E PID 70741は約2時間31分稼働しており、CPU約0.1%、RSSはprocess readback約0.3%、Harnessのidle計測は平均0.114%、p95 / 最大0.2%、RSS平均 / 最大63.031 MiBだった。停止・再起動していない。
 - build 605は未公開のmacOS配布RC候補として受け入れる。GitHub Release、public appcast、merge、Draft解除は実施していない。物理マイク、remote audio、transcript、音声経由Timer、Calendar create、実ChatGPT browser loginは人手gateとして残す。
 - Draft PR #39へpush後、Router `33301419569`、Windows verify `33301420795`、macOS Capability `33301420798`、3OS contract / compare `33301420797`、transition `33301420806`、release metadata `33301420841`が成功した。合計11 SUCCESS / 8 expected SKIPPED / failure 0 / pending 0、Draft / OPEN / MERGEABLE / CLEAN、未解決review thread 0、remote parity 0 / 0をreadbackした。
+
+## current HEAD build 607 物理E2E準備
+
+- 継続中のbuild 597 PID `70741`を停止・再起動せず、現在HEAD `c081cf24897902890d80e2eb915c2c7d8f14e253`から別のad-hoc署名E2E bundleを作成した。fresh sessionは`HoverPocketVoiceE2ESession-jM7jH4`、runtimeは`HoverPocketVoiceE2E-pvPrV7`、PIDは`85676`で、旧・新の2 processが同時に生存している。
+- build 607は`local.codex.hover-pocket.voice-e2e`、strict codesign、bundle mainと`.build/debug/HoverPocket`のMach-O UUID `02E274A9-60E7-3F24-89A1-DAF591FCC9B0`一致をreadbackした。canonical E2E引数なしの起動とVerifier併用起動は意図どおり拒否され、拒否試行の一時rootはTrashへ移した。
+- receipt / performance / process / storage ownershipを検証し、`featureEnabled=false`、`disconnected`、microphoneなし、remote audioなし、Timer readbackなし、物理確認なし、credential currentなしを確認した。Isolation検証はPASSし、idle CPUは平均`0.114%`、p95 / 最大`0.2%`、RSSは平均約`109.650 MiB`、最大約`109.719 MiB`だった。
+- 独立エージェントによる現行差分とbuild 605 Release成果物の安全性・性能レビューはP0 / P1 / P2すべて0件だった。安全検査はbuild / package / 明示Verifierへ限定され、通常起動、Hover、Voice hot pathへの有意な性能低下は確認されていない。
+- desktop automationの登録済みアプリ一覧ではad-hoc E2E appを取得できず、同一表示名 / bundle IDの旧PID `70741`と新PID `85676`を安全に区別できなかった。このため自動クリックは行っていない。build 607のVoice明示ON、macOSマイク許可、物理発話、可聴remote audio、transcript、Timer承認 / readbackはユーザー操作gateのままである。
