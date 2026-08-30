@@ -133,3 +133,13 @@ keyring-only Codex loginの実装制約は、Voice専用profileでChatGPT manage
 - 独立エージェントによるhybrid 3 / 8秒ICE待機、Local Network purpose、verifier専用window、E2E process保護の再レビューはP0 / P1 / P2すべて0件。通常時の追加は完了時に解除されるtimer最大2個で、CPU / RSS /起動時間に有意な劣化はないと判定した。
 - 公証・独立展開・packaged verifier後も隔離E2E PID `70741`は生存し、CPU `0.2%`、RSS約`82.5 MiB`をreadbackした。停止・再起動はしていない。
 - GitHub Release、macOS public feed、merge、Draft解除は実施していない。
+
+## managed login 実process lifecycle検証
+
+- `CodexVoiceAccountLoginController`へ本番既定を変えない依存注入seamを追加し、実controllerと実`CodexAppServerClient`子processを使うfake app-server検証を実装した。本番は引き続き`app-server --stdio`、実browser opener、実credential change通知を使う。
+- stub browserだけで、signed-out read、login start、完了通知、owner-privateな専用credential、ChatGPT account readback、別processでのcredential再利用を確認した。さらにcancel、Provider deactivate、app shutdownの各経路でlogin ID付きcancelとprocess closeを確認した。合計4シナリオ・6 processで、残留processと一時rootは0件だった。
+- fake helperのreceiptは`O_NOFOLLOW`で開き、未作成時は`O_CREAT | O_EXCL`と0600、`fstat`で通常ファイル、current-user、exact 0600、link count 1を要求する。同じfdへpartial write / `EINTR`対応で追記し、明示検証時だけ`fsync`する。symlinkとhardlinkの負例はexit 2で拒否し、外部targetが未変更であることを別readbackした。
+- 独立エージェントの初回レビューはreceipt symlink追記をP2 1件として検出した。上記fd境界へ修正後の最終結果はP0 / P1 / P2すべて0件。重い同期処理はhidden helperだけで、通常起動、Settings、Hover、Voice hot pathへの性能影響なしと判定された。
+- Debug / Release warnings-as-errors、Voice静的42件、`--verify-codex-app-server`、auth control-plane、Realtime renderer、Voice Foundation、Panel 128、Capability 20、Broker 21 descriptor / 20 handler、Pocket Surface / App、Timer、`git diff --check`がPASSした。Release lifecycle verifierは1.60秒だった。
+- local build 602はApple Development署名の`codesign --deep --strict`、起動、通常processのgraceful終了を確認した。隔離物理Voice E2E PID 70741は2時間超の稼働後も生存し、停止・再起動していない。
+- 実装commitは`3ccf423e9b131f402cf9ba146778479b0a199f0d`。実ChatGPT browser login、物理マイク、remote audio、transcript、Calendar createは引き続き人手gateであり、この検証で完了扱いにしない。merge、release、Draft解除は実施していない。
