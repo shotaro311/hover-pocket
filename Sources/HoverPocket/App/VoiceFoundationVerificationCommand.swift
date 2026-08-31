@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 enum VoiceFoundationVerificationError: Error {
@@ -32,6 +33,7 @@ private struct UnsafeDecodedSessionFixture: Codable {
 @MainActor
 enum VoiceFoundationVerificationCommand {
     static func run() async throws {
+        try verifySettingsBindingUsesPublishedValues()
         try verifyGeometryAndScope()
         try verifyTranscriptBoundsAndRedaction()
         try await verifyDecodedModelsAreResanitized()
@@ -48,6 +50,40 @@ enum VoiceFoundationVerificationCommand {
         try await verifyRecoveryTeardownIsSerialized()
         try await verifyAudioCommandsRemainOrdered()
         try await verifyShutdownWaitsForAdapterTeardown()
+    }
+
+    private static func verifySettingsBindingUsesPublishedValues() throws {
+        let defaults = EphemeralAppSettingsDefaults()
+        let settings = AppSettings(defaults: defaults)
+        var received: [VoiceRuntimeSettingsConfiguration] = []
+        let cancellable = voiceRuntimeSettingsPublisher(settings: settings)
+            .dropFirst()
+            .sink { received.append($0) }
+        defer { cancellable.cancel() }
+
+        settings.voiceProvider = .codexAppServer
+        settings.voiceEnabled = true
+        settings.voiceLaneLayoutPreference = .expanded
+
+        guard received == [
+            VoiceRuntimeSettingsConfiguration(
+                featureEnabled: false,
+                preferredLayout: .compact,
+                providerID: .codexAppServer
+            ),
+            VoiceRuntimeSettingsConfiguration(
+                featureEnabled: true,
+                preferredLayout: .compact,
+                providerID: .codexAppServer
+            ),
+            VoiceRuntimeSettingsConfiguration(
+                featureEnabled: true,
+                preferredLayout: .expanded,
+                providerID: .codexAppServer
+            )
+        ] else {
+            throw VoiceFoundationVerificationError.failed("settings_binding_stale_value")
+        }
     }
 
     private static func verifyGeometryAndScope() throws {

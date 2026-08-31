@@ -2,6 +2,31 @@ import AppKit
 import Carbon
 import Combine
 
+struct VoiceRuntimeSettingsConfiguration: Equatable {
+    let featureEnabled: Bool
+    let preferredLayout: VoiceLaneLayoutPreference
+    let providerID: VoiceProviderID
+}
+
+@MainActor
+func voiceRuntimeSettingsPublisher(
+    settings: AppSettings
+) -> AnyPublisher<VoiceRuntimeSettingsConfiguration, Never> {
+    Publishers.CombineLatest3(
+        settings.$voiceEnabled.removeDuplicates(),
+        settings.$voiceLaneLayoutPreference.removeDuplicates(),
+        settings.$voiceProvider.removeDuplicates()
+    )
+    .map { featureEnabled, preferredLayout, providerID in
+        VoiceRuntimeSettingsConfiguration(
+            featureEnabled: featureEnabled,
+            preferredLayout: preferredLayout,
+            providerID: providerID
+        )
+    }
+    .eraseToAnyPublisher()
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hoverWindowController = HoverWindowController()
@@ -228,15 +253,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &settingsCancellables)
     }
 
-    private func configureVoiceRuntime() {
+    private func configureVoiceRuntime(
+        configuration: VoiceRuntimeSettingsConfiguration? = nil
+    ) {
         let settings = hoverWindowController.appSettings
-        let providerID = settings.voiceProvider
-        voiceConfigurationTask = VoiceLaneRuntime.shared.configure(
+        let configuration = configuration ?? VoiceRuntimeSettingsConfiguration(
             featureEnabled: settings.voiceEnabled,
             preferredLayout: settings.voiceLaneLayoutPreference,
-            providerID: providerID,
+            providerID: settings.voiceProvider
+        )
+        voiceConfigurationTask = VoiceLaneRuntime.shared.configure(
+            featureEnabled: configuration.featureEnabled,
+            preferredLayout: configuration.preferredLayout,
+            providerID: configuration.providerID,
             adapterFactory: VoiceProviderAdapterFactory.factory(
-                providerID: providerID,
+                providerID: configuration.providerID,
                 settings: settings
             )
         )
@@ -244,14 +275,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func observeVoiceRuntimeSettings() {
         let settings = hoverWindowController.appSettings
-        Publishers.CombineLatest3(
-            settings.$voiceEnabled.removeDuplicates(),
-            settings.$voiceLaneLayoutPreference.removeDuplicates(),
-            settings.$voiceProvider.removeDuplicates()
-        )
+        voiceRuntimeSettingsPublisher(settings: settings)
             .dropFirst()
-            .sink { [weak self] _ in
-                self?.configureVoiceRuntime()
+            .sink { [weak self] configuration in
+                self?.configureVoiceRuntime(configuration: configuration)
             }
             .store(in: &settingsCancellables)
         settings.$voiceCalendarAccessEnabled
