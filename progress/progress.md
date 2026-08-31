@@ -11,6 +11,7 @@ status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-gr
 - `@Published`の新値通知を捨ててpropertyの旧値を読み直していたことが原因だった。通知された`featureEnabled / preferredLayout / providerID`をimmutable configurationとしてそのままVoice runtimeへ渡し、Provider変更、Voice ON、Expanded変更が各1回で新値を反映する回帰テストを追加した。
 - Debug / Release warnings-as-errors、Voice runtime、静的42 contract、Panel 128 cases、Voice E2E isolation、`git diff --check`がPASSした。fresh修正版`ホバーポケット Voice E2E 619`はPID `52065`で起動し、Harness isolation、strict ad-hoc codesign、初期Voice OFF / micなし / remote audioなしをreadbackした。
 - 独立エージェントレビューはP0 / P1 / P2すべて0件で、設定変更時の発火回数は従来と同じ、音声hot pathへの追加負荷なし、必要最小限の修正と判定した。
+- 実装commit `f6633dcd894abbc42f0b53f815e1adf40b1ad4c3`のDraft PR #39は11 SUCCESS / 8 expected SKIPPED / failure 0 / pending 0。macOS、Windows、3 OS共通契約を同一SHAで確認し、merge / release / 公開は行っていない。
 - Timerだけの表示は物理Voice E2Eの隔離要件であり、通常版の全built-in Providerは変更していない。旧build 618はHarness Stopでsafe closeを確認し、build 619のVoice ON表示と物理音声を人手gateに残す。
 
 ## 2026-08-30 macOS隔離Voice候補のChatGPTログイン修正

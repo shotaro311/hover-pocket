@@ -22,6 +22,7 @@
 - `.build/debug/HoverPocket --verify-voice-e2e-isolation`: PASS
 - `git diff --check`: PASS
 - 独立エージェントレビューはP0 / P1 / P2すべて0件。設定変更時の発火回数は従来と同じで、音声hot pathへ処理を追加せず、抽象化も回帰検証に必要な最小範囲と判定された。
+- 実装commit `f6633dcd894abbc42f0b53f815e1adf40b1ad4c3`をDraft PR #39へpushした。同一SHAのCIは11 SUCCESS / 8 expected SKIPPED / failure 0 / pending 0で、macOS、Windows、3 OS共通契約、release readback routerを確認した。PRはDraft / OPEN / MERGEABLEのまま、merge、release、公開は行っていない。
 - fresh修正版候補`ホバーポケット Voice E2E 619`をbuild 619、session `HoverPocketVoiceE2ESession-XWor5t`、runtime `HoverPocketVoiceE2E-3xMDYN`、PID `52065`として起動した。strict ad-hoc codesignとHarness `ValidateIsolation`はPASSした。
 - build 619は初期状態でVoice OFF、Provider receipt OFF、mic / remote audio / Timer readbackなし、CPU readback 0.1%であり、ユーザーの明示操作前にVoiceやマイクを開始していない。SettingsにはCodex app-server、Voice toggle、専用ChatGPT login導線が表示される。
 - 旧build 618はHarness Stopで`safe_close`、process停止、mic / remote audio / credential currentなしをreadbackした。session / runtimeは回収前のため保持している。
