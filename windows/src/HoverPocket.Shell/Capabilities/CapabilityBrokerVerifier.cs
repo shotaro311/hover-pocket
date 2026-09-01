@@ -39,8 +39,8 @@ internal sealed class CapabilityBrokerVerifier
         }
 
         VerifyConsole.WriteLine("broker_verify=ok");
-        VerifyConsole.WriteLine("broker_registry_descriptors=21");
-        VerifyConsole.WriteLine("broker_available_handlers=20");
+        VerifyConsole.WriteLine("broker_registry_descriptors=22");
+        VerifyConsole.WriteLine("broker_available_handlers=21");
         VerifyConsole.WriteLine("broker_calculator_evaluate=ok");
         VerifyConsole.WriteLine("broker_controls_os_readback=ok");
         VerifyConsole.WriteLine("broker_sticky_lifecycle=ok");
@@ -83,8 +83,8 @@ internal sealed class CapabilityBrokerVerifier
                 audit,
                 approvalPresentationResolver: new HostCapabilityApprovalPresentationResolver(stickyStore));
 
-            Require(registry.DescriptorKeys.Count == 21, "registry_descriptor_count");
-            Require(registry.AvailableHandlerKeys.Count == 20, "registry_handler_count");
+            Require(registry.DescriptorKeys.Count == 22, "registry_descriptor_count");
+            Require(registry.AvailableHandlerKeys.Count == 21, "registry_handler_count");
             Require(
                 PocketCapabilityDescriptors.BuiltIn.Single(item => item.Key == CapabilityIds.StickyDelete).ApprovalPolicy
                     == CapabilityApprovalPolicy.StrongPerCall,

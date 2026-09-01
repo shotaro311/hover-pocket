@@ -6,6 +6,9 @@ struct VoiceNativeApprovalRequest: Sendable {
     enum Kind: Sendable {
         case calendarCreate
         case timerStart
+        case stickyUpsert
+        case controlsBrightnessSet
+        case controlsVolumeSet
     }
 
     let kind: Kind
@@ -131,8 +134,10 @@ private final class VoiceApprovalCoordinator {
         let current = now()
         starts.removeAll { current.timeIntervalSince($0) >= Self.windowSeconds }
         guard active == nil else { return .busy }
-        guard starts.count < Self.maximumStartsPerWindow else { return .rateLimited }
-        starts.append(current)
+        if case .timerStart = request.kind {
+            guard starts.count < Self.maximumStartsPerWindow else { return .rateLimited }
+            starts.append(current)
+        }
 
         let approvalID = UUID()
         let task = Task { @MainActor [presenter] in
@@ -178,6 +183,7 @@ private final class VoiceApprovalCoordinator {
 
 private enum VoiceCapabilityRuntimeError: Error {
     case sessionCancelled
+    case approvalFailed(String)
 }
 
 @MainActor
@@ -185,6 +191,9 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     static let calendarListTool = "calendar_events_list"
     static let calendarCreateTool = "calendar_event_create"
     static let timerStartTool = "timer_countdown_start"
+    static let stickyUpsertTool = "sticky_note_upsert"
+    static let controlsBrightnessSetTool = "controls_brightness_set"
+    static let controlsVolumeSetTool = "controls_volume_set"
 
     private static let maximumArgumentsBytes = 16_384
     private static let maximumRememberedCalls = 512
@@ -263,7 +272,57 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
                 "required": ["durationSeconds"]
             ]
         ])
+        tools.append(Self.stickyUpsertDefinition)
+        tools.append(Self.controlsBrightnessSetDefinition)
+        tools.append(Self.controlsVolumeSetDefinition)
         return tools
+    }
+
+    private static let stickyUpsertDefinition: [String: Any] = [
+        "type": "function",
+        "name": stickyUpsertTool,
+        "description": "Add or update one Sticky Note through HoverPocket CapabilityBroker. The note is written only after the existing native approval and verified by readback.",
+        "parameters": [
+            "type": "object",
+            "additionalProperties": false,
+            "properties": [
+                "body": ["type": "string", "minLength": 1, "maxLength": 10_000],
+                "title": ["type": "string", "maxLength": 120],
+                "color": ["type": "string", "enum": ["yellow", "blue", "green", "pink", "gray"]]
+            ],
+            "required": ["body"]
+        ]
+    ]
+
+    private static let controlsBrightnessSetDefinition: [String: Any] = [
+        "type": "function",
+        "name": controlsBrightnessSetTool,
+        "description": "Adjust a controllable display brightness through CapabilityBroker. operation set/increase/decrease uses value as a percentage or percentage-point delta; preset supports comfortable (70%), maximum (100%), and minimum (5%).",
+        "parameters": controlsAdjustmentSchema(includeDisplayID: true)
+    ]
+
+    private static let controlsVolumeSetDefinition: [String: Any] = [
+        "type": "function",
+        "name": controlsVolumeSetTool,
+        "description": "Adjust system volume through CapabilityBroker. operation set/increase/decrease uses value as a percentage or percentage-point delta; preset supports comfortable (50%), maximum (100%), and minimum (0%).",
+        "parameters": controlsAdjustmentSchema(includeDisplayID: false)
+    ]
+
+    private static func controlsAdjustmentSchema(includeDisplayID: Bool) -> [String: Any] {
+        var properties: [String: Any] = [
+            "operation": ["type": "string", "enum": ["set", "increase", "decrease", "preset"]],
+            "value": ["type": "number", "minimum": 0, "maximum": 100],
+            "preset": ["type": "string", "enum": ["comfortable", "maximum", "minimum"]]
+        ]
+        if includeDisplayID {
+            properties["displayId"] = ["type": "string", "minLength": 1, "maxLength": 128]
+        }
+        return [
+            "type": "object",
+            "additionalProperties": false,
+            "properties": properties,
+            "required": ["operation"]
+        ]
     }
 
     func execute(
@@ -275,7 +334,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         do {
             try requireIdentifier(sessionID, maximum: 160)
             try requireIdentifier(callID, maximum: 160)
-            guard [Self.calendarListTool, Self.calendarCreateTool, Self.timerStartTool].contains(toolName),
+            guard Self.allowedToolNames.contains(toolName),
                   argumentsJSON.utf8.count <= Self.maximumArgumentsBytes else {
                 return failure("invalid_arguments")
             }
@@ -343,6 +402,24 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
                     sessionID: sessionID,
                     arguments: arguments
                 )
+            case Self.stickyUpsertTool:
+                return try await upsertStickyNote(
+                    correlation: correlation,
+                    sessionID: sessionID,
+                    arguments: arguments
+                )
+            case Self.controlsBrightnessSetTool:
+                return try await setBrightness(
+                    correlation: correlation,
+                    sessionID: sessionID,
+                    arguments: arguments
+                )
+            case Self.controlsVolumeSetTool:
+                return try await setVolume(
+                    correlation: correlation,
+                    sessionID: sessionID,
+                    arguments: arguments
+                )
             default:
                 return Self.failure("tool_not_allowed")
             }
@@ -350,6 +427,15 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
             return failure(safeCode(error))
         }
     }
+
+    private static let allowedToolNames: Set<String> = [
+        calendarListTool,
+        calendarCreateTool,
+        timerStartTool,
+        stickyUpsertTool,
+        controlsBrightnessSetTool,
+        controlsVolumeSetTool
+    ]
 
     private func listCalendar(
         correlation: String,
@@ -605,6 +691,371 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         return try json(payload)
     }
 
+    private func upsertStickyNote(
+        correlation: String,
+        sessionID: String,
+        arguments: CapabilityObject
+    ) async throws -> String {
+        try requireExactKeys(
+            arguments,
+            allowed: ["body", "title", "color"],
+            required: ["body"]
+        )
+        let body = VoiceApprovalText.singleLine(
+            try arguments.requiredString("body", maxLength: 10_000),
+            limit: 10_000
+        )
+        guard !body.isEmpty else { return Self.failure("invalid_arguments") }
+        let rawTitle = try arguments.optionalString("title", maxLength: 120) ?? "Voice"
+        let title = VoiceApprovalText.singleLine(rawTitle, limit: 120)
+        let color = try arguments.optionalString("color", maxLength: 16) ?? "yellow"
+        guard ["yellow", "blue", "green", "pink", "gray"].contains(color) else {
+            return Self.failure("invalid_arguments")
+        }
+        let output = try await executeCapability(
+            correlation: correlation,
+            sessionID: sessionID,
+            planIDPrefix: "voice.sticky.upsert",
+            stepID: "upsertStickyNote",
+            capability: PocketCapabilityKeys.stickyUpsert,
+            arguments: [
+                "stableKey": .string("voice:\(correlation.prefix(60))"),
+                "title": .string(title),
+                "body": .string(body),
+                "color": .string(color)
+            ],
+            permission: "sticky.write",
+            approval: VoiceNativeApprovalRequest(
+                kind: .stickyUpsert,
+                title: "付箋を追加しますか？",
+                detail: VoiceApprovalText.singleLine(body, limit: 240)
+            )
+        )
+        return try json([
+            "status": "succeeded",
+            "noteId": try output.requiredString("noteId", maxLength: 128),
+            "title": try output.requiredString("title", maxLength: 120, allowEmpty: true),
+            "body": try output.requiredString("body", maxLength: 10_000, allowEmpty: true),
+            "updatedAt": try output.requiredString("updatedAt", maxLength: 64),
+            "readback": "verified"
+        ])
+    }
+
+    private func setBrightness(
+        correlation: String,
+        sessionID: String,
+        arguments: CapabilityObject
+    ) async throws -> String {
+        let adjustment = try controlsAdjustment(arguments, includeDisplayID: true)
+        let availability = try await readControlsAvailability(
+            correlation: correlation,
+            sessionID: sessionID
+        )
+        let displayID = try resolveDisplayID(arguments, availability: availability)
+        let target: Double
+        switch adjustment.operation {
+        case "set":
+            target = try adjustment.valueRequired / 100
+        case "increase", "decrease":
+            let current = try await readBrightness(
+                correlation: correlation,
+                sessionID: sessionID,
+                displayID: displayID
+            )
+            let delta = try adjustment.valueRequired / 100
+            target = adjustment.operation == "increase" ? current + delta : current - delta
+        case "preset":
+            target = try brightnessPreset(adjustment.presetRequired)
+        default:
+            throw CapabilityBrokerError.invalidPlan("voice_controls_operation")
+        }
+        let level = target.clamped(to: 0.05...1)
+        let output = try await executeCapability(
+            correlation: correlation,
+            sessionID: sessionID,
+            planIDPrefix: "voice.controls.brightness.set",
+            stepID: "setBrightness",
+            capability: PocketCapabilityKeys.controlsBrightnessSet,
+            arguments: [
+                "displayId": .string(displayID),
+                "level": .number(level)
+            ],
+            permission: "controls.write",
+            approval: VoiceNativeApprovalRequest(
+                kind: .controlsBrightnessSet,
+                title: "ディスプレイの明るさを変更しますか？",
+                detail: "\(VoiceApprovalText.singleLine(displayID, limit: 80))\n\(Int((level * 100).rounded()))%"
+            )
+        )
+        let observed = try output.requiredNumber("level", range: 0...1)
+        return try json([
+            "status": "succeeded",
+            "displayId": try output.requiredString("displayId", maxLength: 128),
+            "percent": observed * 100,
+            "readback": "verified"
+        ])
+    }
+
+    private func setVolume(
+        correlation: String,
+        sessionID: String,
+        arguments: CapabilityObject
+    ) async throws -> String {
+        let adjustment = try controlsAdjustment(arguments, includeDisplayID: false)
+        let target: Double
+        switch adjustment.operation {
+        case "set":
+            target = try adjustment.valueRequired / 100
+        case "increase", "decrease":
+            let current = try await readVolume(
+                correlation: correlation,
+                sessionID: sessionID
+            )
+            let delta = try adjustment.valueRequired / 100
+            target = adjustment.operation == "increase" ? current + delta : current - delta
+        case "preset":
+            target = try volumePreset(adjustment.presetRequired)
+        default:
+            throw CapabilityBrokerError.invalidPlan("voice_controls_operation")
+        }
+        let level = target.clamped(to: 0...1)
+        let output = try await executeCapability(
+            correlation: correlation,
+            sessionID: sessionID,
+            planIDPrefix: "voice.controls.volume.set",
+            stepID: "setVolume",
+            capability: PocketCapabilityKeys.controlsVolumeSet,
+            arguments: ["level": .number(level)],
+            permission: "controls.write",
+            approval: VoiceNativeApprovalRequest(
+                kind: .controlsVolumeSet,
+                title: "システム音量を変更しますか？",
+                detail: "\(Int((level * 100).rounded()))%"
+            )
+        )
+        let observed = try output.requiredNumber("level", range: 0...1)
+        return try json([
+            "status": "succeeded",
+            "percent": observed * 100,
+            "muted": try output.requiredBool("muted"),
+            "readback": "verified"
+        ])
+    }
+
+    private func readControlsAvailability(
+        correlation: String,
+        sessionID: String
+    ) async throws -> CapabilityObject {
+        try await executeCapability(
+            correlation: correlation,
+            sessionID: sessionID,
+            planIDPrefix: "voice.controls.availability.get",
+            stepID: "getControlsAvailability",
+            capability: PocketCapabilityKeys.controlsAvailability,
+            arguments: [:],
+            permission: "controls.read"
+        )
+    }
+
+    private func readBrightness(
+        correlation: String,
+        sessionID: String,
+        displayID: String
+    ) async throws -> Double {
+        let output = try await executeCapability(
+            correlation: correlation,
+            sessionID: sessionID,
+            planIDPrefix: "voice.controls.brightness.get",
+            stepID: "getBrightness",
+            capability: PocketCapabilityKeys.controlsBrightnessGet,
+            arguments: ["displayId": .string(displayID)],
+            permission: "controls.read"
+        )
+        return try output.requiredNumber("level", range: 0...1)
+    }
+
+    private func readVolume(
+        correlation: String,
+        sessionID: String
+    ) async throws -> Double {
+        let output = try await executeCapability(
+            correlation: correlation,
+            sessionID: sessionID,
+            planIDPrefix: "voice.controls.volume.get",
+            stepID: "getVolume",
+            capability: PocketCapabilityKeys.controlsVolumeGet,
+            arguments: [:],
+            permission: "controls.read"
+        )
+        return try output.requiredNumber("level", range: 0...1)
+    }
+
+    private func resolveDisplayID(
+        _ arguments: CapabilityObject,
+        availability: CapabilityObject
+    ) throws -> String {
+        guard case .bool(true)? = availability["brightnessAvailable"],
+              case .array(let values)? = availability["displayIds"] else {
+            throw CapabilityBrokerError.unavailable(PocketCapabilityKeys.controlsBrightnessGet)
+        }
+        let displayIDs = values.compactMap { value -> String? in
+            guard case .string(let id) = value else { return nil }
+            return id
+        }
+        guard !displayIDs.isEmpty else {
+            throw CapabilityBrokerError.unavailable(PocketCapabilityKeys.controlsBrightnessGet)
+        }
+        let requested = try arguments.optionalString("displayId", maxLength: 128)
+        if let requested {
+            guard displayIDs.contains(requested) else {
+                throw CapabilityBrokerError.unavailable(PocketCapabilityKeys.controlsBrightnessGet)
+            }
+            return requested
+        }
+        // Availability preserves the OS/provider order; its first controllable
+        // display is the stable primary target for natural-language commands.
+        return displayIDs[0]
+    }
+
+    private func controlsAdjustment(
+        _ arguments: CapabilityObject,
+        includeDisplayID: Bool
+    ) throws -> ControlsAdjustment {
+        var allowed: Set<String> = ["operation", "value", "preset"]
+        if includeDisplayID { allowed.insert("displayId") }
+        try requireExactKeys(arguments, allowed: allowed, required: ["operation"])
+        let operation = try arguments.requiredString("operation", maxLength: 16)
+        guard ["set", "increase", "decrease", "preset"].contains(operation) else {
+            throw CapabilityBrokerError.invalidPlan("voice_controls_operation")
+        }
+        let value = try arguments.optionalNumber("value", range: 0...100)
+        let preset = try arguments.optionalString("preset", maxLength: 16)
+        switch operation {
+        case "set", "increase", "decrease":
+            guard value != nil, preset == nil else {
+                throw CapabilityBrokerError.invalidPlan("voice_controls_arguments")
+            }
+        case "preset":
+            guard value == nil,
+                  let preset,
+                  ["comfortable", "maximum", "minimum"].contains(preset) else {
+                throw CapabilityBrokerError.invalidPlan("voice_controls_arguments")
+            }
+        default:
+            throw CapabilityBrokerError.invalidPlan("voice_controls_operation")
+        }
+        return ControlsAdjustment(operation: operation, value: value, preset: preset)
+    }
+
+    private func brightnessPreset(_ preset: String) throws -> Double {
+        switch preset {
+        case "comfortable": 0.70
+        case "maximum": 1
+        case "minimum": 0.05
+        default: throw CapabilityBrokerError.invalidPlan("voice_controls_preset")
+        }
+    }
+
+    private func volumePreset(_ preset: String) throws -> Double {
+        switch preset {
+        case "comfortable": 0.50
+        case "maximum": 1
+        case "minimum": 0
+        default: throw CapabilityBrokerError.invalidPlan("voice_controls_preset")
+        }
+    }
+
+    private func executeCapability(
+        correlation: String,
+        sessionID: String,
+        planIDPrefix: String,
+        stepID: String,
+        capability: PocketCapabilityKey,
+        arguments: CapabilityObject,
+        permission: String,
+        approval: VoiceNativeApprovalRequest? = nil
+    ) async throws -> CapabilityObject {
+        try requireSessionActive(sessionID)
+        let current = now()
+        let principal = CapabilityPrincipal(userID: "local-user", agentSessionID: sessionID)
+        let permissions = CapabilityPermissionSet(
+            principal: principal,
+            permissions: [permission]
+        )
+        let plan = CapabilityExecutionPlan(
+            id: "\(planIDPrefix).\(correlation.prefix(32))",
+            createdAt: current,
+            origin: .voice,
+            principal: principal,
+            appContext: nil,
+            steps: [CapabilityPlanStep(
+                id: stepID,
+                capability: capability,
+                arguments: arguments,
+                idempotencyKey: "\(planIDPrefix).\(correlation)",
+                dependencies: []
+            )],
+            requiredPermissions: [permission]
+        )
+        let preparation = try context.broker.prepare(plan, permissions: permissions, now: current)
+        let grant: CapabilityApprovalGrant?
+        if let approval {
+            guard let request = preparation.approvalRequest else {
+                throw CapabilityBrokerError.approvalRequired
+            }
+            let outcome = await approvalCoordinator.request(sessionID: sessionID, request: approval)
+            guard outcome == .approved else {
+                reject(request, planDigest: preparation.planDigest)
+                throw VoiceCapabilityRuntimeError.approvalFailed(approvalFailureCode(outcome))
+            }
+            try requireSessionActive(sessionID)
+            grant = try context.broker.decideApproval(
+                requestID: request.id,
+                planDigest: preparation.planDigest,
+                decision: .approve,
+                now: now()
+            )
+        } else {
+            guard preparation.approvalRequest == nil else {
+                throw CapabilityBrokerError.invalidPlan("voice_read_approval")
+            }
+            grant = nil
+        }
+        try requireSessionActive(sessionID)
+        let receipt = try await context.broker.execute(
+            plan,
+            permissions: permissions,
+            approvalGrant: grant,
+            now: now()
+        )
+        try requireSessionActive(sessionID)
+        return try verifiedOutput(receipt)
+    }
+
+    private struct ControlsAdjustment {
+        let operation: String
+        let value: Double?
+        let preset: String?
+
+        var valueRequired: Double {
+            get throws {
+                guard let value else {
+                    throw CapabilityBrokerError.invalidPlan("voice_controls_value")
+                }
+                return value
+            }
+        }
+
+        var presetRequired: String {
+            get throws {
+                guard let preset else {
+                    throw CapabilityBrokerError.invalidPlan("voice_controls_preset")
+                }
+                return preset
+            }
+        }
+    }
+
     private func verifiedOutput(_ receipt: CapabilityWorkflowReceipt) throws -> CapabilityObject {
         guard receipt.status == .succeeded,
               receipt.steps.count == 1,
@@ -694,6 +1145,42 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
             approval: .brokerPolicy,
             permission: "timer.write"
         )
+        try validate(
+            PocketCapabilityKeys.stickyUpsert,
+            effect: .reversibleLocalWrite,
+            approval: .brokerPolicy,
+            permission: "sticky.write"
+        )
+        try validate(
+            PocketCapabilityKeys.controlsAvailability,
+            effect: .privateRead,
+            approval: .permissionGrant,
+            permission: "controls.read"
+        )
+        try validate(
+            PocketCapabilityKeys.controlsBrightnessGet,
+            effect: .privateRead,
+            approval: .permissionGrant,
+            permission: "controls.read"
+        )
+        try validate(
+            PocketCapabilityKeys.controlsBrightnessSet,
+            effect: .reversibleLocalWrite,
+            approval: .brokerPolicy,
+            permission: "controls.write"
+        )
+        try validate(
+            PocketCapabilityKeys.controlsVolumeGet,
+            effect: .privateRead,
+            approval: .permissionGrant,
+            permission: "controls.read"
+        )
+        try validate(
+            PocketCapabilityKeys.controlsVolumeSet,
+            effect: .reversibleLocalWrite,
+            approval: .brokerPolicy,
+            permission: "controls.write"
+        )
     }
 
     private func validate(
@@ -735,8 +1222,16 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     }
 
     private func safeCode(_ error: Error) -> String {
-        if error is CancellationError || error is VoiceCapabilityRuntimeError {
+        if error is CancellationError {
             return "session_cancelled"
+        }
+        if let error = error as? VoiceCapabilityRuntimeError {
+            switch error {
+            case .sessionCancelled:
+                return "session_cancelled"
+            case .approvalFailed(let code):
+                return code
+            }
         }
         return switch error {
         case CapabilityBrokerError.invalidPlan, CapabilityBrokerError.invalidArguments:
@@ -788,6 +1283,29 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         let sessionID: String
         let digest: String
         let task: Task<String, Never>
+    }
+}
+
+private extension Dictionary where Key == String, Value == CapabilityValue {
+    func optionalNumber(
+        _ key: String,
+        range: ClosedRange<Double>
+    ) throws -> Double? {
+        let value: Double?
+        switch self[key] {
+        case .none, .some(.null):
+            value = nil
+        case .some(.number(let number)):
+            value = number
+        case .some(.integer(let integer)):
+            value = Double(integer)
+        default:
+            throw CapabilityBrokerError.invalidPlan("voice_tool_\(key)")
+        }
+        if let value, (!value.isFinite || !range.contains(value)) {
+            throw CapabilityBrokerError.invalidPlan("voice_tool_\(key)")
+        }
+        return value
     }
 }
 

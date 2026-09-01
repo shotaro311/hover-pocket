@@ -73,7 +73,7 @@
       "path": "golden/capability-registry.json",
       "kind": "capability-registry",
       "expected": "pass",
-      "expectedDigest": "sha256:c7d84c45feb2e68794389bc73afc3bbf609f11580ed32fd31db992ae82a8c787"
+      "expectedDigest": "sha256:b02384c1b75d817c31e7d8262bddda832823a692f4e813c0e6b54dd9aeb0b67b"
     },
     {
       "id": "golden-error-codes",
@@ -455,6 +455,13 @@
     {
       "id": "valid-capability-descriptor.controls-availability-get",
       "path": "valid/capability-descriptor.controls-availability-get.json",
+      "kind": "schema",
+      "expected": "pass",
+      "schema": "capability-descriptor.schema.json"
+    },
+    {
+      "id": "valid-capability-descriptor.controls-brightness-get",
+      "path": "valid/capability-descriptor.controls-brightness-get.json",
       "kind": "schema",
       "expected": "pass",
       "schema": "capability-descriptor.schema.json"

@@ -27,6 +27,11 @@
       "descriptor": "valid/capability-descriptor.controls-availability-get.json"
     },
     {
+      "id": "controls.brightness.get",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.controls-brightness-get.json"
+    },
+    {
       "id": "controls.brightness.set",
       "version": 1,
       "descriptor": "valid/capability-descriptor.controls-brightness-set.json"

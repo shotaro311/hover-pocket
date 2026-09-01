@@ -433,7 +433,10 @@ final class OpenAIRealtimeMacOSTransport: NSObject {
               [
                 OpenAIRealtimeMacOSCapabilityRuntime.calendarListTool,
                 OpenAIRealtimeMacOSCapabilityRuntime.calendarCreateTool,
-                OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool
+                OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
+                OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool,
+                OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool,
+                OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool
               ].contains(name),
               arguments.utf8.count <= 16_384,
               let capabilities = capabilityRuntime else {

@@ -77,13 +77,6 @@ struct VoiceLaneHostView: View {
             .accessibilityLabel(localized(japanese: "音声レーンを展開", english: "Expand Voice Lane"))
             .accessibilityValue(localized(japanese: "折りたたみ", english: "collapsed"))
 
-            Button {
-                runtime.endAudioSession()
-            } label: {
-                Image(systemName: "xmark.circle")
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(localized(japanese: "音声セッションを終了", english: "End Voice audio session"))
         }
         .padding(.horizontal, 14)
         .frame(height: VoiceLaneGeometry.compactHeight)
@@ -127,13 +120,6 @@ struct VoiceLaneHostView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(localized(japanese: "音声レーンを折りたたむ", english: "Collapse Voice Lane"))
                 .accessibilityValue(localized(japanese: "展開", english: "expanded"))
-                Button {
-                    runtime.endAudioSession()
-                } label: {
-                    Image(systemName: "xmark.circle")
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(localized(japanese: "音声セッションを終了", english: "End Voice audio session"))
             }
             .padding(.horizontal, 14)
             .frame(height: 38)
@@ -223,7 +209,9 @@ struct VoiceLaneHostView: View {
 
     private var microphoneButton: some View {
         Button {
-            if canResumeAudioSession {
+            if canEndAudioSession || canCancelAudioStart {
+                runtime.endAudioSession()
+            } else if canResumeAudioSession {
                 runtime.setMuted(false)
             } else {
                 runtime.beginAudioSession()
@@ -254,6 +242,7 @@ struct VoiceLaneHostView: View {
         .disabled(!canUseMicrophoneButton)
         .help(microphoneAccessibilityLabel)
         .accessibilityLabel(microphoneAccessibilityLabel)
+        .accessibilityValue(microphoneAccessibilityValue)
     }
 
     private func sessionCard(_ session: VoiceSessionSummary) -> some View {
@@ -328,8 +317,21 @@ struct VoiceLaneHostView: View {
             && runtime.snapshot.uiAttached
     }
 
+    private var canEndAudioSession: Bool {
+        runtime.snapshot.providerID != .off
+            && runtime.snapshot.connection == .connected
+            && !runtime.snapshot.muted
+            && runtime.snapshot.uiAttached
+    }
+
+    private var canCancelAudioStart: Bool {
+        runtime.snapshot.providerID != .off
+            && (runtime.snapshot.connection == .connecting || runtime.snapshot.connection == .recovering)
+            && runtime.snapshot.uiAttached
+    }
+
     private var canUseMicrophoneButton: Bool {
-        canBeginAudioSession || canResumeAudioSession
+        canBeginAudioSession || canResumeAudioSession || canEndAudioSession || canCancelAudioStart
     }
 
     private var voiceStartBlockedByConfiguration: Bool {
@@ -350,11 +352,15 @@ struct VoiceLaneHostView: View {
     private var microphoneAccessibilityLabel: String {
         switch runtime.snapshot.connection {
         case .connecting, .recovering:
-            localized(japanese: "音声セッションを接続中", english: "Voice session is connecting")
+            localized(japanese: "音声接続をキャンセル", english: "Cancel Voice connection")
         case .connected:
-            canResumeAudioSession
-                ? localized(japanese: "音声会話を再開", english: "Resume Voice conversation")
-                : localized(japanese: "音声セッションは接続済み", english: "Voice session is connected")
+            if canEndAudioSession {
+                localized(japanese: "音声会話を終了", english: "End Voice conversation")
+            } else if canResumeAudioSession {
+                localized(japanese: "音声会話を再開", english: "Resume Voice conversation")
+            } else {
+                localized(japanese: "音声セッションは接続済み", english: "Voice session is connected")
+            }
         case .disconnected:
             canBeginAudioSession
                 ? localized(japanese: "音声セッションを開始", english: "Start Voice session")
@@ -366,7 +372,24 @@ struct VoiceLaneHostView: View {
         if runtime.snapshot.connection == .connected {
             return runtime.snapshot.muted ? "mic.slash.fill" : "mic.fill"
         }
-        return canBeginAudioSession ? "mic.fill" : "mic.slash"
+        return canBeginAudioSession ? "mic.fill" : "mic.slash.fill"
+    }
+
+    private var microphoneAccessibilityValue: String {
+        switch runtime.snapshot.connection {
+        case .connecting, .recovering:
+            localized(japanese: "接続中。押すとキャンセル", english: "Connecting. Press to cancel")
+        case .connected where canEndAudioSession:
+            localized(japanese: "会話中。押すと終了", english: "In conversation. Press to end")
+        case .connected where canResumeAudioSession:
+            localized(japanese: "一時停止中。押すと再開", english: "Paused. Press to resume")
+        case .connected:
+            localized(japanese: "接続済み", english: "Connected")
+        case .disconnected where canBeginAudioSession:
+            localized(japanese: "停止中。押すと開始", english: "Stopped. Press to start")
+        case .disconnected:
+            localized(japanese: "利用不可", english: "Unavailable")
+        }
     }
 
     private func localized(japanese: String, english: String) -> String {
@@ -393,6 +416,14 @@ enum VoiceLaneLocalization {
         }
         if let error = snapshot.safeErrorCode {
             return errorText(error, language: language)
+        }
+        if snapshot.uiAttached,
+           (snapshot.connection == .connecting || snapshot.connection == .recovering) {
+            return text(
+                japanese: "接続中 · マイクを押してキャンセル",
+                english: "Connecting · Press the microphone to cancel",
+                language: language
+            )
         }
         if snapshot.connection == .connected,
            snapshot.muted,

@@ -570,7 +570,7 @@ final class VoiceLaneRuntime: ObservableObject {
             defer { self.explicitStartTask = nil }
             do {
                 try await adapter.start()
-                guard self.featureEnabled, self.adapter === adapter else {
+                guard !Task.isCancelled, self.featureEnabled, self.adapter === adapter else {
                     await adapter.stop()
                     return
                 }
@@ -581,7 +581,7 @@ final class VoiceLaneRuntime: ObservableObject {
                     clearSafeError: true
                 )
             } catch {
-                guard self.featureEnabled, self.adapter === adapter else { return }
+                guard !Task.isCancelled, self.featureEnabled, self.adapter === adapter else { return }
                 self.publish(
                     connection: .disconnected,
                     activity: .failed,
@@ -594,11 +594,23 @@ final class VoiceLaneRuntime: ObservableObject {
 
     func endAudioSession() {
         guard featureEnabled else { return }
+        let isPendingStart = snapshot.connection == .connecting || snapshot.connection == .recovering
+        if isPendingStart {
+            restartGeneration &+= 1
+            restartTask?.cancel()
+            restartTask = nil
+            recoveryTask?.cancel()
+            recoveryTask = nil
+            explicitStartTask?.cancel()
+            explicitStartTask = nil
+            restartAttempt = 0
+        }
         let explicitlyStarted = adapter?.requiresExplicitStart == true
         publish(
-            connection: explicitlyStarted ? .disconnected : nil,
+            connection: explicitlyStarted || isPendingStart ? .disconnected : nil,
             activity: .idle,
-            muted: true
+            muted: true,
+            clearSafeError: isPendingStart
         )
         if let adapter {
             enqueueAudioCommand(.closeSession, adapter: adapter)

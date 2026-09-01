@@ -33,7 +33,7 @@ internal sealed class CapabilityVerifier
         }
 
         Console.WriteLine("capability_verify=ok");
-        Console.WriteLine("capability_handlers=20");
+        Console.WriteLine("capability_handlers=21");
         Console.WriteLine("capability_calculator_evaluate=ok");
         Console.WriteLine("capability_controls_readback=ok");
         Console.WriteLine("capability_timer_lifecycle=ok");
@@ -61,7 +61,7 @@ internal sealed class CapabilityVerifier
             var calendar = new FakeCalendarCapabilityDataSource();
             var controls = new FakeControlsCapabilityDataSource();
             var handlers = ProviderCapabilityCompositionRoot.Create(calendar, timerStore, stickyStore, controls);
-            Require(handlers.Keys.Count == 20, "handler_count");
+            Require(handlers.Keys.Count == 21, "handler_count");
             await VerifyCalculatorAsync(handlers);
             await VerifyControlsAsync(handlers, controls);
 
@@ -171,6 +171,12 @@ internal sealed class CapabilityVerifier
             new CapabilityHandlerContext("controls-verifier-key-0003", DateTimeOffset.UtcNow));
         Require(brightness.GetProperty("displayId").GetString() == "display-1", "controls_brightness_id");
         Require(Math.Abs(brightness.GetProperty("level").GetDouble() - 0.6) < 0.001, "controls_brightness_set");
+
+        var brightnessReadback = await handlers.InvokeAsync(
+            CapabilityIds.ControlsBrightnessGet,
+            Json(new { displayId = "display-1" }));
+        Require(brightnessReadback.GetProperty("displayId").GetString() == "display-1", "controls_brightness_get_id");
+        Require(Math.Abs(brightnessReadback.GetProperty("level").GetDouble() - 0.6) < 0.001, "controls_brightness_get");
 
         var media = await handlers.InvokeAsync(
             CapabilityIds.ControlsMediaCommand,

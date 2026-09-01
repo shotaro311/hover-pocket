@@ -1,5 +1,33 @@
 # 2026-09-01 HoverPocket 通常UIとVoice Lane
 
+## Voice capability tools and final microphone toggle
+
+- Compact / Expandedの大きなマイクcontrolをVoice sessionの開始・connecting / recovering中のキャンセル・connected / unmuted中の終了・再ホバー後の明示再開へ統合した。別のVoice session終了buttonは追加しない。パネルを再表示しただけではmuteを解除しない。
+- macOS共通runtimeはCalendar権限ありで`calendar_events_list`、`calendar_event_create`、`timer_countdown_start`、`sticky_note_upsert`、`controls_brightness_set`、`controls_volume_set`を公開する。Calendar権限なしではCalendar 2 toolを除く4 toolへ縮退する。全writeは既存CapabilityBrokerのapproval policy、idempotency、cancellation、実行後readbackを使う。
+- Controlsの自然言語契約は`set / increase / decrease / preset`のstrict argumentsで、相対値はpercentage pointsとして扱う。brightnessは現在値を`controls.brightness.get@1`で読んでから計算し、`comfortable=70%`、`maximum=100%`、`minimum=5%`、volumeは`comfortable=50%`、`maximum=100%`、`minimum=0%`。`decrease value:10`が現在値から正確に10ポイント下がり、範囲外はclampする。
+- Codex app-serverのmodel verifierは4 tool面を確認する。Timerだけを実行する検証後に、Sticky Notesが空、Controlsのdisplay / volume / mediaが変更されず、Calendar createが0件であることをreadbackする。
+- Windowsは新しい`controls.brightness.get@1`をRegistry / Handler / verifierへ追加し、22 descriptors / 21 handlersの共通契約を維持した。共通JSON契約にもdescriptor fixtureとgolden registry entryを追加し、72 fixturesの一致を確認した。Windows Voice dynamic runtimeの既存Calendar / Timer面とproduction positive-tool-policy gateは変更していないため、Windowsでの新Voice tool実機動作は別ゲートである。
+
+### 今回の検証
+
+- `swift build -Xswiftc -warnings-as-errors`: PASS
+- `swift build -c release -Xswiftc -warnings-as-errors`: PASS
+- `swift run HoverPocket --verify-capabilities`: PASS（21 handlers）
+- `swift run HoverPocket --verify-broker`: PASS（22 descriptors / 21 handlers）
+- `swift run HoverPocket --verify-voice-foundation`: PASS
+- `swift run HoverPocket --verify-codex-app-server`: PASS（ChatGPT account / app-server / WebRTC foundation）
+- `python3 script/verify_voice_foundation.py`: PASS（42 cases、model tool surface 4、Timer write-only negative boundary）
+- `python3 script/verify_pocket_contracts.py`: PASS（72 fixtures）
+- `git diff --check`: PASS
+- `./script/build_and_run.sh --verify`: PASS。`dist/HoverPocket.app`をApple Development署名で再構築し、strict codesignを確認した。通常bundle IDは`local.codex.hover-pocket`、起動processは1件である。bundle binaryから`sticky_note_upsert`、`controls_brightness_set`、`controls_volume_set`、`controls.brightness.get`をreadbackした。
+- 独立レビュー: 最終P0 / P1 / P2すべて0件。単一マイクcontrol、再ホバー時の非自動録音、Broker境界、10ポイント計算、Timer専用rate limit、監査redaction、hot path性能、macOS / Windows境界を確認した。
+- Windows `dotnet build`: 未実行（macOS環境に`dotnet`なし）
+
+### 未完了gate
+
+- 実マイクからの自然文認識、remote audio、付箋 / 明るさ / 音量の実OS操作とネイティブ承認は、通常UIでユーザーがマイクを押して発話する物理gateとして未確認である。
+- Windowsの新Voice tool公開は今回の対象外であり、Windows側は`controls.brightness.get@1`の共通Registry契約までである。
+
 ## 再ホバー後の音声会話復帰
 
 - ユーザーが通常版Codex Voiceで実際に会話できたことを確認した。パネルを閉じると、要件どおり音声はmuteされUIはdetachされるが、Codex app-serverのroot threadとRealtime接続はアプリ生存中に保持される。
@@ -7,7 +35,7 @@
 - 大きなマイクbuttonを開始 / 再開の共通操作にした。`connected + muted + uiAttached`では既存接続へ`setMuted(false)`だけを送り、`disconnected`では従来どおり`beginAudioSession()`を呼ぶ。再表示だけではunmuteしないため、ホバーだけで録音が再開することはない。
 - 一時停止中は`一時停止中 · マイクを押して再開`、会話欄は`マイクを押すと音声会話を再開します。`、Accessibility labelは`音声会話を再開`と表示する。
 - runtime verifierへdetach → mute、reattach → mute維持、明示resume → unmute、adapter `startCount == 1`維持を追加した。既存接続を再利用し、重複Realtime sessionを開始しないことをreadbackした。
-- Debug / Release warnings-as-errors、Voice Foundation runtime、Voice静的42 cases、Panel 128 cases、Capability 20 handlers、`git diff --check`、通常bundle再build・起動、strict codesignがPASSした。通常版processは`dist/HoverPocket.app`から起動している。
+- Debug / Release warnings-as-errors、Voice Foundation runtime、Voice静的42 cases、Panel 128 cases、Capability 21 handlers / 22 descriptors、`git diff --check`、通常bundle再build・起動、strict codesignがPASSした。通常版processは`dist/HoverPocket.app`から起動している。
 - 独立レビューはP0 / P1 / P2すべて0件。再表示時の自動録音なし、新規開始回帰なし、追加I/O / polling / probeなし、Voice hot path性能への実質的な影響なしと判定した。
 
 ## 現在Voiceから使える機能
@@ -17,7 +45,7 @@
 - `calendar_event_create`: タイトル、開始、終了、終日指定で予定を1件作成する。毎回ネイティブ承認を表示し、CapabilityBrokerの実行後readbackを確認してから成功を返す。
 - `timer_countdown_start`: 1秒から24時間までのカウントダウンTimerを任意タイトル付きで開始する。毎回ネイティブ承認を表示し、CapabilityBrokerの実行後readbackを確認してから成功を返す。
 - Compact / Expanded表示、会話transcript、現在rootに属するsession cards、mute / unmute、明示終了、パネルclose後のroot / transcript / session保持と明示再開。
-- RegistryにはSticky Notes、Clipboard、Controls、Calculator、Timer pause / resume / stop等もあるが、Voice sessionのtool allowlistは上記3 toolだけであり、まだ音声からは操作できない。Calendar編集 / 削除、Timer一時停止 / 停止、Pocket App生成・導入もVoice toolとしては未公開である。
+- RegistryにはSticky Notes、Clipboard、Controls、Calculator、Timer pause / resume / stop等もある。macOS共通Voice runtimeのtool allowlistはCalendar権限に応じて6または4 toolで、Sticky Notes追加とControlsの明るさ・音量変更をBroker経由で操作できる。Calendar編集 / 削除、Clipboard、Timer一時停止 / 停止、Pocket App生成・導入はVoice toolとしては未公開である。
 
 ## Codex Voice開始前の表示修正
 
@@ -40,7 +68,7 @@
 ## 実画面readback
 
 - Accessibilityで通常版パネルにMirror、Calendar、Sticky Notes、Calculator、Timer、Controls、Clipboard、Today Focus、Settingsのbuttonがあることを確認した。
-- 実際にCalendarへ切り替わり、下部にVoice Laneの開始、Compact / Expanded切り替え、終了buttonが表示されることを確認した。マイク開始buttonは操作していない。
+- 実際にCalendarへ切り替わり、下部にVoice Laneの開始、Compact / Expanded切り替え、同じマイクcontrolでの開始・キャンセル・終了・再開導線が表示されることを確認した。マイクcontrolは操作していない。
 - CalendarはOAuth設定をbundleへ含めているが、実画面は`未読み込み / 読み取り専用`だった。Google accountの認証完了とは判定しない。
 - アプリ実体は`/Users/shotaro/code/share/hover-menu-preview-ai-native-final-integration/dist/HoverPocket.app`。通常版processは1つだけ起動している。
 

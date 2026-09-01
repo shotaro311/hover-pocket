@@ -464,6 +464,11 @@ def main() -> None:
             or "runtime.beginAudioSession()" not in mac_voice \
             or "OpenAIRealtimeMacOSTransportHostView" not in mac_voice:
         fail("macOS Voice Japanese/English localization missing")
+    if mac_voice.count("runtime.endAudioSession()") != 1 \
+            or "if canEndAudioSession || canCancelAudioStart" not in mac_voice \
+            or "else if canResumeAudioSession" not in mac_voice \
+            or 'Image(systemName: "xmark.circle")' in mac_voice:
+        fail("macOS Voice start/cancel/end/resume is not bound to the single microphone control")
     if "ScrollView" not in mac_voice:
         fail("macOS Voice internal scroll missing")
     if "accessibilityReduceMotion" not in mac_voice:
@@ -1136,7 +1141,10 @@ def main() -> None:
             or not all(value in model_verifier for value in (
                 "calendarAccessGranted: { false }",
                 "defer { try? FileManager.default.removeItem(at: root) }",
-                "bridge.dynamicTools.count == 1",
+                "bridge.dynamicTools.count == 4",
+                "OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool",
+                "OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool",
+                "OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool",
                 '"account/read"',
                 '"thread/start"',
                 '"turn/start"',
@@ -1145,13 +1153,15 @@ def main() -> None:
                 "afterWrite:",
                 "approvalCount == 1",
                 "calendar.createdCount == 0",
+                "stickyStore.notes.isEmpty",
+                "modelControlsUnchanged",
                 "timerStore.runningTimers.count == 1",
                 "admissionSnapshot.rejected == 0",
                 "waitForProcessExit(processID)",
                 "model_tool_workspace_leaked",
             )) \
             or "OPENAI_API_KEY" in model_verifier:
-        fail("macOS live Codex model tool verifier bypasses the bounded Timer-only contract")
+        fail("macOS live Codex model tool verifier bypasses the bounded Timer-write-only contract")
     if not all(value in mac_codex_realtime_verifier for value in (
         "CodexAppServerCompatibilityProbe.shared.isCurrent",
         "rootThreadEphemeral: true",
@@ -1284,6 +1294,19 @@ def main() -> None:
         'calendarListTool = "calendar_events_list"',
         'calendarCreateTool = "calendar_event_create"',
         'timerStartTool = "timer_countdown_start"',
+        'stickyUpsertTool = "sticky_note_upsert"',
+        'controlsBrightnessSetTool = "controls_brightness_set"',
+        'controlsVolumeSetTool = "controls_volume_set"',
+        "PocketCapabilityKeys.stickyUpsert",
+        "PocketCapabilityKeys.controlsBrightnessGet",
+        "PocketCapabilityKeys.controlsBrightnessSet",
+        "PocketCapabilityKeys.controlsVolumeGet",
+        "PocketCapabilityKeys.controlsVolumeSet",
+        '"stableKey": .string("voice:',
+        "adjustment.valueRequired / 100",
+        'case "comfortable": 0.70',
+        'case "comfortable": 0.50',
+        "if case .timerStart = request.kind",
         "context.registry.resolve",
         "context.broker.prepare",
         "context.broker.execute",

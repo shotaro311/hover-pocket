@@ -41,6 +41,7 @@ enum VoiceFoundationVerificationCommand {
         try await verifyDefaultOffAndFakeAdapter()
         try await verifyRealtimeProviderAndMacOSTransport()
         try await verifyExplicitAudioStart()
+        try await verifyExplicitStartCancellation()
         try await verifyCapabilityGrantRefresh()
         try await verifyRealtimeCapabilityBrokerRuntime()
         try await verifyAppLifetimeDetachAndRestart()
@@ -693,6 +694,33 @@ enum VoiceFoundationVerificationCommand {
         await runtime.shutdown()
     }
 
+    private static func verifyExplicitStartCancellation() async throws {
+        let adapter = CancellableExplicitStartVoiceSessionAdapter()
+        let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        await runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            providerID: .openAIRealtimeBYOK,
+            adapterFactory: { adapter }
+        ).value
+        try await waitUntil {
+            runtime.snapshot.connection == .disconnected && adapter.startCount == 0
+        }
+
+        runtime.attachPanel()
+        runtime.beginAudioSession()
+        try await waitUntil { runtime.snapshot.connection == .connecting && adapter.startCount == 1 }
+
+        runtime.endAudioSession()
+        try await waitUntil {
+            adapter.closeAudioSessionCount == 1
+                && runtime.snapshot.connection == .disconnected
+                && runtime.snapshot.activity == .idle
+                && runtime.snapshot.muted
+        }
+        await runtime.shutdown()
+    }
+
     private static func verifyCapabilityGrantRefresh() async throws {
         let first = FakeVoiceSessionAdapter()
         var factoryCount = 0
@@ -731,13 +759,24 @@ enum VoiceFoundationVerificationCommand {
             observesWake: false,
             persistenceEnabled: true
         )
+        let controls = FakeControlsCapabilityDataSource()
+        let stickyStore = StickyNotesStore(
+            storageDirectory: root.appendingPathComponent("sticky", isDirectory: true)
+        )
         let handlers = try PocketCapabilityHandlerSet(handlers: [
             CalendarListCapabilityHandler(dataSource: calendar),
             CalendarGetCapabilityHandler(dataSource: calendar),
             CalendarCreateCapabilityHandler(dataSource: calendar),
+            ControlsCapabilityHandler(operation: .availability, dataSource: controls),
+            ControlsCapabilityHandler(operation: .volumeGet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .volumeSet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .brightnessGet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .brightnessSet, dataSource: controls),
             TimerCapabilityHandler(operation: .start, store: timerStore),
             TimerCapabilityHandler(operation: .get, store: timerStore),
-            TimerCapabilityHandler(operation: .stop, store: timerStore)
+            TimerCapabilityHandler(operation: .stop, store: timerStore),
+            StickyCapabilityHandler(operation: .upsert, store: stickyStore),
+            StickyCapabilityHandler(operation: .get, store: stickyStore)
         ])
         let registry = try CapabilityRegistry(handlers: handlers)
         let brokerRoot = root.appendingPathComponent("broker", isDirectory: true)
@@ -758,7 +797,17 @@ enum VoiceFoundationVerificationCommand {
                 return true
             }
         )
-        guard try runtime.sessionTools().count == 3 else {
+        let toolSurface = try runtime.sessionTools()
+        let toolNames = Set(toolSurface.compactMap { $0["name"] as? String })
+        guard toolSurface.count == 6,
+              toolNames == [
+                  OpenAIRealtimeMacOSCapabilityRuntime.calendarListTool,
+                  OpenAIRealtimeMacOSCapabilityRuntime.calendarCreateTool,
+                  OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
+                  OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool,
+                  OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool,
+                  OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool
+              ] else {
             throw VoiceFoundationVerificationError.failed("voice_tool_surface")
         }
 
@@ -801,13 +850,109 @@ enum VoiceFoundationVerificationCommand {
               approvalCount == 2 else {
             throw VoiceFoundationVerificationError.failed("voice_timer_start_readback")
         }
+
+        let sticky = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "sticky-upsert-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool,
+            argumentsJSON: "{\"body\":\"今日の目的\",\"title\":\"Focus\",\"color\":\"yellow\"}"
+        )
+        let stickyObject = try voiceJSON(sticky)
+        guard stickyObject["status"] as? String == "succeeded",
+              stickyObject["body"] as? String == "今日の目的",
+              stickyObject["readback"] as? String == "verified",
+              approvalCount == 3 else {
+            throw VoiceFoundationVerificationError.failed("voice_sticky_upsert_readback")
+        }
+
+        let brighter = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "brightness-increase-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool,
+            argumentsJSON: "{\"operation\":\"increase\",\"value\":10}"
+        )
+        let brighterObject = try voiceJSON(brighter)
+        guard brighterObject["status"] as? String == "succeeded",
+              brighterObject["percent"] as? Double == 50,
+              brighterObject["readback"] as? String == "verified",
+              approvalCount == 4 else {
+            throw VoiceFoundationVerificationError.failed("voice_brightness_relative_readback")
+        }
+
+        let louder = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "volume-increase-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool,
+            argumentsJSON: "{\"operation\":\"increase\",\"value\":10}"
+        )
+        let louderObject = try voiceJSON(louder)
+        guard louderObject["status"] as? String == "succeeded",
+              louderObject["percent"] as? Double == 40,
+              louderObject["readback"] as? String == "verified",
+              approvalCount == 5 else {
+            throw VoiceFoundationVerificationError.failed("voice_volume_relative_readback")
+        }
+
+        let comfortable = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "brightness-comfortable-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool,
+            argumentsJSON: "{\"operation\":\"preset\",\"preset\":\"comfortable\"}"
+        )
+        let comfortableObject = try voiceJSON(comfortable)
+        guard comfortableObject["status"] as? String == "succeeded",
+              comfortableObject["percent"] as? Double == 70,
+              comfortableObject["readback"] as? String == "verified",
+              approvalCount == 6 else {
+            throw VoiceFoundationVerificationError.failed("voice_brightness_preset_readback")
+        }
+
+        let dimmer = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "brightness-decrease-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool,
+            argumentsJSON: "{\"operation\":\"decrease\",\"value\":10}"
+        )
+        let dimmerObject = try voiceJSON(dimmer)
+        guard dimmerObject["status"] as? String == "succeeded",
+              dimmerObject["percent"] as? Double == 60,
+              dimmerObject["readback"] as? String == "verified",
+              approvalCount == 7 else {
+            throw VoiceFoundationVerificationError.failed("voice_brightness_decrease_readback")
+        }
+
+        let maximumVolume = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "volume-maximum-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool,
+            argumentsJSON: "{\"operation\":\"preset\",\"preset\":\"maximum\"}"
+        )
+        let maximumVolumeObject = try voiceJSON(maximumVolume)
+        guard maximumVolumeObject["status"] as? String == "succeeded",
+              maximumVolumeObject["percent"] as? Double == 100,
+              maximumVolumeObject["readback"] as? String == "verified",
+              approvalCount == 8 else {
+            throw VoiceFoundationVerificationError.failed("voice_volume_maximum_readback")
+        }
+
+        let invalidControls = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "invalid-controls-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool,
+            argumentsJSON: "{\"operation\":\"decrease\",\"value\":10,\"preset\":\"minimum\"}"
+        )
+        guard try voiceJSON(invalidControls)["code"] as? String == "invalid_arguments",
+              approvalCount == 8 else {
+            throw VoiceFoundationVerificationError.failed("voice_controls_strict_arguments")
+        }
+
         let replay = await runtime.execute(
             sessionID: "voice-session",
             callID: "timer-start-call",
             toolName: OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
             argumentsJSON: "{\"durationSeconds\":600,\"title\":\"集中\"}"
         )
-        guard replay == timer, approvalCount == 2 else {
+        guard replay == timer, approvalCount == 8 else {
             throw VoiceFoundationVerificationError.failed("voice_tool_idempotency")
         }
         let duplicate = await runtime.execute(
@@ -827,7 +972,7 @@ enum VoiceFoundationVerificationCommand {
             now: { now },
             approvalHandler: { _ in false }
         )
-        guard try deniedRuntime.sessionTools().count == 1 else {
+        guard try deniedRuntime.sessionTools().count == 4 else {
             throw VoiceFoundationVerificationError.failed("voice_calendar_permission_surface")
         }
         let deniedCalendar = await deniedRuntime.execute(
@@ -907,7 +1052,7 @@ enum VoiceFoundationVerificationCommand {
         let cancelled = await pending.value
         guard try voiceJSON(cancelled)["code"] as? String == "session_cancelled",
               calendar.createdCount == createdBeforeCancellation,
-              try cancellationRuntime.sessionTools().count == 1 else {
+              try cancellationRuntime.sessionTools().count == 4 else {
             throw VoiceFoundationVerificationError.failed("voice_session_cancellation_or_grant_rebuild")
         }
     }
@@ -1323,6 +1468,44 @@ private final class ExplicitStartVoiceSessionAdapter: VoiceSessionAdapter {
     func stop() async {
         stopCount += 1
         muted = true
+    }
+}
+
+@MainActor
+private final class CancellableExplicitStartVoiceSessionAdapter: VoiceSessionAdapter {
+    var requiresExplicitStart: Bool { true }
+    private(set) var startCount = 0
+    private(set) var closeAudioSessionCount = 0
+    private var startContinuation: CheckedContinuation<Void, Error>?
+
+    func probeCompatibility() async -> VoiceAdapterGate { .ready }
+
+    func start() async throws {
+        startCount += 1
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                startContinuation = continuation
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancelStart()
+            }
+        }
+    }
+
+    func setMuted(_ muted: Bool) async { _ = muted }
+
+    func closeAudioSession() async {
+        closeAudioSessionCount += 1
+    }
+
+    func stop() async {
+        cancelStart()
+    }
+
+    private func cancelStart() {
+        startContinuation?.resume(throwing: CancellationError())
+        startContinuation = nil
     }
 }
 

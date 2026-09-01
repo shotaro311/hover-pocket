@@ -98,13 +98,24 @@ enum CodexAppServerVerificationCommand {
             observesWake: false,
             persistenceEnabled: true
         )
+        let controls = FakeControlsCapabilityDataSource()
+        let stickyStore = StickyNotesStore(
+            storageDirectory: root.appendingPathComponent("sticky", isDirectory: true)
+        )
         let handlers = try PocketCapabilityHandlerSet(handlers: [
             CalendarListCapabilityHandler(dataSource: calendar),
             CalendarGetCapabilityHandler(dataSource: calendar),
             CalendarCreateCapabilityHandler(dataSource: calendar),
+            ControlsCapabilityHandler(operation: .availability, dataSource: controls),
+            ControlsCapabilityHandler(operation: .volumeGet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .volumeSet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .brightnessGet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .brightnessSet, dataSource: controls),
             TimerCapabilityHandler(operation: .start, store: timerStore),
             TimerCapabilityHandler(operation: .get, store: timerStore),
-            TimerCapabilityHandler(operation: .stop, store: timerStore)
+            TimerCapabilityHandler(operation: .stop, store: timerStore),
+            StickyCapabilityHandler(operation: .upsert, store: stickyStore),
+            StickyCapabilityHandler(operation: .get, store: stickyStore)
         ])
         let registry = try CapabilityRegistry(handlers: handlers)
         let brokerRoot = root.appendingPathComponent("broker", isDirectory: true)
@@ -128,9 +139,13 @@ enum CodexAppServerVerificationCommand {
         )
         let bridge = CodexAppServerCapabilityBridge(runtime: runtime)
         let expectedToolName = OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool
-        guard bridge.dynamicTools.count == 1,
-              bridge.dynamicTools.first?.objectValue?["name"]?.stringValue
-                == expectedToolName else {
+        guard bridge.dynamicTools.count == 4,
+              Set(bridge.dynamicTools.compactMap { $0.objectValue?["name"]?.stringValue }) == [
+                  OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
+                  OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool,
+                  OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool,
+                  OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool
+              ] else {
             try? FileManager.default.removeItem(at: root)
             throw CodexAppServerVerificationError.failed("model_tool_surface_invalid")
         }
@@ -175,6 +190,7 @@ enum CodexAppServerVerificationCommand {
             CodexAppServerModelTurnCompletion
         >()
         let admission = CodexAppServerModelToolAdmission()
+        let controlsBeforeModel = try await controls.snapshot()
 
         do {
             let account = try await client.sendRequest(
@@ -279,6 +295,10 @@ enum CodexAppServerVerificationCommand {
             let output = try toolOutput(toolResult.reply, expectedSuccess: true)
             let arguments = toolResult.request.params?.objectValue?["arguments"]?.objectValue
             let admissionSnapshot = admission.snapshot()
+            let controlsAfterModel = try await controls.snapshot()
+            let modelControlsUnchanged = controlsAfterModel.displays == controlsBeforeModel.displays
+                && controlsAfterModel.volume == controlsBeforeModel.volume
+                && controlsAfterModel.media == controlsBeforeModel.media
             let metrics = await client.metrics()
             guard toolResult.request.params?.objectValue?["threadId"]?.stringValue == threadID,
                   toolResult.request.params?.objectValue?["turnId"]?.stringValue == startedTurnID,
@@ -292,6 +312,8 @@ enum CodexAppServerVerificationCommand {
                   turnCompletion.status == "completed",
                   approvalCount == 1,
                   calendar.createdCount == 0,
+                  stickyStore.notes.isEmpty,
+                  modelControlsUnchanged,
                   timerStore.runningTimers.count == 1,
                   timerStore.runningTimers.first?.title == modelToolVerificationTitle,
                   timerStore.runningTimers.first?.phaseDuration == 60,
@@ -934,13 +956,24 @@ enum CodexAppServerVerificationCommand {
             observesWake: false,
             persistenceEnabled: true
         )
+        let controls = FakeControlsCapabilityDataSource()
+        let stickyStore = StickyNotesStore(
+            storageDirectory: root.appendingPathComponent("sticky", isDirectory: true)
+        )
         let handlers = try PocketCapabilityHandlerSet(handlers: [
             CalendarListCapabilityHandler(dataSource: calendar),
             CalendarGetCapabilityHandler(dataSource: calendar),
             CalendarCreateCapabilityHandler(dataSource: calendar),
+            ControlsCapabilityHandler(operation: .availability, dataSource: controls),
+            ControlsCapabilityHandler(operation: .volumeGet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .volumeSet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .brightnessGet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .brightnessSet, dataSource: controls),
             TimerCapabilityHandler(operation: .start, store: timerStore),
             TimerCapabilityHandler(operation: .get, store: timerStore),
-            TimerCapabilityHandler(operation: .stop, store: timerStore)
+            TimerCapabilityHandler(operation: .stop, store: timerStore),
+            StickyCapabilityHandler(operation: .upsert, store: stickyStore),
+            StickyCapabilityHandler(operation: .get, store: stickyStore)
         ])
         let registry = try CapabilityRegistry(handlers: handlers)
         let brokerRoot = root.appendingPathComponent("broker", isDirectory: true)
@@ -970,7 +1003,10 @@ enum CodexAppServerVerificationCommand {
         guard toolNames == [
             OpenAIRealtimeMacOSCapabilityRuntime.calendarListTool,
             OpenAIRealtimeMacOSCapabilityRuntime.calendarCreateTool,
-            OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool
+            OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
+            OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool,
+            OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool,
+            OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool
         ] else {
             throw CodexAppServerVerificationError.failed("broker_tool_surface")
         }
@@ -1199,13 +1235,24 @@ enum CodexAppServerVerificationCommand {
             observesWake: false,
             persistenceEnabled: true
         )
+        let controls = FakeControlsCapabilityDataSource()
+        let stickyStore = StickyNotesStore(
+            storageDirectory: root.appendingPathComponent("sticky", isDirectory: true)
+        )
         let handlers = try PocketCapabilityHandlerSet(handlers: [
             CalendarListCapabilityHandler(dataSource: calendar),
             CalendarGetCapabilityHandler(dataSource: calendar),
             CalendarCreateCapabilityHandler(dataSource: calendar),
+            ControlsCapabilityHandler(operation: .availability, dataSource: controls),
+            ControlsCapabilityHandler(operation: .volumeGet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .volumeSet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .brightnessGet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .brightnessSet, dataSource: controls),
             TimerCapabilityHandler(operation: .start, store: timerStore),
             TimerCapabilityHandler(operation: .get, store: timerStore),
-            TimerCapabilityHandler(operation: .stop, store: timerStore)
+            TimerCapabilityHandler(operation: .stop, store: timerStore),
+            StickyCapabilityHandler(operation: .upsert, store: stickyStore),
+            StickyCapabilityHandler(operation: .get, store: stickyStore)
         ])
         let registry = try CapabilityRegistry(handlers: handlers)
         let brokerRoot = root.appendingPathComponent("broker", isDirectory: true)

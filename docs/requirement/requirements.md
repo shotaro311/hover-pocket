@@ -238,18 +238,20 @@ Must:
 - Voice Laneは全Providerと生成Pocket Appで同じinstanceを共有し、Provider切り替えやSurface再生成で会話sessionを作り直さない。
 - Voice機能全体は既定オフとする。ユーザーが明示的に有効化した後の既定表示はCompactとし、自動listenは別の明示opt-inとする。
 - `disabled / compact / expanded`の3表示モードを持つ。レーン面全体のクリックでは切り替えず、accessible nameを持つ明示的なexpand / collapse controlだけで切り替える。
-- Compactには視覚的な固定タイトルを置かない。マイク、短く制限した波形、状態、直近会話1〜2行、現在root配下の表示session数、mute、expand、Voice session終了を置き、会話領域を波形より優先して伸縮させる。
+- Compactには視覚的な固定タイトルを置かない。マイク（開始・接続キャンセル・会話終了・再開を同じ位置で切り替える）、短く制限した波形、状態、直近会話1〜2行、現在root配下の表示session数、mute、expandを置き、会話領域を波形より優先して伸縮させる。
 - Compactには視覚タイトルがなくても、screen reader向けのVoice Lane region labelを持たせる。
 - Expandedは左に現在会話のtranscript、右に現在のroot sessionと同じrootから派生したchild / descendant session cardを表示する。全過去会話の一覧、新規会話管理、削除UIは初回要件に含めない。
 - session cardは安全なtitle、状態、経過時間または更新時刻、進捗、直近の安全な要約だけを表示し、raw command、filesystem path、全文transcriptを渡さない。
 - Expandedはfullscreen、別Provider、Provider overlayにしない。長文と多数cardはVoice Lane内部で独立scrollし、Provider領域を縮めない。
 - 書き込み承認要求と実行後receiptはHost所有のVoice Laneへ表示し、Providerまたは生成UIが同じ見た目を偽装できないようにする。
-- muteは音声入出力だけを止め、child sessionをcancelしない。hoverによるパネルcloseはmuteとUI detachを行うが、明示的に終了していないroot / child taskを停止しない。Voice session終了ボタンはRealtime音声sessionだけを終了し、root / child taskは継続する。task cancelはsession card上の別操作とし、対象と影響を表示して別承認を求める。
+- muteは音声入出力だけを止め、child sessionをcancelしない。hoverによるパネルcloseはmuteとUI detachを行うが、明示的に終了していないroot / child taskを停止しない。同じマイクcontrolによる終了操作はRealtime音声sessionだけを終了し、root / child taskは継続する。task cancelはsession card上の別操作とし、対象と影響を表示して別承認を求める。
 
 受け入れ条件:
 
 - すべての組み込みProviderと生成Pocket AppでVoice Laneが同じ最下段にあり、Provider切り替え後もroot session、transcript、child card状態が保持される。
 - Compactには`Codex Voice`などの視覚タイトルがなく、波形は会話領域より短い。
+- 接続前のマイク操作は音声sessionを開始し、connecting / recovering中の同じマイク操作は保留中の開始をキャンセルしてdisconnected・idleへ戻し、connected・unmuted中の同じマイク操作は音声sessionだけを終了する。
+- パネルを再表示しただけでは録音を再開せず、connected・muted中の同じマイク操作を明示的に行った場合だけ既存sessionを再開する。Compact / Expandedのいずれにもマイク以外のVoice session終了buttonを置かない。
 - Expandedではパネル上端、幅、Header矩形、Provider矩形がCompact時と一致し、下端だけが下へ伸びる。
 - Expandedは左transcript / 右root-scoped session cardsの2列を維持し、Smallでもcard列を自動で隠さない。必要時は情報量を減らし、列内scrollする。
 - レーン背景のクリックでは表示モードが変わらず、明示controlだけが`aria-expanded`相当の状態を変更する。
@@ -500,6 +502,8 @@ Planned Must:
 - Today FocusのCalendar readは承認不要、TimerとStickyへの書き込みは正確な引数を提示して承認し、IDで実行後readbackする。
 - `calendar.event.create`は毎回書き込み前承認を求め、作成後にevent IDを取得してGETまたは同等queryでreadbackする。
 - Voice、Text、生成Surface、macOS SwiftUIとWindows Calendar WebView双方の「選択予定から集中を開始」は同じcanonical workflow planをBrokerへ送る。
+- macOSのVoice toolは、Calendar grantの状態に応じたCalendar read/createに加えて、`sticky_note_upsert`、`controls_brightness_set`、`controls_volume_set`をHostが公開する。各toolはstrict arguments、Capability Registry / Broker経由、cancellation / idempotency、実行後readbackを必須とする。Calendar grantがない場合はCalendar toolを公開せず、他の許可済みtoolだけを公開する。
+- Voice Controlsの引数は`set / increase / decrease / preset`のいずれかで、値は0〜100のpercentage pointsとして扱う。「10%下げて」は現在値から10ポイント下げ、brightnessは0.05〜1、volumeは0〜1へclampする。`comfortable`はbrightness 70% / volume 50%、`maximum`は100%、`minimum`はbrightness 5% / volume 0%とし、brightnessの相対操作は`controls.brightness.get@1`のBroker readback後に計算する。
 - current rootとそのchild / descendant session cardだけを表示する。全履歴browser、new / delete / archive管理は初回対象外とする。
 - WindowsのCodex Voice runtimeは既定OFFとし、Settingsで明示enableした後も、Panelのマイクbuttonを実際に操作した1回限りのuser activationと`https://app.hoverpocket.local`のexact originが一致した場合だけMicrophoneを許可する。Settings、非表示Panel、background script、別origin、Cameraは拒否し、permissionをprofileへ保存しない。
 - Windowsは起動するCodex実体を絶対path、ファイル同一性、experimental schemaで検証し、`initialize.experimentalApi`、`account/read`、`thread/realtime/listVoices`がすべて成功した後だけReadyにする。Codex processと子processはHost終了・Voice無効化・crash時に残さない。
@@ -510,7 +514,7 @@ Planned Must:
 - current user所有かつgroup / other権限0のfile-backed `auth.json`がある場合はVoice専用profileからsymlink参照し、HoverPocketのログインUIから既存Codex credentialへのlogin / cancel / logoutを行わない。安全に共有できるfile-backed credentialがない場合は、Voice専用profileを`cli_auth_credentials_store="file"`へ固定し、Settingsの明示操作から`account/login/start`のChatGPT managed browser flowを開始する。API key login、Device Code、external token、BedrockはUIへ公開せず、ログイン完了通知、`account/read`のChatGPT account、専用`auth.json`のowner / permissionをreadbackした後だけVoiceへ反映する。cancel、Provider切替、app終了ではlogin IDを指定して取り消し、専用app-server processを残さない。
 - Codex 0.145.0は実canaryでHost指定tool以外の`update_plan`をoutbound requestへ含めるため、AN3-B2のproduction activation対象外とする。別versionもschema fieldの有無だけで自動承認せず、同じ専用profileと実route canaryを通過したexact executable identityだけを当該process内で許可する。
 - VoiceのCalendar readはGoogle接続やMicrophoneとは別のHost permission grantを既定OFFで保存する。許可前はCalendar toolをモデルへ公開せずProviderへ到達させない。取り消し時はactive tool requestを停止し、新しいtool定義でVoice sessionを再構成する。
-- VoiceのTimer startはexact title / durationをHost native UIへ表示して毎回承認する。同時に表示する承認は1件だけ、開始済み承認promptは1分あたり3件までとし、拒否も上限に含める。Voice停止、root変更、取消では待機中dialogと未使用Broker approvalを破棄する。
+- VoiceのTimer startはexact title / durationをHost native UIへ表示して毎回承認する。同時に表示する承認は1件だけ、Timer startの承認promptは1分あたり3件までとし、拒否も上限に含める。Sticky Notes / Controlsの可逆な書き込みはこのTimer専用rate limitへ含めず、Brokerが要求する承認だけを行う。Voice停止、root変更、取消では待機中dialogと未使用Broker approvalを破棄する。
 - macOSの実音声E2Eは、exact bundle IDとbuild markerを持つDebug専用app、system temp直下のfresh root、process専用credential storeを使う。Release、通常bundle、Verifierとの併用、引数なしのE2E bundle起動は開始前に拒否する。
 - macOS / Windowsの標準物理Voice E2Eは、session開始時のProviderを`codex_app_server`へ束縛する。BYOKで得たreceipt、Provider切替前のmedia event、期待Providerを持たない旧sessionはCodex app-serverの物理受入証拠にしない。負例fixtureでBYOKと途中切替の誤受入れを継続検査する。
 - macOS実音声E2Eでは設定をprocess内メモリへ閉じ、Provider UIをTimerだけに限定する。Updater、Google OAuth callback、Camera準備、Clipboard移行、生成Pocket Appを起動せず、本番のApplication Support、UserDefaults、Keychainへ接続しない。SettingsではMirror、Weather、Calendar、Updateを表示せず、status menuの更新確認とapp再active時のCamera権限再確認も実行しない。Calendar実データ確認は通常の署名済み候補で、Calendar grantと書き込み承認を別途明示した場合だけ行う。
@@ -554,6 +558,8 @@ Planned Must:
 受け入れ条件:
 
 - Voice、Text、既存UI、PocketSurfaceの同一要求が同じCapability ID、canonical plan digest、effect、承認判断、readback semanticsになる。receipt固有のID、時刻、originは入力ごとに異なってよい。
+- 代表的な音声要求をstrict argumentsへ決定論的に変換し、`「付箋に今日の目的を追加して」`は`sticky_note_upsert`の実行後readback、`「画面を10%暗くして」`は`controls.brightness.get@1`から10 percentage points減算した値の実行後readback、`「音量を最大にして」`は100%の実行後readbackまで確認できる。既存の`「10分タイマーをかけて」`も同じTimer approval / readback契約を維持する。
+- Voice Controlsの`decrease value:10`は現在値から10 percentage pointsだけ減算し、`preset maximum`は100%になる。相対計算の前後値とOS readback値をdeterministic verifierで照合し、毎回の過剰な確認を追加しない。
 - 書き込み前は副作用がなく、成功表示は実行後readback一致を根拠にする。
 - Pocket App lifecycleの成功receiptと、`PocketSurfaceRegistry` / execution runtimeが観測するapp ID、version、digest、permission grantが一致する。再起動後も一致し、disable / remove時は対象entryが実行不能、rollback / enable時は選択した検証済みentryが実行可能である。
 - 同じworkspaceを同じ時刻でexportすると同一bytesになり、macOS出力をWindows、Windows出力をmacOSでpreview / restoreできる。正常roundtrip、取消、tamper、traversal、case衝突、oversize、commit失敗、runtime readback不一致をdeterministic verifierで検証し、失敗ケースでは復元前package / dataが維持される。
