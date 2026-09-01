@@ -1240,6 +1240,9 @@ final class CodexVoiceCoordinator {
             transportAttached = false
             isMuted = true
             realtimeLifecycle = .stopped
+            MacOSVoiceE2EPerformanceStore.shared?.recordTransportClosed(
+                localStopRequested: realtimeStopRequested
+            )
             sessionStatus = .closed
             let expectedClose = realtimeStopRequested
             realtimeStopRequested = false
@@ -1259,6 +1262,9 @@ final class CodexVoiceCoordinator {
             transportAttached = false
             isMuted = true
             realtimeLifecycle = .stopped
+            MacOSVoiceE2EPerformanceStore.shared?.recordTransportClosed(
+                localStopRequested: realtimeStopRequested
+            )
             sessionStatus = .recoverableFailure
             lastErrorCode = errorCode
         default:

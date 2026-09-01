@@ -634,6 +634,63 @@ enum MacOSVoiceE2EIsolationVerificationCommand {
                 &failures
             )
 
+            store.recordTransportClosed(localStopRequested: false)
+            let remotelyStopped = try store.readback()
+            check(
+                !remotelyStopped.currentAttemptAttached,
+                "performance_remote_close_still_attached",
+                &failures
+            )
+            check(
+                remotelyStopped.realtimeStopRPCCount == 0,
+                "performance_remote_close_added_stop_rpc",
+                &failures
+            )
+            check(
+                remotelyStopped.maximumRealtimeStopRPCCount == 1,
+                "performance_remote_close_lost_stop_maximum",
+                &failures
+            )
+            check(
+                remotelyStopped.lastSafeEvent == "transport_closed",
+                "performance_remote_close_event",
+                &failures
+            )
+
+            store.beginMediaAttempt()
+            now += 700_000_000
+            store.recordTransportAttached()
+            store.recordTransportClosed(localStopRequested: true)
+            let localStopPending = try store.readback()
+            check(
+                localStopPending.currentAttemptAttached,
+                "performance_local_stop_lost_attached_gate",
+                &failures
+            )
+            check(
+                localStopPending.realtimeStopRPCCount == 0,
+                "performance_local_stop_pending_rpc",
+                &failures
+            )
+            store.recordRealtimeStopRPC()
+            store.recordTransportClosed(localStopRequested: true)
+            let locallyStopped = try store.readback()
+            check(
+                locallyStopped.currentAttemptAttached,
+                "performance_local_stop_response_lost_gate",
+                &failures
+            )
+            check(
+                locallyStopped.realtimeStopRPCCount == 1,
+                "performance_local_stop_response_rpc",
+                &failures
+            )
+            check(
+                locallyStopped.maximumRealtimeStopRPCCount == 1,
+                "performance_local_stop_response_duplicate",
+                &failures
+            )
+
             store.beginMediaAttempt()
             let failedCurrentAttempt = try store.readback()
             check(
@@ -642,7 +699,7 @@ enum MacOSVoiceE2EIsolationVerificationCommand {
                 &failures
             )
             check(
-                failedCurrentAttempt.microphoneToAttachedSamplesMilliseconds == [640, 900],
+                failedCurrentAttempt.microphoneToAttachedSamplesMilliseconds == [640, 900, 700],
                 "performance_failed_attempt_lost_history",
                 &failures
             )

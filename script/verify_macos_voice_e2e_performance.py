@@ -30,6 +30,7 @@ SAFE_EVENTS = {
     "initialized",
     "media_attempt_started",
     "transport_attached",
+    "transport_closed",
     "expanded_rpc",
     "realtime_stop_rpc",
     "safe_close",
@@ -212,6 +213,14 @@ def run_self_test() -> None:
         pass
     else:
         fail("self-test accepted duplicate stop RPCs")
+    missing_stop = dict(payload)
+    missing_stop["realtimeStopRPCCount"] = 0
+    try:
+        validate_stage(missing_stop, "stopped")
+    except SystemExit:
+        pass
+    else:
+        fail("self-test accepted an attached local stop without its RPC")
     failed_current = dict(payload)
     failed_current["currentAttemptAttached"] = False
     failed_current["realtimeStopRPCCount"] = 0

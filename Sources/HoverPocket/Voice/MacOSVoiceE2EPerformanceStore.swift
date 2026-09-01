@@ -142,6 +142,18 @@ final class MacOSVoiceE2EPerformanceStore {
         scheduleWrite()
     }
 
+    func recordTransportClosed(localStopRequested: Bool) {
+        guard measurementStartedAt != nil else { return }
+        if localStopRequested {
+            scheduleWrite()
+            return
+        }
+        microphoneRequestStartedAt = nil
+        currentAttemptAttached = false
+        lastSafeEvent = "transport_closed"
+        scheduleWrite()
+    }
+
     func recordSnapshotPublish() {
         guard measurementStartedAt != nil else { return }
         snapshotPublishCount = min(snapshotPublishCount + 1, 100_000)
