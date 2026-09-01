@@ -2,7 +2,7 @@
 project_slug: hover-pocket
 target: Windows version requirements
 created: 2026-07-05
-updated: 2026-08-13
+updated: 2026-08-28
 updated_by: codex
 status: draft-integrated
 source_app_release: v0.1.0-98
@@ -238,18 +238,20 @@ Must:
 - Voice Laneは全Providerと生成Pocket Appで同じinstanceを共有し、Provider切り替えやSurface再生成で会話sessionを作り直さない。
 - Voice機能全体は既定オフとする。ユーザーが明示的に有効化した後の既定表示はCompactとし、自動listenは別の明示opt-inとする。
 - `disabled / compact / expanded`の3表示モードを持つ。レーン面全体のクリックでは切り替えず、accessible nameを持つ明示的なexpand / collapse controlだけで切り替える。
-- Compactには視覚的な固定タイトルを置かない。マイク、短く制限した波形、状態、直近会話1〜2行、現在root配下の表示session数、mute、expand、Voice session終了を置き、会話領域を波形より優先して伸縮させる。
+- Compactには視覚的な固定タイトルを置かない。マイク（開始・接続キャンセル・会話終了・再開を同じ位置で切り替える）、短く制限した波形、状態、直近会話1〜2行、現在root配下の表示session数、mute、expandを置き、会話領域を波形より優先して伸縮させる。
 - Compactには視覚タイトルがなくても、screen reader向けのVoice Lane region labelを持たせる。
 - Expandedは左に現在会話のtranscript、右に現在のroot sessionと同じrootから派生したchild / descendant session cardを表示する。全過去会話の一覧、新規会話管理、削除UIは初回要件に含めない。
 - session cardは安全なtitle、状態、経過時間または更新時刻、進捗、直近の安全な要約だけを表示し、raw command、filesystem path、全文transcriptを渡さない。
 - Expandedはfullscreen、別Provider、Provider overlayにしない。長文と多数cardはVoice Lane内部で独立scrollし、Provider領域を縮めない。
 - 書き込み承認要求と実行後receiptはHost所有のVoice Laneへ表示し、Providerまたは生成UIが同じ見た目を偽装できないようにする。
-- muteは音声入出力だけを止め、child sessionをcancelしない。hoverによるパネルcloseはmuteとUI detachを行うが、明示的に終了していないroot / child taskを停止しない。Voice session終了ボタンはRealtime音声sessionだけを終了し、root / child taskは継続する。task cancelはsession card上の別操作とし、対象と影響を表示して別承認を求める。
+- muteは音声入出力だけを止め、child sessionをcancelしない。hoverによるパネルcloseはmuteとUI detachを行うが、明示的に終了していないroot / child taskを停止しない。同じマイクcontrolによる終了操作はRealtime音声sessionだけを終了し、root / child taskは継続する。task cancelはsession card上の別操作とし、対象と影響を表示して別承認を求める。
 
 受け入れ条件:
 
 - すべての組み込みProviderと生成Pocket AppでVoice Laneが同じ最下段にあり、Provider切り替え後もroot session、transcript、child card状態が保持される。
 - Compactには`Codex Voice`などの視覚タイトルがなく、波形は会話領域より短い。
+- 接続前のマイク操作は音声sessionを開始し、connecting / recovering中の同じマイク操作は保留中の開始をキャンセルしてdisconnected・idleへ戻し、connected・unmuted中の同じマイク操作は音声sessionだけを終了する。
+- パネルを再表示しただけでは録音を再開せず、connected・muted中の同じマイク操作を明示的に行った場合だけ既存sessionを再開する。Compact / Expandedのいずれにもマイク以外のVoice session終了buttonを置かない。
 - Expandedではパネル上端、幅、Header矩形、Provider矩形がCompact時と一致し、下端だけが下へ伸びる。
 - Expandedは左transcript / 右root-scoped session cardsの2列を維持し、Smallでもcard列を自動で隠さない。必要時は情報量を減らし、列内scrollする。
 - レーン背景のクリックでは表示モードが変わらず、明示controlだけが`aria-expanded`相当の状態を変更する。
@@ -500,20 +502,53 @@ Planned Must:
 - Today FocusのCalendar readは承認不要、TimerとStickyへの書き込みは正確な引数を提示して承認し、IDで実行後readbackする。
 - `calendar.event.create`は毎回書き込み前承認を求め、作成後にevent IDを取得してGETまたは同等queryでreadbackする。
 - Voice、Text、生成Surface、macOS SwiftUIとWindows Calendar WebView双方の「選択予定から集中を開始」は同じcanonical workflow planをBrokerへ送る。
+- macOSのVoice toolは、Calendar grantの状態に応じたCalendar read/createに加えて、`sticky_note_upsert`、`controls_brightness_set`、`controls_volume_set`をHostが公開する。各toolはstrict arguments、Capability Registry / Broker経由、cancellation / idempotency、実行後readbackを必須とする。Calendar grantがない場合はCalendar toolを公開せず、他の許可済みtoolだけを公開する。
+- Voice Controlsの引数は`set / increase / decrease / preset`のいずれかで、値は0〜100のpercentage pointsとして扱う。「10%下げて」は現在値から10ポイント下げ、brightnessは0.05〜1、volumeは0〜1へclampする。`comfortable`はbrightness 70% / volume 50%、`maximum`は100%、`minimum`はbrightness 5% / volume 0%とし、brightnessの相対操作は`controls.brightness.get@1`のBroker readback後に計算する。
 - current rootとそのchild / descendant session cardだけを表示する。全履歴browser、new / delete / archive管理は初回対象外とする。
 - WindowsのCodex Voice runtimeは既定OFFとし、Settingsで明示enableした後も、Panelのマイクbuttonを実際に操作した1回限りのuser activationと`https://app.hoverpocket.local`のexact originが一致した場合だけMicrophoneを許可する。Settings、非表示Panel、background script、別origin、Cameraは拒否し、permissionをprofileへ保存しない。
 - Windowsは起動するCodex実体を絶対path、ファイル同一性、experimental schemaで検証し、`initialize.experimentalApi`、`account/read`、`thread/realtime/listVoices`がすべて成功した後だけReadyにする。Codex processと子processはHost終了・Voice無効化・crash時に残さない。
 - AN3-B1のVoice root threadは`read-only` sandbox、`approvalPolicy=never`、tool / shell / file / MCP / connector禁止のinstructionsで開始する。この段階ではVoiceからCapability Brokerを呼ばず、Calendar / Timer接続はAN3-B2で別途承認・readback付きで有効化する。
 - AN3-B2以降は、Voiceのモデル可視toolをHostが許可したdynamic toolだけへ制限する正のtool policyを必須にする。`dynamicTools`の追加、`read-only`、`approvalPolicy=never`、system prompt、`environments=[]`は単独ではBroker迂回を防ぐ安全境界として扱わない。
-- installed Codexの生成schemaと実際のdelegated tool routerで、shell、MCP、app、plugin、extension、web、imageなどのambient toolが0件であることを独立readbackできない場合、Codex processを開始する前にVoiceをfail closedにする。Codex 0.145.0には正のtool allowlist契約がないため、AN3-B2のproduction activation対象外とする。
+- macOSはVoice専用`CODEX_HOME`でshell、MCP、app、plugin、web、image、multi-agentなどを無効化し、認証情報だけを既存Codexから参照する。さらにinstalled Codexの生成schemaと、ローカルloopback providerへ実際に送られるResponses requestを起動前canaryで検査し、outbound `tools`がHost指定dynamic toolと件数・名前とも完全一致しない場合はfail closedにする。`dynamicTools`自体をallowlistと見なさない。
+- macOSのCodex app-server Voiceは`account/read`が`requiresOpenaiAuth=true`かつ`account.type=chatgpt`を返した場合だけReadyにする。API key、Amazon Bedrock、custom provider、signed-out状態はVoiceを開始せず、Realtime BYOKへ自動fallbackしない。
+- current user所有かつgroup / other権限0のfile-backed `auth.json`がある場合はVoice専用profileからsymlink参照し、HoverPocketのログインUIから既存Codex credentialへのlogin / cancel / logoutを行わない。安全に共有できるfile-backed credentialがない場合は、Voice専用profileを`cli_auth_credentials_store="file"`へ固定し、Settingsの明示操作から`account/login/start`のChatGPT managed browser flowを開始する。API key login、Device Code、external token、BedrockはUIへ公開せず、ログイン完了通知、`account/read`のChatGPT account、専用`auth.json`のowner / permissionをreadbackした後だけVoiceへ反映する。cancel、Provider切替、app終了ではlogin IDを指定して取り消し、専用app-server processを残さない。
+- Codex 0.145.0は実canaryでHost指定tool以外の`update_plan`をoutbound requestへ含めるため、AN3-B2のproduction activation対象外とする。別versionもschema fieldの有無だけで自動承認せず、同じ専用profileと実route canaryを通過したexact executable identityだけを当該process内で許可する。
 - VoiceのCalendar readはGoogle接続やMicrophoneとは別のHost permission grantを既定OFFで保存する。許可前はCalendar toolをモデルへ公開せずProviderへ到達させない。取り消し時はactive tool requestを停止し、新しいtool定義でVoice sessionを再構成する。
-- VoiceのTimer startはexact title / durationをHost native UIへ表示して毎回承認する。同時に表示する承認は1件だけ、開始済み承認promptは1分あたり3件までとし、拒否も上限に含める。Voice停止、root変更、取消では待機中dialogと未使用Broker approvalを破棄する。
+- VoiceのTimer startはexact title / durationをHost native UIへ表示して毎回承認する。同時に表示する承認は1件だけ、Timer startの承認promptは1分あたり3件までとし、拒否も上限に含める。Sticky Notes / Controlsの可逆な書き込みはこのTimer専用rate limitへ含めず、Brokerが要求する承認だけを行う。Voice停止、root変更、取消では待機中dialogと未使用Broker approvalを破棄する。
+- macOSの実音声E2Eは、exact bundle IDとbuild markerを持つDebug専用app、system temp直下のfresh root、process専用credential storeを使う。Release、通常bundle、Verifierとの併用、引数なしのE2E bundle起動は開始前に拒否する。
+- macOS / Windowsの標準物理Voice E2Eは、session開始時のProviderを`codex_app_server`へ束縛する。BYOKで得たreceipt、Provider切替前のmedia event、期待Providerを持たない旧sessionはCodex app-serverの物理受入証拠にしない。負例fixtureでBYOKと途中切替の誤受入れを継続検査する。
+- macOS実音声E2Eでは設定をprocess内メモリへ閉じ、Provider UIをTimerだけに限定する。Updater、Google OAuth callback、Camera準備、Clipboard移行、生成Pocket Appを起動せず、本番のApplication Support、UserDefaults、Keychainへ接続しない。SettingsではMirror、Weather、Calendar、Updateを表示せず、status menuの更新確認とapp再active時のCamera権限再確認も実行しない。Calendar実データ確認は通常の署名済み候補で、Calendar grantと書き込み承認を別途明示した場合だけ行う。
+- macOS実音声E2EのAPI keyは引数、環境変数、session state、receipt、logへ渡さず、隔離appのSettingsへユーザーが入力した現在process内だけで保持し、Stop時に消去する。
 - WebRTC SDPはUTF-8で262,144 bytes以下、`v=0`、NULなしとし、current root threadとconnection generationの両方へ束縛する。raw SDPはPanel transportだけへ返し、Settings、監査、diskへ保存しない。remote audioはWebRTC media trackで再生し、raw audio payloadをBridge、監査、diskへ渡さない。
+- macOSの配布bundleはWebRTC host candidateをmDNSで匿名化するため、`NSLocalNetworkUsageDescription`でVoice接続だけに使うことを明示する。HoverPocket自身はBonjour serviceのbrowse / advertiseを行わず、`NSBonjourServices`やmulticast entitlementを追加しない。権限拒否時はAPIやBYOKへ自動fallbackせず、固定error codeとSystem Settings導線を返す。
+- macOSのICE収集はcandidate取得済みなら3秒でofferを確定し、未取得なら従来上限8秒まで待つ。8秒後は無限待ちや即時rejectにせず、その時点のSDPを接続判定へ渡し、Voice開始全体の30秒上限内で成功または固定error codeへ収束させる。
 - Pocket Appはmanifest、data schema、layout、workflow、permissions、testsをユーザーが確認・変更・削除・rollbackできるファイルとして保持する。
 - 生成UIはauthoritative data、secret、重要処理を所有せず、削除・再生成してもユーザーの意図とデータが残る。
 - Pocket Appのinstall / update / enable / disable / remove / rollbackは、Lifecycleの保存状態だけで成功にしない。Hostが検証済みimmutable packageを`PocketSurfaceRegistry`と実行runtimeへ反映し、同じapp ID、version、package digest、permission grantが描画・実行側でも観測できた後だけ成功receiptを返す。
 - 生成Pocket Appはapp IDごとに独立したSurface / runtime entryとして登録する。任意の生成Appを組み込みToday Focusの固定slotへ差し替えない。
 - 実Codex生成とactivationは、ローカルファイル読取り隔離と上記runtime activation readbackをmacOS / Windows双方で満たすまでfail closedとする。
+- 実Codex生成のOpenAI API keyは、macOS KeychainまたはWindows Credential Managerを正本とし、Hostが認証済みhelperの1回限りrequestを受けた後だけ遅延取得する。API key、broker endpoint、内部capabilityをCodexのargument、environment、workspace、receipt、監査、固定diagnosticへ置かない。
+- Codex 0.145.0のcustom model providerは`auth.command`のstdinをnullにするため、旧credential helperのstdin bootstrapはproduction生成へ使わない。生成用helperはCodex生成processの直接childとして起動し、helper自身がCodex parent PIDとHoverPocket Host grandparent PIDからbroker endpointを導出する。
+- 生成用brokerはmacOSでowner-only Unix socket、Windowsで`CurrentUserOnly` named pipeを使う。HostはCodex生成processが自身の直接childであることを確認し、brokerはhelperがそのCodex processの直接childかつHoverPocketと同じ実行identityであることを確認する。helper側もserverのexact Host PIDと実行identityを確認する。
+- 生成用brokerのcapabilityはHost内部にだけ保持し、IPCでは固定version requestへ変換する。leaseは最大30秒・1回限りとし、期限切れ、unauthorized、malformed、provider失敗、取消、process終了で再利用不能にする。PID由来の決定論的endpointは秘密として扱わず、先取りや誤接続は生成失敗へfail closedにする。
+- custom providerはHostが整合性digestを固定したstatic `model_catalog_json`、exact model `gpt-5.6-sol`、reasoning effort `medium`を使い、production生成中にremote `/models`へアクセスしない。`auth.command`と`auth.args`だけで認証し、`env_key`、direct bearer、`requires_openai_auth`を併用しない。
+- `auth.refresh_interval_ms=0`は生成process内で取得済みcredentialをcacheし、401後だけhelperを再実行する設定として扱う。request / stream retryも0に固定し、最初の取得後にbroker leaseを消費するため、401を含む2回目のcredential取得は成功させない。
+- helper executable pathはモデルtoolのfilesystem permissionで明示denyする。production有効化前に、非機密surrogateを使う実runtime canaryで、2回のResponses requestに対してhelper起動が1回だけであること、remote `/models`アクセスがないこと、Codex auth control-planeからhelperを起動できる一方でモデル要求toolから同じpathを読取り・実行できないこと、Host固定のgeneration output schemaがResponses requestへ結合されPocket App envelopeだけが返ること、request body、auth stdout、process state、Codex Home、log、diskへcredentialが残らないことをreadbackする。
+- Windowsの実Codex生成templateはCodex CLIのnative `elevated` sandboxを明示し、`unelevated`へ自動降格しない。`unelevated`がread-only permission profileを拒否するnegative-controlはdowngrade拒否の証拠であり、`elevated`境界の成功証拠として扱わない。
+- Windows elevated sandboxのOS user、DPAPI保護済みsandbox credential、setup markerは、HoverPocket専用のdedicated Codex Homeへone-time provisioningする。dedicated Homeは、trusted native elevated helperがcomponentごとにreparse pointを拒否し、handle-relativeに作成・検査したdirectory object、またはmedium-integrity userが変更不能な管理対象rootに置く。昇格処理の終了まで同じdirectory identityを保持できない構成は採用しない。
+- provisioningはSettingsまたは配布時の明示したユーザー操作からだけ開始し、UACの目的と作成されるlocal sandbox identityを事前表示する。生成要求、Voice、background task、起動時処理、canary本体からUACを表示しない。管理者credential、password、tokenをHoverPocketへ保存しない。reparse-safe helperが未実装または検証未完了の場合、setup / repairはUACを起動せず固定error codeでfail closedにする。
+- reparse-safe helperの完成前は、Settings表示だけでなく、Settings bridge、production provisioner、production generator resolver、管理者PowerShellの全入口をserver-sideで閉じる。forged requestでもpicker、承認、binary copy、directory作成、process起動を0回とし、旧setup-v5 markerはproduction readinessの根拠にしない。
+- Settingsのsetup / repairは、ユーザーが選択した公式Codex 0.145.0 executableを非昇格Hostでexact SHA-256 / size検査し、同じpinned handleからHost固定先へコピーする。既定Noのネイティブ確認後だけ、固定先binaryとtrusted native elevated helperを使う。ユーザー書き込み可能なscript、shell、未束縛のpath文字列を昇格境界にしない。helperはwhole-homeと各子directoryのjunction / symlink / mount point / reparse tagを昇格したidentityで再確認し、途中のrename / delete / replaceを拒否する。
+- 固定対象は`codex.exe`単体ではなく、公式Windows packageの`codex-windows-sandbox-setup.exe`、`codex-command-runner.exe`と実行に必要なresource closureを含める。各fileをexact size / SHA-256 / Authenticode signerで検証し、admin-controlled配置先へ同一objectとしてpinする。公式Codexのbare helper名fallbackや親processの`PATH`、`USERNAME`、`USER`を昇格authorityとして使わず、helperは絶対path、元の非昇格user SIDへ束縛したrequest、固定environmentだけで起動する。nonce由来のCodex Homeは既存objectを再利用せずsingle-useで新規作成し、完了attestationは元SIDだけへ読取権限を与える。
+- trusted native helperとprivate dependency closureは、専用per-machine installerが固定`%ProgramFiles%\HoverPocket\CodexSandboxSetup`へ64-bit componentとして配置・更新・削除する。installerはembedded payloadと固定UpgradeCodeを持ち、任意CustomAction、service、registry、environment、shortcut、ユーザー書き込み可能なinstall originを使わない。CIはMSI databaseをreadbackし、machine scope、Program Files ancestry、helperの一意性、禁止table、major upgrade順序を検証する。production setupを有効化する前に、MSIとhelperの双方を同じ信頼済みpublisherでAuthenticode署名し、Settingsは固定originのregular / non-reparse file、publisher、object identityが一致する場合だけUAC requestを作成する。
+- AN8 formal Windows releaseは、Shell buildへ同じ`HoverPocketPublisherCertificateSha256`を渡し、`HoverPocket.CodexSandboxSetup.exe`をtimestamp付きAuthenticode署名してから専用MSIへharvestし、MSI build後に同一publisherでMSI自体もtimestamp付き署名する。schema 2 release manifestは専用MSIのexact asset name / size / SHA-256、embedded helperのsize / SHA-256、両者のsignature / timestamp状態、Shell / Velopack / helper / MSIのsame-certificate agreementを記録する。betaは専用MSIをpublishせず、production setup / generation / activationを有効化しない。
+- formal公開後はmanifestの自己申告だけを証拠にせず、immutable GitHub Release snapshotから全assetを再downloadしてhashを取り直し、Windows上で公開MSIのinstaller database、MSIのAuthenticode、administrative imageから取り出したembedded helperのexact hash / Authenticode / timestamp、Setup / Portable / full package内Shellとのsame-certificate agreementを独立readbackする。missing field、asset mutation、hash mismatch、timestamp欠落、publisher mismatchはfail closedとする。
+- 専用MSIのrelease transitionはproduction activationとは別のformal gateとし、署名済み旧版install、新版major upgrade、明示rollback（新版uninstall後に旧版reinstall）、uninstallをdisposable signed-hostで実行し、各段階の固定Program Files helper hash / signatureをreadbackする。通常ユーザー実機のSettings明示操作→UAC secure desktop→固定helper dispatch、およびsetup後のno-UAC positive confinement / credential delivery /実モデル生成canaryは別のphysical gateとして残し、それらが完了するまでproduction setup / generation / activation flagsはfalseのまま維持する。
+- 公式`codex sandbox setup --elevated --current-user --codex-home <dedicated-home>`を呼ぶ場合も、`codex-home`のdirectory identityを昇格前の文字列検査だけに依存させず、公式Codexが行うfile作成とDACL変更がtrusted helperで保持した同じ対象へだけ到達することを保証する。失敗時はreparse先を含むtargetのfileとACLが不変でなければならない。
+- setup成功後は固定binaryとcontrol-planeを別々にreadbackし、生成adapterへの反映は次回起動に限定する。WebViewへfilesystem path、credential、control JSON本文を返さない。生成開始前もHostは固定Codex Homeのregular file、reparse非該当、setup version、offline / online identity名、proxy port空、local binding無効を検証する。setup markerとsandbox users fileは生成process終了までread-only handleでpinし、途中の削除・置換・更新を拒否する。未準備、version不一致、proxy設定差分、file置換、sandbox identity失効はUACや自動reprovisionへ進まず`GENERATOR_SANDBOX_NOT_READY`でfail closedにし、Settingsの明示repairへ戻す。
+- 各生成のworkspace、virtual User Home、Tempは引き続きfreshかつ使い捨てにする。固定Codex HomeはHost control-plane専用とし、`--ignore-user-config`、`--ephemeral`、CLI引数で全生成設定を固定する。実Host profile denyとfresh workspace carveoutにより、model toolから固定Codex Home全体と`.sandbox-secrets`を読めないことをpositive canaryで確認する。固定Codex Home、生成workspace、credential、prompt、transcriptはPocket App backupへ含めない。
+- Windowsのproduction有効化前canaryは、固定version・archive hash・executable hash・有効なOpenAI Authenticode signerを持つlocal executableと、上記の準備済み固定Codex Homeだけを使う。実Host user profileを明示denyしたうえで、Host profileからfresh run rootまでの各階層に存在する兄弟file / directoryをboundedかつ決定論的に列挙して直接denyし、run root内のworkspaceだけをreadへ再許可する同型profileにより、workspace read、workspace write拒否、固定Codex Home / User Home / root外sibling read拒否、network拒否、listener未到達、実行中UACなし、bounded非秘匿diagnostic、validated cleanupを実行後readbackする。canaryのrun rootは件数が無制限に増え得る共有Temp直下ではなく、productionと同型のHost LocalAppData配下に作る一意な専用baseへ隔離し、そのbaseと子rootを検証後に全て削除する。列挙不能、境界外path、件数またはserialized path長の上限超過は生成前に固定failure codeでfail closedとする。未指定pathをread rootから省くことや、親directoryへinheritable denyを追加することだけでは、既存のUsers / Authenticated Users ACLを持つ子pathのread拒否証拠にしない。
+- CIでnative `elevated` sandboxを利用できない場合は、provisioning / readiness self-testと`unelevated` rejectionだけを自動化し、通常Windows hostでone-time provisioning後に実行するno-UAC positive canaryを独立した必須gateとして残す。trusted executable resolverとSettingsの明示setup / repair UIが揃った後も、positive canary、Host-owned credential delivery、実モデル生成readbackが揃うまでは生成物activationをfail closedにする。
 - Pocket App workspace backupはmacOS / Windows共通のversion付きcanonical JSONとし、Host検証済みimmutable packageの全version、active version / digest、enabled / disabled、effective permission、state schema digest、ユーザーの`state.json`だけを含める。OAuth、credential、Capability監査 / receipt、Codex生成workspace、外部pathは含めない。
 - backup exportはHostが固定境界から収集し、全fileの安全な相対path、decoded size、SHA-256、base64 bytesを記録する。restoreは最大64 App、2,048 files、1 MiB / file、64 MiB decoded、96 MiB encodedを上限とし、traversal、absolute path、symlink / reparse point、case-insensitive path衝突、未参照file、hash / schema / package不一致を副作用前に拒否する。
 - restoreは追加 / 置換、version、enabled / disabled、permission差分、data変更をpreviewし、backup digestとpreview digestへ束縛した5分以内・1回限りの承認をネイティブUIで既定`No`として求める。WebView、生成UI、Codexへfilesystem pathまたは直接restore権限を渡さない。
@@ -523,6 +558,8 @@ Planned Must:
 受け入れ条件:
 
 - Voice、Text、既存UI、PocketSurfaceの同一要求が同じCapability ID、canonical plan digest、effect、承認判断、readback semanticsになる。receipt固有のID、時刻、originは入力ごとに異なってよい。
+- 代表的な音声要求をstrict argumentsへ決定論的に変換し、`「付箋に今日の目的を追加して」`は`sticky_note_upsert`の実行後readback、`「画面を10%暗くして」`は`controls.brightness.get@1`から10 percentage points減算した値の実行後readback、`「音量を最大にして」`は100%の実行後readbackまで確認できる。既存の`「10分タイマーをかけて」`も同じTimer approval / readback契約を維持する。
+- Voice Controlsの`decrease value:10`は現在値から10 percentage pointsだけ減算し、`preset maximum`は100%になる。相対計算の前後値とOS readback値をdeterministic verifierで照合し、毎回の過剰な確認を追加しない。
 - 書き込み前は副作用がなく、成功表示は実行後readback一致を根拠にする。
 - Pocket App lifecycleの成功receiptと、`PocketSurfaceRegistry` / execution runtimeが観測するapp ID、version、digest、permission grantが一致する。再起動後も一致し、disable / remove時は対象entryが実行不能、rollback / enable時は選択した検証済みentryが実行可能である。
 - 同じworkspaceを同じ時刻でexportすると同一bytesになり、macOS出力をWindows、Windows出力をmacOSでpreview / restoreできる。正常roundtrip、取消、tamper、traversal、case衝突、oversize、commit失敗、runtime readback不一致をdeterministic verifierで検証し、失敗ケースでは復元前package / dataが維持される。
@@ -536,6 +573,7 @@ Planned Must:
 - installed runtimeがHost検証済みのBroker限定tool policyを持たない場合、Voiceは`SchemaMismatch / BlockedFailure`で停止し、app-server、microphone、Calendar read、Timer approvalを開始しない。表示理由は秘密情報を含まない固定codeから日本語 / 英語へ変換する。
 - Calendar grantの許可、拒否、取り消し、再起動後復元を検証し、許可前 / 取り消し後のProvider呼出し数が0であることを確認する。Timerは同時2件目と1分内4件目がnative dialog表示前に拒否され、session取消で表示中dialogが閉じる。
 - hover close / panel hideでは入力trackとremote audioを即時muteしてUIをdetachするがroot threadを停止しない。明示終了ではRealtime stop、peer connection、data channel、local media track、remote audioを閉じ、再開時に古いSDP / generationを受理しない。
+- macOS実音声E2E receiptはexact allowlistのboolean、enum、最終transcript件数だけをatomic保存し、API key、transcript本文、音声、SDP、PID、filesystem pathを含めない。各media attemptの開始時に、前回attemptのmic、remote audio、transcript件数、Timer readback、Host native確認をすべて消去し、現在attemptだけで合格を判定する。Host native確認は非永続のattempt IDへ束縛し、古い確認sheetの完了を後続attemptへ記録しない。合格には実マイク取得、remote audio trackと再生、ユーザー／assistantの最終transcript各1件以上、Timer Broker readback、Host nativeの「話せた・聞こえた」確認を必要とし、Stop後はmic / remote track / playback / credentialが0で`safe_close`になったことを別経路で読む。
 
 ## 5. Settings 要件
 
@@ -771,6 +809,8 @@ Must:
 - Compactから明示controlでExpandedへ切り替えると、Provider矩形を変えずパネル下端だけが下へ伸びる。
 - macOSのSmall / Medium / Large / Extra LargeとWindowsのSmall / Medium / Largeで、off / compact / expandedのgeometry fixtureが通る。
 - `OS × size × built-in Provider / generated PocketSurface fixture × off/compact/expanded`の直積でShell contractを検査する。
+- macOS Voice E2Eは`Build → Run → ValidateIsolation → Validate → Stop → Readback → Cleanup`を別操作にし、CIは秘密値やマイクを使わない隔離契約まで、実機gateはユーザーがCodex app-serverへのChatGPTログインとマイクを明示操作した物理receiptまでを確認する。新規sessionは期待Providerを`codex_app_server`へ束縛し、BYOKまたは途中でProviderが変わったmedia attemptを物理証拠として受理しない。Run / Stop / Cleanupはsession単位のatomic lockで直列化し、ValidateIsolationはallowlist名だけでなくtop-level symlink、型、canonical root containmentを検査する。Stopはprocess不在とstopped receiptが両方通った後だけlifecycleを`stopped`へ確定し、Cleanupは記録PIDに加えてexact commandのprocess不在を再確認する。
+- macOS Voice E2EのChatGPTログインは、隔離runtime内のVoice専用Codex Homeにあるowner-only regular fileだけへ保存する。Hostの`~/.codex/auth.json`、Keychain、通常版HoverPocketの認証を参照・symlink・変更せず、session Cleanupで専用credentialもruntimeごと回収する。
 
 ### 10.2 Provider E2E
 
@@ -853,7 +893,7 @@ Must:
 - Windows 10 対応を必須にするか、Windows 11 専用でよいか。
 - Clipboard private mode を Windows 初回 MVP の Must に含めるか。
 - Controls の display brightness をどこまで保証するか。DDC/CI は機種差が大きい。
-- Codex Voice Laneの標準runtime providerをCodex app-serverのpower-user mode、OpenAI Realtime / BYOK、別providerのどれにするか。Capability契約はruntimeから独立させる。
+- Codex Voice Laneの標準runtime providerはCodex app-serverとする。Codex導入済み・ログイン済み環境でAPIキーなしに使い、Voice Lane自体は既定OFF、マイクは明示操作後だけ開始する。OpenAI Realtime BYOKはユーザーが明示選択する任意の代替経路とし、自動fallbackしない。Capability契約は両runtimeから独立させ、いずれも同じCapability Registry / Broker / 承認 / readbackを通す。Codex app-serverはBroker限定tool policyをschemaで正に確認できるversionだけを開始し、現行0.145.0のように証明できないversionはapp-server process開始前に停止する。
 - session cardから別アプリへ移動する方式。対応APIを実測できるまでLane内詳細を既定にし、必要時の`codex resume <threadId>`は明示承認付き代替候補とする。
 - user-owned Pocket App workspaceの既定場所。初回に可視folderを選択できる方針を第一候補にする。
 - 配布方式を MSIX、winget、installer、portable のどれにするか。

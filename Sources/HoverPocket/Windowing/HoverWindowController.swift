@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Combine
 import OSLog
 import QuartzCore
@@ -31,6 +32,10 @@ final class HoverWindowController {
     private var lastAccessWindowHealthCheck = Date.distantPast
     private var previewAnimationToken = 0
     private let usesDirectHoverEvents = !CommandLine.arguments.contains("--verify-hover-recovery")
+    private let isPanelSoakVerification = CommandLine.arguments.contains(
+        "--verify-panel-soak"
+    )
+    private var panelSoakUsesImmediateTransitions = true
     private let logger = Logger(subsystem: "com.hoverpocket.app", category: "HoverWindowRecovery")
     private let settings: AppSettings
     private let menuStore: HoverMenuStore
@@ -41,9 +46,17 @@ final class HoverWindowController {
         settings
     }
 
-    init() {
-        let settings = AppSettings()
-        let menuStore = HoverMenuStore(settings: settings)
+    init(
+        settingsDefaults: any AppSettingsDefaultsStoring = HoverPocketRuntimeEnvironment.shared.settingsDefaults,
+        providerRegistry: ProviderRegistry? = nil
+    ) {
+        let settings = AppSettings(defaults: settingsDefaults)
+        HoverPocketRuntimeEnvironment.shared.applyVoiceE2EDefaults(to: settings)
+        let providerStore = ProviderStore(
+            registry: providerRegistry ?? HoverPocketRuntimeEnvironment.shared.providerRegistry,
+            settings: settings
+        )
+        let menuStore = HoverMenuStore(settings: settings, providerStore: providerStore)
         self.settings = settings
         self.menuStore = menuStore
         self.settingsWindowController = SettingsWindowController(
@@ -110,6 +123,177 @@ final class HoverWindowController {
 
     func openSettingsFromMenu() {
         showSettings()
+    }
+
+    func runNonPhysicalSoakVerification(
+        iterations: Int,
+        providerIDs: [PluginID]
+    ) async throws -> PanelSoakVerificationResult {
+        guard isPanelSoakVerification,
+              iterations >= 1,
+              providerIDs.count >= 2,
+              settings.voiceProvider == .off,
+              !settings.voiceEnabled,
+              VoiceLaneRuntime.shared.snapshot.mode == .disabled
+        else {
+            throw PanelSoakVerificationError.failed("panel_soak_precondition_failed")
+        }
+        guard let screen = targetScreen(), let previewWindow else {
+            throw PanelSoakVerificationError.failed("panel_soak_screen_unavailable")
+        }
+
+        let microphoneAuthorization = AVCaptureDevice.authorizationStatus(for: .audio)
+        showPill()
+        for providerID in providerIDs.prefix(2) {
+            openPanel(showing: providerID)
+            closePreview()
+            await settlePanelSoakRunLoop()
+        }
+        await settlePanelSoakRunLoop(milliseconds: 500)
+
+        let baselinePreviewIdentifier = ObjectIdentifier(previewWindow)
+        let baselineAccessWindowCount = accessWindows.count
+        let baselineWindowCount = NSApp.windows.count
+        let baselineTask = try processTaskSnapshot()
+        let baselineThreadCount = baselineTask.threadCount
+        let baselineResidentMiB = baselineTask.residentMiB
+        let baselineSocketCount = try processSocketCount()
+        let baselineChildProcessCount = try childProcessCount()
+        let expectedFrame = PanelGeometry.frames(
+            on: screen,
+            panelSize: settings.panelSize,
+            additionalPreviewHeight: 0,
+            showsNotchSideHandleArea: showsVisibleNotchSideHandle
+        ).preview
+        var maximumThreadCount = baselineThreadCount
+        var maximumOpenMilliseconds = 0.0
+        var providerSwitches = 0
+        var recoveryCycles = 0
+        var animatedTransitionCycles = 0
+
+        for index in 0..<iterations {
+            let providerID = providerIDs[index % providerIDs.count]
+            let startedAt = CFAbsoluteTimeGetCurrent()
+            openPanel(showing: providerID)
+            await Task.yield()
+            maximumOpenMilliseconds = max(
+                maximumOpenMilliseconds,
+                (CFAbsoluteTimeGetCurrent() - startedAt) * 1_000
+            )
+            guard previewWindow.isVisible,
+                  menuStore.providerStore.selectedPluginID == providerID,
+                  VoiceLaneRuntime.shared.snapshot.mode == .disabled,
+                  voiceLaneHeight(on: screen) == 0
+            else {
+                throw PanelSoakVerificationError.failed("panel_soak_open_readback_failed")
+            }
+            providerSwitches += 1
+
+            closePreview()
+            await settlePanelSoakRunLoop()
+            guard !previewWindow.isVisible,
+                  hoverMonitorTimer == nil,
+                  accessMonitorTimer != nil,
+                  ObjectIdentifier(previewWindow) == baselinePreviewIdentifier,
+                  accessWindows.count == baselineAccessWindowCount
+            else {
+                throw PanelSoakVerificationError.failed("panel_soak_close_readback_failed")
+            }
+
+            if (index + 1).isMultiple(of: 20) {
+                performSystemRecovery()
+                await settlePanelSoakRunLoop()
+                recoveryCycles += 1
+            }
+            if (index + 1).isMultiple(of: 25) {
+                maximumThreadCount = max(
+                    maximumThreadCount,
+                    try processTaskSnapshot().threadCount
+                )
+            }
+        }
+
+        panelSoakUsesImmediateTransitions = false
+        defer { panelSoakUsesImmediateTransitions = true }
+        for index in 0..<3 {
+            let providerID = providerIDs[index % providerIDs.count]
+            openPanel(showing: providerID)
+            await settlePanelSoakRunLoop(milliseconds: 300)
+            guard previewWindow.isVisible,
+                  !previewWindow.ignoresMouseEvents,
+                  menuStore.providerStore.selectedPluginID == providerID,
+                  VoiceLaneRuntime.shared.snapshot.mode == .disabled,
+                  voiceLaneHeight(on: screen) == 0
+            else {
+                throw PanelSoakVerificationError.failed("panel_soak_animated_open_readback_failed")
+            }
+
+            closePreview()
+            await settlePanelSoakRunLoop(milliseconds: 300)
+            guard !previewWindow.isVisible,
+                  resetTask == nil,
+                  hoverMonitorTimer == nil,
+                  accessMonitorTimer != nil,
+                  ObjectIdentifier(previewWindow) == baselinePreviewIdentifier,
+                  accessWindows.count == baselineAccessWindowCount
+            else {
+                throw PanelSoakVerificationError.failed("panel_soak_animated_close_readback_failed")
+            }
+            animatedTransitionCycles += 1
+        }
+
+        await settlePanelSoakRunLoop(milliseconds: 500)
+        let finalTask = try processTaskSnapshot()
+        maximumThreadCount = max(maximumThreadCount, finalTask.threadCount)
+        let finalWindowCount = NSApp.windows.count
+        let finalSocketCount = try processSocketCount()
+        let finalChildProcessCount = try childProcessCount()
+
+        let resourceInvariants = [
+            (finalWindowCount <= baselineWindowCount, "window_count"),
+            (accessWindows.count == baselineAccessWindowCount, "access_window_count"),
+            (ObjectIdentifier(previewWindow) == baselinePreviewIdentifier, "preview_identity"),
+            (previewWindow.frame.isApproximatelyEqual(to: expectedFrame), "preview_frame"),
+            (finalTask.threadCount <= baselineThreadCount + 8, "final_thread_count"),
+            (maximumThreadCount <= baselineThreadCount + 12, "maximum_thread_count"),
+            (finalTask.residentMiB <= baselineResidentMiB + 64, "resident_memory"),
+            (
+                finalSocketCount <= baselineSocketCount + 1,
+                "socket_count:\(baselineSocketCount)->\(finalSocketCount)"
+            ),
+            (finalChildProcessCount == baselineChildProcessCount, "child_process_count"),
+            (AVCaptureDevice.authorizationStatus(for: .audio) == microphoneAuthorization, "microphone_authorization"),
+            (settings.voiceProvider == .off, "voice_provider"),
+            (!settings.voiceEnabled, "voice_enabled"),
+            (VoiceLaneRuntime.shared.snapshot.mode == .disabled, "voice_lane_mode")
+        ]
+        let failedResourceInvariants = resourceInvariants.compactMap { passed, name in
+            passed ? nil : name
+        }
+        if !failedResourceInvariants.isEmpty {
+            throw PanelSoakVerificationError.failed(
+                "panel_soak_resource_invariant_failed:\(failedResourceInvariants.joined(separator: ","))"
+            )
+        }
+
+        return PanelSoakVerificationResult(
+            iterations: iterations,
+            providerSwitches: providerSwitches,
+            recoveryCycles: recoveryCycles,
+            animatedTransitionCycles: animatedTransitionCycles,
+            warmOpenMaximumMilliseconds: maximumOpenMilliseconds,
+            baselineWindowCount: baselineWindowCount,
+            finalWindowCount: finalWindowCount,
+            baselineThreadCount: baselineThreadCount,
+            finalThreadCount: finalTask.threadCount,
+            maximumThreadCount: maximumThreadCount,
+            baselineResidentMiB: baselineResidentMiB,
+            finalResidentMiB: finalTask.residentMiB,
+            baselineSocketCount: baselineSocketCount,
+            finalSocketCount: finalSocketCount,
+            baselineChildProcessCount: baselineChildProcessCount,
+            finalChildProcessCount: finalChildProcessCount
+        )
     }
 
     private func panelFrames(on screen: NSScreen) -> PanelFrames {
@@ -684,7 +868,93 @@ final class HoverWindowController {
     }
 
     private var shouldReduceMotion: Bool {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if isPanelSoakVerification {
+            return panelSoakUsesImmediateTransitions
+        }
+        return NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    private func settlePanelSoakRunLoop(milliseconds: UInt64 = 2) async {
+        try? await Task.sleep(nanoseconds: milliseconds * 1_000_000)
+    }
+
+    private func processTaskSnapshot() throws -> (threadCount: Int, residentMiB: Double) {
+        var info = proc_taskinfo()
+        let expectedSize = MemoryLayout<proc_taskinfo>.size
+        let readSize = withUnsafeMutablePointer(to: &info) { pointer in
+            proc_pidinfo(
+                getpid(),
+                PROC_PIDTASKINFO,
+                0,
+                pointer,
+                Int32(expectedSize)
+            )
+        }
+        guard readSize == expectedSize else {
+            throw PanelSoakVerificationError.failed("panel_soak_task_readback_failed")
+        }
+        return (
+            Int(info.pti_threadnum),
+            Double(info.pti_resident_size) / 1_048_576
+        )
+    }
+
+    private func processSocketCount() throws -> Int {
+        errno = 0
+        let requiredSize = proc_pidinfo(getpid(), PROC_PIDLISTFDS, 0, nil, 0)
+        guard requiredSize >= 0, requiredSize > 0 || errno == 0 else {
+            throw PanelSoakVerificationError.failed("panel_soak_socket_readback_failed")
+        }
+        var descriptors = [proc_fdinfo](
+            repeating: proc_fdinfo(),
+            count: max(1, Int(requiredSize) / MemoryLayout<proc_fdinfo>.size)
+        )
+        errno = 0
+        let readSize = descriptors.withUnsafeMutableBytes { buffer in
+            proc_pidinfo(
+                getpid(),
+                PROC_PIDLISTFDS,
+                0,
+                buffer.baseAddress,
+                Int32(buffer.count)
+            )
+        }
+        guard readSize >= 0, readSize > 0 || errno == 0 else {
+            throw PanelSoakVerificationError.failed("panel_soak_socket_readback_failed")
+        }
+        let count = Int(readSize) / MemoryLayout<proc_fdinfo>.size
+        return descriptors.prefix(count).filter { $0.proc_fdtype == PROX_FDTYPE_SOCKET }.count
+    }
+
+    private func childProcessCount() throws -> Int {
+        errno = 0
+        let requiredSize = proc_listpids(
+            UInt32(PROC_PPID_ONLY),
+            UInt32(getpid()),
+            nil,
+            0
+        )
+        guard requiredSize >= 0, requiredSize > 0 || errno == 0 else {
+            throw PanelSoakVerificationError.failed("panel_soak_child_readback_failed")
+        }
+        var processIdentifiers = [pid_t](
+            repeating: 0,
+            count: max(1, Int(requiredSize) / MemoryLayout<pid_t>.size)
+        )
+        errno = 0
+        let readSize = processIdentifiers.withUnsafeMutableBytes { buffer in
+            proc_listpids(
+                UInt32(PROC_PPID_ONLY),
+                UInt32(getpid()),
+                buffer.baseAddress,
+                Int32(buffer.count)
+            )
+        }
+        guard readSize >= 0, readSize > 0 || errno == 0 else {
+            throw PanelSoakVerificationError.failed("panel_soak_child_readback_failed")
+        }
+        let count = Int(readSize) / MemoryLayout<pid_t>.size
+        return processIdentifiers.prefix(count).filter { $0 > 0 }.count
     }
 
     private func setPreviewContentVisible(_ isVisible: Bool, animated: Bool) {

@@ -17,15 +17,23 @@ internal sealed class SettingsWindow : Window
 
     private readonly PanelBridgeController _bridgeController;
     private readonly bool _enableDevTools;
+    private readonly bool _externalIntegrationsEnabled;
+    private readonly string _webViewDataDirectory;
     private readonly Grid _root = new();
     private IDisposable? _bridgeAttachment;
     private WebView2? _webView;
     private Task? _initializationTask;
 
-    public SettingsWindow(PanelBridgeController bridgeController, bool enableDevTools)
+    public SettingsWindow(
+        PanelBridgeController bridgeController,
+        bool enableDevTools,
+        string webViewDataDirectory,
+        bool externalIntegrationsEnabled = true)
     {
         _bridgeController = bridgeController;
         _enableDevTools = enableDevTools;
+        _externalIntegrationsEnabled = externalIntegrationsEnabled;
+        _webViewDataDirectory = webViewDataDirectory;
         ApplyLanguage(_bridgeController.CurrentSettings.Language);
         Width = 620;
         Height = 720;
@@ -61,10 +69,7 @@ internal sealed class SettingsWindow : Window
         {
             CreationProperties = new CoreWebView2CreationProperties
             {
-                UserDataFolder = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "HoverPocket",
-                    "SettingsWebView2")
+                UserDataFolder = _webViewDataDirectory
             },
             DefaultBackgroundColor = System.Drawing.Color.FromArgb(255, 8, 10, 13)
         };
@@ -82,12 +87,18 @@ internal sealed class SettingsWindow : Window
             }
 
             args.Cancel = true;
-            WebViewSecurityPolicy.TryOpenExternalBrowser(args.Uri, UiHostName);
+            WebViewSecurityPolicy.TryOpenExternalBrowser(
+                args.Uri,
+                UiHostName,
+                _externalIntegrationsEnabled);
         };
         webView.CoreWebView2.NewWindowRequested += (_, args) =>
         {
             args.Handled = true;
-            WebViewSecurityPolicy.TryOpenExternalBrowser(args.Uri, UiHostName);
+            WebViewSecurityPolicy.TryOpenExternalBrowser(
+                args.Uri,
+                UiHostName,
+                _externalIntegrationsEnabled);
         };
         webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
             UiHostName,
@@ -104,7 +115,9 @@ internal sealed class SettingsWindow : Window
             BridgeSurface.Settings,
             () => this,
             voiceOpenAIKeyPrompt: PromptOpenAIRealtimeKey,
-            voiceOpenAIKeyDeleteDecision: ConfirmOpenAIRealtimeKeyDeletion);
+            voiceOpenAIKeyDeleteDecision: ConfirmOpenAIRealtimeKeyDeletion,
+            codexSandboxExecutablePicker: SelectCodexSandboxExecutable,
+            codexSandboxProvisionDecision: ConfirmCodexSandboxProvisioning);
         webView.CoreWebView2.WebMessageReceived += async (_, args) =>
         {
             await dispatcher.HandleRawMessageAsync(args.TryGetWebMessageAsString());
@@ -129,9 +142,13 @@ internal sealed class SettingsWindow : Window
         var stack = new StackPanel { Margin = new Thickness(24) };
         stack.Children.Add(new TextBlock
         {
-            Text = english
-                ? "The key is stored only in Windows Credential Manager. It is never sent to this Settings WebView."
-                : "APIキーはWindows Credential Managerだけに保存され、この設定WebViewには返されません。",
+            Text = !_externalIntegrationsEnabled
+                ? english
+                    ? "For this isolated E2E run, the key stays only in process memory. It is never sent to this Settings WebView."
+                    : "この隔離E2E実行では、APIキーはプロセス内メモリだけに保持され、この設定WebViewには返されません。"
+                : english
+                    ? "The key is stored only in Windows Credential Manager. It is never sent to this Settings WebView."
+                    : "APIキーはWindows Credential Managerだけに保存され、この設定WebViewには返されません。",
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 12)
         });
@@ -197,10 +214,46 @@ internal sealed class SettingsWindow : Window
         var english = _bridgeController.CurrentSettings.Language == AppLanguage.English;
         return System.Windows.MessageBox.Show(
             this,
-            english
-                ? "Delete the OpenAI Realtime API key from Windows Credential Manager? Voice will stop until a key is configured again."
-                : "OpenAI Realtime APIキーをWindows Credential Managerから削除しますか？再設定するまでVoiceは停止します。",
+            !_externalIntegrationsEnabled
+                ? english
+                    ? "Delete the OpenAI Realtime API key from this isolated E2E process? Voice will stop until a key is configured again."
+                    : "この隔離E2EプロセスからOpenAI Realtime APIキーを削除しますか？再設定するまでVoiceは停止します。"
+                : english
+                    ? "Delete the OpenAI Realtime API key from Windows Credential Manager? Voice will stop until a key is configured again."
+                    : "OpenAI Realtime APIキーをWindows Credential Managerから削除しますか？再設定するまでVoiceは停止します。",
             english ? "Delete OpenAI API key" : "OpenAI APIキーを削除",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No) == MessageBoxResult.Yes;
+    }
+
+    private string? SelectCodexSandboxExecutable()
+    {
+        var english = _bridgeController.CurrentSettings.Language == AppLanguage.English;
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = english
+                ? "Select the official Codex 0.145.0 executable"
+                : "公式Codex 0.145.0の実行ファイルを選択",
+            Filter = "Codex executable (codex.exe)|codex.exe",
+            CheckFileExists = true,
+            CheckPathExists = true,
+            Multiselect = false,
+            DereferenceLinks = false,
+            FileName = "codex.exe"
+        };
+        return dialog.ShowDialog(this) == true ? dialog.FileName : null;
+    }
+
+    private bool ConfirmCodexSandboxProvisioning()
+    {
+        var english = _bridgeController.CurrentSettings.Language == AppLanguage.English;
+        return System.Windows.MessageBox.Show(
+            this,
+            english
+                ? "Set up or repair the dedicated Codex generation sandbox? Windows will show one UAC prompt and Codex will create or refresh two local sandbox accounts. HoverPocket never receives the administrator credential or sandbox passwords. Normal generation will not request elevation."
+                : "Codex生成専用sandboxをセットアップ／修復しますか？ WindowsのUACが1回表示され、Codexがローカルsandboxアカウント2つを作成または更新します。HoverPocketは管理者credentialやsandbox passwordを受け取りません。通常の生成時には昇格を要求しません。",
+            english ? "Set up Codex generation sandbox" : "Codex生成sandboxを準備",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
             MessageBoxResult.No) == MessageBoxResult.Yes;

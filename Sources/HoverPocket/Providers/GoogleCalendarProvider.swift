@@ -1,8 +1,10 @@
 import SwiftUI
 
 struct GoogleCalendarProvider: PocketProvider {
+    static let pluginID = PluginID(rawValue: "google-calendar")
+
     let manifest = PluginManifest(
-        id: PluginID(rawValue: "google-calendar"),
+        id: Self.pluginID,
         title: "Calendar",
         symbolName: "calendar",
         defaultEnabled: true,

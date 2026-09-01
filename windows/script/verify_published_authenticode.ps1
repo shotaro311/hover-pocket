@@ -603,6 +603,138 @@ function Get-CertificateSha256 {
     }
 }
 
+function Get-RequiredObjectProperty {
+    param($Object, [string]$Name, [string]$FailureCode)
+
+    if ($null -eq $Object -or $Object.PSObject.Properties.Name -cnotcontains $Name) {
+        throw $FailureCode
+    }
+    return $Object.$Name
+}
+
+function Read-CodexSandboxManifestContract {
+    param(
+        $Manifest,
+        $Release,
+        [bool]$IdentityOnlyMode,
+        [string]$ExpectedSignerCertificateSha256
+    )
+
+    $schemaVersion = [int](Get-RequiredObjectProperty -Object $Manifest -Name "schemaVersion" -FailureCode "HP_RELEASE_MANIFEST_SCHEMA_MISSING")
+    $codexMsiAssets = @($Release.assets | Where-Object { ([string]$_.name) -match '^HoverPocket\.CodexSandboxSetup-\d+\.\d+\.\d+-win-x64\.msi$' })
+    if ($schemaVersion -eq 1) {
+        if (-not $IdentityOnlyMode) {
+            throw "HP_CODEX_SANDBOX_FORMAL_MANIFEST_SCHEMA_REQUIRED"
+        }
+        if ($codexMsiAssets.Count -ne 0) {
+            throw "HP_CODEX_SANDBOX_LEGACY_MANIFEST_MSI_REJECTED"
+        }
+        return $null
+    }
+    if ($schemaVersion -ne 2) {
+        throw "HP_RELEASE_MANIFEST_SCHEMA_UNSUPPORTED"
+    }
+
+    $contract = Get-RequiredObjectProperty -Object $Manifest -Name "codexSandboxSetup" -FailureCode "HP_CODEX_SANDBOX_MANIFEST_MISSING"
+    foreach ($field in @(
+        "trustedProductionSetupBoundary",
+        "productionSetupAvailable",
+        "productionGenerationAvailable",
+        "productionActivationAvailable")) {
+        if ((Get-RequiredObjectProperty -Object $contract -Name $field -FailureCode "HP_CODEX_SANDBOX_MANIFEST_FIELD_MISSING") -ne $false) {
+            throw "HP_CODEX_SANDBOX_PRODUCTION_FLAG_ENABLED"
+        }
+    }
+
+    $published = Get-RequiredObjectProperty -Object $contract -Name "published" -FailureCode "HP_CODEX_SANDBOX_PUBLISHED_STATE_MISSING"
+    $manifestAuthenticode = [string](Get-RequiredObjectProperty -Object $Manifest -Name "authenticode" -FailureCode "HP_RELEASE_AUTHENTICODE_STATE_MISSING")
+    if ($manifestAuthenticode -ceq "unsigned") {
+        if (-not $IdentityOnlyMode -or $published -ne $false -or $codexMsiAssets.Count -ne 0) {
+            throw "HP_CODEX_SANDBOX_BETA_TRUST_BOUNDARY_PUBLISHED"
+        }
+        return $null
+    }
+    if ($manifestAuthenticode -cne "signed-timestamped-verified" -or $published -ne $true) {
+        throw "HP_CODEX_SANDBOX_FORMAL_MSI_NOT_PUBLISHED"
+    }
+    $expectedAssetName = "HoverPocket.CodexSandboxSetup-$($Manifest.version)-win-x64.msi"
+    $assetName = [string](Get-RequiredObjectProperty -Object $contract -Name "assetName" -FailureCode "HP_CODEX_SANDBOX_MSI_NAME_MISSING")
+    if ($assetName -cne $expectedAssetName -or $codexMsiAssets.Count -ne 1 -or [string]$codexMsiAssets[0].name -cne $expectedAssetName) {
+        throw "HP_CODEX_SANDBOX_MSI_NAME_MISMATCH"
+    }
+    [long]$assetSize = 0
+    if (-not [long]::TryParse(([string](Get-RequiredObjectProperty -Object $contract -Name "assetSize" -FailureCode "HP_CODEX_SANDBOX_MSI_SIZE_MISSING")), [ref]$assetSize) -or $assetSize -le 0) {
+        throw "HP_CODEX_SANDBOX_MSI_SIZE_INVALID"
+    }
+    $assetSha256 = ([string](Get-RequiredObjectProperty -Object $contract -Name "assetSha256" -FailureCode "HP_CODEX_SANDBOX_MSI_SHA256_MISSING")).ToLowerInvariant()
+    if ($assetSha256 -notmatch '^[0-9a-f]{64}$') {
+        throw "HP_CODEX_SANDBOX_MSI_SHA256_INVALID"
+    }
+    if ((Get-RequiredObjectProperty -Object $contract -Name "msiAuthenticode" -FailureCode "HP_CODEX_SANDBOX_MSI_AUTHENTICODE_MISSING") -cne "signed-timestamped-verified" -or
+        (Get-RequiredObjectProperty -Object $contract -Name "msiTimestamp" -FailureCode "HP_CODEX_SANDBOX_MSI_TIMESTAMP_MISSING") -cne "verified") {
+        throw "HP_CODEX_SANDBOX_MSI_AUTHENTICODE_STATE_INVALID"
+    }
+    if ((Get-RequiredObjectProperty -Object $contract -Name "publisherAgreement" -FailureCode "HP_CODEX_SANDBOX_PUBLISHER_AGREEMENT_MISSING") -cne "shell-helper-msi-same-certificate") {
+        throw "HP_CODEX_SANDBOX_PUBLISHER_AGREEMENT_INVALID"
+    }
+    $declaredSigner = ([string](Get-RequiredObjectProperty -Object $contract -Name "signerCertificateSha256" -FailureCode "HP_CODEX_SANDBOX_SIGNER_SHA256_MISSING")).ToUpperInvariant()
+    if ($declaredSigner -notmatch '^[0-9A-F]{64}$' -or
+        (-not $IdentityOnlyMode -and $declaredSigner -cne $ExpectedSignerCertificateSha256)) {
+        throw "HP_CODEX_SANDBOX_SIGNER_SHA256_MISMATCH"
+    }
+
+    $embeddedHelper = Get-RequiredObjectProperty -Object $contract -Name "embeddedHelper" -FailureCode "HP_CODEX_SANDBOX_EMBEDDED_HELPER_MISSING"
+    if ((Get-RequiredObjectProperty -Object $embeddedHelper -Name "fileName" -FailureCode "HP_CODEX_SANDBOX_HELPER_NAME_MISSING") -cne "HoverPocket.CodexSandboxSetup.exe") {
+        throw "HP_CODEX_SANDBOX_HELPER_NAME_MISMATCH"
+    }
+    [long]$helperSize = 0
+    if (-not [long]::TryParse(([string](Get-RequiredObjectProperty -Object $embeddedHelper -Name "size" -FailureCode "HP_CODEX_SANDBOX_HELPER_SIZE_MISSING")), [ref]$helperSize) -or $helperSize -le 0) {
+        throw "HP_CODEX_SANDBOX_HELPER_SIZE_INVALID"
+    }
+    $helperSha256 = ([string](Get-RequiredObjectProperty -Object $embeddedHelper -Name "sha256" -FailureCode "HP_CODEX_SANDBOX_HELPER_SHA256_MISSING")).ToLowerInvariant()
+    if ($helperSha256 -notmatch '^[0-9a-f]{64}$') {
+        throw "HP_CODEX_SANDBOX_HELPER_SHA256_INVALID"
+    }
+    if ((Get-RequiredObjectProperty -Object $embeddedHelper -Name "authenticode" -FailureCode "HP_CODEX_SANDBOX_HELPER_AUTHENTICODE_MISSING") -cne "signed-timestamped-verified" -or
+        (Get-RequiredObjectProperty -Object $embeddedHelper -Name "timestamp" -FailureCode "HP_CODEX_SANDBOX_HELPER_TIMESTAMP_MISSING") -cne "verified") {
+        throw "HP_CODEX_SANDBOX_HELPER_SIGNATURE_STATE_INVALID"
+    }
+
+    return [pscustomobject]@{
+        AssetName = $assetName
+        AssetSize = $assetSize
+        AssetSha256 = $assetSha256
+        HelperSize = $helperSize
+        HelperSha256 = $helperSha256
+    }
+}
+
+function Expand-CodexSandboxMsiAdministrativeImage {
+    param([string]$MsiPath, [string]$Destination)
+
+    [IO.Directory]::CreateDirectory($Destination) | Out-Null
+    $arguments = @(
+        "/a",
+        "`"$MsiPath`"",
+        "/qn",
+        "/norestart",
+        "TARGETDIR=`"$Destination`""
+    )
+    $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
+    if ($process.ExitCode -ne 0) {
+        throw "HP_CODEX_SANDBOX_MSI_ADMIN_IMAGE_FAILED"
+    }
+    $helpers = @(Get-ChildItem -LiteralPath $Destination -Recurse -File -Filter "HoverPocket.CodexSandboxSetup.exe")
+    if ($helpers.Count -ne 1) {
+        throw "HP_CODEX_SANDBOX_MSI_EMBEDDED_HELPER_NOT_EXACT"
+    }
+    $helper = Get-Item -LiteralPath $helpers[0].FullName -Force
+    if (($helper.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "HP_CODEX_SANDBOX_MSI_EMBEDDED_HELPER_REPARSE_REJECTED"
+    }
+    return $helper.FullName
+}
+
 $canonicalSignerCertificateSha256 = $null
 if (-not $IdentityOnly) {
     $canonicalSignerCertificateSha256 = $ExpectedSignerCertificateSha256.Trim().ToUpperInvariant()
@@ -631,6 +763,11 @@ try {
     Get-ReleaseAsset -Release $release -Name "assets.win.json" -Destination $assetsPath
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     $feed = Get-Content -LiteralPath $feedPath -Raw | ConvertFrom-Json
+    $codexSandboxContract = Read-CodexSandboxManifestContract `
+        -Manifest $manifest `
+        -Release $release `
+        -IdentityOnlyMode $IdentityOnly.IsPresent `
+        -ExpectedSignerCertificateSha256 $canonicalSignerCertificateSha256
     if ($IdentityOnly) {
         if ($manifest.authenticode -notin @("unsigned", "signed-timestamped-verified")) {
             throw "Release manifest contains an unknown Authenticode state."
@@ -663,6 +800,11 @@ try {
     Get-ReleaseAsset -Release $release -Name $setupAsset[0].name -Destination $setupPath
     Get-ReleaseAsset -Release $release -Name $portableAsset[0].name -Destination $portablePath
     Get-ReleaseAsset -Release $release -Name $packageName -Destination $packagePath
+    $codexSandboxMsiPath = $null
+    if ($null -ne $codexSandboxContract) {
+        $codexSandboxMsiPath = Join-Path $temporaryRoot $codexSandboxContract.AssetName
+        Get-ReleaseAsset -Release $release -Name $codexSandboxContract.AssetName -Destination $codexSandboxMsiPath
+    }
 
     $checksums = Read-Checksums -Path $checksumPath
     Assert-DownloadedChecksum -Path $manifestPath -Name "release-manifest.win.json" -Checksums $checksums
@@ -672,6 +814,14 @@ try {
     Assert-DownloadedChecksum -Path $setupPath -Name $setupAsset[0].name -Checksums $checksums
     Assert-DownloadedChecksum -Path $portablePath -Name $portableAsset[0].name -Checksums $checksums
     Assert-DownloadedChecksum -Path $packagePath -Name $packageName -Checksums $checksums
+    if ($null -ne $codexSandboxContract) {
+        Assert-DownloadedChecksum -Path $codexSandboxMsiPath -Name $codexSandboxContract.AssetName -Checksums $checksums
+        $msiFile = Get-Item -LiteralPath $codexSandboxMsiPath
+        $msiSha256 = (Get-FileHash -LiteralPath $codexSandboxMsiPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($msiFile.Length -ne $codexSandboxContract.AssetSize -or $msiSha256 -cne $codexSandboxContract.AssetSha256) {
+            throw "HP_CODEX_SANDBOX_MSI_MANIFEST_READBACK_MISMATCH"
+        }
+    }
     $downloadedPaths = @{
         "release-manifest.win.json" = $manifestPath
         "SHA256SUMS-win.txt" = $checksumPath
@@ -682,6 +832,9 @@ try {
     $downloadedPaths[[string]$setupAsset[0].name] = $setupPath
     $downloadedPaths[[string]$portableAsset[0].name] = $portablePath
     $downloadedPaths[$packageName] = $packagePath
+    if ($null -ne $codexSandboxContract) {
+        $downloadedPaths[$codexSandboxContract.AssetName] = $codexSandboxMsiPath
+    }
     if ($downloadedPaths.Count -ne $expectedAssets.Count) {
         throw "Formal readback did not download every asset from the verified snapshot."
     }
@@ -736,15 +889,40 @@ try {
     Assert-AssemblyReleaseVersion -PackageRoot $packageExtractPath -ExpectedVersion $manifest.version
     Assert-PortablePayloadMatchesFullPackage -PortableRoot $extractPath -PackageRoot $packageExtractPath
 
+    $codexSandboxMsiSignature = $null
+    $codexSandboxHelperSignature = $null
+    if ($null -ne $codexSandboxContract -and -not $IdentityOnly) {
+        $codexSandboxMsiSignature = Assert-TimestampedAuthenticode -Path $codexSandboxMsiPath -Label "Codex sandbox MSI"
+        $codexSandboxMsiSignerCertificateSha256 = (Get-CertificateSha256 -Certificate $codexSandboxMsiSignature.SignerCertificate).ToUpperInvariant()
+        if ($codexSandboxMsiSignerCertificateSha256 -cne $canonicalSignerCertificateSha256) {
+            throw "Published Codex sandbox MSI is not signed by the configured HoverPocket publisher certificate."
+        }
+        $installerVerifierPath = Join-Path $PSScriptRoot "verify_codex_sandbox_installer.ps1"
+        & $installerVerifierPath `
+            -MsiPath $codexSandboxMsiPath `
+            -ExpectedProductVersion $manifest.version `
+            -ExpectedUpgradeCode "{9E28ABD6-A496-472E-98AB-AE8D70C27B48}" | Out-Null
+        $codexSandboxAdminRoot = Join-Path $temporaryRoot "codex-sandbox-msi-admin-image"
+        $embeddedHelperPath = Expand-CodexSandboxMsiAdministrativeImage -MsiPath $codexSandboxMsiPath -Destination $codexSandboxAdminRoot
+        $embeddedHelperFile = Get-Item -LiteralPath $embeddedHelperPath
+        $embeddedHelperSha256 = (Get-FileHash -LiteralPath $embeddedHelperPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($embeddedHelperFile.Length -ne $codexSandboxContract.HelperSize -or $embeddedHelperSha256 -cne $codexSandboxContract.HelperSha256) {
+            throw "HP_CODEX_SANDBOX_EMBEDDED_HELPER_MANIFEST_READBACK_MISMATCH"
+        }
+        $codexSandboxHelperSignature = Assert-TimestampedAuthenticode -Path $embeddedHelperPath -Label "Embedded Codex sandbox helper"
+    }
+
     Assert-SetupEmbedsFullPackage -SetupPath $setupPath -PackagePath $packagePath
     if (-not $IdentityOnly) {
         $signerCertificateSha256s = @(@(
                 Get-CertificateSha256 -Certificate $setupSignature.SignerCertificate
                 Get-CertificateSha256 -Certificate $mainSignature.SignerCertificate
                 Get-CertificateSha256 -Certificate $packageSignature.SignerCertificate
+                Get-CertificateSha256 -Certificate $codexSandboxMsiSignature.SignerCertificate
+                Get-CertificateSha256 -Certificate $codexSandboxHelperSignature.SignerCertificate
             ) | Select-Object -Unique)
         if ($signerCertificateSha256s.Count -ne 1) {
-            throw "Setup, Portable application, and full update package application are signed by different certificates."
+            throw "Shell/Velopack artifacts, Codex sandbox MSI, and embedded helper are signed by different certificates."
         }
         if (([string]$signerCertificateSha256s[0]).ToUpperInvariant() -cne $canonicalSignerCertificateSha256) {
             throw "Published artifacts are not signed by the configured HoverPocket publisher certificate."
@@ -760,12 +938,16 @@ try {
         setup = if ($IdentityOnly) { "release-version-verified" } else { "signed-timestamped-verified" }
         portableApplication = if ($IdentityOnly) { "release-version-verified" } else { "signed-timestamped-verified" }
         updatePackageApplication = if ($IdentityOnly) { "release-version-verified" } else { "signed-timestamped-verified" }
+        codexSandboxMsi = if ($null -eq $codexSandboxContract) { "not-published" } elseif ($IdentityOnly) { "package-identity-verified" } else { "signed-timestamped-verified" }
+        codexSandboxEmbeddedHelper = if ($null -eq $codexSandboxContract) { "not-published" } elseif ($IdentityOnly) { "manifest-bound-not-extracted" } else { "signed-timestamped-verified" }
         packageIdentity = "manifest-version-and-runtime-verified"
         embeddedApplicationVersion = "verified"
         portablePayload = "full-package-application-byte-equivalent"
         setupPayload = "full-package-byte-equivalent"
         signerAgreement = if ($IdentityOnly) { "not-evaluated" } else { "verified" }
         publisherIdentity = if ($IdentityOnly) { "not-evaluated" } else { "verified" }
+        codexSandboxPublisherAgreement = if ($IdentityOnly) { "not-evaluated" } else { "shell-helper-msi-same-certificate-verified" }
+        productionSetupBoundary = "disabled"
         artifactSnapshot = "verified"
     } | ConvertTo-Json -Compress
 }

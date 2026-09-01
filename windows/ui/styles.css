@@ -255,10 +255,14 @@ input {
   display: grid;
   height: 100%;
   min-width: 0;
-  grid-template-columns: 28px 44px minmax(120px, 1fr) auto 28px 28px 28px;
+  grid-template-columns: 28px 44px minmax(120px, 1fr) auto repeat(3, 28px);
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
+}
+
+.hp-voice-compact.hp-voice-has-physical-confirmation {
+  grid-template-columns: 28px 44px minmax(120px, 1fr) auto repeat(4, 28px);
 }
 
 .hp-voice-microphone,
@@ -271,9 +275,14 @@ input {
   background: rgba(255, 255, 255, 0.055);
 }
 
-.hp-voice-microphone:disabled {
+.hp-voice-microphone:disabled,
+.hp-voice-button:disabled {
   color: var(--hp-dim);
   opacity: 0.75;
+}
+
+.hp-voice-physical-confirmation {
+  color: #7bdca8;
 }
 
 .hp-voice-waveform {

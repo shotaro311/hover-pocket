@@ -13,8 +13,8 @@ enum CapabilityBrokerVerificationCommand {
             do {
                 try await verify()
                 print("broker_verify=ok")
-                print("broker_registry_descriptors=21")
-                print("broker_available_handlers=20")
+                print("broker_registry_descriptors=22")
+                print("broker_available_handlers=21")
                 print("broker_calculator_evaluate=ok")
                 print("broker_controls_os_readback=ok")
                 print("broker_sticky_lifecycle=ok")
@@ -84,11 +84,20 @@ enum CapabilityBrokerVerificationCommand {
             )
         )
 
-        try require(registry.descriptorKeys.count == 21, "registry_descriptor_count")
-        try require(registry.availableHandlerKeys.count == 20, "registry_handler_count")
+        try require(registry.descriptorKeys.count == 22, "registry_descriptor_count")
+        try require(registry.availableHandlerKeys.count == 21, "registry_handler_count")
         try require(
             registry.descriptor(PocketCapabilityKeys.stickyDelete)?.approvalPolicy == .strongPerCall,
             "sticky_delete_strong_approval"
+        )
+        try require(
+            registry.descriptor(PocketCapabilityKeys.calendarGet)?.limits.timeoutMilliseconds == 15_000
+                && registry.descriptor(PocketCapabilityKeys.calendarList)?.limits.timeoutMilliseconds == 15_000,
+            "calendar_network_read_timeout"
+        )
+        try require(
+            registry.descriptor(PocketCapabilityKeys.timerGet)?.limits.timeoutMilliseconds == 3_000,
+            "local_read_timeout_unchanged"
         )
         try verifyStrongPerCallIsolation(broker: broker, noteID: noteID, now: now)
         try verifyStrongApprovalPresentationRequired(
@@ -1874,6 +1883,7 @@ enum CapabilityBrokerVerificationCommand {
             ControlsCapabilityHandler(operation: .volumeGet, dataSource: controls),
             ControlsCapabilityHandler(operation: .volumeSet, dataSource: controls),
             ControlsCapabilityHandler(operation: .muteSet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .brightnessGet, dataSource: controls),
             ControlsCapabilityHandler(operation: .brightnessSet, dataSource: controls),
             ControlsCapabilityHandler(operation: .mediaCommand, dataSource: controls),
             TimerCapabilityHandler(operation: .start, store: timerStore),
@@ -2070,7 +2080,7 @@ private final class BrokerSlowReadHandler: PocketCapabilityHandler {
         _ = context
         entered = true
         do {
-            try await Task.sleep(for: .milliseconds(100))
+            try await Task.sleep(for: .seconds(30))
         } catch is CancellationError {
             wasCancelled = true
             throw CancellationError()

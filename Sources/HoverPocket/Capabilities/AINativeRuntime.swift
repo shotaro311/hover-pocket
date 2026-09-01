@@ -2,6 +2,12 @@ import Combine
 import Foundation
 
 @MainActor
+struct VoiceCapabilityContext {
+    let registry: CapabilityRegistry
+    let broker: CapabilityBroker
+}
+
+@MainActor
 final class AINativeRuntime: ObservableObject {
     static let shared = AINativeRuntime()
 
@@ -12,6 +18,7 @@ final class AINativeRuntime: ObservableObject {
     @Published private(set) var generatedExecutionRuntimeRegistry: PocketExecutionRuntimeRegistry?
     @Published private(set) var generatedSurfaceRegistry: PocketSurfaceRegistry?
     @Published private(set) var capabilityDataGovernanceController: CapabilityDataGovernanceController?
+    private(set) var voiceCapabilityContext: VoiceCapabilityContext?
     private var generatedActivationRegistry: PocketAppRuntimeActivationRegistry?
     private var builtInActivationLease: PocketAppActivationLease?
     private var preservedManagedGeneratedProviderIDs: Set<String> = []
@@ -48,6 +55,7 @@ final class AINativeRuntime: ObservableObject {
         generatedActivationRegistry: PocketAppRuntimeActivationRegistry? = nil,
         builtInActivationLease: PocketAppActivationLease? = nil,
         capabilityDataGovernanceController: CapabilityDataGovernanceController? = nil,
+        voiceCapabilityContext: VoiceCapabilityContext? = nil,
         preservingManagedGeneratedProviderIDs: Set<String> = []
     ) {
         let retainedProviderIDs = managedGeneratedProviderIDs.union(
@@ -65,6 +73,7 @@ final class AINativeRuntime: ObservableObject {
         self.generatedExecutionRuntimeRegistry = generatedActivationRegistry?.executionRegistry
         self.generatedSurfaceRegistry = generatedActivationRegistry?.surfaceRegistry
         self.capabilityDataGovernanceController = capabilityDataGovernanceController
+        self.voiceCapabilityContext = voiceCapabilityContext
         self.builtInActivationLease = builtInActivationLease
         if let pocketAppGenerationController {
             self.preservedManagedGeneratedProviderIDs = Set(

@@ -1,6 +1,69 @@
 import Combine
 import Foundation
 
+protocol AppSettingsDefaultsStoring: AnyObject {
+    func set(_ value: Any?, forKey defaultName: String)
+    func removeObject(forKey defaultName: String)
+    func object(forKey defaultName: String) -> Any?
+    func string(forKey defaultName: String) -> String?
+    func data(forKey defaultName: String) -> Data?
+    func bool(forKey defaultName: String) -> Bool
+    func stringArray(forKey defaultName: String) -> [String]?
+}
+
+extension UserDefaults: AppSettingsDefaultsStoring {}
+
+final class EphemeralAppSettingsDefaults: AppSettingsDefaultsStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String: Any] = [:]
+
+    func set(_ value: Any?, forKey defaultName: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        storage[defaultName] = value
+    }
+
+    func removeObject(forKey defaultName: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        storage.removeValue(forKey: defaultName)
+    }
+
+    func object(forKey defaultName: String) -> Any? {
+        withValue(forKey: defaultName) { $0 }
+    }
+
+    func string(forKey defaultName: String) -> String? {
+        withValue(forKey: defaultName) { $0 as? String }
+    }
+
+    func data(forKey defaultName: String) -> Data? {
+        withValue(forKey: defaultName) { $0 as? Data }
+    }
+
+    func bool(forKey defaultName: String) -> Bool {
+        withValue(forKey: defaultName) { value in
+            if let value = value as? Bool {
+                return value
+            }
+            return (value as? NSNumber)?.boolValue ?? false
+        }
+    }
+
+    func stringArray(forKey defaultName: String) -> [String]? {
+        withValue(forKey: defaultName) { $0 as? [String] }
+    }
+
+    private func withValue<T>(
+        forKey defaultName: String,
+        _ body: (Any?) -> T
+    ) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body(storage[defaultName])
+    }
+}
+
 @MainActor
 final class AppSettings: ObservableObject {
     @Published var appLanguage: AppLanguage {
@@ -149,7 +212,13 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    private let defaults: UserDefaults
+    @Published var voiceCalendarAccessEnabled: Bool {
+        didSet {
+            defaults.set(voiceCalendarAccessEnabled, forKey: Self.voiceCalendarAccessEnabledKey)
+        }
+    }
+
+    private let defaults: any AppSettingsDefaultsStoring
     private static let appLanguageKey = "appLanguage"
     private static let displayPlacementModeKey = "displayPlacementMode"
     private static let panelSizeKey = "panelSize"
@@ -174,8 +243,9 @@ final class AppSettings: ObservableObject {
     private static let voiceProviderKey = "voiceProvider"
     private static let voiceEnabledKey = "voiceEnabled"
     private static let voiceLaneLayoutPreferenceKey = "voiceLaneLayoutPreference"
+    private static let voiceCalendarAccessEnabledKey = "voiceCalendarAccessEnabled"
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: any AppSettingsDefaultsStoring = UserDefaults.standard) {
         self.defaults = defaults
         let languageRawValue = defaults.string(forKey: Self.appLanguageKey)
         self.appLanguage = languageRawValue.flatMap(AppLanguage.init(rawValue:)) ?? .japanese
@@ -253,6 +323,9 @@ final class AppSettings: ObservableObject {
                 : defaults.bool(forKey: Self.voiceEnabledKey)
         self.voiceLaneLayoutPreference = defaults.string(forKey: Self.voiceLaneLayoutPreferenceKey)
             .flatMap(VoiceLaneLayoutPreference.init(rawValue:)) ?? .compact
+        self.voiceCalendarAccessEnabled = defaults.object(forKey: Self.voiceCalendarAccessEnabledKey) == nil
+            ? false
+            : defaults.bool(forKey: Self.voiceCalendarAccessEnabledKey)
 
         if defaults.data(forKey: Self.weatherLocationKey) == nil,
            let weatherLocationData = try? JSONEncoder().encode(weatherLocation) {

@@ -68,6 +68,56 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 
 `--verify capabilities` はCalendar / Timer / Sticky NotesのProvider Capability handlerを検証します。`--verify broker` はRegistry、権限、承認の改変・期限切れ・再利用拒否、永続idempotency、実行後readback、監査ログの本文非保存、Today Focus、部分失敗時のTimer補償、timeout、macOSと共通のplan digestを検証します。
 
+## Codex Pocket App生成用Windows sandbox
+
+Windowsのsetup / repairは現在、`GENERATOR_SANDBOX_SETUP_UNAVAILABLE`でproduction fail-closedです。Settingsは状態を表示しますが、実行ボタンを無効化し、forged bridge requestでもpicker、copy、UAC、filesystem変更へ進みません。管理者PowerShellのcheck / `-Provision`もpath検査やdirectory作成より前に`HP_CODEX_SANDBOX_SETUP_UNAVAILABLE`で停止します。
+
+公式Codex 0.145.0のWindows配布物は`codex.exe`だけでは完結せず、少なくとも`codex-resources\codex-windows-sandbox-setup.exe`と`codex-command-runner.exe`を別ファイルとして持ちます。現行のpath-based setupは、固定Codex Homeのwhole-home / nested reparseをUAC中に同一objectへ束縛できず、resource不在時にはbare helper名へfallbackします。このため、旧setup-v5 markerや固定`codex.exe`が残っていてもproduction generatorを構成しません。
+
+再有効化には、署名済みnative helper、元ユーザーSID binding、admin-controlled root、全path componentのreparse / identity検査、公式resource closureのexact size・SHA・署名検証、絶対path起動、single-flight、child process所有、実行後readbackが必要です。通常の生成時にUACを出さず、workspace、virtual User Home、Tempを毎回破棄する設計は維持します。
+
+恒久helperの最初の境界として`HoverPocket.CodexSandboxSetup`を追加しています。現段階ではproduction dispatchを常に`HP_CODEX_SANDBOX_HELPER_NOT_ACTIVATED`で拒否し、公式0.145.0配布物の6ファイルclosure、exact size、SHA-256、Authenticode状態と署名者を決定的に検証するモードだけを提供します。CIはnpm archive自体のSHA-512に続けて、このnative verifierで展開後のclosureをreadbackします。Shellとhelperの間には元プロセスID、Windows SID、完全修飾account、nonce、複製対象handleの期限付きcontractと、同一publisher署名を要求する読み取り専用admissionまで実装済みです。helper内部にはProgramData配下の固定root、管理者ACL、同一handleからのcopy、nonceごとのsingle-use Home、`--user` / `--codex-home`による固定環境setup、Job Object、元SIDだけが読めるattestation readbackも実装しています。helper側のproduction switchは引き続きOFFです。
+
+Shell側にはSettings専用のdormant launch boundaryがあります。helper originは64-bit Program Files known folder配下の`HoverPocket\CodexSandboxSetup\HoverPocket.CodexSandboxSetup.exe`だけで、Shell成果物へapp-local helperをcopy / publishしません。固定pathの全directory componentとhelper本体をregular / non-reparse objectとしてhandleでpinし、Shell build metadataに設定したpublisher certificate SHA-256と有効なAuthenticode signerが一致した場合だけlaunch requestを構成します。WinVerifyTrustはrootを除くcertificate chain全体の失効確認を必須にし、cache-onlyへfallbackせず、失効状態を確認できない場合もUAC前に拒否します。既存のnative既定No確認がYesになった後に限り、同じpinned helperへ`runas`を1回だけdispatchし、`--setup-request` / `--request-sha256` / `--nonce`の固定順argumentを渡します。UAC取消、start失敗、timeout、nonzero exit、process image / object identity readback失敗はpathやhashなどを含まない固定codeへ丸めます。
+
+helperの固定originは、専用のper-machine MSIが`%ProgramFiles%\HoverPocket\CodexSandboxSetup`へself-containedな`win-x64` publish一式を配置する契約です。MSIは埋め込みcabinet、固定UpgradeCode、64-bit component、major upgradeとuninstallを持ち、CustomAction、service、registry、environment、shortcutを追加しません。CIはMSI databaseを別経路で読み、`ALLUSERS=1`、配置先のdirectory ancestry、helperが1本だけ含まれること、禁止tableが空であることを検証します。`ProvisioningAvailable`、`ProductionRuntimeAvailable`、helperのproduction activation、generated-app activationは引き続きOFFなので、未署名betaやforged Settings bridge request、generation、Voice、startup、background task、canaryからUACへ到達しません。`--verify settings`は署名binaryや実elevationを使わないinjectable seamで固定origin、publisher、object identity、exact arguments、1回だけの`runas`、取消・timeout・nonzero・readback failureを検証します。
+
+```powershell
+dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj -- --contract-self-test
+dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj -- --verify-vendor-closure <公式package root>
+```
+
+installerはWiX SDK 5.0.2で決定論的にbuildします。formal releaseでは`publish_release.ps1`がShellとhelperの双方へ同じ公開publisher certificate SHA-256 referenceを`HoverPocketPublisherCertificateSha256` MSBuild propertyで渡し、helper EXEをtimestamp付きで署名してからWiX harvestし、MSI build後に同じ証明書でMSI自体もtimestamp付き署名します。未設定・不正形式・signing tool不在・署名/timestamp/publisher不一致はmanifest確定前にfail closedです。Settings側のregular / non-reparse file、固定Program Files origin、publisher、object identityの再検証は維持します。
+
+```powershell
+dotnet publish `
+  .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj `
+  --configuration Release --runtime win-x64 --self-contained true `
+  -p:PublishSingleFile=false -p:DebugSymbols=false -p:DebugType=None `
+  --output <空のhelper-publish-directory>
+
+dotnet build `
+  .\windows\installer\HoverPocket.CodexSandboxSetup.Installer\HoverPocket.CodexSandboxSetup.Installer.wixproj `
+  --configuration Release --output <空のinstaller-output-directory> `
+  -p:ProductVersion=0.2.7 -p:HelperPublishDir=<helper-publish-directory>
+
+.\windows\script\verify_codex_sandbox_installer.ps1 `
+  -MsiPath <HoverPocket.CodexSandboxSetup.msi> `
+  -ExpectedProductVersion "0.2.7" `
+  -ExpectedUpgradeCode "{9E28ABD6-A496-472E-98AB-AE8D70C27B48}"
+```
+
+positive confinement canaryは上記helper完成後に準備済みhomeを明示し、生成中にUACを要求しないこと、固定Codex Homeと`.sandbox-secrets`をmodel toolが読めないことを含めて確認します。現在は実行対象外です。
+
+```powershell
+.\windows\script\verify_codex_generation_confinement.ps1 `
+  -CodexBin <固定したcodex.exe> `
+  -SandboxImplementation elevated `
+  -ProvisionedCodexHome "$env:LOCALAPPDATA\HoverPocket\CodexGenerationSandbox\codex-home"
+```
+
+production resolverは、固定先のexact binaryと準備済みcontrol-planeが揃った次回起動だけで生成adapterを構成します。生成物のactivationは引き続きOFFです。no-UAC positive canary、credential delivery、実モデル生成readbackが揃う前に有効化しません。
+
 ## Windows updates and release packaging
 
 Windows 版の更新確認は Velopack と GitHub Releases (`shotaro311/hover-pocket`) を使います。トレイと Settings の `Check for Updates` は Windows channel `win` の feed (`releases.win.json`) へ接続し、更新が見つかった場合はダウンロード前と適用/再起動前に確認します。起動時の自動チェックは既定オンで、失敗しても起動を止めません。
@@ -80,23 +130,24 @@ Windows は macOS Sparkle の `https://github.com/shotaro311/hover-pocket/releas
 - Windows 0.2.xは、コード署名証明書を取得するまでAuthenticode未署名の公開ベータとして配布します。
 - Setup.exeの初回実行時にMicrosoft Defender SmartScreenの警告が出る可能性があることを、ダウンロード導線とRelease notesに明記します。
 - 1.0またはmacOS版と同等の正式版では、タイムスタンプ付きAuthenticode署名と公開成果物の署名readbackを必須gateにします。
-- 正式版のworkflow実行前に、正規コード署名証明書raw byteのSHA-256 fingerprintをGitHub Actions repository variable `WINDOWS_SIGNER_CERT_SHA256`へ64文字の16進数で設定します。値が未設定・不正・公開3成果物の署名証明書と不一致ならformal gateはfail closedにします。証明書更新時は公開前レビューでこのvariableも明示更新します。
+- 正式版のworkflow実行前に、正規コード署名証明書raw byteのSHA-256 fingerprintをGitHub Actions repository variable `WINDOWS_SIGNER_CERT_SHA256`へ64文字の16進数で設定します。値が未設定・不正、またはSetup / Portable内Shell / full package内Shell / helper MSI / embedded helperの署名証明書と不一致ならformal gateはfail closedにします。証明書更新時は公開前レビューでこのvariableも明示更新します。
 - 署名証明書やsigning credentialsはGit、ログ、README、progressに記録しません。
 
-Release assetはmacOS Sparkle資産と衝突しない`HoverPocketWin-*`系です。`publish_release.ps1`は、OAuth環境変数が未設定の場合に停止し、Release成果物内のmetadata一致を確認してからVelopack package、`release-manifest.win.json`、`SHA256SUMS-win.txt`を生成します。GitHub Releaseの作成・アップロードはこのスクリプトでは実行しません。既定の`beta` gateは未署名成果物だけを生成し、署名引数を混在させると停止します。publish / release出力は毎回空の通常directoryである必要があり、既存payload、file、reparse pointを検出した場合は削除や上書きを行わず停止します。再実行時は新しい`-OutputRoot`を指定します。
+Release assetはmacOS Sparkle資産と衝突しない`HoverPocketWin-*`系です。`publish_release.ps1`は、OAuth環境変数が未設定の場合に停止し、Release成果物内のmetadata一致を確認してからVelopack package、`release-manifest.win.json`、`SHA256SUMS-win.txt`を生成します。GitHub Releaseの作成・アップロードはこのスクリプトでは実行しません。manifest schema 2は`codexSandboxSetup`を追加し、formalだけがversion固定名の専用MSI、実測size/SHA-256、MSI/helperのtimestamped Authenticode、同一publisher agreementを記録します。一方、既定の`beta` gateは未署名成果物だけを生成し、専用helper MSIをpublishせず、`trustedProductionSetupBoundary`、`productionSetupAvailable`、`productionGenerationAvailable`、`productionActivationAvailable`をすべてfalseに固定します。署名引数をbetaへ混在させると停止します。publish / release出力は毎回空の通常directoryである必要があり、既存payload、file、reparse pointを検出した場合は削除や上書きを行わず停止します。再実行時は新しい`-OutputRoot`を指定します。
 
 ```powershell
 .\windows\script\publish_release.ps1
 ```
 
-正式版は、パスワードやPFXをコマンドラインへ渡さず、Windows証明書ストアに導入済みのコード署名証明書をSHA-1 thumbprintで選びます。RFC 3161 timestamp URL、readback用のpublisher証明書SHA-256、必要な場合だけmachine store指定を明示します。Velopackへ`/fd sha256 /td sha256 /tr`を渡した後、生成したSetup、Portable内アプリ、full package内アプリの3点を展開して、署名の有効性、timestamp、署名者一致、期待publisher一致をローカルで再検証できた場合だけmanifestを`signed-timestamped-verified`にします。値はログへ出力しません。
+正式版は、パスワードやPFXをコマンドラインへ渡さず、Windows証明書ストアに導入済みのコード署名証明書をSHA-1 thumbprintで選びます。RFC 3161 timestamp URL、readback用のpublisher証明書SHA-256、必要な場合だけmachine store指定を明示します。formalではまずShellへpublisher SHA-256 metadataを埋め込み、helperをself-contained publishして直接署名し、その署名済みhelperを専用per-machine MSIへharvestしてからMSIを署名します。その後Velopackへ`/fd sha256 /td sha256 /tr`を渡し、生成したSetup、Portable内アプリ、full package内アプリ、helper、MSIの5点について署名の有効性、timestamp、同一publisher一致をローカルで再検証できた場合だけmanifestを`signed-timestamped-verified`にします。値はログへ出力しません。
 
 ```powershell
 .\windows\script\publish_release.ps1 `
   -WindowsSigningGate formal `
   -SigningCertificateSha1 $env:HOVERPOCKET_SIGNING_CERT_SHA1 `
   -ExpectedSignerCertificateSha256 $env:HOVERPOCKET_SIGNER_CERT_SHA256 `
-  -TimestampServer $env:HOVERPOCKET_TIMESTAMP_SERVER
+  -TimestampServer $env:HOVERPOCKET_TIMESTAMP_SERVER `
+  -SignToolPath $env:HOVERPOCKET_SIGNTOOL_PATH
 ```
 
 証明書をLocalMachine storeへ導入した運用だけ`-SigningCertificateInMachineStore`を追加します。どのformal引数も空、不正形式、HTTP timestamp、credential入りURL、署名不一致の場合は成果物manifestを確定せず停止します。秘密値をGit、README、progress、GitHub repository variableへ保存しません。`WINDOWS_SIGNER_CERT_SHA256`は秘密値ではなく公開後readback用fingerprintですが、設定値そのものはログへ出しません。
@@ -117,9 +168,13 @@ MacまたはCIからは、Windows releaseだけでなくmacOS appcastが変わ�
 python3 script/verify_release_readback.py --windows-tag auto --windows-signing-gate beta
 ```
 
-1.0正式版では`Verify Published Release Readback` workflowを`formal`で手動実行します。`release-manifest.win.json`の`authenticode=signed-timestamped-verified`に加え、Windows上で公開Setup、Portable内`HoverPocket.Shell.exe`、Velopack full update package内`HoverPocket.Shell.exe`の実Authenticode署名、タイムスタンプ、3成果物の署名者一致、repository variableへ固定した正規publisher証明書との一致が揃わない限り配布完了にしません。Setupのpackage同一性は、Velopack 1.2.0のbundle headerに埋め込まれたoffset / lengthを使い、署名時に末尾へ追加されるPE証明書表をpackage byteとして扱わずに検証します。
+1.0正式版では`Verify Published Release Readback` workflowを`formal`で手動実行します。`release-manifest.win.json`の`authenticode=signed-timestamped-verified`だけを信用せず、immutable asset snapshotから全assetを再downloadしてhashを取り直し、Windows上で公開Setup、Portable内`HoverPocket.Shell.exe`、Velopack full update package内`HoverPocket.Shell.exe`、専用MSI、MSI administrative imageから取り出した`HoverPocket.CodexSandboxSetup.exe`の実Authenticode署名とtimestampを検証します。さらに公開MSIを`verify_codex_sandbox_installer.ps1`で再読込し、MSI/helperの実測size/SHA-256がmanifestと一致し、5成果物がrepository variableへ固定した同一publisher certificate SHA-256へ収束する場合だけformal readbackを合格にします。Setupのpackage同一性は、Velopack 1.2.0のbundle headerに埋め込まれたoffset / lengthを使い、署名時に末尾へ追加されるPE証明書表をpackage byteとして扱わずに検証します。
 
-公開済み2version間の実installer / updater遷移は`Verify Release Install and Rollback Transitions` workflowで確認します。GitHub hosted Windows runnerの一時install rootに旧Setupをsilent installし、新full package適用、旧full packageへの明示rollback、再upgrade、uninstall、reinstall、user data保持までをreadbackします。自動更新はdowngradeしないため、rollbackは`Update.exe apply --package`で旧packageを明示します。開始時と合格証跡の直前で公開releaseの全asset snapshotが一致することも必須です。未署名0.2.x betaを実行する場合は、`execute_windows_release_code`とunsigned beta許可を手動workflowで明示する必要があります。正式署名版は、full package内アプリまでを独立した正式署名readback snapshotへ固定する連携が入るまで、この遷移workflowでは実行を拒否します。
+公開済み2version間の実installer / updater遷移は`Verify Release Install and Rollback Transitions` workflowで確認します。既存Velopack遷移はGitHub hosted Windows runnerの一時install rootに旧Setupをsilent installし、新full package適用、旧full packageへの明示rollback、再upgrade、uninstall、reinstall、user data保持までをreadbackします。自動更新はdowngradeしないため、rollbackは`Update.exe apply --package`で旧packageを明示します。未署名0.2.x betaを実行する場合は、`execute_windows_release_code`とunsigned beta許可を手動workflowで明示する必要があり、formal Velopack遷移の既存fail-closed拒否は維持します。
+
+専用helper MSIには別の`execute_codex_sandbox_installer_transition` gateを追加します。このgateはschema 2 formal manifest、公開snapshot、MSI hash、timestamped Authenticode、期待publisherを再検証した後だけ、disposable Windows runnerの固定Program Files先へ旧MSI install → 新MSI major upgrade → 新MSI uninstall + 旧MSI reinstallによる明示rollback → uninstallを実行し、各段階でinstalled helperのhashと署名をreadbackします。このgateはsetup/generation/activationを有効化せず、helper自体を起動しません。開始時と合格直前のrelease asset snapshot一致も必須です。
+
+残る物理gateは別です。通常ユーザーのWindows実機で、署名済みShell + signed per-machine MSIを使ったSettingsの明示操作からだけUAC secure desktopへ1回到達すること、固定Program Files helper/object identity/publisher readback、UAC取消・tamper時の副作用0、setup完了後のno-UAC positive confinement canary、Host-owned credential delivery、実モデル生成readbackを確認する必要があります。これらのphysical UAC / signed-host canaryが完了するまではproduction setup/generation/activation flagsをfalseのまま維持し、完了したとは扱いません。
 
 ## Local privacy notes
 

@@ -3,12 +3,15 @@ param(
     [string]$Configuration = "Release",
     [string]$Runtime = "win-x64",
     [string]$Project = (Join-Path $PSScriptRoot "..\src\HoverPocket.Shell\HoverPocket.Shell.csproj"),
+    [string]$CodexSandboxHelperProject = (Join-Path $PSScriptRoot "..\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj"),
+    [string]$CodexSandboxInstallerProject = (Join-Path $PSScriptRoot "..\installer\HoverPocket.CodexSandboxSetup.Installer\HoverPocket.CodexSandboxSetup.Installer.wixproj"),
     [string]$OutputRoot = (Join-Path $PSScriptRoot "..\..\dist\windows"),
     [string]$PackId = "HoverPocketWin",
     [string]$PackTitle = "HoverPocket",
     [string]$PackAuthors = "Shotaro Matsumoto",
     [string]$ReleaseTag = "",
     [string]$VpkPath = "",
+    [string]$SignToolPath = "",
     [string]$NuGetSource = "",
     [switch]$NoRestore,
     [ValidateSet("beta", "formal")]
@@ -21,6 +24,43 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Invoke-NativeProcessWithOutput {
+    param([string]$Path, [string[]]$Arguments, [string]$Label)
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $Path
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+    foreach ($argument in $Arguments) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            throw "$Label failed to start."
+        }
+        $standardOutput = $process.StandardOutput.ReadToEndAsync()
+        $standardError = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $output = $standardOutput.GetAwaiter().GetResult()
+        [void]$standardError.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) {
+            throw "$Label failed with exit code $($process.ExitCode)."
+        }
+        if (-not [string]::IsNullOrEmpty($output)) {
+            return @($output -split "`r?`n" | Where-Object { $_.Length -gt 0 })
+        }
+        return @()
+    }
+    finally {
+        $process.Dispose()
+    }
+}
 
 function Resolve-VpkPath {
     param([string]$Candidate)
@@ -73,6 +113,10 @@ function Resolve-SigningConfiguration {
         return [pscustomobject]@{
             Authenticode = "unsigned"
             SignParameters = ""
+            SigningCertificateSha1 = ""
+            TimestampServer = ""
+            UseMachineStore = $false
+            PublisherCertificateSha256 = ""
             ExpectedCertificateSha256 = ""
         }
     }
@@ -106,8 +150,68 @@ function Resolve-SigningConfiguration {
     return [pscustomobject]@{
         Authenticode = "signed-timestamped-verified"
         SignParameters = ($arguments -join " ")
+        SigningCertificateSha1 = $sha1
+        TimestampServer = $timestampUri.AbsoluteUri
+        UseMachineStore = $UseMachineStore
+        PublisherCertificateSha256 = $sha256
         ExpectedCertificateSha256 = $sha256
     }
+}
+
+function Resolve-SignToolPath {
+    param([string]$Candidate)
+
+    if (-not [string]::IsNullOrWhiteSpace($Candidate)) {
+        $resolved = (Resolve-Path -LiteralPath $Candidate -ErrorAction Stop).Path
+        $item = Get-Item -LiteralPath $resolved -Force
+        if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Signing tool path must be a regular non-reparse file."
+        }
+        return $item.FullName
+    }
+
+    $command = Get-Command signtool.exe -ErrorAction SilentlyContinue
+    if ($command -and $command.Source) {
+        return $command.Source
+    }
+    $command = Get-Command signtool -ErrorAction SilentlyContinue
+    if ($command -and $command.Source) {
+        return $command.Source
+    }
+    throw "Formal Windows release requires signtool.exe. Pass -SignToolPath when it is not on PATH."
+}
+
+function Invoke-AuthenticodeSign {
+    param(
+        [string]$SignTool,
+        [string]$Path,
+        $SigningConfiguration,
+        [string]$Label
+    )
+
+    $arguments = @("sign", "/sha1", $SigningConfiguration.SigningCertificateSha1)
+    if ($SigningConfiguration.UseMachineStore) {
+        $arguments += "/sm"
+    }
+    $arguments += @(
+        "/fd", "sha256",
+        "/td", "sha256",
+        "/tr", $SigningConfiguration.TimestampServer,
+        $Path
+    )
+    & $SignTool @arguments *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Label signing failed."
+    }
+}
+
+function Get-CodexSandboxMsiAssetName {
+    param([string]$Version)
+
+    if ($Version -notmatch '^\d+\.\d+\.\d+$') {
+        throw "Codex sandbox MSI version must be MAJOR.MINOR.PATCH."
+    }
+    return "HoverPocket.CodexSandboxSetup-$Version-win-x64.msi"
 }
 
 function Get-CertificateSha256 {
@@ -210,6 +314,8 @@ function Assert-FormalReleaseSignatures {
         [string]$PackageId,
         [string]$PackageVersion,
         [string]$MainExecutable,
+        [string]$CodexSandboxHelperPath,
+        [string]$CodexSandboxMsiPath,
         [string]$ExpectedCertificateSha256
     )
 
@@ -256,9 +362,17 @@ function Assert-FormalReleaseSignatures {
                 -Path $packageExecutable `
                 -Label "Full package application" `
                 -ExpectedCertificateSha256 $ExpectedCertificateSha256
+            Assert-TimestampedAuthenticode `
+                -Path $CodexSandboxHelperPath `
+                -Label "Codex sandbox helper" `
+                -ExpectedCertificateSha256 $ExpectedCertificateSha256
+            Assert-TimestampedAuthenticode `
+                -Path $CodexSandboxMsiPath `
+                -Label "Codex sandbox MSI" `
+                -ExpectedCertificateSha256 $ExpectedCertificateSha256
         )
         if (@($certificateHashes | Sort-Object -Unique).Count -ne 1) {
-            throw "Setup, Portable application, and full package application use different signer certificates."
+            throw "Shell/Velopack artifacts, Codex sandbox helper, and Codex sandbox MSI use different signer certificates."
         }
     }
     finally {
@@ -273,7 +387,9 @@ function Invoke-SigningContractTest {
         -ExpectedCertificateSha256 "" `
         -TimestampUrl "" `
         -UseMachineStore $false
-    if ($beta.Authenticode -ne "unsigned" -or -not [string]::IsNullOrEmpty($beta.SignParameters)) {
+    if ($beta.Authenticode -ne "unsigned" -or
+        -not [string]::IsNullOrEmpty($beta.SignParameters) -or
+        -not [string]::IsNullOrEmpty($beta.PublisherCertificateSha256)) {
         throw "Unsigned beta signing contract is invalid."
     }
 
@@ -284,11 +400,15 @@ function Invoke-SigningContractTest {
         -TimestampUrl "https://timestamp.example.test" `
         -UseMachineStore $true
     if ($formal.Authenticode -ne "signed-timestamped-verified" -or
-        $formal.SignParameters -ne ("/sha1 " + ("a" * 40) + " /sm /fd sha256 /td sha256 /tr https://timestamp.example.test/")) {
+        $formal.SignParameters -ne ("/sha1 " + ("a" * 40) + " /sm /fd sha256 /td sha256 /tr https://timestamp.example.test/") -or
+        $formal.PublisherCertificateSha256 -cne ("b" * 64) -or
+        (Get-CodexSandboxMsiAssetName -Version "1.2.3") -cne "HoverPocket.CodexSandboxSetup-1.2.3-win-x64.msi") {
         throw "Formal signing arguments are not deterministic."
     }
 
+    $missingSignTool = Join-Path ([System.IO.Path]::GetTempPath()) ("hoverpocket-missing-signtool-" + [Guid]::NewGuid().ToString("N") + ".exe")
     $invalidCases = @(
+        { Resolve-SignToolPath -Candidate $missingSignTool },
         { Resolve-SigningConfiguration -Gate "beta" -CertificateSha1 ("a" * 40) -ExpectedCertificateSha256 "" -TimestampUrl "" -UseMachineStore $false },
         { Resolve-SigningConfiguration -Gate "formal" -CertificateSha1 "invalid" -ExpectedCertificateSha256 ("b" * 64) -TimestampUrl "https://timestamp.example.test" -UseMachineStore $false },
         { Resolve-SigningConfiguration -Gate "formal" -CertificateSha1 ("a" * 40) -ExpectedCertificateSha256 "invalid" -TimestampUrl "https://timestamp.example.test" -UseMachineStore $false },
@@ -306,6 +426,27 @@ function Invoke-SigningContractTest {
         if (-not $failedClosed) {
             throw "Invalid signing configuration did not fail closed."
         }
+    }
+
+    $nativeOutput = @(Invoke-NativeProcessWithOutput `
+        -Path $env:ComSpec `
+        -Arguments @("/d", "/c", "echo HP_NATIVE_PROCESS_CAPTURE_OK") `
+        -Label "Native process capture contract")
+    if ($nativeOutput -cnotcontains "HP_NATIVE_PROCESS_CAPTURE_OK") {
+        throw "Native process output was not captured."
+    }
+    $nativeFailureRejected = $false
+    try {
+        Invoke-NativeProcessWithOutput `
+            -Path $env:ComSpec `
+            -Arguments @("/d", "/c", "exit /b 7") `
+            -Label "Native process failure contract" | Out-Null
+    }
+    catch {
+        $nativeFailureRejected = $_.Exception.Message -ceq "Native process failure contract failed with exit code 7."
+    }
+    if (-not $nativeFailureRejected) {
+        throw "Native process failure exit code was not rejected."
     }
 
     $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("hoverpocket-signing-contract-" + [Guid]::NewGuid().ToString("N"))
@@ -344,8 +485,20 @@ $signingConfiguration = Resolve-SigningConfiguration `
     -ExpectedCertificateSha256 $ExpectedSignerCertificateSha256 `
     -TimestampUrl $TimestampServer `
     -UseMachineStore $SigningCertificateInMachineStore.IsPresent
+$signTool = $null
+if ($WindowsSigningGate -eq "formal") {
+    $signTool = Resolve-SignToolPath -Candidate $SignToolPath
+}
 
 $projectPath = (Resolve-Path -LiteralPath $Project).Path
+$codexSandboxHelperProjectPath = $null
+$codexSandboxInstallerProjectPath = $null
+$codexSandboxInstallerVerifierPath = $null
+if ($WindowsSigningGate -eq "formal") {
+    $codexSandboxHelperProjectPath = (Resolve-Path -LiteralPath $CodexSandboxHelperProject).Path
+    $codexSandboxInstallerProjectPath = (Resolve-Path -LiteralPath $CodexSandboxInstallerProject).Path
+    $codexSandboxInstallerVerifierPath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "verify_codex_sandbox_installer.ps1")).Path
+}
 $outputRootPath = [System.IO.Path]::GetFullPath($OutputRoot)
 $projectDirectory = Split-Path -Parent $projectPath
 $projectXml = [xml](Get-Content -LiteralPath $projectPath -Raw)
@@ -372,9 +525,18 @@ if (-not [string]::Equals($ReleaseTag, "win-v$version", [System.StringComparison
 
 $publishDir = Join-Path $outputRootPath "publish\$Runtime\$version"
 $releaseDir = Join-Path $outputRootPath "releases\$version"
+$codexSandboxHelperPublishDir = Join-Path $outputRootPath "codex-sandbox-helper\publish\$Runtime\$version"
+$codexSandboxInstallerOutputDir = Join-Path $outputRootPath "codex-sandbox-helper\installer\$version"
 Assert-CleanOutputDirectory -Path $publishDir -Label "Publish"
 Assert-CleanOutputDirectory -Path $releaseDir -Label "Release"
-New-Item -ItemType Directory -Force -Path $publishDir, $releaseDir | Out-Null
+if ($WindowsSigningGate -eq "formal") {
+    Assert-CleanOutputDirectory -Path $codexSandboxHelperPublishDir -Label "Codex sandbox helper publish"
+    Assert-CleanOutputDirectory -Path $codexSandboxInstallerOutputDir -Label "Codex sandbox installer"
+    New-Item -ItemType Directory -Force -Path $publishDir, $releaseDir, $codexSandboxHelperPublishDir, $codexSandboxInstallerOutputDir | Out-Null
+}
+else {
+    New-Item -ItemType Directory -Force -Path $publishDir, $releaseDir | Out-Null
+}
 $googleOAuthClientId = [string]$env:HOVERPOCKET_GOOGLE_CLIENT_ID
 $googleOAuthClientSecret = [string]$env:HOVERPOCKET_GOOGLE_CLIENT_SECRET
 
@@ -395,6 +557,10 @@ $publishArgs = @(
     "-p:GoogleOAuthClientId=$googleOAuthClientId",
     "-p:GoogleOAuthClientSecret=$googleOAuthClientSecret"
 )
+
+if ($WindowsSigningGate -eq "formal") {
+    $publishArgs += "-p:HoverPocketPublisherCertificateSha256=$($signingConfiguration.PublisherCertificateSha256)"
+}
 
 if ($NoRestore) {
     $publishArgs += "--no-restore"
@@ -423,10 +589,11 @@ $previousExpectedVersion = [Environment]::GetEnvironmentVariable("HOVERPOCKET_RE
 $env:HOVERPOCKET_RELEASE_EXPECTED_VERSION = $version
 try {
     Write-Host "Verifying release configuration without printing OAuth values..."
-    & $publishedExe --verify release-config
-    if ($LASTEXITCODE -ne 0) {
-        throw "release-config verification failed with exit code $LASTEXITCODE."
-    }
+    Invoke-NativeProcessWithOutput `
+        -Path $publishedExe `
+        -Arguments @("--verify", "release-config") `
+        -Label "release-config verification" |
+        ForEach-Object { Write-Host $_ }
 }
 finally {
     if ($null -eq $previousExpectedVersion) {
@@ -435,6 +602,104 @@ finally {
     else {
         $env:HOVERPOCKET_RELEASE_EXPECTED_VERSION = $previousExpectedVersion
     }
+}
+
+$codexSandboxHelperPath = $null
+$codexSandboxMsiPath = $null
+$codexSandboxMsiAssetName = $null
+$codexSandboxHelperMetadata = $null
+$codexSandboxMsiMetadata = $null
+if ($WindowsSigningGate -eq "formal") {
+    $helperPublishArgs = @(
+        "publish",
+        $codexSandboxHelperProjectPath,
+        "--configuration", $Configuration,
+        "--runtime", $Runtime,
+        "--self-contained", "true",
+        "--output", $codexSandboxHelperPublishDir,
+        "--nologo",
+        "-p:PublishSingleFile=false",
+        "-p:DebugSymbols=false",
+        "-p:DebugType=None",
+        "-p:Version=$version",
+        "-p:HoverPocketPublisherCertificateSha256=$($signingConfiguration.PublisherCertificateSha256)",
+        "-p:NuGetAudit=false"
+    )
+    if ($NoRestore) {
+        $helperPublishArgs += "--no-restore"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($NuGetSource)) {
+        $helperPublishArgs += @("--source", $NuGetSource, "--ignore-failed-sources")
+    }
+    Write-Host "Publishing dormant Codex sandbox helper for signed MSI harvest..."
+    & dotnet @helperPublishArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Codex sandbox helper publish failed."
+    }
+    $codexSandboxHelperPath = Join-Path $codexSandboxHelperPublishDir "HoverPocket.CodexSandboxSetup.exe"
+    if (-not [IO.File]::Exists($codexSandboxHelperPath)) {
+        throw "Codex sandbox helper artifact is missing before signing."
+    }
+    Invoke-AuthenticodeSign `
+        -SignTool $signTool `
+        -Path $codexSandboxHelperPath `
+        -SigningConfiguration $signingConfiguration `
+        -Label "Codex sandbox helper"
+    [void](Assert-TimestampedAuthenticode `
+        -Path $codexSandboxHelperPath `
+        -Label "Codex sandbox helper" `
+        -ExpectedCertificateSha256 $signingConfiguration.ExpectedCertificateSha256)
+
+    $installerBuildArgs = @(
+        "build",
+        $codexSandboxInstallerProjectPath,
+        "--configuration", $Configuration,
+        "--output", $codexSandboxInstallerOutputDir,
+        "--nologo",
+        "-p:InstallerPlatform=x64",
+        "-p:ProductVersion=$version",
+        "-p:HelperPublishDir=$codexSandboxHelperPublishDir",
+        "-p:NuGetAudit=false"
+    )
+    if ($NoRestore) {
+        $installerBuildArgs += "--no-restore"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($NuGetSource)) {
+        $installerBuildArgs += @("--source", $NuGetSource, "--ignore-failed-sources")
+    }
+    Write-Host "Building dedicated per-machine Codex sandbox MSI from the signed helper payload..."
+    & dotnet @installerBuildArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Codex sandbox MSI build failed."
+    }
+    $msiFiles = @(Get-ChildItem -LiteralPath $codexSandboxInstallerOutputDir -Filter *.msi -File)
+    if ($msiFiles.Count -ne 1) {
+        throw "Codex sandbox installer output must contain exactly one MSI."
+    }
+    $codexSandboxMsiPath = $msiFiles[0].FullName
+    Invoke-AuthenticodeSign `
+        -SignTool $signTool `
+        -Path $codexSandboxMsiPath `
+        -SigningConfiguration $signingConfiguration `
+        -Label "Codex sandbox MSI"
+    [void](Assert-TimestampedAuthenticode `
+        -Path $codexSandboxMsiPath `
+        -Label "Codex sandbox MSI" `
+        -ExpectedCertificateSha256 $signingConfiguration.ExpectedCertificateSha256)
+    & $codexSandboxInstallerVerifierPath `
+        -MsiPath $codexSandboxMsiPath `
+        -ExpectedProductVersion $version `
+        -ExpectedUpgradeCode "{9E28ABD6-A496-472E-98AB-AE8D70C27B48}" | Out-Null
+
+    $codexSandboxHelperFile = Get-Item -LiteralPath $codexSandboxHelperPath
+    $codexSandboxHelperMetadata = [ordered]@{
+        fileName = $codexSandboxHelperFile.Name
+        size = $codexSandboxHelperFile.Length
+        sha256 = (Get-FileHash -LiteralPath $codexSandboxHelperPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        authenticode = "signed-timestamped-verified"
+        timestamp = "verified"
+    }
+    $codexSandboxMsiAssetName = Get-CodexSandboxMsiAssetName -Version $version
 }
 
 $packArgs = @(
@@ -464,18 +729,47 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if ($WindowsSigningGate -eq "formal") {
-    Write-Host "Verifying timestamped Authenticode without printing certificate identifiers..."
+    $codexSandboxPublishedMsiPath = Join-Path $releaseDir $codexSandboxMsiAssetName
+    [IO.File]::Copy($codexSandboxMsiPath, $codexSandboxPublishedMsiPath, $false)
+    $codexSandboxMsiFile = Get-Item -LiteralPath $codexSandboxPublishedMsiPath
+    $codexSandboxMsiMetadata = [ordered]@{
+        assetName = $codexSandboxMsiAssetName
+        assetSize = $codexSandboxMsiFile.Length
+        assetSha256 = (Get-FileHash -LiteralPath $codexSandboxPublishedMsiPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    Write-Host "Verifying timestamped Authenticode and same-publisher agreement without printing certificate identifiers..."
     Assert-FormalReleaseSignatures `
         -Directory $releaseDir `
         -PackageId $PackId `
         -PackageVersion $version `
         -MainExecutable $mainExe `
+        -CodexSandboxHelperPath $codexSandboxHelperPath `
+        -CodexSandboxMsiPath $codexSandboxPublishedMsiPath `
         -ExpectedCertificateSha256 $signingConfiguration.ExpectedCertificateSha256
 }
 
 $releaseManifestPath = Join-Path $releaseDir "release-manifest.win.json"
+$codexSandboxManifest = [ordered]@{
+    published = $false
+    trustedProductionSetupBoundary = $false
+    productionSetupAvailable = $false
+    productionGenerationAvailable = $false
+    productionActivationAvailable = $false
+}
+if ($WindowsSigningGate -eq "formal") {
+    $codexSandboxManifest.published = $true
+    $codexSandboxManifest.assetName = $codexSandboxMsiMetadata.assetName
+    $codexSandboxManifest.assetSize = $codexSandboxMsiMetadata.assetSize
+    $codexSandboxManifest.assetSha256 = $codexSandboxMsiMetadata.assetSha256
+    $codexSandboxManifest.msiAuthenticode = "signed-timestamped-verified"
+    $codexSandboxManifest.msiTimestamp = "verified"
+    $codexSandboxManifest.embeddedHelper = $codexSandboxHelperMetadata
+    $codexSandboxManifest.publisherAgreement = "shell-helper-msi-same-certificate"
+    $codexSandboxManifest.signerCertificateSha256 = $signingConfiguration.ExpectedCertificateSha256
+}
+
 $releaseManifest = [ordered]@{
-    schemaVersion = 1
+    schemaVersion = 2
     product = "HoverPocket"
     packageId = $PackId
     version = $version
@@ -484,8 +778,9 @@ $releaseManifest = [ordered]@{
     updateFeed = "releases.win.json"
     oauthMetadata = "embedded-and-verified"
     authenticode = $signingConfiguration.Authenticode
+    codexSandboxSetup = $codexSandboxManifest
 }
-$releaseManifestJson = $releaseManifest | ConvertTo-Json
+$releaseManifestJson = $releaseManifest | ConvertTo-Json -Depth 5
 [System.IO.File]::WriteAllText(
     $releaseManifestPath,
     $releaseManifestJson,

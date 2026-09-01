@@ -131,14 +131,11 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
         var data: Data { lock.withLock { storage } }
     }
 
-    private static let allowedEnvironmentKeys = [
-        "HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "LANG", "LC_ALL", "TERM"
-    ]
-
     private let executableURL: URL
     private let executableIdentity: ExecutableIdentity
     private let workspaceRoot: PocketAppPinnedDirectory
     private let timeout: TimeInterval
+    private let credentialProvider: @Sendable () throws -> String
 
     private struct ExecutableIdentity: Equatable {
         let device: UInt64
@@ -151,7 +148,12 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
     private static let supportedVersion = "codex-cli 0.145.0"
     private static let openAITeamID = "2DC432GLL2"
 
-    init(executableURL: URL, workspaceRoot: URL, timeout: TimeInterval = 60) throws {
+    init(
+        executableURL: URL,
+        workspaceRoot: URL,
+        timeout: TimeInterval = 60,
+        credentialProvider: @escaping @Sendable () throws -> String
+    ) throws {
         guard executableURL.isFileURL,
               timeout >= 1,
               timeout <= 300 else {
@@ -166,6 +168,7 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
         self.executableIdentity = identity
         self.workspaceRoot = try PocketAppPinnedDirectory(url: workspaceRoot)
         self.timeout = timeout
+        self.credentialProvider = credentialProvider
     }
 
     func generate(
@@ -176,41 +179,57 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
         guard try Self.verifyExecutable(executableURL) == executableIdentity else {
             throw PocketAppGenerationError.generatorUnavailable
         }
+        let modelCatalogData = try CodexPocketAppGenerationModelCatalog.load()
         try workspaceRoot.validate()
         if cancellation.isCancelled { throw PocketAppGenerationError.generatorCancelled }
 
-        let workspace = workspaceRoot.url
+        let runRoot = workspaceRoot.url
             .appendingPathComponent("codex-\(UUID().uuidString.lowercased())", isDirectory: true)
         try FileManager.default.createDirectory(
-            at: workspace,
+            at: runRoot,
             withIntermediateDirectories: false,
             attributes: [.posixPermissions: 0o700]
         )
         defer {
-            try? FileManager.default.removeItem(at: workspace)
+            try? FileManager.default.removeItem(at: runRoot)
+        }
+        let workspace = runRoot.appendingPathComponent("workspace", isDirectory: true)
+        let codexHome = runRoot.appendingPathComponent("codex-home", isDirectory: true)
+        let userHome = runRoot.appendingPathComponent("user-home", isDirectory: true)
+        let temporaryDirectory = runRoot.appendingPathComponent("tmp", isDirectory: true)
+        for directory in [workspace, codexHome, userHome, temporaryDirectory] {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
         }
         try workspaceRoot.validate()
 
         let schemaURL = workspace.appendingPathComponent("generation-output.schema.json")
         try Data(PocketAppGenerationContract.outputSchemaJSON.utf8).write(to: schemaURL, options: [.withoutOverwriting])
         try FileManager.default.setAttributes([.posixPermissions: 0o400], ofItemAtPath: schemaURL.path)
+        let modelCatalogURL = workspace.appendingPathComponent("model-catalog.json")
+        try modelCatalogData.write(to: modelCatalogURL, options: [.withoutOverwriting])
+        try FileManager.default.setAttributes([.posixPermissions: 0o400], ofItemAtPath: modelCatalogURL.path)
 
         let process = Process()
+        let helperExecutableURL = try Self.credentialHelperExecutableURL()
         process.executableURL = executableURL
         process.currentDirectoryURL = workspace
-        process.arguments = [
-            "exec",
-            "--sandbox", "read-only",
-            "--ephemeral",
-            "--ignore-user-config",
-            "--skip-git-repo-check",
-            "--output-schema", schemaURL.path,
-            "-"
-        ]
-        let inherited = ProcessInfo.processInfo.environment
-        process.environment = Dictionary(uniqueKeysWithValues: Self.allowedEnvironmentKeys.compactMap { key in
-            inherited[key].map { (key, $0) }
-        })
+        process.arguments = try Self.confinementArguments(
+            workspace: workspace,
+            codexHome: codexHome,
+            userHome: userHome,
+            schemaURL: schemaURL,
+            modelCatalogURL: modelCatalogURL,
+            credentialHelperExecutableURL: helperExecutableURL
+        )
+        process.environment = Self.confinementEnvironment(
+            codexHome: codexHome,
+            userHome: userHome,
+            temporaryDirectory: temporaryDirectory
+        )
 
         let standardInput = Pipe()
         let standardOutput = Pipe()
@@ -232,6 +251,7 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
             standardError.fileHandleForReading.readabilityHandler = nil
         }
 
+        let credentialBroker: CodexCredentialBrokerServer
         do {
             try process.run()
             let pid = process.processIdentifier
@@ -239,9 +259,15 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
                 Self.stop(process)
                 throw PocketAppGenerationError.generatorUnavailable
             }
+            credentialBroker = try CodexCredentialBrokerServer(
+                generationProcessID: pid,
+                secretProvider: credentialProvider
+            )
         } catch {
+            Self.stop(process)
             throw PocketAppGenerationError.generatorUnavailable
         }
+        defer { credentialBroker.cancel() }
         do {
             let prompt = try PocketAppGenerationContract.prompt(request)
             try standardInput.fileHandleForWriting.write(contentsOf: Data(prompt.utf8))
@@ -326,11 +352,111 @@ final class CodexPocketAppGenerationAdapter: PocketAppGenerationAdapter, @unchec
         return nil
     }
 
-    // File-backed ChatGPT credentials are readable by the same Codex process that
-    // executes model-requested tools. Until credentials can be brokered outside that
-    // process and an OS sandbox outside-root canary passes, production generation is
-    // intentionally unavailable. Fixture generation and package preview remain usable.
+    // The named profile isolates model-requested tools from user configuration and files.
+    // Production remains unavailable until credentials are supplied by a Host-owned
+    // one-time broker and the same outside-root canary passes on both operating systems.
     static var supportsConfidentialGeneration: Bool { false }
+
+    static func confinementArguments(
+        workspace: URL,
+        codexHome: URL,
+        userHome: URL,
+        schemaURL: URL,
+        modelCatalogURL: URL,
+        credentialHelperExecutableURL: URL
+    ) throws -> [String] {
+        let directories = [workspace, codexHome, userHome].map(\.standardizedFileURL)
+        let standardizedSchema = schemaURL.standardizedFileURL
+        let standardizedModelCatalog = modelCatalogURL.standardizedFileURL
+        let standardizedHelper = credentialHelperExecutableURL.standardizedFileURL
+        guard directories.allSatisfy({ $0.isFileURL && $0.path.hasPrefix("/") }),
+              Set(directories.map(\.path)).count == directories.count,
+              Set(directories.map { $0.deletingLastPathComponent().path }).count == 1,
+              standardizedSchema.isFileURL,
+              standardizedSchema.deletingLastPathComponent() == directories[0],
+              standardizedModelCatalog.isFileURL,
+              standardizedModelCatalog.deletingLastPathComponent() == directories[0],
+              standardizedModelCatalog != standardizedSchema,
+              standardizedHelper.isFileURL,
+              standardizedHelper.path.hasPrefix("/") else {
+            throw PocketAppGenerationError.generatorUnavailable
+        }
+        let minimal = try tomlString(":minimal")
+        let workspacePath = try tomlString(directories[0].path)
+        let codexHomePath = try tomlString(directories[1].path)
+        let userHomePath = try tomlString(directories[2].path)
+        let helperPath = try tomlString(standardizedHelper.path)
+        let modelCatalogPath = try tomlString(standardizedModelCatalog.path)
+        let modelID = try tomlString(CodexPocketAppGenerationModelCatalog.modelID)
+        let reasoningEffort = try tomlString(CodexPocketAppGenerationModelCatalog.reasoningEffort)
+        let providerName = try tomlString("HoverPocket OpenAI")
+        let providerBaseURL = try tomlString("https://api.openai.com/v1")
+        let providerWireAPI = try tomlString("responses")
+        let helperArgument = try tomlString(CodexCredentialBrokerHelper.generationArgument)
+        let filesystem = "permissions.hoverpocket-generation.filesystem={\(minimal)=\"read\",\(workspacePath)=\"read\",\(codexHomePath)=\"deny\",\(userHomePath)=\"deny\",\(helperPath)=\"deny\"}"
+        return [
+            "exec",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--skip-git-repo-check",
+            "-c", "approval_policy=\"never\"",
+            "-c", "model=\(modelID)",
+            "-c", "model_reasoning_effort=\(reasoningEffort)",
+            "-c", "model_catalog_json=\(modelCatalogPath)",
+            "-c", "model_provider=\"hoverpocket\"",
+            "-c", "model_providers.hoverpocket.name=\(providerName)",
+            "-c", "model_providers.hoverpocket.base_url=\(providerBaseURL)",
+            "-c", "model_providers.hoverpocket.wire_api=\(providerWireAPI)",
+            "-c", "model_providers.hoverpocket.auth.command=\(helperPath)",
+            "-c", "model_providers.hoverpocket.auth.args=[\(helperArgument)]",
+            "-c", "model_providers.hoverpocket.auth.cwd=\(workspacePath)",
+            "-c", "model_providers.hoverpocket.auth.refresh_interval_ms=0",
+            "-c", "model_providers.hoverpocket.auth.timeout_ms=5000",
+            "-c", "model_providers.hoverpocket.request_max_retries=0",
+            "-c", "model_providers.hoverpocket.stream_max_retries=0",
+            "-c", "default_permissions=\"hoverpocket-generation\"",
+            "-c", filesystem,
+            "-c", "permissions.hoverpocket-generation.network.enabled=false",
+            "-c", "shell_environment_policy.inherit=\"none\"",
+            "-c", "shell_environment_policy.set={PATH=\"/usr/bin:/bin\",LANG=\"C\"}",
+            "--output-schema", standardizedSchema.path,
+            "-"
+        ]
+    }
+
+    static func confinementEnvironment(
+        codexHome: URL,
+        userHome: URL,
+        temporaryDirectory: URL
+    ) -> [String: String] {
+        [
+            "CODEX_HOME": codexHome.standardizedFileURL.path,
+            "HOME": userHome.standardizedFileURL.path,
+            "PATH": "/usr/bin:/bin",
+            "TMPDIR": temporaryDirectory.standardizedFileURL.path,
+            "LANG": "C"
+        ]
+    }
+
+    private static func credentialHelperExecutableURL() throws -> URL {
+        let candidate = Bundle.main.executableURL
+            ?? URL(fileURLWithPath: CommandLine.arguments[0])
+        let standardized = candidate.standardizedFileURL
+        guard standardized.isFileURL,
+              standardized.path.hasPrefix("/") else {
+            throw PocketAppGenerationError.generatorUnavailable
+        }
+        return standardized
+    }
+
+    private static func tomlString(_ value: String) throws -> String {
+        let encoded = try JSONEncoder().encode(value)
+        guard let string = String(data: encoded, encoding: .utf8) else {
+            throw PocketAppGenerationError.generatorUnavailable
+        }
+        return string.replacingOccurrences(of: "\\/", with: "/")
+    }
 
     private static func verifyExecutable(_ url: URL) throws -> ExecutableIdentity {
         var link = stat()

@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 enum VoiceFoundationVerificationError: Error {
@@ -32,12 +33,17 @@ private struct UnsafeDecodedSessionFixture: Codable {
 @MainActor
 enum VoiceFoundationVerificationCommand {
     static func run() async throws {
+        try verifySettingsBindingUsesPublishedValues()
         try verifyGeometryAndScope()
         try verifyTranscriptBoundsAndRedaction()
         try await verifyDecodedModelsAreResanitized()
         try verifyLocalization()
         try await verifyDefaultOffAndFakeAdapter()
-        try await verifyRealtimeProviderAndMacOSResidualGate()
+        try await verifyRealtimeProviderAndMacOSTransport()
+        try await verifyExplicitAudioStart()
+        try await verifyExplicitStartCancellation()
+        try await verifyCapabilityGrantRefresh()
+        try await verifyRealtimeCapabilityBrokerRuntime()
         try await verifyAppLifetimeDetachAndRestart()
         try await verifyStaleAdapterFailureDoesNotReplaceReadyAdapter()
         try await verifyRecoveryWaitsForCancelledStartup()
@@ -45,6 +51,40 @@ enum VoiceFoundationVerificationCommand {
         try await verifyRecoveryTeardownIsSerialized()
         try await verifyAudioCommandsRemainOrdered()
         try await verifyShutdownWaitsForAdapterTeardown()
+    }
+
+    private static func verifySettingsBindingUsesPublishedValues() throws {
+        let defaults = EphemeralAppSettingsDefaults()
+        let settings = AppSettings(defaults: defaults)
+        var received: [VoiceRuntimeSettingsConfiguration] = []
+        let cancellable = voiceRuntimeSettingsPublisher(settings: settings)
+            .dropFirst()
+            .sink { received.append($0) }
+        defer { cancellable.cancel() }
+
+        settings.voiceProvider = .codexAppServer
+        settings.voiceEnabled = true
+        settings.voiceLaneLayoutPreference = .expanded
+
+        guard received == [
+            VoiceRuntimeSettingsConfiguration(
+                featureEnabled: false,
+                preferredLayout: .compact,
+                providerID: .codexAppServer
+            ),
+            VoiceRuntimeSettingsConfiguration(
+                featureEnabled: true,
+                preferredLayout: .compact,
+                providerID: .codexAppServer
+            ),
+            VoiceRuntimeSettingsConfiguration(
+                featureEnabled: true,
+                preferredLayout: .expanded,
+                providerID: .codexAppServer
+            )
+        ] else {
+            throw VoiceFoundationVerificationError.failed("settings_binding_stale_value")
+        }
     }
 
     private static func verifyGeometryAndScope() throws {
@@ -197,7 +237,7 @@ enum VoiceFoundationVerificationCommand {
         guard buffer.events.count <= 64,
               buffer.events.count == validEventCount,
               scalarCount <= 8_192,
-              buffer.events.allSatisfy({ !$0.text.contains("/Users/") })
+              buffer.events.contains(where: { $0.text == "/Users/test/private.txt" })
         else {
             throw VoiceFoundationVerificationError.failed("transcript_bounds_redaction")
         }
@@ -245,6 +285,9 @@ enum VoiceFoundationVerificationCommand {
         else {
             throw VoiceFoundationVerificationError.failed("scalar_bound_path_or_format_control_redaction")
         }
+        guard VoiceApprovalText.singleLine("予定\n  偽の承認\t対象", limit: 80) == "予定 偽の承認 対象" else {
+            throw VoiceFoundationVerificationError.failed("voice_approval_text_not_canonical")
+        }
     }
 
     private static func verifyLocalization() throws {
@@ -258,12 +301,73 @@ enum VoiceFoundationVerificationCommand {
             english: "Voice transport is not available yet",
             language: .english
         )
+        let readySnapshot = VoiceLaneSnapshot(
+            providerID: .codexAppServer,
+            mode: .compact,
+            connection: .disconnected,
+            activity: .idle,
+            muted: true,
+            transcript: [],
+            transcriptPreview: nil,
+            rootSessionID: nil,
+            sessions: [],
+            visibleSessionCount: 0,
+            safeErrorCode: nil,
+            layoutBlockedReason: nil,
+            uiAttached: true,
+            restartAttempt: 0
+        )
         guard japanese == "音声接続はまだ利用できません",
               english == "Voice transport is not available yet",
               VoiceLaneLocalization.connection(.connected, language: .japanese) == "接続済み",
               VoiceLaneLocalization.connection(.connected, language: .english) == "Connected",
               VoiceLaneLocalization.sessionStatus(.waitingForUser, language: .japanese) == "ユーザー操作待ち",
-              VoiceLaneLocalization.transcriptRole(.user, language: .english) == "You"
+              VoiceLaneLocalization.transcriptRole(.user, language: .english) == "You",
+              VoiceLaneLocalization.status(snapshot: readySnapshot, language: .japanese)
+                == "開始前 · マイクを押してください",
+              VoiceLaneLocalization.conversationPrompt(
+                providerID: .codexAppServer,
+                connection: .disconnected,
+                muted: true,
+                language: .japanese
+              ) == "マイクを押すとCodexとの音声セッションを開始します。",
+              VoiceLaneLocalization.conversationPrompt(
+                providerID: .codexAppServer,
+                connection: .connecting,
+                muted: true,
+                language: .japanese
+              ) == "音声セッションへ接続しています…",
+              VoiceLaneLocalization.conversationPrompt(
+                providerID: .codexAppServer,
+                connection: .connected,
+                muted: false,
+                language: .japanese
+              ) == "話しかけてください。",
+              VoiceLaneLocalization.conversationPrompt(
+                providerID: .codexAppServer,
+                connection: .connected,
+                muted: true,
+                language: .japanese
+              ) == "マイクを押すと音声会話を再開します。",
+              VoiceLaneLocalization.status(
+                snapshot: VoiceLaneSnapshot(
+                    providerID: .codexAppServer,
+                    mode: .compact,
+                    connection: .connected,
+                    activity: .listening,
+                    muted: true,
+                    transcript: [],
+                    transcriptPreview: nil,
+                    rootSessionID: "root",
+                    sessions: [],
+                    visibleSessionCount: 0,
+                    safeErrorCode: nil,
+                    layoutBlockedReason: nil,
+                    uiAttached: true,
+                    restartAttempt: 0
+                ),
+                language: .japanese
+              ) == "一時停止中 · マイクを押して再開"
         else {
             throw VoiceFoundationVerificationError.failed("voice_localization")
         }
@@ -287,7 +391,7 @@ enum VoiceFoundationVerificationCommand {
         )
         buffer.append(decodedEvent)
         guard buffer.events.count == 1,
-              buffer.events[0].text == "[redacted]"
+              buffer.events[0].text == "[/Users/alice/private]"
         else {
             throw VoiceFoundationVerificationError.failed("decoded_transcript_resanitized")
         }
@@ -431,7 +535,7 @@ enum VoiceFoundationVerificationCommand {
         await unsafeGateRuntime.shutdown()
     }
 
-    private static func verifyRealtimeProviderAndMacOSResidualGate() async throws {
+    private static func verifyRealtimeProviderAndMacOSTransport() async throws {
         let suiteName = "hover-pocket-voice-provider-verify-\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suiteName) else {
             throw VoiceFoundationVerificationError.failed("provider_defaults_unavailable")
@@ -440,10 +544,20 @@ enum VoiceFoundationVerificationCommand {
         let settings = AppSettings(defaults: defaults)
         guard settings.voiceProvider == .off,
               !settings.voiceEnabled,
+              !settings.voiceCalendarAccessEnabled,
               OpenAIRealtimeFoundation.modelID == "gpt-realtime-2.1",
               OpenAIRealtimeFoundation.callsEndpoint.path == "/v1/realtime/calls",
-              !OpenAIRealtimeFoundation.macOSAudioTransportAvailable else {
+              OpenAIRealtimeFoundation.macOSAudioTransportAvailable,
+              OpenAIRealtimeContract.maximumSDPBytes == 262_144,
+              OpenAIRealtimeContract.maximumEventBytes == 65_536,
+              OpenAIRealtimeContract.maximumFunctionOutputBytes == 32_768 else {
             throw VoiceFoundationVerificationError.failed("realtime_provider_defaults")
+        }
+        try OpenAIRealtimeCallsClient.validateSDP("v=0\r\ns=-\r\n")
+        do {
+            try OpenAIRealtimeCallsClient.validateSDP("not-sdp")
+            throw VoiceFoundationVerificationError.failed("realtime_invalid_sdp_accepted")
+        } catch OpenAIRealtimeMacOSTransportError.invalidSDP {
         }
 
         let key = try OpenAIRealtimeAPIKey(String(repeating: "x", count: 32))
@@ -455,10 +569,10 @@ enum VoiceFoundationVerificationCommand {
         let adapter = OpenAIRealtimeMacOSVoiceSessionAdapter(credentialStore: credentialStore)
         let gate = await adapter.probeCompatibility()
         guard !gate.isReady,
-              gate.safeErrorCode == "openai_realtime_macos_transport_an3_b3b",
+              gate.safeErrorCode == "openai_realtime_macos_transport_unavailable",
               credentialStore.hasCredentialCount == 0,
               credentialStore.loadCount == 0 else {
-            throw VoiceFoundationVerificationError.failed("macos_an3_b3b_gate_touched_credential")
+            throw VoiceFoundationVerificationError.failed("macos_transport_missing_context_touched_credential")
         }
 
         let offRuntime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
@@ -504,6 +618,450 @@ enum VoiceFoundationVerificationCommand {
             throw VoiceFoundationVerificationError.failed("provider_switch_readback")
         }
         await switchRuntime.shutdown()
+    }
+
+    private static func verifyExplicitAudioStart() async throws {
+        let adapter = ExplicitStartVoiceSessionAdapter()
+        let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        await runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            providerID: .openAIRealtimeBYOK,
+            adapterFactory: { adapter }
+        ).value
+        try await waitUntil { runtime.snapshot.activity == .idle }
+        guard adapter.startCount == 0,
+              runtime.snapshot.connection == .disconnected,
+              runtime.snapshot.muted else {
+            throw VoiceFoundationVerificationError.failed("explicit_start_ran_during_enable")
+        }
+        runtime.beginAudioSession()
+        try await Task.sleep(nanoseconds: 5_000_000)
+        guard adapter.startCount == 0 else {
+            throw VoiceFoundationVerificationError.failed("detached_explicit_start_allowed")
+        }
+        runtime.attachPanel()
+        runtime.beginAudioSession()
+        try await waitUntil { runtime.snapshot.connection == .connected }
+        guard adapter.startCount == 1,
+              runtime.snapshot.activity == .listening,
+              !runtime.snapshot.muted else {
+            throw VoiceFoundationVerificationError.failed("explicit_start_readback")
+        }
+        runtime.detachPanel()
+        try await waitUntil { adapter.muted }
+        guard runtime.snapshot.connection == .connected,
+              runtime.snapshot.muted,
+              !runtime.snapshot.uiAttached else {
+            throw VoiceFoundationVerificationError.failed("explicit_detach_did_not_pause_audio")
+        }
+        runtime.attachPanel()
+        guard runtime.snapshot.connection == .connected,
+              runtime.snapshot.muted,
+              runtime.snapshot.uiAttached,
+              adapter.startCount == 1 else {
+            throw VoiceFoundationVerificationError.failed("explicit_reattach_did_not_preserve_session")
+        }
+        runtime.setMuted(false)
+        try await waitUntil { !adapter.muted }
+        guard runtime.snapshot.connection == .connected,
+              !runtime.snapshot.muted,
+              runtime.snapshot.uiAttached,
+              adapter.startCount == 1 else {
+            throw VoiceFoundationVerificationError.failed("explicit_reattach_could_not_resume_audio")
+        }
+        runtime.endAudioSession()
+        try await waitUntil { adapter.closeAudioSessionCount == 1 }
+        guard runtime.snapshot.connection == .disconnected,
+              runtime.snapshot.activity == .idle,
+              runtime.snapshot.muted else {
+            throw VoiceFoundationVerificationError.failed("explicit_end_readback")
+        }
+        runtime.beginAudioSession()
+        try await waitUntil { adapter.startCount == 2 && runtime.snapshot.connection == .connected }
+        runtime.reportTransportFailure("voice_realtime_event_invalid")
+        try await waitUntil { adapter.closeAudioSessionCount == 2 }
+        guard runtime.snapshot.connection == .disconnected,
+              runtime.snapshot.muted,
+              runtime.snapshot.safeErrorCode == "voice_realtime_event_invalid" else {
+            throw VoiceFoundationVerificationError.failed("transport_failure_did_not_close_media")
+        }
+        runtime.beginAudioSession()
+        try await waitUntil { adapter.startCount == 3 && runtime.snapshot.connection == .connected }
+        guard runtime.snapshot.safeErrorCode == nil else {
+            throw VoiceFoundationVerificationError.failed("explicit_start_retry_did_not_clear_failure")
+        }
+        await runtime.shutdown()
+    }
+
+    private static func verifyExplicitStartCancellation() async throws {
+        let adapter = CancellableExplicitStartVoiceSessionAdapter()
+        let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        await runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            providerID: .openAIRealtimeBYOK,
+            adapterFactory: { adapter }
+        ).value
+        try await waitUntil {
+            runtime.snapshot.connection == .disconnected && adapter.startCount == 0
+        }
+
+        runtime.attachPanel()
+        runtime.beginAudioSession()
+        try await waitUntil { runtime.snapshot.connection == .connecting && adapter.startCount == 1 }
+
+        runtime.endAudioSession()
+        try await waitUntil {
+            adapter.closeAudioSessionCount == 1
+                && runtime.snapshot.connection == .disconnected
+                && runtime.snapshot.activity == .idle
+                && runtime.snapshot.muted
+        }
+        await runtime.shutdown()
+    }
+
+    private static func verifyCapabilityGrantRefresh() async throws {
+        let first = FakeVoiceSessionAdapter()
+        var factoryCount = 0
+        let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        await runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            providerID: .codexAppServer,
+            adapterFactory: {
+                factoryCount += 1
+                return first
+            }
+        ).value
+        try await waitUntil { first.startCount == 1 && runtime.snapshot.connection == .connected }
+        runtime.capabilityGrantsDidChange()
+        try await waitUntil {
+            first.capabilityGrantRefreshCount == 1
+                && runtime.snapshot.connection == .connected
+        }
+        guard factoryCount == 1,
+              first.stopCount == 0,
+              first.startCount == 1 else {
+            throw VoiceFoundationVerificationError.failed("capability_grant_restarted_adapter")
+        }
+        await runtime.shutdown()
+    }
+
+    private static func verifyRealtimeCapabilityBrokerRuntime() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hoverpocket-voice-capability-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let calendar = VoiceFakeCalendarDataSource(now: now)
+        let timerStore = TimerStore(
+            storageDirectory: root.appendingPathComponent("timer", isDirectory: true),
+            observesWake: false,
+            persistenceEnabled: true
+        )
+        let controls = FakeControlsCapabilityDataSource()
+        let stickyStore = StickyNotesStore(
+            storageDirectory: root.appendingPathComponent("sticky", isDirectory: true)
+        )
+        let handlers = try PocketCapabilityHandlerSet(handlers: [
+            CalendarListCapabilityHandler(dataSource: calendar),
+            CalendarGetCapabilityHandler(dataSource: calendar),
+            CalendarCreateCapabilityHandler(dataSource: calendar),
+            ControlsCapabilityHandler(operation: .availability, dataSource: controls),
+            ControlsCapabilityHandler(operation: .volumeGet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .volumeSet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .brightnessGet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .brightnessSet, dataSource: controls),
+            TimerCapabilityHandler(operation: .start, store: timerStore),
+            TimerCapabilityHandler(operation: .get, store: timerStore),
+            TimerCapabilityHandler(operation: .stop, store: timerStore),
+            StickyCapabilityHandler(operation: .upsert, store: stickyStore),
+            StickyCapabilityHandler(operation: .get, store: stickyStore)
+        ])
+        let registry = try CapabilityRegistry(handlers: handlers)
+        let brokerRoot = root.appendingPathComponent("broker", isDirectory: true)
+        let broker = CapabilityBroker(
+            registry: registry,
+            ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
+            auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+        )
+        let context = VoiceCapabilityContext(registry: registry, broker: broker)
+        var approvalCount = 0
+        let runtime = try OpenAIRealtimeMacOSCapabilityRuntime(
+            context: context,
+            calendarAccessGranted: { true },
+            timeZoneID: { "Asia/Tokyo" },
+            now: { now },
+            approvalHandler: { _ in
+                approvalCount += 1
+                return true
+            }
+        )
+        let toolSurface = try runtime.sessionTools()
+        let toolNames = Set(toolSurface.compactMap { $0["name"] as? String })
+        guard toolSurface.count == 6,
+              toolNames == [
+                  OpenAIRealtimeMacOSCapabilityRuntime.calendarListTool,
+                  OpenAIRealtimeMacOSCapabilityRuntime.calendarCreateTool,
+                  OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
+                  OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool,
+                  OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool,
+                  OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool
+              ] else {
+            throw VoiceFoundationVerificationError.failed("voice_tool_surface")
+        }
+
+        let listed = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "calendar-list-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.calendarListTool,
+            argumentsJSON: "{}"
+        )
+        let listedObject = try voiceJSON(listed)
+        guard listedObject["status"] as? String == "succeeded",
+              listedObject["readback"] as? String == "verified",
+              (listedObject["events"] as? [[String: Any]])?.count == 1 else {
+            throw VoiceFoundationVerificationError.failed("voice_calendar_list_readback")
+        }
+
+        let created = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "calendar-create-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.calendarCreateTool,
+            argumentsJSON: "{\"title\":\"確認予定\",\"start\":\"2027-01-15T09:00:00+09:00\",\"end\":\"2027-01-15T10:00:00+09:00\",\"isAllDay\":false}"
+        )
+        let createdObject = try voiceJSON(created)
+        guard createdObject["status"] as? String == "succeeded",
+              createdObject["readback"] as? String == "verified",
+              calendar.createdCount == 1 else {
+            throw VoiceFoundationVerificationError.failed("voice_calendar_create_readback")
+        }
+
+        let timer = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "timer-start-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
+            argumentsJSON: "{\"durationSeconds\":600,\"title\":\"集中\"}"
+        )
+        let timerObject = try voiceJSON(timer)
+        guard timerObject["status"] as? String == "succeeded",
+              timerObject["readback"] as? String == "verified",
+              timerObject["state"] as? String == "running",
+              approvalCount == 2 else {
+            throw VoiceFoundationVerificationError.failed("voice_timer_start_readback")
+        }
+
+        let sticky = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "sticky-upsert-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool,
+            argumentsJSON: "{\"body\":\"今日の目的\",\"title\":\"Focus\",\"color\":\"yellow\"}"
+        )
+        let stickyObject = try voiceJSON(sticky)
+        guard stickyObject["status"] as? String == "succeeded",
+              stickyObject["body"] as? String == "今日の目的",
+              stickyObject["readback"] as? String == "verified",
+              approvalCount == 3 else {
+            throw VoiceFoundationVerificationError.failed("voice_sticky_upsert_readback")
+        }
+
+        let brighter = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "brightness-increase-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool,
+            argumentsJSON: "{\"operation\":\"increase\",\"value\":10}"
+        )
+        let brighterObject = try voiceJSON(brighter)
+        guard brighterObject["status"] as? String == "succeeded",
+              brighterObject["percent"] as? Double == 50,
+              brighterObject["readback"] as? String == "verified",
+              approvalCount == 4 else {
+            throw VoiceFoundationVerificationError.failed("voice_brightness_relative_readback")
+        }
+
+        let louder = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "volume-increase-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool,
+            argumentsJSON: "{\"operation\":\"increase\",\"value\":10}"
+        )
+        let louderObject = try voiceJSON(louder)
+        guard louderObject["status"] as? String == "succeeded",
+              louderObject["percent"] as? Double == 40,
+              louderObject["readback"] as? String == "verified",
+              approvalCount == 5 else {
+            throw VoiceFoundationVerificationError.failed("voice_volume_relative_readback")
+        }
+
+        let comfortable = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "brightness-comfortable-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool,
+            argumentsJSON: "{\"operation\":\"preset\",\"preset\":\"comfortable\"}"
+        )
+        let comfortableObject = try voiceJSON(comfortable)
+        guard comfortableObject["status"] as? String == "succeeded",
+              comfortableObject["percent"] as? Double == 70,
+              comfortableObject["readback"] as? String == "verified",
+              approvalCount == 6 else {
+            throw VoiceFoundationVerificationError.failed("voice_brightness_preset_readback")
+        }
+
+        let dimmer = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "brightness-decrease-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool,
+            argumentsJSON: "{\"operation\":\"decrease\",\"value\":10}"
+        )
+        let dimmerObject = try voiceJSON(dimmer)
+        guard dimmerObject["status"] as? String == "succeeded",
+              dimmerObject["percent"] as? Double == 60,
+              dimmerObject["readback"] as? String == "verified",
+              approvalCount == 7 else {
+            throw VoiceFoundationVerificationError.failed("voice_brightness_decrease_readback")
+        }
+
+        let maximumVolume = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "volume-maximum-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool,
+            argumentsJSON: "{\"operation\":\"preset\",\"preset\":\"maximum\"}"
+        )
+        let maximumVolumeObject = try voiceJSON(maximumVolume)
+        guard maximumVolumeObject["status"] as? String == "succeeded",
+              maximumVolumeObject["percent"] as? Double == 100,
+              maximumVolumeObject["readback"] as? String == "verified",
+              approvalCount == 8 else {
+            throw VoiceFoundationVerificationError.failed("voice_volume_maximum_readback")
+        }
+
+        let invalidControls = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "invalid-controls-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool,
+            argumentsJSON: "{\"operation\":\"decrease\",\"value\":10,\"preset\":\"minimum\"}"
+        )
+        guard try voiceJSON(invalidControls)["code"] as? String == "invalid_arguments",
+              approvalCount == 8 else {
+            throw VoiceFoundationVerificationError.failed("voice_controls_strict_arguments")
+        }
+
+        let replay = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "timer-start-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
+            argumentsJSON: "{\"durationSeconds\":600,\"title\":\"集中\"}"
+        )
+        guard replay == timer, approvalCount == 8 else {
+            throw VoiceFoundationVerificationError.failed("voice_tool_idempotency")
+        }
+        let duplicate = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "duplicate-json-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
+            argumentsJSON: "{\"durationSeconds\":60,\"durationSeconds\":120}"
+        )
+        guard try voiceJSON(duplicate)["code"] as? String == "invalid_arguments" else {
+            throw VoiceFoundationVerificationError.failed("voice_duplicate_json_accepted")
+        }
+
+        let deniedRuntime = try OpenAIRealtimeMacOSCapabilityRuntime(
+            context: context,
+            calendarAccessGranted: { false },
+            timeZoneID: { "Asia/Tokyo" },
+            now: { now },
+            approvalHandler: { _ in false }
+        )
+        guard try deniedRuntime.sessionTools().count == 4 else {
+            throw VoiceFoundationVerificationError.failed("voice_calendar_permission_surface")
+        }
+        let deniedCalendar = await deniedRuntime.execute(
+            sessionID: "voice-session-2",
+            callID: "calendar-denied-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.calendarListTool,
+            argumentsJSON: "{}"
+        )
+        guard try voiceJSON(deniedCalendar)["code"] as? String == "permission_denied" else {
+            throw VoiceFoundationVerificationError.failed("voice_calendar_permission_denied")
+        }
+        let deniedTimer = await deniedRuntime.execute(
+            sessionID: "voice-session-2",
+            callID: "timer-denied-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
+            argumentsJSON: "{\"durationSeconds\":60}"
+        )
+        guard try voiceJSON(deniedTimer)["code"] as? String == "user_rejected" else {
+            throw VoiceFoundationVerificationError.failed("voice_timer_rejection")
+        }
+
+        var rejectionCount = 0
+        let rateRuntime = try OpenAIRealtimeMacOSCapabilityRuntime(
+            context: context,
+            calendarAccessGranted: { false },
+            timeZoneID: { "Asia/Tokyo" },
+            now: { now },
+            approvalHandler: { _ in
+                rejectionCount += 1
+                return false
+            }
+        )
+        var rateCodes: [String] = []
+        for index in 0..<4 {
+            let result = await rateRuntime.execute(
+                sessionID: "rate-session",
+                callID: "rate-call-\(index)",
+                toolName: OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
+                argumentsJSON: "{\"durationSeconds\":60,\"title\":\"拒否\"}"
+            )
+            rateCodes.append(try voiceJSON(result)["code"] as? String ?? "")
+        }
+        guard rateCodes == ["user_rejected", "user_rejected", "user_rejected", "approval_rate_limited"],
+              rejectionCount == 3 else {
+            throw VoiceFoundationVerificationError.failed("voice_approval_rate_limit")
+        }
+
+        var calendarGranted = true
+        var approvalStarted = false
+        let cancellationRuntime = try OpenAIRealtimeMacOSCapabilityRuntime(
+            context: context,
+            calendarAccessGranted: { calendarGranted },
+            timeZoneID: { "Asia/Tokyo" },
+            now: { now },
+            approvalHandler: { _ in
+                approvalStarted = true
+                do {
+                    try await Task.sleep(nanoseconds: 5_000_000_000)
+                    return true
+                } catch {
+                    return false
+                }
+            }
+        )
+        let createdBeforeCancellation = calendar.createdCount
+        let pending = Task { @MainActor in
+            await cancellationRuntime.execute(
+                sessionID: "cancel-session",
+                callID: "cancel-calendar-call",
+                toolName: OpenAIRealtimeMacOSCapabilityRuntime.calendarCreateTool,
+                argumentsJSON: "{\"title\":\"取り消す予定\",\"start\":\"2027-01-15T11:00:00+09:00\",\"end\":\"2027-01-15T12:00:00+09:00\",\"isAllDay\":false}"
+            )
+        }
+        try await waitUntil { approvalStarted }
+        calendarGranted = false
+        cancellationRuntime.cancelSession("cancel-session")
+        let cancelled = await pending.value
+        guard try voiceJSON(cancelled)["code"] as? String == "session_cancelled",
+              calendar.createdCount == createdBeforeCancellation,
+              try cancellationRuntime.sessionTools().count == 4 else {
+            throw VoiceFoundationVerificationError.failed("voice_session_cancellation_or_grant_rebuild")
+        }
+    }
+
+    private static func voiceJSON(_ value: String) throws -> [String: Any] {
+        guard let object = try JSONSerialization.jsonObject(with: Data(value.utf8)) as? [String: Any] else {
+            throw VoiceFoundationVerificationError.failed("voice_json_output")
+        }
+        return object
     }
 
     private static func verifyAppLifetimeDetachAndRestart() async throws {
@@ -881,6 +1439,124 @@ private final class CountingOpenAIRealtimeCredentialStore: OpenAIRealtimeCredent
 
     func save(_ apiKey: OpenAIRealtimeAPIKey) throws { _ = apiKey }
     func delete() throws { }
+}
+
+@MainActor
+private final class ExplicitStartVoiceSessionAdapter: VoiceSessionAdapter {
+    var requiresExplicitStart: Bool { true }
+    private(set) var startCount = 0
+    private(set) var closeAudioSessionCount = 0
+    private(set) var stopCount = 0
+    private(set) var muted = true
+
+    func probeCompatibility() async -> VoiceAdapterGate { .ready }
+
+    func start() async throws {
+        startCount += 1
+        muted = false
+    }
+
+    func setMuted(_ muted: Bool) async {
+        self.muted = muted
+    }
+
+    func closeAudioSession() async {
+        closeAudioSessionCount += 1
+        muted = true
+    }
+
+    func stop() async {
+        stopCount += 1
+        muted = true
+    }
+}
+
+@MainActor
+private final class CancellableExplicitStartVoiceSessionAdapter: VoiceSessionAdapter {
+    var requiresExplicitStart: Bool { true }
+    private(set) var startCount = 0
+    private(set) var closeAudioSessionCount = 0
+    private var startContinuation: CheckedContinuation<Void, Error>?
+
+    func probeCompatibility() async -> VoiceAdapterGate { .ready }
+
+    func start() async throws {
+        startCount += 1
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                startContinuation = continuation
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancelStart()
+            }
+        }
+    }
+
+    func setMuted(_ muted: Bool) async { _ = muted }
+
+    func closeAudioSession() async {
+        closeAudioSessionCount += 1
+    }
+
+    func stop() async {
+        cancelStart()
+    }
+
+    private func cancelStart() {
+        startContinuation?.resume(throwing: CancellationError())
+        startContinuation = nil
+    }
+}
+
+@MainActor
+private final class VoiceFakeCalendarDataSource: CalendarCapabilityDataSource {
+    private var events: [String: CalendarCapabilityEvent]
+    private(set) var createdCount = 0
+
+    init(now: Date) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        let startOfDay = calendar.startOfDay(for: now)
+        let start = calendar.date(byAdding: .hour, value: 10, to: startOfDay)!
+        let end = calendar.date(byAdding: .hour, value: 1, to: start)!
+        let event = CalendarCapabilityEvent(
+            eventRef: "event-existing",
+            eventID: "google-existing",
+            safeTitle: "既存予定",
+            start: start,
+            end: end
+        )
+        events = [event.eventRef: event]
+    }
+
+    func listEvents(from start: Date, to end: Date) async throws -> [CalendarCapabilityEvent] {
+        events.values.filter { $0.start < end && $0.end > start }
+    }
+
+    func getEvent(eventRef: String) async throws -> CalendarCapabilityEvent? {
+        events[eventRef]
+    }
+
+    func createEvent(
+        _ request: CalendarCapabilityCreateRequest,
+        idempotencyKey: String
+    ) async throws -> CalendarCapabilityEvent {
+        createdCount += 1
+        let event = CalendarCapabilityEvent(
+            eventRef: "event-created-\(createdCount)",
+            eventID: "google-created-\(createdCount)",
+            safeTitle: request.title,
+            start: request.start,
+            end: request.end,
+            isAllDay: request.isAllDay,
+            allDayStart: request.allDayStart,
+            allDayEnd: request.allDayEnd
+        )
+        events[event.eventRef] = event
+        _ = idempotencyKey
+        return event
+    }
 }
 
 @MainActor

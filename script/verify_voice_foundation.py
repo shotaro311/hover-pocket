@@ -11,6 +11,7 @@ FOUNDATION_FIXTURE = ROOT / "contracts" / "voice" / "an3-a-foundation-fixture.js
 WINDOWS_RUNTIME_FIXTURE = ROOT / "contracts" / "voice" / "an3-b1-windows-runtime-fixture.json"
 WINDOWS_CAPABILITY_FIXTURE = ROOT / "contracts" / "voice" / "an3-b2-windows-capability-fixture.json"
 OPENAI_REALTIME_FIXTURE = ROOT / "contracts" / "voice" / "an3-b3a-openai-realtime-byok-fixture.json"
+MACOS_REALTIME_FIXTURE = ROOT / "contracts" / "voice" / "an3-b3b-macos-realtime-fixture.json"
 
 
 def fail(message: str) -> None:
@@ -22,6 +23,7 @@ def main() -> None:
     runtime_fixture = json.loads(WINDOWS_RUNTIME_FIXTURE.read_text(encoding="utf-8"))
     capability_fixture = json.loads(WINDOWS_CAPABILITY_FIXTURE.read_text(encoding="utf-8"))
     realtime_fixture = json.loads(OPENAI_REALTIME_FIXTURE.read_text(encoding="utf-8"))
+    macos_realtime_fixture = json.loads(MACOS_REALTIME_FIXTURE.read_text(encoding="utf-8"))
     compact_height = fixture["designTokens"]["compactHeight"]
     provider_kinds = fixture["providerKinds"]
     modes = fixture["modes"]
@@ -111,14 +113,126 @@ def main() -> None:
     mac_runtime = (
         ROOT / "Sources" / "HoverPocket" / "Voice" / "VoiceFoundation.swift"
     ).read_text(encoding="utf-8")
+    mac_codex_client = (
+        ROOT / "Sources" / "HoverPocket" / "Voice" / "CodexAppServerClient.swift"
+    ).read_text(encoding="utf-8")
+    mac_codex_coordinator = (
+        ROOT / "Sources" / "HoverPocket" / "Voice" / "CodexVoiceCoordinator.swift"
+    ).read_text(encoding="utf-8")
+    mac_codex_login = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "Voice"
+        / "CodexVoiceAccountLoginController.swift"
+    ).read_text(encoding="utf-8")
+    mac_codex_profile = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "Voice"
+        / "CodexVoiceAppServerProfile.swift"
+    ).read_text(encoding="utf-8")
+    mac_codex_probe = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "Voice"
+        / "CodexAppServerCompatibilityProbe.swift"
+    ).read_text(encoding="utf-8")
+    mac_codex_tool_route_probe = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "Voice"
+        / "CodexAppServerToolRouteProbe.swift"
+    ).read_text(encoding="utf-8")
+    mac_codex_foundation_verifier = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "App"
+        / "CodexAppServerVerificationCommand.swift"
+    ).read_text(encoding="utf-8")
+    mac_codex_login_helper = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "App"
+        / "CodexManagedLoginVerificationHelper.swift"
+    ).read_text(encoding="utf-8")
+    mac_codex_realtime_verifier = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "App"
+        / "CodexAppServerRealtimeVerificationCommand.swift"
+    ).read_text(encoding="utf-8")
+    mac_codex_transport = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "Voice"
+        / "CodexVoiceWebRTCTransport.swift"
+    ).read_text(encoding="utf-8")
+    mac_calendar_live_verifier = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "App"
+        / "CalendarCapabilityLiveVerificationCommand.swift"
+    ).read_text(encoding="utf-8")
+    mac_main = (
+        ROOT / "Sources" / "HoverPocket" / "main.swift"
+    ).read_text(encoding="utf-8")
     mac_realtime_provider = (
         ROOT / "Sources" / "HoverPocket" / "Voice" / "OpenAIRealtimeProvider.swift"
+    ).read_text(encoding="utf-8")
+    mac_realtime_transport = (
+        ROOT / "Sources" / "HoverPocket" / "Voice" / "OpenAIRealtimeMacOSTransport.swift"
+    ).read_text(encoding="utf-8")
+    mac_realtime_capabilities = (
+        ROOT / "Sources" / "HoverPocket" / "Voice" / "OpenAIRealtimeCapabilityRuntime.swift"
+    ).read_text(encoding="utf-8")
+    mac_app_settings = (
+        ROOT / "Sources" / "HoverPocket" / "State" / "AppSettings.swift"
     ).read_text(encoding="utf-8")
     mac_keychain = (
         ROOT / "Sources" / "HoverPocket" / "Services" / "GoogleOAuthKeychainStore.swift"
     ).read_text(encoding="utf-8")
     mac_settings = (
         ROOT / "Sources" / "HoverPocket" / "Views" / "SettingsView.swift"
+    ).read_text(encoding="utf-8")
+    mac_build_script = (ROOT / "script" / "build_and_run.sh").read_text(encoding="utf-8")
+    mac_package_script = (ROOT / "script" / "package_zip.sh").read_text(encoding="utf-8")
+    mac_voice_e2e_harness = (
+        ROOT / "script" / "voice_e2e_macos.sh"
+    ).read_text(encoding="utf-8")
+    mac_voice_e2e_receipt_verifier = (
+        ROOT / "script" / "verify_macos_voice_e2e_receipt.py"
+    ).read_text(encoding="utf-8")
+    mac_voice_e2e_performance_verifier = (
+        ROOT / "script" / "verify_macos_voice_e2e_performance.py"
+    ).read_text(encoding="utf-8")
+    mac_runtime_environment = (
+        ROOT / "Sources" / "HoverPocket" / "Support" / "HoverPocketRuntimeEnvironment.swift"
+    ).read_text(encoding="utf-8")
+    mac_voice_e2e_receipt = (
+        ROOT / "Sources" / "HoverPocket" / "Voice" / "MacOSVoiceE2EReceiptStore.swift"
+    ).read_text(encoding="utf-8")
+    mac_voice_e2e_performance = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "Voice"
+        / "MacOSVoiceE2EPerformanceStore.swift"
+    ).read_text(encoding="utf-8")
+    mac_voice_e2e_verifier = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "App"
+        / "MacOSVoiceE2EIsolationVerificationCommand.swift"
     ).read_text(encoding="utf-8")
     mac_window = (
         ROOT / "Sources" / "HoverPocket" / "Windowing" / "HoverWindowController.swift"
@@ -134,6 +248,14 @@ def main() -> None:
     ).read_text(encoding="utf-8")
     windows_options = (
         ROOT / "windows" / "src" / "HoverPocket.Shell" / "StartupOptions.cs"
+    ).read_text(encoding="utf-8")
+    windows_application_data = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Configuration"
+        / "HoverPocketApplicationData.cs"
     ).read_text(encoding="utf-8")
     windows_client = (
         ROOT
@@ -285,6 +407,22 @@ def main() -> None:
         / "Voice"
         / "VoiceProviderRuntime.cs"
     ).read_text(encoding="utf-8")
+    windows_voice_e2e_receipt = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Voice"
+        / "VoiceE2EReceiptStore.cs"
+    ).read_text(encoding="utf-8")
+    windows_voice_e2e_verifier = (
+        ROOT
+        / "windows"
+        / "src"
+        / "HoverPocket.Shell"
+        / "Verification"
+        / "VoiceE2EIsolationVerifier.cs"
+    ).read_text(encoding="utf-8")
     windows_credentials = (
         ROOT
         / "windows"
@@ -323,8 +461,14 @@ def main() -> None:
         if "localized(japanese: \"音声レーン\", english: \"Voice Lane\")" not in mac_voice:
             fail("macOS Voice accessibility region missing")
     if "VoiceLaneLocalization" not in mac_voice \
-            or "macOSのOpenAI Realtime音声transportはAN3-B3Bまで利用できません" not in mac_voice:
+            or "runtime.beginAudioSession()" not in mac_voice \
+            or "OpenAIRealtimeMacOSTransportHostView" not in mac_voice:
         fail("macOS Voice Japanese/English localization missing")
+    if mac_voice.count("runtime.endAudioSession()") != 1 \
+            or "if canEndAudioSession || canCancelAudioStart" not in mac_voice \
+            or "else if canResumeAudioSession" not in mac_voice \
+            or 'Image(systemName: "xmark.circle")' in mac_voice:
+        fail("macOS Voice start/cancel/end/resume is not bound to the single microphone control")
     if "ScrollView" not in mac_voice:
         fail("macOS Voice internal scroll missing")
     if "accessibilityReduceMotion" not in mac_voice:
@@ -816,23 +960,665 @@ def main() -> None:
         "failsBeforeCredentialRead": True,
         "failsBeforeNetwork": True,
     }:
-        fail("macOS AN3-B3B residual gate contract mismatch")
+        fail("historical AN3-B3A macOS residual gate contract mismatch")
+    if macos_realtime_fixture["phase"] != "AN3-B3B" \
+            or macos_realtime_fixture["operatingSystem"] != "macos" \
+            or macos_realtime_fixture["provider"] != "openai_realtime_byok" \
+            or macos_realtime_fixture["model"] != "gpt-realtime-2.1" \
+            or macos_realtime_fixture["endpoint"] != "https://api.openai.com/v1/realtime/calls":
+        fail("macOS AN3-B3B Realtime fixture identity drifted")
+    macos_activation = macos_realtime_fixture["activation"]
+    if macos_activation != {
+        "defaultOff": True,
+        "explicitMicrophoneClick": True,
+        "panelAttachedRequired": True,
+        "backgroundStart": False,
+        "trustedOrigin": "https://voice.hoverpocket.local/",
+    }:
+        fail("macOS Realtime explicit activation contract drifted")
+    macos_isolation = macos_realtime_fixture["isolation"]
+    if macos_isolation != {
+        "credentialStore": "keychain",
+        "webViewReceivesCredential": False,
+        "websiteDataStore": "non_persistent",
+        "externalNavigation": False,
+        "newWindows": False,
+        "inspectable": False,
+        "rawAudioPersistence": False,
+        "rawSdpLogging": False,
+    }:
+        fail("macOS Realtime isolation contract drifted")
+    if macos_realtime_fixture["bounds"] != {
+        "maximumSdpBytes": 262144,
+        "maximumEventBytes": 65536,
+        "maximumFunctionOutputBytes": 32768,
+        "maximumArgumentsBytes": 16384,
+        "maximumRememberedCalls": 512,
+    }:
+        fail("macOS Realtime allocation bounds drifted")
+    if not all(value in mac_codex_client for value in (
+        "typealias ServerRequestAdmissionHandler",
+        "serverRequestAdmissionHandler",
+        "maximumProtocolLineBytes",
+        "maximumErrorBufferBytes",
+        '"/Applications/ChatGPT.app/Contents/Resources/codex"',
+        "static func candidates",
+        "includePathLookupWhenFixedCandidatesExist",
+        "DispatchSemaphore(value: 0)",
+        "completion.wait(timeout: .now() + 2)",
+        "Darwin.kill(process.processIdentifier, SIGKILL)",
+        "processStarted",
+    )):
+        fail("macOS Codex app-server discovery, input admission, or allocation bounds are incomplete")
+    request_parse_position = mac_codex_client.find(
+        "let request = CodexAppServerRequest"
+    )
+    admission_position = mac_codex_client.find(
+        "await serverRequestAdmissionHandler(request)",
+        request_parse_position,
+    )
+    request_task_position = mac_codex_client.find(
+        "Task { await self.handleServerRequest(request) }",
+        admission_position,
+    )
+    if not (
+        0 <= request_parse_position < admission_position < request_task_position
+    ):
+        fail("macOS Codex ambient admission can be reordered behind tool execution")
+    if not all(value in mac_codex_coordinator for value in (
+        "initializingClientGeneration",
+        "quarantinedClientGenerations",
+        "isKnownClient",
+        "!quarantinedClientGenerations.contains(generation)",
+        "let wasQuarantined = quarantinedClientGenerations.contains(generation)",
+        "if wasQuarantined",
+        "verifyRealtimeLifecyclePolicy",
+        "verifyOneShotResolutionPolicy",
+        "waiterCountForVerification",
+    )):
+        fail("macOS Codex fallback, client quarantine, lifecycle, or generation isolation is incomplete")
+    if not all(value in mac_codex_probe for value in (
+        "timeout: 5",
+        "timeout: 15",
+        ".posixPermissions: 0o700",
+        "executableIdentity",
+        "for executable in candidates",
+        "probeCandidate(executable",
+    )):
+        fail("macOS Codex compatibility probe is not bounded or executable-pinned")
+    if not all(value in mac_codex_tool_route_probe for value in (
+        "CodexAppServerToolRouteProbeInvocation",
+        "runInvocation(",
+        '"response.function_call_arguments.done"',
+        "invocationCapture.complete",
+        "afterWrite:",
+    )) or not all(value in mac_codex_foundation_verifier for value in (
+        "verifyInstalledAppServerBrokerInvocation",
+        "CodexAppServerToolRouteProbe.runInvocation",
+        'result.request.method == "item/tool/call"',
+        'output["readback"] as? String == "verified"',
+        "timerStore.runningTimers.count == 1",
+    )):
+        fail("macOS Codex app-server tool call is not bound to Broker approval and readback")
+    if not all(value in mac_codex_login for value in (
+        '"account/login/start"',
+        '"account/login/cancel"',
+        '"account/login/completed"',
+        '"type": .string("chatgpt")',
+        '"useHostedLoginSuccessPage": .bool(true)',
+        '"appBrand": .string("chatgpt")',
+        "browserOpener(login.authURL)",
+        "Self.resolveProductionContexts",
+        "private nonisolated static func resolveProductionContexts()",
+        "NSWorkspace.shared.open(url)",
+        "CodexVoiceCoordinator.accountAdmissionCode(account) == nil",
+        "context.profile.hasValidManagedCredentialFile",
+        "loginTimeoutNanoseconds",
+        "cleanupTask",
+        "await pendingCleanup?.value",
+        "await task?.value",
+        "includePathLookupWhenFixedCandidatesExist: false",
+        "accountSelectionTimeout: TimeInterval = 20",
+        "accountRequestTimeout: TimeInterval = 8",
+        "client = selection.client",
+        "selection.requestTimeout < Self.accountRequestTimeout",
+        "guard !isShuttingDown",
+        "isShuttingDown = true",
+        "VoiceLaneRuntime.shared.credentialsDidChange()",
+    )) or '"apiKey"' in mac_codex_login \
+            or "CodexAppServerCompatibilityProbe.shared.probe" in mac_codex_login \
+            or 'cli_auth_credentials_store = "file"' not in mac_codex_profile \
+            or "case linkedExternalFile" not in mac_codex_profile \
+            or "case managedFile" not in mac_codex_profile \
+            or "CodexVoiceAccountLoginController.shared.shutdown()" not in mac_app \
+            or "ChatGPTでログイン" not in mac_settings \
+            or "@ObservedObject private var codexVoiceAccount" not in mac_settings:
+        fail("macOS Codex managed ChatGPT login is missing, API-key based, or not lifecycle-bounded")
+    if not all(value in mac_codex_foundation_verifier for value in (
+        "verifyManagedChatGPTLoginLifecycle",
+        "CodexManagedLoginPendingAction.allCases",
+        "managed_login_credential_reuse",
+        "managedLoginProcessesClosed",
+        "processCount: 3 + CodexManagedLoginPendingAction.allCases.count",
+        "browserOpenCount: 1 + CodexManagedLoginPendingAction.allCases.count",
+    )) or not all(value in mac_codex_login_helper for value in (
+        '"--verify-codex-managed-login-fake-app-server"',
+        '"account_read:signed_out"',
+        '"account_read:chatgpt"',
+        '"account/login/start"',
+        '"account/login/cancel"',
+        '"account/login/completed"',
+        '"credential_written"',
+        "O_NOFOLLOW",
+        "O_EXCL",
+        "fstat(descriptor, &status)",
+        "status.st_nlink == 1",
+    )) or not all(value in mac_main for value in (
+        "CodexManagedLoginVerificationHelper.argument",
+        "codex_app_server_managed_login_scenarios=",
+        "codex_app_server_managed_login_process_count=",
+        "codex_app_server_managed_login_browser=",
+        "codex_app_server_managed_login_credential_reuse=",
+        "codex_app_server_managed_login_process_state=",
+    )) or '"apiKey"' in mac_codex_login_helper:
+        fail("macOS Codex managed login lifecycle is not process-backed and deterministic")
+    model_verifier_start = mac_codex_foundation_verifier.find(
+        "static func runModelToolVerification()"
+    )
+    model_verifier_end = mac_codex_foundation_verifier.find(
+        "private static func waitForProcessExit",
+        model_verifier_start,
+    )
+    model_verifier = mac_codex_foundation_verifier[
+        model_verifier_start:model_verifier_end
+    ]
+    if model_verifier_start < 0 or model_verifier_end <= model_verifier_start \
+            or '--verify-codex-app-server-model-tool' not in mac_main \
+            or 'codex_app_server_requested_model=' not in mac_main \
+            or 'codex_app_server_requested_effort=' not in mac_main \
+            or 'modelToolVerificationModel = "gpt-5.6-sol"' not in mac_codex_foundation_verifier \
+            or 'modelToolVerificationEffort = "medium"' not in mac_codex_foundation_verifier \
+            or not all(value in model_verifier for value in (
+                "calendarAccessGranted: { false }",
+                "defer { try? FileManager.default.removeItem(at: root) }",
+                "bridge.dynamicTools.count == 4",
+                "OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool",
+                "OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool",
+                "OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool",
+                '"account/read"',
+                '"thread/start"',
+                '"turn/start"',
+                'notification.method == "turn/completed"',
+                'request.method == "item/tool/call"',
+                "afterWrite:",
+                "approvalCount == 1",
+                "calendar.createdCount == 0",
+                "stickyStore.notes.isEmpty",
+                "modelControlsUnchanged",
+                "timerStore.runningTimers.count == 1",
+                "admissionSnapshot.rejected == 0",
+                "waitForProcessExit(processID)",
+                "model_tool_workspace_leaked",
+            )) \
+            or "OPENAI_API_KEY" in model_verifier:
+        fail("macOS live Codex model tool verifier bypasses the bounded Timer-write-only contract")
+    if not all(value in mac_codex_realtime_verifier for value in (
+        "CodexAppServerCompatibilityProbe.shared.isCurrent",
+        "rootThreadEphemeral: true",
+        "websiteDataStore = .nonPersistent()",
+        "new RTCPeerConnection({iceServers: []})",
+        "gain.gain.value = 0",
+        "waitForProcessExit",
+        "CodexRealtimeProbeCloseGate",
+        "processStarted: { processID in",
+        "realtime_app_server_process_leaked",
+        "CodexAppServerRealtimeVerificationSafeError",
+        '"realtime_probe_page_unavailable"',
+        '"realtime_probe_offer_unavailable"',
+        '"realtime_probe_connection_unavailable"',
+    )) or "getUserMedia" in mac_codex_realtime_verifier:
+        fail("macOS Codex live verifier is not identity-pinned, microphone-free, or bounded")
+    if '--verify-codex-app-server-realtime' not in mac_main \
+            or '"version": .string("v3")' not in mac_codex_coordinator \
+            or 'rootThreadEphemeral' not in mac_codex_coordinator \
+            or 'realtime_closed_before_sdp' not in mac_codex_coordinator \
+            or 'pendingSDP.result.fail(.compatibility(errorCode))' not in mac_codex_coordinator \
+            or 'voices["defaultV1"]' in mac_codex_coordinator \
+            or 'voices["defaultV2"]' in mac_codex_coordinator:
+        fail("macOS Codex app-server realtime verifier or immediate SDP failure readback regressed")
     mac_realtime_adapter = mac_realtime_provider[
         mac_realtime_provider.find("final class OpenAIRealtimeMacOSVoiceSessionAdapter"):
         mac_realtime_provider.find("final class FailClosedVoiceProviderAdapter")
     ]
     if 'static let modelID = "gpt-realtime-2.1"' not in mac_realtime_provider \
             or 'https://api.openai.com/v1/realtime/calls' not in mac_realtime_provider \
-            or "static let macOSAudioTransportAvailable = false" not in mac_realtime_provider \
-            or "credentialStore.load" in mac_realtime_adapter \
-            or "URLSession" in mac_realtime_adapter \
-            or "throw OpenAIRealtimeMacOSTransportError.unavailableUntilAN3B3B" not in mac_realtime_adapter:
-        fail("macOS OpenAI Realtime seam crossed the AN3-B3B residual gate")
+            or "static let macOSAudioTransportAvailable = true" not in mac_realtime_provider \
+            or "var requiresExplicitStart: Bool { true }" not in mac_realtime_adapter \
+            or "try credentialStore.hasCredential()" not in mac_realtime_adapter \
+            or "transport.start(" not in mac_realtime_adapter:
+        fail("macOS OpenAI Realtime provider is not explicit-start and fail-closed")
+    if not all(value in mac_realtime_transport for value in (
+        "static let maximumSDPBytes = 262_144",
+        "static let maximumEventBytes = 65_536",
+        "static let maximumFunctionOutputBytes = 32_768",
+        'https://voice.hoverpocket.local/',
+        "URLSessionConfiguration.ephemeral",
+        "websiteDataStore = .nonPersistent()",
+        "webView.isInspectable = false",
+        "requestMediaCapturePermissionFor origin",
+        "type == .microphone",
+        "captureAuthorizationGeneration == generation",
+        "decisionHandler(allowed ? .allow : .cancel)",
+        "createWebViewWith configuration",
+        "try apiKey.withUTF8Bytes",
+        "response.function_call_arguments.done",
+        "conversation.item.create",
+        "function_call_output",
+        "response.create",
+        "failTransport",
+        "await self?.close()",
+        'failTransport("voice_realtime_event_invalid")',
+        'failTransport("voice_realtime_tool_result_invalid")',
+        "closingCapabilities?.cancelSession(closingSessionID)",
+        "javascriptBoolean(readback)",
+        "forcePageReset()",
+        "Content-Security-Policy",
+        "localTracks.every(track => track.readyState === 'ended')",
+        "let captureEpoch = 0;",
+        "const startEpoch = ++captureEpoch;",
+        "if (startEpoch !== captureEpoch)",
+        "stale_microphone_capture",
+    )):
+        fail("macOS native credential, media isolation, or bounded WebRTC contract is incomplete")
+    macos_start_position = mac_realtime_transport.find("async start(generation, sessionID)")
+    macos_epoch_position = mac_realtime_transport.find(
+        "const startEpoch = ++captureEpoch;",
+        macos_start_position,
+    )
+    macos_get_user_media_position = mac_realtime_transport.find(
+        "navigator.mediaDevices.getUserMedia",
+        macos_epoch_position,
+    )
+    macos_stale_position = mac_realtime_transport.find(
+        "if (startEpoch !== captureEpoch)",
+        macos_get_user_media_position,
+    )
+    macos_stale_stop_position = mac_realtime_transport.find(
+        "stream.getTracks().forEach(track => track.stop());",
+        macos_stale_position,
+    )
+    macos_close_position = mac_realtime_transport.find("close() {", macos_stale_stop_position)
+    macos_close_epoch_position = mac_realtime_transport.find(
+        "captureEpoch += 1;",
+        macos_close_position,
+    )
+    macos_empty_close_position = mac_realtime_transport.find(
+        "if (!state) return true;",
+        macos_close_epoch_position,
+    )
+    if not (
+        0 <= macos_start_position < macos_epoch_position < macos_get_user_media_position
+        < macos_stale_position < macos_stale_stop_position < macos_close_position
+        < macos_close_epoch_position < macos_empty_close_position
+    ):
+        fail("macOS pending microphone capture is not invalidated and stopped before empty close")
+    if "if (options.IsVerify)" not in windows_application_data \
+            or "Debug Voice E2E mode cannot be combined with --verify." not in windows_application_data:
+        fail("Windows Voice E2E can still collide with a verifier application-data override")
+    if not all(value in windows_voice_e2e_receipt for value in (
+        "ExpectedPhysicalProviderId = VoiceProviderIds.CodexAppServer",
+        "InvalidateProviderBoundEvidenceLocked()",
+        "_activeMediaProviderId",
+        "_userTranscriptCount = 0",
+        "_assistantTranscriptCount = 0",
+        "_completeTranscriptCount = 0",
+        "_timerCapabilityReadbackVerified = false",
+        "_physicalMediaUserConfirmed = false",
+    )):
+        fail("Windows Voice E2E provider-bound evidence invalidation is incomplete")
+    if not all(value in windows_voice_e2e_verifier for value in (
+        '"provider switch retained microphone evidence"',
+        '"provider switch retained user transcript evidence"',
+        '"provider roundtrip reused a previous media attempt"',
+        '"provider roundtrip restored stale Timer evidence"',
+        '"fresh provider-bound attempt missed physical confirmation"',
+    )):
+        fail("Windows Voice E2E provider roundtrip negative fixture is incomplete")
+    continuation_position = mac_realtime_transport.find("startContinuation = continuation")
+    javascript_start_position = mac_realtime_transport.find("window.hoverPocketVoice.start", continuation_position)
+    if continuation_position < 0 or javascript_start_position < continuation_position \
+            or "withTaskCancellationHandler" not in mac_realtime_transport \
+            or "try Task.checkCancellation()" not in mac_realtime_transport:
+        fail("macOS Realtime startup can lose connection completion or cancellation")
+    if not all(value in mac_realtime_capabilities for value in (
+        'calendarListTool = "calendar_events_list"',
+        'calendarCreateTool = "calendar_event_create"',
+        'timerStartTool = "timer_countdown_start"',
+        'stickyUpsertTool = "sticky_note_upsert"',
+        'controlsBrightnessSetTool = "controls_brightness_set"',
+        'controlsVolumeSetTool = "controls_volume_set"',
+        "PocketCapabilityKeys.stickyUpsert",
+        "PocketCapabilityKeys.controlsBrightnessGet",
+        "PocketCapabilityKeys.controlsBrightnessSet",
+        "PocketCapabilityKeys.controlsVolumeGet",
+        "PocketCapabilityKeys.controlsVolumeSet",
+        '"stableKey": .string("voice:',
+        "adjustment.valueRequired / 100",
+        'case "comfortable": 0.70',
+        'case "comfortable": 0.50',
+        "if case .timerStart = request.kind",
+        "context.registry.resolve",
+        "context.broker.prepare",
+        "context.broker.execute",
+        "NSAlert()",
+        "readback.status == .verified",
+        "maximumArgumentsBytes = 16_384",
+        "maximumRememberedCalls = 512",
+        "DuplicateKeyValidator",
+        "VoiceApprovalCoordinator",
+        "maximumStartsPerWindow = 3",
+        "beginSheetModal",
+        "func cancelSession(_ sessionID: String)",
+        "VoiceApprovalText.singleLine",
+        '"approval_rate_limited"',
+    )):
+        fail("macOS Realtime tools bypass the exact Registry/Broker/readback boundary")
+    if "settings.$voiceCalendarAccessEnabled" not in mac_app \
+            or "VoiceLaneRuntime.shared.capabilityGrantsDidChange()" not in mac_app \
+            or "func capabilityGrantsDidChange()" not in mac_runtime \
+            or "enqueueAudioCommand(.closeSession, adapter: adapter)" not in mac_runtime:
+        fail("macOS Voice permission revocation or terminal failure does not close/rebuild the session")
+    if mac_settings.count("VoiceLaneRuntime.shared.credentialsDidChange()") != 2 \
+            or "func credentialsDidChange()" not in mac_runtime \
+            or "voiceStartBlockedByConfiguration" not in mac_voice \
+            or "&& runtime.snapshot.safeErrorCode == nil" in mac_voice:
+        fail("macOS Voice credential refresh or transient retry contract is incomplete")
+    if "Voice conversations with OpenAI Realtime" not in mac_build_script:
+        fail("macOS microphone purpose string omits the OpenAI Realtime destination")
+    if not all(value in mac_build_script for value in (
+        "NSLocalNetworkUsageDescription",
+        "establish WebRTC Voice connections",
+        "does not browse for nearby devices",
+        '*" --voice-e2e --voice-e2e-root "*',
+    )):
+        fail("macOS package runtime boundary or local network purpose string regressed")
+    if not all(value in mac_build_script for value in (
+        'HOVERPOCKET_SWIFT_CONFIGURATION="${HOVERPOCKET_SWIFT_CONFIGURATION:-debug}"',
+        'swift build -c "$HOVERPOCKET_SWIFT_CONFIGURATION"',
+        '.build/$HOVERPOCKET_SWIFT_CONFIGURATION/$PRODUCT_NAME',
+        '.build/$HOVERPOCKET_SWIFT_CONFIGURATION/Sparkle.framework',
+        '.build/$HOVERPOCKET_SWIFT_CONFIGURATION/libMediaRemoteAdapter.dylib',
+        'E2E bundle requires the debug Swift configuration',
+        'Release Sparkle framework not found',
+        'Release mediaremote-adapter artifacts not found',
+    )) or mac_package_script.count("HOVERPOCKET_SWIFT_CONFIGURATION=release") != 2 \
+            or not all(value in mac_package_script for value in (
+                'Release Sparkle framework is missing',
+                'Release mediaremote adapter is missing',
+                "grep -Fq '@rpath/Sparkle.framework/'",
+                "grep -Fq '@rpath/libMediaRemoteAdapter.dylib'",
+            )):
+        fail("macOS distribution package is not pinned to a Release Swift build")
+    if not all(value in mac_runtime_environment for value in (
+        'static let voiceE2EFlag = "--voice-e2e"',
+        'static let voiceE2ERootFlag = "--voice-e2e-root"',
+        'static let voiceE2EBundleIdentifier = "local.codex.hover-pocket.voice-e2e"',
+        'static let voiceE2EBuildInfoKey = "HoverPocketVoiceE2EBuild"',
+        "guard debugBuild else",
+        '"voice_e2e_release_rejected"',
+        '$0.hasPrefix("--verify")',
+        '"voice_e2e_verifier_combination_rejected"',
+        "root.deletingLastPathComponent() == temporaryRoot",
+        "externalIntegrationsEnabled: false",
+        '"voice_e2e_arguments_required"',
+        "settingsDefaults: EphemeralAppSettingsDefaults()",
+        "ProviderRegistry(providers: [TimerProvider()])",
+        "settings.voiceProvider = .codexAppServer",
+    )):
+        fail("macOS Voice E2E is not a Debug-only isolated runtime")
+    if not all(value in mac_build_script for value in (
+        'HOVERPOCKET_VOICE_E2E_BUILD',
+        'HoverPocketVoiceE2EBuild-*',
+        'HoverPocketVoiceE2E.app',
+        'local.codex.hover-pocket.voice-e2e',
+        '<key>HoverPocketVoiceE2EBuild</key>',
+        'CODESIGN_IDENTITY="-"',
+        'ENTITLEMENTS_PATH="$ROOT_DIR/Resources/HoverPocket.entitlements"',
+    )):
+        fail("macOS Voice E2E bundle build contract is incomplete")
+    if not all(value in mac_voice_e2e_receipt for value in (
+        "static let allowedKeys: Set<String>",
+        "$0.role == .user && $0.isFinal",
+        "$0.role == .assistant && $0.isFinal",
+        'lastSafeEvent = "safe_close"',
+        "physicalConfirmationRequested",
+        "mediaAttemptID",
+        "mediaAttemptProviderID",
+        "expectedPhysicalProviderID",
+        "invalidateProviderBoundEvidence()",
+        "providerID != nextProviderID",
+        "attemptID == mediaAttemptID",
+        "recordPhysicalMediaUserConfirmation",
+        "microphoneAcquired = false",
+        "remoteAudioTrackEver = false",
+        "remoteAudioPlaybackEver = false",
+        "userTranscriptCount = 0",
+        "assistantTranscriptCount = 0",
+        "timerCapabilityReadbackVerified = false",
+        "physicalMediaUserConfirmed = false",
+        "data.write(to: receiptURL, options: .atomic)",
+    )) or "snapshot.transcript.map" in mac_voice_e2e_receipt:
+        fail("macOS Voice E2E receipt is not allowlisted, count-only, or atomic")
+    if not all(value in mac_voice_e2e_performance for value in (
+        "static let allowedKeys: Set<String>",
+        "maximumLatencySamples = 10",
+        "currentAttemptAttached",
+        "microphoneToAttachedSamplesMilliseconds",
+        "microphoneToAttachedP95Milliseconds",
+        "snapshotPublishCount",
+        "expandedRPCCount",
+        "realtimeStopRPCCount",
+        "maximumRealtimeStopRPCCount",
+        "measurementDurationMilliseconds",
+        "writeQueue.async",
+        "scheduleWrite()",
+        "flushSynchronously(event: String)",
+        "data.write(to: receiptURL, options: .atomic)",
+    )):
+        fail("macOS Voice E2E performance receipt is incomplete")
+    if not all(value in mac_codex_coordinator for value in (
+        "MacOSVoiceE2EPerformanceStore.shared?.recordExpandedRPC(",
+        "MacOSVoiceE2EPerformanceStore.shared?.recordRealtimeStopRPC()",
+    )):
+        fail("macOS Codex Voice E2E performance hooks are incomplete")
+    if "performanceFlushSynchronously: true" not in mac_app:
+        fail("macOS Voice E2E termination lacks synchronous performance readback")
+    mac_realtime_page = mac_realtime_transport[
+        mac_realtime_transport.find("static let page ="):
+    ]
+    if not all(value in mac_realtime_transport for value in (
+        "MacOSVoiceE2EReceiptStore.shared?.beginMediaSession()",
+        "MacOSVoiceE2EPerformanceStore.shared?.recordTransportAttached()",
+        "receiptStore.recordMediaEvent(event)",
+        "guard let attemptID = receiptStore.claimPhysicalConfirmationRequest()",
+        "MacOSVoiceE2EPhysicalMediaConfirmation.present()",
+        "attemptID: attemptID",
+        "MacOSVoiceE2EReceiptStore.shared?.recordSafeClose()",
+        "event:'microphoneAcquired'",
+        "event:'remoteAudioTrackReceived'",
+        "event:'remoteAudioPlaybackSucceeded'",
+    )) or "physicalMediaUserConfirmed" in mac_realtime_page \
+            or "recordPhysicalMediaUserConfirmation" in mac_realtime_page:
+        fail("macOS Voice E2E media receipt or Host-owned physical confirmation drifted")
+    if not all(value in mac_codex_transport for value in (
+        "MacOSVoiceE2EReceiptStore.shared?.beginMediaSession()",
+        "MacOSVoiceE2EPerformanceStore.shared?.recordTransportAttached()",
+        "private func recordE2EMediaEvent(_ event: MacOSVoiceE2EMediaEvent)",
+        "receiptStore.recordMediaEvent(event)",
+        "guard let attemptID = receiptStore.claimPhysicalConfirmationRequest()",
+        "MacOSVoiceE2EPhysicalMediaConfirmation.present()",
+        "attemptID: attemptID",
+        "MacOSVoiceE2EReceiptStore.shared?.recordSafeClose()",
+        'case "microphone_acquired"',
+        'case "remote_audio_track"',
+        'case "remote_audio_playing"',
+    )):
+        fail("macOS Codex Voice E2E media receipt or physical confirmation drifted")
+    codex_attempt_pos = mac_codex_transport.find(
+        "MacOSVoiceE2EReceiptStore.shared?.beginMediaSession()"
+    )
+    codex_authorization_pos = mac_codex_transport.find(
+        "CodexVoiceSystemMicrophoneAuthorizationPolicy.decision("
+    )
+    if mac_codex_transport.count(
+        "MacOSVoiceE2EReceiptStore.shared?.beginMediaSession()"
+    ) != 1 or not 0 <= codex_attempt_pos < codex_authorization_pos:
+        fail("macOS Codex Voice latency measurement does not start at user microphone intent")
+    if "recordTimerCapabilityReadbackVerified()" not in mac_realtime_capabilities:
+        fail("macOS Voice E2E lacks Timer Broker readback evidence")
+    if not all(value in mac_voice_e2e_harness for value in (
+        "Build",
+        "Run",
+        "Readback",
+        "ValidateIsolation",
+        "Validate",
+        "Stop",
+        "Cleanup",
+        "Voice E2E-only Codex app-server profile",
+        "Host Codex credentials and API keys are never",
+        "validate_owned_process",
+        '[[ "$command" == "$executable --voice-e2e --voice-e2e-root $runtime_root" ]]',
+        "find_exact_process",
+        '/usr/bin/open -n "$app_path" --args',
+        "acquire_session_operation_lock",
+        ".voice-e2e-operation-lock",
+        '[[ ! -L "$entry_path" ]]',
+        'matching_pids="$(find_exact_process "$expected_command")"',
+        "physical Codex Voice E2E requires an isolated managed credential",
+        "voice_e2e_codex_profile_isolation=ok",
+        "E2E bundle must use an ad-hoc signature",
+        "E2E bundle must not use a certificate identity",
+        "--stage stopped",
+        "voice-e2e-performance.json",
+        "performanceReceiptRequired",
+        "--require-receipt",
+        "expectedProviderId",
+        "E2E_EXPECTED_PROVIDER",
+        "require_provider_bound_session",
+        '--expected-provider "$E2E_EXPECTED_PROVIDER"',
+    )):
+        fail("macOS Voice E2E operational harness is incomplete")
+    stopped_receipt_pos = mac_voice_e2e_harness.find('--stage stopped')
+    stopped_lifecycle_pos = mac_voice_e2e_harness.find(
+        'plutil -replace lifecycle -string stopped'
+    )
+    if stopped_receipt_pos < 0 or stopped_lifecycle_pos <= stopped_receipt_pos:
+        fail("macOS Voice E2E commits stopped state before receipt validation")
+    if not all(value in mac_voice_e2e_receipt_verifier for value in (
+        "ALLOWED_KEYS",
+        "set(payload) != ALLOWED_KEYS",
+        'parser.add_argument("--self-test", action="store_true")',
+        'validate_stage(rejected, "physical", "codex_app_server")',
+        'choices=("summary", "isolation", "physical", "stopped")',
+        'parser.add_argument(\n        "--expected-provider"',
+        '"codex_app_server"',
+        'receipt provider does not match the session binding',
+        'mismatched_provider in ("openai_realtime_byok", "off")',
+        'expected_provider != "codex_app_server"',
+        'choices=("codex_app_server",)',
+        'validate_stage(byok, "physical", "openai_realtime_byok")',
+        '"physicalMediaUserConfirmed": True',
+        'payload["lastSafeEvent"] != "safe_close"',
+    )):
+        fail("macOS Voice E2E receipt validator is incomplete")
+    if not all(value in mac_voice_e2e_performance_verifier for value in (
+        "ALLOWED_KEYS",
+        "nearest_rank_p95",
+        'choices=("idle", "active", "stopped")',
+        "stop_count > 1 or maximum_stop_count > 1",
+        'payload["currentAttemptAttached"] and stop_count != 1',
+        'parser.add_argument("--require-receipt", action="store_true")',
+        'payload["lastSafeEvent"] != "safe_close"',
+        'parser.add_argument("--self-test", action="store_true")',
+    )):
+        fail("macOS Voice E2E performance validator is incomplete")
+    if not all(value in mac_voice_e2e_verifier for value in (
+        "debugBuild: false",
+        'code: "voice_e2e_release_rejected"',
+        'code: "voice_e2e_verifier_combination_rejected"',
+        'code: "voice_e2e_arguments_required"',
+        '"voice_e2e_root_not_fresh"',
+        '"voice_e2e_root_type_rejected"',
+        "MacOSVoiceE2EReceiptStore.allowedKeys",
+        '"receipt_attempt_microphone_stale"',
+        '"receipt_attempt_user_transcript_stale"',
+        '"receipt_attempt_timer_stale"',
+        '"receipt_attempt_confirmation_stale"',
+        '"receipt_stale_confirmation_accepted"',
+        '"physical_confirmation_wrong_provider_claimed"',
+        '"physical_confirmation_cross_provider_attempt_claimed"',
+        '"receipt_provider_roundtrip_reused_attempt"',
+        '"receipt_provider_roundtrip_timer_stale"',
+        '"receipt_provider_roundtrip_fresh_confirmation_failed"',
+        'stopped.lastSafeEvent == "safe_close"',
+        '"performance_failed_attempt_marked_attached"',
+        '"performance_synchronous_safe_close"',
+    )):
+        fail("macOS Voice E2E deterministic verifier is incomplete")
+    if "if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled" not in mac_settings \
+            or mac_app.count("HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled") < 4:
+        fail("macOS Voice E2E external Settings and lifecycle actions are not gated")
+    calendar_default = mac_app_settings[
+        mac_app_settings.find("self.voiceCalendarAccessEnabled ="):
+        mac_app_settings.find("if defaults.data", mac_app_settings.find("self.voiceCalendarAccessEnabled ="))
+    ]
+    if "? false" not in calendar_default \
+            or "isShowingVoiceCalendarAccessConfirmation = true" not in mac_settings \
+            or "APIキーはネイティブ側だけで使用" not in mac_settings:
+        fail("macOS Voice Calendar or native credential consent does not default closed")
     if "providerID: providerID" not in mac_app \
-            or "VoiceProviderAdapterFactory.factory(providerID: providerID)" not in mac_app \
+            or "VoiceProviderAdapterFactory.factory(" not in mac_app \
+            or "settings: settings" not in mac_app \
+            or "VoiceCapabilityContext(" not in mac_app \
+            or "voiceCapabilityContext: voiceCapabilityContext" not in mac_app \
             or "Publishers.CombineLatest3" not in mac_app \
             or "settings.$voiceProvider.removeDuplicates()" not in mac_app:
         fail("macOS Voice provider/settings are not composed into the Host runtime")
+    if "switch snapshot.providerID" not in mac_app \
+            or "CodexAppServerMacOSRuntime.host.snapshot.availability == .ready" not in mac_app:
+        fail("macOS Voice E2E provider readiness readback bypasses the selected provider")
+    if '--verify-calendar-capability-read-only' not in mac_main \
+            or not all(value in mac_calendar_live_verifier for value in (
+                'CommandLine.arguments.contains("--grant-calendar-read")',
+                "HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled",
+                "GoogleOAuthKeychainStore().load()",
+                "Task.sleep(for: .seconds(5))",
+                "allowsStoredCredentialMutation: false",
+                "GoogleCalendarStore(oauth: oauth)",
+                "PocketCapabilityHandlerSet(handlers: [",
+                "CalendarListCapabilityHandler(dataSource: calendarDataSource)",
+                "LiveCalendarCapabilityDataSource(",
+                "lastSafeFailure = result.failure",
+                "CapabilityRegistry(handlers: handlers)",
+                "CapabilityBroker(",
+                "PocketCapabilityKeys.calendarList",
+                'permissions: ["calendar.events.read"]',
+                "preparation.approvalRequest == nil",
+                "step.readback.status == .verified",
+                'calendar_capability_audit=redacted',
+                'auditText.contains("\\\"safeTitle\\\"")',
+                'auditText.contains("\\\"eventRef\\\"")',
+                'auditText.contains("\\\"calendarId\\\"")',
+                '"calendar_credential_check_timed_out"',
+                '"calendar_request_failed"',
+                '"calendar_network_timed_out"',
+                'step.safeError?.code == "CAPABILITY_TIMEOUT"',
+                '"calendar_capability_timed_out"',
+            )) or "ProviderCapabilityCompositionRoot.live" in mac_calendar_live_verifier \
+            or "TimerStore.shared" in mac_calendar_live_verifier \
+            or "StickyNotesStore.shared" in mac_calendar_live_verifier \
+            or "signIn(" in mac_calendar_live_verifier:
+        fail("macOS live Calendar read verifier bypasses grant, Broker, readback, redaction, or bounded credential access")
     if "func delete() throws" not in mac_realtime_provider \
             or "let status = SecItemDelete(baseQuery() as CFDictionary)" not in mac_keychain \
             or "status == errSecSuccess || status == errSecItemNotFound" not in mac_keychain \
@@ -929,7 +1715,8 @@ def main() -> None:
         f"{matrix_cases} geometry/state cases, root scope, default-off, "
         "legacy lane negative regression, internal scroll, accessibility, "
         "Windows explicit-origin microphone, fenced Realtime transport, "
-        "AN3-B2 Calendar/Timer Broker slice, and AN3-B3A OpenAI Realtime BYOK gates"
+        "AN3-B2 Calendar/Timer Broker slice, AN3-B3A OpenAI Realtime BYOK gates, "
+        "AN3-B3B macOS Realtime security gates, and explicit Codex model tool readback"
     )
 
 

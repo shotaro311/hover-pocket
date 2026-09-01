@@ -67,6 +67,7 @@ internal enum ControlsCapabilityOperation
     VolumeGet,
     VolumeSet,
     MuteSet,
+    BrightnessGet,
     BrightnessSet,
     MediaCommand
 }
@@ -81,6 +82,7 @@ internal sealed class ControlsCapabilityHandler(
         ControlsCapabilityOperation.VolumeGet => CapabilityIds.ControlsVolumeGet,
         ControlsCapabilityOperation.VolumeSet => CapabilityIds.ControlsVolumeSet,
         ControlsCapabilityOperation.MuteSet => CapabilityIds.ControlsMuteSet,
+        ControlsCapabilityOperation.BrightnessGet => CapabilityIds.ControlsBrightnessGet,
         ControlsCapabilityOperation.BrightnessSet => CapabilityIds.ControlsBrightnessSet,
         ControlsCapabilityOperation.MediaCommand => CapabilityIds.ControlsMediaCommand,
         _ => throw new InvalidOperationException("Unknown Controls Capability operation.")
@@ -91,7 +93,7 @@ internal sealed class ControlsCapabilityHandler(
         CapabilityHandlerContext context,
         CancellationToken cancellationToken = default)
     {
-        if (operation is not (ControlsCapabilityOperation.Availability or ControlsCapabilityOperation.VolumeGet))
+        if (operation is not (ControlsCapabilityOperation.Availability or ControlsCapabilityOperation.VolumeGet or ControlsCapabilityOperation.BrightnessGet))
         {
             _ = context.RequireIdempotencyKey();
         }
@@ -104,6 +106,19 @@ internal sealed class ControlsCapabilityHandler(
             case ControlsCapabilityOperation.VolumeGet:
                 RequireEmpty(arguments);
                 return VolumeOutput(RequireVolume(await dataSource.GetSnapshotAsync(cancellationToken)));
+            case ControlsCapabilityOperation.BrightnessGet:
+            {
+                var displayId = CapabilityJson.RequiredString(arguments, "displayId", 128);
+                CapabilitySchemaValidation.ExactKeys(arguments, ["displayId"]);
+                var snapshot = await dataSource.GetSnapshotAsync(cancellationToken);
+                var observed = snapshot.Displays.FirstOrDefault(display =>
+                    string.Equals(display.Id, displayId, StringComparison.Ordinal));
+                if (observed is null || !observed.Supported || observed.Value is null)
+                {
+                    throw new CapabilityHandlerException("CAPABILITY_UNAVAILABLE", "controls.display");
+                }
+                return BrightnessOutput(observed);
+            }
             case ControlsCapabilityOperation.VolumeSet:
             {
                 var target = CapabilityJson.RequiredNumber(arguments, "level", 0, 1);

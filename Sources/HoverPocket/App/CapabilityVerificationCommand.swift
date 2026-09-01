@@ -8,7 +8,7 @@ enum CapabilityVerificationCommand {
             do {
                 try await verify()
                 print("capability_verify=ok")
-                print("capability_handlers=20")
+                print("capability_handlers=21")
                 print("capability_calculator_evaluate=ok")
                 print("capability_controls_readback=ok")
                 print("capability_timer_lifecycle=ok")
@@ -52,6 +52,7 @@ enum CapabilityVerificationCommand {
             ControlsCapabilityHandler(operation: .volumeGet, dataSource: controls),
             ControlsCapabilityHandler(operation: .volumeSet, dataSource: controls),
             ControlsCapabilityHandler(operation: .muteSet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .brightnessGet, dataSource: controls),
             ControlsCapabilityHandler(operation: .brightnessSet, dataSource: controls),
             ControlsCapabilityHandler(operation: .mediaCommand, dataSource: controls),
             TimerCapabilityHandler(operation: .start, store: timerStore, idGenerator: { timerID }),
@@ -66,7 +67,7 @@ enum CapabilityVerificationCommand {
             StickyCapabilityHandler(operation: .delete, store: stickyStore)
         ])
 
-        guard handlers.keys.count == 20 else {
+        guard handlers.keys.count == 21 else {
             throw VerificationFailure("handler_count")
         }
         try await verifyCalculator(handlers: handlers)
@@ -161,6 +162,16 @@ enum CapabilityVerificationCommand {
         )
         try require(brightness["displayId"] == .string("display-1"), "controls_brightness_id")
         try require(brightness["level"] == .number(0.6), "controls_brightness_set")
+
+        let brightnessReadback = try await handlers.invoke(
+            PocketCapabilityKeys.controlsBrightnessGet,
+            arguments: ["displayId": .string("display-1")]
+        )
+        try require(brightnessReadback == [
+            "displayId": .string("display-1"),
+            "level": .number(0.6),
+            "controllable": .bool(true)
+        ], "controls_brightness_get")
 
         let media = try await handlers.invoke(
             PocketCapabilityKeys.controlsMediaCommand,
@@ -744,7 +755,7 @@ private struct VerificationFailure: Error, CustomStringConvertible {
 }
 
 @MainActor
-private final class FakeControlsCapabilityDataSource: ControlsCapabilityDataSource {
+final class FakeControlsCapabilityDataSource: ControlsCapabilityDataSource {
     private var display = ControlsDisplay(
         id: "display-1",
         displayID: 1,

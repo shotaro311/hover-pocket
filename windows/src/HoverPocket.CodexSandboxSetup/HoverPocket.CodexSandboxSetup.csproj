@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>HoverPocket.CodexSandboxSetup</AssemblyName>
+    <RootNamespace>HoverPocket.CodexSandboxSetup</RootNamespace>
+    <Version>0.2.7</Version>
+    <HoverPocketPublisherCertificateSha256 Condition="'$(HoverPocketPublisherCertificateSha256)' == ''"></HoverPocketPublisherCertificateSha256>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HoverPocket.CodexSandboxSetup.Contracts\HoverPocket.CodexSandboxSetup.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(HoverPocketPublisherCertificateSha256)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>HoverPocketPublisherCertificateSha256</_Parameter1>
+      <_Parameter2>$(HoverPocketPublisherCertificateSha256)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>

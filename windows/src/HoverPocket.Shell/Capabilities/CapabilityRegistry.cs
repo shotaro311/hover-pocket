@@ -158,6 +158,14 @@ internal static class PocketCapabilityDescriptors
             CapabilitySchemaValidation.ControlsAvailabilityOutput,
             ["volumeAvailable", "brightnessAvailable", "mediaAvailable", "displayIds"]),
         ControlsDescriptor(
+            CapabilityIds.ControlsBrightnessGet,
+            CapabilityEffect.PrivateRead,
+            CapabilityApprovalPolicy.PermissionGrant,
+            CapabilityIdempotencyPolicy.Optional,
+            CapabilitySchemaValidation.ControlsBrightnessGetInput,
+            CapabilitySchemaValidation.ControlsBrightnessOutput,
+            ["displayId", "level", "controllable"]),
+        ControlsDescriptor(
             CapabilityIds.ControlsBrightnessSet,
             CapabilityEffect.ReversibleLocalWrite,
             CapabilityApprovalPolicy.BrokerPolicy,
@@ -488,6 +496,12 @@ internal static partial class CapabilitySchemaValidation
         ExactKeys(value, ["displayId", "level"]);
         _ = String(value, "displayId", 1, 128);
         _ = Number(value, "level", 0.05, 1);
+    }
+
+    public static void ControlsBrightnessGetInput(JsonElement value)
+    {
+        ExactKeys(value, ["displayId"]);
+        _ = String(value, "displayId", 1, 128);
     }
 
     public static void ControlsMediaInput(JsonElement value)

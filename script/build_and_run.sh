@@ -6,6 +6,9 @@ APP_NAME="HoverPocket"
 DISPLAY_NAME="ホバーポケット"
 PRODUCT_NAME="HoverPocket"
 LEGACY_PROCESS_NAMES=("NotchPocket" "NotchPokke" "HoverMenuPreview")
+VOICE_E2E_BUILD="${HOVERPOCKET_VOICE_E2E_BUILD:-0}"
+VOICE_E2E_BUILD_ROOT="${HOVERPOCKET_VOICE_E2E_BUILD_ROOT:-}"
+HOVERPOCKET_SWIFT_CONFIGURATION="${HOVERPOCKET_SWIFT_CONFIGURATION:-debug}"
 BUNDLE_DIR="$ROOT_DIR/dist/$APP_NAME.app"
 EXECUTABLE_PATH="$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
 APP_ICON_NAME="AppIcon"
@@ -17,6 +20,50 @@ DEFAULT_SPARKLE_FEED_URL="${DEFAULT_SPARKLE_FEED_URL:-}"
 DEFAULT_SPARKLE_PUBLIC_ED_KEY="J2afuh/KnvOiS3eoNrMJoCyldAXL+Oku9scoSS5OUJE="
 
 cd "$ROOT_DIR"
+
+case "$HOVERPOCKET_SWIFT_CONFIGURATION" in
+  debug|release)
+    ;;
+  *)
+    echo "error: Swift configuration must be debug or release" >&2
+    exit 1
+    ;;
+esac
+
+validate_voice_e2e_build_root() {
+  local configured_root="$1"
+  local temporary_root
+  local resolved_root
+  [[ -n "$configured_root" && -d "$configured_root" && ! -L "$configured_root" ]] || {
+    echo "error: E2E build root must be an existing directory" >&2
+    return 1
+  }
+  temporary_root="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
+  resolved_root="$(cd "$configured_root" && pwd -P)"
+  [[ "$(dirname "$resolved_root")" == "$temporary_root" ]] || {
+    echo "error: E2E build root must be a direct child of the system temp directory" >&2
+    return 1
+  }
+  [[ "$(basename "$resolved_root")" == HoverPocketVoiceE2EBuild-* ]] || {
+    echo "error: E2E build root name is invalid" >&2
+    return 1
+  }
+  [[ -z "$(find "$resolved_root" -mindepth 1 -maxdepth 1 -print -quit)" ]] || {
+    echo "error: E2E build root must be fresh" >&2
+    return 1
+  }
+  printf '%s' "$resolved_root"
+}
+
+if [[ "$VOICE_E2E_BUILD" == "1" || "$VOICE_E2E_BUILD" == "true" ]]; then
+  [[ "$HOVERPOCKET_SWIFT_CONFIGURATION" == "debug" ]] || {
+    echo "error: E2E bundle requires the debug Swift configuration" >&2
+    exit 1
+  }
+  VOICE_E2E_BUILD_ROOT="$(validate_voice_e2e_build_root "$VOICE_E2E_BUILD_ROOT")"
+  BUNDLE_DIR="$VOICE_E2E_BUILD_ROOT/HoverPocketVoiceE2E.app"
+  EXECUTABLE_PATH="$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
+fi
 
 read_env_key() {
   local key="$1"
@@ -51,20 +98,43 @@ xml_escape() {
   printf '%s' "$value"
 }
 
-BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-$(read_env_key BUNDLE_IDENTIFIER)}"
-BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-local.codex.hover-pocket}"
-GOOGLE_SIGN_IN_CLIENT_ID="${GOOGLE_SIGN_IN_CLIENT_ID:-$(read_env_key GOOGLE_SIGN_IN_CLIENT_ID)}"
-GOOGLE_SIGN_IN_REVERSED_CLIENT_ID="${GOOGLE_SIGN_IN_REVERSED_CLIENT_ID:-$(read_env_key GOOGLE_SIGN_IN_REVERSED_CLIENT_ID)}"
-GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-$(read_env_key GOOGLE_CLIENT_ID)}"
-GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-$(read_env_key GOOGLE_CLIENT_SECRET)}"
-GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK="${GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK:-$(read_env_key GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK)}"
-CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-$(read_env_key CODESIGN_IDENTITY)}"
-CODESIGN_HARDENED_RUNTIME="${CODESIGN_HARDENED_RUNTIME:-$(read_env_key CODESIGN_HARDENED_RUNTIME)}"
-HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX="${HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX:-$(read_env_key HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX)}"
-SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-$(read_env_key SPARKLE_FEED_URL)}"
-SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-$(read_env_key SPARKLE_PUBLIC_ED_KEY)}"
-SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-$DEFAULT_SPARKLE_FEED_URL}"
-SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-$DEFAULT_SPARKLE_PUBLIC_ED_KEY}"
+VOICE_E2E_PLIST=""
+if [[ "$VOICE_E2E_BUILD" == "1" || "$VOICE_E2E_BUILD" == "true" ]]; then
+  BUNDLE_IDENTIFIER="local.codex.hover-pocket.voice-e2e"
+  GOOGLE_SIGN_IN_CLIENT_ID=""
+  GOOGLE_SIGN_IN_REVERSED_CLIENT_ID=""
+  GOOGLE_CLIENT_ID=""
+  GOOGLE_CLIENT_SECRET=""
+  GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK=""
+  CODESIGN_IDENTITY="-"
+  CODESIGN_HARDENED_RUNTIME=""
+  HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX="${HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX:-}"
+  SPARKLE_FEED_URL=""
+  SPARKLE_PUBLIC_ED_KEY=""
+  ENTITLEMENTS_PATH="$ROOT_DIR/Resources/HoverPocket.entitlements"
+  [[ "$HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX" == voice-e2e-* ]] || {
+    echo "error: E2E build requires a unique voice-e2e-* Keychain suffix" >&2
+    exit 1
+  }
+  VOICE_E2E_PLIST="  <key>HoverPocketVoiceE2EBuild</key>
+  <true/>
+"
+else
+  BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-$(read_env_key BUNDLE_IDENTIFIER)}"
+  BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-local.codex.hover-pocket}"
+  GOOGLE_SIGN_IN_CLIENT_ID="${GOOGLE_SIGN_IN_CLIENT_ID:-$(read_env_key GOOGLE_SIGN_IN_CLIENT_ID)}"
+  GOOGLE_SIGN_IN_REVERSED_CLIENT_ID="${GOOGLE_SIGN_IN_REVERSED_CLIENT_ID:-$(read_env_key GOOGLE_SIGN_IN_REVERSED_CLIENT_ID)}"
+  GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-$(read_env_key GOOGLE_CLIENT_ID)}"
+  GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-$(read_env_key GOOGLE_CLIENT_SECRET)}"
+  GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK="${GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK:-$(read_env_key GOOGLE_OAUTH_ENABLE_LEGACY_FALLBACK)}"
+  CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-$(read_env_key CODESIGN_IDENTITY)}"
+  CODESIGN_HARDENED_RUNTIME="${CODESIGN_HARDENED_RUNTIME:-$(read_env_key CODESIGN_HARDENED_RUNTIME)}"
+  HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX="${HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX:-$(read_env_key HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX)}"
+  SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-$(read_env_key SPARKLE_FEED_URL)}"
+  SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-$(read_env_key SPARKLE_PUBLIC_ED_KEY)}"
+  SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-$DEFAULT_SPARKLE_FEED_URL}"
+  SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-$DEFAULT_SPARKLE_PUBLIC_ED_KEY}"
+fi
 if [[ -z "$HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX" ]]; then
   if [[ "$CODESIGN_IDENTITY" == Developer\ ID\ Application:* ]]; then
     HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX="release"
@@ -144,39 +214,63 @@ install_app_icon() {
   rm -rf "$(dirname "$iconset_dir")"
 }
 
-for process_name in "$APP_NAME" "${LEGACY_PROCESS_NAMES[@]}"; do
-  if pgrep -x "$process_name" >/dev/null 2>&1; then
-    pkill -x "$process_name" || true
+if [[ "$VOICE_E2E_BUILD" != "1" && "$VOICE_E2E_BUILD" != "true" ]]; then
+  stopped_process=false
+  for process_name in "$APP_NAME" "${LEGACY_PROCESS_NAMES[@]}"; do
+    while IFS= read -r process_id; do
+      [[ "$process_id" =~ ^[0-9]+$ ]] || continue
+      process_command="$(ps -p "$process_id" -o command= 2>/dev/null || true)"
+      if [[ "$process_command" == *" --voice-e2e --voice-e2e-root "* ]]; then
+        continue
+      fi
+      kill "$process_id" 2>/dev/null || true
+      stopped_process=true
+    done < <(pgrep -x "$process_name" 2>/dev/null || true)
+  done
+  if [[ "$stopped_process" == "true" ]]; then
     sleep 0.2
   fi
-done
+fi
 
-swift build
+swift build -c "$HOVERPOCKET_SWIFT_CONFIGURATION"
 
-rm -rf "$BUNDLE_DIR"
+if [[ "$VOICE_E2E_BUILD" == "1" || "$VOICE_E2E_BUILD" == "true" ]]; then
+  [[ ! -e "$BUNDLE_DIR" ]] || {
+    echo "error: refusing to overwrite an existing E2E app bundle" >&2
+    exit 1
+  }
+else
+  rm -rf "$BUNDLE_DIR"
+fi
 mkdir -p "$BUNDLE_DIR/Contents/MacOS" "$BUNDLE_DIR/Contents/Frameworks" "$BUNDLE_DIR/Contents/Resources"
-cp ".build/debug/$PRODUCT_NAME" "$EXECUTABLE_PATH"
+cp ".build/$HOVERPOCKET_SWIFT_CONFIGURATION/$PRODUCT_NAME" "$EXECUTABLE_PATH"
 chmod +x "$EXECUTABLE_PATH"
 install_app_icon
 
-SPARKLE_FRAMEWORK_PATH="$(find "$ROOT_DIR/.build" -maxdepth 5 -path '*/debug/Sparkle.framework' -type d 2>/dev/null | head -1)"
-if [[ -n "$SPARKLE_FRAMEWORK_PATH" ]]; then
+SPARKLE_FRAMEWORK_PATH="$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/Sparkle.framework"
+if [[ -d "$SPARKLE_FRAMEWORK_PATH" ]]; then
   ditto "$SPARKLE_FRAMEWORK_PATH" "$BUNDLE_DIR/Contents/Frameworks/Sparkle.framework"
   if ! otool -l "$EXECUTABLE_PATH" | grep -q '@executable_path/../Frameworks'; then
     install_name_tool -add_rpath "@executable_path/../Frameworks" "$EXECUTABLE_PATH"
   fi
+elif [[ "$HOVERPOCKET_SWIFT_CONFIGURATION" == "release" ]]; then
+  echo "error: Release Sparkle framework not found: $SPARKLE_FRAMEWORK_PATH" >&2
+  exit 1
 fi
 
 # mediaremote-adapter: メディア操作コマンドを Apple 署名の perl 経由で送るための dylib と
 # スクリプト。macOS 15.4+ ではこれがないと再生/停止・シークが効かない。
-ADAPTER_DYLIB_PATH="$(find "$ROOT_DIR/.build" -maxdepth 3 -path '*/debug/libMediaRemoteAdapter.dylib' -type f 2>/dev/null | head -1)"
-ADAPTER_RUN_SCRIPT="$(find "$ROOT_DIR/.build" -maxdepth 4 -path '*/debug/MediaRemoteAdapter_MediaRemoteAdapter.bundle/run.pl' -type f 2>/dev/null | head -1)"
-if [[ -n "$ADAPTER_DYLIB_PATH" && -n "$ADAPTER_RUN_SCRIPT" ]]; then
+ADAPTER_DYLIB_PATH="$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/libMediaRemoteAdapter.dylib"
+ADAPTER_RUN_SCRIPT="$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/MediaRemoteAdapter_MediaRemoteAdapter.bundle/run.pl"
+if [[ -f "$ADAPTER_DYLIB_PATH" && -f "$ADAPTER_RUN_SCRIPT" ]]; then
   cp "$ADAPTER_DYLIB_PATH" "$BUNDLE_DIR/Contents/Frameworks/libMediaRemoteAdapter.dylib"
   cp "$ADAPTER_RUN_SCRIPT" "$BUNDLE_DIR/Contents/Resources/mediaremote-adapter.pl"
   if ! otool -l "$EXECUTABLE_PATH" | grep -q '@executable_path/../Frameworks'; then
     install_name_tool -add_rpath "@executable_path/../Frameworks" "$EXECUTABLE_PATH"
   fi
+elif [[ "$HOVERPOCKET_SWIFT_CONFIGURATION" == "release" ]]; then
+  echo "error: Release mediaremote-adapter artifacts not found" >&2
+  exit 1
 else
   echo "warning: mediaremote-adapter artifacts not found; media commands will not work" >&2
 fi
@@ -208,7 +302,7 @@ cat > "$BUNDLE_DIR/Contents/Info.plist" <<PLIST
   <true/>
   <key>HoverPocketKeychainServiceSuffix</key>
   <string>$(xml_escape "$HOVERPOCKET_KEYCHAIN_SERVICE_SUFFIX")</string>
-${GOOGLE_SIGN_IN_PLIST}${GOOGLE_OAUTH_PLIST}  <key>NSAppTransportSecurity</key>
+${VOICE_E2E_PLIST}${GOOGLE_SIGN_IN_PLIST}${GOOGLE_OAUTH_PLIST}  <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsLocalNetworking</key>
     <true/>
@@ -218,7 +312,9 @@ ${SPARKLE_PLIST}  <key>SUEnableInstallerLauncherService</key>
   <key>NSCameraUsageDescription</key>
   <string>ホバーポケット uses the Mac camera to show a mirror preview while the hover panel is open.</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>ホバーポケット uses the microphone only for the mirror microphone check.</string>
+  <string>ホバーポケット uses the microphone for Voice conversations with OpenAI Realtime or the local Codex app-server, and for the mirror microphone check.</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>ホバーポケット uses local network access only to establish WebRTC Voice connections. It does not browse for nearby devices.</string>
   <key>NSLocationUsageDescription</key>
   <string>ホバーポケット uses your location only when you choose Current Location for the weather forecast.</string>
   <key>NSLocationWhenInUseUsageDescription</key>

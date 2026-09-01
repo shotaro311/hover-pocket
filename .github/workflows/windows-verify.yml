@@ -35,8 +35,183 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Prepare pinned Codex CLI for confinement canary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $vendorRoot = Join-Path $env:RUNNER_TEMP "hoverpocket-codex-0.145.0"
+          [void](New-Item -ItemType Directory -Path $vendorRoot)
+          $archiveNames = @(& npm pack "@openai/codex@0.145.0-win32-x64" --pack-destination $vendorRoot --silent)
+          if ($LASTEXITCODE -ne 0 -or $archiveNames.Count -ne 1) {
+            throw "Pinned Codex vendor archive download failed."
+          }
+          $archivePath = Join-Path $vendorRoot ([string]$archiveNames[0]).Trim()
+          $expectedArchiveSha512 = "bb487d964d3de02697452a84df84815b67516904cf6ba7c0497a9e85ccd61fd41db14eb6981b2202001da7ab421b88be6333e69a18c3f05757367606366c2e32"
+          $archiveSha512 = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA512).Hash.ToLowerInvariant()
+          if ($archiveSha512 -cne $expectedArchiveSha512) {
+            throw "Pinned Codex vendor archive integrity check failed."
+          }
+          & tar.exe -xzf $archivePath -C $vendorRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw "Pinned Codex vendor archive extraction failed."
+          }
+          $codexPackageRoot = Join-Path $vendorRoot "package\vendor\x86_64-pc-windows-msvc"
+          $codexBin = Join-Path $codexPackageRoot "bin\codex.exe"
+          "HOVERPOCKET_CODEX_BIN=$codexBin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "HOVERPOCKET_CODEX_PACKAGE_ROOT=$codexPackageRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify Codex generation confinement verifier
+        shell: pwsh
+        run: |
+          foreach ($scriptPath in @(
+            ".\windows\script\verify_codex_generation_confinement.ps1",
+            ".\windows\script\provision_codex_generation_sandbox.ps1")) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $scriptPath),
+              [ref]$tokens,
+              [ref]$errors)
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error $_.Message }
+              exit 1
+            }
+          }
+          .\windows\script\verify_codex_generation_confinement.ps1 -SelfTest
+          .\windows\script\provision_codex_generation_sandbox.ps1 -SelfTest
+
+      - name: Verify Codex sandbox provisioning is fail-closed
+        shell: pwsh
+        run: |
+          function Assert-ProvisioningFailClosed {
+            param([switch]$Provision)
+            $currentPwsh = Join-Path $PSHOME "pwsh.exe"
+            $caseArguments = @(
+              "-NoProfile",
+              "-NonInteractive",
+              "-File",
+              (Resolve-Path .\windows\script\provision_codex_generation_sandbox.ps1),
+              "-CodexBin",
+              "Z:\must-not-be-read\codex.exe")
+            if ($Provision) {
+              $caseArguments += "-Provision"
+            }
+            $start = [Diagnostics.ProcessStartInfo]::new()
+            $start.FileName = $currentPwsh
+            $start.UseShellExecute = $false
+            $start.CreateNoWindow = $true
+            $start.RedirectStandardOutput = $true
+            $start.RedirectStandardError = $true
+            foreach ($argument in $caseArguments) {
+              [void]$start.ArgumentList.Add([string]$argument)
+            }
+            $process = [Diagnostics.Process]::new()
+            $process.StartInfo = $start
+            try {
+              if (-not $process.Start()) {
+                throw "Codex sandbox fail-closed verifier did not start."
+              }
+              $stdout = $process.StandardOutput.ReadToEnd()
+              $stderr = $process.StandardError.ReadToEnd()
+              $process.WaitForExit()
+              if ($process.ExitCode -eq 0 -or "$stdout`n$stderr" -notmatch "HP_CODEX_SANDBOX_SETUP_UNAVAILABLE") {
+                throw "Codex sandbox provisioning did not fail closed before path access."
+              }
+            }
+            finally {
+              $process.Dispose()
+            }
+          }
+          Assert-ProvisioningFailClosed
+          Assert-ProvisioningFailClosed -Provision
+
+      - name: Verify unelevated sandbox cannot replace the elevated boundary
+        shell: pwsh
+        timeout-minutes: 2
+        run: .\windows\script\verify_codex_generation_confinement.ps1 -CodexBin $env:HOVERPOCKET_CODEX_BIN -SandboxImplementation unelevated -ExpectUnelevatedReadOnlyRejection
+
       - name: Build Release
         run: dotnet build .\windows\HoverPocket.Windows.sln --configuration Release --nologo -p:NuGetAudit=false
+
+      - name: Build Debug Voice E2E host
+        run: dotnet build .\windows\HoverPocket.Windows.sln --configuration Debug --nologo --no-restore -p:NuGetAudit=false -p:TreatWarningsAsErrors=true
+
+      - name: Verify native Codex sandbox helper contract
+        run: |
+          dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj --configuration Release --no-build -- --contract-self-test
+          dotnet run --project .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj --configuration Release --no-build -- --verify-vendor-closure $env:HOVERPOCKET_CODEX_PACKAGE_ROOT
+          $start = [Diagnostics.ProcessStartInfo]::new()
+          $start.FileName = Resolve-Path ".\windows\src\HoverPocket.CodexSandboxSetup\bin\Release\net10.0-windows10.0.22621.0\HoverPocket.CodexSandboxSetup.exe"
+          $start.UseShellExecute = $false
+          $start.CreateNoWindow = $true
+          $start.RedirectStandardOutput = $true
+          $start.RedirectStandardError = $true
+          foreach ($argument in @(
+            "--setup-request",
+            "must-not-parse",
+            "--request-sha256",
+            ('0' * 64),
+            "--nonce",
+            ('0' * 64))) {
+            [void]$start.ArgumentList.Add([string]$argument)
+          }
+          $process = [Diagnostics.Process]::new()
+          $process.StartInfo = $start
+          if (-not $process.Start()) {
+            throw "Native Codex sandbox helper fail-closed verifier did not start."
+          }
+          $stdout = $process.StandardOutput.ReadToEnd()
+          $stderr = $process.StandardError.ReadToEnd()
+          $process.WaitForExit()
+          if ($process.ExitCode -ne 21 -or "$stdout`n$stderr" -notmatch "HP_CODEX_SANDBOX_HELPER_NOT_ACTIVATED") {
+            throw "Native Codex sandbox helper did not reject setup before request parsing."
+          }
+
+      - name: Build and verify per-machine Codex sandbox installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $publishRoot = Join-Path $env:RUNNER_TEMP "hoverpocket-codex-sandbox-helper-publish"
+          $installerOutput = Join-Path $env:RUNNER_TEMP "hoverpocket-codex-sandbox-installer"
+          [void](New-Item -ItemType Directory -Path $publishRoot)
+          [void](New-Item -ItemType Directory -Path $installerOutput)
+
+          dotnet publish `
+            .\windows\src\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            --output $publishRoot `
+            --nologo `
+            -p:PublishSingleFile=false `
+            -p:DebugSymbols=false `
+            -p:DebugType=None `
+            -p:NuGetAudit=false
+          if ($LASTEXITCODE -ne 0) {
+            throw "Codex sandbox helper self-contained publish failed."
+          }
+
+          dotnet build `
+            .\windows\installer\HoverPocket.CodexSandboxSetup.Installer\HoverPocket.CodexSandboxSetup.Installer.wixproj `
+            --configuration Release `
+            --output $installerOutput `
+            --nologo `
+            -p:InstallerPlatform=x64 `
+            -p:ProductVersion=0.2.7 `
+            -p:HelperPublishDir=$publishRoot `
+            -p:NuGetAudit=false
+          if ($LASTEXITCODE -ne 0) {
+            throw "Codex sandbox per-machine installer build failed."
+          }
+
+          $msiFiles = @(Get-ChildItem -LiteralPath $installerOutput -Filter *.msi -File)
+          if ($msiFiles.Count -ne 1) {
+            throw "Codex sandbox installer output must contain exactly one MSI."
+          }
+          .\windows\script\verify_codex_sandbox_installer.ps1 `
+            -MsiPath $msiFiles[0].FullName `
+            -ExpectedProductVersion "0.2.7" `
+            -ExpectedUpgradeCode "{9E28ABD6-A496-472E-98AB-AE8D70C27B48}"
 
       - name: Verify settings UI modules
         run: |
@@ -52,6 +227,7 @@ jobs:
         run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify broker
 
       - name: Verify Pocket Surface
+        timeout-minutes: 2
         run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify pocket-surface
 
       - name: Verify timer
@@ -70,12 +246,31 @@ jobs:
         timeout-minutes: 2
         run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify voice
 
+      - name: Verify Voice E2E isolation
+        run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Debug --no-build -- --verify voice-e2e-isolation
+
+      - name: Verify Voice E2E PowerShell syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path .\windows\script\voice_e2e_windows.ps1),
+            [ref]$tokens,
+            [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
       - name: Verify updater
         run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify updater
 
       - name: Verify release signing contract
         shell: pwsh
-        run: .\windows\script\publish_release.ps1 -SigningContractTest
+        run: |
+          .\windows\script\publish_release.ps1 -SigningContractTest
+          .\windows\script\verify_published_authenticode_contract.ps1
 
       - name: Verify rendered WebView UI
         run: dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --configuration Release --no-build -- --verify ui

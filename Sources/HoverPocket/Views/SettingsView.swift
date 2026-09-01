@@ -6,6 +6,7 @@ struct SettingsView: View {
     @ObservedObject private var calendarStore = GoogleCalendarStore.shared
     @ObservedObject private var appUpdater = AppUpdater.shared
     @ObservedObject private var aiNativeRuntime = AINativeRuntime.shared
+    @ObservedObject private var codexVoiceAccount = CodexVoiceAccountLoginController.shared
     @StateObject private var weatherLocationModel = WeatherLocationSettingsModel()
     @State private var capabilityDataSnapshot: CapabilityDataGovernanceSnapshot?
     @State private var capabilityDataError: String?
@@ -13,7 +14,8 @@ struct SettingsView: View {
     @State private var openAIRealtimeKeyDraft = ""
     @State private var openAIRealtimeKeyConfigured = false
     @State private var voiceCredentialError: String?
-    private let openAIRealtimeKeychain = OpenAIRealtimeKeychainStore()
+    @State private var isShowingVoiceCalendarAccessConfirmation = false
+    private let openAIRealtimeKeychain = OpenAIRealtimeCredentialStoreFactory.shared
 
     var body: some View {
         ScrollView {
@@ -48,25 +50,28 @@ struct SettingsView: View {
 
                 stickyNotesSection
 
-                Divider()
+                if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
+                    Divider()
 
-                mirrorSection
+                    mirrorSection
 
-                Divider()
+                    Divider()
 
-                weatherSection
+                    weatherSection
 
-                Divider()
+                    Divider()
 
-                googleCalendarSection
+                    googleCalendarSection
 
-                Divider()
+                    Divider()
 
-                updatesSection
+                    updatesSection
+                }
             }
             .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(width: 460, height: 500)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             refreshCapabilityDataSnapshot()
             refreshVoiceCredentialState()
@@ -74,6 +79,9 @@ struct SettingsView: View {
         .onChange(of: settings.voiceProvider) { _, provider in
             openAIRealtimeKeyDraft = ""
             voiceCredentialError = nil
+            if provider != .codexAppServer {
+                codexVoiceAccount.deactivate()
+            }
             if provider == .off {
                 settings.voiceEnabled = false
                 openAIRealtimeKeyConfigured = false
@@ -102,6 +110,23 @@ struct SettingsView: View {
             Text(localized(
                 japanese: "再実行防止用の実行済み情報は残し、内容と監査ログだけを削除します。",
                 english: "Receipt content and audit logs are deleted. Minimal completion tombstones remain to prevent duplicate execution."
+            ))
+        }
+        .alert(
+            localized(
+                japanese: "Voice Laneにカレンダーアクセスを許可しますか？",
+                english: "Allow Voice Lane to access Calendar?"
+            ),
+            isPresented: $isShowingVoiceCalendarAccessConfirmation
+        ) {
+            Button(localized(japanese: "キャンセル", english: "Cancel"), role: .cancel) {}
+            Button(localized(japanese: "許可", english: "Allow")) {
+                settings.voiceCalendarAccessEnabled = true
+            }
+        } message: {
+            Text(localized(
+                japanese: "今日の予定の読み取りを許可します。予定の作成は、この設定に加えて毎回macOSの確認画面で許可が必要です。",
+                english: "This permits reading today's events. Creating an event still requires approval in a native macOS confirmation every time."
             ))
         }
     }
@@ -446,8 +471,9 @@ struct SettingsView: View {
                 selection: $settings.voiceProvider
             ) {
                 Text(localized(japanese: "オフ", english: "Off")).tag(VoiceProviderID.off)
-                Text("OpenAI Realtime BYOK").tag(VoiceProviderID.openAIRealtimeBYOK)
-                Text("Codex app-server").tag(VoiceProviderID.codexAppServer)
+                Text(localized(japanese: "Codex app-server（推奨）", english: "Codex app-server (Recommended)"))
+                    .tag(VoiceProviderID.codexAppServer)
+                Text("Realtime BYOK").tag(VoiceProviderID.openAIRealtimeBYOK)
             }
             .pickerStyle(.segmented)
 
@@ -456,6 +482,10 @@ struct SettingsView: View {
                 isOn: $settings.voiceEnabled
             )
             .disabled(settings.voiceProvider == .off)
+
+            if settings.voiceProvider == .codexAppServer {
+                codexVoiceAccountSection
+            }
 
             if settings.voiceProvider == .openAIRealtimeBYOK {
                 VStack(alignment: .leading, spacing: 8) {
@@ -466,7 +496,9 @@ struct SettingsView: View {
                     .textFieldStyle(.roundedBorder)
 
                     HStack(spacing: 8) {
-                        Button(localized(japanese: "Keychainへ保存", english: "Save to Keychain")) {
+                        Button(HoverPocketRuntimeEnvironment.shared.isIsolatedVoiceE2E
+                            ? localized(japanese: "このテスト起動に保存", english: "Save for this test run")
+                            : localized(japanese: "Keychainへ保存", english: "Save to Keychain")) {
                             saveOpenAIRealtimeKey()
                         }
                         .disabled(openAIRealtimeKeyDraft.isEmpty)
@@ -478,14 +510,16 @@ struct SettingsView: View {
                     }
 
                     Text(openAIRealtimeKeyConfigured
-                        ? localized(japanese: "APIキーはmacOS Keychainに保存済みです。", english: "API key is stored in macOS Keychain.")
+                        ? HoverPocketRuntimeEnvironment.shared.isIsolatedVoiceE2E
+                            ? localized(japanese: "APIキーはこのテストprocessのメモリだけに保持されています。", english: "The API key is held only in memory for this test process.")
+                            : localized(japanese: "APIキーはmacOS Keychainに保存済みです。", english: "API key is stored in macOS Keychain.")
                         : localized(japanese: "APIキーは未設定です。", english: "API key is not configured."))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
 
                     Text(localized(
-                        japanese: "AN3-B3AではmacOS音声transportはまだ利用できません。Keychainを含むProvider seamは用意しますが、credential/networkを使う前にAN3-B3B gateでfail-closedします。",
-                        english: "macOS audio transport is not available in AN3-B3A. The provider/Keychain seam is present, but it fails closed at the AN3-B3B gate before credential or network use."
+                        japanese: "APIキーはネイティブ側だけで使用し、音声WebViewには渡しません。Voice Laneを有効にしただけではマイクを開始せず、パネルのマイクボタンを押した時だけ接続します。",
+                        english: "The API key is used only by the native host and is never passed to the audio WebView. Enabling Voice Lane does not start the microphone; connection begins only after pressing the microphone button."
                     ))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
@@ -494,6 +528,27 @@ struct SettingsView: View {
                 .padding(10)
                 .background(.quaternary.opacity(0.22))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            }
+
+            if settings.voiceProvider != .off {
+                Toggle(
+                    localized(
+                        japanese: "Voice Laneからカレンダーを利用",
+                        english: "Allow Calendar in Voice Lane"
+                    ),
+                    isOn: Binding(
+                        get: { settings.voiceCalendarAccessEnabled },
+                        set: { enabled in
+                            if enabled {
+                                isShowingVoiceCalendarAccessConfirmation = true
+                            } else {
+                                settings.voiceCalendarAccessEnabled = false
+                            }
+                        }
+                    )
+                )
+                .disabled(!settings.voiceEnabled)
             }
 
             if let voiceCredentialError {
@@ -516,8 +571,8 @@ struct SettingsView: View {
 
             Text(settings.voiceProvider == .codexAppServer
                 ? localized(
-                    japanese: "Codex app-serverは現在のcompatibility gateを維持し、Broker限定ツールを正に証明できない環境ではfail-closedします。自動fallbackはありません。",
-                    english: "Codex app-server keeps its existing compatibility gate and fails closed where Broker-only tools cannot be positively proven. There is no automatic fallback."
+                    japanese: "Codex app-serverを使う標準経路です。Codexアプリのログインを安全に共有できない場合は、HoverPocket専用プロファイルからChatGPTへログインできます。APIキーは不要で、BYOKへ自動切替はしません。",
+                    english: "This is the primary Codex app-server path. If the Codex app login cannot be shared safely, you can sign in to ChatGPT with a dedicated HoverPocket profile. No API key is required and it never falls back to BYOK automatically."
                 )
                 : settings.voiceProvider == .off
                     ? localized(
@@ -525,8 +580,8 @@ struct SettingsView: View {
                         english: "The provider is Off by default. Off performs no credential, network, or transport work."
                     )
                     : localized(
-                        japanese: "WindowsではOpenAI Realtime BYOKを利用できます。macOSの実音声transportはAN3-B3Bで有効化します。",
-                        english: "OpenAI Realtime BYOK is available on Windows. The real macOS audio transport remains gated to AN3-B3B."
+                        japanese: "OpenAI Realtime BYOKは任意の代替経路です。利用時だけAPI料金が発生します。CalendarとTimerはCapability Broker、ネイティブ承認、実行後readbackを通ります。",
+                        english: "OpenAI Realtime BYOK is an optional alternative and incurs API charges only when used. Calendar and Timer cross Capability Broker, native approval, and post-execution readback."
                     ))
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
@@ -534,7 +589,95 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var codexVoiceAccountSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            switch codexVoiceAccount.state {
+            case .idle:
+                Text(localized(
+                    japanese: "ChatGPTのログイン状態は未確認です。",
+                    english: "ChatGPT sign-in status has not been checked."
+                ))
+                Button(localized(japanese: "ログイン状態を確認", english: "Check sign-in status")) {
+                    codexVoiceAccount.refresh()
+                }
+            case .checking:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(localized(
+                        japanese: "ChatGPTのログイン状態を確認しています…",
+                        english: "Checking ChatGPT sign-in status…"
+                    ))
+                }
+            case .signedOut(let managedLoginAvailable, _):
+                Text(managedLoginAvailable
+                    ? localized(
+                        japanese: "HoverPocket専用のCodexプロファイルは未ログインです。",
+                        english: "The dedicated HoverPocket Codex profile is signed out."
+                    )
+                    : localized(
+                        japanese: "共有しているCodexログインではChatGPTアカウントを確認できません。Codexアプリでログインしてから再確認してください。",
+                        english: "A ChatGPT account was not found in the shared Codex login. Sign in with the Codex app, then check again."
+                    ))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    if managedLoginAvailable {
+                        Button(localized(japanese: "ChatGPTでログイン", english: "Sign in with ChatGPT")) {
+                            codexVoiceAccount.startLogin()
+                        }
+                    }
+                    Button(localized(japanese: "再確認", english: "Check again")) {
+                        codexVoiceAccount.refresh()
+                    }
+                }
+            case .signingIn:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(localized(
+                        japanese: "ブラウザでChatGPTへログインしてください。",
+                        english: "Complete ChatGPT sign-in in your browser."
+                    ))
+                    Spacer()
+                    Button(localized(japanese: "キャンセル", english: "Cancel")) {
+                        codexVoiceAccount.cancelLogin()
+                    }
+                }
+            case .signedIn:
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text(localized(
+                        japanese: "ChatGPTへログイン済みです。",
+                        english: "Signed in to ChatGPT."
+                    ))
+                    Spacer()
+                    Button(localized(japanese: "再確認", english: "Check again")) {
+                        codexVoiceAccount.refresh()
+                    }
+                }
+            case .failed:
+                Text(localized(
+                    japanese: "ログイン状態を確認できませんでした。Codex app-serverの互換性と接続状態を確認してください。",
+                    english: "Could not check sign-in status. Check Codex app-server compatibility and connectivity."
+                ))
+                    .foregroundStyle(.red)
+                Button(localized(japanese: "再試行", english: "Retry")) {
+                    codexVoiceAccount.refresh()
+                }
+            }
+        }
+        .font(.system(size: 10))
+        .padding(10)
+        .background(.quaternary.opacity(0.22))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
     private func refreshVoiceCredentialState() {
+        if settings.voiceProvider == .codexAppServer {
+            openAIRealtimeKeyConfigured = false
+            codexVoiceAccount.refresh()
+            return
+        }
         guard settings.voiceProvider == .openAIRealtimeBYOK else {
             openAIRealtimeKeyConfigured = false
             return
@@ -558,6 +701,8 @@ struct SettingsView: View {
             openAIRealtimeKeyDraft = ""
             openAIRealtimeKeyConfigured = true
             voiceCredentialError = nil
+            MacOSVoiceE2EReceiptStore.shared?.recordCredentialCurrent(true)
+            VoiceLaneRuntime.shared.credentialsDidChange()
         } catch {
             openAIRealtimeKeyDraft = ""
             openAIRealtimeKeyConfigured = false
@@ -577,6 +722,8 @@ struct SettingsView: View {
             openAIRealtimeKeyConfigured = false
             openAIRealtimeKeyDraft = ""
             voiceCredentialError = nil
+            MacOSVoiceE2EReceiptStore.shared?.recordCredentialCurrent(false)
+            VoiceLaneRuntime.shared.credentialsDidChange()
         } catch {
             openAIRealtimeKeyDraft = ""
             openAIRealtimeKeyConfigured = true

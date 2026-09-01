@@ -58,6 +58,7 @@ final class ControlsCapabilityHandler: PocketCapabilityHandler {
         case volumeGet
         case volumeSet
         case muteSet
+        case brightnessGet
         case brightnessSet
         case mediaCommand
 
@@ -67,6 +68,7 @@ final class ControlsCapabilityHandler: PocketCapabilityHandler {
             case .volumeGet: PocketCapabilityKeys.controlsVolumeGet
             case .volumeSet: PocketCapabilityKeys.controlsVolumeSet
             case .muteSet: PocketCapabilityKeys.controlsMuteSet
+            case .brightnessGet: PocketCapabilityKeys.controlsBrightnessGet
             case .brightnessSet: PocketCapabilityKeys.controlsBrightnessSet
             case .mediaCommand: PocketCapabilityKeys.controlsMediaCommand
             }
@@ -74,7 +76,7 @@ final class ControlsCapabilityHandler: PocketCapabilityHandler {
 
         var isWrite: Bool {
             switch self {
-            case .availability, .volumeGet: false
+            case .availability, .volumeGet, .brightnessGet: false
             case .volumeSet, .muteSet, .brightnessSet, .mediaCommand: true
             }
         }
@@ -135,6 +137,14 @@ final class ControlsCapabilityHandler: PocketCapabilityHandler {
                     throw CapabilityHandlerError.readbackMismatch("controls.brightness")
                 }
                 return try brightnessOutput(observed)
+            case .brightnessGet:
+                let displayID = try arguments.requiredString("displayId", maxLength: 128)
+                let snapshot = try await dataSource.snapshot()
+                guard let display = snapshot.displays.first(where: { $0.id == displayID }),
+                      display.isControllable else {
+                    throw CapabilityHandlerError.unavailable("controls.display")
+                }
+                return try brightnessOutput(display)
             case .mediaCommand:
                 let command = try arguments.requiredString("command", maxLength: 16)
                 guard ["play_pause", "next", "previous"].contains(command) else {

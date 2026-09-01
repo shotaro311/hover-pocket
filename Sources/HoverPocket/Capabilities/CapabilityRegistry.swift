@@ -6,6 +6,7 @@ enum PocketCapabilityKeys {
     static let calendarGet = PocketCapabilityKey(id: "calendar.event.get", version: 1)
     static let calendarCreate = PocketCapabilityKey(id: "calendar.event.create", version: 1)
     static let controlsAvailability = PocketCapabilityKey(id: "controls.availability.get", version: 1)
+    static let controlsBrightnessGet = PocketCapabilityKey(id: "controls.brightness.get", version: 1)
     static let controlsBrightnessSet = PocketCapabilityKey(id: "controls.brightness.set", version: 1)
     static let controlsMediaCommand = PocketCapabilityKey(id: "controls.media.command", version: 1)
     static let controlsMuteSet = PocketCapabilityKey(id: "controls.mute.set", version: 1)
@@ -157,6 +158,11 @@ enum PocketCapabilityDescriptors {
         maximumPayloadBytes: 4_096,
         maximumCallsPerMinute: 120
     )
+    private static let calendarReadLimits = CapabilityLimits(
+        timeoutMilliseconds: 15_000,
+        maximumPayloadBytes: 4_096,
+        maximumCallsPerMinute: 30
+    )
     private static let localWriteLimits = CapabilityLimits(
         timeoutMilliseconds: 3_000,
         maximumPayloadBytes: 4_096,
@@ -194,7 +200,7 @@ enum PocketCapabilityDescriptors {
             permissions: ["calendar.events.read"],
             approval: .permissionGrant,
             idempotency: .optional,
-            limits: readLimits,
+            limits: calendarReadLimits,
             readback: CapabilityReadbackPolicy(strategy: .sameStoreSnapshot, query: nil, matchFields: ["eventRef", "eventId", "start", "end", "safeTitle"]),
             rollback: false,
             input: CapabilitySchemaValidation.calendarGetInput,
@@ -206,7 +212,7 @@ enum PocketCapabilityDescriptors {
             permissions: ["calendar.events.read"],
             approval: .permissionGrant,
             idempotency: .optional,
-            limits: readLimits,
+            limits: calendarReadLimits,
             readback: CapabilityReadbackPolicy(strategy: .sameStoreSnapshot, query: nil, matchFields: ["events"]),
             rollback: false,
             input: CapabilitySchemaValidation.calendarListInput,
@@ -220,6 +226,15 @@ enum PocketCapabilityDescriptors {
             input: CapabilitySchemaValidation.emptyInput,
             output: CapabilitySchemaValidation.controlsAvailabilityOutput,
             matchFields: ["volumeAvailable", "brightnessAvailable", "mediaAvailable", "displayIds"]
+        ),
+        controlsDescriptor(
+            PocketCapabilityKeys.controlsBrightnessGet,
+            effect: .privateRead,
+            approval: .permissionGrant,
+            idempotency: .optional,
+            input: CapabilitySchemaValidation.controlsBrightnessGetInput,
+            output: CapabilitySchemaValidation.controlsBrightnessOutput,
+            matchFields: ["displayId", "level", "controllable"]
         ),
         controlsDescriptor(
             PocketCapabilityKeys.controlsBrightnessSet,
@@ -529,6 +544,11 @@ enum CapabilitySchemaValidation {
         try exactKeys(object, ["displayId", "level"])
         _ = try string(object, "displayId", minimum: 1, maximum: 128)
         _ = try number(object, "level", range: 0.05...1)
+    }
+
+    static func controlsBrightnessGetInput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["displayId"])
+        _ = try string(object, "displayId", minimum: 1, maximum: 128)
     }
 
     static func controlsMediaInput(_ object: CapabilityObject) throws {

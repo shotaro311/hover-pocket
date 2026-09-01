@@ -2,6 +2,7 @@ namespace HoverPocket.Shell.PocketApps;
 
 internal sealed class PocketAppHealthVerifier
 {
+    private const int WindowsPrivilegeNotHeldHResult = unchecked((int)0x80070522);
     private readonly List<string> _failures = [];
 
     internal IReadOnlyList<string> Run()
@@ -137,6 +138,11 @@ internal sealed class PocketAppHealthVerifier
                 "health_dangling_symlink_fail_safe");
         }
         catch (UnauthorizedAccessException)
+        {
+        }
+        catch (IOException exception) when (
+            OperatingSystem.IsWindows()
+            && exception.HResult == WindowsPrivilegeNotHeldHResult)
         {
         }
         catch (PlatformNotSupportedException)

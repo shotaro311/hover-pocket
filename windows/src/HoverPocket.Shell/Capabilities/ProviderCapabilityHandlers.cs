@@ -14,6 +14,7 @@ internal static class CapabilityIds
     public static readonly PocketCapabilityKey CalendarGet = new("calendar.event.get", 1);
     public static readonly PocketCapabilityKey CalendarCreate = new("calendar.event.create", 1);
     public static readonly PocketCapabilityKey ControlsAvailability = new("controls.availability.get", 1);
+    public static readonly PocketCapabilityKey ControlsBrightnessGet = new("controls.brightness.get", 1);
     public static readonly PocketCapabilityKey ControlsBrightnessSet = new("controls.brightness.set", 1);
     public static readonly PocketCapabilityKey ControlsMediaCommand = new("controls.media.command", 1);
     public static readonly PocketCapabilityKey ControlsMuteSet = new("controls.mute.set", 1);
@@ -638,6 +639,7 @@ internal static class ProviderCapabilityCompositionRoot
             new ControlsCapabilityHandler(ControlsCapabilityOperation.VolumeGet, controlsDataSource),
             new ControlsCapabilityHandler(ControlsCapabilityOperation.VolumeSet, controlsDataSource),
             new ControlsCapabilityHandler(ControlsCapabilityOperation.MuteSet, controlsDataSource),
+            new ControlsCapabilityHandler(ControlsCapabilityOperation.BrightnessGet, controlsDataSource),
             new ControlsCapabilityHandler(ControlsCapabilityOperation.BrightnessSet, controlsDataSource),
             new ControlsCapabilityHandler(ControlsCapabilityOperation.MediaCommand, controlsDataSource)
         ]);

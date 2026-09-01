@@ -35,18 +35,19 @@ final class ClipboardHistoryStore: ObservableObject {
     private let legacyStorageDirectories: [URL]
 
     private static func applicationSupportBaseDirectory() -> URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        HoverPocketRuntimeEnvironment.shared.rootDirectory
     }
 
     private static func defaultStorageDirectory() -> URL {
         applicationSupportBaseDirectory()
-            .appendingPathComponent("HoverPocket", isDirectory: true)
             .appendingPathComponent("Clipboard", isDirectory: true)
     }
 
     private static func defaultLegacyStorageDirectories() -> [URL] {
-        let base = applicationSupportBaseDirectory()
+        guard !HoverPocketRuntimeEnvironment.shared.isIsolatedVoiceE2E else {
+            return []
+        }
+        let base = applicationSupportBaseDirectory().deletingLastPathComponent()
         return [
             base
                 .appendingPathComponent("NotchPocket", isDirectory: true)

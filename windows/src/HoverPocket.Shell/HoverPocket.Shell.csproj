@@ -16,6 +16,7 @@
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
     <GoogleOAuthClientId Condition="'$(GoogleOAuthClientId)' == ''"></GoogleOAuthClientId>
     <GoogleOAuthClientSecret Condition="'$(GoogleOAuthClientSecret)' == ''"></GoogleOAuthClientSecret>
+    <HoverPocketPublisherCertificateSha256 Condition="'$(HoverPocketPublisherCertificateSha256)' == ''"></HoverPocketPublisherCertificateSha256>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,6 +25,17 @@
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4022.49" />
     <PackageReference Include="System.Management" Version="10.0.9" />
     <PackageReference Include="Velopack" Version="1.2.0" />
+    <ProjectReference Include="..\HoverPocket.CodexSandboxSetup\HoverPocket.CodexSandboxSetup.csproj"
+                      ReferenceOutputAssembly="false"
+                      Private="false" />
+    <ProjectReference Include="..\HoverPocket.CodexSandboxSetup.Contracts\HoverPocket.CodexSandboxSetup.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(HoverPocketPublisherCertificateSha256)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>HoverPocketPublisherCertificateSha256</_Parameter1>
+      <_Parameter2>$(HoverPocketPublisherCertificateSha256)</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
 
   <ItemGroup Condition="'$(GoogleOAuthClientId)' != ''">

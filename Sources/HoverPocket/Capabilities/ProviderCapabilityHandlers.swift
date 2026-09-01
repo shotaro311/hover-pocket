@@ -591,6 +591,7 @@ enum ProviderCapabilityCompositionRoot {
             ControlsCapabilityHandler(operation: .volumeGet, dataSource: controlsDataSource),
             ControlsCapabilityHandler(operation: .volumeSet, dataSource: controlsDataSource),
             ControlsCapabilityHandler(operation: .muteSet, dataSource: controlsDataSource),
+            ControlsCapabilityHandler(operation: .brightnessGet, dataSource: controlsDataSource),
             ControlsCapabilityHandler(operation: .brightnessSet, dataSource: controlsDataSource),
             ControlsCapabilityHandler(operation: .mediaCommand, dataSource: controlsDataSource),
             TimerCapabilityHandler(operation: .start, store: .shared),
