@@ -1,5 +1,24 @@
 # 2026-09-01 HoverPocket 通常UIとVoice Lane
 
+## 再ホバー後の音声会話復帰
+
+- ユーザーが通常版Codex Voiceで実際に会話できたことを確認した。パネルを閉じると、要件どおり音声はmuteされUIはdetachされるが、Codex app-serverのroot threadとRealtime接続はアプリ生存中に保持される。
+- 再表示後のsnapshotは`connected + muted + uiAttached`になる。従来の大きなマイクbuttonは`disconnected`専用だったため無効になり、別のspeaker button以外に分かりやすい復帰導線がなかったことが原因である。
+- 大きなマイクbuttonを開始 / 再開の共通操作にした。`connected + muted + uiAttached`では既存接続へ`setMuted(false)`だけを送り、`disconnected`では従来どおり`beginAudioSession()`を呼ぶ。再表示だけではunmuteしないため、ホバーだけで録音が再開することはない。
+- 一時停止中は`一時停止中 · マイクを押して再開`、会話欄は`マイクを押すと音声会話を再開します。`、Accessibility labelは`音声会話を再開`と表示する。
+- runtime verifierへdetach → mute、reattach → mute維持、明示resume → unmute、adapter `startCount == 1`維持を追加した。既存接続を再利用し、重複Realtime sessionを開始しないことをreadbackした。
+- Debug / Release warnings-as-errors、Voice Foundation runtime、Voice静的42 cases、Panel 128 cases、Capability 20 handlers、`git diff --check`、通常bundle再build・起動、strict codesignがPASSした。通常版processは`dist/HoverPocket.app`から起動している。
+- 独立レビューはP0 / P1 / P2すべて0件。再表示時の自動録音なし、新規開始回帰なし、追加I/O / polling / probeなし、Voice hot path性能への実質的な影響なしと判定した。
+
+## 現在Voiceから使える機能
+
+- 自然な音声会話と音声応答。Codex app-server / ChatGPT account経路を使い、通常設定ではOpenAI API keyを必要としない。
+- `calendar_events_list`: ログインとCalendar権限がある場合に、今日の予定を最大24件まで読み取る。タイトル、開始、終了を返す。
+- `calendar_event_create`: タイトル、開始、終了、終日指定で予定を1件作成する。毎回ネイティブ承認を表示し、CapabilityBrokerの実行後readbackを確認してから成功を返す。
+- `timer_countdown_start`: 1秒から24時間までのカウントダウンTimerを任意タイトル付きで開始する。毎回ネイティブ承認を表示し、CapabilityBrokerの実行後readbackを確認してから成功を返す。
+- Compact / Expanded表示、会話transcript、現在rootに属するsession cards、mute / unmute、明示終了、パネルclose後のroot / transcript / session保持と明示再開。
+- RegistryにはSticky Notes、Clipboard、Controls、Calculator、Timer pause / resume / stop等もあるが、Voice sessionのtool allowlistは上記3 toolだけであり、まだ音声からは操作できない。Calendar編集 / 削除、Timer一時停止 / 停止、Pocket App生成・導入もVoice toolとしては未公開である。
+
 ## Codex Voice開始前の表示修正
 
 - ユーザー画面は`切断・待機中`でsafe errorなしだった。実コードではCodex providerの`conversationPlaceholder`がruntime状態に関係なくcompatibility gate文言を表示しており、実際の互換性失敗と開始前の待機を区別できなかった。

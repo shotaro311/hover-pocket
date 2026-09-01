@@ -223,22 +223,26 @@ struct VoiceLaneHostView: View {
 
     private var microphoneButton: some View {
         Button {
-            runtime.beginAudioSession()
+            if canResumeAudioSession {
+                runtime.setMuted(false)
+            } else {
+                runtime.beginAudioSession()
+            }
         } label: {
             Image(systemName: microphoneSymbolName)
                 .font(.system(size: 15, weight: .semibold))
                 .frame(width: 36, height: 36)
-                .foregroundStyle(canBeginAudioSession ? Color.accentColor : Color.secondary)
+                .foregroundStyle(canUseMicrophoneButton ? Color.accentColor : Color.secondary)
                 .background(
                     Circle()
-                        .fill(canBeginAudioSession
+                        .fill(canUseMicrophoneButton
                             ? Color.accentColor.opacity(0.16)
                             : Color.white.opacity(0.04))
                 )
                 .overlay {
                     Circle()
                         .stroke(
-                            canBeginAudioSession
+                            canUseMicrophoneButton
                                 ? Color.accentColor.opacity(0.8)
                                 : Color.white.opacity(0.08),
                             lineWidth: 1
@@ -247,7 +251,7 @@ struct VoiceLaneHostView: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .disabled(!canBeginAudioSession)
+        .disabled(!canUseMicrophoneButton)
         .help(microphoneAccessibilityLabel)
         .accessibilityLabel(microphoneAccessibilityLabel)
     }
@@ -298,6 +302,7 @@ struct VoiceLaneHostView: View {
         VoiceLaneLocalization.conversationPrompt(
             providerID: runtime.snapshot.providerID,
             connection: runtime.snapshot.connection,
+            muted: runtime.snapshot.muted,
             language: settings.appLanguage
         )
     }
@@ -314,6 +319,17 @@ struct VoiceLaneHostView: View {
             && runtime.snapshot.connection == .disconnected
             && runtime.snapshot.uiAttached
             && !voiceStartBlockedByConfiguration
+    }
+
+    private var canResumeAudioSession: Bool {
+        runtime.snapshot.providerID != .off
+            && runtime.snapshot.connection == .connected
+            && runtime.snapshot.muted
+            && runtime.snapshot.uiAttached
+    }
+
+    private var canUseMicrophoneButton: Bool {
+        canBeginAudioSession || canResumeAudioSession
     }
 
     private var voiceStartBlockedByConfiguration: Bool {
@@ -336,7 +352,9 @@ struct VoiceLaneHostView: View {
         case .connecting, .recovering:
             localized(japanese: "音声セッションを接続中", english: "Voice session is connecting")
         case .connected:
-            localized(japanese: "音声セッションは接続済み", english: "Voice session is connected")
+            canResumeAudioSession
+                ? localized(japanese: "音声会話を再開", english: "Resume Voice conversation")
+                : localized(japanese: "音声セッションは接続済み", english: "Voice session is connected")
         case .disconnected:
             canBeginAudioSession
                 ? localized(japanese: "音声セッションを開始", english: "Start Voice session")
@@ -375,6 +393,15 @@ enum VoiceLaneLocalization {
         }
         if let error = snapshot.safeErrorCode {
             return errorText(error, language: language)
+        }
+        if snapshot.connection == .connected,
+           snapshot.muted,
+           snapshot.uiAttached {
+            return text(
+                japanese: "一時停止中 · マイクを押して再開",
+                english: "Paused · Press the microphone to resume",
+                language: language
+            )
         }
         if snapshot.providerID != .off,
            snapshot.connection == .disconnected,
@@ -415,6 +442,7 @@ enum VoiceLaneLocalization {
     static func conversationPrompt(
         providerID: VoiceProviderID,
         connection: VoiceLaneConnection,
+        muted: Bool,
         language: AppLanguage
     ) -> String {
         switch connection {
@@ -427,6 +455,13 @@ enum VoiceLaneLocalization {
                 language: language
             )
         case .connected:
+            if muted {
+                return text(
+                    japanese: "マイクを押すと音声会話を再開します。",
+                    english: "Press the microphone to resume the Voice conversation.",
+                    language: language
+                )
+            }
             return text(
                 japanese: "話しかけてください。",
                 english: "Start speaking.",

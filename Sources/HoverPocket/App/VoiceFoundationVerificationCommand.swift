@@ -327,18 +327,46 @@ enum VoiceFoundationVerificationCommand {
               VoiceLaneLocalization.conversationPrompt(
                 providerID: .codexAppServer,
                 connection: .disconnected,
+                muted: true,
                 language: .japanese
               ) == "マイクを押すとCodexとの音声セッションを開始します。",
               VoiceLaneLocalization.conversationPrompt(
                 providerID: .codexAppServer,
                 connection: .connecting,
+                muted: true,
                 language: .japanese
               ) == "音声セッションへ接続しています…",
               VoiceLaneLocalization.conversationPrompt(
                 providerID: .codexAppServer,
                 connection: .connected,
+                muted: false,
                 language: .japanese
-              ) == "話しかけてください。"
+              ) == "話しかけてください。",
+              VoiceLaneLocalization.conversationPrompt(
+                providerID: .codexAppServer,
+                connection: .connected,
+                muted: true,
+                language: .japanese
+              ) == "マイクを押すと音声会話を再開します。",
+              VoiceLaneLocalization.status(
+                snapshot: VoiceLaneSnapshot(
+                    providerID: .codexAppServer,
+                    mode: .compact,
+                    connection: .connected,
+                    activity: .listening,
+                    muted: true,
+                    transcript: [],
+                    transcriptPreview: nil,
+                    rootSessionID: "root",
+                    sessions: [],
+                    visibleSessionCount: 0,
+                    safeErrorCode: nil,
+                    layoutBlockedReason: nil,
+                    uiAttached: true,
+                    restartAttempt: 0
+                ),
+                language: .japanese
+              ) == "一時停止中 · マイクを押して再開"
         else {
             throw VoiceFoundationVerificationError.failed("voice_localization")
         }
@@ -618,6 +646,28 @@ enum VoiceFoundationVerificationCommand {
               runtime.snapshot.activity == .listening,
               !runtime.snapshot.muted else {
             throw VoiceFoundationVerificationError.failed("explicit_start_readback")
+        }
+        runtime.detachPanel()
+        try await waitUntil { adapter.muted }
+        guard runtime.snapshot.connection == .connected,
+              runtime.snapshot.muted,
+              !runtime.snapshot.uiAttached else {
+            throw VoiceFoundationVerificationError.failed("explicit_detach_did_not_pause_audio")
+        }
+        runtime.attachPanel()
+        guard runtime.snapshot.connection == .connected,
+              runtime.snapshot.muted,
+              runtime.snapshot.uiAttached,
+              adapter.startCount == 1 else {
+            throw VoiceFoundationVerificationError.failed("explicit_reattach_did_not_preserve_session")
+        }
+        runtime.setMuted(false)
+        try await waitUntil { !adapter.muted }
+        guard runtime.snapshot.connection == .connected,
+              !runtime.snapshot.muted,
+              runtime.snapshot.uiAttached,
+              adapter.startCount == 1 else {
+            throw VoiceFoundationVerificationError.failed("explicit_reattach_could_not_resume_audio")
         }
         runtime.endAudioSession()
         try await waitUntil { adapter.closeAudioSessionCount == 1 }

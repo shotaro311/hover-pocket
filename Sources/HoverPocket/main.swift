@@ -96,7 +96,7 @@ if CommandLine.arguments.contains("--verify-voice-foundation") {
     Task { @MainActor in
         do {
             try await VoiceFoundationVerificationCommand.run()
-            print("PASS voice-foundation verify: default-off inert, root scope, bounded credential-safe transcript, app-lifetime UI detach, compact/expanded geometry")
+            print("PASS voice-foundation verify: default-off inert, root scope, bounded credential-safe transcript, app-lifetime UI detach and explicit resume, compact/expanded geometry")
             exit(0)
         } catch {
             print("FAIL voice-foundation verify: \(error)")
