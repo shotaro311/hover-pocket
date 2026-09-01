@@ -36,14 +36,7 @@ struct VoiceLaneHostView: View {
 
     private var compact: some View {
         HStack(spacing: 10) {
-            Button {
-                runtime.beginAudioSession()
-            } label: {
-                Image(systemName: canBeginAudioSession ? "mic.fill" : "mic.slash")
-            }
-            .buttonStyle(.plain)
-            .disabled(!canBeginAudioSession)
-            .accessibilityLabel(microphoneAccessibilityLabel)
+            microphoneButton
 
             waveform
 
@@ -103,14 +96,7 @@ struct VoiceLaneHostView: View {
     private var expanded: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Button {
-                    runtime.beginAudioSession()
-                } label: {
-                    Image(systemName: canBeginAudioSession ? "mic.fill" : "mic.slash")
-                }
-                .buttonStyle(.plain)
-                .disabled(!canBeginAudioSession)
-                .accessibilityLabel(microphoneAccessibilityLabel)
+                microphoneButton
 
                 waveform
 
@@ -235,6 +221,37 @@ struct VoiceLaneHostView: View {
         .accessibilityHidden(true)
     }
 
+    private var microphoneButton: some View {
+        Button {
+            runtime.beginAudioSession()
+        } label: {
+            Image(systemName: microphoneSymbolName)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 36, height: 36)
+                .foregroundStyle(canBeginAudioSession ? Color.accentColor : Color.secondary)
+                .background(
+                    Circle()
+                        .fill(canBeginAudioSession
+                            ? Color.accentColor.opacity(0.16)
+                            : Color.white.opacity(0.04))
+                )
+                .overlay {
+                    Circle()
+                        .stroke(
+                            canBeginAudioSession
+                                ? Color.accentColor.opacity(0.8)
+                                : Color.white.opacity(0.08),
+                            lineWidth: 1
+                        )
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!canBeginAudioSession)
+        .help(microphoneAccessibilityLabel)
+        .accessibilityLabel(microphoneAccessibilityLabel)
+    }
+
     private func sessionCard(_ session: VoiceSessionSummary) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(session.title)
@@ -278,20 +295,11 @@ struct VoiceLaneHostView: View {
     }
 
     private var conversationPlaceholder: String {
-        switch runtime.snapshot.providerID {
-        case .off:
-            localized(japanese: "音声Providerはオフです。", english: "Voice provider is Off.")
-        case .openAIRealtimeBYOK:
-            localized(
-                japanese: "マイクを押すとOpenAI Realtimeとの音声セッションを開始します。",
-                english: "Press the microphone to start an OpenAI Realtime voice session."
-            )
-        case .codexAppServer:
-            localized(
-                japanese: "Codex Voiceはcompatibility gateを通過した環境でのみ利用できます。",
-                english: "Codex Voice is available only after its compatibility gate passes."
-            )
-        }
+        VoiceLaneLocalization.conversationPrompt(
+            providerID: runtime.snapshot.providerID,
+            connection: runtime.snapshot.connection,
+            language: settings.appLanguage
+        )
     }
 
     private var sessionCountAccessibilityLabel: String {
@@ -324,9 +332,23 @@ struct VoiceLaneHostView: View {
     }
 
     private var microphoneAccessibilityLabel: String {
-        canBeginAudioSession
-            ? localized(japanese: "音声セッションを開始", english: "Start Voice session")
-            : localized(japanese: "マイクは現在利用できません", english: "Microphone is currently unavailable")
+        switch runtime.snapshot.connection {
+        case .connecting, .recovering:
+            localized(japanese: "音声セッションを接続中", english: "Voice session is connecting")
+        case .connected:
+            localized(japanese: "音声セッションは接続済み", english: "Voice session is connected")
+        case .disconnected:
+            canBeginAudioSession
+                ? localized(japanese: "音声セッションを開始", english: "Start Voice session")
+                : localized(japanese: "マイクは現在利用できません", english: "Microphone is currently unavailable")
+        }
+    }
+
+    private var microphoneSymbolName: String {
+        if runtime.snapshot.connection == .connected {
+            return runtime.snapshot.muted ? "mic.slash.fill" : "mic.fill"
+        }
+        return canBeginAudioSession ? "mic.fill" : "mic.slash"
     }
 
     private func localized(japanese: String, english: String) -> String {
@@ -354,7 +376,63 @@ enum VoiceLaneLocalization {
         if let error = snapshot.safeErrorCode {
             return errorText(error, language: language)
         }
+        if snapshot.providerID != .off,
+           snapshot.connection == .disconnected,
+           snapshot.activity == .idle,
+           snapshot.uiAttached {
+            return text(
+                japanese: "開始前 · マイクを押してください",
+                english: "Ready · Press the microphone",
+                language: language
+            )
+        }
         return "\(connection(snapshot.connection, language: language)) · \(activity(snapshot.activity, language: language))"
+    }
+
+    static func startPrompt(providerID: VoiceProviderID, language: AppLanguage) -> String {
+        switch providerID {
+        case .off:
+            return text(
+                japanese: "音声Providerはオフです。",
+                english: "Voice provider is Off.",
+                language: language
+            )
+        case .openAIRealtimeBYOK:
+            return text(
+                japanese: "マイクを押すとOpenAI Realtimeとの音声セッションを開始します。",
+                english: "Press the microphone to start an OpenAI Realtime voice session.",
+                language: language
+            )
+        case .codexAppServer:
+            return text(
+                japanese: "マイクを押すとCodexとの音声セッションを開始します。",
+                english: "Press the microphone to start a voice session with Codex.",
+                language: language
+            )
+        }
+    }
+
+    static func conversationPrompt(
+        providerID: VoiceProviderID,
+        connection: VoiceLaneConnection,
+        language: AppLanguage
+    ) -> String {
+        switch connection {
+        case .disconnected:
+            return startPrompt(providerID: providerID, language: language)
+        case .connecting, .recovering:
+            return text(
+                japanese: "音声セッションへ接続しています…",
+                english: "Connecting the Voice session…",
+                language: language
+            )
+        case .connected:
+            return text(
+                japanese: "話しかけてください。",
+                english: "Start speaking.",
+                language: language
+            )
+        }
     }
 
     static func connection(_ value: VoiceLaneConnection, language: AppLanguage) -> String {

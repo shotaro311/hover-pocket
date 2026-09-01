@@ -300,12 +300,45 @@ enum VoiceFoundationVerificationCommand {
             english: "Voice transport is not available yet",
             language: .english
         )
+        let readySnapshot = VoiceLaneSnapshot(
+            providerID: .codexAppServer,
+            mode: .compact,
+            connection: .disconnected,
+            activity: .idle,
+            muted: true,
+            transcript: [],
+            transcriptPreview: nil,
+            rootSessionID: nil,
+            sessions: [],
+            visibleSessionCount: 0,
+            safeErrorCode: nil,
+            layoutBlockedReason: nil,
+            uiAttached: true,
+            restartAttempt: 0
+        )
         guard japanese == "音声接続はまだ利用できません",
               english == "Voice transport is not available yet",
               VoiceLaneLocalization.connection(.connected, language: .japanese) == "接続済み",
               VoiceLaneLocalization.connection(.connected, language: .english) == "Connected",
               VoiceLaneLocalization.sessionStatus(.waitingForUser, language: .japanese) == "ユーザー操作待ち",
-              VoiceLaneLocalization.transcriptRole(.user, language: .english) == "You"
+              VoiceLaneLocalization.transcriptRole(.user, language: .english) == "You",
+              VoiceLaneLocalization.status(snapshot: readySnapshot, language: .japanese)
+                == "開始前 · マイクを押してください",
+              VoiceLaneLocalization.conversationPrompt(
+                providerID: .codexAppServer,
+                connection: .disconnected,
+                language: .japanese
+              ) == "マイクを押すとCodexとの音声セッションを開始します。",
+              VoiceLaneLocalization.conversationPrompt(
+                providerID: .codexAppServer,
+                connection: .connecting,
+                language: .japanese
+              ) == "音声セッションへ接続しています…",
+              VoiceLaneLocalization.conversationPrompt(
+                providerID: .codexAppServer,
+                connection: .connected,
+                language: .japanese
+              ) == "話しかけてください。"
         else {
             throw VoiceFoundationVerificationError.failed("voice_localization")
         }
