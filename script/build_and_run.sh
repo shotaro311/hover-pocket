@@ -245,6 +245,7 @@ fi
 mkdir -p "$BUNDLE_DIR/Contents/MacOS" "$BUNDLE_DIR/Contents/Frameworks" "$BUNDLE_DIR/Contents/Resources"
 cp ".build/$HOVERPOCKET_SWIFT_CONFIGURATION/$PRODUCT_NAME" "$EXECUTABLE_PATH"
 chmod +x "$EXECUTABLE_PATH"
+ditto "$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/HoverPocket_HoverPocket.bundle" "$BUNDLE_DIR/Contents/Resources/HoverPocket_HoverPocket.bundle"
 install_app_icon
 
 SPARKLE_FRAMEWORK_PATH="$ROOT_DIR/.build/$HOVERPOCKET_SWIFT_CONFIGURATION/Sparkle.framework"

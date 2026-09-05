@@ -84,7 +84,7 @@ enum CapabilityBrokerVerificationCommand {
             )
         )
 
-        try require(registry.descriptorKeys.count == 22, "registry_descriptor_count")
+        try require(registry.descriptorKeys.count == 22 + PersonalToolOperation.allCases.count, "registry_descriptor_count")
         try require(registry.availableHandlerKeys.count == 21, "registry_handler_count")
         try require(
             registry.descriptor(PocketCapabilityKeys.stickyDelete)?.approvalPolicy == .strongPerCall,
@@ -598,7 +598,7 @@ enum CapabilityBrokerVerificationCommand {
         calendar: BrokerFakeCalendarDataSource,
         now: Date
     ) async throws {
-        guard let resourceRoot = Bundle.module.resourceURL else {
+        guard let resourceRoot = Bundle.hoverPocketResources.resourceURL else {
             throw BrokerVerificationFailure("pocket_app_bundle")
         }
         let packageRoot = resourceRoot

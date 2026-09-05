@@ -117,6 +117,7 @@ struct CalendarCivilDate: Equatable, Sendable, Comparable {
 
 @MainActor
 protocol CalendarCapabilityDataSource: AnyObject {
+    func personalTool(_ operation: PersonalToolOperation, arguments: CapabilityObject) async throws -> CapabilityObject
     func listEvents(from start: Date, to end: Date) async throws -> [CalendarCapabilityEvent]
     func getEvent(eventRef: String) async throws -> CalendarCapabilityEvent?
     func createEvent(
@@ -125,12 +126,22 @@ protocol CalendarCapabilityDataSource: AnyObject {
     ) async throws -> CalendarCapabilityEvent
 }
 
+extension CalendarCapabilityDataSource {
+    func personalTool(_ operation: PersonalToolOperation, arguments: CapabilityObject) async throws -> CapabilityObject {
+        throw CapabilityHandlerError.unavailable("personal_calendar_operations")
+    }
+}
+
 @MainActor
 final class GoogleCalendarCapabilityDataSource: CalendarCapabilityDataSource {
     private let store: GoogleCalendarStore
 
     init(store: GoogleCalendarStore = .shared) {
         self.store = store
+    }
+
+    func personalTool(_ operation: PersonalToolOperation, arguments: CapabilityObject) async throws -> CapabilityObject {
+        try await store.personalTool(operation, arguments: arguments)
     }
 
     func listEvents(from start: Date, to end: Date) async throws -> [CalendarCapabilityEvent] {
@@ -582,7 +593,7 @@ enum ProviderCapabilityCompositionRoot {
         calendarDataSource: any CalendarCapabilityDataSource,
         controlsDataSource: any ControlsCapabilityDataSource = LiveControlsCapabilityDataSource()
     ) throws -> PocketCapabilityHandlerSet {
-        try PocketCapabilityHandlerSet(handlers: [
+        try PocketCapabilityHandlerSet(handlers: PersonalToolOperation.allCases.map { PersonalToolCapabilityHandler(operation: $0, controls: controlsDataSource, calendar: { try await calendarDataSource.personalTool($0, arguments: $1) }) } + [
             CalendarListCapabilityHandler(dataSource: calendarDataSource),
             CalendarGetCapabilityHandler(dataSource: calendarDataSource),
             CalendarCreateCapabilityHandler(dataSource: calendarDataSource),

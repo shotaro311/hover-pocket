@@ -85,6 +85,19 @@ final class StickyNotesStore: ObservableObject {
         }
     }
 
+    func editForCapability(id: UUID, title: String?, body: String?, color: StickyNoteColor?, at date: Date) throws {
+        guard let index = notes.firstIndex(where: { $0.id == id && $0.archivedAt == nil }) else {
+            throw CapabilityHandlerError.unavailable("note_not_found")
+        }
+        let previous = notes
+        if let title { notes[index].title = title }
+        if let body { notes[index].body = body }
+        if let color { notes[index].color = color }
+        notes[index].updatedAt = date
+        do { try saveOrThrow() }
+        catch { notes = previous; throw error }
+    }
+
     @discardableResult
     func createNote(default color: StickyNoteColor = .yellow) -> StickyNoteItem {
         let now = Date()

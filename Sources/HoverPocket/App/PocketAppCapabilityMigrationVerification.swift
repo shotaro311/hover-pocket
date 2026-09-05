@@ -270,7 +270,7 @@ enum PocketAppCapabilityMigrationVerification {
     }
 
     private static func withBundledPackage(_ body: (URL) throws -> Void) throws {
-        guard let resourceRoot = Bundle.module.resourceURL else {
+        guard let resourceRoot = Bundle.hoverPocketResources.resourceURL else {
             throw PocketAppCapabilityMigrationError.invalid("bundle")
         }
         let bundled = resourceRoot

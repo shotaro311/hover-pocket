@@ -1,0 +1,16 @@
+{
+  "date": "2026-09-05",
+  "branch": "codex/voice-personal-operations",
+  "previewBuild": "631",
+  "previewBinarySHA256": "9a708a26df5c8ee57133d37b8eb77f133a0e9ad3fb0aae5192e5a737af2ecea5",
+  "debugAssertions": 41,
+  "signedAssertions": 42,
+  "signatureVerified": true,
+  "googleConfigurationAndLocationEntitlementVerified": true,
+  "calendarLiveRead": "passed",
+  "calendarLiveWrites": "not_performed",
+  "physicalVoice": "not_verified",
+  "published": false,
+  "installedBuild": "630",
+  "notarization": "not_performed_for_preview"
+}

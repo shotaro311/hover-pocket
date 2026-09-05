@@ -169,7 +169,7 @@ enum PocketCapabilityDescriptors {
         maximumCallsPerMinute: 120
     )
 
-    static let builtIn: [PocketCapabilityDescriptor] = [
+    static let builtIn: [PocketCapabilityDescriptor] = (PersonalToolOperation.allCases.map(\.descriptor) + [
         descriptor(
             PocketCapabilityKeys.calculatorEvaluate,
             effect: .pure,
@@ -363,7 +363,7 @@ enum PocketCapabilityDescriptors {
         timerDescriptor(PocketCapabilityKeys.timerResume, effect: .reversibleLocalWrite, approval: .brokerPolicy, idempotency: .required, input: CapabilitySchemaValidation.timerIDInput, rollback: false),
         timerDescriptor(PocketCapabilityKeys.timerStart, effect: .reversibleLocalWrite, approval: .brokerPolicy, idempotency: .required, input: CapabilitySchemaValidation.timerStartInput, rollback: true),
         timerDescriptor(PocketCapabilityKeys.timerStop, effect: .reversibleLocalWrite, approval: .brokerPolicy, idempotency: .required, input: CapabilitySchemaValidation.timerIDInput, rollback: false)
-    ].sorted { $0.key < $1.key }
+    ]).sorted { $0.key < $1.key }
 
     private static func descriptor(
         _ key: PocketCapabilityKey,

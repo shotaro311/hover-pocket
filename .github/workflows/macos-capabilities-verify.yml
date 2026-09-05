@@ -14,7 +14,10 @@ on:
       - "Sources/HoverPocket/App/AppDelegate.swift"
       - "Sources/HoverPocket/App/MacOSVoiceE2EIsolationVerificationCommand.swift"
       - "Sources/HoverPocket/App/VoiceFoundationVerificationCommand.swift"
+      - "Sources/HoverPocket/App/PersonalToolVerificationCommand.swift"
+      - "contracts/personal-tools/**"
       - "Sources/HoverPocket/Support/HoverPocketRuntimeEnvironment.swift"
+      - "Sources/HoverPocket/Support/PocketResourceBundle.swift"
       - "Sources/HoverPocket/State/AppSettings.swift"
       - "Sources/HoverPocket/State/ClipboardHistoryStore.swift"
       - "Sources/HoverPocket/Views/HoverPanelShell.swift"
@@ -63,7 +66,10 @@ on:
       - "Sources/HoverPocket/App/AppDelegate.swift"
       - "Sources/HoverPocket/App/MacOSVoiceE2EIsolationVerificationCommand.swift"
       - "Sources/HoverPocket/App/VoiceFoundationVerificationCommand.swift"
+      - "Sources/HoverPocket/App/PersonalToolVerificationCommand.swift"
+      - "contracts/personal-tools/**"
       - "Sources/HoverPocket/Support/HoverPocketRuntimeEnvironment.swift"
+      - "Sources/HoverPocket/Support/PocketResourceBundle.swift"
       - "Sources/HoverPocket/State/AppSettings.swift"
       - "Sources/HoverPocket/State/ClipboardHistoryStore.swift"
       - "Sources/HoverPocket/Views/HoverPanelShell.swift"
@@ -129,6 +135,9 @@ jobs:
           node script/verify_macos_realtime_renderer.mjs
           python3 script/verify_voice_foundation.py
           .build/debug/HoverPocket --verify-voice-foundation
+          .build/debug/HoverPocket --verify-personal-tools
+          .build/debug/HoverPocket --export-personal-tool-contracts > /tmp/personal-tool-operations.json
+          cmp contracts/personal-tools/v1/operations.json /tmp/personal-tool-operations.json
           .build/debug/HoverPocket --verify-voice-e2e-isolation
           .build/debug/HoverPocket --verify-panel-layout
           .build/debug/HoverPocket --verify-panel-soak

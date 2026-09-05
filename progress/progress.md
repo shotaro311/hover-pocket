@@ -5,6 +5,18 @@ updated_by: codex
 status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-draft-pr-ci-green; an3-b3b-windows-security-ci-green-physical-e2e-pending; an3-b3b-macos-draft-pr-ci-green-physical-e2e-pending; macos-codex-appserver-chatgpt-bundled-0.150-live-webrtc-passed-no-physical-mic; macos-codex-appserver-broker-tool-live-probe-verified; macos-codex-appserver-live-model-timer-tool-verified; macos-codex-appserver-managed-chatgpt-login-local-verified-human-login-pending; macos-normal-ui-all-providers-voice-lane-readback; macos-voice-e2e-isolation-draft-pr-ci-green-security-clean-physical-e2e-pending; macos-voice-e2e-performance-readback-local-verified; macos-voice-e2e-terminal-receipt-fixed-local-verified; macos-voice-e2e-build608-legacy-nonphysical-only; macos-voice-e2e-build618-stopped; macos-voice-e2e-build619-stopped-receipt-invalid; macos-calendar-read-broker-live-verified; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; an5-credential-broker-draft-pr-ci-green; an5-credential-peer-identity-draft-pr-ci-green-security-clean; an5-credential-mutual-identity-draft-pr-ci-green-security-clean; an5-credential-delivery-draft-pr-ci-green-security-clean-macos-auth-canary-passed; macos-codex-confinement-canary-passed; windows-codex-confinement-downgrade-negative-control-ci-green-positive-elevated-blocked-by-reparse-finding; windows-codex-sandbox-production-fail-closed-ci-green-original-path-fixed; windows-codex-sandbox-helper-internal-ci-green-semantic-readback-security-clean; windows-codex-sandbox-per-machine-msi-ci-green; windows-settings-fixed-helper-uac-boundary-ci-green-physical-canary-pending; production-generator-off; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; core-ga-final-integration-draft-pr-ci-green-physical-e2e-pending; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-transition-verified; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-contract-ci-green-security-fixed-physical-signing-pending; windows-signpath-foundation-selected-application-pending; macos-an8-build583-notarized-release-candidate-verified-unpublished; macos-build597-notarized-rejected-packaged-realtime-local-network-gate; macos-build599-notarized-artifact-verified-packaged-realtime-local-network-gate; macos-build605-notarized-release-candidate-verified-unpublished; macos-build615-notarized-exact-runtime-head-rc-unpublished; macos-build628-voice-start-fix-notarized-unpublished-physical-voice-tools-accepted; macos-build629-voice-options-notarized-unpublished-physical-options-pending; an8-pro-gap-audit-complete-no-go; provider-bound-codex-physical-voice-ci-green; macos-panel-soak-verified; macos-settings-window-readable-and-resizable; an8-exact-runtime-head-evidence-bundle
 ---
 
+## 2026-09-05 macOSの詳細音声操作
+
+- タイマー・付箋・予定・メディア・コピー内容の操作を実装した。Calendar許可ありで24 tool。生成プラットフォームとToday Focusの変更は保留。
+- Debug、新規41検証、既存Voice / Capability / Broker / Timer / Panel / isolation、共有契約72件がPASS。最終Release、署名付きpreviewの42検証、実Calendar readもPASS。本番630は未変更。
+- 詳細: `progress/2026-09/2026-09-05_hover-pocket-personal-operations.md`。
+
+## 2026-09-05 個人用ツールの意図と操作拡張計画
+
+- 既存機能の詳細操作とクリップボード接続の計画をユーザーが採用。ソース実装は未着手。
+- 個人用ツールの生成・導入は本番で無効。固定Today Focusの完成を生成プラットフォームの完成として扱わない。
+- 計画と根拠: `docs/plan/20260905_AI_NATIVE_USER_TOOLS.md`。詳細: `progress/2026-09/2026-09-05_hover-pocket-personal-tools-audit.md`。
+
 ## 2026-09-05 Googleログインと天気の現在地修正・630本番配信完了
 
 - Googleは7月16日の審査承認メールを確認済み。629の配布設定漏れを復元し、再ログインなしでGoogleカレンダーの取得・UI接続済みを確認した。

@@ -280,7 +280,7 @@ enum PocketAppWorkspaceBackupVerification {
     }
 
     private static func bundledPackageCopy(under root: URL) throws -> URL {
-        guard let resources = Bundle.module.resourceURL else {
+        guard let resources = Bundle.hoverPocketResources.resourceURL else {
             throw PocketAppWorkspaceBackupError.invalid("WORKSPACE_FIXTURE_MISSING")
         }
         let source = resources

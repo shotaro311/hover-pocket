@@ -46,8 +46,14 @@ final class HostCapabilityApprovalPresentationResolver: CapabilityApprovalPresen
     private static let maximumDisplayScalars = 80
     private let stickyStore: StickyNotesStore
 
-    init(stickyStore: StickyNotesStore) {
+    private let timerStore: TimerStore
+    private let calendarLabel: (String, CapabilityValue?) -> String?
+
+    init(stickyStore: StickyNotesStore, timerStore: TimerStore = .shared,
+         calendarLabel: @escaping (String, CapabilityValue?) -> String? = { GoogleCalendarStore.shared.personalApprovalLabel($0, revision: $1) }) {
         self.stickyStore = stickyStore
+        self.timerStore = timerStore
+        self.calendarLabel = calendarLabel
     }
 
     func resolve(
@@ -88,6 +94,25 @@ final class HostCapabilityApprovalPresentationResolver: CapabilityApprovalPresen
                 destructive: descriptor.effect == .destructiveSensitive,
                 rollbackAvailable: descriptor.rollbackAvailable
             ))
+        }
+        for (step, descriptor) in zip(plan.steps, descriptors) {
+            guard let operation = PersonalToolOperation.allCases.first(where: { $0.key == descriptor.key }), operation.isDestructive,
+                  let effect = request.effects.first(where: { $0.stepID == step.id }) else { continue }
+            let rawID = try step.arguments.requiredString("targetId", maxLength: 512)
+            let label: String?
+            if operation == .stickyDelete, let id = UUID(uuidString: rawID) {
+                label = stickyStore.note(id: id)?.displayTitle
+            } else if operation == .timerStop, let id = UUID(uuidString: rawID) {
+                label = timerStore.runningTimer(id: id)?.title
+            } else {
+                label = calendarLabel(rawID, step.arguments["expectedRevision"])
+            }
+            guard let label, let safeLabel = Self.sanitizedDisplayLabel(label) else { throw CapabilityBrokerError.invalidPlan("approval_target") }
+            presentations.append(.init(requestID: request.id, planDigest: request.planDigest, stepID: step.id,
+                argumentDigest: effect.argumentDigest, actionKey: "approval." + operation.rawValue,
+                targetKind: operation.isCalendar ? "calendar_event" : operation == .stickyDelete ? "sticky_note" : "timer",
+                targetDisplayKey: "approval.target", targetDisplayLabel: safeLabel, targetState: .present,
+                destructive: true, rollbackAvailable: false))
         }
         return presentations
     }

@@ -155,8 +155,31 @@ final class TimerStore: ObservableObject {
         }
     }
 
-    func pauseForCapability(id: UUID, at date: Date) async throws {
+    func editForCapability(id: UUID, title: String?, remaining: Double?, at date: Date, expected: RunningTimer? = nil) async throws {
         await pendingWriteTask?.value
+        try Task.checkCancellation()
+        if let expected, runningTimer(id: id) != expected { throw CapabilityHandlerError.unavailable("timer_changed") }
+        guard let index = runningTimers.firstIndex(where: { $0.id == id }) else {
+            throw CapabilityHandlerError.unavailable("timer_not_found")
+        }
+        if let remaining, !(1...86400).contains(remaining) {
+            throw CapabilityHandlerError.invalidArgument("remainingSeconds")
+        }
+        let previous = runningTimers
+        if let title { runningTimers[index].title = title }
+        if let remaining {
+            if runningTimers[index].isPaused { runningTimers[index].pausedRemaining = remaining }
+            else { runningTimers[index].endDate = date.addingTimeInterval(remaining) }
+            runningTimers[index].phaseDuration = remaining
+        }
+        do { try persistRunningTimersImmediately(); syncTickTimer() }
+        catch { runningTimers = previous; syncTickTimer(); throw error }
+    }
+
+    func pauseForCapability(id: UUID, at date: Date, expected: RunningTimer? = nil) async throws {
+        await pendingWriteTask?.value
+        try Task.checkCancellation()
+        if let expected, runningTimer(id: id) != expected { throw CapabilityHandlerError.unavailable("timer_changed") }
         guard let index = runningTimers.firstIndex(where: { $0.id == id }),
               !runningTimers[index].isPaused else { return }
         let previousTimers = runningTimers
@@ -171,8 +194,10 @@ final class TimerStore: ObservableObject {
         }
     }
 
-    func resumeForCapability(id: UUID, at date: Date) async throws {
+    func resumeForCapability(id: UUID, at date: Date, expected: RunningTimer? = nil) async throws {
         await pendingWriteTask?.value
+        try Task.checkCancellation()
+        if let expected, runningTimer(id: id) != expected { throw CapabilityHandlerError.unavailable("timer_changed") }
         guard let index = runningTimers.firstIndex(where: { $0.id == id }),
               let remaining = runningTimers[index].pausedRemaining else { return }
         let previousTimers = runningTimers
@@ -191,8 +216,10 @@ final class TimerStore: ObservableObject {
         }
     }
 
-    func stopForCapability(id: UUID) async throws {
+    func stopForCapability(id: UUID, expected: RunningTimer? = nil) async throws {
         await pendingWriteTask?.value
+        try Task.checkCancellation()
+        if let expected, runningTimer(id: id) != expected { throw CapabilityHandlerError.unavailable("timer_changed") }
         let previousTimers = runningTimers
         runningTimers.removeAll { $0.id == id }
         do {

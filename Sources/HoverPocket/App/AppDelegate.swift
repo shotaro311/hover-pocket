@@ -137,7 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 return
             }
-            guard let resources = Bundle.module.resourceURL else {
+            guard let resources = Bundle.hoverPocketResources.resourceURL else {
                 throw PocketAppPackageError.invalid("$:resources")
             }
             let packageRoot = resources

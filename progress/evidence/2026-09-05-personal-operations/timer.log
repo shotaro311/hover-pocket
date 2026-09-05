@@ -1,0 +1,14 @@
+timer_verify=ok
+timer_defaults=ok
+timer_formatting=ok
+timer_progress=ok
+timer_lifecycle=ok
+timer_pin=ok
+timer_storage_isolation=ok
+timer_draft_migration=ok
+timer_stopwatch=ok
+timer_concurrency=ok
+timer_icon_identity=ok
+timer_layout_side_by_side=true
+timer_layout_compact=true
+timer_entry_widths=small:157.3,medium:184.0,large:210.7,extraLarge:237.3

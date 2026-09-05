@@ -10,7 +10,7 @@ enum CodexPocketAppGenerationModelCatalog {
     static let maximumBytes = 64 * 1024
 
     static func load() throws -> Data {
-        guard let resources = Bundle.module.resourceURL else {
+        guard let resources = Bundle.hoverPocketResources.resourceURL else {
             throw PocketAppGenerationError.generatorUnavailable
         }
         let pocketApps = resources.appendingPathComponent("PocketApps", isDirectory: true)

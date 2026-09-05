@@ -9,6 +9,8 @@ struct VoiceNativeApprovalRequest: Sendable {
         case stickyUpsert
         case controlsBrightnessSet
         case controlsVolumeSet
+        case personalEdit
+        case personalDelete
     }
 
     let kind: Kind
@@ -54,7 +56,22 @@ private final class VoiceNativeApprovalPresentation {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = request.title
-        alert.informativeText = request.detail
+        if request.detail.count > 1200 {
+            alert.informativeText = "変更内容を確認してください。"
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 440, height: 220))
+            scroll.hasVerticalScroller = true
+            let text = NSTextView(frame: scroll.bounds)
+            text.isEditable = false
+            text.isSelectable = true
+            text.isVerticallyResizable = true
+            text.autoresizingMask = [.width]
+            text.textContainer?.widthTracksTextView = true
+            text.string = request.detail
+            scroll.documentView = text
+            alert.accessoryView = scroll
+        } else {
+            alert.informativeText = request.detail
+        }
         alert.addButton(withTitle: "許可")
         alert.addButton(withTitle: "キャンセル")
         self.alert = alert
@@ -165,20 +182,22 @@ private final class VoiceApprovalCoordinator {
         active = ActiveApproval(
             id: approvalID,
             sessionID: sessionID,
-            task: task
+            task: task,
+            awaitingConfirmation: true
         )
         let approved = await withTaskCancellationHandler {
             await task.value
         } onCancel: {
             task.cancel()
         }
-        guard !Task.isCancelled,
+        guard !Task.isCancelled, !task.isCancelled,
               !cancelledSessions.contains(sessionID) else {
             if active?.id == approvalID {
                 active = nil
             }
             return VoiceApprovalResult(outcome: .cancelled, automaticReservationID: nil)
         }
+        active?.awaitingConfirmation = false
         if autoApprove, approved {
             return VoiceApprovalResult(outcome: .approved, automaticReservationID: approvalID)
         }
@@ -189,6 +208,12 @@ private final class VoiceApprovalCoordinator {
             outcome: approved ? .approved : .rejected,
             automaticReservationID: nil
         )
+    }
+
+    func cancelPending(_ sessionID: String) -> Bool {
+        guard let active, active.sessionID == sessionID, active.awaitingConfirmation else { return false }
+        active.task.cancel()
+        return true
     }
 
     func finishAutomaticApproval(reservationID: UUID) {
@@ -215,6 +240,7 @@ private final class VoiceApprovalCoordinator {
         let id: UUID
         let sessionID: String
         let task: Task<Bool, Never>
+        var awaitingConfirmation: Bool
     }
 }
 
@@ -222,8 +248,10 @@ private extension VoiceNativeApprovalRequest.Kind {
     var isCurrentAutoApprovalKind: Bool {
         switch self {
         case .calendarCreate, .timerStart, .stickyUpsert,
-             .controlsBrightnessSet, .controlsVolumeSet:
+             .controlsBrightnessSet, .controlsVolumeSet, .personalEdit:
             true
+        case .personalDelete:
+            false
         }
     }
 }
@@ -246,14 +274,15 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     private static let maximumRememberedCalls = 512
     private static let maximumReturnedEvents = 24
 
-    private let context: VoiceCapabilityContext
+    let context: VoiceCapabilityContext
     private let calendarAccessGranted: () -> Bool
     private let actionConfirmationEnabled: @MainActor () -> Bool
     private let timeZoneID: () -> String
-    private let now: () -> Date
+    let now: () -> Date
     private let approvalCoordinator: VoiceApprovalCoordinator
     private var remembered: [String: RememberedCall] = [:]
     private var completed: [String] = []
+    var personalKnownTargets: [String: Set<String>] = [:]
     private var cancelledSessions: Set<String> = []
     private var cancelledOrder: [String] = []
 
@@ -325,6 +354,12 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         tools.append(Self.stickyUpsertDefinition)
         tools.append(Self.controlsBrightnessSetDefinition)
         tools.append(Self.controlsVolumeSetDefinition)
+        tools += PersonalToolOperation.allCases.filter {
+            context.registry.availableHandlerKeys.contains($0.key) && (!$0.isCalendar || calendarAccessGranted())
+        }.map(\.tool)
+        if context.registry.availableHandlerKeys.contains(PersonalToolOperation.timerList.key) {
+            tools.append(["type": "function", "name": "pending_action_cancel", "description": "Cancel a confirmation that is still pending in this conversation, without ending the conversation. This does not undo completed actions. If none is pending, report that fact.", "parameters": ["type": "object", "properties": [:], "additionalProperties": false]])
+        }
         return tools
     }
 
@@ -384,7 +419,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         do {
             try requireIdentifier(sessionID, maximum: 160)
             try requireIdentifier(callID, maximum: 160)
-            guard Self.allowedToolNames.contains(toolName),
+            guard (Self.allowedToolNames.contains(toolName) || PersonalToolOperation(rawValue: toolName) != nil || toolName == "pending_action_cancel"),
                   argumentsJSON.utf8.count <= Self.maximumArgumentsBytes else {
                 return failure("invalid_arguments")
             }
@@ -433,6 +468,13 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     ) async -> String {
         do {
             try requireSessionActive(sessionID)
+            if toolName == "pending_action_cancel" {
+                try requireExactKeys(arguments, allowed: [])
+                return try json(["status": "succeeded", "cancelledPendingAction": approvalCoordinator.cancelPending(sessionID), "completedActionsUndone": false])
+            }
+            if let operation = PersonalToolOperation(rawValue: toolName) {
+                return try await executePersonal(operation, correlation: correlation, sessionID: sessionID, arguments: arguments)
+            }
             switch toolName {
             case Self.calendarListTool:
                 return try await listCalendar(
@@ -538,7 +580,10 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
             guard case .object(let event) = value else {
                 throw CapabilityBrokerError.invalidPlan("calendar_list_output")
             }
+            let reference = try event.requiredString("eventRef", maxLength: 256)
+            personalKnownTargets[sessionID, default: []].insert(reference)
             return [
+                "targetId": reference,
                 "safeTitle": VoiceTextSafety.sanitizeVisibleText(
                     try event.requiredString("safeTitle", maxLength: 160),
                     limit: 160
@@ -650,8 +695,11 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         )
         try requireCalendarAccess(sessionID)
         let output = try verifiedOutput(receipt)
+        let reference = try output.requiredString("eventRef", maxLength: 256)
+        personalKnownTargets[sessionID, default: []].insert(reference)
         return try json([
             "status": "succeeded",
+            "targetId": reference,
             "safeTitle": try output.requiredString("safeTitle", maxLength: 160),
             "start": try output.requiredString("start", maxLength: 64),
             "end": try output.requiredString("end", maxLength: 64),
@@ -749,6 +797,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         } else {
             payload["endAt"] = NSNull()
         }
+        if let id = payload["timerId"] as? String { personalKnownTargets[sessionID, default: []].insert(id) }
         MacOSVoiceE2EReceiptStore.shared?.recordTimerCapabilityReadbackVerified()
         return try json(payload)
     }
@@ -763,10 +812,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
             allowed: ["body", "title", "color"],
             required: ["body"]
         )
-        let body = VoiceApprovalText.singleLine(
-            try arguments.requiredString("body", maxLength: 10_000),
-            limit: 10_000
-        )
+        let body = try arguments.requiredString("body", maxLength: 10_000)
         guard !body.isEmpty else { return Self.failure("invalid_arguments") }
         let rawTitle = try arguments.optionalString("title", maxLength: 120) ?? "Voice"
         let title = VoiceApprovalText.singleLine(rawTitle, limit: 120)
@@ -793,6 +839,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
                 detail: VoiceApprovalText.singleLine(body, limit: 240)
             )
         )
+        personalKnownTargets[sessionID, default: []].insert(try output.requiredString("noteId", maxLength: 128))
         return try json([
             "status": "succeeded",
             "noteId": try output.requiredString("noteId", maxLength: 128),
@@ -1027,7 +1074,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         }
     }
 
-    private func executeCapability(
+    func executeCapability(
         correlation: String,
         sessionID: String,
         planIDPrefix: String,
@@ -1038,6 +1085,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         approval: VoiceNativeApprovalRequest? = nil
     ) async throws -> CapabilityObject {
         try requireSessionActive(sessionID)
+        if permission.hasPrefix("calendar.") { try requireCalendarAccess(sessionID) }
         let current = now()
         let principal = CapabilityPrincipal(userID: "local-user", agentSessionID: sessionID)
         let permissions = CapabilityPermissionSet(
@@ -1091,6 +1139,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
             grant = nil
         }
         try requireSessionActive(sessionID)
+        if permission.hasPrefix("calendar.") { try requireCalendarAccess(sessionID) }
         let receipt = try await context.broker.execute(
             plan,
             permissions: permissions,
@@ -1163,6 +1212,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
 
     func cancelSession(_ sessionID: String) {
         guard VoiceTextSafety.sanitizeIdentifier(sessionID) == sessionID else { return }
+        personalKnownTargets.removeValue(forKey: sessionID)
         rememberCancelled(sessionID)
         approvalCoordinator.cancelSession(sessionID)
         let correlations = remembered.compactMap { key, call in
@@ -1175,14 +1225,14 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         }
     }
 
-    private func requireSessionActive(_ sessionID: String) throws {
+    func requireSessionActive(_ sessionID: String) throws {
         try Task.checkCancellation()
         guard !cancelledSessions.contains(sessionID) else {
             throw VoiceCapabilityRuntimeError.sessionCancelled
         }
     }
 
-    private func requireCalendarAccess(_ sessionID: String) throws {
+    func requireCalendarAccess(_ sessionID: String) throws {
         try requireSessionActive(sessionID)
         guard calendarAccessGranted() else {
             throw CapabilityBrokerError.permissionDenied("calendar.events.read")
@@ -1340,7 +1390,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         }
     }
 
-    private func json(_ object: [String: Any]) throws -> String {
+    func json(_ object: [String: Any]) throws -> String {
         let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
         guard data.count <= OpenAIRealtimeContract.maximumFunctionOutputBytes,
               let result = String(data: data, encoding: .utf8) else {
@@ -1367,7 +1417,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     }
 }
 
-private extension Dictionary where Key == String, Value == CapabilityValue {
+extension Dictionary where Key == String, Value == CapabilityValue {
     func optionalNumber(
         _ key: String,
         range: ClosedRange<Double>
@@ -1401,7 +1451,7 @@ enum VoiceApprovalText {
     }
 }
 
-private enum StrictVoiceJSON {
+enum StrictVoiceJSON {
     static func object(_ source: String) throws -> CapabilityObject {
         let data = Data(source.utf8)
         var validator = DuplicateKeyValidator(data: data)

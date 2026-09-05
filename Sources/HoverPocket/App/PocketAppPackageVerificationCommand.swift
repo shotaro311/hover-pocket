@@ -82,7 +82,7 @@ enum PocketAppPackageVerificationCommand {
         }
 
         do {
-            guard let resourceRoot = Bundle.module.resourceURL else {
+            guard let resourceRoot = Bundle.hoverPocketResources.resourceURL else {
                 throw PocketAppPackageError.invalid("$:bundle_resource")
             }
             let bundledRoot = resourceRoot

@@ -88,6 +88,31 @@ if CommandLine.arguments.contains("--verify-panel-soak") {
     app.run()
     exit(1)
 }
+if CommandLine.arguments.contains("--export-personal-tool-contracts") {
+    let operations = PersonalToolOperation.allCases.map { operation -> [String: Any] in
+        ["capabilityId": operation.key.id, "version": operation.key.version, "permission": operation.permission,
+         "write": operation.isWrite, "destructive": operation.isDestructive, "tool": operation.tool]
+    }
+    let data = try JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "operations": operations], options: [.prettyPrinted, .sortedKeys])
+    print(String(decoding: data, as: UTF8.self))
+    exit(0)
+}
+if CommandLine.arguments.contains("--verify-personal-tools") || CommandLine.arguments.contains("--verify-personal-calendar-read") {
+    Task { @MainActor in
+        do {
+            if CommandLine.arguments.contains("--verify-personal-calendar-read") {
+                try await PersonalToolVerificationCommand.verifyLiveCalendarRead()
+            } else {
+                try await PersonalToolVerificationCommand.run()
+            }
+            exit(0)
+        } catch {
+            print("FAIL personal tools: \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+    dispatchMain()
+}
 if CommandLine.arguments.contains("--verify-weather-location") {
     let app = NSApplication.shared
     Task { @MainActor in
