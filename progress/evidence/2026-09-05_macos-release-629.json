@@ -1,0 +1,32 @@
+{
+  "version": "0.1.0",
+  "build": "629",
+  "releaseTag": "v0.1.0-629",
+  "sourceSnapshotCommit": "b0bcf31d66a5861a6f106d273c33088afebcc8a1",
+  "sha256": "627ad8d7d833221757f860946f3aca5f54506b716e15f3a13e1c0ba7044a1f42",
+  "size": 7633805,
+  "releasePublishedAt": "2026-09-05T03:53:03Z",
+  "feedTag": "macos-latest",
+  "readback": [
+    "public ZIP SHA256",
+    "public appcast build and size",
+    "public ZIP embedded build",
+    "Sparkle Ed25519",
+    "strict codesign",
+    "stapler",
+    "Gatekeeper Notarized Developer ID",
+    "release not draft or prerelease",
+    "remote tag exact snapshot commit",
+    "GitHub latest v0.1.0-629"
+  ],
+  "notPerformed": [
+    "end-user Sparkle install and restart",
+    "physical optional hidden voice continuation and confirmation bypass"
+  ],
+  "crossPlatformReadback": {
+    "windowsTag": "win-v0.2.7",
+    "publicFeedsAndChecksums": "PASS",
+    "windowsReleasePublishedAt": "2026-08-12T07:17:19Z",
+    "fullWindowsPayloadVerification": "SKIPPED: stopped slow unrelated package download; macOS public artifact independently fully verified"
+  }
+}
