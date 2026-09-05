@@ -1,15 +1,17 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-09-04
+updated: 2026-09-05
 updated_by: codex
 status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-draft-pr-ci-green; an3-b3b-windows-security-ci-green-physical-e2e-pending; an3-b3b-macos-draft-pr-ci-green-physical-e2e-pending; macos-codex-appserver-chatgpt-bundled-0.150-live-webrtc-passed-no-physical-mic; macos-codex-appserver-broker-tool-live-probe-verified; macos-codex-appserver-live-model-timer-tool-verified; macos-codex-appserver-managed-chatgpt-login-local-verified-human-login-pending; macos-normal-ui-all-providers-voice-lane-readback; macos-voice-e2e-isolation-draft-pr-ci-green-security-clean-physical-e2e-pending; macos-voice-e2e-performance-readback-local-verified; macos-voice-e2e-terminal-receipt-fixed-local-verified; macos-voice-e2e-build608-legacy-nonphysical-only; macos-voice-e2e-build618-stopped; macos-voice-e2e-build619-stopped-receipt-invalid; macos-calendar-read-broker-live-verified; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; an5-credential-broker-draft-pr-ci-green; an5-credential-peer-identity-draft-pr-ci-green-security-clean; an5-credential-mutual-identity-draft-pr-ci-green-security-clean; an5-credential-delivery-draft-pr-ci-green-security-clean-macos-auth-canary-passed; macos-codex-confinement-canary-passed; windows-codex-confinement-downgrade-negative-control-ci-green-positive-elevated-blocked-by-reparse-finding; windows-codex-sandbox-production-fail-closed-ci-green-original-path-fixed; windows-codex-sandbox-helper-internal-ci-green-semantic-readback-security-clean; windows-codex-sandbox-per-machine-msi-ci-green; windows-settings-fixed-helper-uac-boundary-ci-green-physical-canary-pending; production-generator-off; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; core-ga-final-integration-draft-pr-ci-green-physical-e2e-pending; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-transition-verified; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-contract-ci-green-security-fixed-physical-signing-pending; windows-signpath-foundation-selected-application-pending; macos-an8-build583-notarized-release-candidate-verified-unpublished; macos-build597-notarized-rejected-packaged-realtime-local-network-gate; macos-build599-notarized-artifact-verified-packaged-realtime-local-network-gate; macos-build605-notarized-release-candidate-verified-unpublished; macos-build615-notarized-exact-runtime-head-rc-unpublished; macos-build628-voice-start-fix-notarized-unpublished-physical-voice-tools-accepted; macos-build629-voice-options-notarized-unpublished-physical-options-pending; an8-pro-gap-audit-complete-no-go; provider-bound-codex-physical-voice-ci-green; macos-panel-soak-verified; macos-settings-window-readable-and-resizable; an8-exact-runtime-head-evidence-bundle
 ---
 
-## 2026-09-05 Googleログインと天気の現在地修正
+## 2026-09-05 Googleログインと天気の現在地修正・630本番配信完了
 
-- 本番629でGoogle設定が欠落し、位置情報の署名entitlementもなかったことを確認。既存審査済み設定の復元、配布前検証、location entitlement、20秒timeout / cancel / stale callback拒否、SettingsからのGoogle復元を実装した。
-- Debug、現在地8シナリオ、配布設定5テスト、Panel / Voice検証はPASS。署名済み修正版の実機受入と公開readbackへ進む。
-- 詳細: `progress/2026-09/2026-09-05_hover-pocket-google-weather-fix.md`。
+- Googleは7月16日の審査承認メールを確認済み。629の配布設定漏れを復元し、再ログインなしでGoogleカレンダーの取得・UI接続済みを確認した。
+- locationdログで署名のlocation entitlement欠落を確認・修正した。実機で許可ダイアログ、現在地反映、20秒timeout後の再試行が成功した。
+- 630を署名・公証・本番公開。公開ZIP / appcast / Sparkle署名 / Google設定 / location entitlementを別downloadで検証し、インストール済みappもSparkle経由で629→630へ更新・再起動済み。
+- Debug / Release、現在地8シナリオ、配布設定5テスト、Panel128 / Voice / Weather APIはPASS。同じ修正を既存AI-native final-integration worktreeへ反映した。
+- 詳細: `progress/2026-09/2026-09-05_hover-pocket-google-weather-fix.md`。証拠: `progress/evidence/2026-09-05_macos-release-630.json`。
 
 ## 2026-09-05 macOS 629の本番配信完了
 
