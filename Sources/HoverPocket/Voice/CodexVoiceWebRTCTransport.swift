@@ -230,8 +230,16 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
         }
     }
 
-    func consumeMicrophonePermission() -> Bool {
-        runtimeHost?.consumeMicrophonePermission() ?? false
+    func consumeMicrophonePermission() -> CodexVoiceMicrophonePermissionDecision {
+        runtimeHost?.consumeMicrophonePermission() ?? .denied("microphone_request_not_armed")
+    }
+
+    func handleMicrophonePermissionFailure(_ code: String) {
+        guard sessionStarting else { return }
+        closeTransport(
+            event: "microphone_permission_failed",
+            errorCode: Self.safeErrorCode(code)
+        )
     }
 
     private func recordE2EMediaEvent(_ event: MacOSVoiceE2EMediaEvent) {
@@ -299,7 +307,12 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
         MacOSVoiceE2EReceiptStore.shared?.recordMediaEvent(.remoteAudioTrackStopped)
         MacOSVoiceE2EReceiptStore.shared?.recordMediaEvent(.remoteAudioPlaybackStopped)
         MacOSVoiceE2EReceiptStore.shared?.recordSafeClose()
-        resolveStart(.failure(CodexVoiceWebRTCTransportError.transportClosed))
+        let startError: CodexVoiceWebRTCTransportError = if let errorCode {
+            .transportFailed(Self.safeErrorCode(errorCode))
+        } else {
+            .transportClosed
+        }
+        resolveStart(.failure(startError))
         evaluate("window.hoverPocketVoice.cleanup(false)")
         guard let runtimeHost else { return }
         if clearTransientUIState {
@@ -325,6 +338,7 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
     private func resolveStart(_ result: Result<Void, Error>) {
         startTimeoutTask?.cancel()
         startTimeoutTask = nil
+        runtimeHost?.finishMicrophoneRequest()
         let continuation = startContinuation
         startContinuation = nil
         continuation?.resume(with: result)
@@ -511,8 +525,19 @@ struct CodexVoiceWebRTCTransportView: NSViewRepresentable {
                 microphoneOnly: type == .microphone,
                 armed: true
             )
-            let armed = structurallyAllowed && (driver?.consumeMicrophonePermission() ?? false)
-            decisionHandler(armed ? .grant : .deny)
+            guard structurallyAllowed else {
+                decisionHandler(.deny)
+                return
+            }
+            let decision = driver?.consumeMicrophonePermission()
+                ?? .denied("microphone_request_not_armed")
+            switch decision {
+            case .allowed:
+                decisionHandler(.grant)
+            case .denied(let code):
+                decisionHandler(.deny)
+                driver?.handleMicrophonePermissionFailure(code)
+            }
         }
     }
 }
@@ -568,6 +593,7 @@ private enum CodexVoiceWebContent {
   let peer = null;
   let microphone = null;
   let remoteAudio = null;
+  let muted = false;
   let attached = false;
   let operationEpoch = 0;
   let activeOperationId = null;
@@ -623,9 +649,158 @@ private enum CodexVoiceWebContent {
       remoteAudio.srcObject = null;
       remoteAudio = null;
     }
+    muted = false;
     if (notify && wasAttached && operationId) {
       post({ type: "detached", operationId, reconnectExpected });
     }
+  }
+
+  const maxMicrophoneCaptureAttempts = 4;
+
+  function classifyMicrophoneError(error) {
+    switch (error && error.name) {
+      case "NotAllowedError":
+      case "SecurityError":
+        return "microphone_permission_denied";
+      case "NotFoundError":
+        return "microphone_not_found";
+      case "NotReadableError":
+      case "AbortError":
+        return "microphone_unreadable";
+      case "OverconstrainedError":
+        return "microphone_constraints_unsupported";
+      default:
+        return "webrtc_failed";
+    }
+  }
+
+  function isRetryableMicrophoneError(code) {
+    return code === "microphone_unreadable"
+      || code === "microphone_constraints_unsupported";
+  }
+
+  async function alternateMicrophoneConstraints(isCurrent, limit) {
+    if (!isCurrent() || limit <= 0) return null;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return [];
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      if (!isCurrent()) return null;
+      const preferredGroupIds = new Set(devices
+        .filter((device) => device.kind === "audioinput"
+          && (device.deviceId === "default" || device.deviceId === "communications")
+          && device.groupId)
+        .map((device) => device.groupId));
+      const seenGroups = new Set();
+      const deviceIds = [];
+      for (const device of devices) {
+        if (device.kind !== "audioinput"
+            || !device.deviceId
+            || device.deviceId === "default"
+            || device.deviceId === "communications"
+            || device.groupId === "default"
+            || device.groupId === "communications"
+            || preferredGroupIds.has(device.groupId)) {
+          continue;
+        }
+        const groupKey = device.groupId ? `group:${device.groupId}` : `device:${device.deviceId}`;
+        if (seenGroups.has(groupKey)) continue;
+        seenGroups.add(groupKey);
+        deviceIds.push(device.deviceId);
+        if (deviceIds.length >= limit) break;
+      }
+      return deviceIds.map((deviceId) => ({
+        audio: { deviceId: { exact: deviceId } },
+        video: false
+      }));
+    } catch (_) {
+      return isCurrent() ? [] : null;
+    }
+  }
+
+  async function acquireMicrophone(epoch, operationId) {
+    const isCurrent = () => isCurrentOperation(epoch, operationId);
+    if (!isCurrent()) return { stream: null, code: null };
+    const constrainedCandidates = {
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: false
+    };
+    let lastCode = "microphone_unreadable";
+    let attempts = 0;
+    attempts += 1;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(constrainedCandidates);
+      if (!isCurrent()) {
+        stream?.getTracks().forEach((track) => track.stop());
+        return { stream: null, code: null };
+      }
+      if (stream) return { stream, code: null };
+      lastCode = "microphone_unreadable";
+    } catch (error) {
+      if (!isCurrent()) return { stream: null, code: null };
+      lastCode = classifyMicrophoneError(error);
+      if (lastCode === "microphone_permission_denied") {
+        return { stream: null, code: lastCode };
+      }
+      if (!isRetryableMicrophoneError(lastCode)) {
+        return { stream: null, code: lastCode };
+      }
+    }
+
+    if (!isCurrent()) return { stream: null, code: null };
+    if (lastCode === "microphone_constraints_unsupported"
+        && attempts < maxMicrophoneCaptureAttempts) {
+      attempts += 1;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        if (!isCurrent()) {
+          stream?.getTracks().forEach((track) => track.stop());
+          return { stream: null, code: null };
+        }
+        if (stream) return { stream, code: null };
+        lastCode = "microphone_unreadable";
+      } catch (error) {
+        if (!isCurrent()) return { stream: null, code: null };
+        lastCode = classifyMicrophoneError(error);
+        if (lastCode === "microphone_permission_denied") {
+          return { stream: null, code: lastCode };
+        }
+        if (!isRetryableMicrophoneError(lastCode)) {
+          return { stream: null, code: lastCode };
+        }
+      }
+    }
+
+    if (!isCurrent()) return { stream: null, code: null };
+    const alternateCandidates = await alternateMicrophoneConstraints(
+      isCurrent,
+      maxMicrophoneCaptureAttempts - attempts
+    );
+    if (!isCurrent() || !alternateCandidates) return { stream: null, code: null };
+    for (const constraints of alternateCandidates) {
+      if (!isCurrent() || attempts >= maxMicrophoneCaptureAttempts) {
+        return { stream: null, code: null };
+      }
+      attempts += 1;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (!isCurrent()) {
+          stream?.getTracks().forEach((track) => track.stop());
+          return { stream: null, code: null };
+        }
+        if (stream) return { stream, code: null };
+        lastCode = "microphone_unreadable";
+      } catch (error) {
+        if (!isCurrent()) return { stream: null, code: null };
+        lastCode = classifyMicrophoneError(error);
+        if (lastCode === "microphone_permission_denied") {
+          return { stream: null, code: lastCode };
+        }
+        if (!isRetryableMicrophoneError(lastCode)) {
+          return { stream: null, code: lastCode };
+        }
+      }
+    }
+    return { stream: null, code: lastCode };
   }
 
   async function start(operationId) {
@@ -637,14 +812,16 @@ private enum CodexVoiceWebContent {
     activeOperationId = operationId;
     let acquiredMicrophone = null;
     try {
-      acquiredMicrophone = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        video: false
-      });
+      const microphoneResult = await acquireMicrophone(epoch, operationId);
       if (!isCurrentOperation(epoch, operationId)) {
-        acquiredMicrophone.getTracks().forEach((track) => track.stop());
+        microphoneResult.stream?.getTracks().forEach((track) => track.stop());
         return;
       }
+      if (!microphoneResult.stream) {
+        post({ type: "failure", operationId, code: microphoneResult.code });
+        return;
+      }
+      acquiredMicrophone = microphoneResult.stream;
       microphone = acquiredMicrophone;
       post({ type: "microphone_acquired", operationId });
       const connection = new RTCPeerConnection();
@@ -656,6 +833,7 @@ private enum CodexVoiceWebContent {
         post({ type: "remote_audio_track", operationId });
         remoteAudio ||= new Audio();
         remoteAudio.autoplay = true;
+        remoteAudio.muted = muted;
         remoteAudio.srcObject = event.streams[0] || new MediaStream([event.track]);
         remoteAudio.play()
           .then(() => post({ type: "remote_audio_playing", operationId }))
@@ -682,10 +860,7 @@ private enum CodexVoiceWebContent {
         }
         return;
       }
-      const code = error && error.name === "NotAllowedError"
-        ? "microphone_denied"
-        : "webrtc_failed";
-      cleanup(false);
+      const code = "webrtc_failed";
       post({ type: "failure", operationId, code });
     }
   }
@@ -702,11 +877,14 @@ private enum CodexVoiceWebContent {
     post({ type: "attached", operationId });
   }
 
-  function setMuted(muted) {
-    if (!microphone) return;
-    microphone.getAudioTracks().forEach((track) => {
-      track.enabled = !muted;
-    });
+  function setMuted(nextMuted) {
+    muted = !!nextMuted;
+    if (microphone) {
+      microphone.getAudioTracks().forEach((track) => {
+        track.enabled = !muted;
+      });
+    }
+    if (remoteAudio) remoteAudio.muted = muted;
   }
 
   window.hoverPocketVoice = { start, acceptAnswer, setMuted, cleanup };
@@ -724,6 +902,22 @@ enum CodexVoiceWebRTCEmbeddedContract {
             "let operationEpoch = 0;",
             "let activeOperationId = null;",
             "function isCurrentOperation(epoch, operationId)",
+            "const maxMicrophoneCaptureAttempts = 4;",
+            "function classifyMicrophoneError(error)",
+            "function isRetryableMicrophoneError(code)",
+            "microphone_permission_denied",
+            "microphone_not_found",
+            "microphone_unreadable",
+            "microphone_constraints_unsupported",
+            "let muted = false;",
+            "remoteAudio.muted = muted;",
+            "function setMuted(nextMuted)",
+            "async function alternateMicrophoneConstraints(isCurrent, limit)",
+            "enumerateDevices()",
+            "const preferredGroupIds = new Set(devices",
+            "device.groupId",
+            "async function acquireMicrophone(epoch, operationId)",
+            "const microphoneResult = await acquireMicrophone(epoch, operationId);",
             "acquiredMicrophone.getTracks().forEach((track) => track.stop());",
             "post({ type: \"microphone_acquired\", operationId });",
             "post({ type: \"offer\", operationId, sdp });",
@@ -736,6 +930,9 @@ enum CodexVoiceWebRTCEmbeddedContract {
             "const finalTimeout = window.setTimeout(finish, 8000);"
         ]
         return requiredFragments.allSatisfy(CodexVoiceWebContent.html.contains)
+            && CodexVoiceWebContent.html.components(separatedBy: "getUserMedia").count == 4
+            && !CodexVoiceWebContent.html.contains("cleanup(false);\n        post({ type: \"failure\"")
+            && !CodexVoiceWebContent.html.contains("cleanup(false);\n      post({ type: \"failure\"")
             && !CodexVoiceWebContent.html.contains("ice_timeout")
     }
 }
@@ -762,10 +959,28 @@ fileprivate final class CodexVoiceWebContentSchemeHandler: NSObject, WKURLScheme
     func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
 }
 
-enum CodexVoiceWebRTCTransportError: Error {
+enum CodexVoiceWebRTCTransportError: Error, VoiceSessionStartFailure {
     case webViewUnavailable
     case untrustedURL
     case microphoneRequestNotArmed
     case microphonePermissionDenied
     case transportClosed
+    case transportFailed(String)
+
+    var voiceStartErrorCode: String {
+        switch self {
+        case .webViewUnavailable:
+            return "webrtc_page_unavailable"
+        case .untrustedURL:
+            return "webrtc_untrusted_origin"
+        case .microphoneRequestNotArmed:
+            return "microphone_request_not_armed"
+        case .microphonePermissionDenied:
+            return "microphone_permission_denied"
+        case .transportClosed:
+            return "voice_transport_closed"
+        case .transportFailed(let code):
+            return VoiceTextSafety.sanitizeErrorCode(code)
+        }
+    }
 }

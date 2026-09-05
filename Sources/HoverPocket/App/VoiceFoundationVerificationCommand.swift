@@ -34,6 +34,7 @@ private struct UnsafeDecodedSessionFixture: Codable {
 enum VoiceFoundationVerificationCommand {
     static func run() async throws {
         try verifySettingsBindingUsesPublishedValues()
+        try verifyVoiceSettingsDefaultsAndPersistence()
         try verifyGeometryAndScope()
         try verifyTranscriptBoundsAndRedaction()
         try await verifyDecodedModelsAreResanitized()
@@ -41,6 +42,9 @@ enum VoiceFoundationVerificationCommand {
         try await verifyDefaultOffAndFakeAdapter()
         try await verifyRealtimeProviderAndMacOSTransport()
         try await verifyExplicitAudioStart()
+        try await verifyPanelHiddenContinuation()
+        try await verifyStartErrorPropagation()
+        try verifyMicrophonePermissionLease()
         try await verifyExplicitStartCancellation()
         try await verifyCapabilityGrantRefresh()
         try await verifyRealtimeCapabilityBrokerRuntime()
@@ -84,6 +88,28 @@ enum VoiceFoundationVerificationCommand {
             )
         ] else {
             throw VoiceFoundationVerificationError.failed("settings_binding_stale_value")
+        }
+    }
+
+    private static func verifyVoiceSettingsDefaultsAndPersistence() throws {
+        let defaults = EphemeralAppSettingsDefaults()
+        let settings = AppSettings(defaults: defaults)
+        guard !settings.voiceContinueWhenPanelHidden,
+              settings.voiceActionConfirmationEnabled else {
+            throw VoiceFoundationVerificationError.failed("voice_settings_defaults")
+        }
+
+        settings.voiceContinueWhenPanelHidden = true
+        settings.voiceActionConfirmationEnabled = false
+        guard defaults.bool(forKey: "voiceContinueWhenPanelHidden"),
+              !defaults.bool(forKey: "voiceActionConfirmationEnabled") else {
+            throw VoiceFoundationVerificationError.failed("voice_settings_persistence_write")
+        }
+
+        let reloaded = AppSettings(defaults: defaults)
+        guard reloaded.voiceContinueWhenPanelHidden,
+              !reloaded.voiceActionConfirmationEnabled else {
+            throw VoiceFoundationVerificationError.failed("voice_settings_persistence_read")
         }
     }
 
@@ -370,6 +396,55 @@ enum VoiceFoundationVerificationCommand {
               ) == "一時停止中 · マイクを押して再開"
         else {
             throw VoiceFoundationVerificationError.failed("voice_localization")
+        }
+
+        let errorSnapshot: (String) -> VoiceLaneSnapshot = { code in
+            VoiceLaneSnapshot(
+                providerID: .codexAppServer,
+                mode: .compact,
+                connection: .disconnected,
+                activity: .failed,
+                muted: true,
+                transcript: [],
+                transcriptPreview: nil,
+                rootSessionID: nil,
+                sessions: [],
+                visibleSessionCount: 0,
+                safeErrorCode: code,
+                layoutBlockedReason: nil,
+                uiAttached: true,
+                restartAttempt: 0
+            )
+        }
+        guard VoiceLaneLocalization.status(
+            snapshot: errorSnapshot("microphone_permission_denied"),
+            language: .japanese
+        ) == "マイクの使用が許可されていません。システム設定で許可してください",
+              VoiceLaneLocalization.status(
+                snapshot: errorSnapshot("microphone_permission_denied"),
+                language: .english
+              ) == "Microphone access is denied. Allow it in System Settings.",
+              VoiceLaneLocalization.status(
+                snapshot: errorSnapshot("microphone_request_not_armed"),
+                language: .japanese
+              ) == "マイクの開始操作をやり直してください",
+              VoiceLaneLocalization.status(
+                snapshot: errorSnapshot("microphone_request_expired"),
+                language: .english
+              ) == "The microphone start request expired. Try again.",
+              VoiceLaneLocalization.status(
+                snapshot: errorSnapshot("microphone_not_found"),
+                language: .japanese
+              ) == "利用できるマイクがありません",
+              VoiceLaneLocalization.status(
+                snapshot: errorSnapshot("microphone_unreadable"),
+                language: .english
+              ) == "The microphone is busy or unavailable. Close other apps and try again.",
+              VoiceLaneLocalization.status(
+                snapshot: errorSnapshot("webrtc_failed"),
+                language: .japanese
+              ) == "音声接続に失敗しました。もう一度お試しください" else {
+            throw VoiceFoundationVerificationError.failed("voice_start_error_localization")
         }
     }
 
@@ -694,6 +769,242 @@ enum VoiceFoundationVerificationCommand {
         await runtime.shutdown()
     }
 
+    private static func verifyPanelHiddenContinuation() async throws {
+        let adapter = ExplicitStartVoiceSessionAdapter()
+        var factoryCount = 0
+        let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        await runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            providerID: .openAIRealtimeBYOK,
+            adapterFactory: {
+                factoryCount += 1
+                return adapter
+            }
+        ).value
+        try await waitUntil {
+            runtime.snapshot.connection == .disconnected
+                && runtime.snapshot.activity == .idle
+        }
+
+        runtime.attachPanel()
+        runtime.beginAudioSession()
+        try await waitUntil { runtime.snapshot.connection == .connected }
+        runtime.setRootSessionID("hidden-root")
+        runtime.appendTranscript(VoiceTranscriptEvent(
+            id: "hidden-event",
+            rootSessionID: "hidden-root",
+            role: .assistant,
+            text: "session remains",
+            isFinal: true,
+            timestamp: Date(timeIntervalSince1970: 0)
+        ))
+        runtime.upsertSession(VoiceSessionSummary(
+            sessionID: "hidden-root",
+            rootSessionID: "hidden-root",
+            title: "Hidden root",
+            status: .running,
+            updatedAt: Date(timeIntervalSince1970: 0)
+        ))
+
+        runtime.setContinueWhenPanelHidden(true)
+        runtime.detachPanel()
+        guard runtime.snapshot.connection == .connected,
+              !runtime.snapshot.muted,
+              !runtime.snapshot.uiAttached,
+              !adapter.muted,
+              adapter.panelVisibility.last == false,
+              adapter.startCount == 1,
+              factoryCount == 1 else {
+            throw VoiceFoundationVerificationError.failed("opt_in_hidden_detach")
+        }
+
+        runtime.attachPanel()
+        guard runtime.snapshot.connection == .connected,
+              !runtime.snapshot.muted,
+              runtime.snapshot.rootSessionID == "hidden-root",
+              runtime.snapshot.transcript.count == 1,
+              runtime.snapshot.sessions.count == 1,
+              adapter.panelVisibility.last == true,
+              adapter.startCount == 1 else {
+            throw VoiceFoundationVerificationError.failed("opt_in_reattach_preserved_session")
+        }
+
+        runtime.setMuted(true)
+        try await waitUntil { adapter.muted }
+        runtime.detachPanel()
+        guard runtime.snapshot.connection == .connected,
+              runtime.snapshot.muted,
+              !runtime.snapshot.uiAttached,
+              adapter.panelVisibility.last == false,
+              adapter.startCount == 1 else {
+            throw VoiceFoundationVerificationError.failed("muted_hidden_detach_started_or_unmuted")
+        }
+
+        runtime.attachPanel()
+        runtime.setMuted(false)
+        try await waitUntil { !adapter.muted }
+        runtime.detachPanel()
+        guard !runtime.snapshot.muted, !runtime.snapshot.uiAttached else {
+            throw VoiceFoundationVerificationError.failed("opt_in_unmuted_hidden_detach")
+        }
+        runtime.setContinueWhenPanelHidden(false)
+        try await waitUntil { adapter.muted }
+        guard runtime.snapshot.connection == .connected,
+              runtime.snapshot.muted,
+              !runtime.snapshot.uiAttached,
+              adapter.panelVisibility.last == false,
+              adapter.startCount == 1,
+              factoryCount == 1 else {
+            throw VoiceFoundationVerificationError.failed("hidden_setting_disable_did_not_mute")
+        }
+        runtime.attachPanel()
+        guard runtime.snapshot.connection == .connected,
+              runtime.snapshot.muted,
+              runtime.snapshot.rootSessionID == "hidden-root",
+              runtime.snapshot.transcript.count == 1,
+              runtime.snapshot.sessions.count == 1 else {
+            throw VoiceFoundationVerificationError.failed("hidden_setting_disable_reattach")
+        }
+        await runtime.shutdown()
+
+        let connectingAdapter = CancellableExplicitStartVoiceSessionAdapter()
+        let connectingRuntime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        await connectingRuntime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            providerID: .openAIRealtimeBYOK,
+            adapterFactory: { connectingAdapter }
+        ).value
+        try await waitUntil {
+            connectingRuntime.snapshot.connection == .disconnected
+                && connectingRuntime.snapshot.activity == .idle
+                && connectingAdapter.startCount == 0
+        }
+        connectingRuntime.setContinueWhenPanelHidden(true)
+        connectingRuntime.attachPanel()
+        connectingRuntime.beginAudioSession()
+        try await waitUntil {
+            connectingRuntime.snapshot.connection == .connecting
+                && connectingAdapter.startCount == 1
+        }
+        connectingRuntime.detachPanel()
+        guard connectingRuntime.snapshot.connection == .connecting,
+              connectingRuntime.snapshot.muted,
+              !connectingRuntime.snapshot.uiAttached,
+              connectingAdapter.panelVisible == false,
+              connectingAdapter.startCount == 1 else {
+            throw VoiceFoundationVerificationError.failed("connecting_hidden_detach_state")
+        }
+        connectingAdapter.finishStart()
+        try await waitUntil {
+            connectingRuntime.snapshot.connection == .disconnected
+                && connectingRuntime.snapshot.activity == .idle
+                && connectingRuntime.snapshot.muted
+                && !connectingRuntime.snapshot.uiAttached
+                && connectingAdapter.stopCount == 1
+        }
+        await connectingRuntime.shutdown()
+        guard connectingAdapter.startCount == 1 else {
+            throw VoiceFoundationVerificationError.failed("connecting_hidden_detach_restarted_session")
+        }
+    }
+
+    private static func verifyStartErrorPropagation() async throws {
+        let adapter = FailingExplicitStartVoiceSessionAdapter(
+            error: VerificationVoiceStartError(voiceStartErrorCode: "microphone_unreadable")
+        )
+        let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        await runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            providerID: .codexAppServer,
+            adapterFactory: { adapter }
+        ).value
+        try await waitUntil { runtime.snapshot.connection == .disconnected && adapter.startCount == 0 }
+        runtime.attachPanel()
+        runtime.beginAudioSession()
+        try await waitUntil {
+            adapter.startCount == 1
+                && runtime.snapshot.connection == .disconnected
+                && runtime.snapshot.activity == .failed
+        }
+        guard runtime.snapshot.safeErrorCode == "microphone_unreadable" else {
+            throw VoiceFoundationVerificationError.failed("voice_start_error_propagation")
+        }
+        await runtime.shutdown()
+    }
+
+    private static func verifyMicrophonePermissionLease() throws {
+        let now = Date(timeIntervalSince1970: 100)
+        let deadline = now.addingTimeInterval(5)
+        let preArm = CodexVoiceRuntimeHost.microphonePermissionDecision(
+            desiredEnabled: true,
+            panelVisible: true,
+            availability: .ready,
+            armedUntil: nil,
+            attemptCount: 0,
+            now: now
+        )
+        let expired = CodexVoiceRuntimeHost.microphonePermissionDecision(
+            desiredEnabled: true,
+            panelVisible: true,
+            availability: .ready,
+            armedUntil: now.addingTimeInterval(-0.001),
+            attemptCount: 0,
+            now: now
+        )
+        let first = CodexVoiceRuntimeHost.microphonePermissionDecision(
+            desiredEnabled: true,
+            panelVisible: true,
+            availability: .ready,
+            armedUntil: deadline,
+            attemptCount: 0,
+            now: now
+        )
+        let later = CodexVoiceRuntimeHost.microphonePermissionDecision(
+            desiredEnabled: true,
+            panelVisible: true,
+            availability: .ready,
+            armedUntil: nil,
+            attemptCount: 1,
+            now: deadline.addingTimeInterval(1)
+        )
+        let finalAllowed = CodexVoiceRuntimeHost.microphonePermissionDecision(
+            desiredEnabled: true,
+            panelVisible: true,
+            availability: .ready,
+            armedUntil: nil,
+            attemptCount: CodexVoiceRuntimeHost.maximumMicrophonePermissionAttempts - 1,
+            now: deadline.addingTimeInterval(1)
+        )
+        let exhausted = CodexVoiceRuntimeHost.microphonePermissionDecision(
+            desiredEnabled: true,
+            panelVisible: true,
+            availability: .ready,
+            armedUntil: nil,
+            attemptCount: CodexVoiceRuntimeHost.maximumMicrophonePermissionAttempts,
+            now: deadline.addingTimeInterval(1)
+        )
+        let detached = CodexVoiceRuntimeHost.microphonePermissionDecision(
+            desiredEnabled: true,
+            panelVisible: false,
+            availability: .ready,
+            armedUntil: deadline,
+            attemptCount: 1,
+            now: deadline.addingTimeInterval(1)
+        )
+        guard preArm == .denied("microphone_request_not_armed"),
+              expired == .denied("microphone_request_expired"),
+              first == .allowed,
+              later == .allowed,
+              finalAllowed == .allowed,
+              exhausted == .denied("microphone_request_exhausted"),
+              detached == .denied("microphone_request_not_armed") else {
+            throw VoiceFoundationVerificationError.failed("microphone_permission_lease")
+        }
+    }
+
     private static func verifyExplicitStartCancellation() async throws {
         let adapter = CancellableExplicitStartVoiceSessionAdapter()
         let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
@@ -780,16 +1091,19 @@ enum VoiceFoundationVerificationCommand {
         ])
         let registry = try CapabilityRegistry(handlers: handlers)
         let brokerRoot = root.appendingPathComponent("broker", isDirectory: true)
+        let auditLog = try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
         let broker = CapabilityBroker(
             registry: registry,
             ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
-            auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+            auditLog: auditLog
         )
         let context = VoiceCapabilityContext(registry: registry, broker: broker)
         var approvalCount = 0
+        let confirmationState = VerificationBoolBox(true)
         let runtime = try OpenAIRealtimeMacOSCapabilityRuntime(
             context: context,
             calendarAccessGranted: { true },
+            actionConfirmationEnabled: { confirmationState.value },
             timeZoneID: { "Asia/Tokyo" },
             now: { now },
             approvalHandler: { _ in
@@ -963,6 +1277,213 @@ enum VoiceFoundationVerificationCommand {
         )
         guard try voiceJSON(duplicate)["code"] as? String == "invalid_arguments" else {
             throw VoiceFoundationVerificationError.failed("voice_duplicate_json_accepted")
+        }
+
+        confirmationState.value = false
+        let dynamicallyDisabled = await runtime.execute(
+            sessionID: "voice-session",
+            callID: "dynamic-confirmation-off-call",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool,
+            argumentsJSON: "{\"body\":\"設定反映\"}"
+        )
+        guard try voiceJSON(dynamicallyDisabled)["status"] as? String == "succeeded",
+              try voiceJSON(dynamicallyDisabled)["readback"] as? String == "verified",
+              approvalCount == 8 else {
+            throw VoiceFoundationVerificationError.failed("voice_confirmation_dynamic_update")
+        }
+
+        let auditCounts: () throws -> (approvals: Int, verifiedExecutions: Int) = {
+            let lines = String(decoding: try auditLog.combinedData(), as: UTF8.self)
+                .split(separator: "\n")
+            let entries = lines.compactMap { line in
+                try? JSONSerialization.jsonObject(
+                    with: Data(line.utf8)
+                ) as? [String: Any]
+            }
+            let approvals = entries.filter {
+                $0["eventType"] as? String == "authorization_decision"
+                    && $0["decision"] as? String == "approved"
+            }.count
+            let verifiedExecutions = entries.filter {
+                guard $0["status"] as? String == "succeeded",
+                      let readback = $0["readback"] as? [String: Any] else {
+                    return false
+                }
+                return readback["status"] as? String == "verified"
+            }.count
+            return (approvals, verifiedExecutions)
+        }
+        let auditBeforeAutomaticApproval = try auditCounts()
+        var automaticPresenterCount = 0
+        let automaticRuntime = try OpenAIRealtimeMacOSCapabilityRuntime(
+            context: context,
+            calendarAccessGranted: { true },
+            actionConfirmationEnabled: { false },
+            timeZoneID: { "Asia/Tokyo" },
+            now: { now },
+            approvalHandler: { _ in
+                automaticPresenterCount += 1
+                return false
+            }
+        )
+        let automaticRequests: [(String, String, String)] = [
+            (
+                "automatic-calendar",
+                OpenAIRealtimeMacOSCapabilityRuntime.calendarCreateTool,
+                "{\"title\":\"自動予定\",\"start\":\"2027-01-15T13:00:00+09:00\",\"end\":\"2027-01-15T14:00:00+09:00\",\"isAllDay\":false}"
+            ),
+            (
+                "automatic-timer",
+                OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
+                "{\"durationSeconds\":120,\"title\":\"自動タイマー\"}"
+            ),
+            (
+                "automatic-sticky",
+                OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool,
+                "{\"body\":\"自動付箋\"}"
+            ),
+            (
+                "automatic-brightness",
+                OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool,
+                "{\"operation\":\"set\",\"value\":55}"
+            ),
+            (
+                "automatic-volume",
+                OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool,
+                "{\"operation\":\"set\",\"value\":45}"
+            )
+        ]
+        for (callID, toolName, argumentsJSON) in automaticRequests {
+            let output = await automaticRuntime.execute(
+                sessionID: "automatic-session",
+                callID: callID,
+                toolName: toolName,
+                argumentsJSON: argumentsJSON
+            )
+            let object = try voiceJSON(output)
+            guard object["status"] as? String == "succeeded",
+                  object["readback"] as? String == "verified" else {
+                throw VoiceFoundationVerificationError.failed("voice_confirmation_off_" + callID)
+            }
+        }
+        let auditAfterAutomaticApproval = try auditCounts()
+        guard automaticPresenterCount == 0,
+              auditAfterAutomaticApproval.approvals - auditBeforeAutomaticApproval.approvals >= 5,
+              auditAfterAutomaticApproval.verifiedExecutions - auditBeforeAutomaticApproval.verifiedExecutions >= 5 else {
+            throw VoiceFoundationVerificationError.failed("voice_confirmation_off_broker_audit")
+        }
+
+        calendar.prepareBlockedCreate()
+        let automaticWrite = Task { @MainActor in
+            await automaticRuntime.execute(
+                sessionID: "automatic-write-session",
+                callID: "automatic-write-first",
+                toolName: OpenAIRealtimeMacOSCapabilityRuntime.calendarCreateTool,
+                argumentsJSON: "{\"title\":\"予約中の予定\",\"start\":\"2027-01-15T17:00:00+09:00\",\"end\":\"2027-01-15T18:00:00+09:00\",\"isAllDay\":false}"
+            )
+        }
+        try await waitUntil { calendar.createStarted }
+        let busyWrite = await automaticRuntime.execute(
+            sessionID: "automatic-write-session-2",
+            callID: "automatic-write-second",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool,
+            argumentsJSON: "{\"body\":\"同時書き込み\"}"
+        )
+        guard try voiceJSON(busyWrite)["code"] as? String == "approval_busy",
+              automaticPresenterCount == 0 else {
+            throw VoiceFoundationVerificationError.failed("voice_confirmation_off_parallel_busy")
+        }
+        calendar.releaseBlockedCreate()
+        guard try voiceJSON(await automaticWrite.value)["status"] as? String == "succeeded" else {
+            throw VoiceFoundationVerificationError.failed("voice_confirmation_off_parallel_completion")
+        }
+
+        calendar.prepareBlockedCreate()
+        let cancelledWrite = Task { @MainActor in
+            await automaticRuntime.execute(
+                sessionID: "automatic-cancel-session",
+                callID: "automatic-cancel-write",
+                toolName: OpenAIRealtimeMacOSCapabilityRuntime.calendarCreateTool,
+                argumentsJSON: "{\"title\":\"取消する予定\",\"start\":\"2027-01-15T19:00:00+09:00\",\"end\":\"2027-01-15T20:00:00+09:00\",\"isAllDay\":false}"
+            )
+        }
+        try await waitUntil { calendar.createStarted }
+        automaticRuntime.cancelSession("automatic-cancel-session")
+        calendar.releaseBlockedCreate()
+        guard try voiceJSON(await cancelledWrite.value)["code"] as? String == "session_cancelled",
+              automaticPresenterCount == 0 else {
+            throw VoiceFoundationVerificationError.failed("voice_confirmation_off_parallel_cancel")
+        }
+        let afterCancellation = await automaticRuntime.execute(
+            sessionID: "automatic-write-after-cancel",
+            callID: "automatic-write-after-cancel",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool,
+            argumentsJSON: "{\"body\":\"取消後の書き込み\"}"
+        )
+        guard try voiceJSON(afterCancellation)["status"] as? String == "succeeded",
+              try voiceJSON(afterCancellation)["readback"] as? String == "verified",
+              automaticPresenterCount == 0 else {
+            throw VoiceFoundationVerificationError.failed("voice_confirmation_off_parallel_release")
+        }
+
+        var deniedAutomaticPresenterCount = 0
+        let deniedAutomaticRuntime = try OpenAIRealtimeMacOSCapabilityRuntime(
+            context: context,
+            calendarAccessGranted: { false },
+            actionConfirmationEnabled: { false },
+            timeZoneID: { "Asia/Tokyo" },
+            now: { now },
+            approvalHandler: { _ in
+                deniedAutomaticPresenterCount += 1
+                return true
+            }
+        )
+        let createdBeforeDeniedAutomaticCalendar = calendar.createdCount
+        let deniedAutomaticCalendar = await deniedAutomaticRuntime.execute(
+            sessionID: "denied-automatic-session",
+            callID: "denied-automatic-calendar",
+            toolName: OpenAIRealtimeMacOSCapabilityRuntime.calendarCreateTool,
+            argumentsJSON: "{\"title\":\"権限なし\",\"start\":\"2027-01-15T15:00:00+09:00\",\"end\":\"2027-01-15T16:00:00+09:00\",\"isAllDay\":false}"
+        )
+        guard try voiceJSON(deniedAutomaticCalendar)["code"] as? String == "permission_denied",
+              calendar.createdCount == createdBeforeDeniedAutomaticCalendar,
+              deniedAutomaticPresenterCount == 0 else {
+            throw VoiceFoundationVerificationError.failed("voice_confirmation_off_calendar_grant")
+        }
+
+        for timer in timerStore.runningTimers {
+            try await timerStore.stopForCapability(id: timer.id)
+        }
+        var automaticRatePresenterCount = 0
+        let automaticRateRuntime = try OpenAIRealtimeMacOSCapabilityRuntime(
+            context: context,
+            calendarAccessGranted: { false },
+            actionConfirmationEnabled: { false },
+            timeZoneID: { "Asia/Tokyo" },
+            now: { now },
+            approvalHandler: { _ in
+                automaticRatePresenterCount += 1
+                return true
+            }
+        )
+        var automaticRateCodes: [String] = []
+        for index in 0..<4 {
+            let result = await automaticRateRuntime.execute(
+                sessionID: "automatic-rate-session",
+                callID: "automatic-rate-call-\(index)",
+                toolName: OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
+                argumentsJSON: "{\"durationSeconds\":60,\"title\":\"自動上限\"}"
+            )
+            let object = try voiceJSON(result)
+            automaticRateCodes.append(
+                object["code"] as? String
+                    ?? (object["status"] as? String == "succeeded" ? "succeeded" : "")
+            )
+        }
+        guard automaticRateCodes.prefix(3).allSatisfy({ $0 == "succeeded" }),
+              automaticRateCodes.last == "approval_rate_limited",
+              automaticRatePresenterCount == 0 else {
+            throw VoiceFoundationVerificationError.failed("voice_confirmation_off_timer_rate_limit")
         }
 
         let deniedRuntime = try OpenAIRealtimeMacOSCapabilityRuntime(
@@ -1441,6 +1962,32 @@ private final class CountingOpenAIRealtimeCredentialStore: OpenAIRealtimeCredent
     func delete() throws { }
 }
 
+private struct VerificationVoiceStartError: VoiceSessionStartFailure {
+    let voiceStartErrorCode: String
+}
+
+@MainActor
+private final class FailingExplicitStartVoiceSessionAdapter: VoiceSessionAdapter {
+    let error: Error
+    var requiresExplicitStart: Bool { true }
+    private(set) var startCount = 0
+
+    init(error: Error) {
+        self.error = error
+    }
+
+    func probeCompatibility() async -> VoiceAdapterGate { .ready }
+
+    func start() async throws {
+        startCount += 1
+        throw error
+    }
+
+    func setMuted(_ muted: Bool) async { _ = muted }
+    func closeAudioSession() async { }
+    func stop() async { }
+}
+
 @MainActor
 private final class ExplicitStartVoiceSessionAdapter: VoiceSessionAdapter {
     var requiresExplicitStart: Bool { true }
@@ -1448,12 +1995,17 @@ private final class ExplicitStartVoiceSessionAdapter: VoiceSessionAdapter {
     private(set) var closeAudioSessionCount = 0
     private(set) var stopCount = 0
     private(set) var muted = true
+    private(set) var panelVisibility: [Bool] = []
 
     func probeCompatibility() async -> VoiceAdapterGate { .ready }
 
     func start() async throws {
         startCount += 1
         muted = false
+    }
+
+    func setPanelVisible(_ visible: Bool) {
+        panelVisibility.append(visible)
     }
 
     func setMuted(_ muted: Bool) async {
@@ -1475,7 +2027,9 @@ private final class ExplicitStartVoiceSessionAdapter: VoiceSessionAdapter {
 private final class CancellableExplicitStartVoiceSessionAdapter: VoiceSessionAdapter {
     var requiresExplicitStart: Bool { true }
     private(set) var startCount = 0
+    private(set) var stopCount = 0
     private(set) var closeAudioSessionCount = 0
+    private(set) var panelVisible = false
     private var startContinuation: CheckedContinuation<Void, Error>?
 
     func probeCompatibility() async -> VoiceAdapterGate { .ready }
@@ -1493,6 +2047,10 @@ private final class CancellableExplicitStartVoiceSessionAdapter: VoiceSessionAda
         }
     }
 
+    func setPanelVisible(_ visible: Bool) {
+        panelVisible = visible
+    }
+
     func setMuted(_ muted: Bool) async { _ = muted }
 
     func closeAudioSession() async {
@@ -1500,7 +2058,13 @@ private final class CancellableExplicitStartVoiceSessionAdapter: VoiceSessionAda
     }
 
     func stop() async {
+        stopCount += 1
         cancelStart()
+    }
+
+    func finishStart() {
+        startContinuation?.resume(returning: ())
+        startContinuation = nil
     }
 
     private func cancelStart() {
@@ -1513,6 +2077,9 @@ private final class CancellableExplicitStartVoiceSessionAdapter: VoiceSessionAda
 private final class VoiceFakeCalendarDataSource: CalendarCapabilityDataSource {
     private var events: [String: CalendarCapabilityEvent]
     private(set) var createdCount = 0
+    var blockNextCreate = false
+    private(set) var createStarted = false
+    private var createContinuation: CheckedContinuation<Void, Never>?
 
     init(now: Date) {
         var calendar = Calendar(identifier: .gregorian)
@@ -1542,6 +2109,13 @@ private final class VoiceFakeCalendarDataSource: CalendarCapabilityDataSource {
         _ request: CalendarCapabilityCreateRequest,
         idempotencyKey: String
     ) async throws -> CalendarCapabilityEvent {
+        if blockNextCreate {
+            blockNextCreate = false
+            createStarted = true
+            await withCheckedContinuation { continuation in
+                createContinuation = continuation
+            }
+        }
         createdCount += 1
         let event = CalendarCapabilityEvent(
             eventRef: "event-created-\(createdCount)",
@@ -1556,6 +2130,16 @@ private final class VoiceFakeCalendarDataSource: CalendarCapabilityDataSource {
         events[event.eventRef] = event
         _ = idempotencyKey
         return event
+    }
+
+    func releaseBlockedCreate() {
+        createContinuation?.resume()
+        createContinuation = nil
+    }
+
+    func prepareBlockedCreate() {
+        createStarted = false
+        blockNextCreate = true
     }
 }
 
@@ -1630,4 +2214,13 @@ private final class GatedCloseVoiceSessionAdapter: VoiceSessionAdapter {
     }
 
     func stop() async { }
+}
+
+@MainActor
+private final class VerificationBoolBox {
+    var value: Bool
+
+    init(_ value: Bool) {
+        self.value = value
+    }
 }

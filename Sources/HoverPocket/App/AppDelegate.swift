@@ -262,6 +262,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             preferredLayout: settings.voiceLaneLayoutPreference,
             providerID: settings.voiceProvider
         )
+        VoiceLaneRuntime.shared.setContinueWhenPanelHidden(
+            settings.voiceContinueWhenPanelHidden
+        )
         voiceConfigurationTask = VoiceLaneRuntime.shared.configure(
             featureEnabled: configuration.featureEnabled,
             preferredLayout: configuration.preferredLayout,
@@ -286,6 +289,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .removeDuplicates()
             .sink { _ in
                 VoiceLaneRuntime.shared.capabilityGrantsDidChange()
+            }
+            .store(in: &settingsCancellables)
+        settings.$voiceContinueWhenPanelHidden
+            .dropFirst()
+            .removeDuplicates()
+            .sink { enabled in
+                VoiceLaneRuntime.shared.setContinueWhenPanelHidden(enabled)
             }
             .store(in: &settingsCancellables)
     }

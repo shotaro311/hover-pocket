@@ -577,6 +577,60 @@ enum VoiceLaneLocalization {
             return text(japanese: "音声接続を再開できませんでした", english: "Voice transport could not be restarted", language: language)
         case "voice_compatibility_blocked":
             return text(japanese: "現在の環境では音声機能を利用できません", english: "Voice is unavailable in this environment", language: language)
+        case "microphone_permission_denied":
+            return text(
+                japanese: "マイクの使用が許可されていません。システム設定で許可してください",
+                english: "Microphone access is denied. Allow it in System Settings.",
+                language: language
+            )
+        case "microphone_request_not_armed":
+            return text(
+                japanese: "マイクの開始操作をやり直してください",
+                english: "Start the microphone again from the voice control.",
+                language: language
+            )
+        case "microphone_request_expired":
+            return text(
+                japanese: "マイクの開始要求が期限切れです。もう一度お試しください",
+                english: "The microphone start request expired. Try again.",
+                language: language
+            )
+        case "microphone_request_exhausted":
+            return text(
+                japanese: "マイクを開始できませんでした。もう一度お試しください",
+                english: "The microphone could not be started. Try again.",
+                language: language
+            )
+        case "microphone_not_found":
+            return text(
+                japanese: "利用できるマイクがありません",
+                english: "No microphone is available.",
+                language: language
+            )
+        case "microphone_unreadable":
+            return text(
+                japanese: "マイクを利用できません。ほかのアプリを閉じて再試行してください",
+                english: "The microphone is busy or unavailable. Close other apps and try again.",
+                language: language
+            )
+        case "microphone_constraints_unsupported":
+            return text(
+                japanese: "マイクの互換性を確認できませんでした。もう一度お試しください",
+                english: "The microphone constraints were not supported. Try again.",
+                language: language
+            )
+        case "webrtc_failed", "webrtc_start_failed", "webrtc_answer_failed", "webrtc_negotiation_failed":
+            return text(
+                japanese: "音声接続に失敗しました。もう一度お試しください",
+                english: "The voice connection failed. Try again.",
+                language: language
+            )
+        case "webrtc_start_timed_out", "sdp_timed_out":
+            return text(
+                japanese: "音声接続がタイムアウトしました。もう一度お試しください",
+                english: "The voice connection timed out. Try again.",
+                language: language
+            )
         case "voice_start_failed":
             return text(japanese: "音声接続を開始できませんでした", english: "Voice transport could not start", language: language)
         case "openai_realtime_key_missing":

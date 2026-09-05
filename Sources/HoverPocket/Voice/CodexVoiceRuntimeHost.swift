@@ -21,6 +21,7 @@ final class CodexVoiceRuntimeHost {
     private var panelVisible = false
     private var sessionsVisible = false
     private var microphonePermissionArmedUntil: Date?
+    private var microphonePermissionAttemptCount = 0
     private var publishedTranscript: [CodexVoiceTranscriptEntry] = []
     private var publishedSessions: [String: CodexVoiceThreadSummary] = [:]
     private var publishedRootThreadID: String?
@@ -67,7 +68,7 @@ final class CodexVoiceRuntimeHost {
         let generation = lifecycleGeneration
 
         guard enabled else {
-            microphonePermissionArmedUntil = nil
+            finishMicrophoneRequest()
             let previous = coordinator
             coordinator = nil
             previous?.snapshotHandler = nil
@@ -168,14 +169,14 @@ final class CodexVoiceRuntimeHost {
 
     func clearTransientUIState() {
         panelVisible = false
-        microphonePermissionArmedUntil = nil
+        finishMicrophoneRequest()
         coordinator?.clearTransientUIState()
     }
 
     func setPanelVisible(_ visible: Bool) {
         panelVisible = visible
         if !visible {
-            microphonePermissionArmedUntil = nil
+            finishMicrophoneRequest()
         }
     }
 
@@ -188,22 +189,39 @@ final class CodexVoiceRuntimeHost {
         guard desiredEnabled,
               panelVisible,
               snapshot.availability == .ready else {
-            microphonePermissionArmedUntil = nil
+            finishMicrophoneRequest()
             return false
         }
+        microphonePermissionAttemptCount = 0
         microphonePermissionArmedUntil = now.addingTimeInterval(5)
         coordinator?.markSessionRequestingPermission()
         return true
     }
 
-    func consumeMicrophonePermission(now: Date = Date()) -> Bool {
-        defer { microphonePermissionArmedUntil = nil }
-        guard desiredEnabled,
-              panelVisible,
-              snapshot.availability == .ready,
-              let deadline = microphonePermissionArmedUntil,
-              now <= deadline else { return false }
-        return true
+    func consumeMicrophonePermission(now: Date = Date()) -> CodexVoiceMicrophonePermissionDecision {
+        let decision = Self.microphonePermissionDecision(
+            desiredEnabled: desiredEnabled,
+            panelVisible: panelVisible,
+            availability: snapshot.availability,
+            armedUntil: microphonePermissionArmedUntil,
+            attemptCount: microphonePermissionAttemptCount,
+            now: now
+        )
+        switch decision {
+        case .allowed:
+            if microphonePermissionAttemptCount == 0 {
+                microphonePermissionArmedUntil = nil
+            }
+            microphonePermissionAttemptCount += 1
+        case .denied:
+            finishMicrophoneRequest()
+        }
+        return decision
+    }
+
+    func finishMicrophoneRequest() {
+        microphonePermissionArmedUntil = nil
+        microphonePermissionAttemptCount = 0
     }
 
     func startWebRTC(sdpOffer: String) async throws -> CodexVoiceWebRTCAnswer {
@@ -236,7 +254,7 @@ final class CodexVoiceRuntimeHost {
     }
 
     func markSessionFailure(_ errorCode: String) {
-        microphonePermissionArmedUntil = nil
+        finishMicrophoneRequest()
         coordinator?.markSessionFailure(errorCode)
         voiceRuntime?.reportTransportFailure(errorCode)
     }
@@ -331,4 +349,38 @@ final class CodexVoiceRuntimeHost {
         restartAttempt: 0,
         voiceCount: 0
     )
+
+    static let maximumMicrophonePermissionAttempts = 4
+
+    static func microphonePermissionDecision(
+        desiredEnabled: Bool,
+        panelVisible: Bool,
+        availability: CodexVoiceAvailability,
+        armedUntil: Date?,
+        attemptCount: Int,
+        now: Date
+    ) -> CodexVoiceMicrophonePermissionDecision {
+        guard desiredEnabled,
+              panelVisible,
+              availability == .ready else {
+            return .denied("microphone_request_not_armed")
+        }
+        guard attemptCount < maximumMicrophonePermissionAttempts else {
+            return .denied("microphone_request_exhausted")
+        }
+        if attemptCount == 0 {
+            guard let armedUntil else {
+                return .denied("microphone_request_not_armed")
+            }
+            guard now <= armedUntil else {
+                return .denied("microphone_request_expired")
+            }
+        }
+        return .allowed
+    }
+}
+
+enum CodexVoiceMicrophonePermissionDecision: Equatable {
+    case allowed
+    case denied(String)
 }

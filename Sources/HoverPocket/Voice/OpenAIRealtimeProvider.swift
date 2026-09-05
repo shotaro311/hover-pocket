@@ -94,6 +94,7 @@ final class OpenAIRealtimeMacOSVoiceSessionAdapter: VoiceSessionAdapter {
         credentialStore: any OpenAIRealtimeCredentialStoring = OpenAIRealtimeCredentialStoreFactory.shared,
         context: VoiceCapabilityContext? = nil,
         calendarAccessGranted: @escaping () -> Bool = { false },
+        actionConfirmationEnabled: @escaping @MainActor () -> Bool = { true },
         voiceRuntime: VoiceLaneRuntime = .shared,
         transport: OpenAIRealtimeMacOSTransport = .shared
     ) {
@@ -101,7 +102,8 @@ final class OpenAIRealtimeMacOSVoiceSessionAdapter: VoiceSessionAdapter {
         self.capabilityRuntime = context.flatMap {
             try? OpenAIRealtimeMacOSCapabilityRuntime(
                 context: $0,
-                calendarAccessGranted: calendarAccessGranted
+                calendarAccessGranted: calendarAccessGranted,
+                actionConfirmationEnabled: actionConfirmationEnabled
             )
         }
         self.voiceRuntime = voiceRuntime
@@ -177,6 +179,7 @@ final class CodexAppServerMacOSVoiceSessionAdapter: VoiceSessionAdapter {
     init(
         context: VoiceCapabilityContext?,
         calendarAccessGranted: @escaping () -> Bool,
+        actionConfirmationEnabled: @escaping @MainActor () -> Bool = { true },
         voiceRuntime: VoiceLaneRuntime = .shared,
         compatibilityProbe: CodexAppServerCompatibilityProbe = .shared,
         runtimeHost: CodexVoiceRuntimeHost = CodexAppServerMacOSRuntime.host,
@@ -186,7 +189,8 @@ final class CodexAppServerMacOSVoiceSessionAdapter: VoiceSessionAdapter {
         self.capabilityBridge = context.flatMap {
             guard let runtime = try? OpenAIRealtimeMacOSCapabilityRuntime(
                 context: $0,
-                calendarAccessGranted: calendarAccessGranted
+                calendarAccessGranted: calendarAccessGranted,
+                actionConfirmationEnabled: actionConfirmationEnabled
             ) else { return nil }
             return CodexAppServerCapabilityBridge(runtime: runtime)
         }
@@ -243,6 +247,10 @@ final class CodexAppServerMacOSVoiceSessionAdapter: VoiceSessionAdapter {
         driver.setMuted(muted)
     }
 
+    func setPanelVisible(_ visible: Bool) {
+        runtimeHost.setPanelVisible(visible)
+    }
+
     func setPresentationMode(_ mode: VoiceLaneMode) async {
         runtimeHost.setSessionsVisible(mode == .expanded)
     }
@@ -297,6 +305,9 @@ enum VoiceProviderAdapterFactory {
                         settings.voiceCalendarAccessEnabled
                             && HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled
                     },
+                    actionConfirmationEnabled: {
+                        settings.voiceActionConfirmationEnabled
+                    },
                     voiceRuntime: voiceRuntime
                 )
             }
@@ -307,6 +318,9 @@ enum VoiceProviderAdapterFactory {
                     calendarAccessGranted: {
                         settings.voiceCalendarAccessEnabled
                             && HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled
+                    },
+                    actionConfirmationEnabled: {
+                        settings.voiceActionConfirmationEnabled
                     },
                     voiceRuntime: voiceRuntime
                 )

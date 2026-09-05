@@ -243,8 +243,8 @@ Must:
 - Expandedは左に現在会話のtranscript、右に現在のroot sessionと同じrootから派生したchild / descendant session cardを表示する。全過去会話の一覧、新規会話管理、削除UIは初回要件に含めない。
 - session cardは安全なtitle、状態、経過時間または更新時刻、進捗、直近の安全な要約だけを表示し、raw command、filesystem path、全文transcriptを渡さない。
 - Expandedはfullscreen、別Provider、Provider overlayにしない。長文と多数cardはVoice Lane内部で独立scrollし、Provider領域を縮めない。
-- 書き込み承認要求と実行後receiptはHost所有のVoice Laneへ表示し、Providerまたは生成UIが同じ見た目を偽装できないようにする。
-- muteは音声入出力だけを止め、child sessionをcancelしない。hoverによるパネルcloseはmuteとUI detachを行うが、明示的に終了していないroot / child taskを停止しない。同じマイクcontrolによる終了操作はRealtime音声sessionだけを終了し、root / child taskは継続する。task cancelはsession card上の別操作とし、対象と影響を表示して別承認を求める。
+- Voice action confirmationがONの場合だけ、書き込み前のnative承認要求をHost所有のVoice Laneへ表示する。実行後receiptは設定にかかわらず同Laneへ表示し、Providerまたは生成UIが同じ見た目を偽装できないようにする。OFFの場合は、現行allowlist（Calendar create、Timer start、Sticky upsert、brightness set、volume set）だけnative presenterを省略して自動承認するが、Capability Brokerのapproval/readback結果の表示とauditはHost側で維持する。
+- muteは音声入出力だけを止め、child sessionをcancelしない。hoverによるパネルcloseは既定で入力trackとremote audioをmuteしてUI detachするが、Settingsで継続を明示的にONにした場合だけ、既にconnectedかつunmutedのsessionは音声入出力を維持してUIだけdetachする。connectingまたはmutedのsessionを自動開始・自動unmuteしない。明示的に終了していないroot / child taskを停止せず、同じマイクcontrolによる終了操作はRealtime音声sessionだけを終了し、root / child taskは継続する。task cancelはsession card上の別操作とし、対象と影響を表示して別承認を求める。
 
 受け入れ条件:
 
@@ -475,7 +475,7 @@ Deferred:
 - 旧AI command laneは計画・開発途中のため、現行アプリ UI からは一旦外す。4.9のCodex Voice Laneとは別機能として扱う。
 - 旧Windows baseline roadmapのW1で検討した対象action候補はCalendar read dayとCalendar create eventであった。AI-native実装では4.9と最終実装プランのAN phaseを正本とする。
 - 自然文例候補: `今日の予定`、`明日14時 打ち合わせ`、`金曜 デザイン納期`。
-- Calendar write は必ず承認 UI を通す。
+- Calendar write はHostの承認契約を通す。Voiceでは既定ONのnative confirmationを含み、Settingsで確認をOFFにした場合もCapability Brokerの承認判断を省略しない。
 - 実行結果、失敗、承認/却下は audit log に記録する。
 
 Windows 代替要件:
@@ -487,7 +487,7 @@ Windows 代替要件:
 受け入れ条件:
 
 - Calendar read は承認なしで実行できる。
-- Calendar create は承認しない限り実行されない。
+- Calendar create はCapability Brokerの承認判断を通さない限り実行されない。Voiceの確認OFFは現行allowlistのnative presenterだけを省略する。
 - 失敗時に token や個人情報をログへ出さない。
 
 ### 4.9 Codex Voice Laneと共通Capability
@@ -499,8 +499,8 @@ Planned Must:
 - Capability Registryを操作契約の単一正本とし、MCPは外部公開Adapterとして扱う。
 - Capability Brokerを唯一の実行入口とし、schema検証、権限、承認、idempotency、実行、readback、監査、rollbackを一元管理する。
 - 最初の縦断はToday Focus Pocketとする。今日のCalendar予定を読み、選択した予定に合わせてTimerを開始し、Sticky Notesへ今日の目的を保存する。
-- Today FocusのCalendar readは承認不要、TimerとStickyへの書き込みは正確な引数を提示して承認し、IDで実行後readbackする。
-- `calendar.event.create`は毎回書き込み前承認を求め、作成後にevent IDを取得してGETまたは同等queryでreadbackする。
+- Today FocusのCalendar readは承認不要、TimerとStickyへの書き込みは既定ONで毎回正確な引数を提示して承認し、IDで実行後readbackする。Voiceの確認OFFでは現行allowlistのnative presenterだけを省略し、Brokerの承認判断とreadbackは維持する。
+- `calendar.event.create`は既定ONで毎回書き込み前承認を求め、作成後にevent IDを取得してGETまたは同等queryでreadbackする。Voiceの確認OFFでもBrokerの承認判断、Calendar access、idempotency、readback、auditは維持する。
 - Voice、Text、生成Surface、macOS SwiftUIとWindows Calendar WebView双方の「選択予定から集中を開始」は同じcanonical workflow planをBrokerへ送る。
 - macOSのVoice toolは、Calendar grantの状態に応じたCalendar read/createに加えて、`sticky_note_upsert`、`controls_brightness_set`、`controls_volume_set`をHostが公開する。各toolはstrict arguments、Capability Registry / Broker経由、cancellation / idempotency、実行後readbackを必須とする。Calendar grantがない場合はCalendar toolを公開せず、他の許可済みtoolだけを公開する。
 - Voice Controlsの引数は`set / increase / decrease / preset`のいずれかで、値は0〜100のpercentage pointsとして扱う。「10%下げて」は現在値から10ポイント下げ、brightnessは0.05〜1、volumeは0〜1へclampする。`comfortable`はbrightness 70% / volume 50%、`maximum`は100%、`minimum`はbrightness 5% / volume 0%とし、brightnessの相対操作は`controls.brightness.get@1`のBroker readback後に計算する。
@@ -514,7 +514,7 @@ Planned Must:
 - current user所有かつgroup / other権限0のfile-backed `auth.json`がある場合はVoice専用profileからsymlink参照し、HoverPocketのログインUIから既存Codex credentialへのlogin / cancel / logoutを行わない。安全に共有できるfile-backed credentialがない場合は、Voice専用profileを`cli_auth_credentials_store="file"`へ固定し、Settingsの明示操作から`account/login/start`のChatGPT managed browser flowを開始する。API key login、Device Code、external token、BedrockはUIへ公開せず、ログイン完了通知、`account/read`のChatGPT account、専用`auth.json`のowner / permissionをreadbackした後だけVoiceへ反映する。cancel、Provider切替、app終了ではlogin IDを指定して取り消し、専用app-server processを残さない。
 - Codex 0.145.0は実canaryでHost指定tool以外の`update_plan`をoutbound requestへ含めるため、AN3-B2のproduction activation対象外とする。別versionもschema fieldの有無だけで自動承認せず、同じ専用profileと実route canaryを通過したexact executable identityだけを当該process内で許可する。
 - VoiceのCalendar readはGoogle接続やMicrophoneとは別のHost permission grantを既定OFFで保存する。許可前はCalendar toolをモデルへ公開せずProviderへ到達させない。取り消し時はactive tool requestを停止し、新しいtool定義でVoice sessionを再構成する。
-- VoiceのTimer startはexact title / durationをHost native UIへ表示して毎回承認する。同時に表示する承認は1件だけ、Timer startの承認promptは1分あたり3件までとし、拒否も上限に含める。Sticky Notes / Controlsの可逆な書き込みはこのTimer専用rate limitへ含めず、Brokerが要求する承認だけを行う。Voice停止、root変更、取消では待機中dialogと未使用Broker approvalを破棄する。
+- Voiceの操作確認は既定ONとし、Timer start、Sticky upsert、brightness set、volume set、Calendar createの現行5種だけ、SettingsでOFFにした場合にnative presenterを省略して自動承認できる。OFFでもCapability Brokerのprepare、schema / permission / idempotency、decideApproval、execute、readback、auditを必ず通し、将来tool、破壊的操作、native authority、生成Appへ自動拡張しない。確認ONではVoiceのTimer startはexact title / durationをHost native UIへ表示して毎回承認する。同時に表示する承認は1件だけ、Timer startの承認promptは1分あたり3件までとし、拒否も上限に含める。Sticky Notes / Controlsの可逆な書き込みはこのTimer専用rate limitへ含めず、Brokerが要求する承認だけを行う。Voice停止、root変更、取消では待機中dialogと未使用Broker approvalを破棄する。
 - macOSの実音声E2Eは、exact bundle IDとbuild markerを持つDebug専用app、system temp直下のfresh root、process専用credential storeを使う。Release、通常bundle、Verifierとの併用、引数なしのE2E bundle起動は開始前に拒否する。
 - macOS / Windowsの標準物理Voice E2Eは、session開始時のProviderを`codex_app_server`へ束縛する。BYOKで得たreceipt、Provider切替前のmedia event、期待Providerを持たない旧sessionはCodex app-serverの物理受入証拠にしない。負例fixtureでBYOKと途中切替の誤受入れを継続検査する。
 - macOS実音声E2Eでは設定をprocess内メモリへ閉じ、Provider UIをTimerだけに限定する。Updater、Google OAuth callback、Camera準備、Clipboard移行、生成Pocket Appを起動せず、本番のApplication Support、UserDefaults、Keychainへ接続しない。SettingsではMirror、Weather、Calendar、Updateを表示せず、status menuの更新確認とapp再active時のCamera権限再確認も実行しない。Calendar実データ確認は通常の署名済み候補で、Calendar grantと書き込み承認を別途明示した場合だけ行う。
@@ -572,7 +572,7 @@ Planned Must:
 - Voice機能を無効にした場合、Codex process、microphone、WebRTC、追加レイアウトが起動せず、既存パネル寸法とProvider体験が変わらない。
 - installed runtimeがHost検証済みのBroker限定tool policyを持たない場合、Voiceは`SchemaMismatch / BlockedFailure`で停止し、app-server、microphone、Calendar read、Timer approvalを開始しない。表示理由は秘密情報を含まない固定codeから日本語 / 英語へ変換する。
 - Calendar grantの許可、拒否、取り消し、再起動後復元を検証し、許可前 / 取り消し後のProvider呼出し数が0であることを確認する。Timerは同時2件目と1分内4件目がnative dialog表示前に拒否され、session取消で表示中dialogが閉じる。
-- hover close / panel hideでは入力trackとremote audioを即時muteしてUIをdetachするがroot threadを停止しない。明示終了ではRealtime stop、peer connection、data channel、local media track、remote audioを閉じ、再開時に古いSDP / generationを受理しない。
+- hover close / panel hideでは既定で入力trackとremote audioを即時muteしてUIをdetachする。継続設定をONにした場合だけ、既にconnectedかつunmutedのsessionはmuteせずUIだけをdetachし、connectingまたはmutedのsessionは自動開始・自動unmuteしない。いずれもroot threadを停止しない。明示終了ではRealtime stop、peer connection、data channel、local media track、remote audioを閉じ、再開時に古いSDP / generationを受理しない。
 - macOS実音声E2E receiptはexact allowlistのboolean、enum、最終transcript件数だけをatomic保存し、API key、transcript本文、音声、SDP、PID、filesystem pathを含めない。各media attemptの開始時に、前回attemptのmic、remote audio、transcript件数、Timer readback、Host native確認をすべて消去し、現在attemptだけで合格を判定する。Host native確認は非永続のattempt IDへ束縛し、古い確認sheetの完了を後続attemptへ記録しない。合格には実マイク取得、remote audio trackと再生、ユーザー／assistantの最終transcript各1件以上、Timer Broker readback、Host nativeの「話せた・聞こえた」確認を必要とし、Stop後はmic / remote track / playback / credentialが0で`safe_close`になったことを別経路で読む。
 
 ## 5. Settings 要件
@@ -598,6 +598,8 @@ Must:
 - Codex Voice Lane layout: Compact / Expanded。機能を有効にした直後の既定はCompact。
 - Codex Voice Calendar access: OFF / ON。既定はOFFとし、Google接続、Voice有効化、Microphoneとは別のHost承認を必要とする。
 - Auto listen: OFF / ON。既定はOFFとし、Voice Lane有効化とは別に承認する。
+- Voice panel hidden continuation: OFF / ON。既定はOFFとし、ONでも既にconnectedかつunmutedのsessionだけ音声入出力を維持する。connectingまたはmutedのsessionを自動開始・自動unmuteしない。
+- Voice action confirmation: ON / OFF。既定はONとし、OFF時だけ現在公開済みのCalendar create、Timer start、Sticky upsert、brightness set、volume setのnative確認を省略する。Capability Brokerのschema、permission、idempotency、readback、auditは不変で、将来tool、破壊的操作、native authority、生成Appへ自動拡張しない。
 - Check for Updates。
 
 Windows 追加 Must:

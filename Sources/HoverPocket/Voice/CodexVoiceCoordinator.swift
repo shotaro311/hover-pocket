@@ -1,11 +1,26 @@
 import Foundation
 
-enum CodexVoiceRuntimeError: Error, Equatable, Sendable {
+enum CodexVoiceRuntimeError: Error, Equatable, Sendable, VoiceSessionStartFailure {
     case signedOut
     case compatibility(String)
     case sdpTimedOut
     case negotiationCancelled
     case disposed
+
+    var voiceStartErrorCode: String {
+        switch self {
+        case .signedOut:
+            return "signed_out"
+        case .compatibility(let code):
+            return VoiceTextSafety.sanitizeErrorCode(code)
+        case .sdpTimedOut:
+            return "sdp_timed_out"
+        case .negotiationCancelled:
+            return "negotiation_cancelled"
+        case .disposed:
+            return "voice_disposed"
+        }
+    }
 }
 
 @MainActor

@@ -10,7 +10,7 @@ enum OpenAIRealtimeContract {
     static let trustedOrigin = URL(string: "https://voice.hoverpocket.local/")!
 }
 
-enum OpenAIRealtimeMacOSTransportError: Error {
+enum OpenAIRealtimeMacOSTransportError: Error, VoiceSessionStartFailure {
     case unavailable
     case notAttached
     case keyMissing
@@ -22,6 +22,33 @@ enum OpenAIRealtimeMacOSTransportError: Error {
     case requestFailed(String)
     case staleSession
     case timedOut
+
+    var voiceStartErrorCode: String {
+        switch self {
+        case .unavailable:
+            return "openai_realtime_unavailable"
+        case .notAttached:
+            return "openai_realtime_not_attached"
+        case .keyMissing:
+            return "openai_realtime_key_missing"
+        case .alreadyActive:
+            return "openai_realtime_already_active"
+        case .pageUnavailable:
+            return "openai_realtime_page_unavailable"
+        case .invalidSDP:
+            return "openai_realtime_sdp_invalid"
+        case .answerTooLarge:
+            return "openai_realtime_answer_too_large"
+        case .invalidAnswer:
+            return "openai_realtime_answer_invalid"
+        case .requestFailed(let code):
+            return VoiceTextSafety.sanitizeErrorCode(code)
+        case .staleSession:
+            return "openai_realtime_stale_session"
+        case .timedOut:
+            return "openai_realtime_timeout"
+        }
+    }
 }
 
 final class OpenAIRealtimeCallsClient: @unchecked Sendable {

@@ -218,6 +218,18 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var voiceContinueWhenPanelHidden: Bool {
+        didSet {
+            defaults.set(voiceContinueWhenPanelHidden, forKey: Self.voiceContinueWhenPanelHiddenKey)
+        }
+    }
+
+    @Published var voiceActionConfirmationEnabled: Bool {
+        didSet {
+            defaults.set(voiceActionConfirmationEnabled, forKey: Self.voiceActionConfirmationEnabledKey)
+        }
+    }
+
     private let defaults: any AppSettingsDefaultsStoring
     private static let appLanguageKey = "appLanguage"
     private static let displayPlacementModeKey = "displayPlacementMode"
@@ -244,6 +256,8 @@ final class AppSettings: ObservableObject {
     private static let voiceEnabledKey = "voiceEnabled"
     private static let voiceLaneLayoutPreferenceKey = "voiceLaneLayoutPreference"
     private static let voiceCalendarAccessEnabledKey = "voiceCalendarAccessEnabled"
+    private static let voiceContinueWhenPanelHiddenKey = "voiceContinueWhenPanelHidden"
+    private static let voiceActionConfirmationEnabledKey = "voiceActionConfirmationEnabled"
 
     init(defaults: any AppSettingsDefaultsStoring = UserDefaults.standard) {
         self.defaults = defaults
@@ -326,6 +340,12 @@ final class AppSettings: ObservableObject {
         self.voiceCalendarAccessEnabled = defaults.object(forKey: Self.voiceCalendarAccessEnabledKey) == nil
             ? false
             : defaults.bool(forKey: Self.voiceCalendarAccessEnabledKey)
+        self.voiceContinueWhenPanelHidden = defaults.object(forKey: Self.voiceContinueWhenPanelHiddenKey) == nil
+            ? false
+            : defaults.bool(forKey: Self.voiceContinueWhenPanelHiddenKey)
+        self.voiceActionConfirmationEnabled = defaults.object(forKey: Self.voiceActionConfirmationEnabledKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.voiceActionConfirmationEnabledKey)
 
         if defaults.data(forKey: Self.weatherLocationKey) == nil,
            let weatherLocationData = try? JSONEncoder().encode(weatherLocation) {

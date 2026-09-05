@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import itertools
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -16,6 +18,296 @@ MACOS_REALTIME_FIXTURE = ROOT / "contracts" / "voice" / "an3-b3b-macos-realtime-
 
 def fail(message: str) -> None:
     raise SystemExit(f"FAIL voice-foundation contract: {message}")
+
+
+def verify_codex_voice_javascript_semantics(mac_codex_transport: str) -> None:
+    marker = 'static let html = #"""'
+    start = mac_codex_transport.find(marker)
+    end = mac_codex_transport.find('"""#', start + len(marker))
+    if start < 0 or end < 0:
+        fail("macOS Codex Voice embedded page is missing")
+    html = mac_codex_transport[start + len(marker):end]
+    script_start = html.find("<script>")
+    script_end = html.find("</script>", script_start)
+    if script_start < 0 or script_end < 0:
+        fail("macOS Codex Voice embedded script is missing")
+    if shutil.which("node") is None:
+        fail("Node.js is required for macOS Codex Voice semantic verification")
+
+    node_program = r'''
+const fs = require("fs");
+const vm = require("vm");
+
+const html = fs.readFileSync(0, "utf8");
+const scriptStart = html.indexOf("<script>");
+const scriptEnd = html.indexOf("</script>", scriptStart);
+const script = html.slice(scriptStart + 8, scriptEnd);
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function captureKind(constraints) {
+  if (constraints.audio === true) return "plain";
+  if (constraints.audio && constraints.audio.deviceId) {
+    return constraints.audio.deviceId.exact;
+  }
+  return "constrained";
+}
+
+function namedError(name) {
+  const error = new Error(name);
+  error.name = name;
+  return error;
+}
+
+function makeStream() {
+  let stopCount = 0;
+  const track = { enabled: true, stop() { stopCount += 1; } };
+  return {
+    getTracks() { return [track]; },
+    getAudioTracks() { return [track]; },
+    microphoneEnabled() { return track.enabled; },
+    stopCount() { return stopCount; }
+  };
+}
+
+function makeContext(actions, devices) {
+  const calls = [];
+  const messages = [];
+  const streams = [];
+  let enumerateCount = 0;
+  let resolvePending = null;
+  let rejectPending = null;
+  let latestAudio = null;
+  let latestPeer = null;
+  const mediaDevices = {
+    async enumerateDevices() {
+      enumerateCount += 1;
+      return devices;
+    },
+    getUserMedia(constraints) {
+      calls.push(captureKind(constraints));
+      const action = actions.shift();
+      if (action === "pending") {
+        return new Promise((resolve, reject) => {
+          resolvePending = resolve;
+          rejectPending = reject;
+        });
+      }
+      if (action === "stream") {
+        const stream = makeStream();
+        streams.push(stream);
+        return Promise.resolve(stream);
+      }
+      return Promise.reject(namedError(action || "NotReadableError"));
+    }
+  };
+  const window = {
+    webkit: { messageHandlers: { hoverPocketVoice: {
+      postMessage(message) { messages.push(message); }
+    } } },
+    setTimeout,
+    clearTimeout
+  };
+  class FakeAudio {
+    constructor() {
+      this.autoplay = false;
+      this.muted = false;
+      this.srcObject = null;
+      latestAudio = this;
+    }
+    pause() {}
+    play() { return Promise.resolve(); }
+  }
+  class FakeMediaStream {
+    constructor(tracks = []) { this.tracks = tracks; }
+    getTracks() { return this.tracks; }
+    getAudioTracks() { return this.tracks; }
+  }
+  class FakePeer {
+    constructor() {
+      this.iceGatheringState = "complete";
+      this.localDescription = null;
+      this.connectionState = "new";
+      this.listeners = new Map();
+      latestPeer = this;
+    }
+    addEventListener(type, listener) {
+      const handlers = this.listeners.get(type) || [];
+      handlers.push(listener);
+      this.listeners.set(type, handlers);
+    }
+    removeEventListener(type, listener) {
+      const handlers = this.listeners.get(type) || [];
+      this.listeners.set(type, handlers.filter((candidate) => candidate !== listener));
+    }
+    createDataChannel() {}
+    addTrack() {}
+    async createOffer() { return { type: "offer", sdp: "v=0\\r\\n" }; }
+    async setLocalDescription(offer) { this.localDescription = offer; }
+    async setRemoteDescription() {}
+    close() { this.connectionState = "closed"; }
+    emitTrack() {
+      const handlers = this.listeners.get("track") || [];
+      const track = { kind: "audio" };
+      const stream = new FakeMediaStream([track]);
+      handlers.forEach((handler) => handler({ streams: [stream], track }));
+    }
+  }
+  const sandbox = {
+    window,
+    navigator: { mediaDevices },
+    Audio: FakeAudio,
+    MediaStream: FakeMediaStream,
+    RTCPeerConnection: FakePeer,
+    console,
+    setTimeout,
+    clearTimeout,
+    Promise,
+    Set,
+    Error
+  };
+  vm.createContext(sandbox);
+  new vm.Script(script).runInContext(sandbox);
+  return {
+    start: sandbox.window.hoverPocketVoice.start,
+    cleanup: sandbox.window.hoverPocketVoice.cleanup,
+    calls,
+    enumerateCount() { return enumerateCount; },
+    messages,
+    streams,
+    resolvePending(stream) {
+      assert(resolvePending !== null, "pending capture was not started");
+      resolvePending(stream);
+    },
+    rejectPending(error) {
+      assert(rejectPending !== null, "pending capture was not started");
+      rejectPending(error);
+    },
+    setMuted(muted) {
+      sandbox.window.hoverPocketVoice.setMuted(muted);
+    },
+    emitRemoteTrack() {
+      assert(latestPeer !== null, "peer was not created");
+      latestPeer.emitTrack();
+    },
+    microphoneEnabled() {
+      const stream = streams[streams.length - 1];
+      return stream ? stream.microphoneEnabled() : null;
+    },
+    remoteMuted() {
+      return latestAudio ? latestAudio.muted : null;
+    }
+  };
+}
+
+async function runFailureScenario(actions, devices) {
+  const context = makeContext(actions, devices);
+  await context.start("operation");
+  return context;
+}
+
+async function main() {
+  const devices = [
+    { kind: "audioinput", deviceId: "default", groupId: "g0" },
+    { kind: "audioinput", deviceId: "d0", groupId: "g0" },
+    { kind: "audioinput", deviceId: "d1", groupId: "g1" },
+    { kind: "audioinput", deviceId: "d2", groupId: "g1" },
+    { kind: "audioinput", deviceId: "d3", groupId: "g2" },
+    { kind: "audioinput", deviceId: "d4", groupId: "g3" }
+  ];
+  const constrainedFailure = await runFailureScenario(
+    ["OverconstrainedError", "NotReadableError", "NotReadableError", "NotReadableError"],
+    devices
+  );
+  assert(JSON.stringify(constrainedFailure.calls) === JSON.stringify(["constrained", "plain", "d1", "d3"]), "constraint fallback order");
+  assert(constrainedFailure.messages.some((message) => message.type === "failure" && message.code === "microphone_unreadable"), "constraint fallback failure");
+
+  const unreadableFailure = await runFailureScenario(
+    ["NotReadableError", "NotReadableError", "NotReadableError", "NotReadableError", "NotReadableError"],
+    [...devices, { kind: "audioinput", deviceId: "d5", groupId: "g4" }]
+  );
+  assert(JSON.stringify(unreadableFailure.calls) === JSON.stringify(["constrained", "d1", "d3", "d4"]), "unreadable alternate order and bound");
+
+  for (const [errorName, expectedCode] of [
+    ["NotAllowedError", "microphone_permission_denied"],
+    ["NotFoundError", "microphone_not_found"],
+    ["TypeError", "webrtc_failed"]
+  ]) {
+    const terminalFailure = await runFailureScenario([errorName], devices);
+    assert(terminalFailure.calls.length === 1, `${errorName} retried capture`);
+    assert(terminalFailure.enumerateCount() === 0, `${errorName} enumerated alternates`);
+    assert(terminalFailure.messages.some((message) => message.type === "failure" && message.code === expectedCode), `${errorName} classification`);
+  }
+
+  const stale = makeContext(["pending"], devices);
+  const pendingStart = stale.start("stale-operation");
+  await new Promise((resolve) => setImmediate(resolve));
+  stale.cleanup(false);
+  const lateStream = makeStream();
+  stale.resolvePending(lateStream);
+  await pendingStart;
+  assert(lateStream.stopCount() === 1, "late stream was not stopped");
+  assert(stale.calls.length === 1, "stale operation started another capture");
+  assert(!stale.messages.some((message) => message.type === "failure"), "stale operation posted failure");
+
+  const staleReject = makeContext(["pending"], devices);
+  const pendingRejectStart = staleReject.start("stale-reject-operation");
+  await new Promise((resolve) => setImmediate(resolve));
+  staleReject.cleanup(false);
+  staleReject.rejectPending(namedError("NotReadableError"));
+  await pendingRejectStart;
+  assert(staleReject.calls.length === 1, "stale rejected operation started another capture");
+  assert(staleReject.enumerateCount() === 0, "stale rejected operation enumerated alternates");
+  assert(!staleReject.messages.some((message) => message.type === "failure"), "stale rejected operation posted failure");
+
+  const defaultMute = makeContext(["stream"], devices);
+  await defaultMute.start("default-mute-operation");
+  defaultMute.emitRemoteTrack();
+  defaultMute.setMuted(true);
+  assert(defaultMute.microphoneEnabled() === false, "default detach did not mute microphone");
+  assert(defaultMute.remoteMuted() === true, "default detach did not mute remote audio");
+
+  const delayedMute = makeContext(["stream"], devices);
+  await delayedMute.start("delayed-mute-operation");
+  delayedMute.setMuted(true);
+  delayedMute.emitRemoteTrack();
+  assert(delayedMute.microphoneEnabled() === false, "delayed mute did not mute microphone");
+  assert(delayedMute.remoteMuted() === true, "delayed remote track ignored mute state");
+
+  const continued = makeContext(["stream"], devices);
+  await continued.start("continued-operation");
+  continued.emitRemoteTrack();
+  assert(continued.microphoneEnabled() === true, "opt-in continuation muted microphone");
+  assert(continued.remoteMuted() === false, "opt-in continuation muted remote audio");
+
+  const restarted = makeContext(["stream", "stream"], devices);
+  await restarted.start("first-session");
+  restarted.emitRemoteTrack();
+  restarted.setMuted(true);
+  restarted.cleanup(false);
+  await restarted.start("second-session");
+  restarted.emitRemoteTrack();
+  assert(restarted.microphoneEnabled() === true, "new session microphone remained muted");
+  assert(restarted.remoteMuted() === false, "new session remote audio remained muted");
+}
+
+main().catch((error) => {
+  process.stderr.write("Codex Voice semantic verification failed\n");
+  process.exitCode = 1;
+});
+'''
+    result = subprocess.run(
+        ["node", "-e", node_program],
+        input=html,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        fail("macOS Codex Voice JS candidate/epoch semantics regressed")
 
 
 def main() -> None:
@@ -175,6 +467,13 @@ def main() -> None:
         / "Voice"
         / "CodexVoiceWebRTCTransport.swift"
     ).read_text(encoding="utf-8")
+    mac_codex_runtime_host = (
+        ROOT
+        / "Sources"
+        / "HoverPocket"
+        / "Voice"
+        / "CodexVoiceRuntimeHost.swift"
+    ).read_text(encoding="utf-8")
     mac_calendar_live_verifier = (
         ROOT
         / "Sources"
@@ -197,11 +496,17 @@ def main() -> None:
     mac_app_settings = (
         ROOT / "Sources" / "HoverPocket" / "State" / "AppSettings.swift"
     ).read_text(encoding="utf-8")
+    mac_voice_foundation_verifier = (
+        ROOT / "Sources" / "HoverPocket" / "App" / "VoiceFoundationVerificationCommand.swift"
+    ).read_text(encoding="utf-8")
     mac_keychain = (
         ROOT / "Sources" / "HoverPocket" / "Services" / "GoogleOAuthKeychainStore.swift"
     ).read_text(encoding="utf-8")
     mac_settings = (
         ROOT / "Sources" / "HoverPocket" / "Views" / "SettingsView.swift"
+    ).read_text(encoding="utf-8")
+    requirements = (
+        ROOT / "docs" / "requirement" / "requirements.md"
     ).read_text(encoding="utf-8")
     mac_build_script = (ROOT / "script" / "build_and_run.sh").read_text(encoding="utf-8")
     mac_package_script = (ROOT / "script" / "package_zip.sh").read_text(encoding="utf-8")
@@ -1321,13 +1626,76 @@ def main() -> None:
         "func cancelSession(_ sessionID: String)",
         "VoiceApprovalText.singleLine",
         '"approval_rate_limited"',
+        "private let actionConfirmationEnabled: @MainActor () -> Bool",
+        "actionConfirmationEnabled: @escaping @MainActor () -> Bool",
+        "let confirmationEnabled = actionConfirmationEnabled()",
+        "let autoApprove = !confirmationEnabled && request.kind.isCurrentAutoApprovalKind",
+        "automaticReservationID",
+        "finishAutomaticApproval(reservationID: reservationID)",
+        "var automaticApprovalReservationID: UUID?",
+        "case .calendarCreate, .timerStart, .stickyUpsert",
     )):
         fail("macOS Realtime tools bypass the exact Registry/Broker/readback boundary")
+    if not all(value in mac_realtime_capabilities for value in (
+        "default Voice confirmation setting",
+        "CapabilityBroker prepare, Calendar access, idempotency, and post-execution readback remain required",
+        "CapabilityBroker approval, the Timer rate limit, and post-execution readback remain required",
+        "the note is written only after Broker approval and verified by readback",
+        "keeps Broker approval/readback",
+    )) or any(value in mac_realtime_capabilities for value in (
+        "requires native approval",
+        "existing native approval",
+    )):
+        fail("macOS Voice tool descriptions do not match the optional native confirmation contract")
+    if not all(value in mac_realtime_provider for value in (
+        "actionConfirmationEnabled: @escaping @MainActor () -> Bool",
+        "actionConfirmationEnabled: actionConfirmationEnabled",
+        "settings.voiceActionConfirmationEnabled",
+    )) or "setActionConfirmationEnabled" in mac_realtime_provider:
+        fail("macOS Voice confirmation setting is not a dynamic provider closure")
     if "settings.$voiceCalendarAccessEnabled" not in mac_app \
             or "VoiceLaneRuntime.shared.capabilityGrantsDidChange()" not in mac_app \
             or "func capabilityGrantsDidChange()" not in mac_runtime \
             or "enqueueAudioCommand(.closeSession, adapter: adapter)" not in mac_runtime:
         fail("macOS Voice permission revocation or terminal failure does not close/rebuild the session")
+    if not all(value in mac_runtime for value in (
+        "private var continueWhenPanelHidden = false",
+        "func setContinueWhenPanelHidden(_ enabled: Bool)",
+        "func setPanelVisible(_ visible: Bool)",
+        "adapter?.setPanelVisible(true)",
+        "adapter?.setPanelVisible(false)",
+        "let preserveAudio = continueWhenPanelHidden",
+        "snapshot.connection == .connected",
+        "if preserveAudio",
+        "self.snapshot.connection == .connecting",
+        "activity: .idle",
+        "enqueueAudioCommand(.setMuted(true), adapter: adapter)",
+    )) or "setActionConfirmationEnabled" in mac_runtime:
+        fail("macOS Voice hidden-panel continuation is not a dedicated, mute-safe runtime setting")
+    if not all(value in mac_realtime_provider for value in (
+        "func setPanelVisible(_ visible: Bool)",
+        "runtimeHost.setPanelVisible(visible)",
+    )):
+        fail("macOS Codex Voice panel visibility is not propagated to the permission lease")
+    if not all(value in mac_voice_foundation_verifier for value in (
+        "connectingAdapter.finishStart()",
+        "voice_confirmation_off_parallel_busy",
+        "voice_confirmation_off_parallel_cancel",
+    )):
+        fail("macOS Voice P1 regression coverage is missing")
+    if not all(value in requirements for value in (
+        "既定で入力trackとremote audioをmute",
+        "Settingsで継続を明示的にON",
+        "Voiceの操作確認は既定ON",
+        "native presenterを省略して自動承認できる",
+        "Brokerの承認判断、Calendar access、idempotency、readback、auditは維持",
+    )) or "必ず承認 UI を通す" in requirements:
+        fail("Voice requirements still require native approval UI unconditionally")
+    if not all(value in mac_app for value in (
+        "settings.$voiceContinueWhenPanelHidden",
+        "VoiceLaneRuntime.shared.setContinueWhenPanelHidden(enabled)",
+    )):
+        fail("macOS Voice hidden-panel setting is not dynamically observed")
     if mac_settings.count("VoiceLaneRuntime.shared.credentialsDidChange()") != 2 \
             or "func credentialsDidChange()" not in mac_runtime \
             or "voiceStartBlockedByConfiguration" not in mac_voice \
@@ -1464,6 +1832,45 @@ def main() -> None:
         'case "remote_audio_playing"',
     )):
         fail("macOS Codex Voice E2E media receipt or physical confirmation drifted")
+    if not all(value in mac_codex_transport for value in (
+        "const maxMicrophoneCaptureAttempts = 4;",
+        "function classifyMicrophoneError(error)",
+        "function isRetryableMicrophoneError(code)",
+        'return "microphone_permission_denied"',
+        'return "microphone_not_found"',
+        'return "microphone_unreadable"',
+        'return "microphone_constraints_unsupported"',
+        "async function alternateMicrophoneConstraints(isCurrent, limit)",
+        "enumerateDevices()",
+        "const preferredGroupIds = new Set(devices",
+        "device.groupId",
+        "async function acquireMicrophone(epoch, operationId)",
+        "const microphoneResult = await acquireMicrophone(epoch, operationId);",
+        "let muted = false;",
+        "remoteAudio.muted = muted;",
+        "function setMuted(nextMuted)",
+        "muted = !!nextMuted;",
+        "muted = false;",
+    )) or mac_codex_transport.count("navigator.mediaDevices.getUserMedia") != 3 or any(
+        value in mac_codex_transport for value in (
+            'cleanup(false);\n        post({ type: "failure"',
+            'cleanup(false);\n      post({ type: "failure"',
+        )
+    ):
+        fail("macOS Codex Voice microphone recovery is not bounded or classified")
+    verify_codex_voice_javascript_semantics(mac_codex_transport)
+    if not all(value in mac_codex_runtime_host for value in (
+        "enum CodexVoiceMicrophonePermissionDecision",
+        "microphonePermissionArmedUntil = now.addingTimeInterval(5)",
+        "static func microphonePermissionDecision(",
+        "if microphonePermissionAttemptCount == 0",
+        "microphonePermissionArmedUntil = nil",
+        "maximumMicrophonePermissionAttempts",
+        'return .denied("microphone_request_expired")',
+        'return .denied("microphone_request_exhausted")',
+        "func finishMicrophoneRequest()",
+    )):
+        fail("macOS Codex Voice microphone permission lease drifted")
     codex_attempt_pos = mac_codex_transport.find(
         "MacOSVoiceE2EReceiptStore.shared?.beginMediaSession()"
     )
@@ -1576,6 +1983,20 @@ def main() -> None:
             or "isShowingVoiceCalendarAccessConfirmation = true" not in mac_settings \
             or "APIキーはネイティブ側だけで使用" not in mac_settings:
         fail("macOS Voice Calendar or native credential consent does not default closed")
+    if not all(value in mac_app_settings for value in (
+        'private static let voiceContinueWhenPanelHiddenKey = "voiceContinueWhenPanelHidden"',
+        'private static let voiceActionConfirmationEnabledKey = "voiceActionConfirmationEnabled"',
+        "self.voiceContinueWhenPanelHidden = defaults.object(forKey: Self.voiceContinueWhenPanelHiddenKey) == nil",
+        "self.voiceActionConfirmationEnabled = defaults.object(forKey: Self.voiceActionConfirmationEnabledKey) == nil",
+    )) or not all(value in mac_settings for value in (
+        "パネルを閉じても音声を続ける",
+        "Continue voice when the panel is hidden",
+        "Voice操作の確認を毎回表示",
+        "Ask before Voice actions",
+        "settings.voiceProvider == .off || !settings.voiceEnabled",
+        "Capability Brokerのschema・idempotency・readback・auditは維持",
+    )):
+        fail("macOS Voice hidden continuation or action confirmation Settings are incomplete")
     if "providerID: providerID" not in mac_app \
             or "VoiceProviderAdapterFactory.factory(" not in mac_app \
             or "settings: settings" not in mac_app \

@@ -483,6 +483,44 @@ struct SettingsView: View {
             )
             .disabled(settings.voiceProvider == .off)
 
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(
+                    localized(
+                        japanese: "パネルを閉じても音声を続ける",
+                        english: "Continue voice when the panel is hidden"
+                    ),
+                    isOn: $settings.voiceContinueWhenPanelHidden
+                )
+                .disabled(settings.voiceProvider == .off || !settings.voiceEnabled)
+
+                Text(localized(
+                    japanese: "接続済みでミュート解除中のときだけ、パネルを閉じても音声を維持します。接続中・ミュート中に自動開始や解除はしません。",
+                    english: "Keeps audio only when the session is already connected and unmuted. It never starts or unmutes a connecting or muted session."
+                ))
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(
+                    localized(
+                        japanese: "Voice操作の確認を毎回表示",
+                        english: "Ask before Voice actions"
+                    ),
+                    isOn: $settings.voiceActionConfirmationEnabled
+                )
+                .disabled(settings.voiceProvider == .off || !settings.voiceEnabled)
+
+                Text(localized(
+                    japanese: "オフでは、現在Voiceに公開済みのCalendar作成、Timer開始、Sticky追加、明るさ・音量変更だけ確認ダイアログを省略します。OS権限、Calendar access、Capability Brokerのschema・idempotency・readback・auditは維持します。将来のtool、破壊的操作、native authority、生成Appへ自動拡張しません。",
+                    english: "When off, only the currently exposed Calendar create, Timer start, Sticky add, and brightness or volume changes skip the confirmation dialog. OS permissions, Calendar access, Capability Broker schema, idempotency, readback, and audit remain required. This never expands automatically to future tools, destructive actions, native authority, or generated apps."
+                ))
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
             if settings.voiceProvider == .codexAppServer {
                 codexVoiceAccountSection
             }
@@ -580,8 +618,8 @@ struct SettingsView: View {
                         english: "The provider is Off by default. Off performs no credential, network, or transport work."
                     )
                     : localized(
-                        japanese: "OpenAI Realtime BYOKは任意の代替経路です。利用時だけAPI料金が発生します。CalendarとTimerはCapability Broker、ネイティブ承認、実行後readbackを通ります。",
-                        english: "OpenAI Realtime BYOK is an optional alternative and incurs API charges only when used. Calendar and Timer cross Capability Broker, native approval, and post-execution readback."
+                        japanese: "OpenAI Realtime BYOKは任意の代替経路です。利用時だけAPI料金が発生します。CalendarとTimerはCapability Broker、既定ONのVoice確認、実行後readbackを通ります（確認OFFでもBroker処理は維持）。",
+                        english: "OpenAI Realtime BYOK is an optional alternative and incurs API charges only when used. Calendar and Timer cross Capability Broker, the default-on Voice confirmation, and post-execution readback; Broker processing remains when confirmation is off."
                     ))
             .font(.system(size: 11))
             .foregroundStyle(.secondary)

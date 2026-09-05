@@ -171,6 +171,7 @@ protocol VoiceSessionAdapter: AnyObject {
     var requiresExplicitStart: Bool { get }
     func probeCompatibility() async -> VoiceAdapterGate
     func start() async throws
+    func setPanelVisible(_ visible: Bool)
     func setMuted(_ muted: Bool) async
     func setPresentationMode(_ mode: VoiceLaneMode) async
     func capabilityGrantsDidChange() async
@@ -180,8 +181,22 @@ protocol VoiceSessionAdapter: AnyObject {
 
 extension VoiceSessionAdapter {
     var requiresExplicitStart: Bool { false }
+    func setPanelVisible(_ visible: Bool) { _ = visible }
     func setPresentationMode(_ mode: VoiceLaneMode) async { _ = mode }
     func capabilityGrantsDidChange() async { }
+}
+
+protocol VoiceSessionStartFailure: Error {
+    var voiceStartErrorCode: String { get }
+}
+
+enum VoiceSessionStartFailureCode {
+    static func resolve(_ error: Error) -> String {
+        guard let failure = error as? any VoiceSessionStartFailure else {
+            return "voice_start_failed"
+        }
+        return VoiceTextSafety.sanitizeErrorCode(failure.voiceStartErrorCode)
+    }
 }
 
 struct VoiceLaneSnapshot: Equatable, Sendable {
@@ -383,6 +398,7 @@ final class VoiceLaneRuntime: ObservableObject {
     private var featureEnabled = false
     private var providerID: VoiceProviderID = .off
     private var preferredLayout: VoiceLaneLayoutPreference = .compact
+    private var continueWhenPanelHidden = false
     private var adapterFactory: AdapterFactory?
     private var adapter: (any VoiceSessionAdapter)?
     private var transcriptBuffer = VoiceTranscriptBuffer()
@@ -527,13 +543,34 @@ final class VoiceLaneRuntime: ObservableObject {
         }
     }
 
+    func setContinueWhenPanelHidden(_ enabled: Bool) {
+        continueWhenPanelHidden = enabled
+        guard !enabled,
+              !snapshot.uiAttached,
+              snapshot.connection == .connected,
+              !snapshot.muted else { return }
+        publish(muted: true)
+        if let adapter {
+            enqueueAudioCommand(.setMuted(true), adapter: adapter)
+        }
+    }
+
     func attachPanel() {
         guard featureEnabled else { return }
+        adapter?.setPanelVisible(true)
         publish(uiAttached: true)
     }
 
     func detachPanel() {
         guard featureEnabled else { return }
+        adapter?.setPanelVisible(false)
+        let preserveAudio = continueWhenPanelHidden
+            && snapshot.connection == .connected
+            && !snapshot.muted
+        if preserveAudio {
+            publish(uiAttached: false)
+            return
+        }
         publish(muted: true, uiAttached: false)
         if let adapter {
             enqueueAudioCommand(.setMuted(true), adapter: adapter)
@@ -570,8 +607,21 @@ final class VoiceLaneRuntime: ObservableObject {
             defer { self.explicitStartTask = nil }
             do {
                 try await adapter.start()
-                guard !Task.isCancelled, self.featureEnabled, self.adapter === adapter else {
+                guard !Task.isCancelled,
+                      self.featureEnabled,
+                      self.adapter === adapter,
+                      self.snapshot.connection == .connecting else {
                     await adapter.stop()
+                    return
+                }
+                guard self.snapshot.uiAttached else {
+                    await adapter.stop()
+                    self.publish(
+                        connection: .disconnected,
+                        activity: .idle,
+                        muted: true,
+                        clearSafeError: true
+                    )
                     return
                 }
                 self.publish(
@@ -586,7 +636,7 @@ final class VoiceLaneRuntime: ObservableObject {
                     connection: .disconnected,
                     activity: .failed,
                     muted: true,
-                    safeErrorCode: "voice_start_failed"
+                    safeErrorCode: VoiceSessionStartFailureCode.resolve(error)
                 )
             }
         }
@@ -847,6 +897,7 @@ final class VoiceLaneRuntime: ObservableObject {
         }
 
         if candidate.requiresExplicitStart {
+            candidate.setPanelVisible(snapshot.uiAttached)
             await candidate.setPresentationMode(snapshot.mode)
             adapter = candidate
             restartAttempt = 0

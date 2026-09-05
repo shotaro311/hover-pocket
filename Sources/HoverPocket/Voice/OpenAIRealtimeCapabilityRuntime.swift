@@ -106,6 +106,11 @@ private enum VoiceApprovalOutcome: Equatable {
     case cancelled
 }
 
+private struct VoiceApprovalResult {
+    let outcome: VoiceApprovalOutcome
+    let automaticReservationID: UUID?
+}
+
 @MainActor
 private final class VoiceApprovalCoordinator {
     private static let maximumStartsPerWindow = 3
@@ -128,35 +133,67 @@ private final class VoiceApprovalCoordinator {
 
     func request(
         sessionID: String,
-        request: VoiceNativeApprovalRequest
-    ) async -> VoiceApprovalOutcome {
-        guard !cancelledSessions.contains(sessionID) else { return .cancelled }
+        request: VoiceNativeApprovalRequest,
+        confirmationEnabled: Bool
+    ) async -> VoiceApprovalResult {
+        guard !cancelledSessions.contains(sessionID) else {
+            return VoiceApprovalResult(outcome: .cancelled, automaticReservationID: nil)
+        }
         let current = now()
         starts.removeAll { current.timeIntervalSince($0) >= Self.windowSeconds }
-        guard active == nil else { return .busy }
+        guard active == nil else {
+            return VoiceApprovalResult(outcome: .busy, automaticReservationID: nil)
+        }
         if case .timerStart = request.kind {
-            guard starts.count < Self.maximumStartsPerWindow else { return .rateLimited }
+            guard starts.count < Self.maximumStartsPerWindow else {
+                return VoiceApprovalResult(outcome: .rateLimited, automaticReservationID: nil)
+            }
             starts.append(current)
         }
 
         let approvalID = UUID()
+        let autoApprove = !confirmationEnabled && request.kind.isCurrentAutoApprovalKind
         let task = Task { @MainActor [presenter] in
-            await presenter(request)
+            if autoApprove {
+                // Keep active ownership across one scheduling point so concurrent calls
+                // still observe the coordinator's single-flight guard without presenting UI.
+                await Task.yield()
+                return true
+            }
+            return await presenter(request)
         }
-        active = ActiveApproval(id: approvalID, sessionID: sessionID, task: task)
+        active = ActiveApproval(
+            id: approvalID,
+            sessionID: sessionID,
+            task: task
+        )
         let approved = await withTaskCancellationHandler {
             await task.value
         } onCancel: {
             task.cancel()
         }
+        guard !Task.isCancelled,
+              !cancelledSessions.contains(sessionID) else {
+            if active?.id == approvalID {
+                active = nil
+            }
+            return VoiceApprovalResult(outcome: .cancelled, automaticReservationID: nil)
+        }
+        if autoApprove, approved {
+            return VoiceApprovalResult(outcome: .approved, automaticReservationID: approvalID)
+        }
         if active?.id == approvalID {
             active = nil
         }
-        guard !Task.isCancelled,
-              !cancelledSessions.contains(sessionID) else {
-            return .cancelled
-        }
-        return approved ? .approved : .rejected
+        return VoiceApprovalResult(
+            outcome: approved ? .approved : .rejected,
+            automaticReservationID: nil
+        )
+    }
+
+    func finishAutomaticApproval(reservationID: UUID) {
+        guard active?.id == reservationID else { return }
+        active = nil
     }
 
     func cancelSession(_ sessionID: String) {
@@ -181,6 +218,16 @@ private final class VoiceApprovalCoordinator {
     }
 }
 
+private extension VoiceNativeApprovalRequest.Kind {
+    var isCurrentAutoApprovalKind: Bool {
+        switch self {
+        case .calendarCreate, .timerStart, .stickyUpsert,
+             .controlsBrightnessSet, .controlsVolumeSet:
+            true
+        }
+    }
+}
+
 private enum VoiceCapabilityRuntimeError: Error {
     case sessionCancelled
     case approvalFailed(String)
@@ -201,6 +248,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
 
     private let context: VoiceCapabilityContext
     private let calendarAccessGranted: () -> Bool
+    private let actionConfirmationEnabled: @MainActor () -> Bool
     private let timeZoneID: () -> String
     private let now: () -> Date
     private let approvalCoordinator: VoiceApprovalCoordinator
@@ -212,12 +260,14 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     init(
         context: VoiceCapabilityContext,
         calendarAccessGranted: @escaping () -> Bool,
+        actionConfirmationEnabled: @escaping @MainActor () -> Bool = { true },
         timeZoneID: @escaping () -> String = { TimeZone.current.identifier },
         now: @escaping () -> Date = Date.init,
         approvalHandler: @escaping (VoiceNativeApprovalRequest) async -> Bool = VoiceNativeApprovalPresenter.present
     ) throws {
         self.context = context
         self.calendarAccessGranted = calendarAccessGranted
+        self.actionConfirmationEnabled = actionConfirmationEnabled
         self.timeZoneID = timeZoneID
         self.now = now
         self.approvalCoordinator = VoiceApprovalCoordinator(
@@ -244,7 +294,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
             tools.append([
                 "type": "function",
                 "name": Self.calendarCreateTool,
-                "description": "Request creation of one Calendar event. HoverPocket requires native approval and Broker readback before success.",
+                "description": "Request creation of one Calendar event. HoverPocket applies the default Voice confirmation setting; CapabilityBroker prepare, Calendar access, idempotency, and post-execution readback remain required.",
                 "parameters": [
                     "type": "object",
                     "additionalProperties": false,
@@ -261,7 +311,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         tools.append([
             "type": "function",
             "name": Self.timerStartTool,
-            "description": "Request a countdown Timer. HoverPocket requires native approval and Broker readback before success.",
+            "description": "Request a countdown Timer. HoverPocket applies the default Voice confirmation setting; CapabilityBroker approval, the Timer rate limit, and post-execution readback remain required.",
             "parameters": [
                 "type": "object",
                 "additionalProperties": false,
@@ -281,7 +331,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     private static let stickyUpsertDefinition: [String: Any] = [
         "type": "function",
         "name": stickyUpsertTool,
-        "description": "Add or update one Sticky Note through HoverPocket CapabilityBroker. The note is written only after the existing native approval and verified by readback.",
+        "description": "Add or update one Sticky Note through HoverPocket CapabilityBroker. HoverPocket applies the default Voice confirmation setting; the note is written only after Broker approval and verified by readback.",
         "parameters": [
             "type": "object",
             "additionalProperties": false,
@@ -297,14 +347,14 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     private static let controlsBrightnessSetDefinition: [String: Any] = [
         "type": "function",
         "name": controlsBrightnessSetTool,
-        "description": "Adjust a controllable display brightness through CapabilityBroker. operation set/increase/decrease uses value as a percentage or percentage-point delta; preset supports comfortable (70%), maximum (100%), and minimum (5%).",
+        "description": "Adjust a controllable display brightness through CapabilityBroker. HoverPocket applies the default Voice confirmation setting and keeps Broker approval/readback; operation set/increase/decrease uses value as a percentage or percentage-point delta; preset supports comfortable (70%), maximum (100%), and minimum (5%).",
         "parameters": controlsAdjustmentSchema(includeDisplayID: true)
     ]
 
     private static let controlsVolumeSetDefinition: [String: Any] = [
         "type": "function",
         "name": controlsVolumeSetTool,
-        "description": "Adjust system volume through CapabilityBroker. operation set/increase/decrease uses value as a percentage or percentage-point delta; preset supports comfortable (50%), maximum (100%), and minimum (0%).",
+        "description": "Adjust system volume through CapabilityBroker. HoverPocket applies the default Voice confirmation setting and keeps Broker approval/readback; operation set/increase/decrease uses value as a percentage or percentage-point delta; preset supports comfortable (50%), maximum (100%), and minimum (0%).",
         "parameters": controlsAdjustmentSchema(includeDisplayID: false)
     ]
 
@@ -567,7 +617,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         guard let request = preparation.approvalRequest else {
             throw CapabilityBrokerError.approvalRequired
         }
-        let approval = await approvalCoordinator.request(
+        let approval = await requestApproval(
             sessionID: sessionID,
             request: VoiceNativeApprovalRequest(
                 kind: .calendarCreate,
@@ -575,9 +625,14 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
                 detail: "\(title)\n\(start) 〜 \(end)"
             )
         )
-        guard approval == .approved else {
+        defer {
+            if let reservationID = approval.automaticReservationID {
+                approvalCoordinator.finishAutomaticApproval(reservationID: reservationID)
+            }
+        }
+        guard approval.outcome == .approved else {
             reject(request, planDigest: preparation.planDigest)
-            return Self.failure(approvalFailureCode(approval))
+            return Self.failure(approvalFailureCode(approval.outcome))
         }
         try requireCalendarAccess(sessionID)
         let grant = try context.broker.decideApproval(
@@ -587,13 +642,14 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
             now: now()
         )
         try requireCalendarAccess(sessionID)
-        let output = try verifiedOutput(try await context.broker.execute(
+        let receipt = try await context.broker.execute(
             plan,
             permissions: permissions,
             approvalGrant: grant,
             now: now()
-        ))
+        )
         try requireCalendarAccess(sessionID)
+        let output = try verifiedOutput(receipt)
         return try json([
             "status": "succeeded",
             "safeTitle": try output.requiredString("safeTitle", maxLength: 160),
@@ -649,7 +705,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         guard let request = preparation.approvalRequest else {
             throw CapabilityBrokerError.approvalRequired
         }
-        let approval = await approvalCoordinator.request(
+        let approval = await requestApproval(
             sessionID: sessionID,
             request: VoiceNativeApprovalRequest(
                 kind: .timerStart,
@@ -657,9 +713,14 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
                 detail: "\(title)（\(duration)秒）"
             )
         )
-        guard approval == .approved else {
+        defer {
+            if let reservationID = approval.automaticReservationID {
+                approvalCoordinator.finishAutomaticApproval(reservationID: reservationID)
+            }
+        }
+        guard approval.outcome == .approved else {
             reject(request, planDigest: preparation.planDigest)
-            return Self.failure(approvalFailureCode(approval))
+            return Self.failure(approvalFailureCode(approval.outcome))
         }
         try requireSessionActive(sessionID)
         let grant = try context.broker.decideApproval(
@@ -669,13 +730,14 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
             now: now()
         )
         try requireSessionActive(sessionID)
-        let output = try verifiedOutput(try await context.broker.execute(
+        let receipt = try await context.broker.execute(
             plan,
             permissions: permissions,
             approvalGrant: grant,
             now: now()
-        ))
+        )
         try requireSessionActive(sessionID)
+        let output = try verifiedOutput(receipt)
         var payload: [String: Any] = [
             "status": "succeeded",
             "timerId": try output.requiredString("timerId", maxLength: 36),
@@ -998,16 +1060,23 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
             requiredPermissions: [permission]
         )
         let preparation = try context.broker.prepare(plan, permissions: permissions, now: current)
+        var automaticApprovalReservationID: UUID?
+        defer {
+            if let reservationID = automaticApprovalReservationID {
+                approvalCoordinator.finishAutomaticApproval(reservationID: reservationID)
+            }
+        }
         let grant: CapabilityApprovalGrant?
         if let approval {
             guard let request = preparation.approvalRequest else {
                 throw CapabilityBrokerError.approvalRequired
             }
-            let outcome = await approvalCoordinator.request(sessionID: sessionID, request: approval)
-            guard outcome == .approved else {
+            let outcome = await requestApproval(sessionID: sessionID, request: approval)
+            guard outcome.outcome == .approved else {
                 reject(request, planDigest: preparation.planDigest)
-                throw VoiceCapabilityRuntimeError.approvalFailed(approvalFailureCode(outcome))
+                throw VoiceCapabilityRuntimeError.approvalFailed(approvalFailureCode(outcome.outcome))
             }
+            automaticApprovalReservationID = outcome.automaticReservationID
             try requireSessionActive(sessionID)
             grant = try context.broker.decideApproval(
                 requestID: request.id,
@@ -1065,6 +1134,18 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
             throw CapabilityHandlerError.readbackMismatch("voice")
         }
         return output
+    }
+
+    private func requestApproval(
+        sessionID: String,
+        request: VoiceNativeApprovalRequest
+    ) async -> VoiceApprovalResult {
+        let confirmationEnabled = actionConfirmationEnabled()
+        return await approvalCoordinator.request(
+            sessionID: sessionID,
+            request: request,
+            confirmationEnabled: confirmationEnabled
+        )
     }
 
     private func reject(_ request: CapabilityApprovalRequest, planDigest: String) {
