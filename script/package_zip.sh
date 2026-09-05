@@ -45,6 +45,7 @@ else
 fi
 
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+python3 "$ROOT_DIR/script/verify_macos_app_configuration.py" "$APP_PATH"
 
 APP_EXECUTABLE="$APP_PATH/Contents/MacOS/$APP_NAME"
 [[ -d "$APP_PATH/Contents/Frameworks/Sparkle.framework" ]] || {

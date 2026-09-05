@@ -88,6 +88,20 @@ if CommandLine.arguments.contains("--verify-panel-soak") {
     app.run()
     exit(1)
 }
+if CommandLine.arguments.contains("--verify-weather-location") {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do {
+            try await WeatherLocationVerificationCommand.run()
+            exit(0)
+        } catch {
+            print("FAIL weather location: \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+    app.run()
+    exit(1)
+}
 if CommandLine.arguments.contains("--verify-weather") {
     WeatherVerificationCommand.run()
 }

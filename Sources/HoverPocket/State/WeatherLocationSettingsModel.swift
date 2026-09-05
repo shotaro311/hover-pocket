@@ -2,7 +2,7 @@ import CoreLocation
 import Foundation
 
 @MainActor
-final class WeatherLocationSettingsModel: NSObject, ObservableObject, CLLocationManagerDelegate {
+final class WeatherLocationSettingsModel: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
     @Published var searchText = ""
     @Published private(set) var searchResults: [WeatherLocation] = []
     @Published private(set) var isSearching = false
@@ -10,20 +10,27 @@ final class WeatherLocationSettingsModel: NSObject, ObservableObject, CLLocation
     @Published private(set) var message: String?
 
     private let searchService: WeatherLocationSearchService
-    private let locationManager: CLLocationManager
+    private var locationManager: CLLocationManager?
+    private let makeLocationManager: () -> CLLocationManager
+    private let locationServicesEnabled: () -> Bool
+    private let locationTimeout: Duration
+    private var locationTimeoutTask: Task<Void, Never>?
+    private var isRequestingLocation = false
     private var searchTask: Task<Void, Never>?
     private var locationCompletion: ((WeatherLocation?) -> Void)?
     private var locationLanguage: AppLanguage = .japanese
 
     init(
         searchService: WeatherLocationSearchService = WeatherLocationSearchService(),
-        locationManager: CLLocationManager = CLLocationManager()
+        makeLocationManager: @escaping () -> CLLocationManager = { CLLocationManager() },
+        locationServicesEnabled: @escaping () -> Bool = { CLLocationManager.locationServicesEnabled() },
+        locationTimeout: Duration = .seconds(20)
     ) {
         self.searchService = searchService
-        self.locationManager = locationManager
+        self.makeLocationManager = makeLocationManager
+        self.locationServicesEnabled = locationServicesEnabled
+        self.locationTimeout = locationTimeout
         super.init()
-        locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyKilometer
     }
 
     func search(language: AppLanguage) {
@@ -59,6 +66,7 @@ final class WeatherLocationSettingsModel: NSObject, ObservableObject, CLLocation
     }
 
     func clearSearch() {
+        cancelCurrentLocation()
         searchResults = []
         searchText = ""
         message = nil
@@ -68,7 +76,8 @@ final class WeatherLocationSettingsModel: NSObject, ObservableObject, CLLocation
         language: AppLanguage,
         completion: @escaping (WeatherLocation?) -> Void
     ) {
-        guard CLLocationManager.locationServicesEnabled() else {
+        guard !isLocating else { return }
+        guard locationServicesEnabled() else {
             message = language == .japanese
                 ? "macOSの位置情報サービスが無効です。"
                 : "Location Services are disabled in macOS."
@@ -80,12 +89,28 @@ final class WeatherLocationSettingsModel: NSObject, ObservableObject, CLLocation
         locationLanguage = language
         isLocating = true
         message = nil
+        let locationManager = makeLocationManager()
+        self.locationManager = locationManager
+        // Core Location delivers delegate callbacks on the manager's creation thread (MainActor).
+        locationManager.delegate = self
+        locationManager.desiredAccuracy = kCLLocationAccuracyKilometer
+        locationTimeoutTask = Task { [weak self, locationTimeout] in
+            do {
+                try await Task.sleep(for: locationTimeout)
+            } catch {
+                return
+            }
+            guard let self else { return }
+            self.finishLocation(nil, message: self.locationLanguage == .japanese
+                ? "現在地を取得できませんでした。位置情報の許可とWi-Fiを確認して、もう一度お試しください。都市名での選択もできます。"
+                : "Could not get your location. Check location permission and Wi-Fi, then try again, or select a city.")
+        }
 
         switch locationManager.authorizationStatus {
         case .notDetermined:
             locationManager.requestWhenInUseAuthorization()
         case .authorizedAlways, .authorized:
-            locationManager.requestLocation()
+            requestLocationIfNeeded()
         case .denied, .restricted:
             finishLocation(
                 nil,
@@ -99,47 +124,45 @@ final class WeatherLocationSettingsModel: NSObject, ObservableObject, CLLocation
         }
     }
 
-    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        Task { @MainActor [weak self] in
-            self?.handleAuthorizationChange()
-        }
+    func cancelCurrentLocation() {
+        finishLocation(nil, message: nil)
     }
 
-    nonisolated func locationManager(
-        _ manager: CLLocationManager,
-        didUpdateLocations locations: [CLLocation]
-    ) {
-        let location = locations.last
-        Task { @MainActor [weak self] in
-            guard let self, let location else {
-                guard let self else { return }
-                self.finishLocation(
-                    nil,
-                    message: self.unavailableLocationMessage(language: self.locationLanguage)
-                )
-                return
-            }
-            self.finishLocation(
-                WeatherLocation.current(
-                    latitude: location.coordinate.latitude,
-                    longitude: location.coordinate.longitude
-                ),
-                message: nil
-            )
-        }
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        guard manager === locationManager else { return }
+        handleAuthorizationChange()
     }
 
-    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            self.finishLocation(
-                nil,
-                message: self.unavailableLocationMessage(language: self.locationLanguage)
-            )
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard manager === locationManager else { return }
+        guard let location = locations.last,
+              location.horizontalAccuracy >= 0,
+              CLLocationCoordinate2DIsValid(location.coordinate) else {
+            finishLocation(nil, message: unavailableLocationMessage(language: locationLanguage))
+            return
         }
+        finishLocation(
+            WeatherLocation.current(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude),
+            message: nil
+        )
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        guard manager === locationManager else { return }
+        let denied = (error as? CLError)?.code == .denied
+        finishLocation(nil, message: denied
+            ? deniedLocationMessage(language: locationLanguage)
+            : unavailableLocationMessage(language: locationLanguage))
     }
 
     private func finishLocation(_ location: WeatherLocation?, message: String?) {
+        guard isLocating else { return }
+        locationTimeoutTask?.cancel()
+        locationTimeoutTask = nil
+        locationManager?.stopUpdatingLocation()
+        locationManager?.delegate = nil
+        locationManager = nil
+        isRequestingLocation = false
         isLocating = false
         self.message = message
         let completion = locationCompletion
@@ -148,10 +171,10 @@ final class WeatherLocationSettingsModel: NSObject, ObservableObject, CLLocation
     }
 
     private func handleAuthorizationChange() {
-        guard isLocating else { return }
+        guard isLocating, let locationManager else { return }
         switch locationManager.authorizationStatus {
         case .authorizedAlways, .authorized:
-            locationManager.requestLocation()
+            requestLocationIfNeeded()
         case .denied, .restricted:
             finishLocation(nil, message: deniedLocationMessage(language: locationLanguage))
         case .notDetermined:
@@ -159,6 +182,12 @@ final class WeatherLocationSettingsModel: NSObject, ObservableObject, CLLocation
         @unknown default:
             finishLocation(nil, message: unavailableLocationMessage(language: locationLanguage))
         }
+    }
+
+    private func requestLocationIfNeeded() {
+        guard !isRequestingLocation, let locationManager else { return }
+        isRequestingLocation = true
+        locationManager.requestLocation()
     }
 
     private static func safeMessage(_ error: Error, language: AppLanguage) -> String {

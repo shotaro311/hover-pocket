@@ -146,3 +146,8 @@ jobs:
 
       - name: Verify existing Timer behavior
         run: .build/debug/HoverPocket --verify-timer
+
+      - name: Verify weather location and release configuration
+        run: |
+          .build/debug/HoverPocket --verify-weather-location
+          python3 -m unittest discover -s script/tests -p test_verify_macos_app_configuration.py

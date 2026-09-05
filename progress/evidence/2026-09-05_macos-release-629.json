@@ -20,7 +20,6 @@
     "GitHub latest v0.1.0-629"
   ],
   "notPerformed": [
-    "end-user Sparkle install and restart",
     "physical optional hidden voice continuation and confirmation bypass"
   ],
   "crossPlatformReadback": {
@@ -28,5 +27,16 @@
     "publicFeedsAndChecksums": "PASS",
     "windowsReleasePublishedAt": "2026-08-12T07:17:19Z",
     "fullWindowsPayloadVerification": "SKIPPED: stopped slow unrelated package download; macOS public artifact independently fully verified"
+  },
+  "installedUpdateReadback": {
+    "path": "/Applications/HoverPocket.app",
+    "fromBuild": "168",
+    "toBuild": "629",
+    "pid": 50005,
+    "method": "Sparkle Install Update and Install and Relaunch",
+    "codesign": "PASS",
+    "stapler": "PASS",
+    "settingsStatus": "アップデートはありません",
+    "oldMissingFeedMessageRootCause": "not determined; feed and key were present"
   }
 }

@@ -75,6 +75,9 @@ struct SettingsView: View {
         .onAppear {
             refreshCapabilityDataSnapshot()
             refreshVoiceCredentialState()
+            if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
+                calendarStore.restoreConnectionIfNeeded()
+            }
         }
         .onChange(of: settings.voiceProvider) { _, provider in
             openAIRealtimeKeyDraft = ""
@@ -824,6 +827,10 @@ struct SettingsView: View {
             }
 
             Button {
+                if weatherLocationModel.isLocating {
+                    weatherLocationModel.cancelCurrentLocation()
+                    return
+                }
                 weatherLocationModel.requestCurrentLocation(language: language) { location in
                     if let location {
                         settings.weatherLocation = location
@@ -832,13 +839,12 @@ struct SettingsView: View {
             } label: {
                 Label(
                     localized(
-                        japanese: "現在地を使用",
-                        english: "Use current location"
+                        japanese: weatherLocationModel.isLocating ? "現在地の取得をキャンセル" : "現在地を使用",
+                        english: weatherLocationModel.isLocating ? "Cancel location request" : "Use current location"
                     ),
                     systemImage: "location.fill"
                 )
             }
-            .disabled(weatherLocationModel.isLocating)
 
             HStack(spacing: 8) {
                 TextField(

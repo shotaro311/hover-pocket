@@ -289,6 +289,8 @@ PUBLISH_DRY_RUN=1 PUBLISH_REQUIRE_NOTARIZED=0 ./script/publish_github_release.sh
 
 通常の一般配布では `PUBLISH_REQUIRE_NOTARIZED=0` は使わないでください。
 
+配布用worktreeにも、既存の審査済みGoogle設定を環境変数またはGit管理外の`.env.local`で渡してください。`GOOGLE_SIGN_IN_CLIENT_ID`と対応するURL schemeが必要です。`package_zip.sh`と公開前のZIP検証は、Google設定、署名済みの位置情報entitlement、位置情報の利用目的を確認し、欠落時には公開を止めます。確認値や秘密情報をログへ出力しないでください。
+
 ### 公開成果物のOS別readback
 
 公開後は、macOSの`macos-latest`とversioned release、Windowsの最新`win-v...` releaseを同じ`latest`扱いにせず、次のコマンドで別々に検証します。

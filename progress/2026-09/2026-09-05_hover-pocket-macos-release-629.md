@@ -15,3 +15,10 @@
 
 - WindowsのReleaseは既存`win-v0.2.7`、公開日時は8月12日のまま。公開RELEASES、releases.win.json、release-manifest.win.json、SHA256SUMS-win.txtの取得がPASS。
 - 両OS全asset verifierはmacOSのdownload / hash / signature検証後、Windows約86MB packageの低速downloadで中断した（exit 130）。Windows全payload再検証はスキップ。今回対象のmacOSは別途公開URLから全ZIPを取得・完全検証済み。
+
+## インストール済み旧版からの実更新
+
+- ユーザーの「アップデート配信が未設定です」という画面を調査。起動中は`/Applications/HoverPocket.app` build 168だったが、Info.plistにはmacOS専用SUFeedURLとSUPublicEDKeyが存在した。未設定という表示だけでは設定欠落を断定できない。
+- 旧版の「アップデートを確認」からSparkleが168→629を提示。Install Update、Install and Relaunchを実行した。
+- 更新後は同じインストール先がbuild 629、PID 50005で再起動。strict codesign / staplerがPASS。設定画面で「アップデートはありません」をreadbackした。既存の表示・Voice設定とChatGPTログイン表示も保持されている。
+- 先の「利用者側のインストール・再起動は未実施」は、この実更新で解消した。未設定表示の発生原因そのものは未特定で、ソース修正は行っていない。
