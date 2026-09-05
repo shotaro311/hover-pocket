@@ -1,9 +1,16 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-09-05
+updated: 2026-09-06
 updated_by: codex
 status: ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-draft-pr-ci-green; an3-b3b-windows-security-ci-green-physical-e2e-pending; an3-b3b-macos-draft-pr-ci-green-physical-e2e-pending; macos-codex-appserver-chatgpt-bundled-0.150-live-webrtc-passed-no-physical-mic; macos-codex-appserver-broker-tool-live-probe-verified; macos-codex-appserver-live-model-timer-tool-verified; macos-codex-appserver-managed-chatgpt-login-local-verified-human-login-pending; macos-normal-ui-all-providers-voice-lane-readback; macos-voice-e2e-isolation-draft-pr-ci-green-security-clean-physical-e2e-pending; macos-voice-e2e-performance-readback-local-verified; macos-voice-e2e-terminal-receipt-fixed-local-verified; macos-voice-e2e-build608-legacy-nonphysical-only; macos-voice-e2e-build618-stopped; macos-voice-e2e-build619-stopped-receipt-invalid; macos-calendar-read-broker-live-verified; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; an5-credential-broker-draft-pr-ci-green; an5-credential-peer-identity-draft-pr-ci-green-security-clean; an5-credential-mutual-identity-draft-pr-ci-green-security-clean; an5-credential-delivery-draft-pr-ci-green-security-clean-macos-auth-canary-passed; macos-codex-confinement-canary-passed; windows-codex-confinement-downgrade-negative-control-ci-green-positive-elevated-blocked-by-reparse-finding; windows-codex-sandbox-production-fail-closed-ci-green-original-path-fixed; windows-codex-sandbox-helper-internal-ci-green-semantic-readback-security-clean; windows-codex-sandbox-per-machine-msi-ci-green; windows-settings-fixed-helper-uac-boundary-ci-green-physical-canary-pending; production-generator-off; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; core-ga-final-integration-draft-pr-ci-green-physical-e2e-pending; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-transition-verified; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-contract-ci-green-security-fixed-physical-signing-pending; windows-signpath-foundation-selected-application-pending; macos-an8-build583-notarized-release-candidate-verified-unpublished; macos-build597-notarized-rejected-packaged-realtime-local-network-gate; macos-build599-notarized-artifact-verified-packaged-realtime-local-network-gate; macos-build605-notarized-release-candidate-verified-unpublished; macos-build615-notarized-exact-runtime-head-rc-unpublished; macos-build628-voice-start-fix-notarized-unpublished-physical-voice-tools-accepted; macos-build629-voice-options-notarized-unpublished-physical-options-pending; an8-pro-gap-audit-complete-no-go; provider-bound-codex-physical-voice-ci-green; macos-panel-soak-verified; macos-settings-window-readable-and-resizable; an8-exact-runtime-head-evidence-bundle
 ---
+
+## 2026-09-06 macOS 631の本番配信完了
+
+- 音声による既存機能の確認・編集をbuild 631として署名・公証・本番公開した。remote source tagは`742158a`。
+- 配布ZIP内の新機能42 assertionsと既存主要検証、公開ZIPの署名・公証・Google/現在地設定、両OS配信readback 93 checksがPASS。Windows配信assetは不変。
+- インストール済み版は630。実マイクでの全新操作と実Google書き込みは未検証。
+- 詳細: `progress/2026-09/2026-09-06_hover-pocket-macos-release-631.md`。証拠: `progress/evidence/2026-09-06-macos-release-631/`。
 
 ## 2026-09-05 macOSの詳細音声操作
 

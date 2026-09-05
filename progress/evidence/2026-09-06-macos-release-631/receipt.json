@@ -1,0 +1,33 @@
+{
+  "build": "631",
+  "sourceCommit": "742158a1e4d6ec1cf168e11642767e3a089d7ce1",
+  "release": "https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-631",
+  "sha256": "dcaf11c285ac99381fffaef38f6e8a64786099a5aca4614e7a12c434af8cd0b7",
+  "size": 7814834,
+  "notarization": {
+    "message": "Processing complete",
+    "id": "ec163bbc-f3f5-4173-8569-5398ffdfb66f",
+    "status": "Accepted"
+  },
+  "publicZipParity": true,
+  "publicBundle": {
+    "build": "631",
+    "codesign": "PASS",
+    "stapler": "PASS",
+    "gatekeeper": "PASS",
+    "googleConfigurationAndLocationEntitlement": "PASS"
+  },
+  "releaseReadbackChecks": 93,
+  "windowsAssetsUnchanged": true,
+  "packagedTests": {
+    "personalToolsAssertions": 42,
+    "broker": "PASS",
+    "voiceFoundation": "PASS",
+    "capabilities": "PASS",
+    "timer": "PASS",
+    "panelLayout": "PASS"
+  },
+  "installedBuild": "630",
+  "physicalVoice": "not_verified",
+  "liveCalendarWrites": "not_performed"
+}
