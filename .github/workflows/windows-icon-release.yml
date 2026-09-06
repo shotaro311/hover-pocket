@@ -1,0 +1,38 @@
+name: Build Windows icon update
+on:
+  push:
+    branches: [codex/app-icon-refresh-windows]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      HOVERPOCKET_VERIFY_LOG: ${{ runner.temp }}/hoverpocket-icon-verify.log
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - name: Install matching Velopack packager
+        run: dotnet tool install --global vpk --version 1.2.0
+      - name: Build and verify the icon-only update
+        shell: pwsh
+        run: ./windows/script/build_icon_release_ci.ps1
+      - name: Upload verified packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: HoverPocket-Windows-0.2.8
+          path: dist/windows/releases/0.2.8/*
+          if-no-files-found: error
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-icon-verification
+          path: |
+            ${{ runner.temp }}/hoverpocket-icon-verify.log
+            dist/windows/icon-verification/*
+          if-no-files-found: ignore
