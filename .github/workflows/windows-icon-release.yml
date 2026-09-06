@@ -10,7 +10,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 25
     env:
-      HOVERPOCKET_VERIFY_LOG: ${{ runner.temp }}/hoverpocket-icon-verify.log
+      HOVERPOCKET_VERIFY_LOG: ${{ github.workspace }}/hoverpocket-icon-verify.log
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-dotnet@v5
@@ -33,6 +33,6 @@ jobs:
         with:
           name: Windows-icon-verification
           path: |
-            ${{ runner.temp }}/hoverpocket-icon-verify.log
+            hoverpocket-icon-verify.log
             dist/windows/icon-verification/*
           if-no-files-found: ignore
