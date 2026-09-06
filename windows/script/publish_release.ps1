@@ -127,6 +127,7 @@ $packArgs = @(
     "--packVersion", $version,
     "--packDir", $publishDir,
     "--mainExe", $mainExe,
+    "--icon", (Join-Path $PSScriptRoot "..\..\Resources\AppIcon.ico"),
     "--outputDir", $releaseDir,
     "--channel", "win",
     "--runtime", $Runtime,
