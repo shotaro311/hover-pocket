@@ -8,6 +8,7 @@ namespace HoverPocket.Shell.Services;
 internal sealed class TrayIconService : IDisposable
 {
     private readonly WinForms.NotifyIcon _notifyIcon;
+    private readonly Drawing.Icon _applicationIcon;
     private readonly UpdaterService _updaterService;
     private readonly PanelBridgeController _bridgeController;
     private readonly WinForms.ToolStripMenuItem _openPanelItem;
@@ -34,12 +35,17 @@ internal sealed class TrayIconService : IDisposable
         _quitItem.Click += (_, _) => System.Windows.Application.Current.Shutdown();
         menu.Items.Add(_quitItem);
 
+        using var iconStream = typeof(TrayIconService).Assembly.GetManifestResourceStream("HoverPocket.AppIcon.ico")
+            ?? throw new InvalidOperationException("The application icon resource is missing.");
+        using var sourceIcon = new Drawing.Icon(iconStream, new Drawing.Size(32, 32));
+        _applicationIcon = (Drawing.Icon)sourceIcon.Clone();
+
         // WPF has no first-party tray component; Microsoft documents WinForms NotifyIcon
         // as the standard managed notification-area API, so W1 uses it instead of raw Shell_NotifyIcon.
         _notifyIcon = new WinForms.NotifyIcon
         {
             ContextMenuStrip = menu,
-            Icon = Drawing.SystemIcons.Application,
+            Icon = _applicationIcon,
             Text = "HoverPocket",
             Visible = true
         };
@@ -55,6 +61,7 @@ internal sealed class TrayIconService : IDisposable
         _bridgeController.SettingsChanged -= OnSettingsChanged;
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
+        _applicationIcon.Dispose();
     }
 
     private void OnSettingsChanged(object? sender, UserSettings settings)
