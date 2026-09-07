@@ -99,6 +99,7 @@ internal sealed class CapabilityBroker
         await _executionGate.WaitAsync(cancellationToken);
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var digest = "unavailable";
             IReadOnlyList<PocketCapabilityDescriptor> descriptors;
             try
@@ -165,6 +166,7 @@ internal sealed class CapabilityBroker
 
             if (durableExecution)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _ledger.StartWorkflow(plan.Id, digest);
             }
             var receipts = new List<CapabilityReceipt>();
@@ -372,42 +374,58 @@ internal sealed class CapabilityBroker
         var stopwatch = Stopwatch.StartNew();
         CapabilityReceipt receipt;
         JsonElement? possibleOutput = null;
-        try
+        if (cancellationToken.IsCancellationRequested)
         {
-            var output = await InvokeWithTimeoutAsync(
-                descriptor.Key,
-                step.Arguments,
-                new CapabilityHandlerContext(step.IdempotencyKey, now),
-                descriptor.Limits.TimeoutMilliseconds,
-                cancellationToken);
-            possibleOutput = output.Clone();
-            descriptor.ValidateOutput(output);
-            var readback = await ReadbackAsync(descriptor, output, now, cancellationToken);
-            var status = readback.Status == CapabilityReadbackStatus.Verified
-                ? CapabilityReceiptStatus.Succeeded
-                : descriptor.Effect.IsWrite()
-                    ? CapabilityReceiptStatus.Partial
-                    : CapabilityReceiptStatus.Failed;
-            receipt = new CapabilityReceipt(
+            receipt = FailureReceipt(
+                new OperationCanceledException(cancellationToken),
                 invocationId,
-                plan.Id,
-                planDigest,
-                descriptor.Key,
-                status,
-                output.Clone(),
-                readback,
-                descriptor.RollbackAvailable,
-                descriptor.RollbackAvailable ? "not_requested" : null,
                 auditEntryId,
-                status == CapabilityReceiptStatus.Succeeded
-                    ? null
-                    : new CapabilitySafeError("CAPABILITY_READBACK_MISMATCH", false, "error.capability.readback_mismatch"),
+                descriptor,
+                plan,
+                planDigest,
+                possibleOutput,
                 now,
-                false);
+                cancelledBeforeInvocation: true);
         }
-        catch (Exception ex)
+        else
         {
-            receipt = FailureReceipt(ex, invocationId, auditEntryId, descriptor, plan, planDigest, possibleOutput, now);
+            try
+            {
+                var output = await InvokeWithTimeoutAsync(
+                    descriptor.Key,
+                    step.Arguments,
+                    new CapabilityHandlerContext(step.IdempotencyKey, now),
+                    descriptor.Limits.TimeoutMilliseconds,
+                    cancellationToken);
+                possibleOutput = output.Clone();
+                descriptor.ValidateOutput(output);
+                var readback = await ReadbackAsync(descriptor, output, now, cancellationToken);
+                var status = readback.Status == CapabilityReadbackStatus.Verified
+                    ? CapabilityReceiptStatus.Succeeded
+                    : descriptor.Effect.IsWrite()
+                        ? CapabilityReceiptStatus.Partial
+                        : CapabilityReceiptStatus.Failed;
+                receipt = new CapabilityReceipt(
+                    invocationId,
+                    plan.Id,
+                    planDigest,
+                    descriptor.Key,
+                    status,
+                    output.Clone(),
+                    readback,
+                    descriptor.RollbackAvailable,
+                    descriptor.RollbackAvailable ? "not_requested" : null,
+                    auditEntryId,
+                    status == CapabilityReceiptStatus.Succeeded
+                        ? null
+                        : new CapabilitySafeError("CAPABILITY_READBACK_MISMATCH", false, "error.capability.readback_mismatch"),
+                    now,
+                    false);
+            }
+            catch (Exception ex)
+            {
+                receipt = FailureReceipt(ex, invocationId, auditEntryId, descriptor, plan, planDigest, possibleOutput, now);
+            }
         }
         stopwatch.Stop();
         AppendAudit(receipt, descriptor, plan, argumentDigest, stopwatch.ElapsedMilliseconds, false, now);
@@ -584,17 +602,25 @@ internal sealed class CapabilityBroker
         CapabilityExecutionPlan plan,
         string planDigest,
         JsonElement? possibleOutput,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        bool cancelledBeforeInvocation = false)
     {
         var safe = SafeError(error);
         var unknown = error is OperationCanceledException
             || (error is CapabilityBrokerException broker && broker.Code == "CAPABILITY_TIMEOUT");
+        var status = cancelledBeforeInvocation
+            ? CapabilityReceiptStatus.Failed
+            : unknown
+                ? CapabilityReceiptStatus.Unknown
+                : descriptor.Effect.IsWrite()
+                    ? CapabilityReceiptStatus.Partial
+                    : CapabilityReceiptStatus.Failed;
         return new CapabilityReceipt(
             invocationId,
             plan.Id,
             planDigest,
             descriptor.Key,
-            unknown ? CapabilityReceiptStatus.Unknown : descriptor.Effect.IsWrite() ? CapabilityReceiptStatus.Partial : CapabilityReceiptStatus.Failed,
+            status,
             possibleOutput,
             new CapabilityReadbackReceipt(CapabilityReadbackStatus.Unavailable, descriptor.Readback.Strategy, null, null, null),
             descriptor.RollbackAvailable,

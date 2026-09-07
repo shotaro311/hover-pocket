@@ -22,6 +22,14 @@ enum PocketAppPackageVerificationCommand {
                 require(package.workflows["startFocus"]?.steps.count == 2, "package_workflow", failures: &failures)
                 require(package.workflows["startFocus"]?.requiredPermissions == ["sticky.write", "timer.write"], "package_permissions", failures: &failures)
                 require(package.statePropertyNames == ["selectedEventRef"], "package_state_schema", failures: &failures)
+                require(package.statePropertyTypes["selectedEventRef"] == ["string", "null"], "package_state_types", failures: &failures)
+                require(
+                    package.stateProperties["selectedEventRef"]?.isRequired == true
+                        && package.stateProperties["selectedEventRef"]?.format == nil
+                        && package.stateProperties["selectedEventRef"]?.maximumLength == nil,
+                    "package_state_constraints",
+                    failures: &failures
+                )
                 require(
                     package.testCases == [
                         "calendar-read": "pass",
@@ -50,6 +58,27 @@ enum PocketAppPackageVerificationCommand {
             }
         } catch {
             failures.append("package_resource_digest:fixture:\(error)")
+        }
+
+        do {
+            try withPackage { root in
+                try mutateJSON(root.appendingPathComponent("surfaces/main.surface.json")) { surface in
+                    guard var rootNode = surface["root"] as? [String: Any],
+                          var children = rootNode["children"] as? [[String: Any]] else { return false }
+                    children[0]["value"] = "$5"
+                    rootNode["children"] = children
+                    surface["root"] = rootNode
+                    return true
+                }
+                let package = try runtime.load(directory: root)
+                require(
+                    package.surfaces["main"]?.root.children.first?.properties["value"] == .string("$5"),
+                    "surface_dollar_literal",
+                    failures: &failures
+                )
+            }
+        } catch {
+            failures.append("surface_dollar_literal:fixture:\(error)")
         }
 
         do {
@@ -116,11 +145,114 @@ enum PocketAppPackageVerificationCommand {
                 return true
             }
         }
+        rejectPackage("unsupported_workflow_presentation", failures: &failures) { root in
+            try mutateJSON(root.appendingPathComponent("workflows/start-focus.workflow.json")) { workflow in
+                guard var steps = workflow["steps"] as? [[String: Any]] else { return false }
+                steps[0]["use"] = "calendar.events.list@1"
+                steps[0]["with"] = ["range": "today"]
+                workflow["steps"] = steps
+                return true
+            }
+        }
         rejectPackage("unbound_surface_input", failures: &failures) { root in
             try mutateJSON(root.appendingPathComponent("surfaces/main.surface.json")) { surface in
                 guard var rootNode = surface["root"] as? [String: Any],
                       var children = rootNode["children"] as? [[String: Any]] else { return false }
                 children[2]["value"] = "$input.missing"
+                rootNode["children"] = children
+                surface["root"] = rootNode
+                return true
+            }
+        }
+        rejectPackage("surface_input_type_mismatch", failures: &failures) { root in
+            try mutateJSON(root.appendingPathComponent("workflows/start-focus.workflow.json")) { workflow in
+                guard var inputs = workflow["inputs"] as? [String: Any] else { return false }
+                inputs["purpose"] = "integer"
+                workflow["inputs"] = inputs
+                return true
+            }
+        }
+        rejectPackage("state_workflow_type_mismatch", failures: &failures) { root in
+            try mutateJSON(root.appendingPathComponent("workflows/start-focus.workflow.json")) { workflow in
+                guard var inputs = workflow["inputs"] as? [String: Any] else { return false }
+                inputs["selectedEventRef"] = "integer"
+                workflow["inputs"] = inputs
+                return true
+            }
+        }
+        rejectPackage("conflicting_picker_domain", failures: &failures) { root in
+            try mutateJSON(root.appendingPathComponent("surfaces/main.surface.json")) { surface in
+                guard var rootNode = surface["root"] as? [String: Any],
+                      var children = rootNode["children"] as? [[String: Any]] else { return false }
+                children.append([
+                    "type": "picker",
+                    "label": "Primary mode",
+                    "value": "$input.purpose",
+                    "options": [["label": "A", "value": "a"]]
+                ])
+                children.append([
+                    "type": "picker",
+                    "label": "Secondary mode",
+                    "value": "$input.purpose",
+                    "options": [["label": "B", "value": "b"]]
+                ])
+                rootNode["children"] = children
+                surface["root"] = rootNode
+                return true
+            }
+        }
+        rejectPackage("workflow_input_bound_only_on_unreachable_surface", failures: &failures) { root in
+            try mutateJSON(root.appendingPathComponent("manifest.json")) { manifest in
+                guard var surfaces = manifest["surfaces"] as? [[String: Any]] else { return false }
+                surfaces.append([
+                    "id": "secondary",
+                    "kind": "declarative",
+                    "source": "surfaces/secondary.surface.json"
+                ])
+                manifest["surfaces"] = surfaces
+                return true
+            }
+            try mutateJSON(root.appendingPathComponent("surfaces/main.surface.json")) { surface in
+                guard var rootNode = surface["root"] as? [String: Any],
+                      var children = rootNode["children"] as? [[String: Any]] else { return false }
+                children[1].removeValue(forKey: "titleTarget")
+                children.remove(at: 3)
+                rootNode["children"] = children
+                surface["root"] = rootNode
+                return true
+            }
+            let secondary: [String: Any] = [
+                "$schema": "hoverpocket://schemas/pocket-surface/v1",
+                "surfaceVersion": 1,
+                "id": "secondary",
+                "hostBoundary": [
+                    "region": "provider_host",
+                    "mayRenderHeader": false,
+                    "mayRenderVoiceLane": false,
+                    "mayRenderApproval": false,
+                    "mayRenderReceipt": false
+                ],
+                "root": [
+                    "type": "stack",
+                    "axis": "vertical",
+                    "children": [[
+                        "type": "textField",
+                        "label": "Purpose",
+                        "value": "$input.purpose",
+                        "maxLength": 80
+                    ]]
+                ]
+            ]
+            try JSONSerialization.data(withJSONObject: secondary, options: [.sortedKeys])
+                .write(to: root.appendingPathComponent("surfaces/secondary.surface.json"))
+        }
+        rejectPackage("unsupported_surface_query_shape", failures: &failures) { root in
+            try mutateJSON(root.appendingPathComponent("surfaces/main.surface.json")) { surface in
+                guard var rootNode = surface["root"] as? [String: Any],
+                      var children = rootNode["children"] as? [[String: Any]],
+                      var pickerItems = children[1]["items"] as? [String: Any] else { return false }
+                pickerItems["query"] = "sticky.note.get@1"
+                children[1]["items"] = pickerItems
                 rootNode["children"] = children
                 surface["root"] = rootNode
                 return true
@@ -157,7 +289,7 @@ enum PocketAppPackageVerificationCommand {
         print("pocket_app_package_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_app_package_valid_files=9")
         print("pocket_app_package_bundled=ok")
-        print("pocket_app_package_negative_cases=13")
+        print("pocket_app_package_negative_cases=18")
         print("pocket_app_lifecycle_verify=\(failures.isEmpty ? "ok" : "failed")")
         print("pocket_app_generation_verify=\(failures.isEmpty ? "ok" : "failed")")
         if !failures.isEmpty {
@@ -330,6 +462,20 @@ enum PocketAppPackageVerificationCommand {
                     bindingDigest: duplicateProposal.bindingDigest
                 )
                 require(try installed.readbackVerified && manager.activePackage(packageID: proposal.packageID)?.manifestDigest == proposal.packageDigest, "lifecycle_install_readback", failures: &failures)
+                let appsRoot = root.appendingPathComponent("Apps", isDirectory: true)
+                try Data("Finder metadata".utf8).write(to: appsRoot.appendingPathComponent(".DS_Store"))
+                try FileManager.default.createDirectory(
+                    at: appsRoot.appendingPathComponent("not-a-package", isDirectory: true),
+                    withIntermediateDirectories: false
+                )
+                let snapshotWithUnmanagedEntries = try manager.managementSnapshot()
+                require(
+                    snapshotWithUnmanagedEntries.packages.contains {
+                        $0.packageID == proposal.packageID && $0.state == .enabled
+                    } && snapshotWithUnmanagedEntries.issues.isEmpty,
+                    "lifecycle_unmanaged_entries_do_not_block_snapshot",
+                    failures: &failures
+                )
                 try Data(contentsOf: fixtureURL("package/intent.md")).write(to: draftRoot.appendingPathComponent("intent.md"), options: .atomic)
 
                 let installedIntent = root

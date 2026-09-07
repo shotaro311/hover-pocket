@@ -16,6 +16,7 @@ internal sealed class UiModelVerifier
         var store = UserSettingsStore.CreateTemporary("UiModelVerify");
 
         VerifySettingsRoundTrip(registry, store);
+        VerifyGeneratedProviderBootstrap(registry);
         VerifyCorruptSettingsFallback(registry, store);
         VerifyBridgeDispatch(registry, store).GetAwaiter().GetResult();
 
@@ -93,6 +94,43 @@ internal sealed class UiModelVerifier
             || !settings.AutoCheckForUpdates)
         {
             _failures.Add("settings corrupt fallback: defaults were not restored");
+        }
+    }
+
+    private void VerifyGeneratedProviderBootstrap(ProviderRegistry registry)
+    {
+        const string generated = "generated-pocket-app:local.generated.bootstrap";
+        const string invalidGenerated = "generated-pocket-app:Invalid.App";
+        var store = UserSettingsStore.CreateTemporary("UiModelGeneratedBootstrapVerify");
+        var settings = UserSettingsStore.CreateDefault(registry.ProviderIds);
+        settings.ProviderOrder.Insert(1, generated);
+        settings.ProviderOrder.Add(invalidGenerated);
+        settings.ProviderVisibility[generated] = false;
+        settings.ProviderVisibility[invalidGenerated] = false;
+        settings.PreferredProviderId = generated;
+        settings.LastSelectedProviderId = generated;
+        store.Save(settings);
+
+        var bootstrap = store.LoadForBootstrap(registry.ProviderIds);
+        if (!bootstrap.ProviderOrder.Contains(generated, StringComparer.OrdinalIgnoreCase)
+            || bootstrap.ProviderOrder.Contains(invalidGenerated, StringComparer.OrdinalIgnoreCase)
+            || !bootstrap.ProviderVisibility.TryGetValue(generated, out var generatedVisible)
+            || generatedVisible
+            || bootstrap.PreferredProviderId != generated
+            || bootstrap.LastSelectedProviderId != generated)
+        {
+            _failures.Add("settings bootstrap pruned or broadened generated provider identity before runtime restoration");
+        }
+
+        var restoredIds = registry.ProviderIds.Concat([generated]).ToArray();
+        var restored = UserSettingsStore.Normalize(bootstrap.Clone(), restoredIds);
+        var unavailable = UserSettingsStore.Normalize(bootstrap.Clone(), registry.ProviderIds);
+        if (!restored.ProviderOrder.Contains(generated, StringComparer.OrdinalIgnoreCase)
+            || unavailable.ProviderOrder.Contains(generated, StringComparer.OrdinalIgnoreCase)
+            || unavailable.PreferredProviderId == generated
+            || unavailable.LastSelectedProviderId == generated)
+        {
+            _failures.Add("settings bootstrap did not defer generated provider pruning to runtime readback");
         }
     }
 

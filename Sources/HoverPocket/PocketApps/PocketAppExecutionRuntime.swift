@@ -1,5 +1,16 @@
 import Foundation
 
+enum PocketAppWorkflowPresentationPolicy {
+    private static let supportedCapabilities: Set<PocketCapabilityKey> = [
+        PocketCapabilityKeys.timerStart,
+        PocketCapabilityKeys.stickyUpsert
+    ]
+
+    static func supports(_ capability: PocketCapabilityKey) -> Bool {
+        supportedCapabilities.contains(capability)
+    }
+}
+
 struct PocketAppWorkflowDraft: Equatable, Sendable {
     let packageID: String
     let workflowID: String
@@ -9,11 +20,6 @@ struct PocketAppWorkflowDraft: Equatable, Sendable {
 
 @MainActor
 final class PocketAppExecutionRuntime {
-    private static let presentableWorkflowCapabilities: Set<PocketCapabilityKey> = [
-        PocketCapabilityKeys.timerStart,
-        PocketCapabilityKeys.stickyUpsert
-    ]
-
     let package: PocketAppPackage
     let userStateStore: PocketAppUserStateStore?
 
@@ -21,6 +27,7 @@ final class PocketAppExecutionRuntime {
     private let principal: CapabilityPrincipal
     private let grantedPermissions: Set<String>
     private let timeZone: TimeZone
+    private let activationLease: PocketAppActivationLease?
 
     init(
         package: PocketAppPackage,
@@ -28,7 +35,8 @@ final class PocketAppExecutionRuntime {
         userID: String,
         grantedPermissions: Set<String>,
         timeZone: TimeZone = .current,
-        userStateStore: PocketAppUserStateStore? = nil
+        userStateStore: PocketAppUserStateStore? = nil,
+        activationLease: PocketAppActivationLease? = nil
     ) {
         self.package = package
         self.broker = broker
@@ -36,6 +44,11 @@ final class PocketAppExecutionRuntime {
         self.grantedPermissions = grantedPermissions
         self.timeZone = timeZone
         self.userStateStore = userStateStore
+        self.activationLease = activationLease
+    }
+
+    var isActivationActive: Bool {
+        activationLease?.isActive ?? true
     }
 
     func query(
@@ -43,6 +56,7 @@ final class PocketAppExecutionRuntime {
         arguments: [String: PocketJSONValue],
         now: Date = Date()
     ) async throws -> CapabilityObject {
+        try activationLease?.requireActive()
         let key = try capabilityKey(reference)
         let request = try requestedCapability(key)
         guard request.effect == .pure || request.effect == .privateRead else {
@@ -73,12 +87,15 @@ final class PocketAppExecutionRuntime {
         guard preparation.approvalRequest == nil else {
             throw CapabilityBrokerError.invalidPlan("query_approval")
         }
-        let receipt = try await broker.execute(
-            plan,
-            permissions: permissions,
-            approvalGrant: nil,
-            now: now
-        )
+        let receipt = try await executeTracked {
+            try await self.broker.execute(
+                plan,
+                permissions: permissions,
+                approvalGrant: nil,
+                now: now
+            )
+        }
+        try activationLease?.requireActive()
         guard receipt.status == .succeeded,
               let output = receipt.steps.first?.output else {
             throw CapabilityBrokerError.unavailable(key)
@@ -91,6 +108,7 @@ final class PocketAppExecutionRuntime {
         inputs: [String: CapabilityValue],
         now: Date = Date()
     ) throws -> PocketAppWorkflowDraft {
+        try activationLease?.requireActive()
         guard let workflow = package.workflows[workflowID] else {
             throw CapabilityBrokerError.invalidPlan("pocket_workflow")
         }
@@ -136,6 +154,7 @@ final class PocketAppExecutionRuntime {
         _ draft: PocketAppWorkflowDraft,
         now: Date = Date()
     ) async throws -> CapabilityWorkflowReceipt {
+        try activationLease?.requireActive()
         try validateDraft(draft)
         guard let request = draft.preparation.approvalRequest else {
             throw CapabilityBrokerError.approvalRequired
@@ -146,15 +165,20 @@ final class PocketAppExecutionRuntime {
             decision: .approve,
             now: now
         )
-        return try await broker.execute(
-            draft.plan,
-            permissions: permissionSet,
-            approvalGrant: grant,
-            now: now
-        )
+        let receipt = try await executeTracked {
+            try await self.broker.execute(
+                draft.plan,
+                permissions: self.permissionSet,
+                approvalGrant: grant,
+                now: now
+            )
+        }
+        try activationLease?.requireActive()
+        return receipt
     }
 
     func reject(_ draft: PocketAppWorkflowDraft, now: Date = Date()) {
+        guard isActivationActive else { return }
         do {
             try validateDraft(draft)
             guard let request = draft.preparation.approvalRequest else { return }
@@ -175,6 +199,23 @@ final class PocketAppExecutionRuntime {
             version: package.manifest.version,
             manifestDigest: package.manifestDigest
         )
+    }
+
+    private func executeTracked<T: Sendable>(
+        _ operation: @escaping @MainActor @Sendable () async throws -> T
+    ) async throws -> T {
+        try activationLease?.requireActive()
+        let task = Task { @MainActor in
+            try Task.checkCancellation()
+            return try await operation()
+        }
+        let registration = activationLease?.registerCancellation { task.cancel() }
+        defer { activationLease?.unregisterCancellation(registration) }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     private var permissionSet: CapabilityPermissionSet {
@@ -326,6 +367,6 @@ final class PocketAppExecutionRuntime {
     }
 
     static func supportsWorkflowPresentation(_ capability: PocketCapabilityKey) -> Bool {
-        presentableWorkflowCapabilities.contains(capability)
+        PocketAppWorkflowPresentationPolicy.supports(capability)
     }
 }

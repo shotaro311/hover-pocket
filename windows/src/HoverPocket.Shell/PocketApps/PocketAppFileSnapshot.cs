@@ -280,7 +280,7 @@ internal sealed record PocketAppFileSnapshot(
         CreationDisposition disposition,
         FileFlags flags)
     {
-        var handle = CreateFileW(path, access, share, IntPtr.Zero, disposition, flags, IntPtr.Zero);
+        var handle = CreateFileW(NativePath(path), access, share, IntPtr.Zero, disposition, flags, IntPtr.Zero);
         if (handle.IsInvalid)
         {
             handle.Dispose();
@@ -297,6 +297,20 @@ internal sealed record PocketAppFileSnapshot(
             throw new PocketAppPackageRuntimeException("$:package_symlink");
         }
         return handle;
+    }
+
+    private static string NativePath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        if (fullPath.StartsWith(@"\\?\", StringComparison.Ordinal))
+        {
+            return fullPath;
+        }
+        if (fullPath.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            return @"\\?\UNC\" + fullPath[2..];
+        }
+        return @"\\?\" + fullPath;
     }
 
     private static PocketAppFileIdentity Identity(SafeFileHandle handle)

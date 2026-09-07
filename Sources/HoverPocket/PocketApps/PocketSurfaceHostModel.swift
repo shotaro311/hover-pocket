@@ -10,16 +10,18 @@ struct PocketSurfaceChoice: Equatable, Identifiable, Sendable {
 final class PocketSurfaceHostModel: ObservableObject {
     let packageName: String
     let surface: PocketSurfaceDocument
+    let runtimeIdentity: String
 
     @Published private(set) var inputs: [String: CapabilityValue] = [:]
     @Published private(set) var state: [String: CapabilityValue] = [:]
-    @Published private(set) var choicesByQuery: [String: [PocketSurfaceChoice]] = [:]
+    @Published private(set) var choicesByQueryBinding: [String: [PocketSurfaceChoice]] = [:]
     @Published private(set) var isLoading = false
     @Published private(set) var isExecuting = false
     @Published private(set) var statusText: String?
     @Published private(set) var receiptText: String?
     @Published var showsApproval = false
     @Published private(set) var approvalText = ""
+    @Published private(set) var activationAvailable = true
 
     private let runtime: PocketAppExecutionRuntime
     private var pendingDraft: PocketAppWorkflowDraft?
@@ -32,14 +34,21 @@ final class PocketSurfaceHostModel: ObservableObject {
         self.runtime = runtime
         self.surface = surface
         self.packageName = runtime.package.manifest.name
+        self.runtimeIdentity = [
+            runtime.package.manifest.id,
+            runtime.package.manifest.version,
+            runtime.package.manifestDigest,
+            surfaceID
+        ].joined(separator: ":")
+        self.activationAvailable = runtime.isActivationActive
         if let userStateStore = runtime.userStateStore {
-            self.state = userStateStore.snapshot().mapValues(CapabilityValue.string)
+            self.state = userStateStore.snapshot()
         }
         applyDefaults(in: surface.root)
     }
 
     func load(now: Date = Date()) async {
-        guard !didLoad else { return }
+        guard activationAvailable, runtime.isActivationActive, !didLoad else { return }
         didLoad = true
         isLoading = true
         statusText = nil
@@ -53,7 +62,7 @@ final class PocketSurfaceHostModel: ObservableObject {
                     now: now
                 )
                 let choices = Self.makeChoices(output)
-                choicesByQuery[query.reference] = choices
+                choicesByQueryBinding[query.identity] = choices
                 let persistedID = stringValue(for: query.selection)
                 if let selected = choices.first(where: { $0.id == persistedID }) ?? choices.first {
                     set(.string(selected.id), for: query.selection)
@@ -99,27 +108,38 @@ final class PocketSurfaceHostModel: ObservableObject {
         set(.bool(value), for: binding)
     }
 
-    func selectChoice(_ id: String, query: String, selection: String, titleTarget: String?) {
-        guard let choice = choicesByQuery[query]?.first(where: { $0.id == id }) else { return }
+    func choices(query: String, arguments: [String: PocketJSONValue]) -> [PocketSurfaceChoice] {
+        choicesByQueryBinding[Self.queryIdentity(reference: query, arguments: arguments)] ?? []
+    }
+
+    func selectChoice(
+        _ id: String,
+        query: String,
+        arguments: [String: PocketJSONValue],
+        selection: String,
+        titleTarget: String?
+    ) {
+        let identity = Self.queryIdentity(reference: query, arguments: arguments)
+        guard let choice = choicesByQueryBinding[identity]?.first(where: { $0.id == id }) else { return }
         set(.string(id), for: selection)
         guard let titleTarget else { return }
         set(.string(Self.sanitizeVisibleText(choice.title)), for: titleTarget)
     }
 
     func canPrepare(workflowID: String) -> Bool {
-        guard let workflow = runtime.package.workflows[workflowID] else { return false }
+        guard activationAvailable,
+              runtime.isActivationActive,
+              let workflow = runtime.package.workflows[workflowID] else { return false }
         return workflow.inputs.allSatisfy { name, type in
             guard let value = inputs[name] ?? state[name] else { return false }
-            if type == "string" || type == "entity-ref" {
-                guard case .string(let text) = value else { return false }
-                return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            }
-            return true
+            let binding = inputs[name] == nil ? "$state.\(name)" : "$input.\(name)"
+            return Self.acceptsWorkflowInput(value, type: type)
+                && surfaceAccepts(value, for: binding, in: surface.root)
         }
     }
 
     func prepare(workflowID: String) {
-        guard !isExecuting else { return }
+        guard activationAvailable, runtime.isActivationActive, !isExecuting else { return }
         do {
             guard let workflow = runtime.package.workflows[workflowID] else {
                 throw CapabilityBrokerError.invalidPlan("pocket_workflow")
@@ -143,7 +163,7 @@ final class PocketSurfaceHostModel: ObservableObject {
     }
 
     func approve() {
-        guard let draft = pendingDraft else { return }
+        guard activationAvailable, runtime.isActivationActive, let draft = pendingDraft else { return }
         showsApproval = false
         pendingDraft = nil
         isExecuting = true
@@ -164,11 +184,24 @@ final class PocketSurfaceHostModel: ObservableObject {
     }
 
     func reject() {
-        guard let draft = pendingDraft else { return }
+        guard activationAvailable, runtime.isActivationActive, let draft = pendingDraft else { return }
         showsApproval = false
         pendingDraft = nil
         runtime.reject(draft)
         statusText = "変更をキャンセルしました。"
+    }
+
+    func invalidateActivation() {
+        activationAvailable = false
+        pendingDraft = nil
+        showsApproval = false
+        isExecuting = false
+        isLoading = false
+        inputs.removeAll()
+        state.removeAll()
+        choicesByQueryBinding.removeAll()
+        receiptText = nil
+        statusText = "このPocket Appは現在利用できません。"
     }
 
     private func value(for binding: String) -> CapabilityValue? {
@@ -182,26 +215,16 @@ final class PocketSurfaceHostModel: ObservableObject {
     }
 
     private func set(_ value: CapabilityValue, for binding: String) {
+        guard activationAvailable, runtime.isActivationActive else { return }
         if binding.hasPrefix("$input.") {
             inputs[String(binding.dropFirst("$input.".count))] = value
         } else if binding.hasPrefix("$state.") {
             let name = String(binding.dropFirst("$state.".count))
-            state[name] = value
-            if case .string(let persisted) = value {
-                do {
-                    try runtime.userStateStore?.setString(persisted, for: name)
-                } catch {
-                    statusText = "保存状態を更新できませんでした。"
-                }
-            } else if value == .null {
-                do {
-                    try runtime.userStateStore?.setString(nil, for: name)
-                } catch {
-                    statusText = "保存状態を更新できませんでした。"
-                }
-            }
-            if runtime.package.workflows.values.contains(where: { $0.inputs[name] != nil }) {
-                inputs[name] = value
+            do {
+                try runtime.userStateStore?.setValue(value, for: name)
+                state[name] = value
+            } catch {
+                statusText = "保存状態を更新できませんでした。"
             }
         }
     }
@@ -210,15 +233,22 @@ final class PocketSurfaceHostModel: ObservableObject {
         switch node.type {
         case "durationPicker":
             if let binding = node.stringProperty("value"),
+               isMissingValue(for: binding),
                let value = node.integerProperty("default") {
                 set(.integer(value), for: binding)
             }
-        case "textField", "picker":
-            if let binding = node.stringProperty("value"), value(for: binding) == nil {
+        case "textField":
+            if let binding = node.stringProperty("value"), isMissingValue(for: binding) {
                 set(.string(""), for: binding)
             }
+        case "picker":
+            if let binding = node.stringProperty("value"),
+               let firstOption = pickerOptions(in: node).first,
+               !pickerOptions(in: node).contains(stringValue(for: binding)) {
+                set(.string(firstOption), for: binding)
+            }
         case "toggle":
-            if let binding = node.stringProperty("value"), value(for: binding) == nil {
+            if let binding = node.stringProperty("value"), isMissingValue(for: binding) {
                 set(.bool(false), for: binding)
             }
         default:
@@ -227,11 +257,70 @@ final class PocketSurfaceHostModel: ObservableObject {
         node.children.forEach(applyDefaults)
     }
 
+    private func isMissingValue(for binding: String) -> Bool {
+        guard let value = value(for: binding) else { return true }
+        if case .null = value { return true }
+        return false
+    }
+
+    static func acceptsWorkflowInput(_ value: CapabilityValue, type: String) -> Bool {
+        switch (type, value) {
+        case ("string", .string(let text)), ("entity-ref", .string(let text)):
+            return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case ("integer", .integer), ("number", .integer), ("number", .number), ("boolean", .bool):
+            return true
+        case ("date-time", .string(let text)):
+            return CapabilityDateCodec.date(from: text) != nil
+        default:
+            return false
+        }
+    }
+
+    private func surfaceAccepts(
+        _ value: CapabilityValue,
+        for binding: String,
+        in node: PocketSurfaceRenderNode
+    ) -> Bool {
+        if node.type == "picker", node.stringProperty("value") == binding {
+            return Self.acceptsPickerValue(value, options: pickerOptions(in: node))
+        }
+        return node.children.allSatisfy { surfaceAccepts(value, for: binding, in: $0) }
+    }
+
+    private func pickerOptions(in node: PocketSurfaceRenderNode) -> [String] {
+        guard case .array(let values)? = node.properties["options"] else { return [] }
+        return values.compactMap { value in
+            guard case .object(let option) = value,
+                  case .string(let optionValue)? = option["value"] else { return nil }
+            return optionValue
+        }
+    }
+
+    static func acceptsPickerValue(_ value: CapabilityValue, options: [String]) -> Bool {
+        guard case .string(let selected) = value else { return false }
+        return options.contains(selected)
+    }
+
     private struct QueryBinding {
         let reference: String
         let arguments: [String: PocketJSONValue]
         let selection: String
         let titleTarget: String?
+
+        var identity: String {
+            PocketSurfaceHostModel.queryIdentity(reference: reference, arguments: arguments)
+        }
+    }
+
+    nonisolated static func queryIdentity(
+        reference: String,
+        arguments: [String: PocketJSONValue]
+    ) -> String {
+        let canonicalArguments = (try? JSONSerialization.data(
+            withJSONObject: arguments.mapValues(\.foundationValue),
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )) ?? Data("{}".utf8)
+        return reference + "\n" + canonicalArguments.base64EncodedString()
     }
 
     private func queryBindings(in node: PocketSurfaceRenderNode) -> [QueryBinding] {
