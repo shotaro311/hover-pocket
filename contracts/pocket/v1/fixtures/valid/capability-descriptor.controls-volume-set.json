@@ -1,0 +1,25 @@
+{
+  "$schema": "hoverpocket://schemas/capability-descriptor/v1",
+  "id": "controls.volume.set",
+  "version": 1,
+  "titleKey": "capability.controls.volume.set",
+  "effect": "reversible_local_write",
+  "permissions": ["controls.write"],
+  "approvalPolicy": "broker_policy",
+  "idempotency": "required",
+  "availability": {"macos": "available", "windows": "available"},
+  "limits": {"timeoutMs": 3000, "maxPayloadBytes": 4096, "maxCallsPerMinute": 120},
+  "inputSchema": {
+    "type": "object",
+    "required": ["level"],
+    "properties": {"level": {"type": "number", "minimum": 0, "maximum": 1}},
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": ["level", "muted"],
+    "properties": {"level": {"type": "number", "minimum": 0, "maximum": 1}, "muted": {"type": "boolean"}},
+    "additionalProperties": false
+  },
+  "readback": {"strategy": "os_state", "match": ["level", "muted"]}
+}

@@ -9,6 +9,8 @@ using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Display;
 using HoverPocket.Shell.Interop;
+using HoverPocket.Shell.PocketApps;
+using HoverPocket.Shell.Voice;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
@@ -23,6 +25,8 @@ internal sealed class PanelWindow : NoActivateWindow
     private const string UiHostName = "app.hoverpocket.local";
     private const string UiBaseUrl = "https://app.hoverpocket.local/index.html";
     private const double CornerRadiusDips = 18;
+    private static readonly long MicrophoneGestureLifetimeTicks =
+        (long)(Stopwatch.Frequency * 5.0);
 
     private readonly PanelBridgeController _bridgeController;
     private readonly bool _enableWebView;
@@ -45,6 +49,7 @@ internal sealed class PanelWindow : NoActivateWindow
     private WebView2? _webView;
     private Task? _initializationTask;
     private IDisposable? _bridgeAttachment;
+    private long _microphoneGestureExpiresAt;
     private bool _closed;
 
     public AnimationDiagnostics LastAnimationDiagnostics { get; private set; } = AnimationDiagnostics.Empty;
@@ -58,11 +63,13 @@ internal sealed class PanelWindow : NoActivateWindow
 
         var metrics = PanelSizeCatalog.Get(_bridgeController.CurrentSettings.PanelSize);
         Width = metrics.Width;
-        Height = metrics.TotalHeight;
+        Height = metrics.TotalHeight
+            + VoicePanelGeometry.Height(_bridgeController.CurrentSettings.PanelSize, _bridgeController.ResolvedVoiceLaneMode);
         MinWidth = PanelSizeCatalog.Get(PanelSize.Small).Width;
         MinHeight = PanelSizeCatalog.Get(PanelSize.Small).TotalHeight;
         MaxWidth = PanelSizeCatalog.Get(PanelSize.Large).Width;
-        MaxHeight = PanelSizeCatalog.Get(PanelSize.Large).TotalHeight;
+        MaxHeight = PanelSizeCatalog.Get(PanelSize.Large).TotalHeight
+            + VoicePanelGeometry.ExpandedHeight(PanelSize.Large);
         Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(4, 4, 6));
 
         _fallbackVisual = new Border
@@ -158,6 +165,123 @@ internal sealed class PanelWindow : NoActivateWindow
         return false;
     }
 
+    public async Task<PocketAppStateTransitionLease> BeginPocketAppStateTransitionAsync(
+        string appId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            return await Dispatcher.InvokeAsync(
+                () => BeginPocketAppStateTransitionAsync(appId, cancellationToken)).Task.Unwrap();
+        }
+        if (_closed || _initializationTask is null)
+        {
+            return PocketAppStateTransitionLease.Noop(appId);
+        }
+
+        await _initializationTask;
+        if (_webView?.CoreWebView2 is null)
+        {
+            return PocketAppStateTransitionLease.Noop(appId);
+        }
+
+        var operationId = Guid.NewGuid().ToString("N");
+        var operationJson = JsonSerializer.Serialize(operationId, BridgeJson.Options);
+        var appIdJson = JsonSerializer.Serialize(appId, BridgeJson.Options);
+        var startScript = $$"""
+            (() => {
+                const operationId = {{operationJson}};
+                window.__hoverPocketStateFlushResults ??= Object.create(null);
+                window.__hoverPocketStateFlushResults[operationId] = null;
+                Promise.resolve(
+                    typeof window.__hoverPocketFlushActiveProviderState === "function"
+                        ? window.__hoverPocketFlushActiveProviderState({{appIdJson}}, {{operationJson}})
+                        : false)
+                    .then((saved) => { window.__hoverPocketStateFlushResults[operationId] = saved !== false; })
+                    .catch(() => { window.__hoverPocketStateFlushResults[operationId] = false; });
+                return true;
+            })()
+            """;
+        try
+        {
+            _ = await _webView.ExecuteScriptAsync(startScript);
+            var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var result = await _webView.ExecuteScriptAsync(
+                    $"window.__hoverPocketStateFlushResults?.[{operationJson}] ?? null");
+                if (result.Equals("true", StringComparison.OrdinalIgnoreCase))
+                {
+                    return new PocketAppStateTransitionLease(appId, operationId, true);
+                }
+                if (result.Equals("false", StringComparison.OrdinalIgnoreCase))
+                {
+                    return new PocketAppStateTransitionLease(appId, operationId, false);
+                }
+                await Task.Delay(50, cancellationToken);
+            }
+            return new PocketAppStateTransitionLease(appId, operationId, false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await CompletePocketAppStateTransitionCoreAsync(operationId);
+            throw;
+        }
+        catch
+        {
+            await CompletePocketAppStateTransitionCoreAsync(operationId);
+            return PocketAppStateTransitionLease.Failed(appId);
+        }
+        finally
+        {
+            try
+            {
+                _ = await _webView.ExecuteScriptAsync(
+                    $"delete window.__hoverPocketStateFlushResults?.[{operationJson}]");
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    public async Task CompletePocketAppStateTransitionAsync(PocketAppStateTransitionLease lease)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            await Dispatcher.InvokeAsync(
+                () => CompletePocketAppStateTransitionAsync(lease)).Task.Unwrap();
+            return;
+        }
+        if (_closed || _initializationTask is null || lease.OperationId is null)
+        {
+            return;
+        }
+
+        await _initializationTask;
+        if (_webView?.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        await CompletePocketAppStateTransitionCoreAsync(lease.OperationId);
+    }
+
+    private async Task CompletePocketAppStateTransitionCoreAsync(string operationId)
+    {
+        if (_webView?.CoreWebView2 is null) { return; }
+        var operationJson = JsonSerializer.Serialize(operationId, BridgeJson.Options);
+        try
+        {
+            _ = await _webView.ExecuteScriptAsync(
+                $"window.__hoverPocketCompleteActiveProviderStateTransition?.({operationJson})");
+        }
+        catch
+        {
+        }
+    }
+
     public async Task<UiWebVerifyResult?> RunWebVerifyScriptAsync()
     {
         await EnsureWebViewInitializedAsync();
@@ -206,11 +330,15 @@ internal sealed class PanelWindow : NoActivateWindow
     {
         var metrics = PanelSizeCatalog.Get(panelSize);
         Width = metrics.Width;
-        Height = metrics.TotalHeight;
+        Height = metrics.TotalHeight
+            + VoicePanelGeometry.Height(panelSize, _bridgeController.ResolvedVoiceLaneMode);
         ApplyRoundedRegion();
     }
 
-    public async Task OpenAsync(DisplaySurfaceLayout layout)
+    public Task OpenAsync(DisplaySurfaceLayout layout) =>
+        OpenAsync(layout, layout.PanelTarget);
+
+    public async Task OpenAsync(DisplaySurfaceLayout layout, WindowPlacement target)
     {
         var generation = ++_animationGeneration;
         WindowPlacement from;
@@ -235,14 +363,14 @@ internal sealed class PanelWindow : NoActivateWindow
 
         await AnimateToAsync(
             from,
-            layout.PanelTarget,
+            target,
             1,
             generation,
             AnimationDuration,
             MorphDirection.Open);
         if (generation == _animationGeneration)
         {
-            ApplyPlacement(layout.PanelTarget, show: true);
+            ApplyPlacement(target, show: true);
             Opacity = 1;
             ResetMorphState();
             ScheduleSnapshotRefresh();
@@ -604,6 +732,7 @@ internal sealed class PanelWindow : NoActivateWindow
         WebViewSecurityPolicy.ApplyBrowserDebugSettings(webView.CoreWebView2.Settings, _enableDevTools);
         webView.CoreWebView2.NavigationStarting += (_, args) =>
         {
+            Interlocked.Exchange(ref _microphoneGestureExpiresAt, 0);
             if (WebViewSecurityPolicy.IsAllowedVirtualHostNavigation(args.Uri, UiHostName))
             {
                 return;
@@ -617,6 +746,26 @@ internal sealed class PanelWindow : NoActivateWindow
             args.Handled = true;
             WebViewSecurityPolicy.TryOpenExternalBrowser(args.Uri, UiHostName);
         };
+        webView.CoreWebView2.PermissionRequested += (_, args) =>
+        {
+            var gestureActive = PeekVoiceMicrophoneGesture();
+            var allow = IsVoiceMicrophonePermissionAllowedForVerify(
+                args.Uri,
+                args.PermissionKind,
+                _bridgeController.CurrentSettings.VoiceEnabled,
+                IsVisible && !_closed,
+                gestureActive,
+                args.IsUserInitiated);
+            if (allow)
+            {
+                allow = ConsumeVoiceMicrophoneGesture();
+            }
+            args.State = allow
+                ? CoreWebView2PermissionState.Allow
+                : CoreWebView2PermissionState.Deny;
+            args.SavesInProfile = false;
+            args.Handled = true;
+        };
         webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
             UiHostName,
             uiFolder,
@@ -628,7 +777,10 @@ internal sealed class PanelWindow : NoActivateWindow
             ScheduleSnapshotRefresh();
             return Task.CompletedTask;
         });
-        _bridgeAttachment = _bridgeController.Attach(dispatcher);
+        _bridgeAttachment = _bridgeController.Attach(
+            dispatcher,
+            approvalOwner: () => this,
+            voiceMicrophoneGesture: RegisterVoiceMicrophoneGesture);
         dispatcher.Register("panel.beginTextInput", (_, _) =>
             Task.FromResult<object?>(BeginKeyboardInteraction()));
         dispatcher.Register("panel.endTextInput", (_, _) =>
@@ -668,11 +820,61 @@ internal sealed class PanelWindow : NoActivateWindow
     protected override void OnClosed(EventArgs e)
     {
         _closed = true;
+        Interlocked.Exchange(ref _microphoneGestureExpiresAt, 0);
         EndKeyboardInteraction();
         ReleaseBridgeAttachment();
         _webView?.Dispose();
         _webView = null;
         base.OnClosed(e);
+    }
+
+    private bool RegisterVoiceMicrophoneGesture()
+    {
+        if (_closed
+            || !IsVisible
+            || !_bridgeController.CurrentSettings.VoiceEnabled)
+        {
+            return false;
+        }
+        Interlocked.Exchange(
+            ref _microphoneGestureExpiresAt,
+            Stopwatch.GetTimestamp() + MicrophoneGestureLifetimeTicks);
+        return true;
+    }
+
+    private bool PeekVoiceMicrophoneGesture()
+    {
+        var expiresAt = Volatile.Read(ref _microphoneGestureExpiresAt);
+        return expiresAt > 0 && Stopwatch.GetTimestamp() <= expiresAt;
+    }
+
+    private bool ConsumeVoiceMicrophoneGesture()
+    {
+        var expiresAt = Interlocked.Exchange(ref _microphoneGestureExpiresAt, 0);
+        return expiresAt > 0 && Stopwatch.GetTimestamp() <= expiresAt;
+    }
+
+    internal static bool IsVoiceMicrophonePermissionAllowedForVerify(
+        string? uri,
+        CoreWebView2PermissionKind permissionKind,
+        bool featureEnabled,
+        bool panelVisible,
+        bool recentExplicitGesture,
+        bool browserUserInitiated)
+    {
+        if (!featureEnabled
+            || !panelVisible
+            || !recentExplicitGesture
+            || !browserUserInitiated
+            || permissionKind != CoreWebView2PermissionKind.Microphone
+            || !Uri.TryCreate(uri, UriKind.Absolute, out var parsed))
+        {
+            return false;
+        }
+        return parsed.Scheme == Uri.UriSchemeHttps
+            && parsed.IsDefaultPort
+            && string.IsNullOrEmpty(parsed.UserInfo)
+            && string.Equals(parsed.Host, UiHostName, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ResolveUiFolder()
@@ -755,6 +957,12 @@ internal sealed record AnimationDiagnostics(
 
 internal sealed record UiWebVerifyResult(
     bool EchoOk,
+    bool LegacyAiLaneNotMountedOk,
+    bool VoiceDefaultOffOk,
+    bool VoiceTeardownVisibleOk,
+    bool VoiceLocalizationOk,
+    bool VoiceTransportContractOk,
+    bool VoiceWebRtcHarnessOk,
     bool ControlsRenderedOk,
     bool ControlsLayoutOk,
     bool ControlsHitAreasOk,
@@ -785,10 +993,21 @@ internal sealed record UiWebVerifyResult(
     bool PocketSurfaceDurationOk,
     bool PocketSurfacePurposeOk,
     bool PocketSurfaceStatePersistedOk,
+    bool PocketSurfaceStateBoundControlsPersistedOk,
+    bool PocketSurfaceFailedStateWriteRetriedOk,
+    bool PocketSurfaceWorkflowBlockedOnStateWriteFailureOk,
+    bool PocketSurfaceStateWorkflowInputOk,
     bool PocketSurfaceApprovalHostOwnedOk,
     bool PocketSurfaceLayoutMatrixOk,
+    bool PocketSurfaceStateTransitionBoundaryOk,
     bool TextSizeScaleReadyOk,
     bool ProviderSwitchOk,
+    bool ProviderSwitchCleanupAwaitedOk,
+    bool ProviderSwitchBlockedOnSaveFailureOk,
+    bool ProviderRerenderCleanupAwaitedOk,
+    bool ProviderRerenderBlockedOnSaveFailureOk,
+    bool ProviderHostStateFlushOk,
+    bool ProviderSurfaceIdentityRemountOk,
     bool SettingsWriteOk,
     string OriginalProvider,
     string SwitchedProvider,

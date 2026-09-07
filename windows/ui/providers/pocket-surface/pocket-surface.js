@@ -17,11 +17,25 @@ export function renderPocketSurfaceProvider(context) {
   const inputs = new Map();
   const state = new Map();
   const queryResults = new Map();
+  const pendingTextState = new Map();
+  const textStateTimers = new Map();
+  const statePersistenceTails = new Map();
   let disposed = false;
+  let stateFlushTask = null;
+  let loadTask = Promise.resolve();
+  let transitionHoldCount = 0;
   initializeState(surface.initialState, state);
-  initializeDefaults(surface.renderModel.root, inputs, state);
+  const defaultStateUpdates = initializeDefaults(surface.renderModel.root, inputs, state);
   draw();
-  void load();
+  for (const update of defaultStateUpdates) void persistBoundState(update.binding, update.value);
+  void refresh();
+
+  function refresh() {
+    if (transitionHoldCount > 0 || disposed) return loadTask;
+    const next = loadTask.then(load);
+    loadTask = next.catch(() => {});
+    return next;
+  }
 
   async function load() {
     setHostStatus("今日の予定を読み込んでいます…", "neutral");
@@ -31,13 +45,14 @@ export function renderPocketSurfaceProvider(context) {
         surfaceId: surface.surfaceId,
       });
       if (disposed) return;
+      queryResults.clear();
       for (const result of payload.queryResults ?? []) {
-        queryResults.set(result.query, result.output);
+        queryResults.set(queryBindingKey(result.query, result.arguments), result.output);
       }
       const stateUpdates = initializeQuerySelections(surface.renderModel.root, inputs, state, queryResults);
       draw();
       for (const update of stateUpdates) {
-        await persistState(update.binding, update.value);
+        await persistBoundState(update.binding, update.value);
       }
     } catch {
       setHostStatus("今日の予定を読み込めませんでした。", "error");
@@ -86,15 +101,22 @@ export function renderPocketSurfaceProvider(context) {
         button.type = "button";
         button.dataset.workflow = node.workflow ?? "";
         button.textContent = sanitizeVisibleText(node.label ?? "Run");
-        button.disabled = !canInvoke(node.workflow, inputs, state);
+        button.disabled = !canInvoke(node.workflow, surface.workflowInputs, inputs, state);
         button.addEventListener("click", async () => {
           button.disabled = true;
           setHostStatus("確認を待っています…", "neutral");
+          let transitionStarted = false;
           try {
+            transitionStarted = true;
+            const saved = await beginStateTransition();
+            if (!saved) {
+              setHostStatus("入力内容を保存できないため、処理を開始しませんでした。", "error");
+              return;
+            }
             const receipt = await context.request("pocketApp.invokeWorkflow", {
               appId: surface.appId,
               workflowId: node.workflow,
-              inputs: Object.fromEntries(inputs),
+              inputs: resolvedWorkflowInputs(node.workflow, surface.workflowInputs, inputs, state),
             });
             const succeeded = receipt.status === "succeeded" && receipt.readbackVerified;
             setHostStatus(
@@ -108,7 +130,8 @@ export function renderPocketSurfaceProvider(context) {
           } catch {
             setHostStatus("処理を完了できませんでした。", "error");
           } finally {
-            button.disabled = !canInvoke(node.workflow, inputs, state);
+            if (transitionStarted) releaseStateTransition();
+            button.disabled = !canInvoke(node.workflow, surface.workflowInputs, inputs, state);
           }
         });
         return button;
@@ -126,6 +149,10 @@ export function renderPocketSurfaceProvider(context) {
         input.addEventListener("input", () => {
           setBinding(node.value, truncateUnicodeScalars(sanitizeVisibleText(input.value), input.maxLength), inputs, state);
           refreshButtons();
+          scheduleBoundStatePersistence(node.value, valueFor(node.value, inputs, state));
+        });
+        input.addEventListener("change", async () => {
+          await flushBoundState(node.value);
         });
         field.append(label, input);
         return field;
@@ -135,19 +162,24 @@ export function renderPocketSurfaceProvider(context) {
         label.className = "hp-pocket-toggle";
         const input = document.createElement("input");
         input.type = "checkbox";
+        input.dataset.binding = node.value ?? "";
         input.checked = Boolean(valueFor(node.value, inputs, state));
-        input.addEventListener("change", () => setBinding(node.value, input.checked, inputs, state));
+        input.addEventListener("change", async () => {
+          setBinding(node.value, input.checked, inputs, state);
+          refreshButtons();
+          await persistBoundState(node.value, input.checked);
+        });
         const text = document.createElement("span");
         text.textContent = sanitizeVisibleText(node.label ?? "Toggle");
         label.append(input, text);
         return label;
       }
       case "picker":
-        return pickerNode(node, inputs, state);
+        return pickerNode(node, inputs, state, refreshButtons, persistBoundState);
       case "calendarEventPicker":
-        return calendarPickerNode(node, inputs, state, queryResults, refreshButtons, persistState);
+        return calendarPickerNode(node, inputs, state, queryResults, refreshButtons, persistBoundState);
       case "durationPicker":
-        return durationNode(node, inputs, state);
+        return durationNode(node, inputs, state, refreshButtons, persistBoundState);
       case "status":
         return statusNode(node.value ?? "", node.tone ?? "neutral");
       default:
@@ -157,7 +189,7 @@ export function renderPocketSurfaceProvider(context) {
 
   function refreshButtons() {
     for (const button of root.querySelectorAll(".hp-pocket-primary")) {
-      button.disabled = !canInvoke(button.dataset.workflow, inputs, state);
+      button.disabled = !canInvoke(button.dataset.workflow, surface.workflowInputs, inputs, state);
     }
   }
 
@@ -188,45 +220,146 @@ export function renderPocketSurfaceProvider(context) {
       });
       return true;
     } catch {
-      setHostStatus("選択を保存できませんでした。", "error");
+      if (!disposed) setHostStatus("選択を保存できませんでした。", "error");
       return false;
     }
   }
 
+  async function persistBoundState(binding, value) {
+    if (!binding?.startsWith("$state.")) return true;
+    const key = bindingName(binding);
+    pendingTextState.set(key, { binding, value, promise: null });
+    return flushBoundState(binding);
+  }
+
+  function scheduleBoundStatePersistence(binding, value) {
+    if (!binding?.startsWith("$state.")) return;
+    const key = bindingName(binding);
+    pendingTextState.set(key, { binding, value, promise: null });
+    clearTimeout(textStateTimers.get(key));
+    textStateTimers.set(key, setTimeout(() => {
+      textStateTimers.delete(key);
+      void flushBoundState(binding);
+    }, 180));
+  }
+
+  function queueStatePersistence(pending) {
+    const key = bindingName(pending.binding);
+    const previous = statePersistenceTails.get(key) ?? Promise.resolve(true);
+    const next = previous
+      .then(() => persistState(pending.binding, pending.value))
+      .then((saved) => {
+        if (pendingTextState.get(key) === pending) {
+          if (saved) pendingTextState.delete(key);
+          else pending.promise = null;
+        }
+        return saved;
+      });
+    pending.promise = next;
+    statePersistenceTails.set(key, next);
+    void next.then(() => {
+      if (statePersistenceTails.get(key) === next) statePersistenceTails.delete(key);
+    });
+    return next;
+  }
+
+  function flushBoundState(binding) {
+    if (!binding?.startsWith("$state.")) return Promise.resolve(true);
+    const key = bindingName(binding);
+    clearTimeout(textStateTimers.get(key));
+    textStateTimers.delete(key);
+    const pending = pendingTextState.get(key);
+    if (!pending) return statePersistenceTails.get(key) ?? Promise.resolve(true);
+    if (pending.promise) return pending.promise;
+    return queueStatePersistence(pending);
+  }
+
+  async function flushPendingTextState() {
+    const pending = [...pendingTextState.values()];
+    const pendingFlushes = pending.map((item) => flushBoundState(item.binding));
+    const activeWrites = [...statePersistenceTails.values()];
+    const results = await Promise.all([...new Set([...pendingFlushes, ...activeWrites])]);
+    return results.every((result) => result !== false);
+  }
+
+  function flushStateWrites() {
+    if (stateFlushTask) return stateFlushTask;
+    stateFlushTask = loadTask.then(flushPendingTextState).finally(() => {
+      stateFlushTask = null;
+    });
+    return stateFlushTask;
+  }
+
+  async function flushPendingState() {
+    const wasInert = root.inert;
+    root.inert = true;
+    const saved = await flushStateWrites();
+    if (!disposed && transitionHoldCount === 0) root.inert = wasInert;
+    return saved;
+  }
+
+  async function beginStateTransition() {
+    transitionHoldCount += 1;
+    root.inert = true;
+    return await flushStateWrites();
+  }
+
+  function releaseStateTransition() {
+    transitionHoldCount = Math.max(0, transitionHoldCount - 1);
+    if (!disposed && transitionHoldCount === 0) root.inert = false;
+  }
+
   return {
-    refresh: load,
-    dispose() {
+    refresh,
+    flushPendingState,
+    beginStateTransition,
+    releaseStateTransition,
+    async dispose() {
+      const saved = await flushPendingState();
+      if (!saved) return false;
       disposed = true;
+      root.inert = true;
+      return true;
     },
   };
 }
 
 function initializeState(initialState, state) {
   for (const [key, value] of Object.entries(initialState ?? {})) {
-    if (typeof value === "string" && key) state.set(key, value);
+    if (key && ["string", "boolean", "number"].includes(typeof value)) state.set(key, value);
   }
 }
 
 function initializeDefaults(node, inputs, state) {
-  if (node.type === "durationPicker" && !inputs.has(bindingName(node.value))) {
-    setBinding(node.value, Number(node.default ?? node.min), inputs, state);
-  } else if (["textField", "picker"].includes(node.type) && valueFor(node.value, inputs, state) == null) {
-    setBinding(node.value, "", inputs, state);
+  const updates = [];
+  const applyDefault = (binding, value) => {
+    setBinding(binding, value, inputs, state);
+    if (binding?.startsWith("$state.")) updates.push({ binding, value });
+  };
+  if (node.type === "durationPicker" && valueFor(node.value, inputs, state) == null) {
+    applyDefault(node.value, Number(node.default ?? node.min));
+  } else if (node.type === "textField" && valueFor(node.value, inputs, state) == null) {
+    applyDefault(node.value, "");
+  } else if (node.type === "picker") {
+    const values = (node.options ?? []).map((option) => option.value);
+    if (!values.includes(valueFor(node.value, inputs, state)) && values.length > 0) {
+      applyDefault(node.value, values[0]);
+    }
   } else if (node.type === "toggle" && valueFor(node.value, inputs, state) == null) {
-    setBinding(node.value, false, inputs, state);
+    applyDefault(node.value, false);
   }
-  for (const child of node.children ?? []) initializeDefaults(child, inputs, state);
+  for (const child of node.children ?? []) updates.push(...initializeDefaults(child, inputs, state));
+  return updates;
 }
 
 function initializeQuerySelections(node, inputs, state, queryResults) {
   const updates = [];
   if (node.type === "calendarEventPicker") {
-    const events = queryResults.get(node.items?.query)?.events ?? [];
+    const events = queryResults.get(queryBindingKey(node.items?.query, node.items?.arguments))?.events ?? [];
     const persisted = stringValue(valueFor(node.selection, inputs, state));
     const selected = events.find((event) => event.eventRef === persisted) ?? events[0];
     if (selected) {
       setBinding(node.selection, selected.eventRef, inputs, state);
-      inputs.set(bindingName(node.selection), selected.eventRef);
       if (persisted !== selected.eventRef) updates.push({ binding: node.selection, value: selected.eventRef });
       if (node.titleTarget) setBinding(node.titleTarget, sanitizeVisibleText(selected.safeTitle ?? ""), inputs, state);
     }
@@ -243,7 +376,8 @@ function calendarPickerNode(node, inputs, state, queryResults, onChange, persist
   const label = document.createElement("span");
   label.textContent = "集中する予定";
   const select = document.createElement("select");
-  const events = queryResults.get(node.items?.query)?.events ?? [];
+  select.dataset.binding = node.selection ?? "";
+  const events = queryResults.get(queryBindingKey(node.items?.query, node.items?.arguments))?.events ?? [];
   if (!events.length) {
     const option = document.createElement("option");
     option.textContent = "今日の予定はありません";
@@ -261,7 +395,6 @@ function calendarPickerNode(node, inputs, state, queryResults, onChange, persist
     select.value = stringValue(valueFor(node.selection, inputs, state));
     select.addEventListener("change", async () => {
       setBinding(node.selection, select.value, inputs, state);
-      inputs.set(bindingName(node.selection), select.value);
       const selected = events.find((event) => event.eventRef === select.value);
       if (node.titleTarget && selected) {
         setBinding(node.titleTarget, sanitizeVisibleText(selected.safeTitle ?? ""), inputs, state);
@@ -277,7 +410,7 @@ function calendarPickerNode(node, inputs, state, queryResults, onChange, persist
   return field;
 }
 
-function durationNode(node, inputs, state) {
+function durationNode(node, inputs, state, onChange, persistState) {
   const field = document.createElement("label");
   field.className = "hp-pocket-duration";
   const label = document.createElement("span");
@@ -295,18 +428,23 @@ function durationNode(node, inputs, state) {
     setBinding(node.value, seconds, inputs, state);
     unit.textContent = `${Math.max(1, Math.floor(seconds / 60))}分`;
   };
-  input.addEventListener("change", update);
+  input.addEventListener("change", async () => {
+    update();
+    onChange();
+    await persistState(node.value, Number(input.value));
+  });
   update();
   field.append(label, input, unit);
   return field;
 }
 
-function pickerNode(node, inputs, state) {
+function pickerNode(node, inputs, state, onChange, persistState) {
   const field = document.createElement("label");
   field.className = "hp-pocket-field";
   const label = document.createElement("span");
   label.textContent = sanitizeVisibleText(node.label ?? "Select");
   const select = document.createElement("select");
+  select.dataset.binding = node.value ?? "";
   for (const item of node.options ?? []) {
     const option = document.createElement("option");
     option.value = item.value;
@@ -314,7 +452,13 @@ function pickerNode(node, inputs, state) {
     select.append(option);
   }
   select.value = stringValue(valueFor(node.value, inputs, state));
-  select.addEventListener("change", () => setBinding(node.value, select.value, inputs, state));
+  select.addEventListener("change", async () => {
+    setBinding(node.value, select.value, inputs, state);
+    onChange();
+    if (node.value?.startsWith("$state.")) {
+      await persistState(node.value, select.value);
+    }
+  });
   field.append(label, select);
   return field;
 }
@@ -341,14 +485,36 @@ function bindingName(binding) {
   return String(binding ?? "").split(".").slice(1).join(".");
 }
 
+function queryBindingKey(query, argumentsValue) {
+  return `${String(query ?? "")}\n${JSON.stringify(canonicalJson(argumentsValue ?? {}))}`;
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalJson(value[key])]));
+  }
+  return value;
+}
+
 function stringValue(value) {
   return typeof value === "string" ? value : "";
 }
 
-function canInvoke(workflow, inputs) {
+function resolvedWorkflowInputs(workflow, workflowInputs, inputs, state) {
+  const names = workflowInputs?.[workflow];
+  if (!Array.isArray(names)) return null;
+  return Object.fromEntries(names.map((name) => [
+    name,
+    inputs.has(name) ? inputs.get(name) : state.get(name),
+  ]));
+}
+
+function canInvoke(workflow, workflowInputs, inputs, state) {
+  const resolved = resolvedWorkflowInputs(workflow, workflowInputs, inputs, state);
   return Boolean(workflow)
-    && inputs.size > 0
-    && [...inputs.values()].every((value) => (
+    && resolved !== null
+    && Object.values(resolved).every((value) => (
       typeof value === "string" ? value.length > 0 : value !== null && value !== undefined
     ));
 }
@@ -384,14 +550,33 @@ export async function runPocketSurfaceUiVerify() {
   const model = {
     appId: "local.example.today-focus",
     surfaceId: "main",
+    initialState: {
+      note: "Before",
+      enabled: false,
+      mode: "removed",
+      focusSeconds: 600,
+    },
+    workflowInputs: {
+      startFocus: ["durationSeconds", "purpose", "selectedEventRef"],
+      runLiteral: [],
+    },
     renderModel: {
       root: {
         type: "stack", axis: "vertical", spacing: 12, children: [
           { type: "text", style: "title", value: "Today Focus" },
-          { type: "calendarEventPicker", items: { query: "calendar.events.list@1", arguments: {} }, selection: "$state.selectedEventRef", titleTarget: "$input.purpose" },
+          { type: "calendarEventPicker", items: { query: "calendar.events.list@1", arguments: { timeZone: "UTC" } }, selection: "$state.selectedEventRef", titleTarget: "$input.purpose" },
+          { type: "calendarEventPicker", items: { query: "calendar.events.list@1", arguments: { timeZone: "Asia/Tokyo" } }, selection: "$state.secondaryEventRef" },
           { type: "durationPicker", value: "$input.durationSeconds", min: 60, max: 14400, default: 1500 },
+          { type: "durationPicker", value: "$state.focusSeconds", min: 60, max: 14400, default: 900 },
           { type: "textField", label: "Purpose", value: "$input.purpose", maxLength: 80 },
+          { type: "textField", label: "Note", value: "$state.note", maxLength: 80 },
+          { type: "toggle", label: "Enabled", value: "$state.enabled" },
+          { type: "picker", label: "Mode", value: "$state.mode", options: [
+            { label: "Quiet", value: "quiet" },
+            { label: "Active", value: "active" },
+          ] },
           { type: "button", label: "Start focus", workflow: "startFocus" },
+          { type: "button", label: "Run literal", workflow: "runLiteral" },
         ],
       },
     },
@@ -407,6 +592,13 @@ export async function runPocketSurfaceUiVerify() {
     { name: "large", scale: 1.24 },
   ];
   let baseline;
+  let stateWorkflowInputForwarded = false;
+  let inputlessWorkflowInvoked = false;
+  let stateBoundControlsPersisted = false;
+  let pickerNormalizationPersisted = false;
+  let failedStateWriteRetried = false;
+  let workflowBlockedOnStateWriteFailure = true;
+  let stateTransitionBoundary = false;
   let layoutMatrix = true;
   let layoutCases = 0;
 
@@ -417,21 +609,74 @@ export async function runPocketSurfaceUiVerify() {
       host.dataset.textSize = textCase.name;
       host.style.cssText = `position:fixed;left:-10000px;top:0;width:${panelCase.width}px;height:${panelCase.height}px;--hp-text-scale:${textCase.scale}`;
       document.body.append(host);
-      let statePersisted = false;
+      const persistedState = new Map();
+      let loadCalls = 0;
+      let noteWriteAttempts = 0;
+      let startFocusInvocationCount = 0;
       const provider = renderPocketSurfaceProvider({
         container: host,
         state: { pocketSurface: model },
         request: async (method, params) => {
           if (method === "pocketApp.load") {
-            return { queryResults: [{ query: "calendar.events.list@1", output: { events: [{ eventRef: "event:1", safeTitle: "Focus", start: "2026-08-15T01:00:00Z", end: "2026-08-15T02:00:00Z" }] } }] };
+            loadCalls += 1;
+            return { queryResults: [
+              { query: "calendar.events.list@1", arguments: { timeZone: "UTC" }, output: { events: [{ eventRef: "event:utc", safeTitle: "Focus", start: "2026-08-15T01:00:00Z", end: "2026-08-15T02:00:00Z" }] } },
+              { query: "calendar.events.list@1", arguments: { timeZone: "Asia/Tokyo" }, output: { events: [{ eventRef: "event:jst", safeTitle: "Secondary", start: "2026-08-15T03:00:00Z", end: "2026-08-15T04:00:00Z" }] } },
+            ] };
           }
           if (method === "pocketApp.updateState") {
-            statePersisted = params?.key === "selectedEventRef" && params?.value === "event:1";
+            if (params?.key === "note") {
+              noteWriteAttempts += 1;
+              if (noteWriteAttempts === 1) throw new Error("fixture_state_write_failed");
+            }
+            pickerNormalizationPersisted ||= params?.key === "mode" && params?.value === "quiet";
+            persistedState.set(params?.key, params?.value);
             return { saved: true };
+          }
+          if (method === "pocketApp.invokeWorkflow") {
+            if (params?.workflowId === "startFocus") startFocusInvocationCount += 1;
+            inputlessWorkflowInvoked ||= params?.workflowId === "runLiteral"
+              && Object.keys(params?.inputs ?? {}).length === 0;
+            stateWorkflowInputForwarded ||= params?.workflowId === "startFocus"
+              && params?.inputs?.selectedEventRef === "event:utc"
+              && params?.inputs?.purpose === "Focus"
+              && params?.inputs?.durationSeconds === 1500
+              && Object.keys(params.inputs).sort().join(",") === "durationSeconds,purpose,selectedEventRef";
+            return { status: "succeeded", readbackVerified: true, summary: "Verified" };
           }
           throw new Error("unexpected_method");
         },
       });
+      await nextLayout();
+      const stateNote = host.querySelector('input[data-binding="$state.note"]');
+      if (stateNote) {
+        stateNote.value = "After";
+        stateNote.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      const stateToggle = host.querySelector('input[data-binding="$state.enabled"]');
+      if (stateToggle) {
+        stateToggle.checked = true;
+        stateToggle.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      const statePicker = host.querySelector('select[data-binding="$state.mode"]');
+      if (statePicker) {
+        statePicker.value = "active";
+        statePicker.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      const stateDuration = [...host.querySelectorAll(".hp-pocket-duration input")]
+        .find((input) => input.value === "600");
+      if (stateDuration) {
+        stateDuration.value = "1200";
+        stateDuration.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      const startFocusButton = host.querySelector('[data-workflow="startFocus"]');
+      startFocusButton?.click();
+      await nextLayout();
+      workflowBlockedOnStateWriteFailure &&= startFocusInvocationCount === 0
+        && noteWriteAttempts === 1;
+      startFocusButton?.click();
+      await nextLayout();
+      host.querySelector('[data-workflow="runLiteral"]')?.click();
       await nextLayout();
       const surface = host.querySelector(".hp-pocket-surface");
       const surfaceRect = surface?.getBoundingClientRect();
@@ -450,19 +695,59 @@ export async function runPocketSurfaceUiVerify() {
       );
       baseline ??= {
         rendered: Boolean(host.querySelector(".hp-pocket-surface .hp-pocket-text.is-title")),
-        selection: host.querySelector("select")?.value === "event:1",
+        selection: host.querySelector('select[data-binding="$state.selectedEventRef"]')?.value === "event:utc"
+          && host.querySelector('select[data-binding="$state.secondaryEventRef"]')?.value === "event:jst",
         duration: host.querySelector(".hp-pocket-duration input")?.value === "1500",
         purpose: host.querySelector(".hp-pocket-field input")?.value === "Focus",
-        statePersisted,
+        statePersisted: persistedState.get("selectedEventRef") === "event:utc"
+          && persistedState.get("secondaryEventRef") === "event:jst",
         approvalHostOwned: !host.querySelector("[data-approval], .hp-pocket-approval"),
       };
-      provider?.dispose?.();
+      const firstPostWorkflowFlush = await provider?.flushPendingState?.();
+      const secondPostWorkflowFlush = await provider?.flushPendingState?.();
+      failedStateWriteRetried ||= firstPostWorkflowFlush !== false
+        && secondPostWorkflowFlush !== false
+        && noteWriteAttempts === 2
+        && persistedState.get("note") === "After";
+      const loadsBeforeTransition = loadCalls;
+      const firstTransitionSaved = await provider?.beginStateTransition?.();
+      const secondTransitionSaved = await provider?.beginStateTransition?.();
+      const inertDuringTransition = surface?.inert === true;
+      await provider?.refresh?.();
+      const refreshBlockedDuringTransition = loadCalls === loadsBeforeTransition;
+      provider?.releaseStateTransition?.();
+      const overlappingTransitionStillHeld = surface?.inert === true;
+      provider?.releaseStateTransition?.();
+      const interactionRestored = surface?.inert === false;
+      await provider?.refresh?.();
+      stateTransitionBoundary ||= firstTransitionSaved !== false
+        && secondTransitionSaved !== false
+        && inertDuringTransition
+        && refreshBlockedDuringTransition
+        && overlappingTransitionStillHeld
+        && interactionRestored
+        && loadCalls === loadsBeforeTransition + 1;
+      const flushed = await provider?.flushPendingState?.();
+      const disposalSaved = await provider?.dispose?.();
+      await nextLayout();
+      stateBoundControlsPersisted ||= flushed !== false
+        && disposalSaved !== false
+        && pickerNormalizationPersisted
+        && persistedState.get("note") === "After"
+        && persistedState.get("enabled") === true
+        && persistedState.get("mode") === "active"
+        && persistedState.get("focusSeconds") === 1200;
       host.remove();
     }
   }
 
   return {
     ...baseline,
+    stateWorkflowInputForwarded: stateWorkflowInputForwarded && inputlessWorkflowInvoked,
+    stateBoundControlsPersisted,
+    failedStateWriteRetried,
+    workflowBlockedOnStateWriteFailure,
+    stateTransitionBoundary,
     layoutMatrix: layoutMatrix && layoutCases === panelCases.length * textCases.length,
   };
 }

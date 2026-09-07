@@ -22,6 +22,36 @@
       "descriptor": "valid/capability-descriptor.calendar-events-list.json"
     },
     {
+      "id": "controls.availability.get",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.controls-availability-get.json"
+    },
+    {
+      "id": "controls.brightness.set",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.controls-brightness-set.json"
+    },
+    {
+      "id": "controls.media.command",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.controls-media-command.json"
+    },
+    {
+      "id": "controls.mute.set",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.controls-mute-set.json"
+    },
+    {
+      "id": "controls.volume.get",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.controls-volume-get.json"
+    },
+    {
+      "id": "controls.volume.set",
+      "version": 1,
+      "descriptor": "valid/capability-descriptor.controls-volume-set.json"
+    },
+    {
       "id": "sticky.note.archive",
       "version": 1,
       "descriptor": "valid/capability-descriptor.sticky-note-archive.json"

@@ -142,6 +142,54 @@ internal static class PocketCapabilityDescriptors
             false,
             CapabilitySchemaValidation.CalendarListInput,
             CapabilitySchemaValidation.CalendarListOutput),
+        ControlsDescriptor(
+            CapabilityIds.ControlsAvailability,
+            CapabilityEffect.PrivateRead,
+            CapabilityApprovalPolicy.PermissionGrant,
+            CapabilityIdempotencyPolicy.Optional,
+            CapabilitySchemaValidation.EmptyInput,
+            CapabilitySchemaValidation.ControlsAvailabilityOutput,
+            ["volumeAvailable", "brightnessAvailable", "mediaAvailable", "displayIds"]),
+        ControlsDescriptor(
+            CapabilityIds.ControlsBrightnessSet,
+            CapabilityEffect.ReversibleLocalWrite,
+            CapabilityApprovalPolicy.BrokerPolicy,
+            CapabilityIdempotencyPolicy.Required,
+            CapabilitySchemaValidation.ControlsBrightnessInput,
+            CapabilitySchemaValidation.ControlsBrightnessOutput,
+            ["displayId", "level", "controllable"]),
+        ControlsDescriptor(
+            CapabilityIds.ControlsMediaCommand,
+            CapabilityEffect.ReversibleLocalWrite,
+            CapabilityApprovalPolicy.BrokerPolicy,
+            CapabilityIdempotencyPolicy.Required,
+            CapabilitySchemaValidation.ControlsMediaInput,
+            CapabilitySchemaValidation.ControlsMediaOutput,
+            ["command", "available", "isPlaying", "safeTitle", "safeSource"]),
+        ControlsDescriptor(
+            CapabilityIds.ControlsMuteSet,
+            CapabilityEffect.ReversibleLocalWrite,
+            CapabilityApprovalPolicy.BrokerPolicy,
+            CapabilityIdempotencyPolicy.Required,
+            CapabilitySchemaValidation.ControlsMuteInput,
+            CapabilitySchemaValidation.ControlsVolumeOutput,
+            ["level", "muted"]),
+        ControlsDescriptor(
+            CapabilityIds.ControlsVolumeGet,
+            CapabilityEffect.PrivateRead,
+            CapabilityApprovalPolicy.PermissionGrant,
+            CapabilityIdempotencyPolicy.Optional,
+            CapabilitySchemaValidation.EmptyInput,
+            CapabilitySchemaValidation.ControlsVolumeOutput,
+            ["level", "muted"]),
+        ControlsDescriptor(
+            CapabilityIds.ControlsVolumeSet,
+            CapabilityEffect.ReversibleLocalWrite,
+            CapabilityApprovalPolicy.BrokerPolicy,
+            CapabilityIdempotencyPolicy.Required,
+            CapabilitySchemaValidation.ControlsVolumeInput,
+            CapabilitySchemaValidation.ControlsVolumeOutput,
+            ["level", "muted"]),
         Descriptor(
             CapabilityIds.StickyArchive,
             CapabilityEffect.ReversibleLocalWrite,
@@ -267,6 +315,33 @@ internal static class PocketCapabilityDescriptors
             rollback,
             input,
             CapabilitySchemaValidation.TimerOutput);
+
+    private static PocketCapabilityDescriptor ControlsDescriptor(
+        PocketCapabilityKey key,
+        CapabilityEffect effect,
+        CapabilityApprovalPolicy approval,
+        CapabilityIdempotencyPolicy idempotency,
+        Action<JsonElement> input,
+        Action<JsonElement> output,
+        IReadOnlyList<string> matchFields) =>
+        Descriptor(
+            key,
+            effect,
+            effect == CapabilityEffect.PrivateRead
+                ? new HashSet<string>(["controls.read"], StringComparer.Ordinal)
+                : new HashSet<string>(["controls.write"], StringComparer.Ordinal),
+            approval,
+            idempotency,
+            effect == CapabilityEffect.PrivateRead ? ReadLimits : LocalWriteLimits,
+            new CapabilityReadbackPolicy(
+                effect == CapabilityEffect.PrivateRead
+                    ? CapabilityReadbackStrategy.SameStoreSnapshot
+                    : CapabilityReadbackStrategy.OsState,
+                null,
+                matchFields),
+            false,
+            input,
+            output);
 }
 
 internal static partial class CapabilitySchemaValidation
@@ -342,6 +417,20 @@ internal static partial class CapabilitySchemaValidation
         return result;
     }
 
+    public static double Number(JsonElement value, string name, double minimum, double maximum)
+    {
+        if (!value.TryGetProperty(name, out var property)
+            || property.ValueKind != JsonValueKind.Number
+            || !property.TryGetDouble(out var result)
+            || !double.IsFinite(result)
+            || result < minimum
+            || result > maximum)
+        {
+            throw Invalid(name);
+        }
+        return result;
+    }
+
     public static bool Boolean(JsonElement value, string name)
     {
         if (!value.TryGetProperty(name, out var property)
@@ -371,6 +460,100 @@ internal static partial class CapabilitySchemaValidation
         {
             throw Invalid("timezone");
         }
+    }
+
+    public static void EmptyInput(JsonElement value) => ExactKeys(value, []);
+
+    public static void ControlsVolumeInput(JsonElement value)
+    {
+        ExactKeys(value, ["level"]);
+        _ = Number(value, "level", 0, 1);
+    }
+
+    public static void ControlsMuteInput(JsonElement value)
+    {
+        ExactKeys(value, ["muted"]);
+        _ = Boolean(value, "muted");
+    }
+
+    public static void ControlsBrightnessInput(JsonElement value)
+    {
+        ExactKeys(value, ["displayId", "level"]);
+        _ = String(value, "displayId", 1, 128);
+        _ = Number(value, "level", 0.05, 1);
+    }
+
+    public static void ControlsMediaInput(JsonElement value)
+    {
+        ExactKeys(value, ["command"]);
+        _ = String(
+            value,
+            "command",
+            1,
+            16,
+            new HashSet<string>(["play_pause", "next", "previous"], StringComparer.Ordinal));
+    }
+
+    public static void ControlsVolumeOutput(JsonElement value)
+    {
+        ExactKeys(value, ["level", "muted"]);
+        _ = Number(value, "level", 0, 1);
+        _ = Boolean(value, "muted");
+    }
+
+    public static void ControlsBrightnessOutput(JsonElement value)
+    {
+        ExactKeys(value, ["displayId", "level", "controllable"]);
+        _ = String(value, "displayId", 1, 128);
+        _ = Number(value, "level", 0, 1);
+        if (!Boolean(value, "controllable"))
+        {
+            throw Invalid("controllable");
+        }
+    }
+
+    public static void ControlsAvailabilityOutput(JsonElement value)
+    {
+        ExactKeys(value, ["volumeAvailable", "brightnessAvailable", "mediaAvailable", "displayIds"]);
+        _ = Boolean(value, "volumeAvailable");
+        _ = Boolean(value, "brightnessAvailable");
+        _ = Boolean(value, "mediaAvailable");
+        if (!value.TryGetProperty("displayIds", out var displayIds)
+            || displayIds.ValueKind != JsonValueKind.Array
+            || displayIds.GetArrayLength() > 16)
+        {
+            throw Invalid("displayIds");
+        }
+        foreach (var displayId in displayIds.EnumerateArray())
+        {
+            if (displayId.ValueKind != JsonValueKind.String)
+            {
+                throw Invalid("displayIds");
+            }
+            var raw = displayId.GetString() ?? string.Empty;
+            if (raw.Length == 0 || raw.EnumerateRunes().Count() > 128)
+            {
+                throw Invalid("displayIds");
+            }
+        }
+    }
+
+    public static void ControlsMediaOutput(JsonElement value)
+    {
+        ExactKeys(value, ["command", "available", "isPlaying", "safeTitle", "safeSource"]);
+        _ = String(
+            value,
+            "command",
+            1,
+            16,
+            new HashSet<string>(["play_pause", "next", "previous"], StringComparer.Ordinal));
+        if (!Boolean(value, "available"))
+        {
+            throw Invalid("available");
+        }
+        _ = Boolean(value, "isPlaying");
+        _ = String(value, "safeTitle", 0, 160);
+        _ = String(value, "safeSource", 0, 120);
     }
 
     public static void CalculatorInput(JsonElement value)

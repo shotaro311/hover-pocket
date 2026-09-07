@@ -1,0 +1,155 @@
+name: Verify Release Install and Rollback Transitions
+
+on:
+  push:
+    paths:
+      - "script/verify_macos_release_transition.sh"
+      - "windows/script/verify_release_transition.ps1"
+      - ".github/workflows/release-transition-verify.yml"
+  pull_request:
+    paths:
+      - "script/verify_macos_release_transition.sh"
+      - "windows/script/verify_release_transition.ps1"
+      - ".github/workflows/release-transition-verify.yml"
+  workflow_dispatch:
+    inputs:
+      execute_macos_release_code:
+        description: "Execute selected signed and notarized macOS releases inside a disposable runner"
+        required: true
+        default: false
+        type: boolean
+      execute_windows_release_code:
+        description: "Execute selected public Windows installer and packages inside a disposable runner"
+        required: true
+        default: false
+        type: boolean
+      allow_unsigned_beta:
+        description: "Allow explicitly selected unsigned Windows beta releases"
+        required: true
+        default: false
+        type: boolean
+      macos_previous_tag:
+        description: "Older macOS versioned release"
+        required: true
+        default: "v0.1.0-161"
+        type: string
+      macos_current_tag:
+        description: "Newer macOS versioned release"
+        required: true
+        default: "v0.1.0-168"
+        type: string
+      windows_previous_tag:
+        description: "Older Windows release"
+        required: true
+        default: "win-v0.2.6"
+        type: string
+      windows_current_tag:
+        description: "Newer Windows release"
+        required: true
+        default: "win-v0.2.7"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  macos-contract:
+    name: macOS transition script syntax
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Parse transition script
+        run: bash -n script/verify_macos_release_transition.sh
+
+  windows-contract:
+    name: Windows transition script syntax
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Parse transition script
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "windows/script/verify_release_transition.ps1"),
+            [ref]$null,
+            [ref]$errors)
+          if ($errors.Count -ne 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
+      - name: Verify immutable release snapshot contract
+        shell: pwsh
+        run: |
+          windows/script/verify_release_transition.ps1 `
+            -PreviousTag win-v0.2.6 `
+            -CurrentTag win-v0.2.7 `
+            -SnapshotContractTest
+
+  macos-transition:
+    name: macOS package install and rollback transition
+    if: github.event_name == 'workflow_dispatch' && inputs.execute_macos_release_code
+    needs: macos-contract
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify version transitions in a temporary Applications root
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HOVERPOCKET_MACOS_PREVIOUS_TAG: ${{ inputs.macos_previous_tag }}
+          HOVERPOCKET_MACOS_CURRENT_TAG: ${{ inputs.macos_current_tag }}
+        run: |
+          set -o pipefail
+          bash script/verify_macos_release_transition.sh \
+            "$HOVERPOCKET_MACOS_PREVIOUS_TAG" \
+            "$HOVERPOCKET_MACOS_CURRENT_TAG" | tee macos-transition-report.json
+
+      - name: Upload transition receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-release-transition
+          path: macos-transition-report.json
+          if-no-files-found: error
+          retention-days: 30
+
+  windows-transition:
+    name: Windows install, update, rollback, and reinstall
+    if: github.event_name == 'workflow_dispatch' && inputs.execute_windows_release_code
+    needs: windows-contract
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify version transitions in an isolated install root
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HOVERPOCKET_ALLOW_UNSIGNED_BETA: ${{ inputs.allow_unsigned_beta }}
+          HOVERPOCKET_WINDOWS_PREVIOUS_TAG: ${{ inputs.windows_previous_tag }}
+          HOVERPOCKET_WINDOWS_CURRENT_TAG: ${{ inputs.windows_current_tag }}
+        run: |
+          $allowUnsigned = [bool]::Parse($env:HOVERPOCKET_ALLOW_UNSIGNED_BETA)
+          windows/script/verify_release_transition.ps1 `
+            -PreviousTag $env:HOVERPOCKET_WINDOWS_PREVIOUS_TAG `
+            -CurrentTag $env:HOVERPOCKET_WINDOWS_CURRENT_TAG `
+            -AllowUnsignedBeta:$allowUnsigned | Tee-Object -FilePath windows-transition-report.json
+
+      - name: Upload transition receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-release-transition
+          path: windows-transition-report.json
+          if-no-files-found: error
+          retention-days: 30

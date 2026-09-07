@@ -14,6 +14,14 @@ const pocketAppListEl = document.querySelector("[data-pocket-app-list]");
 const aiNativeEl = document.querySelector("[data-ai-native]");
 const aiNativeLabelEl = document.querySelector("[data-ai-native-label]");
 const aiNativeNoteEl = document.querySelector("[data-ai-native-note]");
+const voiceHeadingEl = document.querySelector("[data-voice-heading]");
+const voiceEnabledEl = document.querySelector("[data-voice-enabled]");
+const voiceEnabledLabelEl = document.querySelector("[data-voice-enabled-label]");
+const voiceLayoutEl = document.querySelector("[data-voice-layout]");
+const voiceNoteEl = document.querySelector("[data-voice-note]");
+const voiceCalendarAccessEl = document.querySelector("[data-voice-calendar-access]");
+const voiceCalendarLabelEl = document.querySelector("[data-voice-calendar-label]");
+const voiceCalendarNoteEl = document.querySelector("[data-voice-calendar-note]");
 const pocketGenerationEl = document.querySelector("[data-pocket-generation]");
 const pocketGenerationNoteEl = document.querySelector("[data-pocket-generation-note]");
 const pocketGenerationRequestEl = document.querySelector("[data-pocket-generation-request]");
@@ -99,6 +107,26 @@ function render(state) {
   aiNativeNoteEl.textContent = state.settings.language === "en"
     ? "Off by default. Disabling cancels generation immediately; enabling after an OFF startup requires a HoverPocket restart and never hot-starts Codex."
     : "既定ではオフです。OFFは生成を即時停止します。OFFで起動した後のONはHoverPocket再起動後に有効となり、Codexをhot-startしません。";
+  const voiceEnabled = Boolean(state.settings.voiceEnabled);
+  voiceHeadingEl.textContent = "Voice Lane";
+  voiceEnabledEl.checked = voiceEnabled;
+  voiceEnabledLabelEl.textContent = state.settings.language === "en"
+    ? "Enable Voice Lane"
+    : "Voice Laneを有効化";
+  voiceNoteEl.textContent = state.settings.language === "en"
+    ? "Off by default. Voice starts only when Codex exposes a Host-verified Broker-only tool policy. Unsupported versions stay safely stopped. Timer requests require native approval every time."
+    : "既定はオフです。CodexがHost検証済みのBroker限定ツール方針に対応する場合だけ音声会話を開始します。未対応版では安全に停止します。Timerは毎回ネイティブ承認を求めます。";
+  voiceCalendarAccessEl.checked = Boolean(state.settings.voiceCalendarAccessGranted);
+  voiceCalendarLabelEl.textContent = state.settings.language === "en"
+    ? "Share today's event titles and times with Codex"
+    : "今日の予定名と時刻をCodexへ共有";
+  voiceCalendarNoteEl.textContent = state.settings.language === "en"
+    ? "Separate from Google sign-in and microphone access. You can revoke this permission at any time."
+    : "Googleログインやマイク権限とは別の許可です。いつでも取り消せます。";
+  renderSegment(voiceLayoutEl, [
+    { id: "compact", label: state.settings.language === "en" ? "Compact" : "コンパクト" },
+    { id: "expanded", label: state.settings.language === "en" ? "Expanded" : "展開" },
+  ], state.settings.voiceLaneLayout ?? "compact", (layout) => update("settings.setVoiceLayout", { layout }), !voiceEnabled);
   renderPocketApps(state);
   generationState = state.pocketAppGeneration ?? generationState;
   renderPocketGeneration(generationState, state.settings.language);
@@ -385,12 +413,13 @@ function renderProviderSelection(state) {
   preferredProviderEl.disabled = state.settings.rememberLastSelectedProvider !== false;
 }
 
-function renderSegment(root, options, selectedId, onSelect) {
+function renderSegment(root, options, selectedId, onSelect, disabled = false) {
   root.replaceChildren();
   for (const option of options) {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = option.label;
+    button.disabled = disabled;
     button.setAttribute("aria-pressed", String(option.id === selectedId));
     button.addEventListener("click", () => onSelect(option.id));
     root.append(button);
@@ -457,6 +486,14 @@ preferredProviderEl.addEventListener("change", () => {
 
 aiNativeEl.addEventListener("change", () => {
   update("settings.setAiNativeEnabled", { enabled: aiNativeEl.checked });
+});
+
+voiceEnabledEl.addEventListener("change", () => {
+  update("settings.setVoiceEnabled", { enabled: voiceEnabledEl.checked });
+});
+
+voiceCalendarAccessEl.addEventListener("change", () => {
+  update("settings.setVoiceCalendarAccess", { enabled: voiceCalendarAccessEl.checked });
 });
 
 handleSideAreaEl.addEventListener("change", () => {

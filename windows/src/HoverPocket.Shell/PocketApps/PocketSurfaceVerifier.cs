@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using HoverPocket.Shell.Verification;
 
 namespace HoverPocket.Shell.PocketApps;
 
@@ -13,7 +14,7 @@ internal sealed class PocketSurfaceVerifier
     public int Run()
     {
         var runtime = new PocketSurfaceRuntime(
-            new HashSet<string>(["calendar.events.list@1"], StringComparer.Ordinal),
+            new HashSet<string>(["calendar.events.list@1", "sticky.note.get@1"], StringComparer.Ordinal),
             new HashSet<string>(["startFocus"], StringComparer.Ordinal));
         var renderDigest = "unavailable";
 
@@ -37,12 +38,14 @@ internal sealed class PocketSurfaceVerifier
         {
             _failures.Add($"valid_fixture:{ex.Message}");
         }
+        VerifyOmittedDurationDefault(runtime);
 
         RejectData(FixtureData("invalid/pocket-surface.asset-traversal.json"), "asset_traversal", runtime);
         RejectData(FixtureData("invalid/pocket-surface.receipt-component.json"), "receipt_component", runtime);
         RejectMutation(root => root["root"]!["children"]![0]!["unexpected"] = true, "unknown_key", runtime);
         RejectMutation(root => root["root"]!["children"]![0]!["type"] = "webView", "unknown_component", runtime);
         RejectMutation(root => root["root"]!["children"]![1]!["items"]!["query"] = "calendar.events.delete@1", "unknown_query", runtime);
+        RejectMutation(root => root["root"]!["children"]![1]!["items"]!["query"] = "sticky.note.get@1", "unsupported_query_shape", runtime);
         RejectMutation(root => root["root"]!["children"]![4]!["workflow"] = "missing", "unknown_workflow", runtime);
         RejectMutation(root =>
         {
@@ -55,21 +58,27 @@ internal sealed class PocketSurfaceVerifier
         RejectData(DeepSurfaceData(), "depth", runtime);
         RejectData(WideSurfaceData(), "node_count", runtime);
         RejectMutation(root => root["root"]!["children"]![4]!["label"] = new string('界', 121), "unicode_scalar_limit", runtime);
+        RejectData(SurfaceData(new JsonObject
+        {
+            ["type"] = "status",
+            ["value"] = "saved",
+            ["tone"] = "success"
+        }), "host_receipt_spoof", runtime);
 
         if (_failures.Count > 0)
         {
-            Console.Error.WriteLine("pocket_surface_verify=failed");
+            VerifyConsole.WriteLine("pocket_surface_verify=failed");
             foreach (var failure in _failures)
             {
-                Console.Error.WriteLine($"failure={failure}");
+                VerifyConsole.WriteLine($"failure={failure}");
             }
             return 1;
         }
 
-        Console.WriteLine("pocket_surface_verify=ok");
-        Console.WriteLine("pocket_surface_valid_nodes=6");
-        Console.WriteLine("pocket_surface_negative_cases=13");
-        Console.WriteLine($"pocket_surface_render_digest={renderDigest}");
+        VerifyConsole.WriteLine("pocket_surface_verify=ok");
+        VerifyConsole.WriteLine("pocket_surface_valid_nodes=6");
+        VerifyConsole.WriteLine("pocket_surface_negative_cases=15");
+        VerifyConsole.WriteLine($"pocket_surface_render_digest={renderDigest}");
         return 0;
     }
 
@@ -85,6 +94,24 @@ internal sealed class PocketSurfaceVerifier
         catch (Exception ex)
         {
             _failures.Add($"{label}:fixture:{ex.Message}");
+        }
+    }
+
+    private void VerifyOmittedDurationDefault(PocketSurfaceRuntime runtime)
+    {
+        try
+        {
+            var root = JsonNode.Parse(FixtureData("valid/pocket-surface.today-focus.json"))
+                ?? throw new InvalidOperationException("fixture_parse");
+            root["root"]!["children"]![2]!.AsObject().Remove("default");
+            var document = runtime.Load(Encoding.UTF8.GetBytes(root.ToJsonString()));
+            Require(
+                Convert.ToInt32(document.Root.Children[2].Properties["default"]) == 60,
+                "duration_default_omitted");
+        }
+        catch (Exception ex)
+        {
+            _failures.Add($"duration_default_omitted:{ex.Message}");
         }
     }
 

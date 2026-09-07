@@ -5,6 +5,7 @@ import Foundation
 enum PocketAppGenerationVerification {
     static func verify(failures: inout [String]) {
         verifyDefaultOff(failures: &failures)
+        PocketAppRuntimeActivationVerification.verify(failures: &failures)
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("hover-pocket-generation-host-\(UUID().uuidString)", isDirectory: true)
         let dataRoot = FileManager.default.temporaryDirectory
@@ -130,6 +131,81 @@ enum PocketAppGenerationVerification {
                 "generation_enable_readback_failure_restored_disabled",
                 failures: &failures
             )
+            let failingRuntimeEnableLifecycle = try PocketAppLifecycleManager(
+                rootDirectory: root,
+                userDataRoot: dataRoot,
+                activationReadback: { receipt in
+                    if receipt.state == .enabled {
+                        throw PocketAppRuntimeActivationError.unavailable
+                    }
+                    return PocketAppRuntimeReadback(
+                        appID: receipt.packageID,
+                        version: receipt.version,
+                        packageDigest: receipt.packageDigest,
+                        effectivePermissions: receipt.effectivePermissions
+                    )
+                }
+            )
+            do {
+                _ = try failingRuntimeEnableLifecycle.enable(packageID: request.appID)
+                failures.append("generation_runtime_enable_failure_accepted")
+            } catch PocketAppLifecycleError.readbackFailed {
+            }
+            require(
+                try failingRuntimeEnableLifecycle.managedPackage(packageID: request.appID)?.state == .disabled
+                    && failingRuntimeEnableLifecycle.activePackage(packageID: request.appID) == nil,
+                "generation_runtime_enable_failure_remains_disabled",
+                failures: &failures
+            )
+
+            let reupdate = try lifecycle.stage(draftDirectory: updateMaterialized.directory)
+            let reupdateGrant = try lifecycle.approve(
+                requestID: reupdate.requestID,
+                bindingDigest: reupdate.bindingDigest
+            )
+            _ = try lifecycle.install(reupdate, approvalGrant: reupdateGrant)
+            let failingRuntimeRollbackLifecycle = try PocketAppLifecycleManager(
+                rootDirectory: root,
+                userDataRoot: dataRoot,
+                activationReadback: { receipt in
+                    if receipt.state == .enabled {
+                        throw PocketAppRuntimeActivationError.unavailable
+                    }
+                    return PocketAppRuntimeReadback(
+                        appID: receipt.packageID,
+                        version: receipt.version,
+                        packageDigest: receipt.packageDigest,
+                        effectivePermissions: receipt.effectivePermissions
+                    )
+                }
+            )
+            let failingRollback = try failingRuntimeRollbackLifecycle.prepareRollback(
+                packageID: request.appID,
+                version: request.version
+            )
+            let failingRollbackGrant = try failingRuntimeRollbackLifecycle.approve(
+                requestID: failingRollback.requestID,
+                bindingDigest: failingRollback.bindingDigest
+            )
+            do {
+                _ = try failingRuntimeRollbackLifecycle.rollback(
+                    failingRollback,
+                    approvalGrant: failingRollbackGrant
+                )
+                failures.append("generation_runtime_rollback_failure_accepted")
+            } catch PocketAppLifecycleError.readbackFailed {
+            }
+            let rollbackFallback = try failingRuntimeRollbackLifecycle.managedPackage(packageID: request.appID)
+            let rollbackFallbackActivePackage = try failingRuntimeRollbackLifecycle.activePackage(
+                packageID: request.appID
+            )
+            require(
+                rollbackFallback?.state == .disabled
+                    && rollbackFallback?.version == updateRequest.version
+                    && rollbackFallbackActivePackage == nil,
+                "generation_runtime_rollback_failure_disables_previous_version",
+                failures: &failures
+            )
             let packageDataRoot = dataRoot.appendingPathComponent(request.appID, isDirectory: true)
             try FileManager.default.createDirectory(at: packageDataRoot, withIntermediateDirectories: true)
             let sentinel = packageDataRoot.appendingPathComponent("sentinel.txt")
@@ -189,6 +265,7 @@ enum PocketAppGenerationVerification {
             try verifyProcessTreeCleanup(failures: &failures)
             try verifyRootPin(failures: &failures)
             try verifyGenerationStartupDoesNotRecover(failures: &failures)
+            try verifyFailedActivationRefreshesManagement(failures: &failures)
             try verifyCommittedReceiptSurvivesManagedRefreshFailure(failures: &failures)
             try verifyUnrelatedActionPreservesPendingProposal(failures: &failures)
         } catch {
@@ -480,6 +557,68 @@ enum PocketAppGenerationVerification {
             failures: &failures
         )
         withExtendedLifetime(controller) {}
+    }
+
+    private static func verifyFailedActivationRefreshesManagement(
+        failures: inout [String]
+    ) throws {
+        let temporaryRoot = URL(
+            fileURLWithPath: FileManager.default.currentDirectoryPath,
+            isDirectory: true
+        ).appendingPathComponent(".build", isDirectory: true)
+        let root = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-activation-failure-host-\(UUID().uuidString)", isDirectory: true)
+        let dataRoot = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-activation-failure-data-\(UUID().uuidString)", isDirectory: true)
+        let draftRoot = temporaryRoot
+            .appendingPathComponent("hover-pocket-generation-activation-failure-draft-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            makeTreeMutable(root)
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: dataRoot)
+            try? FileManager.default.removeItem(at: draftRoot)
+        }
+        try FileManager.default.createDirectory(at: draftRoot, withIntermediateDirectories: true)
+        let adapter = FixturePocketAppGenerationAdapter(fixtureRoot: fixtureURL("."))
+        let materializer = PocketAppGenerationMaterializer(rootDirectory: draftRoot)
+        let request = try makeRequest(
+            requestID: "generation-activation-failure",
+            userRequest: "Create a focus app whose activation fails.",
+            appID: "local.example.activation-failure",
+            version: "1.0.0",
+            namespace: "today-focus"
+        )
+        do {
+            let lifecycle = try PocketAppLifecycleManager(rootDirectory: root, userDataRoot: dataRoot)
+            _ = try installFixture(request, adapter: adapter, materializer: materializer, lifecycle: lifecycle)
+            _ = try lifecycle.disable(packageID: request.appID)
+        }
+        let controller = try PocketAppGenerationController(
+            rootDirectory: root,
+            userDataRoot: dataRoot,
+            generationRoot: draftRoot,
+            generator: nil,
+            runtimeActivationReadback: { receipt in
+                if receipt.state == .enabled {
+                    throw PocketAppRuntimeActivationError.unavailable
+                }
+                return PocketAppRuntimeReadback(
+                    appID: receipt.packageID,
+                    version: receipt.version,
+                    packageDigest: receipt.packageDigest,
+                    effectivePermissions: receipt.effectivePermissions
+                )
+            }
+        )
+        controller.enable(packageID: request.appID)
+        let observed = controller.managedPackages.first { $0.packageID == request.appID }
+        require(
+            controller.phase == .failed
+                && controller.errorCode == PocketAppGenerationError.packageInvalid.code
+                && observed?.state == .disabled,
+            "generation_failed_activation_refreshes_disabled_management",
+            failures: &failures
+        )
     }
 
     private static func verifyCommittedReceiptSurvivesManagedRefreshFailure(
