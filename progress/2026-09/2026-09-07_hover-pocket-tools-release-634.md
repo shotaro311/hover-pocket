@@ -2,7 +2,7 @@
 
 ## 状態
 
-署名済み最終ビルドの受入とApple公証が完了。本番配信と公開物のreadbackを実行中。ユーザーが自然な操作と削除機能の受入通過後の本番配信を承認済み。
+完了。macOS 0.1.0 build634を署名・Apple公証・本番公開し、公開ZIP/appcastを別経路で取得して照合済み。ユーザーが自然な操作と削除機能の受入通過後の本番配信を承認済み。
 
 ## 変更
 
@@ -43,3 +43,19 @@
 - 公証前に全source digest、実行したバイナリのSHA256、build634、feed URLを読み戻し、実行後変更がないことを確認。検証用アプリだけを終了し、利用者の既存インストール633は起動を継続。
 
 - Apple公証は`Accepted`。staple、Gatekeeper、最終ZIP展開後の署名・公証確認がPASS。公証前後でテスト済み実行ファイルのSHA256が一致。配布物の値は`notarization.json`へ保存。
+
+## 本番公開
+
+- macOS `v0.1.0-634`を公開し、`macos-latest`のappcastと手動ZIPを更新。source tag `71f96d5`をremoteからreadback。
+- 対象sourceのGitHub「Verify Pocket Contracts」CIがsuccess（run 34114194978）。
+- Windows `win-v0.2.8`の8資産は、公開前後でID・サイズ・digest・更新時刻がすべて不変。
+- 公開物検証の既定はWindows正式署名基準のため、既存ベータmanifestに対して一度失敗。配布中のWindowsベータ仕様に合わせて`--windows-signing-gate beta`を明示し、両OSの公開物検証を実行し93項目がPASS。Windows正式版の署名条件を満たしたとは扱わない。
+
+## 完了readback
+
+- `release-readback.json`: macOS634 / Windows0.2.8、公開物93 checks PASS。
+- `macos-gatekeeper-readback.json`: 公開先から再取得したZIP3種はローカルの公証済みZIPとbyte-identical。appcast2箇所も同一。Deep/strict codesign、staple、Gatekeeper、Sparkle公開鍵とfeed、Google/current-location配布設定を確認。公開メタデータも最後に再取得した。
+- 公開ZIP SHA256: `d4257b95ab1009a9b733a7b8425c91b9cec2cb8db032fca13cf3c37afedf0839`。source tag: `71f96d5a662e35e1b60467641a8bae65b517e318`。
+- インストール済みアプリは633。既存アプリの置換はせず、アプリ内の更新確認または[macOS配布ZIP](https://github.com/shotaro311/hover-pocket/releases/download/macos-latest/HoverPocket-macOS-app.zip)から634へ更新できる。
+- 依頼範囲のローカル実装・隔離データでの削除検証・ソース保存・本番配信を追加確認なしで実施。Windowsの新機能実装/再配信、物理カメラ/音声、Google書き込みは今回実施していない。
+- [リリース](https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-634)。
