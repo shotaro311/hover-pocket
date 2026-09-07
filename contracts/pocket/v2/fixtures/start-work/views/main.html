@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>作業スタート</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f6f2;color:#202b25;font:16px/1.65 system-ui,sans-serif;padding:24px 16px}main{max-width:480px;margin:0 auto;background:#fff;border:1px solid #dce2db;border-radius:18px;padding:24px}h1{font-size:25px;margin:0 0 8px}p{margin:0 0 20px}.time{display:inline-block;background:#e7f1e8;color:#245135;border-radius:30px;padding:4px 14px;font-weight:700;margin-bottom:16px}label{display:block;font-weight:650;margin-bottom:8px}input{width:100%;padding:12px;border:1px solid #7c8b80;border-radius:8px;font:inherit}button{width:100%;border:0;border-radius:10px;background:#245b3e;color:white;padding:14px;font:inherit;font-weight:700;margin-top:18px;cursor:pointer}button:disabled{opacity:.55;cursor:default}input:focus-visible,button:focus-visible{outline:3px solid #447dc3;outline-offset:3px}.help{font-size:14px;color:#4b5a50;margin:14px 0 0}#status{margin-top:18px;overflow-wrap:anywhere} 
+</style></head><body><main>
+<div class="time">15分だけ集中</div><h1>作業を始めよう</h1><p>今から取り組むことを、ひとつ。</p>
+<label for="title">作業名</label><input id="title" type="text" placeholder="例：資料の下書き" autocomplete="off">
+<button id="start" type="button" disabled>15分タイマー ＋ 付箋</button>
+<p class="help">実行前にHoverPocketの確認が開きます。承認するとタイマーを開始し、同じ作業名の付箋を残します。付箋は毎回更新されます。</p>
+<p id="status" role="status" aria-live="polite">作業名を入力してください。</p>
+<p class="help">実行の成否・キャンセル・一部失敗は、HoverPocketの結果表示で確認してください。</p>
+</main><script>
+const field=document.getElementById('title');
+const button=document.getElementById('start');
+const status=document.getElementById('status');
+let busy=false;
+function update(){button.disabled=busy||!field.value.trim();}
+field.addEventListener('input',update);
+async function prepare(){
+ if(busy)return;
+ const title=field.value.trim();
+ if(!title){status.textContent='作業名を入力してください。';field.focus();return;}
+ busy=true;field.disabled=true;update();status.textContent='HoverPocketに確認を依頼しています…';
+ try{
+  await window.pocket.workflow('startWork',{title});
+  status.textContent='確認・実行結果はHoverPocketで確認してください。この画面では実行完了を判定しません。';
+ }catch(error){
+  status.textContent='確認の依頼でエラーが発生しました。実行状況はHoverPocketで確認してください。自動再試行はしません。';
+ }finally{busy=false;field.disabled=false;update();}
+}
+button.addEventListener('click',prepare);
+field.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.isComposing){event.preventDefault();prepare();}});
+</script></body></html>

@@ -1,0 +1,2 @@
+panel_soak_close_reason=resign_key
+FAIL panel soak: panel_soak_open_readback_failed iteration=5 visible=false selected=true voice_off=true voice_height=0.0 app_active=false key=false

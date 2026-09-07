@@ -4,23 +4,44 @@ import SwiftUI
 
 struct PocketAppGenerationSettingsView: View {
     @ObservedObject var controller: PocketAppGenerationController
+    @ObservedObject var settings: AppSettings
     let language: AppLanguage
+    var onOpenTool: ((String) -> Void)? = nil
 
     @State private var requestText = ""
     @State private var updateTarget: String?
     @State private var showRestoreConfirmation = false
+    @State private var showsPreview = false
+    @State private var removalTarget: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(localized(
-                japanese: "自然言語からPocket App定義を生成します。生成物はHostが再検証し、承認するまで導入されません。",
-                english: "Generate Pocket App definition files from natural language. The Host revalidates them and never installs before explicit approval."
+                japanese: "欲しいツールを言葉で伝えてください。試しながら修正し、使える形になったら追加できます。",
+                english: "Describe a tool you want. Try it, refine it, then add it to your panel."
             ))
             .font(.system(size: 10))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
 
             workspaceBackupControls
+
+            HStack {
+                Text("GPT-6 Astra")
+                Picker("推論の強さ", selection: $settings.pocketToolReasoningEffort) {
+                    if !controller.supportedReasoningEfforts.contains(settings.pocketToolReasoningEffort) {
+                        Text(settings.pocketToolReasoningEffort.capitalized + "（利用状況を確認中）").tag(settings.pocketToolReasoningEffort)
+                    }
+                    ForEach(controller.supportedReasoningEfforts, id: \.self) { effort in
+                        Text(effort.capitalized).tag(effort)
+                    }
+                }
+                Button { Task { await controller.refreshGeneratorModels() } } label: { Image(systemName: "arrow.clockwise") }
+                    .accessibilityLabel("利用可能な推論設定を確認")
+            }
+            Text("既定はMediumです。変更は次の生成から反映します。")
+                .font(.caption).foregroundStyle(.secondary)
+            if let status = controller.generatorStatus { Text(status).font(.caption).foregroundStyle(.orange) }
 
             TextEditor(text: $requestText)
                 .font(.system(size: 11))
@@ -31,8 +52,13 @@ struct PocketAppGenerationSettingsView: View {
                 )
 
             HStack(spacing: 8) {
+                if controller.draftCheckpoint != nil {
+                    Text("作成中: " + (controller.draftCheckpoint?.name ?? ""))
+                        .font(.caption)
+                    Button("別のツールを作る") { controller.startNewDraft(); updateTarget = nil }
+                }
                 if let updateTarget {
-                    Text(localized(japanese: "更新: \(updateTarget)", english: "Update: \(updateTarget)"))
+                    Text(localized(japanese: "更新: \(controller.packageTitle(updateTarget))", english: "Update: \(updateTarget)"))
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.secondary)
                     Button(localized(japanese: "解除", english: "Clear")) {
@@ -41,6 +67,8 @@ struct PocketAppGenerationSettingsView: View {
                 }
                 Spacer()
                 if controller.phase == .generating {
+                    ProgressView().controlSize(.small)
+                    Text("ツールを作成しています…").font(.caption).accessibilityAddTraits(.updatesFrequently)
                     Button(localized(japanese: "キャンセル", english: "Cancel")) {
                         controller.cancelGeneration()
                     }
@@ -58,7 +86,7 @@ struct PocketAppGenerationSettingsView: View {
                     .disabled(
                         requestText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             || !controller.isGeneratorAvailable
-                            || controller.pendingProposal != nil
+                            || (controller.pendingProposal != nil && controller.draftCheckpoint == nil)
                             || controller.pendingWorkspaceRestore != nil
                     )
                 }
@@ -66,8 +94,8 @@ struct PocketAppGenerationSettingsView: View {
 
             if !controller.isGeneratorAvailable {
                 Text(localized(
-                    japanese: "Codex CLIを検出できないため生成は利用できません。既存Pocket Appの管理は継続できます。",
-                    english: "Codex CLI is unavailable, so generation is disabled. Existing Pocket Apps can still be managed."
+                    japanese: "Codexの生成接続を準備できませんでした。Codexのインストールとログインを確認してください。",
+                    english: "The Codex connection could not be prepared. Check the installation and sign-in."
                 ))
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
@@ -77,27 +105,59 @@ struct PocketAppGenerationSettingsView: View {
                 proposalCard(proposal)
             }
 
-            if let receipt = controller.lastReceipt, receipt.readbackVerified {
-                Label(
-                    localized(
-                        japanese: "readback確認済み: \(receipt.action) \(receipt.packageID) \(receipt.version ?? "-") \(shortDigest(receipt.packageDigest))",
-                        english: "Readback verified: \(receipt.action) \(receipt.packageID) \(receipt.version ?? "-") \(shortDigest(receipt.packageDigest))"
-                    ),
-                    systemImage: "checkmark.seal.fill"
-                )
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.green)
+            if let issue = controller.historyIssue { Text(issue).font(.caption).foregroundStyle(.orange) }
+            if !controller.history.isEmpty {
+                DisclosureGroup("変更履歴（ツールごとに20件・100 MiBまで）") {
+                    ForEach(controller.history.prefix(60)) { checkpoint in
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(checkpoint.name + (checkpoint.kind == "installed" ? " · 導入済み" : checkpoint.kind == "restored" ? " · 履歴を復元" : " · 作成途中"))
+                                    .font(.caption.bold())
+                                Text(checkpoint.summary).font(.caption).lineLimit(2)
+                                Text(checkpoint.createdAt, format: .dateTime.month().day().hour().minute())
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("ここへ戻す") { controller.restoreCheckpoint(checkpoint) }
+                                .disabled(controller.phase == .generating || controller.phase == .installing)
+                        }.padding(.vertical, 4)
+                    }
+                    Text("復元で戻るのはツールの画面と動作です。記録したデータは保持します。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
 
-            if let errorCode = controller.errorCode {
-                Text(errorCode)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.red)
+            if let receipt = controller.lastReceipt, receipt.readbackVerified {
+                Label(controller.packageTitle(receipt.packageID) + "の変更を確認しました。", systemImage: "checkmark.seal.fill")
+                    .font(.caption).foregroundStyle(.green)
+            }
+
+            if let message = controller.errorMessage {
+                Text(message).font(.caption).foregroundStyle(.red)
+            }
+
+            if let message = controller.removalMessage {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+            }
+
+            if !controller.uninstalledPackages.isEmpty {
+                DisclosureGroup("アンインストール済み（記録を保持）") {
+                    ForEach(controller.uninstalledPackages, id: \.packageID) { package in
+                        HStack {
+                            Text(controller.packageTitle(package.packageID))
+                            Spacer()
+                            if let checkpoint = controller.history.first(where: { $0.packageID == package.packageID }) {
+                                Button("復元して確認") { controller.restoreCheckpoint(checkpoint) }
+                            }
+                            Button("記録も削除…", role: .destructive) { removalTarget = package.packageID }
+                        }.padding(.vertical, 4)
+                    }
+                }.disabled(controller.managementIsBusy)
             }
 
             if !controller.managedPackages.isEmpty {
                 Divider()
-                Text(localized(japanese: "Host管理中", english: "Host-managed"))
+                Text(localized(japanese: "追加したツール", english: "Your tools"))
                     .font(.system(size: 11, weight: .bold))
                 ForEach(controller.managedPackages, id: \.packageID) { package in
                     packageCard(package)
@@ -130,19 +190,58 @@ struct PocketAppGenerationSettingsView: View {
                             .disabled(controller.pendingWorkspaceRestore != nil)
                         }
                         Button(
-                            localized(japanese: "削除（データ保持）", english: "Remove, preserve data"),
+                            localized(japanese: "削除…", english: "Remove…"),
                             role: .destructive
                         ) {
-                            controller.removePreservingData(packageID: issue.packageID)
+                            removalTarget = issue.packageID
                         }
                         .font(.system(size: 9))
-                        .disabled(!issue.removalAllowed || controller.pendingWorkspaceRestore != nil)
+                        .disabled(!issue.removalAllowed || controller.managementIsBusy)
                     }
                     .padding(9)
                     .background(.orange.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 }
             }
+        }
+        .confirmationDialog("「\(removalTarget.map(controller.packageTitle) ?? "ツール")」を削除", isPresented: Binding(
+            get: { removalTarget != nil }, set: { if !$0 { removalTarget = nil } }
+        ), titleVisibility: .visible) {
+            if let packageID = removalTarget {
+                if controller.managedPackages.contains(where: { $0.packageID == packageID }) {
+                    Button("アンインストール（記録を残す）") {
+                        if updateTarget == packageID { updateTarget = nil; requestText = "" }
+                        controller.removeTool(packageID: packageID, includingData: false)
+                    }
+                }
+                Button("記録・作成履歴も削除", role: .destructive) {
+                    if updateTarget == packageID { updateTarget = nil; requestText = "" }
+                    controller.removeTool(packageID: packageID, includingData: true)
+                }
+            }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("記録を残すと、履歴からツールを戻せます。記録も削除すると、ツールの定義・保存した記録・作成履歴・アプリ内の移行前バックアップをゴミ箱へ移します。標準機能、作成した付箋・タイマー・予定、書き出したバックアップには影響しません。")
+        }
+        .task { await controller.refreshGeneratorModels() }
+        .sheet(isPresented: $showsPreview) {
+            VStack(spacing: 8) {
+                HStack {
+                    Text("ツールを試す").font(.headline)
+                    Spacer()
+                    Button("閉じる") { showsPreview = false }
+                }.padding()
+                Text("試し入力は導入後に引き継がれません。外部サービスへの操作は導入後に利用できます。")
+                    .font(.caption).foregroundStyle(.secondary).padding(.horizontal)
+                if let model = controller.previewModel {
+                    PocketSurfaceHostView(model: model).id(model.runtimeIdentity)
+                        .environment(\.panelTextSize, settings.panelTextSize)
+                        .frame(width: PanelLayout.previewSize(for: settings.panelSize).width,
+                               height: PanelLayout.previewSize(for: settings.panelSize).height - 60)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .padding([.horizontal, .bottom])
+                }
+            }.fixedSize(horizontal: true, vertical: true)
         }
         .alert(
             localized(japanese: "Pocket App workspaceを復元", english: "Restore Pocket App workspace"),
@@ -166,7 +265,7 @@ struct PocketAppGenerationSettingsView: View {
     private var workspaceBackupControls: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
-                Button(localized(japanese: "workspaceを書き出す", english: "Export workspace")) {
+                Button(localized(japanese: "ツールと記録をバックアップ", english: "Back up tools and records")) {
                     let panel = NSSavePanel()
                     panel.canCreateDirectories = true
                     panel.nameFieldStringValue = "HoverPocket-PocketApps.hoverpocket-backup.json"
@@ -174,7 +273,7 @@ struct PocketAppGenerationSettingsView: View {
                         controller.exportWorkspace(to: url)
                     }
                 }
-                Button(localized(japanese: "backupから復元", english: "Restore from backup")) {
+                Button(localized(japanese: "バックアップから復元", english: "Restore from backup")) {
                     let panel = NSOpenPanel()
                     panel.canChooseFiles = true
                     panel.canChooseDirectories = false
@@ -238,8 +337,8 @@ struct PocketAppGenerationSettingsView: View {
             }
 
             Text(localized(
-                japanese: "OAuth、credential、監査ログ、Codex workspaceは含みません。復元は全hash・schema・権限・dataを再検証します。",
-                english: "OAuth, credentials, audit logs, and Codex workspaces are excluded. Restore revalidates every hash, schema, permission, and data entry."
+                japanese: "ツールと保存した記録をまとめて保存します。ログイン情報は含みません。",
+                english: "Save your tools and records together. Sign-in information is not included."
             ))
             .font(.system(size: 9))
             .foregroundStyle(.secondary)
@@ -252,14 +351,25 @@ struct PocketAppGenerationSettingsView: View {
     @ViewBuilder
     private func proposalCard(_ proposal: PocketAppLifecycleProposal) -> some View {
         VStack(alignment: .leading, spacing: 6) {
+            if let migration = proposal.dataMigration {
+                Text("保存項目の変更を確認してください").font(.headline)
+                ForEach(migration.summary, id: \.self) { Text($0).font(.callout) }
+                Text("導入時に元のデータをバックアップします。確認後に記録が更新された場合は、再確認が必要になります。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             HStack {
-                Text("\(proposal.action.rawValue) · \(proposal.packageID) · v\(proposal.version)")
+                Text(controller.draftCheckpoint?.name ?? controller.packageTitle(proposal.packageID))
                     .font(.system(size: 11, weight: .bold))
                 Spacer()
-                Text(shortDigest(proposal.packageDigest))
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.secondary)
             }
+            if controller.previewModel != nil {
+                Button("プレビューで試す", systemImage: "play.rectangle") { showsPreview = true }
+                    .buttonStyle(.borderedProminent)
+                Text("修正したい点を上に入力すると、作成中のツールを続けて変更できます。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            DisclosureGroup("検証と権限の詳細") {
+            Text(shortDigest(proposal.packageDigest)).font(.caption.monospaced())
             Text(PocketAppGenerationApprovalPresentation.text(
                 proposal,
                 source: controller.pendingAllowsActivation ? "host-verified-package" : "codex-preview-only"
@@ -284,12 +394,13 @@ struct PocketAppGenerationSettingsView: View {
             Text("tests \(proposal.tests.filter { $0.status == $0.expected }.count)/\(proposal.tests.count)")
                 .font(.system(size: 9, design: .monospaced))
                 .fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
-                Button(localized(japanese: "拒否", english: "Reject"), role: .cancel) {
+                Button(localized(japanese: "導入を取り消す", english: "Cancel installation"), role: .cancel) {
                     controller.rejectPending()
                 }
                 Spacer()
-                Button(localized(japanese: "このbytesを承認して導入", english: "Approve exact bytes & install")) {
+                Button(localized(japanese: "このツールを追加・更新", english: "Add or update this tool")) {
                     controller.approveAndInstall(
                         requestID: proposal.requestID,
                         bindingDigest: proposal.bindingDigest
@@ -321,16 +432,13 @@ struct PocketAppGenerationSettingsView: View {
         let health = controller.appHealth.first { $0.packageID == package.packageID }
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(package.packageID)
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                Text(controller.packageTitle(package.packageID))
+                    .font(.system(size: 12, weight: .semibold))
                 Spacer()
-                Text("\(package.state.rawValue) · v\(package.version ?? "-")")
+                Text(package.state == .enabled ? "利用中" : "停止中")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
-            Text(shortDigest(package.packageDigest))
-                .font(.system(size: 8, design: .monospaced))
-                .foregroundStyle(.secondary)
             if let health {
                 HStack(spacing: 5) {
                     Image(systemName: health.status == .attention ? "exclamationmark.triangle.fill" : "heart.text.square")
@@ -340,7 +448,10 @@ struct PocketAppGenerationSettingsView: View {
                 .foregroundStyle(health.disableSuggested || health.status == .attention ? .orange : .secondary)
             }
             HStack(spacing: 7) {
-                Button(localized(japanese: "更新", english: "Update")) {
+                if package.state == .enabled, let onOpenTool {
+                    Button("パネルで開く") { onOpenTool(package.packageID) }
+                }
+                Button(localized(japanese: "会話で修正", english: "Refine")) {
                     updateTarget = package.packageID
                 }
                 if package.state == .enabled {
@@ -360,12 +471,12 @@ struct PocketAppGenerationSettingsView: View {
                     }
                 }
                 .disabled(rollbackVersions.isEmpty)
-                Button(localized(japanese: "削除（データ保持）", english: "Remove, preserve data"), role: .destructive) {
-                    controller.removePreservingData(packageID: package.packageID)
+                Button(localized(japanese: "削除…", english: "Remove…"), role: .destructive) {
+                    removalTarget = package.packageID
                 }
             }
             .font(.system(size: 9))
-            .disabled(controller.pendingWorkspaceRestore != nil)
+            .disabled(controller.managementIsBusy)
         }
         .padding(9)
         .background(.quaternary.opacity(0.18))

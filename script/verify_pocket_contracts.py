@@ -59,6 +59,8 @@ SUPPORTED_SCHEMA_KEYWORDS = frozenset(
         "const",
         "enum",
         "items",
+        "minProperties",
+        "maxProperties",
         "minItems",
         "maxItems",
         "uniqueItems",
@@ -586,6 +588,10 @@ class SchemaEngine:
             fail("SCHEMA_VALUE_INVALID", location, "value is not in enum")
 
         if isinstance(instance, dict):
+            if "minProperties" in schema and len(instance) < schema["minProperties"]:
+                fail("SCHEMA_VALUE_INVALID", location, "object has too few properties")
+            if "maxProperties" in schema and len(instance) > schema["maxProperties"]:
+                fail("SCHEMA_VALUE_INVALID", location, "object has too many properties")
             required = schema.get("required", [])
             for key in required:
                 if key not in instance:
@@ -846,7 +852,7 @@ def enforce_schema_policy(
             except re.error as exc:
                 fail("SCHEMA_POLICY_VIOLATION", node_location, f"invalid regex pattern: {exc}")
 
-        for keyword in ("minLength", "maxLength", "minItems", "maxItems"):
+        for keyword in ("minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties"):
             if keyword in node and (
                 not isinstance(node[keyword], int)
                 or isinstance(node[keyword], bool)
@@ -857,6 +863,8 @@ def enforce_schema_policy(
             fail("SCHEMA_POLICY_VIOLATION", node_location, "minLength exceeds maxLength")
         if "minItems" in node and "maxItems" in node and node["minItems"] > node["maxItems"]:
             fail("SCHEMA_POLICY_VIOLATION", node_location, "minItems exceeds maxItems")
+        if "minProperties" in node and "maxProperties" in node and node["minProperties"] > node["maxProperties"]:
+            fail("SCHEMA_POLICY_VIOLATION", node_location, "minProperties exceeds maxProperties")
         if "uniqueItems" in node and not isinstance(node["uniqueItems"], bool):
             fail("SCHEMA_POLICY_VIOLATION", node_location, "uniqueItems must be boolean")
 

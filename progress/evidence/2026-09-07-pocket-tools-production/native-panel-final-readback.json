@@ -1,0 +1,40 @@
+{
+  "build": "633",
+  "realHoverPanel": true,
+  "isolatedStorage": true,
+  "nativeActions": {
+    "cancelPersistedNoChanges": true,
+    "approvedTimerCount": 1,
+    "timerDurationSeconds": 900,
+    "approvedStickyCount": 1,
+    "receiptVisible": true
+  },
+  "historyRestore": {
+    "sameRecordID": "48de2091-49de-44de-82b7-0a90c627235b",
+    "retainedFields": {
+      "lastWatered": "2026-09-07",
+      "name": "窓辺のモンステラ"
+    },
+    "removedLocationPreservedInBackup": true
+  },
+  "panelChecks": [
+    "small panel",
+    "large panel",
+    "largest text in smallest panel",
+    "editor controls visible",
+    "native settings open provider",
+    "relaunch retains records",
+    "edit and save",
+    "restore confirmation and install"
+  ],
+  "standardCollection": {
+    "realAstraMediumGeneration": true,
+    "generatedPackage": "books-panel",
+    "smallPanelLargestText": true,
+    "invalidNumberPreservesInput": true,
+    "numeric42AndBooleanTruePersisted": true,
+    "searchNoMatchVisible": true,
+    "deleteConfirmationCancelPreservesRecord": true,
+    "recordVisibleAfterProcessRestart": true
+  }
+}

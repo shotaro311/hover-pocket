@@ -3,8 +3,8 @@ import Combine
 import SwiftUI
 
 enum SettingsWindowLayout {
-    static let preferredContentSize = NSSize(width: 620, height: 700)
-    static let minimumContentSize = NSSize(width: 520, height: 480)
+    static let preferredContentSize = NSSize(width: 820, height: 700)
+    static let minimumContentSize = NSSize(width: 700, height: 480)
     static let screenMargin: CGFloat = 24
     static let styleMask: NSWindow.StyleMask = [.titled, .closable, .resizable]
 
@@ -25,6 +25,7 @@ enum SettingsWindowLayout {
 
 @MainActor
 final class SettingsWindowController {
+    var onOpenProvider: ((PluginID) -> Void)?
     private let settings: AppSettings
     private let providerStore: ProviderStore
     private var window: NSWindow?
@@ -70,7 +71,9 @@ final class SettingsWindowController {
         window.isReleasedWhenClosed = false
         window.contentMinSize = SettingsWindowLayout.minimumContentSize(limitedTo: contentSize)
         let hostingController = NSHostingController(
-            rootView: SettingsView(settings: settings, providerStore: providerStore)
+            rootView: SettingsView(settings: settings, providerStore: providerStore, onOpenPocketApp: { [weak self] appID in
+                self?.onOpenProvider?(PluginID(rawValue: PocketSurfaceRegistry.generatedProviderID(appID: appID)))
+            })
         )
         hostingController.sizingOptions = []
         window.contentViewController = hostingController

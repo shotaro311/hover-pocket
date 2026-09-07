@@ -105,6 +105,8 @@ struct PocketAppGenerationRequest: Equatable, Sendable {
     let version: String
     let namespace: String
     let capabilities: [PocketAppGenerationCapability]
+    var previousFiles: [PocketAppGeneratedFile] = []
+    var reasoningEffort: String = "medium"
 
     var requestDigest: String {
         var hasher = SHA256()
@@ -118,6 +120,11 @@ struct PocketAppGenerationRequest: Equatable, Sendable {
         field(version)
         field(namespace)
         field(userRequest)
+        if reasoningEffort != "medium" { field("effort:" + reasoningEffort) }
+        for file in previousFiles.sorted(by: { $0.path < $1.path }) {
+            field("previous:" + file.path)
+            field(file.utf8)
+        }
         for capability in capabilities.sorted(by: {
             $0.id == $1.id ? $0.version < $1.version : $0.id < $1.id
         }) {
@@ -168,7 +175,7 @@ protocol PocketAppGenerationAdapter: Sendable {
     func generate(
         _ request: PocketAppGenerationRequest,
         cancellation: PocketAppGenerationCancellation
-    ) throws -> PocketAppGenerationEnvelope
+    ) async throws -> PocketAppGenerationEnvelope
 }
 
 extension PocketAppGenerationAdapter {
@@ -213,7 +220,7 @@ enum PocketAppGenerationContract {
         "type": "object",
         "required": ["path", "utf8"],
         "properties": {
-          "path": {"type": "string", "maxLength": 240, "pattern": "^(manifest\\.json|intent\\.md|data\\.schema\\.json|surfaces/[A-Za-z0-9._-]+\\.surface\\.json|workflows/[A-Za-z0-9._-]+\\.workflow\\.json|tests/[A-Za-z0-9._-]+\\.json)$"},
+          "path": {"type": "string", "maxLength": 240, "pattern": "^(manifest\\.json|intent\\.md|data\\.schema\\.json|surfaces/[A-Za-z0-9._-]+\\.surface\\.json|workflows/[A-Za-z0-9._-]+\\.workflow\\.json|tests/[A-Za-z0-9._-]+\\.json|collections/[A-Za-z0-9._-]+\\.schema\\.json|views/[A-Za-z0-9._-]+\\.html)$"},
           "utf8": {"type": "string", "maxLength": 1048576}
         },
         "additionalProperties": false
@@ -352,7 +359,7 @@ enum PocketAppGenerationApprovalPresentation {
 }
 
 struct PocketAppGenerationMaterializer {
-    private static let allowedPathPattern = "^(manifest\\.json|intent\\.md|data\\.schema\\.json|surfaces/[A-Za-z0-9._-]+\\.surface\\.json|workflows/[A-Za-z0-9._-]+\\.workflow\\.json|tests/[A-Za-z0-9._-]+\\.json)$"
+    private static let allowedPathPattern = "^(manifest\\.json|intent\\.md|data\\.schema\\.json|surfaces/[A-Za-z0-9._-]+\\.surface\\.json|workflows/[A-Za-z0-9._-]+\\.workflow\\.json|tests/[A-Za-z0-9._-]+\\.json|collections/[A-Za-z0-9._-]+\\.schema\\.json|views/[A-Za-z0-9._-]+\\.html)$"
     private static let windowsReservedNames: Set<String> = [
         "CON", "PRN", "AUX", "NUL",
         "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
@@ -466,7 +473,7 @@ struct PocketAppGenerationMaterializer {
         return result
     }
 
-    private static func safeGeneratedPath(_ value: String) -> Bool {
+    static func safeGeneratedPath(_ value: String) -> Bool {
         guard value.unicodeScalars.count <= 240,
               value.range(of: allowedPathPattern, options: .regularExpression) != nil,
               !value.hasPrefix("/"), !value.contains("\\"), !value.contains("\0") else {

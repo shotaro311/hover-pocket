@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "id": "9a91a009-2213-4506-a780-260598d039dc",
+  "packageID": "local.verification.tool0",
+  "name": "検証",
+  "version": "1.0.0",
+  "packageDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "createdAt": "2026-09-06T15:00:00.000Z",
+  "summary": "検証用",
+  "kind": "preview",
+  "validation": "contract-passed",
+  "byteCount": 2000
+}

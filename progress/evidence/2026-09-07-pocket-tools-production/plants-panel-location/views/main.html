@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>水やり記録</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:var(--pocket-background);color:var(--pocket-text);font-family:system-ui,sans-serif}main{padding:.65rem}button,input{font:inherit;border:1px solid var(--pocket-border);border-radius:var(--pocket-radius);background:var(--pocket-surface);color:var(--pocket-text);padding:.35rem .5rem}button{cursor:pointer;white-space:nowrap}button:disabled{opacity:.5;cursor:default}button:focus-visible,input:focus-visible{outline:2px solid var(--pocket-accent);outline-offset:2px}header,.actions{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}h1{font-size:1.05rem;margin:0;flex:1}h2{font-size:1rem;margin:0 0 .35rem}.primary{border-color:var(--pocket-accent)}input{width:100%;min-width:0}.search{display:block;margin:.5rem 0}.records{display:grid;gap:.3rem}.row{display:flex;align-items:center;gap:.45rem;border:1px solid var(--pocket-border);border-radius:var(--pocket-radius);padding:.4rem .5rem}.details{min-width:0;flex:1}.name{font-weight:600;overflow-wrap:anywhere}.meta,.hint,#status{color:var(--pocket-muted);font-size:.9rem}.meta{overflow-wrap:anywhere;margin-top:.1rem}.row .actions{flex-wrap:nowrap}p{margin:.45rem 0;overflow-wrap:anywhere}label{display:block;margin:.4rem 0 .2rem}.fields{display:grid;grid-template-columns:1fr 1fr;gap:0 .5rem}.wide{grid-column:1/-1}form .actions,#confirmation .actions{margin-top:.6rem}#error{border-left:2px solid var(--pocket-accent);padding-left:.5rem}#error:empty,#status:empty{display:none}[hidden]{display:none!important}@media(max-width:340px){.fields{grid-template-columns:1fr}.row{flex-wrap:wrap}.details{flex-basis:100%}}
+</style></head><body><main>
+<header><h1>水やり記録</h1><button id="refresh" type="button">更新</button><button id="add" class="primary" type="button" disabled>追加</button></header>
+<section id="overview"><label class="search"><span class="hint">植物名・置き場所で検索</span><input id="search" type="search" placeholder="植物名・置き場所" autocomplete="off"></label><div id="records" class="records"></div></section>
+<form id="editor" hidden><h2 id="editorTitle">植物を追加</h2><div class="fields"><div class="wide"><label for="plantName">植物名</label><input id="plantName" maxlength="120" required autocomplete="off"></div><div><label for="waterDate">最後に水をあげた日</label><input id="waterDate" type="date" required></div><div><label for="location">置き場所（任意）</label><input id="location" maxlength="120" autocomplete="off" placeholder="例：窓辺"></div></div><div class="actions"><button id="save" class="primary" type="submit">保存</button><button id="cancel" type="button">キャンセル</button></div></form>
+<section id="confirmation" hidden aria-labelledby="deleteTitle"><h2 id="deleteTitle">記録を削除しますか？</h2><p id="deleteName"></p><p class="hint">この植物の記録を削除します。元に戻せません。</p><div class="actions"><button id="deleteYes" type="button">削除する</button><button id="deleteNo" type="button">キャンセル</button></div></section>
+<p id="status" role="status" aria-live="polite"></p><p id="error" role="alert"></p>
+</main><script>
+const $=id=>document.getElementById(id);
+let snapshot=null,busy=false,editing=null,removing=null,baseRevision=null,blocked=false,origin=null;
+const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const panelOpen=()=>!$('editor').hidden||!$('confirmation').hidden;
+function lock(value){busy=value;document.querySelectorAll('button').forEach(b=>b.disabled=value);$('add').disabled=value||!snapshot||panelOpen();$('refresh').disabled=value||panelOpen();$('save').disabled=value||blocked;$('deleteYes').disabled=value||blocked;for(const id of ['plantName','waterDate','location'])$(id).disabled=value;}
+function draw(){
+ const records=$('records');records.replaceChildren();if(!snapshot)return;
+ const query=$('search').value.trim().toLocaleLowerCase();
+ const items=snapshot.records.filter(r=>(r.fields.name+' '+(r.fields.location||'')).toLocaleLowerCase().includes(query)).sort((a,b)=>a.fields.lastWatered.localeCompare(b.fields.lastWatered)||a.fields.name.localeCompare(b.fields.name,'ja'));
+ if(!items.length){const p=document.createElement('p');p.className='hint';p.textContent=snapshot.records.length?'一致する植物がありません。':'植物はまだありません。「追加」で記録しましょう。';records.append(p);}
+ for(const r of items){
+ const row=document.createElement('div');row.className='row';const details=document.createElement('div');details.className='details';
+ const name=document.createElement('div');name.className='name';name.textContent=r.fields.name;
+ const date=document.createElement('div');date.className='meta';date.textContent='最終水やり '+r.fields.lastWatered;
+ details.append(name,date);
+ if(r.fields.location){const location=document.createElement('div');location.className='meta';location.textContent='置き場所 '+r.fields.location;details.append(location);}
+ const actions=document.createElement('div');actions.className='actions';
+ for(const [title,fn] of [['編集',()=>openEditor(r)],['削除',()=>openDelete(r)]]){
+ const b=document.createElement('button');b.type='button';b.textContent=title;b.disabled=busy;b.dataset.record=r.id;b.dataset.action=title;b.setAttribute('aria-label',r.fields.name+'を'+title);b.onclick=()=>{origin={id:r.id,action:title};fn()};actions.append(b);
+ }row.append(details,actions);records.append(row);
+ }$('status').textContent=items.length+' / '+snapshot.records.length+'件 ・水やり日の古い順';
+}
+function clearError(){$('error').textContent=''}
+function closePanel(){
+ $('editor').hidden=true;$('confirmation').hidden=true;$('overview').hidden=false;editing=null;removing=null;blocked=false;draw();lock(false);
+ const target=Array.from($('records').querySelectorAll('button')).find(b=>origin&&b.dataset.record===origin.id&&b.dataset.action===origin.action);(target||$('add')).focus();
+}
+function openEditor(record){
+ clearError();editing=record?record.id:null;baseRevision=snapshot.revision;blocked=false;
+ $('overview').hidden=true;$('confirmation').hidden=true;$('editor').hidden=false;
+ $('editorTitle').textContent=record?'植物を編集':'植物を追加';
+ $('plantName').value=record?record.fields.name:'';$('waterDate').value=record?record.fields.lastWatered:today();$('location').value=record?(record.fields.location||''):'';
+ $('status').textContent='';lock(false);$('plantName').focus();
+}
+function openDelete(record){
+ clearError();removing=record.id;baseRevision=snapshot.revision;blocked=false;
+ $('overview').hidden=true;$('editor').hidden=true;$('confirmation').hidden=false;
+ $('deleteName').textContent=record.fields.name+' ・ '+record.fields.lastWatered;
+ $('status').textContent='';lock(false);$('deleteNo').focus();
+}
+async function refresh(){
+ if(busy||panelOpen())return;clearError();lock(true);$('status').textContent='読み込み中…';
+ try{snapshot=await pocket.collections.read('plants');draw();}
+ catch(e){$('error').textContent='記録を読み込めませんでした。「更新」で再試行してください。';$('status').textContent='';}
+ finally{lock(false);}
+}
+async function mutate(action,message){
+ lock(true);clearError();
+ try{snapshot=await action();closePanel();$('status').textContent=message;}
+ catch(e){blocked=true;try{snapshot=await pocket.collections.read('plants');}catch(readError){}
+ $('error').textContent='保存または削除できませんでした。他の画面での変更や接続の問題が考えられます。入力内容を確認し、キャンセルして「更新」で最新の一覧を読み込み、開き直してください。';
+ }finally{lock(false);}
+}
+$('add').onclick=()=>{if(panelOpen())return;origin=null;openEditor(null)};
+$('refresh').onclick=refresh;$('search').oninput=draw;
+$('cancel').onclick=$('deleteNo').onclick=()=>{if(!busy){clearError();closePanel()}};
+$('editor').onsubmit=event=>{
+ event.preventDefault();if(busy||blocked)return;
+ const name=$('plantName').value.trim(),lastWatered=$('waterDate').value,location=$('location').value.trim();
+ if(!name){$('error').textContent='植物名を入力してください。';$('plantName').focus();return;}
+ if(!$('editor').reportValidity())return;
+ const fields={name,lastWatered};if(location)fields.location=location;
+ const id=editing,revision=baseRevision;
+ mutate(()=>id?pocket.collections.update('plants',id,fields,revision):pocket.collections.insert('plants',fields,revision),'水やり記録を保存しました。');
+};
+$('deleteYes').onclick=()=>{if(!busy&&!blocked&&removing){const id=removing,revision=baseRevision;mutate(()=>pocket.collections.delete('plants',id,revision),'記録を削除しました。')}};
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!busy&&panelOpen()){event.preventDefault();clearError();closePanel()}});
+window.addEventListener('focus',refresh);refresh();
+</script></body></html>

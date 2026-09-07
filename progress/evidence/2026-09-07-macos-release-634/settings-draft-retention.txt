@@ -1,0 +1,42 @@
+The following is a diff from the previous accessibility tree for Window: "設定" with ~ and + representing changed and added elements, respectively. Removed elements are summarized by ID range.
+Removed element IDs: 48-51
+~				6 row (selected) 自作ツール
+~				9 row (selectable) データと履歴
+~		45 scroll area Secondary Actions: Scroll Up, Scroll Down
+~			46 text 自作ツール 欲しい機能を言葉で伝えて、作成・修正・管理できます。 ツールの作成と管理
+~			47 checkbox Description: AIネイティブ機能, Value: 1
++			48 text 欲しいツールを言葉で伝えてください。試しながら修正し、使える形になったら追加できます。
++			49 button ツールと記録をバックアップ
++			50 button バックアップから復元
++			51 text ツールと保存した記録をまとめて保存します。ログイン情報は含みません。 GPT-6 Astra
+~			52 pop up button 推論の強さ, Value: Medium
+~			53 button Description: 利用可能な推論設定を確認, ID: arrow.clockwise
++			54 text 既定はMediumです。変更は次の生成から反映します。
++			55 scroll area Secondary Actions: Scroll Up, Scroll Down
++				56 text entry area (settable) 設定切替でこの入力を保持
++				57 scroll bar (disabled, settable, float) 0
++			58 button 生成して検証
++			59 disclosure triangle Description: 変更履歴（ツールごとに20件・100 MiBまで）, Value: off
++			60 text 追加したツール 水やり記録 利用中
++			61 image Description: 正方形で囲まれたハートと文字, ID: heart.text.square
++			62 text 正常
++			63 button パネルで開く
++			64 button 会話で修正
++			65 button 無効化
++			66 menu button ロールバック
++			67 button 削除…
++			68 text 作業開始 利用中
++			69 image Description: 正方形で囲まれたハートと文字, ID: heart.text.square
++			70 text 正常
++			71 button パネルで開く
++			72 button 会話で修正
++			73 button 無効化
++			74 menu button (disabled) ロールバック
++			75 button 削除…
++			76 scroll bar (settable, float) 0
++				77 value indicator (settable, float) 0
++				78 increment arrow button
++				79 decrement arrow button
++				80 increment page button
++				81 decrement page button
+The focused UI element is 56 text entry area (settable) 設定切替でこの入力を保持

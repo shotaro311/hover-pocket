@@ -65,7 +65,10 @@ if CommandLine.arguments.contains("--verify-panel-soak") {
     let app = NSApplication.shared
     Task { @MainActor in
         do {
-            let result = try await PanelSoakVerificationCommand.run()
+            let packageDirectory = CommandLine.arguments.firstIndex(of: "--pocket-package").flatMap { index in
+                index + 1 < CommandLine.arguments.count ? URL(fileURLWithPath: CommandLine.arguments[index + 1]) : nil
+            }
+            let result = try await PanelSoakVerificationCommand.run(packageDirectory: packageDirectory)
             print("panel_soak_verify=ok")
             print("panel_soak_iterations=\(result.iterations)")
             print("panel_soak_provider_switches=\(result.providerSwitches)")
@@ -96,6 +99,113 @@ if CommandLine.arguments.contains("--export-personal-tool-contracts") {
     let data = try JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "operations": operations], options: [.prettyPrinted, .sortedKeys])
     print(String(decoding: data, as: UTF8.self))
     exit(0)
+}
+if let argument = CommandLine.arguments.firstIndex(of: "--preview-pocket-tools-panel"), argument + 1 < CommandLine.arguments.count {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.regular)
+    Task { @MainActor in
+        do { try await PocketToolsPreviewVerification.showPanel(root: URL(fileURLWithPath: CommandLine.arguments[argument + 1])) }
+        catch { print("FAIL pocket tools panel: \(error)"); exit(1) }
+    }
+    app.run()
+    exit(0)
+}
+
+if let argument = CommandLine.arguments.firstIndex(of: "--preview-pocket-tools"), argument + 1 < CommandLine.arguments.count {
+    let directory = URL(fileURLWithPath: CommandLine.arguments[argument + 1])
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do { try await PocketToolsPreviewVerification.show(packageDirectory: directory) }
+        catch { print("FAIL pocket tools preview: \(error)"); exit(1) }
+    }
+    app.run()
+    exit(0)
+}
+if let argument = CommandLine.arguments.firstIndex(of: "--verify-pocket-tools-generated-ui"), argument + 1 < CommandLine.arguments.count {
+    let directory = URL(fileURLWithPath: CommandLine.arguments[argument + 1])
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do {
+            let previousIndex = CommandLine.arguments.firstIndex(of: "--previous-tool")
+            let previous = previousIndex.flatMap { $0 + 1 < CommandLine.arguments.count ? URL(fileURLWithPath: CommandLine.arguments[$0 + 1]) : nil }
+            try await PocketToolsHTMLVerification.runGenerated(packageDirectory: directory, previousDirectory: previous)
+            exit(0)
+        } catch {
+            print("FAIL generated pocket tool UI: \(error)")
+            exit(1)
+        }
+    }
+    app.run()
+    exit(1)
+}
+if CommandLine.arguments.contains("--verify-pocket-tools-html") {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do {
+            try await PocketToolsHTMLVerification.run()
+            exit(0)
+        } catch {
+            print("FAIL pocket tools HTML: \(error)")
+            exit(1)
+        }
+    }
+    app.run()
+    exit(1)
+}
+if CommandLine.arguments.contains("--verify-pocket-tools-workflow") {
+    Task { @MainActor in
+        do { try await PocketToolsPlatformVerification.runLiveWorkflow(); exit(0) }
+        catch { print("FAIL pocket tools workflow generation: \(type(of: error))"); exit(1) }
+    }
+    dispatchMain()
+}
+
+if let argument = CommandLine.arguments.firstIndex(of: "--verify-pocket-tools-actions"), argument + 1 < CommandLine.arguments.count {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do { try await PocketToolsPlatformVerification.verifyGeneratedActions(packageDirectory: URL(fileURLWithPath: CommandLine.arguments[argument + 1])); exit(0) }
+        catch { print("FAIL generated actions: \(error)"); exit(1) }
+    }
+    app.run()
+    exit(1)
+}
+if let argument = CommandLine.arguments.firstIndex(of: "--verify-pocket-tools-edit"), argument + 1 < CommandLine.arguments.count {
+    let directory = URL(fileURLWithPath: CommandLine.arguments[argument + 1])
+    Task { @MainActor in
+        do {
+            try await PocketToolsPlatformVerification.runLiveEdit(packageDirectory: directory)
+            exit(0)
+        } catch {
+            print("FAIL pocket tools live edit: \(type(of: error))")
+            exit(1)
+        }
+    }
+    dispatchMain()
+}
+if CommandLine.arguments.contains("--verify-pocket-tools-generation") {
+    Task { @MainActor in
+        do {
+            try await PocketToolsPlatformVerification.runLiveGeneration()
+            exit(0)
+        } catch {
+            if let error = error as? PocketAppGenerationError { print("FAIL live pocket tools generation: \(error.code)") }
+            else { print("FAIL live pocket tools generation: \(type(of: error))") }
+            exit(1)
+        }
+    }
+    dispatchMain()
+}
+if CommandLine.arguments.contains("--verify-pocket-tools-platform") {
+    Task { @MainActor in
+        do {
+            try PocketToolsPlatformVerification.run()
+            exit(0)
+        } catch {
+            print("FAIL pocket tools platform: \(error)")
+            exit(1)
+        }
+    }
+    dispatchMain()
 }
 if CommandLine.arguments.contains("--verify-personal-tools") || CommandLine.arguments.contains("--verify-personal-calendar-read") {
     Task { @MainActor in

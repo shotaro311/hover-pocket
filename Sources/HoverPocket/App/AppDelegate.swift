@@ -42,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureVoiceRuntime()
         observeVoiceRuntimeSettings()
         observeVoiceE2EReceipt()
-        installMainMenu()
+        Self.installMainMenu(settingsTarget: self, settingsAction: #selector(openSettingsFromMainMenu))
         if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
             registerURLSchemeCallbackHandler()
         }
@@ -178,27 +178,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     userID: "local-user"
                 )
                 _ = activationRegistry.restoreEnabledApps()
-                let generator: (any PocketAppGenerationAdapter)?
-                if let executableURL = CodexPocketAppGenerationAdapter.resolveExecutable() {
-                    let credentialStore = OpenAIRealtimeKeychainStore()
-                    generator = try? CodexPocketAppGenerationAdapter(
-                        executableURL: executableURL,
-                        workspaceRoot: generationRoot.appendingPathComponent("CodexWorkspaces", isDirectory: true),
-                        credentialProvider: {
-                            guard let apiKey = try credentialStore.load() else {
-                                throw PocketAppGenerationError.generatorUnavailable
-                            }
-                            return try apiKey.withUTF8Bytes { bytes in
-                                guard let value = String(data: bytes, encoding: .utf8) else {
-                                    throw PocketAppGenerationError.generatorUnavailable
-                                }
-                                return value
-                            }
-                        }
-                    )
-                } else {
-                    generator = nil
-                }
+                let generator: (any PocketAppGenerationAdapter)? = try? CodexAppServerPocketGenerator(
+                    workspaceRoot: generationRoot.appendingPathComponent("CodexWorkspaces", isDirectory: true)
+                )
                 let appSettings = hoverWindowController.appSettings
                 generationController = try PocketAppGenerationController(
                     rootDirectory: generatedHostRoot,
@@ -215,6 +197,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             AINativeRuntime.shared.forgetManagedGeneratedProviderID(providerID)
                         }
                         return readback
+                    },
+                    generationSettings: appSettings,
+                    previewFactory: { package, dataRoot in
+                        var stores: [String: PocketCollectionStore] = [:]
+                        for (id, schema) in package.collections {
+                            stores[id] = try PocketCollectionStore(packageID: package.manifest.id,
+                                collectionID: id, schema: schema,
+                                rootDirectory: dataRoot.appendingPathComponent(String(package.stateSchemaDigest.dropFirst(7))))
+                        }
+                        let previewRuntime = PocketAppExecutionRuntime(package: package, broker: broker,
+                            userID: "local-preview", grantedPermissions: [], collectionStores: stores)
+                        let surfaceID = package.surfaces["main"] == nil ? package.surfaces.keys.sorted().first! : "main"
+                        return try PocketSurfaceHostModel(runtime: previewRuntime, surfaceID: surfaceID)
                     }
                 )
                 generatedActivationRegistry = activationRegistry
@@ -385,17 +380,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         OAuthURLCallbackCoordinator.shared.handle(url)
     }
 
-    private func installMainMenu() {
+    static func installMainMenu(settingsTarget: AnyObject?, settingsAction: Selector?) {
         let mainMenu = NSMenu()
 
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu(title: "HoverPocket")
         let settingsItem = NSMenuItem(
             title: "Settings…",
-            action: #selector(openSettingsFromMainMenu),
+            action: settingsAction,
             keyEquivalent: ","
         )
-        settingsItem.target = self
+        settingsItem.target = settingsTarget
         appMenu.addItem(settingsItem)
         appMenu.addItem(.separator())
         appMenu.addItem(NSMenuItem(title: "Quit HoverPocket", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
@@ -424,7 +419,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hoverWindowController.openSettingsFromMenu()
     }
 
-    private func menuItem(
+    private static func menuItem(
         _ title: String,
         action: String,
         key: String,

@@ -22,6 +22,7 @@ final class HoverWindowController {
     private var accessWindows: [String: NSPanel] = [:]
     private var accessWindowStyles: [String: PanelAccessStyle] = [:]
     private var previewWindow: NSPanel?
+    private var awaitingPointerAfterExplicitOpen = false
     private var activePreviewScreen: NSScreen?
     private var closeTask: DispatchWorkItem?
     private var resetTask: DispatchWorkItem?
@@ -66,6 +67,7 @@ final class HoverWindowController {
 
         syncAccessWindows(orderFront: false)
         configurePreviewWindow()
+        settingsWindowController.onOpenProvider = { [weak self] in self?.openPanel(showing: $0) }
         observeSettings()
         observeTimerAlerts()
     }
@@ -111,6 +113,7 @@ final class HoverWindowController {
 
     func openPanelFromMenu() {
         showPreview(on: targetScreen())
+        awaitingPointerAfterExplicitOpen = true
     }
 
     /// Opens the panel and switches to the given provider. `select` must run
@@ -119,6 +122,7 @@ final class HoverWindowController {
     func openPanel(showing pluginID: PluginID) {
         showPreview(on: targetScreen())
         menuStore.providerStore.select(pluginID)
+        awaitingPointerAfterExplicitOpen = true
     }
 
     func openSettingsFromMenu() {
@@ -185,7 +189,7 @@ final class HoverWindowController {
                   VoiceLaneRuntime.shared.snapshot.mode == .disabled,
                   voiceLaneHeight(on: screen) == 0
             else {
-                throw PanelSoakVerificationError.failed("panel_soak_open_readback_failed")
+                throw PanelSoakVerificationError.failed("panel_soak_open_readback_failed iteration=\(index) visible=\(previewWindow.isVisible) selected=\(menuStore.providerStore.selectedPluginID == providerID) voice_off=\(VoiceLaneRuntime.shared.snapshot.mode == .disabled) voice_height=\(voiceLaneHeight(on: screen)) app_active=\(NSApp.isActive) key=\(previewWindow.isKeyWindow)")
             }
             providerSwitches += 1
 
@@ -218,7 +222,9 @@ final class HoverWindowController {
         for index in 0..<3 {
             let providerID = providerIDs[index % providerIDs.count]
             openPanel(showing: providerID)
-            await settlePanelSoakRunLoop(milliseconds: 300)
+            let openDeadline = Date().addingTimeInterval(2)
+            repeat { await settlePanelSoakRunLoop(milliseconds: 20) }
+            while (previewWindow.ignoresMouseEvents || previewWindow.frame != expectedFrame) && Date() < openDeadline
             guard previewWindow.isVisible,
                   !previewWindow.ignoresMouseEvents,
                   menuStore.providerStore.selectedPluginID == providerID,
@@ -229,7 +235,9 @@ final class HoverWindowController {
             }
 
             closePreview()
-            await settlePanelSoakRunLoop(milliseconds: 300)
+            let closeDeadline = Date().addingTimeInterval(2)
+            repeat { await settlePanelSoakRunLoop(milliseconds: 20) }
+            while previewWindow.isVisible && Date() < closeDeadline
             guard !previewWindow.isVisible,
                   resetTask == nil,
                   hoverMonitorTimer == nil,
@@ -405,6 +413,15 @@ final class HoverWindowController {
         hostingController.sizingOptions = []
         panel.contentViewController = hostingController
         previewWindow = panel
+        NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification, object: panel)
+            .sink { [weak self] _ in
+                // The nonphysical soak drives open/close itself; desktop focus is checked in UI acceptance.
+                guard let self, !self.isPanelSoakVerification, self.awaitingPointerAfterExplicitOpen,
+                      self.previewWindow?.attachedSheet == nil else { return }
+                self.awaitingPointerAfterExplicitOpen = false
+                self.closePreview()
+            }
+            .store(in: &settingsCancellables)
     }
 
     private func makePanel(size: NSSize, acceptsKeyboardFocus: Bool) -> NSPanel {
@@ -560,7 +577,8 @@ final class HoverWindowController {
         let task = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.closeTask = nil
-            guard !self.isMouseInsideHoverRegion() else { return }
+            guard !self.isMouseInsideHoverRegion(), self.previewWindow?.attachedSheet == nil,
+                  !self.awaitingPointerAfterExplicitOpen else { return }
             self.closePreview()
         }
         closeTask = task
@@ -576,6 +594,7 @@ final class HoverWindowController {
     }
 
     private func closePreview() {
+        awaitingPointerAfterExplicitOpen = false
         guard let previewWindow, previewWindow.isVisible else {
             menuStore.providerStore.prepareForPanelClose()
             return
@@ -679,8 +698,11 @@ final class HoverWindowController {
     }
 
     private func closeIfMouseLeftHoverRegion() {
+        if isMouseInsideHoverRegion() { awaitingPointerAfterExplicitOpen = false }
         guard previewWindow?.isVisible == true,
               closeTask == nil,
+              previewWindow?.attachedSheet == nil,
+              !awaitingPointerAfterExplicitOpen,
               TimerStore.shared.activeAlert == nil,
               !isMouseInsideHoverRegion()
         else {

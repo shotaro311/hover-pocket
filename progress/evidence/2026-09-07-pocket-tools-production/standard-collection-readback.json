@@ -1,0 +1,15 @@
+{
+  "formatVersion": 1,
+  "records": [
+    {
+      "fields": {
+        "finished": true,
+        "pagesRead": 42,
+        "title": "本番パネルで読む本"
+      },
+      "id": "8d62adc6-a1c8-4b20-9a7a-699b3ec5cdba"
+    }
+  ],
+  "revision": 1,
+  "schemaVersion": 1
+}

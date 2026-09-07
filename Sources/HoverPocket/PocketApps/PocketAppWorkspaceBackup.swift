@@ -38,6 +38,7 @@ struct PocketAppWorkspaceBackupFile: Equatable, Sendable {
 
 struct PocketAppWorkspaceBackupArchive: Equatable, Sendable {
     static let schema = "hoverpocket.pocket-app-workspace-backup/v1"
+    static let schemaV2 = "hoverpocket.pocket-app-workspace-backup/v2"
 
     let createdAt: Date
     let sourcePlatform: String
@@ -113,6 +114,7 @@ final class PocketAppWorkspaceBackupManager {
     private struct PendingRestore {
         let proposal: PocketAppWorkspaceRestoreProposal
         let validated: ValidatedArchive
+        let sourceDigests: [String: String]
     }
 
     private struct IssuedGrant {
@@ -196,7 +198,9 @@ final class PocketAppWorkspaceBackupManager {
         let changes = try restoreChanges(validated)
         let backupDigest = Self.sha256(data)
         let previewBytes = try Self.canonicalPreview(changes)
-        let bindingDigest = Self.sha256(Data((backupDigest + "\n").utf8) + previewBytes)
+        let sourceDigests = try currentDataDigests(validated.archive.apps.map(\.appID))
+        let sourceBytes = try JSONSerialization.data(withJSONObject: sourceDigests, options: [.sortedKeys])
+        let bindingDigest = Self.sha256(Data((backupDigest + "\n").utf8) + previewBytes + sourceBytes)
         let requestID = "workspace-restore-approval:\(UUID().uuidString.lowercased())"
         let proposal = PocketAppWorkspaceRestoreProposal(
             requestID: requestID,
@@ -206,7 +210,7 @@ final class PocketAppWorkspaceBackupManager {
             createdAt: now,
             expiresAt: now.addingTimeInterval(Self.approvalLifetime)
         )
-        pending[requestID] = PendingRestore(proposal: proposal, validated: validated)
+        pending[requestID] = PendingRestore(proposal: proposal, validated: validated, sourceDigests: sourceDigests)
         return proposal
     }
 
@@ -260,6 +264,7 @@ final class PocketAppWorkspaceBackupManager {
             throw failure("RESTORE_PROPOSAL_CHANGED")
         }
         guard let grant else { throw failure("RESTORE_APPROVAL_REQUIRED") }
+        guard try currentDataDigests(item.validated.archive.apps.map(\.appID)) == item.sourceDigests else { throw failure("RESTORE_PROPOSAL_CHANGED") }
         let currentPreview = try Self.canonicalPreview(restoreChanges(item.validated))
         let approvedPreview = try Self.canonicalPreview(proposal.changes)
         guard currentPreview == approvedPreview else { throw failure("RESTORE_PROPOSAL_CHANGED") }
@@ -341,15 +346,11 @@ final class PocketAppWorkspaceBackupManager {
             let permissions = Set(loadedActive.manifest.requestedCapabilities
                 .flatMap { $0.permissions })
                 .sorted()
-            let stateBytes = try validatedStateBytes(
-                appID: managedPackage.packageID,
-                stateProperties: loadedActive.stateProperties,
-                sourceRoot: userDataRoot,
-                defaultIfMissing: Data("{}".utf8)
-            )
+            let stateBytes = try captureData(package: loadedActive)
+            let dataVersion = loadedActive.collections.isEmpty ? 1 : 2
             let dataDigest = Self.sha256(stateBytes)
             files.append(PocketAppWorkspaceBackupFile(
-                path: "data/\(managedPackage.packageID)/state.json",
+                path: "data/\(managedPackage.packageID)/\(dataVersion == 1 ? "state.json" : "data.json")",
                 size: stateBytes.count,
                 sha256: dataDigest,
                 bytes: stateBytes
@@ -382,7 +383,7 @@ final class PocketAppWorkspaceBackupManager {
                 installedVersions: packages.map {
                     PocketAppWorkspaceInstalledVersion(version: $0.version, packageDigest: $0.digest)
                 },
-                dataVersion: 1,
+                dataVersion: dataVersion,
                 dataDigest: dataDigest
             ))
         }
@@ -419,7 +420,7 @@ final class PocketAppWorkspaceBackupManager {
             expected: ["schema", "createdAt", "sourcePlatform", "hostVersion", "apps", "files"],
             code: "RESTORE_DOCUMENT_INVALID"
         )
-        guard object["schema"] as? String == PocketAppWorkspaceBackupArchive.schema,
+        guard [PocketAppWorkspaceBackupArchive.schema, PocketAppWorkspaceBackupArchive.schemaV2].contains(object["schema"] as? String ?? ""),
               let createdAtText = object["createdAt"] as? String,
               let createdAt = Self.parseDate(createdAtText),
               let sourcePlatform = object["sourcePlatform"] as? String,
@@ -450,7 +451,8 @@ final class PocketAppWorkspaceBackupManager {
                   Self.safeArchivePath(path),
                   Self.validDigest(digest),
                   sizeNumber.intValue == bytes.count,
-                  bytes.count <= PocketAppPackageRuntime.maximumFileBytes,
+                  bytes.count <= (path.hasPrefix("data/") && path.hasSuffix("/data.json")
+                    ? Self.maximumDecodedBytes : PocketAppPackageRuntime.maximumFileBytes),
                   Self.sha256(bytes) == digest,
                   filePaths.insert(path).inserted,
                   foldedPaths.insert(path.lowercased()).inserted else {
@@ -492,8 +494,8 @@ final class PocketAppWorkspaceBackupManager {
                   state == .enabled || state == .disabled,
                   let rawPermissions = item["effectivePermissions"] as? [Any],
                   let rawVersions = item["installedVersions"] as? [Any],
-                  let dataVersionNumber = item["dataVersion"] as? NSNumber,
-                  dataVersionNumber.intValue == 1,
+                  let dataVersion = PocketCollectionSchema.integer(item["dataVersion"]),
+                  (object["schema"] as? String == PocketAppWorkspaceBackupArchive.schema ? [1] : [1, 2]).contains(dataVersion),
                   let dataDigest = item["dataDigest"] as? String,
                   Self.validDigest(dataDigest) else {
                 throw failure("RESTORE_APP_INVALID")
@@ -536,7 +538,7 @@ final class PocketAppWorkspaceBackupManager {
                 lifecycleState: state,
                 effectivePermissions: permissions,
                 installedVersions: versions,
-                dataVersion: 1,
+                dataVersion: dataVersion,
                 dataDigest: dataDigest
             ))
         }
@@ -578,15 +580,12 @@ final class PocketAppWorkspaceBackupManager {
                   observedPermissions == app.effectivePermissions else {
                 throw failure("RESTORE_APP_BINDING_MISMATCH")
             }
-            let dataPath = "data/\(app.appID)/state.json"
+            guard app.dataVersion == (loadedActive.collections.isEmpty ? 1 : 2) else { throw failure("RESTORE_DATA_VERSION_INVALID") }
+            let dataPath = "data/\(app.appID)/\(app.dataVersion == 1 ? "state.json" : "data.json")"
             guard let stateFile = filesByPath[dataPath], stateFile.sha256 == app.dataDigest else {
                 throw failure("RESTORE_DATA_MISSING")
             }
-            _ = try validatedStateBytes(
-                appID: app.appID,
-                stateProperties: loadedActive.stateProperties,
-                bytes: stateFile.bytes
-            )
+            try validateData(package: loadedActive, bytes: stateFile.bytes)
             expectedPaths.insert(dataPath)
             packages[app.appID] = payloads
             userData[app.appID] = stateFile.bytes
@@ -619,7 +618,7 @@ final class PocketAppWorkspaceBackupManager {
             } else {
                 currentPermissions = []
             }
-            let currentData = try? currentStateBytes(appID: app.appID)
+            let currentData = try? lifecycle.currentPackage(packageID: app.appID, includingDisabled: true).map { try captureData(package: $0) }
             let targetData = validated.userData[app.appID] ?? Data()
             changes.append(PocketAppWorkspaceRestoreChange(
                 appID: app.appID,
@@ -645,54 +644,65 @@ final class PocketAppWorkspaceBackupManager {
         let appIDs = Set(validated.archive.apps.map(\.appID))
         try removeApps(appIDs, now: now)
         for app in validated.archive.apps {
-            guard let payloads = validated.packages[app.appID],
-                  let stateBytes = validated.userData[app.appID] else {
-                throw failure("RESTORE_PACKAGE_MISSING")
-            }
-            for payload in payloads {
-                let draft = transactionRoot
-                    .appendingPathComponent("draft-\(UUID().uuidString.lowercased())", isDirectory: true)
-                defer { try? FileManager.default.removeItem(at: draft) }
-                try materialize(payload.files, at: draft)
-                let proposal = try lifecycle.stage(draftDirectory: draft, now: now)
-                guard proposal.packageID == app.appID,
-                      proposal.version == payload.version,
-                      proposal.packageDigest == payload.digest else {
-                    throw failure("RESTORE_PACKAGE_CHANGED")
+            try PocketToolDataLock.withLock(rootDirectory: userDataRoot, packageID: app.appID) {
+                guard let payloads = validated.packages[app.appID],
+                      let stateBytes = validated.userData[app.appID] else {
+                    throw failure("RESTORE_PACKAGE_MISSING")
                 }
-                let grant = try lifecycle.approve(
-                    requestID: proposal.requestID,
-                    bindingDigest: proposal.bindingDigest,
-                    now: now
-                )
-                _ = try lifecycle.install(proposal, approvalGrant: grant, now: now)
-            }
-            let current = try lifecycle.managedPackage(packageID: app.appID)
-            if current?.version != app.activeVersion || current?.packageDigest != app.activePackageDigest {
-                let rollback = try lifecycle.prepareRollback(
-                    packageID: app.appID,
-                    version: app.activeVersion,
-                    now: now
-                )
-                guard rollback.packageDigest == app.activePackageDigest else {
-                    throw failure("RESTORE_ACTIVE_PACKAGE_MISMATCH")
+                let existingData = userDataRoot.appendingPathComponent(app.appID)
+                if app.dataVersion == 2, FileManager.default.fileExists(atPath: existingData.path) {
+                    _ = try PocketToolDataMigration.capture(directory: existingData)
+                    let preservedRoot = transactionRoot.appendingPathComponent("PriorData/" + app.appID)
+                    _ = try PocketAppPinnedDirectory(url: preservedRoot)
+                    let preserved = preservedRoot.appendingPathComponent(UUID().uuidString)
+                    try FileManager.default.moveItem(at: existingData, to: preserved)
                 }
-                let grant = try lifecycle.approve(
-                    requestID: rollback.requestID,
-                    bindingDigest: rollback.bindingDigest,
-                    now: now
-                )
-                _ = try lifecycle.rollback(rollback, approvalGrant: grant, now: now)
-            }
-            try replaceState(appID: app.appID, bytes: stateBytes)
-            if app.lifecycleState == .disabled {
-                _ = try lifecycle.disable(packageID: app.appID, now: now)
-            }
-            if allowFailureInjection, failureInjection?("after_app_commit") == true {
-                throw failure("RESTORE_INJECTED_FAILURE")
-            }
-            if verifyRuntime {
-                try verifyFinalRuntime(app)
+                for payload in payloads {
+                    let draft = transactionRoot
+                        .appendingPathComponent("draft-\(UUID().uuidString.lowercased())", isDirectory: true)
+                    defer { try? FileManager.default.removeItem(at: draft) }
+                    try materialize(payload.files, at: draft)
+                    let proposal = try lifecycle.stage(draftDirectory: draft, now: now)
+                    guard proposal.packageID == app.appID,
+                          proposal.version == payload.version,
+                          proposal.packageDigest == payload.digest else {
+                        throw failure("RESTORE_PACKAGE_CHANGED")
+                    }
+                    let grant = try lifecycle.approve(
+                        requestID: proposal.requestID,
+                        bindingDigest: proposal.bindingDigest,
+                        now: now
+                    )
+                    _ = try lifecycle.install(proposal, approvalGrant: grant, now: now)
+                }
+                let current = try lifecycle.managedPackage(packageID: app.appID)
+                if current?.version != app.activeVersion || current?.packageDigest != app.activePackageDigest {
+                    let rollback = try lifecycle.prepareRollback(
+                        packageID: app.appID,
+                        version: app.activeVersion,
+                        now: now
+                    )
+                    guard rollback.packageDigest == app.activePackageDigest else {
+                        throw failure("RESTORE_ACTIVE_PACKAGE_MISMATCH")
+                    }
+                    let grant = try lifecycle.approve(
+                        requestID: rollback.requestID,
+                        bindingDigest: rollback.bindingDigest,
+                        now: now
+                    )
+                    _ = try lifecycle.rollback(rollback, approvalGrant: grant, now: now)
+                }
+                let activePayload = try packagePayload(payloads, version: app.activeVersion, digest: app.activePackageDigest)
+                try replaceData(package: loadPackage(activePayload), bytes: stateBytes)
+                if app.lifecycleState == .disabled {
+                    _ = try lifecycle.disable(packageID: app.appID, now: now)
+                }
+                if allowFailureInjection, failureInjection?("after_app_commit") == true {
+                    throw failure("RESTORE_INJECTED_FAILURE")
+                }
+                if verifyRuntime {
+                    try verifyFinalRuntime(app)
+                }
             }
         }
     }
@@ -705,7 +715,8 @@ final class PocketAppWorkspaceBackupManager {
                   current.state == app.lifecycleState else {
                 throw failure("RESTORE_LIFECYCLE_READBACK_MISMATCH")
             }
-            let stateBytes = try currentStateBytes(appID: app.appID)
+            guard let package = try lifecycle.currentPackage(packageID: app.appID, includingDisabled: true) else { throw failure("RESTORE_PACKAGE_MISSING") }
+            let stateBytes = try captureData(package: package)
             guard Self.sha256(stateBytes) == app.dataDigest else {
                 throw failure("RESTORE_DATA_READBACK_MISMATCH")
             }
@@ -837,6 +848,80 @@ final class PocketAppWorkspaceBackupManager {
         return try validatedStateBytes(appID: appID, stateProperties: stateProperties, bytes: bytes)
     }
 
+    private func captureData(package: PocketAppPackage) throws -> Data {
+        try PocketToolDataLock.withLock(rootDirectory: userDataRoot, packageID: package.manifest.id) {
+            try captureDataWhileLocked(package: package)
+        }
+    }
+
+    private func currentDataDigests(_ appIDs: [String]) throws -> [String: String] {
+        var result: [String: String] = [:]
+        for id in appIDs {
+            result[id] = try PocketToolDataLock.withLock(rootDirectory: userDataRoot, packageID: id) {
+                try PocketToolDataMigration.digest(PocketToolDataMigration.capture(directory: userDataRoot.appendingPathComponent(id)))
+            }
+        }
+        return result
+    }
+
+    private func captureDataWhileLocked(package: PocketAppPackage) throws -> Data {
+        let state = try validatedStateBytes(appID: package.manifest.id, stateProperties: package.stateProperties,
+            sourceRoot: userDataRoot, defaultIfMissing: Data("{}".utf8))
+        if package.collections.isEmpty { return state }
+        var collections: [String: Any] = [:]
+        for (id, schema) in package.collections {
+            let store = try PocketCollectionStore(packageID: package.manifest.id, collectionID: id,
+                schema: schema, rootDirectory: userDataRoot)
+            collections[id] = try store.snapshot().json
+        }
+        return try JSONSerialization.data(withJSONObject: ["formatVersion": 2,
+            "state": JSONSerialization.jsonObject(with: state), "collections": collections], options: [.sortedKeys])
+    }
+
+    private func dataParts(package: PocketAppPackage, bytes: Data) throws -> (state: Data, collections: [String: Data]) {
+        if package.collections.isEmpty { return (bytes, [:]) }
+        guard bytes.count <= Self.maximumDecodedBytes,
+              let object = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+              Set(object.keys) == ["formatVersion", "state", "collections"],
+              PocketCollectionSchema.integer(object["formatVersion"]) == 2,
+              let state = object["state"] as? [String: Any],
+              let collections = object["collections"] as? [String: [String: Any]],
+              Set(collections.keys) == Set(package.collections.keys) else { throw failure("RESTORE_DATA_INVALID") }
+        return (try JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]),
+            try collections.mapValues { try JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys]) })
+    }
+
+    private func validateData(package: PocketAppPackage, bytes: Data) throws {
+        let parts = try dataParts(package: package, bytes: bytes)
+        _ = try validatedStateBytes(appID: package.manifest.id, stateProperties: package.stateProperties, bytes: parts.state)
+        if parts.collections.isEmpty { return }
+        let root = transactionRoot.appendingPathComponent("validate-collections-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = root.appendingPathComponent(package.manifest.id).appendingPathComponent("Collections")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        for (id, data) in parts.collections {
+            guard let schema = package.collections[id], data.count <= PocketCollectionStore.maximumBytes else { throw failure("RESTORE_DATA_INVALID") }
+            try data.write(to: directory.appendingPathComponent(id + ".json"), options: .withoutOverwriting)
+            let store = try PocketCollectionStore(packageID: package.manifest.id, collectionID: id, schema: schema, rootDirectory: root)
+            _ = try store.snapshot()
+        }
+    }
+
+    private func replaceData(package: PocketAppPackage, bytes: Data) throws {
+        try validateData(package: package, bytes: bytes)
+        let parts = try dataParts(package: package, bytes: bytes)
+        try replaceState(appID: package.manifest.id, bytes: parts.state)
+        if !parts.collections.isEmpty {
+            let directory = try PocketAppPinnedDirectory(url: userDataRoot.appendingPathComponent(package.manifest.id).appendingPathComponent("Collections"))
+            for (id, data) in parts.collections {
+                try directory.validate()
+                try data.write(to: directory.url.appendingPathComponent(id + ".json"), options: .atomic)
+                try directory.validate()
+            }
+        }
+        guard try captureData(package: package) == bytes else { throw failure("RESTORE_DATA_READBACK_MISMATCH") }
+    }
+
     private func validatedStateBytes(
         appID: String,
         stateProperties: [String: PocketAppStatePropertySchema],
@@ -891,7 +976,7 @@ final class PocketAppWorkspaceBackupManager {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let object: [String: Any] = [
-            "schema": PocketAppWorkspaceBackupArchive.schema,
+            "schema": archive.apps.contains(where: { $0.dataVersion == 2 }) ? PocketAppWorkspaceBackupArchive.schemaV2 : PocketAppWorkspaceBackupArchive.schema,
             "createdAt": formatter.string(from: archive.createdAt),
             "sourcePlatform": archive.sourcePlatform,
             "hostVersion": archive.hostVersion,
@@ -1008,7 +1093,7 @@ final class PocketAppWorkspaceBackupManager {
         if components.first == "data" {
             return components.count == 3
                 && validAppID(String(components[1]))
-                && components[2] == "state.json"
+                && ["state.json", "data.json"].contains(String(components[2]))
         }
         guard components.first == "apps", components.count >= 7,
               validAppID(String(components[1])), components[2] == "versions",

@@ -1,0 +1,17 @@
+The following is a diff from the previous accessibility tree for Window: "設定" with ~ and + representing changed and added elements, respectively. Removed elements are summarized by ID range.
+Removed element IDs: 54-55, 66-68
++			51 button (disabled) 生成して検証
++			52 disclosure triangle Description: 変更履歴（ツールごとに20件・100 MiBまで）, Value: off
++			53 text 水やり記録の変更を確認しました。 追加したツール 水やり記録 利用中
+~			75 image Description: 正方形で囲まれたハートと文字, ID: heart.text.square
+~			76 text 正常
+~			77 button パネルで開く
+~			78 button 会話で修正
+~			79 button 無効化
+~			80 menu button (disabled) ロールバック
+~			81 button 削除…
+~			82 text 作業開始 利用中
+Selected:
+	33 row (selected)
+
+Note: Pay special attention to the content selected by the user. If the user asks a question or refers to the content they are looking at on-screen, they might be referring to the selected content (but they might be referring to something else that's visible, too).

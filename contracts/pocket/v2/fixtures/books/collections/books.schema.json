@@ -1,0 +1,1 @@
+{"$schema":"hoverpocket://schemas/pocket-collection/v1","schemaVersion":1,"title":"読みたい本","fields":{"title":{"title":"タイトル","type":"string","required":true,"nullable":false},"author":{"title":"著者","type":"string","required":false,"nullable":false},"finished":{"title":"読了","type":"boolean","required":false,"nullable":false}}}

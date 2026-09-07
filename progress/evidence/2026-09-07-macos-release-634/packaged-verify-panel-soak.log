@@ -1,0 +1,13 @@
+panel_soak_verify=ok
+panel_soak_iterations=100
+panel_soak_provider_switches=100
+panel_soak_recovery_cycles=5
+panel_soak_animated_transition_cycles=3
+panel_soak_warm_open_max_ms=90.451
+panel_soak_windows=3->3
+panel_soak_threads=16->23,max=23
+panel_soak_rss_mib=115.188->121.266
+panel_soak_rss_growth_limit_mib=64
+panel_soak_sockets=1->2
+panel_soak_children=0->0
+PASS panel soak: Voice OFF, 100 open/close, local provider switching, recovery, and bounded resources

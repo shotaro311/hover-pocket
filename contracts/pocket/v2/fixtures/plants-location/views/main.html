@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>水やり記録</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f2f6f1;color:#203d30;font-family:system-ui,sans-serif;line-height:1.6}main{max-width:960px;margin:auto;padding:20px}header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}h1{font-size:1.6rem;margin:0}h2{font-size:1.15rem;margin:0 0 12px}p{margin:8px 0}button,input{font:inherit}button{cursor:pointer;border:1px solid #64816c;border-radius:8px;padding:8px 14px;background:white;color:#244932}button.primary{background:#275d3b;color:white}button.danger{color:#9d2828;border-color:#b86d6d}button:disabled{opacity:.5;cursor:wait}input{width:100%;padding:9px;border:1px solid #748879;border-radius:7px;background:white;color:#203d30}label{display:block;margin-bottom:12px}form{background:white;padding:18px;border:1px solid #ccd9ce;border-radius:12px;margin:18px 0}.inputs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:0 18px}.actions{display:flex;gap:8px;flex-wrap:wrap}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:16px}.card{background:white;border:1px solid #cbd9ce;border-top:4px solid #628c60;border-radius:12px;padding:18px;overflow-wrap:anywhere}.date{font-size:1.3rem;font-weight:650;margin-bottom:16px}.location{white-space:pre-wrap;margin-bottom:16px}.muted{color:#526958;font-size:.9rem}#error{background:#fff0ee;color:#92251b;padding:12px;border:1px solid #d59b91;border-radius:8px;margin-top:12px}#error:empty{display:none}:focus-visible{outline:3px solid #a07919;outline-offset:3px}
+</style></head>
+<body><main>
+<header><h1>水やり記録</h1><button id="refresh" type="button">再読み込み</button></header>
+<p class="muted">植物ごとに、最後の水やりと置き場所を記録しましょう。</p>
+<div id="error" role="alert"></div><p id="status" role="status" aria-live="polite"></p>
+<form id="form"><h2 id="formTitle">植物を追加</h2>
+<div class="inputs"><label>植物名<input id="name" required maxlength="120" autocomplete="off" placeholder="例：モンステラ"></label>
+<label>最後に水をあげた日<input id="date" type="date" required></label>
+<label>置いている場所（任意）<input id="location" type="text" autocomplete="off" placeholder="例：リビングの窓辺"></label></div>
+<div class="actions"><button id="save" class="primary" type="submit">追加して保存</button><button id="cancel" type="button" hidden>編集をやめる</button></div></form>
+<section aria-label="植物一覧"><div id="cards" class="cards"></div></section>
+</main><script>
+(function(){
+'use strict';
+const el=id=>document.getElementById(id);
+let snapshot=null,busy=false,editing=null,pendingDelete=null,needsRefresh=false;
+function lock(value){busy=value;el('refresh').disabled=value;el('name').disabled=value;el('date').disabled=value;el('location').disabled=value;el('save').disabled=value||!snapshot||needsRefresh;el('cancel').disabled=value;document.querySelectorAll('#cards button').forEach(b=>b.disabled=value||needsRefresh);}
+function reset(){editing=null;el('form').reset();el('formTitle').textContent='植物を追加';el('save').textContent='追加して保存';el('cancel').hidden=true;}
+function button(label,action,kind){const b=document.createElement('button');b.type='button';b.textContent=label;if(kind)b.className=kind;b.addEventListener('click',action);return b;}
+function render(){
+const cards=el('cards');cards.replaceChildren();
+if(!snapshot)return;
+if(!snapshot.records.length){const p=document.createElement('p');p.textContent='まだ植物がありません。上のフォームから追加できます。';cards.append(p);}
+snapshot.records.forEach(record=>{
+const card=document.createElement('article');card.className='card';
+const title=document.createElement('h2');title.textContent=record.fields.name;
+const label=document.createElement('p');label.className='muted';label.textContent='最後に水をあげた日';
+const date=document.createElement('p');date.className='date';date.textContent=record.fields.lastWatered;
+const locationLabel=document.createElement('p');locationLabel.className='muted';locationLabel.textContent='置いている場所';
+const location=document.createElement('p');location.className='location';location.textContent=record.fields.location||'未設定';
+const actions=document.createElement('div');actions.className='actions';
+actions.append(button('編集',()=>{editing=record.id;pendingDelete=null;el('name').value=record.fields.name;el('date').value=record.fields.lastWatered;el('location').value=record.fields.location??'';el('formTitle').textContent='植物を編集';el('save').textContent='変更を保存';el('cancel').hidden=false;render();el('name').focus();}),button('削除',()=>{pendingDelete=record.id;render();},'danger'));
+card.append(title,label,date,locationLabel,location,actions);
+if(pendingDelete===record.id){const prompt=document.createElement('p');prompt.textContent='この植物の記録を削除しますか？';const confirm=document.createElement('div');confirm.className='actions';confirm.append(button('削除する',()=>mutate('削除',()=>window.pocket.collections.delete('plants',record.id,snapshot.revision)),'danger'),button('戻る',()=>{pendingDelete=null;render();}));card.append(prompt,confirm);}
+cards.append(card);
+});lock(busy);
+}
+async function read(clear){
+if(busy)return;lock(true);el('status').textContent='読み込み中…';if(clear)el('error').textContent='';
+try{snapshot=await window.pocket.collections.read('plants');needsRefresh=false;pendingDelete=null;render();el('status').textContent=snapshot.records.length+' 件の植物';}
+catch(e){needsRefresh=true;el('error').textContent='読み込みに失敗しました。再読み込みをお試しください。表示中の情報は最新でない可能性があります。';el('status').textContent='読み込みエラー';}
+finally{lock(false);}
+}
+async function mutate(label,operation){
+if(busy||!snapshot||needsRefresh)return;lock(true);el('error').textContent='';el('status').textContent=label+'中…';
+try{snapshot=await operation();pendingDelete=null;if(label==='保存'||(editing&&!snapshot.records.some(r=>r.id===editing)))reset();render();el('status').textContent=label+'しました。';}
+catch(e){
+el('error').textContent=label+'に失敗しました。競合や通信エラーの可能性があります。入力内容は保持しています。最新の一覧と入力内容を確認してから、再操作してください。';
+try{snapshot=await window.pocket.collections.read('plants');needsRefresh=false;pendingDelete=null;render();el('status').textContent='最新の一覧を読み込みました。再操作が必要です。';}
+catch(readError){needsRefresh=true;el('error').textContent+=' 最新情報の読み込みにも失敗しました。再読み込みしてください。';el('status').textContent='読み込みエラー';}
+}finally{lock(false);}
+}
+el('form').addEventListener('submit',event=>{event.preventDefault();if(busy||!snapshot||needsRefresh)return;const name=el('name').value.trim();if(!name){el('error').textContent='植物名を入力してください。';el('name').focus();return;}
+const fields={name:name,lastWatered:el('date').value};
+const location=el('location').value;
+if(location!=='')fields.location=location;
+if(editing&&!snapshot.records.some(r=>r.id===editing)){el('error').textContent='編集中の植物が見つかりません。「編集をやめる」で追加に戻るか、一覧から選び直してください。';return;}
+mutate('保存',()=>editing?window.pocket.collections.update('plants',editing,fields,snapshot.revision):window.pocket.collections.insert('plants',fields,snapshot.revision));
+});
+el('cancel').addEventListener('click',reset);
+el('refresh').addEventListener('click',()=>read(true));
+window.addEventListener('focus',()=>read(false));
+read(true);
+})();
+</script></body></html>

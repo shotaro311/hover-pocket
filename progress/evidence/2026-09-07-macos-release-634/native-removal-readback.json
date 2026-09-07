@@ -1,0 +1,29 @@
+{
+  "cancelPreserved": true,
+  "uninstallRetainedRecord": {
+    "pagesRead": 42,
+    "finished": true
+  },
+  "restoredRecordVisible": true,
+  "fullDeleteOwnedRootsAbsent": [
+    "Data/local.generated.a03d60de420bf49eab8846abeaf5e31e5",
+    "Generation/History/local.generated.a03d60de420bf49eab8846abeaf5e31e5",
+    "Host/Apps/local.generated.a03d60de420bf49eab8846abeaf5e31e5"
+  ],
+  "otherToolData": [
+    {
+      "file": "Data/local.generated.a1d8e57d48bca4038a5f63bd57ac4e5b0/Collections/plants.json",
+      "sha256": "3be898fc8e5c34ed6995cf899eecf666a6c87531b7376472f360042762d87583"
+    }
+  ],
+  "nativeBuiltInsPresent": [
+    "Mirror",
+    "Controls",
+    "Calculator",
+    "GoogleCalendar",
+    "TodayFocus",
+    "Clipboard",
+    "StickyNotes",
+    "Timer"
+  ]
+}

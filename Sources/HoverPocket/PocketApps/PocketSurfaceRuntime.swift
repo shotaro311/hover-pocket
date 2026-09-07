@@ -28,9 +28,11 @@ enum PocketJSONValue: Equatable, Sendable {
         switch value {
         case is NSNull:
             self = .null
-        case let value as Bool:
-            self = .bool(value)
         case let value as NSNumber:
+            if CFGetTypeID(value) == CFBooleanGetTypeID() {
+                self = .bool(value.boolValue)
+                return
+            }
             let number = value.doubleValue
             guard number.isFinite else {
                 throw PocketSurfaceRuntimeError.invalid("\(path):number")

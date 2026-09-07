@@ -14,6 +14,22 @@
 - macOS公開ZIPはDeveloper ID署名、Apple notarization、staple済みです。
 - Windows公開ベータはVelopackの`win` channelを使い、macOSのLatest / appcastと分離しています。
 
+## 設定画面
+
+左側のカテゴリから「表示と操作」「機能」「自作ツール」「音声・AI」「カレンダー・天気」「データと履歴」「一般」を切り替えます。表示する機能は「機能」、AIで作るツールは「自作ツール」、アップデートは「一般」にあります。カテゴリを切り替えても入力途中のツール依頼は保持します。
+
+## 個人用ツール（macOS）
+
+設定の「自作ツール」で「AIネイティブ機能」を有効にすると、欲しいツールを文章で依頼できます。生成した画面をプレビューで試し、「このツールを追加・更新」でパネルへ追加します。続けて修正内容を入力するか、導入済みツールの「会話で修正」を選ぶと、その定義を引き継いで編集できます。
+
+標準の記録管理画面と、通信やファイルへの直接アクセスを制限した独自HTML画面を使えます。生成はGPT-6 Astra、既定の推論強度はMediumで、設定から変更できます。作成途中の履歴を残し、復元後も記録したデータを保持します。保存項目の変更には移行内容の確認を出します。
+
+実際のHoverPocketパネルに共通の暗い配色と文字サイズ設定を適用し、一覧を先に表示します。追加・編集時だけ入力欄を開き、パネルの大きさに合わせて操作できます。タイマーと付箋の操作は本体の確認画面を経て実行し、結果を表示します。
+
+自作ツールの「削除…」では、記録と作成履歴を残すアンインストール、記録・作成履歴も含む削除を選べます。アンインストール済みのツールは専用欄から復元できます。完全削除では、そのツールの定義、記録、作成履歴、内部の移行前バックアップをmacOSのゴミ箱へ移します。標準のカレンダーやミラー、ツールを使って作成した付箋・タイマー・予定、書き出したバックアップは保持します。
+
+macOS build634の配信・検証状況は[リリース記録](progress/2026-09/2026-09-07_hover-pocket-tools-release-634.md)を参照してください。Windows版の個人用ツールは未実装です。
+
 ## ダウンロードとインストール
 
 ### macOS
@@ -24,15 +40,15 @@
 
 ### Windows公開ベータ
 
-[HoverPocket Windows 0.2.7 Setup.exeをダウンロード](https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.7/HoverPocketWin-win-Setup.exe)
+[HoverPocket Windows 0.2.8 Setup.exeをダウンロード](https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.8/HoverPocketWin-win-Setup.exe)
 
-インストールせずに試す場合は、[Portable ZIP](https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.7/HoverPocketWin-win-Portable.zip)を利用できます。Windows版0.2.7はWindows 11 x64向けの公開ベータです。現時点ではAuthenticode未署名のため、初回起動時にMicrosoft Defender SmartScreenの警告が表示される場合があります。1.0正式版ではタイムスタンプ付きAuthenticode署名を必須にします。
+インストールせずに試す場合は、[Portable ZIP](https://github.com/shotaro311/hover-pocket/releases/download/win-v0.2.8/HoverPocketWin-win-Portable.zip)を利用できます。Windows版0.2.8はWindows 11 x64向けの公開ベータです。現時点ではAuthenticode未署名のため、初回起動時にMicrosoft Defender SmartScreenの警告が表示される場合があります。1.0正式版ではタイムスタンプ付きAuthenticode署名を必須にします。
 
 GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は開発者向けのソースコード一式です。アプリ本体ではないため、通常のインストールでは使いません。
 
 ## 現在できること
 
-現在は組み込みの `Mirror`、`Controls`、`Calendar`、`Clipboard`、`Sticky Notes`、`Timer`、`Calculator` プロバイダーを搭載しています。AI command lane は計画・開発途中のため、現在のアプリ UI からは一旦外しています。
+現在は組み込みの `Mirror`、`Controls`、`Calendar`、`Clipboard`、`Sticky Notes`、`Timer`、`Calculator` プロバイダーを搭載しています。macOSでは設定の「音声・AI」から音声操作を、「自作ツール」から個人用機能の作成を有効にできます。
 
 ### ミラー
 

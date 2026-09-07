@@ -9,6 +9,32 @@ enum PocketAppWorkflowPresentationPolicy {
     static func supports(_ capability: PocketCapabilityKey) -> Bool {
         supportedCapabilities.contains(capability)
     }
+
+    static func canonicalArguments(
+        _ arguments: CapabilityObject,
+        capability: PocketCapabilityKey,
+        allowsOptionalDefaults: Bool
+    ) throws -> CapabilityObject {
+        var canonical = arguments
+        if allowsOptionalDefaults, capability == PocketCapabilityKeys.timerStart {
+            if canonical["title"] == nil { canonical["title"] = .string("タイマー") }
+            if canonical["sourceRef"] == nil { canonical["sourceRef"] = .null }
+        }
+        if capability == PocketCapabilityKeys.timerStart {
+            guard case .string(let title)? = canonical["title"] else {
+                throw CapabilityBrokerError.invalidPlan("pocket_workflow_presentation")
+            }
+            canonical["title"] = .string(TodayFocusApprovalText.sanitize(title))
+        } else if capability == PocketCapabilityKeys.stickyUpsert {
+            guard case .string(let title)? = canonical["title"],
+                  case .string(let body)? = canonical["body"] else {
+                throw CapabilityBrokerError.invalidPlan("pocket_workflow_presentation")
+            }
+            canonical["title"] = .string(TodayFocusApprovalText.sanitize(title))
+            canonical["body"] = .string(TodayFocusApprovalText.sanitize(body))
+        }
+        return canonical
+    }
 }
 
 struct PocketAppWorkflowDraft: Equatable, Sendable {
@@ -22,6 +48,7 @@ struct PocketAppWorkflowDraft: Equatable, Sendable {
 final class PocketAppExecutionRuntime {
     let package: PocketAppPackage
     let userStateStore: PocketAppUserStateStore?
+    let collectionStores: [String: PocketCollectionStore]
 
     private let broker: CapabilityBroker
     private let principal: CapabilityPrincipal
@@ -36,7 +63,8 @@ final class PocketAppExecutionRuntime {
         grantedPermissions: Set<String>,
         timeZone: TimeZone = .current,
         userStateStore: PocketAppUserStateStore? = nil,
-        activationLease: PocketAppActivationLease? = nil
+        activationLease: PocketAppActivationLease? = nil,
+        collectionStores: [String: PocketCollectionStore] = [:]
     ) {
         self.package = package
         self.broker = broker
@@ -45,6 +73,7 @@ final class PocketAppExecutionRuntime {
         self.timeZone = timeZone
         self.userStateStore = userStateStore
         self.activationLease = activationLease
+        self.collectionStores = collectionStores
     }
 
     var isActivationActive: Bool {
@@ -119,9 +148,10 @@ final class PocketAppExecutionRuntime {
                 throw CapabilityBrokerError.invalidPlan("pocket_workflow_presentation")
             }
             let resolvedArguments = try step.arguments.mapValues { try resolve($0, inputs: inputs, now: now) }
-            let arguments = try Self.canonicalWorkflowArguments(
+            let arguments = try PocketAppWorkflowPresentationPolicy.canonicalArguments(
                 resolvedArguments,
-                capability: step.capability
+                capability: step.capability,
+                allowsOptionalDefaults: package.manifest.apiVersion == "hoverpocket.app/v2"
             )
             let request = try requestedCapability(step.capability)
             try validateScope(arguments, request: request)
@@ -343,27 +373,6 @@ final class PocketAppExecutionRuntime {
         formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
-    }
-
-    private static func canonicalWorkflowArguments(
-        _ arguments: CapabilityObject,
-        capability: PocketCapabilityKey
-    ) throws -> CapabilityObject {
-        var canonical = arguments
-        if capability == PocketCapabilityKeys.timerStart {
-            guard case .string(let title)? = canonical["title"] else {
-                throw CapabilityBrokerError.invalidPlan("pocket_workflow_presentation")
-            }
-            canonical["title"] = .string(TodayFocusApprovalText.sanitize(title))
-        } else if capability == PocketCapabilityKeys.stickyUpsert {
-            guard case .string(let title)? = canonical["title"],
-                  case .string(let body)? = canonical["body"] else {
-                throw CapabilityBrokerError.invalidPlan("pocket_workflow_presentation")
-            }
-            canonical["title"] = .string(TodayFocusApprovalText.sanitize(title))
-            canonical["body"] = .string(TodayFocusApprovalText.sanitize(body))
-        }
-        return canonical
     }
 
     static func supportsWorkflowPresentation(_ capability: PocketCapabilityKey) -> Bool {

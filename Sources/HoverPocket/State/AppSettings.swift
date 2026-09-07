@@ -66,6 +66,9 @@ final class EphemeralAppSettingsDefaults: AppSettingsDefaultsStoring, @unchecked
 
 @MainActor
 final class AppSettings: ObservableObject {
+    @Published var pocketToolReasoningEffort: String {
+        didSet { defaults.set(pocketToolReasoningEffort, forKey: "pocketToolReasoningEffort") }
+    }
     @Published var appLanguage: AppLanguage {
         didSet {
             defaults.set(appLanguage.rawValue, forKey: Self.appLanguageKey)
@@ -261,6 +264,7 @@ final class AppSettings: ObservableObject {
 
     init(defaults: any AppSettingsDefaultsStoring = UserDefaults.standard) {
         self.defaults = defaults
+        self.pocketToolReasoningEffort = defaults.string(forKey: "pocketToolReasoningEffort") ?? "medium"
         let languageRawValue = defaults.string(forKey: Self.appLanguageKey)
         self.appLanguage = languageRawValue.flatMap(AppLanguage.init(rawValue:)) ?? .japanese
         let rawValue = defaults.string(forKey: Self.displayPlacementModeKey)

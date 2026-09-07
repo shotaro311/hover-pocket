@@ -3,11 +3,13 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var providerStore: ProviderStore
+    var onOpenPocketApp: ((String) -> Void)? = nil
     @ObservedObject private var calendarStore = GoogleCalendarStore.shared
     @ObservedObject private var appUpdater = AppUpdater.shared
     @ObservedObject private var aiNativeRuntime = AINativeRuntime.shared
     @ObservedObject private var codexVoiceAccount = CodexVoiceAccountLoginController.shared
     @StateObject private var weatherLocationModel = WeatherLocationSettingsModel()
+    @State private var selectedCategory: SettingsCategory? = .appearance
     @State private var capabilityDataSnapshot: CapabilityDataGovernanceSnapshot?
     @State private var capabilityDataError: String?
     @State private var isShowingCapabilityHistoryDeleteConfirmation = false
@@ -18,58 +20,46 @@ struct SettingsView: View {
     private let openAIRealtimeKeychain = OpenAIRealtimeCredentialStoreFactory.shared
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                languageSection
-
-                Divider()
-
-                displaySection
-
-                Divider()
-
-                entryPointSection
-
-                Divider()
-
-                panelsSection
-
-                Divider()
-
-                providersSection
-
-                Divider()
-
-                pocketAppsSection
-
-                Divider()
-
-                voiceSection
-
-                Divider()
-
-                stickyNotesSection
-
-                if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
-                    Divider()
-
-                    mirrorSection
-
-                    Divider()
-
-                    weatherSection
-
-                    Divider()
-
-                    googleCalendarSection
-
-                    Divider()
-
-                    updatesSection
+        HStack(spacing: 0) {
+            List(selection: $selectedCategory) {
+                ForEach(availableCategories) { category in
+                    Label(category.title(language: language), systemImage: category.symbol)
+                        .tag(category)
+                        .padding(.vertical, 5)
                 }
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .listStyle(.sidebar)
+            .frame(width: 168)
+            .accessibilityLabel(localized(japanese: "設定カテゴリ", english: "Settings categories"))
+
+            Divider()
+
+            // Keep each page mounted so switching categories preserves an unfinished tool request.
+            ZStack {
+                ForEach(availableCategories) { category in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 22) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(category.title(language: language))
+                                    .font(.title2.weight(.semibold))
+                                Text(category.detail(language: language))
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Divider()
+                            categoryContent(category)
+                        }
+                        .padding(24)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .opacity(selectedCategory == category ? 1 : 0)
+                    .allowsHitTesting(selectedCategory == category)
+                    .disabled(selectedCategory != category)
+                    .accessibilityHidden(selectedCategory != category)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
@@ -131,6 +121,48 @@ struct SettingsView: View {
                 japanese: "今日の予定の読み取りを許可します。予定の作成は、この設定に加えて毎回macOSの確認画面で許可が必要です。",
                 english: "This permits reading today's events. Creating an event still requires approval in a native macOS confirmation every time."
             ))
+        }
+    }
+
+    private var availableCategories: [SettingsCategory] {
+        SettingsCategory.allCases.filter {
+            $0 != .connections || HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled
+        }
+    }
+
+    @ViewBuilder
+    private func categoryContent(_ category: SettingsCategory) -> some View {
+        switch category {
+        case .appearance:
+            panelsSection
+            Divider()
+            displaySection
+            Divider()
+            entryPointSection
+        case .features:
+            providersSection
+            Divider()
+            stickyNotesSection
+            if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
+                Divider()
+                mirrorSection
+            }
+        case .tools:
+            pocketAppsSection
+        case .voice:
+            voiceSection
+        case .connections:
+            googleCalendarSection
+            Divider()
+            weatherSection
+        case .data:
+            capabilityHistorySection
+        case .general:
+            languageSection
+            if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
+                Divider()
+                updatesSection
+            }
         }
     }
 
@@ -309,7 +341,7 @@ struct SettingsView: View {
 
     private var pocketAppsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Pocket Apps")
+            Text(localized(japanese: "ツールの作成と管理", english: "Create and manage tools"))
                 .font(.system(size: 13, weight: .bold))
 
             Toggle(
@@ -317,6 +349,31 @@ struct SettingsView: View {
                 isOn: $settings.aiNativeEnabled
             )
 
+            if !settings.aiNativeEnabled {
+                Text(localized(
+                    japanese: "有効にすると、自分用のツールを作成してパネルへ追加できます。",
+                    english: "Enable this to create personal tools and add them to your panel."
+                ))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if settings.aiNativeEnabled,
+               let generationController = aiNativeRuntime.pocketAppGenerationController {
+                Divider()
+                PocketAppGenerationSettingsView(
+                    controller: generationController,
+                    settings: settings,
+                    language: language,
+                    onOpenTool: onOpenPocketApp
+                )
+            }
+        }
+    }
+
+    private var capabilityHistorySection: some View {
+        VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(localized(japanese: "監査ログと実行履歴", english: "Audit logs and execution history"))
                     .font(.system(size: 11, weight: .semibold))
@@ -361,59 +418,44 @@ struct SettingsView: View {
             .background(.quaternary.opacity(0.22))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-            if let package = aiNativeRuntime.pocketAppExecutionRuntime?.package {
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "target")
+            DisclosureGroup(localized(japanese: "標準AI機能の詳細", english: "Built-in AI details")) {
+                if let package = aiNativeRuntime.pocketAppExecutionRuntime?.package {
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "target")
+                                .foregroundStyle(.secondary)
+                            Text(package.manifest.name)
+                                .font(.system(size: 12, weight: .semibold))
+                            Spacer()
+                            Text("v\(package.manifest.version)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text(PocketSurfaceHostModel.sanitizeVisibleText(package.intent).prefixingUnicodeScalars(500))
+                            .font(.system(size: 11))
                             .foregroundStyle(.secondary)
-                        Text(package.manifest.name)
-                            .font(.system(size: 12, weight: .semibold))
-                        Spacer()
-                        Text("v\(package.manifest.version)")
-                            .font(.system(size: 10, design: .monospaced))
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text(package.manifest.requestedCapabilities.map { $0.key.id }.sorted().joined(separator: " · "))
+                            .font(.system(size: 9, design: .monospaced))
                             .foregroundStyle(.secondary)
+                            .lineLimit(3)
+
+                        Label(
+                            localized(
+                                japanese: "定義、ユーザーデータ、実行履歴は分離して保持",
+                                english: "Definition, user data, and receipts are stored separately"
+                            ),
+                            systemImage: "externaldrive.badge.checkmark"
+                        )
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
                     }
-
-                    Text(PocketSurfaceHostModel.sanitizeVisibleText(package.intent).prefixingUnicodeScalars(500))
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text(package.manifest.requestedCapabilities.map { $0.key.id }.sorted().joined(separator: " · "))
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(3)
-
-                    Label(
-                        localized(
-                            japanese: "定義、ユーザーデータ、実行履歴は分離して保持",
-                            english: "Definition, user data, and receipts are stored separately"
-                        ),
-                        systemImage: "externaldrive.badge.checkmark"
-                    )
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .padding(10)
+                    .background(.quaternary.opacity(0.28))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
-                .padding(10)
-                .background(.quaternary.opacity(0.28))
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            } else {
-                Text(localized(
-                    japanese: "有効なPocket Appはありません。AIネイティブ機能は既定でオフです。",
-                    english: "No Pocket App is active. AI-native features are off by default."
-                ))
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if settings.aiNativeEnabled,
-               let generationController = aiNativeRuntime.pocketAppGenerationController {
-                Divider()
-                PocketAppGenerationSettingsView(
-                    controller: generationController,
-                    language: language
-                )
             }
         }
     }

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>作業開始</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:var(--pocket-background);color:var(--pocket-text);font-family:system-ui,sans-serif}main{padding:.8rem;max-width:100%;overflow-wrap:anywhere}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:var(--pocket-gap)}h1{font-size:1rem;margin:0}button,input{font:inherit;border:1px solid var(--pocket-border);border-radius:var(--pocket-radius);padding:.45rem .65rem;background:var(--pocket-surface);color:var(--pocket-text)}button{cursor:pointer}button:disabled{opacity:.6;cursor:wait}button:focus-visible,input:focus-visible{outline:2px solid var(--pocket-accent);outline-offset:2px}.primary{border-color:var(--pocket-accent)}.summary{margin:.8rem 0;padding:.65rem;border:1px solid var(--pocket-border);border-radius:var(--pocket-radius);background:var(--pocket-surface)}p{margin:.45rem 0;line-height:1.5}.muted{color:var(--pocket-muted)}label{display:block;margin:.8rem 0 .35rem}input{display:block;width:100%;min-width:0}.actions{display:flex;gap:.5rem;justify-content:flex-end;flex-wrap:wrap;margin-top:.65rem}[hidden]{display:none!important}#status:empty,#error:empty{display:none}#error{border-left:2px solid var(--pocket-accent);padding-left:.5rem}
+</style></head><body><main>
+<header class="toolbar"><h1>作業開始</h1><button id="add" class="primary" type="button">作業名を入力</button></header>
+<section id="overview"><div class="summary"><strong>15分タイマー ＋ 作業付箋</strong><p class="muted">実行前にHoverPocketでまとめて確認します。</p></div><p class="muted">付箋はこのツール専用の1枚を更新します。実行結果はHoverPocketに表示されます。</p></section>
+<form id="editor" hidden>
+<label for="title">作業名</label><input id="title" name="title" required autocomplete="off" placeholder="例：資料の下書き">
+<p class="muted">15分タイマーを開始し、同じ作業名の付箋を作成・更新します。</p>
+<div class="actions"><button id="cancel" type="button">キャンセル</button><button id="submit" class="primary" type="submit">確認へ</button></div>
+</form>
+<p id="status" role="status" aria-live="polite"></p><p id="error" role="alert"></p>
+</main><script>
+const add=document.getElementById('add'),editor=document.getElementById('editor'),overview=document.getElementById('overview'),title=document.getElementById('title'),cancel=document.getElementById('cancel'),submit=document.getElementById('submit'),status=document.getElementById('status'),error=document.getElementById('error');
+let busy=false;
+function closeEditor(){if(busy)return;editor.hidden=true;overview.hidden=false;add.hidden=false;error.textContent='';add.focus()}
+add.addEventListener('click',()=>{overview.hidden=true;editor.hidden=false;add.hidden=true;status.textContent='';error.textContent='';title.focus()});
+cancel.addEventListener('click',closeEditor);
+editor.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();closeEditor()}});
+editor.addEventListener('submit',async e=>{
+e.preventDefault();if(busy)return;
+const value=title.value.trim();
+if(!value){error.textContent='作業名を入力してください。';title.focus();return}
+busy=true;submit.disabled=true;cancel.disabled=true;title.disabled=true;error.textContent='';status.textContent='HoverPocketの確認を準備しています…';
+try{
+await pocket.workflow('startWork',{title:value});
+status.textContent='確認・実行結果はHoverPocketでご確認ください。この画面では実行完了を判定しません。';
+busy=false;closeEditor();
+}catch(err){status.textContent='';error.textContent='確認を準備できませんでした。内容を確認して、もう一度お試しください。';}
+finally{busy=false;submit.disabled=false;cancel.disabled=false;title.disabled=false;if(!editor.hidden)submit.focus()}
+});
+</script></body></html>

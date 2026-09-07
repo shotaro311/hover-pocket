@@ -1,0 +1,2 @@
+calendar_capability_read_verify=failed
+error=calendar_read_grant_required

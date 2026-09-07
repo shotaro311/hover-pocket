@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/pocket-tool-checkpoint/v1",
+  "title": "Validated definition checkpoint",
+  "type": "object",
+  "required": [
+    "formatVersion",
+    "id",
+    "packageID",
+    "name",
+    "version",
+    "packageDigest",
+    "createdAt",
+    "summary",
+    "kind",
+    "validation",
+    "byteCount"
+  ],
+  "properties": {
+    "formatVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "packageID": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z0-9][a-z0-9-]*){2,}$",
+      "maxLength": 160
+    },
+    "name": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$",
+      "maxLength": 64
+    },
+    "packageDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 240
+    },
+    "kind": {
+      "enum": [
+        "preview",
+        "restored",
+        "installed"
+      ]
+    },
+    "validation": {
+      "const": "contract-passed"
+    },
+    "byteCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8388608
+    }
+  },
+  "additionalProperties": false
+}

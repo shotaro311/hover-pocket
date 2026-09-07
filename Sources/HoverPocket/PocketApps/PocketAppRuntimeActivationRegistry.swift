@@ -282,13 +282,19 @@ final class PocketAppRuntimeActivationRegistry {
                 rootDirectory: userDataRoot
             )
             let activationLease = PocketAppActivationLease()
+            var stores: [String: PocketCollectionStore] = [:]
+            for (id, schema) in package.collections {
+                stores[id] = try PocketCollectionStore(packageID: package.manifest.id,
+                    collectionID: id, schema: schema, rootDirectory: userDataRoot)
+            }
             let runtime = PocketAppExecutionRuntime(
                 package: package,
                 broker: broker,
                 userID: userID,
                 grantedPermissions: effectivePermissions,
                 userStateStore: stateStore,
-                activationLease: activationLease
+                activationLease: activationLease,
+                collectionStores: stores
             )
             return Candidate(
                 readback: PocketAppRuntimeReadback(

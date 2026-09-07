@@ -214,7 +214,7 @@ install_app_icon() {
   rm -rf "$(dirname "$iconset_dir")"
 }
 
-if [[ "$VOICE_E2E_BUILD" != "1" && "$VOICE_E2E_BUILD" != "true" ]]; then
+if [[ "${1:-}" != "--build-only" && "$VOICE_E2E_BUILD" != "1" && "$VOICE_E2E_BUILD" != "true" ]]; then
   stopped_process=false
   for process_name in "$APP_NAME" "${LEGACY_PROCESS_NAMES[@]}"; do
     while IFS= read -r process_id; do

@@ -27,6 +27,30 @@ final class PocketSurfaceHostModel: ObservableObject {
     private var pendingDraft: PocketAppWorkflowDraft?
     private var didLoad = false
 
+    var collectionSchemas: [String: PocketCollectionSchema] { runtime.package.collections }
+
+    func collectionSnapshot(_ id: String) throws -> PocketCollectionSnapshot {
+        try collectionStore(id).snapshot()
+    }
+
+    @discardableResult
+    func writeCollection(_ id: String, recordID: String?, fields: [String: PocketJSONValue], revision: Int) throws -> PocketCollectionSnapshot {
+        let store = try collectionStore(id)
+        if let recordID { return try store.update(id: recordID, fields: fields, expectedRevision: revision) }
+        return try store.insert(fields: fields, expectedRevision: revision)
+    }
+
+    @discardableResult
+    func deleteCollectionRecord(_ id: String, recordID: String, revision: Int) throws -> PocketCollectionSnapshot {
+        try collectionStore(id).delete(id: recordID, expectedRevision: revision)
+    }
+
+    private func collectionStore(_ id: String) throws -> PocketCollectionStore {
+        guard activationAvailable, runtime.isActivationActive,
+              let store = runtime.collectionStores[id] else { throw PocketCollectionError.invalidSchema }
+        return store
+    }
+
     init(runtime: PocketAppExecutionRuntime, surfaceID: String) throws {
         guard let surface = runtime.package.surfaces[surfaceID] else {
             throw CapabilityBrokerError.invalidPlan("pocket_surface")
@@ -139,7 +163,7 @@ final class PocketSurfaceHostModel: ObservableObject {
     }
 
     func prepare(workflowID: String) {
-        guard activationAvailable, runtime.isActivationActive, !isExecuting else { return }
+        guard activationAvailable, runtime.isActivationActive, !isExecuting, pendingDraft == nil else { return }
         do {
             guard let workflow = runtime.package.workflows[workflowID] else {
                 throw CapabilityBrokerError.invalidPlan("pocket_workflow")
@@ -160,6 +184,38 @@ final class PocketSurfaceHostModel: ObservableObject {
         } catch {
             statusText = "入力内容を確認してください。"
         }
+    }
+
+    func prepareHTMLWorkflow(_ workflowID: String, values: [String: Any]) throws {
+        guard surface.root.type == "html", activationAvailable, runtime.isActivationActive,
+              !isExecuting, pendingDraft == nil,
+              let workflow = runtime.package.workflows[workflowID],
+              Set(values.keys) == Set(workflow.inputs.keys) else { throw PocketCollectionError.invalidRecord }
+        var arguments: [String: CapabilityValue] = [:]
+        for (key, raw) in values {
+            let value = try PocketJSONValue(any: raw, path: "$.inputs.\(key)")
+            let converted: CapabilityValue
+            switch value {
+            case .string(let value):
+                guard value.count <= 4_096 else { throw PocketCollectionError.invalidRecord }
+                converted = .string(value)
+            case .number(let value):
+                if workflow.inputs[key] == "integer" {
+                    guard value.rounded() == value, abs(value) < 9_007_199_254_740_991 else { throw PocketCollectionError.invalidRecord }
+                    converted = .integer(Int(value))
+                } else { converted = .number(value) }
+            case .bool(let value): converted = .bool(value)
+            default: throw PocketCollectionError.invalidRecord
+            }
+            guard Self.acceptsWorkflowInput(converted, type: workflow.inputs[key]!) else { throw PocketCollectionError.invalidRecord }
+            arguments[key] = converted
+        }
+        let draft = try runtime.prepare(workflowID: workflowID, inputs: arguments)
+        pendingDraft = draft
+        approvalText = Self.approvalSummary(draft)
+        showsApproval = true
+        receiptText = nil
+        statusText = nil
     }
 
     func approve() {

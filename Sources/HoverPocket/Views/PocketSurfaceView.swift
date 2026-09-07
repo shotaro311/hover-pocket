@@ -9,29 +9,42 @@ struct PocketSurfaceHostView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if model.activationAvailable {
-                    PocketSurfaceNodeView(node: model.surface.root, model: model)
+        VStack(spacing: 8) {
+            if model.activationAvailable {
+                if model.surface.root.type == "html",
+                   case .string(let html)? = model.surface.root.properties["html"] {
+                    PocketHTMLSurfaceView(model: model, html: html)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .id(model.runtimeIdentity)
+                } else if model.surface.root.type == "collection",
+                          case .string(let collectionID)? = model.surface.root.properties["collection"],
+                          case .string(let titleField)? = model.surface.root.properties["titleField"] {
+                    PocketCollectionView(model: model, collectionID: collectionID, titleField: titleField)
+                        .padding(12)
                 } else {
-                    hostStatus(text: "このPocket Appは現在利用できません。", color: .white.opacity(0.58))
+                    ScrollView {
+                        PocketSurfaceNodeView(node: model.surface.root, model: model)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                    }
                 }
-
-                if model.isLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .accessibilityLabel("予定を読み込み中")
-                }
-
-                if let receiptText = model.receiptText {
-                    hostStatus(text: receiptText, color: Color(red: 0.38, green: 0.82, blue: 0.52))
-                } else if let statusText = model.statusText {
-                    hostStatus(text: statusText, color: .white.opacity(0.58))
-                }
+            } else {
+                hostStatus(text: "このPocket Appは現在利用できません。", color: .white.opacity(0.58))
             }
-            .padding(18)
+            if model.isLoading {
+                ProgressView().controlSize(.small)
+                    .accessibilityLabel("読み込み中")
+            }
+            if let receiptText = model.receiptText {
+                hostStatus(text: receiptText, color: Color(red: 0.38, green: 0.82, blue: 0.52))
+                    .padding([.horizontal, .bottom], 8)
+            } else if let statusText = model.statusText {
+                hostStatus(text: statusText, color: .white.opacity(0.7))
+                    .padding([.horizontal, .bottom], 8)
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(PocketToolTheme.background)
+        .environment(\.colorScheme, .dark)
         .task {
             await model.load()
         }

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/pocket-tool-backup-data/v2",
+  "title": "State and collection backup payload",
+  "type": "object",
+  "required": [
+    "formatVersion",
+    "state",
+    "collections"
+  ],
+  "properties": {
+    "formatVersion": {
+      "const": 2
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ]
+      }
+    },
+    "collections": {
+      "type": "object",
+      "maxProperties": 16,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+      },
+      "additionalProperties": {
+        "$ref": "hoverpocket://schemas/pocket-collection-data/v1"
+      }
+    }
+  },
+  "additionalProperties": false
+}

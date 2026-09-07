@@ -65,6 +65,7 @@ struct PocketAppLifecycleProposal: Equatable, Sendable {
     let stagingDirectory: URL
     let stateSchemaDigest: String
     let statePropertyNames: Set<String>
+    var dataMigration: PocketToolDataMigration? = nil
 }
 
 struct PocketAppLifecycleApprovalGrant: Equatable, Sendable {
@@ -279,7 +280,7 @@ final class PocketAppLifecycleManager {
             let previewDigest = try Self.previewDigest(previews)
             let tests = try stagingTestRunner.run(package)
             let current = try readActiveRecord(packageID: package.manifest.id)
-            try validateMigration(package: package, current: current)
+            let dataMigration = try prepareDataMigration(package: package, current: current)
             let action: PocketAppLifecycleAction = current == nil || current?.state == .removed ? .install : .update
             let currentPackage = try verifiedCurrentPackage(record: current, allowRemovedCapabilities: true)
             if let currentPackage,
@@ -304,7 +305,8 @@ final class PocketAppLifecycleManager {
                 currentState: current?.state,
                 previewDigest: previewDigest,
                 permissionDiff: diff,
-                capabilityGrantDiff: grantDiff
+                capabilityGrantDiff: grantDiff,
+                migrationDigest: dataMigration?.digest
             )
             let requestID = "install-approval:\(UUID().uuidString.lowercased())"
             let proposal = PocketAppLifecycleProposal(
@@ -326,7 +328,8 @@ final class PocketAppLifecycleManager {
                 approvalRequired: true,
                 stagingDirectory: stagingDirectory,
                 stateSchemaDigest: package.stateSchemaDigest,
-                statePropertyNames: package.statePropertyNames
+                statePropertyNames: package.statePropertyNames,
+                dataMigration: dataMigration
             )
             pendingApprovals[requestID] = PendingApproval(
                 bindingDigest: binding,
@@ -463,7 +466,7 @@ final class PocketAppLifecycleManager {
               Self.compareSemanticVersions(targetPackage.manifest.version, currentPackage.manifest.version) == .orderedAscending else {
             throw PocketAppLifecycleError.invalidPackage
         }
-        try validateMigration(package: targetPackage, current: current)
+        let dataMigration = try prepareDataMigration(package: targetPackage, current: current)
         let previews = try makePreviews(targetPackage)
         let previewDigest = try Self.previewDigest(previews)
         let currentEffectivePackage = current.state == .enabled ? currentPackage : nil
@@ -484,7 +487,8 @@ final class PocketAppLifecycleManager {
             currentState: current.state,
             previewDigest: previewDigest,
             permissionDiff: diff,
-            capabilityGrantDiff: grantDiff
+            capabilityGrantDiff: grantDiff,
+            migrationDigest: dataMigration?.digest
         )
         let requestID = "rollback-approval:\(UUID().uuidString.lowercased())"
         let proposal = PocketAppLifecycleProposal(
@@ -506,7 +510,8 @@ final class PocketAppLifecycleManager {
             approvalRequired: true,
             stagingDirectory: targetDirectory,
             stateSchemaDigest: targetPackage.stateSchemaDigest,
-            statePropertyNames: targetPackage.statePropertyNames
+            statePropertyNames: targetPackage.statePropertyNames,
+            dataMigration: dataMigration
         )
         pendingApprovals[requestID] = PendingApproval(
             bindingDigest: binding,
@@ -666,7 +671,7 @@ final class PocketAppLifecycleManager {
         }
         if movedVersions {
             try? makeMutable(directory: tombstone)
-            try? FileManager.default.removeItem(at: tombstone)
+            try? FileManager.default.trashItem(at: tombstone, resultingItemURL: nil)
         }
         guard try readActiveRecord(packageID: packageID)?.state == .removed,
               !FileManager.default.fileExists(atPath: versions.path) else {
@@ -857,6 +862,70 @@ final class PocketAppLifecycleManager {
         )
     }
 
+    func installedDefinitionBytes(packageID: String) throws -> Int {
+        try installedDefinitions(packageID: packageID).reduce(0) { bytes, definition in
+            bytes + (try PocketAppFileSnapshot.capture(directory: definition.package.rootDirectory).files.values.reduce(0) { $0 + $1.count })
+        }
+    }
+
+    /// Full older checkpoints live in History; runtime needs only the current and previous definition.
+    func retainCurrentAndPreviousDefinition(packageID: String, previousDigest: String?,
+        moveToTrash: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }) throws {
+        try PocketToolDataLock.withLock(rootDirectory: userDataRoot, packageID: packageID) {
+            guard let current = try currentPackage(packageID: packageID, includingDisabled: true),
+                  current.manifest.apiVersion == "hoverpocket.app/v2" else { return }
+            let definitions = try installedDefinitions(packageID: packageID)
+            let protected = Set([current.manifestDigest] + [previousDigest].compactMap { $0 })
+            for definition in definitions where !protected.contains(definition.package.manifestDigest) {
+                guard try currentPackage(packageID: packageID, includingDisabled: true)?.manifestDigest == current.manifestDigest else {
+                    throw PocketAppLifecycleError.activeChanged
+                }
+                try verifyImmutable(directory: definition.directory)
+                let versionRoot = definition.directory.deletingLastPathComponent()
+                let versionsRoot = versionRoot.deletingLastPathComponent()
+                let versionMode = try FileManager.default.attributesOfItem(atPath: versionRoot.path)[.posixPermissions]!
+                let rootMode = try FileManager.default.attributesOfItem(atPath: versionsRoot.path)[.posixPermissions]!
+                try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: versionRoot.path)
+                try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: versionsRoot.path)
+                defer {
+                    if FileManager.default.fileExists(atPath: versionRoot.path) {
+                        try? FileManager.default.setAttributes([.posixPermissions: versionMode], ofItemAtPath: versionRoot.path)
+                    }
+                    try? FileManager.default.setAttributes([.posixPermissions: rootMode], ofItemAtPath: versionsRoot.path)
+                }
+                do {
+                    try makeMutable(directory: definition.directory)
+                    try moveToTrash(definition.directory)
+                } catch {
+                    try? makeImmutable(directory: definition.directory)
+                    throw error
+                }
+                if try FileManager.default.contentsOfDirectory(atPath: versionRoot.path).isEmpty {
+                    try moveToTrash(versionRoot)
+                }
+            }
+            guard try currentPackage(packageID: packageID, includingDisabled: true)?.manifestDigest == current.manifestDigest else {
+                throw PocketAppLifecycleError.readbackFailed
+            }
+        }
+    }
+
+    private func installedDefinitions(packageID: String) throws -> [(directory: URL, package: PocketAppPackage)] {
+        guard Self.validPackageID(packageID) else { throw PocketAppLifecycleError.invalidPackage }
+        let root = versionsRoot(packageID: packageID)
+        guard FileManager.default.fileExists(atPath: root.path) else { return [] }
+        var definitions: [(directory: URL, package: PocketAppPackage)] = []
+        for version in try safeChildDirectories(of: root) {
+            for directory in try safeChildDirectories(of: version) where !directory.lastPathComponent.hasPrefix(".installing-") {
+                try verifyImmutable(directory: directory)
+                let package = try verifiedInstalledMigrationSource(at: directory.appendingPathComponent("package"))
+                guard package.manifest.id == packageID else { throw PocketAppLifecycleError.corruptVersion }
+                definitions.append((directory, package))
+            }
+        }
+        return definitions
+    }
+
     private func installedVersions(packageID: String) throws -> [String] {
         let root = versionsRoot(packageID: packageID)
         guard FileManager.default.fileExists(atPath: root.path) else { return [] }
@@ -878,7 +947,12 @@ final class PocketAppLifecycleManager {
     }
 
     func activePackage(packageID: String) throws -> PocketAppPackage? {
-        guard let record = try readActiveRecord(packageID: packageID), record.state == .enabled else { return nil }
+        try currentPackage(packageID: packageID, includingDisabled: false)
+    }
+
+    func currentPackage(packageID: String, includingDisabled: Bool) throws -> PocketAppPackage? {
+        guard let record = try readActiveRecord(packageID: packageID),
+              record.state == .enabled || (includingDisabled && record.state == .disabled) else { return nil }
         guard let version = record.version, let digest = record.packageDigest else {
             throw PocketAppLifecycleError.readbackFailed
         }
@@ -903,6 +977,16 @@ final class PocketAppLifecycleManager {
     }
 
     private func activateProposal(
+        _ proposal: PocketAppLifecycleProposal,
+        approvalGrant: PocketAppLifecycleApprovalGrant?,
+        now: Date
+    ) throws -> PocketAppLifecycleReceipt {
+        try PocketToolDataLock.withLock(rootDirectory: userDataRoot, packageID: proposal.packageID) {
+            try activateProposalWhileLocked(proposal, approvalGrant: approvalGrant, now: now)
+        }
+    }
+
+    private func activateProposalWhileLocked(
         _ proposal: PocketAppLifecycleProposal,
         approvalGrant: PocketAppLifecycleApprovalGrant?,
         now: Date
@@ -944,7 +1028,8 @@ final class PocketAppLifecycleManager {
         guard try stagingTestRunner.run(package) == proposal.tests else {
             throw PocketAppLifecycleError.packageChanged
         }
-        try validateMigration(package: package, current: current)
+        let migration = try prepareDataMigration(package: package, current: current)
+        guard migration == proposal.dataMigration else { throw PocketAppLifecycleError.activeChanged }
         let currentPackage = try verifiedCurrentPackage(record: current, allowRemovedCapabilities: true)
         let currentEffectivePackage = current?.state == .enabled ? currentPackage : nil
         let currentPermissions = currentEffectivePackage.map(permissions) ?? Set<String>()
@@ -967,7 +1052,8 @@ final class PocketAppLifecycleManager {
             currentState: proposal.currentState,
             previewDigest: proposal.previewDigest,
             permissionDiff: observedDiff,
-            capabilityGrantDiff: observedGrantDiff
+            capabilityGrantDiff: observedGrantDiff,
+            migrationDigest: migration?.digest
         )
         guard observedBinding == proposal.bindingDigest else { throw PocketAppLifecycleError.approvalInvalid }
         guard let approvalGrant else { throw PocketAppLifecycleError.approvalRequired }
@@ -993,6 +1079,13 @@ final class PocketAppLifecycleManager {
             targetDirectory = try installImmutableSnapshot(sourceSnapshot, package: package)
         }
         let previous = current
+        var dataTransaction: PocketToolDataMigrationTransaction?
+        if let migration, previous != nil {
+            dataTransaction = try PocketToolDataMigrationTransaction.begin(plan: migration,
+                previousActiveRecord: PocketAppFileSnapshot.readFileNoFollow(rootDirectory: rootDirectory,
+                    relativePath: "Apps/\(proposal.packageID)/active.json", maximumBytes: 32_768), userDataRoot: userDataRoot,
+                journalRoot: rootDirectory.appendingPathComponent("DataMigrations"))
+        }
         let record = ActiveRecord(
             packageID: proposal.packageID,
             version: proposal.version,
@@ -1012,7 +1105,11 @@ final class PocketAppLifecycleManager {
                 throw PocketAppLifecycleError.readbackFailed
             }
         } catch {
-            try? restore(record: previous, packageID: proposal.packageID)
+            try dataTransaction?.rollback()
+            if let dataTransaction {
+                try restore(record: previous, packageID: proposal.packageID)
+                try dataTransaction.finishRollback()
+            } else { try? restore(record: previous, packageID: proposal.packageID) }
             throw error
         }
         if proposal.action != .rollback {
@@ -1033,13 +1130,15 @@ final class PocketAppLifecycleManager {
             dataDisposition: nil
         )
         do {
-            return try verifyActivationReadback(receipt)
+            let verified = try verifyActivationReadback(receipt)
+            try dataTransaction?.commit()
+            return verified
         } catch {
-            try? recoverAfterActivationFailure(
-                previous: previous,
-                committed: record,
-                now: now
-            )
+            try dataTransaction?.rollback()
+            if let dataTransaction {
+                try recoverAfterActivationFailure(previous: previous, committed: record, now: now)
+                try dataTransaction.finishRollback()
+            } else { try? recoverAfterActivationFailure(previous: previous, committed: record, now: now) }
             throw PocketAppLifecycleError.readbackFailed
         }
     }
@@ -1193,6 +1292,15 @@ final class PocketAppLifecycleManager {
         guard current.stateSchemaDigest == package.stateSchemaDigest,
               Set(current.statePropertyNames) == package.statePropertyNames else {
             throw PocketAppLifecycleError.migrationRequired
+        }
+    }
+
+    private func prepareDataMigration(package: PocketAppPackage, current: ActiveRecord?) throws -> PocketToolDataMigration? {
+        do { try validateMigration(package: package, current: current); return nil }
+        catch PocketAppLifecycleError.migrationRequired {
+            guard let source = try verifiedCurrentPackage(record: current) else { throw PocketAppLifecycleError.migrationRequired }
+            do { return try PocketToolDataMigration.prepare(from: source, to: package, userDataRoot: userDataRoot) }
+            catch { throw PocketAppLifecycleError.migrationRequired }
         }
     }
 
@@ -1512,6 +1620,18 @@ final class PocketAppLifecycleManager {
     }
 
     private func recoverInterruptedTransactions() throws {
+        for transaction in try PocketToolDataMigrationTransaction.pending(
+            journalRoot: rootDirectory.appendingPathComponent("DataMigrations"), userDataRoot: userDataRoot) {
+            try PocketToolDataLock.withLock(rootDirectory: userDataRoot, packageID: transaction.journal.packageID) {
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                let previous = try decoder.decode(ActiveRecord.self, from: transaction.journal.previousActiveRecord)
+                guard previous.packageID == transaction.journal.packageID else { throw PocketAppLifecycleError.corruptVersion }
+                try transaction.rollback()
+                try restore(record: previous, packageID: previous.packageID)
+                try transaction.finishRollback()
+            }
+        }
         let fileManager = FileManager.default
         if fileManager.fileExists(atPath: stagingRoot.path) {
             try ensureNoSymlinks(in: stagingRoot)
@@ -1538,7 +1658,7 @@ final class PocketAppLifecycleManager {
                 for tombstone in tombstones {
                     if active?.state == .removed {
                         try makeMutable(directory: tombstone)
-                        try fileManager.removeItem(at: tombstone)
+                        try fileManager.trashItem(at: tombstone, resultingItemURL: nil)
                     } else if tombstones.count == 1, !fileManager.fileExists(atPath: versions.path) {
                         try fileManager.moveItem(at: tombstone, to: versions)
                         try makeImmutable(directory: versions)
@@ -1707,7 +1827,8 @@ final class PocketAppLifecycleManager {
         currentState: PocketAppLifecycleState?,
         previewDigest: String,
         permissionDiff: PocketAppPermissionDiff,
-        capabilityGrantDiff: PocketAppCapabilityGrantDiff
+        capabilityGrantDiff: PocketAppCapabilityGrantDiff,
+        migrationDigest: String? = nil
     ) -> String {
         var hasher = SHA256()
         func field(_ value: String) {
@@ -1722,6 +1843,7 @@ final class PocketAppLifecycleManager {
         field(currentDigest ?? "none")
         field(currentState?.rawValue ?? "none")
         field(previewDigest)
+        if let migrationDigest { field("migration:" + migrationDigest) }
         for item in permissionDiff.added.sorted() { field("+\(item)") }
         for item in permissionDiff.removed.sorted() { field("-\(item)") }
         for item in capabilityGrantDiff.added.sorted() { field("grant+:\(item)") }
