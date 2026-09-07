@@ -1258,7 +1258,7 @@
     ],
     [
       "contracts/pocket/v2/fixtures/start-work/views/main.html",
-      "e61484527e5fec326577e3198bc8e722daee9e6d08c1eef9d2dec25f5cf9c180"
+      "fbf05ca1c2e348650d75dc01cc0c9d4c41e6fe5b14bce9c67be9d8a06553f0c1"
     ],
     [
       "contracts/pocket/v2/fixtures/start-work/workflows/start-work.workflow.json",
@@ -1324,5 +1324,8 @@
       "Resources/HoverPocket.entitlements",
       "b2d8d7ec4f8f731a08f8dec8d3b3cb9008db7e796172df6c908d333fe76768f8"
     ]
+  ],
+  "postBuildFixtureFormatting": [
+    "contracts/pocket/v2/fixtures/start-work/views/main.html"
   ]
 }
