@@ -34,7 +34,7 @@ enum PocketToolsPreviewVerification {
 
     /// Uses the real hover window, header, provider routing, model generator, and native stores.
     /// Only storage/defaults are redirected; no fixture replaces the generated UI or its actions.
-    static func showPanel(root: URL) async throws {
+    static func showPanel(root: URL, initialPackage: URL? = nil) async throws {
         AppDelegate.installMainMenu(settingsTarget: nil, settingsAction: nil)
         guard root.lastPathComponent.hasPrefix("PocketToolsPanel-"),
               root.deletingLastPathComponent().resolvingSymlinksInPath() == FileManager.default.temporaryDirectory.resolvingSymlinksInPath() else {
@@ -63,7 +63,9 @@ enum PocketToolsPreviewVerification {
         settings.aiNativeEnabled = true
         settings.appLanguage = .japanese
         settings.panelSize = .small
-        let generator = try CodexAppServerPocketGenerator(workspaceRoot: root.appendingPathComponent("Generator"))
+        let generator: any PocketAppGenerationAdapter
+        if let initialPackage { generator = CapturedPackage(files: try PocketAppFileSnapshot.capture(directory: initialPackage).files) }
+        else { generator = try CodexAppServerPocketGenerator(workspaceRoot: root.appendingPathComponent("Generator")) }
         let controller = try PocketAppGenerationController(rootDirectory: definitions, userDataRoot: data,
             generationRoot: root.appendingPathComponent("Generation"), generator: generator,
             runtimeActivationReadback: { try registry.synchronize($0) }, generationSettings: settings,
@@ -86,6 +88,14 @@ enum PocketToolsPreviewVerification {
         NSApplication.shared.activate(ignoringOtherApps: true)
         self.window = window
         self.panelController = panel
+        panel.connectAppController()
+        if initialPackage != nil {
+            window.orderOut(nil)
+            settings.panelTextSize = .extraLarge
+            let accepted = await PocketAppOSController.shared.execute(session: "isolated-ui-verification", callID: "preview-request",
+                arguments: .object(["operation": .string("generate"), "request": .string("保存済みの実生成ツールを隔離パネルで検証")]))
+            print("App OS preview request: " + accepted)
+        }
         print("Panel verification workspace: \(root.path)")
     }
 

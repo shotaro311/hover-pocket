@@ -7,6 +7,7 @@ struct SettingsView: View {
     @ObservedObject private var calendarStore = GoogleCalendarStore.shared
     @ObservedObject private var appUpdater = AppUpdater.shared
     @ObservedObject private var aiNativeRuntime = AINativeRuntime.shared
+    @ObservedObject private var codexVoiceHost = CodexAppServerMacOSRuntime.host
     @ObservedObject private var codexVoiceAccount = CodexVoiceAccountLoginController.shared
     @StateObject private var weatherLocationModel = WeatherLocationSettingsModel()
     @State private var selectedCategory: SettingsCategory? = .appearance
@@ -118,8 +119,8 @@ struct SettingsView: View {
             }
         } message: {
             Text(localized(
-                japanese: "今日の予定の読み取りを許可します。予定の作成は、この設定に加えて毎回macOSの確認画面で許可が必要です。",
-                english: "This permits reading today's events. Creating an event still requires approval in a native macOS confirmation every time."
+                japanese: "今日の予定の読み取りを許可します。予定の変更には、この設定に加えて音声カテゴリの確認設定が適用されます。",
+                english: "This permits reading today's events. Calendar changes also follow the confirmation options in Voice settings."
             ))
         }
     }
@@ -522,6 +523,18 @@ struct SettingsView: View {
             }
             .pickerStyle(.segmented)
 
+            if settings.voiceProvider == .codexAppServer {
+                Picker(localized(japanese: "対話の声", english: "Conversation voice"), selection: $settings.codexVoiceSelection) {
+                    Text(localized(japanese: "接続先の既定", english: "Server default")).tag("")
+                    ForEach(codexVoiceHost.availableVoices, id: \.self) { voice in Text(voice.capitalized).tag(voice) }
+                    if !settings.codexVoiceSelection.isEmpty && !codexVoiceHost.availableVoices.contains(settings.codexVoiceSelection) {
+                        Text(settings.codexVoiceSelection + "（未確認）").tag(settings.codexVoiceSelection)
+                    }
+                }
+                Text(localized(japanese: "声は次回の音声接続から反映します。候補は接続先の確認後に表示されます。", english: "Applies on your next voice connection. Choices appear after checking the server."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Toggle(
                 localized(japanese: "Voice Laneを有効化", english: "Enable Voice Lane"),
                 isOn: $settings.voiceEnabled
@@ -550,16 +563,31 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Toggle(
                     localized(
-                        japanese: "Voice操作の確認を毎回表示",
-                        english: "Ask before Voice actions"
+                        japanese: "通常操作を音声で確認",
+                        english: "Confirm regular actions by voice"
                     ),
                     isOn: $settings.voiceActionConfirmationEnabled
                 )
                 .disabled(settings.voiceProvider == .off || !settings.voiceEnabled)
 
                 Text(localized(
-                    japanese: "オフでは、現在Voiceに公開済みのCalendar作成、Timer開始、Sticky追加、明るさ・音量変更だけ確認ダイアログを省略します。OS権限、Calendar access、Capability Brokerのschema・idempotency・readback・auditは維持します。将来のtool、破壊的操作、native authority、生成Appへ自動拡張しません。",
-                    english: "When off, only the currently exposed Calendar create, Timer start, Sticky add, and brightness or volume changes skip the confirmation dialog. OS permissions, Calendar access, Capability Broker schema, idempotency, readback, and audit remain required. This never expands automatically to future tools, destructive actions, native authority, or generated apps."
+                    japanese: "追加・編集・開始などの前に音声で確認します。オフでは依頼した操作をそのまま実行します。",
+                    english: "Ask by voice before adding, editing, or starting. When off, execute the requested action directly."
+                ))
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(
+                    localized(japanese: "削除・取消操作を音声で確認", english: "Confirm deletions and cancellations by voice"),
+                    isOn: $settings.voiceDestructiveConfirmationEnabled
+                )
+                .disabled(settings.voiceProvider == .off || !settings.voiceEnabled)
+                Text(localized(
+                    japanese: "予定・付箋・記録の削除、タイマーの取消、追加ツールの取り外しを対象にします。両方オフなら確認画面も追加の音声確認も出しません。macOSの権限許可は別途必要です。",
+                    english: "Covers deleting events, notes and records, cancelling timers, and removing added tools. With both options off, there are no confirmation dialogs or follow-up voice approvals. macOS permissions still apply."
                 ))
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)

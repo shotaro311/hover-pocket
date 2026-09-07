@@ -247,7 +247,7 @@ Must:
 - Expandedは左に現在会話のtranscript、右に現在のroot sessionと同じrootから派生したchild / descendant session cardを表示する。全過去会話の一覧、新規会話管理、削除UIは初回要件に含めない。
 - session cardは安全なtitle、状態、経過時間または更新時刻、進捗、直近の安全な要約だけを表示し、raw command、filesystem path、全文transcriptを渡さない。
 - Expandedはfullscreen、別Provider、Provider overlayにしない。長文と多数cardはVoice Lane内部で独立scrollし、Provider領域を縮めない。
-- Voice action confirmationがONの場合だけ、書き込み前のnative承認要求をHost所有のVoice Laneへ表示する。実行後receiptは設定にかかわらず同Laneへ表示し、Providerまたは生成UIが同じ見た目を偽装できないようにする。OFFの場合は、現行allowlist（Calendar create、Timer start、Sticky upsert、brightness set、volume set）だけnative presenterを省略して自動承認するが、Capability Brokerのapproval/readback結果の表示とauditはHost側で維持する。
+- macOS Voiceでは通常操作と削除・取消の確認設定を分ける。該当設定がONならHostが保持した同じ計画への音声承認を待ち、OFFなら追加確認なしで実行する。アプリの承認ダイアログは表示しない。設定にかかわらず、Capability Brokerのapproval/readbackとauditをHost側で維持する。OS権限や設定画面からの管理操作は別扱い。
 - muteは音声入出力だけを止め、child sessionをcancelしない。hoverによるパネルcloseは既定で入力trackとremote audioをmuteしてUI detachするが、Settingsで継続を明示的にONにした場合だけ、既にconnectedかつunmutedのsessionは音声入出力を維持してUIだけdetachする。connectingまたはmutedのsessionを自動開始・自動unmuteしない。明示的に終了していないroot / child taskを停止せず、同じマイクcontrolによる終了操作はRealtime音声sessionだけを終了し、root / child taskは継続する。task cancelはsession card上の別操作とし、対象と影響を表示して別承認を求める。
 
 受け入れ条件:
@@ -479,7 +479,7 @@ Deferred:
 - 旧AI command laneは計画・開発途中のため、現行アプリ UI からは一旦外す。4.9のCodex Voice Laneとは別機能として扱う。
 - 旧Windows baseline roadmapのW1で検討した対象action候補はCalendar read dayとCalendar create eventであった。AI-native実装では4.9と最終実装プランのAN phaseを正本とする。
 - 自然文例候補: `今日の予定`、`明日14時 打ち合わせ`、`金曜 デザイン納期`。
-- Calendar write はHostの承認契約を通す。Voiceでは既定ONのnative confirmationを含み、Settingsで確認をOFFにした場合もCapability Brokerの承認判断を省略しない。
+- Calendar write はHostの承認契約を通す。macOS Voiceでは通常操作と削除操作の音声確認をそれぞれ既定ONとし、Settingsで確認をOFFにした場合もCapability Brokerの承認判断を省略しない。
 - 実行結果、失敗、承認/却下は audit log に記録する。
 
 Windows 代替要件:
@@ -586,7 +586,7 @@ Planned Must:
 - audit fileはHost固定の`capability-YYYYMMDD.jsonl` regular fileだけを対象とし、malformed file、symlink / reparse point、破損台帳を検出した場合は削除や追記をfail closedにする。
 - Voice機能を無効にした場合、Codex process、microphone、WebRTC、追加レイアウトが起動せず、既存パネル寸法とProvider体験が変わらない。
 - installed runtimeがHost検証済みのBroker限定tool policyを持たない場合、Voiceは`SchemaMismatch / BlockedFailure`で停止し、app-server、microphone、Calendar read、Timer approvalを開始しない。表示理由は秘密情報を含まない固定codeから日本語 / 英語へ変換する。
-- Calendar grantの許可、拒否、取り消し、再起動後復元を検証し、許可前 / 取り消し後のProvider呼出し数が0であることを確認する。Timerは同時2件目と1分内4件目がnative dialog表示前に拒否され、session取消で表示中dialogが閉じる。
+- Calendar grantの許可、拒否、取り消し、再起動後復元を検証し、許可前 / 取り消し後のProvider呼出し数が0であることを確認する。Timerは同時2件目と1分内4件目が確認前に拒否され、session取消で待機中の音声承認を無効化する。
 - hover close / panel hideでは既定で入力trackとremote audioを即時muteしてUIをdetachする。継続設定をONにした場合だけ、既にconnectedかつunmutedのsessionはmuteせずUIだけをdetachし、connectingまたはmutedのsessionは自動開始・自動unmuteしない。いずれもroot threadを停止しない。明示終了ではRealtime stop、peer connection、data channel、local media track、remote audioを閉じ、再開時に古いSDP / generationを受理しない。
 - macOS実音声E2E receiptはexact allowlistのboolean、enum、最終transcript件数だけをatomic保存し、API key、transcript本文、音声、SDP、PID、filesystem pathを含めない。各media attemptの開始時に、前回attemptのmic、remote audio、transcript件数、Timer readback、Host native確認をすべて消去し、現在attemptだけで合格を判定する。Host native確認は非永続のattempt IDへ束縛し、古い確認sheetの完了を後続attemptへ記録しない。合格には実マイク取得、remote audio trackと再生、ユーザー／assistantの最終transcript各1件以上、Timer Broker readback、Host nativeの「話せた・聞こえた」確認を必要とし、Stop後はmic / remote track / playback / credentialが0で`safe_close`になったことを別経路で読む。
 
@@ -614,7 +614,8 @@ Must:
 - Codex Voice Calendar access: OFF / ON。既定はOFFとし、Google接続、Voice有効化、Microphoneとは別のHost承認を必要とする。
 - Auto listen: OFF / ON。既定はOFFとし、Voice Lane有効化とは別に承認する。
 - Voice panel hidden continuation: OFF / ON。既定はOFFとし、ONでも既にconnectedかつunmutedのsessionだけ音声入出力を維持する。connectingまたはmutedのsessionを自動開始・自動unmuteしない。
-- Voice action confirmation: ON / OFF。既定はONとし、OFF時だけ現在公開済みのCalendar create、Timer start、Sticky upsert、brightness set、volume setのnative確認を省略する。Capability Brokerのschema、permission、idempotency、readback、auditは不変で、将来tool、破壊的操作、native authority、生成Appへ自動拡張しない。
+- macOS Voice通常操作の確認 / 削除・取消の確認: 独立したON / OFF、両方既定ON。ONなら音声で確認し、OFFなら該当操作の追加確認を省略する。追加ツールの導入・編集・記録・workflow・取り外しも同じ設定へ接続する。Capability Brokerのschema、permission、idempotency、readback、auditと標準機能保護は維持する。
+- macOS Voiceの天気: 既存WeatherForecastStoreと設定地域・温度単位を共有。現在の天気と8日分の予報、タイムゾーン、取得時刻、キャッシュ警告を返す。取得失敗を成功扱いにせず、座標を音声モデルへ返さない。
 - Check for Updates。
 
 Windows 追加 Must:
@@ -967,3 +968,7 @@ Must:
 - カレンダーやミラーなど標準機能を維持し、自作ツールだけを対象に、記録を残すアンインストールと記録・作成履歴も含む完全削除を選択できる。アンインストール済みツールは保存履歴から戻せる。
 - 完全削除は対象ツールの定義・記録・履歴・内部バックアップをゴミ箱へ移す。別ツール、標準機能、作成した付箋・タイマー・予定、書き出したバックアップを消さない。失敗時は状態を示して再試行できる。
 - macOS設定を目的別のカテゴリで整理し、既存の設定値と、カテゴリを切り替えたときの入力途中の依頼を保持する。受入確認後にmacOSへ本番配信する。
+
+### 2026-09-07 音声・画面・ツール開発の統合方針
+
+CodexをHoverPocketの共通コントローラーとするアーキテクチャを採用。現在好評な音声操作を維持し、音声側が対話と指揮、別のAstraセッションが生成・修正、Hostが管理・保存・検証を担当する。詳細・互換性・受入条件の正本は[設計文書](../plan/20260907_CODEX_APP_OS_ARCHITECTURE.md)。この項目は採用要件であり、実装完了を意味しない。

@@ -114,18 +114,10 @@ final class PocketSurfaceRegistry: ObservableObject {
     }
 
     private final class Entry {
-        private final class WeakModel {
-            weak var value: PocketSurfaceHostModel?
-
-            init(_ value: PocketSurfaceHostModel) {
-                self.value = value
-            }
-        }
-
         let readback: PocketAppRuntimeReadback
         let runtimeHandle: AnyObject
         let surfaceIDs: Set<String>
-        private var models: [String: [WeakModel]] = [:]
+        private var models: [String: PocketSurfaceHostModel] = [:]
 
         init(
             readback: PocketAppRuntimeReadback,
@@ -139,19 +131,16 @@ final class PocketSurfaceRegistry: ObservableObject {
 
         @MainActor
         func invalidate() {
-            models.values
-                .flatMap { $0 }
-                .compactMap(\.value)
-                .forEach { $0.invalidateActivation() }
+            models.values.forEach { $0.invalidateActivation() }
             models.removeAll()
         }
 
         @MainActor
         func makeModel(surfaceID: String) throws -> PocketSurfaceHostModel? {
+            if let model = models[surfaceID] { return model }
             guard let runtime = runtimeHandle as? PocketAppExecutionRuntime else { return nil }
             let model = try PocketSurfaceHostModel(runtime: runtime, surfaceID: surfaceID)
-            models[surfaceID] = (models[surfaceID] ?? [])
-                .filter { $0.value != nil } + [WeakModel(model)]
+            models[surfaceID] = model
             return model
         }
     }

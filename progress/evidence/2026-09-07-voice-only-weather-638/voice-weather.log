@@ -1,0 +1,1 @@
+PASS voice weather: 8 checks; shared forecast service/cache, units, dates, fresh/stale/unavailable states, no coordinates in tool output

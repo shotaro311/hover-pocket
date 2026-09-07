@@ -63,7 +63,8 @@ final class ProviderStore: ObservableObject {
         let generated = AINativeRuntime.shared.generatedSurfaceRegistry?.routes.map {
             GeneratedPocketAppProvider(appID: $0.appID, surfaceID: $0.surfaceID, title: $0.title)
         } ?? []
-        return registry.providers + generated
+        let preview: [any PocketProvider] = AINativeRuntime.shared.pocketAppGenerationController?.previewModel == nil ? [] : [PocketDraftProvider()]
+        return registry.providers + generated + preview
     }
 
     private func provider(for id: PluginID?) -> (any PocketProvider)? {

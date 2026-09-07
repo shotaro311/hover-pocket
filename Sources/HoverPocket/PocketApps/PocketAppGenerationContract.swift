@@ -167,6 +167,7 @@ struct PocketAppGenerationEnvelope: Equatable, Sendable {
     let version: String
     let namespace: String
     let files: [PocketAppGeneratedFile]
+    var previewValidation: String? = nil
 }
 
 protocol PocketAppGenerationAdapter: Sendable {

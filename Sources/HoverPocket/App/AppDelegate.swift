@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         configureAINativeRuntimeIfEnabled()
         observeAINativeRuntimeSetting()
+        hoverWindowController.connectAppController()
         configureVoiceRuntime()
         observeVoiceRuntimeSettings()
         observeVoiceE2EReceipt()

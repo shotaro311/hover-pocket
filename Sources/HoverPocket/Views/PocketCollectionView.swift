@@ -4,15 +4,46 @@ struct PocketCollectionView: View {
     @ObservedObject var model: PocketSurfaceHostModel
     let collectionID: String
     let titleField: String
-    @State private var snapshot: PocketCollectionSnapshot?
-    @State private var selectedID: String?
-    @State private var draft: [String: PocketJSONValue] = [:]
-    @State private var isEditing = false
-    @State private var errorText: String?
-    @State private var search = ""
-    @State private var pendingDelete: PocketCollectionRecord?
+    @ObservedObject private var selection: PocketCollectionSelection
+
+    init(model: PocketSurfaceHostModel, collectionID: String, titleField: String) {
+        self.model = model
+        self.collectionID = collectionID
+        self.titleField = titleField
+        self.selection = model.collectionSelection(collectionID)
+    }
+
     @FocusState private var focusedField: String?
     @Environment(\.panelTextSize) private var panelTextSize
+
+    private var snapshot: PocketCollectionSnapshot? {
+        get { selection.snapshot }
+        nonmutating set { selection.snapshot = newValue }
+    }
+    private var selectedID: String? {
+        get { selection.selectedID }
+        nonmutating set { selection.selectedID = newValue }
+    }
+    private var draft: [String: PocketJSONValue] {
+        get { selection.draft }
+        nonmutating set { selection.draft = newValue }
+    }
+    private var isEditing: Bool {
+        get { selection.isEditing }
+        nonmutating set { selection.isEditing = newValue }
+    }
+    private var errorText: String? {
+        get { selection.errorText }
+        nonmutating set { selection.errorText = newValue }
+    }
+    private var search: String {
+        get { selection.search }
+        nonmutating set { selection.search = newValue }
+    }
+    private var pendingDelete: PocketCollectionRecord? {
+        get { selection.pendingDelete }
+        nonmutating set { selection.pendingDelete = newValue }
+    }
 
     private var schema: PocketCollectionSchema? { model.collectionSchemas[collectionID] }
     private var fieldKeys: [String] {
@@ -47,7 +78,7 @@ struct PocketCollectionView: View {
                         .buttonStyle(.borderedProminent).tint(Color(red: 0.98, green: 0.76, blue: 0.25))
                 }
             } else {
-                TextField("検索", text: $search).textFieldStyle(.roundedBorder)
+                TextField("検索", text: $selection.search).textFieldStyle(.roundedBorder)
                 if visibleRecords.isEmpty {
                     Text(search.isEmpty ? "まだ記録がありません。追加して使い始められます。" : "一致する記録がありません。")
                         .foregroundStyle(.secondary).padding(.vertical, 16)

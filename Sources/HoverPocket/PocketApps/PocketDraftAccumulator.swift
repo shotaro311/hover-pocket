@@ -26,16 +26,17 @@ actor PocketDraftAccumulator {
         return "Accepted \(text.utf8.count) bytes for \(path). Draft contains \(files.count) files."
     }
 
-    func validatedEnvelope() throws -> PocketAppGenerationEnvelope {
+    func validatedEnvelope(checkPreview: Bool = false) async throws -> PocketAppGenerationEnvelope {
         let generated = files.sorted(by: { $0.key < $1.key }).map { PocketAppGeneratedFile(path: $0.key, utf8: $0.value) }
         let snapshot = PocketAppFileSnapshot(rootDirectory: workspace,
             files: files.mapValues { Data($0.utf8) }, identities: [:])
         _ = try PocketAppPackageRuntime().load(snapshot: snapshot)
-        let envelope = PocketAppGenerationEnvelope(requestID: request.requestID, requestDigest: request.requestDigest,
+        var envelope = PocketAppGenerationEnvelope(requestID: request.requestID, requestDigest: request.requestDigest,
             appID: request.appID, version: request.version, namespace: request.namespace, files: generated)
         let result = try PocketAppGenerationMaterializer(rootDirectory: workspace).materialize(envelope: envelope, request: request)
         defer { try? FileManager.default.removeItem(at: result.directory) }
         _ = try PocketAppStagingTestRunner().run(result.package)
+        if checkPreview { envelope.previewValidation = try await PocketGeneratedPreviewValidator.validate(result.package) }
         return envelope
     }
 }

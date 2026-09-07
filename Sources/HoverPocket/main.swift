@@ -104,7 +104,10 @@ if let argument = CommandLine.arguments.firstIndex(of: "--preview-pocket-tools-p
     let app = NSApplication.shared
     app.setActivationPolicy(.regular)
     Task { @MainActor in
-        do { try await PocketToolsPreviewVerification.showPanel(root: URL(fileURLWithPath: CommandLine.arguments[argument + 1])) }
+        do {
+            let initial = CommandLine.arguments.firstIndex(of: "--initial-tool").flatMap { $0 + 1 < CommandLine.arguments.count ? URL(fileURLWithPath: CommandLine.arguments[$0 + 1]) : nil }
+            try await PocketToolsPreviewVerification.showPanel(root: URL(fileURLWithPath: CommandLine.arguments[argument + 1]), initialPackage: initial)
+        }
         catch { print("FAIL pocket tools panel: \(error)"); exit(1) }
     }
     app.run()
@@ -182,7 +185,60 @@ if let argument = CommandLine.arguments.firstIndex(of: "--verify-pocket-tools-ed
     }
     dispatchMain()
 }
+if let argument = CommandLine.arguments.firstIndex(of: "--verify-pocket-generated-preview"), argument + 1 < CommandLine.arguments.count {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    Task { @MainActor in
+        do {
+            let package = try PocketAppPackageRuntime().load(directory: URL(fileURLWithPath: CommandLine.arguments[argument + 1]))
+            print("PASS generated preview: " + (try await PocketGeneratedPreviewValidator.validate(package)))
+            exit(0)
+        } catch { print("FAIL generated preview: \(error)"); exit(1) }
+    }
+    app.run()
+    exit(0)
+}
+if CommandLine.arguments.contains("--verify-voice-weather-live") {
+    Task { @MainActor in
+        do { try await PocketAppOSVoiceVerification.run(operation: "weather"); exit(0) }
+        catch { print("FAIL live voice weather: \(error)"); exit(1) }
+    }
+    dispatchMain()
+}
+if CommandLine.arguments.contains("--verify-voice-weather") {
+    Task { @MainActor in
+        do { try await WeatherVoiceVerification.run(); exit(0) }
+        catch { print("FAIL voice weather: \(error)"); exit(1) }
+    }
+    dispatchMain()
+}
+if CommandLine.arguments.contains("--verify-voice-only-confirmation") {
+    Task { @MainActor in
+        do { try await VoiceOnlyVerificationCommand.run(); exit(0) }
+        catch { print("FAIL voice-only confirmation: \(error)"); exit(1) }
+    }
+    dispatchMain()
+}
+if CommandLine.arguments.contains("--verify-pocket-app-os-voice") {
+    Task { @MainActor in
+        do { try await PocketAppOSVoiceVerification.run(); exit(0) }
+        catch { print("FAIL Pocket App OS voice: \(error)"); exit(1) }
+    }
+    dispatchMain()
+}
+if CommandLine.arguments.contains("--verify-pocket-app-os") {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    Task { @MainActor in
+        do { try await PocketAppOSVerification.run(); exit(0) }
+        catch { print("FAIL Pocket App OS: \(error)"); exit(1) }
+    }
+    app.run()
+    exit(0)
+}
 if CommandLine.arguments.contains("--verify-pocket-tools-generation") {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
     Task { @MainActor in
         do {
             try await PocketToolsPlatformVerification.runLiveGeneration()
@@ -193,7 +249,8 @@ if CommandLine.arguments.contains("--verify-pocket-tools-generation") {
             exit(1)
         }
     }
-    dispatchMain()
+    app.run()
+    exit(0)
 }
 if CommandLine.arguments.contains("--verify-pocket-tools-platform") {
     Task { @MainActor in
@@ -307,7 +364,8 @@ if CommandLine.arguments.contains("--verify-codex-app-server-realtime") {
     let app = NSApplication.shared
     Task { @MainActor in
         do {
-            let result = try await CodexAppServerRealtimeVerificationCommand.run()
+            let voiceChoice = CommandLine.arguments.firstIndex(of: "--voice-choice").flatMap { $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }
+            let result = try await CodexAppServerRealtimeVerificationCommand.run(voiceSelection: voiceChoice)
             print("codex_app_server_realtime_account=chatgpt")
             print("codex_app_server_realtime_voices=\(result.voiceCount)")
             print("codex_app_server_realtime_thread=ephemeral")

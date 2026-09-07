@@ -66,6 +66,9 @@ final class EphemeralAppSettingsDefaults: AppSettingsDefaultsStoring, @unchecked
 
 @MainActor
 final class AppSettings: ObservableObject {
+    @Published var codexVoiceSelection: String {
+        didSet { defaults.set(codexVoiceSelection, forKey: "codexVoiceSelection") }
+    }
     @Published var pocketToolReasoningEffort: String {
         didSet { defaults.set(pocketToolReasoningEffort, forKey: "pocketToolReasoningEffort") }
     }
@@ -233,6 +236,12 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    @Published var voiceDestructiveConfirmationEnabled: Bool {
+        didSet {
+            defaults.set(voiceDestructiveConfirmationEnabled, forKey: Self.voiceDestructiveConfirmationEnabledKey)
+        }
+    }
+
     private let defaults: any AppSettingsDefaultsStoring
     private static let appLanguageKey = "appLanguage"
     private static let displayPlacementModeKey = "displayPlacementMode"
@@ -261,6 +270,7 @@ final class AppSettings: ObservableObject {
     private static let voiceCalendarAccessEnabledKey = "voiceCalendarAccessEnabled"
     private static let voiceContinueWhenPanelHiddenKey = "voiceContinueWhenPanelHidden"
     private static let voiceActionConfirmationEnabledKey = "voiceActionConfirmationEnabled"
+    private static let voiceDestructiveConfirmationEnabledKey = "voiceDestructiveConfirmationEnabled"
 
     init(defaults: any AppSettingsDefaultsStoring = UserDefaults.standard) {
         self.defaults = defaults
@@ -331,6 +341,7 @@ final class AppSettings: ObservableObject {
             : defaults.bool(forKey: Self.aiNativeEnabledKey)
         self.capabilityDataRetentionPeriod = defaults.string(forKey: Self.capabilityDataRetentionPeriodKey)
             .flatMap(CapabilityDataRetentionPeriod.init(rawValue:)) ?? .ninetyDays
+        self.codexVoiceSelection = defaults.string(forKey: "codexVoiceSelection") ?? ""
         let storedVoiceProvider = defaults.string(forKey: Self.voiceProviderKey)
             .flatMap(VoiceProviderID.init(rawValue:)) ?? .off
         self.voiceProvider = storedVoiceProvider
@@ -350,6 +361,10 @@ final class AppSettings: ObservableObject {
         self.voiceActionConfirmationEnabled = defaults.object(forKey: Self.voiceActionConfirmationEnabledKey) == nil
             ? true
             : defaults.bool(forKey: Self.voiceActionConfirmationEnabledKey)
+
+        self.voiceDestructiveConfirmationEnabled = defaults.object(forKey: Self.voiceDestructiveConfirmationEnabledKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.voiceDestructiveConfirmationEnabledKey)
 
         if defaults.data(forKey: Self.weatherLocationKey) == nil,
            let weatherLocationData = try? JSONEncoder().encode(weatherLocation) {

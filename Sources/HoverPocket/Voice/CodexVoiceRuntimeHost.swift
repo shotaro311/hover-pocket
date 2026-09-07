@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 @MainActor
@@ -7,7 +8,9 @@ enum CodexAppServerMacOSRuntime {
 }
 
 @MainActor
-final class CodexVoiceRuntimeHost {
+final class CodexVoiceRuntimeHost: ObservableObject {
+    @Published private(set) var availableVoices: [String] = []
+    var preferredVoice: (() -> String)?
     private weak var voiceRuntime: VoiceLaneRuntime?
     private let workspaceDirectory: URL
     private let injectedClientFactory: CodexVoiceCoordinator.ClientFactory?
@@ -137,6 +140,7 @@ final class CodexVoiceRuntimeHost {
             clientFactory: resolvedClientFactory,
             toolAdapter: toolAdapter
         )
+        candidate.preferredVoice = { [weak self] in self?.preferredVoice?() ?? "" }
         candidate.snapshotHandler = { [weak self, weak candidate] (snapshot: CodexVoiceSnapshot) in
             guard let self, let candidate, self.coordinator === candidate else { return }
             self.publish(snapshot)
@@ -145,6 +149,7 @@ final class CodexVoiceRuntimeHost {
         candidate.setSessionsVisible(sessionsVisible)
         publish(candidate.snapshot)
         await candidate.initialize()
+        availableVoices = candidate.availableVoices
 
         guard desiredEnabled,
               generation == lifecycleGeneration,
@@ -157,6 +162,10 @@ final class CodexVoiceRuntimeHost {
             return
         }
         publish(candidate.snapshot)
+    }
+
+    func appendHostNotice(sessionID: String, text: String) async -> Bool {
+        await coordinator?.appendHostNotice(sessionID: sessionID, text: text) ?? false
     }
 
     func resetRealtimeForCapabilityChange(alreadyStopped: Bool = false) async {

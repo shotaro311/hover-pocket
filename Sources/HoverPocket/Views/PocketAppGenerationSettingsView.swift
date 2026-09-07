@@ -368,6 +368,9 @@ struct PocketAppGenerationSettingsView: View {
                 Text("修正したい点を上に入力すると、作成中のツールを続けて変更できます。")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Text(controller.previewValidationSummary)
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             DisclosureGroup("検証と権限の詳細") {
             Text(shortDigest(proposal.packageDigest)).font(.caption.monospaced())
             Text(PocketAppGenerationApprovalPresentation.text(

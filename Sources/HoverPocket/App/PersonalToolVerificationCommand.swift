@@ -134,7 +134,7 @@ enum PersonalToolVerificationCommand {
             try check(Bundle.hoverPocketResources.bundleURL.path.hasPrefix(Bundle.main.bundleURL.path + "/"), "packaged resources do not depend on checkout")
         }
         let schemas = try runtime.sessionTools()
-        try check(schemas.count == 24, "all tools exposed")
+        try check(schemas.count == 25, "all tools exposed")
         try check(clipboardReads == 0, "no passive clipboard access")
         try check(
             !succeeded(
@@ -346,3 +346,131 @@ private final class PersonalVerificationControls: ControlsCapabilityDataSource {
 
 @MainActor
 private final class PersonalVerificationFlag { var value = true }
+
+@MainActor
+enum VoiceOnlyVerificationCommand {
+    static func run() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("VoiceOnlyVerification-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let timers = TimerStore(storageDirectory: root.appendingPathComponent("Timer"), observesWake: false)
+        let notes = StickyNotesStore(storageDirectory: root.appendingPathComponent("Notes"))
+        let controls = PersonalVerificationControls()
+        var clock = Date()
+        let normal = PersonalVerificationFlag(), destructive = PersonalVerificationFlag()
+        normal.value = false
+        let personalKeys = Set(PersonalToolOperation.allCases.map(\.key))
+        let realKeys: Set<PocketCapabilityKey> = [.init(id: "timer.countdown.start", version: 1), .init(id: "timer.countdown.get", version: 1), .init(id: "sticky.note.upsert", version: 1), .init(id: "sticky.note.get", version: 1)]
+        let handlers = try PocketCapabilityHandlerSet(handlers: PocketCapabilityDescriptors.builtIn.filter {
+            !personalKeys.contains($0.key) && !realKeys.contains($0.key)
+        }.map { PersonalVerificationStub(key: $0.key) })
+        for handler: any PocketCapabilityHandler in [
+            TimerCapabilityHandler(operation: .start, store: timers), TimerCapabilityHandler(operation: .get, store: timers),
+            StickyCapabilityHandler(operation: .upsert, store: notes), StickyCapabilityHandler(operation: .get, store: notes)
+        ] { try handlers.register(handler) }
+        var calendarGranted = true
+        var calendarWrites = 0
+        for operation in PersonalToolOperation.allCases {
+            try handlers.register(PersonalToolCapabilityHandler(operation: operation, timers: timers, notes: notes,
+                controls: controls, clipboard: { "確認" }, calendar: { operation, _ in
+                    if operation == .calendarSearch {
+                        return ["items": .array([.object(["targetId": .string("calendar:isolated"), "title": .string("隔離予定")])])]
+                    }
+                    if operation.isWrite { calendarWrites += 1 }
+                    return ["targetId": .string("calendar:isolated"), "revision": .string("revision-1"), "title": .string("隔離予定")]
+                }))
+        }
+        let registry = try CapabilityRegistry(handlers: handlers)
+        let broker = CapabilityBroker(registry: registry, ledger: try .init(rootDirectory: root.appendingPathComponent("Broker")),
+            auditLog: try .init(rootDirectory: root.appendingPathComponent("Broker")),
+            approvalPresentationResolver: HostCapabilityApprovalPresentationResolver(stickyStore: notes, timerStore: timers, calendarLabel: { _, _ in "隔離予定" }))
+        let runtime = try OpenAIRealtimeMacOSCapabilityRuntime(context: .init(registry: registry, broker: broker),
+            calendarAccessGranted: { calendarGranted }, actionConfirmationEnabled: { normal.value },
+            destructiveConfirmationEnabled: { destructive.value }, now: { clock })
+        defer { runtime.cancelSession("voice-only") }
+        let bridge = CodexAppServerCapabilityBridge(runtime: runtime)
+        var calls = 0, checks = 0
+        func check(_ value: Bool, _ name: String) throws {
+            guard value else { throw PocketPreviewValidationError(code: "voice_only_" + name) }
+            checks += 1
+        }
+        func call(_ name: String, _ args: CapabilityObject = [:], id: String? = nil, session: String = "voice-only") async throws -> CapabilityObject {
+            calls += 1
+            let raw = await runtime.execute(sessionID: session, callID: id ?? "call-\(calls)", toolName: name,
+                argumentsJSON: String(decoding: try CapabilityCanonicalJSON.data(.object(args)), as: UTF8.self))
+            return try StrictVoiceJSON.object(raw)
+        }
+        func confirm(_ pending: CapabilityObject, id: String? = nil, session: String = "voice-only") async throws -> CapabilityObject {
+            try await call("voice_action_confirm", ["confirmation_id": pending["confirmation_id"] ?? .string("missing"), "confirmed": .bool(true)], id: id, session: session)
+        }
+        func seed(_ key: String) throws -> StickyNoteItem {
+            try notes.upsertNote(stableKey: key, title: "確認用 " + key, body: "保持する本文", color: .yellow, at: clock)
+        }
+        let defaults = EphemeralAppSettingsDefaults()
+        defaults.set(false, forKey: "voiceActionConfirmationEnabled")
+        let settings = AppSettings(defaults: defaults)
+        try check(!settings.voiceActionConfirmationEnabled && settings.voiceDestructiveConfirmationEnabled, "legacy_setting_preserved")
+        settings.voiceDestructiveConfirmationEnabled = false
+        try check(!AppSettings(defaults: defaults).voiceDestructiveConfirmationEnabled, "delete_setting_persisted")
+        let target = try seed("first")
+        let targetArgs: CapabilityObject = ["targetId": .string(target.id.uuidString.lowercased())]
+        try check(try await call("sticky_note_delete", targetArgs)["code"] == .string("unknown_target"), "unknown_delete_rejected")
+        _ = try await call("sticky_notes_list")
+        try check(try await call("sticky_note_edit", targetArgs.merging(["title": .string("音声だけで変更")]) { _, new in new })["status"] == .string("succeeded"), "normal_off_no_confirmation")
+        let pending = try await call("sticky_note_delete", targetArgs, id: "pending-delete")
+        try check(pending["status"] == .string("awaiting_confirmation") && notes.note(id: target.id) != nil, "delete_waits_without_dialog")
+        try check(try await call("sticky_note_delete", targetArgs, id: "pending-delete") == pending, "pending_replay_returns_same_id")
+        try check(try await confirm(pending)["code"] == .string("confirmation_mismatch"), "same_utterance_cannot_confirm")
+        bridge.noteUserInput(sessionID: "other")
+        try check(try await confirm(pending, session: "other")["code"] == .string("confirmation_mismatch"), "other_session_cannot_confirm")
+        try check(try await call("clipboard_text_read")["status"] == .string("succeeded"), "reads_during_confirmation")
+        bridge.noteUserInput(sessionID: "voice-only")
+        try check(try await confirm(pending, id: "confirm-once")["readback"] == .string("verified") && notes.note(id: target.id) == nil, "spoken_confirmation_deletes_and_verifies")
+        try check(try await confirm(pending, id: "confirm-once")["status"] == .string("succeeded"), "confirmation_replay_no_duplicate")
+        try check(try await confirm(pending)["code"] == .string("confirmation_mismatch"), "consumed_id_rejected")
+
+        let changed = try seed("changed")
+        _ = try await call("sticky_notes_list")
+        let changedArgs: CapabilityObject = ["targetId": .string(changed.id.uuidString.lowercased())]
+        let stale = try await call("sticky_note_delete", changedArgs)
+        _ = try notes.editForCapability(id: changed.id, title: "別画面から変更", body: nil, color: nil, at: clock.addingTimeInterval(1))
+        bridge.noteUserInput(sessionID: "voice-only")
+        try check(try await confirm(stale)["status"] == .string("failed") && notes.note(id: changed.id)?.title == "別画面から変更", "stale_revision_keeps_new_data")
+        let cancelled = try await call("sticky_note_delete", changedArgs)
+        try check(try await call("pending_action_cancel")["cancelledPendingAction"] == .bool(true), "spoken_cancel")
+        await Task.yield()
+        bridge.noteUserInput(sessionID: "voice-only")
+        try check(try await confirm(cancelled)["status"] == .string("failed") && notes.note(id: changed.id) != nil, "cancelled_id_cannot_execute")
+        let expired = try await call("sticky_note_delete", changedArgs)
+        clock = clock.addingTimeInterval(301)
+        bridge.noteUserInput(sessionID: "voice-only")
+        try check(try await confirm(expired)["status"] == .string("failed") && notes.note(id: changed.id) != nil, "expired_id_cannot_execute")
+        await Task.yield()
+
+        destructive.value = false
+        normal.value = true
+        try check(try await call("sticky_note_delete", changedArgs)["readback"] == .string("verified") && notes.note(id: changed.id) == nil, "delete_off_independent_of_normal_on")
+        let creation = try await call("timer_countdown_start", ["durationSeconds": .integer(60), "title": .string("音声承認")])
+        try check(creation["status"] == .string("awaiting_confirmation") && timers.runningTimers.isEmpty, "normal_on_awaits_voice")
+        bridge.noteUserInput(sessionID: "voice-only")
+        try check(try await confirm(creation)["readback"] == .string("verified") && timers.runningTimers.count == 1, "timer_voice_approval_readback")
+        normal.value = false
+        _ = try await call("timer_countdown_list")
+        let timerID = timers.runningTimers[0].id.uuidString.lowercased()
+        try check(try await call("timer_countdown_cancel", ["targetId": .string(timerID)])["readback"] == .string("verified") && timers.runningTimers.isEmpty, "both_off_timer_cancel")
+        _ = try await call("calendar_events_search", ["start": .string("2026-09-07T00:00:00+09:00"), "end": .string("2026-09-08T00:00:00+09:00")])
+        try check(try await call("calendar_event_delete", ["targetId": .string("calendar:isolated")])["status"] == .string("succeeded") && calendarWrites == 1, "both_off_calendar_delete")
+        destructive.value = true
+        let revoked = try await call("calendar_event_delete", ["targetId": .string("calendar:isolated")])
+        calendarGranted = false
+        bridge.noteUserInput(sessionID: "voice-only")
+        try check(try await confirm(revoked)["status"] == .string("failed") && calendarWrites == 1, "calendar_revoked_while_waiting")
+        let disconnected = try seed("disconnect")
+        _ = try await call("sticky_notes_list")
+        let disconnectedPending = try await call("sticky_note_delete", ["targetId": .string(disconnected.id.uuidString.lowercased())])
+        bridge.conversationDidDisconnect(sessionID: "voice-only")
+        await Task.yield()
+        bridge.noteUserInput(sessionID: "voice-only")
+        try check(try await confirm(disconnectedPending)["status"] == .string("failed") && notes.note(id: disconnected.id) != nil, "disconnect_invalidates_confirmation")
+        print("PASS voice-only confirmation: \(checks) checks; independent normal/delete settings, no native presenter, speech approval/cancel, replay, session/revision/expiry binding, real isolated writes and readback")
+    }
+}

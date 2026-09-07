@@ -5,6 +5,25 @@ updated_by: codex
 status: macos-634-settings-tools-published-verified; ai-native-in-progress; an2-merged; an3-a-pr-ready; an3-b1-draft-pr-ci-green; an3-b2-draft-pr-ci-green-security-clean-policy-blocked; an3-b3a-draft-pr-ci-green; an3-b3b-windows-security-ci-green-physical-e2e-pending; an3-b3b-macos-draft-pr-ci-green-physical-e2e-pending; macos-codex-appserver-chatgpt-bundled-0.150-live-webrtc-passed-no-physical-mic; macos-codex-appserver-broker-tool-live-probe-verified; macos-codex-appserver-live-model-timer-tool-verified; macos-codex-appserver-managed-chatgpt-login-local-verified-human-login-pending; macos-normal-ui-all-providers-voice-lane-readback; macos-voice-e2e-isolation-draft-pr-ci-green-security-clean-physical-e2e-pending; macos-voice-e2e-performance-readback-local-verified; macos-voice-e2e-terminal-receipt-fixed-local-verified; macos-voice-e2e-build608-legacy-nonphysical-only; macos-voice-e2e-build618-stopped; macos-voice-e2e-build619-stopped-receipt-invalid; macos-calendar-read-broker-live-verified; an4-merged; an5-a-merged; an5-b-merged; an5-c-pr-ready; an5-credential-broker-draft-pr-ci-green; an5-credential-peer-identity-draft-pr-ci-green-security-clean; an5-credential-mutual-identity-draft-pr-ci-green-security-clean; an5-credential-delivery-draft-pr-ci-green-security-clean-macos-auth-canary-passed; macos-codex-confinement-canary-passed; windows-codex-confinement-downgrade-negative-control-ci-green-positive-elevated-blocked-by-reparse-finding; windows-codex-sandbox-production-fail-closed-ci-green-original-path-fixed; windows-codex-sandbox-helper-internal-ci-green-semantic-readback-security-clean; windows-codex-sandbox-per-machine-msi-ci-green; windows-settings-fixed-helper-uac-boundary-ci-green-physical-canary-pending; macos-pocket-tools-generator-local-verified-unpublished; core-capability-reintegration-local-verified; core-integration-candidate-local-verified; core-ga-legacy-ai-path-removed-local-verified; core-ga-final-integration-draft-pr-ci-green-physical-e2e-pending; an8-a-pr-ready-review-resolved; an8-b-draft-macos-transition-verified-windows-beta-transition-verified; an8-c-draft-pr-ci-green; an8-retention-draft-pr-ci-green; an8-compatibility-migration-draft-pr-ci-green; an8-app-health-local-verified; an8-windows-signing-contract-ci-green-security-fixed-physical-signing-pending; windows-signpath-foundation-selected-application-pending; macos-an8-build583-notarized-release-candidate-verified-unpublished; macos-build597-notarized-rejected-packaged-realtime-local-network-gate; macos-build599-notarized-artifact-verified-packaged-realtime-local-network-gate; macos-build605-notarized-release-candidate-verified-unpublished; macos-build615-notarized-exact-runtime-head-rc-unpublished; macos-build628-voice-start-fix-notarized-unpublished-physical-voice-tools-accepted; macos-build629-voice-options-notarized-unpublished-physical-options-pending; an8-pro-gap-audit-complete-no-go; provider-bound-codex-physical-voice-ci-green; macos-panel-soak-verified; macos-settings-window-readable-and-resizable; an8-exact-runtime-head-evidence-bundle
 ---
 
+## 2026-09-07 音声だけの確認設定・天気・macOS 638を配布準備中
+
+- 通常操作と削除・取消の確認を個別設定し、確認オンの場合も音声だけで承認・取消できるようにした。追加ツールにも接続。
+- 設定地域の天気を既存ストアから返し、実モデルでの取得がPASS。Debugの新規23+8、App OS50、既存主要検証がPASS。本番反映はユーザー承認済み、配布物の最終検証と公開を進める。
+- 詳細: [実装・配信ログ](2026-09/2026-09-07_hover-pocket-voice-only-weather-release.md)。
+
+## 2026-09-07 Codex App OSのmacOSローカル実装・自動検証完了
+
+- 既存音声を維持し、画面同期、背景生成、音声確認後の導入・記録・workflow・削除・復元、標準機能保護、声の選択、実preview検証を接続した。
+- 最終build637で新規43項目、platform78、personal-tools42、HTML20、panel128と既存主要検証がPASS。実Astra生成2種のpreviewを再検証し、実ChatGPTモデルの共通tool実行と選択音声でのWebRTC接続も確認した。
+- 実パネルの最小サイズ・最大文字を観測。物理マイクでの連続対話・画面同期・音声承認と声の聞き比べ、native入力の実クリック受入は未完了。公開・既存アプリの置換・Windows実装は行っていない。
+- 詳細: [実装・検証ログ](2026-09/2026-09-07_hover-pocket-codex-app-os-implementation.md)。[設計](../docs/plan/20260907_CODEX_APP_OS_ARCHITECTURE.md) / [接続契約](../docs/plan/20260907_CODEX_APP_OS_CONTRACT.md)。
+
+## 2026-09-07 ノッチ伸縮案を見送り
+
+- ユーザー判断で試作635/636を不採用とし、ソースと要件を変更前の`8beddb7`へ復元。既存の設定整理・自作ツール機能は保持。本番634は変更なし。
+- 試作差分と検証記録を退避し、確認用アプリを終了。試作バイナリは一時退避先へ移動。
+- readback: 対象ソース・要件のHEAD一致、試作ソースのビルド対象外への移動、試作PIDの終了を確認。記録: `progress/evidence/2026-09-07-notch-prototype-withdrawn/`。
+
 ## 2026-09-07 設定整理・個人用ツール・macOS 634本番配信完了
 
 - 設定を7カテゴリに整理し、切替で入力途中の依頼を保持。標準機能を維持し、自作ツールに記録を残すアンインストールと完全削除を追加。実設定UIで削除・復元・データ保持を確認。

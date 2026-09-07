@@ -1,0 +1,15 @@
+broker_verify=ok
+broker_registry_descriptors=22
+broker_available_handlers=21
+broker_calculator_evaluate=ok
+broker_controls_os_readback=ok
+broker_sticky_lifecycle=ok
+broker_approval_presentation=ok
+broker_today_focus=ok
+broker_pocket_app=ok
+broker_pocket_app_declared_tests=4
+broker_pocket_app_layout_cases=16
+broker_concurrent_duplicate=ok
+broker_retention_governance=ok
+broker_negative_cases=12
+broker_golden_plan_digest=sha256:d098ea1b5f9f70e91486fd53229e7ddb68f73a9952ab94f17eed27cdeeb6413f

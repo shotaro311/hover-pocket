@@ -1,0 +1,10 @@
+{
+  "build": "637",
+  "bundle_id": "local.codex.hover-pocket",
+  "binary_sha256": "c1649e4465244a7e449dcb96799ab1b71dab8a02ecd1a936b97b899e1a08d027",
+  "signature_verified": true,
+  "installed_app_preserved": true,
+  "isolated_ui_app_stopped": true,
+  "physical_microphone_e2e": "not_verified",
+  "published": false
+}

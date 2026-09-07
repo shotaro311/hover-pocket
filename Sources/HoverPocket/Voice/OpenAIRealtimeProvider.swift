@@ -95,6 +95,7 @@ final class OpenAIRealtimeMacOSVoiceSessionAdapter: VoiceSessionAdapter {
         context: VoiceCapabilityContext? = nil,
         calendarAccessGranted: @escaping () -> Bool = { false },
         actionConfirmationEnabled: @escaping @MainActor () -> Bool = { true },
+        destructiveConfirmationEnabled: @escaping @MainActor () -> Bool = { true },
         voiceRuntime: VoiceLaneRuntime = .shared,
         transport: OpenAIRealtimeMacOSTransport = .shared
     ) {
@@ -103,7 +104,8 @@ final class OpenAIRealtimeMacOSVoiceSessionAdapter: VoiceSessionAdapter {
             try? OpenAIRealtimeMacOSCapabilityRuntime(
                 context: $0,
                 calendarAccessGranted: calendarAccessGranted,
-                actionConfirmationEnabled: actionConfirmationEnabled
+                actionConfirmationEnabled: actionConfirmationEnabled,
+                destructiveConfirmationEnabled: destructiveConfirmationEnabled
             )
         }
         self.voiceRuntime = voiceRuntime
@@ -180,6 +182,7 @@ final class CodexAppServerMacOSVoiceSessionAdapter: VoiceSessionAdapter {
         context: VoiceCapabilityContext?,
         calendarAccessGranted: @escaping () -> Bool,
         actionConfirmationEnabled: @escaping @MainActor () -> Bool = { true },
+        destructiveConfirmationEnabled: @escaping @MainActor () -> Bool = { true },
         voiceRuntime: VoiceLaneRuntime = .shared,
         compatibilityProbe: CodexAppServerCompatibilityProbe = .shared,
         runtimeHost: CodexVoiceRuntimeHost = CodexAppServerMacOSRuntime.host,
@@ -190,9 +193,10 @@ final class CodexAppServerMacOSVoiceSessionAdapter: VoiceSessionAdapter {
             guard let runtime = try? OpenAIRealtimeMacOSCapabilityRuntime(
                 context: $0,
                 calendarAccessGranted: calendarAccessGranted,
-                actionConfirmationEnabled: actionConfirmationEnabled
+                actionConfirmationEnabled: actionConfirmationEnabled,
+                destructiveConfirmationEnabled: destructiveConfirmationEnabled
             ) else { return nil }
-            return CodexAppServerCapabilityBridge(runtime: runtime)
+            return CodexAppServerCapabilityBridge(runtime: runtime, appController: .shared)
         }
         self.runtimeHost = runtimeHost
         self.driver = driver
@@ -308,6 +312,9 @@ enum VoiceProviderAdapterFactory {
                     actionConfirmationEnabled: {
                         settings.voiceActionConfirmationEnabled
                     },
+                    destructiveConfirmationEnabled: {
+                        settings.voiceDestructiveConfirmationEnabled
+                    },
                     voiceRuntime: voiceRuntime
                 )
             }
@@ -321,6 +328,9 @@ enum VoiceProviderAdapterFactory {
                     },
                     actionConfirmationEnabled: {
                         settings.voiceActionConfirmationEnabled
+                    },
+                    destructiveConfirmationEnabled: {
+                        settings.voiceDestructiveConfirmationEnabled
                     },
                     voiceRuntime: voiceRuntime
                 )

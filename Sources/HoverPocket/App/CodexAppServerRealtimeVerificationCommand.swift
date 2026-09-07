@@ -27,7 +27,7 @@ private protocol CodexAppServerRealtimeVerificationSafeError {
 enum CodexAppServerRealtimeVerificationCommand {
     private static let workspacePrefix = "HoverPocketCodexRealtime-"
 
-    static func run() async throws -> CodexAppServerRealtimeVerificationResult {
+    static func run(voiceSelection: String? = nil) async throws -> CodexAppServerRealtimeVerificationResult {
         let toolAdapter = CodexAppServerRealtimeVerificationToolAdapter()
         let compatibility = await CodexAppServerCompatibilityProbe.shared.probe(
             dynamicTools: toolAdapter.dynamicTools
@@ -90,6 +90,7 @@ enum CodexAppServerRealtimeVerificationCommand {
             toolAdapter: toolAdapter,
             rootThreadEphemeral: true
         )
+        if let voiceSelection { coordinator.preferredVoice = { voiceSelection } }
         let webRTC = CodexRealtimeSDPConnectionProbe()
         var processID: Int32?
 
@@ -143,6 +144,9 @@ enum CodexAppServerRealtimeVerificationCommand {
                 )
             }
 
+            guard await coordinator.appendHostNotice(sessionID: answer.rootThreadID, text: "HoverPocket verification status: connected. No action is requested; do not call any tools.") else {
+                throw CodexAppServerRealtimeVerificationError.failed("realtime_host_notice_failed")
+            }
             await webRTC.close()
             await coordinator.stopRealtime()
             await coordinator.close()

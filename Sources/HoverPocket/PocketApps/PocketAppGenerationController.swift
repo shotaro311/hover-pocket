@@ -23,6 +23,7 @@ final class PocketAppGenerationController: ObservableObject {
     @Published private(set) var history: [PocketToolCheckpoint] = []
     @Published private(set) var historyIssue: String?
     @Published private(set) var draftCheckpoint: PocketToolCheckpoint?
+    @Published private(set) var previewValidationReport = "contract-passed"
     @Published private(set) var previewModel: PocketSurfaceHostModel?
 
     private let generator: (any PocketAppGenerationAdapter)?
@@ -80,6 +81,19 @@ final class PocketAppGenerationController: ObservableObject {
         packageNames[packageID] ?? history.first(where: { $0.packageID == packageID })?.name ?? "個人用ツール"
     }
 
+    var previewValidationSummary: String {
+        if previewValidationReport.contains("representative-collection-input-save-search-cancel") {
+            return "小さい画面・大きな文字での表示と、代表的な記録の入力・保存・検索・取消を試用データで確認しました。会話との組み合わせや使いやすさは、プレビューで確認してください。"
+        }
+        if previewValidationReport.contains("isolated-native-render") {
+            return "標準画面の描画を確認しました。画面上の一連の操作と会話との組み合わせは、プレビューで確認してください。"
+        }
+        if previewValidationReport.contains("isolated-web-render") {
+            return "小さい画面・大きな文字での表示を確認しました。機能の実行と会話との組み合わせはプレビューで確認してください。"
+        }
+        return "定義と権限の検査が完了しています。画面上の操作はプレビューで確認してください。"
+    }
+
     var errorMessage: String? {
         guard let errorCode else { return nil }
         switch errorCode {
@@ -135,6 +149,7 @@ final class PocketAppGenerationController: ObservableObject {
     }
 
     func restoreCheckpoint(_ checkpoint: PocketToolCheckpoint) {
+        guard !PocketAppOwnership.isStandard(checkpoint.packageID) else { fail(.invalidRequest); return }
         guard phase != .generating, phase != .installing, pendingWorkspaceRestore == nil else { return }
         do {
             let source = try historyStore.package(for: checkpoint)
@@ -169,7 +184,7 @@ final class PocketAppGenerationController: ObservableObject {
         } catch { historyIssue = "履歴を復元できませんでした。直前の画面と保存データは保持しています。" }
     }
 
-    private func presentDraft(_ package: PocketAppPackage, summary: String, kind: String = "preview", allowsActivation: Bool) throws {
+    private func presentDraft(_ package: PocketAppPackage, summary: String, kind: String = "preview", allowsActivation: Bool, validation: String = "contract-passed") throws {
         let proposal = try lifecycle.stage(draftDirectory: package.rootDirectory)
         do {
             let model = try previewFactory?(package, previewDataRoot)
@@ -181,6 +196,7 @@ final class PocketAppGenerationController: ObservableObject {
             if let old = pendingProposal { try lifecycle.reject(requestID: old.requestID, bindingDigest: old.bindingDigest) }
             previewModel?.invalidateActivation()
             previewModel = model
+            previewValidationReport = validation
             draftCheckpoint = checkpoint
             pendingProposal = proposal
             pendingAllowsActivation = allowsActivation
@@ -346,7 +362,7 @@ final class PocketAppGenerationController: ObservableObject {
             let materialized = try materializer.materialize(envelope: envelope, request: request)
             defer { try? FileManager.default.removeItem(at: materialized.directory) }
             try validatePins()
-            try presentDraft(materialized.package, summary: userRequest, allowsActivation: generator.allowsActivation)
+            try presentDraft(materialized.package, summary: userRequest, allowsActivation: generator.allowsActivation, validation: envelope.previewValidation ?? "contract-passed")
             generationCancellation = nil
         } catch PocketToolHistoryError.capacityExceeded {
             generationCancellation = nil
@@ -371,6 +387,7 @@ final class PocketAppGenerationController: ObservableObject {
 
     func approveAndInstall(requestID: String, bindingDigest: String) {
         guard let proposal = pendingProposal,
+              !PocketAppOwnership.isStandard(proposal.packageID),
               proposal.requestID == requestID,
               proposal.bindingDigest == bindingDigest,
               pendingAllowsActivation else {
@@ -443,6 +460,7 @@ final class PocketAppGenerationController: ObservableObject {
     }
 
     func disable(packageID: String) {
+        guard !PocketAppOwnership.isStandard(packageID) else { fail(.invalidRequest); return }
         guard pendingWorkspaceRestore == nil else {
             workspaceBackupErrorCode = "RESTORE_BUSY"
             return
@@ -471,6 +489,7 @@ final class PocketAppGenerationController: ObservableObject {
     }
 
     func enable(packageID: String) {
+        guard !PocketAppOwnership.isStandard(packageID) else { fail(.invalidRequest); return }
         guard pendingWorkspaceRestore == nil else {
             workspaceBackupErrorCode = "RESTORE_BUSY"
             return
@@ -503,7 +522,7 @@ final class PocketAppGenerationController: ObservableObject {
     }
 
     func removeTool(packageID: String, includingData: Bool) {
-        guard !managementIsBusy, packageID != "local.example.today-focus" else { return }
+        guard !managementIsBusy, !PocketAppOwnership.isStandard(packageID) else { return }
         removalMessage = nil
         if draftCheckpoint?.packageID == packageID { startNewDraft() }
         removePreservingData(packageID: packageID)
@@ -541,6 +560,7 @@ final class PocketAppGenerationController: ObservableObject {
     }
 
     func removePreservingData(packageID: String) {
+        guard !PocketAppOwnership.isStandard(packageID) else { fail(.invalidRequest); return }
         guard !managementIsBusy else {
             workspaceBackupErrorCode = "RESTORE_BUSY"
             return
@@ -569,6 +589,7 @@ final class PocketAppGenerationController: ObservableObject {
     }
 
     func prepareRollback(packageID: String, version: String) {
+        guard !PocketAppOwnership.isStandard(packageID) else { fail(.invalidRequest); return }
         guard pendingProposal == nil, pendingWorkspaceRestore == nil else {
             fail(.busy)
             return
@@ -589,6 +610,7 @@ final class PocketAppGenerationController: ObservableObject {
     }
 
     func prepareCapabilityMigration(packageID: String, targetVersion: String) {
+        guard !PocketAppOwnership.isStandard(packageID) else { fail(.invalidRequest); return }
         guard pendingProposal == nil, pendingWorkspaceRestore == nil else {
             fail(.busy)
             return
@@ -612,6 +634,7 @@ final class PocketAppGenerationController: ObservableObject {
     }
 
     private func makeRequest(userRequest: String, updating packageID: String?) throws -> PocketAppGenerationRequest {
+        if let packageID, PocketAppOwnership.isStandard(packageID) { throw PocketAppGenerationError.invalidRequest }
         let trimmed = userRequest.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
               trimmed.unicodeScalars.count <= PocketAppGenerationRequest.maximumUserRequestScalars,

@@ -62,6 +62,9 @@ struct PocketHTMLSurfaceView: NSViewRepresentable {
           const entry=pending.get(event.data.id);if(!entry)return;pending.delete(event.data.id);clearTimeout(entry.timer);
           event.data.error?entry.reject(new Error(event.data.error)):entry.resolve(event.data.result);
         });
+        let editingTimer;
+        document.addEventListener('input',event=>{if(event.target.matches?.('[data-pocket-action=search]'))return;clearTimeout(editingTimer);editingTimer=setTimeout(()=>call('view.editing',{editing:true}).catch(()=>{}),120);},true);
+        document.addEventListener('click',event=>{const action=event.target.closest?.('[data-pocket-action]')?.dataset.pocketAction;if(action==='save'||action==='cancel')clearTimeout(editingTimer);if(action==='cancel')call('view.editing',{editing:false}).catch(()=>{});},true);
         Object.defineProperty(window,'pocket',{value:Object.freeze({
           collections:Object.freeze({list:()=>call('collections.list'),read:collection=>call('collections.read',{collection}),
           insert:(collection,fields,revision)=>call('collections.insert',{collection,fields,revision}),
@@ -140,6 +143,11 @@ struct PocketHTMLSurfaceView: NSViewRepresentable {
         }
 
         private func dispatch(_ method: String, args: [String: Any]) throws -> Any {
+            if method == "view.editing" {
+                guard Set(args.keys) == ["editing"], let editing = args["editing"] as? Bool else { throw PocketCollectionError.invalidRecord }
+                model.hasUnsavedHTMLInput = editing
+                return ["editing": editing]
+            }
             if method == "collections.list" {
                 guard args.isEmpty else { throw PocketCollectionError.invalidRecord }
                 return model.collectionSchemas.keys.sorted().map { ["id": $0, "title": model.collectionSchemas[$0]!.title] }

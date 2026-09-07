@@ -46,7 +46,7 @@ struct PocketSurfaceHostView: View {
         .background(PocketToolTheme.background)
         .environment(\.colorScheme, .dark)
         .task {
-            await model.load()
+            await model.load(refreshQueries: true)
         }
         .alert("実行前の確認", isPresented: $model.showsApproval) {
             Button("キャンセル", role: .cancel) {

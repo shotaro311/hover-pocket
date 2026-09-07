@@ -1446,7 +1446,7 @@ def main() -> None:
             or not all(value in model_verifier for value in (
                 "calendarAccessGranted: { false }",
                 "defer { try? FileManager.default.removeItem(at: root) }",
-                "bridge.dynamicTools.count == 4",
+                "bridge.dynamicTools.count == 6",
                 "OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool",
                 "OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool",
                 "OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool",
@@ -1628,12 +1628,17 @@ def main() -> None:
         '"approval_rate_limited"',
         "private let actionConfirmationEnabled: @MainActor () -> Bool",
         "actionConfirmationEnabled: @escaping @MainActor () -> Bool",
-        "let confirmationEnabled = actionConfirmationEnabled()",
-        "let autoApprove = !confirmationEnabled && request.kind.isCurrentAutoApprovalKind",
+        "confirmationEnabled = destructiveConfirmationEnabled()",
+        "confirmationEnabled = actionConfirmationEnabled()",
+        "let autoApprove = !confirmationEnabled",
+        "func confirmSpeech",
+        "userRevision > speech.userRevision",
+        "speech.expires > now()",
+        "await response.value()",
         "automaticReservationID",
         "finishAutomaticApproval(reservationID: reservationID)",
         "var automaticApprovalReservationID: UUID?",
-        "case .calendarCreate, .timerStart, .stickyUpsert",
+        "if case .personalDelete = request.kind",
     )):
         fail("macOS Realtime tools bypass the exact Registry/Broker/readback boundary")
     if not all(value in mac_realtime_capabilities for value in (
@@ -1991,10 +1996,12 @@ def main() -> None:
     )) or not all(value in mac_settings for value in (
         "パネルを閉じても音声を続ける",
         "Continue voice when the panel is hidden",
-        "Voice操作の確認を毎回表示",
-        "Ask before Voice actions",
+        "通常操作を音声で確認",
+        "削除・取消操作を音声で確認",
+        "settings.voiceDestructiveConfirmationEnabled",
+        "Confirm regular actions by voice",
         "settings.voiceProvider == .off || !settings.voiceEnabled",
-        "Capability Brokerのschema・idempotency・readback・auditは維持",
+        "macOSの権限許可は別途必要です。",
     )):
         fail("macOS Voice hidden continuation or action confirmation Settings are incomplete")
     if "providerID: providerID" not in mac_app \

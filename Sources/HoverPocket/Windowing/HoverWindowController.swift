@@ -125,6 +125,34 @@ final class HoverWindowController {
         awaitingPointerAfterExplicitOpen = true
     }
 
+    func connectAppController() {
+        let controller = PocketAppOSController.shared
+        controller.providerStore = menuStore.providerStore
+        controller.actionConfirmationEnabled = { [weak self] in self?.settings.voiceActionConfirmationEnabled ?? true }
+        controller.destructiveConfirmationEnabled = { [weak self] in self?.settings.voiceDestructiveConfirmationEnabled ?? true }
+        controller.readWeather = { [weak self] in
+            guard let self, HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled else {
+                throw WeatherForecastServiceError.invalidRequest
+            }
+            return try await WeatherVoiceReader.read(store: .shared, location: self.settings.weatherLocation,
+                temperatureUnit: self.settings.weatherTemperatureUnit)
+        }
+        controller.calendarAccessGranted = { [weak self] in self?.settings.voiceCalendarAccessEnabled == true }
+        CodexAppServerMacOSRuntime.host.preferredVoice = { [weak self] in self?.settings.codexVoiceSelection ?? "" }
+        controller.notifySession = { session, text in
+            await CodexAppServerMacOSRuntime.host.appendHostNotice(sessionID: session, text: text)
+        }
+        controller.openScreen = { [weak self] id in
+            guard let self else { return false }
+            self.openPanel(showing: id)
+            return self.previewWindow?.isVisible == true && self.menuStore.providerStore.selectedPluginID == id
+        }
+        controller.openTools = { [weak self] in
+            self?.menuStore.providerStore.objectWillChange.send()
+            self?.openPanel(showing: PocketDraftProvider.pluginID)
+        }
+    }
+
     func openSettingsFromMenu() {
         showSettings()
     }

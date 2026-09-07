@@ -1113,14 +1113,15 @@ enum VoiceFoundationVerificationCommand {
         )
         let toolSurface = try runtime.sessionTools()
         let toolNames = Set(toolSurface.compactMap { $0["name"] as? String })
-        guard toolSurface.count == 6,
+        guard toolSurface.count == 8,
               toolNames == [
                   OpenAIRealtimeMacOSCapabilityRuntime.calendarListTool,
                   OpenAIRealtimeMacOSCapabilityRuntime.calendarCreateTool,
                   OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
                   OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool,
                   OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool,
-                  OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool
+                  OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool,
+                  "voice_action_confirm", "pending_action_cancel"
               ] else {
             throw VoiceFoundationVerificationError.failed("voice_tool_surface")
         }
@@ -1493,7 +1494,7 @@ enum VoiceFoundationVerificationCommand {
             now: { now },
             approvalHandler: { _ in false }
         )
-        guard try deniedRuntime.sessionTools().count == 4 else {
+        guard try deniedRuntime.sessionTools().count == 6 else {
             throw VoiceFoundationVerificationError.failed("voice_calendar_permission_surface")
         }
         let deniedCalendar = await deniedRuntime.execute(
@@ -1573,7 +1574,7 @@ enum VoiceFoundationVerificationCommand {
         let cancelled = await pending.value
         guard try voiceJSON(cancelled)["code"] as? String == "session_cancelled",
               calendar.createdCount == createdBeforeCancellation,
-              try cancellationRuntime.sessionTools().count == 4 else {
+              try cancellationRuntime.sessionTools().count == 6 else {
             throw VoiceFoundationVerificationError.failed("voice_session_cancellation_or_grant_rebuild")
         }
     }

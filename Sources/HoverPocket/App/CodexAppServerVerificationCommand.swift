@@ -139,12 +139,13 @@ enum CodexAppServerVerificationCommand {
         )
         let bridge = CodexAppServerCapabilityBridge(runtime: runtime)
         let expectedToolName = OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool
-        guard bridge.dynamicTools.count == 4,
+        guard bridge.dynamicTools.count == 6,
               Set(bridge.dynamicTools.compactMap { $0.objectValue?["name"]?.stringValue }) == [
                   OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
                   OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool,
                   OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool,
-                  OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool
+                  OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool,
+                  "voice_action_confirm", "pending_action_cancel"
               ] else {
             try? FileManager.default.removeItem(at: root)
             throw CodexAppServerVerificationError.failed("model_tool_surface_invalid")
@@ -1006,7 +1007,8 @@ enum CodexAppServerVerificationCommand {
             OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
             OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool,
             OpenAIRealtimeMacOSCapabilityRuntime.controlsBrightnessSetTool,
-            OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool
+            OpenAIRealtimeMacOSCapabilityRuntime.controlsVolumeSetTool,
+            "voice_action_confirm", "pending_action_cancel"
         ] else {
             throw CodexAppServerVerificationError.failed("broker_tool_surface")
         }

@@ -15,6 +15,13 @@ protocol CodexVoiceCapabilityToolAdapterProtocol: AnyObject {
     ) async -> CodexAppServerReply
 
     func cancelSession(_ sessionID: String)
+    func noteUserInput(sessionID: String)
+    func conversationDidDisconnect(sessionID: String)
+}
+
+extension CodexVoiceCapabilityToolAdapterProtocol {
+    func noteUserInput(sessionID: String) {}
+    func conversationDidDisconnect(sessionID: String) {}
 }
 
 @MainActor
@@ -23,14 +30,16 @@ final class CodexAppServerCapabilityBridge: CodexVoiceCapabilityToolAdapterProto
     private static let maximumToolOutputBytes = 64 * 1_024
 
     private let runtime: any OpenAIRealtimeCapabilityExecuting
+    private let appController: PocketAppOSController?
 
-    init(runtime: any OpenAIRealtimeCapabilityExecuting) {
+    init(runtime: any OpenAIRealtimeCapabilityExecuting, appController: PocketAppOSController? = nil) {
         self.runtime = runtime
+        self.appController = appController
     }
 
     var dynamicTools: [CodexJSONValue] {
         guard let tools = try? runtime.sessionTools() else { return [] }
-        return tools.compactMap(Self.dynamicTool)
+        return (tools + (appController == nil ? [] : [PocketAppOSController.tool])).compactMap(Self.dynamicTool)
     }
 
     func handle(
@@ -70,16 +79,28 @@ final class CodexAppServerCapabilityBridge: CodexVoiceCapabilityToolAdapterProto
             return Self.toolFailure("invalid_arguments")
         }
 
-        let output = await runtime.execute(
+        let appConfirmationCancelled = toolName == "pending_action_cancel" && appController?.cancelPendingConfirmation(session: context.rootThreadID) == true
+        var output: String
+        if toolName == PocketAppOSController.toolName, let appController {
+            output = await appController.execute(session: context.rootThreadID, callID: callID, arguments: arguments)
+        } else {
+            output = await runtime.execute(
             sessionID: context.rootThreadID,
             callID: callID,
             toolName: toolName,
             argumentsJSON: argumentsJSON
         )
+        }
+        if appConfirmationCancelled, let data = output.data(using: .utf8),
+           var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            object["status"] = "succeeded"
+            object["host_confirmation_cancelled"] = true
+            if let updated = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), let text = String(data: updated, encoding: .utf8) { output = text }
+        }
         guard output.utf8.count <= Self.maximumToolOutputBytes else {
             return Self.toolFailure("output_too_large")
         }
-        let success = Self.outputSucceeded(output)
+        let success = Self.outputSucceeded(output) || Self.outputAccepted(output)
         return .success(.object([
             "success": .bool(success),
             "contentItems": .array([
@@ -91,8 +112,19 @@ final class CodexAppServerCapabilityBridge: CodexVoiceCapabilityToolAdapterProto
         ]))
     }
 
+    func conversationDidDisconnect(sessionID: String) {
+        _ = runtime.cancelPendingConfirmation(sessionID: sessionID)
+        appController?.cancelSession(sessionID)
+    }
+
+    func noteUserInput(sessionID: String) {
+        runtime.noteUserInput(sessionID: sessionID)
+        appController?.noteUserInput(session: sessionID)
+    }
+
     func cancelSession(_ sessionID: String) {
         runtime.cancelSession(sessionID)
+        appController?.cancelSession(sessionID)
     }
 
     private static func dynamicTool(_ source: [String: Any]) -> CodexJSONValue? {
@@ -112,6 +144,13 @@ final class CodexAppServerCapabilityBridge: CodexVoiceCapabilityToolAdapterProto
               let data = try? JSONSerialization.data(withJSONObject: candidate, options: [.sortedKeys]),
               data.count <= Self.maximumToolRequestBytes else { return nil }
         return try? JSONDecoder().decode(CodexJSONValue.self, from: data)
+    }
+
+    private static func outputAccepted(_ output: String) -> Bool {
+        guard let data = output.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let status = object["status"] as? String else { return false }
+        return ["accepted", "awaiting_confirmation"].contains(status)
     }
 
     private static func outputSucceeded(_ output: String) -> Bool {

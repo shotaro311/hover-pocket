@@ -117,7 +117,7 @@ actor CodexAppServerPocketGenerator: PocketAppGenerationAdapter {
                 _ = try await capture.output()
                 diagnostic("generation-output-received")
                 do {
-                    let envelope = try await accumulator.validatedEnvelope()
+                    let envelope = try await accumulator.validatedEnvelope(checkPreview: true)
                     await client.close()
                     return envelope
                 } catch {
@@ -125,7 +125,8 @@ actor CodexAppServerPocketGenerator: PocketAppGenerationAdapter {
                     else if let error = error as? PocketAppGenerationError { diagnostic(error.code) }
                     else { diagnostic("package-staging-rejected") }
                     guard attempt < 2 else { throw PocketAppGenerationError.packageInvalid }
-                    input = "Host validation rejected the package. Read the relevant pocket_guide topics, check exact required keys, declared file paths, schema types and workflow scope, and correct the in-memory draft files using pocket_draft_file. Call pocket_draft_validate before finishing. The previous working definition must be preserved."
+                    let previewFeedback = (error as? PocketPreviewValidationError)?.description ?? "Contract validation failed."
+                    input = previewFeedback + " Host validation rejected the package. Read the relevant pocket_guide topics, check exact required keys, declared file paths, schema types and workflow scope, and correct the in-memory draft files using pocket_draft_file. Call pocket_draft_validate before finishing. The previous working definition must be preserved."
                 }
             }
             throw PocketAppGenerationError.packageInvalid

@@ -5,15 +5,32 @@ struct GoogleCalendarPreviewView: View {
     @ObservedObject var settings: AppSettings
 
     @ObservedObject private var store = GoogleCalendarStore.shared
-    @State private var displayedMonth = Calendar.current.startOfMonth(for: Date())
-    @State private var selectedDate = Date()
-    @State private var lockedDate: Date?
-    @State private var hoveredDate: Date?
-    @State private var draft: GoogleCalendarEventDraft?
+    @ObservedObject private var selection = PocketCalendarSelection.shared
     @State private var deleteTarget: GoogleCalendarEventOccurrence?
     @State private var pendingFocusDraft: TodayFocusDraft?
     @State private var pendingFocusTitle = ""
     @State private var focusConfirmationPresented = false
+
+    private var displayedMonth: Date {
+        get { selection.displayedMonth }
+        nonmutating set { selection.displayedMonth = newValue }
+    }
+    private var selectedDate: Date {
+        get { selection.selectedDate }
+        nonmutating set { selection.selectedDate = newValue }
+    }
+    private var lockedDate: Date? {
+        get { selection.lockedDate }
+        nonmutating set { selection.lockedDate = newValue }
+    }
+    private var hoveredDate: Date? {
+        get { selection.hoveredDate }
+        nonmutating set { selection.hoveredDate = newValue }
+    }
+    private var draft: GoogleCalendarEventDraft? {
+        get { selection.draft }
+        nonmutating set { selection.draft = newValue }
+    }
 
     var body: some View {
         Group {
@@ -213,11 +230,16 @@ struct GoogleCalendarPreviewView: View {
     }
 
     private var detailPane: some View {
-        ScrollView {
-            detailContent
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+        ScrollViewReader { reader in
+            ScrollView {
+                detailContent
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .scrollIndicators(.automatic)
+            .onChange(of: selection.selectedEventID) { _, id in
+                if let id, draft == nil { reader.scrollTo(id, anchor: .center) }
+            }
         }
-        .scrollIndicators(.automatic)
     }
 
     @ViewBuilder
@@ -307,7 +329,7 @@ struct GoogleCalendarPreviewView: View {
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(events) { event in
-                        eventRow(event)
+                        eventRow(event).id(event.id)
                     }
                 }
             }
@@ -364,6 +386,11 @@ struct GoogleCalendarPreviewView: View {
                 .help(settings.text(.delete))
             }
         }
+        .padding(3)
+        .background(selection.selectedEventID == event.id ? Color.white.opacity(0.08) : .clear)
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .contentShape(Rectangle())
+        .onTapGesture { selection.selectedEventID = event.id }
     }
 
     private func prepareTodayFocus(_ event: GoogleCalendarEventOccurrence) {
@@ -613,6 +640,7 @@ struct GoogleCalendarPreviewView: View {
         selectedDate = event.start
         lockedDate = event.start
         hoveredDate = nil
+        selection.selectedEventID = event.id
         draft = .editing(event)
     }
 

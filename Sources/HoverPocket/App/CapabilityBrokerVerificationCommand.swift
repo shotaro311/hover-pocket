@@ -669,11 +669,11 @@ enum CapabilityBrokerVerificationCommand {
             throw BrokerVerificationFailure("pocket_app_surface_reopen_model")
         }
         try require(
-            firstSurfaceModel !== reopenedSurfaceModel,
-            "pocket_app_surface_reopen_refreshes_queries"
+            firstSurfaceModel === reopenedSurfaceModel,
+            "pocket_app_surface_reopen_preserves_shared_selection"
         )
         await firstSurfaceModel.load(now: now)
-        await reopenedSurfaceModel.load(now: now)
+        await reopenedSurfaceModel.load(now: now, refreshQueries: true)
         try require(
             !firstSurfaceModel.stringValue(for: "$state.selectedEventRef").isEmpty
                 && !reopenedSurfaceModel.stringValue(for: "$state.selectedEventRef").isEmpty,

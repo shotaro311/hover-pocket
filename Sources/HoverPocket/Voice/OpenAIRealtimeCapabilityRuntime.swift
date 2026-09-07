@@ -28,6 +28,13 @@ protocol OpenAIRealtimeCapabilityExecuting: AnyObject {
         argumentsJSON: String
     ) async -> String
     func cancelSession(_ sessionID: String)
+    func noteUserInput(sessionID: String)
+    func cancelPendingConfirmation(sessionID: String) -> Bool
+}
+
+extension OpenAIRealtimeCapabilityExecuting {
+    func noteUserInput(sessionID: String) {}
+    func cancelPendingConfirmation(sessionID: String) -> Bool { false }
 }
 
 @MainActor
@@ -134,15 +141,26 @@ private final class VoiceApprovalCoordinator {
     private static let windowSeconds: TimeInterval = 60
 
     private let now: () -> Date
-    private let presenter: (VoiceNativeApprovalRequest) async -> Bool
+    private let presenter: ((VoiceNativeApprovalRequest) async -> Bool)?
     private var starts: [Date] = []
+    private var speech: SpeechApproval?
+    private var speechExpiryTask: Task<Void, Never>?
+
+    private struct SpeechApproval {
+        let id: String
+        let sessionID: String
+        let correlation: String
+        let userRevision: UInt64
+        let expires: Date
+        let continuation: CheckedContinuation<Bool, Never>
+    }
     private var active: ActiveApproval?
     private var cancelledSessions: Set<String> = []
     private var cancelledOrder: [String] = []
 
     init(
         now: @escaping () -> Date,
-        presenter: @escaping (VoiceNativeApprovalRequest) async -> Bool
+        presenter: ((VoiceNativeApprovalRequest) async -> Bool)?
     ) {
         self.now = now
         self.presenter = presenter
@@ -151,7 +169,10 @@ private final class VoiceApprovalCoordinator {
     func request(
         sessionID: String,
         request: VoiceNativeApprovalRequest,
-        confirmationEnabled: Bool
+        confirmationEnabled: Bool,
+        correlation: String,
+        userRevision: UInt64,
+        onPending: @escaping (String) -> Void
     ) async -> VoiceApprovalResult {
         guard !cancelledSessions.contains(sessionID) else {
             return VoiceApprovalResult(outcome: .cancelled, automaticReservationID: nil)
@@ -169,15 +190,17 @@ private final class VoiceApprovalCoordinator {
         }
 
         let approvalID = UUID()
-        let autoApprove = !confirmationEnabled && request.kind.isCurrentAutoApprovalKind
-        let task = Task { @MainActor [presenter] in
+        let autoApprove = !confirmationEnabled
+        let task = Task { @MainActor [self] in
             if autoApprove {
                 // Keep active ownership across one scheduling point so concurrent calls
                 // still observe the coordinator's single-flight guard without presenting UI.
                 await Task.yield()
                 return true
             }
-            return await presenter(request)
+            if let presenter { return await presenter(request) }
+            return await awaitSpeech(sessionID: sessionID, correlation: correlation,
+                userRevision: userRevision, onPending: onPending)
         }
         active = ActiveApproval(
             id: approvalID,
@@ -198,7 +221,7 @@ private final class VoiceApprovalCoordinator {
             return VoiceApprovalResult(outcome: .cancelled, automaticReservationID: nil)
         }
         active?.awaitingConfirmation = false
-        if autoApprove, approved {
+        if (autoApprove || presenter == nil), approved {
             return VoiceApprovalResult(outcome: .approved, automaticReservationID: approvalID)
         }
         if active?.id == approvalID {
@@ -208,6 +231,42 @@ private final class VoiceApprovalCoordinator {
             outcome: approved ? .approved : .rejected,
             automaticReservationID: nil
         )
+    }
+
+    private func awaitSpeech(sessionID: String, correlation: String, userRevision: UInt64,
+                             onPending: @escaping (String) -> Void) async -> Bool {
+        let id = UUID().uuidString.lowercased()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled else { continuation.resume(returning: false); return }
+                speech = SpeechApproval(id: id, sessionID: sessionID, correlation: correlation,
+                    userRevision: userRevision, expires: now().addingTimeInterval(300), continuation: continuation)
+                speechExpiryTask = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(300)) } catch { return }
+                    self?.resolveSpeech(id: id, approved: false)
+                }
+                onPending(id)
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.resolveSpeech(id: id, approved: false) }
+        }
+    }
+
+    func confirmSpeech(id: String, sessionID: String, userRevision: UInt64) -> String? {
+        guard let speech, speech.id == id, speech.sessionID == sessionID else { return nil }
+        guard speech.expires > now() else { resolveSpeech(id: id, approved: false); return nil }
+        guard userRevision > speech.userRevision else { return nil }
+        let correlation = speech.correlation
+        resolveSpeech(id: id, approved: true)
+        return correlation
+    }
+
+    private func resolveSpeech(id: String, approved: Bool) {
+        guard let speech, speech.id == id else { return }
+        self.speech = nil
+        speechExpiryTask?.cancel()
+        speechExpiryTask = nil
+        speech.continuation.resume(returning: approved)
     }
 
     func cancelPending(_ sessionID: String) -> Bool {
@@ -244,18 +303,6 @@ private final class VoiceApprovalCoordinator {
     }
 }
 
-private extension VoiceNativeApprovalRequest.Kind {
-    var isCurrentAutoApprovalKind: Bool {
-        switch self {
-        case .calendarCreate, .timerStart, .stickyUpsert,
-             .controlsBrightnessSet, .controlsVolumeSet, .personalEdit:
-            true
-        case .personalDelete:
-            false
-        }
-    }
-}
-
 private enum VoiceCapabilityRuntimeError: Error {
     case sessionCancelled
     case approvalFailed(String)
@@ -277,6 +324,8 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     let context: VoiceCapabilityContext
     private let calendarAccessGranted: () -> Bool
     private let actionConfirmationEnabled: @MainActor () -> Bool
+    private let destructiveConfirmationEnabled: @MainActor () -> Bool
+    private var userInputRevision: [String: UInt64] = [:]
     private let timeZoneID: () -> String
     let now: () -> Date
     private let approvalCoordinator: VoiceApprovalCoordinator
@@ -290,13 +339,15 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         context: VoiceCapabilityContext,
         calendarAccessGranted: @escaping () -> Bool,
         actionConfirmationEnabled: @escaping @MainActor () -> Bool = { true },
+        destructiveConfirmationEnabled: @escaping @MainActor () -> Bool = { true },
         timeZoneID: @escaping () -> String = { TimeZone.current.identifier },
         now: @escaping () -> Date = Date.init,
-        approvalHandler: @escaping (VoiceNativeApprovalRequest) async -> Bool = VoiceNativeApprovalPresenter.present
+        approvalHandler: ((VoiceNativeApprovalRequest) async -> Bool)? = nil
     ) throws {
         self.context = context
         self.calendarAccessGranted = calendarAccessGranted
         self.actionConfirmationEnabled = actionConfirmationEnabled
+        self.destructiveConfirmationEnabled = destructiveConfirmationEnabled
         self.timeZoneID = timeZoneID
         self.now = now
         self.approvalCoordinator = VoiceApprovalCoordinator(
@@ -357,9 +408,14 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         tools += PersonalToolOperation.allCases.filter {
             context.registry.availableHandlerKeys.contains($0.key) && (!$0.isCalendar || calendarAccessGranted())
         }.map(\.tool)
-        if context.registry.availableHandlerKeys.contains(PersonalToolOperation.timerList.key) {
-            tools.append(["type": "function", "name": "pending_action_cancel", "description": "Cancel a confirmation that is still pending in this conversation, without ending the conversation. This does not undo completed actions. If none is pending, report that fact.", "parameters": ["type": "object", "properties": [:], "additionalProperties": false]])
-        }
+        tools.append(["type": "function", "name": "pending_action_cancel", "description": "Cancel a confirmation that is still pending in this conversation, without ending the conversation. This does not undo completed actions. If none is pending, report that fact.", "parameters": ["type": "object", "properties": [:], "additionalProperties": false]])
+        tools.append([
+            "type": "function", "name": "voice_action_confirm",
+            "description": "Confirm the exact pending voice action only after the user explicitly agrees in a subsequent utterance. Use confirmation_id from awaiting_confirmation. Never infer consent or call this in the same user turn. Cancellation uses pending_action_cancel.",
+            "parameters": ["type": "object", "additionalProperties": false,
+                "properties": ["confirmation_id": ["type": "string"], "confirmed": ["type": "boolean"]],
+                "required": ["confirmation_id", "confirmed"]]
+        ])
         return tools
     }
 
@@ -419,7 +475,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         do {
             try requireIdentifier(sessionID, maximum: 160)
             try requireIdentifier(callID, maximum: 160)
-            guard (Self.allowedToolNames.contains(toolName) || PersonalToolOperation(rawValue: toolName) != nil || toolName == "pending_action_cancel"),
+            guard (Self.allowedToolNames.contains(toolName) || PersonalToolOperation(rawValue: toolName) != nil || toolName == "pending_action_cancel" || toolName == "voice_action_confirm"),
                   argumentsJSON.utf8.count <= Self.maximumArgumentsBytes else {
                 return failure("invalid_arguments")
             }
@@ -428,32 +484,35 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
             let requestDigest = Self.digest("\(toolName)\n\(argumentsJSON)")
             if let existing = remembered[correlation] {
                 guard existing.digest == requestDigest else { return failure("idempotency_conflict") }
-                return await existing.task.value
+                return await existing.response.value()
             }
             pruneRememberedCalls()
             guard remembered.count < Self.maximumRememberedCalls else {
                 return failure("overloaded")
             }
+            let response = VoiceToolReplyChannel()
             let task = Task { @MainActor [weak self] in
-                guard let self else { return Self.failure("unavailable") }
-                return await self.executeOnce(
+                guard let self else {
+                    let result = Self.failure("unavailable"); response.publish(result); return result
+                }
+                let result = await self.executeOnce(
                     correlation: correlation,
                     sessionID: sessionID,
                     callID: callID,
                     toolName: toolName,
                     arguments: arguments
                 )
+                response.publish(result)
+                if self.remembered[correlation] != nil { self.completed.append(correlation) }
+                return result
             }
             remembered[correlation] = RememberedCall(
                 sessionID: sessionID,
                 digest: requestDigest,
-                task: task
+                task: task,
+                response: response
             )
-            let result = await task.value
-            if remembered[correlation] != nil {
-                completed.append(correlation)
-            }
-            return result
+            return await response.value()
         } catch {
             return failure(safeCode(error))
         }
@@ -468,6 +527,15 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     ) async -> String {
         do {
             try requireSessionActive(sessionID)
+            if toolName == "voice_action_confirm" {
+                try requireExactKeys(arguments, allowed: ["confirmation_id", "confirmed"], required: ["confirmation_id", "confirmed"])
+                let id = try arguments.requiredString("confirmation_id", maxLength: 64)
+                guard try arguments.requiredBool("confirmed"),
+                      let original = approvalCoordinator.confirmSpeech(id: id, sessionID: sessionID,
+                        userRevision: userInputRevision[sessionID, default: 0]),
+                      let call = remembered[original] else { return failure("confirmation_mismatch") }
+                return await call.task.value
+            }
             if toolName == "pending_action_cancel" {
                 try requireExactKeys(arguments, allowed: [])
                 return try json(["status": "succeeded", "cancelledPendingAction": approvalCoordinator.cancelPending(sessionID), "completedActionsUndone": false])
@@ -664,6 +732,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         }
         let approval = await requestApproval(
             sessionID: sessionID,
+            correlation: correlation,
             request: VoiceNativeApprovalRequest(
                 kind: .calendarCreate,
                 title: "カレンダーへ予定を追加しますか？",
@@ -755,6 +824,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         }
         let approval = await requestApproval(
             sessionID: sessionID,
+            correlation: correlation,
             request: VoiceNativeApprovalRequest(
                 kind: .timerStart,
                 title: "タイマーを開始しますか？",
@@ -1119,7 +1189,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
             guard let request = preparation.approvalRequest else {
                 throw CapabilityBrokerError.approvalRequired
             }
-            let outcome = await requestApproval(sessionID: sessionID, request: approval)
+            let outcome = await requestApproval(sessionID: sessionID, correlation: correlation, request: approval)
             guard outcome.outcome == .approved else {
                 reject(request, planDigest: preparation.planDigest)
                 throw VoiceCapabilityRuntimeError.approvalFailed(approvalFailureCode(outcome.outcome))
@@ -1187,14 +1257,31 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
 
     private func requestApproval(
         sessionID: String,
+        correlation: String,
         request: VoiceNativeApprovalRequest
     ) async -> VoiceApprovalResult {
-        let confirmationEnabled = actionConfirmationEnabled()
+        let confirmationEnabled: Bool
+        if case .personalDelete = request.kind { confirmationEnabled = destructiveConfirmationEnabled() }
+        else { confirmationEnabled = actionConfirmationEnabled() }
         return await approvalCoordinator.request(
-            sessionID: sessionID,
-            request: request,
-            confirmationEnabled: confirmationEnabled
-        )
+            sessionID: sessionID, request: request, confirmationEnabled: confirmationEnabled,
+            correlation: correlation, userRevision: userInputRevision[sessionID, default: 0]
+        ) { [weak self] id in
+            guard let self, let message = try? self.json([
+                "status": "awaiting_confirmation", "confirmation_id": id,
+                "summary": request.title, "detail": request.detail,
+                "instruction": "Ask the user by voice and wait for their explicit subsequent reply. Then call voice_action_confirm. No mouse or dialog is required."
+            ]) else { return }
+            self.remembered[correlation]?.response.publish(message)
+        }
+    }
+
+    func noteUserInput(sessionID: String) {
+        userInputRevision[sessionID, default: 0] &+= 1
+    }
+
+    func cancelPendingConfirmation(sessionID: String) -> Bool {
+        approvalCoordinator.cancelPending(sessionID)
     }
 
     private func reject(_ request: CapabilityApprovalRequest, planDigest: String) {
@@ -1213,6 +1300,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     func cancelSession(_ sessionID: String) {
         guard VoiceTextSafety.sanitizeIdentifier(sessionID) == sessionID else { return }
         personalKnownTargets.removeValue(forKey: sessionID)
+        userInputRevision.removeValue(forKey: sessionID)
         rememberCancelled(sessionID)
         approvalCoordinator.cancelSession(sessionID)
         let correlations = remembered.compactMap { key, call in
@@ -1414,6 +1502,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         let sessionID: String
         let digest: String
         let task: Task<String, Never>
+        let response: VoiceToolReplyChannel
     }
 }
 

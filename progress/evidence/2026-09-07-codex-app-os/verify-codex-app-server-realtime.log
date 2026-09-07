@@ -1,0 +1,6 @@
+codex_app_server_realtime_account=chatgpt
+codex_app_server_realtime_voices=9
+codex_app_server_realtime_thread=ephemeral
+codex_app_server_realtime_sdp=connected
+codex_app_server_realtime_process=closed
+PASS codex app-server realtime: account, voices, ephemeral thread, SDP, WebRTC, teardown
