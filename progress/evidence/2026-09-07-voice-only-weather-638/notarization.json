@@ -1,0 +1,13 @@
+{
+  "build": "638",
+  "notarization_status": "Accepted",
+  "notarization_id": "bd07f4de-0961-4fd2-9cc4-acd78619b07a",
+  "binary_sha256": "8b14cf994c59cb363f24ff9a6f1f3742260c2f24d6162f70ea1840265191b0c4",
+  "zip_sha256": "ca6905cad98995b756fc99df046cf3b5c13206e5f86a9365230cc3fcc46cc2a9",
+  "checks": {
+    "signature": true,
+    "staple": true,
+    "gatekeeper": true
+  },
+  "source_commit": "275f9ff9ce95bc4a2064e697aa37cc806efc9953"
+}

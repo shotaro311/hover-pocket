@@ -1,6 +1,6 @@
 # 音声だけで完結する確認設定・天気の取得・macOS 638
 
-状態: Release638の検証を完了し、Apple公証中。ユーザーが追加修正と本番反映を承認済み。
+状態: macOS 0.1.0 build638の本番公開、公開物の別経路readback、このMacの更新・設定画面の確認まで完了。ユーザーが追加修正と本番反映を承認済み。
 
 ## 変更
 
@@ -18,7 +18,19 @@
 - 最終bundleの実ChatGPTモデルで天気取得がPASS。Maple選択のWebRTC接続と子プロセス終了もPASS。
 - 実Astra生成の読書管理・水やり記録を最終bundleで再検証しPASS。panel soakは100開閉・100切替・5復旧・3アニメーションとリソース上限を1回でPASS。
 - 共有v1契約72/v2契約46/Voice静的42がPASS。配布先がmacOS専用feedであること、Google設定・位置情報entitlementをreadback。実行ファイルSHA256とソース207ファイルのdigestを固定。
-- 根拠: [検証証拠](../evidence/2026-09-07-voice-only-weather-638/)。Apple公証・公開後readbackは進行中。
+- 根拠: [検証証拠](../evidence/2026-09-07-voice-only-weather-638/)。
+
+## 本番公開とインストール後の確認
+
+- Apple公証はAccepted。staple、Gatekeeper、deep/strict署名の検証がPASS。公証前後でテスト済み実行ファイルのSHA256が一致。
+- ソースtag `v0.1.0-638` は `275f9ff9ce95bc4a2064e697aa37cc806efc9953`。GitHubの契約CI（run 34131078779）はUbuntu/Windows/macOSと比較jobがすべてsuccess。
+- [macOS 638](https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-638)を公開し、macos-latestのappcastと手動ZIPを更新。公開物93 checks PASS。3種類の公開ZIPと2か所のappcastの同一性、公開ZIPの署名・公証・Gatekeeper・配布設定を別経路で確認した。
+- Windows0.2.8の8資産はID・size・digest・更新時刻が公開前後で不変。
+- 公開ZIP SHA256: `ca6905cad98995b756fc99df046cf3b5c13206e5f86a9365230cc3fcc46cc2a9`。配布実行ファイルSHA256: `8b14cf994c59cb363f24ff9a6f1f3742260c2f24d6162f70ea1840265191b0c4`。
+- このMacの/Applications/HoverPocket.appを634から638へ更新し、新しいプロセスが1つ起動していることを確認。旧appは名前を変えてゴミ箱へ退避し、恒久削除していない。公開ZIPと一致するアーカイブを展開して適用し、インストール後のバイナリhashを再照合した。
+- 既存の付箋・タイマー・追加ツールの保存JSON 6ファイルはSHA256がすべて不変。ChatGPTへのログインと既存の通常操作確認OFFを実設定画面からreadback。新しい削除・取消確認は既定ONで、音声確認を使う。設定値の切り替えは検証で行っていない。
+- 実際の音声設定画面で2項目が読みやすく表示されることを画像でも確認。音声・AIページを開いた状態にしている。
+- ユーザーが承認した修正・検証・ソース保存・本番公開・このMacへの更新を追加確認なしで実施した。
 
 ## 受入の範囲
 

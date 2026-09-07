@@ -1,6 +1,6 @@
 # 共通コントローラーの接続契約
 
-承認済みアーキテクチャの具体化。macOSの既存音声toolに `hoverpocket_control` を追加する。既存toolの名前、引数、承認経路は維持する。
+承認済みアーキテクチャの具体化。macOSの既存音声toolに `hoverpocket_control` を追加する。既存toolの名前・引数とBrokerの承認・readbackを保持する。音声確認の方式と設定は末尾の追加承認に従う。
 
 - `operation` は catalog / screen / generate / job / cancel / install_prepare / remove_prepare / confirm / collections / records / record_prepare / restore_prepare / inspect / workflow_prepare / weather。
 - provider_id、package_id、collection_id、record_id はHostが返したIDを使う。表示名では変更対象を決めない。calendar_date は利用者のタイムゾーンの YYYY-MM-DD。
