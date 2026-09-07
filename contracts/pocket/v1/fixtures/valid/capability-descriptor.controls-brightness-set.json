@@ -1,0 +1,32 @@
+{
+  "$schema": "hoverpocket://schemas/capability-descriptor/v1",
+  "id": "controls.brightness.set",
+  "version": 1,
+  "titleKey": "capability.controls.brightness.set",
+  "effect": "reversible_local_write",
+  "permissions": ["controls.write"],
+  "approvalPolicy": "broker_policy",
+  "idempotency": "required",
+  "availability": {"macos": "available", "windows": "available"},
+  "limits": {"timeoutMs": 3000, "maxPayloadBytes": 4096, "maxCallsPerMinute": 120},
+  "inputSchema": {
+    "type": "object",
+    "required": ["displayId", "level"],
+    "properties": {
+      "displayId": {"type": "string", "minLength": 1, "maxLength": 128},
+      "level": {"type": "number", "minimum": 0.05, "maximum": 1}
+    },
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": ["displayId", "level", "controllable"],
+    "properties": {
+      "displayId": {"type": "string", "minLength": 1, "maxLength": 128},
+      "level": {"type": "number", "minimum": 0, "maximum": 1},
+      "controllable": {"type": "boolean", "const": true}
+    },
+    "additionalProperties": false
+  },
+  "readback": {"strategy": "os_state", "match": ["displayId", "level", "controllable"]}
+}

@@ -1,9 +1,28 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-08-16
+updated: 2026-08-24
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-pr-ready-ci-green; an5-c-runtime-activation-pending; capability-expansion-merged
+status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-pr-ready-ci-green; an5-c-runtime-activation-pending; core-capability-reintegration-local-verified; an8-c-pro-running
 ---
+
+## 2026-08-24 AI-native Core Capability Reintegration
+
+- current `main` exact `a35b0ea`をbaseに、隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-core-reintegration`、branch `codex/ai-native-core-capability-reintegration`で、競合中PR #13のHost-owned destructive approval presentationとPR #15のControls Capabilityを再統合した。既存PRのユーザー変更は戻していない。
+- macOS / Windows共通でControls 6 CapabilityをRegistry / Broker / OS adapterへ接続し、明示mute set、mute保持volume set、対象displayだけのfresh brightness readback、boundedかつ制御文字除去済みmedia metadataを実装した。WindowsのCapability media経路はdirect UIのtimeout fallbackを使わず、providerが返すcommand confirmation / errorを保持する。
+- Windows DDC/CIでは、write後read失敗時に楽観更新値を成功readbackへ転用しない。`fresh.Error`があれば`WriteVerified=false`とし、deterministic verifierへ回帰を追加した。macOS外部display音量も、通常UIは従来の記憶値fallbackを維持する一方、Capability readbackでは実DDC/CoreAudio観測がなければfail closedにした。
+- exact working-tree Security scan `8d09288e-c2a3-4c21-988d-1c96ca07ca71`は変更source 30 / 30をreviewし、sealed complete、reportable finding 0件となった。DDC false readbackは実在したが現行は同一ユーザーのlocal manual UIだけでself-onlyのためsecurity policy上ignore。実装安全gateとして上記修正を適用した。Sticky delete target-version binding、完全なcross-platform media causal identity、custom WebView bridge分離はgeneric Voice / MCP / generated UI公開前の未完了gateとして残す。
+- ローカルMacでSwift warnings-as-errors build、Capability 20 handler、Broker 21 descriptor / 20 handler、Pocket Surface、Pocket App package / lifecycle / generation、共通contract 13 schema / 64 fixtureの2回成功、`git diff --check`をreadbackした。Windows .NET SDKはこのMacにないため、Windows build / Controls / Capability / Broker verifierはPR CIを必須gateとする。
+- Draft PR [#24](https://github.com/shotaro311/hover-pocket/pull/24)のimplementation head `5a1369c`で、Windows、macOS、Ubuntu / macOS / Windows contract、2件のcross-OS compare、PR Routerを含む11 / 11 checkが成功し、`MERGEABLE / CLEAN`をreadbackした。PRはDraftのまま保持し、自動mergeしていない。
+- ChatGPT Pro OrchestratorへAN8-C backup / export / restore / data-version readbackのexact base `2d8b89c`・両OSchanges patchを委譲済み。run `20260824-000623-hoverpocket-an8-cpocket-app-workspacebackup-export-restoredata-version-readbackmacoswindowschanges-patch`は自動回収待ちで、返却時はdelivery ID / state hash claim後だけ適用する。
+- 次はPR #24のhuman reviewを受け、同時にAN8-C返却を隔離worktreeで検証する。Windows unsigned betaは明示承認なしに実行しない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-core-capability-reintegration.md`。
+
+## 2026-08-15 AI-native Controls Capability
+
+- exact `main` `2cd51b9`から隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-core-expansion`、branch `codex/ai-native-core-capability-expansion`を作成し、Built-in Capability ExpansionのControls単位を実装した。
+- macOS / WindowsのRegistryとProvider adapterへ`controls.availability.get@1`、`controls.volume.get@1`、`controls.volume.set@1`、`controls.mute.set@1`、`controls.brightness.set@1`、`controls.media.command@1`を追加した。readは`controls.read`、writeは`controls.write`、writeはidempotency key、Broker承認、実OS状態readbackを必須にし、出力はvolume / mute、bounded display ID、safe title / sourceだけへ限定した。
+- 監査で、再生位置の自然な進行だけでnext / previous成功と誤認できる問題と、macOSのvolume setが承認されていないmute解除も行う問題を検出して修正した。track readbackはtitleの変化を要求し、volume setはmute状態を保持する。外部DDCで保持できない場合は、音を出さずfail closedにする。
+- ローカルMacでSwift warnings-as-errors build、Capability 20 handler、Broker 21 descriptor / 20 handler、Controlsのnegative readback、Media、Timer、Clipboard、Pocket Surface、Pocket App、Panel layout、12 schema / 63 fixtureの2回の決定論的contract report、全Windows JavaScript syntax、`git diff --check`が成功した。Windows .NET SDKはこのMacにないため、Windows Release build / verifierはPR CIを必須gateとする。
+- exact working-treeのCodex Security diff scan `27dc0225-9797-4d2f-b8eb-0eb111210182`は変更source 15 / 15を確認し、sealed complete、reportable finding 0件となった。2件は現行のdefault-offかつControls adapter未公開では攻撃経路なしとしてrejectedだが、将来Voice / Pocket App / MCPへ公開する前の必須修正として実装へ反映済みである。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-controls-capability.md`。
 
 ## 2026-08-16 AI-native AN5-B Codex Pocket App Generation / Management UI
 

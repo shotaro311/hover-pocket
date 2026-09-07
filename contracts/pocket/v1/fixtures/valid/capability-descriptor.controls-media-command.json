@@ -1,0 +1,31 @@
+{
+  "$schema": "hoverpocket://schemas/capability-descriptor/v1",
+  "id": "controls.media.command",
+  "version": 1,
+  "titleKey": "capability.controls.media.command",
+  "effect": "reversible_local_write",
+  "permissions": ["controls.write"],
+  "approvalPolicy": "broker_policy",
+  "idempotency": "required",
+  "availability": {"macos": "available", "windows": "available"},
+  "limits": {"timeoutMs": 3000, "maxPayloadBytes": 4096, "maxCallsPerMinute": 120},
+  "inputSchema": {
+    "type": "object",
+    "required": ["command"],
+    "properties": {"command": {"type": "string", "enum": ["play_pause", "next", "previous"]}},
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": ["command", "available", "isPlaying", "safeTitle", "safeSource"],
+    "properties": {
+      "command": {"type": "string", "enum": ["play_pause", "next", "previous"]},
+      "available": {"type": "boolean", "const": true},
+      "isPlaying": {"type": "boolean"},
+      "safeTitle": {"type": "string", "maxLength": 160},
+      "safeSource": {"type": "string", "maxLength": 120}
+    },
+    "additionalProperties": false
+  },
+  "readback": {"strategy": "os_state", "match": ["command", "available", "isPlaying", "safeTitle", "safeSource"]}
+}

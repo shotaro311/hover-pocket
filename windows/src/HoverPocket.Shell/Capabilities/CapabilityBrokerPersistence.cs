@@ -224,6 +224,14 @@ internal sealed class CapabilityApprovalStore(TimeSpan? timeToLive = null)
         }
     }
 
+    public void DiscardPending(string requestId)
+    {
+        lock (_sync)
+        {
+            _pending.Remove(requestId);
+        }
+    }
+
     public CapabilityApprovalRequest? Request(
         CapabilityExecutionPlan plan,
         string digest,
