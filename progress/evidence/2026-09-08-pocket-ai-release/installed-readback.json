@@ -1,0 +1,12 @@
+{
+  "build": "642",
+  "update_route": "Sparkle Install Update / Install and Relaunch",
+  "binary_matches_independent_public_download": true,
+  "saved_data_files_checked": 6,
+  "saved_data_unchanged": true,
+  "chatgpt_login": "logged_in_before_and_after",
+  "ai_text_library": "visible_enabled_in_production_settings",
+  "saved_data_unchanged_after_ui": true,
+  "running_application_count": 1,
+  "settings_values_changed": false
+}

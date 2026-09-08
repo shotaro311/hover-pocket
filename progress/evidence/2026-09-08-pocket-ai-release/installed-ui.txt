@@ -1,0 +1,4 @@
+CUA readback after Sparkle 641 -> 642 update and relaunch:
+Settings > Self-made tools > Feature libraries: AI text processing v1 enabled, Codex library described as providing generation, voice and AI text connection; existing tool usage displayed.
+Voice/AI: ChatGPT logged in; ordinary and destructive voice confirmation both off as before.
+No setting values changed. Settings window closed after verification.

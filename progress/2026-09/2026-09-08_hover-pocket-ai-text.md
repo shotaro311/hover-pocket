@@ -16,3 +16,7 @@
 - 既存パッケージ・health・backup: PASS。WebKit20件、ライブラリ49件、v2契約62件、Pocket App OS49件、音声foundation契約: PASS。
 
 検証用文章のみを使用。Windowsと本番配布後の実機動作は未検証。根拠は[evidence](../evidence/2026-09-08-pocket-ai-text/)と同ディレクトリのソースSHA256。
+
+## 本番配信
+
+追加の配信依頼により、macOS 642として公開し、このMacもSparkle経由で更新済み。[配信とreadback](2026-09-08_hover-pocket-ai-release.md)。
