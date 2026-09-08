@@ -50,6 +50,7 @@ final class PocketAppExecutionRuntime {
     let userStateStore: PocketAppUserStateStore?
     let collectionStores: [String: PocketCollectionStore]
 
+    private let aiTextService: any PocketAITextGenerating
     private let broker: CapabilityBroker
     private let principal: CapabilityPrincipal
     private let grantedPermissions: Set<String>
@@ -64,8 +65,10 @@ final class PocketAppExecutionRuntime {
         timeZone: TimeZone = .current,
         userStateStore: PocketAppUserStateStore? = nil,
         activationLease: PocketAppActivationLease? = nil,
-        collectionStores: [String: PocketCollectionStore] = [:]
+        collectionStores: [String: PocketCollectionStore] = [:],
+        aiTextService: any PocketAITextGenerating = PocketAITextService.shared
     ) {
+        self.aiTextService = aiTextService
         self.package = package
         self.broker = broker
         self.principal = CapabilityPrincipal(userID: userID, pocketAppID: package.manifest.id)
@@ -74,6 +77,24 @@ final class PocketAppExecutionRuntime {
         self.userStateStore = userStateStore
         self.activationLease = activationLease
         self.collectionStores = collectionStores
+    }
+
+    func validateAIRequest(_ request: PocketAITextRequest) throws {
+        try activationLease?.requireActive()
+        guard grantedPermissions.contains(PocketAITextService.permission),
+              package.manifest.requestedCapabilities.contains(where: { $0.key == PocketAITextService.key }) else {
+            throw PocketAITextError.unavailable
+        }
+    }
+
+    func generateAIText(_ request: PocketAITextRequest) async throws -> String {
+        try validateAIRequest(request)
+        let result = try await executeTracked { try await self.aiTextService.generate(request) }
+        try activationLease?.requireActive()
+        try Task.checkCancellation()
+        guard !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              result.unicodeScalars.count <= 16_000 else { throw PocketAITextError.failed }
+        return result
     }
 
     var isActivationActive: Bool {

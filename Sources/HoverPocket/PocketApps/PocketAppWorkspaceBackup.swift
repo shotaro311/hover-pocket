@@ -602,6 +602,11 @@ final class PocketAppWorkspaceBackupManager {
     }
 
     private func restoreChanges(_ validated: ValidatedArchive) throws -> [PocketAppWorkspaceRestoreChange] {
+        do {
+            for payloads in validated.packages.values {
+                for payload in payloads { try lifecycle.validateLibraryAvailability(loadPackage(payload)) }
+            }
+        } catch is PocketLibraryError { throw failure("RESTORE_LIBRARY_UNAVAILABLE") }
         var changes: [PocketAppWorkspaceRestoreChange] = []
         for app in validated.archive.apps {
             let current = try lifecycle.managedPackage(packageID: app.appID)

@@ -25,7 +25,7 @@ struct VoiceLaneHostView: View {
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             } else if runtime.snapshot.providerID == .codexAppServer {
-                CodexVoiceWebRTCTransportView(driver: CodexAppServerMacOSRuntime.driver)
+                CodexVoiceWebRTCTransportView(driver: PocketCodexLibrary.driver)
                     .frame(width: 1, height: 1)
                     .opacity(0.001)
                     .allowsHitTesting(false)

@@ -26,6 +26,13 @@ final class PocketAppGenerationController: ObservableObject {
     @Published private(set) var previewValidationReport = "contract-passed"
     @Published private(set) var previewModel: PocketSurfaceHostModel?
 
+    @Published private(set) var libraryMessage: String?
+    @Published private(set) var libraryConsumers: [String: Set<String>] = [:]
+
+    var libraryCatalog: PocketLibraryCatalog {
+        try! PocketLibraryCatalog(disabled: generationSettings?.disabledPocketLibraries ?? [])
+    }
+
     private let generator: (any PocketAppGenerationAdapter)?
     private let lifecycle: PocketAppLifecycleManager
     private let materializer: PocketAppGenerationMaterializer
@@ -62,7 +69,8 @@ final class PocketAppGenerationController: ObservableObject {
             rootDirectory: definitionPin.url,
             userDataRoot: userDataPin.url,
             performStartupRecovery: false,
-            activationReadback: runtimeActivationReadback
+            activationReadback: runtimeActivationReadback,
+            libraryCatalog: { try PocketLibraryCatalog(disabled: generationSettings?.disabledPocketLibraries ?? []) }
         )
         self.materializer = PocketAppGenerationMaterializer(rootDirectory: generationPin.url)
         self.workspaceBackupManager = try PocketAppWorkspaceBackupManager(
@@ -111,7 +119,7 @@ final class PocketAppGenerationController: ObservableObject {
         }
     }
 
-    var isGeneratorAvailable: Bool { generator != nil }
+    var isGeneratorAvailable: Bool { generator != nil && libraryCatalog.isAvailable("pocket.codex") }
 
     func refreshGeneratorModels() async {
         guard let generator = generator as? CodexAppServerPocketGenerator else { return }
@@ -163,7 +171,7 @@ final class PocketAppGenerationController: ObservableObject {
             }.first ?? "tool-history"
             let request = PocketAppGenerationRequest(requestID: "restore:\(UUID().uuidString.lowercased())",
                 userRequest: "履歴から復元", appID: checkpoint.packageID, version: version, namespace: namespace,
-                capabilities: PocketAppGenerationCapability.boundedCatalog(namespace: namespace))
+                capabilities: libraryCatalog.generationCapabilities(namespace: namespace))
             let generatedFiles = try files.map { path, data -> PocketAppGeneratedFile in
                 var data = data
                 if path == "manifest.json" {
@@ -222,6 +230,44 @@ final class PocketAppGenerationController: ObservableObject {
         managementIssues = snapshot.issues
         appHealth = try lifecycle.healthSnapshots()
         try validatePins()
+    }
+
+    func refreshLibraries() {
+        do {
+            let packages = try lifecycle.libraryConsumers() + historyStore.list().map { try historyStore.package(for: $0) }
+            var consumers: [String: Set<String>] = [:]
+            for package in packages {
+                consumers[package.manifest.id, default: []].formUnion(try libraryCatalog.dependencies(of: package))
+                packageNames[package.manifest.id] = package.manifest.name
+            }
+            libraryConsumers = consumers
+            libraryMessage = nil
+        } catch {
+            libraryMessage = "ツールや履歴の利用関係を確認できません。ライブラリの無効化を停止しています。"
+        }
+    }
+
+    func setLibraryEnabled(_ enabled: Bool, id: String) {
+        guard phase != .generating, phase != .installing, pendingProposal == nil,
+              pendingWorkspaceRestore == nil, let generationSettings else {
+            libraryMessage = "作成中のツールや確認画面を閉じてから変更してください。"
+            return
+        }
+        if !enabled {
+            refreshLibraries()
+            guard libraryMessage == nil else { return }
+        }
+        do {
+            let next = try libraryCatalog.settingEnabled(enabled, id: id, consumers: libraryConsumers)
+            generationSettings.saveDisabledPocketLibraries(next.disabled)
+            guard libraryCatalog == next else { throw PocketLibraryError.invalidCatalog }
+            objectWillChange.send()
+            libraryMessage = enabled ? "ライブラリを有効にしました。" : "ライブラリを無効にしました。記録は保持しています。"
+        } catch PocketLibraryError.inUse(let ids) {
+            libraryMessage = "利用中のため無効化できません: " + ids.map { $0 == "HoverPocket" ? $0 : packageTitle($0) }.joined(separator: "、")
+        } catch {
+            libraryMessage = "ライブラリの対応環境や依存関係を確認してください。"
+        }
     }
 
     func refreshHealth() {
@@ -338,7 +384,7 @@ final class PocketAppGenerationController: ObservableObject {
             fail(.busy)
             return
         }
-        guard let generator else {
+        guard let generator, libraryCatalog.isAvailable("pocket.codex") else {
             fail(.generatorUnavailable)
             return
         }
@@ -362,6 +408,7 @@ final class PocketAppGenerationController: ObservableObject {
             let materialized = try materializer.materialize(envelope: envelope, request: request)
             defer { try? FileManager.default.removeItem(at: materialized.directory) }
             try validatePins()
+            try libraryCatalog.validate(materialized.package)
             try presentDraft(materialized.package, summary: userRequest, allowsActivation: generator.allowsActivation, validation: envelope.previewValidation ?? "contract-passed")
             generationCancellation = nil
         } catch PocketToolHistoryError.capacityExceeded {
@@ -679,7 +726,7 @@ final class PocketAppGenerationController: ObservableObject {
             appID: appID,
             version: version,
             namespace: namespace,
-            capabilities: PocketAppGenerationCapability.boundedCatalog(namespace: namespace)
+            capabilities: libraryCatalog.generationCapabilities(namespace: namespace)
         )
         if let currentPackage {
             request.previousFiles = try PocketAppFileSnapshot.capture(directory: currentPackage.rootDirectory).files
@@ -688,6 +735,7 @@ final class PocketAppGenerationController: ObservableObject {
                     return PocketAppGeneratedFile(path: path, utf8: utf8)
                 }
         }
+        request.libraryCatalog = libraryCatalog
         request.reasoningEffort = generationSettings?.pocketToolReasoningEffort ?? "medium"
         try request.validate()
         return request

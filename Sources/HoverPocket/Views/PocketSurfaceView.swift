@@ -30,6 +30,13 @@ struct PocketSurfaceHostView: View {
             } else {
                 hostStatus(text: "このPocket Appは現在利用できません。", color: .white.opacity(0.58))
             }
+            if model.isAIExecuting {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("AIが文章を処理しています…").font(.caption)
+                    Button("キャンセル") { model.cancelAIText() }
+                }
+            }
             if model.isLoading {
                 ProgressView().controlSize(.small)
                     .accessibilityLabel("読み込み中")
@@ -47,6 +54,21 @@ struct PocketSurfaceHostView: View {
         .environment(\.colorScheme, .dark)
         .task {
             await model.load(refreshQueries: true)
+        }
+        .onDisappear { model.cancelAIText() }
+        .sheet(isPresented: $model.showsAIApproval, onDismiss: {
+            if !model.isAIExecuting { model.cancelAIText() }
+        }) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("AIへ文章を送信").font(.headline)
+                Text("以下の内容を確認してください。結果はこのツールに返します。").font(.caption)
+                ScrollView { Text(model.aiApprovalText).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                HStack {
+                    Button("キャンセル", role: .cancel) { model.cancelAIText() }
+                    Spacer()
+                    Button("OpenAIへ送信") { model.approveAIText() }.keyboardShortcut(.defaultAction)
+                }
+            }.padding(20).frame(width: 430, height: 400)
         }
         .alert("実行前の確認", isPresented: $model.showsApproval) {
             Button("キャンセル", role: .cancel) {

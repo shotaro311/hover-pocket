@@ -69,6 +69,14 @@ final class AppSettings: ObservableObject {
     @Published var codexVoiceSelection: String {
         didSet { defaults.set(codexVoiceSelection, forKey: "codexVoiceSelection") }
     }
+    @Published private(set) var disabledPocketLibraries: Set<String> {
+        didSet { defaults.set(disabledPocketLibraries.sorted(), forKey: "disabledPocketLibraries") }
+    }
+
+    func saveDisabledPocketLibraries(_ ids: Set<String>) {
+        disabledPocketLibraries = ids
+    }
+
     @Published var pocketToolReasoningEffort: String {
         didSet { defaults.set(pocketToolReasoningEffort, forKey: "pocketToolReasoningEffort") }
     }
@@ -274,6 +282,7 @@ final class AppSettings: ObservableObject {
 
     init(defaults: any AppSettingsDefaultsStoring = UserDefaults.standard) {
         self.defaults = defaults
+        self.disabledPocketLibraries = Set(defaults.stringArray(forKey: "disabledPocketLibraries") ?? [])
         self.pocketToolReasoningEffort = defaults.string(forKey: "pocketToolReasoningEffort") ?? "medium"
         let languageRawValue = defaults.string(forKey: Self.appLanguageKey)
         self.appLanguage = languageRawValue.flatMap(AppLanguage.init(rawValue:)) ?? .japanese

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/pocket-ai-text-response/v1",
+  "title": "Host approved AI text response",
+  "type": "object",
+  "required": [
+    "text"
+  ],
+  "properties": {
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16000
+    }
+  },
+  "additionalProperties": false
+}

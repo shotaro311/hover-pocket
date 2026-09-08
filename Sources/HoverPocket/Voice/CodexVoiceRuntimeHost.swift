@@ -2,12 +2,6 @@ import Combine
 import Foundation
 
 @MainActor
-enum CodexAppServerMacOSRuntime {
-    static let host = CodexVoiceRuntimeHost(voiceRuntime: .shared)
-    static let driver = CodexVoiceWebRTCDriver(runtimeHost: host)
-}
-
-@MainActor
 final class CodexVoiceRuntimeHost: ObservableObject {
     @Published private(set) var availableVoices: [String] = []
     var preferredVoice: (() -> String)?

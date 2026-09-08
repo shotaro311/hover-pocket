@@ -36,6 +36,7 @@ struct PocketHTMLSurfaceView: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
+        coordinator.model.cancelAIText()
         coordinator.active = false
         view.stopLoading()
         view.configuration.userContentController.removeScriptMessageHandler(forName: "pocket", contentWorld: .page)
@@ -53,7 +54,7 @@ struct PocketHTMLSurfaceView: NSViewRepresentable {
         (()=>{let serial=0;const pending=new Map();
         const call=(method,args={})=>new Promise((resolve,reject)=>{
           if(pending.size>=16){reject(new Error('BUSY'));return;}
-          const id=++serial;const timer=setTimeout(()=>{pending.delete(id);reject(new Error('TIMEOUT'));},15000);
+          const id=++serial;const timer=setTimeout(()=>{pending.delete(id);reject(new Error('TIMEOUT'));},method==='ai.generate'?245000:15000);
           pending.set(id,{resolve,reject,timer});parent.postMessage({pocket:1,id,method,args},'*');
         });
         addEventListener('message',event=>{if(event.source!==parent)return;
@@ -70,6 +71,7 @@ struct PocketHTMLSurfaceView: NSViewRepresentable {
           insert:(collection,fields,revision)=>call('collections.insert',{collection,fields,revision}),
           update:(collection,id,fields,revision)=>call('collections.update',{collection,id,fields,revision}),
           delete:(collection,id,revision)=>call('collections.delete',{collection,id,revision})}),
+          ai:Object.freeze({generate:(request)=>call('ai.generate',request),cancel:()=>call('ai.cancel')}),
           workflow:(workflow,inputs={})=>call('workflow.prepare',{workflow,inputs})
         }),writable:false,configurable:false});})();
         </script>
@@ -137,6 +139,15 @@ struct PocketHTMLSurfaceView: NSViewRepresentable {
                   PocketCollectionSchema.integer(object["id"]) != nil,
                   let method = object["method"] as? String,
                   let args = object["args"] as? [String: Any] else { replyHandler(nil, "INVALID_REQUEST"); return }
+            if method == "ai.generate" {
+                do { try model.requestAIText(args, reply: replyHandler) }
+                catch { replyHandler(nil, (error as? PocketAITextError)?.rawValue ?? "AI_INPUT_INVALID") }
+                return
+            }
+            if method == "ai.cancel" {
+                guard args.isEmpty else { replyHandler(nil, "AI_INPUT_INVALID"); return }
+                model.cancelAIText(); replyHandler(["cancelled": true], nil); return
+            }
             do { replyHandler(try dispatch(method, args: args), nil) }
             catch PocketCollectionError.revisionConflict { replyHandler(nil, "REVISION_CONFLICT"); }
             catch { replyHandler(nil, "REQUEST_REJECTED"); }

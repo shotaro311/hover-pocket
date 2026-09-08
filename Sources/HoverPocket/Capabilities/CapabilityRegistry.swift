@@ -170,6 +170,7 @@ enum PocketCapabilityDescriptors {
     )
 
     static let builtIn: [PocketCapabilityDescriptor] = (PersonalToolOperation.allCases.map(\.descriptor) + [
+        PocketAITextService.descriptor,
         descriptor(
             PocketCapabilityKeys.calculatorEvaluate,
             effect: .pure,

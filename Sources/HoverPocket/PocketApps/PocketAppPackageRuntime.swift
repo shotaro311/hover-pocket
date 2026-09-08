@@ -334,6 +334,9 @@ struct PocketAppPackageRuntime {
             try require(capabilityKeys.insert(key).inserted, "$.manifest.requestedCapabilities:duplicate")
             let scope = try request["scope"].map { try PocketJSONValue(any: $0, path: "$.manifest.requestedCapabilities[\(index)].scope") }
             try validateScope(scope, key: key, path: "$.manifest.requestedCapabilities[\(index)].scope", allowsToolNamespace: isV2)
+            if key == PocketAITextService.key {
+                try require(isV2 && surfaceKinds.values.contains("html"), "$.manifest:ai_requires_html_v2")
+            }
             capabilities.append(PocketAppRequestedCapability(
                 key: key,
                 scope: scope,
@@ -492,6 +495,7 @@ struct PocketAppPackageRuntime {
                 try identifier($0.element, path: "$.workflow.steps[\(index)].dependsOn[\($0.offset)]")
             }
             try require(Set(dependencies).count == dependencies.count && dependencies.allSatisfy(seen.contains) && !dependencies.contains(stepID), "$.workflow.steps[\(index)].dependsOn")
+            try require(capability != PocketAITextService.key, "$.workflow:ai_requires_dedicated_approval")
             steps.append(PocketAppWorkflowStep(id: stepID, capability: capability, arguments: arguments, dependencies: dependencies))
         }
         try require(!hasWrite || approvalMode != "none", "$.workflow.approval:writes")

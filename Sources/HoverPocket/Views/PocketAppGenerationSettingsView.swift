@@ -14,6 +14,40 @@ struct PocketAppGenerationSettingsView: View {
     @State private var showsPreview = false
     @State private var removalTarget: String?
 
+    private var libraryControls: some View {
+        DisclosureGroup("機能ライブラリ") {
+            Text("有効な機能を組み合わせてツールを作ります。利用中のツールや復元用の履歴がある機能は保護されます。")
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(controller.libraryCatalog.libraries) { library in
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(library.name + " · v" + String(library.version)).font(.caption.bold())
+                        Text(library.purpose).font(.caption).foregroundStyle(.secondary)
+                        let users = controller.libraryConsumers.keys.sorted().filter {
+                            controller.libraryConsumers[$0]?.contains(library.id) == true
+                        }
+                        if !users.isEmpty {
+                            Text("利用中: " + users.map { controller.packageTitle($0) }.joined(separator: "、"))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    if library.hostRequired {
+                        Text("本体で使用中").font(.caption)
+                    } else {
+                        Toggle(library.name, isOn: Binding(
+                            get: { controller.libraryCatalog.isAvailable(library.id) },
+                            set: { controller.setLibraryEnabled($0, id: library.id) }
+                        )).labelsHidden().toggleStyle(.switch).controlSize(.small)
+                            .disabled(controller.phase == .generating || controller.phase == .installing || controller.pendingProposal != nil || controller.pendingWorkspaceRestore != nil)
+                    }
+                }.padding(.vertical, 4)
+            }
+            if let message = controller.libraryMessage { Text(message).font(.caption).accessibilityAddTraits(.updatesFrequently) }
+            Button("利用関係を更新") { controller.refreshLibraries() }
+        }.onAppear { controller.refreshLibraries() }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(localized(
@@ -23,6 +57,8 @@ struct PocketAppGenerationSettingsView: View {
             .font(.system(size: 10))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+
+            libraryControls
 
             workspaceBackupControls
 

@@ -138,9 +138,9 @@ final class HoverWindowController {
                 temperatureUnit: self.settings.weatherTemperatureUnit)
         }
         controller.calendarAccessGranted = { [weak self] in self?.settings.voiceCalendarAccessEnabled == true }
-        CodexAppServerMacOSRuntime.host.preferredVoice = { [weak self] in self?.settings.codexVoiceSelection ?? "" }
+        PocketCodexLibrary.host.preferredVoice = { [weak self] in self?.settings.codexVoiceSelection ?? "" }
         controller.notifySession = { session, text in
-            await CodexAppServerMacOSRuntime.host.appendHostNotice(sessionID: session, text: text)
+            await PocketCodexLibrary.host.appendHostNotice(sessionID: session, text: text)
         }
         controller.openScreen = { [weak self] id in
             guard let self else { return false }

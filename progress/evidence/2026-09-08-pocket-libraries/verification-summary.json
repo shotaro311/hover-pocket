@@ -1,0 +1,20 @@
+{
+  "date": "2026-09-08",
+  "baseHead": "89bb56db8794403d64b2ce5a5eeb8315ed37311f",
+  "libraryChecks": 49,
+  "existingPlatformChecks": 78,
+  "v1ContractFixtures": 72,
+  "v2ContractChecks": 53,
+  "voiceContractChecks": 42,
+  "voiceActivityChecks": 37,
+  "htmlChecks": 20,
+  "liveGeneratedCombinations": 2,
+  "liveGeneratedWorkflowExecuted": true,
+  "settingsUI": "native on-off-on verified in isolated fixture",
+  "productionPublished": false,
+  "productionAppReplaced": false,
+  "windowsVerified": false,
+  "generatedToolAICallsAvailable": false,
+  "appOSChecks": 49,
+  "debugExecutableSHA256": "8aaeeaf82274a3299012e0d91ca5c9cd7c34d4434edea01b59d904236d02f086"
+}

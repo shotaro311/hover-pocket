@@ -197,6 +197,7 @@ final class PocketAppLifecycleManager {
     private let capabilityMigrator: PocketAppCapabilityMigrator
     private let healthStore: PocketAppHealthStore?
     private let stagingTestRunner: PocketAppStagingTestRunner
+    private let libraryCatalog: (() throws -> PocketLibraryCatalog)?
     private let hostVersion: String
     private let failureInjection: ((String) -> Bool)?
     private let activationReadback: ((PocketAppLifecycleReceipt) throws -> PocketAppRuntimeReadback)?
@@ -215,7 +216,8 @@ final class PocketAppLifecycleManager {
         failureInjection: ((String) -> Bool)? = nil,
         hostVersion: String = PocketAppHostContract.version,
         performStartupRecovery: Bool = true,
-        activationReadback: ((PocketAppLifecycleReceipt) throws -> PocketAppRuntimeReadback)? = nil
+        activationReadback: ((PocketAppLifecycleReceipt) throws -> PocketAppRuntimeReadback)? = nil,
+        libraryCatalog: (() throws -> PocketLibraryCatalog)? = nil
     ) throws {
         guard Self.validVersion(hostVersion) else { throw PocketAppLifecycleError.invalidPackage }
         self.rootDirectory = rootDirectory.standardizedFileURL
@@ -229,6 +231,7 @@ final class PocketAppLifecycleManager {
         self.hostVersion = hostVersion
         self.failureInjection = failureInjection
         self.activationReadback = activationReadback
+        self.libraryCatalog = libraryCatalog
         do {
             try FileManager.default.createDirectory(
                 at: self.rootDirectory,
@@ -910,6 +913,12 @@ final class PocketAppLifecycleManager {
         }
     }
 
+    func libraryConsumers() throws -> [PocketAppPackage] {
+        let snapshot = try managementSnapshot()
+        guard snapshot.issues.isEmpty else { throw PocketAppLifecycleError.corruptVersion }
+        return try snapshot.packages.flatMap { try installedDefinitions(packageID: $0.packageID).map(\.package) }
+    }
+
     private func installedDefinitions(packageID: String) throws -> [(directory: URL, package: PocketAppPackage)] {
         guard Self.validPackageID(packageID) else { throw PocketAppLifecycleError.invalidPackage }
         let root = versionsRoot(packageID: packageID)
@@ -1304,7 +1313,12 @@ final class PocketAppLifecycleManager {
         }
     }
 
+    func validateLibraryAvailability(_ package: PocketAppPackage) throws {
+        try libraryCatalog?().validate(package)
+    }
+
     private func validateHostCompatibility(_ package: PocketAppPackage) throws {
+        try validateLibraryAvailability(package)
         guard Self.compareSemanticVersions(package.manifest.minimumHostVersion, hostVersion) != .orderedDescending else {
             throw PocketAppLifecycleError.hostVersionUnsupported
         }

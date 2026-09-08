@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/pocket-ai-text-request/v1",
+  "title": "Host approved AI text request",
+  "type": "object",
+  "required": [
+    "instructions",
+    "text"
+  ],
+  "properties": {
+    "instructions": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16000
+    }
+  },
+  "additionalProperties": false
+}

@@ -249,12 +249,14 @@ final class PocketAppRuntimeActivationRegistry {
         userDataRoot: URL,
         broker: CapabilityBroker,
         userID: String,
-        failureInjection: ((String) -> Bool)? = nil
+        failureInjection: ((String) -> Bool)? = nil,
+        libraryCatalog: (() throws -> PocketLibraryCatalog)? = nil
     ) throws {
         let lifecycle = try PocketAppLifecycleManager(
             rootDirectory: rootDirectory,
             userDataRoot: userDataRoot,
-            performStartupRecovery: true
+            performStartupRecovery: true,
+            libraryCatalog: libraryCatalog
         )
         self.sourceLifecycle = lifecycle
         self.managementSnapshotSource = lifecycle.managementSnapshot

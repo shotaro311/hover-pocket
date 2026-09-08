@@ -29,3 +29,15 @@ HTMLはopaque sandboxの子frame内で実行する。CSP、WKContentRuleList、n
 ## 検証
 
 `python3 script/verify_pocket_tools_contracts.py`は既存の標準ライブラリのみのSchemaEngineを使い、v2 fixturesとv1拒否、必須・型・個数・日時を検証する。`fixtures/books`と`fixtures/plants`は実Astra Mediumが作った検証用パッケージで、ユーザーデータを含まない。実WebKit・保存・移行の検証は`--verify-pocket-tools-platform`、`--verify-pocket-tools-html`、`--verify-pocket-tools-generated-ui`で行う。
+
+## 同梱ライブラリの設定（2026-09-08）
+
+`pocket-library-settings.schema.json`はmacOS HostのUserDefaultsから取り出す設定部分の契約。キーが未保存なら全ライブラリが有効。`disabledPocketLibraries`は重複のないID配列で、空配列に戻すと従来動作へ戻る。将来の未知IDは保持しても現在の機能を追加する権限にはならない。旧Hostは追加キーを無視する。
+
+これはツールmanifestやバックアップの追加フィールドではない。依存関係は既存の画面形式・collections・requestedCapabilitiesから導出する。ツールの記録、v1/v2定義、既存digestは変更しない。Codex向け台帳はHost内部の一時情報で、生成要求のdigestに含む。設計と追加手順は[ライブラリ設計](../../../docs/plan/20260908_POCKET_LIBRARY_ARCHITECTURE.md)を参照。
+
+## HTMLツールのAI文章処理（2026-09-08）
+
+`pocket-ai-text-request.schema.json` と `pocket-ai-text-response.schema.json` は `pocket.ai.generate({instructions, text})` の依頼と応答の正本。依頼は1〜1,000 Unicode scalar、文章と結果は1〜16,000 scalar。依頼では余分なキー・空白のみ・NULを実行時にも拒否する。Promiseは `{text}` を返す。manifest v2の既存requestedCapabilitiesへ `ai.text.generate@1`、permissionsへ `ai.text.send` を宣言する。workflowからのAI実行は拒否し、HTML専用のHost確認を必須とする。
+
+既存manifest形式・記録・バックアップは変更しない。旧Hostでは新操作を含むツールが未対応として拒否される。既存ツールの移行は不要。`--verify-pocket-ai-text`、`--verify-pocket-ai-text-live`、`--verify-pocket-ai-generated` で権限・取消・実モデル・生成HTMLからの結果表示を確認する。

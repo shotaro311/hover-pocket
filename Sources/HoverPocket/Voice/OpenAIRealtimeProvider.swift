@@ -185,8 +185,8 @@ final class CodexAppServerMacOSVoiceSessionAdapter: VoiceSessionAdapter {
         destructiveConfirmationEnabled: @escaping @MainActor () -> Bool = { true },
         voiceRuntime: VoiceLaneRuntime = .shared,
         compatibilityProbe: CodexAppServerCompatibilityProbe = .shared,
-        runtimeHost: CodexVoiceRuntimeHost = CodexAppServerMacOSRuntime.host,
-        driver: CodexVoiceWebRTCDriver = CodexAppServerMacOSRuntime.driver
+        runtimeHost: CodexVoiceRuntimeHost = PocketCodexLibrary.host,
+        driver: CodexVoiceWebRTCDriver = PocketCodexLibrary.driver
     ) {
         self.compatibilityProbe = compatibilityProbe
         self.capabilityBridge = context.flatMap {

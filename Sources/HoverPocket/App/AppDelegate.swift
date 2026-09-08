@@ -144,17 +144,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 let generationRoot = pocketAppsRoot.appendingPathComponent("Generation", isDirectory: true)
                 let generatedHostRoot = pocketAppsRoot.appendingPathComponent("GeneratedHost", isDirectory: true)
+                let appSettings = hoverWindowController.appSettings
                 let activationRegistry = try PocketAppRuntimeActivationRegistry(
                     rootDirectory: generatedHostRoot,
                     userDataRoot: userDataRoot,
                     broker: broker,
-                    userID: "local-user"
+                    userID: "local-user",
+                    libraryCatalog: { try PocketLibraryCatalog(disabled: appSettings.disabledPocketLibraries) }
                 )
                 _ = activationRegistry.restoreEnabledApps()
-                let generator: (any PocketAppGenerationAdapter)? = try? CodexAppServerPocketGenerator(
+                let generator: (any PocketAppGenerationAdapter)? = try? PocketCodexLibrary.makeGenerator(
                     workspaceRoot: generationRoot.appendingPathComponent("CodexWorkspaces", isDirectory: true)
                 )
-                let appSettings = hoverWindowController.appSettings
                 generationController = try PocketAppGenerationController(
                     rootDirectory: generatedHostRoot,
                     userDataRoot: userDataRoot,
@@ -271,7 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case .openAIRealtimeBYOK:
                     (try? OpenAIRealtimeCredentialStoreFactory.shared.hasCredential()) ?? false
                 case .codexAppServer:
-                    CodexAppServerMacOSRuntime.host.snapshot.availability == .ready
+                    PocketCodexLibrary.host.snapshot.availability == .ready
                 }
                 receiptStore.recordVoiceSnapshot(
                     snapshot,

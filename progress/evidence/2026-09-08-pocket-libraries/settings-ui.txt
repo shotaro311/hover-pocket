@@ -1,0 +1,13 @@
+Native UI readback, 2026-09-08. Tool: Computer Use.
+App: HoverPocket Library Verification (local.codex.hover-pocket.library-ui)
+Window: 機能ライブラリの検証（保存先を隔離）
+Uses the actual PocketAppGenerationSettingsView + PocketAppGenerationController.
+Controller roots are unique temporary directories; settings use EphemeralAppSettingsDefaults; generator=nil for UI-only verification.
+Disclosure: 機能ライブラリ off -> on.
+Observed 9 library rows; Codex連携 shows 本体で使用中 and has no toggle.
+Observed タイマー toggle on -> off; message: ライブラリを無効にしました。記録は保持しています。
+Observed タイマー toggle off -> on; message: ライブラリを有効にしました。
+Screenshot visually checked: dark settings view, controls fit 560x800, vertically scrollable.
+Final AX readback: timer on, all optional libraries on. Preview window closed and owned process terminated; existing apps left running.
+The UI fixture intentionally has no generator connection. Real App Server generation is verified separately in live.log.
+Packaging note: initial E2E build required a unique Keychain suffix. The initial shared E2E bundle ID conflicted with an older running test app. The disposable bundle was given a unique library-ui identity, standard metadata and unique development Keychain suffix, re-signed ad hoc, and renamed to avoid the UI adapter's cached application identity. No production bundle or preferences were modified.

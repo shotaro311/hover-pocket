@@ -19,6 +19,13 @@ final class PocketSurfaceHostModel: ObservableObject {
     @Published private(set) var isExecuting = false
     @Published private(set) var statusText: String?
     @Published private(set) var receiptText: String?
+    @Published var showsAIApproval = false
+    @Published private(set) var aiApprovalText = ""
+    @Published private(set) var isAIExecuting = false
+    private var pendingAI: (id: UUID, request: PocketAITextRequest, reply: @MainActor (Any?, String?) -> Void)?
+    private var aiTask: Task<Void, Never>?
+    private var aiExpiry: Task<Void, Never>?
+    private var aiStartedAt: [Date] = []
     @Published var showsApproval = false
     @Published private(set) var approvalText = ""
     @Published private(set) var activationAvailable = true
@@ -203,7 +210,7 @@ final class PocketSurfaceHostModel: ObservableObject {
     }
 
     func prepare(workflowID: String) {
-        guard activationAvailable, runtime.isActivationActive, !isExecuting, pendingDraft == nil else { return }
+        guard activationAvailable, runtime.isActivationActive, !isExecuting, pendingAI == nil, pendingDraft == nil else { return }
         do {
             guard let workflow = runtime.package.workflows[workflowID] else {
                 throw CapabilityBrokerError.invalidPlan("pocket_workflow")
@@ -253,7 +260,7 @@ final class PocketSurfaceHostModel: ObservableObject {
 
     private func prepareWorkflow(_ workflowID: String, values: [String: Any]) throws {
         guard activationAvailable, runtime.isActivationActive,
-              !isExecuting, pendingDraft == nil,
+              !isExecuting, pendingAI == nil, pendingDraft == nil,
               let workflow = runtime.package.workflows[workflowID],
               Set(values.keys) == Set(workflow.inputs.keys) else { throw PocketCollectionError.invalidRecord }
         var arguments: [String: CapabilityValue] = [:]
@@ -281,6 +288,59 @@ final class PocketSurfaceHostModel: ObservableObject {
         showsApproval = true
         receiptText = nil
         statusText = nil
+    }
+
+    func requestAIText(_ values: [String: Any], reply: @escaping @MainActor (Any?, String?) -> Void) throws {
+        guard activationAvailable, runtime.isActivationActive, surface.root.type == "html", pendingDraft == nil,
+              !isExecuting, pendingAI == nil, Set(values.keys) == ["instructions", "text"],
+              let instructions = values["instructions"] as? String, let text = values["text"] as? String else { throw PocketAITextError.invalid }
+        let request = try PocketAITextRequest(instructions: instructions, text: text)
+        try runtime.validateAIRequest(request)
+        aiStartedAt = aiStartedAt.filter { Date().timeIntervalSince($0) < 60 }
+        guard aiStartedAt.count < 10 else { throw PocketAITextError.busy }
+        let id = UUID()
+        pendingAI = (id, request, reply)
+        aiApprovalText = "送信先: OpenAI（Codexのログインを使用）\n処理: GPT-6 Astra / Medium\n\n依頼内容\n" + instructions + "\n\n送信する文章\n" + text
+        showsAIApproval = true
+        aiExpiry = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(240)) } catch { return }
+            guard let self, self.pendingAI?.id == id else { return }
+            self.finishAI(id: id, result: nil, error: PocketAITextError.timedOut.rawValue)
+        }
+    }
+
+    func approveAIText() {
+        guard activationAvailable, runtime.isActivationActive, let pendingAI, !isAIExecuting else { return }
+        showsAIApproval = false
+        isAIExecuting = true
+        aiStartedAt.append(Date())
+        let id = pendingAI.id, request = pendingAI.request
+        aiTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let text = try await self.runtime.generateAIText(request)
+                guard !Task.isCancelled else { return }
+                self.finishAI(id: id, result: ["text": text], error: nil)
+            } catch {
+                self.finishAI(id: id, result: nil, error: (error as? PocketAITextError)?.rawValue ?? PocketAITextError.failed.rawValue)
+            }
+        }
+    }
+
+    func cancelAIText() {
+        guard let pendingAI else { return }
+        finishAI(id: pendingAI.id, result: nil, error: PocketAITextError.cancelled.rawValue)
+    }
+
+    private func finishAI(id: UUID, result: Any?, error: String?) {
+        guard let pending = pendingAI, pending.id == id else { return }
+        pendingAI = nil
+        aiTask?.cancel(); aiTask = nil
+        aiExpiry?.cancel(); aiExpiry = nil
+        showsAIApproval = false
+        isAIExecuting = false
+        aiApprovalText = ""
+        pending.reply(result, error)
     }
 
     func approve() {
@@ -315,6 +375,7 @@ final class PocketSurfaceHostModel: ObservableObject {
     }
 
     func invalidateActivation() {
+        cancelAIText()
         pendingVoiceApprovalID = nil
         activationAvailable = false
         pendingDraft = nil

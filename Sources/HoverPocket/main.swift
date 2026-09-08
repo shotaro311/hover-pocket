@@ -267,6 +267,51 @@ if CommandLine.arguments.contains("--verify-pocket-tools-generation") {
     app.run()
     exit(0)
 }
+if CommandLine.arguments.contains("--verify-pocket-libraries-live") {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    Task { @MainActor in
+        do { try await PocketLibraryVerification.runLive(); exit(0) }
+        catch { print("FAIL live libraries: \(error)"); exit(1) }
+    }
+    app.run()
+    exit(0)
+}
+if CommandLine.arguments.contains("--preview-pocket-libraries") {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    do {
+        let window = try PocketLibraryVerification.showSettings()
+        withExtendedLifetime(window) { app.run() }
+    } catch { print("FAIL library settings: \(error)"); exit(1) }
+    exit(0)
+}
+if CommandLine.arguments.contains("--preview-pocket-ai-approval") {
+    let app = NSApplication.shared; app.setActivationPolicy(.accessory)
+    do { let window = try PocketAITextVerification.showApproval(); withExtendedLifetime(window) { app.run() } }
+    catch { print("FAIL AI approval UI"); exit(1) }
+    exit(0)
+}
+if CommandLine.arguments.contains("--verify-pocket-ai-text") || CommandLine.arguments.contains("--verify-pocket-ai-text-live") || CommandLine.arguments.contains("--verify-pocket-ai-generated") {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    Task { @MainActor in
+        do {
+            if CommandLine.arguments.contains("--verify-pocket-ai-generated") { try await PocketAITextVerification.liveGenerated() }
+            else if CommandLine.arguments.contains("--verify-pocket-ai-text-live") { try await PocketAITextVerification.live() }
+            else { try await PocketAITextVerification.run() }
+            exit(0)
+        } catch { print("FAIL pocket AI text: \(error)"); exit(1) }
+    }
+    app.run(); exit(0)
+}
+if CommandLine.arguments.contains("--verify-pocket-libraries") {
+    Task { @MainActor in
+        do { try PocketLibraryVerification.run(); exit(0) }
+        catch { print("FAIL pocket libraries: \(error)"); exit(1) }
+    }
+    dispatchMain()
+}
 if CommandLine.arguments.contains("--verify-pocket-tools-platform") {
     Task { @MainActor in
         do {

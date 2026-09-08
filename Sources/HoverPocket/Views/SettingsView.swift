@@ -7,7 +7,7 @@ struct SettingsView: View {
     @ObservedObject private var calendarStore = GoogleCalendarStore.shared
     @ObservedObject private var appUpdater = AppUpdater.shared
     @ObservedObject private var aiNativeRuntime = AINativeRuntime.shared
-    @ObservedObject private var codexVoiceHost = CodexAppServerMacOSRuntime.host
+    @ObservedObject private var codexVoiceHost = PocketCodexLibrary.host
     @ObservedObject private var codexVoiceAccount = CodexVoiceAccountLoginController.shared
     @StateObject private var weatherLocationModel = WeatherLocationSettingsModel()
     @State private var selectedCategory: SettingsCategory? = .appearance

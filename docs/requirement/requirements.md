@@ -2,7 +2,7 @@
 project_slug: hover-pocket
 target: Windows version requirements
 created: 2026-07-05
-updated: 2026-08-28
+updated: 2026-09-08
 updated_by: codex
 status: draft-integrated
 source_app_release: v0.1.0-98
@@ -25,6 +25,12 @@ Windows 版の本質は、「画面上端へポインターを運ぶだけで、
 ## 個人用ツールの追加契約（2026-09-06）
 
 macOSで、会話から標準collection画面または隔離HTML画面を生成し、試用・導入・追加編集・履歴復元・データを保持した削除を行うv2基盤を実装する。v1との互換性を維持し、保存データと画面定義は分ける。v2定義と新しいバックアップは`contracts/pocket/v2/README.md`を参照する。Windowsの現行runtimeはv2を拒否するため、macOSだけの完了をWindowsの完了として扱わない。各OSの配信は従来どおり分離する。
+
+## 管理された機能ライブラリ（2026-09-08）
+
+macOSの個人用ツールは、開発側が同梱する機能ライブラリの有効な台帳からCodexが必要な機能を選んで生成する。台帳はID・契約版・対応OS・依存関係・公開操作を管理し、権限と実行検査は既存のCapabilityRegistryに従う。利用関係は既存ツール定義から導出する。利用中のツールと復元用の定義・履歴がある機能は無効化できない。無効化で記録を削除しない。生成・導入・復元・起動時に利用可能な機能を検査する。
+
+Codexの音声接続とツール生成接続は本体専用のAIライブラリへまとめ、各セッションの所有者とキャンセルを分ける。生成したHTMLツールは `pocket.ai.generate` で文章要約・書き換え等を呼べる。導入時に `ai.text.send` を許可し、毎回の送信前に送信先・依頼・文章全文をHostが確認表示する。取消・終了・時間切れでは結果を返さず、入力・出力をHostが自動保存しない。保存形式と移行・ロールバックの契約は[設計判断](../plan/20260908_POCKET_LIBRARY_ARCHITECTURE.md)を参照する。Windows対応と本番配信は別の受入とする。
 
 ## 1. 前提と範囲
 

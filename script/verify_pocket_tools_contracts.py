@@ -65,6 +65,20 @@ def main() -> None:
     check(payload, 'pocket-tool-backup-data.schema.json')
     changed = copy.deepcopy(payload); changed['collections']['items']['revision'] = -1
     check(changed, 'pocket-tool-backup-data.schema.json', True)
+    for fixture in ['library-settings-old', 'library-settings-disabled', 'library-settings-rollback']:
+        check(json.loads((fixtures / (fixture + '.json')).read_text()), 'pocket-library-settings.schema.json')
+    for value in [None, 'pocket.timer', [1], ['pocket.timer', 'pocket.timer']]:
+        check({'disabledPocketLibraries': value}, 'pocket-library-settings.schema.json', True)
+    for kind in ['request', 'response']:
+        value = json.loads((fixtures / ('ai-text-' + kind + '.json')).read_text())
+        check(value, 'pocket-ai-text-' + kind + '.schema.json')
+        for field in value:
+            changed = copy.deepcopy(value); changed[field] = ''
+            check(changed, 'pocket-ai-text-' + kind + '.schema.json', True)
+        changed = copy.deepcopy(value); changed['extra'] = 'not allowed'
+        check(changed, 'pocket-ai-text-' + kind + '.schema.json', True)
+        changed = copy.deepcopy(value); changed['text'] = 'a' * 16001
+        check(changed, 'pocket-ai-text-' + kind + '.schema.json', True)
     print(f'PASS pocket tools v2 contracts: {count} schema and v1 rejection checks')
 
 if __name__ == '__main__': main()

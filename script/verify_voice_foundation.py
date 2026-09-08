@@ -2013,7 +2013,7 @@ def main() -> None:
             or "settings.$voiceProvider.removeDuplicates()" not in mac_app:
         fail("macOS Voice provider/settings are not composed into the Host runtime")
     if "switch snapshot.providerID" not in mac_app \
-            or "CodexAppServerMacOSRuntime.host.snapshot.availability == .ready" not in mac_app:
+            or "PocketCodexLibrary.host.snapshot.availability == .ready" not in mac_app:
         fail("macOS Voice E2E provider readiness readback bypasses the selected provider")
     if '--verify-calendar-capability-read-only' not in mac_main \
             or not all(value in mac_calendar_live_verifier for value in (

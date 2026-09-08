@@ -1,0 +1,6 @@
+2026-09-08 CUA native UI verification, isolated disposable app.
+Full OpenAI destination, Astra / Medium, instructions and input visible in SwiftUI approval sheet.
+Cancel button: AI_CANCELLED, sheet dismissed.
+Second request, approve button with fake service: AI_UI_RESULT_RECEIVED.
+No real user data was used. Real model execution is verified separately in live.log and generated.log.
+Own disposable test process stopped after verification; production app unchanged.
