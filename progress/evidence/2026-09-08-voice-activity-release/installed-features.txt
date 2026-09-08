@@ -1,0 +1,55 @@
+Window: "設定", App: ホバーポケット.
+0 standard window 設定, Secondary Actions: Raise
+	1 container
+		2 scroll area
+			3 list 設定カテゴリ
+				4 row (selectable) 表示と操作
+				5 row (selected) 機能
+				6 row (selectable) 自作ツール
+				7 row (selectable) 音声・AI
+				8 row (selectable) カレンダー・天気
+				9 row (selectable) データと履歴
+				10 row (selectable) 一般
+		11 scroll area
+			12 text 機能 表示する機能と、各機能の動作を選びます。 機能
+			13 機能切り替え
+				14 radio button Description: クリック, Value: 0
+				15 radio button Description: ホバー, Value: 1
+			16 text アイコンにポインタを重ねるだけでパネルを切り替えます。 ヘッダーの機能アイコンはドラッグ&ドロップでも並べ替えできます。
+			17 image Description: 長方形の中にある切り取られた人, ID: person.crop.rectangle
+			18 text ミラー
+			19 checkbox 0
+			20 image Description: カレンダー, ID: calendar
+			21 text カレンダー
+			22 checkbox 1
+			23 image Description: メモ, ID: note.text
+			24 text 付箋
+			25 checkbox 1
+			26 image Description: 関数, ID: function
+			27 text 電卓
+			28 checkbox 1
+			29 image Description: タイマー, ID: timer
+			30 text タイマー
+			31 checkbox 1
+			32 image Description: 編集, ID: slider.horizontal.3
+			33 text コントロール
+			34 checkbox 1
+			35 image Description: ペースト, ID: doc.on.clipboard
+			36 text クリップボード
+			37 checkbox 1
+			38 text 付箋
+			39 checkbox Description: 付箋操作後に Undo を表示, Value: 1
+			40 text ミラー
+			41 checkbox Description: ミラー下にマイクテストを表示, Value: 0
+			42 text マイクはテストボタンを押したときだけ起動します。
+	43 close button
+	44 zoom button
+	45 text 設定
+46 menu bar
+	47 ホバーポケット
+	48 Edit
+
+Selected:
+	5 row (selected)
+
+Note: Pay special attention to the content selected by the user. If the user asks a question or refers to the content they are looking at on-screen, they might be referring to the selected content (but they might be referring to something else that's visible, too).

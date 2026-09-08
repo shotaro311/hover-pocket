@@ -1,0 +1,9 @@
+{
+  "source_commit": "57ed31b90985e3061928a01467915ee25eeba15c",
+  "build": "639",
+  "bundle_identifier": "local.codex.hover-pocket",
+  "zip_sha256": "e43025d26b826b3a02f41814b96cf44baecddef78ee2098f13008a460d567a74",
+  "binary_sha256": "98bf95489c1849e09a8fc94623e54980bb162c3b9a1e7c44a65e939e3b7e41e3",
+  "source_files": 192,
+  "notarization": "Accepted"
+}

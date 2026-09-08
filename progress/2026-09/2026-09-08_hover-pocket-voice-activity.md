@@ -1,6 +1,6 @@
 # 音声表示・音声による終了とToday Focus削除
 
-2026-09-08 / ローカル実装・検証済み、本番638へ未反映。
+2026-09-08 / 実装・検証、macOS本番639の公開・このMacへの更新まで完了。
 
 ユーザーの画像に合わせ、macOSのマイク横の波形、ノッチ左右の表示、ノッチなし画面の表示を実装した。追加依頼の「会話を終了して」もCodexの音声ツールへ接続した。ローカル変更と非破壊の検証は依頼に含まれるため再確認せず実施した。
 
@@ -24,9 +24,25 @@
 
 検証画面は接続状態をfixtureで与えている。実マイクの発話、実サービス応答音声との同期、物理的な複数ディスプレイ上の操作は未検証。画像だけを音声E2Eの成功として扱わない。検証用アプリは終了した。
 
-## 成果物と配信境界
+## ローカル検証時点の成果物と配信境界
 
 - ローカルアプリ: `dist/HoverPocket.app`。検証用bundle identifierで、本番インストールと区別している。
 - [会話中](../evidence/2026-09-08-voice-activity/speaking-1.png) / [ミュート](../evidence/2026-09-08-voice-activity/muted.png)
 - [検証ログ・readback](../evidence/2026-09-08-voice-activity/)
 - `/Applications/HoverPocket.app`は638のままで、既知の公開版binary hashと一致。公証、GitHub公開、Windows実装・配信、本番インストール置換は実施していない。
+
+## 追加依頼による本番反映
+
+ユーザーの「本番反映お願いします」を受け、署名・公証・公開とこのMacへの更新を再確認せず実施した。以下が最終状態で、上記の未配信状態を更新する。
+
+- 配信source: `57ed31b90985e3061928a01467915ee25eeba15c`、tag: `v0.1.0-639`。Swiftソース192ファイルのSHA-256がビルド前後で一致。
+- 最初のpackage処理は終了コード1で停止し、詳細原因は未取得。出力を保存して再実行したReleaseビルドは107.79秒で成功し、以降のpackage・配布用検証もPASSした。
+- Developer ID署名Release639で、音声表示27、音声確認23、天気8、Voice Foundation、Codex app-server、App OS49、platform78、panel112、Pocket App package/runtime/lifecycle/governance/backup、音声統計JSを検証しPASS。連続100回開閉・100回切り替えのsoakもPASS。window3→3、thread15→18、子プロセス0→0、RSS97.4→115.7MiB。
+- 同じsource commitの[共通契約CI](https://github.com/shotaro311/hover-pocket/actions/runs/34175721117)は、macOS・Windows・Linuxと3 OSの結果比較の4ジョブがsuccess。
+- Apple公証: `Accepted`、submission `7162077d-ccb0-4ab9-bc50-5ef71cc10f5c`。staple、strict codesign、Gatekeeper、Googleログイン・位置情報の配布設定もPASS。
+- [macOS639](https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-639)とmacOS専用feedを公開。公開ファイルを別途取得した93 checksと、3 ZIP・2 appcastの署名／公証readbackがPASS。Windows0.2.8の8資産は更新前後でid・size・digest・updated_atが一致。
+- このMacを638→639へ更新・再起動。公開ZIPから展開したアプリとインストール済みbinaryのSHA-256が一致し、本番アプリの起動数は1。旧638はゴミ箱へ退避した。
+- 保存データ6ファイルは、今回の更新直前と再起動・UI確認後で一致。実設定UIからToday Focusの削除、ChatGPTログイン済み、通常確認OFF・削除確認OFFを確認。設定値を変更していない。確認用の設定画面は閉じた。
+- 実マイクでの発話、実音声に対する波形同期、声による会話終了、物理的な複数画面の受入は未検証。
+
+[配信検証・readback根拠](../evidence/2026-09-08-voice-activity-release/)。

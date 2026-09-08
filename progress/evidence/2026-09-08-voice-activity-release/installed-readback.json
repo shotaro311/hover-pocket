@@ -1,0 +1,15 @@
+{
+  "build": "639",
+  "bundle_identifier": "local.codex.hover-pocket",
+  "binary_matches_public_release": true,
+  "running_application_count": 1,
+  "previous_build_retained_in_trash": true,
+  "data_files_checked": 6,
+  "data_unchanged_immediately_after_install": true,
+  "data_unchanged_after_restart_and_ui_check": true,
+  "chatgpt_login_ui": "logged_in",
+  "today_focus_in_features_ui": false,
+  "normal_operation_confirmation": false,
+  "deletion_confirmation": false,
+  "settings_modified": false
+}
