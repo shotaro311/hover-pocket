@@ -1,0 +1,9 @@
+{
+  "local_build": "639",
+  "local_binary_sha256": "b09b4f08093866b345c772f5ed85fa409b56af85f85bf668b27c07973504024b",
+  "installed_build": "638",
+  "installed_binary_sha256": "8b14cf994c59cb363f24ff9a6f1f3742260c2f24d6162f70ea1840265191b0c4",
+  "scope": "local implementation and verification; no production publication or replacement",
+  "physical_microphone_conversation_verified": false,
+  "installed_matches_published_638": true
+}

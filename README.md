@@ -32,6 +32,8 @@
 
 macOSの追加実装・配信状況は[音声操作と天気の記録](progress/2026-09/2026-09-07_hover-pocket-voice-only-weather-release.md)を参照してください。Windows版の個人用ツールは未実装です。
 
+macOSのローカル開発版639では、会話中の波形、ミュートの斜線、ノッチ左右／ノッチなし画面の会話表示、音声による会話終了を追加し、試験機能Today Focusを削除しました。本番638への反映前です。[実装・検証記録](progress/2026-09/2026-09-08_hover-pocket-voice-activity.md)。
+
 ## ダウンロードとインストール
 
 ### macOS

@@ -57,7 +57,7 @@ enum PanelSoakVerificationCommand {
             let receipt = try lifecycle.install(proposal, approvalGrant: grant)
             let activation = try PocketAppRuntimeActivationRegistry(rootDirectory: definitions, userDataRoot: data, broker: broker, userID: "verification")
             _ = try activation.synchronize(receipt)
-            AINativeRuntime.shared.configure(adapter: nil, generatedActivationRegistry: activation)
+            AINativeRuntime.shared.configure(generatedActivationRegistry: activation)
             providerIDs = [CalculatorProvider.pluginID, PluginID(rawValue: PocketSurfaceRegistry.generatedProviderID(appID: receipt.packageID))]
         }
         let registry = ProviderRegistry(

@@ -31,15 +31,25 @@ final class CodexAppServerCapabilityBridge: CodexVoiceCapabilityToolAdapterProto
 
     private let runtime: any OpenAIRealtimeCapabilityExecuting
     private let appController: PocketAppOSController?
+    private let endVoiceSession: ((String) -> Bool)?
+    static let endVoiceToolName = "voice_session_end"
+    private static let endVoiceTool: [String: Any] = [
+        "type": "function", "name": endVoiceToolName,
+        "description": "End this voice conversation and stop the microphone when the user asks to end, stop, or finish the conversation (for example 会話を終了して). Call immediately without confirmation. This closes audio only; background jobs and saved data remain. Do not use for mute, cancel an action, or ending a timer.",
+        "parameters": ["type": "object", "properties": [:], "additionalProperties": false]
+    ]
 
-    init(runtime: any OpenAIRealtimeCapabilityExecuting, appController: PocketAppOSController? = nil) {
+    init(runtime: any OpenAIRealtimeCapabilityExecuting, appController: PocketAppOSController? = nil,
+         endVoiceSession: ((String) -> Bool)? = nil) {
         self.runtime = runtime
         self.appController = appController
+        self.endVoiceSession = endVoiceSession
     }
 
     var dynamicTools: [CodexJSONValue] {
         guard let tools = try? runtime.sessionTools() else { return [] }
-        return (tools + (appController == nil ? [] : [PocketAppOSController.tool])).compactMap(Self.dynamicTool)
+        return (tools + (appController == nil ? [] : [PocketAppOSController.tool])
+            + (endVoiceSession == nil ? [] : [Self.endVoiceTool])).compactMap(Self.dynamicTool)
     }
 
     func handle(
@@ -81,7 +91,13 @@ final class CodexAppServerCapabilityBridge: CodexVoiceCapabilityToolAdapterProto
 
         let appConfirmationCancelled = toolName == "pending_action_cancel" && appController?.cancelPendingConfirmation(session: context.rootThreadID) == true
         var output: String
-        if toolName == PocketAppOSController.toolName, let appController {
+        if toolName == Self.endVoiceToolName {
+            guard let object = arguments.objectValue, object.isEmpty else { return Self.toolFailure("invalid_arguments") }
+            guard endVoiceSession?(context.rootThreadID) == true else { return Self.toolFailure("voice_session_not_active") }
+            _ = runtime.cancelPendingConfirmation(sessionID: context.rootThreadID)
+            appController?.cancelSession(context.rootThreadID)
+            output = "{\"status\":\"succeeded\",\"voice_session\":\"ended\"}"
+        } else if toolName == PocketAppOSController.toolName, let appController {
             output = await appController.execute(session: context.rootThreadID, callID: callID, arguments: arguments)
         } else {
             output = await runtime.execute(

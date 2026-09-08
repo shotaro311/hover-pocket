@@ -22,7 +22,7 @@ enum PocketAppOSVerification {
 
     static func run() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("PocketAppOS-" + UUID().uuidString)
-        defer { AINativeRuntime.shared.configure(adapter: nil); try? FileManager.default.removeItem(at: root) }
+        defer { AINativeRuntime.shared.configure(); try? FileManager.default.removeItem(at: root) }
         let definition: [String: Any] = ["$schema": "hoverpocket://schemas/pocket-collection/v1", "schemaVersion": 1,
             "title": "確認記録", "fields": ["title": ["title": "名前", "type": "string", "required": true, "nullable": false]]]
         var files = try PocketToolsPlatformVerification.fixtureFiles(collection: definition)
@@ -46,7 +46,7 @@ enum PocketAppOSVerification {
                 let runtime = PocketAppExecutionRuntime(package: package, broker: broker, userID: "preview", grantedPermissions: [], collectionStores: stores)
                 return try PocketSurfaceHostModel(runtime: runtime, surfaceID: "main")
             })
-        AINativeRuntime.shared.configure(adapter: nil, pocketAppGenerationController: controller, generatedActivationRegistry: registry)
+        AINativeRuntime.shared.configure(pocketAppGenerationController: controller, generatedActivationRegistry: registry)
         let defaults = EphemeralAppSettingsDefaults()
         let settings = AppSettings(defaults: defaults)
         let providerStore = ProviderStore(registry: .builtIn, settings: settings)

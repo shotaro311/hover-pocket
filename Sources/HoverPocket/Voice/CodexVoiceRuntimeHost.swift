@@ -245,6 +245,10 @@ final class CodexVoiceRuntimeHost: ObservableObject {
         voiceRuntime?.reportTransportActivity(.listening)
     }
 
+    func reportAudioActivity(_ activity: VoiceLaneActivity) {
+        voiceRuntime?.reportTransportActivity(activity)
+    }
+
     func markTransportDetached(reconnectExpected: Bool) {
         guard let sourceCoordinator = coordinator else { return }
         let sourceGeneration = lifecycleGeneration

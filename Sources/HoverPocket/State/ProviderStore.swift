@@ -34,7 +34,6 @@ final class ProviderStore: ObservableObject {
     var visibleManifests: [PluginManifest] {
         let eligibleManifests = availableManifests.filter { manifest in
             manifest.defaultEnabled
-                || (manifest.id == TodayFocusPocketProvider.pluginID && settings.aiNativeEnabled)
         }
         let manifests = settings.visibleManifests(eligibleManifests)
         return manifests.filter { manifest in

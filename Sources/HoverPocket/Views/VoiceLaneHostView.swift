@@ -196,15 +196,8 @@ struct VoiceLaneHostView: View {
     }
 
     private var waveform: some View {
-        HStack(spacing: 2) {
-            ForEach([5.0, 10.0, 7.0, 12.0, 6.0], id: \.self) { height in
-                Capsule()
-                    .fill(Color.secondary.opacity(0.6))
-                    .frame(width: 2, height: height)
-            }
-        }
-        .frame(width: 34)
-        .accessibilityHidden(true)
+        VoiceWaveformView(presentation: VoiceActivityPresentation(snapshot: runtime.snapshot))
+            .frame(width: 34)
     }
 
     private var microphoneButton: some View {

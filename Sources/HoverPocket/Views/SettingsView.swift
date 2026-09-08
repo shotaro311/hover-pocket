@@ -419,45 +419,7 @@ struct SettingsView: View {
             .background(.quaternary.opacity(0.22))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-            DisclosureGroup(localized(japanese: "標準AI機能の詳細", english: "Built-in AI details")) {
-                if let package = aiNativeRuntime.pocketAppExecutionRuntime?.package {
-                    VStack(alignment: .leading, spacing: 7) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "target")
-                                .foregroundStyle(.secondary)
-                            Text(package.manifest.name)
-                                .font(.system(size: 12, weight: .semibold))
-                            Spacer()
-                            Text("v\(package.manifest.version)")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                        }
 
-                        Text(PocketSurfaceHostModel.sanitizeVisibleText(package.intent).prefixingUnicodeScalars(500))
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        Text(package.manifest.requestedCapabilities.map { $0.key.id }.sorted().joined(separator: " · "))
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(3)
-
-                        Label(
-                            localized(
-                                japanese: "定義、ユーザーデータ、実行履歴は分離して保持",
-                                english: "Definition, user data, and receipts are stored separately"
-                            ),
-                            systemImage: "externaldrive.badge.checkmark"
-                        )
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    }
-                    .padding(10)
-                    .background(.quaternary.opacity(0.28))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-            }
         }
     }
 

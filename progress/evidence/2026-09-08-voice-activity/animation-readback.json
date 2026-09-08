@@ -1,0 +1,6 @@
+{
+  "notch_wave": true,
+  "plain_wave": true,
+  "lane_wave": true,
+  "method": "PIL ImageChops difference of matching waveform regions in two Computer Use screenshots"
+}

@@ -79,19 +79,6 @@ enum PocketAppRuntimeActivationVerification {
             "activation_inflight_cancellation",
             failures: &failures
         )
-        let builtInLease = PocketAppActivationLease()
-        var builtInCancellationObserved = false
-        _ = builtInLease.registerCancellation { builtInCancellationObserved = true }
-        AINativeRuntime.shared.configure(
-            adapter: nil,
-            builtInActivationLease: builtInLease
-        )
-        AINativeRuntime.shared.configure(adapter: nil)
-        require(
-            builtInCancellationObserved && !builtInLease.isActive,
-            "activation_builtin_off_cancellation",
-            failures: &failures
-        )
         require(
             PocketSurfaceRegistry.generatedProviderID(appID: appA).hasPrefix("generated-pocket-app:")
                 && PocketSurfaceRegistry.generatedSurfaceRouteID(appID: appA, surfaceID: "main")
@@ -335,7 +322,6 @@ enum PocketAppRuntimeActivationVerification {
             if let defaults = UserDefaults(suiteName: defaultsName) {
                 defaults.set(true, forKey: "aiNativeEnabled")
                 AINativeRuntime.shared.configure(
-                    adapter: nil,
                     generatedActivationRegistry: registry
                 )
                 let settings = AppSettings(defaults: defaults)
@@ -389,7 +375,6 @@ enum PocketAppRuntimeActivationVerification {
                 )
 
                 AINativeRuntime.shared.configure(
-                    adapter: nil,
                     preservingManagedGeneratedProviderIDs: settings.savedGeneratedProviderIDs
                 )
                 providerStore.moveProvider(StickyNotesProvider.pluginID, by: 1)
@@ -425,7 +410,7 @@ enum PocketAppRuntimeActivationVerification {
                     "activation_removed_provider_settings_pruned",
                     failures: &failures
                 )
-                AINativeRuntime.shared.configure(adapter: nil)
+                AINativeRuntime.shared.configure()
                 defaults.removePersistentDomain(forName: defaultsName)
             } else {
                 failures.append("activation_generated_provider_defaults")

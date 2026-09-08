@@ -102,7 +102,6 @@ final class HoverPocketRuntimeEnvironment: @unchecked Sendable {
             ControlsProvider.pluginID.rawValue,
             CalculatorProvider.pluginID.rawValue,
             GoogleCalendarProvider.pluginID.rawValue,
-            TodayFocusPocketProvider.pluginID.rawValue,
             ClipboardProvider.pluginID.rawValue,
             StickyNotesProvider.pluginID.rawValue
         ]

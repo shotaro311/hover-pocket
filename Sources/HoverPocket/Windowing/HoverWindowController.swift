@@ -195,7 +195,8 @@ final class HoverWindowController {
             on: screen,
             panelSize: settings.panelSize,
             additionalPreviewHeight: 0,
-            showsNotchSideHandleArea: showsVisibleNotchSideHandle
+            showsNotchSideHandleArea: showsVisibleNotchSideHandle,
+            showsVoiceConversation: VoiceActivityPresentation(snapshot: VoiceLaneRuntime.shared.snapshot).showsConversation
         ).preview
         var maximumThreadCount = baselineThreadCount
         var maximumOpenMilliseconds = 0.0
@@ -337,7 +338,8 @@ final class HoverWindowController {
             on: screen,
             panelSize: settings.panelSize,
             additionalPreviewHeight: voiceLaneHeight(on: screen),
-            showsNotchSideHandleArea: showsVisibleNotchSideHandle
+            showsNotchSideHandleArea: showsVisibleNotchSideHandle,
+            showsVoiceConversation: VoiceActivityPresentation(snapshot: VoiceLaneRuntime.shared.snapshot).showsConversation
         )
     }
 
@@ -346,7 +348,8 @@ final class HoverWindowController {
         let baseline = PanelGeometry.frames(
             on: screen,
             panelSize: settings.panelSize,
-            showsNotchSideHandleArea: showsVisibleNotchSideHandle
+            showsNotchSideHandleArea: showsVisibleNotchSideHandle,
+            showsVoiceConversation: VoiceActivityPresentation(snapshot: VoiceLaneRuntime.shared.snapshot).showsConversation
         )
         let availableExtraHeight = max(0, baseline.preview.minY - screen.visibleFrame.minY)
         return VoiceLaneGeometry.resolvedPreference(
@@ -402,6 +405,7 @@ final class HoverWindowController {
         case .miniBar:
             return AnyView(
                 HoverMiniBarView(
+                    settings: settings,
                     onBarEnter: { [weak self] in self?.handleDirectHover(on: screen) },
                     onBarExit: { [weak self] in self?.scheduleClose() },
                     onTap: { [weak self] in self?.togglePreview(on: screen) }
@@ -1063,6 +1067,17 @@ final class HoverWindowController {
             .sink { [weak self] _ in
                 DispatchQueue.main.async { [weak self] in
                     self?.resizePreviewForPanelSizeChange()
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        VoiceLaneRuntime.shared.$snapshot
+            .map { VoiceActivityPresentation(snapshot: $0).showsConversation }
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.positionWindows()
                 }
             }
             .store(in: &settingsCancellables)

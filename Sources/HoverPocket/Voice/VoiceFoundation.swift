@@ -642,6 +642,15 @@ final class VoiceLaneRuntime: ObservableObject {
         }
     }
 
+    @discardableResult
+    func endAudioSession(expectedRootSessionID: String) -> Bool {
+        guard snapshot.providerID == .codexAppServer,
+              snapshot.connection == .connected,
+              snapshot.rootSessionID == expectedRootSessionID else { return false }
+        endAudioSession()
+        return true
+    }
+
     func endAudioSession() {
         guard featureEnabled else { return }
         let isPendingStart = snapshot.connection == .connecting || snapshot.connection == .recovering

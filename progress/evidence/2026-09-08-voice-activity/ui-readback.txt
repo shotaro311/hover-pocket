@@ -1,0 +1,41 @@
+Window: "HoverPocket 音声表示の検証（音声は接続しません）", App: HoverPocket Voice UI.
+0 standard window HoverPocket 音声表示の検証（音声は接続しません）, Secondary Actions: Raise
+	1 container
+		2 text ノッチあり / ノッチなし
+		3 unknown 音声会話・ミュート中
+		4 unknown 音声会話・ミュート中
+		5 container 音声レーン
+			6 button Description: 音声会話を再開, Value: 一時停止中。押すと再開, ID: mic.slash.fill
+			7 text 一時停止中 · マイクを押して再開 マイクを押すと音声会話を再開します。 セッション 0件
+			8 button Description: 音声レーンのミュートを解除, ID: speaker.slash.fill
+			9 button Description: 音声レーンを展開, Value: 折りたたみ, ID: chevron.down
+		10 button 聞き取り中
+		11 button 応答中
+		12 button ミュート
+		13 button 会話終了
+	14 close button
+	15 zoom button (disabled)
+	16 text HoverPocket 音声表示の検証（音声は接続しません）
+
+The focused UI element is 0 standard window HoverPocket 音声表示の検証（音声は接続しません）, Secondary Actions: Raise
+
+Window: "HoverPocket 音声表示の検証（音声は接続しません）", App: HoverPocket Voice UI.
+0 standard window HoverPocket 音声表示の検証（音声は接続しません）, Secondary Actions: Raise
+	1 container
+		2 text ノッチあり / ノッチなし
+		3 unknown 音声会話・ミュート中
+		4 unknown 音声会話・ミュート中
+		5 container 音声レーン
+			6 button Description: 音声セッションを開始, Value: 停止中。押すと開始, ID: mic.fill
+			7 text 開始前 · マイクを押してください マイクを押すとCodexとの音声セッションを開始します。 セッション 0件
+			8 button (disabled) Description: 音声レーンのミュートを解除, ID: speaker.slash.fill
+			9 button Description: 音声レーンを展開, Value: 折りたたみ, ID: chevron.down
+		10 button 聞き取り中
+		11 button 応答中
+		12 button ミュート
+		13 button 会話終了
+	14 close button
+	15 zoom button (disabled)
+	16 text HoverPocket 音声表示の検証（音声は接続しません）
+
+The focused UI element is 0 standard window HoverPocket 音声表示の検証（音声は接続しません）, Secondary Actions: Raise

@@ -196,7 +196,10 @@ final class CodexAppServerMacOSVoiceSessionAdapter: VoiceSessionAdapter {
                 actionConfirmationEnabled: actionConfirmationEnabled,
                 destructiveConfirmationEnabled: destructiveConfirmationEnabled
             ) else { return nil }
-            return CodexAppServerCapabilityBridge(runtime: runtime, appController: .shared)
+            return CodexAppServerCapabilityBridge(runtime: runtime, appController: .shared,
+                endVoiceSession: { [weak voiceRuntime] sessionID in
+                    voiceRuntime?.endAudioSession(expectedRootSessionID: sessionID) ?? false
+                })
         }
         self.runtimeHost = runtimeHost
         self.driver = driver

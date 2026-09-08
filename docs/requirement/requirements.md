@@ -496,6 +496,12 @@ Windows 代替要件:
 
 ### 4.9 Codex Voice Laneと共通Capability
 
+macOSの音声表示・終了操作（2026-09-08追加）:
+
+- マイク横の波形は会話中に動き、応答中は大きく動く。ミュート中は静止し、マイクと波形に斜線を出す。Reduce Motionでは静止表示する。
+- 音声セッション中はノッチ左に会話アイコン、右に波形を表示する。ノッチなしでは上端中央の108ptの小さなバーへ両方を収める。セッション終了後は通常の起点へ戻り、Voice OFFの寸法を変えない。
+- 「会話を終了して」などの明示依頼ではCodexが`voice_session_end`を呼び、追加確認なしで現在の音声セッションを終了する。別セッションや旧セッションの要求で現在の会話を終了しない。ミュート、操作の取消、タイマー終了とは区別する。
+
 
 2026-09-05に採用したmacOS操作拡張:
 
@@ -513,7 +519,7 @@ Planned Must:
 - Calendar、Timer、Sticky Notes、Clipboard、Controls、Calculatorを`PocketCapability`として登録し、既存UI、Voice、Text、生成Pocket App、MCP Adapterが同じRegistryとBrokerを使う。
 - Capability Registryを操作契約の単一正本とし、MCPは外部公開Adapterとして扱う。
 - Capability Brokerを唯一の実行入口とし、schema検証、権限、承認、idempotency、実行、readback、監査、rollbackを一元管理する。
-- 最初の縦断はToday Focus Pocketとする。今日のCalendar予定を読み、選択した予定に合わせてTimerを開始し、Sticky Notesへ今日の目的を保存する。
+- 初期の縦断検証にはToday Focus Pocketを使用した。macOSの利用者向け機能からは2026-09-08に削除し、一覧、設定詳細、Calendarの集中ボタン、起動時の実行環境を提供しない。既存データには触れず、契約検証用fixtureだけを保持する。
 - Today FocusのCalendar readは承認不要、TimerとStickyへの書き込みは既定ONで毎回正確な引数を提示して承認し、IDで実行後readbackする。Voiceの確認OFFでは現行allowlistのnative presenterだけを省略し、Brokerの承認判断とreadbackは維持する。
 - `calendar.event.create`は既定ONで毎回書き込み前承認を求め、作成後にevent IDを取得してGETまたは同等queryでreadbackする。Voiceの確認OFFでもBrokerの承認判断、Calendar access、idempotency、readback、auditは維持する。
 - Voice、Text、生成Surface、macOS SwiftUIとWindows Calendar WebView双方の「選択予定から集中を開始」は同じcanonical workflow planをBrokerへ送る。

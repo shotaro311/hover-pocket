@@ -58,6 +58,21 @@ if CommandLine.arguments.contains("--verify-pocket-app") {
 if CommandLine.arguments.contains("--verify-broker") {
     CapabilityBrokerVerificationCommand.run()
 }
+if CommandLine.arguments.contains("--verify-voice-activity") {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do {
+            try await VoiceActivityVerification.run(showPreview: CommandLine.arguments.contains("--show-preview"))
+            exit(0)
+        } catch {
+            print("voice_activity_verification=failed \(error)")
+            exit(1)
+        }
+    }
+    app.run()
+    exit(1)
+}
+
 if CommandLine.arguments.contains("--verify-panel-layout") {
     PanelLayoutVerificationCommand.run()
 }

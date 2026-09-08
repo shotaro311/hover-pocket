@@ -131,42 +131,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard hoverWindowController.appSettings.aiNativeEnabled,
                   runtimeEnvironment.externalIntegrationsEnabled else {
                 AINativeRuntime.shared.configure(
-                    adapter: nil,
                     capabilityDataGovernanceController: governanceController,
                     voiceCapabilityContext: voiceCapabilityContext,
                     preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
                 )
                 return
             }
-            guard let resources = Bundle.hoverPocketResources.resourceURL else {
-                throw PocketAppPackageError.invalid("$:resources")
-            }
-            let packageRoot = resources
-                .appendingPathComponent("PocketApps", isDirectory: true)
-                .appendingPathComponent("local.example.today-focus", isDirectory: true)
-            let package = try PocketAppPackageRuntime().load(directory: packageRoot)
             let pocketAppsRoot = runtimeEnvironment.storageDirectory("PocketApps")
             let userDataRoot = pocketAppsRoot.appendingPathComponent("UserData", isDirectory: true)
-            let userStateStore = try PocketAppUserStateStore(
-                packageID: package.manifest.id,
-                stateProperties: package.stateProperties,
-                rootDirectory: userDataRoot
-            )
-            let builtInActivationLease = PocketAppActivationLease()
-            let pocketAppRuntime = PocketAppExecutionRuntime(
-                package: package,
-                broker: broker,
-                userID: "local-user",
-                grantedPermissions: [
-                    "calendar.events.read",
-                    "sticky.read",
-                    "sticky.write",
-                    "timer.read",
-                    "timer.write"
-                ],
-                userStateStore: userStateStore,
-                activationLease: builtInActivationLease
-            )
             let generationController: PocketAppGenerationController?
             let generatedActivationRegistry: PocketAppRuntimeActivationRegistry?
             do {
@@ -219,21 +191,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 generatedActivationRegistry = nil
             }
             AINativeRuntime.shared.configure(
-                adapter: TodayFocusTextAdapter(
-                    broker: broker,
-                    activationLease: builtInActivationLease
-                ),
-                pocketAppExecutionRuntime: pocketAppRuntime,
                 pocketAppGenerationController: generationController,
                 generatedActivationRegistry: generatedActivationRegistry,
-                builtInActivationLease: builtInActivationLease,
                 capabilityDataGovernanceController: governanceController,
                 voiceCapabilityContext: voiceCapabilityContext,
                 preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
             )
         } catch {
             AINativeRuntime.shared.configure(
-                adapter: nil,
                 preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
             )
         }

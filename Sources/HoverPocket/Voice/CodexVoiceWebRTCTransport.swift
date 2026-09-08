@@ -202,6 +202,13 @@ final class CodexVoiceWebRTCDriver: ObservableObject {
         case "remote_audio_playback_failed":
             guard object["operationId"] as? String == activeOperationID else { return }
             recordE2EMediaEvent(.remoteAudioPlaybackFailed)
+        case "audio_activity":
+            guard let operationID = object["operationId"] as? String,
+                  operationID == activeOperationID,
+                  let value = object["activity"] as? String,
+                  let activity = VoiceLaneActivity(rawValue: value),
+                  activity == .listening || activity == .speaking else { return }
+            runtimeHost?.reportAudioActivity(activity)
         case "attached":
             guard object["operationId"] as? String == activeOperationID else { return }
             sessionStarting = false
@@ -597,6 +604,7 @@ private enum CodexVoiceWebContent {
   let attached = false;
   let operationEpoch = 0;
   let activeOperationId = null;
+  let audioActivityTimer = null;
 
   function post(message) {
     bridge.postMessage(message);
@@ -636,6 +644,8 @@ private enum CodexVoiceWebContent {
     operationEpoch += 1;
     activeOperationId = null;
     attached = false;
+    window.clearTimeout(audioActivityTimer);
+    audioActivityTimer = null;
     if (peer) {
       peer.close();
       peer = null;
@@ -865,6 +875,45 @@ private enum CodexVoiceWebContent {
     }
   }
 
+  // Poll only this live transport. No capture, audio routing, or transcript changes.
+  function observeAudioActivity(connection, epoch, operationId) {
+    let previousActivity = null;
+    let lastSoundAt = 0;
+    const previousEnergy = new Map();
+    const sample = async () => {
+      if (!isCurrentOperation(epoch, operationId) || connection !== peer) return;
+      let level = 0;
+      try {
+        const stats = await connection.getStats();
+        if (!isCurrentOperation(epoch, operationId) || connection !== peer) return;
+        stats.forEach((report) => {
+          if (report.type !== "inbound-rtp" || report.kind !== "audio") return;
+          if (Number.isFinite(report.audioLevel)) level = Math.max(level, report.audioLevel);
+          const previous = previousEnergy.get(report.id);
+          if (Number.isFinite(report.totalAudioEnergy) && Number.isFinite(report.totalSamplesDuration)) {
+            if (previous && report.totalSamplesDuration > previous.duration) {
+              const energy = Math.max(0, report.totalAudioEnergy - previous.energy);
+              level = Math.max(level, Math.sqrt(energy / (report.totalSamplesDuration - previous.duration)));
+            }
+            previousEnergy.set(report.id, { energy: report.totalAudioEnergy, duration: report.totalSamplesDuration });
+          }
+        });
+      } catch (_) {
+        // Missing stats must never interrupt a working conversation.
+      }
+      if (!isCurrentOperation(epoch, operationId) || connection !== peer) return;
+      const now = performance.now();
+      if (!muted && level > 0.01) lastSoundAt = now;
+      const activity = !muted && lastSoundAt > 0 && now - lastSoundAt < 320 ? "speaking" : "listening";
+      if (activity !== previousActivity) {
+        previousActivity = activity;
+        post({ type: "audio_activity", operationId, activity });
+      }
+      audioActivityTimer = window.setTimeout(sample, 160);
+    };
+    sample();
+  }
+
   async function acceptAnswer(operationId, sdp) {
     const epoch = operationEpoch;
     const connection = peer;
@@ -875,6 +924,7 @@ private enum CodexVoiceWebContent {
     if (!isCurrentOperation(epoch, operationId) || connection !== peer) return;
     attached = true;
     post({ type: "attached", operationId });
+    observeAudioActivity(connection, epoch, operationId);
   }
 
   function setMuted(nextMuted) {

@@ -83,13 +83,15 @@ enum PanelGeometry {
         on screen: NSScreen,
         panelSize: PanelSizeOption,
         additionalPreviewHeight: CGFloat = 0,
-        showsNotchSideHandleArea: Bool = true
+        showsNotchSideHandleArea: Bool = true,
+        showsVoiceConversation: Bool = false
     ) -> PanelFrames {
         let notchProfile = notchProfile(on: screen)
         let access = accessMetrics(
             on: screen,
             notchProfile: notchProfile,
-            showsNotchSideHandleArea: showsNotchSideHandleArea
+            showsNotchSideHandleArea: showsNotchSideHandleArea,
+            showsVoiceConversation: showsVoiceConversation
         )
         let previewSize = previewSize(
             panelSize: panelSize,
@@ -149,11 +151,27 @@ enum PanelGeometry {
         return .none(centerX: screen.frame.midX)
     }
 
-    private static func accessMetrics(
+    static func accessMetrics(
         on screen: NSScreen,
         notchProfile: ScreenNotchProfile,
-        showsNotchSideHandleArea: Bool
+        showsNotchSideHandleArea: Bool,
+        showsVoiceConversation: Bool = false
     ) -> PillMetrics {
+        if showsVoiceConversation {
+            let width: CGFloat
+            let style: PanelAccessStyle
+            switch notchProfile {
+            case .actual(_, let notchWidth, _):
+                width = notchWidth + PanelLayout.notchHandleWidth * 2
+                style = .notchPill
+            case .none:
+                width = PanelLayout.notchHandleWidth * 2
+                style = .miniBar
+            }
+            return PillMetrics(minX: notchProfile.centerX - width / 2, width: width,
+                height: PanelLayout.pillHeight, previewTopY: screen.frame.maxY - PanelLayout.pillHeight,
+                style: style)
+        }
         switch notchProfile {
         case let .actual(minX, width, _):
             guard showsNotchSideHandleArea else {

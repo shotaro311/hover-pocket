@@ -78,7 +78,7 @@ enum PocketToolsPreviewVerification {
                 let runtime = PocketAppExecutionRuntime(package: package, broker: broker, userID: "preview", grantedPermissions: [], collectionStores: stores)
                 return try PocketSurfaceHostModel(runtime: runtime, surfaceID: package.surfaces["main"] == nil ? package.surfaces.keys.sorted().first! : "main")
             })
-        AINativeRuntime.shared.configure(adapter: nil, pocketAppGenerationController: controller, generatedActivationRegistry: registry)
+        AINativeRuntime.shared.configure(pocketAppGenerationController: controller, generatedActivationRegistry: registry)
         let window = NSWindow(contentRect: NSRect(x: 160, y: 80, width: 680, height: 760),
             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.title = "HoverPocket 本番パネル受入"

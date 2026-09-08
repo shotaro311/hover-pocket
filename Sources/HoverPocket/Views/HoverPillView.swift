@@ -3,6 +3,7 @@ import SwiftUI
 
 struct HoverPillView: View {
     @ObservedObject var settings: AppSettings
+    @ObservedObject private var voiceRuntime = VoiceLaneRuntime.shared
     @ObservedObject private var timerStore = TimerStore.shared
     let onEnter: () -> Void
     let onExit: () -> Void
@@ -10,7 +11,13 @@ struct HoverPillView: View {
 
     var body: some View {
         Group {
-            if showsVisibleSideHandle {
+            if VoiceActivityPresentation(snapshot: voiceRuntime.snapshot).showsConversation {
+                GeometryReader { geometry in
+                    VoiceAccessIndicator(presentation: VoiceActivityPresentation(snapshot: voiceRuntime.snapshot),
+                        language: settings.appLanguage,
+                        notchWidth: max(0, geometry.size.width - PanelLayout.notchHandleWidth * 2))
+                }
+            } else if showsVisibleSideHandle {
                 visiblePill
                     .modifier(TimerAlertBounceModifier(alert: timerStore.activeAlert))
             } else {
@@ -107,6 +114,8 @@ struct TimerAlertBounceModifier: ViewModifier {
 }
 
 struct HoverMiniBarView: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject private var voiceRuntime = VoiceLaneRuntime.shared
     let onBarEnter: () -> Void
     let onBarExit: () -> Void
     let onTap: () -> Void
@@ -114,6 +123,20 @@ struct HoverMiniBarView: View {
     @ObservedObject private var timerStore = TimerStore.shared
 
     var body: some View {
+        Group {
+            if VoiceActivityPresentation(snapshot: voiceRuntime.snapshot).showsConversation {
+                VoiceAccessIndicator(presentation: VoiceActivityPresentation(snapshot: voiceRuntime.snapshot),
+                    language: settings.appLanguage)
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onTap)
+                    .onHover { inside in inside ? onBarEnter() : onBarExit() }
+            } else {
+                restingBar
+            }
+        }
+    }
+
+    private var restingBar: some View {
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
                 Color.black.opacity(0.001)
