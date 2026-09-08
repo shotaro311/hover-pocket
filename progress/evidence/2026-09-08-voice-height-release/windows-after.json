@@ -1,0 +1,58 @@
+[
+  {
+    "id": 547693319,
+    "name": "assets.win.json",
+    "size": 214,
+    "digest": "sha256:65434f3b8cb6637d7fbcea16f2341c994fde8ba9f22be07f91843f640a8d28ab",
+    "updated_at": "2026-09-06T21:13:07Z"
+  },
+  {
+    "id": 547693305,
+    "name": "HoverPocketWin-0.2.8-full.nupkg",
+    "size": 86674997,
+    "digest": "sha256:f523b4ee2245469b653469dba8e73cf50a052e8a0359dbd36217240acc2c537d",
+    "updated_at": "2026-09-06T21:13:24Z"
+  },
+  {
+    "id": 547693309,
+    "name": "HoverPocketWin-win-Portable.zip",
+    "size": 86560682,
+    "digest": "sha256:7876f6d9248e194686d4f2ac7cbaabe18f93ad813f7dee46e4611b54234d2d5a",
+    "updated_at": "2026-09-06T21:13:23Z"
+  },
+  {
+    "id": 547693302,
+    "name": "HoverPocketWin-win-Setup.exe",
+    "size": 91250741,
+    "digest": "sha256:1783b3e69d5f64206d8bca08511d58bc106e4e8ccfbda168c983e0c3f249e355",
+    "updated_at": "2026-09-06T21:13:24Z"
+  },
+  {
+    "id": 547693320,
+    "name": "release-manifest.win.json",
+    "size": 278,
+    "digest": "sha256:d057d357ad729832bf0095cd6275646c28a41afa9820069e9bd0538c0a12ef4e",
+    "updated_at": "2026-09-06T21:13:07Z"
+  },
+  {
+    "id": 547693310,
+    "name": "RELEASES",
+    "size": 84,
+    "digest": "sha256:ffaf4ecd5d644546764a7490fe84ecb6b9328ce448e86f40b612546dec56cdf9",
+    "updated_at": "2026-09-06T21:13:06Z"
+  },
+  {
+    "id": 547693338,
+    "name": "releases.win.json",
+    "size": 262,
+    "digest": "sha256:22fadbb9c83d465a81112c97938b3252a5c30e2c6588dc2b51e785ed93922d92",
+    "updated_at": "2026-09-06T21:13:08Z"
+  },
+  {
+    "id": 547693308,
+    "name": "SHA256SUMS-win.txt",
+    "size": 631,
+    "digest": "sha256:31d2c13508d5c1de608aedf388da12b79fade5a786998c356548f5e02369c59b",
+    "updated_at": "2026-09-06T21:13:06Z"
+  }
+]

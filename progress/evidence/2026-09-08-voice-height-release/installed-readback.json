@@ -1,0 +1,11 @@
+{
+  "build": "640",
+  "binary_matches_public_release": true,
+  "running_application_count": 1,
+  "previous_build_retained_in_trash": true,
+  "data_files_checked": 6,
+  "data_unchanged_after_restart": true,
+  "data_unchanged_after_ui_check": true,
+  "chatgpt_login": "logged_in",
+  "settings_modified": false
+}

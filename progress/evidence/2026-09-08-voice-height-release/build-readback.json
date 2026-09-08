@@ -1,0 +1,7 @@
+{
+  "source_commit": "58949ae2c2ac40b2b0e2fecdc83b25296107e2e8",
+  "build": "640",
+  "bundle_identifier": "local.codex.hover-pocket",
+  "zip_sha256": "5f753fbfa8ffbb496b1d2f0beed7d64d46a25eb82fa89c028d06e2a5b3656d9d",
+  "binary_sha256": "5f1b8ad7cb54ccecfe5597992bb4cc567428ec6ab7676a426c0d66a2080ccf18"
+}
