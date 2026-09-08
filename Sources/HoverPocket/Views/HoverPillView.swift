@@ -15,7 +15,8 @@ struct HoverPillView: View {
                 GeometryReader { geometry in
                     VoiceAccessIndicator(presentation: VoiceActivityPresentation(snapshot: voiceRuntime.snapshot),
                         language: settings.appLanguage,
-                        notchWidth: max(0, geometry.size.width - PanelLayout.notchHandleWidth * 2))
+                        notchWidth: max(0, geometry.size.width - PanelLayout.notchHandleWidth * 2),
+                        height: geometry.size.height)
                 }
             } else if showsVisibleSideHandle {
                 visiblePill
@@ -29,7 +30,8 @@ struct HoverPillView: View {
             idealWidth: PanelLayout.defaultPillWidth,
             maxWidth: .infinity
         )
-        .frame(height: PanelLayout.pillHeight)
+        .frame(height: VoiceActivityPresentation(snapshot: voiceRuntime.snapshot).showsConversation
+            ? nil : PanelLayout.pillHeight)
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
         .onHover { inside in
@@ -125,8 +127,10 @@ struct HoverMiniBarView: View {
     var body: some View {
         Group {
             if VoiceActivityPresentation(snapshot: voiceRuntime.snapshot).showsConversation {
-                VoiceAccessIndicator(presentation: VoiceActivityPresentation(snapshot: voiceRuntime.snapshot),
-                    language: settings.appLanguage)
+                GeometryReader { geometry in
+                    VoiceAccessIndicator(presentation: VoiceActivityPresentation(snapshot: voiceRuntime.snapshot),
+                        language: settings.appLanguage, height: geometry.size.height)
+                }
                     .contentShape(Rectangle())
                     .onTapGesture(perform: onTap)
                     .onHover { inside in inside ? onBarEnter() : onBarExit() }

@@ -69,6 +69,7 @@ struct VoiceAccessIndicator: View {
     let presentation: VoiceActivityPresentation
     let language: AppLanguage
     var notchWidth: CGFloat = 0
+    var height: CGFloat = PanelLayout.pillHeight
 
     var body: some View {
         HStack(spacing: 0) {
@@ -80,7 +81,7 @@ struct VoiceAccessIndicator: View {
             VoiceWaveformView(presentation: presentation, barCount: 9)
                 .frame(width: PanelLayout.notchHandleWidth)
         }
-        .frame(height: PanelLayout.pillHeight)
+        .frame(height: height)
         .background(TopDockedPillShape(radius: 10).fill(.black))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(language == .japanese

@@ -151,6 +151,11 @@ enum PanelGeometry {
         return .none(centerX: screen.frame.midX)
     }
 
+    static func voiceAccessHeight(topInset: CGFloat, backingScaleFactor: CGFloat) -> CGFloat {
+        // Leave one physical pixel above the usable content area on each display.
+        max(0, min(PanelLayout.pillHeight, topInset) - 1 / max(1, backingScaleFactor))
+    }
+
     static func accessMetrics(
         on screen: NSScreen,
         notchProfile: ScreenNotchProfile,
@@ -158,6 +163,10 @@ enum PanelGeometry {
         showsVoiceConversation: Bool = false
     ) -> PillMetrics {
         if showsVoiceConversation {
+            let topInset = screen.safeAreaInsets.top > 0
+                ? screen.safeAreaInsets.top : screen.frame.maxY - screen.visibleFrame.maxY
+            let height = voiceAccessHeight(topInset: topInset > 0 ? topInset : NSStatusBar.system.thickness,
+                backingScaleFactor: screen.backingScaleFactor)
             let width: CGFloat
             let style: PanelAccessStyle
             switch notchProfile {
@@ -169,7 +178,7 @@ enum PanelGeometry {
                 style = .miniBar
             }
             return PillMetrics(minX: notchProfile.centerX - width / 2, width: width,
-                height: PanelLayout.pillHeight, previewTopY: screen.frame.maxY - PanelLayout.pillHeight,
+                height: height, previewTopY: screen.frame.maxY - height,
                 style: style)
         }
         switch notchProfile {

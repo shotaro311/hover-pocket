@@ -49,7 +49,14 @@ enum VoiceActivityVerification {
             try check(active.width == 288 && active.minX == center - 144, "notch_symmetric_wings")
             let plain = PanelGeometry.accessMetrics(on: screen, notchProfile: .none(centerX: center),
                 showsNotchSideHandleArea: false, showsVoiceConversation: true)
-            try check(plain.width == 108 && plain.height == 33 && plain.minX == center - 54, "no_notch_compact_bar")
+            try check(plain.width == 108 && plain.height > 0 && plain.height < 33 && plain.minX == center - 54, "no_notch_compact_bar")
+        }
+        for inset: CGFloat in [22, 24, 28, 32, 38] {
+            for scale: CGFloat in [1, 2] {
+                let height = PanelGeometry.voiceAccessHeight(topInset: inset, backingScaleFactor: scale)
+                try check(height <= inset - 1 / scale && height < PanelLayout.pillHeight,
+                    "voice_indicator_within_top_area_\(Int(inset))_\(Int(scale))")
+            }
         }
         let inactive = PanelGeometry.accessMetrics(on: screen, notchProfile: .none(centerX: screen.frame.midX),
             showsNotchSideHandleArea: false)
@@ -141,9 +148,9 @@ enum VoiceActivityVerification {
                 Text("ノッチあり / ノッチなし").foregroundStyle(.secondary)
                 if VoiceActivityPresentation(snapshot: runtime.snapshot).showsConversation {
                     VoiceAccessIndicator(presentation: VoiceActivityPresentation(snapshot: runtime.snapshot),
-                        language: .japanese, notchWidth: 180)
+                        language: .japanese, notchWidth: 180, height: 31.5)
                         .frame(width: 288)
-                    VoiceAccessIndicator(presentation: VoiceActivityPresentation(snapshot: runtime.snapshot), language: .japanese)
+                    VoiceAccessIndicator(presentation: VoiceActivityPresentation(snapshot: runtime.snapshot), language: .japanese, height: 23)
                         .frame(width: 108)
                 }
                 VoiceLaneHostView(runtime: runtime, settings: settings)
