@@ -38,8 +38,6 @@ struct VoiceLaneHostView: View {
         HStack(spacing: 10) {
             microphoneButton
 
-            waveform
-
             VStack(alignment: .leading, spacing: 2) {
                 Text(statusText)
                     .font(.system(size: 10, weight: .semibold))
@@ -90,8 +88,6 @@ struct VoiceLaneHostView: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 microphoneButton
-
-                waveform
 
                 Text(statusText)
                     .font(.system(size: 10, weight: .semibold))
@@ -195,11 +191,6 @@ struct VoiceLaneHostView: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: runtime.snapshot.sessions)
     }
 
-    private var waveform: some View {
-        VoiceWaveformView(presentation: VoiceActivityPresentation(snapshot: runtime.snapshot))
-            .frame(width: 34)
-    }
-
     private var microphoneButton: some View {
         Button {
             if canEndAudioSession || canCancelAudioStart {
@@ -210,21 +201,27 @@ struct VoiceLaneHostView: View {
                 runtime.beginAudioSession()
             }
         } label: {
-            Image(systemName: microphoneSymbolName)
-                .font(.system(size: 15, weight: .semibold))
+            Group {
+                if runtime.snapshot.connection == .connected && !runtime.snapshot.muted {
+                    VoiceWaveformView(presentation: VoiceActivityPresentation(snapshot: runtime.snapshot), tint: .green)
+                } else {
+                    Image(systemName: microphoneSymbolName)
+                        .font(.system(size: 15, weight: .semibold))
+                }
+            }
                 .frame(width: 36, height: 36)
-                .foregroundStyle(canUseMicrophoneButton ? Color.accentColor : Color.secondary)
+                .foregroundStyle(microphoneTint)
                 .background(
                     Circle()
                         .fill(canUseMicrophoneButton
-                            ? Color.accentColor.opacity(0.16)
+                            ? microphoneTint.opacity(0.16)
                             : Color.white.opacity(0.04))
                 )
                 .overlay {
                     Circle()
                         .stroke(
                             canUseMicrophoneButton
-                                ? Color.accentColor.opacity(0.8)
+                                ? microphoneTint.opacity(0.8)
                                 : Color.white.opacity(0.08),
                             lineWidth: 1
                         )
@@ -359,6 +356,13 @@ struct VoiceLaneHostView: View {
                 ? localized(japanese: "音声セッションを開始", english: "Start Voice session")
                 : localized(japanese: "マイクは現在利用できません", english: "Microphone is currently unavailable")
         }
+    }
+
+    private var microphoneTint: Color {
+        if runtime.snapshot.connection == .connected {
+            return runtime.snapshot.muted ? .red : .green
+        }
+        return canUseMicrophoneButton ? .accentColor : .secondary
     }
 
     private var microphoneSymbolName: String {

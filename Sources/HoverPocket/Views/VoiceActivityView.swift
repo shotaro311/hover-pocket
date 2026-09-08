@@ -28,6 +28,7 @@ struct VoiceActivityPresentation: Equatable {
 struct VoiceWaveformView: View {
     let presentation: VoiceActivityPresentation
     var barCount = 7
+    var tint: Color = Color(red: 0.75, green: 0.72, blue: 1)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -35,7 +36,7 @@ struct VoiceWaveformView: View {
             HStack(spacing: 2) {
                 ForEach(0..<barCount, id: \.self) { index in
                     Capsule()
-                        .fill(presentation.muted ? Color.secondary : Color(red: 0.75, green: 0.72, blue: 1))
+                        .fill(presentation.muted ? Color.secondary : tint)
                         .frame(width: 2, height: presentation.barHeight(
                             index: index, time: reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate))
                 }

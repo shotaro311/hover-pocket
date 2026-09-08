@@ -1,0 +1,4 @@
+The following is a diff from the previous accessibility tree for Window: "" with ~ and + representing changed and added elements, respectively. Removed elements are summarized by ID range.
+~			33 button Description: 音声セッションを開始, Value: 停止中。押すと開始, ID: mic.fill
+~			30 text 開始前 · マイクを押してください マイクを押すとCodexとの音声セッションを開始します。 セッション 0件
+~			31 button (disabled) Description: 音声レーンのミュートを解除, ID: speaker.slash.fill
