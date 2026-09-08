@@ -32,7 +32,9 @@
 
 macOSの追加実装・配信状況は[音声操作と天気の記録](progress/2026-09/2026-09-07_hover-pocket-voice-only-weather-release.md)を参照してください。Windows版の個人用ツールは未実装です。
 
-macOSの本番640では、音声バーの高さを画面の上端領域内に収め、下端に1物理ピクセルの余裕を残すよう修正しました。[修正・配信記録](progress/2026-09/2026-09-08_hover-pocket-voice-height.md)。
+macOSの本番641では、音声会話中のボタンを緑の動く波形、ミュート中を赤い斜線付きマイクへ変更し、横の独立した波形を削除しました。[変更・配信記録](progress/2026-09/2026-09-08_hover-pocket-voice-button.md)。
+
+macOSの640では、音声バーの高さを画面の上端領域内に収め、下端に1物理ピクセルの余裕を残すよう修正しました。[修正・配信記録](progress/2026-09/2026-09-08_hover-pocket-voice-height.md)。
 
 macOSの639では、会話中の波形、ミュートの斜線、ノッチ左右／ノッチなし画面の会話表示、音声による会話終了を追加し、試験機能Today Focusを削除しました。署名・Apple公証・公開ファイルの検証と、このMacの更新を完了しています。実マイクでの発話は未検証です。[実装・配信記録](progress/2026-09/2026-09-08_hover-pocket-voice-activity.md)。
 

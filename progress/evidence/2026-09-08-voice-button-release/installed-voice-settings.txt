@@ -1,0 +1,46 @@
+Window: "設定", App: ホバーポケット.
+0 standard window 設定, Secondary Actions: Raise
+	1 container
+		2 scroll area
+			3 list 設定カテゴリ
+				4 row (selectable) 表示と操作
+				5 row (selectable) 機能
+				6 row (selectable) 自作ツール
+				7 row (selected) 音声・AI
+				8 row (selectable) カレンダー・天気
+				9 row (selectable) データと履歴
+				10 row (selectable) 一般
+		11 scroll area
+			12 text 音声・AI 音声の接続先、アカウントと操作の確認方法を設定します。 Voice Lane
+			13 音声Provider
+				14 radio button Description: オフ, Value: 0
+				15 radio button Description: Codex app-server（推奨）, Value: 1
+				16 radio button Description: Realtime BYOK, Value: 0
+			17 pop up button 対話の声, Value: 接続先の既定
+			18 text 声は次回の音声接続から反映します。候補は接続先の確認後に表示されます。
+			19 checkbox Description: Voice Laneを有効化, Value: 1
+			20 checkbox Description: パネルを閉じても音声を続ける, Value: 1
+			21 text 接続済みでミュート解除中のときだけ、パネルを閉じても音声を維持します。接続中・ミュート中に自動開始や解除はしません。
+			22 checkbox Description: 通常操作を音声で確認, Value: 0
+			23 text 追加・編集・開始などの前に音声で確認します。オフでは依頼した操作をそのまま実行します。
+			24 checkbox Description: 削除・取消操作を音声で確認, Value: 0
+			25 text 予定・付箋・記録の削除、タイマーの取消、追加ツールの取り外しを対象にします。両方オフなら確認画面も追加の音声確認も出しません。macOSの権限許可は別途必要です。
+			26 image (selected) Description: 選択済み, ID: checkmark.circle.fill
+			27 text ChatGPTへログイン済みです。
+			28 button 再確認
+			29 checkbox Description: Voice Laneからカレンダーを利用, Value: 1
+			30 表示
+				31 radio button Description: コンパクト, Value: 1
+				32 radio button Description: 展開, Value: 0
+			33 text Codex app-serverを使う標準経路です。Codexアプリのログインを安全に共有できない場合は、HoverPocket専用プロファイルからChatGPTへログインできます。APIキーは不要で、BYOKへ自動切替はしません。
+	34 close button
+	35 zoom button
+	36 text 設定
+37 menu bar
+	38 ホバーポケット
+	39 Edit
+
+Selected:
+	7 row (selected)
+
+Note: Pay special attention to the content selected by the user. If the user asks a question or refers to the content they are looking at on-screen, they might be referring to the selected content (but they might be referring to something else that's visible, too).
