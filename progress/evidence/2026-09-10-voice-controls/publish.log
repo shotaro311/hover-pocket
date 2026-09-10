@@ -1,0 +1,22 @@
+release_configuration=ok: Google Sign-In callback and location access
+--prepared:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-publish-zip.0LBecF/HoverPocket.app/Contents/Frameworks/libMediaRemoteAdapter.dylib
+--validated:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-publish-zip.0LBecF/HoverPocket.app/Contents/Frameworks/libMediaRemoteAdapter.dylib
+--prepared:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-publish-zip.0LBecF/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/.
+--prepared:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-publish-zip.0LBecF/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate
+--validated:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-publish-zip.0LBecF/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate
+--prepared:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-publish-zip.0LBecF/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Updater.app
+--prepared:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-publish-zip.0LBecF/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Downloader.xpc
+--validated:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-publish-zip.0LBecF/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Updater.app
+--validated:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-publish-zip.0LBecF/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Downloader.xpc
+--prepared:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-publish-zip.0LBecF/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc
+--validated:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-publish-zip.0LBecF/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc
+--validated:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-publish-zip.0LBecF/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/.
+/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T//hoverpocket-publish-zip.0LBecF/HoverPocket.app: valid on disk
+/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T//hoverpocket-publish-zip.0LBecF/HoverPocket.app: satisfies its Designated Requirement
+Processing: /var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T//hoverpocket-publish-zip.0LBecF/HoverPocket.app
+The validate action worked!
+/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T//hoverpocket-publish-zip.0LBecF/HoverPocket.app: accepted
+source=Notarized Developer ID
+https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-643
+release=https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-643
+macos_feed=https://github.com/shotaro311/hover-pocket/releases/tag/macos-latest

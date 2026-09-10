@@ -20,7 +20,7 @@
 
 ## 検証
 
-ローカル検証は通過。本番用の署名・公証・公開を進めている。
+ローカル検証と署名Release643の検証を通過し、本番配信とこのMacの更新を完了した。
 
 - 修正前642の独立した短命verifierで、現在のCodex 0.153.4を再判定して実サービスへ接続。ChatGPT認証、音声9種、一時thread、SDP/WebRTC接続、子プロセス終了がPASS。実マイクは使わず、検証用の無音trackを使用した。本番の常駐プロセスは再起動していない。
 - この結果は検証時点の認証・サービス・新規接続が正常である証拠。以前発生した障害のコードや、断続的なネットワーク問題の有無を確定するものではない。
@@ -31,6 +31,19 @@
 - Voice契約42ケース、v1共有契約72 fixtures、v2共有契約62 checks、音声レンダラーの遅延マイク取得・終了検証がPASS。文言変更で旧期待値が2か所残った初回失敗は修正し、実行検証を通した。
 - 根拠: [検証ログと配信前の記録](../evidence/2026-09-10-voice-controls/)。
 
-## 完了の境界
+## 本番643の配信とこのMacの更新
 
-公開前の本番は642、予定する修正版は643。Windows実装は対象外。実マイクの音声対話と他のMacでの操作は、模擬接続の画面検証とは分けて扱う。
+- Source commit: `df10209b20cf09c15610f4c548e5d241cb876237`。公開tagは [`v0.1.0-643`](https://github.com/shotaro311/hover-pocket/releases/tag/v0.1.0-643)。Swift197ファイルのhashをビルド前後と公開前に照合した。
+- 公式の `notarize_release.sh` でReleaseビルド・Developer ID署名・公証・staple・Gatekeeperを確認。Appleの受付IDは `72472115-4dfc-4c85-946b-d6908dc1a8d6`、結果は `Accepted`。
+- 署名済み643でVoice Foundation、音声操作42項目、Codex再検査・取消・実installed readiness、保存復元、AI文章処理20項目がPASS。実サービスへの無音WebRTC接続と終了も通過した。
+- [契約CI 34476473324](https://github.com/shotaro311/hover-pocket/actions/runs/34476473324)でmacOS・Windows・Ubuntuと3 OS結果比較の全4 jobsが成功。
+- `PUBLISH_PREPARE_RELEASE=0` により検証済みの同じ公証済みZIPを公式scriptで公開。ZIPのSHA-256は `4881fba25dfa23fa8a30656fe499383c2354fec890d38f9b42a78fad6ce9fea0`。
+- 公開後の `verify_release_readback.py` は93 checksがPASS。初回と2回目は既存Windows Setupのダウンロード時に通信エラーが出たが、単独取得の成功後に全体を再実行して通過した。公開ファイルは再送・変更していない。
+- `verify_published_macos.sh` でも公開ZIP・appcast・Sparkle署名・Developer ID・staple・Gatekeeperを確認。Windows0.2.8の全8資産はID・名前・size・digest・更新時刻が前後で一致。
+- さらにビルドディレクトリ外へ公開ZIPを独立ダウンロードし、ハッシュとアプリ643を確認した。このMacのSparkleで642→643をダウンロードし、Install and Relaunchを実行。インストール済みbinaryは公開ダウンロードと一致し、稼働プロセスは1つ、署名と公証も有効。
+- 保存データ6ファイルのhash、ChatGPTログイン、音声有効・閉じても継続・通常確認OFF・削除確認OFF・カレンダー許可ON・コンパクト表示を更新前後で確認。確認用の設定画面を閉じた。
+- 新たな確認は不要と判断し、明示依頼された公開とこのMacの更新まで進めた。既存の未追跡の研究・ノッチ試作資料は保持した。
+
+## 未検証の範囲
+
+実マイクでの音声対話、他のMacでの操作、Windowsへの今回のUI機能追加は未実施。実サービスへの接続は無音track、操作画面の検証は模擬adapterであり、実発話のE2Eと混同しない。過去のユーザーの障害コードは未保存で、その障害との一致は断定しない。

@@ -1,0 +1,28 @@
+{
+  "status": "completed",
+  "conclusion": "success",
+  "headSha": "df10209b20cf09c15610f4c548e5d241cb876237",
+  "url": "https://github.com/shotaro311/hover-pocket/actions/runs/34476473324",
+  "jobs": [
+    {
+      "name": "macOS deterministic contract verifier",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Windows deterministic contract verifier",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Ubuntu deterministic contract verifier",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Compare reports across all operating systems",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ]
+}
