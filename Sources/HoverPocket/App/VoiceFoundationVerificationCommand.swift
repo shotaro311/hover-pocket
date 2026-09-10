@@ -46,6 +46,7 @@ enum VoiceFoundationVerificationCommand {
         try await verifyStartErrorPropagation()
         try verifyMicrophonePermissionLease()
         try await verifyExplicitStartCancellation()
+        try await verifyExplicitStartGenerationGuard()
         try await verifyCapabilityGrantRefresh()
         try await verifyRealtimeCapabilityBrokerRuntime()
         try await verifyAppLifetimeDetachAndRestart()
@@ -350,13 +351,13 @@ enum VoiceFoundationVerificationCommand {
               VoiceLaneLocalization.sessionStatus(.waitingForUser, language: .japanese) == "ユーザー操作待ち",
               VoiceLaneLocalization.transcriptRole(.user, language: .english) == "You",
               VoiceLaneLocalization.status(snapshot: readySnapshot, language: .japanese)
-                == "開始前 · マイクを押してください",
+                == "開始前 · 波形を押してください",
               VoiceLaneLocalization.conversationPrompt(
                 providerID: .codexAppServer,
                 connection: .disconnected,
                 muted: true,
                 language: .japanese
-              ) == "マイクを押すとCodexとの音声セッションを開始します。",
+              ) == "波形を押すとCodexとの音声セッションを開始します。",
               VoiceLaneLocalization.conversationPrompt(
                 providerID: .codexAppServer,
                 connection: .connecting,
@@ -393,7 +394,7 @@ enum VoiceFoundationVerificationCommand {
                     restartAttempt: 0
                 ),
                 language: .japanese
-              ) == "一時停止中 · マイクを押して再開"
+              ) == "ミュート中 · マイクを押して解除"
         else {
             throw VoiceFoundationVerificationError.failed("voice_localization")
         }
@@ -1028,6 +1029,54 @@ enum VoiceFoundationVerificationCommand {
                 && runtime.snapshot.connection == .disconnected
                 && runtime.snapshot.activity == .idle
                 && runtime.snapshot.muted
+        }
+        await runtime.shutdown()
+    }
+
+    private static func verifyExplicitStartGenerationGuard() async throws {
+        let adapter = SupersedingCancellableExplicitStartVoiceSessionAdapter()
+        let runtime = VoiceLaneRuntime(restartDelaysNanoseconds: [0])
+        await runtime.configure(
+            featureEnabled: true,
+            preferredLayout: .compact,
+            providerID: .codexAppServer,
+            adapterFactory: { adapter }
+        ).value
+        try await waitUntil { runtime.snapshot.connection == .disconnected && adapter.startCount == 0 }
+
+        runtime.attachPanel()
+        runtime.beginAudioSession()
+        try await waitUntil {
+            runtime.snapshot.connection == .connecting && adapter.startCount == 1
+        }
+        runtime.endAudioSession()
+        runtime.beginAudioSession()
+        try await waitUntil {
+            runtime.snapshot.connection == .connecting && adapter.startCount == 2
+        }
+
+        // The replacement start must remain owned by explicitStartTask after the
+        // cancelled first start finishes its deferred cleanup.
+        try await waitUntil {
+            adapter.cancelledStartIDs == [1]
+                && runtime.snapshot.connection == .connecting
+        }
+        runtime.endAudioSession()
+        try await waitUntil {
+            adapter.cancelledStartIDs == [1, 2]
+                && runtime.snapshot.connection == .disconnected
+        }
+
+        runtime.beginAudioSession()
+        try await waitUntil {
+            runtime.snapshot.connection == .connecting && adapter.startCount == 3
+        }
+        adapter.finishStart(id: 3)
+        try await waitUntil { runtime.snapshot.connection == .connected }
+        guard adapter.cancelledStartIDs == [1, 2],
+              adapter.startCount == 3,
+              runtime.snapshot.connection == .connected else {
+            throw VoiceFoundationVerificationError.failed("explicit_start_generation_guard")
         }
         await runtime.shutdown()
     }
@@ -2071,6 +2120,53 @@ private final class CancellableExplicitStartVoiceSessionAdapter: VoiceSessionAda
     private func cancelStart() {
         startContinuation?.resume(throwing: CancellationError())
         startContinuation = nil
+    }
+}
+
+@MainActor
+private final class SupersedingCancellableExplicitStartVoiceSessionAdapter: VoiceSessionAdapter {
+    var requiresExplicitStart: Bool { true }
+    private(set) var startCount = 0
+    private(set) var cancelledStartIDs: [Int] = []
+    private var startContinuations: [Int: CheckedContinuation<Void, Error>] = [:]
+
+    func probeCompatibility() async -> VoiceAdapterGate { .ready }
+
+    func start() async throws {
+        startCount += 1
+        let startID = startCount
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                startContinuations[startID] = continuation
+            }
+        } onCancel: { [weak self] in
+            Task { @MainActor in
+                self?.cancelStart(id: startID)
+            }
+        }
+    }
+
+    func setMuted(_ muted: Bool) async { _ = muted }
+    func closeAudioSession() async { }
+
+    func stop() async {
+        let pending = startContinuations
+        startContinuations.removeAll()
+        pending.forEach { id, continuation in
+            cancelledStartIDs.append(id)
+            continuation.resume(throwing: CancellationError())
+        }
+    }
+
+    func finishStart(id: Int) {
+        guard let continuation = startContinuations.removeValue(forKey: id) else { return }
+        continuation.resume()
+    }
+
+    private func cancelStart(id: Int) {
+        guard let continuation = startContinuations.removeValue(forKey: id) else { return }
+        cancelledStartIDs.append(id)
+        continuation.resume(throwing: CancellationError())
     }
 }
 

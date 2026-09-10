@@ -2,7 +2,7 @@
 project_slug: hover-pocket
 target: Windows version requirements
 created: 2026-07-05
-updated: 2026-09-08
+updated: 2026-09-10
 updated_by: codex
 status: draft-integrated
 source_app_release: v0.1.0-98
@@ -248,19 +248,19 @@ Must:
 - Voice Laneは全Providerと生成Pocket Appで同じinstanceを共有し、Provider切り替えやSurface再生成で会話sessionを作り直さない。
 - Voice機能全体は既定オフとする。ユーザーが明示的に有効化した後の既定表示はCompactとし、自動listenは別の明示opt-inとする。
 - `disabled / compact / expanded`の3表示モードを持つ。レーン面全体のクリックでは切り替えず、accessible nameを持つ明示的なexpand / collapse controlだけで切り替える。
-- Compactには視覚的な固定タイトルを置かない。マイク（開始・接続キャンセル・会話終了・再開を同じ位置で切り替える）、短く制限した波形、状態、直近会話1〜2行、現在root配下の表示session数、mute、expandを置き、会話領域を波形より優先して伸縮させる。
+- Compactには視覚的な固定タイトルを置かない。音声の開始・接続キャンセル・会話終了のcontrol、状態、直近会話1〜2行、現在root配下の表示session数、独立したmute、expandを置き、会話領域をcontrolより優先して伸縮させる。
 - Compactには視覚タイトルがなくても、screen reader向けのVoice Lane region labelを持たせる。
 - Expandedは左に現在会話のtranscript、右に現在のroot sessionと同じrootから派生したchild / descendant session cardを表示する。全過去会話の一覧、新規会話管理、削除UIは初回要件に含めない。
 - session cardは安全なtitle、状態、経過時間または更新時刻、進捗、直近の安全な要約だけを表示し、raw command、filesystem path、全文transcriptを渡さない。
 - Expandedはfullscreen、別Provider、Provider overlayにしない。長文と多数cardはVoice Lane内部で独立scrollし、Provider領域を縮めない。
 - macOS Voiceでは通常操作と削除・取消の確認設定を分ける。該当設定がONならHostが保持した同じ計画への音声承認を待ち、OFFなら追加確認なしで実行する。アプリの承認ダイアログは表示しない。設定にかかわらず、Capability Brokerのapproval/readbackとauditをHost側で維持する。OS権限や設定画面からの管理操作は別扱い。
-- muteは音声入出力だけを止め、child sessionをcancelしない。hoverによるパネルcloseは既定で入力trackとremote audioをmuteしてUI detachするが、Settingsで継続を明示的にONにした場合だけ、既にconnectedかつunmutedのsessionは音声入出力を維持してUIだけdetachする。connectingまたはmutedのsessionを自動開始・自動unmuteしない。明示的に終了していないroot / child taskを停止せず、同じマイクcontrolによる終了操作はRealtime音声sessionだけを終了し、root / child taskは継続する。task cancelはsession card上の別操作とし、対象と影響を表示して別承認を求める。
+- muteは音声入出力だけを止め、child sessionをcancelしない。hoverによるパネルcloseは既定で入力trackとremote audioをmuteしてUI detachするが、Settingsで継続を明示的にONにした場合だけ、既にconnectedかつunmutedのsessionは音声入出力を維持してUIだけdetachする。connectingまたはmutedのsessionを自動開始・自動unmuteしない。明示的に終了していないroot / child taskを停止せず、音声会話controlによる終了操作はRealtime音声sessionだけを終了し、root / child taskは継続する。task cancelはsession card上の別操作とし、対象と影響を表示して別承認を求める。
 
 受け入れ条件:
 
 - すべての組み込みProviderと生成Pocket AppでVoice Laneが同じ最下段にあり、Provider切り替え後もroot session、transcript、child card状態が保持される。
 - Compactには`Codex Voice`などの視覚タイトルがなく、波形は会話領域より短い。
-- 接続前のマイク操作は音声sessionを開始し、connecting / recovering中の同じマイク操作は保留中の開始をキャンセルしてdisconnected・idleへ戻し、connected・unmuted中の同じマイク操作は音声sessionだけを終了する。
+- 接続前の音声会話controlは音声sessionを開始し、connecting / recovering中の同じcontrolは保留中の開始をキャンセルしてdisconnected・idleへ戻す。macOSでは波形アイコンを使い、connected中はミュート状態を問わず音声sessionだけを終了する。ミュートは別のマイクcontrolで切り替える。
 - パネルを再表示しただけでは録音を再開せず、connected・muted中の同じマイク操作を明示的に行った場合だけ既存sessionを再開する。Compact / Expandedのいずれにもマイク以外のVoice session終了buttonを置かない。
 - Expandedではパネル上端、幅、Header矩形、Provider矩形がCompact時と一致し、下端だけが下へ伸びる。
 - Expandedは左transcript / 右root-scoped session cardsの2列を維持し、Smallでもcard列を自動で隠さない。必要時は情報量を減らし、列内scrollする。
@@ -502,11 +502,12 @@ Windows 代替要件:
 
 ### 4.9 Codex Voice Laneと共通Capability
 
-macOSの音声表示・終了操作（2026-09-08追加）:
+macOSの音声表示・終了操作（2026-09-10更新）:
 
-- 音声レーンのマイク横に独立した波形を出さず、会話中はボタン自体を緑の波形へ切り替えて動かす。ミュート中は赤い斜線付きマイクへ切り替える。終了後は開始用マイクへ戻る。Reduce Motionでは波形を静止する。
-- 音声セッション中はノッチ左に会話アイコン、右に波形を表示する。ノッチなしでは上端中央の108ptの小さなバーへ両方を収める。会話表示の高さは各画面のノッチ／メニューバーの領域に合わせ、下端に1物理ピクセルの余裕を残して作業領域へはみ出さない。セッション終了後は通常の起点へ戻り、Voice OFFの寸法を変えない。
+- Compact / Expandedの両方で、開始・開始取消・終了のcontrolは波形アイコンで表示する。接続中はミュート状態を問わず音声sessionを終了する。ミュートcontrolはマイク / 斜線付きマイクを使い、クリックで音声入出力のミュートを切り替える。ミュート時の状態連動の波形は斜線を重ねず、静止したグレーの点だけにする。Reduce Motionでは波形を静止する。
+- 音声セッション中はノッチ左にミュート切替用のマイク、右に会話終了用の波形を表示する。パネルを閉じたままクリックでき、左右controlへhoverしただけでパネルを開かない。ミュート中もcontrolを残して解除できる。ノッチなしでは上端中央の108ptの小さなバーへ両方を収め、パネルを開く経路を維持する。会話表示の高さは各画面のノッチ／メニューバーの領域に合わせ、下端に1物理ピクセルの余裕を残して作業領域へはみ出さない。セッション終了後は通常の起点へ戻り、Voice OFFの寸法を変えない。
 - 「会話を終了して」などの明示依頼ではCodexが`voice_session_end`を呼び、追加確認なしで現在の音声セッションを終了する。別セッションや旧セッションの要求で現在の会話を終了しない。ミュート、操作の取消、タイマー終了とは区別する。
+- macOSで接続先Codexの更新を検出した場合は、開始操作の際に互換性を再検査し、通過後に接続情報を更新する。再検査の一時的な失敗後は次の開始操作で試せる。開始の取消・設定無効化後に遅れて音声を開始せず、取り消した古い処理で次の接続を終了しない。失敗時はCodexの更新・接続確認・ログイン状態に応じた文言を表示する。
 
 
 2026-09-05に採用したmacOS操作拡張:

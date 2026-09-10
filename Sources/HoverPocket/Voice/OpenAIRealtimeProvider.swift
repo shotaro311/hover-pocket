@@ -169,12 +169,13 @@ final class OpenAIRealtimeMacOSVoiceSessionAdapter: VoiceSessionAdapter {
 
 @MainActor
 final class CodexAppServerMacOSVoiceSessionAdapter: VoiceSessionAdapter {
-    private let compatibilityProbe: CodexAppServerCompatibilityProbe
+    private let compatibilityProbe: any CodexAppServerCompatibilityChecking
     private let capabilityBridge: CodexAppServerCapabilityBridge?
     private let runtimeHost: CodexVoiceRuntimeHost
     private let driver: CodexVoiceWebRTCDriver
     private weak var voiceRuntime: VoiceLaneRuntime?
     private var compatibilityResult: CodexAppServerCompatibilityResult?
+    private var startGeneration: UInt64 = 0
 
     var requiresExplicitStart: Bool { true }
 
@@ -184,12 +185,13 @@ final class CodexAppServerMacOSVoiceSessionAdapter: VoiceSessionAdapter {
         actionConfirmationEnabled: @escaping @MainActor () -> Bool = { true },
         destructiveConfirmationEnabled: @escaping @MainActor () -> Bool = { true },
         voiceRuntime: VoiceLaneRuntime = .shared,
-        compatibilityProbe: CodexAppServerCompatibilityProbe = .shared,
+        compatibilityProbe: any CodexAppServerCompatibilityChecking = CodexAppServerCompatibilityProbe.shared,
         runtimeHost: CodexVoiceRuntimeHost = PocketCodexLibrary.host,
-        driver: CodexVoiceWebRTCDriver = PocketCodexLibrary.driver
+        driver: CodexVoiceWebRTCDriver = PocketCodexLibrary.driver,
+        capabilityBridge: CodexAppServerCapabilityBridge? = nil
     ) {
         self.compatibilityProbe = compatibilityProbe
-        self.capabilityBridge = context.flatMap {
+        self.capabilityBridge = capabilityBridge ?? context.flatMap {
             guard let runtime = try? OpenAIRealtimeMacOSCapabilityRuntime(
                 context: $0,
                 calendarAccessGranted: calendarAccessGranted,
@@ -211,6 +213,7 @@ final class CodexAppServerMacOSVoiceSessionAdapter: VoiceSessionAdapter {
             return .blocked("codex_capability_runtime_unavailable")
         }
         let result = await compatibilityProbe.probe(
+            explicitURL: nil,
             dynamicTools: capabilityBridge?.dynamicTools ?? []
         )
         compatibilityResult = result
@@ -218,36 +221,99 @@ final class CodexAppServerMacOSVoiceSessionAdapter: VoiceSessionAdapter {
     }
 
     func start() async throws {
-        guard let capabilityBridge else {
-            throw CodexVoiceRuntimeError.compatibility("codex_capability_runtime_unavailable")
-        }
-        guard let compatibilityResult,
-              compatibilityResult.gate.isReady,
-              let executableURL = compatibilityResult.executableURL,
-              let executableIdentity = compatibilityResult.executableIdentity,
-              let profile = compatibilityResult.appServerProfile else {
-            throw CodexVoiceRuntimeError.compatibility("codex_compatibility_not_ready")
-        }
-        guard await compatibilityProbe.isCurrent(compatibilityResult) else {
-            throw CodexVoiceRuntimeError.compatibility("codex_executable_changed")
-        }
-        guard runtimeHost.configureExecutable(
-            executableURL,
-            expectedIdentity: executableIdentity,
-            profile: profile
-        ) else {
-            throw CodexVoiceRuntimeError.compatibility("codex_executable_configuration_conflict")
-        }
-        runtimeHost.configureToolAdapter(capabilityBridge)
-        runtimeHost.setPanelVisible(voiceRuntime?.snapshot.uiAttached == true)
-        runtimeHost.setSessionsVisible(voiceRuntime?.snapshot.mode == .expanded)
-        await runtimeHost.setEnabled(true)
-        guard runtimeHost.snapshot.availability == .ready else {
-            throw CodexVoiceRuntimeError.compatibility(
-                runtimeHost.snapshot.lastErrorCode ?? "codex_app_server_unavailable"
+        startGeneration &+= 1
+        let generation = startGeneration
+        do {
+            try checkStartCancellation(generation)
+            guard let capabilityBridge else {
+                throw CodexVoiceRuntimeError.compatibility("codex_capability_runtime_unavailable")
+            }
+            guard var compatibilityResult = self.compatibilityResult else {
+                throw CodexVoiceRuntimeError.compatibility("codex_compatibility_not_ready")
+            }
+
+            if !compatibilityResult.gate.isReady {
+                compatibilityResult = await compatibilityProbe.probe(
+                    explicitURL: compatibilityResult.executableURL,
+                    dynamicTools: capabilityBridge.dynamicTools
+                )
+                try checkStartCancellation(generation)
+                self.compatibilityResult = compatibilityResult
+            }
+            guard compatibilityResult.gate.isReady else {
+                throw CodexVoiceRuntimeError.compatibility(
+                    compatibilityResult.gate.safeErrorCode ?? "codex_compatibility_not_ready"
+                )
+            }
+
+            let revalidation = await compatibilityProbe.revalidateForStart(
+                compatibilityResult,
+                dynamicTools: capabilityBridge.dynamicTools
             )
+            try checkStartCancellation(generation)
+            guard let compatibilityResult = revalidation.result,
+                  compatibilityResult.gate.isReady,
+                  let executableURL = compatibilityResult.executableURL,
+                  let executableIdentity = compatibilityResult.executableIdentity,
+                  let profile = compatibilityResult.appServerProfile else {
+                if !revalidation.refreshed {
+                    self.compatibilityResult = revalidation.result
+                }
+                throw CodexVoiceRuntimeError.compatibility(
+                    revalidation.result?.gate.safeErrorCode
+                        ?? "codex_executable_changed"
+                )
+            }
+            self.compatibilityResult = compatibilityResult
+            guard await compatibilityProbe.isCurrent(compatibilityResult) else {
+                throw CodexVoiceRuntimeError.compatibility("codex_executable_changed")
+            }
+            try checkStartCancellation(generation)
+
+            let executableConfigured: Bool
+            if revalidation.refreshed {
+                executableConfigured = await runtimeHost.reconfigureExecutable(
+                    executableURL,
+                    expectedIdentity: executableIdentity,
+                    profile: profile
+                )
+                try checkStartCancellation(generation)
+            } else {
+                executableConfigured = runtimeHost.configureExecutable(
+                    executableURL,
+                    expectedIdentity: executableIdentity,
+                    profile: profile
+                )
+            }
+            guard executableConfigured else {
+                throw CodexVoiceRuntimeError.compatibility("codex_executable_configuration_conflict")
+            }
+            runtimeHost.configureToolAdapter(capabilityBridge)
+            runtimeHost.setPanelVisible(voiceRuntime?.snapshot.uiAttached == true)
+            runtimeHost.setSessionsVisible(voiceRuntime?.snapshot.mode == .expanded)
+            await runtimeHost.setEnabled(true)
+            try checkStartCancellation(generation)
+            guard runtimeHost.snapshot.availability == .ready else {
+                throw CodexVoiceRuntimeError.compatibility(
+                    runtimeHost.snapshot.lastErrorCode ?? "codex_app_server_unavailable"
+                )
+            }
+            try await driver.startSession()
+            try checkStartCancellation(generation)
+        } catch {
+            if Task.isCancelled, generation == startGeneration {
+                await driver.stopSession()
+                if generation == startGeneration {
+                    await runtimeHost.setEnabled(false)
+                }
+            }
+            throw error
         }
-        try await driver.startSession()
+    }
+
+    private func checkStartCancellation(_ generation: UInt64) throws {
+        try Task.checkCancellation()
+        guard generation == startGeneration else { throw CancellationError() }
     }
 
     func setMuted(_ muted: Bool) async {
@@ -272,6 +338,7 @@ final class CodexAppServerMacOSVoiceSessionAdapter: VoiceSessionAdapter {
     }
 
     func stop() async {
+        startGeneration &+= 1
         await driver.stopSession()
         await runtimeHost.setEnabled(false)
     }

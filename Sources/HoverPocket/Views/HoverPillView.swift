@@ -11,18 +11,15 @@ struct HoverPillView: View {
 
     var body: some View {
         Group {
-            if VoiceActivityPresentation(snapshot: voiceRuntime.snapshot).showsConversation {
-                GeometryReader { geometry in
-                    VoiceAccessIndicator(presentation: VoiceActivityPresentation(snapshot: voiceRuntime.snapshot),
-                        language: settings.appLanguage,
-                        notchWidth: max(0, geometry.size.width - PanelLayout.notchHandleWidth * 2),
-                        height: geometry.size.height)
-                }
+            if showsVoiceConversation {
+                voiceAccessIndicator
             } else if showsVisibleSideHandle {
                 visiblePill
                     .modifier(TimerAlertBounceModifier(alert: timerStore.activeAlert))
+                    .onTapGesture(perform: onTap)
             } else {
                 Color.black.opacity(0.001)
+                    .onTapGesture(perform: onTap)
             }
         }
         .frame(
@@ -30,13 +27,44 @@ struct HoverPillView: View {
             idealWidth: PanelLayout.defaultPillWidth,
             maxWidth: .infinity
         )
-        .frame(height: VoiceActivityPresentation(snapshot: voiceRuntime.snapshot).showsConversation
+        .frame(height: showsVoiceConversation
             ? nil : PanelLayout.pillHeight)
         .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
         .onHover { inside in
+            guard !showsVoiceConversation else { return }
             inside ? onEnter() : onExit()
         }
+    }
+
+    private var showsVoiceConversation: Bool {
+        VoiceActivityPresentation(snapshot: voiceRuntime.snapshot).showsConversation
+    }
+
+    private var voiceAccessIndicator: some View {
+        GeometryReader { geometry in
+            VoiceAccessIndicator(
+                presentation: VoiceActivityPresentation(snapshot: voiceRuntime.snapshot),
+                language: settings.appLanguage,
+                notchWidth: max(0, geometry.size.width - PanelLayout.notchHandleWidth * 2),
+                height: geometry.size.height,
+                onMuteToggle: toggleVoiceMute,
+                onEndVoiceSession: endVoiceSession,
+                onCenterTap: onTap,
+                onCenterHover: handleVoiceCenterHover
+            )
+        }
+    }
+
+    private func toggleVoiceMute() {
+        voiceRuntime.setMuted(!voiceRuntime.snapshot.muted)
+    }
+
+    private func endVoiceSession() {
+        voiceRuntime.endAudioSession()
+    }
+
+    private func handleVoiceCenterHover(_ inside: Bool) {
+        inside ? onEnter() : onExit()
     }
 
     private var showsVisibleSideHandle: Bool {
@@ -126,18 +154,42 @@ struct HoverMiniBarView: View {
 
     var body: some View {
         Group {
-            if VoiceActivityPresentation(snapshot: voiceRuntime.snapshot).showsConversation {
-                GeometryReader { geometry in
-                    VoiceAccessIndicator(presentation: VoiceActivityPresentation(snapshot: voiceRuntime.snapshot),
-                        language: settings.appLanguage, height: geometry.size.height)
-                }
-                    .contentShape(Rectangle())
-                    .onTapGesture(perform: onTap)
-                    .onHover { inside in inside ? onBarEnter() : onBarExit() }
+            if showsVoiceConversation {
+                voiceAccessIndicator
             } else {
                 restingBar
             }
         }
+    }
+
+    private var showsVoiceConversation: Bool {
+        VoiceActivityPresentation(snapshot: voiceRuntime.snapshot).showsConversation
+    }
+
+    private var voiceAccessIndicator: some View {
+        GeometryReader { geometry in
+            VoiceAccessIndicator(
+                presentation: VoiceActivityPresentation(snapshot: voiceRuntime.snapshot),
+                language: settings.appLanguage,
+                height: geometry.size.height,
+                onMuteToggle: toggleVoiceMute,
+                onEndVoiceSession: endVoiceSession,
+                onCenterTap: onTap,
+                onCenterHover: handleVoiceCenterHover
+            )
+        }
+    }
+
+    private func toggleVoiceMute() {
+        voiceRuntime.setMuted(!voiceRuntime.snapshot.muted)
+    }
+
+    private func endVoiceSession() {
+        voiceRuntime.endAudioSession()
+    }
+
+    private func handleVoiceCenterHover(_ inside: Bool) {
+        inside ? onBarEnter() : onBarExit()
     }
 
     private var restingBar: some View {

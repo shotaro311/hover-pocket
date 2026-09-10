@@ -36,7 +36,7 @@ struct VoiceLaneHostView: View {
 
     private var compact: some View {
         HStack(spacing: 10) {
-            microphoneButton
+            voiceSessionButton
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(statusText)
@@ -55,16 +55,7 @@ struct VoiceLaneHostView: View {
                 .foregroundStyle(.secondary)
                 .accessibilityLabel(sessionCountAccessibilityLabel)
 
-            Button {
-                runtime.setMuted(!runtime.snapshot.muted)
-            } label: {
-                Image(systemName: runtime.snapshot.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-            }
-            .buttonStyle(.plain)
-            .disabled(runtime.snapshot.muted && runtime.snapshot.connection != .connected)
-            .accessibilityLabel(runtime.snapshot.muted
-                ? localized(japanese: "音声レーンのミュートを解除", english: "Unmute Voice Lane")
-                : localized(japanese: "音声レーンをミュート", english: "Mute Voice Lane"))
+            muteButton
 
             Button {
                 settings.voiceLaneLayoutPreference = .expanded
@@ -87,7 +78,7 @@ struct VoiceLaneHostView: View {
     private var expanded: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                microphoneButton
+                voiceSessionButton
 
                 Text(statusText)
                     .font(.system(size: 10, weight: .semibold))
@@ -98,16 +89,7 @@ struct VoiceLaneHostView: View {
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .accessibilityLabel(sessionCountAccessibilityLabel)
-                Button {
-                    runtime.setMuted(!runtime.snapshot.muted)
-                } label: {
-                    Image(systemName: runtime.snapshot.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                }
-                .buttonStyle(.plain)
-                .disabled(runtime.snapshot.muted && runtime.snapshot.connection != .connected)
-                .accessibilityLabel(runtime.snapshot.muted
-                    ? localized(japanese: "音声レーンのミュートを解除", english: "Unmute Voice Lane")
-                    : localized(japanese: "音声レーンをミュート", english: "Mute Voice Lane"))
+                muteButton
                 Button {
                     settings.voiceLaneLayoutPreference = .compact
                 } label: {
@@ -191,37 +173,29 @@ struct VoiceLaneHostView: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: runtime.snapshot.sessions)
     }
 
-    private var microphoneButton: some View {
+    private var voiceSessionButton: some View {
         Button {
             if canEndAudioSession || canCancelAudioStart {
                 runtime.endAudioSession()
-            } else if canResumeAudioSession {
-                runtime.setMuted(false)
             } else {
                 runtime.beginAudioSession()
             }
         } label: {
-            Group {
-                if runtime.snapshot.connection == .connected && !runtime.snapshot.muted {
-                    VoiceWaveformView(presentation: VoiceActivityPresentation(snapshot: runtime.snapshot), tint: .green)
-                } else {
-                    Image(systemName: microphoneSymbolName)
-                        .font(.system(size: 15, weight: .semibold))
-                }
-            }
+            Image(systemName: "waveform")
+                .font(.system(size: 17, weight: .semibold))
                 .frame(width: 36, height: 36)
-                .foregroundStyle(microphoneTint)
+                .foregroundStyle(voiceSessionButtonTint)
                 .background(
                     Circle()
-                        .fill(canUseMicrophoneButton
-                            ? microphoneTint.opacity(0.16)
+                        .fill(canUseVoiceSessionButton
+                            ? voiceSessionButtonTint.opacity(0.16)
                             : Color.white.opacity(0.04))
                 )
                 .overlay {
                     Circle()
                         .stroke(
-                            canUseMicrophoneButton
-                                ? microphoneTint.opacity(0.8)
+                            canUseVoiceSessionButton
+                                ? voiceSessionButtonTint.opacity(0.8)
                                 : Color.white.opacity(0.08),
                             lineWidth: 1
                         )
@@ -229,10 +203,23 @@ struct VoiceLaneHostView: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .disabled(!canUseMicrophoneButton)
-        .help(microphoneAccessibilityLabel)
-        .accessibilityLabel(microphoneAccessibilityLabel)
-        .accessibilityValue(microphoneAccessibilityValue)
+        .disabled(!canUseVoiceSessionButton)
+        .help(voiceSessionAccessibilityLabel)
+        .accessibilityLabel(voiceSessionAccessibilityLabel)
+        .accessibilityValue(voiceSessionAccessibilityValue)
+    }
+
+    private var muteButton: some View {
+        Button {
+            runtime.setMuted(!runtime.snapshot.muted)
+        } label: {
+            Image(systemName: runtime.snapshot.muted ? "mic.slash" : "mic")
+        }
+        .buttonStyle(.plain)
+        .disabled(!canToggleMute)
+        .help(muteAccessibilityLabel)
+        .accessibilityLabel(muteAccessibilityLabel)
+        .accessibilityValue(muteAccessibilityValue)
     }
 
     private func sessionCard(_ session: VoiceSessionSummary) -> some View {
@@ -300,17 +287,9 @@ struct VoiceLaneHostView: View {
             && !voiceStartBlockedByConfiguration
     }
 
-    private var canResumeAudioSession: Bool {
-        runtime.snapshot.providerID != .off
-            && runtime.snapshot.connection == .connected
-            && runtime.snapshot.muted
-            && runtime.snapshot.uiAttached
-    }
-
     private var canEndAudioSession: Bool {
         runtime.snapshot.providerID != .off
             && runtime.snapshot.connection == .connected
-            && !runtime.snapshot.muted
             && runtime.snapshot.uiAttached
     }
 
@@ -320,8 +299,13 @@ struct VoiceLaneHostView: View {
             && runtime.snapshot.uiAttached
     }
 
-    private var canUseMicrophoneButton: Bool {
-        canBeginAudioSession || canResumeAudioSession || canEndAudioSession || canCancelAudioStart
+    private var canUseVoiceSessionButton: Bool {
+        canBeginAudioSession || canEndAudioSession || canCancelAudioStart
+    }
+
+    private var canToggleMute: Bool {
+        runtime.snapshot.providerID != .off
+            && runtime.snapshot.connection == .connected
     }
 
     private var voiceStartBlockedByConfiguration: Bool {
@@ -339,54 +323,49 @@ struct VoiceLaneHostView: View {
         ].contains(runtime.snapshot.safeErrorCode)
     }
 
-    private var microphoneAccessibilityLabel: String {
+    private var voiceSessionAccessibilityLabel: String {
         switch runtime.snapshot.connection {
         case .connecting, .recovering:
             localized(japanese: "音声接続をキャンセル", english: "Cancel Voice connection")
         case .connected:
-            if canEndAudioSession {
-                localized(japanese: "音声会話を終了", english: "End Voice conversation")
-            } else if canResumeAudioSession {
-                localized(japanese: "音声会話を再開", english: "Resume Voice conversation")
-            } else {
-                localized(japanese: "音声セッションは接続済み", english: "Voice session is connected")
-            }
+            localized(japanese: "音声会話を終了", english: "End Voice conversation")
         case .disconnected:
             canBeginAudioSession
                 ? localized(japanese: "音声セッションを開始", english: "Start Voice session")
-                : localized(japanese: "マイクは現在利用できません", english: "Microphone is currently unavailable")
+                : localized(japanese: "音声は現在利用できません", english: "Voice is currently unavailable")
         }
     }
 
-    private var microphoneTint: Color {
+    private var voiceSessionButtonTint: Color {
         if runtime.snapshot.connection == .connected {
-            return runtime.snapshot.muted ? .red : .green
+            return .green
         }
-        return canUseMicrophoneButton ? .accentColor : .secondary
+        return canUseVoiceSessionButton ? .accentColor : .secondary
     }
 
-    private var microphoneSymbolName: String {
-        if runtime.snapshot.connection == .connected {
-            return runtime.snapshot.muted ? "mic.slash.fill" : "mic.fill"
-        }
-        return canBeginAudioSession ? "mic.fill" : "mic.slash.fill"
-    }
-
-    private var microphoneAccessibilityValue: String {
+    private var voiceSessionAccessibilityValue: String {
         switch runtime.snapshot.connection {
         case .connecting, .recovering:
             localized(japanese: "接続中。押すとキャンセル", english: "Connecting. Press to cancel")
-        case .connected where canEndAudioSession:
-            localized(japanese: "会話中。押すと終了", english: "In conversation. Press to end")
-        case .connected where canResumeAudioSession:
-            localized(japanese: "一時停止中。押すと再開", english: "Paused. Press to resume")
         case .connected:
-            localized(japanese: "接続済み", english: "Connected")
+            localized(japanese: "会話中。押すと終了", english: "In conversation. Press to end")
         case .disconnected where canBeginAudioSession:
             localized(japanese: "停止中。押すと開始", english: "Stopped. Press to start")
         case .disconnected:
             localized(japanese: "利用不可", english: "Unavailable")
         }
+    }
+
+    private var muteAccessibilityLabel: String {
+        runtime.snapshot.muted
+            ? localized(japanese: "音声レーンのミュートを解除", english: "Unmute Voice Lane")
+            : localized(japanese: "音声レーンをミュート", english: "Mute Voice Lane")
+    }
+
+    private var muteAccessibilityValue: String {
+        runtime.snapshot.muted
+            ? localized(japanese: "ミュート中。押すと解除", english: "Muted. Press to unmute")
+            : localized(japanese: "ミュートしていません。押すとミュート", english: "Unmuted. Press to mute")
     }
 
     private func localized(japanese: String, english: String) -> String {
@@ -417,8 +396,8 @@ enum VoiceLaneLocalization {
         if snapshot.uiAttached,
            (snapshot.connection == .connecting || snapshot.connection == .recovering) {
             return text(
-                japanese: "接続中 · マイクを押してキャンセル",
-                english: "Connecting · Press the microphone to cancel",
+                japanese: "接続中 · 波形を押してキャンセル",
+                english: "Connecting · Press the waveform to cancel",
                 language: language
             )
         }
@@ -426,8 +405,8 @@ enum VoiceLaneLocalization {
            snapshot.muted,
            snapshot.uiAttached {
             return text(
-                japanese: "一時停止中 · マイクを押して再開",
-                english: "Paused · Press the microphone to resume",
+                japanese: "ミュート中 · マイクを押して解除",
+                english: "Muted · Press the microphone to unmute",
                 language: language
             )
         }
@@ -436,8 +415,8 @@ enum VoiceLaneLocalization {
            snapshot.activity == .idle,
            snapshot.uiAttached {
             return text(
-                japanese: "開始前 · マイクを押してください",
-                english: "Ready · Press the microphone",
+                japanese: "開始前 · 波形を押してください",
+                english: "Ready · Press the waveform",
                 language: language
             )
         }
@@ -454,14 +433,14 @@ enum VoiceLaneLocalization {
             )
         case .openAIRealtimeBYOK:
             return text(
-                japanese: "マイクを押すとOpenAI Realtimeとの音声セッションを開始します。",
-                english: "Press the microphone to start an OpenAI Realtime voice session.",
+                japanese: "波形を押すとOpenAI Realtimeとの音声セッションを開始します。",
+                english: "Press the waveform to start an OpenAI Realtime voice session.",
                 language: language
             )
         case .codexAppServer:
             return text(
-                japanese: "マイクを押すとCodexとの音声セッションを開始します。",
-                english: "Press the microphone to start a voice session with Codex.",
+                japanese: "波形を押すとCodexとの音声セッションを開始します。",
+                english: "Press the waveform to start a voice session with Codex.",
                 language: language
             )
         }
@@ -636,9 +615,84 @@ enum VoiceLaneLocalization {
             return text(japanese: "音声接続がタイムアウトしました", english: "Voice connection timed out", language: language)
         case "openai_realtime_remote_error", "openai_realtime_answer_invalid":
             return text(japanese: "音声サービスとの接続に失敗しました", english: "Voice service connection failed", language: language)
-        case "codex_voice_compatibility_blocked":
-            return text(japanese: "Codex Voiceの互換性確認を通過していません", english: "Codex Voice compatibility is blocked", language: language)
+        case "codex_executable_changed":
+            return text(
+                japanese: "Codexが更新されたため、音声接続を再確認できませんでした。HoverPocketを再起動してお試しください",
+                english: "Codex was updated, so Voice compatibility could not be rechecked. Restart HoverPocket and try again.",
+                language: language
+            )
+        case "codex_executable_configuration_conflict":
+            return text(
+                japanese: "Codexの接続状態が変わったため、音声接続を開始できません。HoverPocketを再起動してお試しください",
+                english: "The Codex connection state changed, so Voice could not start. Restart HoverPocket and try again.",
+                language: language
+            )
+        case "codex_not_found", "codex_executable_not_pinned":
+            return text(
+                japanese: "Codexが見つかりません。Codexをインストールしてからお試しください",
+                english: "Codex was not found. Install Codex and try again.",
+                language: language
+            )
+        case "codex_identity_unavailable", "codex_version_probe_failed":
+            return text(
+                japanese: "Codexを確認できません。CodexとHoverPocketを更新して再起動してください",
+                english: "Codex could not be checked. Update Codex and HoverPocket, then restart.",
+                language: language
+            )
+        case "codex_voice_profile_invalid", "codex_dynamic_tools_invalid",
+             "codex_capability_runtime_unavailable", "codex_broker_only_tool_policy_missing",
+             "codex_compatibility_not_ready", "codex_app_server_unavailable",
+             "app_server_transport_failed", "codex_voice_compatibility_blocked":
+            return text(
+                japanese: "Codexの音声機能を準備できません。CodexとHoverPocketを更新して再起動してください",
+                english: "Codex Voice could not be prepared. Update Codex and HoverPocket, then restart.",
+                language: language
+            )
+        case "codex_realtime_schema_missing", "codex_thread_tool_contract_missing":
+            return text(
+                japanese: "現在のCodexの音声機能には対応していません。CodexとHoverPocketを更新してください",
+                english: "This Codex version does not support Voice. Update Codex and HoverPocket.",
+                language: language
+            )
+        case "codex_broker_only_tool_route_mismatch":
+            return text(
+                japanese: "Codexへの音声接続を確認できませんでした。もう一度お試しください",
+                english: "Could not verify the Voice connection to Codex. Try again.",
+                language: language
+            )
+        case "codex_tool_route_probe_timed_out":
+            return text(
+                japanese: "Codexへの音声接続の確認がタイムアウトしました。もう一度お試しください",
+                english: "The Voice connection check to Codex timed out. Try again.",
+                language: language
+            )
+        case "codex_chatgpt_account_required", "signed_out":
+            return text(
+                japanese: "Codex Voiceを使うにはChatGPTアカウントでログインしてください",
+                english: "Sign in with a ChatGPT account to use Codex Voice.",
+                language: language
+            )
+        case "account_response_invalid":
+            return text(
+                japanese: "Codexのログイン状態を確認できません。Codexを再起動してお試しください",
+                english: "Could not check the Codex sign-in status. Restart Codex and try again.",
+                language: language
+            )
         default:
+            if code.hasPrefix("codex_schema_") {
+                return text(
+                    japanese: "Codexの音声機能を確認できませんでした。もう一度お試しください",
+                    english: "Could not verify the Codex Voice feature. Try again.",
+                    language: language
+                )
+            }
+            if code.hasPrefix("codex_tool_route_probe_") {
+                return text(
+                    japanese: "Codexへの音声接続を確認できませんでした。もう一度お試しください",
+                    english: "Could not verify the Voice connection to Codex. Try again.",
+                    language: language
+                )
+            }
             return text(japanese: "音声機能を利用できません", english: "Voice is unavailable", language: language)
         }
     }

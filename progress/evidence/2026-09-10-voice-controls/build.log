@@ -1,0 +1,12 @@
+[0/1] Planning build
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/8] Compiling HoverPocket VoiceFoundationVerificationCommand.swift
+[4/8] Emitting module HoverPocket
+[5/8] Compiling HoverPocket HoverPillView.swift
+[6/8] Compiling HoverPocket VoiceLaneHostView.swift
+[6/9] Write Objects.LinkFileList
+[7/9] Linking HoverPocket
+[8/9] Applying HoverPocket
+Build complete! (5.64s)

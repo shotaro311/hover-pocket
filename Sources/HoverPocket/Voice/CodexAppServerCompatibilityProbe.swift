@@ -11,6 +11,46 @@ struct CodexAppServerCompatibilityResult: Equatable, Sendable {
     let appServerProfile: CodexVoiceAppServerProfile?
 }
 
+protocol CodexAppServerCompatibilityChecking: Sendable {
+    func probe(
+        explicitURL: URL?,
+        dynamicTools: [CodexJSONValue]
+    ) async -> CodexAppServerCompatibilityResult
+    func isCurrent(_ result: CodexAppServerCompatibilityResult) async -> Bool
+}
+
+struct CodexAppServerCompatibilityRevalidation: Sendable {
+    let result: CodexAppServerCompatibilityResult?
+    let refreshed: Bool
+}
+
+extension CodexAppServerCompatibilityChecking {
+    func revalidateForStart(
+        _ cached: CodexAppServerCompatibilityResult,
+        dynamicTools: [CodexJSONValue]
+    ) async -> CodexAppServerCompatibilityRevalidation {
+        guard !(await isCurrent(cached)) else {
+            return CodexAppServerCompatibilityRevalidation(
+                result: cached,
+                refreshed: false
+            )
+        }
+        guard let executableURL = cached.executableURL else {
+            return CodexAppServerCompatibilityRevalidation(
+                result: nil,
+                refreshed: true
+            )
+        }
+        return CodexAppServerCompatibilityRevalidation(
+            result: await probe(
+                explicitURL: executableURL,
+                dynamicTools: dynamicTools
+            ),
+            refreshed: true
+        )
+    }
+}
+
 enum CodexAppServerSchemaContract {
     static let requiredMarkers = [
         "thread/realtime/start",
@@ -507,3 +547,5 @@ actor CodexAppServerCompatibilityProbe {
         return process.terminationStatus
     }
 }
+
+extension CodexAppServerCompatibilityProbe: CodexAppServerCompatibilityChecking {}

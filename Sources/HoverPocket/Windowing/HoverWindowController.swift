@@ -483,7 +483,7 @@ final class HoverWindowController {
     }
 
     private func handleDirectHover(on screen: NSScreen) {
-        guard usesDirectHoverEvents else { return }
+        guard usesDirectHoverEvents, !isVoiceControlLocation(on: screen) else { return }
         showPreview(on: screen)
     }
 
@@ -710,6 +710,36 @@ final class HoverWindowController {
         return accessContainsMouse || previewContainsMouse
     }
 
+    /// Voice controls on the closed access surface must receive the click
+    /// without opening the panel first. The center gap keeps the normal panel
+    /// hover/click entry available, including on the no-notch 108pt bar.
+    private func isVoiceControlLocation(on screen: NSScreen) -> Bool {
+        guard VoiceActivityPresentation(snapshot: VoiceLaneRuntime.shared.snapshot).showsConversation,
+              let accessWindow = accessWindows[screenKey(screen)],
+              let style = accessWindowStyles[screenKey(screen)] else {
+            return false
+        }
+
+        let sideWidth = style == .notchPill
+            ? PanelLayout.notchHandleWidth
+            : VoiceAccessIndicator.noNotchSideControlWidth
+        let frame = accessWindow.frame
+        let location = NSEvent.mouseLocation
+        let leftControl = NSRect(
+            x: frame.minX,
+            y: frame.minY,
+            width: sideWidth,
+            height: frame.height
+        )
+        let rightControl = NSRect(
+            x: frame.maxX - sideWidth,
+            y: frame.minY,
+            width: sideWidth,
+            height: frame.height
+        )
+        return leftControl.contains(location) || rightControl.contains(location)
+    }
+
     private func startHoverMonitor() {
         guard hoverMonitorTimer == nil else { return }
 
@@ -770,7 +800,8 @@ final class HoverWindowController {
         for screen in accessScreens() {
             guard let accessWindow = accessWindows[screenKey(screen)],
                   accessWindow.isVisible,
-                  accessWindow.frame.contains(mouseLocation)
+                  accessWindow.frame.contains(mouseLocation),
+                  !isVoiceControlLocation(on: screen)
             else {
                 continue
             }

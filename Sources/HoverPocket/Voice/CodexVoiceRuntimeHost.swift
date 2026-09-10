@@ -59,6 +59,27 @@ final class CodexVoiceRuntimeHost: ObservableObject {
         return true
     }
 
+    func reconfigureExecutable(
+        _ executableURL: URL,
+        expectedIdentity: String,
+        profile: CodexVoiceAppServerProfile
+    ) async -> Bool {
+        let resolved = executableURL.standardizedFileURL.resolvingSymlinksInPath()
+        let unchanged = configuredExecutableURL == resolved
+            && configuredExecutableIdentity == expectedIdentity
+            && configuredProfile == profile
+        guard !unchanged else { return true }
+
+        if desiredEnabled || coordinator != nil {
+            await setEnabled(false)
+        }
+        return configureExecutable(
+            resolved,
+            expectedIdentity: expectedIdentity,
+            profile: profile
+        )
+    }
+
     func setEnabled(_ enabled: Bool) async {
         desiredEnabled = enabled
         lifecycleGeneration &+= 1

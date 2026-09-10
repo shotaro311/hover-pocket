@@ -14,7 +14,8 @@ enum VoiceActivityVerification {
             guard condition else { throw VoiceFoundationVerificationError.failed(name) }
             count += 1
         }
-        try check(NSImage(systemSymbolName: "person.wave.2.fill", accessibilityDescription: nil) != nil, "conversation_symbol_available")
+        try check(NSImage(systemSymbolName: "waveform", accessibilityDescription: nil) != nil, "voice_waveform_symbol_available")
+        try check(NSImage(systemSymbolName: "mic", accessibilityDescription: nil) != nil, "voice_mic_symbol_available")
         try check(!VoiceActivityPresentation(snapshot: .disabled).showsConversation, "voice_off_hidden")
         await runtime.configure(featureEnabled: true, preferredLayout: .compact,
             providerID: .codexAppServer, adapterFactory: { adapter }).value
@@ -39,7 +40,24 @@ enum VoiceActivityVerification {
         runtime.setMuted(false)
         runtime.setContinueWhenPanelHidden(true)
         runtime.detachPanel()
+        try check(!runtime.snapshot.uiAttached && !runtime.snapshot.muted, "hidden_panel_keeps_active_audio")
         try check(VoiceActivityPresentation(snapshot: runtime.snapshot).animates, "hidden_panel_conversation_visible")
+        let hiddenIndicator = VoiceAccessIndicator(
+            presentation: VoiceActivityPresentation(snapshot: runtime.snapshot),
+            language: .japanese,
+            notchWidth: 180,
+            height: 31.5,
+            onMuteToggle: { runtime.setMuted(!runtime.snapshot.muted) },
+            onEndVoiceSession: { runtime.endAudioSession() },
+            onCenterTap: { },
+            onCenterHover: { _ in }
+        )
+        hiddenIndicator.onMuteToggle?()
+        try check(runtime.snapshot.muted && VoiceActivityPresentation(snapshot: runtime.snapshot).showsConversation,
+            "closed_notch_mic_mutes_without_opening_panel")
+        hiddenIndicator.onMuteToggle?()
+        try check(!runtime.snapshot.muted && VoiceActivityPresentation(snapshot: runtime.snapshot).showsConversation,
+            "closed_notch_mic_unmutes_without_opening_panel")
         runtime.attachPanel()
         guard let screen = NSScreen.main else { throw VoiceFoundationVerificationError.failed("screen_missing") }
         for center in [screen.frame.midX, screen.frame.midX + 100] {
@@ -135,7 +153,21 @@ enum VoiceActivityVerification {
         _ = await bridge.handle(request: request, context: CodexVoiceToolRequestContext(
             rootThreadID: "activity-verification-session", clientGeneration: 1))
         try check(runtime.snapshot.connection == .connected, "old_end_request_cannot_stop_new_session")
-        runtime.endAudioSession()
+        let waveformIndicator = VoiceAccessIndicator(
+            presentation: VoiceActivityPresentation(snapshot: runtime.snapshot),
+            language: .japanese,
+            notchWidth: 180,
+            height: 31.5,
+            onMuteToggle: { runtime.setMuted(!runtime.snapshot.muted) },
+            onEndVoiceSession: { runtime.endAudioSession() },
+            onCenterTap: { },
+            onCenterHover: { _ in }
+        )
+        waveformIndicator.onEndVoiceSession?()
+        for _ in 0..<100 where runtime.snapshot.connection != .disconnected {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try check(runtime.snapshot.connection == .disconnected, "closed_notch_waveform_ends_voice_session")
         await runtime.shutdown()
         print("voice_activity_lifecycle=passed checks=\(count)")
     }
@@ -147,10 +179,26 @@ enum VoiceActivityVerification {
             VStack(spacing: 22) {
                 Text("ノッチあり / ノッチなし").foregroundStyle(.secondary)
                 if VoiceActivityPresentation(snapshot: runtime.snapshot).showsConversation {
-                    VoiceAccessIndicator(presentation: VoiceActivityPresentation(snapshot: runtime.snapshot),
-                        language: .japanese, notchWidth: 180, height: 31.5)
+                    VoiceAccessIndicator(
+                        presentation: VoiceActivityPresentation(snapshot: runtime.snapshot),
+                        language: .japanese,
+                        notchWidth: 180,
+                        height: 31.5,
+                        onMuteToggle: { runtime.setMuted(!runtime.snapshot.muted) },
+                        onEndVoiceSession: { runtime.endAudioSession() },
+                        onCenterTap: { },
+                        onCenterHover: { _ in }
+                    )
                         .frame(width: 288)
-                    VoiceAccessIndicator(presentation: VoiceActivityPresentation(snapshot: runtime.snapshot), language: .japanese, height: 23)
+                    VoiceAccessIndicator(
+                        presentation: VoiceActivityPresentation(snapshot: runtime.snapshot),
+                        language: .japanese,
+                        height: 23,
+                        onMuteToggle: { runtime.setMuted(!runtime.snapshot.muted) },
+                        onEndVoiceSession: { runtime.endAudioSession() },
+                        onCenterTap: { },
+                        onCenterHover: { _ in }
+                    )
                         .frame(width: 108)
                 }
                 VoiceLaneHostView(runtime: runtime, settings: settings)

@@ -402,6 +402,15 @@ def main() -> None:
     mac_voice = (
         ROOT / "Sources" / "HoverPocket" / "Views" / "VoiceLaneHostView.swift"
     ).read_text(encoding="utf-8")
+    mac_voice_activity = (
+        ROOT / "Sources" / "HoverPocket" / "Views" / "VoiceActivityView.swift"
+    ).read_text(encoding="utf-8")
+    mac_hover_pill = (
+        ROOT / "Sources" / "HoverPocket" / "Views" / "HoverPillView.swift"
+    ).read_text(encoding="utf-8")
+    mac_voice_activity_verification = (
+        ROOT / "Sources" / "HoverPocket" / "App" / "VoiceActivityVerification.swift"
+    ).read_text(encoding="utf-8")
     mac_runtime = (
         ROOT / "Sources" / "HoverPocket" / "Voice" / "VoiceFoundation.swift"
     ).read_text(encoding="utf-8")
@@ -770,16 +779,71 @@ def main() -> None:
             or "OpenAIRealtimeMacOSTransportHostView" not in mac_voice:
         fail("macOS Voice Japanese/English localization missing")
     if mac_voice.count("runtime.endAudioSession()") != 1 \
+            or "voiceSessionButton" not in mac_voice \
             or "if canEndAudioSession || canCancelAudioStart" not in mac_voice \
-            or "else if canResumeAudioSession" not in mac_voice \
+            or 'Image(systemName: "waveform")' not in mac_voice \
+            or 'Image(systemName: runtime.snapshot.muted ? "mic.slash" : "mic")' not in mac_voice \
+            or "canToggleMute" not in mac_voice \
             or 'Image(systemName: "xmark.circle")' in mac_voice:
-        fail("macOS Voice start/cancel/end/resume is not bound to the single microphone control")
+        fail("macOS Voice waveform end control or microphone mute control is incomplete")
+    if (
+        "snapshot.connection == .connected" not in mac_voice[mac_voice.find("private var canToggleMute"):]
+        or "runtime.setMuted(!runtime.snapshot.muted)" not in mac_voice
+    ):
+        fail("macOS Voice microphone mute toggle is not available for connected sessions")
+    if not all(value in mac_voice_activity for value in (
+        'muted ? "mic.slash" : "mic"',
+        "let onMuteToggle: (() -> Void)?",
+        "let onEndVoiceSession: (() -> Void)?",
+        "let onCenterTap: (() -> Void)?",
+        "let onCenterHover: ((Bool) -> Void)?",
+        "noNotchCenterWidth",
+        ".accessibilityElement(children: .contain)",
+    )):
+        fail("macOS closed Voice access controls or no-notch center entry are missing")
+    if "rotationEffect(.degrees(-38))" in mac_voice_activity:
+        fail("macOS muted Voice waveform still draws a slash overlay")
+    if "presentation.muted ? Color.secondary" not in mac_voice_activity \
+            or "guard animates else { return 3 }" not in mac_voice_activity:
+        fail("macOS muted Voice waveform is not a static gray indicator")
+    if not all(value in mac_voice_activity_verification for value in (
+        "onMuteToggle: { runtime.setMuted(!runtime.snapshot.muted) }",
+        "onEndVoiceSession: { runtime.endAudioSession() }",
+        "onCenterTap: { }",
+        "onCenterHover: { _ in }",
+    )):
+        fail("macOS closed Voice fixture callbacks are incomplete")
+    if not all(value in mac_voice for value in (
+        "現在のCodexの音声機能には対応していません。CodexとHoverPocketを更新してください",
+        "Codexの音声機能を確認できませんでした。もう一度お試しください",
+        "Codexへの音声接続を確認できませんでした。もう一度お試しください",
+        "Codexが更新されたため、音声接続を再確認できませんでした",
+        "Codexが見つかりません。Codexをインストールしてからお試しください",
+        "Codexへの音声接続の確認がタイムアウトしました",
+        "Codex Voiceを使うにはChatGPTアカウントでログインしてください",
+    )):
+        fail("macOS Codex Voice connection error localization is incomplete")
+    for jargon in ("thread契約", "音声API仕様", "ツール経路", "app-server"):
+        if jargon in mac_voice:
+            fail("macOS Codex Voice connection error localization exposes internal jargon")
+    if not all(value in mac_hover_pill for value in (
+        "onMuteToggle: toggleVoiceMute",
+        "onEndVoiceSession: endVoiceSession",
+        "onCenterTap: onTap",
+        "onCenterHover: handleVoiceCenterHover",
+        "private var restingBar: some View",
+        "isPointerNear = inside",
+        "guard !showsVoiceConversation else { return }",
+    )):
+        fail("macOS closed Voice access surface does not separate controls from hover-open")
     if "ScrollView" not in mac_voice:
         fail("macOS Voice internal scroll missing")
     if "accessibilityReduceMotion" not in mac_voice:
         fail("macOS Reduce Motion handling missing")
-    if ".disabled(runtime.snapshot.muted && runtime.snapshot.connection != .connected)" not in mac_voice:
-        fail("macOS unavailable Voice adapter can report an unmuted state")
+    if "VoiceAccessIndicator.noNotchSideControlWidth" not in mac_window \
+            or "private func isVoiceControlLocation(on screen: NSScreen)" not in mac_window \
+            or "!isVoiceControlLocation(on: screen)" not in mac_window:
+        fail("macOS closed Voice control hit regions do not preserve the panel-open center")
     if "prefers-reduced-motion: reduce" not in styles:
         fail("Windows Reduce Motion handling missing")
     if "AVAudio" in mac_runtime or "WebRTC" in mac_runtime:

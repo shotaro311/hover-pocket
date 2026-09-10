@@ -409,6 +409,7 @@ final class VoiceLaneRuntime: ObservableObject {
     private var recoveryTask: Task<Void, Never>?
     private var audioCommandTask: Task<Void, Never>?
     private var explicitStartTask: Task<Void, Never>?
+    private var explicitStartGeneration: UInt64 = 0
     private var restartGeneration = 0
     private var restartAttempt = 0
     private let restartDelaysNanoseconds: [UInt64]
@@ -464,12 +465,22 @@ final class VoiceLaneRuntime: ObservableObject {
         let pendingAudioCommand = audioCommandTask
         audioCommandTask = nil
         restartAttempt = 0
+        let pendingExplicitStart: Task<Void, Never>?
+        if wasEnabled, providerChanged || !featureEnabled {
+            explicitStartGeneration &+= 1
+            pendingExplicitStart = explicitStartTask
+            explicitStartTask?.cancel()
+            explicitStartTask = nil
+        } else {
+            pendingExplicitStart = nil
+        }
 
         if providerChanged, wasEnabled {
             self.featureEnabled = false
             let previousAdapter = adapter
             adapter = nil
             await pendingAudioCommand?.value
+            await pendingExplicitStart?.value
             if let previousAdapter {
                 await previousAdapter.stop()
             }
@@ -488,6 +499,7 @@ final class VoiceLaneRuntime: ObservableObject {
             allSessions.removeAll()
             rootSessionID = nil
             await pendingAudioCommand?.value
+            await pendingExplicitStart?.value
             if let previousAdapter {
                 await previousAdapter.stop()
             }
@@ -602,15 +614,24 @@ final class VoiceLaneRuntime: ObservableObject {
             muted: true,
             clearSafeError: true
         )
+        explicitStartGeneration &+= 1
+        let generation = explicitStartGeneration
         explicitStartTask = Task { @MainActor [weak self, weak adapter] in
             guard let self, let adapter else { return }
-            defer { self.explicitStartTask = nil }
+            defer {
+                if self.explicitStartGeneration == generation {
+                    self.explicitStartTask = nil
+                }
+            }
             do {
                 try await adapter.start()
+                try Task.checkCancellation()
                 guard !Task.isCancelled,
+                      generation == self.explicitStartGeneration,
                       self.featureEnabled,
                       self.adapter === adapter,
                       self.snapshot.connection == .connecting else {
+                    guard generation == self.explicitStartGeneration else { return }
                     await adapter.stop()
                     return
                 }
@@ -631,7 +652,10 @@ final class VoiceLaneRuntime: ObservableObject {
                     clearSafeError: true
                 )
             } catch {
-                guard !Task.isCancelled, self.featureEnabled, self.adapter === adapter else { return }
+                guard !Task.isCancelled,
+                      generation == self.explicitStartGeneration,
+                      self.featureEnabled,
+                      self.adapter === adapter else { return }
                 self.publish(
                     connection: .disconnected,
                     activity: .failed,
@@ -655,6 +679,7 @@ final class VoiceLaneRuntime: ObservableObject {
         guard featureEnabled else { return }
         let isPendingStart = snapshot.connection == .connecting || snapshot.connection == .recovering
         if isPendingStart {
+            explicitStartGeneration &+= 1
             restartGeneration &+= 1
             restartTask?.cancel()
             restartTask = nil
@@ -824,6 +849,7 @@ final class VoiceLaneRuntime: ObservableObject {
         configurationTask = nil
         await pendingConfiguration?.value
         featureEnabled = false
+        explicitStartGeneration &+= 1
         restartGeneration &+= 1
         let pendingRestart = restartTask
         pendingRestart?.cancel()

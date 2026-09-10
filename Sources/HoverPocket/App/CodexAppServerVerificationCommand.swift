@@ -57,6 +57,7 @@ enum CodexAppServerVerificationCommand {
         let managedLoginLifecycle = try await verifyManagedChatGPTLoginLifecycle()
         try await verifyCapabilityBridge()
         try await verifyBrokerCapabilityBridge()
+        try await verifyExecutableChangeRevalidation()
         guard CodexVoiceCoordinator.verifyRealtimeLifecyclePolicy() else {
             throw CodexAppServerVerificationError.failed("realtime_lifecycle_policy")
         }
@@ -1216,6 +1217,248 @@ enum CodexAppServerVerificationCommand {
         return first
     }
 
+    private static func verifyExecutableChangeRevalidation() async throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "hoverpocket-codex-identity-verification-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        do {
+            try fileManager.createDirectory(
+                at: root,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
+        } catch {
+            throw CodexAppServerVerificationError.failed("executable_change_fixture_workspace")
+        }
+        defer { try? fileManager.removeItem(at: root) }
+
+        let executable = root.appendingPathComponent("codex-fixture")
+        let oldExecutable = """
+        #!/bin/sh
+        if [ "$1" = "--version" ]; then
+            printf '%s\\n' 'codex 0.153.3'
+            exit 0
+        fi
+        exit 1
+        """
+        do {
+            try Data(oldExecutable.utf8).write(to: executable, options: .atomic)
+            guard chmod(executable.path, 0o700) == 0 else {
+                throw CodexAppServerVerificationError.failed("executable_change_fixture_permissions")
+            }
+        } catch let error as CodexAppServerVerificationError {
+            throw error
+        } catch {
+            throw CodexAppServerVerificationError.failed("executable_change_fixture_write")
+        }
+
+        guard let oldIdentity = CodexAppServerCompatibilityProbe.identityToken(executable) else {
+            throw CodexAppServerVerificationError.failed("executable_change_fixture_identity")
+        }
+        let cached = CodexAppServerCompatibilityResult(
+            gate: .ready,
+            executableURL: executable,
+            version: "codex 0.153.3",
+            schemaDigest: "fixture-schema-old",
+            executableIdentity: oldIdentity,
+            appServerProfile: nil
+        )
+        let installedProbe = CodexAppServerCompatibilityProbe.shared
+        guard await installedProbe.isCurrent(cached) else {
+            throw CodexAppServerVerificationError.failed("executable_change_fixture_initial_current")
+        }
+
+        let updatedExecutable = """
+        #!/bin/sh
+        # This longer marker forces a new file identity in filesystems with coarse mtime precision.
+        if [ "$1" = "--version" ]; then
+            printf '%s\\n' 'codex 0.153.4'
+            exit 0
+        fi
+        exit 1
+        """
+        do {
+            try Data(updatedExecutable.utf8).write(to: executable, options: .atomic)
+            guard chmod(executable.path, 0o700) == 0 else {
+                throw CodexAppServerVerificationError.failed("executable_change_fixture_permissions_after_update")
+            }
+        } catch let error as CodexAppServerVerificationError {
+            throw error
+        } catch {
+            throw CodexAppServerVerificationError.failed("executable_change_fixture_update")
+        }
+        guard !(await installedProbe.isCurrent(cached)) else {
+            throw CodexAppServerVerificationError.failed("executable_change_fixture_stale_accepted")
+        }
+
+        let refreshed = CodexAppServerCompatibilityResult(
+            gate: .ready,
+            executableURL: executable,
+            version: "codex 0.153.4",
+            schemaDigest: "fixture-schema-new",
+            executableIdentity: "new-fixture-identity",
+            appServerProfile: nil
+        )
+        let checker = CodexAppServerCompatibilityRevalidationFixture(
+            refreshedResult: refreshed
+        )
+        let revalidation = await checker.revalidateForStart(
+            cached,
+            dynamicTools: []
+        )
+        guard revalidation.refreshed,
+              revalidation.result == refreshed,
+              await checker.probeCallCount == 1,
+              await checker.currentCallCount == 1,
+              await checker.lastExplicitURL == executable else {
+            throw CodexAppServerVerificationError.failed("executable_change_revalidation_failed")
+        }
+
+        let currentChecker = CodexAppServerCompatibilityRevalidationFixture(
+            refreshedResult: cached
+        )
+        let currentRevalidation = await currentChecker.revalidateForStart(
+            cached,
+            dynamicTools: []
+        )
+        guard !currentRevalidation.refreshed,
+              currentRevalidation.result == cached,
+              await currentChecker.probeCallCount == 0,
+              await currentChecker.currentCallCount == 1 else {
+            throw CodexAppServerVerificationError.failed("executable_change_revalidation_unneeded")
+        }
+        try await verifyAdapterStartCancellation(
+            executable: executable,
+            oldIdentity: oldIdentity
+        )
+        print("codex_app_server_executable_change=stale_rejected_reprobe_verified")
+    }
+
+    private static func verifyAdapterStartCancellation(
+        executable: URL,
+        oldIdentity: String
+    ) async throws {
+        guard let newIdentity = CodexAppServerCompatibilityProbe.identityToken(executable) else {
+            throw CodexAppServerVerificationError.failed("adapter_start_fixture_identity")
+        }
+        let profile = CodexVoiceAppServerProfile(
+            codexHomeURL: executable.deletingLastPathComponent()
+                .appendingPathComponent("adapter-codex-home", isDirectory: true),
+            processEnvironment: [:],
+            identity: "adapter-start-fixture-profile",
+            authStorage: .disabled
+        )
+        let oldResult = CodexAppServerCompatibilityResult(
+            gate: .ready,
+            executableURL: executable,
+            version: "codex 0.153.3",
+            schemaDigest: "adapter-schema-old",
+            executableIdentity: oldIdentity,
+            appServerProfile: profile
+        )
+        let refreshedResult = CodexAppServerCompatibilityResult(
+            gate: .ready,
+            executableURL: executable,
+            version: "codex 0.153.4",
+            schemaDigest: "adapter-schema-new",
+            executableIdentity: newIdentity,
+            appServerProfile: profile
+        )
+        let blockedReprobeResult = CodexAppServerCompatibilityResult(
+            gate: .blocked("adapter_fixture_reprobe_blocked"),
+            executableURL: executable,
+            version: "codex 0.153.4",
+            schemaDigest: "adapter-schema-blocked",
+            executableIdentity: newIdentity,
+            appServerProfile: nil
+        )
+        let checker = CodexAppServerAdapterStartFixture(
+            initialResult: oldResult,
+            refreshedResult: refreshedResult,
+            firstReprobeResult: blockedReprobeResult
+        )
+        let clientFactoryGate = CodexAppServerAdapterClientFactoryGate()
+        let voiceRuntime = VoiceLaneRuntime()
+        let runtimeHost = CodexVoiceRuntimeHost(
+            voiceRuntime: voiceRuntime,
+            workspaceDirectory: executable.deletingLastPathComponent()
+                .appendingPathComponent("adapter-start-workspace", isDirectory: true),
+            clientFactory: {
+                await clientFactoryGate.markEntered()
+                await clientFactoryGate.waitForRelease()
+                throw CodexVoiceRuntimeError.compatibility("adapter_fixture_released")
+            }
+        )
+        let driver = CodexVoiceWebRTCDriver(
+            runtimeHost: runtimeHost,
+            startTimeoutNanoseconds: 100_000_000
+        )
+        let capabilityBridge = CodexAppServerCapabilityBridge(
+            runtime: CodexAppServerVerificationCapabilityRuntime()
+        )
+        let adapter = CodexAppServerMacOSVoiceSessionAdapter(
+            context: nil,
+            calendarAccessGranted: { false },
+            voiceRuntime: voiceRuntime,
+            compatibilityProbe: checker,
+            runtimeHost: runtimeHost,
+            driver: driver,
+            capabilityBridge: capabilityBridge
+        )
+
+        guard await adapter.probeCompatibility() == .ready else {
+            throw CodexAppServerVerificationError.failed("adapter_start_fixture_probe")
+        }
+        do {
+            try await adapter.start()
+            throw CodexAppServerVerificationError.failed("adapter_start_fixture_block_not_observed")
+        } catch CodexVoiceRuntimeError.compatibility("adapter_fixture_reprobe_blocked") {
+            // The next explicit start must re-probe the same executable.
+        }
+        let startTask = Task { @MainActor in
+            do {
+                try await adapter.start()
+                return false
+            } catch {
+                return true
+            }
+        }
+        var factoryEntered = false
+        for _ in 0..<50 {
+            if await clientFactoryGate.entered {
+                factoryEntered = true
+                break
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        guard factoryEntered else {
+            startTask.cancel()
+            await clientFactoryGate.release()
+            _ = await startTask.value
+            throw CodexAppServerVerificationError.failed("adapter_start_fixture_not_started")
+        }
+        startTask.cancel()
+        await clientFactoryGate.release()
+        let didThrow = await startTask.value
+        let probeCallCount = await checker.probeCallCount
+        let currentCallCount = await checker.currentCallCount
+        let explicitURL = await checker.lastExplicitURL
+        guard didThrow,
+              probeCallCount == 3,
+              currentCallCount == 3,
+              explicitURL == executable,
+              !runtimeHost.snapshot.featureEnabled,
+              runtimeHost.snapshot.availability == .disabled,
+              runtimeHost.snapshot.sessionStatus == .idle else {
+            await adapter.stop()
+            throw CodexAppServerVerificationError.failed("adapter_start_fixture_not_cancelled")
+        }
+        await adapter.stop()
+        print("codex_app_server_adapter_start=updated_reprobe_cancelled_safely")
+    }
+
     private static func verifyInstalledAppServerBrokerInvocation(
         _ compatibility: CodexAppServerCompatibilityResult
     ) async throws {
@@ -1486,5 +1729,97 @@ private final class CodexAppServerModelToolAdmission: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return Snapshot(admitted: admitted, rejected: rejected)
+    }
+}
+
+private actor CodexAppServerCompatibilityRevalidationFixture:
+    CodexAppServerCompatibilityChecking {
+    let refreshedResult: CodexAppServerCompatibilityResult
+    private(set) var probeCallCount = 0
+    private(set) var currentCallCount = 0
+    private(set) var lastExplicitURL: URL?
+
+    init(refreshedResult: CodexAppServerCompatibilityResult) {
+        self.refreshedResult = refreshedResult
+    }
+
+    func probe(
+        explicitURL: URL?,
+        dynamicTools: [CodexJSONValue]
+    ) async -> CodexAppServerCompatibilityResult {
+        _ = dynamicTools
+        probeCallCount += 1
+        lastExplicitURL = explicitURL
+        return refreshedResult
+    }
+
+    func isCurrent(_ result: CodexAppServerCompatibilityResult) async -> Bool {
+        currentCallCount += 1
+        return result.executableIdentity == refreshedResult.executableIdentity
+    }
+}
+
+private actor CodexAppServerAdapterStartFixture:
+    CodexAppServerCompatibilityChecking {
+    let initialResult: CodexAppServerCompatibilityResult
+    let refreshedResult: CodexAppServerCompatibilityResult
+    let firstReprobeResult: CodexAppServerCompatibilityResult?
+    private(set) var probeCallCount = 0
+    private(set) var currentCallCount = 0
+    private(set) var lastExplicitURL: URL?
+
+    init(
+        initialResult: CodexAppServerCompatibilityResult,
+        refreshedResult: CodexAppServerCompatibilityResult,
+        firstReprobeResult: CodexAppServerCompatibilityResult? = nil
+    ) {
+        self.initialResult = initialResult
+        self.refreshedResult = refreshedResult
+        self.firstReprobeResult = firstReprobeResult
+    }
+
+    func probe(
+        explicitURL: URL?,
+        dynamicTools: [CodexJSONValue]
+    ) async -> CodexAppServerCompatibilityResult {
+        _ = dynamicTools
+        probeCallCount += 1
+        lastExplicitURL = explicitURL
+        if probeCallCount == 1 {
+            return initialResult
+        }
+        if probeCallCount == 2, let firstReprobeResult {
+            return firstReprobeResult
+        }
+        return refreshedResult
+    }
+
+    func isCurrent(_ result: CodexAppServerCompatibilityResult) async -> Bool {
+        currentCallCount += 1
+        return result.executableIdentity == refreshedResult.executableIdentity
+    }
+}
+
+private actor CodexAppServerAdapterClientFactoryGate {
+    private(set) var entered = false
+    private var released = false
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func markEntered() {
+        entered = true
+    }
+
+    func waitForRelease() async {
+        guard !released else { return }
+        await withCheckedContinuation { continuation in
+            releaseWaiters.append(continuation)
+        }
+    }
+
+    func release() {
+        released = true
+        let waiters = releaseWaiters
+        releaseWaiters.removeAll()
+        waiters.forEach { $0.resume() }
     }
 }

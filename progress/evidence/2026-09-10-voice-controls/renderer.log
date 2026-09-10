@@ -1,0 +1,1 @@
+PASS macOS Realtime renderer verify: close invalidates late capture, sanitized media telemetry is emitted, and active local/remote tracks are stopped
