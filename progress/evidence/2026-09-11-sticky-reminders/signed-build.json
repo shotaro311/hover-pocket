@@ -1,0 +1,13 @@
+{
+  "sourceHead": "ad17aa21eaaaef519a67ddc77325d887d6578368",
+  "sourceFreezeVerified": true,
+  "sourceFiles": 201,
+  "build": "644",
+  "archiveSHA256": "b103fd037bc6c111e1fc8db9c6a99512ffc31482a4c9154e10897391d7c1d5be",
+  "binarySHA256": "519ee21ee29c0a271c7af5a61aff53e80cb296385b06d02b0a6ba9bb1c396bc0",
+  "notarization": {
+    "message": "Processing complete",
+    "status": "Accepted",
+    "id": "d612e854-5093-46ea-968a-4162028b6c6f"
+  }
+}
