@@ -38,6 +38,7 @@ final class HoverWindowController {
     )
     private var panelSoakUsesImmediateTransitions = true
     private let logger = Logger(subsystem: "com.hoverpocket.app", category: "HoverWindowRecovery")
+    private let stickyReminders: StickyReminderController
     private let settings: AppSettings
     private let menuStore: HoverMenuStore
     private let settingsWindowController: SettingsWindowController
@@ -49,8 +50,10 @@ final class HoverWindowController {
 
     init(
         settingsDefaults: any AppSettingsDefaultsStoring = HoverPocketRuntimeEnvironment.shared.settingsDefaults,
-        providerRegistry: ProviderRegistry? = nil
+        providerRegistry: ProviderRegistry? = nil,
+        stickyReminders: StickyReminderController = .shared
     ) {
+        self.stickyReminders = stickyReminders
         let settings = AppSettings(defaults: settingsDefaults)
         HoverPocketRuntimeEnvironment.shared.applyVoiceE2EDefaults(to: settings)
         let providerStore = ProviderStore(
@@ -70,6 +73,7 @@ final class HoverWindowController {
         settingsWindowController.onOpenProvider = { [weak self] in self?.openPanel(showing: $0) }
         observeSettings()
         observeTimerAlerts()
+        observeStickyReminders()
     }
 
     func showPill() {
@@ -397,6 +401,7 @@ final class HoverWindowController {
             return AnyView(
                 HoverPillView(
                     settings: settings,
+                    stickyReminders: stickyReminders,
                     onEnter: { [weak self] in self?.handleDirectHover(on: screen) },
                     onExit: { [weak self] in self?.scheduleClose() },
                     onTap: { [weak self] in self?.togglePreview(on: screen) }
@@ -406,6 +411,7 @@ final class HoverWindowController {
             return AnyView(
                 HoverMiniBarView(
                     settings: settings,
+                    stickyReminders: stickyReminders,
                     onBarEnter: { [weak self] in self?.handleDirectHover(on: screen) },
                     onBarExit: { [weak self] in self?.scheduleClose() },
                     onTap: { [weak self] in self?.togglePreview(on: screen) }
@@ -433,6 +439,7 @@ final class HoverWindowController {
                 hoverState: hoverState,
                 store: menuStore,
                 settings: settings,
+                stickyReminders: stickyReminders,
                 onOpenSettings: { [weak self] in self?.showSettings() },
                 onClosePanel: { [weak self] in self?.closePreview() },
                 onExternalDragStarted: { [weak self] in self?.prepareForExternalDrag() }
@@ -610,7 +617,9 @@ final class HoverWindowController {
             guard let self else { return }
             self.closeTask = nil
             guard !self.isMouseInsideHoverRegion(), self.previewWindow?.attachedSheet == nil,
-                  !self.awaitingPointerAfterExplicitOpen else { return }
+                  !self.awaitingPointerAfterExplicitOpen,
+                  TimerStore.shared.activeAlert == nil,
+                  self.stickyReminders.activeNote == nil else { return }
             self.closePreview()
         }
         closeTask = task
@@ -766,6 +775,7 @@ final class HoverWindowController {
               previewWindow?.attachedSheet == nil,
               !awaitingPointerAfterExplicitOpen,
               TimerStore.shared.activeAlert == nil,
+              stickyReminders.activeNote == nil,
               !isMouseInsideHoverRegion()
         else {
             return
@@ -1154,6 +1164,17 @@ final class HoverWindowController {
             .sink { [weak self] alert in
                 guard let self, alert != nil else { return }
                 openPanel(showing: TimerProvider.pluginID)
+            }
+            .store(in: &settingsCancellables)
+    }
+
+    private func observeStickyReminders() {
+        stickyReminders.$activeNote
+            .map { $0?.id }
+            .removeDuplicates()
+            .sink { [weak self] noteID in
+                guard noteID != nil else { return }
+                self?.openPanel(showing: StickyNotesProvider.pluginID)
             }
             .store(in: &settingsCancellables)
     }

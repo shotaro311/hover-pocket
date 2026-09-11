@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / 'contracts/pocket/v2'
 
 def main() -> None:
+    from verify_sticky_reminder_contracts import verify as verify_sticky_reminders
+    verify_sticky_reminders()
     schemas = {path.name: json.loads(path.read_text()) for path in CONTRACTS.glob('*.schema.json')}
     schemas_by_id = {schema['$id']: schema for schema in schemas.values()}
     for name, schema in schemas.items():

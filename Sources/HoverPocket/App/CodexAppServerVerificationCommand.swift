@@ -75,7 +75,7 @@ enum CodexAppServerVerificationCommand {
         )
     }
 
-    static func runModelToolVerification() async throws
+    static func runModelToolVerification(stickyReminder: Bool = false) async throws
         -> CodexAppServerModelToolVerificationResult {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "hoverpocket-codex-model-tool-\(UUID().uuidString.lowercased())",
@@ -115,6 +115,8 @@ enum CodexAppServerVerificationCommand {
             TimerCapabilityHandler(operation: .start, store: timerStore),
             TimerCapabilityHandler(operation: .get, store: timerStore),
             TimerCapabilityHandler(operation: .stop, store: timerStore),
+            StickyCapabilityHandler(operation: .upsertV2, store: stickyStore),
+            StickyCapabilityHandler(operation: .getV2, store: stickyStore),
             StickyCapabilityHandler(operation: .upsert, store: stickyStore),
             StickyCapabilityHandler(operation: .get, store: stickyStore)
         ])
@@ -139,7 +141,26 @@ enum CodexAppServerVerificationCommand {
             }
         )
         let bridge = CodexAppServerCapabilityBridge(runtime: runtime)
-        let expectedToolName = OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool
+        let expectedToolName = stickyReminder
+            ? OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool
+            : OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool
+        let requestedModel = stickyReminder ? "gpt-6-astra" : modelToolVerificationModel
+        let reminderTitle = "資料"
+        let reminderBody = "資料を送る"
+        let prompt: String
+        if stickyReminder {
+            prompt = "これは隔離された機能検証です。Hostの現在時刻は "
+                + CapabilityDateCodec.string(from: now) + "、タイムゾーンは Asia/Tokyo です。"
+                + "このHost時刻から10分後に、資料を送るとリマインダー付きの付箋を作成してください。"
+                + "付箋のタイトルは「" + reminderTitle + "」、本文は「" + reminderBody + "」です。"
+                + "適切なHoverPocketツールを1回だけ使い、他のツールを使わないでください。"
+                + "ツールの検証済み結果を読み、保存されたリマインダー日時を短く報告してください。"
+        } else {
+            prompt = "Call timer_countdown_start exactly once with "
+                + "durationSeconds 60 and title \"" + modelToolVerificationTitle
+                + "\". Do not call any other tool. After the tool result, "
+                + "reply with one short confirmation."
+        }
         guard bridge.dynamicTools.count == 6,
               Set(bridge.dynamicTools.compactMap { $0.objectValue?["name"]?.stringValue }) == [
                   OpenAIRealtimeMacOSCapabilityRuntime.timerStartTool,
@@ -270,18 +291,12 @@ enum CodexAppServerVerificationCommand {
                 "turn/start",
                 params: .object([
                     "threadId": .string(threadID),
-                    "model": .string(modelToolVerificationModel),
+                    "model": .string(requestedModel),
                     "effort": .string(modelToolVerificationEffort),
                     "input": .array([
                         .object([
                             "type": .string("text"),
-                            "text": .string(
-                                "Call timer_countdown_start exactly once with "
-                                    + "durationSeconds 60 and title \""
-                                    + modelToolVerificationTitle
-                                    + "\". Do not call any other tool. After the tool result, "
-                                    + "reply with one short confirmation."
-                            ),
+                            "text": .string(prompt),
                             "textElements": .array([])
                         ])
                     ])
@@ -301,24 +316,52 @@ enum CodexAppServerVerificationCommand {
             let modelControlsUnchanged = controlsAfterModel.displays == controlsBeforeModel.displays
                 && controlsAfterModel.volume == controlsBeforeModel.volume
                 && controlsAfterModel.media == controlsBeforeModel.media
+            let operationVerified: Bool
+            if stickyReminder {
+                let inputReminder = arguments?["reminder"]?.objectValue
+                let outputReminder = output["reminder"] as? [String: Any]
+                let inputDate = inputReminder?["scheduledAt"]?.stringValue.flatMap(CapabilitySchemaValidation.reminderDate)
+                let outputDate = (outputReminder?["scheduledAt"] as? String).flatMap(CapabilitySchemaValidation.reminderDate)
+                let noteID = (output["noteId"] as? String).flatMap(UUID.init(uuidString:))
+                let restoredStore = StickyNotesStore(storageDirectory: root.appendingPathComponent("sticky", isDirectory: true))
+                let restored = noteID.flatMap { restoredStore.note(id: $0) }
+                operationVerified = arguments?["title"]?.stringValue == reminderTitle
+                    && arguments?["body"]?.stringValue == reminderBody
+                    && inputDate == now.addingTimeInterval(600)
+                    && inputReminder?["timeZone"]?.stringValue == "Asia/Tokyo"
+                    && outputDate == now.addingTimeInterval(600)
+                    && outputReminder?["timeZone"] as? String == "Asia/Tokyo"
+                    && outputReminder?["acknowledgedAt"] is NSNull
+                    && output["title"] as? String == reminderTitle
+                    && output["body"] as? String == reminderBody
+                    && stickyStore.notes.count == 1
+                    && restoredStore.notes.count == 1
+                    && restored?.title == reminderTitle && restored?.body == reminderBody
+                    && restored?.reminder?.scheduledAt == now.addingTimeInterval(600)
+                    && restored?.reminder?.timeZone == "Asia/Tokyo"
+                    && restored?.reminder?.acknowledgedAt == nil
+                    && timerStore.runningTimers.isEmpty
+            } else {
+                operationVerified = arguments?["durationSeconds"]?.integerValue == 60
+                    && arguments?["title"]?.stringValue == modelToolVerificationTitle
+                    && output["state"] as? String == "running"
+                    && stickyStore.notes.isEmpty
+                    && timerStore.runningTimers.count == 1
+                    && timerStore.runningTimers.first?.title == modelToolVerificationTitle
+                    && timerStore.runningTimers.first?.phaseDuration == 60
+            }
             let metrics = await client.metrics()
             guard toolResult.request.params?.objectValue?["threadId"]?.stringValue == threadID,
                   toolResult.request.params?.objectValue?["turnId"]?.stringValue == startedTurnID,
-                  arguments?["durationSeconds"]?.integerValue == 60,
-                  arguments?["title"]?.stringValue == modelToolVerificationTitle,
+                  operationVerified,
                   output["status"] as? String == "succeeded",
-                  output["state"] as? String == "running",
                   output["readback"] as? String == "verified",
                   turnCompletion.threadID == threadID,
                   turnCompletion.turnID == startedTurnID,
                   turnCompletion.status == "completed",
                   approvalCount == 1,
                   calendar.createdCount == 0,
-                  stickyStore.notes.isEmpty,
                   modelControlsUnchanged,
-                  timerStore.runningTimers.count == 1,
-                  timerStore.runningTimers.first?.title == modelToolVerificationTitle,
-                  timerStore.runningTimers.first?.phaseDuration == 60,
                   admissionSnapshot.admitted == 1,
                   admissionSnapshot.rejected == 0,
                   metrics.malformedOutputLines == 0,
@@ -339,7 +382,7 @@ enum CodexAppServerVerificationCommand {
                 throw CodexAppServerVerificationError.failed("model_tool_workspace_leaked")
             }
             return CodexAppServerModelToolVerificationResult(
-                requestedModel: modelToolVerificationModel,
+                requestedModel: requestedModel,
                 requestedEffort: modelToolVerificationEffort,
                 toolName: expectedToolName,
                 approvalCount: approvalCount,
@@ -974,6 +1017,8 @@ enum CodexAppServerVerificationCommand {
             TimerCapabilityHandler(operation: .start, store: timerStore),
             TimerCapabilityHandler(operation: .get, store: timerStore),
             TimerCapabilityHandler(operation: .stop, store: timerStore),
+            StickyCapabilityHandler(operation: .upsertV2, store: stickyStore),
+            StickyCapabilityHandler(operation: .getV2, store: stickyStore),
             StickyCapabilityHandler(operation: .upsert, store: stickyStore),
             StickyCapabilityHandler(operation: .get, store: stickyStore)
         ])
@@ -1496,6 +1541,8 @@ enum CodexAppServerVerificationCommand {
             TimerCapabilityHandler(operation: .start, store: timerStore),
             TimerCapabilityHandler(operation: .get, store: timerStore),
             TimerCapabilityHandler(operation: .stop, store: timerStore),
+            StickyCapabilityHandler(operation: .upsertV2, store: stickyStore),
+            StickyCapabilityHandler(operation: .getV2, store: stickyStore),
             StickyCapabilityHandler(operation: .upsert, store: stickyStore),
             StickyCapabilityHandler(operation: .get, store: stickyStore)
         ])

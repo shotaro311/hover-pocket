@@ -1135,6 +1135,8 @@ enum VoiceFoundationVerificationCommand {
             TimerCapabilityHandler(operation: .start, store: timerStore),
             TimerCapabilityHandler(operation: .get, store: timerStore),
             TimerCapabilityHandler(operation: .stop, store: timerStore),
+            StickyCapabilityHandler(operation: .upsertV2, store: stickyStore),
+            StickyCapabilityHandler(operation: .getV2, store: stickyStore),
             StickyCapabilityHandler(operation: .upsert, store: stickyStore),
             StickyCapabilityHandler(operation: .get, store: stickyStore)
         ])
@@ -1219,12 +1221,15 @@ enum VoiceFoundationVerificationCommand {
             sessionID: "voice-session",
             callID: "sticky-upsert-call",
             toolName: OpenAIRealtimeMacOSCapabilityRuntime.stickyUpsertTool,
-            argumentsJSON: "{\"body\":\"今日の目的\",\"title\":\"Focus\",\"color\":\"yellow\"}"
+            argumentsJSON: "{\"body\":\"今日の目的\",\"title\":\"Focus\",\"color\":\"yellow\",\"reminder\":{\"scheduledAt\":\"2027-01-16T15:00:00+09:00\",\"timeZone\":\"Asia/Tokyo\"}}"
         )
         let stickyObject = try voiceJSON(sticky)
         guard stickyObject["status"] as? String == "succeeded",
               stickyObject["body"] as? String == "今日の目的",
               stickyObject["readback"] as? String == "verified",
+              (stickyObject["reminder"] as? [String: Any])?["scheduledAt"] as? String == "2027-01-16T06:00:00.000Z",
+              (stickyObject["reminder"] as? [String: Any])?["timeZone"] as? String == "Asia/Tokyo",
+              stickyStore.notes.first?.reminder?.scheduledAt == CapabilityDateCodec.date(from: "2027-01-16T15:00:00+09:00"),
               approvalCount == 3 else {
             throw VoiceFoundationVerificationError.failed("voice_sticky_upsert_readback")
         }
@@ -1414,6 +1419,9 @@ enum VoiceFoundationVerificationCommand {
             guard object["status"] as? String == "succeeded",
                   object["readback"] as? String == "verified" else {
                 throw VoiceFoundationVerificationError.failed("voice_confirmation_off_" + callID)
+            }
+            if callID == "automatic-sticky", !(object["reminder"] is NSNull) {
+                throw VoiceFoundationVerificationError.failed("voice_sticky_without_reminder_returns_null")
             }
         }
         let auditAfterAutomaticApproval = try auditCounts()

@@ -1,0 +1,79 @@
+[
+  {
+    "name": "set",
+    "valid": true,
+    "input": {
+      "stableKey": "voice:reminder-fixture",
+      "title": "資料",
+      "body": "資料を送る",
+      "color": "yellow",
+      "reminder": {
+        "scheduledAt": "2027-01-16T15:00:00+09:00",
+        "timeZone": "Asia/Tokyo"
+      }
+    }
+  },
+  {
+    "name": "preserve",
+    "valid": true,
+    "input": {
+      "stableKey": "voice:reminder-fixture",
+      "title": "資料",
+      "body": "資料を送る",
+      "color": "yellow"
+    }
+  },
+  {
+    "name": "clear",
+    "valid": true,
+    "input": {
+      "stableKey": "voice:reminder-fixture",
+      "title": "資料",
+      "body": "資料を送る",
+      "color": "yellow",
+      "reminder": null
+    }
+  },
+  {
+    "name": "no-offset",
+    "valid": false,
+    "input": {
+      "stableKey": "voice:reminder-fixture",
+      "title": "資料",
+      "body": "資料を送る",
+      "color": "yellow",
+      "reminder": {
+        "scheduledAt": "2027-01-16T15:00:00",
+        "timeZone": "Asia/Tokyo"
+      }
+    }
+  },
+  {
+    "name": "missing-zone",
+    "valid": false,
+    "input": {
+      "stableKey": "voice:reminder-fixture",
+      "title": "資料",
+      "body": "資料を送る",
+      "color": "yellow",
+      "reminder": {
+        "scheduledAt": "2027-01-16T15:00:00+09:00"
+      }
+    }
+  },
+  {
+    "name": "client-acknowledgment",
+    "valid": false,
+    "input": {
+      "stableKey": "voice:reminder-fixture",
+      "title": "資料",
+      "body": "資料を送る",
+      "color": "yellow",
+      "reminder": {
+        "scheduledAt": "2027-01-16T15:00:00+09:00",
+        "timeZone": "Asia/Tokyo",
+        "acknowledgedAt": null
+      }
+    }
+  }
+]

@@ -43,6 +43,24 @@ if CommandLine.arguments.contains("--verify-calculator") {
 if CommandLine.arguments.contains("--verify-clipboard") {
     ClipboardVerificationCommand.run()
 }
+if CommandLine.arguments.contains("--verify-sticky-reminder-presentation") {
+    let app = NSApplication.shared
+    Task { @MainActor in
+        do {
+            try await StickyReminderPresentationVerification.run(
+                showPreview: CommandLine.arguments.contains("--show-preview"))
+            exit(0)
+        } catch {
+            print("sticky_reminder_presentation=failed \(error)")
+            exit(1)
+        }
+    }
+    app.run()
+    exit(1)
+}
+if CommandLine.arguments.contains("--verify-sticky-reminders") {
+    StickyReminderVerificationCommand.run()
+}
 if CommandLine.arguments.contains("--verify-timer") {
     TimerVerificationCommand.run()
 }
@@ -441,11 +459,13 @@ if CommandLine.arguments.contains("--verify-codex-app-server-realtime") {
     app.run()
     exit(1)
 }
-if CommandLine.arguments.contains("--verify-codex-app-server-model-tool") {
+if CommandLine.arguments.contains("--verify-codex-app-server-model-tool")
+    || CommandLine.arguments.contains("--verify-codex-app-server-model-reminder") {
     Task { @MainActor in
         do {
             let result = try await CodexAppServerVerificationCommand
-                .runModelToolVerification()
+                .runModelToolVerification(stickyReminder: CommandLine.arguments.contains(
+                    "--verify-codex-app-server-model-reminder"))
             print("codex_app_server_requested_model=\(result.requestedModel)")
             print("codex_app_server_requested_effort=\(result.requestedEffort)")
             print("codex_app_server_model_account=chatgpt")
@@ -453,7 +473,7 @@ if CommandLine.arguments.contains("--verify-codex-app-server-model-tool") {
             print("codex_app_server_model_approval_count=\(result.approvalCount)")
             print("codex_app_server_model_readback=verified")
             print("codex_app_server_model_process=\(result.processClosed ? "closed" : "open")")
-            print("PASS codex app-server model tool: ChatGPT account, requested model and effort, Broker approval, temporary Timer, readback, teardown")
+            print("PASS codex app-server model tool: ChatGPT account, requested model and effort, Broker approval, isolated saved data, readback, teardown")
             exit(0)
         } catch {
             print("FAIL codex app-server model tool: \(error)")

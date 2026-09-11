@@ -94,6 +94,21 @@ struct StickyNotePreviewCard<ContextMenu: View>: View {
 
             Spacer(minLength: 0)
 
+            if let reminder = note.reminder {
+                Label {
+                    Text(reminder.scheduledAt, format: .dateTime.month().day().hour().minute())
+                    if reminder.acknowledgedAt != nil {
+                        Text(language == .japanese ? "確認済み" : "Acknowledged")
+                    }
+                } icon: {
+                    Image(systemName: reminder.acknowledgedAt == nil ? "bell" : "bell.slash")
+                }
+                .panelTextFont(size: 9, weight: .semibold)
+                .foregroundStyle(Color.black.opacity(0.62))
+                .lineLimit(2)
+                .accessibilityElement(children: .combine)
+            }
+
             Text(note.updatedAt.formatted(.dateTime.hour().minute()))
                 .panelTextFont(size: 8.5, weight: .semibold, design: .monospaced)
                 .foregroundStyle(Color.black.opacity(0.34))
@@ -122,6 +137,7 @@ struct StickyNoteEditorCard<ContextMenu: View>: View {
     @Binding var draftBody: String
     @Binding var draftColor: StickyNoteColor?
     let onDraftChanged: () -> Void
+    let onSaveReminder: (Date?) -> Bool
     let onArchive: () -> Void
     let onDelete: () -> Void
     let onDone: () -> Void
@@ -132,6 +148,11 @@ struct StickyNoteEditorCard<ContextMenu: View>: View {
             toolbar
             titleField
             bodyEditor
+            StickyNoteReminderEditor(
+                note: note,
+                language: language,
+                onSave: onSaveReminder
+            )
         }
         .padding(10)
         .frame(maxWidth: .infinity, minHeight: gridSize.editorMinHeight, alignment: .topLeading)
@@ -429,5 +450,112 @@ private extension Color {
             blue: first.blueComponent + (second.blueComponent - first.blueComponent) * clamped,
             opacity: first.alphaComponent + (second.alphaComponent - first.alphaComponent) * clamped
         )
+    }
+}
+
+struct StickyNoteReminderEditor: View {
+    let note: StickyNoteItem
+    let language: AppLanguage
+    let onSave: (Date?) -> Bool
+
+    @State private var isEditing = false
+    @State private var selectedDate = Date().addingTimeInterval(3600)
+    @State private var feedback: String?
+    @State private var didFail = false
+
+    private func localized(_ japanese: String, _ english: String) -> String {
+        language == .japanese ? japanese : english
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if isEditing {
+                HStack(spacing: 6) {
+                    Image(systemName: "bell")
+                    DatePicker(
+                        localized("通知日時", "Reminder date and time"),
+                        selection: $selectedDate,
+                        displayedComponents: [.date, .hourAndMinute]
+                    )
+                    .datePickerStyle(.field)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .environment(\.locale, Locale(identifier: language == .japanese ? "ja_JP" : "en_US"))
+                    .accessibilityLabel(localized("通知日時", "Reminder date and time"))
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 8) {
+                    Button(localized("リマインダーを保存", "Save reminder")) {
+                        NSApp.keyWindow?.makeFirstResponder(nil)
+                        let minuteDate = Calendar.current.dateInterval(of: .minute, for: selectedDate)?.start ?? selectedDate
+                        guard minuteDate > Date() else {
+                            didFail = true
+                            feedback = localized("現在より後の日時を指定してください。", "Choose a future date and time.")
+                            return
+                        }
+                        save(minuteDate)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button(localized("取消", "Cancel")) {
+                        isEditing = false
+                        feedback = nil
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .controlSize(.small)
+                Text(TimeZone.current.identifier)
+                    .font(.system(size: 9))
+            } else {
+                HStack(spacing: 6) {
+                    if let reminder = note.reminder {
+                        Image(systemName: reminder.acknowledgedAt == nil ? "bell" : "bell.slash")
+                        Text(reminder.scheduledAt, format: .dateTime.month().day().hour().minute())
+                        if reminder.acknowledgedAt != nil {
+                            Text(localized("確認済み", "Acknowledged"))
+                        }
+                        Spacer(minLength: 0)
+                        Button(localized("変更", "Edit"), action: beginEditing)
+                        Button(localized("解除", "Remove")) { save(nil) }
+                    } else {
+                        Button(action: beginEditing) {
+                            Label(localized("リマインダーを追加", "Add reminder"), systemImage: "bell.badge")
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityElement(children: .contain)
+            }
+            if let feedback {
+                Label(feedback, systemImage: didFail ? "exclamationmark.triangle" : "checkmark.circle")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(didFail ? Color.red : Color.black.opacity(0.7))
+                    .accessibilityElement(children: .combine)
+            }
+        }
+        .panelTextFont(size: 10, weight: .medium)
+        .foregroundStyle(Color.black.opacity(0.72))
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.22)))
+    }
+
+    private func beginEditing() {
+        NSApp.activate(ignoringOtherApps: true)
+        selectedDate = note.reminder?.scheduledAt ?? Date().addingTimeInterval(3600)
+        feedback = nil
+        isEditing = true
+    }
+
+    private func save(_ date: Date?) {
+        didFail = !onSave(date)
+        if didFail {
+            feedback = localized("保存できませんでした。日時を確認して再試行してください。", "Could not save. Check the date and time and try again.")
+        } else {
+            isEditing = false
+            feedback = date == nil
+                ? localized("リマインダーを解除しました。", "Reminder removed.")
+                : localized("リマインダーを保存しました。", "Reminder saved.")
+        }
     }
 }

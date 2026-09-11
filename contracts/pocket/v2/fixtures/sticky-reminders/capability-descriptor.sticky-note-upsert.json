@@ -1,0 +1,154 @@
+{
+  "$schema": "hoverpocket://schemas/capability-descriptor/v1",
+  "id": "sticky.note.upsert",
+  "version": 2,
+  "titleKey": "capability.sticky.note.upsert",
+  "effect": "reversible_local_write",
+  "permissions": [
+    "sticky.write"
+  ],
+  "approvalPolicy": "broker_policy",
+  "idempotency": "required",
+  "availability": {
+    "macos": "available",
+    "windows": "unavailable"
+  },
+  "limits": {
+    "timeoutMs": 3000,
+    "maxPayloadBytes": 4096,
+    "maxCallsPerMinute": 120
+  },
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "stableKey",
+      "title",
+      "body",
+      "color"
+    ],
+    "properties": {
+      "stableKey": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 96,
+        "pattern": "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9][A-Za-z0-9._-]{0,62}$(?![\\s\\S])"
+      },
+      "title": {
+        "type": "string",
+        "maxLength": 120
+      },
+      "body": {
+        "type": "string",
+        "maxLength": 10000
+      },
+      "color": {
+        "type": "string",
+        "enum": [
+          "yellow",
+          "blue",
+          "green",
+          "pink",
+          "gray"
+        ]
+      },
+      "reminder": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "required": [
+          "scheduledAt",
+          "timeZone"
+        ],
+        "properties": {
+          "scheduledAt": {
+            "type": "string",
+            "format": "date-time",
+            "maxLength": 64,
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$"
+          },
+          "timeZone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "noteId",
+      "title",
+      "body",
+      "updatedAt",
+      "reminder"
+    ],
+    "properties": {
+      "noteId": {
+        "type": "string",
+        "maxLength": 128
+      },
+      "title": {
+        "type": "string",
+        "maxLength": 120
+      },
+      "body": {
+        "type": "string",
+        "maxLength": 10000
+      },
+      "updatedAt": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "reminder": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "required": [
+          "scheduledAt",
+          "timeZone",
+          "acknowledgedAt"
+        ],
+        "properties": {
+          "scheduledAt": {
+            "type": "string",
+            "format": "date-time",
+            "maxLength": 64,
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$"
+          },
+          "timeZone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "acknowledgedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "additionalProperties": false
+  },
+  "readback": {
+    "strategy": "capability_query",
+    "capabilityId": "sticky.note.get",
+    "capabilityVersion": 2,
+    "match": [
+      "noteId",
+      "title",
+      "body",
+      "updatedAt",
+      "reminder"
+    ]
+  }
+}

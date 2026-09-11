@@ -75,6 +75,14 @@ enum PocketAppOSVerification {
         }
         let catalog = try await call("catalog")
         try check((catalog["screens"] as? [[String: Any]])?.contains { $0["provider_id"] as? String == "google-calendar" && $0["owner"] as? String == "standard" } == true, "standard_catalog")
+        let clockBefore = verificationTime
+        let clockScreen = catalog["screen"] as? [String: Any]
+        try check(clockScreen?["current_time"] as? String == CapabilityDateCodec.string(from: clockBefore)
+            && clockScreen?["timezone"] as? String == TimeZone.current.identifier, "catalog_host_current_time")
+        verificationTime = clockBefore.addingTimeInterval(600)
+        let refreshedClock = try await call("catalog")["screen"] as? [String: Any]
+        try check(refreshedClock?["current_time"] as? String == CapabilityDateCodec.string(from: verificationTime), "catalog_clock_refresh_for_relative_reminder")
+        verificationTime = clockBefore
         let accepted = try await call("generate", ["request": .string("記録ツール")], callID: "generate-once")
         let job = accepted["job_id"] as! String
         try check(accepted["status"] as? String == "accepted" && host.jobStatus == "generating", "background_acceptance")

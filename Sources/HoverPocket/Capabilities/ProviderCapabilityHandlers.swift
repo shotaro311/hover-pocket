@@ -443,6 +443,8 @@ final class TimerCapabilityHandler: PocketCapabilityHandler {
 final class StickyCapabilityHandler: PocketCapabilityHandler {
     enum Operation {
         case upsert
+        case upsertV2
+        case getV2
         case get
         case status
         case archive
@@ -450,6 +452,8 @@ final class StickyCapabilityHandler: PocketCapabilityHandler {
 
         var key: PocketCapabilityKey {
             switch self {
+            case .upsertV2: PocketCapabilityKeys.stickyUpsertV2
+            case .getV2: PocketCapabilityKeys.stickyGetV2
             case .upsert: CapabilityIDs.stickyUpsert
             case .get: CapabilityIDs.stickyGet
             case .status: CapabilityIDs.stickyStatus
@@ -473,12 +477,16 @@ final class StickyCapabilityHandler: PocketCapabilityHandler {
 
     func handle(arguments: CapabilityObject, context: CapabilityHandlerContext) async throws -> CapabilityObject {
         switch operation {
-        case .upsert:
+        case .upsert, .upsertV2:
             _ = try context.requiredIdempotencyKey()
             let stableKey = try PocketStableKey.validate(arguments.requiredString("stableKey", maxLength: PocketStableKey.maximumScalars))
             let title = try arguments.requiredString("title", maxLength: 120, allowEmpty: true)
             let body = try arguments.requiredString("body", maxLength: 10_000, allowEmpty: true)
             let color = try Self.color(try arguments.requiredString("color", maxLength: 16))
+            let reminderChange = operation == .upsertV2 ? try Self.reminderChange(arguments) : .unchanged
+            if case .set(let scheduledAt, _) = reminderChange, scheduledAt <= context.now {
+                throw CapabilityHandlerError.invalidArgument("reminder.scheduledAt")
+            }
             let note: StickyNoteItem
             do {
                 note = try store.upsertNote(
@@ -486,19 +494,20 @@ final class StickyCapabilityHandler: PocketCapabilityHandler {
                     title: title,
                     body: body,
                     color: color,
+                    reminderChange: reminderChange,
                     id: idGenerator(),
                     at: context.now
                 )
             } catch {
                 throw CapabilityHandlerError.unavailable("sticky_storage")
             }
-            return try Self.readOutput(note)
-        case .get:
+            return try Self.readOutput(note, includesReminder: operation == .upsertV2)
+        case .get, .getV2:
             let id = try Self.noteID(arguments)
             guard let note = store.note(id: id) else {
                 throw CapabilityHandlerError.unavailable("sticky_note")
             }
-            return try Self.readOutput(note)
+            return try Self.readOutput(note, includesReminder: operation == .getV2)
         case .status:
             return Self.statusOutput(noteID: try Self.noteID(arguments), store: store)
         case .archive:
@@ -524,6 +533,17 @@ final class StickyCapabilityHandler: PocketCapabilityHandler {
                 throw CapabilityHandlerError.unavailable("sticky_storage")
             }
         }
+    }
+
+    private static func reminderChange(_ arguments: CapabilityObject) throws -> StickyNoteReminderChange {
+        guard let value = arguments["reminder"] else { return .unchanged }
+        try CapabilitySchemaValidation.stickyReminder(value, output: false)
+        if value == .null { return .clear }
+        guard case .object(let reminder) = value,
+              let scheduled = CapabilitySchemaValidation.reminderDate(try reminder.requiredString("scheduledAt", maxLength: 64)) else {
+            throw CapabilityHandlerError.invalidArgument("reminder")
+        }
+        return .set(scheduledAt: scheduled, timeZone: try reminder.requiredString("timeZone", maxLength: 128))
     }
 
     private static func noteID(_ arguments: CapabilityObject) throws -> UUID {
@@ -552,7 +572,7 @@ final class StickyCapabilityHandler: PocketCapabilityHandler {
         ]
     }
 
-    private static func readOutput(_ note: StickyNoteItem) throws -> CapabilityObject {
+    private static func readOutput(_ note: StickyNoteItem, includesReminder: Bool = false) throws -> CapabilityObject {
         guard note.title.unicodeScalars.count <= 120,
               note.body.unicodeScalars.count <= 10_000 else {
             throw CapabilityHandlerError.readbackMismatch("sticky.note")
@@ -560,6 +580,15 @@ final class StickyCapabilityHandler: PocketCapabilityHandler {
         var output = mutationOutput(note)
         output["title"] = .string(note.title)
         output["body"] = .string(note.body)
+        if includesReminder {
+            output["reminder"] = note.reminder.map { reminder in
+                .object([
+                    "scheduledAt": .string(CapabilityDateCodec.string(from: reminder.scheduledAt)),
+                    "timeZone": .string(reminder.timeZone),
+                    "acknowledgedAt": reminder.acknowledgedAt.map { .string(CapabilityDateCodec.string(from: $0)) } ?? .null
+                ])
+            } ?? .null
+        }
         return output
     }
 
@@ -610,6 +639,8 @@ enum ProviderCapabilityCompositionRoot {
             TimerCapabilityHandler(operation: .pause, store: .shared),
             TimerCapabilityHandler(operation: .resume, store: .shared),
             TimerCapabilityHandler(operation: .stop, store: .shared),
+            StickyCapabilityHandler(operation: .upsertV2, store: .shared),
+            StickyCapabilityHandler(operation: .getV2, store: .shared),
             StickyCapabilityHandler(operation: .upsert, store: .shared),
             StickyCapabilityHandler(operation: .get, store: .shared),
             StickyCapabilityHandler(operation: .status, store: .shared),

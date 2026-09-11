@@ -76,6 +76,7 @@ enum CapabilityVerificationCommand {
         try await verifyTimerPersistenceFailure(root: root)
         try await verifySticky(handlers: handlers, noteID: noteID, root: stickyRoot)
         try await verifyCalendar(handlers: handlers, dataSource: calendar)
+        try await StickyReminderCapabilityVerification.verify(root: root)
 
         do {
             _ = try await handlers.invoke(

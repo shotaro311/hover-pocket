@@ -422,14 +422,22 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     private static let stickyUpsertDefinition: [String: Any] = [
         "type": "function",
         "name": stickyUpsertTool,
-        "description": "Add or update one Sticky Note through HoverPocket CapabilityBroker. HoverPocket applies the default Voice confirmation setting; the note is written only after Broker approval and verified by readback.",
+        "description": "Add one Sticky Note, optionally with a one-time reminder. For reminders resolve the requested date/time using the current local time, and pass scheduledAt as RFC3339 with UTC offset plus an IANA timeZone. Ask if the date/time is unclear; never invent it. Omit reminder for no change, null clears it. HoverPocket applies the default Voice confirmation setting; the note is written only after Broker approval and verified by readback. Report only the saved date/time.",
         "parameters": [
             "type": "object",
             "additionalProperties": false,
             "properties": [
                 "body": ["type": "string", "minLength": 1, "maxLength": 10_000],
                 "title": ["type": "string", "maxLength": 120],
-                "color": ["type": "string", "enum": ["yellow", "blue", "green", "pink", "gray"]]
+                "color": ["type": "string", "enum": ["yellow", "blue", "green", "pink", "gray"]],
+                "reminder": [
+                    "type": ["object", "null"], "additionalProperties": false,
+                    "properties": [
+                        "scheduledAt": ["type": "string", "format": "date-time", "maxLength": 64],
+                        "timeZone": ["type": "string", "minLength": 1, "maxLength": 128]
+                    ],
+                    "required": ["scheduledAt", "timeZone"]
+                ]
             ],
             "required": ["body"]
         ]
@@ -879,7 +887,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
     ) async throws -> String {
         try requireExactKeys(
             arguments,
-            allowed: ["body", "title", "color"],
+            allowed: ["body", "title", "color", "reminder"],
             required: ["body"]
         )
         let body = try arguments.requiredString("body", maxLength: 10_000)
@@ -890,32 +898,56 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
         guard ["yellow", "blue", "green", "pink", "gray"].contains(color) else {
             return Self.failure("invalid_arguments")
         }
+        var capabilityArguments: CapabilityObject = [
+            "stableKey": .string("voice:\(correlation.prefix(60))"),
+            "title": .string(title), "body": .string(body), "color": .string(color)
+        ]
+        var detail = VoiceApprovalText.singleLine(body, limit: 240)
+        if let reminder = arguments["reminder"] {
+            try CapabilitySchemaValidation.stickyReminder(reminder, output: false)
+            capabilityArguments["reminder"] = reminder
+            if case .object(let fields) = reminder {
+                let scheduled = try fields.requiredString("scheduledAt", maxLength: 64)
+                let zone = try fields.requiredString("timeZone", maxLength: 128)
+                guard let date = CapabilitySchemaValidation.reminderDate(scheduled), date > now() else {
+                    return Self.failure("invalid_arguments")
+                }
+                detail += "\nリマインダー: \(scheduled) (\(zone))"
+            } else {
+                detail += "\nリマインダー: 解除"
+            }
+        }
         let output = try await executeCapability(
             correlation: correlation,
             sessionID: sessionID,
             planIDPrefix: "voice.sticky.upsert",
             stepID: "upsertStickyNote",
-            capability: PocketCapabilityKeys.stickyUpsert,
-            arguments: [
-                "stableKey": .string("voice:\(correlation.prefix(60))"),
-                "title": .string(title),
-                "body": .string(body),
-                "color": .string(color)
-            ],
+            capability: PocketCapabilityKeys.stickyUpsertV2,
+            arguments: capabilityArguments,
             permission: "sticky.write",
             approval: VoiceNativeApprovalRequest(
                 kind: .stickyUpsert,
                 title: "付箋を追加しますか？",
-                detail: VoiceApprovalText.singleLine(body, limit: 240)
+                detail: detail
             )
         )
         personalKnownTargets[sessionID, default: []].insert(try output.requiredString("noteId", maxLength: 128))
+        let reminderPayload: Any
+        switch output["reminder"] {
+        case .some(.object(let reminder)):
+            reminderPayload = try JSONSerialization.jsonObject(with: CapabilityCanonicalJSON.data(.object(reminder)))
+        case .some(.null):
+            reminderPayload = NSNull()
+        default:
+            throw CapabilityBrokerError.invalidPlan("voice_reminder_readback")
+        }
         return try json([
             "status": "succeeded",
             "noteId": try output.requiredString("noteId", maxLength: 128),
             "title": try output.requiredString("title", maxLength: 120, allowEmpty: true),
             "body": try output.requiredString("body", maxLength: 10_000, allowEmpty: true),
             "updatedAt": try output.requiredString("updatedAt", maxLength: 64),
+            "reminder": reminderPayload,
             "readback": "verified"
         ])
     }
@@ -1365,7 +1397,7 @@ final class OpenAIRealtimeMacOSCapabilityRuntime: OpenAIRealtimeCapabilityExecut
             permission: "timer.write"
         )
         try validate(
-            PocketCapabilityKeys.stickyUpsert,
+            PocketCapabilityKeys.stickyUpsertV2,
             effect: .reversibleLocalWrite,
             approval: .brokerPolicy,
             permission: "sticky.write"

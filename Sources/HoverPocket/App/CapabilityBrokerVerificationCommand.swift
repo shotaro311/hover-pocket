@@ -13,7 +13,7 @@ enum CapabilityBrokerVerificationCommand {
             do {
                 try await verify()
                 print("broker_verify=ok")
-                print("broker_registry_descriptors=22")
+                print("broker_registry_descriptors=25")
                 print("broker_available_handlers=21")
                 print("broker_calculator_evaluate=ok")
                 print("broker_controls_os_readback=ok")
@@ -84,7 +84,7 @@ enum CapabilityBrokerVerificationCommand {
             )
         )
 
-        try require(registry.descriptorKeys.count == 22 + PersonalToolOperation.allCases.count, "registry_descriptor_count")
+        try require(registry.descriptorKeys.count == 25 + PersonalToolOperation.allCases.count, "registry_descriptor_count")
         try require(registry.availableHandlerKeys.count == 21, "registry_handler_count")
         try require(
             registry.descriptor(PocketCapabilityKeys.stickyDelete)?.approvalPolicy == .strongPerCall,

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct HoverPillView: View {
     @ObservedObject var settings: AppSettings
+    @ObservedObject var stickyReminders = StickyReminderController.shared
     @ObservedObject private var voiceRuntime = VoiceLaneRuntime.shared
     @ObservedObject private var timerStore = TimerStore.shared
     let onEnter: () -> Void
@@ -15,7 +16,9 @@ struct HoverPillView: View {
                 voiceAccessIndicator
             } else if showsVisibleSideHandle {
                 visiblePill
-                    .modifier(TimerAlertBounceModifier(alert: timerStore.activeAlert))
+                    .modifier(TimerAlertBounceModifier(
+                        startedAt: timerStore.activeAlert?.startedAt ?? stickyReminders.startedAt
+                    ))
                     .onTapGesture(perform: onTap)
             } else {
                 Color.black.opacity(0.001)
@@ -72,7 +75,7 @@ struct HoverPillView: View {
     }
 
     private var alertAccent: Color? {
-        timerStore.activeAlert?.color.color
+        timerStore.activeAlert?.color.color ?? stickyReminders.activeNote?.color.color
     }
 
     private var visiblePill: some View {
@@ -119,13 +122,16 @@ struct HoverPillView: View {
 /// retracted into the top edge and pops downward, so it never detaches from
 /// the screen edge. Skipped entirely when Reduce Motion is on.
 struct TimerAlertBounceModifier: ViewModifier {
-    let alert: TimerAlert?
+    let startedAt: Date?
+
+    init(alert: TimerAlert?) { startedAt = alert?.startedAt }
+    init(startedAt: Date?) { self.startedAt = startedAt }
 
     func body(content: Content) -> some View {
-        if let alert, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        if let startedAt, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             TimelineView(.animation) { context in
                 content.offset(
-                    y: Self.bounceOffset(elapsed: context.date.timeIntervalSince(alert.startedAt))
+                    y: Self.bounceOffset(elapsed: context.date.timeIntervalSince(startedAt))
                 )
             }
         } else {
@@ -145,6 +151,7 @@ struct TimerAlertBounceModifier: ViewModifier {
 
 struct HoverMiniBarView: View {
     @ObservedObject var settings: AppSettings
+    @ObservedObject var stickyReminders = StickyReminderController.shared
     @ObservedObject private var voiceRuntime = VoiceLaneRuntime.shared
     let onBarEnter: () -> Void
     let onBarExit: () -> Void
@@ -219,7 +226,9 @@ struct HoverMiniBarView: View {
 
             VStack(spacing: 0) {
                 bar
-                    .modifier(TimerAlertBounceModifier(alert: timerStore.activeAlert))
+                    .modifier(TimerAlertBounceModifier(
+                        startedAt: timerStore.activeAlert?.startedAt ?? stickyReminders.startedAt
+                    ))
                     .offset(y: isExpandedLook ? PanelLayout.miniBarExpandedTopOffset : 0)
 
                 Spacer(minLength: 0)
@@ -233,7 +242,7 @@ struct HoverMiniBarView: View {
     }
 
     private var alertAccent: Color? {
-        timerStore.activeAlert?.color.color
+        timerStore.activeAlert?.color.color ?? stickyReminders.activeNote?.color.color
     }
 
     /// While a timer alert is active the bar keeps its expanded look even

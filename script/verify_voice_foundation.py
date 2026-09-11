@@ -1492,7 +1492,7 @@ def main() -> None:
     )) or '"apiKey"' in mac_codex_login_helper:
         fail("macOS Codex managed login lifecycle is not process-backed and deterministic")
     model_verifier_start = mac_codex_foundation_verifier.find(
-        "static func runModelToolVerification()"
+        "static func runModelToolVerification(stickyReminder: Bool = false)"
     )
     model_verifier_end = mac_codex_foundation_verifier.find(
         "private static func waitForProcessExit",
@@ -1526,11 +1526,16 @@ def main() -> None:
                 "modelControlsUnchanged",
                 "timerStore.runningTimers.count == 1",
                 "admissionSnapshot.rejected == 0",
+                'stickyReminder ? "gpt-6-astra" : modelToolVerificationModel',
+                "CapabilityDateCodec.string(from: now)",
+                "inputDate == now.addingTimeInterval(600)",
+                "restored?.reminder?.scheduledAt == now.addingTimeInterval(600)",
+                "timerStore.runningTimers.isEmpty",
                 "waitForProcessExit(processID)",
                 "model_tool_workspace_leaked",
             )) \
             or "OPENAI_API_KEY" in model_verifier:
-        fail("macOS live Codex model tool verifier bypasses the bounded Timer-write-only contract")
+        fail("macOS live Codex model tool verifier bypasses the isolated Timer or reminder contract")
     if not all(value in mac_codex_realtime_verifier for value in (
         "CodexAppServerCompatibilityProbe.shared.isCurrent",
         "rootThreadEphemeral: true",

@@ -1,0 +1,9 @@
+capability_sticky_reminder_v2=ok
+capability_verify=ok
+capability_handlers=21
+capability_calculator_evaluate=ok
+capability_controls_readback=ok
+capability_timer_lifecycle=ok
+capability_sticky_upsert=ok
+capability_sticky_lifecycle=ok
+capability_calendar_readback=ok

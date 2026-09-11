@@ -4,6 +4,7 @@ struct HoverPanelShell: View {
     let hoverState: HoverState
     @ObservedObject var store: HoverMenuStore
     @ObservedObject var settings: AppSettings
+    @ObservedObject var stickyReminders = StickyReminderController.shared
     @ObservedObject private var voiceRuntime = VoiceLaneRuntime.shared
     let onOpenSettings: () -> Void
     let onClosePanel: () -> Void
@@ -34,6 +35,12 @@ struct HoverPanelShell: View {
 
                     Divider()
                         .overlay(Color.white.opacity(0.08))
+
+                    if let note = stickyReminders.activeNote {
+                        StickyReminderAlertView(note: note, reminders: stickyReminders,
+                            language: settings.appLanguage)
+                            .id(note.id)
+                    }
 
                     PluginHostView(
                         providerStore: store.providerStore,
@@ -68,5 +75,48 @@ struct HoverPanelShell: View {
         .onHover { inside in
             inside ? hoverState.onEnter() : hoverState.onExit()
         }
+    }
+}
+
+private struct StickyReminderAlertView: View {
+    let note: StickyNoteItem
+    @ObservedObject var reminders: StickyReminderController
+    let language: AppLanguage
+    @State private var couldNotStop = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                Image(systemName: "bell.badge.fill")
+                    .foregroundStyle(note.color.color)
+                Text(note.displayTitle(language: language))
+                    .lineLimit(2)
+                Spacer(minLength: 4)
+                Button(language == .japanese ? "通知を停止" : "Stop reminder") {
+                    couldNotStop = !reminders.acknowledge()
+                }
+                .controlSize(.small)
+                .accessibilityLabel(language == .japanese ? "付箋の通知を停止" : "Stop sticky note reminder")
+            }
+            .panelTextFont(size: 11, weight: .semibold)
+            if !note.body.isEmpty {
+                Text(note.body)
+                    .panelTextFont(size: 10, weight: .regular)
+                    .lineLimit(2)
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+            if couldNotStop {
+                Text(language == .japanese
+                    ? "確認状態を保存できませんでした。もう一度お試しください。"
+                    : "Could not save the acknowledgement. Please try again.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.yellow)
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(note.color.color.opacity(0.14))
+        .accessibilityElement(children: .contain)
     }
 }

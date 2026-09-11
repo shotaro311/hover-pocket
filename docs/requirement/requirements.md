@@ -603,6 +603,15 @@ Planned Must:
 - hover close / panel hideでは既定で入力trackとremote audioを即時muteしてUIをdetachする。継続設定をONにした場合だけ、既にconnectedかつunmutedのsessionはmuteせずUIだけをdetachし、connectingまたはmutedのsessionは自動開始・自動unmuteしない。いずれもroot threadを停止しない。明示終了ではRealtime stop、peer connection、data channel、local media track、remote audioを閉じ、再開時に古いSDP / generationを受理しない。
 - macOS実音声E2E receiptはexact allowlistのboolean、enum、最終transcript件数だけをatomic保存し、API key、transcript本文、音声、SDP、PID、filesystem pathを含めない。各media attemptの開始時に、前回attemptのmic、remote audio、transcript件数、Timer readback、Host native確認をすべて消去し、現在attemptだけで合格を判定する。Host native確認は非永続のattempt IDへ束縛し、古い確認sheetの完了を後続attemptへ記録しない。合格には実マイク取得、remote audio trackと再生、ユーザー／assistantの最終transcript各1件以上、Timer Broker readback、Host nativeの「話せた・聞こえた」確認を必要とし、Stop後はmic / remote track / playback / credentialが0で`safe_close`になったことを別経路で読む。
 
+### macOS付箋リマインダー（2026-09-11）
+
+- 新規・既存の付箋へ任意の1回通知日時を設定、変更、解除できる。通常の本文編集は設定済み日時を保持する。
+- 期限にHoverPocketパネルを開き、付箋の内容と停止ボタンを共通領域へ表示し、タイマー同様の音・上端の視覚通知を出す。付箋provider非表示中も停止できる。
+- 同時期限は順に通知し、Timer通知を優先する間も付箋通知を失わない。アプリ終了中・スリープ中の期限は次回起動・復帰時に拾う。確認済みは再通知しない。削除・アーカイブ中は通知せず、Undoで元の未確認状態へ戻る。
+- notes.jsonへ任意reminderを保存し、旧付箋は未設定として扱う。旧形式からの最初の保存時にバックアップを残す。保存失敗で本文・設定を失わず、完了を誤表示しない。
+- macOSのsticky.note.upsert/get v2で日時とタイムゾーン、確認状態を読み戻す。v1は維持する。Codex音声からの作成に対応し、相対日時はHostの現在時刻を根拠とする。Windowsはv1のままである。
+- 詳細な契約と互換性: [設計](../plan/20260911_STICKY_REMINDERS.md)。
+
 ## 5. Settings 要件
 
 Must:

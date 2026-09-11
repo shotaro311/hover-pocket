@@ -18,6 +18,8 @@ enum PocketCapabilityKeys {
     static let timerResume = PocketCapabilityKey(id: "timer.countdown.resume", version: 1)
     static let timerStop = PocketCapabilityKey(id: "timer.countdown.stop", version: 1)
     static let stickyUpsert = PocketCapabilityKey(id: "sticky.note.upsert", version: 1)
+    static let stickyUpsertV2 = PocketCapabilityKey(id: "sticky.note.upsert", version: 2)
+    static let stickyGetV2 = PocketCapabilityKey(id: "sticky.note.get", version: 2)
     static let stickyGet = PocketCapabilityKey(id: "sticky.note.get", version: 1)
     static let stickyStatus = PocketCapabilityKey(id: "sticky.note.status", version: 1)
     static let stickyArchive = PocketCapabilityKey(id: "sticky.note.archive", version: 1)
@@ -341,6 +343,30 @@ enum PocketCapabilityDescriptors {
             rollback: false,
             input: CapabilitySchemaValidation.stickyUpsertInput,
             output: CapabilitySchemaValidation.stickyOutput
+        ),
+        descriptor(
+            PocketCapabilityKeys.stickyGetV2,
+            effect: .privateRead,
+            permissions: ["sticky.read"],
+            approval: .permissionGrant,
+            idempotency: .optional,
+            limits: readLimits,
+            readback: CapabilityReadbackPolicy(strategy: .sameStoreSnapshot, query: nil, matchFields: ["noteId", "updatedAt", "reminder"]),
+            rollback: false,
+            input: CapabilitySchemaValidation.stickyIDInput,
+            output: CapabilitySchemaValidation.stickyOutputV2
+        ),
+        descriptor(
+            PocketCapabilityKeys.stickyUpsertV2,
+            effect: .reversibleLocalWrite,
+            permissions: ["sticky.write"],
+            approval: .brokerPolicy,
+            idempotency: .required,
+            limits: localWriteLimits,
+            readback: CapabilityReadbackPolicy(strategy: .capabilityQuery, query: PocketCapabilityKeys.stickyGetV2, matchFields: ["noteId", "title", "body", "updatedAt", "reminder"]),
+            rollback: false,
+            input: CapabilitySchemaValidation.stickyUpsertInputV2,
+            output: CapabilitySchemaValidation.stickyOutputV2
         ),
         descriptor(
             PocketCapabilityKeys.nativeAuthority,
@@ -692,6 +718,63 @@ enum CapabilitySchemaValidation {
         _ = try string(object, "title", maximum: 120)
         _ = try string(object, "body", maximum: 10_000)
         _ = try string(object, "color", minimum: 1, maximum: 16, allowed: ["yellow", "blue", "green", "pink", "gray"])
+    }
+
+    static func stickyUpsertInputV2(_ object: CapabilityObject) throws {
+        var legacy = object
+        let reminder = legacy.removeValue(forKey: "reminder")
+        try stickyUpsertInput(legacy)
+        if let reminder { try stickyReminder(reminder, output: false) }
+    }
+
+    static func stickyOutputV2(_ object: CapabilityObject) throws {
+        var legacy = object
+        guard let reminder = legacy.removeValue(forKey: "reminder") else {
+            throw CapabilityBrokerError.invalidPlan("schema_reminder")
+        }
+        try stickyOutput(legacy)
+        try stickyReminder(reminder, output: true)
+    }
+
+    static func stickyReminder(_ value: CapabilityValue, output: Bool) throws {
+        if value == .null { return }
+        guard case .object(let object) = value else {
+            throw CapabilityBrokerError.invalidPlan("schema_reminder")
+        }
+        try exactKeys(object, output ? ["scheduledAt", "timeZone", "acknowledgedAt"] : ["scheduledAt", "timeZone"])
+        let scheduled = try string(object, "scheduledAt", minimum: 1, maximum: 64)
+        let zone = try string(object, "timeZone", minimum: 1, maximum: 128)
+        guard reminderDate(scheduled) != nil,
+              TimeZone.knownTimeZoneIdentifiers.contains(zone) || zone == "UTC" else {
+            throw CapabilityBrokerError.invalidPlan("schema_reminder_date_timezone")
+        }
+        if output {
+            switch object["acknowledgedAt"] {
+            case .some(.null): break
+            case .some(.string(let value)) where reminderDate(value) != nil: break
+            default: throw CapabilityBrokerError.invalidPlan("schema_reminder_acknowledgedAt")
+            }
+        }
+    }
+
+    static func reminderDate(_ value: String) -> Date? {
+        guard value.range(of: #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$"#, options: .regularExpression) == value.startIndex..<value.endIndex,
+              let date = CapabilityDateCodec.date(from: value) else { return nil }
+        var offset = 0
+        if !value.hasSuffix("Z") {
+            let suffix = String(value.suffix(6))
+            guard let hours = Int(suffix.dropFirst().prefix(2)), hours <= 23,
+                  let minutes = Int(suffix.suffix(2)), minutes <= 59 else { return nil }
+            offset = (hours * 60 + minutes) * 60 * (suffix.hasPrefix("-") ? -1 : 1)
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: offset)
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        // ISO8601DateFormatter can normalize impossible dates; never silently move a reminder.
+        guard formatter.string(from: date) == String(value.prefix(19)) else { return nil }
+        return date
     }
 
     static func stickyIDInput(_ object: CapabilityObject) throws {

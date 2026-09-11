@@ -365,6 +365,8 @@ enum VoiceOnlyVerificationCommand {
         }.map { PersonalVerificationStub(key: $0.key) })
         for handler: any PocketCapabilityHandler in [
             TimerCapabilityHandler(operation: .start, store: timers), TimerCapabilityHandler(operation: .get, store: timers),
+            StickyCapabilityHandler(operation: .upsertV2, store: notes),
+            StickyCapabilityHandler(operation: .getV2, store: notes),
             StickyCapabilityHandler(operation: .upsert, store: notes), StickyCapabilityHandler(operation: .get, store: notes)
         ] { try handlers.register(handler) }
         var calendarGranted = true

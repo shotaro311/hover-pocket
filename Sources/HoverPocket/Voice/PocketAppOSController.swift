@@ -375,7 +375,8 @@ final class PocketAppOSController: ObservableObject {
         case .loaded: calendarStatus = "loaded"
         case .failed: calendarStatus = "failed"
         }
-        var result: [String: Any] = ["today": dateFormatter().string(from: Date()), "timezone": TimeZone.current.identifier, "calendar_data_status": calendarStatus, "provider_id": providerStore?.selectedPluginID?.rawValue ?? "", "calendar_date": dateFormatter().string(from: PocketCalendarSelection.shared.visibleDate),
+        let current = now()
+        var result: [String: Any] = ["current_time": CapabilityDateCodec.string(from: current), "today": dateFormatter().string(from: current), "timezone": TimeZone.current.identifier, "calendar_data_status": calendarStatus, "provider_id": providerStore?.selectedPluginID?.rawValue ?? "", "calendar_date": dateFormatter().string(from: PocketCalendarSelection.shared.visibleDate),
          "calendar_editing": PocketCalendarSelection.shared.draft != nil]
         if let state = calendarEventState() {
             result["calendar_event_revision"] = state.revision

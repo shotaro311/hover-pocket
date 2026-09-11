@@ -23,6 +23,7 @@ final class TimerStore: ObservableObject {
     private let persistenceEnabled: Bool
     private var tickTimer: Timer?
     private var alertSound: NSSound?
+    private var queuedAlerts: [TimerAlert] = []
     private var pendingWriteTask: Task<Void, Never>?
     private var wakeObserver: NSObjectProtocol?
 
@@ -224,6 +225,7 @@ final class TimerStore: ObservableObject {
         runningTimers.removeAll { $0.id == id }
         do {
             try persistRunningTimersImmediately()
+            queuedAlerts.removeAll { $0.id == id }
             if activeAlert?.id == id {
                 stopAlert()
             }
@@ -257,6 +259,7 @@ final class TimerStore: ObservableObject {
 
     func stop(id: UUID) {
         runningTimers.removeAll { $0.id == id }
+        queuedAlerts.removeAll { $0.id == id }
         if activeAlert?.id == id {
             stopAlert()
         }
@@ -267,7 +270,8 @@ final class TimerStore: ObservableObject {
     func stopAlert() {
         alertSound?.stop()
         alertSound = nil
-        activeAlert = nil
+        activeAlert = queuedAlerts.isEmpty ? nil : queuedAlerts.removeFirst()
+        if activeAlert?.soundEnabled == true { playAlertSound() }
     }
 
     func startStopwatch(preset: StopwatchPreset? = nil, at date: Date = Date()) {
@@ -378,8 +382,8 @@ final class TimerStore: ObservableObject {
         }
     }
 
-    private func tick() {
-        now = Date()
+    func tick(at date: Date = Date()) {
+        now = date
         let expired = runningTimers.filter { !$0.isPaused && $0.endDate <= now }
         guard !expired.isEmpty else { return }
         for timer in expired {
@@ -392,15 +396,19 @@ final class TimerStore: ObservableObject {
     private func fire(_ timer: RunningTimer) {
         guard let index = runningTimers.firstIndex(where: { $0.id == timer.id }) else { return }
 
-        activeAlert = TimerAlert(
+        let alert = TimerAlert(
             id: timer.id,
             title: timer.title,
             color: timer.color,
             startedAt: Date(),
             soundEnabled: timer.soundEnabled
         )
-        if timer.soundEnabled {
-            playAlertSound()
+        if activeAlert == nil {
+            activeAlert = alert
+            if timer.soundEnabled { playAlertSound() }
+        } else if activeAlert?.id != alert.id {
+            queuedAlerts.removeAll { $0.id == alert.id }
+            queuedAlerts.append(alert)
         }
 
         if timer.isPomodoro {
