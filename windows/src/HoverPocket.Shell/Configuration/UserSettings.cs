@@ -1,5 +1,6 @@
 using HoverPocket.Shell.Voice;
 using HoverPocket.Shell.Capabilities;
+using HoverPocket.Shell.Providers.Weather;
 
 namespace HoverPocket.Shell.Configuration;
 
@@ -14,6 +15,10 @@ internal sealed class UserSettings
     public ProviderSwitchingMode SwitchingMode { get; set; } = ProviderSwitchingMode.Click;
 
     public AppLanguage Language { get; set; } = AppLanguage.Japanese;
+
+    public WeatherLocation WeatherLocation { get; set; } = WeatherLocation.Default;
+
+    public string WeatherTemperatureUnit { get; set; } = "automatic";
 
     public bool StartWithWindows { get; set; }
 
@@ -56,6 +61,8 @@ internal sealed class UserSettings
             DisplayPlacement = DisplayPlacement,
             PanelSize = PanelSize,
             TextSize = TextSize,
+            WeatherLocation = WeatherLocation,
+            WeatherTemperatureUnit = WeatherTemperatureUnit,
             SwitchingMode = SwitchingMode,
             Language = Language,
             StartWithWindows = StartWithWindows,

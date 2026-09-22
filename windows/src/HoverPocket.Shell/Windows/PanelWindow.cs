@@ -76,9 +76,9 @@ internal sealed class PanelWindow : NoActivateWindow
             + VoicePanelGeometry.Height(_bridgeController.CurrentSettings.PanelSize, _bridgeController.ResolvedVoiceLaneMode);
         MinWidth = PanelSizeCatalog.Get(PanelSize.Small).Width;
         MinHeight = PanelSizeCatalog.Get(PanelSize.Small).TotalHeight;
-        MaxWidth = PanelSizeCatalog.Get(PanelSize.Large).Width;
-        MaxHeight = PanelSizeCatalog.Get(PanelSize.Large).TotalHeight
-            + VoicePanelGeometry.ExpandedHeight(PanelSize.Large);
+        MaxWidth = PanelSizeCatalog.Get(PanelSize.ExtraLarge).Width;
+        MaxHeight = PanelSizeCatalog.Get(PanelSize.ExtraLarge).TotalHeight
+            + VoicePanelGeometry.ExpandedHeight(PanelSize.ExtraLarge);
         Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(4, 4, 6));
 
         _fallbackVisual = new Border

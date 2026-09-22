@@ -5,6 +5,11 @@ updated_by: codex
 status: macos-644-main-integrated; published-macos-644; physical-voice-e2e-pending
 ---
 
+## 2026-09-22 Windows版の644相当対応を開始
+
+- インストール済みMac build 644のソースを基準にWindowsの既存基盤を統合し、天気・地点設定・特大パネル/文字を実装。Windows Releaseクロスビルド（警告0/エラー0）、天気コア18項目、画面16組合せが通過。
+- ミラーとマイクチェックは対象外。S311-winの専用タスクでVoice・Pocket Tools v2・付箋リマインダーと実機確認を続行する。Windowsネイティブ受入・配布は未完了。[詳細](2026-09/2026-09-22_hover-pocket-windows-macos644-parity.md)。
+
 ## 現在地（2026-09-29）
 
 - 本番644を含む `codex/pocket-tools-platform`（`35701a4`）を [PR #41](https://github.com/shotaro311/hover-pocket/pull/41) でmainへ統合済み（`48c1c03`）。ローカルmainとGitHub mainの一致を確認。GitHub CIは10件成功・8件予定どおりスキップ・失敗0件。

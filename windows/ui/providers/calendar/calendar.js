@@ -1,3 +1,4 @@
+import { renderWeather } from "./weather.js";
 const styleHref = "./providers/calendar/calendar.css";
 
 let cachedState = null;
@@ -32,6 +33,9 @@ export function renderCalendarProvider(context) {
     </section>
   `;
   context.container.append(root);
+  const weatherElement = document.createElement("section");
+  root.append(weatherElement);
+  const weather = renderWeather(weatherElement, context);
 
   const scheduleEl = root.querySelector("[data-schedule]");
   const connectionEl = root.querySelector("[data-connection]");
@@ -104,6 +108,7 @@ export function renderCalendarProvider(context) {
 
   return {
     refresh() {
+      void weather.refresh();
       return context.request("calendar.getState").then((state) => {
         if (!disposed) {
           cachedState = state;
@@ -114,6 +119,7 @@ export function renderCalendarProvider(context) {
     },
     dispose() {
       disposed = true;
+      weather.dispose();
       void context.request("panel.endTextInput").catch(() => {});
     },
   };

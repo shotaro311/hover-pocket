@@ -283,6 +283,36 @@ internal sealed class SettingsVerifier
         await Send(dispatcher, """{"id":"9","method":"settings.resetDefaults"}""");
         VerifyDefaults(store, registry, startup);
         await VerifyResetDisablesGenerationAsync(registry);
+        await VerifyWeatherSettingsAsync(controller, dispatcher, panelDispatcher, store, registry);
+    }
+
+    private async Task VerifyWeatherSettingsAsync(PanelBridgeController controller, BridgeDispatcher dispatcher,
+        BridgeDispatcher panelDispatcher, UserSettingsStore store, ProviderRegistry registry)
+    {
+        var location = Providers.Weather.WeatherRegions.All.Single(region => region.Id == "40").Location;
+        var request = JsonSerializer.Serialize(new { id = "weather-location", method = "weather.setLocation", @params = new { location } }, BridgeJson.Options);
+        await Send(dispatcher, request);
+        await Send(dispatcher, """{"id":"weather-unit","method":"weather.setUnit","params":{"unit":"fahrenheit"}}""");
+        await Send(dispatcher, """{"id":"weather-size","method":"settings.setPanelSize","params":{"panelSize":"extraLarge"}}""");
+        var state = await Send(dispatcher, """{"id":"weather-text","method":"settings.setTextSize","params":{"textSize":"extraLarge"}}""");
+        var saved = store.ReloadOrDefault(registry.ProviderIds);
+        if (saved.WeatherLocation != location || saved.WeatherTemperatureUnit != "fahrenheit"
+            || saved.PanelSize != PanelSize.ExtraLarge || saved.TextSize != PanelTextSize.ExtraLarge
+            || !state.Contains("\"panelSize\":\"extraLarge\"", StringComparison.Ordinal))
+            _failures.Add("weather / XL settings did not roundtrip through bridge and disk");
+        foreach (var method in new[] { "weather.setLocation", "weather.setUnit", "weather.search", "weather.useCurrentLocation" })
+        {
+            var denied = await panelDispatcher.ProcessRawMessageAsync(JsonSerializer.Serialize(new { id = "weather-panel", method }));
+            if (denied?.Contains("unknown_method", StringComparison.Ordinal) != true)
+                _failures.Add("panel exposed Settings-only weather method: " + method);
+        }
+        var invalid = await dispatcher.ProcessRawMessageAsync("""{"id":"weather-invalid","method":"weather.setUnit","params":{"unit":"kelvin"}}""");
+        if (invalid?.Contains("handler_error", StringComparison.Ordinal) != true || controller.CurrentSettings.WeatherTemperatureUnit != "fahrenheit")
+            _failures.Add("invalid weather unit was accepted");
+        await Send(dispatcher, """{"id":"weather-reset","method":"settings.resetDefaults"}""");
+        saved = store.ReloadOrDefault(registry.ProviderIds);
+        if (saved.WeatherLocation.Id != "13" || saved.WeatherTemperatureUnit != "automatic")
+            _failures.Add("weather reset did not restore defaults");
     }
 
     private void VerifyVoiceAvailabilityWireValues()

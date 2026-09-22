@@ -4,6 +4,10 @@ WPF の常駐シェルと WebView2 のパネルで構成する Windows 版です
 
 Windows 版の provider は Controls、Calendar、Clipboard、Sticky Notes、Timer、Calculator です。Mirror と Microphone は Windows 版の対象外で、macOS 版の実装には影響しません。
 
+Calendarには今日と7日先までの天気を表示します。設定で世界の都市を検索するか、47都道府県から選択し、温度を自動・摂氏・華氏へ切り替えられます。Windowsの位置情報許可は「現在地を使用」を押したときだけ要求します。予報は地点・座標・温度単位ごとに保存し、通信できない場合は保存済み予報であることを明示します。位置情報を使用できない場合も都市・都道府県を選択できます。天気情報は[Open-Meteo](https://open-meteo.com/)から取得します。
+
+パネルと文字サイズは小・中・大・特大の4段階です。特大パネルは780×560 DIPsで、Voiceの展開領域にも対応します。
+
 Controlsでは再生速度を「− / ＋」で0.25倍刻みに変更し、Windowsメディアセッションの読み戻し値を表示します。再生サムネイルを押すと、一意に特定できた再生元ウィンドウだけを前面へ表示してパネルを閉じます。Timerはストップウォッチ、タイマー、ポモドーロの3種類を横並びの追加カードから登録できます。実行中項目は1列のコンパクトなリストへ表示し、ストップウォッチとカウントダウンを各4件まで独立して扱います。ストップウォッチは100分の1秒表示で、providerを切り替えたりパネルを閉じたりしてもアプリ稼働中は計測を続けます。
 
 ## Build
@@ -45,6 +49,8 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify controls
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify ui
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify settings
+dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify weather
+dotnet run --project .\windows\tests\Weather.Core\Weather.Core.csproj --configuration Release
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify pocket-surface
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify capabilities
 dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj -- --verify broker
@@ -53,6 +59,8 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 `--verify shell` は access surface と panel の `WS_EX_NOACTIVATE`、`WS_EX_TOOLWINDOW`、`WS_EX_TOPMOST`、2 回目起動、120ms pollingだけによるopen、hidden / 位置ずれ / style欠落の自己修復、window再生成、3段階recovery、ポインター移動、open/close 25回、描画フレーム数と最大フレーム間隔を検査します。
 
 `--verify display` は現在のモニター構成を列挙し、`Main` / `Sub` / `All` の対象 display 数、`Sub` のサブなし fallback、access surface / panel / collapsed rect の画面内収まり、DIPs と物理ピクセルの round-trip を検査して exit code で返します。WinExe のため標準出力が空になる場合があります。
+
+`--verify weather` と `Weather.Core` は同じ実装を使い、47都道府県、温度単位、8日間の予報、世界の都市検索、キャッシュの分離・破損・通信失敗、取消、不正データ拒否、特大サイズを検証します。テストは通信をfixtureへ置き換え、実際の位置情報許可を要求しません。`--verify settings` は地点・単位・特大サイズの保存後読み戻し、設定画面以外からの天気設定変更拒否、不正単位の拒否、既定値への復元も確認します。
 
 `--verify controls` は音量・ミュート・輝度・メディア操作・再生元ウィンドウ解決の決定的テストと、実機の読み取り専用 probe を実行します。外部ディスプレイの輝度は DDC/CI 非対応や応答遅延を許容し、パネル全体を停止させずに非対応表示へフォールバックします。
 

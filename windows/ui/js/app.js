@@ -449,7 +449,9 @@ function providerRenderKey(state) {
   const surfaceIdentity = surface
     ? `:${surface.appId ?? ""}:${surface.version ?? ""}:${surface.manifestDigest ?? ""}`
     : "";
-  return `${state.selectedProvider?.id ?? "none"}:${state.settings.language}${surfaceIdentity}`;
+  const weatherIdentity = state.selectedProvider?.id === "calendar"
+    ? JSON.stringify([state.settings.weatherLocation, state.settings.weatherTemperatureUnit]) : "";
+  return `${state.selectedProvider?.id ?? "none"}:${state.settings.language}${surfaceIdentity}:${weatherIdentity}`;
 }
 
 function renderVoiceLane(state) {

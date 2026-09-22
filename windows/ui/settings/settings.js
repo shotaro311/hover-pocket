@@ -1,6 +1,7 @@
 import { on, request } from "../js/bridge.js";
 import { labelForSize, setLanguage, t } from "../js/i18n.js";
 import { createGenerationTargetState } from "./generation-target-state.mjs";
+import { createWeatherSettings } from "./weather-settings.js";
 
 const languageEl = document.querySelector("[data-language]");
 const displayPlacementEl = document.querySelector("[data-display-placement]");
@@ -74,6 +75,7 @@ let currentState = null;
 let stickyState = null;
 let generationState = null;
 const generationTarget = createGenerationTargetState();
+const weatherSettings = createWeatherSettings(document.querySelector("[data-weather-settings]"), request, render);
 
 on("state.changed", (state) => render(state));
 
@@ -89,6 +91,7 @@ async function bootstrap() {
 function render(state) {
   currentState = state;
   setLanguage(state.settings.language);
+  weatherSettings.render(state);
   document.querySelectorAll("[data-i18n]").forEach((node) => {
     node.textContent = t(node.getAttribute("data-i18n"));
   });
@@ -111,7 +114,7 @@ function render(state) {
     label: labelForSize(size.id),
   })), state.settings.panelSize, (panelSize) => update("settings.setPanelSize", { panelSize }));
 
-  renderSegment(textSizeEl, ["small", "medium", "large"].map((size) => ({
+  renderSegment(textSizeEl, ["small", "medium", "large", "extraLarge"].map((size) => ({
     id: size,
     label: labelForSize(size),
   })), state.settings.textSize, (textSize) => update("settings.setTextSize", { textSize }));

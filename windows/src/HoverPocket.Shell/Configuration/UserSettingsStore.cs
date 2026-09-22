@@ -174,6 +174,10 @@ internal sealed class UserSettingsStore
         {
             settings.VoiceEnabled = false;
         }
+        if (settings.WeatherLocation is not { IsValid: true })
+            settings.WeatherLocation = Providers.Weather.WeatherLocation.Default;
+        if (settings.WeatherTemperatureUnit is not ("automatic" or "celsius" or "fahrenheit"))
+            settings.WeatherTemperatureUnit = "automatic";
         var known = providerIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var order = settings.ProviderOrder
             .Where(id => known.Contains(id))

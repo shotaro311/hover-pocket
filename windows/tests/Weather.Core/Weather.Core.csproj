@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/HoverPocket.Shell/Providers/Weather/*.cs" Exclude="../../src/HoverPocket.Shell/Providers/Weather/WindowsWeatherLocation.cs" Link="Weather/%(Filename)%(Extension)" />
+    <Compile Include="../../src/HoverPocket.Shell/Configuration/PanelSize*.cs" Link="Configuration/%(Filename)%(Extension)" />
+    <Compile Include="../../src/HoverPocket.Shell/Bridge/BridgeJson.cs" Link="BridgeJson.cs" />
+  </ItemGroup>
+</Project>

@@ -294,3 +294,7 @@ select {
 .pocket-generation .danger {
   border-color: rgba(255, 96, 96, 0.45);
 }
+ .weather-settings-row { display: flex; flex-wrap: wrap; gap: 8px; }
+ .weather-settings-row input { flex: 1; min-width: 150px; padding: 8px; border: 1px solid #3a404b; border-radius: 6px; background: #11151b; color: #f7f8fb; }
+ .weather-results { display: grid; gap: 5px; margin-bottom: 12px; }
+ .weather-results button { text-align: left; }

@@ -113,6 +113,13 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (options.VerifyWeather)
+        {
+            VerifyConsole.AttachParent();
+            _ = RunWeatherVerificationAsync();
+            return;
+        }
+
         if (options.VerifyCalc || options.VerifyTimer || options.VerifyCalendar)
         {
             VerifyConsole.AttachParent();
@@ -300,6 +307,12 @@ public partial class App : System.Windows.Application
         {
             Environment.ExitCode = 1;
         }
+    }
+
+    private async Task RunWeatherVerificationAsync()
+    {
+        Environment.ExitCode = await Providers.Weather.WeatherVerifier.RunAsync(VerifyConsole.WriteLine);
+        Shutdown();
     }
 
     private async Task RunShellVerificationAsync()

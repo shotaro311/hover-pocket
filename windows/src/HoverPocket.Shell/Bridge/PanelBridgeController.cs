@@ -11,6 +11,7 @@ using HoverPocket.Shell.Providers.Clipboard;
 using HoverPocket.Shell.Providers.Controls;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
+using HoverPocket.Shell.Providers.Weather;
 using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Services;
 using HoverPocket.Shell.Settings;
@@ -32,6 +33,8 @@ internal sealed class PanelBridgeController : IDisposable
     private readonly UpdaterService _updaterService;
     private readonly CalculatorBridgeHandlers _calculatorBridgeHandlers = new();
     private readonly CalendarBridgeController _calendarBridgeController;
+    private readonly WeatherStore _weatherStore;
+    private readonly WeatherService _weatherService = new();
     private readonly ClipboardBridgeController _clipboardBridgeController;
     private readonly ControlsBridgeController _controlsBridgeController = new();
     private readonly StickyBridgeController _stickyBridgeController;
@@ -83,6 +86,7 @@ internal sealed class PanelBridgeController : IDisposable
     {
         _providerRegistry = providerRegistry;
         _settingsStore = settingsStore;
+        _weatherStore = new WeatherStore(Path.Combine(settingsStore.RootDirectory, "weather"));
         _startupRegistration = startupRegistration ?? new RunKeyStartupRegistrationService();
         _updaterService = updaterService ?? new UpdaterService();
         _openAIRealtimeCredentialStore = openAIRealtimeCredentialStore
@@ -462,6 +466,23 @@ internal sealed class PanelBridgeController : IDisposable
                     cancellationToken));
             _pocketAppGenerationController?.AttachSettings(dispatcher, approvalOwner);
         }
+        dispatcher.Register("weather.getForecast", async (parameters, token) =>
+            await _weatherStore.LoadAsync(CurrentSettings.WeatherLocation, CurrentSettings.WeatherTemperatureUnit,
+                parameters is { } value && value.TryGetProperty("force", out var force) && force.ValueKind == JsonValueKind.True, token));
+        dispatcher.Register("weather.openAttribution", (_, token) =>
+        {
+            token.ThrowIfCancellationRequested();
+            Process.Start(new ProcessStartInfo("https://open-meteo.com/") { UseShellExecute = true });
+            return Task.FromResult<object?>(new { opened = true });
+        });
+        if (surface == BridgeSurface.Settings)
+        {
+            dispatcher.Register("weather.search", async (parameters, token) =>
+                await _weatherService.SearchAsync(ReadRequiredString(parameters, "query"), ToWireValue(CurrentSettings.Language), token));
+            dispatcher.Register("weather.setLocation", SetWeatherLocationAsync);
+            dispatcher.Register("weather.setUnit", SetWeatherUnitAsync);
+            dispatcher.Register("weather.useCurrentLocation", UseCurrentWeatherLocationAsync);
+        }
         _calculatorBridgeHandlers.Register(dispatcher);
         if (_externalIntegrationsEnabled)
         {
@@ -552,6 +573,8 @@ internal sealed class PanelBridgeController : IDisposable
                 displayPlacement = ToWireValue(CurrentSettings.DisplayPlacement),
                 panelSize = ToWireValue(CurrentSettings.PanelSize),
                 textSize = ToWireValue(CurrentSettings.TextSize),
+                weatherLocation = CurrentSettings.WeatherLocation,
+                weatherTemperatureUnit = CurrentSettings.WeatherTemperatureUnit,
                 switchingMode = ToWireValue(CurrentSettings.SwitchingMode),
                 language = ToWireValue(CurrentSettings.Language),
                 startWithWindows = CurrentSettings.StartWithWindows,
@@ -574,6 +597,7 @@ internal sealed class PanelBridgeController : IDisposable
                 providerOrder = EffectiveProviderOrder(),
                 providerVisibility = CurrentSettings.ProviderVisibility
             },
+            weatherRegions = WeatherRegions.All,
             updater = _updaterService.Snapshot,
             panel = new
             {
@@ -908,6 +932,42 @@ internal sealed class PanelBridgeController : IDisposable
             SaveSettings(updated);
         }
 
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetWeatherLocationAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (parameters is not { } value || !value.TryGetProperty("location", out var item))
+            throw new InvalidOperationException("Choose a weather location.");
+        var location = item.Deserialize<WeatherLocation>(BridgeJson.Options);
+        if (location is not { IsValid: true }) throw new InvalidOperationException("Invalid weather location.");
+        var updated = CurrentSettings.Clone();
+        updated.WeatherLocation = location;
+        SaveSettings(updated);
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetWeatherUnitAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var unit = ReadRequiredString(parameters, "unit");
+        if (unit is not ("automatic" or "celsius" or "fahrenheit"))
+            throw new InvalidOperationException("Invalid temperature unit.");
+        var updated = CurrentSettings.Clone();
+        updated.WeatherTemperatureUnit = unit;
+        SaveSettings(updated);
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> UseCurrentWeatherLocationAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        var location = await WindowsWeatherLocation.GetAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        var updated = CurrentSettings.Clone();
+        updated.WeatherLocation = location;
+        SaveSettings(updated);
         return await PublishStateAsync(cancellationToken);
     }
 
@@ -2612,6 +2672,7 @@ internal sealed class PanelBridgeController : IDisposable
         {
             "small" => PanelSize.Small,
             "large" => PanelSize.Large,
+            "extralarge" => PanelSize.ExtraLarge,
             _ => PanelSize.Medium
         };
     }
@@ -2649,6 +2710,7 @@ internal sealed class PanelBridgeController : IDisposable
         {
             "small" => PanelTextSize.Small,
             "large" => PanelTextSize.Large,
+            "extralarge" => PanelTextSize.ExtraLarge,
             _ => PanelTextSize.Medium
         };
     }
@@ -2720,6 +2782,7 @@ internal sealed class PanelBridgeController : IDisposable
         {
             PanelSize.Small => "small",
             PanelSize.Large => "large",
+            PanelSize.ExtraLarge => "extraLarge",
             _ => "medium"
         };
     }
@@ -2750,6 +2813,7 @@ internal sealed class PanelBridgeController : IDisposable
         {
             PanelTextSize.Small => "small",
             PanelTextSize.Large => "large",
+            PanelTextSize.ExtraLarge => "extraLarge",
             _ => "medium"
         };
     }
