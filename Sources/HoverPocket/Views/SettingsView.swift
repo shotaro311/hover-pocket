@@ -201,7 +201,7 @@ struct SettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(settings.orderedManifests(providerStore.registry.manifests)) { manifest in
+                ForEach(settings.orderedManifests(providerStore.availableManifests)) { manifest in
                     HStack(spacing: 8) {
                         Image(systemName: manifest.symbolName)
                             .frame(width: 18)
@@ -560,11 +560,7 @@ struct SettingsView: View {
                 settings.isProviderVisible(manifest.id)
             },
             set: { isVisible in
-                settings.setProvider(
-                    manifest.id,
-                    isVisible: isVisible,
-                    manifests: providerStore.registry.manifests
-                )
+                providerStore.setProvider(manifest.id, isVisible: isVisible)
             }
         )
     }

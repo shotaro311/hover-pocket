@@ -8,17 +8,19 @@ internal sealed class PocketAppPinnedDirectory : IDisposable
 {
     private readonly SafeFileHandle _handle;
     private readonly FileIdentity _identity;
+    private readonly bool _allowReplacement;
     private bool _disposed;
 
-    public PocketAppPinnedDirectory(string path)
+    public PocketAppPinnedDirectory(string path, bool allowReplacement = true)
     {
         FullPath = Path.GetFullPath(path);
+        _allowReplacement = allowReplacement;
         if (FullPath.StartsWith("\\\\", StringComparison.Ordinal))
         {
             throw Failure("GENERATION_ROOT_UNSAFE");
         }
         EnsureNoReparsePath(FullPath, createMissing: true);
-        _handle = OpenDirectory(FullPath);
+        _handle = OpenDirectory(FullPath, _allowReplacement);
         _identity = Identity(_handle);
         Validate();
     }
@@ -29,10 +31,55 @@ internal sealed class PocketAppPinnedDirectory : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         EnsureNoReparsePath(FullPath, createMissing: false);
-        using var current = OpenDirectory(FullPath);
+        using var current = OpenDirectory(FullPath, _allowReplacement);
         if (Identity(current) != _identity || Identity(_handle) != _identity)
         {
             throw Failure("GENERATION_ROOT_UNSAFE");
+        }
+    }
+
+    public SafeFileHandle? OpenFileForRead(string fileName)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (string.IsNullOrEmpty(fileName)
+            || fileName != Path.GetFileName(fileName)
+            || fileName.Contains(Path.DirectorySeparatorChar)
+            || fileName.Contains(Path.AltDirectorySeparatorChar))
+        {
+            throw Failure("GENERATION_ROOT_UNSAFE");
+        }
+        Validate();
+        var path = Path.Combine(FullPath, fileName);
+        var handle = CreateFile(
+            path,
+            GenericRead,
+            FileShare.Read,
+            IntPtr.Zero,
+            FileMode.Open,
+            FileFlagsAndAttributes.OpenReparsePoint | FileFlagsAndAttributes.SequentialScan,
+            IntPtr.Zero);
+        if (handle.IsInvalid)
+        {
+            var error = Marshal.GetLastWin32Error();
+            handle.Dispose();
+            if (error is ErrorFileNotFound or ErrorPathNotFound) { return null; }
+            throw Failure("GENERATION_ROOT_UNSAFE");
+        }
+        try
+        {
+            var information = Information(handle);
+            if ((information.FileAttributes & (uint)FileAttributes.Directory) != 0
+                || (information.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0)
+            {
+                throw Failure("GENERATION_ROOT_UNSAFE");
+            }
+            Validate();
+            return handle;
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
         }
     }
 
@@ -76,12 +123,12 @@ internal sealed class PocketAppPinnedDirectory : IDisposable
         }
     }
 
-    private static SafeFileHandle OpenDirectory(string path)
+    private static SafeFileHandle OpenDirectory(string path, bool allowReplacement)
     {
         var handle = CreateFile(
             path,
             0,
-            FileShare.Read | FileShare.Write | FileShare.Delete,
+            FileShare.Read | FileShare.Write | (allowReplacement ? FileShare.Delete : FileShare.None),
             IntPtr.Zero,
             FileMode.Open,
             FileFlagsAndAttributes.BackupSemantics | FileFlagsAndAttributes.OpenReparsePoint,
@@ -91,24 +138,43 @@ internal sealed class PocketAppPinnedDirectory : IDisposable
             handle.Dispose();
             throw Failure("GENERATION_ROOT_UNSAFE");
         }
-        if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+        try
+        {
+            var information = Information(handle);
+            if ((information.FileAttributes & (uint)FileAttributes.Directory) == 0
+                || (information.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0)
+            {
+                throw Failure("GENERATION_ROOT_UNSAFE");
+            }
+            return handle;
+        }
+        catch
         {
             handle.Dispose();
-            throw Failure("GENERATION_ROOT_UNSAFE");
+            throw;
         }
-        return handle;
     }
 
     private static FileIdentity Identity(SafeFileHandle handle)
+    {
+        var information = Information(handle);
+        return new FileIdentity(
+            information.VolumeSerialNumber,
+            ((ulong)information.FileIndexHigh << 32) | information.FileIndexLow);
+    }
+
+    private static ByHandleFileInformation Information(SafeFileHandle handle)
     {
         if (!GetFileInformationByHandle(handle, out var information))
         {
             throw Failure("GENERATION_ROOT_UNSAFE");
         }
-        return new FileIdentity(
-            information.VolumeSerialNumber,
-            ((ulong)information.FileIndexHigh << 32) | information.FileIndexLow);
+        return information;
     }
+
+    private const uint GenericRead = 0x80000000;
+    private const int ErrorFileNotFound = 2;
+    private const int ErrorPathNotFound = 3;
 
     private readonly record struct FileIdentity(uint VolumeSerialNumber, ulong FileIndex);
 
@@ -131,7 +197,8 @@ internal sealed class PocketAppPinnedDirectory : IDisposable
     private enum FileFlagsAndAttributes : uint
     {
         BackupSemantics = 0x02000000,
-        OpenReparsePoint = 0x00200000
+        OpenReparsePoint = 0x00200000,
+        SequentialScan = 0x08000000
     }
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]

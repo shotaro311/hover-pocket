@@ -51,6 +51,13 @@ struct PocketAppWorkflowDocument: Equatable, Sendable {
     let requiredPermissions: Set<String>
 }
 
+struct PocketAppStatePropertySchema: Equatable, Sendable {
+    let types: Set<String>
+    let isRequired: Bool
+    let format: String?
+    let maximumLength: Int?
+}
+
 struct PocketAppPackage: Equatable, Sendable {
     let rootDirectory: URL
     let manifest: PocketAppManifestDocument
@@ -58,6 +65,8 @@ struct PocketAppPackage: Equatable, Sendable {
     let intent: String
     let stateSchemaDigest: String
     let statePropertyNames: Set<String>
+    let statePropertyTypes: [String: Set<String>]
+    let stateProperties: [String: PocketAppStatePropertySchema]
     let surfaces: [String: PocketSurfaceDocument]
     let workflows: [String: PocketAppWorkflowDocument]
     let testCases: [String: String]
@@ -103,7 +112,9 @@ struct PocketAppPackageRuntime {
 
         let stateData = try packageData(manifest.stateSchemaPath, files: packageFiles)
         let stateSchemaDigest = "sha256:" + SHA256.hash(data: stateData).map { String(format: "%02x", $0) }.joined()
-        let statePropertyNames = try validateStateSchema(jsonObject(stateData, path: "$.state.schema"))
+        let stateProperties = try validateStateSchema(jsonObject(stateData, path: "$.state.schema"))
+        let statePropertyTypes = stateProperties.mapValues(\.types)
+        let statePropertyNames = Set(statePropertyTypes.keys)
 
         let requestedScopes = Dictionary(
             uniqueKeysWithValues: manifest.requestedCapabilities.map { ($0.key, $0.scope) }
@@ -130,22 +141,47 @@ struct PocketAppPackageRuntime {
                 requestedScopes: requestedScopes
             )
             try require(workflow.id == id, "$.workflows.\(id):id")
+            for (index, step) in workflow.steps.enumerated() {
+                try require(
+                    PocketAppWorkflowPresentationPolicy.supports(step.capability),
+                    "$.workflows.\(id).steps[\(index)]:presentation"
+                )
+            }
             workflows[id] = workflow
         }
 
-        let workflowInputNames = Set(workflows.values.flatMap { $0.inputs.keys })
-        var boundNames: Set<String> = []
+        var workflowInputTypes: [String: String] = [:]
+        for workflow in workflows.values {
+            for (name, type) in workflow.inputs {
+                if let existingType = workflowInputTypes[name] {
+                    try require(existingType == type, "$.workflows:input_type_conflict")
+                } else {
+                    workflowInputTypes[name] = type
+                }
+            }
+        }
         for surface in surfaces.values {
+            var boundNames: Set<String> = []
+            var pickerDomains: [String: Set<String>] = [:]
             try validateBindings(
                 node: surface.root,
-                inputNames: workflowInputNames,
-                stateNames: statePropertyNames,
+                inputTypes: workflowInputTypes,
+                stateTypes: statePropertyTypes,
                 boundNames: &boundNames,
+                pickerDomains: &pickerDomains,
                 path: "$.surfaces.\(surface.id).root"
             )
             try validateSurfaceScopes(node: surface.root, requestedScopes: requestedScopes, path: "$.surfaces.\(surface.id).root")
+            for workflowID in referencedWorkflows(node: surface.root) {
+                guard let workflow = workflows[workflowID] else {
+                    throw PocketAppPackageError.invalid("$.surfaces.\(surface.id):workflow")
+                }
+                try require(
+                    Set(workflow.inputs.keys).isSubset(of: boundNames),
+                    "$.surfaces.\(surface.id):unbound_workflow_input"
+                )
+            }
         }
-        try require(workflowInputNames.isSubset(of: boundNames), "$.workflows:unbound_input")
 
         var testCases: [String: String] = [:]
         for path in manifest.tests {
@@ -166,6 +202,8 @@ struct PocketAppPackageRuntime {
             intent: intent,
             stateSchemaDigest: stateSchemaDigest,
             statePropertyNames: statePropertyNames,
+            statePropertyTypes: statePropertyTypes,
+            stateProperties: stateProperties,
             surfaces: surfaces,
             workflows: workflows,
             testCases: testCases
@@ -366,7 +404,7 @@ struct PocketAppPackageRuntime {
         )
     }
 
-    private func validateStateSchema(_ object: [String: Any]) throws -> Set<String> {
+    private func validateStateSchema(_ object: [String: Any]) throws -> [String: PocketAppStatePropertySchema] {
         try exactKeys(object, required: ["type", "properties", "additionalProperties"], optional: ["$schema", "required"], path: "$.state.schema")
         if let schema = object["$schema"] {
             try require(try string(schema, path: "$.state.schema.$schema") == "https://json-schema.org/draft/2020-12/schema", "$.state.schema.$schema")
@@ -375,6 +413,14 @@ struct PocketAppPackageRuntime {
         try require(try boolean(object["additionalProperties"], path: "$.state.schema.additionalProperties") == false, "$.state.schema.additionalProperties")
         let properties = try dictionary(object["properties"], path: "$.state.schema.properties")
         try require(properties.count <= 128, "$.state.schema.properties")
+        let required = try (object["required"].map { try array($0, path: "$.state.schema.required") } ?? [])
+            .map { try string($0, path: "$.state.schema.required") }
+        try require(
+            Set(required).count == required.count && required.allSatisfy { properties[$0] != nil },
+            "$.state.schema.required"
+        )
+        let requiredNames = Set(required)
+        var stateProperties: [String: PocketAppStatePropertySchema] = [:]
         for (name, value) in properties {
             try require(matches(name, "^[A-Za-z][A-Za-z0-9_]{0,63}$"), "$.state.schema.properties")
             let property = try dictionary(value, path: "$.state.schema.properties.\(name)")
@@ -386,42 +432,151 @@ struct PocketAppPackageRuntime {
                 types = try array(property["type"], path: "$.state.schema.properties.\(name).type").map { try string($0, path: "$.state.schema.properties.\(name).type") }
             }
             try require(!types.isEmpty && Set(types).count == types.count && types.allSatisfy { ["string", "integer", "number", "boolean", "null"].contains($0) }, "$.state.schema.properties.\(name).type")
-            if let format = property["format"] {
-                try require(try string(format, path: "$.state.schema.properties.\(name).format") == "date", "$.state.schema.properties.\(name).format")
+            let format: String?
+            if let rawFormat = property["format"] {
+                let parsed = try string(rawFormat, path: "$.state.schema.properties.\(name).format")
+                try require(parsed == "date", "$.state.schema.properties.\(name).format")
+                format = parsed
+            } else {
+                format = nil
             }
+            let maximumLength: Int?
             if let maximum = property["maxLength"] {
-                try require((1...10_000).contains(try integer(maximum, path: "$.state.schema.properties.\(name).maxLength")), "$.state.schema.properties.\(name).maxLength")
+                let parsed = try integer(maximum, path: "$.state.schema.properties.\(name).maxLength")
+                try require((1...10_000).contains(parsed), "$.state.schema.properties.\(name).maxLength")
+                maximumLength = parsed
+            } else {
+                maximumLength = nil
             }
+            stateProperties[name] = PocketAppStatePropertySchema(
+                types: Set(types),
+                isRequired: requiredNames.contains(name),
+                format: format,
+                maximumLength: maximumLength
+            )
         }
-        let required = try (object["required"].map { try array($0, path: "$.state.schema.required") } ?? []).map { try string($0, path: "$.state.schema.required") }
-        try require(Set(required).count == required.count && required.allSatisfy { properties[$0] != nil }, "$.state.schema.required")
-        return Set(properties.keys)
+        return stateProperties
     }
 
     private func validateBindings(
         node: PocketSurfaceRenderNode,
-        inputNames: Set<String>,
-        stateNames: Set<String>,
+        inputTypes: [String: String],
+        stateTypes: [String: Set<String>],
         boundNames: inout Set<String>,
+        pickerDomains: inout [String: Set<String>],
         path: String
     ) throws {
         for (key, value) in node.properties {
-            if case .string(let binding) = value, binding.hasPrefix("$") {
+            guard case .string(let binding) = value else { continue }
+            let acceptedInputTypes = acceptedWorkflowInputTypes(nodeType: node.type, propertyName: key)
+            let acceptedStateTypes = acceptedStateTypes(nodeType: node.type, propertyName: key)
+            guard acceptedInputTypes != nil || acceptedStateTypes != nil else { continue }
+            if binding.hasPrefix("$") {
                 if binding.hasPrefix("$input.") {
                     let name = String(binding.dropFirst("$input.".count))
-                    try require(inputNames.contains(name), "\(path).\(key):binding")
+                    guard let declaredType = inputTypes[name],
+                          let acceptedInputTypes else {
+                        throw PocketAppPackageError.invalid("\(path).\(key):binding")
+                    }
+                    try require(acceptedInputTypes.contains(declaredType), "\(path).\(key):binding_type")
                     boundNames.insert(name)
                 } else if binding.hasPrefix("$state.") {
                     let name = String(binding.dropFirst("$state.".count))
-                    try require(stateNames.contains(name), "\(path).\(key):binding")
+                    guard let declaredStateTypes = stateTypes[name],
+                          let acceptedStateTypes else {
+                        throw PocketAppPackageError.invalid("\(path).\(key):binding")
+                    }
+                    let nonNullStateTypes = declaredStateTypes.subtracting(["null"])
+                    try require(
+                        !nonNullStateTypes.isEmpty && nonNullStateTypes.isSubset(of: acceptedStateTypes),
+                        "\(path).\(key):binding_type"
+                    )
+                    if let fallbackInputType = inputTypes[name] {
+                        guard let acceptedInputTypes = acceptedWorkflowInputTypes(nodeType: node.type, propertyName: key) else {
+                            throw PocketAppPackageError.invalid("\(path).\(key):workflow_fallback_type")
+                        }
+                        try require(
+                            acceptedInputTypes.contains(fallbackInputType),
+                            "\(path).\(key):workflow_fallback_type"
+                        )
+                    }
                     boundNames.insert(name)
                 } else {
                     throw PocketAppPackageError.invalid("\(path).\(key):binding")
                 }
+                if node.type == "picker", key == "value" {
+                    let domain = pickerDomain(node)
+                    if let existing = pickerDomains[binding] {
+                        try require(existing == domain, "\(path).\(key):picker_domain_conflict")
+                    } else {
+                        pickerDomains[binding] = domain
+                    }
+                }
             }
         }
         for (index, child) in node.children.enumerated() {
-            try validateBindings(node: child, inputNames: inputNames, stateNames: stateNames, boundNames: &boundNames, path: "\(path).children[\(index)]")
+            try validateBindings(
+                node: child,
+                inputTypes: inputTypes,
+                stateTypes: stateTypes,
+                boundNames: &boundNames,
+                pickerDomains: &pickerDomains,
+                path: "\(path).children[\(index)]"
+            )
+        }
+    }
+
+    private func pickerDomain(_ node: PocketSurfaceRenderNode) -> Set<String> {
+        guard case .array(let options)? = node.properties["options"] else { return [] }
+        return Set(options.compactMap { option in
+            guard case .object(let properties) = option,
+                  case .string(let value)? = properties["value"] else { return nil }
+            return value
+        })
+    }
+
+    private func acceptedWorkflowInputTypes(nodeType: String, propertyName: String) -> Set<String>? {
+        switch (nodeType, propertyName) {
+        case ("textField", "value"):
+            return ["string"]
+        case ("toggle", "value"):
+            return ["boolean"]
+        case ("picker", "value"):
+            return ["string"]
+        case ("calendarEventPicker", "selection"):
+            return ["entity-ref"]
+        case ("calendarEventPicker", "titleTarget"):
+            return ["string"]
+        case ("durationPicker", "value"):
+            return ["integer", "number"]
+        default:
+            return nil
+        }
+    }
+
+    private func referencedWorkflows(node: PocketSurfaceRenderNode) -> Set<String> {
+        var workflows = Set<String>()
+        if node.type == "button", case .string(let workflowID) = node.properties["workflow"] {
+            workflows.insert(workflowID)
+        }
+        for child in node.children {
+            workflows.formUnion(referencedWorkflows(node: child))
+        }
+        return workflows
+    }
+
+    private func acceptedStateTypes(nodeType: String, propertyName: String) -> Set<String>? {
+        switch (nodeType, propertyName) {
+        case ("textField", "value"):
+            return ["string"]
+        case ("toggle", "value"):
+            return ["boolean"]
+        case ("picker", "value"):
+            return ["string"]
+        case ("calendarEventPicker", "selection"), ("calendarEventPicker", "titleTarget"):
+            return ["string"]
+        default:
+            return nil
         }
     }
 
@@ -450,6 +605,7 @@ struct PocketAppPackageRuntime {
            case .string(let query)? = items["query"],
            case .object(let arguments)? = items["arguments"] {
             let key = try capabilityKey(query, path: "\(path).items.query")
+            try require(key == PocketCapabilityKeys.calendarList, "\(path).items.query:unsupported_shape")
             try require(requestedScopes.keys.contains(key), "\(path).items.query:undeclared")
             try validateCapabilityScope(
                 arguments: arguments,

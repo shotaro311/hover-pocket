@@ -7,6 +7,7 @@ using HoverPocket.Shell.PocketApps;
 using HoverPocket.Shell.Providers.Calendar;
 using HoverPocket.Shell.Providers.Sticky;
 using HoverPocket.Shell.Providers.Timer;
+using HoverPocket.Shell.Verification;
 
 namespace HoverPocket.Shell.Capabilities;
 
@@ -28,25 +29,25 @@ internal sealed class CapabilityBrokerVerifier
 
         if (_failures.Count > 0)
         {
-            Console.Error.WriteLine("broker_verify=failed");
+            VerifyConsole.WriteLine("broker_verify=failed");
             foreach (var failure in _failures)
             {
-                Console.Error.WriteLine($"failure={failure}");
+                VerifyConsole.WriteLine($"failure={failure}");
             }
             return 1;
         }
 
-        Console.WriteLine("broker_verify=ok");
-        Console.WriteLine("broker_registry_descriptors=15");
-        Console.WriteLine("broker_available_handlers=14");
-        Console.WriteLine("broker_calculator_evaluate=ok");
-        Console.WriteLine("broker_sticky_lifecycle=ok");
-        Console.WriteLine("broker_today_focus=ok");
-        Console.WriteLine("broker_pocket_app=ok");
-        Console.WriteLine("broker_pocket_app_declared_tests=4");
-        Console.WriteLine("broker_concurrent_duplicate=ok");
-        Console.WriteLine("broker_negative_cases=11");
-        Console.WriteLine($"broker_golden_plan_digest={GoldenPlanDigest}");
+        VerifyConsole.WriteLine("broker_verify=ok");
+        VerifyConsole.WriteLine("broker_registry_descriptors=15");
+        VerifyConsole.WriteLine("broker_available_handlers=14");
+        VerifyConsole.WriteLine("broker_calculator_evaluate=ok");
+        VerifyConsole.WriteLine("broker_sticky_lifecycle=ok");
+        VerifyConsole.WriteLine("broker_today_focus=ok");
+        VerifyConsole.WriteLine("broker_pocket_app=ok");
+        VerifyConsole.WriteLine("broker_pocket_app_declared_tests=4");
+        VerifyConsole.WriteLine("broker_concurrent_duplicate=ok");
+        VerifyConsole.WriteLine("broker_negative_cases=11");
+        VerifyConsole.WriteLine($"broker_golden_plan_digest={GoldenPlanDigest}");
         return 0;
     }
 
@@ -374,6 +375,7 @@ internal sealed class CapabilityBrokerVerifier
             await VerifyPartialRollbackAsync(root, now, principal);
             await VerifyCurrentStepRollbackAsync(root, now, principal);
             await VerifyCancellationRollbackAsync(root, now, principal);
+            await VerifyCancellationAfterSuccessfulStepAsync(root, now, principal);
             await VerifyTimeoutAsync(root, now, principal);
         }
         finally
@@ -439,15 +441,14 @@ internal sealed class CapabilityBrokerVerifier
             AppContext.BaseDirectory,
             "PocketApps",
             "local.example.today-focus"));
-        var timeZone = TimeZoneInfo.CreateCustomTimeZone(
-            $"JST-pocket-{Guid.NewGuid():N}",
-            TimeSpan.FromHours(9),
-            "JST",
-            "JST");
+        var timeZone = TimeZoneInfo.FindSystemTimeZoneById("Tokyo Standard Time");
+        Require(
+            PocketAppExecutionRuntime.ContractTimeZoneId(timeZone) == "Asia/Tokyo",
+            "pocket_app_windows_timezone_contract");
         var stateRoot = Path.Combine(root, "pocket-app-user-state");
-        var userStateStore = new PocketAppUserStateStore(
+        using var userStateStore = new PocketAppUserStateStore(
             package.Manifest.Id,
-            package.StatePropertyNames,
+            package.StateProperties,
             stateRoot);
         var runtime = new PocketAppExecutionRuntime(
             package,
@@ -458,7 +459,18 @@ internal sealed class CapabilityBrokerVerifier
                 StringComparer.Ordinal),
             timeZone,
             userStateStore);
-        var hostController = new PocketAppHostController(runtime, () => new UserSettings());
+        var hostController = new PocketAppHostController(
+            runtime,
+            () => new UserSettings { AiNativeEnabled = true },
+            () => now);
+        var surfaceState = JsonSerializer.SerializeToElement(hostController.BuildSurfaceState());
+        Require(
+            surfaceState.GetProperty("workflowInputs")
+                .GetProperty("startFocus")
+                .EnumerateArray()
+                .Select(item => item.GetString() ?? string.Empty)
+                .SequenceEqual(["durationSeconds", "purpose", "selectedEventRef"], StringComparer.Ordinal),
+            "pocket_app_surface_workflow_inputs");
         var managerState = JsonSerializer.SerializeToElement(hostController.BuildManagerState());
         Require(managerState.GetProperty("appId").GetString() == package.Manifest.Id, "pocket_app_manager_id");
         Require(managerState.GetProperty("version").GetString() == package.Manifest.Version, "pocket_app_manager_version");
@@ -483,6 +495,12 @@ internal sealed class CapabilityBrokerVerifier
         using (var loadDocument = JsonDocument.Parse(loadResponse!))
         {
             Require(loadDocument.RootElement.GetProperty("error").ValueKind == JsonValueKind.Null, "pocket_app_host_load");
+            var firstQuery = loadDocument.RootElement.GetProperty("result")
+                .GetProperty("queryResults")[0];
+            Require(
+                firstQuery.GetProperty("query").GetString() == "calendar.events.list@1"
+                    && firstQuery.GetProperty("arguments").ValueKind == JsonValueKind.Object,
+                "pocket_app_host_query_binding_identity");
         }
         var updateResponse = await dispatcher.ProcessRawMessageAsync(
             JsonSerializer.Serialize(new
@@ -500,13 +518,168 @@ internal sealed class CapabilityBrokerVerifier
         {
             Require(updateDocument.RootElement.GetProperty("error").ValueKind == JsonValueKind.Null, "pocket_app_state_update");
         }
-        var reloadedStateStore = new PocketAppUserStateStore(
+        using var reloadedStateStore = new PocketAppUserStateStore(
             package.Manifest.Id,
-            package.StatePropertyNames,
+            package.StateProperties,
+            stateRoot);
+        var reloadedState = reloadedStateStore.Snapshot();
+        Require(
+            reloadedState.TryGetValue("selectedEventRef", out var reloadedEventRef)
+            && reloadedEventRef.ValueKind == JsonValueKind.String
+            && reloadedEventRef.GetString() == "primary:sensitive-event-ref",
+            "pocket_app_state_persistence");
+        using var typedStateStore = new PocketAppUserStateStore(
+            "local.example.typed-state",
+            new HashSet<string>(["enabled", "label", "ratio"], StringComparer.Ordinal),
+            stateRoot);
+        typedStateStore.SetValue("enabled", CapabilityJson.From(true));
+        typedStateStore.SetValue("label", CapabilityJson.From("Saved"));
+        typedStateStore.SetValue("ratio", CapabilityJson.From(1.5));
+        using var typedStateReadbackStore = new PocketAppUserStateStore(
+            "local.example.typed-state",
+            new HashSet<string>(["enabled", "label", "ratio"], StringComparer.Ordinal),
+            stateRoot);
+        var typedStateReadback = typedStateReadbackStore.Snapshot();
+        Require(
+            typedStateReadback["enabled"].ValueKind == JsonValueKind.True
+            && typedStateReadback["label"].GetString() == "Saved"
+            && typedStateReadback["ratio"].GetDouble() == 1.5,
+            "pocket_app_typed_state_persistence");
+        var migratedStateTypes = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal)
+        {
+            ["enabled"] = new HashSet<string>(["string"], StringComparer.Ordinal),
+            ["label"] = new HashSet<string>(["string"], StringComparer.Ordinal),
+            ["ratio"] = new HashSet<string>(["integer"], StringComparer.Ordinal)
+        };
+        using var migratedStateStore = new PocketAppUserStateStore(
+            "local.example.typed-state",
+            migratedStateTypes,
+            stateRoot);
+        var migratedState = migratedStateStore.Snapshot();
+        Require(
+            migratedState.Count == 1
+                && migratedState["label"].GetString() == "Saved",
+            "pocket_app_state_schema_migration");
+        using var migratedStateReadbackStore = new PocketAppUserStateStore(
+            "local.example.typed-state",
+            migratedStateTypes,
+            stateRoot);
+        var migratedStateReadback = migratedStateReadbackStore.Snapshot();
+        Require(
+            migratedStateReadback.Count == 1
+                && migratedStateReadback["label"].GetString() == "Saved",
+            "pocket_app_state_schema_migration_persisted");
+        try
+        {
+            migratedStateStore.SetValue("label", CapabilityJson.From(true));
+            _failures.Add("pocket_app_state_schema_write_accepted");
+        }
+        catch (PocketAppUserStateStoreException)
+        {
+        }
+        var constrainedStateProperties = new Dictionary<string, PocketAppStatePropertySchema>(StringComparer.Ordinal)
+        {
+            ["focusDate"] = new PocketAppStatePropertySchema(
+                new HashSet<string>(["string"], StringComparer.Ordinal),
+                true,
+                "date",
+                10)
+        };
+        using var constrainedStateStore = new PocketAppUserStateStore(
+            "local.example.constrained-state",
+            constrainedStateProperties,
+            stateRoot);
+        constrainedStateStore.SetValue("focusDate", CapabilityJson.From("2026-08-20"));
+        try
+        {
+            constrainedStateStore.SetValue("focusDate", CapabilityJson.From("2026-02-30"));
+            _failures.Add("pocket_app_state_date_constraint_accepted");
+        }
+        catch (PocketAppUserStateStoreException)
+        {
+        }
+        try
+        {
+            constrainedStateStore.SetValue("focusDate", CapabilityJson.From("2026-08-200"));
+            _failures.Add("pocket_app_state_max_length_constraint_accepted");
+        }
+        catch (PocketAppUserStateStoreException)
+        {
+        }
+        try
+        {
+            constrainedStateStore.SetValue("focusDate", null);
+            _failures.Add("pocket_app_state_required_removal_accepted");
+        }
+        catch (PocketAppUserStateStoreException)
+        {
+        }
+        using (var optionalRequiredLoadStore = new PocketAppUserStateStore(
+            "local.example.required-load-state",
+            new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal)
+            {
+                ["focusDate"] = new HashSet<string>(["string"], StringComparer.Ordinal)
+            },
+            stateRoot))
+        {
+            optionalRequiredLoadStore.SetValue("focusDate", CapabilityJson.From("not-a-date"));
+        }
+        using var repairedRequiredStateStore = new PocketAppUserStateStore(
+            "local.example.required-load-state",
+            constrainedStateProperties,
             stateRoot);
         Require(
-            reloadedStateStore.Snapshot().GetValueOrDefault("selectedEventRef") == "primary:sensitive-event-ref",
-            "pocket_app_state_persistence");
+            repairedRequiredStateStore.Snapshot().Count == 0,
+            "pocket_app_state_invalid_required_value_repaired");
+        using var repairedRequiredStateReadbackStore = new PocketAppUserStateStore(
+            "local.example.required-load-state",
+            constrainedStateProperties,
+            stateRoot);
+        Require(
+            repairedRequiredStateReadbackStore.Snapshot().Count == 0,
+            "pocket_app_state_invalid_required_value_repair_persisted");
+        using var isolatedStateStore = new PocketAppUserStateStore(
+            "local.example.state-isolated-a",
+            new HashSet<string>(["label"], StringComparer.Ordinal),
+            stateRoot);
+        using var otherStateStore = new PocketAppUserStateStore(
+            "local.example.state-isolated-b",
+            new HashSet<string>(["label"], StringComparer.Ordinal),
+            stateRoot);
+        otherStateStore.SetString("label", "other-app");
+        var isolatedDirectory = Path.Combine(stateRoot, "local.example.state-isolated-a");
+        var isolatedBackup = Path.Combine(stateRoot, "local.example.state-isolated-a-backup");
+        var directorySwapBlocked = false;
+        try
+        {
+            Directory.Move(isolatedDirectory, isolatedBackup);
+            Directory.CreateDirectory(isolatedDirectory);
+            try
+            {
+                isolatedStateStore.SetString("label", "must-not-write");
+            }
+            catch (PocketAppUserStateStoreException)
+            {
+                directorySwapBlocked = true;
+            }
+            finally
+            {
+                Directory.Delete(isolatedDirectory, recursive: true);
+                Directory.Move(isolatedBackup, isolatedDirectory);
+            }
+        }
+        catch (IOException)
+        {
+            directorySwapBlocked = true;
+        }
+        Require(directorySwapBlocked, "pocket_app_state_directory_swap_blocked");
+        using var otherStateReadbackStore = new PocketAppUserStateStore(
+            "local.example.state-isolated-b",
+            new HashSet<string>(["label"], StringComparer.Ordinal),
+            stateRoot);
+        Require(
+            otherStateReadbackStore.Snapshot()["label"].GetString() == "other-app",
+            "pocket_app_state_directory_swap_isolated");
         var forgedStateResponse = await dispatcher.ProcessRawMessageAsync(
             JsonSerializer.Serialize(new
             {
@@ -600,7 +773,7 @@ internal sealed class CapabilityBrokerVerifier
         try
         {
             _ = await runtime.QueryAsync(
-                "timer.start@1",
+                "timer.countdown.start@1",
                 CapabilityJson.From(new
                 {
                     durationSeconds = 60,
@@ -617,6 +790,43 @@ internal sealed class CapabilityBrokerVerifier
         var rejected = runtime.Prepare("startFocus", inputs, now.AddSeconds(1));
         runtime.Reject(rejected, now.AddSeconds(1));
         Require(timerStore.RunningTimers.Count == 1 && stickyStore.Notes.Count == 1, "pocket_app_reject_no_write");
+
+        var blockingTimer = new BrokerBlockingTimerStartHandler();
+        var countingSticky = new BrokerCountingStickyUpsertHandler();
+        var revocationRoot = Path.Combine(root, "pocket-app-revocation-broker");
+        var revocationBroker = new CapabilityBroker(
+            new CapabilityRegistry(new PocketCapabilityHandlerSet([blockingTimer, countingSticky])),
+            new CapabilityBrokerLedger(revocationRoot),
+            new CapabilityBrokerAuditLog(revocationRoot));
+        var revocationLease = new PocketAppActivationLease();
+        var revocationRuntime = new PocketAppExecutionRuntime(
+            package,
+            revocationBroker,
+            "user-pocket-app-revocation-fixture",
+            new HashSet<string>(
+                ["calendar.events.read", "sticky.read", "sticky.write", "timer.read", "timer.write"],
+                StringComparer.Ordinal),
+            timeZone,
+            activationLease: revocationLease);
+        var revocationDraft = revocationRuntime.Prepare("startFocus", inputs, now.AddSeconds(2));
+        var inFlight = revocationRuntime.ApproveAndExecuteAsync(revocationDraft, now.AddSeconds(2));
+        Require(
+            await blockingTimer.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5)),
+            "pocket_app_revocation_entered_handler");
+        revocationLease.Invalidate();
+        try
+        {
+            _ = await inFlight;
+            _failures.Add("pocket_app_revocation_execution_survived");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (PocketAppRuntimeActivationException ex) when (ex.Code == "RUNTIME_ACTIVATION_UNAVAILABLE")
+        {
+        }
+        Require(blockingTimer.WasCancelled, "pocket_app_revocation_cancelled_handler");
+        Require(countingSticky.InvocationCount == 0, "pocket_app_revocation_blocks_later_write");
     }
 
     private void VerifyStrongPerCallIsolation(CapabilityBroker broker, DateTimeOffset now)
@@ -982,6 +1192,63 @@ internal sealed class CapabilityBrokerVerifier
         Require(timerStore.RunningTimers.Count == 0, "cancel_rollback_timer_removed");
     }
 
+    private async Task VerifyCancellationAfterSuccessfulStepAsync(
+        string root,
+        DateTimeOffset now,
+        CapabilityPrincipal principal)
+    {
+        using var timerStore = new TimerStore(
+            Path.Combine(root, "cancel-after-step-timer"),
+            new ManualTimerClock(now),
+            new NullTimerAlertSound(),
+            enableScheduler: false);
+        using var cancellation = new CancellationTokenSource();
+        var sticky = new BrokerCountingStickyUpsertHandler();
+        var handlers = new PocketCapabilityHandlerSet([
+            new TimerCapabilityHandler(TimerCapabilityOperation.Start, timerStore),
+            new BrokerPostReadCancellationTimerReadHandler(timerStore, cancellation),
+            new TimerCapabilityHandler(TimerCapabilityOperation.Stop, timerStore),
+            sticky
+        ]);
+        var brokerRoot = Path.Combine(root, "cancel-after-step-broker");
+        var broker = new CapabilityBroker(
+            new CapabilityRegistry(handlers),
+            new CapabilityBrokerLedger(brokerRoot),
+            new CapabilityBrokerAuditLog(brokerRoot));
+        var permissions = Permissions(principal, "sticky.write", "timer.write");
+        var adapter = new TodayFocusTextAdapter(broker);
+        var draft = adapter.PrepareFocus(
+            new TodayFocusCalendarEvent("event:cancel-after-step", "Cancel after step", now, now.AddMinutes(10)),
+            600,
+            "cancel-after-step",
+            principal,
+            permissions,
+            now);
+        var grant = broker.DecideApproval(
+            draft.Preparation.ApprovalRequest!.Id,
+            draft.Preparation.PlanDigest,
+            CapabilityApprovalDecision.Approve,
+            now);
+        var receipt = await broker.ExecuteAsync(draft.Plan, permissions, grant, now, cancellation.Token);
+        Require(receipt.Status == CapabilityReceiptStatus.Failed, "cancel_after_step_status");
+        if (receipt.Steps.Count != 2)
+        {
+            var statuses = string.Join(",", receipt.Steps.Select(step =>
+                $"{step.Capability.Id}:{step.Status}:{step.Readback.Status}:{step.SafeError?.Code ?? "none"}"));
+            _failures.Add($"cancel_after_step_receipts:{receipt.Steps.Count}:{statuses}");
+            return;
+        }
+        Require(receipt.Steps[0].Status == CapabilityReceiptStatus.Succeeded, "cancel_after_step_first_succeeded");
+        Require(receipt.Steps[0].RollbackStatus == "succeeded", "cancel_after_step_rollback_succeeded");
+        Require(receipt.Steps[1].Status == CapabilityReceiptStatus.Failed, "cancel_after_step_second_failed");
+        Require(receipt.Steps[1].SafeError?.Code == "CAPABILITY_CANCELLED", "cancel_after_step_safe_error");
+        Require(sticky.InvocationCount == 0, "cancel_after_step_no_sticky_write");
+        Require(timerStore.RunningTimers.Count == 0, "cancel_after_step_timer_removed");
+
+        var replay = await broker.ExecuteAsync(draft.Plan, permissions, null, now.AddSeconds(1));
+        Require(replay.Replayed && replay.Status == CapabilityReceiptStatus.Failed, "cancel_after_step_durable_replay");
+    }
+
     private static CapabilityPermissionSet Permissions(CapabilityPrincipal principal, params string[] permissions) =>
         new(principal, new HashSet<string>(permissions, StringComparer.Ordinal));
 
@@ -1091,6 +1358,64 @@ internal sealed class CapabilityBrokerVerifier
         }
     }
 
+    private sealed class BrokerBlockingTimerStartHandler : IPocketCapabilityHandler
+    {
+        private int _wasCancelled;
+
+        public PocketCapabilityKey Key => CapabilityIds.TimerStart;
+
+        public TaskCompletionSource<bool> Entered { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool WasCancelled => Volatile.Read(ref _wasCancelled) == 1;
+
+        public async Task<JsonElement> HandleAsync(
+            JsonElement arguments,
+            CapabilityHandlerContext context,
+            CancellationToken cancellationToken = default)
+        {
+            _ = arguments;
+            _ = context.RequireIdempotencyKey();
+            Entered.TrySetResult(true);
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                Volatile.Write(ref _wasCancelled, 1);
+                throw;
+            }
+            throw new InvalidOperationException("unreachable");
+        }
+    }
+
+    private sealed class BrokerCountingStickyUpsertHandler : IPocketCapabilityHandler
+    {
+        private int _invocationCount;
+
+        public PocketCapabilityKey Key => CapabilityIds.StickyUpsert;
+
+        public int InvocationCount => Volatile.Read(ref _invocationCount);
+
+        public Task<JsonElement> HandleAsync(
+            JsonElement arguments,
+            CapabilityHandlerContext context,
+            CancellationToken cancellationToken = default)
+        {
+            _ = arguments;
+            _ = context.RequireIdempotencyKey();
+            cancellationToken.ThrowIfCancellationRequested();
+            Interlocked.Increment(ref _invocationCount);
+            return Task.FromResult(CapabilityJson.From(new
+            {
+                noteId = Guid.Empty,
+                state = "active",
+                updatedAt = DateTimeOffset.UnixEpoch.ToString("O", CultureInfo.InvariantCulture)
+            }));
+        }
+    }
+
     private sealed class BrokerMismatchedTimerReadHandler(TimerStore store) : IPocketCapabilityHandler
     {
         public PocketCapabilityKey Key => CapabilityIds.TimerGet;
@@ -1142,6 +1467,36 @@ internal sealed class CapabilityBrokerVerifier
                     timerId = rawId.ToLowerInvariant(),
                     state = "running",
                     endAt = CapabilityCanonicalJson.Date(context.Now.AddMinutes(10))
+                }));
+        }
+    }
+
+    private sealed class BrokerPostReadCancellationTimerReadHandler(
+        TimerStore store,
+        CancellationTokenSource callerCancellation) : IPocketCapabilityHandler
+    {
+        public PocketCapabilityKey Key => CapabilityIds.TimerGet;
+
+        public Task<JsonElement> HandleAsync(
+            JsonElement arguments,
+            CapabilityHandlerContext context,
+            CancellationToken cancellationToken = default)
+        {
+            _ = cancellationToken;
+            var rawId = CapabilityJson.RequiredString(arguments, "timerId", 36);
+            if (!Guid.TryParse(rawId, out var id))
+            {
+                throw new CapabilityHandlerException("CAPABILITY_ARGUMENT_INVALID", "timerId");
+            }
+            var timer = store.GetRunningTimer(id);
+            callerCancellation.Cancel();
+            return Task.FromResult(timer is null
+                ? CapabilityJson.From(new { timerId = rawId.ToLowerInvariant(), state = "stopped", endAt = (string?)null })
+                : CapabilityJson.From(new
+                {
+                    timerId = rawId.ToLowerInvariant(),
+                    state = "running",
+                    endAt = timer.EndAtUtc.ToString("O", CultureInfo.InvariantCulture)
                 }));
         }
     }

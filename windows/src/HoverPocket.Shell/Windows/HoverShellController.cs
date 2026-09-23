@@ -69,7 +69,7 @@ internal sealed class HoverShellController : IDisposable
         _dispatcher = dispatcher;
         _enablePanelWebView = enablePanelWebView;
         _enableDevTools = enableDevTools;
-        var userSettings = userSettingsStore.Load(providerRegistry.ProviderIds);
+        var userSettings = userSettingsStore.LoadForBootstrap(providerRegistry.ProviderIds);
         if (settings.DisplayPlacementOverride is { } displayPlacementOverride)
         {
             userSettings.DisplayPlacement = displayPlacementOverride;
@@ -88,6 +88,9 @@ internal sealed class HoverShellController : IDisposable
         _panelBridgeController.ExternalDragStarted += OnExternalDragStarted;
         _panelBridgeController.PanelCloseRequested += OnPanelCloseRequested;
         _panel = CreatePanelWindow();
+        _panelBridgeController.SetPocketAppStateFlush(
+            (appId, cancellationToken) => _panel.BeginPocketAppStateTransitionAsync(appId, cancellationToken),
+            lease => _panel.CompletePocketAppStateTransitionAsync(lease));
 
         _pollingTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
         {

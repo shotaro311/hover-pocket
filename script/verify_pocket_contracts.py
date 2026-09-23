@@ -225,6 +225,13 @@ WRITE_EFFECTS = frozenset(
     }
 )
 
+PRESENTABLE_POCKET_WORKFLOW_CAPABILITIES = frozenset(
+    {
+        ("timer.countdown.start", 1),
+        ("sticky.note.upsert", 1),
+    }
+)
+
 EXPECTED_APPROVAL_POLICY = {
     "pure": "none",
     "private_read": "permission_grant",
@@ -1633,6 +1640,12 @@ def validate_pocket_surface(document: Mapping[str, Any], context: FixtureContext
                 f"{location}.items.query",
                 "APP_REFERENCE_INVALID",
             )
+            if (capability_id, version) != ("calendar.events.list", 1):
+                fail(
+                    "APP_REFERENCE_INVALID",
+                    f"{location}.items.query",
+                    "calendarEventPicker requires calendar.events.list@1 output",
+                )
             descriptor = context.registry.resolve(capability_id, version, f"{location}.items.query")
             scope = requested_scope(context, capability_id, version, f"{location}.items.query")
             if descriptor["effect"] not in {"pure", "private_read"}:
@@ -1679,6 +1692,115 @@ def validate_pocket_surface(document: Mapping[str, Any], context: FixtureContext
             fail("APP_REFERENCE_INVALID", location, "PocketSurface cannot render a Host-owned execution receipt")
 
     walk(document["root"], "$.root", 1)
+
+
+def validate_surface_workflow_input_bindings(
+    surfaces: Mapping[str, Mapping[str, Any]],
+    workflows: Mapping[str, Mapping[str, Any]],
+    state_schema: Mapping[str, Any],
+) -> None:
+    input_types: dict[str, str] = {}
+    for workflow in workflows.values():
+        for name, declared_type in workflow["inputs"].items():
+            existing = input_types.get(name)
+            if existing is not None and existing != declared_type:
+                fail(
+                    "WORKFLOW_INPUT_TYPE_MISMATCH",
+                    f"$.workflows.{workflow['id']}.inputs.{name}",
+                    "the same surface input name has conflicting workflow types",
+                )
+            input_types[name] = declared_type
+
+    accepted: dict[tuple[str, str], frozenset[str]] = {
+        ("textField", "value"): frozenset({"string"}),
+        ("toggle", "value"): frozenset({"boolean"}),
+        ("picker", "value"): frozenset({"string"}),
+        ("calendarEventPicker", "selection"): frozenset({"entity-ref"}),
+        ("calendarEventPicker", "titleTarget"): frozenset({"string"}),
+        ("durationPicker", "value"): frozenset({"integer", "number"}),
+    }
+    accepted_state: dict[tuple[str, str], frozenset[str]] = {
+        ("textField", "value"): frozenset({"string"}),
+        ("toggle", "value"): frozenset({"boolean"}),
+        ("picker", "value"): frozenset({"string"}),
+        ("calendarEventPicker", "selection"): frozenset({"string"}),
+        ("calendarEventPicker", "titleTarget"): frozenset({"string"}),
+    }
+    state_types: dict[str, frozenset[str]] = {}
+    for name, property_schema in state_schema.get("properties", {}).items():
+        declared = property_schema.get("type")
+        state_types[name] = frozenset({declared} if isinstance(declared, str) else declared or [])
+
+    def walk(
+        node: Mapping[str, Any],
+        location: str,
+        bound_inputs: set[str],
+        referenced_workflows: set[str],
+    ) -> None:
+        node_type = node["type"]
+        if node_type == "button":
+            referenced_workflows.add(node["workflow"])
+        for property_name, binding in node.items():
+            if not isinstance(binding, str) or not binding.startswith(("$input.", "$state.")):
+                continue
+            if binding.startswith("$input."):
+                accepted_types = accepted.get((node_type, property_name))
+                input_name = binding[len("$input."):]
+                declared_type = input_types.get(input_name)
+                compatible = accepted_types is not None and declared_type in accepted_types
+            else:
+                accepted_types = accepted_state.get((node_type, property_name))
+                input_name = binding[len("$state."):]
+                declared_state_types = state_types.get(input_name, frozenset()) - {"null"}
+                compatible = (
+                    accepted_types is not None
+                    and bool(declared_state_types)
+                    and declared_state_types.issubset(accepted_types)
+                )
+                fallback_type = input_types.get(input_name)
+                if fallback_type is not None:
+                    compatible = compatible and fallback_type in accepted.get((node_type, property_name), frozenset())
+            if not compatible:
+                fail(
+                    "WORKFLOW_INPUT_TYPE_MISMATCH",
+                    f"{location}.{property_name}",
+                    "surface control and declared workflow input types are incompatible",
+                )
+            if input_name in input_types:
+                bound_inputs.add(input_name)
+        for index, child in enumerate(node.get("children", [])):
+            walk(child, f"{location}.children[{index}]", bound_inputs, referenced_workflows)
+
+    for surface_id, surface in surfaces.items():
+        bound_inputs: set[str] = set()
+        referenced_workflows: set[str] = set()
+        picker_domains: dict[str, frozenset[str]] = {}
+
+        def validate_picker_domains(node: Mapping[str, Any], location: str) -> None:
+            if node["type"] == "picker":
+                binding = node["value"]
+                domain = frozenset(option["value"] for option in node["options"])
+                existing = picker_domains.get(binding)
+                if existing is not None and existing != domain:
+                    fail(
+                        "APP_REFERENCE_INVALID",
+                        f"{location}.value",
+                        "pickers sharing one binding must declare the same option domain",
+                    )
+                picker_domains[binding] = domain
+            for index, child in enumerate(node.get("children", [])):
+                validate_picker_domains(child, f"{location}.children[{index}]")
+
+        validate_picker_domains(surface["root"], f"$.surfaces.{surface_id}.root")
+        walk(surface["root"], f"$.surfaces.{surface_id}.root", bound_inputs, referenced_workflows)
+        for workflow_id in referenced_workflows:
+            missing_inputs = set(workflows[workflow_id]["inputs"]) - bound_inputs
+            if missing_inputs:
+                fail(
+                    "APP_REFERENCE_INVALID",
+                    f"$.surfaces.{surface_id}.root",
+                    "button workflow inputs must be bound on the same reachable surface",
+                )
 
 
 def input_schema_accepts_type(schema: Mapping[str, Any], workflow_type: str) -> bool:
@@ -1731,6 +1853,12 @@ def validate_pocket_workflow(document: Mapping[str, Any], context: FixtureContex
                 fail("WORKFLOW_REFERENCE_INVALID", exc.location, exc.detail)
             raise
         ensure_capability_executable(descriptor, f"$.steps[{index}].use")
+        if (capability_id, version) not in PRESENTABLE_POCKET_WORKFLOW_CAPABILITIES:
+            fail(
+                "WORKFLOW_REFERENCE_INVALID",
+                f"$.steps[{index}].use",
+                "Pocket App workflow capability has no Host-owned approval presentation",
+            )
         scope = requested_scope(context, capability_id, version, f"$.steps[{index}].use")
         has_writes = has_writes or descriptor["effect"] in WRITE_EFFECTS
         total_timeout_seconds += descriptor["limits"]["timeoutMs"] / 1000.0
@@ -2235,6 +2363,12 @@ def load_fixture_support(context: FixtureContext, manifest: Mapping[str, Any]) -
         source = bindings.get(package_path)
         if source is None or load_json(context.fixture_dir / source, location=source) != workflows[workflow_id]:
             fail("APP_REFERENCE_INVALID", package_path, "manifest workflow is not bound to its validated fixture")
+    state_schema_path = reference_app["state"]["schema"]
+    state_schema_source = bindings.get(state_schema_path)
+    if state_schema_source is None:
+        fail("APP_REFERENCE_INVALID", state_schema_path, "manifest state schema is not bound to the reference package")
+    state_schema = load_json(context.fixture_dir / state_schema_source, location=state_schema_source)
+    validate_surface_workflow_input_bindings(surfaces, workflows, state_schema)
     return FixtureSupport(
         plans_by_id=plans,
         invocations_by_id=invocations,

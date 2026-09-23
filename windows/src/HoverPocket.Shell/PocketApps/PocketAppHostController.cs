@@ -6,24 +6,42 @@ using HoverPocket.Shell.Configuration;
 
 namespace HoverPocket.Shell.PocketApps;
 
-internal sealed class PocketAppHostController
+internal sealed class PocketAppHostController : IDisposable
 {
     private readonly PocketAppExecutionRuntime _runtime;
     private readonly Func<UserSettings> _settings;
+    private readonly Func<DateTimeOffset> _now;
     private readonly object _eventRefSync = new();
     private readonly HashSet<string> _allowedEventRefs = new(StringComparer.Ordinal);
+    private bool _disposed;
 
     public PocketAppHostController(
         PocketAppExecutionRuntime runtime,
-        Func<UserSettings> settings)
+        Func<UserSettings> settings,
+        Func<DateTimeOffset>? now = null)
     {
         _runtime = runtime;
         _settings = settings;
+        _now = now ?? (() => DateTimeOffset.Now);
+    }
+
+    internal bool IsActivationActive => _runtime.IsActivationActive;
+
+    internal string AppId => _runtime.Package.Manifest.Id;
+
+    internal string AppName => _runtime.Package.Manifest.Name;
+
+    public void Dispose()
+    {
+        if (_disposed) { return; }
+        _disposed = true;
+        _runtime.Dispose();
     }
 
     public object BuildSurfaceState(string surfaceId = "main")
     {
         EnsureAiNativeEnabled();
+        _runtime.EnsureActivationActive();
         if (!_runtime.Package.Surfaces.TryGetValue(surfaceId, out var surface))
         {
             throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "pocket_surface");
@@ -37,14 +55,19 @@ internal sealed class PocketAppHostController
             manifestDigest = _runtime.Package.ManifestDigest,
             surfaceId,
             renderModel = document.RootElement.Clone(),
+            workflowInputs = _runtime.Package.Workflows.ToDictionary(
+                item => item.Key,
+                item => item.Value.Inputs.Keys.Order(StringComparer.Ordinal).ToArray(),
+                StringComparer.Ordinal),
             initialState = _runtime.UserStateStore?.Snapshot()
-                ?? new Dictionary<string, string>(StringComparer.Ordinal)
+                ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal)
         };
     }
 
     public object BuildManagerState()
     {
         EnsureAiNativeEnabled();
+        _runtime.EnsureActivationActive();
         var package = _runtime.Package;
         return new
         {
@@ -72,7 +95,7 @@ internal sealed class PocketAppHostController
         dispatcher.Register("pocketApp.updateState", UpdateStateAsync);
     }
 
-    private async Task<object?> LoadAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    internal async Task<object?> LoadAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         EnsureAiNativeEnabled();
         EnsureApp(parameters);
@@ -89,11 +112,12 @@ internal sealed class PocketAppHostController
             var output = await _runtime.QueryAsync(
                 query.Reference,
                 query.Arguments,
-                DateTimeOffset.Now,
+                _now(),
                 cancellationToken);
             queryResults.Add(new
             {
                 query = query.Reference,
+                arguments = query.Arguments,
                 output = SafeQueryOutput(output, allowedEventRefs)
             });
         }
@@ -109,7 +133,7 @@ internal sealed class PocketAppHostController
         };
     }
 
-    private async Task<object?> InvokeWorkflowAsync(
+    internal async Task<object?> InvokeWorkflowAsync(
         JsonElement? parameters,
         CancellationToken cancellationToken)
     {
@@ -148,7 +172,7 @@ internal sealed class PocketAppHostController
             inputs["purpose"] = CapabilityJson.From(TodayFocusApprovalText.Sanitize(purpose.GetString() ?? string.Empty));
         }
 
-        var draft = _runtime.Prepare(workflowId, inputs, DateTimeOffset.Now);
+        var draft = _runtime.Prepare(workflowId, inputs, _now());
         if (draft.Preparation.ApprovalRequest is null)
         {
             throw new CapabilityBrokerException("CAPABILITY_APPROVAL_REQUIRED", draft.Plan.Id);
@@ -170,7 +194,7 @@ internal sealed class PocketAppHostController
 
         var receipt = await _runtime.ApproveAndExecuteAsync(
             draft,
-            DateTimeOffset.Now,
+            _now(),
             cancellationToken);
         var readbackVerified = receipt.Steps.All(step => step.Readback.Status == CapabilityReadbackStatus.Verified);
         return new
@@ -185,24 +209,34 @@ internal sealed class PocketAppHostController
         };
     }
 
-    private Task<object?> UpdateStateAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    internal Task<object?> UpdateStateAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         EnsureAiNativeEnabled();
+        _runtime.EnsureActivationActive();
         EnsureApp(parameters);
         var key = RequiredString(parameters, "key", 128);
         if (parameters is null
             || !parameters.Value.TryGetProperty("value", out var rawValue)
-            || rawValue.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
+            || rawValue.ValueKind is not (
+                JsonValueKind.String
+                or JsonValueKind.Number
+                or JsonValueKind.True
+                or JsonValueKind.False
+                or JsonValueKind.Null))
         {
             throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "state_value");
         }
-        var value = rawValue.ValueKind == JsonValueKind.Null ? null : rawValue.GetString();
-        if (key == "selectedEventRef" && value is not null)
+        var stringValue = rawValue.ValueKind == JsonValueKind.String ? rawValue.GetString() : null;
+        if (key == "selectedEventRef" && rawValue.ValueKind != JsonValueKind.Null)
         {
+            if (stringValue is null)
+            {
+                throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "selected_event_ref");
+            }
             lock (_eventRefSync)
             {
-                if (!_allowedEventRefs.Contains(value))
+                if (!_allowedEventRefs.Contains(stringValue))
                 {
                     throw new CapabilityBrokerException("CAPABILITY_PLAN_INVALID", "selected_event_ref");
                 }
@@ -212,7 +246,7 @@ internal sealed class PocketAppHostController
             ?? throw new CapabilityBrokerException("CAPABILITY_UNAVAILABLE", "pocket_state");
         try
         {
-            store.SetString(key, value);
+            store.SetValue(key, rawValue.ValueKind == JsonValueKind.Null ? null : rawValue);
         }
         catch (PocketAppUserStateStoreException)
         {

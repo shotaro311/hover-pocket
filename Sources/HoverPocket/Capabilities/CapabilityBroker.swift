@@ -74,6 +74,7 @@ final class CapabilityBroker {
     ) async throws -> CapabilityWorkflowReceipt {
         await acquireExecutionSlot()
         defer { releaseExecutionSlot() }
+        try Task.checkCancellation()
         var digest = "unavailable"
         let descriptors: [PocketCapabilityDescriptor]
         do {
@@ -127,6 +128,7 @@ final class CapabilityBroker {
         }
 
         if durableExecution {
+            try Task.checkCancellation()
             try ledger.startWorkflow(planID: plan.id, planDigest: digest)
         }
         var receipts: [CapabilityReceipt] = []
@@ -134,6 +136,7 @@ final class CapabilityBroker {
         var workflowStatus = CapabilityReceiptStatus.succeeded
 
         for (index, step) in plan.steps.enumerated() {
+            await Task.yield()
             let descriptor = descriptors[index]
             let receipt = try await executeStep(
                 step,
@@ -155,13 +158,20 @@ final class CapabilityBroker {
                 rollbackCandidates.append((step, descriptor, receipts.count - 1))
             }
             if !rollbackCandidates.isEmpty {
-                let rollbackSucceeded = try await rollback(
-                    successfulSteps: rollbackCandidates,
-                    receipts: &receipts,
-                    plan: plan,
-                    planDigest: digest,
-                    now: now
-                )
+                let receiptSnapshot = receipts
+                let rollbackOutcome = try await Task { @MainActor [self] in
+                    var rollbackReceipts = receiptSnapshot
+                    let succeeded = try await rollback(
+                        successfulSteps: rollbackCandidates,
+                        receipts: &rollbackReceipts,
+                        plan: plan,
+                        planDigest: digest,
+                        now: now
+                    )
+                    return (succeeded, rollbackReceipts)
+                }.value
+                let rollbackSucceeded = rollbackOutcome.0
+                receipts = rollbackOutcome.1
                 if rollbackSucceeded && receipt.status != .unknown {
                     workflowStatus = .failed
                 }
@@ -328,49 +338,63 @@ final class CapabilityBroker {
 
         let receipt: CapabilityReceipt
         var possibleOutput: CapabilityObject?
-        do {
-            let output = try await invokeWithTimeout(
-                descriptor.key,
-                arguments: step.arguments,
-                context: CapabilityHandlerContext(idempotencyKey: step.idempotencyKey, now: now),
-                timeoutMilliseconds: descriptor.limits.timeoutMilliseconds
-            )
-            possibleOutput = output
-            try descriptor.validateOutput(output)
-            let readback = try await readback(
-                descriptor: descriptor,
-                output: output,
-                now: now
-            )
-            let status: CapabilityReceiptStatus = readback.status == .verified
-                ? .succeeded
-                : (descriptor.effect.isWrite ? .partial : .failed)
-            receipt = CapabilityReceipt(
-                invocationID: invocationID,
-                planID: plan.id,
-                planDigest: planDigest,
-                capability: descriptor.key,
-                status: status,
-                output: output,
-                readback: readback,
-                rollbackAvailable: descriptor.rollbackAvailable,
-                rollbackStatus: descriptor.rollbackAvailable ? "not_requested" : nil,
-                auditEntryID: auditEntryID,
-                safeError: status == .succeeded ? nil : .init(code: "CAPABILITY_READBACK_MISMATCH", retryable: false, messageKey: "error.capability.readback_mismatch"),
-                completedAt: now,
-                replayed: false
-            )
-        } catch {
+        if Task.isCancelled {
             receipt = failureReceipt(
-                error,
+                CancellationError(),
                 invocationID: invocationID,
                 auditEntryID: auditEntryID,
                 descriptor: descriptor,
                 plan: plan,
                 planDigest: planDigest,
                 possibleOutput: possibleOutput,
-                now: now
+                now: now,
+                cancelledBeforeInvocation: true
             )
+        } else {
+            do {
+                let output = try await invokeWithTimeout(
+                    descriptor.key,
+                    arguments: step.arguments,
+                    context: CapabilityHandlerContext(idempotencyKey: step.idempotencyKey, now: now),
+                    timeoutMilliseconds: descriptor.limits.timeoutMilliseconds
+                )
+                possibleOutput = output
+                try descriptor.validateOutput(output)
+                let readback = try await readback(
+                    descriptor: descriptor,
+                    output: output,
+                    now: now
+                )
+                let status: CapabilityReceiptStatus = readback.status == .verified
+                    ? .succeeded
+                    : (descriptor.effect.isWrite ? .partial : .failed)
+                receipt = CapabilityReceipt(
+                    invocationID: invocationID,
+                    planID: plan.id,
+                    planDigest: planDigest,
+                    capability: descriptor.key,
+                    status: status,
+                    output: output,
+                    readback: readback,
+                    rollbackAvailable: descriptor.rollbackAvailable,
+                    rollbackStatus: descriptor.rollbackAvailable ? "not_requested" : nil,
+                    auditEntryID: auditEntryID,
+                    safeError: status == .succeeded ? nil : .init(code: "CAPABILITY_READBACK_MISMATCH", retryable: false, messageKey: "error.capability.readback_mismatch"),
+                    completedAt: now,
+                    replayed: false
+                )
+            } catch {
+                receipt = failureReceipt(
+                    error,
+                    invocationID: invocationID,
+                    auditEntryID: auditEntryID,
+                    descriptor: descriptor,
+                    plan: plan,
+                    planDigest: planDigest,
+                    possibleOutput: possibleOutput,
+                    now: now
+                )
+            }
         }
 
         let elapsed = ContinuousClock.now - start
@@ -506,25 +530,31 @@ final class CapabilityBroker {
         context: CapabilityHandlerContext,
         timeoutMilliseconds: Int
     ) async throws -> CapabilityObject {
-        try await withCheckedThrowingContinuation { continuation in
-            let gate = CapabilityInvocationContinuationGate(continuation, expectedTaskCount: 2)
-            let operation = Task { @MainActor [registry] in
-                do {
-                    try Task.checkCancellation()
-                    gate.resolve(.success(try await registry.invoke(key, arguments: arguments, context: context)))
-                } catch {
-                    gate.resolve(.failure(error))
+        let cancellation = CapabilityInvocationCancellationBox()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let gate = CapabilityInvocationContinuationGate(continuation, expectedTaskCount: 2)
+                cancellation.install(gate)
+                let operation = Task { @MainActor [registry] in
+                    do {
+                        try Task.checkCancellation()
+                        gate.resolve(.success(try await registry.invoke(key, arguments: arguments, context: context)))
+                    } catch {
+                        gate.resolve(.failure(error))
+                    }
                 }
-            }
-            let timeout = Task { @MainActor in
-                do {
-                    try await Task.sleep(for: .milliseconds(timeoutMilliseconds))
-                    gate.resolve(.failure(CapabilityBrokerError.timedOut(key)))
-                } catch {
-                    gate.resolve(.failure(error))
+                let timeout = Task { @MainActor in
+                    do {
+                        try await Task.sleep(for: .milliseconds(timeoutMilliseconds))
+                        gate.resolve(.failure(CapabilityBrokerError.timedOut(key)))
+                    } catch {
+                        gate.resolve(.failure(error))
+                    }
                 }
+                gate.install(tasks: [operation, timeout])
             }
-            gate.install(tasks: [operation, timeout])
+        } onCancel: {
+            Task { @MainActor in cancellation.cancel() }
         }
     }
 
@@ -551,13 +581,19 @@ final class CapabilityBroker {
         plan: CapabilityExecutionPlan,
         planDigest: String,
         possibleOutput: CapabilityObject?,
-        now: Date
+        now: Date,
+        cancelledBeforeInvocation: Bool = false
     ) -> CapabilityReceipt {
         let safe = Self.safeError(error)
-        let status: CapabilityReceiptStatus = error is CancellationError
-            || (error as? CapabilityBrokerError).map { if case .timedOut = $0 { true } else { false } } == true
-            ? .unknown
-            : (descriptor.effect.isWrite ? .partial : .failed)
+        let status: CapabilityReceiptStatus
+        if cancelledBeforeInvocation {
+            status = .failed
+        } else if error is CancellationError
+            || (error as? CapabilityBrokerError).map({ if case .timedOut = $0 { true } else { false } }) == true {
+            status = .unknown
+        } else {
+            status = descriptor.effect.isWrite ? .partial : .failed
+        }
         return CapabilityReceipt(
             invocationID: invocationID,
             planID: plan.id,
@@ -777,6 +813,15 @@ private final class CapabilityInvocationContinuationGate {
         finishIfReady()
     }
 
+    func cancel() {
+        guard winningResult == nil else { return }
+        winningResult = .failure(CancellationError())
+        if installed {
+            tasks.forEach { $0.cancel() }
+        }
+        finishIfReady()
+    }
+
     private func finishIfReady() {
         guard installed,
               remainingTaskCount == 0,
@@ -785,5 +830,23 @@ private final class CapabilityInvocationContinuationGate {
         self.continuation = nil
         tasks.removeAll(keepingCapacity: false)
         continuation.resume(with: winningResult)
+    }
+}
+
+@MainActor
+private final class CapabilityInvocationCancellationBox {
+    private var gate: CapabilityInvocationContinuationGate?
+    private var isCancelled = false
+
+    func install(_ gate: CapabilityInvocationContinuationGate) {
+        self.gate = gate
+        if isCancelled {
+            gate.cancel()
+        }
+    }
+
+    func cancel() {
+        isCancelled = true
+        gate?.cancel()
     }
 }

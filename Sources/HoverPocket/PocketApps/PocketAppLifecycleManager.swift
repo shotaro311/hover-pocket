@@ -76,6 +76,7 @@ struct PocketAppLifecycleReceipt: Codable, Equatable, Sendable {
     let packageID: String
     let version: String?
     let packageDigest: String?
+    let effectivePermissions: [String]
     let state: PocketAppLifecycleState
     let readbackVerified: Bool
     let dataDisposition: PocketAppDataDisposition?
@@ -179,6 +180,7 @@ final class PocketAppLifecycleManager {
     private let stagingTestRunner: PocketAppStagingTestRunner
     private let hostVersion: String
     private let failureInjection: ((String) -> Bool)?
+    private let activationReadback: ((PocketAppLifecycleReceipt) throws -> PocketAppRuntimeReadback)?
     private var pendingApprovals: [String: PendingApproval] = [:]
     private var decidedRequests: Set<String> = []
     private var grants: [String: IssuedApproval] = [:]
@@ -192,7 +194,8 @@ final class PocketAppLifecycleManager {
         runtime: PocketAppPackageRuntime = PocketAppPackageRuntime(),
         failureInjection: ((String) -> Bool)? = nil,
         hostVersion: String = PocketAppHostContract.version,
-        performStartupRecovery: Bool = true
+        performStartupRecovery: Bool = true,
+        activationReadback: ((PocketAppLifecycleReceipt) throws -> PocketAppRuntimeReadback)? = nil
     ) throws {
         guard Self.validVersion(hostVersion) else { throw PocketAppLifecycleError.invalidPackage }
         self.rootDirectory = rootDirectory.standardizedFileURL
@@ -201,6 +204,7 @@ final class PocketAppLifecycleManager {
         self.stagingTestRunner = PocketAppStagingTestRunner()
         self.hostVersion = hostVersion
         self.failureInjection = failureInjection
+        self.activationReadback = activationReadback
         do {
             try FileManager.default.createDirectory(
                 at: self.rootDirectory,
@@ -459,15 +463,16 @@ final class PocketAppLifecycleManager {
             updatedAt: now
         )
         try writeAndVerify(record: current)
-        return PocketAppLifecycleReceipt(
+        return try verifyActivationReadback(PocketAppLifecycleReceipt(
             action: "disable",
             packageID: packageID,
             version: current.version,
             packageDigest: current.packageDigest,
+            effectivePermissions: [],
             state: .disabled,
             readbackVerified: true,
             dataDisposition: nil
-        )
+        ))
     }
 
     func enable(packageID: String, now: Date = Date()) throws -> PocketAppLifecycleReceipt {
@@ -515,15 +520,26 @@ final class PocketAppLifecycleManager {
             }
             throw error
         }
-        return PocketAppLifecycleReceipt(
+        let receipt = PocketAppLifecycleReceipt(
             action: "enable",
             packageID: packageID,
             version: version,
             packageDigest: digest,
+            effectivePermissions: current.permissions,
             state: .enabled,
             readbackVerified: true,
             dataDisposition: nil
         )
+        do {
+            return try verifyActivationReadback(receipt)
+        } catch {
+            try? recoverAfterActivationFailure(
+                previous: current,
+                committed: enabled,
+                now: now
+            )
+            throw PocketAppLifecycleError.readbackFailed
+        }
     }
 
     func remove(
@@ -578,22 +594,23 @@ final class PocketAppLifecycleManager {
               !FileManager.default.fileExists(atPath: versions.path) else {
             throw PocketAppLifecycleError.readbackFailed
         }
-        return PocketAppLifecycleReceipt(
+        return try verifyActivationReadback(PocketAppLifecycleReceipt(
             action: "remove",
             packageID: packageID,
             version: nil,
             packageDigest: nil,
+            effectivePermissions: [],
             state: .removed,
             readbackVerified: true,
             dataDisposition: dataDisposition
-        )
+        ))
     }
 
     func managedPackages() throws -> [PocketAppManagedPackage] {
         guard FileManager.default.fileExists(atPath: appsRoot.path) else { return [] }
         return try safeChildDirectories(of: appsRoot).compactMap { directory in
             let packageID = directory.lastPathComponent
-            guard Self.validPackageID(packageID) else { throw PocketAppLifecycleError.corruptVersion }
+            guard Self.validPackageID(packageID) else { return nil }
             return try managedPackage(packageID: packageID)
         }.sorted { $0.packageID < $1.packageID }
     }
@@ -612,9 +629,7 @@ final class PocketAppLifecycleManager {
         ).sorted { $0.lastPathComponent < $1.lastPathComponent }
         for directory in entries {
             let packageID = directory.lastPathComponent
-            guard Self.validPackageID(packageID) else {
-                throw PocketAppLifecycleError.corruptVersion
-            }
+            guard Self.validPackageID(packageID) else { continue }
             do {
                 let values = try directory.resourceValues(forKeys: keys)
                 guard values.isDirectory == true, values.isSymbolicLink != true else {
@@ -676,6 +691,18 @@ final class PocketAppLifecycleManager {
         )
     }
 
+    func durableManagedPackage(packageID: String) throws -> PocketAppManagedPackage? {
+        guard Self.validPackageID(packageID) else { throw PocketAppLifecycleError.invalidPackage }
+        guard let record = try readActiveRecord(packageID: packageID) else { return nil }
+        return PocketAppManagedPackage(
+            packageID: packageID,
+            state: record.state,
+            version: record.state == .removed ? nil : record.version,
+            packageDigest: record.state == .removed ? nil : record.packageDigest,
+            installedVersions: []
+        )
+    }
+
     private func installedVersions(packageID: String) throws -> [String] {
         let root = versionsRoot(packageID: packageID)
         guard FileManager.default.fileExists(atPath: root.path) else { return [] }
@@ -709,6 +736,15 @@ final class PocketAppLifecycleManager {
             throw PocketAppLifecycleError.corruptVersion
         }
         try validateHostCompatibility(package)
+        return package
+    }
+
+    func activePackageForActivation(packageID: String) throws -> PocketAppPackage? {
+        guard let package = try activePackage(packageID: packageID),
+              let record = try readActiveRecord(packageID: packageID) else { return nil }
+        guard permissions(package).sorted() == record.permissions.sorted() else {
+            throw PocketAppLifecycleError.corruptVersion
+        }
         return package
     }
 
@@ -832,15 +868,77 @@ final class PocketAppLifecycleManager {
         }
         pendingApprovals.removeValue(forKey: proposal.requestID)
         decidedRequests.remove(proposal.requestID)
-        return PocketAppLifecycleReceipt(
+        let receipt = PocketAppLifecycleReceipt(
             action: proposal.action.rawValue,
             packageID: proposal.packageID,
             version: proposal.version,
             packageDigest: proposal.packageDigest,
+            effectivePermissions: permissions(package).sorted(),
             state: .enabled,
             readbackVerified: true,
             dataDisposition: nil
         )
+        do {
+            return try verifyActivationReadback(receipt)
+        } catch {
+            try? recoverAfterActivationFailure(
+                previous: previous,
+                committed: record,
+                now: now
+            )
+            throw PocketAppLifecycleError.readbackFailed
+        }
+    }
+
+    private func recoverAfterActivationFailure(
+        previous: ActiveRecord?,
+        committed: ActiveRecord,
+        now: Date
+    ) throws {
+        let fallbackSource = previous ?? committed
+        let fallback: ActiveRecord
+        if fallbackSource.state == .removed {
+            fallback = fallbackSource
+        } else {
+            fallback = ActiveRecord(
+                packageID: fallbackSource.packageID,
+                version: fallbackSource.version,
+                packageDigest: fallbackSource.packageDigest,
+                permissions: fallbackSource.permissions,
+                stateSchemaDigest: fallbackSource.stateSchemaDigest,
+                statePropertyNames: fallbackSource.statePropertyNames,
+                state: .disabled,
+                updatedAt: now
+            )
+        }
+        try writeAndVerify(record: fallback)
+        guard let activationReadback else { return }
+        let recoveryReceipt = PocketAppLifecycleReceipt(
+            action: "activation_failure_recovery",
+            packageID: fallback.packageID,
+            version: fallback.version,
+            packageDigest: fallback.packageDigest,
+            effectivePermissions: [],
+            state: fallback.state,
+            readbackVerified: true,
+            dataDisposition: fallback.state == .removed ? .preserve : nil
+        )
+        _ = try? activationReadback(recoveryReceipt)
+    }
+
+    private func verifyActivationReadback(
+        _ receipt: PocketAppLifecycleReceipt
+    ) throws -> PocketAppLifecycleReceipt {
+        guard let activationReadback else { return receipt }
+        do {
+            let observed = try activationReadback(receipt)
+            guard observed.matches(receipt) else {
+                throw PocketAppLifecycleError.readbackFailed
+            }
+            return receipt
+        } catch {
+            throw PocketAppLifecycleError.readbackFailed
+        }
     }
 
     private func installImmutableSnapshot(

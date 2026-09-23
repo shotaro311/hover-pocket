@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json.Nodes;
 using HoverPocket.Shell.Capabilities;
+using HoverPocket.Shell.Verification;
 
 namespace HoverPocket.Shell.PocketApps;
 
@@ -26,6 +27,15 @@ internal sealed class PocketAppPackageVerifier
             Require(package.Workflows["startFocus"].Steps.Count == 2, "package_workflow");
             Require(package.Workflows["startFocus"].RequiredPermissions.SetEquals(["sticky.write", "timer.write"]), "package_permissions");
             Require(package.StatePropertyNames.SetEquals(["selectedEventRef"]), "package_state_schema");
+            Require(package.StatePropertyTypes["selectedEventRef"].SetEquals(["string", "null"]), "package_state_types");
+            Require(
+                package.StateProperties["selectedEventRef"] is
+                {
+                    IsRequired: true,
+                    Format: null,
+                    MaximumLength: null
+                },
+                "package_state_constraints");
             Require(
                 package.TestCases.Count == 4
                 && package.TestCases["calendar-read"] == "pass"
@@ -33,7 +43,7 @@ internal sealed class PocketAppPackageVerifier
                 && package.TestCases["start-focus-idempotent-replay"] == "pass"
                 && package.TestCases["start-focus-rejected"] == "reject",
                 "package_tests");
-            Console.WriteLine($"pocket_app_manifest_digest={package.ManifestDigest}");
+            VerifyConsole.WriteLine($"pocket_app_manifest_digest={package.ManifestDigest}");
         }, "valid_package");
 
         WithPackage(root =>
@@ -50,6 +60,18 @@ internal sealed class PocketAppPackageVerifier
             Require(changed.ManifestDigest != referencePackage.ManifestDigest, "package_resource_digest");
         }, "package_resource_digest");
 
+        WithPackage(root =>
+        {
+            MutateJson(Path.Combine(root, "surfaces", "main.surface.json"), surface =>
+            {
+                surface["root"]!["children"]![0]!["value"] = "$5";
+            });
+            var package = new PocketAppPackageRuntime().Load(root);
+            Require(
+                package.Surfaces["main"].Root.Children[0].Properties["value"] as string == "$5",
+                "surface_dollar_literal");
+        }, "surface_dollar_literal");
+
         try
         {
             if (referencePackage is null)
@@ -58,6 +80,7 @@ internal sealed class PocketAppPackageVerifier
             }
             var bundledRoot = Path.Combine(AppContext.BaseDirectory, "PocketApps", "local.example.today-focus");
             var bundled = new PocketAppPackageRuntime().Load(bundledRoot);
+            VerifyConsole.WriteLine($"pocket_app_bundled_manifest_digest={bundled.ManifestDigest}");
             Require(bundled.ManifestDigest == referencePackage.ManifestDigest, "bundled_manifest");
             Require(bundled.Surfaces["main"].CanonicalRenderModelBytes().AsSpan().SequenceEqual(
                 referencePackage.Surfaces["main"].CanonicalRenderModelBytes()), "bundled_surfaces");
@@ -92,9 +115,98 @@ internal sealed class PocketAppPackageVerifier
         {
             workflow["limits"]!["maxSteps"] = 33;
         }));
+        RejectPackage("unsupported_workflow_presentation", root => MutateJson(Path.Combine(root, "workflows", "start-focus.workflow.json"), workflow =>
+        {
+            workflow["steps"]![0]!["use"] = "calendar.events.list@1";
+            workflow["steps"]![0]!["with"] = new JsonObject
+            {
+                ["range"] = "today"
+            };
+        }));
         RejectPackage("unbound_surface_input", root => MutateJson(Path.Combine(root, "surfaces", "main.surface.json"), surface =>
         {
             surface["root"]!["children"]![2]!["value"] = "$input.missing";
+        }));
+        RejectPackage("surface_input_type_mismatch", root => MutateJson(Path.Combine(root, "workflows", "start-focus.workflow.json"), workflow =>
+        {
+            workflow["inputs"]!["purpose"] = "integer";
+        }));
+        RejectPackage("state_workflow_type_mismatch", root => MutateJson(Path.Combine(root, "workflows", "start-focus.workflow.json"), workflow =>
+        {
+            workflow["inputs"]!["selectedEventRef"] = "integer";
+        }));
+        RejectPackage("conflicting_picker_domain", root => MutateJson(Path.Combine(root, "surfaces", "main.surface.json"), surface =>
+        {
+            var children = surface["root"]!["children"]!.AsArray();
+            children.Add(new JsonObject
+            {
+                ["type"] = "picker",
+                ["label"] = "Primary mode",
+                ["value"] = "$input.purpose",
+                ["options"] = new JsonArray(new JsonObject { ["label"] = "A", ["value"] = "a" })
+            });
+            children.Add(new JsonObject
+            {
+                ["type"] = "picker",
+                ["label"] = "Secondary mode",
+                ["value"] = "$input.purpose",
+                ["options"] = new JsonArray(new JsonObject { ["label"] = "B", ["value"] = "b" })
+            });
+        }));
+        RejectPackage("workflow_input_bound_only_on_unreachable_surface", root =>
+        {
+            MutateJson(Path.Combine(root, "manifest.json"), manifest =>
+            {
+                manifest["surfaces"]!.AsArray().Add(new JsonObject
+                {
+                    ["id"] = "secondary",
+                    ["kind"] = "declarative",
+                    ["source"] = "surfaces/secondary.surface.json"
+                });
+            });
+            MutateJson(Path.Combine(root, "surfaces", "main.surface.json"), surface =>
+            {
+                var children = surface["root"]!["children"]!.AsArray();
+                children[1]!.AsObject().Remove("titleTarget");
+                children.RemoveAt(3);
+            });
+            var secondary = new JsonObject
+            {
+                ["$schema"] = "hoverpocket://schemas/pocket-surface/v1",
+                ["surfaceVersion"] = 1,
+                ["id"] = "secondary",
+                ["hostBoundary"] = new JsonObject
+                {
+                    ["region"] = "provider_host",
+                    ["mayRenderHeader"] = false,
+                    ["mayRenderVoiceLane"] = false,
+                    ["mayRenderApproval"] = false,
+                    ["mayRenderReceipt"] = false
+                },
+                ["root"] = new JsonObject
+                {
+                    ["type"] = "stack",
+                    ["axis"] = "vertical",
+                    ["children"] = new JsonArray
+                    {
+                        new JsonObject
+                        {
+                            ["type"] = "textField",
+                            ["label"] = "Purpose",
+                            ["value"] = "$input.purpose",
+                            ["maxLength"] = 80
+                        }
+                    }
+                }
+            };
+            File.WriteAllText(
+                Path.Combine(root, "surfaces", "secondary.surface.json"),
+                secondary.ToJsonString(),
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        });
+        RejectPackage("unsupported_surface_query_shape", root => MutateJson(Path.Combine(root, "surfaces", "main.surface.json"), surface =>
+        {
+            surface["root"]!["children"]![1]!["items"]!["query"] = "sticky.note.get@1";
         }));
         RejectPackage("unsupported_test_case", root => MutateJson(Path.Combine(root, "tests", "calendar-read.json"), test =>
         {
@@ -123,20 +235,20 @@ internal sealed class PocketAppPackageVerifier
 
         if (_failures.Count > 0)
         {
-            Console.Error.WriteLine("pocket_app_package_verify=failed");
+            VerifyConsole.WriteLine("pocket_app_package_verify=failed");
             foreach (var failure in _failures)
             {
-                Console.Error.WriteLine($"failure={failure}");
+                VerifyConsole.WriteLine($"failure={failure}");
             }
             return 1;
         }
 
-        Console.WriteLine("pocket_app_package_verify=ok");
-        Console.WriteLine("pocket_app_package_valid_files=9");
-        Console.WriteLine("pocket_app_package_bundled=ok");
-        Console.WriteLine("pocket_app_package_negative_cases=12");
-        Console.WriteLine("pocket_app_lifecycle_verify=ok");
-        Console.WriteLine("pocket_app_generation_verify=ok");
+        VerifyConsole.WriteLine("pocket_app_package_verify=ok");
+        VerifyConsole.WriteLine("pocket_app_package_valid_files=9");
+        VerifyConsole.WriteLine("pocket_app_package_bundled=ok");
+        VerifyConsole.WriteLine("pocket_app_package_negative_cases=17");
+        VerifyConsole.WriteLine("pocket_app_lifecycle_verify=ok");
+        VerifyConsole.WriteLine("pocket_app_generation_verify=ok");
         return 0;
     }
 
@@ -293,6 +405,15 @@ internal sealed class PocketAppPackageVerifier
                 var installed = manager.Install(proposal, grant, now);
                 manager.Reject(duplicateProposal.RequestId, duplicateProposal.BindingDigest);
                 Require(installed.ReadbackVerified && manager.ActivePackage(proposal.PackageId)?.ManifestDigest == proposal.PackageDigest, "lifecycle_install_readback");
+                var appsRoot = Path.Combine(root, "Apps");
+                File.WriteAllText(Path.Combine(appsRoot, ".DS_Store"), "Finder metadata", new UTF8Encoding(false));
+                Directory.CreateDirectory(Path.Combine(appsRoot, "not-a-package"));
+                var snapshotWithUnmanagedEntries = manager.ManagementSnapshot();
+                Require(
+                    snapshotWithUnmanagedEntries.Packages.Any(item =>
+                        item.PackageId == proposal.PackageId && item.State == PocketAppLifecycleState.Enabled)
+                    && snapshotWithUnmanagedEntries.Issues.Count == 0,
+                    "lifecycle_unmanaged_entries_do_not_block_snapshot");
                 File.WriteAllBytes(Path.Combine(draftRoot, "intent.md"), FixtureData("package/intent.md"));
 
                 var installedIntent = Path.Combine(
@@ -932,14 +1053,17 @@ internal sealed class PocketAppPackageVerifier
     private void WithPackage(Action<string> body, string label)
     {
         var root = Path.Combine(Path.GetTempPath(), $"hover-pocket-package-{Guid.NewGuid():N}");
+        VerifyConsole.WriteLine($"POCKET_PACKAGE_CASE_BEGIN {label}");
         try
         {
             AssemblePackage(root);
             body(root);
+            VerifyConsole.WriteLine($"POCKET_PACKAGE_CASE_END {label}");
         }
         catch (Exception ex)
         {
             _failures.Add($"{label}:fixture:{ex.GetType().Name}:{ex.Message}");
+            VerifyConsole.WriteLine($"POCKET_PACKAGE_CASE_FAIL {label} {ex.GetType().Name}:{ex.Message}");
         }
         finally
         {
