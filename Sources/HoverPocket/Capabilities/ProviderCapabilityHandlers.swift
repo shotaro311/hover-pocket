@@ -578,12 +578,21 @@ final class StickyCapabilityHandler: PocketCapabilityHandler {
 
 @MainActor
 enum ProviderCapabilityCompositionRoot {
-    static func live(calendarDataSource: any CalendarCapabilityDataSource) throws -> PocketCapabilityHandlerSet {
+    static func live(
+        calendarDataSource: any CalendarCapabilityDataSource,
+        controlsDataSource: any ControlsCapabilityDataSource = LiveControlsCapabilityDataSource()
+    ) throws -> PocketCapabilityHandlerSet {
         try PocketCapabilityHandlerSet(handlers: [
             CalendarListCapabilityHandler(dataSource: calendarDataSource),
             CalendarGetCapabilityHandler(dataSource: calendarDataSource),
             CalendarCreateCapabilityHandler(dataSource: calendarDataSource),
             CalculatorEvaluateCapabilityHandler(),
+            ControlsCapabilityHandler(operation: .availability, dataSource: controlsDataSource),
+            ControlsCapabilityHandler(operation: .volumeGet, dataSource: controlsDataSource),
+            ControlsCapabilityHandler(operation: .volumeSet, dataSource: controlsDataSource),
+            ControlsCapabilityHandler(operation: .muteSet, dataSource: controlsDataSource),
+            ControlsCapabilityHandler(operation: .brightnessSet, dataSource: controlsDataSource),
+            ControlsCapabilityHandler(operation: .mediaCommand, dataSource: controlsDataSource),
             TimerCapabilityHandler(operation: .start, store: .shared),
             TimerCapabilityHandler(operation: .get, store: .shared),
             TimerCapabilityHandler(operation: .pause, store: .shared),

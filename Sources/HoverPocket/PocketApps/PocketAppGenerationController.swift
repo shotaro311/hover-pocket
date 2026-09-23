@@ -23,7 +23,8 @@ final class PocketAppGenerationController: ObservableObject {
         userDataRoot: URL,
         generationRoot: URL,
         generator: (any PocketAppGenerationAdapter)?,
-        postCommitHook: (() -> Void)? = nil
+        postCommitHook: (() -> Void)? = nil,
+        runtimeActivationReadback: ((PocketAppLifecycleReceipt) throws -> PocketAppRuntimeReadback)? = nil
     ) throws {
         let definitionPin = try PocketAppPinnedDirectory(url: rootDirectory)
         let userDataPin = try PocketAppPinnedDirectory(url: userDataRoot)
@@ -34,7 +35,8 @@ final class PocketAppGenerationController: ObservableObject {
         self.lifecycle = try PocketAppLifecycleManager(
             rootDirectory: definitionPin.url,
             userDataRoot: userDataPin.url,
-            performStartupRecovery: false
+            performStartupRecovery: false,
+            activationReadback: runtimeActivationReadback
         )
         self.materializer = PocketAppGenerationMaterializer(rootDirectory: generationPin.url)
         try validatePins()
@@ -143,9 +145,11 @@ final class PocketAppGenerationController: ObservableObject {
             try refreshManagedPackagesAfterCommit(receipt)
         } catch let error as PocketAppGenerationError {
             discardPendingAfterFailedActivation(proposal)
+            refreshManagedPackagesAfterFailure()
             fail(error)
         } catch {
             discardPendingAfterFailedActivation(proposal)
+            refreshManagedPackagesAfterFailure()
             fail(.approvalMismatch)
         }
     }
@@ -182,6 +186,7 @@ final class PocketAppGenerationController: ObservableObject {
             postCommitHook?()
             try refreshManagedPackagesAfterCommit(receipt)
         } catch {
+            refreshManagedPackagesAfterFailure()
             fail(.packageInvalid)
         }
     }
@@ -205,6 +210,7 @@ final class PocketAppGenerationController: ObservableObject {
             postCommitHook?()
             try refreshManagedPackagesAfterCommit(receipt)
         } catch {
+            refreshManagedPackagesAfterFailure()
             fail(.packageInvalid)
         }
     }
@@ -228,6 +234,7 @@ final class PocketAppGenerationController: ObservableObject {
             postCommitHook?()
             try refreshManagedPackagesAfterCommit(receipt)
         } catch {
+            refreshManagedPackagesAfterFailure()
             fail(.packageInvalid)
         }
     }
@@ -425,6 +432,10 @@ final class PocketAppGenerationController: ObservableObject {
         managedPackages = snapshot.packages.filter { $0.state != .removed }
         managementIssues = snapshot.issues
         try validatePins()
+    }
+
+    private func refreshManagedPackagesAfterFailure() {
+        try? refreshManagedPackages()
     }
 
     static func shouldRejectPendingProposal(

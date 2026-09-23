@@ -19,6 +19,7 @@ internal sealed record StartupOptions(
     bool VerifyCalendarLive,
     bool VerifySettings,
     bool VerifyAiLane,
+    bool VerifyVoice,
     bool VerifyUpdater,
     bool VerifyReleaseConfig,
     bool SecondInstanceProbe,
@@ -46,6 +47,7 @@ internal sealed record StartupOptions(
         || VerifyCalendarLive
         || VerifySettings
         || VerifyAiLane
+        || VerifyVoice
         || VerifyUpdater
         || VerifyReleaseConfig;
 
@@ -67,6 +69,7 @@ internal sealed record StartupOptions(
         var verifyCalendarLive = false;
         var verifySettings = false;
         var verifyAiLane = false;
+        var verifyVoice = false;
         var verifyUpdater = false;
         var verifyReleaseConfig = false;
         var secondInstanceProbe = false;
@@ -99,6 +102,7 @@ internal sealed record StartupOptions(
                 verifyCalendarLive = string.Equals(verifyTarget, "calendar-live", StringComparison.OrdinalIgnoreCase);
                 verifySettings = string.Equals(verifyTarget, "settings", StringComparison.OrdinalIgnoreCase);
                 verifyAiLane = string.Equals(verifyTarget, "ailane", StringComparison.OrdinalIgnoreCase);
+                verifyVoice = string.Equals(verifyTarget, "voice", StringComparison.OrdinalIgnoreCase);
                 verifyUpdater = string.Equals(verifyTarget, "updater", StringComparison.OrdinalIgnoreCase);
                 verifyReleaseConfig = string.Equals(verifyTarget, "release-config", StringComparison.OrdinalIgnoreCase);
                 continue;
@@ -165,6 +169,7 @@ internal sealed record StartupOptions(
             verifyCalendarLive,
             verifySettings,
             verifyAiLane,
+            verifyVoice,
             verifyUpdater,
             verifyReleaseConfig,
             secondInstanceProbe,

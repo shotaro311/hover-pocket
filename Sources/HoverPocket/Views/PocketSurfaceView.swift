@@ -11,7 +11,11 @@ struct PocketSurfaceHostView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                PocketSurfaceNodeView(node: model.surface.root, model: model)
+                if model.activationAvailable {
+                    PocketSurfaceNodeView(node: model.surface.root, model: model)
+                } else {
+                    hostStatus(text: "このPocket Appは現在利用できません。", color: .white.opacity(0.58))
+                }
 
                 if model.isLoading {
                     ProgressView()
@@ -251,13 +255,17 @@ private struct PocketSurfaceNodeView: View {
         let selection = node.stringProperty("selection") ?? ""
         let titleTarget = node.stringProperty("titleTarget")
         let query: String
+        let arguments: [String: PocketJSONValue]
         if case .object(let items)? = node.properties["items"],
-           case .string(let value)? = items["query"] {
+           case .string(let value)? = items["query"],
+           case .object(let queryArguments)? = items["arguments"] {
             query = value
+            arguments = queryArguments
         } else {
             query = ""
+            arguments = [:]
         }
-        let choices = model.choicesByQuery[query] ?? []
+        let choices = model.choices(query: query, arguments: arguments)
         return VStack(alignment: .leading, spacing: 7) {
             Text("集中する予定")
                 .font(scaledFont(size: 10, weight: .bold))
@@ -270,7 +278,15 @@ private struct PocketSurfaceNodeView: View {
             } else {
                 Picker("集中する予定", selection: Binding(
                     get: { model.stringValue(for: selection) },
-                    set: { model.selectChoice($0, query: query, selection: selection, titleTarget: titleTarget) }
+                    set: {
+                        model.selectChoice(
+                            $0,
+                            query: query,
+                            arguments: arguments,
+                            selection: selection,
+                            titleTarget: titleTarget
+                        )
+                    }
                 )) {
                     ForEach(choices) { choice in
                         Text(choice.subtitle.map { "\(choice.title)  \($0)" } ?? choice.title)

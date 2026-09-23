@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "phase": "AN3-B2-windows-calendar-timer-slice",
+  "operatingSystem": "windows",
+  "defaultOff": true,
+  "appServer": {
+    "experimentalApi": true,
+    "threadStartField": "dynamicTools",
+    "requestMethod": "item/tool/call",
+    "responseFields": [
+      "contentItems",
+      "success"
+    ],
+    "environments": [],
+    "positiveToolPolicy": "dynamicToolsOnly",
+    "codex0145SupportsPositiveToolPolicy": false,
+    "productionActivationApproved": false,
+    "sandbox": "read-only",
+    "approvalPolicy": "never",
+    "namespace": "hoverpocket"
+  },
+  "tools": [
+    {
+      "name": "calendar_events_list",
+      "capabilityId": "calendar.events.list",
+      "capabilityVersion": 1,
+      "permission": "calendar.events.read",
+      "write": false,
+      "nativeApproval": false,
+      "hostGrantRequired": true
+    },
+    {
+      "name": "timer_countdown_start",
+      "capabilityId": "timer.countdown.start",
+      "capabilityVersion": 1,
+      "permission": "timer.write",
+      "write": true,
+      "nativeApproval": true,
+      "readback": "verified"
+    }
+  ],
+  "boundaries": {
+    "providerStoreDirectAccess": false,
+    "bridgeDispatcherDirectAccess": false,
+    "mcpExposure": false,
+    "unknownServerRequestsFailClosed": true,
+    "rootThreadBound": true,
+    "sessionCancellationRevokesPendingWrites": true,
+    "repeatedCallExecutesOnce": true,
+    "calendarTitlesAreUntrustedData": true,
+    "calendarResultIncludesProviderIdentifiers": false,
+    "calendarGrantIsPersistedAndRevocable": true,
+    "voiceSettingsTransitionsSerialized": true,
+    "timerApprovalSingleFlight": true,
+    "timerPromptRateLimitedBeforePresentation": true,
+    "productionFailsClosedWithoutPositiveToolPolicy": true,
+    "settingsReceivesToolPayload": false,
+    "auditStoresToolPayload": false
+  },
+  "outOfScope": {
+    "calendarCreate": true,
+    "todayFocusVoiceWorkflow": true,
+    "stickyWrite": true,
+    "macProductionAdapter": true,
+    "mcpAdapter": true
+  }
+}

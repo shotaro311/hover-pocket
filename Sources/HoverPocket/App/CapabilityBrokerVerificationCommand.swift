@@ -5,6 +5,7 @@ import SwiftUI
 
 enum CapabilityBrokerVerificationCommand {
     private static let goldenPlanDigest = "sha256:d098ea1b5f9f70e91486fd53229e7ddb68f73a9952ab94f17eed27cdeeb6413f"
+    private static let privatePresentationTitle = "  Private\n\u{202E} title " + String(repeating: "x", count: 90)
 
     @MainActor
     static func run() -> Never {
@@ -12,16 +13,18 @@ enum CapabilityBrokerVerificationCommand {
             do {
                 try await verify()
                 print("broker_verify=ok")
-                print("broker_registry_descriptors=15")
-                print("broker_available_handlers=14")
+                print("broker_registry_descriptors=21")
+                print("broker_available_handlers=20")
                 print("broker_calculator_evaluate=ok")
+                print("broker_controls_os_readback=ok")
                 print("broker_sticky_lifecycle=ok")
+                print("broker_approval_presentation=ok")
                 print("broker_today_focus=ok")
                 print("broker_pocket_app=ok")
                 print("broker_pocket_app_declared_tests=4")
                 print("broker_pocket_app_layout_cases=16")
                 print("broker_concurrent_duplicate=ok")
-                print("broker_negative_cases=11")
+                print("broker_negative_cases=12")
                 print("broker_golden_plan_digest=\(goldenPlanDigest)")
                 Darwin.exit(0)
             } catch {
@@ -70,16 +73,25 @@ enum CapabilityBrokerVerificationCommand {
         let broker = CapabilityBroker(
             registry: registry,
             ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
-            auditLog: audit
+            auditLog: audit,
+            approvalPresentationResolver: HostCapabilityApprovalPresentationResolver(
+                stickyStore: stickyStore
+            )
         )
 
-        try require(registry.descriptorKeys.count == 15, "registry_descriptor_count")
-        try require(registry.availableHandlerKeys.count == 14, "registry_handler_count")
+        try require(registry.descriptorKeys.count == 21, "registry_descriptor_count")
+        try require(registry.availableHandlerKeys.count == 20, "registry_handler_count")
         try require(
             registry.descriptor(PocketCapabilityKeys.stickyDelete)?.approvalPolicy == .strongPerCall,
             "sticky_delete_strong_approval"
         )
         try verifyStrongPerCallIsolation(broker: broker, noteID: noteID, now: now)
+        try verifyStrongApprovalPresentationRequired(
+            registry: registry,
+            root: root,
+            noteID: noteID,
+            now: now
+        )
         do {
             try registry.descriptor(PocketCapabilityKeys.stickyArchive)?.validateOutput([
                 "noteId": .string(noteID.uuidString),
@@ -99,6 +111,7 @@ enum CapabilityBrokerVerificationCommand {
         }
 
         try await verifyCalculator(broker: broker, now: now)
+        try await verifyControls(broker: broker, now: now)
         try await verifyStickyLifecycle(
             broker: broker,
             store: stickyStore,
@@ -465,7 +478,9 @@ enum CapabilityBrokerVerificationCommand {
             "secret-purpose-approved",
             "secret-purpose-rejected",
             "secret-purpose-concurrent",
-            principal.userID
+            principal.userID,
+            privatePresentationTitle,
+            noteID.uuidString.lowercased()
         ] {
             try require(!auditText.contains(forbidden), "audit_redaction_\(forbidden)")
         }
@@ -478,13 +493,25 @@ enum CapabilityBrokerVerificationCommand {
         try require(!auditText.contains(invalidAuditMarker), "invalid_plan_audit_redaction")
         try require(!auditText.contains(invalidVersionMarker), "invalid_version_audit_redaction")
         let durableLedgerText = String(data: try Data(contentsOf: ledgerURL), encoding: .utf8) ?? ""
-        for forbidden in ["secret-purpose-approved", "secret-purpose-concurrent", "Sensitive Calendar Title"] {
+        for forbidden in [
+            "secret-purpose-approved",
+            "secret-purpose-concurrent",
+            "Sensitive Calendar Title",
+            privatePresentationTitle,
+            noteID.uuidString.lowercased()
+        ] {
             try require(!durableLedgerText.contains(forbidden), "ledger_redaction_\(forbidden)")
         }
 
         try await verifyPocketAppExecution(root: root, calendar: calendar, now: now)
+        try await verifyTodayFocusActivationRevocation(
+            root: root,
+            now: now,
+            principal: principal
+        )
         try await verifyPartialRollback(root: root, now: now, principal: principal)
         try await verifyCurrentStepRollback(root: root, now: now, principal: principal)
+        try await verifyCancellationAfterSuccessfulStep(root: root, now: now, principal: principal)
         try await verifyTimeout(root: root, now: now, principal: principal)
     }
 
@@ -525,7 +552,7 @@ enum CapabilityBrokerVerificationCommand {
         let stateRoot = root.appendingPathComponent("pocket-app-user-state", isDirectory: true)
         let userStateStore = try PocketAppUserStateStore(
             packageID: package.manifest.id,
-            allowedKeys: package.statePropertyNames,
+            stateProperties: package.stateProperties,
             rootDirectory: stateRoot
         )
         let runtime = PocketAppExecutionRuntime(
@@ -537,19 +564,256 @@ enum CapabilityBrokerVerificationCommand {
             userStateStore: userStateStore
         )
         let hostModel = try PocketSurfaceHostModel(runtime: runtime, surfaceID: "main")
+        let generatedSurfaceRegistry = PocketSurfaceRegistry()
+        let runtimeReadback = PocketAppRuntimeReadback(
+            appID: package.manifest.id,
+            version: package.manifest.version,
+            packageDigest: package.manifestDigest,
+            effectivePermissions: [
+                "calendar.events.read",
+                "sticky.read",
+                "sticky.write",
+                "timer.read",
+                "timer.write"
+            ]
+        )
+        generatedSurfaceRegistry.activate(
+            runtimeReadback,
+            runtimeHandle: runtime,
+            surfaceIDs: ["main"]
+        )
+        guard let firstSurfaceModel = try generatedSurfaceRegistry.model(
+            appID: package.manifest.id,
+            surfaceID: "main"
+        ), let reopenedSurfaceModel = try generatedSurfaceRegistry.model(
+            appID: package.manifest.id,
+            surfaceID: "main"
+        ) else {
+            throw BrokerVerificationFailure("pocket_app_surface_reopen_model")
+        }
+        try require(
+            firstSurfaceModel !== reopenedSurfaceModel,
+            "pocket_app_surface_reopen_refreshes_queries"
+        )
+        await firstSurfaceModel.load(now: now)
+        await reopenedSurfaceModel.load(now: now)
+        try require(
+            !firstSurfaceModel.stringValue(for: "$state.selectedEventRef").isEmpty
+                && !reopenedSurfaceModel.stringValue(for: "$state.selectedEventRef").isEmpty,
+            "pocket_app_surface_reopen_queries_loaded"
+        )
+        generatedSurfaceRegistry.deactivate(appID: package.manifest.id)
+        try require(
+            !firstSurfaceModel.activationAvailable && !reopenedSurfaceModel.activationAvailable,
+            "pocket_app_surface_reopen_models_revoked"
+        )
         try require(hostModel.integerValue(for: "$input.durationSeconds") == 1_500, "pocket_app_surface_default")
         await hostModel.load(now: now)
+        try require(
+            !hostModel.choices(
+                query: "calendar.events.list@1",
+                arguments: [
+                    "range": .string("today"),
+                    "timezone": .string("$context.timezone")
+                ]
+            ).isEmpty,
+            "pocket_app_query_binding_choices"
+        )
+        try require(
+            PocketSurfaceHostModel.queryIdentity(
+                reference: "calendar.events.list@1",
+                arguments: ["timeZone": .string("UTC")]
+            ) != PocketSurfaceHostModel.queryIdentity(
+                reference: "calendar.events.list@1",
+                arguments: ["timeZone": .string("Asia/Tokyo")]
+            ),
+            "pocket_app_query_binding_arguments_isolated"
+        )
         try verifyPocketSurfaceLayoutMatrix(model: hostModel)
         let selectedEventRef = hostModel.stringValue(for: "$state.selectedEventRef")
         try require(!selectedEventRef.isEmpty, "pocket_app_surface_selection")
+        hostModel.updateString(
+            String(repeating: "x", count: PocketAppUserStateStore.maximumValueScalars + 1),
+            binding: "$state.selectedEventRef"
+        )
+        try require(
+            hostModel.stringValue(for: "$state.selectedEventRef") == selectedEventRef
+                && userStateStore.snapshot()["selectedEventRef"] == .string(selectedEventRef),
+            "pocket_app_surface_failed_state_write_not_published"
+        )
+        try require(
+            !PocketSurfaceHostModel.acceptsWorkflowInput(.null, type: "boolean")
+                && !PocketSurfaceHostModel.acceptsWorkflowInput(.string("true"), type: "boolean")
+                && PocketSurfaceHostModel.acceptsWorkflowInput(.bool(true), type: "boolean"),
+            "pocket_app_surface_workflow_input_exact_type"
+        )
+        try require(
+            !PocketSurfaceHostModel.acceptsPickerValue(.string("removed"), options: ["quiet", "active"])
+                && PocketSurfaceHostModel.acceptsPickerValue(.string("quiet"), options: ["quiet", "active"]),
+            "pocket_app_surface_picker_option_membership"
+        )
         let reloadedStateStore = try PocketAppUserStateStore(
             packageID: package.manifest.id,
-            allowedKeys: package.statePropertyNames,
+            stateProperties: package.stateProperties,
             rootDirectory: stateRoot
         )
         try require(
-            reloadedStateStore.snapshot()["selectedEventRef"] == selectedEventRef,
+            reloadedStateStore.snapshot()["selectedEventRef"] == .string(selectedEventRef),
             "pocket_app_surface_state_persistence"
+        )
+        let namespaceModel = try PocketSurfaceHostModel(runtime: runtime, surfaceID: "main")
+        namespaceModel.updateString("input-value", binding: "$input.selectedEventRef")
+        namespaceModel.updateString("state-value", binding: "$state.selectedEventRef")
+        try require(
+            namespaceModel.stringValue(for: "$input.selectedEventRef") == "input-value"
+                && namespaceModel.stringValue(for: "$state.selectedEventRef") == "state-value",
+            "pocket_app_input_state_namespaces_independent"
+        )
+        let typedStateStore = try PocketAppUserStateStore(
+            packageID: "local.example.typed-state",
+            allowedKeys: ["enabled", "label", "ratio"],
+            rootDirectory: stateRoot
+        )
+        try typedStateStore.setValue(.bool(true), for: "enabled")
+        try typedStateStore.setValue(.string("Saved"), for: "label")
+        try typedStateStore.setValue(.number(1.5), for: "ratio")
+        let typedStateReadback = try PocketAppUserStateStore(
+            packageID: "local.example.typed-state",
+            allowedKeys: ["enabled", "label", "ratio"],
+            rootDirectory: stateRoot
+        ).snapshot()
+        try require(
+            typedStateReadback["enabled"] == .bool(true)
+                && typedStateReadback["label"] == .string("Saved")
+                && typedStateReadback["ratio"] == .number(1.5),
+            "pocket_app_typed_state_persistence"
+        )
+        let migratedStateTypes: [String: Set<String>] = [
+            "enabled": ["string"],
+            "label": ["string"],
+            "ratio": ["integer"]
+        ]
+        let migratedStateStore = try PocketAppUserStateStore(
+            packageID: "local.example.typed-state",
+            propertyTypes: migratedStateTypes,
+            rootDirectory: stateRoot
+        )
+        try require(
+            migratedStateStore.snapshot() == ["label": .string("Saved")],
+            "pocket_app_state_schema_migration"
+        )
+        let migratedStateReadback = try PocketAppUserStateStore(
+            packageID: "local.example.typed-state",
+            propertyTypes: migratedStateTypes,
+            rootDirectory: stateRoot
+        ).snapshot()
+        try require(
+            migratedStateReadback == ["label": .string("Saved")],
+            "pocket_app_state_schema_migration_persisted"
+        )
+        do {
+            try migratedStateStore.setValue(.bool(true), for: "label")
+            throw BrokerVerificationFailure("pocket_app_state_schema_write_accepted")
+        } catch PocketAppUserStateStoreError.invalidValue {
+        }
+        let constrainedStateProperties: [String: PocketAppStatePropertySchema] = [
+            "focusDate": PocketAppStatePropertySchema(
+                types: ["string"],
+                isRequired: true,
+                format: "date",
+                maximumLength: 10
+            )
+        ]
+        let constrainedStateStore = try PocketAppUserStateStore(
+            packageID: "local.example.constrained-state",
+            stateProperties: constrainedStateProperties,
+            rootDirectory: stateRoot
+        )
+        try constrainedStateStore.setValue(.string("2026-08-20"), for: "focusDate")
+        do {
+            try constrainedStateStore.setValue(.string("2026-02-30"), for: "focusDate")
+            throw BrokerVerificationFailure("pocket_app_state_date_constraint_accepted")
+        } catch PocketAppUserStateStoreError.invalidValue {
+        }
+        do {
+            try constrainedStateStore.setValue(.string("2026-08-200"), for: "focusDate")
+            throw BrokerVerificationFailure("pocket_app_state_max_length_constraint_accepted")
+        } catch PocketAppUserStateStoreError.invalidValue {
+        }
+        do {
+            try constrainedStateStore.setValue(nil, for: "focusDate")
+            throw BrokerVerificationFailure("pocket_app_state_required_removal_accepted")
+        } catch PocketAppUserStateStoreError.invalidValue {
+        }
+        let optionalRequiredLoadStore = try PocketAppUserStateStore(
+            packageID: "local.example.required-load-state",
+            propertyTypes: ["focusDate": ["string"]],
+            rootDirectory: stateRoot
+        )
+        try optionalRequiredLoadStore.setValue(.string("not-a-date"), for: "focusDate")
+        let repairedRequiredStateStore = try PocketAppUserStateStore(
+            packageID: "local.example.required-load-state",
+            stateProperties: constrainedStateProperties,
+            rootDirectory: stateRoot
+        )
+        try require(
+            repairedRequiredStateStore.snapshot().isEmpty,
+            "pocket_app_state_invalid_required_value_repaired"
+        )
+        let repairedRequiredStateReadback = try PocketAppUserStateStore(
+            packageID: "local.example.required-load-state",
+            stateProperties: constrainedStateProperties,
+            rootDirectory: stateRoot
+        )
+        try require(
+            repairedRequiredStateReadback.snapshot().isEmpty,
+            "pocket_app_state_invalid_required_value_repair_persisted"
+        )
+        let isolatedStateStore = try PocketAppUserStateStore(
+            packageID: "local.example.state-isolated-a",
+            allowedKeys: ["label"],
+            rootDirectory: stateRoot
+        )
+        let otherStateStore = try PocketAppUserStateStore(
+            packageID: "local.example.state-isolated-b",
+            allowedKeys: ["label"],
+            rootDirectory: stateRoot
+        )
+        try otherStateStore.setString("other-app", for: "label")
+        let isolatedDirectory = stateRoot.appendingPathComponent(
+            "local.example.state-isolated-a",
+            isDirectory: true
+        )
+        let isolatedBackup = stateRoot.appendingPathComponent(
+            "local.example.state-isolated-a-backup",
+            isDirectory: true
+        )
+        let otherDirectory = stateRoot.appendingPathComponent(
+            "local.example.state-isolated-b",
+            isDirectory: true
+        )
+        try FileManager.default.moveItem(at: isolatedDirectory, to: isolatedBackup)
+        try FileManager.default.createSymbolicLink(
+            at: isolatedDirectory,
+            withDestinationURL: otherDirectory
+        )
+        defer {
+            try? FileManager.default.removeItem(at: isolatedDirectory)
+            try? FileManager.default.moveItem(at: isolatedBackup, to: isolatedDirectory)
+        }
+        do {
+            try isolatedStateStore.setString("cross-app-write", for: "label")
+            throw BrokerVerificationFailure("pocket_app_state_directory_swap_accepted")
+        } catch PocketAppUserStateStoreError.persistenceFailed {
+        }
+        let otherStateReadback = try PocketAppUserStateStore(
+            packageID: "local.example.state-isolated-b",
+            allowedKeys: ["label"],
+            rootDirectory: stateRoot
+        ).snapshot()
+        try require(
+            otherStateReadback["label"] == .string("other-app"),
+            "pocket_app_state_directory_swap_isolated"
         )
         do {
             try reloadedStateStore.setString("forbidden", for: "unknown")
@@ -731,6 +995,50 @@ enum CapabilityBrokerVerificationCommand {
     }
 
     @MainActor
+    private static func verifyStrongApprovalPresentationRequired(
+        registry: CapabilityRegistry,
+        root: URL,
+        noteID: UUID,
+        now: Date
+    ) throws {
+        let brokerRoot = root.appendingPathComponent("missing-presentation-broker", isDirectory: true)
+        let broker = CapabilityBroker(
+            registry: registry,
+            ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
+            auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+        )
+        let principal = CapabilityPrincipal(userID: "user-missing-presentation-fixture")
+        let plan = CapabilityExecutionPlan(
+            id: "missing-presentation-plan",
+            createdAt: now,
+            origin: .text,
+            principal: principal,
+            appContext: nil,
+            steps: [CapabilityPlanStep(
+                id: "deleteNote",
+                capability: PocketCapabilityKeys.stickyDelete,
+                arguments: ["noteId": .string(noteID.uuidString)],
+                idempotencyKey: "missing-presentation-key-0001",
+                dependencies: []
+            )],
+            requiredPermissions: ["sticky.delete"]
+        )
+        do {
+            _ = try broker.prepare(
+                plan,
+                permissions: CapabilityPermissionSet(
+                    principal: principal,
+                    permissions: ["sticky.delete"]
+                ),
+                now: now
+            )
+            throw BrokerVerificationFailure("missing_strong_presentation_accepted")
+        } catch CapabilityBrokerError.invalidPlan(let field) {
+            try require(field == "approval_presentation", "missing_strong_presentation_error")
+        }
+    }
+
+    @MainActor
     private static func verifyCalculator(broker: CapabilityBroker, now: Date) async throws {
         let principal = CapabilityPrincipal(userID: "user-calculator-fixture")
         let plan = CapabilityExecutionPlan(
@@ -769,6 +1077,49 @@ enum CapabilityBrokerVerificationCommand {
     }
 
     @MainActor
+    private static func verifyControls(broker: CapabilityBroker, now: Date) async throws {
+        let principal = CapabilityPrincipal(userID: "controls-broker-user")
+        let permissions = CapabilityPermissionSet(
+            principal: principal,
+            permissions: ["controls.write"]
+        )
+        let plan = CapabilityExecutionPlan(
+            id: "controls-volume-plan",
+            createdAt: now,
+            origin: .text,
+            principal: principal,
+            appContext: nil,
+            steps: [CapabilityPlanStep(
+                id: "setVolume",
+                capability: PocketCapabilityKeys.controlsVolumeSet,
+                arguments: ["level": .number(0.75)],
+                idempotencyKey: "controls-broker-volume-key-0001",
+                dependencies: []
+            )],
+            requiredPermissions: ["controls.write"]
+        )
+        let preparation = try broker.prepare(plan, permissions: permissions, now: now)
+        guard let request = preparation.approvalRequest else {
+            throw BrokerVerificationFailure("controls_approval_missing")
+        }
+        let grant = try broker.decideApproval(
+            requestID: request.id,
+            planDigest: preparation.planDigest,
+            decision: .approve,
+            now: now
+        )
+        let receipt = try await broker.execute(
+            plan,
+            permissions: permissions,
+            approvalGrant: grant,
+            now: now
+        )
+        try require(receipt.status == .succeeded, "controls_receipt_status")
+        try require(receipt.steps.first?.readback.status == .verified, "controls_readback_verified")
+        try require(receipt.steps.first?.output?["level"] == .number(0.75), "controls_readback_level")
+    }
+
+    @MainActor
     private static func verifyStickyLifecycle(
         broker: CapabilityBroker,
         store: StickyNotesStore,
@@ -777,7 +1128,7 @@ enum CapabilityBrokerVerificationCommand {
     ) async throws {
         _ = try store.upsertNote(
             stableKey: "broker-lifecycle-fixture",
-            title: "Private title",
+            title: privatePresentationTitle,
             body: "Private body",
             color: .yellow,
             id: noteID,
@@ -845,6 +1196,25 @@ enum CapabilityBrokerVerificationCommand {
         guard let deleteRequest = deletePreparation.approvalRequest else {
             throw BrokerVerificationFailure("sticky_delete_approval_missing")
         }
+        guard deletePreparation.approvalPresentations.count == 1,
+              let presentation = deletePreparation.approvalPresentations.first,
+              let effect = deleteRequest.effects.first else {
+            throw BrokerVerificationFailure("sticky_delete_presentation_missing")
+        }
+        try require(presentation.requestID == deleteRequest.id, "sticky_presentation_request_binding")
+        try require(presentation.planDigest == deletePreparation.planDigest, "sticky_presentation_plan_binding")
+        try require(presentation.stepID == "deleteNote", "sticky_presentation_step_binding")
+        try require(presentation.argumentDigest == effect.argumentDigest, "sticky_presentation_argument_binding")
+        try require(presentation.targetKind == "sticky_note", "sticky_presentation_target_kind")
+        try require(presentation.targetState == .present, "sticky_presentation_target_state")
+        try require(presentation.destructive, "sticky_presentation_destructive")
+        try require(presentation.targetDisplayLabel?.hasPrefix("Private title ") == true, "sticky_presentation_label")
+        try require((presentation.targetDisplayLabel?.unicodeScalars.count ?? 0) <= 80, "sticky_presentation_label_limit")
+        try require(presentation.targetDisplayLabel?.contains("\n") == false, "sticky_presentation_label_newline")
+        try require(presentation.targetDisplayLabel?.contains("\u{202E}") == false, "sticky_presentation_label_bidi")
+        let encodedRequest = String(data: try JSONEncoder().encode(deleteRequest), encoding: .utf8) ?? ""
+        try require(!encodedRequest.contains(privatePresentationTitle), "sticky_presentation_not_in_request")
+        try require(!encodedRequest.contains(noteID.uuidString.lowercased()), "sticky_target_id_not_in_request")
         let deleteGrant = try broker.decideApproval(
             requestID: deleteRequest.id,
             planDigest: deletePreparation.planDigest,
@@ -861,6 +1231,82 @@ enum CapabilityBrokerVerificationCommand {
         try require(deleteReceipt.steps.first?.output?["state"] == .string("missing"), "sticky_delete_output")
         try require(deleteReceipt.steps.first?.readback.status == .verified, "sticky_delete_readback")
         try require(store.note(id: noteID) == nil, "sticky_delete_effect")
+
+        let missingPlan = CapabilityExecutionPlan(
+            id: "sticky-delete-missing-plan",
+            createdAt: now.addingTimeInterval(2),
+            origin: .text,
+            principal: principal,
+            appContext: nil,
+            steps: [CapabilityPlanStep(
+                id: "deleteMissingNote",
+                capability: PocketCapabilityKeys.stickyDelete,
+                arguments: ["noteId": .string(noteID.uuidString)],
+                idempotencyKey: "sticky-broker-delete-missing-key-0001",
+                dependencies: []
+            )],
+            requiredPermissions: ["sticky.delete"]
+        )
+        let missingPreparation = try broker.prepare(
+            missingPlan,
+            permissions: deletePermissions,
+            now: now.addingTimeInterval(2)
+        )
+        try require(
+            missingPreparation.approvalPresentations.first?.targetState == .missing,
+            "sticky_missing_presentation_state"
+        )
+        try require(
+            missingPreparation.approvalPresentations.first?.targetDisplayLabel == nil,
+            "sticky_missing_presentation_label"
+        )
+
+        let bodyOnlyID = UUID(uuidString: "77777777-7777-4777-8777-777777777777")!
+        _ = try store.upsertNote(
+            stableKey: "broker-body-only-presentation-fixture",
+            title: " \n ",
+            body: "Body fallback\n details",
+            color: .blue,
+            id: bodyOnlyID,
+            at: now.addingTimeInterval(3)
+        )
+        let bodyOnlyPlan = CapabilityExecutionPlan(
+            id: "sticky-delete-body-only-plan",
+            createdAt: now.addingTimeInterval(3),
+            origin: .text,
+            principal: principal,
+            appContext: nil,
+            steps: [CapabilityPlanStep(
+                id: "deleteBodyOnlyNote",
+                capability: PocketCapabilityKeys.stickyDelete,
+                arguments: ["noteId": .string(bodyOnlyID.uuidString)],
+                idempotencyKey: "sticky-broker-delete-body-only-key-0001",
+                dependencies: []
+            )],
+            requiredPermissions: ["sticky.delete"]
+        )
+        let bodyOnlyPreparation = try broker.prepare(
+            bodyOnlyPlan,
+            permissions: deletePermissions,
+            now: now.addingTimeInterval(3)
+        )
+        try require(
+            bodyOnlyPreparation.approvalPresentations.first?.targetDisplayLabel == "Body fallback details",
+            "sticky_body_fallback_presentation_label"
+        )
+        if let request = bodyOnlyPreparation.approvalRequest {
+            do {
+                _ = try broker.decideApproval(
+                    requestID: request.id,
+                    planDigest: bodyOnlyPreparation.planDigest,
+                    decision: .reject,
+                    now: now.addingTimeInterval(3)
+                )
+                throw BrokerVerificationFailure("sticky_body_fallback_reject_accepted")
+            } catch CapabilityBrokerError.approvalRejected {
+            }
+        }
+        try require(try store.deleteNoteAtomically(id: bodyOnlyID), "sticky_body_fallback_cleanup")
     }
 
     private static func verifyCalendarCreateEventBody(now: Date) throws {
@@ -1090,6 +1536,67 @@ enum CapabilityBrokerVerificationCommand {
     }
 
     @MainActor
+    private static func verifyTodayFocusActivationRevocation(
+        root: URL,
+        now: Date,
+        principal: CapabilityPrincipal
+    ) async throws {
+        let timerHandler = BrokerBlockingTimerStartHandler()
+        let handlers = try PocketCapabilityHandlerSet(handlers: [
+            timerHandler,
+            BrokerFailingStickyHandler()
+        ])
+        let brokerRoot = root.appendingPathComponent("activation-revocation-broker", isDirectory: true)
+        let broker = CapabilityBroker(
+            registry: try CapabilityRegistry(handlers: handlers),
+            ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
+            auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+        )
+        let permissions = CapabilityPermissionSet(
+            principal: principal,
+            permissions: ["sticky.write", "timer.write"]
+        )
+        let lease = PocketAppActivationLease()
+        let adapter = TodayFocusTextAdapter(
+            broker: broker,
+            activationLease: lease
+        )
+        let draft = try adapter.prepareFocus(
+            event: TodayFocusCalendarEvent(
+                eventRef: "event:activation-revocation",
+                safeTitle: "Activation revocation",
+                start: now,
+                end: now.addingTimeInterval(600)
+            ),
+            durationSeconds: 600,
+            purpose: "activation-revocation",
+            principal: principal,
+            permissions: permissions,
+            now: now
+        )
+        let execution = Task { @MainActor in
+            try await adapter.approveAndExecute(
+                draft,
+                permissions: permissions,
+                now: now
+            )
+        }
+        for _ in 0..<100 where !timerHandler.entered {
+            await Task.yield()
+        }
+        try require(timerHandler.entered, "today_focus_activation_entered")
+        lease.invalidate()
+        do {
+            _ = try await execution.value
+            throw BrokerVerificationFailure("today_focus_activation_result_returned")
+        } catch is CancellationError {
+        } catch PocketAppRuntimeActivationError.unavailable {
+        }
+        try require(timerHandler.wasCancelled, "today_focus_activation_handler_cancelled")
+        try require(!timerHandler.didWrite, "today_focus_activation_no_stale_write")
+    }
+
+    @MainActor
     private static func verifyTimeout(
         root: URL,
         now: Date,
@@ -1151,7 +1658,8 @@ enum CapabilityBrokerVerificationCommand {
         )
         try require(receipt.status == .unknown, "timeout_status")
         try require(receipt.steps.first?.safeError?.code == "CAPABILITY_TIMEOUT", "timeout_safe_error")
-        try require(slowHandler.wasCancelled, "timeout_handler_cancelled")
+        try require(!slowHandler.didReturn, "timeout_handler_no_late_result")
+        try require(!slowHandler.entered || slowHandler.wasCancelled, "timeout_started_handler_cancelled")
     }
 
     @MainActor
@@ -1211,17 +1719,95 @@ enum CapabilityBrokerVerificationCommand {
     }
 
     @MainActor
+    private static func verifyCancellationAfterSuccessfulStep(
+        root: URL,
+        now: Date,
+        principal: CapabilityPrincipal
+    ) async throws {
+        let timerID = UUID(uuidString: "77777777-7777-4777-8777-777777777777")!
+        let timerStore = TimerStore(
+            storageDirectory: root.appendingPathComponent("cancel-after-step-timer", isDirectory: true),
+            observesWake: false,
+            persistenceEnabled: true
+        )
+        let lease = PocketAppActivationLease()
+        let sticky = BrokerCountingStickyHandler()
+        let handlers = try PocketCapabilityHandlerSet(handlers: [
+            TimerCapabilityHandler(operation: .start, store: timerStore, idGenerator: { timerID }),
+            BrokerPostReadCancellationTimerReadHandler(store: timerStore, lease: lease),
+            TimerCapabilityHandler(operation: .stop, store: timerStore),
+            sticky
+        ])
+        let brokerRoot = root.appendingPathComponent("cancel-after-step-broker", isDirectory: true)
+        let broker = CapabilityBroker(
+            registry: try CapabilityRegistry(handlers: handlers),
+            ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
+            auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+        )
+        let permissions = CapabilityPermissionSet(principal: principal, permissions: ["sticky.write", "timer.write"])
+        let adapter = TodayFocusTextAdapter(broker: broker)
+        let draft = try adapter.prepareFocus(
+            event: TodayFocusCalendarEvent(
+                eventRef: "event:cancel-after-step",
+                safeTitle: "Cancel after step",
+                start: now,
+                end: now.addingTimeInterval(600)
+            ),
+            durationSeconds: 600,
+            purpose: "cancel-after-step",
+            principal: principal,
+            permissions: permissions,
+            now: now
+        )
+        let grant = try broker.decideApproval(
+            requestID: draft.preparation.approvalRequest!.id,
+            planDigest: draft.preparation.planDigest,
+            decision: .approve,
+            now: now
+        )
+        let execution = Task { @MainActor in
+            try await broker.execute(draft.plan, permissions: permissions, approvalGrant: grant, now: now)
+        }
+        let registration = lease.registerCancellation { execution.cancel() }
+        defer { lease.unregisterCancellation(registration) }
+        let receipt = try await execution.value
+        try require(receipt.status == .failed, "cancel_after_step_status")
+        try require(receipt.steps.count == 2, "cancel_after_step_receipts")
+        try require(receipt.steps[0].status == .succeeded, "cancel_after_step_first_succeeded")
+        try require(receipt.steps[0].rollbackStatus == "succeeded", "cancel_after_step_rollback_succeeded")
+        try require(receipt.steps[1].status == .failed, "cancel_after_step_second_failed")
+        try require(receipt.steps[1].safeError?.code == "CAPABILITY_CANCELLED", "cancel_after_step_safe_error")
+        try require(sticky.invocationCount == 0, "cancel_after_step_no_sticky_write")
+        try require(timerStore.runningTimers.isEmpty, "cancel_after_step_timer_removed")
+
+        let replay = try await broker.execute(
+            draft.plan,
+            permissions: permissions,
+            approvalGrant: nil,
+            now: now.addingTimeInterval(1)
+        )
+        try require(replay.replayed && replay.status == .failed, "cancel_after_step_durable_replay")
+    }
+
+    @MainActor
     private static func makeHandlers(
         calendar: BrokerFakeCalendarDataSource,
         timerStore: TimerStore,
         stickyStore: StickyNotesStore,
         noteID: UUID
     ) throws -> PocketCapabilityHandlerSet {
-        try PocketCapabilityHandlerSet(handlers: [
+        let controls = BrokerFakeControlsDataSource()
+        return try PocketCapabilityHandlerSet(handlers: [
             CalendarListCapabilityHandler(dataSource: calendar),
             CalendarGetCapabilityHandler(dataSource: calendar),
             CalendarCreateCapabilityHandler(dataSource: calendar),
             CalculatorEvaluateCapabilityHandler(),
+            ControlsCapabilityHandler(operation: .availability, dataSource: controls),
+            ControlsCapabilityHandler(operation: .volumeGet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .volumeSet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .muteSet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .brightnessSet, dataSource: controls),
+            ControlsCapabilityHandler(operation: .mediaCommand, dataSource: controls),
             TimerCapabilityHandler(operation: .start, store: timerStore),
             TimerCapabilityHandler(operation: .get, store: timerStore),
             TimerCapabilityHandler(operation: .pause, store: timerStore),
@@ -1278,6 +1864,69 @@ private struct BrokerVerificationFailure: Error, CustomStringConvertible {
 }
 
 @MainActor
+private final class BrokerFakeControlsDataSource: ControlsCapabilityDataSource {
+    private var volume = ControlsVolumeState(level: 0.5, isMuted: false)
+    private var media = ControlsNowPlayingState(
+        title: "Track",
+        sourceName: "Music",
+        hasMedia: true,
+        artworkData: nil,
+        mediaURLString: nil,
+        previewWindowID: nil,
+        progress: 0,
+        duration: 120,
+        isPlaying: false,
+        playbackRate: 1
+    )
+
+    func snapshot() async throws -> ControlsCapabilitySnapshot {
+        ControlsCapabilitySnapshot(
+            displays: [ControlsDisplay(
+                id: "display-1",
+                displayID: 1,
+                name: "Display",
+                kind: .internalDisplay,
+                brightness: 0.5,
+                isControllable: true
+            )],
+            volume: volume,
+            volumeAvailable: true,
+            media: media
+        )
+    }
+
+    func setVolume(_ level: Double) async throws -> ControlsVolumeState {
+        volume.level = level
+        return volume
+    }
+
+    func setMuted(_ muted: Bool) async throws -> ControlsVolumeState {
+        volume.isMuted = muted
+        return volume
+    }
+
+    func setBrightness(_ level: Double, displayID: String) async throws -> ControlsDisplay {
+        ControlsDisplay(
+            id: displayID,
+            displayID: 1,
+            name: "Display",
+            kind: .internalDisplay,
+            brightness: level,
+            isControllable: true
+        )
+    }
+
+    func executeMediaCommand(_ command: String) async throws -> ControlsNowPlayingState {
+        if command == "play_pause" {
+            media.isPlaying.toggle()
+        } else {
+            media.title = command == "next" ? "Next" : "Previous"
+        }
+        return media
+    }
+}
+
+@MainActor
 private final class BrokerFakeCalendarDataSource: CalendarCapabilityDataSource {
     private let event: CalendarCapabilityEvent
 
@@ -1321,9 +1970,28 @@ private final class BrokerFailingStickyHandler: PocketCapabilityHandler {
 }
 
 @MainActor
+private final class BrokerCountingStickyHandler: PocketCapabilityHandler {
+    let key = PocketCapabilityKeys.stickyUpsert
+    private(set) var invocationCount = 0
+
+    func handle(arguments: CapabilityObject, context: CapabilityHandlerContext) async throws -> CapabilityObject {
+        _ = arguments
+        _ = try context.requiredIdempotencyKey()
+        invocationCount += 1
+        return [
+            "noteId": .string("00000000-0000-0000-0000-000000000000"),
+            "state": .string("active"),
+            "updatedAt": .string(CapabilityDateCodec.string(from: context.now))
+        ]
+    }
+}
+
+@MainActor
 private final class BrokerSlowReadHandler: PocketCapabilityHandler {
     let key: PocketCapabilityKey
+    private(set) var entered = false
     private(set) var wasCancelled = false
+    private(set) var didReturn = false
 
     init(key: PocketCapabilityKey) {
         self.key = key
@@ -1332,13 +2000,37 @@ private final class BrokerSlowReadHandler: PocketCapabilityHandler {
     func handle(arguments: CapabilityObject, context: CapabilityHandlerContext) async throws -> CapabilityObject {
         _ = arguments
         _ = context
+        entered = true
         do {
             try await Task.sleep(for: .milliseconds(100))
         } catch is CancellationError {
             wasCancelled = true
             throw CancellationError()
         }
+        didReturn = true
         return ["value": .string("late")]
+    }
+}
+
+@MainActor
+private final class BrokerBlockingTimerStartHandler: PocketCapabilityHandler {
+    let key = PocketCapabilityKeys.timerStart
+    private(set) var entered = false
+    private(set) var wasCancelled = false
+    private(set) var didWrite = false
+
+    func handle(arguments: CapabilityObject, context: CapabilityHandlerContext) async throws -> CapabilityObject {
+        _ = arguments
+        _ = try context.requiredIdempotencyKey()
+        entered = true
+        do {
+            try await Task.sleep(for: .seconds(30))
+        } catch is CancellationError {
+            wasCancelled = true
+            throw CancellationError()
+        }
+        didWrite = true
+        return [:]
     }
 }
 
@@ -1362,6 +2054,34 @@ private final class BrokerMismatchedTimerReadHandler: PocketCapabilityHandler {
             "timerId": .string(rawID.lowercased()),
             "state": .string("running"),
             "endAt": .string(CapabilityDateCodec.string(from: context.now.addingTimeInterval(999)))
+        ]
+    }
+}
+
+@MainActor
+private final class BrokerPostReadCancellationTimerReadHandler: PocketCapabilityHandler {
+    let key = PocketCapabilityKeys.timerGet
+    private let store: TimerStore
+    private let lease: PocketAppActivationLease
+
+    init(store: TimerStore, lease: PocketAppActivationLease) {
+        self.store = store
+        self.lease = lease
+    }
+
+    func handle(arguments: CapabilityObject, context: CapabilityHandlerContext) async throws -> CapabilityObject {
+        guard case .string(let rawID)? = arguments["timerId"], let id = UUID(uuidString: rawID) else {
+            throw CapabilityHandlerError.invalidArgument("timerId")
+        }
+        let timer = store.runningTimer(id: id)
+        lease.invalidate()
+        guard timer != nil else {
+            return ["timerId": .string(rawID.lowercased()), "state": .string("stopped"), "endAt": .null]
+        }
+        return [
+            "timerId": .string(rawID.lowercased()),
+            "state": .string("running"),
+            "endAt": .string(CapabilityDateCodec.string(from: context.now.addingTimeInterval(600)))
         ]
     }
 }

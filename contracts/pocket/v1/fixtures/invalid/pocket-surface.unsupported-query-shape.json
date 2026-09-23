@@ -1,0 +1,13 @@
+{
+  "base": "valid/pocket-surface.today-focus.json",
+  "mutation": {
+    "setPath": [
+      "root",
+      "children",
+      1,
+      "items",
+      "query"
+    ],
+    "value": "sticky.note.get@1"
+  }
+}

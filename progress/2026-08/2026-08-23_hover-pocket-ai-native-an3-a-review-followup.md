@@ -1,0 +1,147 @@
+# 2026-08-23 HoverPocket AI-native AN3-A Final Review Hardening
+
+## 対象
+
+- Worktree: `/Users/shotaro/code/share/hover-menu-preview-ai-native-an3a`
+- Branch: `codex/ai-native-an3-voice-foundation`
+- PR: [#19](https://github.com/shotaro311/hover-pocket/pull/19)
+- 修正base: `b506557e13b45bd13d1f4a774a60a8a2314bfa33`
+- Pro patch head: `5170115b7d1f3afcfaef1e38e643bce0b8c3a641`
+- 最終code head: `90492d8644928c14b9f3b98afc154d28fb3716ca`
+
+## ChatGPT Pro Orchestrator回収
+
+- route: 通常Pro。ユーザーのChatGPT Pro活用指定を優先した。
+- role: `builder`
+- 開始: `2026-08-23T21:23:45+09:00`
+- 回収完了: `2026-08-23T21:31:16+09:00`
+- transport記録: GPT-5.6 Sol / Pro、Oracle `0.17.2`、Node `v24.19.0`
+- Project target: 検証済み。個別会話URLは記録されていない。
+- UI上のmodel selection証拠: `unverified`。transport metadataはGPT-5.6 Solを記録しているが、画面上のモデル表示を独立確認した証拠とは扱わない。
+- run: `/Users/shotaro/Documents/Codex/chatgpt-pro-orchestrator-runs/20260823-211957-pr-192filesystem-pathosvoice-uiwindows-transport-crashclient-teardownrestartpatch`
+- delivery: `return-a6894e4ea4f650aae5178cea2c076919`
+- Pro-owned: review修正設計、macOS / Windows実装、deterministic回帰、patch artifact作成。
+- Codex-owned: receipt、base、hash、path検証、機械適用、ローカルbuild / test、Security scan、commit / push、PR / CI / review readback。
+- GitHub capabilityはread-only、Proからの外部書き込みなし。local filesystem capabilityはfalse、artifactはinline deliveryである。
+- 本文文字数とURL / domain数はcoding patch runの受入指標ではないため未集計。必要成果物とsource context、artifact hash、local / CI結果を正本にした。
+
+## Artifact検証
+
+- artifact: `changes.patch`
+- base SHA: `b506557e13b45bd13d1f4a774a60a8a2314bfa33`
+- size: 13,796 bytes
+- SHA-256: `f7ee323511dfd498f5d5e819054d6359576e79989a99b21d41f5c404979af88d`
+- Oracle response SHA-256: `9b5e3b5de0c0ca233346b5cc121e0a30c644a2ca092ee5c76d99235db7f8f07f`
+- `git apply --check`: exact baseのclean worktreeで成功。
+- actual changed pathは次の4件だけで、task packetのallowed path内だった。
+  - `Sources/HoverPocket/App/VoiceFoundationVerificationCommand.swift`
+  - `Sources/HoverPocket/Voice/VoiceFoundation.swift`
+  - `windows/src/HoverPocket.Shell/Verification/VoiceFoundationVerifier.cs`
+  - `windows/src/HoverPocket.Shell/Voice/CodexVoiceCoordinator.cs`
+- Pro成果をCodexが別実装へ置き換える例外は使っていない。patchを機械適用し、必要な受入検証だけをCodexが担当した。
+
+## 実装
+
+### 相対filesystem path秘匿
+
+- macOS / Windowsの`VoiceTextSafety`へ同じrelative path判定を追加した。
+- `Sources/HoverPocket/App.swift`を`[redacted]`へ置換する。
+- `https://example.com/Sources/HoverPocket/App.swift`、`and/or`、`input/output`は通常テキストとして保持する。
+- 既存のabsolute path、secret marker、Unicode format control除去、scalar / event上限、decoded model再sanitizationは維持する。
+
+### Windows transport teardown-before-restart
+
+- crash / disconnect / stale unexpected requestで切り離したclientの非同期破棄TaskをCoordinatorが追跡する。
+- restartはschedule時点で対象teardown Taskを固定し、完了後にだけreplacement clientを起動する。
+- Initialize、Voice OFF、system transition、application disposeも保留teardownをdrainする。
+- gated dispose fixtureで、破棄が保留中はfactory callが1回のまま、解放後に2回目のclientだけがReadyになることを確認する。
+
+### 追加review follow-up
+
+- 進捗同期headで新規P2 review 1件を検出した。active clientが想定外requestを送った経路だけ`DisposeDetachedClientAsync`がfire-and-forgetのままで、Voice OFF / coordinator dispose /再有効化が旧process cleanupを待たない可能性があった。
+- active unexpected-request経路も`TrackTransportTeardown`へ統一した。
+- `GatedDisposeHarness`を使い、旧client破棄保留中はVoice OFF / ONが完了せずreplacement factoryも呼ばれないこと、解放後に一つのreplacementだけがReadyになることを確認する。
+- review threadへcommit `330c331`の根拠を返信して解決した。
+
+### 認証情報の表示前秘匿
+
+- macOS / Windowsのホスト側可視テキスト境界へ、standalone Bearer credential、裸のOpenAI key（`sk-` / `sk-proj-` / `sk-svcacct-`）、JSON形式のtoken / API key / client secretフィールドを検出する同等の処理を追加した。
+- `access_token` / `refresh_token` / `token` / `api_key` / `apikey` / `client_secret` / `secret`は、大文字小文字、underscore / hyphen、JSONの空白差を許容しつつ、値をUIへ渡す前に全文を`[redacted]`へ置換する。
+- macOS / Windowsへ`Bearer sk-proj-secret`、`sk-proj-abcdefghijklmnopqrstuvwxyz`、JSONの`access_token` / `client_secret`を追加し、通常URL・`and/or`・`input/output`を維持する回帰を追加した。
+- POSIX形式に加えてWindowsネイティブのrelative path（例: `Sources\HoverPocket\App.swift`）も両OSで秘匿する。単一separatorの通常文字列`input\output`は維持する。
+
+### Windows stale disconnect / teardown登録競合
+
+- 起動途中の旧clientがgeneration更新後に切断する経路もteardown追跡へ統一した。owner disposalを保留している間、Voice OFF、再有効化、replacement factoryを完了させず、解放後だけ一つのreplacementをReadyへ昇格する。
+- 最初のWindows CIは、Dispose task開始から追跡登録までの短い競合を新しい決定論的回帰で検出した。追跡用completionをlock内で先に登録してからowner disposalを開始する形へ修正し、同時進行の停止・終了が未登録状態を読む窓を閉じた。
+
+## ローカル検証
+
+成功:
+
+- `./script/build_and_run.sh --build-only`
+- `dist/HoverPocket.app/Contents/MacOS/HoverPocket --verify-voice-foundation`
+  - `PASS voice-foundation verify: default-off inert, root scope, bounded redacted transcript, app-lifetime UI detach, compact/expanded geometry`
+- `swift build -Xswiftc -warnings-as-errors`
+- `python3 script/verify_voice_foundation.py`
+  - `PASS voice-foundation contract: 42 geometry/state cases, root scope, default-off, legacy lane negative regression, internal scroll, accessibility`
+- `codesign --verify --deep --strict dist/HoverPocket.app`
+- `git diff --check`
+
+制約:
+
+- ローカルMacには`dotnet`がなく、Windows Release build / Voice verifierはローカル実行できない。Windows GitHub Actionsを受入根拠にした。
+
+## PR CI / review readback
+
+- Router: [32643297550](https://github.com/shotaro311/hover-pocket/actions/runs/32643297550) 成功。
+- 3OS deterministic contract / compare: [32643299059](https://github.com/shotaro311/hover-pocket/actions/runs/32643299059) 成功。
+- Windows Verify: [32643299113](https://github.com/shotaro311/hover-pocket/actions/runs/32643299113) 成功。
+- macOS Verify: [32643299061](https://github.com/shotaro311/hover-pocket/actions/runs/32643299061) 成功。
+- 最終review follow-upを含む全threadへ修正根拠を返信して解決した。
+- 全review thread: 66件。未解決: 0件。
+- PR #19: Open / Ready、`CLEAN / MERGEABLE`。
+- local / remote parity: `0 / 0`、worktree clean。
+
+## Security diff scan
+
+- scan ID: `c143d307-1abb-4c9b-b7ca-b69ab0066272`
+- exact range: `b506557e13b45bd13d1f4a774a60a8a2314bfa33...5170115b7d1f3afcfaef1e38e643bce0b8c3a641`
+- changed file: 4 / 4 review完了。
+- coverage surface: 4 / 4 closed。
+- completeness: complete。
+- reportable finding: 0。
+- status: sealed complete。
+- measured token usage: total 2,401,293 / input 2,387,043 / cached input 2,305,024。coverageはcomplete。
+- TAC advisory statusはコネクター未接続で取得不能だった。これは認可gateではなく、scanは通常どおり完了した。
+- report: `/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/codex-security-scans-0JCxLg/hover-menu-preview-ai-native-an3a/5170115b7d1f3afcfaef1e38e643bce0b8c3a641_20260823T124142Z_zr2cbcyw/report.md`
+
+追加review follow-up:
+
+- scan ID: `ff122990-cb48-4e3d-a051-3a7ccb43e192`
+- exact range: `e933f708713ee00f2a8be1bb7c01dbd00f1e1eac...330c331d30525d2aa1b94fd7ff41e834d03cf4df`
+- changed file: 2 / 2 review完了。
+- coverage surface: 2 / 2 closed。
+- completeness: complete。
+- reportable finding: 0。
+- status: sealed complete。
+- measured token usage: total 2,796,744 / input 2,791,032 / cached input 2,774,272。coverageはcomplete。
+- report: `/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/codex-security-scans-0JCxLg/hover-menu-preview-ai-native-an3a/330c331d30525d2aa1b94fd7ff41e834d03cf4df_20260823T125543Z_a6b36i5m/report.md`
+
+追加された安全境界ごとのexact scan:
+
+- `6240afee`（Bearer credential）: 4 / 4 closed、finding 0、sealed complete。
+- `c4ca161f`（stale disconnect teardown）: 2 / 2 closed、finding 0、sealed complete。
+- `3cb362a2`（teardown事前登録）: 1 / 1 closed、finding 0、sealed complete。
+- `aedc405e-14c1-41c0-b721-fc0217df2721`（`385ad688...f504c3c`、裸のOpenAI key）: 4 / 4 closed、finding 0、sealed complete。
+- `86297e47-699f-4d42-a7a2-09200ccda4b2`（`f504c3c...cebfc74`、JSON credential field）: 4 / 4 closed、finding 0、sealed complete。
+- `e05df431-7f64-410e-87e4-c3a7bf9581a5`（`57052db...90492d8`、Windows relative path）: 4 / 4 closed、finding 0、sealed complete。
+- 最終scan report: `/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/codex-security-scans-0JCxLg/hover-menu-preview-ai-native-an3a/90492d8644928c14b9f3b98afc154d28fb3716ca_20260823T134522Z_5da5f59m/report.md`
+
+## 残るgate
+
+1. この進捗記録をcommit / pushし、docs-only headのCI、review thread、mergeability、remote parityを再確認する。
+2. PR #18を人手で先にmergeする。PR #19も自動mergeしない。
+3. PR #19の修正をPR #21へ通常mergeし、その後PR #21をPR #22へ通常mergeする。
+4. PR #21 / #22の各headでWindows、macOS、3OS contract、review thread、mergeability、remote parityを再確認する。
+5. AN8-B release transitionの実行・rollback・長期運用gateへ進む。

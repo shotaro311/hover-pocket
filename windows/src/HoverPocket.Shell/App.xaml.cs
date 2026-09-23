@@ -53,6 +53,14 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (options.VerifyVoice)
+        {
+            VerifyConsole.AttachParent();
+            Environment.ExitCode = new VoiceFoundationVerifier().Run();
+            Shutdown();
+            return;
+        }
+
         if (options.VerifySticky)
         {
             VerifyConsole.AttachParent();
@@ -113,7 +121,8 @@ public partial class App : System.Windows.Application
             VerifyConsole.AttachParent();
             var surfaceResult = new PocketSurfaceVerifier().Run();
             var packageResult = new PocketAppPackageVerifier().Run();
-            Environment.ExitCode = surfaceResult == 0 && packageResult == 0 ? 0 : 1;
+            var activationResult = PocketAppRuntimeActivationVerifier.Verify();
+            Environment.ExitCode = surfaceResult == 0 && packageResult == 0 && activationResult == 0 ? 0 : 1;
             Shutdown();
             return;
         }
