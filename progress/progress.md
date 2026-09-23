@@ -1,9 +1,15 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-08-16
+updated: 2026-09-23
 updated_by: codex
 status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-pr-ready-ci-green; an5-c-runtime-activation-pending; capability-expansion-merged
 ---
+
+## 2026-09-23 GitHub Codex Autofix を廃止
+
+- ユーザー指定で定期PR自動修正の仕組みを廃止。GitHub Actions `Codex PR Router` を無効化してから削除し、main `baca5f6` へ反映。専用ラベル7件を削除し、PR #39 からも消えたことを確認した。
+- Mac の Codex Automation 2件と Windows の Automation 1件、両OSの専用プラグイン・repo 設定を撤去。Wiki手順の削除は Obsidian Vault `9a66bb1` で同期済み。Windows の保存済みプロジェクト表示だけは削除手段がなく残る。
+- 詳細: `progress/2026-09/2026-09-23_github-codex-autofix-retirement.md`。
 
 ## 2026-08-16 AI-native AN5-B Codex Pocket App Generation / Management UI
 
