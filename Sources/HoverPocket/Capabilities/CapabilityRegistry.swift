@@ -5,6 +5,12 @@ enum PocketCapabilityKeys {
     static let calendarList = PocketCapabilityKey(id: "calendar.events.list", version: 1)
     static let calendarGet = PocketCapabilityKey(id: "calendar.event.get", version: 1)
     static let calendarCreate = PocketCapabilityKey(id: "calendar.event.create", version: 1)
+    static let controlsAvailability = PocketCapabilityKey(id: "controls.availability.get", version: 1)
+    static let controlsBrightnessSet = PocketCapabilityKey(id: "controls.brightness.set", version: 1)
+    static let controlsMediaCommand = PocketCapabilityKey(id: "controls.media.command", version: 1)
+    static let controlsMuteSet = PocketCapabilityKey(id: "controls.mute.set", version: 1)
+    static let controlsVolumeGet = PocketCapabilityKey(id: "controls.volume.get", version: 1)
+    static let controlsVolumeSet = PocketCapabilityKey(id: "controls.volume.set", version: 1)
     static let timerStart = PocketCapabilityKey(id: "timer.countdown.start", version: 1)
     static let timerGet = PocketCapabilityKey(id: "timer.countdown.get", version: 1)
     static let timerPause = PocketCapabilityKey(id: "timer.countdown.pause", version: 1)
@@ -198,6 +204,60 @@ enum PocketCapabilityDescriptors {
             input: CapabilitySchemaValidation.calendarListInput,
             output: CapabilitySchemaValidation.calendarListOutput
         ),
+        controlsDescriptor(
+            PocketCapabilityKeys.controlsAvailability,
+            effect: .privateRead,
+            approval: .permissionGrant,
+            idempotency: .optional,
+            input: CapabilitySchemaValidation.emptyInput,
+            output: CapabilitySchemaValidation.controlsAvailabilityOutput,
+            matchFields: ["volumeAvailable", "brightnessAvailable", "mediaAvailable", "displayIds"]
+        ),
+        controlsDescriptor(
+            PocketCapabilityKeys.controlsBrightnessSet,
+            effect: .reversibleLocalWrite,
+            approval: .brokerPolicy,
+            idempotency: .required,
+            input: CapabilitySchemaValidation.controlsBrightnessInput,
+            output: CapabilitySchemaValidation.controlsBrightnessOutput,
+            matchFields: ["displayId", "level", "controllable"]
+        ),
+        controlsDescriptor(
+            PocketCapabilityKeys.controlsMediaCommand,
+            effect: .reversibleLocalWrite,
+            approval: .brokerPolicy,
+            idempotency: .required,
+            input: CapabilitySchemaValidation.controlsMediaInput,
+            output: CapabilitySchemaValidation.controlsMediaOutput,
+            matchFields: ["command", "available", "isPlaying", "safeTitle", "safeSource"]
+        ),
+        controlsDescriptor(
+            PocketCapabilityKeys.controlsMuteSet,
+            effect: .reversibleLocalWrite,
+            approval: .brokerPolicy,
+            idempotency: .required,
+            input: CapabilitySchemaValidation.controlsMuteInput,
+            output: CapabilitySchemaValidation.controlsVolumeOutput,
+            matchFields: ["level", "muted"]
+        ),
+        controlsDescriptor(
+            PocketCapabilityKeys.controlsVolumeGet,
+            effect: .privateRead,
+            approval: .permissionGrant,
+            idempotency: .optional,
+            input: CapabilitySchemaValidation.emptyInput,
+            output: CapabilitySchemaValidation.controlsVolumeOutput,
+            matchFields: ["level", "muted"]
+        ),
+        controlsDescriptor(
+            PocketCapabilityKeys.controlsVolumeSet,
+            effect: .reversibleLocalWrite,
+            approval: .brokerPolicy,
+            idempotency: .required,
+            input: CapabilitySchemaValidation.controlsVolumeInput,
+            output: CapabilitySchemaValidation.controlsVolumeOutput,
+            matchFields: ["level", "muted"]
+        ),
         descriptor(
             PocketCapabilityKeys.stickyArchive,
             effect: .reversibleLocalWrite,
@@ -334,6 +394,33 @@ enum PocketCapabilityDescriptors {
             output: CapabilitySchemaValidation.timerOutput
         )
     }
+
+    private static func controlsDescriptor(
+        _ key: PocketCapabilityKey,
+        effect: CapabilityEffect,
+        approval: CapabilityApprovalPolicy,
+        idempotency: CapabilityIdempotencyPolicy,
+        input: @escaping @Sendable (CapabilityObject) throws -> Void,
+        output: @escaping @Sendable (CapabilityObject) throws -> Void,
+        matchFields: [String]
+    ) -> PocketCapabilityDescriptor {
+        descriptor(
+            key,
+            effect: effect,
+            permissions: [effect == .privateRead ? "controls.read" : "controls.write"],
+            approval: approval,
+            idempotency: idempotency,
+            limits: effect == .privateRead ? readLimits : localWriteLimits,
+            readback: CapabilityReadbackPolicy(
+                strategy: effect == .privateRead ? .sameStoreSnapshot : .osState,
+                query: nil,
+                matchFields: matchFields
+            ),
+            rollback: false,
+            input: input,
+            output: output
+        )
+    }
 }
 
 enum CapabilitySchemaValidation {
@@ -376,6 +463,22 @@ enum CapabilitySchemaValidation {
         return value
     }
 
+    static func number(_ object: CapabilityObject, _ key: String, range: ClosedRange<Double>) throws -> Double {
+        let value: Double
+        switch object[key] {
+        case .some(.number(let number)):
+            value = number
+        case .some(.integer(let integer)):
+            value = Double(integer)
+        default:
+            throw CapabilityBrokerError.invalidPlan("schema_\(key)")
+        }
+        guard value.isFinite, range.contains(value) else {
+            throw CapabilityBrokerError.invalidPlan("schema_\(key)")
+        }
+        return value
+    }
+
     static func boolean(_ object: CapabilityObject, _ key: String) throws -> Bool {
         guard case .bool(let value)? = object[key] else {
             throw CapabilityBrokerError.invalidPlan("schema_\(key)")
@@ -398,6 +501,74 @@ enum CapabilitySchemaValidation {
         guard TimeZone(identifier: timezone) != nil else {
             throw CapabilityBrokerError.invalidPlan("schema_timezone")
         }
+    }
+
+    static func emptyInput(_ object: CapabilityObject) throws {
+        try exactKeys(object, [])
+    }
+
+    static func controlsVolumeInput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["level"])
+        _ = try number(object, "level", range: 0...1)
+    }
+
+    static func controlsMuteInput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["muted"])
+        _ = try boolean(object, "muted")
+    }
+
+    static func controlsBrightnessInput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["displayId", "level"])
+        _ = try string(object, "displayId", minimum: 1, maximum: 128)
+        _ = try number(object, "level", range: 0.05...1)
+    }
+
+    static func controlsMediaInput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["command"])
+        _ = try string(object, "command", minimum: 1, maximum: 16, allowed: ["play_pause", "next", "previous"])
+    }
+
+    static func controlsVolumeOutput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["level", "muted"])
+        _ = try number(object, "level", range: 0...1)
+        _ = try boolean(object, "muted")
+    }
+
+    static func controlsBrightnessOutput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["displayId", "level", "controllable"])
+        _ = try string(object, "displayId", minimum: 1, maximum: 128)
+        _ = try number(object, "level", range: 0...1)
+        guard try boolean(object, "controllable") else {
+            throw CapabilityBrokerError.invalidPlan("schema_controllable")
+        }
+    }
+
+    static func controlsAvailabilityOutput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["volumeAvailable", "brightnessAvailable", "mediaAvailable", "displayIds"])
+        _ = try boolean(object, "volumeAvailable")
+        _ = try boolean(object, "brightnessAvailable")
+        _ = try boolean(object, "mediaAvailable")
+        guard case .array(let ids)? = object["displayIds"], ids.count <= 16 else {
+            throw CapabilityBrokerError.invalidPlan("schema_displayIds")
+        }
+        for id in ids {
+            guard case .string(let value) = id,
+                  !value.isEmpty,
+                  value.unicodeScalars.count <= 128 else {
+                throw CapabilityBrokerError.invalidPlan("schema_displayIds")
+            }
+        }
+    }
+
+    static func controlsMediaOutput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["command", "available", "isPlaying", "safeTitle", "safeSource"])
+        _ = try string(object, "command", minimum: 1, maximum: 16, allowed: ["play_pause", "next", "previous"])
+        guard try boolean(object, "available") else {
+            throw CapabilityBrokerError.invalidPlan("schema_available")
+        }
+        _ = try boolean(object, "isPlaying")
+        _ = try string(object, "safeTitle", maximum: 160)
+        _ = try string(object, "safeSource", maximum: 120)
     }
 
     static func calculatorInput(_ object: CapabilityObject) throws {

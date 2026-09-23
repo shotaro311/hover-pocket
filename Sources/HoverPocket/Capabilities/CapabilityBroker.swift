@@ -6,6 +6,7 @@ final class CapabilityBroker {
     private let ledger: CapabilityBrokerLedger
     private let approvalStore: CapabilityApprovalStore
     private let auditLog: CapabilityBrokerAuditLog
+    private let approvalPresentationResolver: any CapabilityApprovalPresentationResolving
     private var callHistory: [String: [Date]] = [:]
     private var executionActive = false
     private var executionWaiters: [CheckedContinuation<Void, Never>] = []
@@ -14,12 +15,14 @@ final class CapabilityBroker {
         registry: CapabilityRegistry,
         ledger: CapabilityBrokerLedger,
         approvalStore: CapabilityApprovalStore = CapabilityApprovalStore(),
-        auditLog: CapabilityBrokerAuditLog
+        auditLog: CapabilityBrokerAuditLog,
+        approvalPresentationResolver: any CapabilityApprovalPresentationResolving = EmptyCapabilityApprovalPresentationResolver()
     ) {
         self.registry = registry
         self.ledger = ledger
         self.approvalStore = approvalStore
         self.auditLog = auditLog
+        self.approvalPresentationResolver = approvalPresentationResolver
     }
 
     func prepare(
@@ -37,10 +40,65 @@ final class CapabilityBroker {
                 descriptors: descriptors,
                 now: now
             )
-            return CapabilityBrokerPreparation(planDigest: digest, approvalRequest: request)
+            let presentations: [CapabilityApprovalPresentation]
+            if let request {
+                do {
+                    presentations = try approvalPresentationResolver.resolve(
+                        plan: plan,
+                        descriptors: descriptors,
+                        request: request
+                    )
+                    try validateApprovalPresentations(
+                        presentations,
+                        plan: plan,
+                        descriptors: descriptors,
+                        request: request
+                    )
+                } catch {
+                    approvalStore.discardPending(requestID: request.id)
+                    throw error
+                }
+            } else {
+                presentations = []
+            }
+            return CapabilityBrokerPreparation(
+                planDigest: digest,
+                approvalRequest: request,
+                approvalPresentations: presentations
+            )
         } catch {
             try appendAuthorizationAudit(plan: plan, planDigest: digest, decision: "denied", error: error, now: now)
             throw error
+        }
+    }
+
+    private func validateApprovalPresentations(
+        _ presentations: [CapabilityApprovalPresentation],
+        plan: CapabilityExecutionPlan,
+        descriptors: [PocketCapabilityDescriptor],
+        request: CapabilityApprovalRequest
+    ) throws {
+        let effects = Dictionary(uniqueKeysWithValues: request.effects.map { ($0.stepID, $0) })
+        guard effects.count == request.effects.count,
+              Set(presentations.map(\.stepID)).count == presentations.count else {
+            throw CapabilityBrokerError.invalidPlan("approval_presentation")
+        }
+        for presentation in presentations {
+            guard let effect = effects[presentation.stepID],
+                  presentation.requestID == request.id,
+                  presentation.planDigest == request.planDigest,
+                  presentation.argumentDigest == effect.argumentDigest,
+                  presentation.destructive == (effect.effect == .destructiveSensitive),
+                  presentation.rollbackAvailable == effect.rollbackAvailable,
+                  (presentation.targetDisplayLabel?.unicodeScalars.count ?? 0) <= 80 else {
+                throw CapabilityBrokerError.invalidPlan("approval_presentation")
+            }
+        }
+        for (step, descriptor) in zip(plan.steps, descriptors)
+            where descriptor.approvalPolicy == .strongPerCall {
+            guard presentations.contains(where: { $0.stepID == step.id }) else {
+                throw CapabilityBrokerError.invalidPlan("approval_presentation")
+            }
         }
     }
 

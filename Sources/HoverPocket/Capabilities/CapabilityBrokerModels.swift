@@ -187,6 +187,7 @@ struct CapabilityApprovalRequest: Codable, Equatable, Sendable {
 struct CapabilityBrokerPreparation: Equatable, Sendable {
     let planDigest: String
     let approvalRequest: CapabilityApprovalRequest?
+    let approvalPresentations: [CapabilityApprovalPresentation]
 }
 
 struct CapabilityApprovalGrant: Equatable, Sendable {

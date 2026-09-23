@@ -82,7 +82,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let broker = CapabilityBroker(
                 registry: registry,
                 ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
-                auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+                auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot),
+                approvalPresentationResolver: HostCapabilityApprovalPresentationResolver(
+                    stickyStore: .shared
+                )
             )
             guard let resources = Bundle.module.resourceURL else {
                 throw PocketAppPackageError.invalid("$:resources")
