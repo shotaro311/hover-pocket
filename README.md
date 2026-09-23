@@ -282,6 +282,24 @@ PUBLISH_DRY_RUN=1 PUBLISH_REQUIRE_NOTARIZED=0 ./script/publish_github_release.sh
 
 通常の一般配布では `PUBLISH_REQUIRE_NOTARIZED=0` は使わないでください。
 
+### 公開成果物のOS別readback
+
+公開後は、macOSの`macos-latest`とversioned release、Windowsの最新`win-v...` releaseを同じ`latest`扱いにせず、次のコマンドで別々に検証します。
+
+```bash
+python3 script/verify_release_readback.py --windows-signing-gate beta
+```
+
+この検証は公開URLから成果物を再取得し、macOS appcast、versioned ZIP、手動インストールZIP、GitHub SHA-256、公開鍵によるSparkle Ed25519署名、Windows feed、manifest、全公開assetの実測SHA-256、Velopack packageのSHA-1を照合します。Windows成果物を合計約270MB再取得するため、公開後または週次監視で使います。
+
+Windows正式版の受入時は、共通readbackに加えてWindows runner上でSetup、Portable版アプリ、Velopack full package内アプリの実Authenticode署名、タイムスタンプ、3成果物の署名証明書一致、repository variableへ固定した正規証明書SHA-256との一致を確認します。manifest内の文字列だけでは正式版の署名証拠にしません。
+
+```bash
+python3 script/verify_release_readback.py --windows-signing-gate formal
+```
+
+Windows 0.2.xの未署名公開ベータは`beta` gateには合格しますが、`formal` gateには合格しません。週次の公開readbackは`beta`で監視し、正式版候補はworkflowを`formal`で手動実行します。PRでは外部ネットワークに依存しない署名ベクトル・metadata試験とPowerShell構文検証だけを実行します。
+
 ## 自動アップデート
 
 自動アップデートは Sparkle 2 を使います。ローカル開発ビルドでは、未公開の更新フィードを見に行かないよう `SPARKLE_FEED_URL` を明示した場合だけ Settings の `Check for Updates` が有効になります。

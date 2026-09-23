@@ -16,3 +16,5 @@ dist/
 *client-secret*.json
 *client_secret*.json
 .wrangler/
+__pycache__/
+*.pyc
