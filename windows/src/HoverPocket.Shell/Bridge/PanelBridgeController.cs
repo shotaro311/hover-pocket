@@ -2761,6 +2761,7 @@ internal sealed class PanelBridgeController : IDisposable
     {
         _ = sender;
         TimerAlertFired?.Invoke(this, alert);
+        _ = PostEventOnUiThreadAsync("timer.alert", new { alert, state = _timerBridgeHandlers.GetSnapshot() });
     }
 
     private void OnTimerAlertChanged(object? sender, TimerAlert? alert)

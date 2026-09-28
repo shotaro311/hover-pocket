@@ -52,6 +52,7 @@ internal sealed class PanelWindow : NoActivateWindow
     private Task? _initializationTask;
     private IDisposable? _bridgeAttachment;
     private long _microphoneGestureExpiresAt;
+    private BridgeDispatcher? _bridgeDispatcher;
     private bool _closed;
 
     public AnimationDiagnostics LastAnimationDiagnostics { get; private set; } = AnimationDiagnostics.Empty;
@@ -289,6 +290,37 @@ internal sealed class PanelWindow : NoActivateWindow
         catch
         {
         }
+    }
+
+    public async Task<bool> VerifyBackgroundBridgePostAsync()
+    {
+        if (_bridgeDispatcher is not { } dispatcher || _webView?.CoreWebView2 is null)
+        {
+            return false;
+        }
+
+        await _webView.ExecuteScriptAsync("""
+            window.__backgroundBridgeReceived = false;
+            window.chrome.webview.addEventListener('message', function probe(event) {
+                if (event.data?.event === 'diagnostics.backgroundThread') {
+                    window.__backgroundBridgeReceived = event.data.payload?.verified === true;
+                    window.chrome.webview.removeEventListener('message', probe);
+                }
+            });
+            """);
+        await Task.Run(() => dispatcher.PostEventAsync("diagnostics.backgroundThread", new { verified = true }));
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(3);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (await _webView.ExecuteScriptAsync("window.__backgroundBridgeReceived === true") == "true")
+            {
+                return true;
+            }
+
+            await Task.Delay(50);
+        }
+
+        return false;
     }
 
     public async Task<UiWebVerifyResult?> RunWebVerifyScriptAsync()
@@ -783,12 +815,8 @@ internal sealed class PanelWindow : NoActivateWindow
             uiFolder,
             CoreWebView2HostResourceAccessKind.DenyCors);
 
-        var dispatcher = new BridgeDispatcher(json =>
-        {
-            webView.CoreWebView2.PostWebMessageAsJson(json);
-            ScheduleSnapshotRefresh();
-            return Task.CompletedTask;
-        });
+        var dispatcher = new BridgeDispatcher(json => PostBridgeJsonAsync(webView, json));
+        _bridgeDispatcher = dispatcher;
         _bridgeAttachment = _bridgeController.Attach(
             dispatcher,
             approvalOwner: () => this,
@@ -803,6 +831,42 @@ internal sealed class PanelWindow : NoActivateWindow
             ScheduleSnapshotRefresh();
         };
         webView.CoreWebView2.Navigate(UiBaseUrl);
+    }
+
+    private async Task PostBridgeJsonAsync(WebView2 webView, string json)
+    {
+        if (Dispatcher.CheckAccess())
+        {
+            PostBridgeJson(webView, json);
+            return;
+        }
+
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        try
+        {
+            await Dispatcher.InvokeAsync(() => PostBridgeJson(webView, json)).Task;
+        }
+        catch (InvalidOperationException) when (_closed || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+        }
+        catch (TaskCanceledException) when (_closed || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+        }
+    }
+
+    private void PostBridgeJson(WebView2 webView, string json)
+    {
+        if (_closed || !ReferenceEquals(_webView, webView) || webView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        webView.CoreWebView2.PostWebMessageAsJson(json);
+        ScheduleSnapshotRefresh();
     }
 
     private object BeginKeyboardInteraction()
@@ -835,6 +899,7 @@ internal sealed class PanelWindow : NoActivateWindow
         Interlocked.Exchange(ref _microphoneGestureExpiresAt, 0);
         EndKeyboardInteraction();
         ReleaseBridgeAttachment();
+        _bridgeDispatcher = null;
         _webView?.Dispose();
         _webView = null;
         base.OnClosed(e);

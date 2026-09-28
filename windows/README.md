@@ -70,6 +70,10 @@ dotnet run --project .\windows\src\HoverPocket.Shell\HoverPocket.Shell.csproj --
 
 `--verify updater` は Velopack のローカルフォルダーフィードを一時生成し、更新なし / 更新ありの dry-run を確認します。実ダウンロードと適用は行いません。
 
+`--verify ui` はバックグラウンドから送ったイベントがWebView2へ届くことと、一時データで開始した無音タイマーが、非表示パネルを満了時に再表示することも確認します。実際の通知音やWindowsのスリープはこの検証に含みません。
+
+`0.2.9-local.2` はWindows公開版 `win-v0.2.8` を基準にしたローカル安定化候補です。タイマー等からWebView2への送信をUIスレッドへ移し、終了済みパネルへの遅延送信を無視します。タイマー満了イベントは接続中の各画面へ送信し、設定画面の開閉でパネルへの通知を失わないようにしています。公開releaseは作成していません。
+
 `--verify release-config` は、配布成果物がRelease構成・期待バージョン・Windows更新channel・Google OAuth AssemblyMetadataを持ち、ビルド時の設定と一致することを値を表示せず確認します。
 
 `--verify calendar-live` は、既存のWindows Credential Manager資格情報を使って当月のCalendarを読み取り、予定内容を表示せずcalendar数とevent数だけを出力します。予定の作成・更新・削除は行いません。

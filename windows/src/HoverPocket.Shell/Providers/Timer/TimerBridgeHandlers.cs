@@ -6,7 +6,6 @@ namespace HoverPocket.Shell.Providers.Timer;
 internal sealed class TimerBridgeHandlers : IDisposable
 {
     private readonly TimerStore _store;
-    private BridgeDispatcher? _dispatcher;
     private Guid? _lastAlertId;
 
     public TimerBridgeHandlers(TimerStore? store = null)
@@ -19,9 +18,10 @@ internal sealed class TimerBridgeHandlers : IDisposable
 
     public event EventHandler<TimerAlert?>? AlertChanged;
 
+    public TimerSnapshot GetSnapshot() => _store.GetSnapshot();
+
     public void Register(BridgeDispatcher dispatcher)
     {
-        _dispatcher = dispatcher;
         dispatcher.Register("timer.getState", (_, _) => Task.FromResult<object?>(NotifyAlertState(_store.GetSnapshot())));
         dispatcher.Register("timer.updateStopwatchDraft", UpdateStopwatchDraftAsync);
         dispatcher.Register("timer.updateDraft", UpdateDraftAsync);
@@ -91,10 +91,6 @@ internal sealed class TimerBridgeHandlers : IDisposable
         _lastAlertId = alert.Id;
         AlertFired?.Invoke(this, alert);
         AlertChanged?.Invoke(this, alert);
-        if (_dispatcher is not null)
-        {
-            _ = _dispatcher.PostEventAsync("timer.alert", new { alert, state = _store.GetSnapshot() });
-        }
     }
 
     private TimerSnapshot NotifyAlertState(TimerSnapshot snapshot)

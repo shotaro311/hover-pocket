@@ -12,7 +12,9 @@ internal sealed class ReleaseConfigVerifier
         var configuration = assembly
             .GetCustomAttribute<AssemblyConfigurationAttribute>()
             ?.Configuration;
-        var actualVersion = assembly.GetName().Version?.ToString(3);
+        var actualVersion = assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion.Split('+')[0];
         var expectedVersion = Environment
             .GetEnvironmentVariable("HOVERPOCKET_RELEASE_EXPECTED_VERSION")
             ?.Trim();

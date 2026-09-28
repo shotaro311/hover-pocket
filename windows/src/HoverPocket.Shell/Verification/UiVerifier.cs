@@ -1,3 +1,5 @@
+using System.Text.Json;
+using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Windows;
 
 namespace HoverPocket.Shell.Verification;
@@ -264,6 +266,17 @@ internal sealed class UiVerifier
                 }
             }
 
+            if (ready && !await _controller.Panel.VerifyBackgroundBridgePostAsync())
+            {
+                _failures.Add("bridge: background event was not received by WebView2");
+            }
+
+            if (ready)
+            {
+                await VerifyHiddenPanelTimerAsync(withSecondaryView: true);
+                await VerifyHiddenPanelTimerAsync(withSecondaryView: false);
+            }
+
             if (_controller.Panel.ProcessFailures.Count > 0)
             {
                 _failures.Add("webview process failures: " + string.Join(",", _controller.Panel.ProcessFailures));
@@ -277,7 +290,7 @@ internal sealed class UiVerifier
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
-                "PASS ui verify: stable Controls refresh, source activation and rate actions, responsive Timer cards/input/stopwatch, media fallback, tabbed centered Clipboard split/full preview/trash actions, Calculator history sidebar, declarative PocketSurface renderer with host-owned approval, draggable stable icons, text scaling/input activation, stable Mac-style calendar editor, bridge/provider/settings round-trip");
+                "PASS ui verify: background bridge delivery, hidden-panel timer alert/reopen, stable Controls refresh, source activation and rate actions, responsive Timer cards/input/stopwatch, media fallback, tabbed centered Clipboard split/full preview/trash actions, Calculator history sidebar, declarative PocketSurface renderer with host-owned approval, draggable stable icons, text scaling/input activation, stable Mac-style calendar editor, bridge/provider/settings round-trip");
             return 0;
         }
 
@@ -288,5 +301,89 @@ internal sealed class UiVerifier
         }
 
         return 1;
+    }
+
+    private async Task VerifyHiddenPanelTimerAsync(bool withSecondaryView)
+    {
+        var secondaryViewReceived = false;
+        using var secondaryView = withSecondaryView
+            ? _controller.PanelBridgeController.Attach(new BridgeDispatcher(json =>
+            {
+                using var message = JsonDocument.Parse(json);
+                if (message.RootElement.TryGetProperty("event", out var eventName)
+                    && eventName.GetString() == "timer.alert")
+                {
+                    secondaryViewReceived = true;
+                }
+
+                return Task.CompletedTask;
+            }))
+            : null;
+        var webView = _controller.Panel.WebView!;
+        await webView.ExecuteScriptAsync("""
+            window.__timerProbeStarted = false;
+            window.__timerProbeReceived = false;
+            import('/js/bridge.js').then(async ({ request, on }) => {
+                const state = await request('timer.getState');
+                window.__stopTimerProbeListener = on('timer.alert', ({ alert }) => {
+                    if (alert.title === 'Hidden panel verification') {
+                        window.__timerProbeReceived = true;
+                    }
+                });
+                await request('timer.start', { preset: {
+                    ...state.draftTimer, title: 'Hidden panel verification',
+                    durationSeconds: 2, isPomodoro: false, soundEnabled: false
+                }});
+                window.__timerProbeStarted = true;
+            });
+            """);
+        try
+        {
+            if (!await WaitForScriptFlagAsync("window.__timerProbeStarted === true"))
+            {
+                _failures.Add("timer: fixture timer did not start");
+                return;
+            }
+
+            await _controller.HidePanelForVerifyAsync();
+            if (_controller.Panel.IsVisible)
+            {
+                _failures.Add("timer: panel did not hide before timer expiry");
+            }
+
+            if (!await WaitForScriptFlagAsync("window.__timerProbeReceived === true")
+                || !_controller.Panel.IsVisible)
+            {
+                _failures.Add("timer: expiry did not deliver an alert and reopen the hidden panel");
+            }
+
+            if (withSecondaryView && !secondaryViewReceived)
+            {
+                _failures.Add("timer: attached secondary view did not receive the expiry event");
+            }
+        }
+        finally
+        {
+            await webView.ExecuteScriptAsync("""
+                window.__stopTimerProbeListener?.();
+                import('/js/bridge.js').then(({ request }) => request('timer.stopAlert'));
+                """);
+        }
+    }
+
+    private async Task<bool> WaitForScriptFlagAsync(string script)
+    {
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (await _controller.Panel.WebView!.ExecuteScriptAsync(script) == "true")
+            {
+                return true;
+            }
+
+            await Task.Delay(50);
+        }
+
+        return false;
     }
 }
