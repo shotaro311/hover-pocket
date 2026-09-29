@@ -1,0 +1,13 @@
+panel_layout_verify=ok
+panel_layout_cases=112
+panel_size_compatibility=ok
+panel_text_size_compatibility=ok
+panel_settings_persistence=ok
+settings_window_layout=ok
+panel_dimensions=small:520x372,medium:600x430,large:680x488,extraLarge:760x546
+calculator_layout_small=height:310.0/317.0,mainWidth:368.0,fits:true
+calculator_layout_medium=height:359.0/375.0,mainWidth:422.0,fits:true
+calculator_layout_large=height:428.0/433.0,mainWidth:430.0,fits:true
+calculator_layout_extraLarge=height:428.0/491.0,mainWidth:430.0,fits:true
+
+exit=0

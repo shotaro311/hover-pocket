@@ -56,43 +56,7 @@ struct PocketAppGenerationCapability: Equatable, Sendable {
     let scope: [String: String]
 
     static func boundedCatalog(namespace: String) -> [PocketAppGenerationCapability] {
-        [
-            PocketAppGenerationCapability(
-                id: "calendar.events.list",
-                version: 1,
-                effect: "private_read",
-                permissions: ["calendar.events.read"],
-                scope: ["range": "today"]
-            ),
-            PocketAppGenerationCapability(
-                id: "sticky.note.get",
-                version: 1,
-                effect: "private_read",
-                permissions: ["sticky.read"],
-                scope: ["namespace": namespace]
-            ),
-            PocketAppGenerationCapability(
-                id: "sticky.note.upsert",
-                version: 1,
-                effect: "reversible_local_write",
-                permissions: ["sticky.write"],
-                scope: ["namespace": namespace]
-            ),
-            PocketAppGenerationCapability(
-                id: "timer.countdown.get",
-                version: 1,
-                effect: "private_read",
-                permissions: ["timer.read"],
-                scope: [:]
-            ),
-            PocketAppGenerationCapability(
-                id: "timer.countdown.start",
-                version: 1,
-                effect: "reversible_local_write",
-                permissions: ["timer.write"],
-                scope: [:]
-            )
-        ]
+        (try! PocketLibraryCatalog()).generationCapabilities(namespace: namespace).filter { $0.id != PocketAITextService.key.id }
     }
 }
 
@@ -105,6 +69,9 @@ struct PocketAppGenerationRequest: Equatable, Sendable {
     let version: String
     let namespace: String
     let capabilities: [PocketAppGenerationCapability]
+    var libraryCatalog: PocketLibraryCatalog? = nil
+    var previousFiles: [PocketAppGeneratedFile] = []
+    var reasoningEffort: String = "medium"
 
     var requestDigest: String {
         var hasher = SHA256()
@@ -118,6 +85,14 @@ struct PocketAppGenerationRequest: Equatable, Sendable {
         field(version)
         field(namespace)
         field(userRequest)
+        if let libraryCatalog {
+            field("libraries:" + (try! libraryCatalog.promptJSON(namespace: namespace)))
+        }
+        if reasoningEffort != "medium" { field("effort:" + reasoningEffort) }
+        for file in previousFiles.sorted(by: { $0.path < $1.path }) {
+            field("previous:" + file.path)
+            field(file.utf8)
+        }
         for capability in capabilities.sorted(by: {
             $0.id == $1.id ? $0.version < $1.version : $0.id < $1.id
         }) {
@@ -141,8 +116,8 @@ struct PocketAppGenerationRequest: Equatable, Sendable {
               !userRequest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               userRequest.unicodeScalars.count <= Self.maximumUserRequestScalars,
               !userRequest.contains("\0"),
-              !capabilities.isEmpty,
-              capabilities.count <= 32 else {
+              capabilities.count <= 32,
+              Set(capabilities.map { "\($0.id)@\($0.version)" }).count == capabilities.count else {
             throw PocketAppGenerationError.invalidRequest
         }
     }
@@ -160,6 +135,7 @@ struct PocketAppGenerationEnvelope: Equatable, Sendable {
     let version: String
     let namespace: String
     let files: [PocketAppGeneratedFile]
+    var previewValidation: String? = nil
 }
 
 protocol PocketAppGenerationAdapter: Sendable {
@@ -168,7 +144,7 @@ protocol PocketAppGenerationAdapter: Sendable {
     func generate(
         _ request: PocketAppGenerationRequest,
         cancellation: PocketAppGenerationCancellation
-    ) throws -> PocketAppGenerationEnvelope
+    ) async throws -> PocketAppGenerationEnvelope
 }
 
 extension PocketAppGenerationAdapter {
@@ -213,7 +189,7 @@ enum PocketAppGenerationContract {
         "type": "object",
         "required": ["path", "utf8"],
         "properties": {
-          "path": {"type": "string", "maxLength": 240, "pattern": "^(manifest\\.json|intent\\.md|data\\.schema\\.json|surfaces/[A-Za-z0-9._-]+\\.surface\\.json|workflows/[A-Za-z0-9._-]+\\.workflow\\.json|tests/[A-Za-z0-9._-]+\\.json)$"},
+          "path": {"type": "string", "maxLength": 240, "pattern": "^(manifest\\.json|intent\\.md|data\\.schema\\.json|surfaces/[A-Za-z0-9._-]+\\.surface\\.json|workflows/[A-Za-z0-9._-]+\\.workflow\\.json|tests/[A-Za-z0-9._-]+\\.json|collections/[A-Za-z0-9._-]+\\.schema\\.json|views/[A-Za-z0-9._-]+\\.html)$"},
           "utf8": {"type": "string", "maxLength": 1048576}
         },
         "additionalProperties": false
@@ -352,7 +328,7 @@ enum PocketAppGenerationApprovalPresentation {
 }
 
 struct PocketAppGenerationMaterializer {
-    private static let allowedPathPattern = "^(manifest\\.json|intent\\.md|data\\.schema\\.json|surfaces/[A-Za-z0-9._-]+\\.surface\\.json|workflows/[A-Za-z0-9._-]+\\.workflow\\.json|tests/[A-Za-z0-9._-]+\\.json)$"
+    private static let allowedPathPattern = "^(manifest\\.json|intent\\.md|data\\.schema\\.json|surfaces/[A-Za-z0-9._-]+\\.surface\\.json|workflows/[A-Za-z0-9._-]+\\.workflow\\.json|tests/[A-Za-z0-9._-]+\\.json|collections/[A-Za-z0-9._-]+\\.schema\\.json|views/[A-Za-z0-9._-]+\\.html)$"
     private static let windowsReservedNames: Set<String> = [
         "CON", "PRN", "AUX", "NUL",
         "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
@@ -436,6 +412,7 @@ struct PocketAppGenerationMaterializer {
               package.manifest.stateStore == "user-data://\(request.appID)" else {
             throw PocketAppGenerationError.packageInvalid
         }
+        try request.libraryCatalog?.validate(package)
         let catalog = Dictionary(uniqueKeysWithValues: request.capabilities.map { ("\($0.id)@\($0.version)", $0) })
         for capability in package.manifest.requestedCapabilities {
             guard let allowed = catalog["\(capability.key.id)@\(capability.key.version)"],
@@ -453,7 +430,7 @@ struct PocketAppGenerationMaterializer {
     private static func effectWireValue(_ effect: CapabilityEffect) -> String {
         if effect == .privateRead { return "private_read" }
         if effect == .reversibleLocalWrite { return "reversible_local_write" }
-        return "unsupported"
+        return effect.rawValue
     }
 
     private static func stringScope(_ value: PocketJSONValue?) -> [String: String] {
@@ -466,7 +443,7 @@ struct PocketAppGenerationMaterializer {
         return result
     }
 
-    private static func safeGeneratedPath(_ value: String) -> Bool {
+    static func safeGeneratedPath(_ value: String) -> Bool {
         guard value.unicodeScalars.count <= 240,
               value.range(of: allowedPathPattern, options: .regularExpression) != nil,
               !value.hasPrefix("/"), !value.contains("\\"), !value.contains("\0") else {

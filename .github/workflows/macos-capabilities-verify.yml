@@ -10,10 +10,33 @@ on:
       - "Sources/HoverPocket/App/CapabilityBrokerVerificationCommand.swift"
       - "Sources/HoverPocket/App/PocketAppPackageVerificationCommand.swift"
       - "Sources/HoverPocket/App/PocketSurfaceVerificationCommand.swift"
+      - "Sources/HoverPocket/App/PanelSoakVerificationCommand.swift"
       - "Sources/HoverPocket/App/AppDelegate.swift"
+      - "Sources/HoverPocket/App/MacOSVoiceE2EIsolationVerificationCommand.swift"
+      - "Sources/HoverPocket/App/VoiceFoundationVerificationCommand.swift"
+      - "Sources/HoverPocket/App/PersonalToolVerificationCommand.swift"
+      - "contracts/personal-tools/**"
+      - "Sources/HoverPocket/Support/HoverPocketRuntimeEnvironment.swift"
+      - "Sources/HoverPocket/Support/PocketResourceBundle.swift"
       - "Sources/HoverPocket/State/AppSettings.swift"
+      - "Sources/HoverPocket/State/ClipboardHistoryStore.swift"
+      - "Sources/HoverPocket/Views/HoverPanelShell.swift"
+      - "Sources/HoverPocket/Views/SettingsView.swift"
+      - "Sources/HoverPocket/Views/VoiceLaneHostView.swift"
+      - "Sources/HoverPocket/Voice/**"
+      - "Sources/HoverPocket/Windowing/HoverWindowController.swift"
+      - "Sources/HoverPocket/Windowing/PanelGeometry.swift"
       - "Sources/HoverPocket/Models/GoogleCalendarModels.swift"
       - "Sources/HoverPocket/Models/StickyNoteModels.swift"
+      - "Sources/HoverPocket/Models/AIModelModels.swift"
+      - "Sources/HoverPocket/Models/PocketActionModels.swift"
+      - "Sources/HoverPocket/Providers/GoogleCalendarProvider.swift"
+      - "Sources/HoverPocket/Services/AppleFoundationModelProvider.swift"
+      - "Sources/HoverPocket/Services/ApprovalGate.swift"
+      - "Sources/HoverPocket/Services/AuditLog.swift"
+      - "Sources/HoverPocket/Services/CalendarPocketTool.swift"
+      - "Sources/HoverPocket/State/AICommandStore.swift"
+      - "Sources/HoverPocket/Views/AICommandPaletteView.swift"
       - "Sources/HoverPocket/Services/GoogleCalendarAPIClient.swift"
       - "Sources/HoverPocket/State/GoogleCalendarStore.swift"
       - "Sources/HoverPocket/State/StickyNotesStore.swift"
@@ -22,6 +45,14 @@ on:
       - "Package.swift"
       - "Package.resolved"
       - "contracts/pocket/v1/**"
+      - "contracts/voice/**"
+      - "script/build_and_run.sh"
+      - "script/verify_codex_auth_control_plane_macos.py"
+      - "script/verify_codex_generation_confinement_macos.py"
+      - "script/verify_macos_voice_e2e_receipt.py"
+      - "script/verify_macos_realtime_renderer.mjs"
+      - "script/verify_voice_foundation.py"
+      - "script/voice_e2e_macos.sh"
       - ".github/workflows/macos-capabilities-verify.yml"
   pull_request:
     paths:
@@ -31,10 +62,33 @@ on:
       - "Sources/HoverPocket/App/CapabilityBrokerVerificationCommand.swift"
       - "Sources/HoverPocket/App/PocketAppPackageVerificationCommand.swift"
       - "Sources/HoverPocket/App/PocketSurfaceVerificationCommand.swift"
+      - "Sources/HoverPocket/App/PanelSoakVerificationCommand.swift"
       - "Sources/HoverPocket/App/AppDelegate.swift"
+      - "Sources/HoverPocket/App/MacOSVoiceE2EIsolationVerificationCommand.swift"
+      - "Sources/HoverPocket/App/VoiceFoundationVerificationCommand.swift"
+      - "Sources/HoverPocket/App/PersonalToolVerificationCommand.swift"
+      - "contracts/personal-tools/**"
+      - "Sources/HoverPocket/Support/HoverPocketRuntimeEnvironment.swift"
+      - "Sources/HoverPocket/Support/PocketResourceBundle.swift"
       - "Sources/HoverPocket/State/AppSettings.swift"
+      - "Sources/HoverPocket/State/ClipboardHistoryStore.swift"
+      - "Sources/HoverPocket/Views/HoverPanelShell.swift"
+      - "Sources/HoverPocket/Views/SettingsView.swift"
+      - "Sources/HoverPocket/Views/VoiceLaneHostView.swift"
+      - "Sources/HoverPocket/Voice/**"
+      - "Sources/HoverPocket/Windowing/HoverWindowController.swift"
+      - "Sources/HoverPocket/Windowing/PanelGeometry.swift"
       - "Sources/HoverPocket/Models/GoogleCalendarModels.swift"
       - "Sources/HoverPocket/Models/StickyNoteModels.swift"
+      - "Sources/HoverPocket/Models/AIModelModels.swift"
+      - "Sources/HoverPocket/Models/PocketActionModels.swift"
+      - "Sources/HoverPocket/Providers/GoogleCalendarProvider.swift"
+      - "Sources/HoverPocket/Services/AppleFoundationModelProvider.swift"
+      - "Sources/HoverPocket/Services/ApprovalGate.swift"
+      - "Sources/HoverPocket/Services/AuditLog.swift"
+      - "Sources/HoverPocket/Services/CalendarPocketTool.swift"
+      - "Sources/HoverPocket/State/AICommandStore.swift"
+      - "Sources/HoverPocket/Views/AICommandPaletteView.swift"
       - "Sources/HoverPocket/Services/GoogleCalendarAPIClient.swift"
       - "Sources/HoverPocket/State/GoogleCalendarStore.swift"
       - "Sources/HoverPocket/State/StickyNotesStore.swift"
@@ -43,6 +97,14 @@ on:
       - "Package.swift"
       - "Package.resolved"
       - "contracts/pocket/v1/**"
+      - "contracts/voice/**"
+      - "script/build_and_run.sh"
+      - "script/verify_codex_auth_control_plane_macos.py"
+      - "script/verify_codex_generation_confinement_macos.py"
+      - "script/verify_macos_voice_e2e_receipt.py"
+      - "script/verify_macos_realtime_renderer.mjs"
+      - "script/verify_voice_foundation.py"
+      - "script/voice_e2e_macos.sh"
       - ".github/workflows/macos-capabilities-verify.yml"
   workflow_dispatch:
 
@@ -60,6 +122,27 @@ jobs:
       - name: Build
         run: swift build -Xswiftc -warnings-as-errors
 
+      - name: Verify Host-owned Voice Lane foundation
+        run: |
+          bash -n script/build_and_run.sh
+          bash -n script/voice_e2e_macos.sh
+          python3 -m py_compile script/verify_codex_auth_control_plane_macos.py
+          python3 script/verify_codex_auth_control_plane_macos.py --self-test
+          python3 -m py_compile script/verify_codex_generation_confinement_macos.py
+          python3 script/verify_codex_generation_confinement_macos.py --self-test
+          python3 -m py_compile script/verify_macos_voice_e2e_receipt.py
+          python3 script/verify_macos_voice_e2e_receipt.py --self-test
+          node script/verify_macos_realtime_renderer.mjs
+          python3 script/verify_voice_foundation.py
+          .build/debug/HoverPocket --verify-voice-foundation
+          .build/debug/HoverPocket --verify-personal-tools
+          .build/debug/HoverPocket --verify-voice-only-confirmation
+          .build/debug/HoverPocket --export-personal-tool-contracts > /tmp/personal-tool-operations.json
+          cmp contracts/personal-tools/v1/operations.json /tmp/personal-tool-operations.json
+          .build/debug/HoverPocket --verify-voice-e2e-isolation
+          .build/debug/HoverPocket --verify-panel-layout
+          .build/debug/HoverPocket --verify-panel-soak
+
       - name: Verify capability handlers
         run: .build/debug/HoverPocket --verify-capabilities
 
@@ -73,3 +156,8 @@ jobs:
 
       - name: Verify existing Timer behavior
         run: .build/debug/HoverPocket --verify-timer
+
+      - name: Verify weather location and release configuration
+        run: |
+          .build/debug/HoverPocket --verify-weather-location
+          python3 -m unittest discover -s script/tests

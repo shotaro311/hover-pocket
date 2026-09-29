@@ -162,6 +162,35 @@ final class GoogleCalendarAPIClient: @unchecked Sendable {
         }
     }
 
+    func personalEventResource(calendarID: String, eventID: String) async throws -> CapabilityObject? {
+        try await withAuthorizedRetry { accessToken -> CapabilityObject? in
+            var request = URLRequest(url: Self.eventURL(calendarID: calendarID, eventID: eventID))
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw GoogleCalendarAPIError.invalidResponse }
+            if http.statusCode == 401 { throw GoogleCalendarAPIError.authorizationExpired }
+            if http.statusCode == 404 || http.statusCode == 410 { return nil }
+            guard http.statusCode == 200 else { throw GoogleCalendarAPIError.requestFailed("Calendar read failed") }
+            return try StrictVoiceJSON.object(String(decoding: data, as: UTF8.self))
+        }
+    }
+
+    func modifyPersonalEvent(calendarID: String, eventID: String, revision: String, patch: CapabilityObject?) async throws {
+        try await withAuthorizedRetry { accessToken in
+            var components = URLComponents(url: Self.eventURL(calendarID: calendarID, eventID: eventID), resolvingAgainstBaseURL: false)!
+            components.queryItems = [URLQueryItem(name: "sendUpdates", value: "all")]
+            var request = URLRequest(url: components.url!)
+            request.httpMethod = patch == nil ? "DELETE" : "PATCH"
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            request.setValue(revision, forHTTPHeaderField: "If-Match")
+            if let patch {
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = try CapabilityCanonicalJSON.data(.object(patch))
+            }
+            _ = try await send(request)
+        }
+    }
+
     private func fetchCalendarSources(accessToken: String) async throws -> [GoogleCalendarSource] {
         var components = URLComponents(string: "https://www.googleapis.com/calendar/v3/users/me/calendarList")!
         components.queryItems = [

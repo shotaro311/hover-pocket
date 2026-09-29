@@ -1,0 +1,3 @@
+PASS voice-foundation verify: default-off inert, root scope, bounded credential-safe transcript, app-lifetime UI detach and explicit resume, compact/expanded geometry
+
+exit=0

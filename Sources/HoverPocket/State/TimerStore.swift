@@ -23,6 +23,7 @@ final class TimerStore: ObservableObject {
     private let persistenceEnabled: Bool
     private var tickTimer: Timer?
     private var alertSound: NSSound?
+    private var queuedAlerts: [TimerAlert] = []
     private var pendingWriteTask: Task<Void, Never>?
     private var wakeObserver: NSObjectProtocol?
 
@@ -59,11 +60,8 @@ final class TimerStore: ObservableObject {
     }
 
     private static func defaultStorageDirectory(fileManager: FileManager) -> URL {
-        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        return base
-            .appendingPathComponent("HoverPocket", isDirectory: true)
-            .appendingPathComponent("Timer", isDirectory: true)
+        _ = fileManager
+        return HoverPocketRuntimeEnvironment.shared.storageDirectory("Timer")
     }
 
     var canStartTimer: Bool {
@@ -123,6 +121,7 @@ final class TimerStore: ObservableObject {
         at date: Date
     ) async throws -> RunningTimer? {
         await pendingWriteTask?.value
+        try Task.checkCancellation()
         guard canStartTimer else { return nil }
         let phaseDuration = preset.isPomodoro ? preset.workDuration : preset.duration
         guard phaseDuration > 0 else { return nil }
@@ -157,8 +156,31 @@ final class TimerStore: ObservableObject {
         }
     }
 
-    func pauseForCapability(id: UUID, at date: Date) async throws {
+    func editForCapability(id: UUID, title: String?, remaining: Double?, at date: Date, expected: RunningTimer? = nil) async throws {
         await pendingWriteTask?.value
+        try Task.checkCancellation()
+        if let expected, runningTimer(id: id) != expected { throw CapabilityHandlerError.unavailable("timer_changed") }
+        guard let index = runningTimers.firstIndex(where: { $0.id == id }) else {
+            throw CapabilityHandlerError.unavailable("timer_not_found")
+        }
+        if let remaining, !(1...86400).contains(remaining) {
+            throw CapabilityHandlerError.invalidArgument("remainingSeconds")
+        }
+        let previous = runningTimers
+        if let title { runningTimers[index].title = title }
+        if let remaining {
+            if runningTimers[index].isPaused { runningTimers[index].pausedRemaining = remaining }
+            else { runningTimers[index].endDate = date.addingTimeInterval(remaining) }
+            runningTimers[index].phaseDuration = remaining
+        }
+        do { try persistRunningTimersImmediately(); syncTickTimer() }
+        catch { runningTimers = previous; syncTickTimer(); throw error }
+    }
+
+    func pauseForCapability(id: UUID, at date: Date, expected: RunningTimer? = nil) async throws {
+        await pendingWriteTask?.value
+        try Task.checkCancellation()
+        if let expected, runningTimer(id: id) != expected { throw CapabilityHandlerError.unavailable("timer_changed") }
         guard let index = runningTimers.firstIndex(where: { $0.id == id }),
               !runningTimers[index].isPaused else { return }
         let previousTimers = runningTimers
@@ -173,8 +195,10 @@ final class TimerStore: ObservableObject {
         }
     }
 
-    func resumeForCapability(id: UUID, at date: Date) async throws {
+    func resumeForCapability(id: UUID, at date: Date, expected: RunningTimer? = nil) async throws {
         await pendingWriteTask?.value
+        try Task.checkCancellation()
+        if let expected, runningTimer(id: id) != expected { throw CapabilityHandlerError.unavailable("timer_changed") }
         guard let index = runningTimers.firstIndex(where: { $0.id == id }),
               let remaining = runningTimers[index].pausedRemaining else { return }
         let previousTimers = runningTimers
@@ -193,12 +217,15 @@ final class TimerStore: ObservableObject {
         }
     }
 
-    func stopForCapability(id: UUID) async throws {
+    func stopForCapability(id: UUID, expected: RunningTimer? = nil) async throws {
         await pendingWriteTask?.value
+        try Task.checkCancellation()
+        if let expected, runningTimer(id: id) != expected { throw CapabilityHandlerError.unavailable("timer_changed") }
         let previousTimers = runningTimers
         runningTimers.removeAll { $0.id == id }
         do {
             try persistRunningTimersImmediately()
+            queuedAlerts.removeAll { $0.id == id }
             if activeAlert?.id == id {
                 stopAlert()
             }
@@ -232,6 +259,7 @@ final class TimerStore: ObservableObject {
 
     func stop(id: UUID) {
         runningTimers.removeAll { $0.id == id }
+        queuedAlerts.removeAll { $0.id == id }
         if activeAlert?.id == id {
             stopAlert()
         }
@@ -242,7 +270,8 @@ final class TimerStore: ObservableObject {
     func stopAlert() {
         alertSound?.stop()
         alertSound = nil
-        activeAlert = nil
+        activeAlert = queuedAlerts.isEmpty ? nil : queuedAlerts.removeFirst()
+        if activeAlert?.soundEnabled == true { playAlertSound() }
     }
 
     func startStopwatch(preset: StopwatchPreset? = nil, at date: Date = Date()) {
@@ -353,8 +382,8 @@ final class TimerStore: ObservableObject {
         }
     }
 
-    private func tick() {
-        now = Date()
+    func tick(at date: Date = Date()) {
+        now = date
         let expired = runningTimers.filter { !$0.isPaused && $0.endDate <= now }
         guard !expired.isEmpty else { return }
         for timer in expired {
@@ -367,15 +396,19 @@ final class TimerStore: ObservableObject {
     private func fire(_ timer: RunningTimer) {
         guard let index = runningTimers.firstIndex(where: { $0.id == timer.id }) else { return }
 
-        activeAlert = TimerAlert(
+        let alert = TimerAlert(
             id: timer.id,
             title: timer.title,
             color: timer.color,
             startedAt: Date(),
             soundEnabled: timer.soundEnabled
         )
-        if timer.soundEnabled {
-            playAlertSound()
+        if activeAlert == nil {
+            activeAlert = alert
+            if timer.soundEnabled { playAlertSound() }
+        } else if activeAlert?.id != alert.id {
+            queuedAlerts.removeAll { $0.id == alert.id }
+            queuedAlerts.append(alert)
         }
 
         if timer.isPomodoro {

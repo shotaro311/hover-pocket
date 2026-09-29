@@ -1,0 +1,3 @@
+PASS actual conversational schema edit: prior record ID preserved and new field saved through generated UI
+PASS actual generated UI: 9 UI, provider route, restart and preserve-data removal checks
+Generated UI evidence: /var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/PocketGeneratedUI-9481C1E2-93D9-4F2E-9A7C-DCF7E706F1AB

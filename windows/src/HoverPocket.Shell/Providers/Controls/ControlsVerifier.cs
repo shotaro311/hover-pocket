@@ -53,6 +53,7 @@ internal sealed class ControlsVerifier
 
     private async Task RunAsync()
     {
+        VerifyBrightnessReadbackErrorIsRejected();
         await VerifyDeterministicFlowAsync();
         await VerifyBrightnessDetectionRaceAsync();
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -63,6 +64,20 @@ internal sealed class ControlsVerifier
         if (_verifyLivePreview)
         {
             await VerifyLivePreviewAsync(media, cancellation.Token);
+        }
+    }
+
+    private void VerifyBrightnessReadbackErrorIsRejected()
+    {
+        var failedFreshRead = new DisplayBrightnessState(
+            "ddc:display-1",
+            "Display",
+            true,
+            63,
+            "DDC/CI brightness read failed.");
+        if (MonitorBrightnessService.WriteMatches(true, failedFreshRead, 63))
+        {
+            _failures.Add("brightness write accepted a failed DDC/CI read as verified");
         }
     }
 
@@ -104,6 +119,15 @@ internal sealed class ControlsVerifier
         if (!muted.Volume.Muted)
         {
             _failures.Add("deterministic mute toggle did not read back muted=true");
+        }
+
+        var explicitlyUnmuted = await controller.SetMutedAsync(false, CancellationToken.None);
+        var idempotentlyUnmuted = await controller.SetMutedAsync(false, CancellationToken.None);
+        if (explicitlyUnmuted.Volume.Muted
+            || idempotentlyUnmuted.Volume.Muted
+            || volume.SetMutedCount != 2)
+        {
+            _failures.Add("deterministic explicit mute set was implemented as a state-dependent toggle");
         }
 
         var brightnessReadsBeforeSet = brightness.ReadCount;
@@ -516,6 +540,8 @@ internal sealed class ControlsVerifier
 
         public int ReadCount { get; private set; }
 
+        public int SetMutedCount { get; private set; }
+
         public event EventHandler<VolumeState>? StateChanged;
 
         public Task StartMonitoringAsync(CancellationToken cancellationToken)
@@ -546,6 +572,13 @@ internal sealed class ControlsVerifier
         public Task<VolumeState> ToggleMuteAsync(CancellationToken cancellationToken)
         {
             _muted = !_muted;
+            return ReadAsync(cancellationToken);
+        }
+
+        public Task<VolumeState> SetMutedAsync(bool muted, CancellationToken cancellationToken)
+        {
+            SetMutedCount++;
+            _muted = muted;
             return ReadAsync(cancellationToken);
         }
     }

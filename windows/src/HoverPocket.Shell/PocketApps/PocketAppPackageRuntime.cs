@@ -46,6 +46,12 @@ internal sealed record PocketAppWorkflowDocument(
     int TimeoutSeconds,
     IReadOnlySet<string> RequiredPermissions);
 
+internal sealed record PocketAppStatePropertySchema(
+    IReadOnlySet<string> Types,
+    bool IsRequired,
+    string? Format,
+    int? MaximumLength);
+
 internal sealed record PocketAppPackage(
     string RootDirectory,
     PocketAppManifestDocument Manifest,
@@ -53,9 +59,12 @@ internal sealed record PocketAppPackage(
     string Intent,
     string StateSchemaDigest,
     IReadOnlySet<string> StatePropertyNames,
+    IReadOnlyDictionary<string, IReadOnlySet<string>> StatePropertyTypes,
+    IReadOnlyDictionary<string, PocketAppStatePropertySchema> StateProperties,
     IReadOnlyDictionary<string, PocketSurfaceDocument> Surfaces,
     IReadOnlyDictionary<string, PocketAppWorkflowDocument> Workflows,
-    IReadOnlyDictionary<string, string> TestCases);
+    IReadOnlyDictionary<string, string> TestCases,
+    IReadOnlyList<PocketCapabilityCompatibilityIssue> CompatibilityIssues);
 
 internal sealed class PocketAppPackageRuntime
 {
@@ -83,11 +92,15 @@ internal sealed class PocketAppPackageRuntime
         RegexOptions.CultureInvariant);
 
     private readonly IReadOnlyDictionary<PocketCapabilityKey, PocketCapabilityDescriptor> _descriptors;
+    private readonly PocketCapabilityCompatibilityCatalog _compatibilityCatalog;
 
-    public PocketAppPackageRuntime(IEnumerable<PocketCapabilityDescriptor>? descriptors = null)
+    public PocketAppPackageRuntime(
+        IEnumerable<PocketCapabilityDescriptor>? descriptors = null,
+        PocketCapabilityCompatibilityCatalog? compatibilityCatalog = null)
     {
         _descriptors = (descriptors ?? PocketCapabilityDescriptors.BuiltIn)
             .ToDictionary(descriptor => descriptor.Key);
+        _compatibilityCatalog = compatibilityCatalog ?? PocketCapabilityCompatibilityCatalog.BuiltIn;
     }
 
     public PocketAppPackage Load(string directory)
@@ -97,6 +110,18 @@ internal sealed class PocketAppPackageRuntime
 
     public PocketAppPackage Load(PocketAppFileSnapshot snapshot)
     {
+        return Load(snapshot, allowRemovedCapabilitiesForMigration: false);
+    }
+
+    public PocketAppPackage LoadMigrationSource(PocketAppFileSnapshot snapshot)
+    {
+        return Load(snapshot, allowRemovedCapabilitiesForMigration: true);
+    }
+
+    private PocketAppPackage Load(
+        PocketAppFileSnapshot snapshot,
+        bool allowRemovedCapabilitiesForMigration)
+    {
         var root = snapshot.RootDirectory;
         var packageFiles = snapshot.Files;
         if (!packageFiles.TryGetValue("manifest.json", out var manifestData))
@@ -104,7 +129,13 @@ internal sealed class PocketAppPackageRuntime
             throw new PocketAppPackageRuntimeException("$:package_files");
         }
         var manifestElement = ReadObject(manifestData, "$.manifest");
-        var manifest = ParseManifest(manifestElement);
+        var manifest = ParseManifest(manifestElement, allowRemovedCapabilitiesForMigration);
+        var compatibilityIssues = manifest.RequestedCapabilities
+            .Select(item => _compatibilityCatalog.Issue(item.Key))
+            .Where(item => item is not null)
+            .Select(item => item!)
+            .OrderBy(item => item.Key)
+            .ToArray();
 
         var expectedFiles = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -121,7 +152,12 @@ internal sealed class PocketAppPackageRuntime
         var intent = Encoding.UTF8.GetString(packageFiles[manifest.IntentPath]);
         Require(!string.IsNullOrWhiteSpace(intent) && intent.EnumerateRunes().Count() <= 20_000, "$.intent");
         var stateSchemaDigest = "sha256:" + Convert.ToHexString(SHA256.HashData(packageFiles[manifest.StateSchemaPath])).ToLowerInvariant();
-        var statePropertyNames = ValidateStateSchema(ReadObject(packageFiles[manifest.StateSchemaPath], "$.state.schema"));
+        var stateProperties = ValidateStateSchema(ReadObject(packageFiles[manifest.StateSchemaPath], "$.state.schema"));
+        var statePropertyTypes = stateProperties.ToDictionary(
+            item => item.Key,
+            item => item.Value.Types,
+            StringComparer.Ordinal);
+        var statePropertyNames = statePropertyTypes.Keys.ToHashSet(StringComparer.Ordinal);
 
         var requestedScopes = manifest.RequestedCapabilities.ToDictionary(item => item.Key, item => item.Scope);
         var readableQueries = manifest.RequestedCapabilities
@@ -142,17 +178,53 @@ internal sealed class PocketAppPackageRuntime
         {
             var workflow = ParseWorkflow(ReadObject(packageFiles[item.Value], $"$.workflows.{item.Key}"), requestedScopes);
             Require(workflow.Id == item.Key, $"$.workflows.{item.Key}:id");
+            for (var index = 0; index < workflow.Steps.Count; index++)
+            {
+                Require(
+                    PocketAppExecutionRuntime.SupportsWorkflowPresentation(workflow.Steps[index].Capability),
+                    $"$.workflows.{item.Key}.steps[{index}]:presentation");
+            }
             workflows.Add(item.Key, workflow);
         }
 
-        var workflowInputNames = workflows.Values.SelectMany(item => item.Inputs.Keys).ToHashSet(StringComparer.Ordinal);
-        var boundNames = new HashSet<string>(StringComparer.Ordinal);
+        var workflowInputTypes = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var workflow in workflows.Values)
+        {
+            foreach (var input in workflow.Inputs)
+            {
+                if (workflowInputTypes.TryGetValue(input.Key, out var existingType))
+                {
+                    Require(existingType == input.Value, "$.workflows:input_type_conflict");
+                }
+                else
+                {
+                    workflowInputTypes[input.Key] = input.Value;
+                }
+            }
+        }
         foreach (var surface in surfaces.Values)
         {
-            ValidateBindings(surface.Root, workflowInputNames, statePropertyNames, boundNames, $"$.surfaces.{surface.Id}.root");
+            var boundNames = new HashSet<string>(StringComparer.Ordinal);
+            var pickerDomains = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
+            ValidateBindings(
+                surface.Root,
+                workflowInputTypes,
+                statePropertyTypes,
+                boundNames,
+                pickerDomains,
+                $"$.surfaces.{surface.Id}.root");
             ValidateSurfaceScopes(surface.Root, requestedScopes, $"$.surfaces.{surface.Id}.root");
+            foreach (var workflowId in ReferencedWorkflows(surface.Root))
+            {
+                if (!workflows.TryGetValue(workflowId, out var workflow))
+                {
+                    throw new PocketAppPackageRuntimeException($"$.surfaces.{surface.Id}:workflow");
+                }
+                Require(
+                    workflow.Inputs.Keys.ToHashSet(StringComparer.Ordinal).IsSubsetOf(boundNames),
+                    $"$.surfaces.{surface.Id}:unbound_workflow_input");
+            }
         }
-        Require(workflowInputNames.IsSubsetOf(boundNames), "$.workflows:unbound_input");
 
         var testCases = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var testPath in manifest.Tests)
@@ -173,12 +245,17 @@ internal sealed class PocketAppPackageRuntime
             intent,
             stateSchemaDigest,
             statePropertyNames,
+            statePropertyTypes,
+            stateProperties,
             surfaces,
             workflows,
-            testCases);
+            testCases,
+            compatibilityIssues);
     }
 
-    private PocketAppManifestDocument ParseManifest(JsonElement value)
+    private PocketAppManifestDocument ParseManifest(
+        JsonElement value,
+        bool allowRemovedCapabilitiesForMigration)
     {
         ExactKeys(
             value,
@@ -225,6 +302,11 @@ internal sealed class PocketAppPackageRuntime
             if (!_descriptors.TryGetValue(key, out var descriptor) || descriptor.ApprovalPolicy == CapabilityApprovalPolicy.RuntimeProhibited)
             {
                 throw new PocketAppPackageRuntimeException($"$.manifest.requestedCapabilities[{index}]:unknown");
+            }
+            if (_compatibilityCatalog.Status(key) == PocketCapabilityLifecycleStatus.Removed
+                && !allowRemovedCapabilitiesForMigration)
+            {
+                throw new PocketAppPackageRuntimeException($"$.manifest.requestedCapabilities[{index}]:removed");
             }
             Require(capabilityKeys.Add(key), "$.manifest.requestedCapabilities:duplicate");
             JsonElement? scope = request.TryGetProperty("scope", out var rawScope) ? rawScope.Clone() : null;
@@ -361,7 +443,7 @@ internal sealed class PocketAppPackageRuntime
         return new PocketAppWorkflowDocument(id, inputs, approvalMode, approvalGroup, steps, partialMode, timeoutSeconds, requiredPermissions);
     }
 
-    private static IReadOnlySet<string> ValidateStateSchema(JsonElement value)
+    private static IReadOnlyDictionary<string, PocketAppStatePropertySchema> ValidateStateSchema(JsonElement value)
     {
         ExactKeys(value, ["type", "properties", "additionalProperties"], ["$schema", "required"], "$.state.schema");
         if (value.TryGetProperty("$schema", out var schema))
@@ -372,11 +454,20 @@ internal sealed class PocketAppPackageRuntime
         Require(!GetBoolean(value.GetProperty("additionalProperties"), "$.state.schema.additionalProperties"), "$.state.schema.additionalProperties");
         var properties = RequireObject(value.GetProperty("properties"), "$.state.schema.properties");
         Require(properties.EnumerateObject().Count() <= 128, "$.state.schema.properties");
-        var names = new HashSet<string>(StringComparer.Ordinal);
+        var required = value.TryGetProperty("required", out var requiredValue)
+            ? RequireArray(requiredValue, 0, 128, "$.state.schema.required")
+                .Select(item => GetString(item, "$.state.schema.required")).ToArray()
+            : Array.Empty<string>();
+        Require(
+            required.Distinct(StringComparer.Ordinal).Count() == required.Length
+            && required.All(name => properties.TryGetProperty(name, out _)),
+            "$.state.schema.required");
+        var requiredNames = required.ToHashSet(StringComparer.Ordinal);
+        var stateProperties = new Dictionary<string, PocketAppStatePropertySchema>(StringComparer.Ordinal);
         foreach (var propertyItem in properties.EnumerateObject())
         {
             Require(ArgumentNamePattern.IsMatch(propertyItem.Name), "$.state.schema.properties");
-            Require(names.Add(propertyItem.Name), "$.state.schema.properties:duplicate");
+            Require(!stateProperties.ContainsKey(propertyItem.Name), "$.state.schema.properties:duplicate");
             var property = RequireObject(propertyItem.Value, $"$.state.schema.properties.{propertyItem.Name}");
             ExactKeys(property, ["type"], ["format", "maxLength"], $"$.state.schema.properties.{propertyItem.Name}");
             string[] types = property.GetProperty("type").ValueKind == JsonValueKind.String
@@ -385,59 +476,168 @@ internal sealed class PocketAppPackageRuntime
                     .Select(item => GetString(item, $"$.state.schema.properties.{propertyItem.Name}.type")).ToArray();
             Require(types.Distinct(StringComparer.Ordinal).Count() == types.Length
                 && types.All(type => type is "string" or "integer" or "number" or "boolean" or "null"), $"$.state.schema.properties.{propertyItem.Name}.type");
+            string? parsedFormat = null;
             if (property.TryGetProperty("format", out var format))
             {
-                Require(GetString(format, $"$.state.schema.properties.{propertyItem.Name}.format") == "date", $"$.state.schema.properties.{propertyItem.Name}.format");
+                parsedFormat = GetString(format, $"$.state.schema.properties.{propertyItem.Name}.format");
+                Require(parsedFormat == "date", $"$.state.schema.properties.{propertyItem.Name}.format");
             }
+            int? maximumLength = null;
             if (property.TryGetProperty("maxLength", out var maximum))
             {
-                var maximumLength = GetInteger(maximum, $"$.state.schema.properties.{propertyItem.Name}.maxLength");
+                maximumLength = GetInteger(maximum, $"$.state.schema.properties.{propertyItem.Name}.maxLength");
                 Require(maximumLength is >= 1 and <= 10_000, $"$.state.schema.properties.{propertyItem.Name}.maxLength");
             }
+            stateProperties[propertyItem.Name] = new PocketAppStatePropertySchema(
+                types.ToHashSet(StringComparer.Ordinal),
+                requiredNames.Contains(propertyItem.Name),
+                parsedFormat,
+                maximumLength);
         }
-        if (value.TryGetProperty("required", out var requiredValue))
-        {
-            var required = RequireArray(requiredValue, 0, 128, "$.state.schema.required")
-                .Select(item => GetString(item, "$.state.schema.required")).ToArray();
-            Require(required.Distinct(StringComparer.Ordinal).Count() == required.Length && required.All(names.Contains), "$.state.schema.required");
-        }
-        return names;
+        return stateProperties;
     }
 
     private static void ValidateBindings(
         PocketSurfaceRenderNode node,
-        IReadOnlySet<string> inputNames,
-        IReadOnlySet<string> stateNames,
+        IReadOnlyDictionary<string, string> inputTypes,
+        IReadOnlyDictionary<string, IReadOnlySet<string>> stateTypes,
         ISet<string> boundNames,
+        IDictionary<string, IReadOnlySet<string>> pickerDomains,
         string path)
     {
         foreach (var property in node.Properties)
         {
-            if (property.Value is not string binding || !binding.StartsWith('$'))
+            if (property.Value is not string binding)
+            {
+                continue;
+            }
+            var acceptedInputTypes = AcceptedWorkflowInputTypes(node.Type, property.Key);
+            var acceptedStateTypes = AcceptedStateTypes(node.Type, property.Key);
+            if (acceptedInputTypes is null && acceptedStateTypes is null)
+            {
+                continue;
+            }
+            if (!binding.StartsWith('$'))
             {
                 continue;
             }
             if (binding.StartsWith("$input.", StringComparison.Ordinal))
             {
                 var name = binding["$input.".Length..];
-                Require(inputNames.Contains(name), $"{path}.{property.Key}:binding");
+                if (!inputTypes.TryGetValue(name, out var declaredType) || acceptedInputTypes is null)
+                {
+                    throw new PocketAppPackageRuntimeException($"{path}.{property.Key}:binding");
+                }
+                Require(acceptedInputTypes.Contains(declaredType), $"{path}.{property.Key}:binding_type");
                 boundNames.Add(name);
             }
             else if (binding.StartsWith("$state.", StringComparison.Ordinal))
             {
                 var name = binding["$state.".Length..];
-                Require(stateNames.Contains(name), $"{path}.{property.Key}:binding");
+                if (!stateTypes.TryGetValue(name, out var declaredStateTypes))
+                {
+                    throw new PocketAppPackageRuntimeException($"{path}.{property.Key}:binding");
+                }
+                if (acceptedStateTypes is null)
+                {
+                    throw new PocketAppPackageRuntimeException($"{path}.{property.Key}:binding_type");
+                }
+                var nonNullStateTypes = declaredStateTypes.Where(type => type != "null").ToArray();
+                Require(
+                    nonNullStateTypes.Length > 0 && nonNullStateTypes.All(acceptedStateTypes.Contains),
+                    $"{path}.{property.Key}:binding_type");
+                if (inputTypes.TryGetValue(name, out var fallbackInputType))
+                {
+                    Require(
+                        acceptedInputTypes is not null && acceptedInputTypes.Contains(fallbackInputType),
+                        $"{path}.{property.Key}:workflow_fallback_type");
+                }
                 boundNames.Add(name);
             }
             else
             {
                 throw new PocketAppPackageRuntimeException($"{path}.{property.Key}:binding");
             }
+            if (node.Type == "picker" && property.Key == "value")
+            {
+                var domain = PickerDomain(node);
+                if (pickerDomains.TryGetValue(binding, out var existing))
+                {
+                    Require(existing.SetEquals(domain), $"{path}.{property.Key}:picker_domain_conflict");
+                }
+                else
+                {
+                    pickerDomains[binding] = domain;
+                }
+            }
         }
         for (var index = 0; index < node.Children.Count; index++)
         {
-            ValidateBindings(node.Children[index], inputNames, stateNames, boundNames, $"{path}.children[{index}]");
+            ValidateBindings(
+                node.Children[index],
+                inputTypes,
+                stateTypes,
+                boundNames,
+                pickerDomains,
+                $"{path}.children[{index}]");
         }
+    }
+
+    private static IReadOnlySet<string> PickerDomain(PocketSurfaceRenderNode node)
+    {
+        if (!node.Properties.TryGetValue("options", out var rawOptions)
+            || rawOptions is not IEnumerable<IReadOnlyDictionary<string, object?>> options)
+        {
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+        return options
+            .Select(option => option.TryGetValue("value", out var value) ? value as string : null)
+            .Where(value => value is not null)
+            .Select(value => value!)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    private static IReadOnlySet<string>? AcceptedWorkflowInputTypes(string nodeType, string propertyName)
+    {
+        return (nodeType, propertyName) switch
+        {
+            ("textField", "value") => new HashSet<string>(["string"], StringComparer.Ordinal),
+            ("toggle", "value") => new HashSet<string>(["boolean"], StringComparer.Ordinal),
+            ("picker", "value") => new HashSet<string>(["string"], StringComparer.Ordinal),
+            ("calendarEventPicker", "selection") => new HashSet<string>(["entity-ref"], StringComparer.Ordinal),
+            ("calendarEventPicker", "titleTarget") => new HashSet<string>(["string"], StringComparer.Ordinal),
+            ("durationPicker", "value") => new HashSet<string>(["integer", "number"], StringComparer.Ordinal),
+            _ => null
+        };
+    }
+
+    private static IReadOnlySet<string> ReferencedWorkflows(PocketSurfaceRenderNode node)
+    {
+        var workflows = new HashSet<string>(StringComparer.Ordinal);
+        if (node.Type == "button"
+            && node.Properties.TryGetValue("workflow", out var workflowValue)
+            && workflowValue is string workflowId)
+        {
+            workflows.Add(workflowId);
+        }
+        foreach (var child in node.Children)
+        {
+            workflows.UnionWith(ReferencedWorkflows(child));
+        }
+        return workflows;
+    }
+
+    private static IReadOnlySet<string>? AcceptedStateTypes(string nodeType, string propertyName)
+    {
+        return (nodeType, propertyName) switch
+        {
+            ("textField", "value") => new HashSet<string>(["string"], StringComparer.Ordinal),
+            ("toggle", "value") => new HashSet<string>(["boolean"], StringComparer.Ordinal),
+            ("picker", "value") => new HashSet<string>(["string"], StringComparer.Ordinal),
+            ("calendarEventPicker", "selection") => new HashSet<string>(["string"], StringComparer.Ordinal),
+            ("calendarEventPicker", "titleTarget") => new HashSet<string>(["string"], StringComparer.Ordinal),
+            _ => null
+        };
     }
 
     private static void ValidateWorkflowBinding(JsonElement value, IReadOnlySet<string> inputs, string path)
@@ -484,6 +684,7 @@ internal sealed class PocketAppPackageRuntime
             && rawArguments is JsonElement arguments)
         {
             var key = CapabilityKey(query, $"{path}.items.query");
+            Require(key == CapabilityIds.CalendarList, $"{path}.items.query:unsupported_shape");
             Require(requestedScopes.ContainsKey(key), $"{path}.items.query:undeclared");
             ValidateCapabilityScope(arguments, requestedScopes[key], key, $"{path}.items.arguments");
         }

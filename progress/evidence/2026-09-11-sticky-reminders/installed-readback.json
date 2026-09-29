@@ -1,0 +1,25 @@
+{
+  "build": "644",
+  "binarySHA256": "519ee21ee29c0a271c7af5a61aff53e80cb296385b06d02b0a6ba9bb1c396bc0",
+  "matchesSignedPublicArchive": true,
+  "savedDataUnchanged": true,
+  "savedDataFiles": 6,
+  "productionProcesses": [
+    "69783 /Applications/HoverPocket.app/Contents/MacOS/HoverPocket"
+  ],
+  "updateMethod": "Sparkle Install and Relaunch",
+  "savedDataUnchangedAfterFinalVerification": true,
+  "chatGPTLoggedIn": true,
+  "voiceSettingsPreserved": true,
+  "voiceSelection": "juniper",
+  "voiceEnabled": true,
+  "continueWhenHidden": true,
+  "normalConfirmation": false,
+  "destructiveConfirmation": false,
+  "calendarEnabled": true,
+  "voiceLayout": "compact",
+  "installedReminderVerifiers": "passed",
+  "physicalMicrophoneInput": "not-tested",
+  "codesign": "verified-deep-strict",
+  "notarization": "stapled-ticket-validated"
+}

@@ -1,0 +1,10 @@
+pocket_app_manifest_digest=sha256:e9c369e0b52620d95c14baa2e04070535a1f21020308090f0467eed8cf4f04df
+pocket_app_package_verify=ok
+pocket_app_package_valid_files=9
+pocket_app_package_bundled=ok
+pocket_app_package_negative_cases=18
+pocket_app_lifecycle_verify=ok
+pocket_app_generation_verify=ok
+pocket_app_capability_migration_verify=ok
+pocket_app_health_verify=ok
+pocket_app_workspace_backup_verify=ok

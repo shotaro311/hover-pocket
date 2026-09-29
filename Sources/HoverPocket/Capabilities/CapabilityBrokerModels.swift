@@ -187,6 +187,7 @@ struct CapabilityApprovalRequest: Codable, Equatable, Sendable {
 struct CapabilityBrokerPreparation: Equatable, Sendable {
     let planDigest: String
     let approvalRequest: CapabilityApprovalRequest?
+    let approvalPresentations: [CapabilityApprovalPresentation]
 }
 
 struct CapabilityApprovalGrant: Equatable, Sendable {
@@ -331,6 +332,7 @@ struct CapabilityWorkflowReceipt: Codable, Equatable, Sendable {
 enum CapabilityBrokerError: Error, Equatable, Sendable {
     case invalidPlan(String)
     case unknownCapability(PocketCapabilityKey)
+    case removedCapability(PocketCapabilityKey, PocketCapabilityKey?)
     case unavailable(PocketCapabilityKey)
     case runtimeProhibited(PocketCapabilityKey)
     case invalidArguments(PocketCapabilityKey, String)

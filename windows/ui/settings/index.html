@@ -51,9 +51,30 @@
         <input type="checkbox" data-ai-native>
       </label>
       <p class="settings-note" data-ai-native-note></p>
+      <div class="pocket-sandbox-setup" data-codex-sandbox>
+        <div class="pocket-app-heading">
+          <strong data-codex-sandbox-heading>Codex生成sandbox</strong>
+          <span data-codex-sandbox-badge>未準備</span>
+        </div>
+        <p class="settings-note" data-codex-sandbox-note></p>
+        <div class="settings-button-row">
+          <button type="button" data-codex-sandbox-check>状態を再確認</button>
+          <button type="button" data-codex-sandbox-setup disabled>セットアップ／修復</button>
+        </div>
+        <div class="settings-status" data-codex-sandbox-status></div>
+      </div>
       <div class="pocket-app-list" data-pocket-app-list></div>
       <div class="pocket-generation" data-pocket-generation hidden>
         <p class="settings-note" data-pocket-generation-note></p>
+        <div class="pocket-workspace-backup">
+          <div class="settings-button-row">
+            <button type="button" data-pocket-workspace-export>workspaceを書き出す</button>
+            <button type="button" data-pocket-workspace-restore>backupから復元</button>
+          </div>
+          <div class="settings-status" data-pocket-workspace-status></div>
+          <div class="pocket-app-list" data-pocket-workspace-preview></div>
+          <p class="settings-note" data-pocket-workspace-note></p>
+        </div>
         <textarea rows="4" maxlength="8000" data-pocket-generation-request aria-label="Pocket App request"></textarea>
         <div class="pocket-generation-update-target" data-pocket-generation-update-selection hidden>
           <span data-pocket-generation-update-target></span>
@@ -67,6 +88,33 @@
         <div class="pocket-app-list settings-spaced-row" data-pocket-generation-proposal></div>
         <div class="pocket-app-list settings-spaced-row" data-pocket-generation-managed></div>
       </div>
+    </section>
+    <section class="settings-section">
+      <h2 data-capability-history-heading>監査ログと実行履歴</h2>
+      <div class="segmented" data-capability-retention></div>
+      <p class="settings-note" data-capability-history-summary></p>
+      <button type="button" data-capability-history-clear>履歴を削除</button>
+      <p class="settings-note" data-capability-history-note></p>
+    </section>
+    <section class="settings-section">
+      <h2 data-voice-heading>Voice Lane</h2>
+      <div class="segmented" data-voice-provider></div>
+      <label class="toggle-row settings-spaced-row">
+        <span data-voice-enabled-label>Voice Laneを有効化</span>
+        <input type="checkbox" data-voice-enabled>
+      </label>
+      <div class="settings-button-row settings-spaced-row" data-voice-openai-key-row hidden>
+        <span class="settings-status" data-voice-openai-key-status></span>
+        <button type="button" data-voice-openai-key-configure>APIキーを設定</button>
+        <button type="button" data-voice-openai-key-delete>APIキーを削除</button>
+      </div>
+      <div class="segmented settings-spaced-row" data-voice-layout></div>
+      <label class="toggle-row settings-spaced-row">
+        <span data-voice-calendar-label>今日の予定名と時刻をCodexへ共有</span>
+        <input type="checkbox" data-voice-calendar-access>
+      </label>
+      <p class="settings-note" data-voice-calendar-note></p>
+      <p class="settings-note" data-voice-note></p>
     </section>
     <section class="settings-section">
       <h2 data-i18n="topHandle">上端ハンドル</h2>

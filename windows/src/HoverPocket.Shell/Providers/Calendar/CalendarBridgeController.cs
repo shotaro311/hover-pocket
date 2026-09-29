@@ -6,10 +6,14 @@ namespace HoverPocket.Shell.Providers.Calendar;
 internal sealed class CalendarBridgeController
 {
     private readonly CalendarStore _store;
+    private readonly bool _externalIntegrationsEnabled;
 
-    public CalendarBridgeController(CalendarStore? store = null)
+    public CalendarBridgeController(
+        CalendarStore? store = null,
+        bool externalIntegrationsEnabled = true)
     {
         _store = store ?? new CalendarStore();
+        _externalIntegrationsEnabled = externalIntegrationsEnabled;
     }
 
     public CalendarStore Store => _store;
@@ -31,11 +35,13 @@ internal sealed class CalendarBridgeController
     private async Task<object?> SignInAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         _ = parameters;
+        EnsureExternalIntegrationsEnabled();
         return await _store.SignInAsync(cancellationToken);
     }
 
     private async Task<object?> LoadMonthAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
+        EnsureExternalIntegrationsEnabled();
         var month = ReadOptionalDate(parameters, "month") ?? DateTimeOffset.Now;
         return await _store.LoadMonthAsync(month, cancellationToken);
     }
@@ -61,22 +67,34 @@ internal sealed class CalendarBridgeController
 
     private async Task<object?> CreateEventAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
+        EnsureExternalIntegrationsEnabled();
         var draft = ReadRequiredObject<CalendarEventDraft>(parameters, "draft");
         return await _store.CreateEventAsync(draft, cancellationToken);
     }
 
     private async Task<object?> UpdateEventAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
+        EnsureExternalIntegrationsEnabled();
         var draft = ReadRequiredObject<CalendarEventDraft>(parameters, "draft");
         return await _store.UpdateEventAsync(draft, cancellationToken);
     }
 
     private async Task<object?> DeleteEventAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
+        EnsureExternalIntegrationsEnabled();
         return await _store.DeleteEventAsync(
             ReadRequiredString(parameters, "calendarId"),
             ReadRequiredString(parameters, "eventId"),
             cancellationToken);
+    }
+
+    private void EnsureExternalIntegrationsEnabled()
+    {
+        if (!_externalIntegrationsEnabled)
+        {
+            throw new InvalidOperationException(
+                "Calendar external integration is disabled in isolated Voice E2E mode.");
+        }
     }
 
     private static DateTimeOffset ReadRequiredDate(JsonElement? parameters, string propertyName)

@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using HoverPocket.Shell.Verification;
 
 namespace HoverPocket.Shell.PocketApps;
 
@@ -9,13 +11,405 @@ internal sealed class PocketAppGenerationVerifier
 
     public IReadOnlyList<string> Run()
     {
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN runtime-activation");
+        _failures.AddRange(PocketAppRuntimeActivationVerifier.Run());
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END runtime-activation");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN e2e");
         VerifyE2E();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END e2e");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN credential-broker");
+        Task.Run(VerifyCredentialBrokerAsync).GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END credential-broker");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN sandbox-readiness");
+        VerifyCodexSandboxReadiness();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END sandbox-readiness");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN settings-approval");
         VerifySettingsApprovalBoundary().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END settings-approval");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN preview-only");
         VerifyPreviewOnlyBoundary().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END preview-only");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN failed-activation-refresh");
+        VerifyFailedActivationRefreshesManagement().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END failed-activation-refresh");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN committed-receipt");
         VerifyCommittedReceiptSurvivesManagedRefreshFailure().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END committed-receipt");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN pending-proposal");
         VerifyUnrelatedActionPreservesPendingProposal().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END pending-proposal");
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_BEGIN deactivate-flush");
+        VerifyDeactivateFlushBoundary().GetAwaiter().GetResult();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END deactivate-flush");
         VerifyApprovalTextSanitization();
+        VerifyConsole.WriteLine("POCKET_GENERATION_CASE_END approval-text");
         return _failures;
+    }
+
+    private async Task VerifyCredentialBrokerAsync()
+    {
+        const string fixtureSecret = "fixture-token-not-a-real-credential";
+        try
+        {
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN lease");
+            var lease = new CodexCredentialBrokerLease(
+                new string('a', 43),
+                DateTimeOffset.UtcNow.AddSeconds(5),
+                () => fixtureSecret);
+            Require(
+                lease.Redeem(new string('a', 43)) == fixtureSecret && lease.IsConsumed,
+                "generation_credential_broker_one_time_lease");
+            try
+            {
+                _ = lease.Redeem(new string('a', 43));
+                _failures.Add("generation_credential_broker_replay");
+            }
+            catch (CodexCredentialBrokerException)
+            {
+            }
+
+            var expired = new CodexCredentialBrokerLease(
+                new string('b', 43),
+                DateTimeOffset.UtcNow.AddSeconds(-1),
+                () => fixtureSecret);
+            try
+            {
+                _ = expired.Redeem(new string('b', 43));
+                _failures.Add("generation_credential_broker_expired");
+            }
+            catch (CodexCredentialBrokerException)
+            {
+                Require(expired.IsConsumed, "generation_credential_broker_expired_consumed");
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END lease");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN named-pipe");
+            using (var server = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(5),
+                Environment.ProcessId,
+                () => fixtureSecret))
+            {
+                var secret = await CodexCredentialBrokerClient.FetchSecretAsync(
+                    server.PipeName,
+                    server.Capability,
+                    Environment.ProcessId);
+                await server.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(secret == fixtureSecret, "generation_credential_broker_named_pipe");
+                try
+                {
+                    _ = await CodexCredentialBrokerClient.FetchSecretAsync(
+                        server.PipeName,
+                        server.Capability,
+                        Environment.ProcessId,
+                        TimeSpan.FromMilliseconds(250));
+                    _failures.Add("generation_credential_broker_pipe_replay");
+                }
+                catch (CodexCredentialBrokerException)
+                {
+                }
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END named-pipe");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN wrong-capability");
+            using (var wrongCapabilityServer = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(5),
+                Environment.ProcessId,
+                () => fixtureSecret))
+            {
+                try
+                {
+                    _ = await CodexCredentialBrokerClient.FetchSecretAsync(
+                        wrongCapabilityServer.PipeName,
+                        new string('c', 43),
+                        Environment.ProcessId);
+                    _failures.Add("generation_credential_broker_wrong_capability");
+                }
+                catch (CodexCredentialBrokerException)
+                {
+                }
+                await wrongCapabilityServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                try
+                {
+                    _ = await CodexCredentialBrokerClient.FetchSecretAsync(
+                        wrongCapabilityServer.PipeName,
+                        wrongCapabilityServer.Capability,
+                        Environment.ProcessId,
+                        TimeSpan.FromMilliseconds(250));
+                    _failures.Add("generation_credential_broker_wrong_capability_replay");
+                }
+                catch (CodexCredentialBrokerException)
+                {
+                }
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END wrong-capability");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN foreign-peer");
+            using (var foreignPeerServer = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(20),
+                Environment.ProcessId,
+                () => fixtureSecret))
+            {
+                var powershellPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.System),
+                    "WindowsPowerShell",
+                    "v1.0",
+                    "powershell.exe");
+                var foreignPeerInfo = new ProcessStartInfo(powershellPath)
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+                foreignPeerInfo.ArgumentList.Add("-NoLogo");
+                foreignPeerInfo.ArgumentList.Add("-NoProfile");
+                foreignPeerInfo.ArgumentList.Add("-NonInteractive");
+                foreignPeerInfo.ArgumentList.Add("-Command");
+                foreignPeerInfo.ArgumentList.Add(
+                    "$accepted=$false;"
+                    + "$pipe=[IO.Pipes.NamedPipeClientStream]::new('.',"
+                    + "$env:HOVERPOCKET_TEST_BROKER_ENDPOINT,"
+                    + "[IO.Pipes.PipeDirection]::InOut,[IO.Pipes.PipeOptions]::Asynchronous);"
+                    + "try{$pipe.Connect(2000);"
+                    + "$writer=[IO.StreamWriter]::new($pipe);$writer.AutoFlush=$true;"
+                    + "$writer.WriteLine('HP-CODEX-BROKER/1 '+$env:HOVERPOCKET_TEST_BROKER_CAPABILITY);"
+                    + "$reader=[IO.StreamReader]::new($pipe);$response=$reader.ReadLine();"
+                    + "$accepted=$response -like 'OK *'}catch{}finally{$pipe.Dispose()};"
+                    + "if($accepted){exit 1}else{exit 0}");
+                foreignPeerInfo.Environment["HOVERPOCKET_TEST_BROKER_ENDPOINT"] =
+                    foreignPeerServer.PipeName;
+                foreignPeerInfo.Environment["HOVERPOCKET_TEST_BROKER_CAPABILITY"] =
+                    foreignPeerServer.Capability;
+                using var foreignPeer = Process.Start(foreignPeerInfo)
+                    ?? throw new CodexCredentialBrokerException();
+                var foreignPeerStdoutTask = foreignPeer.StandardOutput.ReadToEndAsync();
+                var foreignPeerStderrTask = foreignPeer.StandardError.ReadToEndAsync();
+                await foreignPeer.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+                await foreignPeerServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(
+                    foreignPeer.ExitCode == 0
+                        && foreignPeerServer.IsConsumed
+                        && string.IsNullOrEmpty(await foreignPeerStdoutTask)
+                        && string.IsNullOrEmpty(await foreignPeerStderrTask),
+                    "generation_credential_broker_foreign_peer_rejected");
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END foreign-peer");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN unauthorized-peer");
+            using (var unauthorizedPeerServer = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(5),
+                Environment.ProcessId,
+                () => fixtureSecret,
+                _ => false))
+            {
+                try
+                {
+                    _ = await CodexCredentialBrokerClient.FetchSecretAsync(
+                        unauthorizedPeerServer.PipeName,
+                        unauthorizedPeerServer.Capability,
+                        Environment.ProcessId);
+                    _failures.Add("generation_credential_broker_unauthorized_peer");
+                }
+                catch (CodexCredentialBrokerException)
+                {
+                }
+                await unauthorizedPeerServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(
+                    unauthorizedPeerServer.IsConsumed,
+                    "generation_credential_broker_unauthorized_peer_consumed");
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END unauthorized-peer");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN helper");
+            using (var helper = StartCredentialHelperProcess())
+            using (var helperServer = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(10),
+                helper.Id,
+                () => fixtureSecret))
+            {
+                var result = await CompleteCredentialHelperAsync(
+                    helper,
+                    CodexCredentialBrokerHelper.CreateBootstrapLine(
+                        helperServer.PipeName,
+                        helperServer.Capability,
+                        Environment.ProcessId));
+                await helperServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(
+                    result.ExitCode == 0
+                        && result.StandardOutput == fixtureSecret
+                        && string.IsNullOrEmpty(result.StandardError),
+                    "generation_credential_broker_helper_stdout_only");
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END helper");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN generation-parent-chain");
+            using (var generationProbe = StartCredentialGenerationProbeProcess())
+            using (var generationServer = CodexCredentialBrokerServer.CreateForGeneration(
+                TimeSpan.FromSeconds(10),
+                generationProbe.Id,
+                () => fixtureSecret))
+            {
+                var standardOutputTask = generationProbe.StandardOutput.ReadToEndAsync();
+                var standardErrorTask = generationProbe.StandardError.ReadToEndAsync();
+                await generationProbe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                var standardOutput = await standardOutputTask;
+                var standardError = await standardErrorTask;
+                await generationServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(
+                    generationProbe.ExitCode == 0
+                        && generationServer.IsConsumed
+                        && standardOutput == fixtureSecret
+                        && string.IsNullOrEmpty(standardError),
+                    "generation_credential_broker_codex_parent_chain");
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END generation-parent-chain");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN same-binary-wrong-pid");
+            using (var impostor = StartCredentialHelperProcess())
+            using (var wrongProcessServer = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(10),
+                Environment.ProcessId,
+                () => fixtureSecret))
+            {
+                var result = await CompleteCredentialHelperAsync(
+                    impostor,
+                    CodexCredentialBrokerHelper.CreateBootstrapLine(
+                        wrongProcessServer.PipeName,
+                        wrongProcessServer.Capability,
+                        Environment.ProcessId));
+                await wrongProcessServer.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(
+                    result.ExitCode == 1
+                        && wrongProcessServer.IsConsumed
+                        && string.IsNullOrEmpty(result.StandardOutput)
+                        && result.StandardError.Trim() == "credential unavailable",
+                    "generation_credential_broker_same_binary_wrong_pid_rejected");
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END same-binary-wrong-pid");
+
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_BEGIN wrong-server-pid");
+            using (var wrongServerProcess = new CodexCredentialBrokerServer(
+                TimeSpan.FromSeconds(5),
+                Environment.ProcessId,
+                () => fixtureSecret))
+            {
+                try
+                {
+                    _ = await CodexCredentialBrokerClient.FetchSecretAsync(
+                        wrongServerProcess.PipeName,
+                        wrongServerProcess.Capability,
+                        checked(Environment.ProcessId + 1));
+                    _failures.Add("generation_credential_broker_wrong_server_pid");
+                }
+                catch (CodexCredentialBrokerException)
+                {
+                }
+                await wrongServerProcess.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+                Require(
+                    wrongServerProcess.IsConsumed,
+                    "generation_credential_broker_wrong_server_pid_consumed");
+            }
+            VerifyConsole.WriteLine("CREDENTIAL_BROKER_CASE_END wrong-server-pid");
+        }
+        catch (Exception ex)
+        {
+            _failures.Add($"generation_credential_broker_contract:{ex.GetType().Name}:{ex.Message}");
+        }
+    }
+
+    private static Process StartCredentialHelperProcess()
+    {
+        var processPath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(processPath))
+        {
+            throw new CodexCredentialBrokerException();
+        }
+        var startInfo = new ProcessStartInfo(processPath)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        var launchMode = "apphost";
+        if (string.Equals(
+            Path.GetFileNameWithoutExtension(processPath),
+            "dotnet",
+            StringComparison.OrdinalIgnoreCase))
+        {
+            var entryAssemblyPath = typeof(PocketAppGenerationVerifier).Assembly.Location;
+            if (string.IsNullOrWhiteSpace(entryAssemblyPath))
+            {
+                throw new CodexCredentialBrokerException();
+            }
+            startInfo.ArgumentList.Add(entryAssemblyPath);
+            launchMode = "dotnet-host";
+        }
+        startInfo.ArgumentList.Add(CodexCredentialBrokerHelper.Argument);
+        VerifyConsole.WriteLine($"CREDENTIAL_BROKER_HELPER_LAUNCH_MODE {launchMode}");
+        return Process.Start(startInfo) ?? throw new CodexCredentialBrokerException();
+    }
+
+    private static Process StartCredentialGenerationProbeProcess()
+    {
+        var processPath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(processPath))
+        {
+            throw new CodexCredentialBrokerException();
+        }
+        var startInfo = new ProcessStartInfo(processPath)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        if (string.Equals(
+            Path.GetFileNameWithoutExtension(processPath),
+            "dotnet",
+            StringComparison.OrdinalIgnoreCase))
+        {
+            var entryAssemblyPath = typeof(PocketAppGenerationVerifier).Assembly.Location;
+            if (string.IsNullOrWhiteSpace(entryAssemblyPath))
+            {
+                throw new CodexCredentialBrokerException();
+            }
+            startInfo.ArgumentList.Add(entryAssemblyPath);
+        }
+        startInfo.ArgumentList.Add(CodexCredentialBrokerGenerationProbe.Argument);
+        return Process.Start(startInfo) ?? throw new CodexCredentialBrokerException();
+    }
+
+    private static async Task<(int ExitCode, string StandardOutput, string StandardError)>
+        CompleteCredentialHelperAsync(Process process, string bootstrapLine)
+    {
+        var standardOutputTask = process.StandardOutput.ReadToEndAsync();
+        var standardErrorTask = process.StandardError.ReadToEndAsync();
+        try
+        {
+            await process.StandardInput.WriteAsync(bootstrapLine);
+            await process.StandardInput.WriteAsync("\n");
+            await process.StandardInput.FlushAsync();
+            process.StandardInput.Close();
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        catch
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2));
+                }
+            }
+            catch
+            {
+            }
+            throw;
+        }
+        return (process.ExitCode, await standardOutputTask, await standardErrorTask);
     }
 
     private void VerifyE2E()
@@ -136,13 +530,93 @@ internal sealed class PocketAppGenerationVerifier
                         && failingEnableLifecycle.ActivePackage(request.AppId) is null,
                     "generation_enable_readback_failure_restored_disabled");
             }
+            using (var failingRuntimeEnableLifecycle = new PocketAppLifecycleManager(
+                root,
+                dataRoot,
+                activationReadback: receipt =>
+                {
+                    if (receipt.State == PocketAppLifecycleState.Enabled)
+                    {
+                        throw new PocketAppRuntimeActivationException("RUNTIME_ACTIVATION_UNAVAILABLE");
+                    }
+                    return new PocketAppRuntimeReadback(
+                        receipt.PackageId,
+                        receipt.Version,
+                        receipt.PackageDigest,
+                        receipt.EffectivePermissions);
+                }))
+            {
+                try
+                {
+                    _ = failingRuntimeEnableLifecycle.Enable(request.AppId);
+                    _failures.Add("generation_runtime_enable_failure_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_READBACK_FAILED")
+                {
+                }
+                Require(
+                    failingRuntimeEnableLifecycle.ManagedPackage(request.AppId)?.State == PocketAppLifecycleState.Disabled
+                        && failingRuntimeEnableLifecycle.ActivePackage(request.AppId) is null,
+                    "generation_runtime_enable_failure_remains_disabled");
+            }
+
+            var reupdateMaterialized = materializer.Materialize(updateEnvelope, updateRequest);
+            try
+            {
+                var reupdate = lifecycle.Stage(reupdateMaterialized.Directory);
+                var reupdateGrant = lifecycle.Approve(reupdate.RequestId, reupdate.BindingDigest);
+                _ = lifecycle.Install(reupdate, reupdateGrant);
+            }
+            finally
+            {
+                TryDeleteDraft(reupdateMaterialized.Directory);
+            }
+            using (var failingRuntimeRollbackLifecycle = new PocketAppLifecycleManager(
+                root,
+                dataRoot,
+                activationReadback: receipt =>
+                {
+                    if (receipt.State == PocketAppLifecycleState.Enabled)
+                    {
+                        throw new PocketAppRuntimeActivationException("RUNTIME_ACTIVATION_UNAVAILABLE");
+                    }
+                    return new PocketAppRuntimeReadback(
+                        receipt.PackageId,
+                        receipt.Version,
+                        receipt.PackageDigest,
+                        receipt.EffectivePermissions);
+                }))
+            {
+                var failingRollback = failingRuntimeRollbackLifecycle.PrepareRollback(
+                    request.AppId,
+                    request.Version);
+                var failingRollbackGrant = failingRuntimeRollbackLifecycle.Approve(
+                    failingRollback.RequestId,
+                    failingRollback.BindingDigest);
+                try
+                {
+                    _ = failingRuntimeRollbackLifecycle.Rollback(failingRollback, failingRollbackGrant);
+                    _failures.Add("generation_runtime_rollback_failure_accepted");
+                }
+                catch (PocketAppLifecycleException ex) when (ex.Code == "LIFECYCLE_READBACK_FAILED")
+                {
+                }
+                var rollbackFallback = failingRuntimeRollbackLifecycle.ManagedPackage(request.AppId);
+                Require(
+                    rollbackFallback?.State == PocketAppLifecycleState.Disabled
+                        && rollbackFallback?.Version == updateRequest.Version
+                        && failingRuntimeRollbackLifecycle.ActivePackage(request.AppId) is null,
+                    "generation_runtime_rollback_failure_disables_previous_version");
+            }
+            var raceTarget = lifecycle.ManagedPackage(request.AppId)
+                ?? throw new InvalidOperationException("generation_race_target_missing");
             var installedIntent = Path.Combine(
                 root,
                 "Apps",
                 request.AppId,
                 "Versions",
-                VersionStorageKey(disabledAgain.Version!),
-                disabledAgain.PackageDigest!["sha256:".Length..],
+                VersionStorageKey(raceTarget.Version!),
+                raceTarget.PackageDigest!["sha256:".Length..],
                 "package",
                 "intent.md");
             var originalIntent = File.ReadAllBytes(installedIntent);
@@ -356,9 +830,260 @@ internal sealed class PocketAppGenerationVerifier
                     "^local\\.generated\\.a[0-9a-f]{32}$",
                     System.Text.RegularExpressions.RegexOptions.CultureInvariant),
             "generation_untargeted_request_gets_fresh_app_id");
+        var confinementHostUserProfile = Path.Combine(
+            Path.GetTempPath(),
+            $"hover-pocket-codex-frontier-profile-{Guid.NewGuid():N}");
+        try
+        {
+        var confinementRoot = Path.Combine(
+            confinementHostUserProfile,
+            "AppData",
+            "Local",
+            "Temp",
+            "run");
+        var confinementWorkspace = Path.Combine(confinementRoot, "workspace");
+        var confinementCodexHome = Path.Combine(
+            confinementHostUserProfile,
+            "AppData",
+            "Local",
+            "HoverPocket",
+            "CodexGenerationSandbox",
+            "codex-home");
+        var confinementUserHome = Path.Combine(confinementRoot, "user-home");
+        var confinementHostCodexHome = Path.Combine(
+            confinementHostUserProfile,
+            "AppData",
+            "Local",
+            "Temp",
+            "host-codex-home");
+        var confinementForeign = Path.Combine(
+            confinementHostUserProfile,
+            "AppData",
+            "Local",
+            "Temp",
+            "foreign");
+        var confinementTemp = Path.GetDirectoryName(confinementRoot)
+            ?? throw new CodexCredentialBrokerException();
+        var confinementDocuments = Path.Combine(confinementHostUserProfile, "Documents");
+        foreach (var directory in new[]
+        {
+            confinementWorkspace,
+            confinementCodexHome,
+            confinementUserHome,
+            confinementHostCodexHome,
+            confinementForeign,
+            confinementDocuments
+        })
+        {
+            Directory.CreateDirectory(directory);
+        }
+        var confinementSchema = Path.Combine(confinementWorkspace, "generation-output.schema.json");
+        var confinementModelCatalog = Path.Combine(confinementWorkspace, "model-catalog.json");
+        var modelCatalog = CodexPocketAppGenerationModelCatalog.Load();
+        CodexPocketAppGenerationModelCatalog.Validate(modelCatalog);
+        Require(modelCatalog.Length > 0, "generation_codex_static_model_catalog");
+        var tamperedModelCatalog = (byte[])modelCatalog.Clone();
+        tamperedModelCatalog[0] ^= 0x01;
+        try
+        {
+            CodexPocketAppGenerationModelCatalog.Validate(tamperedModelCatalog);
+            _failures.Add("generation_codex_static_model_catalog_tamper");
+        }
+        catch (PocketAppGenerationException)
+        {
+        }
+        var confinementHelper = Environment.ProcessPath
+            ?? throw new CodexCredentialBrokerException();
+        var confinementArguments = CodexPocketAppGenerationAdapter.ConfinementArguments(
+            confinementWorkspace,
+            confinementCodexHome,
+            confinementUserHome,
+            confinementHostUserProfile,
+            confinementSchema,
+            confinementModelCatalog,
+            confinementHelper);
+        var confinementJoined = string.Join('\n', confinementArguments);
+        Require(
+            !confinementArguments.Contains("--sandbox", StringComparer.Ordinal)
+                && confinementArguments.Contains("--ignore-user-config", StringComparer.Ordinal)
+                && confinementArguments.Contains("--ignore-rules", StringComparer.Ordinal)
+                && confinementJoined.Contains("windows.sandbox=\"elevated\"", StringComparison.Ordinal)
+                && confinementJoined.Contains("default_permissions=\"hoverpocket-generation\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementHostUserProfile)}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementDocuments)}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementTemp)}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementHostCodexHome)}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementForeign)}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementWorkspace)}=\"read\"", StringComparison.Ordinal)
+                && !confinementJoined.Contains($"{JsonSerializer.Serialize(confinementRoot)}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(confinementUserHome)}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"{JsonSerializer.Serialize(Path.GetFullPath(confinementHelper))}=\"deny\"", StringComparison.Ordinal)
+                && confinementJoined.Contains($"model={JsonSerializer.Serialize(CodexPocketAppGenerationModelCatalog.ModelId)}", StringComparison.Ordinal)
+                && confinementJoined.Contains($"model_reasoning_effort={JsonSerializer.Serialize(CodexPocketAppGenerationModelCatalog.ReasoningEffort)}", StringComparison.Ordinal)
+                && confinementJoined.Contains($"model_catalog_json={JsonSerializer.Serialize(confinementModelCatalog)}", StringComparison.Ordinal)
+                && confinementJoined.Contains("model_provider=\"hoverpocket\"", StringComparison.Ordinal)
+                && confinementJoined.Contains("model_providers.hoverpocket.base_url=\"https://api.openai.com/v1\"", StringComparison.Ordinal)
+                && confinementJoined.Contains("model_providers.hoverpocket.auth.command=", StringComparison.Ordinal)
+                && confinementJoined.Contains($"model_providers.hoverpocket.auth.args=[{JsonSerializer.Serialize(CodexCredentialBrokerHelper.GenerationArgument)}]", StringComparison.Ordinal)
+                && confinementJoined.Contains("model_providers.hoverpocket.auth.refresh_interval_ms=0", StringComparison.Ordinal)
+                && confinementJoined.Contains("model_providers.hoverpocket.request_max_retries=0", StringComparison.Ordinal)
+                && confinementJoined.Contains("network.enabled=false", StringComparison.Ordinal)
+                && confinementJoined.Contains("shell_environment_policy.inherit=\"none\"", StringComparison.Ordinal)
+                && confinementJoined.Contains("SYSTEMDRIVE=", StringComparison.Ordinal)
+                && confinementJoined.Contains("SYSTEMROOT=", StringComparison.Ordinal)
+                && confinementJoined.Contains("WINDIR=", StringComparison.Ordinal)
+                && confinementJoined.Contains("COMSPEC=", StringComparison.Ordinal)
+                && confinementArguments.TakeLast(3).SequenceEqual(["--output-schema", confinementSchema, "-"], StringComparer.Ordinal),
+            "generation_codex_named_permission_profile");
+        var confinementEnvironment = CodexPocketAppGenerationAdapter.ConfinementEnvironment(
+            confinementCodexHome,
+            confinementUserHome,
+            Path.Combine(confinementUserHome, "AppData", "Local"),
+            Path.Combine(confinementUserHome, "AppData", "Roaming"),
+            Path.Combine(confinementRoot, "tmp"));
+        Require(
+            confinementEnvironment.Count == 14
+                && confinementEnvironment["CODEX_HOME"] == confinementCodexHome
+                && confinementEnvironment["HOME"] == confinementUserHome
+                && confinementEnvironment["USERPROFILE"] == confinementUserHome
+                && confinementEnvironment["USERNAME"] == Environment.UserName
+                && confinementEnvironment["SYSTEMDRIVE"]
+                    == Path.GetPathRoot(confinementEnvironment["SYSTEMROOT"])?.TrimEnd(
+                        Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar)
+                && confinementEnvironment["SYSTEMROOT"] == confinementEnvironment["WINDIR"]
+                && confinementEnvironment["COMSPEC"].EndsWith("cmd.exe", StringComparison.OrdinalIgnoreCase)
+                && confinementEnvironment["LANG"] == "C"
+                && confinementEnvironment.Keys.All(key =>
+                    !key.StartsWith("HOVERPOCKET_CODEX_BROKER", StringComparison.OrdinalIgnoreCase)
+                        && !string.Equals(key, "OPENAI_API_KEY", StringComparison.OrdinalIgnoreCase)),
+            "generation_codex_isolated_environment");
+        for (var index = 0; index <= 256; index += 1)
+        {
+            Directory.CreateDirectory(Path.Combine(
+                confinementHostUserProfile,
+                $"overflow-{index:D3}"));
+        }
+        try
+        {
+            _ = CodexPocketAppGenerationAdapter.ConfinementDenyFrontier(
+                confinementHostUserProfile,
+                confinementRoot);
+            _failures.Add("generation_codex_frontier_bound_accepted");
+        }
+        catch (PocketAppGenerationException)
+        {
+        }
         Require(
             CodexPocketAppGenerationAdapter.ResolveExecutable() is null,
             "generation_real_codex_confidentiality_gate");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(confinementHostUserProfile))
+                {
+                    PocketAppVerifierFileSystem.MakeTreeMutable(confinementHostUserProfile);
+                    Directory.Delete(confinementHostUserProfile, true);
+                }
+            }
+            catch { }
+        }
+    }
+
+    private void VerifyCodexSandboxReadiness()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            $"hover-pocket-codex-sandbox-readiness-{Guid.NewGuid():N}");
+        var home = Path.Combine(root, "codex-home");
+        var sandbox = Path.Combine(home, ".sandbox");
+        var secrets = Path.Combine(home, ".sandbox-secrets");
+        try
+        {
+            Directory.CreateDirectory(sandbox);
+            Directory.CreateDirectory(secrets);
+            File.WriteAllText(
+                Path.Combine(sandbox, "setup_marker.json"),
+                JsonSerializer.Serialize(new
+                {
+                    version = CodexGenerationSandboxLease.SetupVersion,
+                    offline_username = CodexGenerationSandboxLease.OfflineUserName,
+                    online_username = CodexGenerationSandboxLease.OnlineUserName,
+                    proxy_ports = Array.Empty<int>(),
+                    allow_local_binding = false
+                }));
+            File.WriteAllText(
+                Path.Combine(secrets, "sandbox_users.json"),
+                JsonSerializer.Serialize(new
+                {
+                    version = CodexGenerationSandboxLease.SetupVersion,
+                    offline = new
+                    {
+                        username = CodexGenerationSandboxLease.OfflineUserName,
+                        password = "fixture-dpapi-blob"
+                    },
+                    online = new
+                    {
+                        username = CodexGenerationSandboxLease.OnlineUserName,
+                        password = "fixture-dpapi-blob"
+                    }
+                }));
+
+            using (var lease = CodexGenerationSandboxLease.Open(home))
+            {
+                lease.Validate();
+                Require(
+                    string.Equals(lease.HomePath, Path.GetFullPath(home), StringComparison.OrdinalIgnoreCase),
+                    "generation_codex_sandbox_ready");
+                try
+                {
+                    File.Delete(Path.Combine(secrets, "sandbox_users.json"));
+                    _failures.Add("generation_codex_sandbox_users_not_pinned");
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+
+            File.WriteAllText(
+                Path.Combine(sandbox, "setup_marker.json"),
+                JsonSerializer.Serialize(new
+                {
+                    version = CodexGenerationSandboxLease.SetupVersion,
+                    offline_username = CodexGenerationSandboxLease.OfflineUserName,
+                    online_username = CodexGenerationSandboxLease.OnlineUserName,
+                    proxy_ports = new[] { 7890 },
+                    allow_local_binding = false
+                }));
+            try
+            {
+                using var _ = CodexGenerationSandboxLease.Open(home);
+                _failures.Add("generation_codex_sandbox_proxy_drift_accepted");
+            }
+            catch (PocketAppGenerationException exception)
+            {
+                Require(
+                    exception.Code == "GENERATOR_SANDBOX_NOT_READY",
+                    "generation_codex_sandbox_failure_code");
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    PocketAppVerifierFileSystem.MakeTreeMutable(root);
+                    Directory.Delete(root, true);
+                }
+            }
+            catch { }
+        }
     }
 
     private void VerifyRootPin()
@@ -422,11 +1147,20 @@ internal sealed class PocketAppGenerationVerifier
         try
         {
             var approve = false;
+            var allowActivationFlush = true;
             using var controller = new PocketAppGenerationController(
                 root,
                 dataRoot,
                 draftRoot,
                 new FixturePocketAppGenerationAdapter(FixtureRoot()));
+            controller.SetBeforeDeactivate((appId, cancellationToken) =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return Task.FromResult(new PocketAppStateTransitionLease(
+                    appId,
+                    "fixture-approval",
+                    allowActivationFlush));
+            });
             var settings = new HoverPocket.Shell.Bridge.BridgeDispatcher();
             controller.AttachSettings(settings, approvalDecision: _ => approve);
             var panel = new HoverPocket.Shell.Bridge.BridgeDispatcher();
@@ -448,6 +1182,14 @@ internal sealed class PocketAppGenerationVerifier
             generated = await settings.ProcessRawMessageAsync(generate.Replace("\"generate\"", "\"generate-2\"", StringComparison.Ordinal));
             Require(generated?.Contains("\"phase\":\"awaiting_approval\"", StringComparison.Ordinal) == true, "generation_native_approval_restage");
             approve = true;
+            allowActivationFlush = false;
+            var blocked = await settings.ProcessRawMessageAsync(
+                """{"id":"approve-flush-blocked","method":"pocketApps.presentApproval","params":{}}""");
+            Require(
+                blocked?.Contains("GENERATION_STATE_FLUSH_FAILED", StringComparison.Ordinal) == true
+                    && blocked.Contains("\"proposal\":{", StringComparison.Ordinal),
+                "generation_activation_flush_failure_preserves_proposal");
+            allowActivationFlush = true;
             var installed = await settings.ProcessRawMessageAsync(
                 """{"id":"approve-native","method":"pocketApps.presentApproval","params":{}}""");
             Require(
@@ -512,6 +1254,80 @@ internal sealed class PocketAppGenerationVerifier
         catch (Exception ex)
         {
             _failures.Add($"generation_preview_only:{ex.GetType().Name}:{ex.Message}");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    PocketAppVerifierFileSystem.MakeTreeMutable(root);
+                    Directory.Delete(root, true);
+                }
+            }
+            catch { }
+            try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
+            try { if (Directory.Exists(draftRoot)) { Directory.Delete(draftRoot, true); } } catch { }
+        }
+    }
+
+    private async Task VerifyFailedActivationRefreshesManagement()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-activation-failure-host-{Guid.NewGuid():N}");
+        var dataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-activation-failure-data-{Guid.NewGuid():N}");
+        var draftRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-activation-failure-draft-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(draftRoot);
+            var adapter = new FixturePocketAppGenerationAdapter(FixtureRoot());
+            var materializer = new PocketAppGenerationMaterializer(draftRoot);
+            var request = MakeRequest(
+                "generation-activation-failure",
+                "Create a focus app whose activation fails.",
+                "local.example.activation-failure",
+                "1.0.0",
+                "today-focus");
+            using (var lifecycle = new PocketAppLifecycleManager(root, dataRoot))
+            {
+                _ = InstallFixture(request, adapter, materializer, lifecycle);
+                _ = lifecycle.Disable(request.AppId);
+            }
+            var refreshNotifications = 0;
+            using var controller = new PocketAppGenerationController(
+                root,
+                dataRoot,
+                draftRoot,
+                null,
+                runtimeActivationReadback: receipt =>
+                {
+                    if (receipt.State == PocketAppLifecycleState.Enabled)
+                    {
+                        throw new PocketAppRuntimeActivationException("RUNTIME_ACTIVATION_UNAVAILABLE");
+                    }
+                    return new PocketAppRuntimeReadback(
+                        receipt.PackageId,
+                        receipt.Version,
+                        receipt.PackageDigest,
+                        receipt.EffectivePermissions);
+                },
+                postRefreshHook: () => refreshNotifications++);
+            var settings = new HoverPocket.Shell.Bridge.BridgeDispatcher();
+            controller.AttachSettings(settings, approvalDecision: _ => true);
+            var response = await settings.ProcessRawMessageAsync(
+                """{"id":"enable-activation-failure","method":"pocketApps.enable","params":{"appId":"local.example.activation-failure"}}""");
+            Require(
+                response is not null
+                    && response.Contains("\"phase\":\"failed\"", StringComparison.Ordinal)
+                    && response.Contains("\"errorCode\":\"GENERATION_PACKAGE_INVALID\"", StringComparison.Ordinal)
+                    && response.Contains("\"appId\":\"local.example.activation-failure\",\"state\":\"disabled\"", StringComparison.Ordinal),
+                "generation_failed_activation_refreshes_disabled_management");
+            Require(
+                refreshNotifications == 1,
+                "generation_failed_activation_publishes_route_refresh");
+        }
+        catch (Exception ex)
+        {
+            _failures.Add($"generation_failed_activation_refresh:{ex.GetType().Name}:{ex.Message}");
         }
         finally
         {
@@ -605,12 +1421,16 @@ internal sealed class PocketAppGenerationVerifier
                 "generation_corrupt_package_isolated_on_startup");
             var removed = await recoveredSettings.ProcessRawMessageAsync(
                 """{"id":"remove-corrupt","method":"pocketApps.removePreservingData","params":{"appId":"local.example.unrelated"}}""");
+            var removedResult = ResponseResult(removed);
+            var removedReceipt = removedResult.GetProperty("receipt");
             Require(
-                removed is not null
-                    && removed.Contains("\"appId\":\"local.example.unrelated\",\"state\":\"removed\"", StringComparison.Ordinal)
-                    && removed.Contains("\"readbackVerified\":true", StringComparison.Ordinal)
-                    && !removed.Contains("\"errorCode\":\"LIFECYCLE_PACKAGE_CORRUPT\"", StringComparison.Ordinal)
-                    && removed.Contains("\"appId\":\"local.example.selected\",\"state\":\"disabled\"", StringComparison.Ordinal),
+                removedReceipt.GetProperty("appId").GetString() == "local.example.unrelated"
+                    && removedReceipt.GetProperty("state").GetString() == "removed"
+                    && removedReceipt.GetProperty("readbackVerified").GetBoolean()
+                    && !removedResult.GetProperty("managementIssues").EnumerateArray().Any()
+                    && removedResult.GetProperty("managedApps").EnumerateArray().Any(item =>
+                        item.GetProperty("appId").GetString() == "local.example.selected"
+                        && item.GetProperty("state").GetString() == "disabled"),
                 "generation_corrupt_package_remove_preserves_healthy_management");
         }
         catch (Exception ex)
@@ -702,6 +1522,136 @@ internal sealed class PocketAppGenerationVerifier
             try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
             try { if (Directory.Exists(draftRoot)) { Directory.Delete(draftRoot, true); } } catch { }
         }
+    }
+
+    private async Task VerifyDeactivateFlushBoundary()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-flush-host-{Guid.NewGuid():N}");
+        var dataRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-flush-data-{Guid.NewGuid():N}");
+        var draftRoot = Path.Combine(Path.GetTempPath(), $"hover-pocket-generation-flush-draft-{Guid.NewGuid():N}");
+        const string appId = "local.example.flush";
+        try
+        {
+            Directory.CreateDirectory(draftRoot);
+            var adapter = new FixturePocketAppGenerationAdapter(FixtureRoot());
+            var materializer = new PocketAppGenerationMaterializer(draftRoot);
+            var request = MakeRequest(
+                "generation-flush-v1",
+                "Create a focus app whose state must be flushed before deactivation.",
+                appId,
+                "1.0.0",
+                "today-focus");
+            using (var lifecycle = new PocketAppLifecycleManager(root, dataRoot))
+            {
+                _ = InstallFixture(request, adapter, materializer, lifecycle);
+                var update = MakeRequest(
+                    "generation-flush-v2",
+                    request.UserRequest,
+                    appId,
+                    "1.0.1",
+                    request.Namespace);
+                _ = InstallFixture(update, adapter, materializer, lifecycle);
+            }
+
+            var allowFlush = true;
+            var flushCalls = 0;
+            var flushCompleted = false;
+            var releaseCalls = 0;
+            using var controller = new PocketAppGenerationController(root, dataRoot, draftRoot, null);
+            controller.SetBeforeDeactivate((targetAppId, cancellationToken) =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                flushCalls += 1;
+                flushCompleted = string.Equals(targetAppId, appId, StringComparison.Ordinal);
+                return Task.FromResult(new PocketAppStateTransitionLease(
+                    targetAppId,
+                    $"fixture-flush-{flushCalls}",
+                    allowFlush));
+            }, lease =>
+            {
+                if (string.Equals(lease.AppId, appId, StringComparison.Ordinal))
+                {
+                    releaseCalls += 1;
+                }
+                return Task.CompletedTask;
+            });
+            var settings = new HoverPocket.Shell.Bridge.BridgeDispatcher();
+            controller.AttachSettings(settings, approvalDecision: _ => true);
+
+            var disabled = await settings.ProcessRawMessageAsync(
+                """{"id":"flush-disable","method":"pocketApps.disable","params":{"appId":"local.example.flush"}}""");
+            Require(
+                flushCompleted
+                    && flushCalls == 1
+                    && releaseCalls == 1
+                    && disabled?.Contains("\"phase\":\"disabled\"", StringComparison.Ordinal) == true,
+                "generation_disable_awaits_state_flush");
+
+            _ = await settings.ProcessRawMessageAsync(
+                """{"id":"flush-enable","method":"pocketApps.enable","params":{"appId":"local.example.flush"}}""");
+            var pending = await settings.ProcessRawMessageAsync(
+                """{"id":"flush-rollback","method":"pocketApps.prepareRollback","params":{"appId":"local.example.flush","version":"1.0.0"}}""");
+            allowFlush = false;
+            flushCompleted = false;
+            var blocked = await settings.ProcessRawMessageAsync(
+                """{"id":"flush-remove-blocked","method":"pocketApps.removePreservingData","params":{"appId":"local.example.flush"}}""");
+            Require(
+                flushCalls == 2
+                    && releaseCalls == 2
+                    && flushCompleted
+                    && pending?.Contains("\"phase\":\"awaiting_approval\"", StringComparison.Ordinal) == true
+                    && blocked?.Contains("GENERATION_STATE_FLUSH_FAILED", StringComparison.Ordinal) == true
+                    && blocked.Contains("\"proposal\":{", StringComparison.Ordinal)
+                    && blocked.Contains("\"action\":\"rollback\"", StringComparison.Ordinal)
+                    && blocked.Contains("\"appId\":\"local.example.flush\",\"state\":\"enabled\"", StringComparison.Ordinal),
+                "generation_remove_flush_failure_preserves_pending_proposal");
+
+            allowFlush = true;
+            var removed = await settings.ProcessRawMessageAsync(
+                """{"id":"flush-remove","method":"pocketApps.removePreservingData","params":{"appId":"local.example.flush"}}""");
+            var removedReceipt = ResponseResult(removed).GetProperty("receipt");
+            Require(
+                flushCalls == 3
+                    && releaseCalls == 3
+                    && removedReceipt.GetProperty("appId").GetString() == appId
+                    && removedReceipt.GetProperty("state").GetString() == "removed"
+                    && removedReceipt.GetProperty("readbackVerified").GetBoolean(),
+                "generation_remove_after_state_flush_readback");
+        }
+        catch (Exception ex)
+        {
+            _failures.Add($"generation_deactivate_flush:{ex.GetType().Name}:{ex.Message}");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    PocketAppVerifierFileSystem.MakeTreeMutable(root);
+                    Directory.Delete(root, true);
+                }
+            }
+            catch { }
+            try { if (Directory.Exists(dataRoot)) { Directory.Delete(dataRoot, true); } } catch { }
+            try { if (Directory.Exists(draftRoot)) { Directory.Delete(draftRoot, true); } } catch { }
+        }
+    }
+
+    private static JsonElement ResponseResult(string? response)
+    {
+        if (string.IsNullOrWhiteSpace(response))
+        {
+            throw new InvalidOperationException("fixture_response_missing");
+        }
+        using var document = JsonDocument.Parse(response);
+        var root = document.RootElement;
+        if (root.GetProperty("error").ValueKind != JsonValueKind.Null
+            || root.GetProperty("result").ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException("fixture_response_failed");
+        }
+        return root.GetProperty("result").Clone();
     }
 
     private void VerifyApprovalTextSanitization()

@@ -1,0 +1,98 @@
+# 2026-09-01 HoverPocket 通常UIとVoice Lane
+
+## Voice capability tools and final microphone toggle
+
+- Compact / Expandedの大きなマイクcontrolをVoice sessionの開始・connecting / recovering中のキャンセル・connected / unmuted中の終了・再ホバー後の明示再開へ統合した。別のVoice session終了buttonは追加しない。パネルを再表示しただけではmuteを解除しない。
+- macOS共通runtimeはCalendar権限ありで`calendar_events_list`、`calendar_event_create`、`timer_countdown_start`、`sticky_note_upsert`、`controls_brightness_set`、`controls_volume_set`を公開する。Calendar権限なしではCalendar 2 toolを除く4 toolへ縮退する。全writeは既存CapabilityBrokerのapproval policy、idempotency、cancellation、実行後readbackを使う。
+- Controlsの自然言語契約は`set / increase / decrease / preset`のstrict argumentsで、相対値はpercentage pointsとして扱う。brightnessは現在値を`controls.brightness.get@1`で読んでから計算し、`comfortable=70%`、`maximum=100%`、`minimum=5%`、volumeは`comfortable=50%`、`maximum=100%`、`minimum=0%`。`decrease value:10`が現在値から正確に10ポイント下がり、範囲外はclampする。
+- Codex app-serverのmodel verifierは4 tool面を確認する。Timerだけを実行する検証後に、Sticky Notesが空、Controlsのdisplay / volume / mediaが変更されず、Calendar createが0件であることをreadbackする。
+- Windowsは新しい`controls.brightness.get@1`をRegistry / Handler / verifierへ追加し、22 descriptors / 21 handlersの共通契約を維持した。共通JSON契約にもdescriptor fixtureとgolden registry entryを追加し、72 fixturesの一致を確認した。Windows Voice dynamic runtimeの既存Calendar / Timer面とproduction positive-tool-policy gateは変更していないため、Windowsでの新Voice tool実機動作は別ゲートである。
+
+### 今回の検証
+
+- `swift build -Xswiftc -warnings-as-errors`: PASS
+- `swift build -c release -Xswiftc -warnings-as-errors`: PASS
+- `swift run HoverPocket --verify-capabilities`: PASS（21 handlers）
+- `swift run HoverPocket --verify-broker`: PASS（22 descriptors / 21 handlers）
+- `swift run HoverPocket --verify-voice-foundation`: PASS
+- `swift run HoverPocket --verify-codex-app-server`: PASS（ChatGPT account / app-server / WebRTC foundation）
+- `python3 script/verify_voice_foundation.py`: PASS（42 cases、model tool surface 4、Timer write-only negative boundary）
+- `python3 script/verify_pocket_contracts.py`: PASS（72 fixtures）
+- `git diff --check`: PASS
+- `./script/build_and_run.sh --verify`: PASS。`dist/HoverPocket.app`をApple Development署名で再構築し、strict codesignを確認した。通常bundle IDは`local.codex.hover-pocket`、起動processは1件である。bundle binaryから`sticky_note_upsert`、`controls_brightness_set`、`controls_volume_set`、`controls.brightness.get`をreadbackした。
+- 独立レビュー: 最終P0 / P1 / P2すべて0件。単一マイクcontrol、再ホバー時の非自動録音、Broker境界、10ポイント計算、Timer専用rate limit、監査redaction、hot path性能、macOS / Windows境界を確認した。
+- Windows `dotnet build`: 未実行（macOS環境に`dotnet`なし）
+
+### 未完了gate
+
+- 実マイクからの自然文認識、remote audio、付箋 / 明るさ / 音量の実OS操作とネイティブ承認は、通常UIでユーザーがマイクを押して発話する物理gateとして未確認である。
+- Windowsの新Voice tool公開は今回の対象外であり、Windows側は`controls.brightness.get@1`の共通Registry契約までである。
+
+## 再ホバー後の音声会話復帰
+
+- ユーザーが通常版Codex Voiceで実際に会話できたことを確認した。パネルを閉じると、要件どおり音声はmuteされUIはdetachされるが、Codex app-serverのroot threadとRealtime接続はアプリ生存中に保持される。
+- 再表示後のsnapshotは`connected + muted + uiAttached`になる。従来の大きなマイクbuttonは`disconnected`専用だったため無効になり、別のspeaker button以外に分かりやすい復帰導線がなかったことが原因である。
+- 大きなマイクbuttonを開始 / 再開の共通操作にした。`connected + muted + uiAttached`では既存接続へ`setMuted(false)`だけを送り、`disconnected`では従来どおり`beginAudioSession()`を呼ぶ。再表示だけではunmuteしないため、ホバーだけで録音が再開することはない。
+- 一時停止中は`一時停止中 · マイクを押して再開`、会話欄は`マイクを押すと音声会話を再開します。`、Accessibility labelは`音声会話を再開`と表示する。
+- runtime verifierへdetach → mute、reattach → mute維持、明示resume → unmute、adapter `startCount == 1`維持を追加した。既存接続を再利用し、重複Realtime sessionを開始しないことをreadbackした。
+- Debug / Release warnings-as-errors、Voice Foundation runtime、Voice静的42 cases、Panel 128 cases、Capability 21 handlers / 22 descriptors、`git diff --check`、通常bundle再build・起動、strict codesignがPASSした。通常版processは`dist/HoverPocket.app`から起動している。
+- 独立レビューはP0 / P1 / P2すべて0件。再表示時の自動録音なし、新規開始回帰なし、追加I/O / polling / probeなし、Voice hot path性能への実質的な影響なしと判定した。
+
+## 現在Voiceから使える機能
+
+- 自然な音声会話と音声応答。Codex app-server / ChatGPT account経路を使い、通常設定ではOpenAI API keyを必要としない。
+- `calendar_events_list`: ログインとCalendar権限がある場合に、今日の予定を最大24件まで読み取る。タイトル、開始、終了を返す。
+- `calendar_event_create`: タイトル、開始、終了、終日指定で予定を1件作成する。毎回ネイティブ承認を表示し、CapabilityBrokerの実行後readbackを確認してから成功を返す。
+- `timer_countdown_start`: 1秒から24時間までのカウントダウンTimerを任意タイトル付きで開始する。毎回ネイティブ承認を表示し、CapabilityBrokerの実行後readbackを確認してから成功を返す。
+- Compact / Expanded表示、会話transcript、現在rootに属するsession cards、mute / unmute、明示終了、パネルclose後のroot / transcript / session保持と明示再開。
+- RegistryにはSticky Notes、Clipboard、Controls、Calculator、Timer pause / resume / stop等もある。macOS共通Voice runtimeのtool allowlistはCalendar権限に応じて6または4 toolで、Sticky Notes追加とControlsの明るさ・音量変更をBroker経由で操作できる。Calendar編集 / 削除、Clipboard、Timer一時停止 / 停止、Pocket App生成・導入はVoice toolとしては未公開である。
+
+## Codex Voice開始前の表示修正
+
+- ユーザー画面は`切断・待機中`でsafe errorなしだった。実コードではCodex providerの`conversationPlaceholder`がruntime状態に関係なくcompatibility gate文言を表示しており、実際の互換性失敗と開始前の待機を区別できなかった。
+- macOS System Settingsのマイク一覧を読み取り、`HoverMenuPreview`と隔離`HoverPocketVoiceE2E`がともにONであることを確認した。設定変更は行っていない。
+- 通常bundleのCodex app-server Realtime verifierは、ChatGPT account、19 voices、ephemeral thread、SDP、WebRTC connected、process closedを確認した。CLI verifierは物理マイクを取得しないため、バックエンドとWebRTC契約の確認に限定する。
+- 要件`R-SHELL-006`に従い、Voice LaneをONにしただけでは自動listenせず、Panel上の明示マイク操作で開始する契約は維持した。
+- Compact / Expanded共通のマイク開始操作を36 x 36の円形buttonへ変更した。開始可能な待機状態は`開始前・マイクを押してください`、本文は`マイクを押すとCodexとの音声セッションを開始します`と表示する。接続中 / 接続済みのsymbolとAccessibility labelも実接続状態に合わせた。会話欄はdisconnected / connecting・recovering / connectedを開始案内 / 接続中 / 話しかけてくださいへ分ける。
+- `VoiceFoundationVerificationCommand`へCodex開始前の日本語statusと、開始前 / 接続中 / 接続済みの会話文言回帰を追加した。Debug warnings-as-errors、Voice Foundation runtime、静的42 contract、Panel 128 cases、`git diff --check`、通常bundle再build、strict codesign、bundle自身の非物理Realtime verifierはPASSした。bundle binaryに新しい3状態の英語文言があり、旧compatibility placeholderがないことも別readbackした。
+- 独立レビューは開始後も開始案内が残るP2を1件検出し、上記3状態分岐と回帰assertで解消した。最終P0 / P1 / P2はすべて0件で、明示開始条件、36 x 36 layout、Accessibility、通常runtime / Voice hot path性能に問題なしと判定した。
+- 修正版通常processを起動済み。物理マイク、可聴remote audio、user / assistant transcript、Voice経由Capability実行は、Panelのマイクbuttonをユーザーが押して発話する人手gateとして未完了である。
+
+## Timer限定候補から通常版へ切り替え
+
+- Timerだけが表示されていたprocessは、物理Voice E2E専用候補build 619だった。通常版Providerの不具合ではなく、E2E候補が本番データを隔離するためRegistryをTimerだけへ限定する仕様による。
+- build 619のprocessを停止した。停止後の機能設定、mic、remote audio、credentialはすべてinactiveだったが、既存performance receiptは`currentAttemptAttached=true / stop RPC=0`のままでHarness Stop verifierが失敗したため、build 619を物理E2E合格証拠には使わない。session metadataはその失敗状態を保持している。
+- `dist/HoverPocket.app`を通常bundle ID `local.codex.hover-pocket`で再build・Apple Development署名し、起動した。E2E markerはなく、strict codesignはPASSした。
+- 通常版設定は`hiddenProviders=[]`、Voice ProviderはCodex app-server、Voice LaneとAI-nativeを有効にした。OpenAI API keyは使用していない。
+
+## 実画面readback
+
+- Accessibilityで通常版パネルにMirror、Calendar、Sticky Notes、Calculator、Timer、Controls、Clipboard、Today Focus、Settingsのbuttonがあることを確認した。
+- 実際にCalendarへ切り替わり、下部にVoice Laneの開始、Compact / Expanded切り替え、同じマイクcontrolでの開始・キャンセル・終了・再開導線が表示されることを確認した。マイクcontrolは操作していない。
+- CalendarはOAuth設定をbundleへ含めているが、実画面は`未読み込み / 読み取り専用`だった。Google accountの認証完了とは判定しない。
+- アプリ実体は`/Users/shotaro/code/share/hover-menu-preview-ai-native-final-integration/dist/HoverPocket.app`。通常版processは1つだけ起動している。
+
+## E2E終了証拠の修正
+
+- server起点のRealtime close / terminal errorでは、current attemptのattached状態をfalseにして、stop RPC 0回を正しく許容する。
+- local stop応答ではattached証拠を保持し、直前のstop RPC countをserial queueへ永続化する。performance gateはattached attemptにstop RPC exactly 1回を要求し、0回と2回を拒否する。
+- 通常版では`MacOSVoiceE2EPerformanceStore.shared`がnilであり、Voice、audio、transcript、snapshot、Provider描画のhot pathへfile I/Oやpollingを追加していない。
+- 独立エージェント再レビューはP0 / P1 / P2すべて0件。通常runtimeの性能低下、過剰な安全実装、blocking test不足はないと判定した。
+
+## 検証
+
+- Debug / Release `swift build` warnings-as-errors: PASS
+- macOS Voice E2E performance self-test: PASS
+- Voice E2E isolation: PASS
+- Voice Foundation runtime: PASS
+- Voice static contract: PASS、42 cases
+- macOS Realtime renderer: PASS
+- Panel layout: PASS、128 cases
+- `git diff --check`: PASS
+- `build_and_run.sh --verify`: PASS、通常版起動とstrict codesign readback済み
+
+## 未完了gate
+
+- 実マイク、remote audio、user / assistant transcript、Capability承認 / readbackはユーザーの明示操作が必要なため未実施。
+- Calendarの保存済みGoogle account確認と実予定readは未完了。
+- Draft PR #39のmerge、release、公開は行わない。

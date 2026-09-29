@@ -1,0 +1,15 @@
+{
+  "transport": "injected_fake_no_microphone",
+  "observations": [
+    "waveform_start_reconnects",
+    "panel_microphone_mutes_and_mic_slash",
+    "panel_waveform_ends_while_muted",
+    "muted_waveform_gray_dots_no_slash_notch_and_no_notch",
+    "real_closed_notch_microphone_toggles_without_panel",
+    "real_closed_notch_waveform_ends_while_muted",
+    "resting_panel_entry_preserved"
+  ],
+  "interaction": "native_accessibility_buttons",
+  "coordinate_click": "CUA reported noWindowsAvailable for non-key access panel; accessibility button actions succeeded",
+  "production_app_restarted": false
+}

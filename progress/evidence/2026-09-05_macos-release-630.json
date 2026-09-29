@@ -1,0 +1,48 @@
+{
+  "build": "630",
+  "sha256": "a8ad926409d1686159e2f72397ade0623b18ff47247e7a057473cb180a8be2d6",
+  "size": 7655620,
+  "publicZipParity": true,
+  "feed": "macos-latest",
+  "sparkleSignature": "PASS",
+  "codesign": "PASS",
+  "stapler": "PASS",
+  "gatekeeper": "PASS",
+  "googleConfiguration": "PASS",
+  "locationEntitlement": "PASS",
+  "sourceCommit": "3d9470f35718c0d645fa3cf5c8afe0db36cf8e40",
+  "notarization": {
+    "status": "Accepted",
+    "submission": "573ac32d-af78-4ef6-a43e-381261388af3"
+  },
+  "google": {
+    "verificationApprovalDate": "2026-07-16",
+    "storedLoginRestored": true,
+    "calendarReadback": "PASS",
+    "newLoginRequired": false
+  },
+  "location": {
+    "permissionDialogDisplayed": true,
+    "currentLocationReflected": true,
+    "coordinatesRecorded": false,
+    "timeoutAndRetryVerified": true
+  },
+  "installed": {
+    "path": "/Applications/HoverPocket.app",
+    "fromBuild": "629",
+    "build": "630",
+    "pid": 60220,
+    "uiGoogleStatus": "接続済み",
+    "uiWeatherLocation": "現在地",
+    "uiUpdateStatus": "アップデートはありません"
+  },
+  "tests": {
+    "debugWarningsAsErrors": "PASS",
+    "releaseWarningsAsErrors": "PASS",
+    "locationScenarios": 8,
+    "releaseConfigurationTests": 5,
+    "panelCases": 128,
+    "voiceFoundation": "PASS",
+    "weatherAPI": "PASS"
+  }
+}

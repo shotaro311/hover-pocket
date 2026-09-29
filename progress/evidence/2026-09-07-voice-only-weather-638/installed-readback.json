@@ -1,0 +1,9 @@
+{
+  "previous_build": "634",
+  "installed_build": "638",
+  "public_archive_sha256": "ca6905cad98995b756fc99df046cf3b5c13206e5f86a9365230cc3fcc46cc2a9",
+  "installed_binary_sha256": "8b14cf994c59cb363f24ff9a6f1f3742260c2f24d6162f70ea1840265191b0c4",
+  "signature_staple_gatekeeper_verified": true,
+  "process_running": true,
+  "previous_app_preserved": true
+}

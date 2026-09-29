@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>HoverPocket.CodexSandboxSetup.Contracts</AssemblyName>
+    <RootNamespace>HoverPocket.CodexSandboxSetup.Contracts</RootNamespace>
+    <Version>0.2.7</Version>
+  </PropertyGroup>
+
+</Project>

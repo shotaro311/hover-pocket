@@ -1,0 +1,14 @@
+{
+  "time": "2026-09-11T04:42:22.304196+00:00",
+  "sourceHead": "fe32f5fa62620984a046b7bdd2b46851c9c785c6",
+  "installedBuild": "643",
+  "data": {
+    "StickyNotes/notes.json": "0e8baa6dff1329f3d4783e411e8c5c11f363e9c514aedcd3d818a2270ae99e73",
+    "Timer/drafts.json": "7137dd9dff940949aab3705b4b091328fbf4a122fa2639d3b830afc5f64f3011",
+    "Timer/running.json": "ace810d7e2cbb4f8c40ce09dc8e191ae466adb4e1a7d49c59f2215b411d38b05",
+    "Timer/presets.json": "837c24a062951099acd120ea310bd235a7e750a0c4d0a874295c3520c674107c",
+    "Timer/pinned.json": "ace810d7e2cbb4f8c40ce09dc8e191ae466adb4e1a7d49c59f2215b411d38b05",
+    "PocketApps/UserData/local.example.today-focus/state.json": "8aee00f3f438c9ec0aeb092d91116f17261cec1600ce4ec6a4f0fd80c9eb2fab"
+  },
+  "installedBinarySHA256": "e85bc243c93a373f2ff40981a126dcafca271dbe95efacd2bfd09c61cb3ea3ab"
+}

@@ -9,16 +9,25 @@ internal sealed class PocketAppGenerationController : IDisposable
     private readonly IPocketAppGenerationAdapter? _generator;
     private readonly PocketAppLifecycleManager _lifecycle;
     private readonly PocketAppGenerationMaterializer _materializer;
+    private readonly PocketAppWorkspaceBackupManager _workspaceBackupManager;
     private readonly PocketAppPinnedDirectory[] _pins;
     private readonly Action? _postCommitHook;
+    private readonly Action? _postRefreshHook;
+    private Func<string, CancellationToken, Task<PocketAppStateTransitionLease>>? _beforeDeactivate;
+    private Func<PocketAppStateTransitionLease, Task>? _completeDeactivate;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateSync = new();
     private PocketAppGenerationPhase _phase = PocketAppGenerationPhase.Idle;
     private PocketAppLifecycleProposal? _pendingProposal;
     private PocketAppLifecycleReceipt? _lastReceipt;
+    private PocketAppWorkspaceRestoreProposal? _pendingWorkspaceRestore;
+    private PocketAppWorkspaceRestoreReceipt? _lastWorkspaceRestoreReceipt;
     private IReadOnlyList<PocketAppManagedPackage> _managedPackages = Array.Empty<PocketAppManagedPackage>();
     private IReadOnlyList<PocketAppManagementIssue> _managementIssues = Array.Empty<PocketAppManagementIssue>();
+    private IReadOnlyList<PocketAppHealthSnapshot> _appHealth = Array.Empty<PocketAppHealthSnapshot>();
     private string? _errorCode;
+    private string? _lastWorkspaceBackupDigest;
+    private string? _workspaceBackupErrorCode;
     private CancellationTokenSource? _generationCancellation;
     private bool _enabled = true;
     private bool _pendingAllowsActivation;
@@ -29,7 +38,9 @@ internal sealed class PocketAppGenerationController : IDisposable
         string userDataRoot,
         string generationRoot,
         IPocketAppGenerationAdapter? generator,
-        Action? postCommitHook = null)
+        Action? postCommitHook = null,
+        Func<PocketAppLifecycleReceipt, PocketAppRuntimeReadback>? runtimeActivationReadback = null,
+        Action? postRefreshHook = null)
     {
         var definitionPin = new PocketAppPinnedDirectory(rootDirectory);
         var userDataPin = new PocketAppPinnedDirectory(userDataRoot);
@@ -37,11 +48,19 @@ internal sealed class PocketAppGenerationController : IDisposable
         _pins = [definitionPin, userDataPin, generationPin];
         _generator = generator;
         _postCommitHook = postCommitHook;
+        _postRefreshHook = postRefreshHook;
         _lifecycle = new PocketAppLifecycleManager(
             definitionPin.FullPath,
             userDataPin.FullPath,
-            performStartupRecovery: false);
+            performStartupRecovery: false,
+            activationReadback: runtimeActivationReadback);
         _materializer = new PocketAppGenerationMaterializer(generationPin.FullPath);
+        _workspaceBackupManager = new PocketAppWorkspaceBackupManager(
+            definitionPin.FullPath,
+            userDataPin.FullPath,
+            Path.Combine(definitionPin.FullPath, "BackupRestore"),
+            _lifecycle,
+            runtimeActivationReadback);
         ValidatePins();
         RefreshManagedPackages();
     }
@@ -49,6 +68,7 @@ internal sealed class PocketAppGenerationController : IDisposable
     public void SetEnabled(bool enabled)
     {
         PocketAppLifecycleProposal? pending = null;
+        PocketAppWorkspaceRestoreProposal? pendingWorkspaceRestore = null;
         lock (_stateSync)
         {
             _enabled = enabled;
@@ -56,7 +76,9 @@ internal sealed class PocketAppGenerationController : IDisposable
             {
                 _generationCancellation?.Cancel();
                 pending = _pendingProposal;
+                pendingWorkspaceRestore = _pendingWorkspaceRestore;
                 _pendingProposal = null;
+                _pendingWorkspaceRestore = null;
                 _pendingAllowsActivation = false;
                 _phase = PocketAppGenerationPhase.Idle;
                 _errorCode = null;
@@ -66,12 +88,33 @@ internal sealed class PocketAppGenerationController : IDisposable
         {
             try { _lifecycle.Reject(pending.RequestId, pending.BindingDigest); } catch { }
         }
+        if (!enabled && pendingWorkspaceRestore is not null)
+        {
+            try
+            {
+                _workspaceBackupManager.Reject(
+                    pendingWorkspaceRestore.RequestId,
+                    pendingWorkspaceRestore.BindingDigest);
+            }
+            catch { }
+        }
+    }
+
+    public void SetBeforeDeactivate(
+        Func<string, CancellationToken, Task<PocketAppStateTransitionLease>>? beforeDeactivate,
+        Func<PocketAppStateTransitionLease, Task>? completeDeactivate = null)
+    {
+        _beforeDeactivate = beforeDeactivate;
+        _completeDeactivate = completeDeactivate;
     }
 
     public void AttachSettings(
         BridgeDispatcher dispatcher,
         Func<System.Windows.Window?>? approvalOwner = null,
-        Func<PocketAppLifecycleProposal, bool>? approvalDecision = null)
+        Func<PocketAppLifecycleProposal, bool>? approvalDecision = null,
+        Func<string?>? workspaceBackupExportTarget = null,
+        Func<string?>? workspaceBackupRestoreSource = null,
+        Func<PocketAppWorkspaceRestoreProposal, bool>? workspaceRestoreDecision = null)
     {
         dispatcher.Register("pocketApps.generationState", (_, cancellationToken) =>
             Task.FromResult<object?>(BuildState(cancellationToken)));
@@ -85,6 +128,26 @@ internal sealed class PocketAppGenerationController : IDisposable
         dispatcher.Register("pocketApps.enable", EnableAsync);
         dispatcher.Register("pocketApps.removePreservingData", RemovePreservingDataAsync);
         dispatcher.Register("pocketApps.prepareRollback", PrepareRollbackAsync);
+        dispatcher.Register("pocketApps.prepareCapabilityMigration", PrepareCapabilityMigrationAsync);
+        dispatcher.Register(
+            "pocketApps.exportBackup",
+            (_, cancellationToken) => ExportWorkspaceAsync(
+                approvalOwner,
+                workspaceBackupExportTarget,
+                cancellationToken));
+        dispatcher.Register(
+            "pocketApps.prepareRestore",
+            (_, cancellationToken) => PrepareWorkspaceRestoreAsync(
+                approvalOwner,
+                workspaceBackupRestoreSource,
+                cancellationToken));
+        dispatcher.Register(
+            "pocketApps.presentRestoreApproval",
+            (_, cancellationToken) => PresentWorkspaceRestoreApprovalAsync(
+                approvalOwner,
+                workspaceRestoreDecision,
+                cancellationToken));
+        dispatcher.Register("pocketApps.cancelRestore", CancelWorkspaceRestoreAsync);
         dispatcher.Register("pocketApps.refresh", (_, cancellationToken) =>
             Task.FromResult<object?>(Refresh(cancellationToken)));
     }
@@ -104,6 +167,8 @@ internal sealed class PocketAppGenerationController : IDisposable
                 receipt = _lastReceipt is null ? null : ReceiptState(_lastReceipt),
                 managedApps = _managedPackages.Select(ManagedState).ToArray(),
                 managementIssues = _managementIssues.Select(ManagementIssueState).ToArray(),
+                appHealth = _appHealth.Select(HealthState).ToArray(),
+                workspaceBackup = WorkspaceBackupState(),
                 storageBoundary = "separate_definition_data_receipts",
                 activation = "explicit_approval_only"
             };
@@ -122,6 +187,319 @@ internal sealed class PocketAppGenerationController : IDisposable
         _disposed = true;
     }
 
+    private async Task<object?> ExportWorkspaceAsync(
+        Func<System.Windows.Window?>? ownerProvider,
+        Func<string?>? exportTarget,
+        CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            lock (_stateSync)
+            {
+                if (!_enabled) { return FailWorkspaceLocked("BACKUP_DISABLED"); }
+                if (WorkspaceOperationBusyLocked()) { return FailWorkspaceLocked("BACKUP_BUSY"); }
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            var destination = exportTarget is not null
+                ? exportTarget()
+                : PresentWorkspaceExportDialog(ownerProvider?.Invoke());
+            if (destination is null) { return BuildState(); }
+            ValidatePins();
+            RefreshManagedPackages();
+            var digest = _workspaceBackupManager.Export(destination);
+            lock (_stateSync)
+            {
+                _lastWorkspaceBackupDigest = digest;
+                _lastWorkspaceRestoreReceipt = null;
+                _workspaceBackupErrorCode = null;
+            }
+            ValidatePins();
+            return BuildState();
+        }
+        catch (PocketAppWorkspaceBackupException ex)
+        {
+            return FailWorkspace(ex.Code);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return FailWorkspace("BACKUP_EXPORT_FAILED");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task<object?> PrepareWorkspaceRestoreAsync(
+        Func<System.Windows.Window?>? ownerProvider,
+        Func<string?>? restoreSource,
+        CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            lock (_stateSync)
+            {
+                if (!_enabled) { return FailWorkspaceLocked("RESTORE_DISABLED"); }
+                if (WorkspaceOperationBusyLocked()) { return FailWorkspaceLocked("RESTORE_BUSY"); }
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            var source = restoreSource is not null
+                ? restoreSource()
+                : PresentWorkspaceRestoreDialog(ownerProvider?.Invoke());
+            if (source is null) { return BuildState(); }
+            ValidatePins();
+            RefreshManagedPackages();
+            var proposal = _workspaceBackupManager.PrepareRestore(source);
+            lock (_stateSync)
+            {
+                _pendingWorkspaceRestore = proposal;
+                _lastWorkspaceRestoreReceipt = null;
+                _workspaceBackupErrorCode = null;
+            }
+            ValidatePins();
+            return BuildState();
+        }
+        catch (PocketAppWorkspaceBackupException ex)
+        {
+            return FailWorkspace(ex.Code);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return FailWorkspace("RESTORE_PREVIEW_FAILED");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task<object?> PresentWorkspaceRestoreApprovalAsync(
+        Func<System.Windows.Window?>? ownerProvider,
+        Func<PocketAppWorkspaceRestoreProposal, bool>? restoreDecision,
+        CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        var stateTransitions = new List<PocketAppStateTransitionLease>();
+        PocketAppWorkspaceRestoreProposal? activeProposal = null;
+        try
+        {
+            PocketAppWorkspaceRestoreProposal proposal;
+            lock (_stateSync)
+            {
+                if (!_enabled) { return FailWorkspaceLocked("RESTORE_DISABLED"); }
+                proposal = _pendingWorkspaceRestore
+                    ?? throw new PocketAppWorkspaceBackupException("RESTORE_APPROVAL_INVALID");
+                activeProposal = proposal;
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            var approved = restoreDecision is not null
+                ? restoreDecision(proposal)
+                : PresentWorkspaceRestoreApproval(
+                    ownerProvider?.Invoke(),
+                    WorkspaceRestoreApprovalText(proposal));
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!approved)
+            {
+                _workspaceBackupManager.Reject(proposal.RequestId, proposal.BindingDigest);
+                lock (_stateSync)
+                {
+                    if (ReferenceEquals(_pendingWorkspaceRestore, proposal))
+                    {
+                        _pendingWorkspaceRestore = null;
+                    }
+                    _workspaceBackupErrorCode = null;
+                }
+                return BuildState();
+            }
+            lock (_stateSync)
+            {
+                if (!ReferenceEquals(_pendingWorkspaceRestore, proposal))
+                {
+                    return FailWorkspaceLocked("RESTORE_APPROVAL_INVALID");
+                }
+            }
+            foreach (var appId in proposal.Changes.Select(change => change.AppId).Order(StringComparer.Ordinal))
+            {
+                var transition = await BeginDeactivateAsync(appId, cancellationToken);
+                stateTransitions.Add(transition);
+                if (!transition.Saved)
+                {
+                    return FailWorkspace("RESTORE_STATE_FLUSH_FAILED");
+                }
+            }
+            ValidatePins();
+            RefreshManagedPackages();
+            var grant = _workspaceBackupManager.Approve(proposal.RequestId, proposal.BindingDigest);
+            var receipt = _workspaceBackupManager.Restore(proposal, grant);
+            if (!receipt.ReadbackVerified
+                || receipt.RestoredApps.Count != proposal.Changes.Count
+                || receipt.RestoredApps.Any(app => !app.RuntimeReadbackVerified))
+            {
+                throw new PocketAppWorkspaceBackupException("RESTORE_READBACK_MISMATCH");
+            }
+            lock (_stateSync)
+            {
+                _pendingWorkspaceRestore = null;
+                _lastWorkspaceRestoreReceipt = receipt;
+                _lastWorkspaceBackupDigest = receipt.BackupDigest;
+                _workspaceBackupErrorCode = null;
+            }
+            _postCommitHook?.Invoke();
+            RefreshManagedPackages();
+            _postRefreshHook?.Invoke();
+            ValidatePins();
+            return BuildState();
+        }
+        catch (PocketAppWorkspaceBackupException ex)
+        {
+            DiscardWorkspaceRestore(activeProposal);
+            lock (_stateSync) { _pendingWorkspaceRestore = null; }
+            RefreshManagedPackagesAfterFailure();
+            return FailWorkspace(ex.Code);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            DiscardWorkspaceRestore(activeProposal);
+            lock (_stateSync) { _pendingWorkspaceRestore = null; }
+            RefreshManagedPackagesAfterFailure();
+            return FailWorkspace("RESTORE_COMMIT_FAILED");
+        }
+        finally
+        {
+            foreach (var transition in stateTransitions)
+            {
+                await CompleteDeactivateAsync(transition);
+            }
+            _gate.Release();
+        }
+    }
+
+    private async Task<object?> CancelWorkspaceRestoreAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        _ = parameters;
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            PocketAppWorkspaceRestoreProposal? proposal;
+            lock (_stateSync) { proposal = _pendingWorkspaceRestore; }
+            if (proposal is not null)
+            {
+                _workspaceBackupManager.Reject(proposal.RequestId, proposal.BindingDigest);
+            }
+            lock (_stateSync)
+            {
+                _pendingWorkspaceRestore = null;
+                _workspaceBackupErrorCode = null;
+            }
+            return BuildState();
+        }
+        catch (PocketAppWorkspaceBackupException ex)
+        {
+            return FailWorkspace(ex.Code);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private bool WorkspaceOperationBusyLocked() =>
+        _phase is PocketAppGenerationPhase.Generating or PocketAppGenerationPhase.Installing
+        || _pendingProposal is not null
+        || _pendingWorkspaceRestore is not null;
+
+    private void DiscardWorkspaceRestore(PocketAppWorkspaceRestoreProposal? proposal)
+    {
+        if (proposal is null) { return; }
+        try { _workspaceBackupManager.Reject(proposal.RequestId, proposal.BindingDigest); } catch { }
+    }
+
+    private static string? PresentWorkspaceExportDialog(System.Windows.Window? owner)
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            AddExtension = true,
+            CheckPathExists = true,
+            DefaultExt = ".json",
+            FileName = "HoverPocket-PocketApps.hoverpocket-backup.json",
+            Filter = "HoverPocket backup (*.hoverpocket-backup.json)|*.hoverpocket-backup.json|JSON (*.json)|*.json|All files (*.*)|*.*",
+            OverwritePrompt = true,
+            Title = "Pocket App workspaceを書き出す"
+        };
+        var result = owner is null ? dialog.ShowDialog() : dialog.ShowDialog(owner);
+        return result == true ? dialog.FileName : null;
+    }
+
+    private static string? PresentWorkspaceRestoreDialog(System.Windows.Window? owner)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            CheckFileExists = true,
+            CheckPathExists = true,
+            Filter = "HoverPocket backup (*.hoverpocket-backup.json)|*.hoverpocket-backup.json|JSON (*.json)|*.json|All files (*.*)|*.*",
+            Multiselect = false,
+            Title = "Pocket App workspaceをbackupから復元"
+        };
+        var result = owner is null ? dialog.ShowDialog() : dialog.ShowDialog(owner);
+        return result == true ? dialog.FileName : null;
+    }
+
+    private static bool PresentWorkspaceRestoreApproval(System.Windows.Window? owner, string text)
+    {
+        var result = owner is null
+            ? System.Windows.MessageBox.Show(
+                text,
+                "Pocket App workspaceを復元",
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Warning,
+                System.Windows.MessageBoxResult.No)
+            : System.Windows.MessageBox.Show(
+                owner,
+                text,
+                "Pocket App workspaceを復元",
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Warning,
+                System.Windows.MessageBoxResult.No);
+        return result == System.Windows.MessageBoxResult.Yes;
+    }
+
+    internal static string WorkspaceRestoreApprovalText(PocketAppWorkspaceRestoreProposal proposal)
+    {
+        var additions = proposal.Changes.Count(change => change.Action == "add");
+        var replacements = proposal.Changes.Count(change => change.Action == "replace");
+        var permissionChanges = proposal.Changes.Sum(change =>
+            change.AddedPermissions.Count + change.RemovedPermissions.Count);
+        var lifecycleChanges = proposal.Changes.Count(change =>
+            change.FromLifecycleState != change.ToLifecycleState);
+        var dataChanges = proposal.Changes.Count(change => change.DataChanged);
+        return string.Join(
+            Environment.NewLine,
+            [
+                "検証済みのPocket App workspace backupを復元します。",
+                $"追加: {additions}件 / 置換: {replacements}件",
+                $"状態変更: {lifecycleChanges}件 / 権限変更: {permissionChanges}件 / データ変更: {dataChanges}件",
+                $"backup: {proposal.BackupDigest}",
+                $"binding: {proposal.BindingDigest}",
+                "失敗時は復元前snapshotへ戻します。内容が一致する場合だけ「はい」を選択してください。"
+            ]);
+    }
+
     private async Task<object?> GenerateAsync(JsonElement? parameters, CancellationToken cancellationToken)
     {
         var userRequest = RequiredString(parameters, "request", PocketAppGenerationRequest.MaximumUserRequestScalars);
@@ -134,7 +512,8 @@ internal sealed class PocketAppGenerationController : IDisposable
             {
                 if (!_enabled) { return FailLocked("GENERATION_DISABLED"); }
                 if (_phase is PocketAppGenerationPhase.Generating or PocketAppGenerationPhase.Installing
-                    || _pendingProposal is not null)
+                    || _pendingProposal is not null
+                    || _pendingWorkspaceRestore is not null)
                 {
                     return FailLocked("GENERATION_BUSY");
                 }
@@ -236,6 +615,7 @@ internal sealed class PocketAppGenerationController : IDisposable
     {
         await _gate.WaitAsync(cancellationToken);
         PocketAppLifecycleProposal? activationProposal = null;
+        PocketAppStateTransitionLease? stateTransition = null;
         try
         {
             PocketAppLifecycleProposal proposal;
@@ -291,6 +671,16 @@ internal sealed class PocketAppGenerationController : IDisposable
                 {
                     return FailLocked("GENERATION_APPROVAL_MISMATCH");
                 }
+            }
+            stateTransition = await BeginDeactivateAsync(proposal.PackageId, cancellationToken);
+            if (!stateTransition.Saved)
+            {
+                await CompleteDeactivateAsync(stateTransition);
+                stateTransition = null;
+                return Fail("GENERATION_STATE_FLUSH_FAILED");
+            }
+            lock (_stateSync)
+            {
                 _phase = PocketAppGenerationPhase.Installing;
                 _errorCode = null;
             }
@@ -310,17 +700,29 @@ internal sealed class PocketAppGenerationController : IDisposable
             RecordCommittedReceipt(receipt, PocketAppGenerationPhase.Installed, clearPending: true);
             _postCommitHook?.Invoke();
             RefreshManagedPackagesAfterCommit(receipt);
+            _postRefreshHook?.Invoke();
+            await CompleteDeactivateAsync(stateTransition);
+            stateTransition = null;
             return BuildState();
         }
         catch (PocketAppGenerationException ex)
         {
+            await CompleteDeactivateAsync(stateTransition);
             DiscardFailedActivation(activationProposal);
+            RefreshManagedPackagesAfterFailure();
             return Fail(ex.Code);
         }
         catch (PocketAppLifecycleException)
         {
+            await CompleteDeactivateAsync(stateTransition);
             DiscardFailedActivation(activationProposal);
+            RefreshManagedPackagesAfterFailure();
             return Fail("GENERATION_APPROVAL_MISMATCH");
+        }
+        catch
+        {
+            await CompleteDeactivateAsync(stateTransition);
+            throw;
         }
         finally
         {
@@ -371,9 +773,14 @@ internal sealed class PocketAppGenerationController : IDisposable
     {
         var packageId = RequiredString(parameters, "appId", 160);
         await _gate.WaitAsync(cancellationToken);
+        PocketAppStateTransitionLease? stateTransition = null;
         try
         {
-            lock (_stateSync) { if (!_enabled) { return FailLocked("GENERATION_DISABLED"); } }
+            lock (_stateSync)
+            {
+                if (!_enabled) { return FailLocked("GENERATION_DISABLED"); }
+                if (_pendingWorkspaceRestore is not null) { return FailLocked("GENERATION_BUSY"); }
+            }
             ValidatePins();
             RefreshManagedPackages();
             lock (_stateSync)
@@ -383,6 +790,13 @@ internal sealed class PocketAppGenerationController : IDisposable
                     throw Failure("GENERATION_PACKAGE_INVALID");
                 }
             }
+            stateTransition = await BeginDeactivateAsync(packageId, cancellationToken);
+            if (!stateTransition.Saved)
+            {
+                await CompleteDeactivateAsync(stateTransition);
+                stateTransition = null;
+                return Fail("GENERATION_STATE_FLUSH_FAILED");
+            }
             var receipt = _lifecycle.Disable(packageId);
             if (!receipt.ReadbackVerified || receipt.State != PocketAppLifecycleState.Disabled)
             {
@@ -391,11 +805,21 @@ internal sealed class PocketAppGenerationController : IDisposable
             RecordCommittedReceipt(receipt, PocketAppGenerationPhase.Disabled, clearPending: false);
             _postCommitHook?.Invoke();
             RefreshManagedPackagesAfterCommit(receipt);
+            _postRefreshHook?.Invoke();
+            await CompleteDeactivateAsync(stateTransition);
+            stateTransition = null;
             return BuildState();
         }
         catch (Exception ex) when (ex is PocketAppGenerationException or PocketAppLifecycleException)
         {
+            await CompleteDeactivateAsync(stateTransition);
+            RefreshManagedPackagesAfterFailure();
             return Fail("GENERATION_PACKAGE_INVALID");
+        }
+        catch
+        {
+            await CompleteDeactivateAsync(stateTransition);
+            throw;
         }
         finally
         {
@@ -409,7 +833,11 @@ internal sealed class PocketAppGenerationController : IDisposable
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            lock (_stateSync) { if (!_enabled) { return FailLocked("GENERATION_DISABLED"); } }
+            lock (_stateSync)
+            {
+                if (!_enabled) { return FailLocked("GENERATION_DISABLED"); }
+                if (_pendingWorkspaceRestore is not null) { return FailLocked("GENERATION_BUSY"); }
+            }
             ValidatePins();
             RefreshManagedPackages();
             lock (_stateSync)
@@ -427,10 +855,12 @@ internal sealed class PocketAppGenerationController : IDisposable
             RecordCommittedReceipt(receipt, PocketAppGenerationPhase.Installed, clearPending: false);
             _postCommitHook?.Invoke();
             RefreshManagedPackagesAfterCommit(receipt);
+            _postRefreshHook?.Invoke();
             return BuildState();
         }
         catch (Exception ex) when (ex is PocketAppGenerationException or PocketAppLifecycleException)
         {
+            RefreshManagedPackagesAfterFailure();
             return Fail("GENERATION_PACKAGE_INVALID");
         }
         finally
@@ -443,11 +873,23 @@ internal sealed class PocketAppGenerationController : IDisposable
     {
         var packageId = RequiredString(parameters, "appId", 160);
         await _gate.WaitAsync(cancellationToken);
+        PocketAppStateTransitionLease? stateTransition = null;
         try
         {
-            lock (_stateSync) { if (!_enabled) { return FailLocked("GENERATION_DISABLED"); } }
+            lock (_stateSync)
+            {
+                if (!_enabled) { return FailLocked("GENERATION_DISABLED"); }
+                if (_pendingWorkspaceRestore is not null) { return FailLocked("GENERATION_BUSY"); }
+            }
             ValidatePins();
             RefreshManagedPackages();
+            stateTransition = await BeginDeactivateAsync(packageId, cancellationToken);
+            if (!stateTransition.Saved)
+            {
+                await CompleteDeactivateAsync(stateTransition);
+                stateTransition = null;
+                return Fail("GENERATION_STATE_FLUSH_FAILED");
+            }
             RejectPendingProposalIfNeeded(packageId);
             var receipt = _lifecycle.Remove(packageId, PocketAppDataDisposition.Preserve);
             if (!receipt.ReadbackVerified
@@ -459,11 +901,21 @@ internal sealed class PocketAppGenerationController : IDisposable
             RecordCommittedReceipt(receipt, PocketAppGenerationPhase.Removed, clearPending: false);
             _postCommitHook?.Invoke();
             RefreshManagedPackagesAfterCommit(receipt);
+            _postRefreshHook?.Invoke();
+            await CompleteDeactivateAsync(stateTransition);
+            stateTransition = null;
             return BuildState();
         }
         catch (Exception ex) when (ex is PocketAppGenerationException or PocketAppLifecycleException)
         {
+            await CompleteDeactivateAsync(stateTransition);
+            RefreshManagedPackagesAfterFailure();
             return Fail("GENERATION_PACKAGE_INVALID");
+        }
+        catch
+        {
+            await CompleteDeactivateAsync(stateTransition);
+            throw;
         }
         finally
         {
@@ -481,10 +933,54 @@ internal sealed class PocketAppGenerationController : IDisposable
             lock (_stateSync) { if (!_enabled) { return FailLocked("GENERATION_DISABLED"); } }
             lock (_stateSync)
             {
-                if (_pendingProposal is not null) { return FailLocked("GENERATION_BUSY"); }
+                if (_pendingProposal is not null || _pendingWorkspaceRestore is not null)
+                {
+                    return FailLocked("GENERATION_BUSY");
+                }
             }
             ValidatePins();
             var proposal = _lifecycle.PrepareRollback(packageId, version);
+            if (!proposal.ApprovalRequired) { throw Failure("GENERATION_PACKAGE_INVALID"); }
+            lock (_stateSync)
+            {
+                _pendingProposal = proposal;
+                _pendingAllowsActivation = true;
+                _lastReceipt = null;
+                _phase = PocketAppGenerationPhase.AwaitingApproval;
+                _errorCode = null;
+            }
+            ValidatePins();
+            return BuildState();
+        }
+        catch (Exception ex) when (ex is PocketAppGenerationException or PocketAppLifecycleException)
+        {
+            return Fail("GENERATION_PACKAGE_INVALID");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task<object?> PrepareCapabilityMigrationAsync(
+        JsonElement? parameters,
+        CancellationToken cancellationToken)
+    {
+        var packageId = RequiredString(parameters, "appId", 160);
+        var targetVersion = RequiredString(parameters, "targetVersion", 64);
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            lock (_stateSync) { if (!_enabled) { return FailLocked("GENERATION_DISABLED"); } }
+            lock (_stateSync)
+            {
+                if (_pendingProposal is not null || _pendingWorkspaceRestore is not null)
+                {
+                    return FailLocked("GENERATION_BUSY");
+                }
+            }
+            ValidatePins();
+            var proposal = _lifecycle.PrepareCapabilityMigration(packageId, targetVersion);
             if (!proposal.ApprovalRequired) { throw Failure("GENERATION_PACKAGE_INVALID"); }
             lock (_stateSync)
             {
@@ -602,12 +1098,31 @@ internal sealed class PocketAppGenerationController : IDisposable
         var observed = snapshot.Packages
             .Where(item => item.State != PocketAppLifecycleState.Removed)
             .ToArray();
+        var health = _lifecycle.HealthSnapshots();
         lock (_stateSync)
         {
             _managedPackages = observed;
             _managementIssues = snapshot.Issues;
+            _appHealth = health;
         }
         ValidatePins();
+    }
+
+    internal void RefreshHealth()
+    {
+        try
+        {
+            var observed = _lifecycle.HealthSnapshots();
+            lock (_stateSync) { _appHealth = observed; }
+        }
+        catch
+        {
+        }
+    }
+
+    internal void RecoverAfterSystemTransition()
+    {
+        try { RefreshManagedPackages(); } catch { RefreshHealth(); }
     }
 
     private void RecordCommittedReceipt(
@@ -677,6 +1192,54 @@ internal sealed class PocketAppGenerationController : IDisposable
         ValidatePins();
     }
 
+    private void RefreshManagedPackagesAfterFailure()
+    {
+        try
+        {
+            RefreshManagedPackages();
+        }
+        catch (Exception ex) when (ex is PocketAppGenerationException
+            or PocketAppLifecycleException
+            or IOException
+            or UnauthorizedAccessException)
+        {
+        }
+        try
+        {
+            _postRefreshHook?.Invoke();
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task<PocketAppStateTransitionLease> BeginDeactivateAsync(
+        string packageId,
+        CancellationToken cancellationToken)
+    {
+        var begin = _beforeDeactivate;
+        if (begin is null) { return PocketAppStateTransitionLease.Noop(packageId); }
+        try
+        {
+            return await begin(packageId, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return PocketAppStateTransitionLease.Failed(packageId);
+        }
+    }
+
+    private async Task CompleteDeactivateAsync(PocketAppStateTransitionLease? lease)
+    {
+        var complete = _completeDeactivate;
+        if (lease is null || complete is null) { return; }
+        try { await complete(lease); } catch { }
+    }
+
     private void ValidatePins()
     {
         try
@@ -698,6 +1261,31 @@ internal sealed class PocketAppGenerationController : IDisposable
         lock (_stateSync) { return FailLocked(code); }
     }
 
+    private object FailWorkspace(string code)
+    {
+        lock (_stateSync) { return FailWorkspaceLocked(code); }
+    }
+
+    private object FailWorkspaceLocked(string code)
+    {
+        _workspaceBackupErrorCode = code;
+        return new
+        {
+            phase = PhaseWireValue(_phase),
+            enabled = _enabled,
+            generatorAvailable = _enabled && _generator is not null,
+            errorCode = _errorCode,
+            proposal = _pendingProposal is null ? null : ProposalState(_pendingProposal),
+            receipt = _lastReceipt is null ? null : ReceiptState(_lastReceipt),
+            managedApps = _managedPackages.Select(ManagedState).ToArray(),
+            managementIssues = _managementIssues.Select(ManagementIssueState).ToArray(),
+            appHealth = _appHealth.Select(HealthState).ToArray(),
+            workspaceBackup = WorkspaceBackupState(),
+            storageBoundary = "separate_definition_data_receipts",
+            activation = "explicit_approval_only"
+        };
+    }
+
     private object FailLocked(string code)
     {
         _errorCode = code;
@@ -712,6 +1300,8 @@ internal sealed class PocketAppGenerationController : IDisposable
             receipt = _lastReceipt is null ? null : ReceiptState(_lastReceipt),
             managedApps = _managedPackages.Select(ManagedState).ToArray(),
             managementIssues = _managementIssues.Select(ManagementIssueState).ToArray(),
+            appHealth = _appHealth.Select(HealthState).ToArray(),
+            workspaceBackup = WorkspaceBackupState(),
             storageBoundary = "separate_definition_data_receipts",
             activation = "explicit_approval_only"
         };
@@ -757,7 +1347,20 @@ internal sealed class PocketAppGenerationController : IDisposable
     {
         appId = issue.PackageId,
         errorCode = issue.ErrorCode,
-        removalAllowed = issue.RemovalAllowed
+        removalAllowed = issue.RemovalAllowed,
+        migrationAvailable = issue.MigrationAvailable,
+        suggestedVersion = issue.SuggestedVersion
+    };
+
+    private static object HealthState(PocketAppHealthSnapshot health) => new
+    {
+        appId = health.PackageId,
+        status = health.Status.ToString().ToLowerInvariant(),
+        reasonCode = health.ReasonCode,
+        lastUsedAt = health.LastUsedAt,
+        lastSuccessfulActivationAt = health.LastSuccessfulActivationAt,
+        consecutiveActivationFailures = health.ConsecutiveActivationFailures,
+        disableSuggested = health.DisableSuggested
     };
 
     private static object ReceiptState(PocketAppLifecycleReceipt receipt) => new
@@ -766,9 +1369,53 @@ internal sealed class PocketAppGenerationController : IDisposable
         appId = receipt.PackageId,
         version = receipt.Version,
         packageDigest = receipt.PackageDigest,
+        effectivePermissions = receipt.EffectivePermissions,
         state = receipt.State.ToString().ToLowerInvariant(),
         readbackVerified = receipt.ReadbackVerified,
         dataDisposition = receipt.DataDisposition?.ToString().ToLowerInvariant()
+    };
+
+    private object WorkspaceBackupState() => new
+    {
+        pending = _pendingWorkspaceRestore is null ? null : new
+        {
+            requestId = _pendingWorkspaceRestore.RequestId,
+            backupDigest = _pendingWorkspaceRestore.BackupDigest,
+            bindingDigest = _pendingWorkspaceRestore.BindingDigest,
+            expiresAt = _pendingWorkspaceRestore.ExpiresAt,
+            changes = _pendingWorkspaceRestore.Changes.Select(change => new
+            {
+                appId = change.AppId,
+                action = change.Action,
+                fromVersion = change.FromVersion,
+                toVersion = change.ToVersion,
+                fromLifecycleState = change.FromLifecycleState,
+                toLifecycleState = change.ToLifecycleState,
+                addedPermissions = change.AddedPermissions,
+                removedPermissions = change.RemovedPermissions,
+                dataChanged = change.DataChanged
+            }).ToArray()
+        },
+        lastBackupDigest = _lastWorkspaceBackupDigest,
+        receipt = _lastWorkspaceRestoreReceipt is null ? null : new
+        {
+            backupDigest = _lastWorkspaceRestoreReceipt.BackupDigest,
+            readbackVerified = _lastWorkspaceRestoreReceipt.ReadbackVerified,
+            rollbackPerformed = _lastWorkspaceRestoreReceipt.RollbackPerformed,
+            restoredApps = _lastWorkspaceRestoreReceipt.RestoredApps.Select(app => new
+            {
+                appId = app.AppId,
+                version = app.Version,
+                packageDigest = app.PackageDigest,
+                lifecycleState = app.LifecycleState.ToString().ToLowerInvariant(),
+                effectivePermissions = app.EffectivePermissions,
+                runtimeReadbackVerified = app.RuntimeReadbackVerified,
+                dataVersion = app.DataVersion,
+                dataDigest = app.DataDigest
+            }).ToArray()
+        },
+        errorCode = _workspaceBackupErrorCode,
+        exclusions = new[] { "oauth", "credentials", "audit_logs", "codex_workspace" }
     };
 
     internal static string ApprovalPresentationText(PocketAppLifecycleProposal proposal)

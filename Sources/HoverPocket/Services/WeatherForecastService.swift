@@ -35,7 +35,9 @@ struct WeatherForecastService: Sendable {
     ) async throws -> WeatherForecast {
         let temperatureScale = temperatureUnit.resolvedScale(for: location)
         let url = try requestURL(location: location, temperatureScale: temperatureScale)
-        let (data, response) = try await session.data(from: url)
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else {
             throw WeatherForecastServiceError.invalidResponse
         }

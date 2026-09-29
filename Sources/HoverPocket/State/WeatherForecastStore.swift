@@ -107,6 +107,18 @@ final class WeatherForecastStore: ObservableObject {
         }
     }
 
+    func forecastForVoice(location: WeatherLocation, temperatureUnit: WeatherTemperatureUnitOption) async throws -> (WeatherForecast, String?) {
+        loadIfNeeded(location: location, temperatureUnit: temperatureUnit)
+        if let fetchTask { await fetchTask.value }
+        try Task.checkCancellation()
+        guard case .loaded(let forecast, let warning) = state,
+              forecast.locationID == location.id,
+              forecast.temperatureScale == temperatureUnit.resolvedScale(for: location) else {
+            throw WeatherForecastServiceError.invalidResponse
+        }
+        return (forecast, warning)
+    }
+
     private static func safeErrorMessage(_ error: Error) -> String {
         if let localized = (error as? LocalizedError)?.errorDescription, !localized.isEmpty {
             return localized

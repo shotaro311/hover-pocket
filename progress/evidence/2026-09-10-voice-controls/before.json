@@ -1,0 +1,16 @@
+{
+  "installed_build": "642",
+  "installed_version": "0.1.0",
+  "installed_binary_sha256": "0b23623ee748d68d2cae9d4e78fb7c0f20569efeb45751c2fc916839300767b2",
+  "source_head": "6a8bcf71bafadf3baf2e1ed075a57f94bb79ec0d",
+  "saved_files_unchanged_after_initial_ui": 6,
+  "initial_ui_checks": [
+    "panel_mic_mutes",
+    "closed_notch_mic_unmutes",
+    "closed_notch_mic_mutes",
+    "closed_notch_waveform_ends_while_muted",
+    "normal_panel_reopens_after_end"
+  ],
+  "physical_microphone_used": false,
+  "final_muted_waveform_visual_pending": true
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/pocket-collection-surface/v1",
+  "title": "Standard collection surface",
+  "type": "object",
+  "required": [
+    "$schema",
+    "id",
+    "collection",
+    "titleField"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "hoverpocket://schemas/pocket-collection-surface/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    },
+    "collection": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    },
+    "titleField": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    }
+  },
+  "additionalProperties": false
+}

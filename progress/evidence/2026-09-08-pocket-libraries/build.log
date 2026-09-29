@@ -1,0 +1,26 @@
+Building for debugging...
+[0/5] Write sources
+[1/5] Write swift-version--58304C5D6DBC2206.txt
+[3/8] Compiling HoverPocket PocketAppLifecycleManager.swift
+[4/8] Emitting module HoverPocket
+[5/8] Compiling HoverPocket AppDelegate.swift
+[6/8] Compiling HoverPocket PocketLibraryVerification.swift
+[7/20] Compiling HoverPocket PocketAppWorkspaceBackup.swift
+[8/23] Compiling HoverPocket PanelSoakVerificationCommand.swift
+[9/23] Compiling HoverPocket PocketAppCapabilityMigrationVerification.swift
+[10/23] Compiling HoverPocket PocketAppGenerationVerification.swift
+[11/23] Compiling HoverPocket PocketAppOSVerification.swift
+[12/23] Compiling HoverPocket PocketToolsPlatformVerification.swift
+[13/23] Compiling HoverPocket PocketToolsPreviewVerification.swift
+[14/23] Compiling HoverPocket AINativeRuntime.swift
+[15/23] Compiling HoverPocket PocketAppPackageVerificationCommand.swift
+[16/23] Compiling HoverPocket PocketAppRuntimeActivationVerification.swift
+[17/23] Compiling HoverPocket PocketAppWorkspaceBackupVerification.swift
+[18/23] Compiling HoverPocket PocketToolsHTMLVerification.swift
+[19/23] Compiling HoverPocket PocketAppGenerationController.swift
+[20/23] Compiling HoverPocket PocketAppRuntimeActivationRegistry.swift
+[21/23] Compiling HoverPocket PocketAppGenerationSettingsView.swift
+[21/24] Write Objects.LinkFileList
+[22/24] Linking HoverPocket
+[23/24] Applying HoverPocket
+Build complete! (5.48s)

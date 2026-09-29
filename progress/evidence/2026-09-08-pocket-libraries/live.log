@@ -1,0 +1,28 @@
+CHECK libraries tool-routing-verified
+CHECK libraries generation-thread-started
+CHECK libraries draft-tool:pocket_guide
+CHECK libraries draft-tool:pocket_draft_file
+CHECK libraries draft-tool:pocket_draft_file
+CHECK libraries draft-tool:pocket_draft_file
+CHECK libraries draft-tool:pocket_draft_file
+CHECK libraries draft-tool:pocket_draft_file
+CHECK libraries draft-tool:pocket_draft_file
+CHECK libraries draft-tool:pocket_draft_validate
+CHECK libraries turn-status:completed
+CHECK libraries generation-output-received
+PASS live library selection reading: pocket.collections; preview=contract; isolated-native-render-max-text; store-readback. Native click paths, workflow execution and subjective design quality require separate acceptance.; package=/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/PocketLibrariesLive-7FD9ABAF-DD0B-43C9-BE3B-A786C723374E/reading/draft-66cc5f0b-df44-4c83-bb43-3f53fecb3245
+CHECK libraries generation-thread-started
+CHECK libraries draft-tool:pocket_guide
+CHECK libraries draft-tool:pocket_guide
+CHECK libraries draft-tool:pocket_guide
+CHECK libraries draft-tool:pocket_draft_file
+CHECK libraries draft-tool:pocket_draft_file
+CHECK libraries draft-tool:pocket_draft_file
+CHECK libraries draft-tool:pocket_draft_file
+CHECK libraries draft-tool:pocket_draft_file
+CHECK libraries draft-tool:pocket_draft_file
+CHECK libraries draft-tool:pocket_draft_validate
+CHECK libraries turn-status:completed
+CHECK libraries generation-output-received
+PASS live library selection work: pocket.html,pocket.sticky,pocket.timer; preview=contract; isolated-web-render; layout-520-and-300-max-text; workflow-not-executed; no-collection. Workflow execution and subjective design quality require separate acceptance.; package=/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/PocketLibrariesLive-7FD9ABAF-DD0B-43C9-BE3B-A786C723374E/work/draft-8228644f-3407-41b2-a0c5-2c47578abd70
+PASS library live generation: 2 combinations; evidence=/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/PocketLibrariesLive-7FD9ABAF-DD0B-43C9-BE3B-A786C723374E

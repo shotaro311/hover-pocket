@@ -1,0 +1,24 @@
+{
+  "run_id": 34131078779,
+  "head_sha": "275f9ff9ce95bc4a2064e697aa37cc806efc9953",
+  "status": "completed",
+  "conclusion": "success",
+  "jobs": [
+    {
+      "name": "Ubuntu deterministic contract verifier",
+      "conclusion": "success"
+    },
+    {
+      "name": "Windows deterministic contract verifier",
+      "conclusion": "success"
+    },
+    {
+      "name": "macOS deterministic contract verifier",
+      "conclusion": "success"
+    },
+    {
+      "name": "Compare reports across all operating systems",
+      "conclusion": "success"
+    }
+  ]
+}

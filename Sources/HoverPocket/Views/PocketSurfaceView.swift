@@ -9,27 +9,66 @@ struct PocketSurfaceHostView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                PocketSurfaceNodeView(node: model.surface.root, model: model)
-
-                if model.isLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .accessibilityLabel("予定を読み込み中")
+        VStack(spacing: 8) {
+            if model.activationAvailable {
+                if model.surface.root.type == "html",
+                   case .string(let html)? = model.surface.root.properties["html"] {
+                    PocketHTMLSurfaceView(model: model, html: html)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .id(model.runtimeIdentity)
+                } else if model.surface.root.type == "collection",
+                          case .string(let collectionID)? = model.surface.root.properties["collection"],
+                          case .string(let titleField)? = model.surface.root.properties["titleField"] {
+                    PocketCollectionView(model: model, collectionID: collectionID, titleField: titleField)
+                        .padding(12)
+                } else {
+                    ScrollView {
+                        PocketSurfaceNodeView(node: model.surface.root, model: model)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                    }
                 }
-
-                if let receiptText = model.receiptText {
-                    hostStatus(text: receiptText, color: Color(red: 0.38, green: 0.82, blue: 0.52))
-                } else if let statusText = model.statusText {
-                    hostStatus(text: statusText, color: .white.opacity(0.58))
+            } else {
+                hostStatus(text: "このPocket Appは現在利用できません。", color: .white.opacity(0.58))
+            }
+            if model.isAIExecuting {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("AIが文章を処理しています…").font(.caption)
+                    Button("キャンセル") { model.cancelAIText() }
                 }
             }
-            .padding(18)
+            if model.isLoading {
+                ProgressView().controlSize(.small)
+                    .accessibilityLabel("読み込み中")
+            }
+            if let receiptText = model.receiptText {
+                hostStatus(text: receiptText, color: Color(red: 0.38, green: 0.82, blue: 0.52))
+                    .padding([.horizontal, .bottom], 8)
+            } else if let statusText = model.statusText {
+                hostStatus(text: statusText, color: .white.opacity(0.7))
+                    .padding([.horizontal, .bottom], 8)
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(PocketToolTheme.background)
+        .environment(\.colorScheme, .dark)
         .task {
-            await model.load()
+            await model.load(refreshQueries: true)
+        }
+        .onDisappear { model.cancelAIText() }
+        .sheet(isPresented: $model.showsAIApproval, onDismiss: {
+            if !model.isAIExecuting { model.cancelAIText() }
+        }) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("AIへ文章を送信").font(.headline)
+                Text("以下の内容を確認してください。結果はこのツールに返します。").font(.caption)
+                ScrollView { Text(model.aiApprovalText).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                HStack {
+                    Button("キャンセル", role: .cancel) { model.cancelAIText() }
+                    Spacer()
+                    Button("OpenAIへ送信") { model.approveAIText() }.keyboardShortcut(.defaultAction)
+                }
+            }.padding(20).frame(width: 430, height: 400)
         }
         .alert("実行前の確認", isPresented: $model.showsApproval) {
             Button("キャンセル", role: .cancel) {
@@ -251,13 +290,17 @@ private struct PocketSurfaceNodeView: View {
         let selection = node.stringProperty("selection") ?? ""
         let titleTarget = node.stringProperty("titleTarget")
         let query: String
+        let arguments: [String: PocketJSONValue]
         if case .object(let items)? = node.properties["items"],
-           case .string(let value)? = items["query"] {
+           case .string(let value)? = items["query"],
+           case .object(let queryArguments)? = items["arguments"] {
             query = value
+            arguments = queryArguments
         } else {
             query = ""
+            arguments = [:]
         }
-        let choices = model.choicesByQuery[query] ?? []
+        let choices = model.choices(query: query, arguments: arguments)
         return VStack(alignment: .leading, spacing: 7) {
             Text("集中する予定")
                 .font(scaledFont(size: 10, weight: .bold))
@@ -270,7 +313,15 @@ private struct PocketSurfaceNodeView: View {
             } else {
                 Picker("集中する予定", selection: Binding(
                     get: { model.stringValue(for: selection) },
-                    set: { model.selectChoice($0, query: query, selection: selection, titleTarget: titleTarget) }
+                    set: {
+                        model.selectChoice(
+                            $0,
+                            query: query,
+                            arguments: arguments,
+                            selection: selection,
+                            titleTarget: titleTarget
+                        )
+                    }
                 )) {
                     ForEach(choices) { choice in
                         Text(choice.subtitle.map { "\(choice.title)  \($0)" } ?? choice.title)

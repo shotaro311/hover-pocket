@@ -28,9 +28,11 @@ enum PocketJSONValue: Equatable, Sendable {
         switch value {
         case is NSNull:
             self = .null
-        case let value as Bool:
-            self = .bool(value)
         case let value as NSNumber:
+            if CFGetTypeID(value) == CFBooleanGetTypeID() {
+                self = .bool(value.boolValue)
+                return
+            }
             let number = value.doubleValue
             guard number.isFinite else {
                 throw PocketSurfaceRuntimeError.invalid("\(path):number")
@@ -238,6 +240,10 @@ struct PocketSurfaceRuntime {
         case "calendarEventPicker":
             try exactKeys(node, required: ["type", "items", "selection"], optional: ["titleTarget"], path: path)
             let items = try queryBinding(node["items"], path: "\(path).items")
+            guard case .object(let itemProperties) = items,
+                  itemProperties["query"] == .string("calendar.events.list@1") else {
+                throw PocketSurfaceRuntimeError.invalid("\(path).items.query:unsupported_shape")
+            }
             let selection = try binding(node["selection"], inputAllowed: false, stateAllowed: true, path: "\(path).selection")
             var properties: [String: PocketJSONValue] = ["items": items, "selection": .string(selection)]
             if let titleTarget = node["titleTarget"] {
@@ -272,7 +278,7 @@ struct PocketSurfaceRuntime {
             try exactKeys(node, required: ["type", "value", "tone"], optional: [], path: path)
             let text = try boundedString(node["value"], range: 0...1000, path: "\(path).value")
             let tone = try string(node["tone"], path: "\(path).tone")
-            try require(["neutral", "success", "warning", "error"].contains(tone), "\(path).tone")
+            try require(["neutral", "warning", "error"].contains(tone), "\(path).tone")
             return renderNode(type, ["tone": .string(tone), "value": .string(text)])
         default:
             throw PocketSurfaceRuntimeError.invalid("\(path).type:unknown")

@@ -1,6 +1,7 @@
 {
   "$schema": "hoverpocket://schemas/voice-lane-state/v1",
   "stateVersion": 1,
+  "providerId": "codex_app_server",
   "mode": "expanded",
   "connection": "connected",
   "activity": "thinking",

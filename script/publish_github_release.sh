@@ -38,6 +38,10 @@ verify_notarized_zip_payload() {
     exit 1
   fi
 
+  if ! python3 "$ROOT_DIR/script/verify_macos_app_configuration.py" "$extracted_app"; then
+    return 1
+  fi
+
   if ! codesign --verify --deep --strict --verbose=2 "$extracted_app"; then
     rm -rf "$extract_dir"
     exit 1

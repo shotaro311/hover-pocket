@@ -1,0 +1,22 @@
+{
+  "build": "643",
+  "binary_sha256": "e85bc243c93a373f2ff40981a126dcafca271dbe95efacd2bfd09c61cb3ea3ab",
+  "matches_public_download": true,
+  "running_process_ids": [
+    71603
+  ],
+  "saved_data_files_unchanged": 6,
+  "installed_signature_valid": true,
+  "installed_notarization_valid": true,
+  "updater": "Sparkle Install and Relaunch",
+  "chatgpt_login_preserved": true,
+  "voice_settings_preserved": {
+    "enabled": true,
+    "continue_when_panel_hidden": true,
+    "ordinary_confirmation": false,
+    "destructive_confirmation": false,
+    "calendar_access": true,
+    "layout": "compact"
+  },
+  "settings_window_closed": true
+}

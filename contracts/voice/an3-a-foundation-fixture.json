@@ -1,0 +1,156 @@
+{
+  "version": 1,
+  "designTokens": {
+    "compactHeight": 64,
+    "expandedHeight": {
+      "windows": {
+        "small": 190,
+        "medium": 220,
+        "large": 250
+      },
+      "macos": {
+        "small": 190,
+        "medium": 220,
+        "large": 250,
+        "extraLarge": 280
+      }
+    }
+  },
+  "baselinePanels": {
+    "windows": {
+      "small": {
+        "width": 520,
+        "height": 372
+      },
+      "medium": {
+        "width": 600,
+        "height": 430
+      },
+      "large": {
+        "width": 680,
+        "height": 488
+      }
+    },
+    "macos": {
+      "small": {
+        "width": 520,
+        "height": 372
+      },
+      "medium": {
+        "width": 600,
+        "height": 430
+      },
+      "large": {
+        "width": 680,
+        "height": 488
+      },
+      "extraLarge": {
+        "width": 760,
+        "height": 546
+      }
+    }
+  },
+  "providerKinds": [
+    "built_in",
+    "generated"
+  ],
+  "modes": [
+    "disabled",
+    "compact",
+    "expanded"
+  ],
+  "geometryInvariants": [
+    "shell_top_invariant",
+    "shell_width_invariant",
+    "header_rect_invariant",
+    "provider_rect_invariant",
+    "voice_row_last",
+    "expanded_downward_only",
+    "no_fullscreen"
+  ],
+  "compact": {
+    "visualTitle": false,
+    "accessibilityRegionLabel": "Voice Lane",
+    "waveformMaxWidth": 44,
+    "explicitToggleOnly": true
+  },
+  "expanded": {
+    "leftColumn": "transcript",
+    "rightColumn": "root_scoped_sessions",
+    "columnRatio": [
+      62,
+      38
+    ],
+    "independentInternalScroll": true,
+    "explicitToggleOnly": true,
+    "fullscreen": false
+  },
+  "sessionScope": {
+    "rootSessionId": "root-a",
+    "sessions": [
+      {
+        "sessionId": "root-a",
+        "rootSessionId": "root-a",
+        "parentSessionId": null
+      },
+      {
+        "sessionId": "child-a",
+        "rootSessionId": "root-a",
+        "parentSessionId": "root-a"
+      },
+      {
+        "sessionId": "grandchild-a",
+        "rootSessionId": "root-a",
+        "parentSessionId": "child-a"
+      },
+      {
+        "sessionId": "root-b",
+        "rootSessionId": "root-b",
+        "parentSessionId": null
+      }
+    ],
+    "expectedVisibleSessionIds": [
+      "root-a",
+      "child-a",
+      "grandchild-a"
+    ]
+  },
+  "transcript": {
+    "memoryOnly": true,
+    "maxEvents": 64,
+    "maxUnicodeScalars": 8192,
+    "maxEventUnicodeScalars": 1024,
+    "persistRawTranscript": false,
+    "redactPathLikeText": true
+  },
+  "lifecycle": {
+    "owner": "application_lifetime_coordinator",
+    "providerSwitchPreservesSession": true,
+    "panelHide": {
+      "mute": true,
+      "detachUi": true,
+      "cancelRootOrChildTasks": false
+    },
+    "panelRecreatePreservesSession": true,
+    "sleepWake": "recover_muted",
+    "transportCrash": {
+      "restartAttempts": 3,
+      "boundedBackoff": true,
+      "failClosedAfterExhaustion": true
+    },
+    "unexpectedServerRequest": "fail_closed"
+  },
+  "an3AActivation": {
+    "defaultOff": true,
+    "productionMicrophone": false,
+    "productionWebRtc": false,
+    "brokerToolExecution": false,
+    "mcpExposure": false,
+    "productionRealtimeAdapter": false
+  },
+  "accessibility": {
+    "reduceMotionDisablesVoiceAnimation": true,
+    "keyboardReachableToggle": true,
+    "screenReaderRegion": true
+  }
+}

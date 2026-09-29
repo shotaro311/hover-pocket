@@ -1,3 +1,4 @@
 contracts/pocket/v1/** text eol=lf
+Sources/HoverPocket/Resources/PocketApps/** text eol=lf
 script/verify_pocket_contracts.py text eol=lf
 .github/workflows/pocket-contracts-verify.yml text eol=lf

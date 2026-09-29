@@ -1,11 +1,18 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
+using HoverPocket.Shell.Capabilities;
+using HoverPocket.Shell.Voice;
 
 namespace HoverPocket.Shell.Configuration;
 
 internal sealed class UserSettingsStore
 {
+    private const string GeneratedProviderPrefix = "generated-pocket-app:";
+    private static readonly Regex GeneratedAppIdPattern = new(
+        "^[a-z][a-z0-9]*(?:\\.[a-z0-9][a-z0-9-]*){2,}$",
+        RegexOptions.CultureInvariant);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -38,6 +45,18 @@ internal sealed class UserSettingsStore
 
     public UserSettings Load(IReadOnlyList<string> providerIds)
     {
+        return LoadCore(providerIds, preserveGeneratedProviders: false);
+    }
+
+    public UserSettings LoadForBootstrap(IReadOnlyList<string> providerIds)
+    {
+        return LoadCore(providerIds, preserveGeneratedProviders: true);
+    }
+
+    private UserSettings LoadCore(
+        IReadOnlyList<string> providerIds,
+        bool preserveGeneratedProviders)
+    {
         UserSettings? loaded = null;
         if (File.Exists(SettingsPath))
         {
@@ -60,7 +79,10 @@ internal sealed class UserSettingsStore
             }
         }
 
-        var normalized = Normalize(loaded ?? CreateDefault(providerIds), providerIds);
+        var normalizationIds = preserveGeneratedProviders
+            ? BootstrapProviderIds(loaded, providerIds)
+            : providerIds;
+        var normalized = Normalize(loaded ?? CreateDefault(providerIds), normalizationIds);
         if (loaded is null)
         {
             TrySave(normalized);
@@ -73,7 +95,25 @@ internal sealed class UserSettingsStore
     {
         Directory.CreateDirectory(RootDirectory);
         var json = JsonSerializer.Serialize(settings, JsonOptions);
-        File.WriteAllText(SettingsPath, json);
+        var temporaryPath = $"{SettingsPath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(temporaryPath, json);
+            File.Move(temporaryPath, SettingsPath, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+            catch
+            {
+            }
+        }
     }
 
     private void TrySave(UserSettings settings)
@@ -107,6 +147,11 @@ internal sealed class UserSettingsStore
             StartWithWindows = false,
             AutoCheckForUpdates = true,
             AiNativeEnabled = false,
+            CapabilityDataRetentionPeriod = CapabilityDataRetentionPeriod.NinetyDays,
+            VoiceEnabled = false,
+            VoiceProviderId = VoiceProviderIds.Off,
+            VoiceCalendarAccessGranted = false,
+            VoiceLaneLayout = VoiceLaneLayoutPreference.Compact,
             RememberLastSelectedProvider = true,
             PreferredProviderId = providerIds.FirstOrDefault(),
             HandleIconStyle = HandleIconStyle.B,
@@ -120,6 +165,15 @@ internal sealed class UserSettingsStore
 
     public static UserSettings Normalize(UserSettings settings, IReadOnlyList<string> providerIds)
     {
+        if (!Enum.IsDefined(settings.CapabilityDataRetentionPeriod))
+        {
+            settings.CapabilityDataRetentionPeriod = CapabilityDataRetentionPeriod.NinetyDays;
+        }
+        settings.VoiceProviderId = VoiceProviderIds.Normalize(settings.VoiceProviderId);
+        if (settings.VoiceProviderId == VoiceProviderIds.Off)
+        {
+            settings.VoiceEnabled = false;
+        }
         var known = providerIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var order = settings.ProviderOrder
             .Where(id => known.Contains(id))
@@ -158,6 +212,59 @@ internal sealed class UserSettingsStore
             ?? providerIds.FirstOrDefault();
         settings.LastSelectedProviderId = NormalizeProviderId(settings.LastSelectedProviderId, providerIds);
         return settings;
+    }
+
+    public static UserSettings NormalizeForBootstrap(
+        UserSettings settings,
+        IReadOnlyList<string> providerIds)
+    {
+        return Normalize(settings, BootstrapProviderIds(settings, providerIds));
+    }
+
+    private static IReadOnlyList<string> BootstrapProviderIds(
+        UserSettings? settings,
+        IReadOnlyList<string> providerIds)
+    {
+        var result = providerIds
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (settings is null)
+        {
+            return result;
+        }
+
+        var candidates = settings.ProviderOrder
+            .Concat(settings.ProviderVisibility.Keys)
+            .ToList();
+        if (settings.PreferredProviderId is { } preferredProviderId)
+        {
+            candidates.Add(preferredProviderId);
+        }
+        if (settings.LastSelectedProviderId is { } lastSelectedProviderId)
+        {
+            candidates.Add(lastSelectedProviderId);
+        }
+        foreach (var candidate in candidates)
+        {
+            if (IsValidGeneratedProviderId(candidate)
+                && !result.Contains(candidate, StringComparer.OrdinalIgnoreCase))
+            {
+                result.Add(candidate);
+            }
+        }
+        return result;
+    }
+
+    private static bool IsValidGeneratedProviderId(string? providerId)
+    {
+        if (providerId is null
+            || !providerId.StartsWith(GeneratedProviderPrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+        var appId = providerId[GeneratedProviderPrefix.Length..];
+        return appId.Length is >= 1 and <= 160
+            && GeneratedAppIdPattern.IsMatch(appId);
     }
 
     private static string? NormalizeProviderId(string? providerId, IReadOnlyList<string> providerIds)

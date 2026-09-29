@@ -35,6 +35,7 @@ enum PanelLayoutVerificationCommand {
                 expected.option.rawValue == expected.rawValue
             }
         let persistenceCompatibility = verifySettingsPersistence()
+        let settingsWindowCompatibility = verifySettingsWindowLayout()
 
         if !panelSizeCompatibility {
             failures.append("panel-size-compatibility")
@@ -45,9 +46,13 @@ enum PanelLayoutVerificationCommand {
         if !persistenceCompatibility {
             failures.append("panel-settings-persistence")
         }
+        if !settingsWindowCompatibility {
+            failures.append("settings-window-layout")
+        }
         lines.append("panel_size_compatibility=\(panelSizeCompatibility ? "ok" : "failed")")
         lines.append("panel_text_size_compatibility=\(textSizeCompatibility ? "ok" : "failed")")
         lines.append("panel_settings_persistence=\(persistenceCompatibility ? "ok" : "failed")")
+        lines.append("settings_window_layout=\(settingsWindowCompatibility ? "ok" : "failed")")
         lines.append(
             "panel_dimensions=" + expectedPanelSizes.map {
                 "\($0.option.rawValue):\(Int($0.width))x\(Int($0.height))"
@@ -132,6 +137,24 @@ enum PanelLayoutVerificationCommand {
 
     private static func cleanupSettingsSuite(_ suiteName: String) {
         UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName)
+    }
+
+    private static func verifySettingsWindowLayout() -> Bool {
+        let preferred = SettingsWindowLayout.contentSize(
+            limitedTo: NSSize(width: 1_200, height: 900)
+        )
+        guard preferred == SettingsWindowLayout.preferredContentSize else {
+            return false
+        }
+
+        let compactLimit = NSSize(width: 480, height: 420)
+        let compact = SettingsWindowLayout.contentSize(limitedTo: compactLimit)
+        let compactMinimum = SettingsWindowLayout.minimumContentSize(limitedTo: compact)
+        return compact.width == compactLimit.width
+            && compact.height == compactLimit.height
+            && compactMinimum.width == compact.width
+            && compactMinimum.height == compact.height
+            && SettingsWindowLayout.styleMask.contains(.resizable)
     }
 
     @MainActor

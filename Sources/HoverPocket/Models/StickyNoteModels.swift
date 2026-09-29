@@ -1,6 +1,41 @@
 import Foundation
 import SwiftUI
 
+struct StickyNoteReminder: Codable, Equatable, Sendable {
+    var scheduledAt: Date
+    var timeZone: String
+    var acknowledgedAt: Date? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case scheduledAt, timeZone, acknowledgedAt
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(scheduledAt, forKey: .scheduledAt)
+        try container.encode(timeZone, forKey: .timeZone)
+        try container.encode(acknowledgedAt, forKey: .acknowledgedAt)
+    }
+}
+
+enum StickyNoteReminderChange: Equatable, Sendable {
+    case unchanged
+    case set(scheduledAt: Date, timeZone: String)
+    case clear
+}
+
+enum StickyNoteReminderError: LocalizedError {
+    case invalidSchedule
+    case invalidTimeZone
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidSchedule: "Choose a future reminder date. / リマインダーには未来の日時を指定してください。"
+        case .invalidTimeZone: "Choose a valid time zone. / 有効なタイムゾーンを指定してください。"
+        }
+    }
+}
+
 struct StickyNoteItem: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     var stableKey: String? = nil
@@ -11,6 +46,7 @@ struct StickyNoteItem: Identifiable, Codable, Equatable, Sendable {
     var updatedAt: Date
     var archivedAt: Date?
     var sortIndex: Double
+    var reminder: StickyNoteReminder? = nil
 
     var displayTitle: String {
         displayTitle(language: .english)

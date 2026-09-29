@@ -2,18 +2,51 @@ import AppKit
 import Carbon
 import Combine
 
+struct VoiceRuntimeSettingsConfiguration: Equatable {
+    let featureEnabled: Bool
+    let preferredLayout: VoiceLaneLayoutPreference
+    let providerID: VoiceProviderID
+}
+
+@MainActor
+func voiceRuntimeSettingsPublisher(
+    settings: AppSettings
+) -> AnyPublisher<VoiceRuntimeSettingsConfiguration, Never> {
+    Publishers.CombineLatest3(
+        settings.$voiceEnabled.removeDuplicates(),
+        settings.$voiceLaneLayoutPreference.removeDuplicates(),
+        settings.$voiceProvider.removeDuplicates()
+    )
+    .map { featureEnabled, preferredLayout, providerID in
+        VoiceRuntimeSettingsConfiguration(
+            featureEnabled: featureEnabled,
+            preferredLayout: preferredLayout,
+            providerID: providerID
+        )
+    }
+    .eraseToAnyPublisher()
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hoverWindowController = HoverWindowController()
     private var statusBarMenuController: StatusBarMenuController?
     private var settingsCancellables = Set<AnyCancellable>()
+    private var voiceConfigurationTask: Task<Void, Never>?
+    private var voiceTerminationTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         configureAINativeRuntimeIfEnabled()
         observeAINativeRuntimeSetting()
-        installMainMenu()
-        registerURLSchemeCallbackHandler()
+        hoverWindowController.connectAppController()
+        configureVoiceRuntime()
+        observeVoiceRuntimeSettings()
+        observeVoiceE2EReceipt()
+        Self.installMainMenu(settingsTarget: self, settingsAction: #selector(openSettingsFromMainMenu))
+        if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
+            registerURLSchemeCallbackHandler()
+        }
         statusBarMenuController = StatusBarMenuController(
             settings: hoverWindowController.appSettings,
             onOpenPanel: { [weak self] in
@@ -23,14 +56,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.hoverWindowController.openSettingsFromMenu()
             },
             onCheckForUpdates: {
+                guard HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled else {
+                    return
+                }
                 AppUpdater.shared.checkForUpdates()
             },
             onQuit: {
                 NSApp.terminate(nil)
             }
         )
-        MirrorCameraModel.shared.prepareIfAuthorized()
-        _ = AppUpdater.shared
+        if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
+            MirrorCameraModel.shared.prepareIfAuthorized()
+            _ = AppUpdater.shared
+        }
         hoverWindowController.positionWindows()
         hoverWindowController.showPill()
 
@@ -61,86 +99,109 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureAINativeRuntimeIfEnabled() {
-        guard hoverWindowController.appSettings.aiNativeEnabled else {
-            AINativeRuntime.shared.configure(adapter: nil)
-            return
-        }
+        let runtimeEnvironment = HoverPocketRuntimeEnvironment.shared
+        let savedGeneratedProviderIDs = hoverWindowController.appSettings.savedGeneratedProviderIDs
         do {
+            let brokerRoot = runtimeEnvironment.storageDirectory("CapabilityBroker")
+            let ledger = try CapabilityBrokerLedger(rootDirectory: brokerRoot)
+            let auditLog = try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+            let governanceController = CapabilityDataGovernanceController(
+                ledger: ledger,
+                auditLog: auditLog
+            )
+            _ = try governanceController.applyRetention(
+                hoverWindowController.appSettings.capabilityDataRetentionPeriod
+            )
             let handlers = try ProviderCapabilityCompositionRoot.live(
                 calendarDataSource: GoogleCalendarCapabilityDataSource()
             )
             let registry = try CapabilityRegistry(handlers: handlers)
-            let applicationSupport = try FileManager.default.url(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask,
-                appropriateFor: nil,
-                create: true
-            )
-            let brokerRoot = applicationSupport
-                .appendingPathComponent("HoverPocket", isDirectory: true)
-                .appendingPathComponent("CapabilityBroker", isDirectory: true)
             let broker = CapabilityBroker(
                 registry: registry,
-                ledger: try CapabilityBrokerLedger(rootDirectory: brokerRoot),
-                auditLog: try CapabilityBrokerAuditLog(rootDirectory: brokerRoot)
+                ledger: ledger,
+                auditLog: auditLog,
+                approvalPresentationResolver: HostCapabilityApprovalPresentationResolver(
+                    stickyStore: .shared
+                )
             )
-            guard let resources = Bundle.module.resourceURL else {
-                throw PocketAppPackageError.invalid("$:resources")
+            let voiceCapabilityContext = VoiceCapabilityContext(
+                registry: registry,
+                broker: broker
+            )
+            guard hoverWindowController.appSettings.aiNativeEnabled,
+                  runtimeEnvironment.externalIntegrationsEnabled else {
+                AINativeRuntime.shared.configure(
+                    capabilityDataGovernanceController: governanceController,
+                    voiceCapabilityContext: voiceCapabilityContext,
+                    preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
+                )
+                return
             }
-            let packageRoot = resources
-                .appendingPathComponent("PocketApps", isDirectory: true)
-                .appendingPathComponent("local.example.today-focus", isDirectory: true)
-            let package = try PocketAppPackageRuntime().load(directory: packageRoot)
-            let pocketAppsRoot = applicationSupport
-                .appendingPathComponent("HoverPocket", isDirectory: true)
-                .appendingPathComponent("PocketApps", isDirectory: true)
+            let pocketAppsRoot = runtimeEnvironment.storageDirectory("PocketApps")
             let userDataRoot = pocketAppsRoot.appendingPathComponent("UserData", isDirectory: true)
-            let userStateStore = try PocketAppUserStateStore(
-                packageID: package.manifest.id,
-                allowedKeys: package.statePropertyNames,
-                rootDirectory: userDataRoot
-            )
-            let pocketAppRuntime = PocketAppExecutionRuntime(
-                package: package,
-                broker: broker,
-                userID: "local-user",
-                grantedPermissions: [
-                    "calendar.events.read",
-                    "sticky.read",
-                    "sticky.write",
-                    "timer.read",
-                    "timer.write"
-                ],
-                userStateStore: userStateStore
-            )
             let generationController: PocketAppGenerationController?
+            let generatedActivationRegistry: PocketAppRuntimeActivationRegistry?
             do {
                 let generationRoot = pocketAppsRoot.appendingPathComponent("Generation", isDirectory: true)
-                let generator: (any PocketAppGenerationAdapter)?
-                if let executableURL = CodexPocketAppGenerationAdapter.resolveExecutable() {
-                    generator = try? CodexPocketAppGenerationAdapter(
-                        executableURL: executableURL,
-                        workspaceRoot: generationRoot.appendingPathComponent("CodexWorkspaces", isDirectory: true)
-                    )
-                } else {
-                    generator = nil
-                }
+                let generatedHostRoot = pocketAppsRoot.appendingPathComponent("GeneratedHost", isDirectory: true)
+                let appSettings = hoverWindowController.appSettings
+                let activationRegistry = try PocketAppRuntimeActivationRegistry(
+                    rootDirectory: generatedHostRoot,
+                    userDataRoot: userDataRoot,
+                    broker: broker,
+                    userID: "local-user",
+                    libraryCatalog: { try PocketLibraryCatalog(disabled: appSettings.disabledPocketLibraries) }
+                )
+                _ = activationRegistry.restoreEnabledApps()
+                let generator: (any PocketAppGenerationAdapter)? = try? PocketCodexLibrary.makeGenerator(
+                    workspaceRoot: generationRoot.appendingPathComponent("CodexWorkspaces", isDirectory: true)
+                )
                 generationController = try PocketAppGenerationController(
-                    rootDirectory: pocketAppsRoot.appendingPathComponent("GeneratedHost", isDirectory: true),
+                    rootDirectory: generatedHostRoot,
                     userDataRoot: userDataRoot,
                     generationRoot: generationRoot.appendingPathComponent("Drafts", isDirectory: true),
-                    generator: generator
+                    generator: generator,
+                    runtimeActivationReadback: { receipt in
+                        let readback = try activationRegistry.synchronize(receipt)
+                        if receipt.state == .removed {
+                            let providerID = PocketSurfaceRegistry.generatedProviderID(
+                                appID: receipt.packageID
+                            )
+                            appSettings.pruneProviderConfiguration(PluginID(rawValue: providerID))
+                            AINativeRuntime.shared.forgetManagedGeneratedProviderID(providerID)
+                        }
+                        return readback
+                    },
+                    generationSettings: appSettings,
+                    previewFactory: { package, dataRoot in
+                        var stores: [String: PocketCollectionStore] = [:]
+                        for (id, schema) in package.collections {
+                            stores[id] = try PocketCollectionStore(packageID: package.manifest.id,
+                                collectionID: id, schema: schema,
+                                rootDirectory: dataRoot.appendingPathComponent(String(package.stateSchemaDigest.dropFirst(7))))
+                        }
+                        let previewRuntime = PocketAppExecutionRuntime(package: package, broker: broker,
+                            userID: "local-preview", grantedPermissions: [], collectionStores: stores)
+                        let surfaceID = package.surfaces["main"] == nil ? package.surfaces.keys.sorted().first! : "main"
+                        return try PocketSurfaceHostModel(runtime: previewRuntime, surfaceID: surfaceID)
+                    }
                 )
+                generatedActivationRegistry = activationRegistry
             } catch {
                 generationController = nil
+                generatedActivationRegistry = nil
             }
             AINativeRuntime.shared.configure(
-                adapter: TodayFocusTextAdapter(broker: broker),
-                pocketAppExecutionRuntime: pocketAppRuntime,
-                pocketAppGenerationController: generationController
+                pocketAppGenerationController: generationController,
+                generatedActivationRegistry: generatedActivationRegistry,
+                capabilityDataGovernanceController: governanceController,
+                voiceCapabilityContext: voiceCapabilityContext,
+                preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
             )
         } catch {
-            AINativeRuntime.shared.configure(adapter: nil)
+            AINativeRuntime.shared.configure(
+                preservingManagedGeneratedProviderIDs: savedGeneratedProviderIDs
+            )
         }
     }
 
@@ -154,21 +215,113 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &settingsCancellables)
     }
 
+    private func configureVoiceRuntime(
+        configuration: VoiceRuntimeSettingsConfiguration? = nil
+    ) {
+        let settings = hoverWindowController.appSettings
+        let configuration = configuration ?? VoiceRuntimeSettingsConfiguration(
+            featureEnabled: settings.voiceEnabled,
+            preferredLayout: settings.voiceLaneLayoutPreference,
+            providerID: settings.voiceProvider
+        )
+        VoiceLaneRuntime.shared.setContinueWhenPanelHidden(
+            settings.voiceContinueWhenPanelHidden
+        )
+        voiceConfigurationTask = VoiceLaneRuntime.shared.configure(
+            featureEnabled: configuration.featureEnabled,
+            preferredLayout: configuration.preferredLayout,
+            providerID: configuration.providerID,
+            adapterFactory: VoiceProviderAdapterFactory.factory(
+                providerID: configuration.providerID,
+                settings: settings
+            )
+        )
+    }
+
+    private func observeVoiceRuntimeSettings() {
+        let settings = hoverWindowController.appSettings
+        voiceRuntimeSettingsPublisher(settings: settings)
+            .dropFirst()
+            .sink { [weak self] configuration in
+                self?.configureVoiceRuntime(configuration: configuration)
+            }
+            .store(in: &settingsCancellables)
+        settings.$voiceCalendarAccessEnabled
+            .dropFirst()
+            .removeDuplicates()
+            .sink { _ in
+                VoiceLaneRuntime.shared.capabilityGrantsDidChange()
+            }
+            .store(in: &settingsCancellables)
+        settings.$voiceContinueWhenPanelHidden
+            .dropFirst()
+            .removeDuplicates()
+            .sink { enabled in
+                VoiceLaneRuntime.shared.setContinueWhenPanelHidden(enabled)
+            }
+            .store(in: &settingsCancellables)
+    }
+
+    private func observeVoiceE2EReceipt() {
+        guard let receiptStore = MacOSVoiceE2EReceiptStore.shared else { return }
+        VoiceLaneRuntime.shared.$snapshot
+            .sink { snapshot in
+                let credentialCurrent = switch snapshot.providerID {
+                case .off:
+                    false
+                case .openAIRealtimeBYOK:
+                    (try? OpenAIRealtimeCredentialStoreFactory.shared.hasCredential()) ?? false
+                case .codexAppServer:
+                    PocketCodexLibrary.host.snapshot.availability == .ready
+                }
+                receiptStore.recordVoiceSnapshot(
+                    snapshot,
+                    credentialCurrent: credentialCurrent
+                )
+            }
+            .store(in: &settingsCancellables)
+    }
+
     @objc private func screenParametersChanged() {
         hoverWindowController.recoverAfterSystemTransition()
     }
 
     @objc private func applicationBecameActive() {
-        MirrorCameraModel.shared.recheckPermissionAfterExternalChange()
+        if HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled {
+            MirrorCameraModel.shared.recheckPermissionAfterExternalChange()
+        }
         hoverWindowController.ensureAccessWindowsAvailable()
     }
 
     @objc private func workspaceDidWake() {
+        VoiceLaneRuntime.shared.recoverAfterSystemTransition()
+        AINativeRuntime.shared.recoverAfterSystemTransition()
         hoverWindowController.recoverAfterSystemTransition()
     }
 
     @objc private func workspaceSessionDidBecomeActive() {
+        VoiceLaneRuntime.shared.recoverAfterSystemTransition()
+        AINativeRuntime.shared.recoverAfterSystemTransition()
         hoverWindowController.recoverAfterSystemTransition()
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard voiceTerminationTask == nil else { return .terminateLater }
+        voiceTerminationTask = Task { @MainActor [weak self] in
+            await self?.voiceConfigurationTask?.value
+            await CodexVoiceAccountLoginController.shared.shutdown()
+            await VoiceLaneRuntime.shared.shutdown()
+            if HoverPocketRuntimeEnvironment.shared.isIsolatedVoiceE2E {
+                try? OpenAIRealtimeCredentialStoreFactory.shared.delete()
+                MacOSVoiceE2EReceiptStore.shared?.recordCredentialCurrent(false)
+                MacOSVoiceE2EReceiptStore.shared?.recordSafeClose(
+                    performanceFlushSynchronously: true
+                )
+            }
+            self?.voiceTerminationTask = nil
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     private func registerURLSchemeCallbackHandler() {
@@ -194,17 +347,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         OAuthURLCallbackCoordinator.shared.handle(url)
     }
 
-    private func installMainMenu() {
+    static func installMainMenu(settingsTarget: AnyObject?, settingsAction: Selector?) {
         let mainMenu = NSMenu()
 
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu(title: "HoverPocket")
         let settingsItem = NSMenuItem(
             title: "Settings…",
-            action: #selector(openSettingsFromMainMenu),
+            action: settingsAction,
             keyEquivalent: ","
         )
-        settingsItem.target = self
+        settingsItem.target = settingsTarget
         appMenu.addItem(settingsItem)
         appMenu.addItem(.separator())
         appMenu.addItem(NSMenuItem(title: "Quit HoverPocket", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
@@ -233,7 +386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hoverWindowController.openSettingsFromMenu()
     }
 
-    private func menuItem(
+    private static func menuItem(
         _ title: String,
         action: String,
         key: String,

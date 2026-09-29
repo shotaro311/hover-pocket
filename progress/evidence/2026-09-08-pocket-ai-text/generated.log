@@ -1,0 +1,13 @@
+CHECK tool-routing-verified
+CHECK generation-thread-started
+CHECK draft-tool:pocket_guide
+CHECK draft-tool:pocket_guide
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_validate
+CHECK turn-status:completed
+CHECK generation-output-received
+PASS live generated AI tool: library selection, install permission, real HTML input, Host approval, real Codex result displayed; package=/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/PocketAIGenerated-31859855-2E44-44EC-813B-813360A46BDB/Drafts/draft-035ac24f-3b79-4f0f-8082-5e29ff5ac0e5

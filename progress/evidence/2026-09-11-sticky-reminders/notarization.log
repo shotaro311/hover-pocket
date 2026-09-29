@@ -1,0 +1,95 @@
+/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app: replacing existing signature
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/libMediaRemoteAdapter.dylib
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/libMediaRemoteAdapter.dylib
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/.
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Updater.app
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Updater.app
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Downloader.xpc
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Downloader.xpc
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/.
+/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app: valid on disk
+/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app: satisfies its Designated Requirement
+/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app: rejected
+source=Unnotarized Developer ID
+origin=Developer ID Application: Shotaro Matsumoto (N7VVPW44ZA)
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/libMediaRemoteAdapter.dylib
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/libMediaRemoteAdapter.dylib
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/.
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Updater.app
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Updater.app
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Downloader.xpc
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Downloader.xpc
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/.
+/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app: valid on disk
+/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app: satisfies its Designated Requirement
+Processing: /Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app
+Processing: /Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app
+The staple and validate action worked!
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/libMediaRemoteAdapter.dylib
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/libMediaRemoteAdapter.dylib
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/.
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Updater.app
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Updater.app
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Downloader.xpc
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Downloader.xpc
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/.
+/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app: valid on disk
+/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app: satisfies its Designated Requirement
+Processing: /Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app
+The validate action worked!
+/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app: accepted
+source=Notarized Developer ID
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/libMediaRemoteAdapter.dylib
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/libMediaRemoteAdapter.dylib
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/.
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Updater.app
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Downloader.xpc
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Updater.app
+--prepared:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Downloader.xpc
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc
+--validated:/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/.
+/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app: valid on disk
+/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app: satisfies its Designated Requirement
+Processing: /Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app
+The validate action worked!
+/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app: accepted
+source=Notarized Developer ID
+--prepared:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-notarized-zip.upaZoe/HoverPocket.app/Contents/Frameworks/libMediaRemoteAdapter.dylib
+--validated:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-notarized-zip.upaZoe/HoverPocket.app/Contents/Frameworks/libMediaRemoteAdapter.dylib
+--prepared:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-notarized-zip.upaZoe/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/.
+--prepared:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-notarized-zip.upaZoe/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate
+--validated:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-notarized-zip.upaZoe/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate
+--prepared:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-notarized-zip.upaZoe/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Updater.app
+--validated:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-notarized-zip.upaZoe/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Updater.app
+--prepared:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-notarized-zip.upaZoe/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc
+--validated:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-notarized-zip.upaZoe/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc
+--prepared:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-notarized-zip.upaZoe/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Downloader.xpc
+--validated:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-notarized-zip.upaZoe/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Downloader.xpc
+--validated:/private/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/hoverpocket-notarized-zip.upaZoe/HoverPocket.app/Contents/Frameworks/Sparkle.framework/Versions/Current/.
+/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T//hoverpocket-notarized-zip.upaZoe/HoverPocket.app: valid on disk
+/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T//hoverpocket-notarized-zip.upaZoe/HoverPocket.app: satisfies its Designated Requirement
+Processing: /var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T//hoverpocket-notarized-zip.upaZoe/HoverPocket.app
+The validate action worked!
+/var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T//hoverpocket-notarized-zip.upaZoe/HoverPocket.app: accepted
+source=Notarized Developer ID
+notary_submission_id=d612e854-5093-46ea-968a-4162028b6c6f
+notary_status=Accepted
+app=/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/HoverPocket.app
+zip=/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/releases/HoverPocket-0.1.0-644.zip
+sha256=/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/releases/HoverPocket-0.1.0-644.zip.sha256
+appcast=/Users/shotaro/code/share/hover-menu-preview-macos-release-629/dist/releases/appcast.xml

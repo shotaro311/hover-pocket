@@ -124,8 +124,18 @@ final class GoogleOAuthService: @unchecked Sendable {
     ]
 
     private let keychain = GoogleOAuthKeychainStore()
+    private let preloadedCredential: GoogleOAuthStoredCredential?
+    private let allowsStoredCredentialMutation: Bool
     private let tokenLock = NSLock()
     private var currentToken: GoogleOAuthToken?
+
+    init(
+        preloadedCredential: GoogleOAuthStoredCredential? = nil,
+        allowsStoredCredentialMutation: Bool = true
+    ) {
+        self.preloadedCredential = preloadedCredential
+        self.allowsStoredCredentialMutation = allowsStoredCredentialMutation
+    }
 
     var isConfigured: Bool {
         GoogleOAuthConfiguration.current != nil
@@ -142,7 +152,7 @@ final class GoogleOAuthService: @unchecked Sendable {
     func storedCredentialStatus() -> GoogleOAuthStoredCredentialStatus {
         let credential: GoogleOAuthStoredCredential
         do {
-            guard let loadedCredential = try keychain.load() else {
+            guard let loadedCredential = try preloadedCredential ?? keychain.load() else {
                 return .missing
             }
             credential = loadedCredential
@@ -154,10 +164,15 @@ final class GoogleOAuthService: @unchecked Sendable {
 
     func removeStoredCredential() {
         setCurrentToken(nil)
-        keychain.delete()
+        if allowsStoredCredentialMutation {
+            keychain.delete()
+        }
     }
 
     func signIn() async throws {
+        guard allowsStoredCredentialMutation else {
+            throw GoogleOAuthError.storedCredentialRequiresReconnect
+        }
         guard let configuration = GoogleOAuthConfiguration.current else {
             throw GoogleOAuthError.missingConfiguration
         }
@@ -171,6 +186,10 @@ final class GoogleOAuthService: @unchecked Sendable {
     }
 
     func signOut() {
+        guard allowsStoredCredentialMutation else {
+            setCurrentToken(nil)
+            return
+        }
         let refreshToken = try? keychain.load()?.refreshToken
         setCurrentToken(nil)
         keychain.delete()
@@ -256,7 +275,7 @@ final class GoogleOAuthService: @unchecked Sendable {
 
         let credential: GoogleOAuthStoredCredential
         do {
-            guard let loadedCredential = try keychain.load() else {
+            guard let loadedCredential = try preloadedCredential ?? keychain.load() else {
                 throw GoogleOAuthError.missingRefreshToken
             }
             credential = loadedCredential
