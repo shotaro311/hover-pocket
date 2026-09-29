@@ -18,12 +18,18 @@
 
 ## ローカル検証
 
-- Debug / Release warnings-as-errorsビルド成功。検証コード修正後の最終Releaseビルドは実行中。
+- Debug / Release warnings-as-errorsビルド成功。検証コード修正後の最終Releaseビルドと音声承認・Personal Tools・付箋通知の検証も成功。
 - 共有v1契約72、v2契約62、付箋通知契約18、Voice静的42、Python30テスト、認証/隔離/音声receiptのself-testが成功。
 - Capability、Broker、Pocket Surface、Package/lifecycle/generation/migration/health/backup、Timer、付箋通知、Voice Foundation/Activity、Personal Tools、Voice E2E隔離、Panel Layout/100回soak、天気地点、Tools Platform、Libraries、AI Text、App OS、天気音声、音声承認、Codex app-serverが成功。
 - App OSの実Codex catalog読取は1回実行・正常終了。実マイク発話とは区別する。
 - Windows UIのJavaScript構文・設定生成対象の検証成功。Windows native build/実行はGitHub CIで確認予定。
 - 公開644のZIPとインストール済み105ファイル一致、署名・公証・Gatekeeperは本チャットの直前調査で確認。
+
+## GitHub CIで判明した追加修正
+
+- macOS runner既定のXcode 16.4 / Swift 6.1.2がemit-moduleでsignal 11となった。公式runner imageの同梱一覧を確認し、Xcode 26.3を明示選択する。アプリの対応OS下限は変更しない。
+- 音声の削除確認設定に合わせた説明文3件が共有operations.jsonへ未反映だった。既存exportコマンドから再生成して完全一致を確認。操作ID・型・権限・schemaの変更はない。
+- runner参照: https://github.com/actions/runner-images/blob/macos-15-arm64/20260907.0337/images/macos/macos-15-arm64-Readme.md
 
 ## 残る確認
 

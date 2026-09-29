@@ -115,12 +115,16 @@ jobs:
   verify:
     runs-on: macos-15
     timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Build
-        run: swift build -Xswiftc -warnings-as-errors
+        run: |
+          swift --version
+          swift build -Xswiftc -warnings-as-errors
 
       - name: Verify Host-owned Voice Lane foundation
         run: |
