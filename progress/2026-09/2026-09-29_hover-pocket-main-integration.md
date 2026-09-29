@@ -31,6 +31,8 @@
 - 音声の削除確認設定に合わせた説明文3件が共有operations.jsonへ未反映だった。既存exportコマンドから再生成して完全一致を確認。操作ID・型・権限・schemaの変更はない。
 - runner参照: https://github.com/actions/runner-images/blob/macos-15-arm64/20260907.0337/images/macos/macos-15-arm64-Readme.md
 
+- Windows CIはDebug/Release・installer・Capability・Brokerまで成功後、共有generation schemaとの不一致で停止。Windowsの出力schemaを共有正本へ一致させ、Mac専用collections/viewsをWindowsのmaterializerが拒否する既存制約は保持。拒否ケース2件を追加した。WindowsでMac専用機能が使用可能になったとは扱わない。
+
 ## 残る確認
 
 - GitHub CI、remote mainとlocal mainの最終SHA一致を確認する。

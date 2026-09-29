@@ -673,16 +673,20 @@ internal sealed class PocketAppGenerationVerifier
             {
             }
 
-            var unsafeFiles = envelope.Files.ToArray();
-            unsafeFiles[0] = unsafeFiles[0] with { Path = "../manifest.json" };
-            var unsafeEnvelope = envelope with { Files = unsafeFiles };
-            try
+            // The shared envelope also describes Mac-only files; Windows materialization must reject them.
+            foreach (var unsupportedPath in new[] { "../manifest.json", "collections/records.schema.json", "views/main.html" })
             {
-                _ = materializer.Materialize(unsafeEnvelope, request);
-                _failures.Add("generation_unsafe_path_accepted");
-            }
-            catch (PocketAppGenerationException ex) when (ex.Code == "GENERATION_PATH_UNSAFE")
-            {
+                var unsafeFiles = envelope.Files.ToArray();
+                unsafeFiles[0] = unsafeFiles[0] with { Path = unsupportedPath };
+                var unsafeEnvelope = envelope with { Files = unsafeFiles };
+                try
+                {
+                    _ = materializer.Materialize(unsafeEnvelope, request);
+                    _failures.Add($"generation_unsafe_path_accepted:{unsupportedPath}");
+                }
+                catch (PocketAppGenerationException ex) when (ex.Code == "GENERATION_PATH_UNSAFE")
+                {
+                }
             }
 
             using (var cancelled = new CancellationTokenSource())

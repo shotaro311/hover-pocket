@@ -154,7 +154,7 @@ internal static class PocketAppGenerationContract
         "type": "object",
         "required": ["path", "utf8"],
         "properties": {
-          "path": {"type": "string", "maxLength": 240, "pattern": "^(manifest\\.json|intent\\.md|data\\.schema\\.json|surfaces/[A-Za-z0-9._-]+\\.surface\\.json|workflows/[A-Za-z0-9._-]+\\.workflow\\.json|tests/[A-Za-z0-9._-]+\\.json)$"},
+          "path": {"type": "string", "maxLength": 240, "pattern": "^(manifest\\.json|intent\\.md|data\\.schema\\.json|surfaces/[A-Za-z0-9._-]+\\.surface\\.json|workflows/[A-Za-z0-9._-]+\\.workflow\\.json|tests/[A-Za-z0-9._-]+\\.json|collections/[A-Za-z0-9._-]+\\.schema\\.json|views/[A-Za-z0-9._-]+\\.html)$"},
           "utf8": {"type": "string", "maxLength": 1048576}
         },
         "additionalProperties": false
