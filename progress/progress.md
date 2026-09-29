@@ -1,15 +1,758 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-09-23
+updated: 2026-09-29
 updated_by: codex
-status: ai-native-in-progress; an2-merged; an3-real-voice-pending; an4-merged; an5-a-merged; an5-b-pr-ready-ci-green; an5-c-runtime-activation-pending; capability-expansion-merged
+status: macos-644-main-integration-verifying; published-macos-644; physical-voice-e2e-pending
 ---
+
+## 現在地（2026-09-29）
+
+- 本番644を含む `codex/pocket-tools-platform`（`35701a4`）を `main`（`1782066`）へ統合する。現在は統合候補の検証中。
+- 公開Mac版とこのMacのインストール済み版は0.1.0（644）。公開ZIPとインストール済み105ファイルが一致し、署名・公証・Gatekeeperを確認済み。
+- main側の新アイコンとGitHub Codex Autofix廃止を保持する。既存worktreeの未コミット変更は今回の統合へ混ぜない。
+- 実マイク会話、他Mac、Windows実機の受入は別途必要。今回、新しいアプリ配信は行わない。
+- 詳細: [main統合の検証記録](2026-09/2026-09-29_hover-pocket-main-integration.md)。以下は各作業日時点の履歴で、現在の公開・統合状態はこの節を優先する。
 
 ## 2026-09-23 GitHub Codex Autofix を廃止
 
 - ユーザー指定で定期PR自動修正の仕組みを廃止。GitHub Actions `Codex PR Router` を無効化してから削除し、main `baca5f6` へ反映。専用ラベル7件を削除し、PR #39 からも消えたことを確認した。
 - Mac の Codex Automation 2件と Windows の Automation 1件、両OSの専用プラグイン・repo 設定を撤去。Wiki手順の削除は Obsidian Vault `9a66bb1` で同期済み。Windows の保存済みプロジェクト表示だけは削除手段がなく残る。
 - 詳細: `progress/2026-09/2026-09-23_github-codex-autofix-retirement.md`。
+
+## 2026-09-11 付箋リマインダーを本番644へ配信
+
+- 作成時の日時指定、タイマー同様の通知、音声作成、本番更新の依頼を受領。設計合意を受けて実装。保存・通知・Voice・共有契約・実Codex作成・実パネルでの日時設定を検証。Apple公証・公開物93 checks・macOS署名readbackを通過し、このMacもSparkleで643→644へ更新。保存データ6ファイル、ChatGPTログインと音声設定の維持を確認。実マイク発話と他Macは未検証。[詳細](2026-09/2026-09-11_hover-pocket-sticky-reminders.md)。
+
+## 2026-09-10 音声の再接続・操作を修正し、本番643へ更新
+
+- Codex更新時に古い互換性判定を再検査し、開始取消と直後の再試行を保護した。今回の過去障害コードは未保存だが、更新による停止は再現し、現在の実サービス接続は通過。
+- 開始・終了は波形、ミュートはマイクへ分離。閉じたノッチの左マイクでミュート切替、右波形で終了できる。ミュート時の波形はグレーの点だけにし、マイクのデザインを保持。
+- Luna / maxの2担当が実装。親の最終ビルド・音声操作42・Codex・保存復元・AI20・契約・実画面確認がPASS。署名Release643でも主要検証と実サービス接続が通過。
+- Apple公証Accepted、3 OS契約CI、公開物93 checksとmacOS署名・公証readbackがPASS。このMacもSparkleで642→643へ更新・再起動し、公開binary一致、保存データ6ファイル、ログインと音声設定の保持を確認。Windows8資産は不変。[変更・配信と根拠](2026-09/2026-09-10_hover-pocket-voice-controls.md)。
+
+## 2026-09-10 音声開始エラーを診断
+
+- 本番642と新しいCodex 0.153.4を確認。schemaと認証なしのローカル接続検査は通過。Codex更新後の古い接続判定が有力な原因だが、今回の内部エラーコードが保存されておらず未確定。
+- 会話中の左マイクは音声接続の終了、右スピーカーは接続を保持したミュート。会話threadは終了操作で削除しない。
+- 製品コード・設定変更、再起動・音声再接続は未実施。[診断と根拠](2026-09/2026-09-10_hover-pocket-voice-diagnosis.md)。
+
+## 2026-09-08 機能ライブラリとAI文章処理を本番642へ配信
+
+- 署名・公証・3 OS契約CI、公開成果物と更新feedの独立readbackを通過。
+- このMacもアプリ内のSparkleで641→642へ更新・再起動。公開binary一致、AI文章処理ライブラリ表示、保存データ6ファイル・ChatGPTログインの保持を確認。Windows8資産は不変。
+- [配信・更新記録](2026-09/2026-09-08_hover-pocket-ai-release.md)。
+
+## 2026-09-08 生成ツールからのAI文章処理をローカル実装
+
+- 生成HTMLがAIへ文章を送り、結果を表示できる。10個目の同梱ライブラリとして追加し、導入権限と毎回の全文確認を必須にした。
+- 単体20件、実Codex、実生成ツールでの入力から結果表示、実画面の取消・模擬受信が通過。既存パッケージ・WebKit・ライブラリ・契約も通過。
+- 公開・本番置換・Windows対応は未実施。[詳細と根拠](2026-09/2026-09-08_hover-pocket-ai-text.md)。
+
+## 2026-09-08 機能ライブラリ基盤をローカル実装
+
+- 9個の同梱ライブラリを管理し、Codexへ有効な機能を渡す。利用中ツール・復元履歴を保護し、生成・導入・起動・バックアップ復元で利用可否を検査する。
+- 新規49項目、既存platform78、package/lifecycle/backup、共有契約・Voice・WebKit検証がPASS。実Astraによる2種類の組合せ生成、生成ツールのタイマー＋付箋の承認・取消・readback、隔離した実設定画面のon/off/onを確認。
+- Codex接続は本体専用のライブラリとして集約。当段階では生成ツールからのAI呼出しは未提供（上記の追加実装で対応）。公開・本番置換・Windows対応は未実施。
+- 詳細: [実装と検証](2026-09/2026-09-08_hover-pocket-libraries.md) / [設計](../docs/plan/20260908_POCKET_LIBRARY_ARCHITECTURE.md)。
+
+## 2026-09-08 生成ツール向け共通機能の候補調査
+
+- 公式製品情報と現行生成APIから、ファイル受け渡し、文章/URLの取り込み・出力、日時通知を優先候補に選定。需要規模は未測定で、設計・実装の採用は未承認。
+- 既存機能の生成ツールへの接続と、実入力から結果までの受入を重視。未対応説明だけのツールを完成扱いしない。
+- 詳細: [候補・調査根拠](../docs/plan/20260908_POCKET_TOOL_CAPABILITY_CANDIDATES.md) / [調査ログ](2026-09/2026-09-08_hover-pocket-capability-research.md)。
+
+## 2026-09-08 音声ボタンの表示変更
+
+- 独立した波形を削除し、会話中は緑の波形ボタン、ミュート中は赤い斜線付きマイクへ変更。
+- ローカル641でビルド・音声37・panel112・Voice Foundationと実UIのアニメーション・ミュート・再開・終了を確認。追加依頼によりRelease641の署名・Apple公証・3 OS契約CI・公開93 checks・macOS署名公証readbackを通して公開。このMacも640→641へ更新・再起動し、保存データ6ファイルとログインを保持。Windows8資産は不変。
+- エラーはユーザーからネットワーク接続エラーだったと報告があり、追加診断は終了。
+- 詳細: [変更・検証ログ](2026-09/2026-09-08_hover-pocket-voice-button.md)。
+
+## 2026-09-08 音声バーの下端はみ出しを修正
+
+- 会話表示を固定33ptから画面ごとの上端領域内へ縮小。この画面は30ptの領域に29.5ptで配置し、下端に1物理ピクセルを残す。
+- ビルド、音声37項目、panel112、Voice Foundation、縮小したSwiftUI表示・ミュートの確認がPASS。署名Release640でも検証し、Apple公証Accepted・3 OS契約CI・公開93 checks・macOS署名公証readbackがPASS。本番配信とこのMacの639→640更新・再起動まで完了。保存データ6ファイルとChatGPTログインを保持、Windows8資産も不変。
+- 詳細: [修正・検証ログ](2026-09/2026-09-08_hover-pocket-voice-height.md)。
+
+## 2026-09-08 音声波形・会話表示・音声終了・Today Focus削除
+
+- マイク横と画面上端へ状態連動の波形を実装。ミュート中は静止と斜線。ノッチ左右と、ノッチなし用108ptバーを分けて配置する。
+- Today FocusをProvider、Calendar、設定詳細、起動経路から削除。自作ツールと既存データ、契約fixtureは保持する。
+- Codexの`voice_session_end`から現在のセッションを終了できる。別セッション、旧要求、不正引数で会話を終了しない。
+- ローカルbuild639で新規27項目、音声統計JS、Voice Foundation、Codex、App OS49、platform78、panel112、package/lifecycle/backup、共有契約72+46・Voice42がPASS。100回開閉・切り替えのsoakもPASS。
+- 実SwiftUIの3か所の波形、ミュート斜線、停止表示をComputer Useで確認。入力音声はfixtureであり、実マイクでの発話は未検証。
+- 追加の本番反映依頼により、Release639の署名・Apple公証Accepted、source tag57ed31b、3 OS契約CI、公開93 checks・macOS署名公証readbackを確認して配信。このMacも638→639へ更新・再起動済み。保存データ6ファイル、ChatGPTログイン、確認設定を保持し、Windows8資産も不変。
+- 詳細: [実装・配信ログ](2026-09/2026-09-08_hover-pocket-voice-activity.md)。
+
+## 2026-09-07 音声だけの確認設定・天気・macOS 638を本番反映
+
+- 通常操作と削除・取消の確認を個別設定し、オンでも音声で承認・取消できるようにした。追加ツールにも同じ設定を適用。設定地域の天気を音声から取得できる。
+- 署名Release638で音声確認23・天気8・App OS50と既存主要検証、実モデルの天気取得・Maple接続、実生成2種・100回のpanel soakがPASS。物理マイクでの会話・声の聞き比べは未検証。
+- Apple公証Accepted、source tag275f9ff、GitHub契約CI success。macOS638とfeedを公開し、両OS公開物93 checksとmacOS署名公証readbackがPASS。Windows8資産は不変。
+- このMacも634から638へ更新・再起動済み。保存データ6ファイルとChatGPTログインを保持。通常確認OFF・削除確認ONを実UIで確認し、設定値は変更していない。
+- 詳細: [実装・配信ログ](2026-09/2026-09-07_hover-pocket-voice-only-weather-release.md)。
+
+## 2026-09-07 Codex App OSのmacOSローカル実装・自動検証完了
+
+- 既存音声を維持し、画面同期、背景生成、音声確認後の導入・記録・workflow・削除・復元、標準機能保護、声の選択、実preview検証を接続した。
+- 最終build637で新規43項目、platform78、personal-tools42、HTML20、panel128と既存主要検証がPASS。実Astra生成2種のpreviewを再検証し、実ChatGPTモデルの共通tool実行と選択音声でのWebRTC接続も確認した。
+- 実パネルの最小サイズ・最大文字を観測。物理マイクでの連続対話・画面同期・音声承認と声の聞き比べ、native入力の実クリック受入は未完了。公開・既存アプリの置換・Windows実装は行っていない。
+- 詳細: [実装・検証ログ](2026-09/2026-09-07_hover-pocket-codex-app-os-implementation.md)。[設計](../docs/plan/20260907_CODEX_APP_OS_ARCHITECTURE.md) / [接続契約](../docs/plan/20260907_CODEX_APP_OS_CONTRACT.md)。
+
+## 2026-09-07 ノッチ伸縮案を見送り
+
+- ユーザー判断で試作635/636を不採用とし、ソースと要件を変更前の`8beddb7`へ復元。既存の設定整理・自作ツール機能は保持。本番634は変更なし。
+- 試作差分と検証記録を退避し、確認用アプリを終了。試作バイナリは一時退避先へ移動。
+- readback: 対象ソース・要件のHEAD一致、試作ソースのビルド対象外への移動、試作PIDの終了を確認。記録: `progress/evidence/2026-09-07-notch-prototype-withdrawn/`。
+
+## 2026-09-07 設定整理・個人用ツール・macOS 634本番配信完了
+
+- 設定を7カテゴリに整理し、切替で入力途中の依頼を保持。標準機能を維持し、自作ツールに記録を残すアンインストールと完全削除を追加。実設定UIで削除・復元・データ保持を確認。
+- 新規platform78、既存主要機能、実設定UIでの削除・復元、Google Calendarの実読取を検証。最終署名・Apple公証・本番公開、公開feed/ZIPの93項目と独立したmacOS署名・公証readbackがPASS。
+- source tagは`71f96d5`。公開ZIP3種は同一、Windows0.2.8の8資産は不変。インストール済み633は自動置換していない。
+- 詳細: `progress/2026-09/2026-09-07_hover-pocket-tools-release-634.md`。
+
+## 2026-09-07 個人用ツールの本番UI適合・macOSローカル受入完了
+
+- 実パネルの共通ダークテーマ、文字サイズ追従、一覧優先と入力画面の切り替え、固定高さ・二重スクロールの解消、設定からパネルを開く経路を実装した。
+- 実生成した水やり・作業開始・標準読書メモで、最小パネル・最大文字サイズ、入力/保存/検索、会話更新、履歴復元、再起動後の記録、実際のタイマー開始と付箋保存を確認。データと移行前バックアップを別経路でreadbackした。
+- 実行前確認に進めなかったタイマー引数の不一致を修正。v2の省略値をHostで補完し、導入前の検証も実行側の仕様へ揃えた。
+- Developer ID署名Release build633で新規65、隔離WebKit16、実生成UI9+移行、実生成Host操作、既存主要機能、パネル開閉100回と100切り替えがPASS。共有v1契約72/v2契約46/Voice静的42、署名と配布設定もPASS。
+- macOSのローカル実装・受入まで完了。公証・公開・既存インストール置換・Windows実装は未実施。build632の単体HTML画像を実パネル受入とした旧報告の範囲を訂正した。
+- 詳細: `progress/2026-09/2026-09-07_hover-pocket-tools-production.md`。実パネル画像と検証根拠: `progress/evidence/2026-09-07-pocket-tools-production/`。
+
+## 2026-09-06 個人用ツール基盤・macOSローカル検証完了
+
+- 設定のPocket Appsから、Astraへ依頼して標準レコード画面/独自HTMLを生成、試用、導入、会話で編集、履歴から復元できる基盤を実装した。開発側High、アプリの既定Mediumで変更済み選択を保持する。
+- 実Astra Mediumで本管理、水やり、タイマー+付箋の3ツールと、水やりへの置き場所追加を生成。実WebKitと標準SwiftUIの入力・編集・検索・削除、導入・再起動・復元後のデータ保持を確認した。
+- Developer ID署名のRelease build632で、新規61、WebKit16、実生成UI9とschema移行、既存package/lifecycle/generation/backup/Broker/Personal Tools/Voice Foundation、署名・配布設定がPASS。共有v1契約72、v2契約46、Voice静的42もPASS。
+- ローカル実装と検証まで完了。公証・公開・既存インストールの置換・Windows実装は未実施。v2をWindowsが使用可能とは扱わない。
+- 設計: `docs/plan/20260906_POCKET_TOOLS_PLATFORM.md`。記録: `progress/2026-09/2026-09-06_hover-pocket-tools-platform.md`。証拠: `progress/evidence/2026-09-06-pocket-tools-platform/`。
+
+## 2026-09-06 macOS 631の本番配信完了
+
+- 音声による既存機能の確認・編集をbuild 631として署名・公証・本番公開した。remote source tagは`742158a`。
+- 配布ZIP内の新機能42 assertionsと既存主要検証、公開ZIPの署名・公証・Google/現在地設定、両OS配信readback 93 checksがPASS。Windows配信assetは不変。
+- インストール済み版は630。実マイクでの全新操作と実Google書き込みは未検証。
+- 詳細: `progress/2026-09/2026-09-06_hover-pocket-macos-release-631.md`。証拠: `progress/evidence/2026-09-06-macos-release-631/`。
+
+## 2026-09-05 macOSの詳細音声操作
+
+- タイマー・付箋・予定・メディア・コピー内容の操作を実装した。Calendar許可ありで24 tool。生成プラットフォームとToday Focusの変更は保留。
+- Debug、新規41検証、既存Voice / Capability / Broker / Timer / Panel / isolation、共有契約72件がPASS。最終Release、署名付きpreviewの42検証、実Calendar readもPASS。本番630は未変更。
+- 詳細: `progress/2026-09/2026-09-05_hover-pocket-personal-operations.md`。
+
+## 2026-09-05 個人用ツールの意図と操作拡張計画
+
+- 既存機能の詳細操作とクリップボード接続の計画をユーザーが採用。ソース実装は未着手。
+- 個人用ツールの生成・導入は本番で無効。固定Today Focusの完成を生成プラットフォームの完成として扱わない。
+- 計画と根拠: `docs/plan/20260905_AI_NATIVE_USER_TOOLS.md`。詳細: `progress/2026-09/2026-09-05_hover-pocket-personal-tools-audit.md`。
+
+## 2026-09-05 Googleログインと天気の現在地修正・630本番配信完了
+
+- Googleは7月16日の審査承認メールを確認済み。629の配布設定漏れを復元し、再ログインなしでGoogleカレンダーの取得・UI接続済みを確認した。
+- locationdログで署名のlocation entitlement欠落を確認・修正した。実機で許可ダイアログ、現在地反映、20秒timeout後の再試行が成功した。
+- 630を署名・公証・本番公開。公開ZIP / appcast / Sparkle署名 / Google設定 / location entitlementを別downloadで検証し、インストール済みappもSparkle経由で629→630へ更新・再起動済み。
+- Debug / Release、現在地8シナリオ、配布設定5テスト、Panel128 / Voice / Weather APIはPASS。同じ修正を既存AI-native final-integration worktreeへ反映した。
+- 詳細: `progress/2026-09/2026-09-05_hover-pocket-google-weather-fix.md`。証拠: `progress/evidence/2026-09-05_macos-release-630.json`。
+
+## 2026-09-05 macOS 629の本番配信完了
+
+- 追加確認: `/Applications/HoverPocket.app`の旧版168からアプリ内Sparkleで629へ更新・再起動済み。署名・公証と、設定の「アップデートはありません」を確認した。
+
+- ユーザーの明示依頼により、公証済みbuild 629をmacOS本番フィードへ配信する。元の開発worktreeを保全し、`codex/macos-release-629`へ配信時点のソースを保存した。
+- 配布ZIPの署名・公証・Gatekeeper・Sparkle Ed25519と、配布binaryの主要8検証がPASS。公開URLからZIPとappcastを再取得し、629への更新、hash一致、署名・公証・Gatekeeper・Sparkle署名を確認した。
+- 詳細: `progress/2026-09/2026-09-05_hover-pocket-macos-release-629.md`。
+
+## 2026-09-04 Voice設定とパネル非表示時の継続
+
+- Voice Lane設定に`voiceContinueWhenPanelHidden`（既定OFF）と`voiceActionConfirmationEnabled`（既定ON）を追加し、AppSettingsのUserDefaults永続化、Settingsの日本語 / 英語Toggle、Voice OFF時のdisabledを実装した。
+- パネルcloseは既定でmic / remote audioをmuteする。継続設定ONでも、既にconnectedかつunmutedの場合だけUI detachとして音声を維持し、connectingまたはmutedから自動開始・自動unmuteしない。設定をOFFへ戻したときはhidden中でも即時muteし、再hoverでsession、transcript、cardを保持する。
+- Codex WebRTCのmute stateをJS内で保持し、既存remote audioとmute後に到着したremote trackへも適用する。明示終了後の新規sessionではmic / remoteをunmutedへ初期化する。BYOK / Codexの操作確認は保存値を非同期伝播せず、各approval開始時にsettings closureを一度だけsnapshotする。
+- 確認OFFは現行5種（Calendar create、Timer start、Sticky upsert、brightness、volume）のnative presenterだけを省略し、Broker prepare、permission、decideApproval、execute、readback、audit、Calendar別grant、Timer 3件 / 分制限を維持する。将来tool、破壊的操作、native authority、生成Appへ自動拡張しない。
+- 接続中にパネルが隠れた場合はpermission leaseを失効し、開始が遅れて成功しても`disconnected / idle / muted`へ戻す。確認OFFの自動承認はBroker実行とreadbackが終わるまで1件のreservationを保持し、同時書き込み、実行途中cancel、cancel後のreservation解放を検証した。
+- Swift debug / release warnings-as-errors、`--verify-voice-foundation`、Node VMを含むPython静的Verifier、Capability、Broker、Voice E2E isolation、Codex app-server Realtime、`git diff --check`がPASSした。独立レビューの最終結果はP0 / P1 / P2すべて0件で、通常の逐次tool chainやVoice hot pathに有意な性能低下はない。
+- `0.1.0 (629)`をDeveloper ID署名・公証した。submission `3b9a9f55-4e61-4ff7-92bc-c6e9c471fa49`は`Accepted`。app本体とZIP再展開後のstrict codesign、stapler、Gatekeeper、ZIP SHA-256をreadbackし、SHA-256は`627ad8d7d833221757f860946f3aca5f54506b716e15f3a13e1c0ba7044a1f42`。通常bundleをPID `52719`で起動した。
+- GitHub Release、公開macOS appcast、PR、branchは変更していない。実マイクでのhidden continuation、remote audio継続、確認OFFの実操作はbuild 629でユーザー確認待ち。
+
+## 2026-09-04 Codex Voice開始失敗の修正
+
+- 通常版で「音声接続を開始できませんでした」と表示される報告を調査した。Codex app-serverはChatGPT account、19 voices、ephemeral thread、SDP、WebRTC、teardownまで成功しており、開始失敗はmacOS WebViewの`getUserMedia`と詳細エラーがgeneric `voice_start_failed`へ上書きされる経路へ限定した。既定入力はUSB接続のDJI MIC MINIで、失敗時のCoreAudio HALログも確認した。
+- マイク取得を最大4候補に限定し、既定device、constraints非対応時だけplain default、同一groupを除外した代替deviceの順で試すようにした。permission拒否、deviceなし、不明エラーは即時停止し、stop / detach / timeout後に遅れて成功または`NotReadableError`が返っても次の取得へ進まない。
+- 明示したマイク操作に紐づくpermission leaseとoperation epochを追加し、詳細な安全エラーをUIまで保持した。ProviderやOpenAI APIへの自動fallback、無限retry、polling、通常Hover経路の追加I/Oは追加していない。
+- Luna Maxが実装し、別エージェントが安全性・通常動作・性能を独立レビューした。初回レビューのrace、候補重複、lease範囲、terminal error再試行、テスト網羅性の指摘をすべて修正し、最終findingは0件となった。
+- Debug / Release warnings-as-errors、Voice Foundation、静的42 contract、Node VMによるlate success / late `NotReadableError`、Codex app-server Realtime、`git diff --check`がPASSした。
+- `0.1.0 (628)`をDeveloper ID署名・公証した。submission `c4a78c35-ae53-43bc-b990-e1a0cad84e9a`は`Accepted`。app本体とZIP再展開後のstrict codesign、stapler、Gatekeeperが成功し、ZIP SHA-256は`7d86d140e9b8781361a0a60bc40aee11b97841d16f7f2f580e462957ac0cc500`。通常bundleをPID `42572`で起動した。
+- ユーザー実機確認で音声会話、Sticky Notes追加、明るさ変更、音量変更がすべて動作した。GitHub ReleaseとmacOS appcastの公開先は変更していない。
+- 詳細: `progress/2026-09/2026-09-04_hover-pocket-voice-start-fix.md`。
+
+## 2026-09-01 Voice Lane capability tools and single microphone control
+
+- Voice LaneのCompact / Expandedで、開始・接続待ちキャンセル・会話終了・再ホバー後の既存session再開を同じ大きなマイクcontrolへ統合した。connecting / recovering中も同じcontrolで保留中の開始をキャンセルでき、再表示だけでは録音を再開しない。別Voice session終了buttonは置かない。
+- macOSの共通`OpenAIRealtimeMacOSCapabilityRuntime`へ、Registry / CapabilityBroker経由の`sticky_note_upsert`、`controls_brightness_set`、`controls_volume_set`を追加した。Calendar権限ありでは6 tool、権限なしではTimerと3つの新toolの4 toolだけを公開し、Provider Store直接参照は行わない。
+- `controls.brightness.get@1`をprivate read capabilityとして追加し、明るさの相対変更は現在値をBroker readbackして0〜100のpercentage pointsで計算する。「10%下げて」は10ポイント減、`comfortable`は明るさ70% / 音量50%、`maximum`は100%、`minimum`は明るさ5% / 音量0%としてclampする。OS値の実行後readbackを必須にした。
+- 付箋追加とControls変更は既存のBroker approval policyを通し、active writeのsingle-flight、idempotency、cancellation、safe errorを維持した。Timerの1分3件rate limitはTimer startだけへ限定し、付箋 / Controlsを不必要に止めない。
+- macOSのVoice Foundation verifierでSticky readback、brightness `decrease value:10`、volume `preset maximum`、strict invalid arguments、idempotent replayを検証した。Codex app-server model verifierは4 tool面を公開し、Timerだけを実行する検証後にSticky Notesが空、Controls状態が不変、Calendar createが0件であることをreadbackする。
+- macOS Debug / Release warnings-as-errors、`swift run HoverPocket --verify-capabilities`（21 handlers）、`--verify-broker`（22 descriptors / 21 handlers）、`--verify-voice-foundation`、`--verify-codex-app-server`、`python3 script/verify_voice_foundation.py`、`python3 script/verify_pocket_contracts.py`（72 fixtures）、`git diff --check`、`./script/build_and_run.sh --verify`がPASSした。通常bundleを再署名・起動し、strict codesign、単一process、bundle内の4つの新契約名をreadbackした。独立レビューは最終P0 / P1 / P2すべて0件。WindowsはCapability Registry / Handler / verifierを21 handlers・22 descriptorsへ更新したが、このMac環境に`dotnet`がないためWindows build / 実機Voiceは未確認。Windowsの既存Voice dynamic tool production gateは変更せず、Codex positive tool policy未承認のfail-closed契約を維持する。
+
+## 2026-09-01 Voice Laneの再ホバー復帰
+
+- ユーザーが通常版Codex Voiceで実際に音声会話できたことを確認した。一方、パネルを閉じて再ホバーすると、既存Realtime接続は`connected + muted`で保持されるのに、大きなマイクbuttonが新規開始専用のため無効になり、会話を再開できなかった。
+- パネルを閉じた際は従来どおり即時mute / UI detachとし、再表示だけでは録音を自動再開しない。再ホバー後は大きなマイクbuttonを`音声会話を再開`として有効化し、明示操作で既存接続をunmuteする。切断済みの場合は従来どおり同じbuttonから新規接続する。
+- UIは`一時停止中 · マイクを押して再開`と再開案内を表示する。決定論的検証でdetach後のmute、attach後もmute維持、resume後のunmute、`startCount == 1`維持をreadbackした。
+- Debug / Release warnings-as-errors、Voice Foundation runtime、静的42 contract、Panel 128 cases、Capability 21 handlers / 22 descriptors、`git diff --check`、通常bundle build / launch / strict codesignがPASSした。独立レビューはP0 / P1 / P2すべて0件で、追加I/O、polling、probe、新規session起動はなく、過剰な安全実装やVoice hot path性能低下を認めなかった。
+- macOS Voice sessionへ公開するCapability toolはCalendar権限に応じて6または4つである。Calendar作成、Timer開始、付箋追加、明るさ・音量変更はBrokerの既存承認ポリシーと実行後readbackを通る。Clipboard、Calculator、Timer pause / stop、任意のPocket App生成・導入はまだVoice toolとして公開していない。詳細: `progress/2026-09/2026-09-01_hover-pocket-normal-ui-voice.md`。
+
+## 2026-09-01 Codex Voice開始導線の修正
+
+- 通常版のVoice Laneが`切断・待機中`のまま応答しない報告を再現調査した。System Settingsのマイク権限は`HoverMenuPreview`がON、Codex app-serverのinstalled readinessと非物理RealtimeはChatGPT account / 19 voices / ephemeral thread / SDP / WebRTC / teardownまでPASSした。
+- 表示していたcompatibility gate文言は実エラーではなく、Codex providerの開始前に常時出すplaceholderだった。Voiceは要件どおり自動listenせず、Panelのマイク操作でだけ開始するが、16pt相当のplain iconと誤ったplaceholderでは操作が伝わらなかった。
+- 開始操作を36 x 36の円形buttonへ拡大し、待機statusを`開始前・マイクを押してください`、本文を`マイクを押すとCodexとの音声セッションを開始します`へ変更した。接続後に`mic.slash / 利用不可`と誤読されないよう、connection / muteに応じたsymbolとAccessibility文言も修正した。会話欄は開始前 / 接続中 / 接続済みで別文言を使い、開始後に開始案内を残さない。
+- Debug warnings-as-errors、Voice Foundation runtime、静的42 contract、Panel 128 cases、`git diff --check`、通常bundle再build、strict codesign、bundle自身のCodex app-server RealtimeがPASSした。独立レビューの最終結果はP0 / P1 / P2すべて0件で、開始条件、layout、Accessibility、hot path性能に問題なし。修正版通常processを起動済み。物理マイク、可聴remote audio、user / assistant transcriptはユーザーの明示したマイク操作と発話を要するため未実施。詳細: `progress/2026-09/2026-09-01_hover-pocket-normal-ui-voice.md`。
+
+## 2026-09-01 通常UIとVoice Laneのreadback
+
+- Timer限定のbuild 619は物理Voice E2E隔離候補であり、通常版のProvider欠落ではなかった。build 619 processを停止し、既存performance receiptがattached状態を残したため物理E2E合格証拠には使わない。
+- 通常bundle `local.codex.hover-pocket`を再build・署名・起動した。AccessibilityでMirror、Calendar、Sticky Notes、Calculator、Timer、Controls、Clipboard、Today Focus、Settingsと、下部固定のVoice Laneをreadbackした。実表示はCalendarへ切り替わり、Timer専用状態ではない。
+- server closeとlocal stop応答のperformance証拠を分離した。attached local stopはstop RPC exactly 1回を要求し、server closeはattached=false / stop 0回を許容する。通常版ではE2E storeがnilのためhot pathへI/Oやpollingを追加しない。
+- Debug / Release warnings-as-errors、Voice E2E performance / isolation、Voice Foundation、静的42件、Realtime renderer、Panel 128件、通常版build / strict codesignがPASSした。独立レビューはP0 / P1 / P2すべて0件で、過剰な安全実装や通常性能の悪化を認めなかった。
+- Voice ProviderはCodex app-server、Voice Lane / AI-nativeはON、OpenAI API keyは不使用。実マイク、remote audio、transcript、Calendar account確認は未完了。詳細: `progress/2026-09/2026-09-01_hover-pocket-normal-ui-voice.md`。
+
+## 2026-08-31 Voice Lane設定のruntime伝播修正
+
+- build 618でSettingsのVoice toggleはON、Codex app-server選択、ChatGPTログイン済みだが、同一processのreceiptが`featureEnabled=false / providerId=off`のままでPanel下段のVoice Laneが出ないことを再現した。
+- `@Published`の新値通知を捨ててpropertyの旧値を読み直していたことが原因だった。通知された`featureEnabled / preferredLayout / providerID`をimmutable configurationとしてそのままVoice runtimeへ渡し、Provider変更、Voice ON、Expanded変更が各1回で新値を反映する回帰テストを追加した。
+- Debug / Release warnings-as-errors、Voice runtime、静的42 contract、Panel 128 cases、Voice E2E isolation、`git diff --check`がPASSした。fresh修正版`ホバーポケット Voice E2E 619`はPID `52065`で起動し、Harness isolation、strict ad-hoc codesign、初期Voice OFF / micなし / remote audioなしをreadbackした。
+- 独立エージェントレビューはP0 / P1 / P2すべて0件で、設定変更時の発火回数は従来と同じ、音声hot pathへの追加負荷なし、必要最小限の修正と判定した。
+- 実装commit `f6633dcd894abbc42f0b53f815e1adf40b1ad4c3`のDraft PR #39は11 SUCCESS / 8 expected SKIPPED / failure 0 / pending 0。macOS、Windows、3 OS共通契約を同一SHAで確認し、merge / release / 公開は行っていない。
+- Timerだけの表示は物理Voice E2Eの隔離要件であり、通常版の全built-in Providerは変更していない。旧build 618はHarness Stopでsafe closeを確認し、build 619のVoice ON表示と物理音声を人手gateに残す。
+
+## 2026-08-30 macOS隔離Voice候補のChatGPTログイン修正
+
+- build 617の実設定画面をAccessibilityで再現し、Codex app-server選択中でも「再確認」だけが表示され「ChatGPTでログイン」が存在しないことを確認した。原因は、物理Voice E2E要件が専用ChatGPTログインを求める一方、隔離runtimeのCodex認証storageが`.disabled`へ固定されていた契約不一致である。
+- 認証policyを`disabled / managedOnly / externalOrManaged`へ分離した。隔離Voice E2Eは`managedOnly`とし、fresh runtime内のVoice専用Codex Homeだけへowner-only regular fileを作成できる。本番は従来の`externalOrManaged`を維持し、Hostの`~/.codex/auth.json`、Keychain、通常版HoverPocketの認証を隔離候補から参照・symlink・変更しない。
+- Harnessは`CodexVoiceAppServer`を隔離allowlistへ追加し、profile / Codex Home / config / managed credentialの型、current-user所有、権限、hardlink数を検査する。physical stageでは専用credentialが存在しない限り合格させず、Cleanupは従来どおりruntime全体を回収する。
+- Debug / Release warnings-as-errors、Codex app-server管理ログイン4シナリオ・6 process、Voice E2E isolation、Voice Foundation、Panel 128 cases、Voice静的42 cases、shell構文、`git diff --check`がPASSした。
+- fresh候補`ホバーポケット Voice E2E 618`をsession `HoverPocketVoiceE2ESession-1lQSaT` / runtime `HoverPocketVoiceE2E-dSiGNi` / PID `25480`で起動した。設定画面に「HoverPocket専用のCodexプロファイルは未ログインです。」「ChatGPTでログイン」「再確認」が表示されることをAccessibilityでreadbackした。profile / configはcurrent-user所有の`0700 / 0600`、専用`auth.json`はログイン前のため未作成、Voiceは既定OFFでmic / remote audio / Timer / physical confirmationなし。実ブラウザログインはまだ開始していない。
+- 旧build 617はHarness Stopで`safe_close`、process停止、receipt保持を確認して一時session / runtime / buildをTrashへ移した。物理Voiceの人手gateはbuild 618だけへ引き継ぐ。
+- 独立安全・性能レビューはP0 / P1 0件、実装上のP2 0件。Host auth非参照、runtime内`CODEX_HOME / HOME`、credentialの型・owner・mode・hardlink、Cleanup、本番`externalOrManaged`不変、通常起動 / Voice hot pathへの継続負荷なしを確認した。唯一の文書P2だったHarness usageの旧「logged-in Codex account共有」表現は、隔離profile内で個別ログインしHost credentialを共有しない説明へ修正した。
+- 実装commit `c96457c7778a3767da8639d8bf6d0bebf20df3ea`をDraft PR #39へpushした。CIは15 SUCCESS / 8 expected SKIPPED / failure 0 / pending 0で、macOS、Windows、3 OS契約、routerを同一SHAで確認した。PRはDraft / OPEN / MERGEABLE、remote parity 0 / 0で、merge、公開、releaseは行っていない。
+
+## 2026-08-30 macOS設定画面の見切れ修正
+
+- 設定ウィンドウとSwiftUI rootがともに`460 x 500`固定で、ウィンドウがリサイズ不可だった。実候補build 615の設定画面をAccessibility / screenshot / CGWindowで確認し、Voice Lane付近の左端テキストが欠け、window frameが`460 x 532`であることを再現した。
+- 初期本文サイズを`620 x 700`、最小を`520 x 480`とし、画面のvisible frameから24pt余白とタイトルバーを差し引いてclampする。ウィンドウをリサイズ可能にし、SwiftUI側の固定frameを削除して縦ScrollViewの本文を利用可能幅へleading配置した。再表示時はユーザーが変えた位置・サイズを維持し、画面外へ出た場合だけ現在screenへ戻す。
+- `--verify-panel-layout`へpreferred / compact clamp / minimum / resizable契約を追加した。warnings-as-errors build、Panel 128 cases、Voice Foundation runtime、Voice静的42件、`git diff --check`がPASSした。
+- 修正版の一意表示candidate `ホバーポケット Voice E2E 617`をfresh session `HoverPocketVoiceE2ESession-1B3yId` / runtime `HoverPocketVoiceE2E-snVEbU` / PID `19758`で起動した。設定windowはCGWindow readbackで`620 x 732`、Accessibilityでzoom button有効、左端欠落なしを確認した。Harness isolation / process ownershipもPASSし、Voice OFF、disconnected、microphone / remote audio / Timer / 物理確認なしを維持する。
+- 比較用build 615 / 616はHarness Stopで`safe_close`とprocess停止を確認し、一時session / runtime / buildをTrashへ移した。物理Voiceの人手gateはbuild 617へ引き継ぐ。
+
+## 2026-08-30 AN8 exact-head evidence bundle
+
+- runtime source HEAD `9a110e9ae260ec65f7c99496baf36ff8c899b250`はremote parity `0 / 0`で、Draft PR #39の11 SUCCESS / 8 expected SKIPPED / failure 0 / pending 0をreadbackした。Windows [33307549713](https://github.com/shotaro311/hover-pocket/actions/runs/33307549713)、macOS [33307549728](https://github.com/shotaro311/hover-pocket/actions/runs/33307549728)、3 OS contract / compare [33307549725](https://github.com/shotaro311/hover-pocket/actions/runs/33307549725)は同一SHAで成功した。公開・正式署名・実機transitionを要する8件のskipは未完了gateとして分離した。
+- 同HEADをmacOS `0.1.0 (615)`としてDeveloper ID署名・公証した。submission `2f2ead18-b466-4831-844d-3fcffb42ff54`は`Accepted`、ZIP SHA-256 `2901a0136531dff1834dee26c0cf14649e059b4f323e5c3293d37e516b3266d9`、size `7511492` bytes。main Mach-O UUID `45B20385-18C5-30FD-ACCD-04D272923CA3`、strict codesign、stapler、Gatekeeper `Notarized Developer ID`、Sparkle `2.9.3` / MediaRemote dependency closure、appcast build / length / EdDSAを再readbackした。GitHub Releaseとpublic appcastは変更していない。
+- build 615配布binaryでVoice OFFの100回開閉、100 provider switch、5 recovery、3 animated transitionを実行し、window `3->3`、socket `0->1`、child `0->0`、RSS増加約`12.5 MiB`でPASSした。Capability、Broker、Pocket Surface、Pocket App package / lifecycle / generation / migration / health / workspace backup、Voice Foundation / E2E isolationも同じ配布binaryで成功した。
+- Codex app-serverはAPI keyを使わず、ChatGPT account / 19 voices / ephemeral thread / SDP / WebRTC / teardownと、`gpt-5.6-sol` / `medium`のTimer tool 1回、Broker承認、readback、子process終了を確認した。物理マイク、remote audio、transcript、Calendar createは使用していない。
+- exact evidenceは`progress/evidence/2026-08-30_an8-exact-head-9a110e9.json`へ固定した。既存の物理Voice候補PID `70741`を含む3 processは停止せず生存を確認した。現候補は旧runtime sourceのため、人手gate前にcurrent exact HEADから一意表示candidateを新規作成する。
+- runtime source HEAD `9a110e9ae260ec65f7c99496baf36ff8c899b250`と同じ実装から、一意表示名`ホバーポケット Voice E2E 615`のprovider-bound候補をfresh buildした。session schema 2 / expected provider `codex_app_server`、PID `10329`、strict ad-hoc codesign、bundle / Debug main UUID `3FA123A2-0564-313B-8780-41017D7B0F7F`一致、process / storage所有をreadbackした。Voiceは既定OFF、disconnected、mic / remote audio / Timer / 物理確認なし。120秒235 sampleのidle CPU平均`0.113%`、p95`0.1%`、最大`2.7%`、RSS平均`100.988 MiB`、最大`101.609 MiB`で、前後の子process / network socketは`0->0`、Voice media attempt / snapshot / Expanded RPC / stop RPCは0だった。旧PID `619` / `70741` / `86913`は同時刻帯にAppKitの正常終了経路へ入り、現在はfresh候補1 processだけを人手物理gate待ちとして維持する。旧process終了の発火元は断定せず、crashとは扱わない。
+- 独立レビューは耐久検証の遅延初期化フレークを検出し、検証専用の両Provider warm-up、前後500ms待機、socket `baseline + 1`、実数付き失敗ログへ修正した。修正後P0 / P1 / P2はすべて0件で、通常起動、Hover、Voice、app-serverのCPU / I/O / latencyへの影響はない。判定は引き続きNO-GOで、Draft解除、merge、release、公開は実施していない。
+
+## 2026-08-30 macOS Codex app-server Voice基盤
+
+- file-backed認証を安全に共有できない環境向けに、Voice専用profile内の`account/login/start`によるChatGPT managed browser loginを実装した。Settingsの明示操作だけで開始し、API key、Device Code、external token、Bedrockは公開しない。ログイン完了通知、`account/read`のChatGPT account、専用`auth.json`のcurrent-user所有とprivate permissionをreadbackした後だけVoiceへ反映する。
+- owner-onlyの外部`auth.json`がある場合は従来どおりsymlink参照を優先し、そのcredentialに対してHoverPocketからlogin / cancel / logoutを行わない。専用managed fileと外部credentialの所有境界を分離し、Provider切替、cancel、app終了ではlogin ID付き取消とapp-server closeをboundedに実行する。
+- 独立エージェントは候補fallback、MainActor上の`which`、終了再入、候補選択timeoutの持越し、managed不可時のprocess参照喪失を検出した。固定候補時のPATH探索省略、PATH-only探索最大約2.5秒、候補選択20秒、request最大8秒、shutdown gate、全clientのclose / clearへ修正し、最終P0 / P1 / P2はすべて0件。先頭正常候補は再起動せず、通常起動、Hover、Voice hot pathへの性能影響なしと判定された。
+- Debug / Release warnings-as-errors、Voice静的42件、Codex app-server foundation / exact Broker tool route、`git diff --check`がPASSした。Apple Development署名のlocal build 600はstrict codesign、起動、graceful quitを確認し、隔離物理Voice E2E PID 70741は停止せず生存した。実ChatGPT browser loginはアカウント操作を伴うため未実行で、人手E2E gateに残す。
+- 実装commit `4ed69eff3023d44b2452ee5d9772eef16d26ed73`のDraft PR #39は15 SUCCESS / 8 expected SKIPPED / failure 0 / pending 0、Draft / OPEN / MERGEABLE / CLEAN、未解決review thread 0、remote parity 0 / 0をreadbackした。merge / release / Draft解除は実施していない。
+- managed loginを実controllerと実子processで通す決定論的検証を追加した。stub browserだけを使い、成功、専用credential再利用、cancel、Provider切替、app終了の4シナリオ・6 processを確認し、すべてのprocess終了と一時workspace消滅を別readbackした。実ブラウザや実アカウントは操作していない。
+- fake app-serverのreceiptは検証用CLIだけで開き、`O_NOFOLLOW`、排他的作成、current-user所有、通常ファイル、0600、hardlinkなしを固定した。symlink / hardlink負例はともに拒否され、外部target未変更をreadbackした。独立再レビューはP0 / P1 / P2すべて0件で、同期`fsync`は明示helper内だけ、通常起動・Settings・Hover・Voice hot pathへの性能影響なしと判定した。
+- 実装commit `3ccf423e9b131f402cf9ba146778479b0a199f0d`でDebug / Release warnings-as-errors、Voice静的42件、app-server lifecycle、Voice、Panel 128、Capability 20、Broker 21 / 20、Pocket Surface / App、TimerがPASSした。Apple Development署名のlocal build 602はstrict codesign、起動、graceful quitをreadbackし、隔離物理Voice E2E PID 70741は停止せず生存した。
+- 配布scriptが`.build/debug/HoverPocket`を梱包していたことを実バイナリsize / UUIDで検出した。公証済みbuild 604はCodex app-server Realtimeを通過したが、Debug成果物のためRC候補から除外した。`build_and_run.sh`へ明示configurationを追加し、通常開発はDebug既定、隔離E2EはDebug限定、`package_zip.sh`はRelease固定とした。
+- 配布依存はactive configurationのSparkle / MediaRemoteAdapter / `run.pl`を直接参照し、Release欠落とmainの`@rpath` closure不一致をZIP作成前にfatalとした。独立エージェントは通常runtime / Voice / Hoverのhot pathへ処理が増えず、配布版はRelease最適化で改善側と確認し、最終P0 / P1 / P2は0件だった。
+- code commit `02128284fb5d075b9773f297064440021c42c79e`を`0.1.0 (605)`としてDeveloper ID署名・公証した。Apple submission `73ee5ac8-1e9e-4643-aca4-cf451b4cdf01`は`Accepted`で、staple、Gatekeeper、strict codesign、ZIP SHA、appcast、独立再展開をPASSした。ZIP SHA-256は`734f1d8ae8af77f253e655be12eaec61a679bd2b7dd425f671176a920085ad26`、sizeは`7495993` bytesである。
+- ZIP内mainのUUIDは`.build/release/HoverPocket`と一致し、配布mainは`17442032` bytes、Debugは`28203648` bytesだった。配布binary自身でCapability 20、Broker 21 / 20、Pocket App、Voice Foundation、managed login 4シナリオ / 6 process、Codex app-server ChatGPT account / 19 voices / ephemeral thread / SDP / WebRTC / teardownをPASSした。OpenAI API key、実ブラウザ、物理マイク、remote audio、Calendar createは使用していない。
+- Draft PR #39のHEAD `3576b83bf253473f0a439d8bfb2c4d7cc1b5b356`は11 SUCCESS / 8 expected SKIPPED / failure 0 / pending 0、Draft / OPEN / MERGEABLE / CLEAN、未解決review thread 0、remote parity 0 / 0だった。merge / release / Draft解除は実施していない。
+- 既存の長時間隔離E2E build 597（PID `70741`）を停止せず、現在のDraft PR HEAD `c081cf24897902890d80e2eb915c2c7d8f14e253`から別のad-hoc署名build 607を作成し、fresh session `HoverPocketVoiceE2ESession-jM7jH4` / runtime `HoverPocketVoiceE2E-pvPrV7` / PID `85676`として同時起動した。bundleとDebug mainのMach-O UUID `02E274A9-60E7-3F24-89A1-DAF591FCC9B0`一致、strict codesign、process所有、receipt / performance存在、Voice既定OFF、disconnected、mic / remote audio / Timer readback / 物理確認未実行をreadbackし、Isolation検証もPASSした。
+- build 607のidle計測はCPU平均`0.114%`、p95 / 最大`0.2%`、RSS平均約`109.650 MiB`、最大約`109.719 MiB`だった。独立レビューの最終結果はP0 / P1 / P2すべて0件で、通常runtime・起動・Hover・Voice hot pathを損なう過剰な安全処理は確認されていない。macOS desktop automationでは同一表示名 / bundle IDの旧・新E2E processを正確に識別できないため、自動クリックは行わず、最新build 607の物理マイク / remote audio / transcript / Timer承認を人手gateとして残した。
+- 一意表示名のbuild 608はPID `86913`で既定OFF・人手物理E2E待ちを維持し、長時間基準PID `70741`も停止していない。別エージェントの最終レビューはP0 / P1が0件で、通常起動・Hover・Voice hot pathを損なう過剰な安全処理を認めなかった。P2はkeyring-only環境の認証継承互換性1件で、現在環境はowner-only `auth.json`を使えるため動作阻害ではない。
+- ChatGPT Pro Orchestratorへexact HEAD `e02761e3c584810b5e66ed90fdcc74804d20b3a5`のAN8残存gate監査をreview-onlyで単一送信した。Node `v24.19.0`、Oracle `0.17.2`、request / task packet / source context hash、ChatGPT Project targetをruntime preflightで検証後に開始し、runは`20260830-175124-hoverpocketdraft-pr-head-e02761ean8voice`、sessionは`pro-run-a9b6cde0-a`。コード変更、GitHub書込み、merge、release、公開は許可しておらず、同じ依頼を再送せずreturn bridgeで回収する。
+- 人手gateを一意に識別できるよう、同じHEADのE2E binaryと固定bundle IDを維持したまま、隔離bundleの表示名だけを`ホバーポケット Voice E2E 608`へ変更しad-hoc再署名した。fresh session `HoverPocketVoiceE2ESession-Ia7yuR` / runtime `HoverPocketVoiceE2E-9OKeZP` / PID `86913`で、strict codesign、Harness Readback / ValidateIsolation、CPU平均 / p95 / 最大`0.1%`、RSS平均約`113.904 MiB`を確認した。中間PID `85676`はHarness Stopで`safe_close`をreadbackして正常停止し、長時間基準PID `70741`と一意表示名PID `86913`だけを維持した。Voiceは明示OFFのままで、次はユーザーが表示名を確認してSettingsから有効化し、macOSマイク許可、物理発話、可聴remote audio、transcript、Timer承認 / readbackを行う。
+
+- 隔離Voice E2Eへ性能readbackを追加した。mic開始意図からtransport attachedまでの直近10件とp95、snapshot publish、Expanded RPC、Realtime stop RPC、計測時間を会話本文・認証情報なしの固定schemaで保存し、HarnessのReadback / Validate / Stopがexact allowlist、現在attempt、単一stop、safe closeを検証する。通常版はStoreを生成せず、計測file I/Oとwriter queueは起動しない。
+- 独立性能・安全レビューの初回指摘は、過去成功sampleと現在attemptの混同、active readbackのstale、mic開始hot pathの同期atomic write、Readbackでのreceipt実検証不足だった。`currentAttemptAttached`、utility直列writer、transcript / Timer / 物理確認時flush、`--require-receipt`で修正した。終了直前の非同期safe close競合もE2E終了時だけ同期flushして修正し、最終P0 / P1 / P2はすべて0件。通常起動、Hover、Voice開始への実質的なCPU / I/O / latency影響なしと判定された。
+- 新しい隔離E2Eビルドの安定後10秒外部計測は21 sample、CPU平均0.157%、p95 0.2%、最大0.2%、RSS平均109.234 MiB、最大109.281 MiB。Voice opt-in前のためmedia attempt / snapshot / Expanded RPC / stop RPCはすべて0である。readback、隔離検証、safe close、stop、cleanupを実バイナリで確認し、既存の物理E2E PID 56971は停止せず維持した。
+
+- macOS Voice Laneの標準providerを、OpenAI APIキーではなくCodex app-serverへ接続した。Codexのログイン状態を利用し、Calendar read/createとTimer startは既存Capability Registry / Broker / 承認 / readbackを通す。Realtime BYOKは明示選択時だけ使う代替経路で、自動fallbackしない。
+- Voice専用`CODEX_HOME`でambient機能を無効化し、installed schemaに加えてlocal loopback providerへ実際に送られるResponses requestを起動前canaryで検査する。outbound `tools`がHost指定dynamic toolと件数・名前とも完全一致した場合だけReadyにする。解決済み実行ファイルURL、size / mtime / inode由来identity、version、専用profile、tool digestをcache keyへ固定し、spawn直前とbounded restartごとにidentityとversionを再確認する。
+- `account/read`はChatGPTログインだけを許可し、API key、Amazon Bedrock、custom provider、signed-outを停止する。Codexの既存`auth.json`はowner-only sourceを専用profileからsymlink参照するだけで、OpenAI API keyはHoverPocketへ入力・保存しない。
+- 通常の実行ファイル解決順で`/Applications/ChatGPT.app/Contents/Resources/codex`をHomebrew版より先に評価し、自動検出時は候補を順にcompatibility probeして最初のReadyを採用する。明示`HOVERPOCKET_CODEX_EXECUTABLE`は指定した1件だけを検証し、勝手に別binaryへfallbackしない。probe後はbinary identity / version / profileを固定して同じCodex app-serverだけを起動する。
+- 物理マイクを取得しない明示live verifierを追加した。非永続WKWebView内で外部ICE serverなしのpeer、無音Web Audio track、data channelを作り、ChatGPT account、19 voices、ephemeral root thread、SDP answer、WebRTC connected、tool未実行、app-server process終了、一時workspace消滅を順にreadbackする。
+- `thread/realtime/error`またはSDP前の`closed`を30秒timeoutまで隠さず、pending negotiationへ即時返却する。v3 requestではapp-serverにvoice既定値選択を任せ、APIモデル / APIキーをHoverPocketから指定しない。
+- Voice開始はWebView ready待ちを2秒、全体を30秒で有限化し、取消、切断、停止をcleanupへ接続した。app-server stdout / notificationは順序処理、transcriptは67ms単位、Expanded child cardは接続中だけ3秒ごと・最新16件・最大4並列readに制限した。root card timestampもdeltaごとに更新しない。
+- 独立エージェントの安全性 / 性能レビューは、ChatGPT.app同梱Codexのlive差分まで最終再レビューし、今回差分でP0 / P1 / P2すべて0件。Broker限定policy、read-only sandbox、空workspace roots、非永続WebView、CSP、5秒microphone leaseは必要な境界として維持した。一方、ambient要求だけを入力順に短く隔離し、通常tool本体は並行実行するため、stdout停止や応答遅延を増やさない。pending / current / 旧clientはidentityとgenerationで分離し、隔離済みclientは再起動しない。live verifierのWebView、無音oscillator、最大0.5秒のcleanup待ちは明示検証コマンドに限定し、通常hot pathへ入れない。v3では未使用のlegacy default voiceキーを要求せず、非空voice集合だけを確認する。
+- app-server専用profileの追加差分も別エージェントが再レビューし、API key認証の誤受入れと一過性probe失敗の無期限cacheを検出・修正した。公式0.149のroute canaryは0.27〜0.65秒でVoice設定時に1回だけ、mic開始hot pathには入らない。keyring-only環境向けの専用ChatGPT managed login実装はローカル検証済みで、実ブラウザログインとfile-backed認証からの移行readbackを人手gateに残す。
+- `swift build -Xswiftc -warnings-as-errors`、Voice Foundation、Capability、Broker、Pocket contract 15 schema / 71 fixture、Voice静的42件、app-server入力順 / client隔離の回帰、`git diff --check`が成功した。隔離E2E bundleはad-hoc署名を`codesign --deep --strict`で確認し、実行ファイルとmicrophone purpose stringを別経路でreadback後、生成物をTrashへ移した。
+- 隔離Voice E2Eの既定providerとreceipt判定をCodex app-serverへ統一した。app-server readinessを選択中providerからreadbackし、Codex WebRTCでもmic取得とremote audio再生後にHost所有の「話せた・聞こえた」確認をattempt単位で一度だけ表示する。通常版はreceipt storeが`nil`で即時returnするためhot pathへ同期I/Oを追加しない。別エージェントの独立レビューはP0 / P1 / P2すべて0件で、stale operation、旧alert応答、終了競合も拒否されることを確認した。
+- 修正後のDebug / Release warnings-as-errors build、Voice Foundation、Voice E2E isolation、receipt physical / stopped self-test、Capability 20 handler、Broker 21 descriptor / 20 handler、Pocket contract 15 schema / 71 fixture、静的42件、`git diff --check`が成功した。環境変数なしのChatGPT.app同梱Codex live verifierは3回連続で2.86 / 2.24 / 2.19秒、account / 19 voices / ephemeral thread / SDP / WebRTC / teardownを通過した。
+- Calendar実データをVoice originの`calendar.events.list`として既存Registry / Brokerへ通す`--verify-calendar-capability-read-only`を追加した。外部integration、明示`--grant-calendar-read`、既存Google credentialを必須とし、CalendarList handlerだけを登録する。予定内容は表示せず件数だけを返し、承認なし、実行後readback verified、auditに`safeTitle` / `eventRef` / `calendarId`が残らないことを検証する。ブラウザ認証とCalendar書き込み経路は持たない。
+- 通常署名設定を引き継いだ一時candidateは、既存Keychain itemへの新規candidateアクセスがSecurity.framework内で停止した。診断用Keychain readをdetached taskと5秒OneShot gateへ分離し、同じcredentialをmutation-disabled OAuth / Calendar storeへ注入して二重Keychain readを除去した。署名済みcandidateは5秒で`calendar_credential_check_timed_out`、Calendar API未到達、broker root残存0をreadbackし、一時candidateをTrashへ移した。通常Google Calendar経路はdefault引数で従来動作を維持する。
+- インストール済みappを隔離コピーし、最新Release binaryへ差し替えたbuild 584 candidateを同じDeveloper ID、bundle ID、Team ID、Designated Requirement、`release` Keychain suffixで再署名した。既存Google credentialを変更せず読み込めることを確認し、Voice originの`calendar.events.list`が実Calendar、Broker、readbackまで2回成功した。最終実測は3.16秒、予定内容を出さず件数1、承認なし、audit redactedである。
+- private read共通3秒timeoutは実Calendar取得を`URLError -999`で途中取消していた。Calendar get / listだけを15秒・30 calls/minへ分離し、Timerなどローカルreadは3秒のまま維持した。Broker timeoutは取消由来のnetwork errorより優先して`calendar_capability_timed_out`へ固定分類する。独立再レビューはP0 / P1 / P2すべて0件で、MainActor同期停止、個人情報漏洩、他Capabilityへの性能影響がないことを確認した。
+- local loopback Responses providerから決定論的function callを返し、実Codex app-serverが送信した`item/tool/call`を同じBridge、Capability Runtime、Registry / Broker、承認、Timer実行、readbackへ通す明示CLI検証を追加した。replyはapp-server pipeへの書込み後にだけcaptureし、同一call replay、拒否、root scopeも既存fixtureと合わせて確認する。外部Calendar、既存Timer、API keyへ触れず、通常compatibility probeは`invocation=nil`のままである。CLI実測は約1.02秒、通常起動 / Voice hot pathへの追加実行なし。独立再レビューはP0 / P1 / P2すべて0件だった。
+- `--verify-codex-app-server-model-tool`を追加し、ChatGPTログイン済みCodex app-serverへ指定値`gpt-5.6-sol / medium`の実ターンを1回送った。公開toolは一時Timerの`timer_countdown_start`だけで、Codex自身が60秒Timerを選択し、Host承認1回、Bridge、Registry / Broker、実行、readback、app-serverへのreply書込み、`turn/completed`、process終了、一時workspace消滅まで確認した。app-serverが実採用したmodel / effortはprotocolからreadbackできないため、CLI出力も`requested_model / requested_effort`と明記する。Calendar accessはfalse、作成件数0、API key参照なし、既存Timer非使用。明示CLIは6.81〜9.61秒、最終8.03秒で、通常起動 / Hover / Voice開始hot pathから呼ばれない。独立レビューで初期化前失敗時のworkspace回収とmodel表示の誤読余地を修正し、最終P0 / P1 / P2は0件、通常時の性能影響は実質0と判定された。
+- 実モデルtool検証を含むcode commit `7194ff297df6c456d1ead2a88008e40826b36642`のDraft PR #39は、Router [33293498009](https://github.com/shotaro311/hover-pocket/actions/runs/33293498009)、macOS [33293498781](https://github.com/shotaro311/hover-pocket/actions/runs/33293498781)、Windows [33293498790](https://github.com/shotaro311/hover-pocket/actions/runs/33293498790)、3OS contract / compare [33293498775](https://github.com/shotaro311/hover-pocket/actions/runs/33293498775)、transition [33293498770](https://github.com/shotaro311/hover-pocket/actions/runs/33293498770)、release readback [33293498792](https://github.com/shotaro311/hover-pocket/actions/runs/33293498792)が成功した。11成功・8 gate skip・失敗0・pending 0、Draft / OPEN / MERGEABLE / CLEAN、remote parity 0 / 0をreadbackした。
+- Calendar候補は検証後にTrashへ移し、物理Voice E2E process PID 56971は停止せず維持した。Calendar create、Timer start、物理マイク / remote audioは引き続き別の明示承認・人手確認gateとする。
+- 独立エージェントは初回に、無関係なTimer singleton初期化、後続Keychain再読込、token refresh失敗時の保存credential削除というP1 3件を検出した。Calendar-only Registry、preloaded credential、`allowsStoredCredentialMutation=false`で修正し、最終再レビューはP0 / P1 / P2すべて0件だった。通常起動とVoice hot pathには新CLI分岐以外の実質的なCPU / RSS増加がない。
+- ad-hoc署名の隔離E2Eアプリを実起動し、Timerだけのregistry、通常データと外部integrationの隔離、Codex app-server選択済み、Voice明示opt-in前の停止状態をprocessとreceiptからreadbackした。物理マイク、実remote audio、transcript、Timer承認は人の発話・聴覚確認が必要なため未完了で、公開可とは扱わない。
+- Homebrew Codex `0.145.0`は追加tool混入でroute gateを停止し、隔離した公式`0.149.0`はroute / account / 19 voicesまで成功後、現行backendとの`session.model`契約差でSDP開始を即時停止する。一方、ChatGPT.app同梱Codex `0.150.0-alpha.12.2`は環境変数なしでaccount、19 voices、ephemeral thread、SDP、WebRTC、teardownを全通過し、Codexの実ターンによるTimer tool選択もBroker / readback込みで成功した。物理マイク、remote audio、transcript、音声経由のCalendar / Timer E2Eは引き続き未完了であり、公開可能とは扱わない。
+- Calendar読み取りgate commit `a836856b570e7f949ab9081080c462d1ca6ce326`のDraft PR #39は、Router [33291040507](https://github.com/shotaro311/hover-pocket/actions/runs/33291040507)、macOS [33291041914](https://github.com/shotaro311/hover-pocket/actions/runs/33291041914)、Windows [33291041972](https://github.com/shotaro311/hover-pocket/actions/runs/33291041972)、3OS contract / compare [33291041947](https://github.com/shotaro311/hover-pocket/actions/runs/33291041947)、transition [33291041883](https://github.com/shotaro311/hover-pocket/actions/runs/33291041883)、release readback [33291041901](https://github.com/shotaro311/hover-pocket/actions/runs/33291041901)が成功した。11成功・公開成果物を要する8 gate skip・失敗0・pending 0、Draft / OPEN / MERGEABLE / CLEAN、remote parity 0 / 0をreadbackした。
+- 実装commit `dc734a95f30e847cb70c705df8d67728178a578f`のDraft PR #39は、Router [33289398813](https://github.com/shotaro311/hover-pocket/actions/runs/33289398813)、macOS [33289399447](https://github.com/shotaro311/hover-pocket/actions/runs/33289399447)、Windows [33289399448](https://github.com/shotaro311/hover-pocket/actions/runs/33289399448)、3OS contract / compare [33289399439](https://github.com/shotaro311/hover-pocket/actions/runs/33289399439)、transition [33289399443](https://github.com/shotaro311/hover-pocket/actions/runs/33289399443)、release readback [33289399458](https://github.com/shotaro311/hover-pocket/actions/runs/33289399458)が成功した。公開成果物を必要とする8 gateは意図どおりskip、失敗0・pending 0、`MERGEABLE`である。merge / releaseは実施していない。
+- 詳細: `progress/2026-08/2026-08-30_hover-pocket-codex-appserver-voice.md`。
+
+## 2026-08-30 macOS配布bundle Realtime回帰
+
+- 現行HEAD `9068d9674883a4916787dc62ef64e854dabfd97e`を`0.1.0 (597)`としてDeveloper ID署名・Apple公証し、submission `10bf95ad-0d86-4137-9336-cce2d8922937`は`Accepted`、app / ZIP再展開後のcodesign、stapler、Gatekeeper、SHA-256、appcast、公開dry-runまで成功した。ただし配布bundleの`--verify-codex-app-server-realtime`だけが再現性をもって失敗したため、build 597はRCとして不採用とした。GitHub Release / appcast公開はしていない。
+- Debug / Release CLIはRealtime接続まで成功する一方、Developer ID署名bundleはWebKitのmDNS host candidate登録に失敗した。verifierへ非機密の固定段階code、本番と同じcustom URL scheme、検証中だけの1px offscreen host windowを追加した。通常VoiceとverifierのICE待機は、candidate取得済みなら3秒、未取得なら従来上限8秒まで待ち、8秒後は後段の接続判定へ進む方式に統一した。
+- `NSLocalNetworkUsageDescription`へWebRTC Voice接続だけの用途を明記し、Bonjour browse / advertise、`NSBonjourServices`、multicast entitlementは追加していない。現在の開発Macでは署名bundleが`realtime_probe_connection_unavailable`のままで、System SettingsのLocal Network許可を伴う人手readbackが残る。テスト用build 598は未公証・非RCである。
+- 配布package scriptがprocess名だけで既存HoverPocketを停止し、維持対象だった物理E2E PID 56971も停止する回帰を検出した。同じruntime rootはfresh制約で再利用せず、新しい隔離sessionをBuild / Run / ReadbackしてPID 70741を復旧した。build scriptはcanonicalな`--voice-e2e --voice-e2e-root`引数を持つprocessを停止対象から除外し、その後の配布package実行後もPID 70741が生存することをreadbackした。
+- 独立エージェントは初回、ICEを一律3秒で確定すると3〜8秒にcandidateが出る正常系を落とすP1を1件検出した。上記hybrid waitへ修正後の最終再レビューはP0 / P1 / P2すべて0件。Debug / Release warnings-as-errors、Capability 20、Broker 21 descriptor / 20 handler、Pocket Surface / App、Timer、Panel 128、Voice静的42、Codex実モデルTimer、CLI Realtime、E2E isolation、Pocket contract 15 schema / 71 fixture、release readback 23 test、receipt / performance self-testはすべてPASSした。
+- 修正commit `248539b05bccc7ece521a3d9c34bad5ae5e2ad7b`のDraft PR #39は15成功・公開artifactを要する8 gate skip・失敗0・pending 0、Draft / OPEN / MERGEABLE / CLEAN、remote parity 0 / 0をreadbackした。merge / releaseは実施していない。
+- product source exact HEAD `9961543db7c6502381830954c738029bf8da4c8d`をbuild `599`としてDeveloper ID署名・公証した。Apple submission `52ecaaec-4b2c-4d44-97f7-57cb20dce3a2`は`Accepted`で、ZIP SHA-256は`747c4e43cfc65d9cbd0fde5d960834f87f4df7cb41cfab82eb224cd6a10f302d`、sizeは`10138820` bytes。別の一時directoryへZIPを展開し、top-levelが`HoverPocket.app`だけ、bundle ID `local.codex.hover-pocket`、version `0.1.0`、build `599`、appcast version / URL / length一致、strict codesign、stapler、Gatekeeper `Notarized Developer ID`をreadbackした。公開releaseは作成していない。
+- build 599配布bundleのCapability、Broker、Pocket Surface / App、Voice Foundation / E2E isolation、Codex app-server foundation / 実モデルTimer toolはPASSした。標準VoiceはOpenAI API keyではなくChatGPT accountのCodex app-serverを使い、Realtime BYOKは明示選択時だけの代替経路のままである。
+- build 599配布bundleの`--verify-codex-app-server-realtime`だけは`realtime_probe_connection_unavailable`で失敗した。署名bundleのLocal Network許可と物理音声往復が未確認のため、build 599は公証・成果物検証済みcandidateだがVoice対応RCとしては未受入である。
+- 再レビュー済みのhybrid ICE待機は、candidateが3秒以内に得られた場合だけ早期継続し、未取得時は8秒まで正常接続余地を維持する。独立エージェントの最終判定はP0 / P1 / P2すべて0件で、通常hot pathの追加は解除されるtimer最大2個、purpose stringとverifier専用1px windowには常駐処理がない。過剰安全による正常動作・CPU / RSS /起動性能の有意な悪化は認めなかった。
+- 隔離物理Voice E2EはPID `70741`、fresh runtime `HoverPocketVoiceE2E-wevAYd`で稼働を維持し、公証・ZIP独立展開・packaged verifier後も生存をreadbackした。停止・再起動はしていない。
+
+## 2026-08-30 AN8 macOS notarized release candidate build 583
+
+- Windows正式署名は、まず無料のSignPath Foundation OSS枠を使用する方針とした。申請、受入、CI origin verification接続は未完了であり、正式Windows署名の完了とは扱わない。
+- exact head `cd71796aabceee56407e1b738c5ceb59255d1c86`からmacOS `0.1.0 (583)`をDeveloper ID Applicationで署名し、Apple notary submission `a11f687d-ce71-463f-bd5d-7080b8b21214`が`Accepted`となった。appへticketをstapleし、app本体と最終ZIP再展開後の両方で`codesign --deep --strict`、`stapler validate`、`spctl`が成功した。
+- リリース候補`HoverPocket-0.1.0-583.zip`のSHA-256は`6dbcba8649850a7c36bdc493af266a41a73871e321c15d88d2d9609c72b1157f`。ZIPのtop-levelは`HoverPocket.app`のみで、appcastはbuild 583、version 0.1.0、versioned URL、Sparkle EdDSA signatureを持つ。公開scriptのnotarized dry-runも成功した。
+- notarization済みappバイナリからCapability、Broker、Pocket Surface、Pocket App package / lifecycle / generation / migration / health / workspace backup、Voice Foundation、Voice E2E isolation verifierを実行し全件成功した。release用entitlementsはApple Events、microphone、cameraの3件、hardened runtimeとsecure timestampを確認した。
+- GitHub releaseと`macos-latest`は更新していない。一般公開版は引き続き`0.1.0 (168)`である。build 583はDraft PR #39の未公開候補であり、物理マイク / remote audio / transcriptのユーザー確認、PR Ready / merge判断が完了するまで公開しない。
+- 詳細: `progress/2026-08/2026-08-30_hover-pocket-an8-macos-release-candidate.md`。
+
+## 2026-08-29 AN8 Windows署名配布・readback・transition契約
+
+- ChatGPT Pro Orchestrator delivery `return-1e6256872e7bbbcef22f6e3a91b220ac`をbase / artifact hash / pathで検証し、formal専用MSI、schema 2 manifest、公開asset readback、署名 / publisher照合、manual install / rollback transitionの契約を適用した。betaとproduction機能は引き続きOFFである。
+- Security finding `csf_e7d87707f7a44496d2c2d690`を修正し、IdentityOnlyからMSI DB / `msiexec /a`を到達不能にした。formalはtimestamped署名とcanonical certificate pinの後だけMSIを解析する。PowerShell AST契約をWindows CIへ追加し、将来の別call siteもguard外なら拒否する。
+- code head `7b0dd71725d6dd18648c79823ef0cda99122d870`でPR #39は19成功・16 gate skip・失敗0・pending 0、`MERGEABLE / CLEAN`。Windows [33256015304](https://github.com/shotaro311/hover-pocket/actions/runs/33256015304)はRelease / Debug / MSI build警告0・エラー0、署名契約とAST契約、Voice 42件、Broker、Settings、UIを成功した。release readback、transition syntax、macOS、3 OS contractも成功した。
+- Pro runはgeneration 2の全7 acceptanceとlocal verificationをPASSにし、terminal receipt `complete`、delivery `synthesis_completed_at`までreadbackした。既存公開release readback [33256489278](https://github.com/shotaro311/hover-pocket/actions/runs/33256489278)はWindows package identityとmacOS署名 / notarization / Gatekeeperを成功した。
+- 初回の実Windows transitionでGUI executableの`$LASTEXITCODE`未定義と、公開版へbuild-time OAuth照合値を要求する責務混在を検出した。`Process.ExitCode` readbackと公開版Updater verifierへ修正し、head `f9fa4267f237c7e6e1bd7780c46e68d5a2a277a2`でWindows [33256921874](https://github.com/shotaro311/hover-pocket/actions/runs/33256921874)を含む13 check成功・11 gate skip・失敗0、Draft / CLEANを確認した。
+- 実transition [33256955463](https://github.com/shotaro311/hover-pocket/actions/runs/33256955463)は公開Windows beta `0.2.6 → 0.2.7 → rollback → re-upgrade → uninstall → reinstall`とuser data保持をartifact receiptから確認した。macOSの公開版transitionも [33256490541](https://github.com/shotaro311/hover-pocket/actions/runs/33256490541) で成功した。
+- 正式署名済みMSI/helperの生成・公開とそのtransition、通常Windows hostのUAC、公開後formal Authenticode readback、物理Voice / 実モデル生成は未完了。Draft PR #39はReady / mergeへ進めず、production setup / generation / activationをOFFで維持する。
+- 詳細: `progress/2026-08/2026-08-29_hover-pocket-ai-native-final-integration.md`。
+
+## 2026-08-29 Windows Settings fixed-helper UAC boundary
+
+- ChatGPT Pro Orchestrator delivery `return-ef597cc5f3b9dee4a03b6d500d8a06f2`をclaim-synthesisで検証し、base `cc70c140cfccf28551a67b2dd775233240de1fc8`、artifact SHA-256 `a675afd34a5b4483e9c68db3d45d2308d5a9eeed7a35b0f1752c0659ec2309a0`、変更対象7ファイルを照合して適用した。
+- Settings専用の将来境界として、固定`ProgramFilesX64` helperだけを解決するresolver、full path component / final object / launched process image identity、publisher metadata / Authenticode / certificate SHA pin、native default-No承認、exact request、単一`runas`起動、固定errorとreadbackを追加した。app-local helper copy / publishは除去した。
+- SecurityレビューでWinVerifyTrustのcache-only / revocation無効候補を検出し、Shellとhelperの両側をwhole-chain revocation、root除外、cache-only fallbackなしへ修正した。revocation確認不能もUAC前にfail closedとする。
+- 初回Windows run [33251115377](https://github.com/shotaro311/hover-pocket/actions/runs/33251115377)はRelease / Debug buildとhelper / MSI contractまで成功後、Win32 flagを.NET `FileOptions`へ渡したSettings verifierだけが`ArgumentOutOfRangeException`で失敗した。directory / reparse handle openを`CreateFileW`へ修正し、identity pinの意味を維持した。
+- 修正code head `82da1b7c110087b926010556869f6d8f63088d00`でWindows [33251291505](https://github.com/shotaro311/hover-pocket/actions/runs/33251291505)、macOS [33251291487](https://github.com/shotaro311/hover-pocket/actions/runs/33251291487)、3 OS contract / compare [33251291502](https://github.com/shotaro311/hover-pocket/actions/runs/33251291502)、Router [33251290676](https://github.com/shotaro311/hover-pocket/actions/runs/33251290676)の7 / 7 checkが成功した。WindowsはRelease / Debug build警告0・エラー0、Settings、helper / MSI contract、Voice 42件、Broker、Pocket App generationをログ本文からreadbackした。
+- Codex Security scan `92657ca5-0536-4875-8ad7-c45d2920458b`はexact range `cc70c140cfccf28551a67b2dd775233240de1fc8..82da1b7c110087b926010556869f6d8f63088d00`、snapshot `codex-security-snapshot/v1:sha256:5c94d0b10292c8061dbe33398491463ee47d826dd4f1458e7af02f430e9c5c29`、対象9ファイル、6 surface、reportable finding 0件、coverage partialでsealed完了した。署名済みhelper /物理UAC / elevated process cleanupはfollow-upとして分離した。
+- ローカルではSwift warnings-as-errors build、15 schema / 71 fixture、Codex auth / confinement、macOS Voice E2E receipt / renderer、Voice 42件、Capability / Broker / Pocket Surface / Pocket App package・lifecycle・generation・migration・health・workspace backup、Timer、`git diff --check`が成功した。
+- 通常Windowsでの署名済みhelper、UAC normal / cancel / timeout、elevated process-tree cleanup、post-start identity readbackが揃うまでproduction setup / generation / activationはOFF、Draft PR #39はReady / mergeへ進めない。
+- 詳細: `progress/2026-08/2026-08-29_hover-pocket-ai-native-final-integration.md`。
+
+## 2026-08-29 Windows Codex sandbox per-machine installer
+
+- `HoverPocket.CodexSandboxSetup`のself-contained `win-x64` publish一式を、専用per-machine MSIから固定`%ProgramFiles%\HoverPocket\CodexSandboxSetup`へ配置する契約を追加した。WiX SDKは法的受諾を自動化しない5.0.2へ固定し、embedded cabinet、固定UpgradeCode、64-bit component、major upgrade / uninstallだけを持たせた。
+- `verify_codex_sandbox_installer.ps1`はMSI databaseを別経路で開き、`ALLUSERS=1`、ProductVersion / UpgradeCode、Program Files ancestry、全componentの64-bit属性、helperの一意性、embedded cabinet、upgrade順序を検証する。CustomAction、service、registry、environment、shortcutは0件を必須にする。
+- code head `209931a9faa541f1e33344908b66dfa4cb7c8336`のWindows run [33228860540](https://github.com/shotaro311/hover-pocket/actions/runs/33228860540)でMSI buildは警告0・エラー0、`PASS Codex sandbox per-machine installer contract`となった。Router、3 OS Pocket contract / compareも成功した。
+- Codex Security diff scan `71e7156e-74ac-4998-9c82-bc00a0a08c6c`をexact range `5c29adfbdf3b06b89c211d3f3bc0ed75f5911f8d..209931a9faa541f1e33344908b66dfa4cb7c8336`でsealed completeとし、per-machine固定root、MSIの禁止table、upgrade順序、CI publish / readback、production fail-closedの5 surfaceをcoverage complete、reportable finding 0件で確認した。署名、installed ACL / object identity、Settings UAC、実機install / upgrade / rollback / uninstallは別gateとして除外した。
+- 同headのmacOS Capabilities [33228860545](https://github.com/shotaro311/hover-pocket/actions/runs/33228860545)は、既存の10ms timeout対100ms handler fixtureだけが`timeout_status`で失敗した。直前19 runとローカル30回は成功しており、macOS / Windows双方のfixtureをtimeoutでcancelされるまで30秒待つ形へ変更した。Swift buildと修正後50回連続のBroker verifierは成功した。
+- 修正head `6c9e4708a8cf0dcc1b24107c2f4cf8d8665656e4`でWindows [33248167930](https://github.com/shotaro311/hover-pocket/actions/runs/33248167930)、macOS [33248167915](https://github.com/shotaro311/hover-pocket/actions/runs/33248167915)、Router [33248166883](https://github.com/shotaro311/hover-pocket/actions/runs/33248166883)、push / PR起点の3 OS contract [33248165880](https://github.com/shotaro311/hover-pocket/actions/runs/33248165880) / [33248167921](https://github.com/shotaro311/hover-pocket/actions/runs/33248167921)を含む11 / 11 checkが成功した。WindowsはRelease / Debug build警告0・エラー0、`broker_verify=ok`、helper contract、MSI contract、Voice 42件を、macOSはbuild、`broker_verify=ok`、Voice 42件をログ本文からreadbackした。
+- MSIとhelperの署名、Settingsによる固定origin / publisher / object identityの検証、UAC dispatch、Windows実機physical canaryは未実装である。production setup / generation / activationは引き続きOFF、Draft PR #39はReady / mergeへ進めない。
+- 詳細: `progress/2026-08/2026-08-29_hover-pocket-ai-native-final-integration.md`。
+
+## 2026-08-28 Windows Codex setup semantic readback
+
+- OpenAI Codex `rust-v0.145.0` / commit `25af12f7e61572b0bc18ddb1008be543b91519b0`の実装を照合し、`setup_marker.json`と`sandbox_users.json`をversion 5のexact schemaとして意味検証する`CodexSetupReadbackVerifier`を追加した。unknown / duplicate field、非canonical base64、無効なusername、同一password、空でないproxy / read / write rootsを拒否する。
+- machine-scope DPAPIで2つのpasswordを復号し、公式実装と同じ24 byte・`ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+`の文字集合・相互に異なる値を要求する。managed / native plaintextをzero化し、native bufferを`LocalFree`する。
+- 初期案の英数字限定が公式passwordの記号を誤拒否する不一致を実ファイル照合で検出し、コミット前に公式文字集合へ修正した。
+- ローカルではhelper contract、Release / Debug全solution build警告0・エラー0、Settings target、Voice Foundation 42件、YAML parse、変更file限定format、`git diff --check`が成功した。
+- Codex Security diff scan `b89a6dad-fb92-44f2-b70e-81c931e7b3a1`はworking-tree snapshot `codex-security-snapshot/v1:sha256:f5246e1fe992305b4426d541c20c5c989fc0a32c019c83b71012ce2771f6f47e`を3 / 3 authoritative item、6 surface、coverage complete、reportable finding 0件でsealed completeとした。path checkとreadの間隔は、readback完了までhomeがadmin-onlyであるため現状の非管理者attack pathから棄却し、ACL順序変更時の再監査条件として残した。
+- 実装commit `7f5ab9938057ae9aad92b2519b50ba6d6dd938f3`のWindows run [33177820477](https://github.com/shotaro311/hover-pocket/actions/runs/33177820477)で、Windows専用machine-scope DPAPI round-tripを含む`PASS Codex sandbox helper contract`、vendor closure、Release / Debug buildと全既存Verifierが成功した。
+- 同headでRouter [33177819003](https://github.com/shotaro311/hover-pocket/actions/runs/33177819003)、macOS Capabilities [33177820374](https://github.com/shotaro311/hover-pocket/actions/runs/33177820374)、3 OS contract / compare [33177820470](https://github.com/shotaro311/hover-pocket/actions/runs/33177820470)を含むPR check 7 / 7が成功した。Draft PR #39は`MERGEABLE / CLEAN`である。
+- production setup / generationは引き続きOFF。残りは、署名済みhelperを固定Program Files originへ配置するper-machine installer、SettingsからそのoriginだけをUAC起動する契約、通常Windows hostのphysical canaryである。
+- 詳細: `progress/2026-08/2026-08-28_hover-pocket-ai-native-final-integration.md`。
+
+## 2026-08-28 Windows Codex sandbox native helper internal implementation
+
+- `HoverPocket.CodexSandboxSetup`内部に、`%ProgramData%`配下の管理者所有root、公式Codex 0.145.0の6ファイルclosureを複製済みhandleから固定配置する処理、nonceごとのsingle-use Codex Home、固定argument / cleared environment、Job Objectによる子process所有、実行後marker / attestation readbackを実装した。production setup dispatchとSettingsからのUAC接続は引き続きOFFである。
+- nonce Homeは既存objectがあれば`HP_CODEX_SANDBOX_TARGET_ALREADY_EXISTS`で拒否し、attestationは元user SIDだけが読めるSID別directoryへ保存する。Builtin Usersへのidentity metadata公開と、同じnonce Homeを再利用する条件付きgapを実装段階で閉じた。
+- ChatGPT Pro Orchestrator run `20260828-205951-...`は`sent-state-unknown`から同じsessionのbounded harvestを2回行ったがartifactを回収できず、terminal化して`mark-done`した。同じpromptは再送せず、Skillが許可するblocked時のCodex実装へ切り替えた。
+- Codex Security scan `ddedf27f-5261-41f9-8522-1d08412fbc66`は修正前working-tree snapshot `codex-security-snapshot/v1:sha256:a8adc5749b8f661509a2fbb2d099472b5263ff405b422d041ca32a848a08aaad`を5 / 5 surface、coverage complete、reportable finding 0件で完了した。single-use HomeとSID限定attestationは条件付きgapとして残ったため、その後の実装で修正した。このscanを修正後head全体のSecurity合格証拠としては扱わない。
+- ローカルではRelease / Debugの全solution buildが警告0・エラー0、helper contract self-test、production pre-parse exit 21、Settings JavaScript、Voice共通契約42件、workflow YAML、`git diff --check`に合格した。変更file限定の`dotnet format whitespace --verify-no-changes`は合格し、全solution formatは今回と無関係な既存whitespace差分で不合格のため変更していない。
+- code head `f63e265f91ad1366369dc6a9c39b72c392701368`のWindows run [33175266675](https://github.com/shotaro311/hover-pocket/actions/runs/33175266675)は、helper contractとvendor closureの合格後、PowerShellがnative exit 21をassert前にjob失敗として扱うCI harnessだけで失敗した。`ProcessStartInfo`でstdout / stderr / exit codeを明示取得する修正後、code head `48933374f8a5c29cc764ad52bce95c09641594f9`のWindows run [33175584387](https://github.com/shotaro311/hover-pocket/actions/runs/33175584387)は全stepに合格した。
+- 同headでRouter [33175576923](https://github.com/shotaro311/hover-pocket/actions/runs/33175576923)、macOS Capabilities [33175583944](https://github.com/shotaro311/hover-pocket/actions/runs/33175583944)、3 OS contract / compare [33175584002](https://github.com/shotaro311/hover-pocket/actions/runs/33175584002)を含むPR check 7 / 7が成功し、Draft PR #39は`MERGEABLE / CLEAN`である。
+- 未完了gateは、署名済みhelperの固定admin-owned installer配置、そこからだけ起動するSettings UAC、`sandbox_users.json`の意味検証、通常Windows hostでのwhole-home / nested reparse・UAC取消・timeout descendant・正常setup・post-readback fail-closedのphysical canaryである。これらと実モデル生成readbackが揃うまでproduction generatorを有効化しない。
+- 詳細: `progress/2026-08/2026-08-28_hover-pocket-ai-native-final-integration.md`。
+
+## 2026-08-28 Windows Codex sandbox production fail-closed remediation
+
+- Security finding `csf_3caf7ab99af268f9b88d011e`への即時対処として、Settings bridge、production provisioner、production generator resolver、管理者PowerShellのsetup / repair全入口を固定errorで閉じた。旧setup-v5 markerや既設`codex.exe`だけではproduction生成を再有効化しない。
+- forged Settings requestはpickerと承認より前に停止し、production provisionerの直接呼び出しもbinary copy、directory作成、管理者判定、process起動へ進まない。Settingsは初回state readback前からsetupボタンを無効化する。
+- ChatGPT Pro Orchestrator run `20260828-113152-...`は`sent-state-unknown`から同一session回収を試みたが、bounded recoveryの総時間上限でartifact未回収のままblockedとなった。再送せず、Skillが許可するPro blocked時のCodex再実装へ切り替えた。
+- `git diff --check`、Settings JavaScript構文、initial disabled回帰、Voice共通契約42件、workflow YAML parseは成功した。独立したread-only bypass / regression reviewではserver-side bypass 0件、初期ボタン有効の表示回帰1件を検出し、修正後の回帰検証が成功した。
+- code head `8658d6cc078287a3ad98fe3b5e6dfef46f727daf`のPR Windows run [33168494246](https://github.com/shotaro311/hover-pocket/actions/runs/33168494246)で、PowerShell parser / self-test / nonexistent-drive Check・Provision、Release / Debug build、Settings / Pocket / Voice / Updater / rendered UI verifierがすべて成功した。Release / Debug buildは警告0・エラー0である。
+- 同headでmacOS Capabilities [33168494251](https://github.com/shotaro311/hover-pocket/actions/runs/33168494251)、3 OS contract / compare、Routerを含むPR check 7 / 7が成功し、PRは`MERGEABLE / CLEAN`である。
+- read-only Security verifyはfinding `csf_3caf7ab99af268f9b88d011e`を`fixed`と判定した。元の昇格sinkはproduction全入口から到達不能で、既存Settings・Voice・Capability契約もCIで維持された。これは元の脆弱経路の修正判定であり、安全な正規setup機能の完成判定ではない。
+- 中間のWindows run [33168222594](https://github.com/shotaro311/hover-pocket/actions/runs/33168222594)と[33168369422](https://github.com/shotaro311/hover-pocket/actions/runs/33168369422)は製品実装ではなくfail-closed CI harnessの配列binding / native nonzero捕捉で失敗し、`.NET ProcessStartInfo`でexit codeとstderrを明示取得する形へ修正後に上記runで成功した。
+- これは安全な停止境界であり、最終機能の代替ではない。署名済みnative helper、元user SID binding、admin-owned root、公式Codex resource closureのexact検証、absolute-path起動、single-flight、child process所有、実UAC canaryは未完了である。
+- 詳細: `progress/2026-08/2026-08-28_hover-pocket-ai-native-final-integration.md`。
+
+## 2026-08-28 AI-native final-head security gate
+
+- Draft PR #39のcode head `a20a35f1e2480e6e5e557f43256699fe5567be51`は、Router、Windows Verify、macOS Capabilities、macOS / Windows / UbuntuのPocket contract compareを含む全7 checkが成功した。通常ユーザーWindows実機の隔離taskでも、provisioning self-test、未準備時の`HP_CODEX_SANDBOX_NOT_READY`、Release build警告0・エラー0、Settings / Pocket Surface verifier、配布物へのprovisioning script混入0をreadbackした。
+- Codex Security diff scan `47c3e1c5-ce27-4c96-8d1e-6d522c79b040`をexact range `16090d7a86c81ab19d85018462814c7279bb8801..a20a35f1e2480e6e5e557f43256699fe5567be51`で完了し、59 / 59 review item、3 / 3 candidate validation、coverage complete、sealed artifactを再読込した。
+- reportable findingは1件で、severityはmedium、occurrenceは`occ_6b501da2f23a262f400826dd`。固定Codex executableのsize / SHA / handle pinは任意binary差し替えを防ぐが、固定`codex-home`のdirectory identityをUAC前に保持しないため、同一ユーザーのmedium-integrity processが事前配置したjunctionを公式Codex setupが昇格後に再解決し、reparse先へfile作成またはDACL変更を行う可能性がある。
+- actual Windows UAC setup、junction canary、positive elevated confinementは実行していない。production generation / activationは引き続きfail closedであり、現行setup / repairを実用リリースの受入対象から外した。
+- 次の実装gateは、trusted native elevated helperで各path componentのreparseを拒否し、handle-relativeなdirectory identityを全昇格処理の終了まで保持すること。無害なadmin-owned canary rootでwhole-home / nested reparse拒否、target不変、正常setup、UAC取消、post-readback失敗時のfail closedを検証する。
+- 詳細: `progress/2026-08/2026-08-28_hover-pocket-ai-native-final-integration.md`。
+
+## 2026-08-27 AI-native AN5 Codex auth control-plane runtime canary
+
+- macOS / Windowsの生成adapterへ、Host resourceのSHA-256を固定したstatic model catalogを追加した。modelは`gpt-5.6-sol`、reasoning effortは`medium`へ固定し、生成processからremote `/models`へアクセスさせない。
+- catalogはregular file、size、digest、model、tool / search / parallel / multi-agent無効化をHostが検証してから、fresh workspaceへread-onlyでコピーする。改ざんbytesは両OSの決定論的Verifierで拒否する。
+- exact signed `codex-cli 0.145.0`を使う非機密surrogate canaryで、2回のResponses request、remote model catalog access 0、auth helper起動1回、モデルtoolからhelper read / execute拒否、request body / stdout / stderr / temp diskへのcredential非残留をreadbackした。さらにHost固定のgeneration output schemaが両Responses requestへ結合され、Codex stdoutがToday Focus Pocket envelopeのcanonical JSONだけになることを確認した。
+- Swift warnings-as-errors build、Pocket App package / lifecycle / generation / migration / health / workspace backup、Capability、Broker、Pocket Surface、Voice Foundation、Panel layout、Timer、15 schema / 71 fixtureの2回byte一致、workflow YAML、`git diff --check`が成功した。
+- exact working-tree Security scan `d01e40c3-9ea3-47d7-875b-c0dd6e3fff3b`はsnapshot `codex-security-snapshot/v1:sha256:26f7188cdd471fd51706f8e9cb48e83e286607f49675836f6f941bdb522a9929`、changed source 8 / 8、coverage complete、reportable finding 0件でsealed completeとなり、完成manifest / findings / coverageを再読込した。
+- generation schema縦断追加のexact working-tree Security scan `6386a980-8f9a-4988-85fa-9f5c38f2fe7c`はsnapshot `codex-security-snapshot/v1:sha256:68d21b2a3cceb696b23002109acb2a40dc1571a33bea0f3984f0057d9753dc0d`、changed source 1 / 1、coverage complete、reportable finding 0件でsealed completeとなった。schema / fixture差し替えとcredential漏えいの候補は、固定digest、両requestのexact schema一致、canonical stdout完全一致、実Codex canaryのbody / output / disk非残留で閉じ、完成manifest / findings / coverageを再読込した。
+- code head `034f5f3fd587a55e58c404a482e8881f8e330be7`でRouter [33031829954](https://github.com/shotaro311/hover-pocket/actions/runs/33031829954)、Windows [33031831285](https://github.com/shotaro311/hover-pocket/actions/runs/33031831285)、macOS [33031831272](https://github.com/shotaro311/hover-pocket/actions/runs/33031831272)、3OS Pocket contract [33031831229](https://github.com/shotaro311/hover-pocket/actions/runs/33031831229)がすべて成功した。macOS logで新auth control-plane self-testと`pocket_app_generation_verify=ok`、Windows logでRelease / Debug warning 0 / error 0、`generation-parent-chain`、`pocket_app_generation_verify=ok`、3OS reportのbyte一致をreadbackした。push起点の重複contract [33031829090](https://github.com/shotaro311/hover-pocket/actions/runs/33031829090)も成功した。
+- Draft PR #39は同headで`Draft / OPEN / MERGEABLE / CLEAN`、review / comment 0件である。
+- 同じToday Focus fixtureはHost製品Verifierでschema検証、preview、承認、install、update、rollback、disable / enable、remove、readbackまで成功した。これはmock Responses transportの隔離証拠であり、実モデル生成の代替にはしない。
+- production gateは変更していない。macOS `supportsConfidentialGeneration == false`、Windows `ResolveExecutable() == null`、両OS preview-onlyを維持する。Windows compile / Verifierは更新headのPR CIで確認済みだが、native elevated positive canaryは通常Windows hostの独立gateとする。
+
+## 2026-08-27 AI-native AN5 Codex生成credential delivery接続
+
+- Codex 0.145.0のcommand-backed custom providerはauth helperをstdinなしで起動することを公式config契約とexact sourceで確認した。旧v1 helperのHost起動・stdin bootstrapは独立contract testとして残し、production生成用にはHost → Codex生成process → auth helperの親子関係からendpointを導出するv2を追加した。
+- macOSはHost PIDとCodex生成PIDからowner-only Unix socketを作り、helperのsame UID、Codex直接child、HoverPocket designated requirementをserver側で確認する。helper側もserverのexact Host PIDとdesignated requirementを確認する。
+- Windowsは同じPID pairから`CurrentUserOnly` named pipeを作り、OSが返すclient / server PID、Codex直接child、`Environment.ProcessPath`一致を相互確認する。providerはCredential Managerを認証済みrequest後に遅延readする。
+- 両OSともAPI key、endpoint、capabilityをargument、environment、workspace、receipt、logへ置かない。内部leaseは30秒・1回限りで、provider失敗を含む最初のredeemで消費し、broker終了時にsocket / pipeを閉じる。model toolのfilesystem profileはhelper executable pathを明示denyする。
+- Codex custom providerは`auth.command`、constant helper arg、`auth.refresh_interval_ms=0`、request / stream retry 0へ固定した。直接bearerやcredential環境変数は使わない。
+- production gateは変更していない。macOSは`supportsConfidentialGeneration == false`、Windowsは`ResolveExecutable() == null`、両OSはpreview-onlyを維持する。実API key、実model生成、activation、実マイク、署名、配布には接続していない。
+- 最新差分でSwift warnings-as-errors build、Pocket App package / lifecycle / generation / migration / health / workspace backup、Capability、Broker、Pocket Surface、Voice Foundation、Timer、15 schema / 71 fixture、Voice静的42件、Windows JavaScript構文、`git diff --check`が成功した。macOS verifierはv1 one-shot / replay / expiry / mutual identityに加え、v2 Host → generation probe → helper parent chainとsocket cleanupを実実行した。
+- exact working-tree Security scan `55b573a8-4b94-4ec0-b077-286887885e00`はsnapshot `codex-security-snapshot/v1:sha256:bb7ef31f647030015b83542f5230dbe7dfd08936c7e631c9bb2e835630967ef0`、changed source 10 / 10、coverage complete、reportable finding 0件でsealed completeとなり、完成manifest / findings / coverageを再読込した。
+- code head `ab7fcc8dd75c97f4bcd59aa7d8cf1061c9296991`はremote parity `0 / 0`であり、Router [33028857939](https://github.com/shotaro311/hover-pocket/actions/runs/33028857939)、Windows [33028858902](https://github.com/shotaro311/hover-pocket/actions/runs/33028858902)、macOS [33028858917](https://github.com/shotaro311/hover-pocket/actions/runs/33028858917)、3OS Pocket contract [33028858939](https://github.com/shotaro311/hover-pocket/actions/runs/33028858939)がすべて成功した。重複push run [33028856731](https://github.com/shotaro311/hover-pocket/actions/runs/33028856731)も3OS verifier / byte一致を含め成功した。
+- Windows logで`generation-parent-chain`の開始・終了、`pocket_app_generation_verify=ok`、Release / Debug Voice E2E buildのwarning 0 / error 0をreadbackした。macOS logでもSwift buildと`pocket_app_generation_verify=ok`をreadbackした。Draft PR #39は`Draft / OPEN / MERGEABLE / CLEAN`、review / comment 0件である。
+- 残る受入は、通常Windows hostのelevated positive confinement、実モデルを使うauth control-plane / model-tool helper deny分離、credential非永続readback、Pocket App DSL生成からrollback、両OS物理Voice E2E、正式署名・配布である。
+
+## 2026-08-27 AI-native AN5 macOS Codex sandbox実行canary
+
+- 本番Pocket App生成の`supportsConfidentialGeneration == false`を維持したまま、固定vendor path、OpenAI Developer ID署名、Team ID、strict codesign、exact `codex-cli 0.145.0`を満たす実行体だけを許可するmacOS verifierを追加した。symlink、非regular file、group / world writable、想定外owner・version・署名は実行前にfail closedで拒否する。
+- fresh temp rootへread-only workspace、deny Codex Home、deny virtual User Home、専用TMPDIRを作り、別sibling rootとloopback listenerを置いた。`codex sandbox -P hoverpocket-generation`でworkspace readのみ成功し、workspace write、Codex Home read、User Home read、outside-root read、loopback接続がすべて拒否されることを実実行でreadbackした。
+- childは10秒上限とprocess group TERM / KILL、stdout / stderr上限、exact JSON結果、stderr canary非露出、validated temp cleanupへ閉じた。receiptはversionとallowlist booleanだけで、秘密値、canary本文、path、PIDを含めない。CIは署名済みCLIの存在へ依存させず、全判定反転とpermission markerを確認する`--self-test`だけを実行する。
+- ローカルでPython self-test、実sandbox canary、symlink CLI拒否、Swift warnings-as-errors build、Pocket App package / lifecycle / generation / migration / health / workspace backup、workflow YAML parse、`git diff --check`が成功した。実canary receiptはsigned executable、workspace read、write denial、両Home / outside-root read denial、network denial、listener未到達、stderr上限をすべてtrueとして返した。
+- exact working-tree Security scan `a020f0d1-bfde-401f-94ab-243146343be9`はsnapshot `codex-security-snapshot/v1:sha256:ff99dad207ee72deafdbf38d21001cb1444b175dfdd61da4a96ee2b4b838ee05`をcoverage complete、reportable finding 0件で封印・再読込した。workflow-only差分とproduction fail-closed root controlも補助surfaceとして確認した。
+- code head `8cd445b`はremote parity `0 / 0`であり、同じexact headを手動dispatchしたmacOS [33022481993](https://github.com/shotaro311/hover-pocket/actions/runs/33022481993)、Windows [33022484529](https://github.com/shotaro311/hover-pocket/actions/runs/33022484529)、3OS Pocket contract [33022486583](https://github.com/shotaro311/hover-pocket/actions/runs/33022486583)が成功した。最終進捗commitを含むhead `ebb0aa7`では遅れて通常のPR workflowも自動起動し、Router [33022842034](https://github.com/shotaro311/hover-pocket/actions/runs/33022842034)、macOS [33022844429](https://github.com/shotaro311/hover-pocket/actions/runs/33022844429)、Windows [33022844408](https://github.com/shotaro311/hover-pocket/actions/runs/33022844408)、3OS Pocket contract [33022844417](https://github.com/shotaro311/hover-pocket/actions/runs/33022844417)の全7 checkが成功した。
+- Draft PR #39は`Draft / OPEN / MERGEABLE / CLEAN`、review / comment / unresolved thread 0件である。macOS logで新self-test、Windows全既存Verifier、3OS byte一致をreadbackした。実マイク・実API・配布gateが未完了なのでReady / mergeには進めない。
+- Windows側はnative elevated sandboxをproduction templateへ固定し、unelevated backendがread-only profileを受理しないnegative-controlを追加した。pinned `codex-cli 0.145.0`のarchive / executable hash、Authenticode、signer、versionを検証し、CI [33024514348](https://github.com/shotaro311/hover-pocket/actions/runs/33024514348)でself-test、actual downgrade rejection、Release / Debug build、全既存Verifierをreadbackした。これはelevated成功の証拠ではない。
+- Windows exact code range `d8520c9...12aa701`のSecurity scan `0db33908-e8ec-4fe2-87b4-75079f34849c`はsnapshot `codex-security-snapshot/v1:sha256:ba93a9bd10cff7fd7dd79e08615faf1e7e1890f1a44006b66ec964d8060fb19a`、coverage complete、finding 0件でsealed completeとなった。productionは`ResolveExecutable() == null`、activationは`AllowsActivation == false`を維持する。
+- 残るgateは、通常Windows hostでのnative elevated positive canary、Host-owned一回限りcredential deliveryと実DSL生成、両OSの実マイク / API Voice E2E、正式署名、配布、rollbackである。これらが完了するまでproduction生成を有効化しない。詳細: `progress/2026-08/2026-08-27_hover-pocket-ai-native-final-integration.md`。
+
+## 2026-08-26 AI-native Core GA final integration candidate
+
+- main `a35b0ea8`とDraft PR #32〜#38のheadをGitHubから再確認し、ChatGPT Pro criticの独立レビューに固定した。Pro runは送信後のdownload処理で`setTypeOfService EINVAL`になったが、新規promptを送らず同じsessionをharvestし、standalone `integration-review.md`（SHA-256 `8e8bc5c4...5b80`）を回収した。exact head、統合順、競合責務、physical E2E / signing分離、stop条件の受入4 / 4をCodexがreadbackし、runをterminal化した。
+- exact #36 `16090d7`から隔離branch `codex/ai-native-core-ga-final-integration`を作り、#37 `7472c73`、#38 `5883925`、#35 `e4cd8f0`の順に統合した。R1は`8f3a348`、R2は`9201154`、R3は`b66392f`。#32〜#34は#35の祖先として1回だけ取り込み、再mergeしていない。
+- 競合はPro予測どおり`progress/progress.md`とWindows `Program.cs`に限定された。Windowsはcredential helperを`StartupOptions`、Velopack、WPFより先にterminal dispatchし、通常経路ではVoice E2E専用rootと本番rootの隔離を維持した。Windows workflowはRelease / Debug build、Pocket Surface timeout、Voice E2E isolation、PowerShell構文、既存signing contractをすべて保持した。
+- final headで`swift build -Xswiftc -warnings-as-errors`、Voice静的42件、Voice Foundation、Panel layout 128件、Capability 20 handler、Broker 21 descriptor / 20 handler、Pocket Surface、Pocket App package / lifecycle / generation / migration / health / backup、Timer、Pocket contract 15 schema / 71 fixtureの2回byte一致、Windows JavaScript / Settings生成先、`git diff --check`が成功した。
+- exact差分Security scanは39 / 39 sourceを確認し、sealed complete、reportable finding 0件だった。追加のrelease hardeningとして、Windows Debug Voice E2Eと通常Verifierの併用を明示拒否し、本番credential / Calendarへ再接続できる設定上書きを閉じた。macOSはマイク許可待ち中のcloseを世代管理し、遅れて返る音声streamを停止してSDP・session stateを残さないよう修正した。実行型のrenderer回帰、静的Voice契約、Swift warnings-as-errors build、製品Verifier、共通contractはローカルで成功し、Windows C# buildは更新headのCIをgateとする。
+- `b51e7f0`をbaseに、macOS実音声を本番状態から分離して検証するDebug専用E2E harnessを追加した。専用bundle / fresh temp root / ephemeral defaults / process-memory credential / Timer-only Provider Registryへ閉じ、Google OAuth、Calendar、Weather、Camera、Updater、production Application Support、UserDefaults、Keychainを使わない。Run / Stop / Cleanupはsession lockで直列化し、exact command / PID、top-level symlink・型・canonical containment、attempt-bound native confirmation、stopped receipt後のcleanupを検証する。
+- 秘密値・マイクなしの実ライフサイクルで、事前lock拒否、Run、receipt readback、隔離検証、allowlist名のsymlink拒否、Stop後の`safe_close` / credential 0、Trash cleanup、source path不在、exact process不在を別経路で確認した。Swift debug / release warnings-as-errors、Voice / Capability / Broker / Pocket App / Surface / Timer、Windows JavaScript、15 schema / 71 fixtureの2回byte一致、`git diff --check`も成功した。最終Security scan `710a8647-1d45-4f45-98dc-56d0b66a5909`はsnapshot `ad8cb7ef...`の20 / 20 fileをcoverage complete、finding 0件で封印した。
+- Draft PR #39 code head `c3435b1`で、Windows [32952589486](https://github.com/shotaro311/hover-pocket/actions/runs/32952589486)、macOS [32952589632](https://github.com/shotaro311/hover-pocket/actions/runs/32952589632)、Router [32952585405](https://github.com/shotaro311/hover-pocket/actions/runs/32952585405)、Pocket contractの全11 checkが成功した。macOSはE2E receipt self-test、renderer、静的Voice契約、隔離Verifierを含み、WindowsはRelease / Debug Voice E2E buildと全既存Verifierを含む。PRは`Draft / OPEN / MERGEABLE / CLEAN`、review / comment / unresolved threadは0件である。実API key、マイク、可聴remote audio、署名済みTCCは未実施である。
+- Draft PR [#39](https://github.com/shotaro311/hover-pocket/pull/39) hardening code head `b328243`で、Windows [32941881191](https://github.com/shotaro311/hover-pocket/actions/runs/32941881191)、macOS [32941881164](https://github.com/shotaro311/hover-pocket/actions/runs/32941881164)、Router [32941879235](https://github.com/shotaro311/hover-pocket/actions/runs/32941879235)が3 / 3成功した。WindowsはRelease / Debug buildが警告0・エラー0で、Voice E2E verifier mutual exclusion、PowerShell構文、signing contract、rendered WebView2まで成功した。macOSは新しいlate microphone capture回帰を実行し、track停止、stale state / SDP offer不在を確認した。両OSの実マイク・可聴remote audio、macOS notarization / Gatekeeper / Sparkle、Windows timestamped Authenticode / Velopack / feed、実配布rollback、stack mergeは未完了である。詳細: `progress/2026-08/2026-08-26_hover-pocket-ai-native-final-integration.md`。
+
+## 2026-08-26 AI-native AN3-B3B macOS Realtime Voice
+
+- AN3-B3A exact head `16090d7`から隔離worktreeとbranch `codex/ai-native-an3b3b-macos-realtime`を作り、macOSのOpenAI Realtime BYOK実音声transportを実装した。Voice Laneを有効にしただけではマイクを開始せず、パネルのマイク操作後だけ接続する。
+- API keyはKeychainからnative ephemeral `URLSession`へだけ渡し、非永続・非inspectable WebViewはmicrophone / WebRTC / remote audio / data channelだけを所有する。Calendar list/createとTimer startは共有Capability Registry / Broker、native承認、実行後readbackを経由する。
+- Voice承認を同時1件、拒否を含め60秒3件へ制限し、セッション終了・Calendar grant取消・credential変更で承認と処理を取消してadapterを再構築する。承認文面の単一行化、function異常時のmedia close、JavaScript mute / teardown readbackとfail-closed page resetも追加した。
+- Codex Security差分scan `5670016c-fea6-463c-a42b-6e9aea700b55`の5件のLowをすべて局所修正し、元の攻撃経路と対応回帰を再照合した。WebContent異常時の物理microphone停止は、静的fallbackだけでなく実機fault-injectionを最終gateとして残す。
+- ローカルではSwift warnings-as-errors build、Voice Foundation、Capability 20 handler、Broker 21 descriptor / 20 handler、Pocket App、Pocket Surface、Panel layout 128件、Timer、共通contract 15 schema / 71 fixture、Voice静的契約、`git diff --check`が成功した。SwiftPMにはTests targetがないため`swift test`は`no tests found`であり、製品内の決定論的verifierを正本とした。
+- Draft PR [#38](https://github.com/shotaro311/hover-pocket/pull/38) code head `a0140fa`で、Windows [32919662223](https://github.com/shotaro311/hover-pocket/actions/runs/32919662223)、macOS [32919662200](https://github.com/shotaro311/hover-pocket/actions/runs/32919662200)、Router [32919662240](https://github.com/shotaro311/hover-pocket/actions/runs/32919662240)が3/3成功した。PRは`Draft / MERGEABLE / CLEAN`、review / comment 0件、remote parity `0 / 0`である。
+- 未完了gateは、実API keyと実マイクによる発話・remote audio一往復、Calendar read/createとTimer startの実データ承認/readback、mute/end/WebContent異常時の物理track停止、stack PRの人手mergeである。詳細: `progress/2026-08/2026-08-26_hover-pocket-ai-native-an3-b3b-macos-realtime.md`。
+
+## 2026-08-26 AI-native AN3-B3B Windows実音声E2E security follow-up
+
+- exact base `16090d7a86c81ab19d85018462814c7279bb8801`からcode head `276e5eb57b06e45c0cc8f8a5ffe064b46040eeca`までをCodex Security scan `32812599-f0a7-4397-af98-fcce4a65990f`で確認し、Low 4件を検出した。coverageはchanged source 13 / 13である。
+- E2E receiptへHost発行media leaseと順序検証を追加し、rendererがHost-ownedのtransport detach / safe closeを記録する経路を除去した。さらにrenderer診断だけでは合格にせず、WPFのネイティブ確認ダイアログでユーザーが実マイク入力とremote audioを確認した場合だけ`physicalMediaUserConfirmed=true`を記録する。receipt schemaはv2とし、PowerShell `Validate`は実音声確認、Timer Capability readback、接続状態を必須にした。
+- media receipt telemetryはfire-and-forgetにし、未完了Promiseでもmicrophone / WebRTC cleanupが先に完了するharnessへ固定した。E2E API keyはCredential Managerへ永続化せずzeroing process-memory storeだけを使い、Productionは従来どおりCredential Managerを使う。E2E Panel / Settingsからの外部browser起動もHost policyで拒否する。
+- verify-fixでは、telemetry cleanup、credential persistence、external browserの3件をfixedと判定した。最初のrenderer receipt findingも、active rendererがleaseを知るだけではHost-owned user confirmationを作れず、最終`Validate`がその確認を必須にする現headでfixedと再判定した。renderer由来のmedia fieldsは診断情報であり、単独では合格証跡にしない。
+- ローカルで`node --check`（panel / i18n / settings）と`git diff --check`が成功した。このMacには.NET SDK / PowerShellがないため、Windows CIを必須gateにした。
+- Draft PR [#37](https://github.com/shotaro311/hover-pocket/pull/37) code head `ba1273fb832463307d4a41de3e0b769607d4677c`で、Windows [32914420289](https://github.com/shotaro311/hover-pocket/actions/runs/32914420289)はRelease / Debug build、Voice foundation、Voice E2E isolation、PowerShell構文、rendered WebView2を含む全stepが成功した。Router [32914419440](https://github.com/shotaro311/hover-pocket/actions/runs/32914419440)も成功し、PRは`Draft / MERGEABLE / CLEAN`、review / comment 0件である。
+- 未完了はWindows実機でのAPI key入力、実マイク、remote audio、Timer承認、ネイティブ実音声確認、`Validate`、Stop後cleanupのreadbackである。macOS AN3-B3Bは既存のChatGPT Pro runの正本delivery待ちで、重複promptは送らない。詳細: `progress/2026-08/2026-08-26_hover-pocket-ai-native-an3-b3b-windows-security.md`。
+
+## 2026-08-24 AI-native AN3-B3B Windows実音声E2E隔離基盤
+
+- `codex/ai-native-an3b3b-windows-e2e`をAN3-B3A exact head `16090d7`から分離し、Pro担当中のmacOS Realtime transportと重ならないWindows実機E2E基盤を実装した。
+- Debug専用fresh temp rootへ設定、WebView2、Provider data、Capability Broker、receiptを閉じ、本番と別のCredential Manager targetとIPCを使う。ReleaseはE2E flagsを拒否し、Updater / startup / Google Calendar / Controls / Clipboard / Codex app-server / AI-nativeはfail closedにした。
+- WebRTCのmicrophone、remote audio track / playback、teardownをHostへsafe eventとして返し、transcript本文・音声・SDP・API key・path・PIDを含まないallowlist receiptへatomic保存する。Timer Capability Brokerの実行後readbackもbooleanで記録する。
+- `voice_e2e_windows.ps1`へBuild / Run / Readback / Stopを追加した。ローカルではWindows UI JavaScript構文と`git diff --check`が成功した。このMacに.NET SDK / PowerShellがないため、C# warnings-as-errors、Debug verifier、PowerShell、rendered WebView2はDraft PR Windows CIを必須gateとする。
+- 現行OpenAI coordinatorはtranscript eventをsnapshotへ反映しないため、ProのmacOS artifactで共通event契約を確定してからWindowsへ統合する。実API keyを使うWindows物理E2EはCI後のWindows実機gateであり、秘密値・transcript・音声・SDPをartifactへ残さない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an3-b3b-windows-e2e.md`。
+- Draft PR #37の初回Windows run `32722365200`で検出した通常UI verifierの`clipboard.getState`未登録を、E2E隔離境界を`IsIsolatedVoiceE2E`へ限定して修正した。修正後run `32722634593`はRelease / Debug build、Voice E2E isolation、PowerShell構文、rendered WebView UIを含む全stepが成功した。code head `b8b1a912d9f657fd0792740c39b39c66d127fac3`は`Draft / MERGEABLE / CLEAN`、review / comment 0件、remote parity `0 / 0`である。
+
+## 2026-08-24 AI-native AN5 credential broker mutual process identity
+
+- PR #34 final head `81cf0eee`からstack branch `codex/ai-native-an5-credential-broker-mutual-identity`を分離し、Hostが実helperを起動してPIDを取得してからbrokerを作り、version付きbounded JSONを専用stdin pipeへ渡す起動順序へ変更した。endpoint / capabilityを環境変数やprocess argumentへ置かない。
+- macOSはclient / server双方でpeer UID、exact PID、designated requirementを確認する。Windowsは`GetNamedPipeClientProcessId` / `GetNamedPipeServerProcessId`のexact PIDとHoverPocket executable pathを双方で確認する。同じHoverPocket binaryでもHostが起動した対象PIDと異なるprocessは拒否する。
+- macOS verifierは実helper child成功、同一binary誤PID、誤server PID、Python foreign peer拒否を含むPocket App verificationを3回連続で成功した。warnings-as-errors build、Voice契約42件、Panel 128件、Capability / Broker / Surface / Timer、15 schema / 71 fixture、Windows JavaScript構文、`git diff --check`も成功した。
+- final head `1d55dab3`でWindows [32672304607](https://github.com/shotaro311/hover-pocket/actions/runs/32672304607)、macOS [32672304592](https://github.com/shotaro311/hover-pocket/actions/runs/32672304592)、PR Router [32672304100](https://github.com/shotaro311/hover-pocket/actions/runs/32672304100)が成功した。Windows Release buildはwarning 0 / error 0で、helper、foreign peer、same-binary wrong PID、wrong server PIDを含む全caseの終端をreadbackした。
+- final exact range `81cf0eee...1d55dab3`のCodex Security diff scan `210c26b0-0934-4e9d-875e-60e7fd663a63`は変更source 5 / 5件を確認し、reportable finding 0件で封印・再読込した。snapshot digestは`codex-security-snapshot/v1:sha256:ca026630152d323ee57fbdf94f326bbb28cb195b7106cad365a8aa73d3211126`。coverageは正式Authenticode publisher bindingとproduction store / confined generator E2Eだけをdeferred gateに残す。production generatorは未接続でfail-closedを維持する。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an5-credential-broker-mutual-identity.md`。
+- stacked Draft PR [#35](https://github.com/shotaro311/hover-pocket/pull/35)の初回Windows run [32672078767](https://github.com/shotaro311/hover-pocket/actions/runs/32672078767)では実helper childがtimeoutした。childは`Console.OpenStandardInput()`でredirect済みstdinを明示取得し、HostはCRLFではなくLFを明示書込みするよう修正した。`Environment.ProcessPath`が`dotnet` hostの場合のentry assembly再起動も追加し、修正後CIで全case成功を確認した。
+
+## 2026-08-24 AI-native AN5 credential broker peer identity
+
+- PR #33 head `7447e329`からstack branch `codex/ai-native-an5-credential-broker-identity`を分離し、credential値やAN3-B3AのKeychain / Credential Manager契約を変更せず、broker接続元のidentity gateだけを追加した。
+- macOSはUnix socketのpeer UIDと`LOCAL_PEERPID`を取得し、実行中peer codeが現在のHoverPocketと同じdesignated requirementを満たす場合だけrequestを読む。別実行体へ正しいfixture capabilityを渡す先着canaryはsecretを取得できず、leaseを消費してfail closedになった。同じHoverPocket helper subprocessは成功した。
+- Windowsは`GetNamedPipeClientProcessId`でclient PIDを取得し、現在のHoverPocket executableと同じ正規化pathのprocessだけを許可する。PowerShell別processの先着canaryと注入authorizerのnegative caseを追加した。正式releaseでのAuthenticode signer bindingは別gateとして残す。
+- `swift build -Xswiftc -warnings-as-errors`、Pocket App package / lifecycle / generation / migration / health / workspace backup、Pocket Surface、Capability、Broker、Voice、15 schema / 71 fixture、Voice contract 42件、`git diff --check`が成功した。このMacに.NET SDKはないためWindows Release buildとforeign-peer verifierはstacked Draft PR CIで確認する。
+- Codex Security diff scan `efe77173-169f-402b-a202-85475b321270`はreportable finding 0件で封印・再読込した。coverageはpartialで、production有効化前にmacOS helper側server identity pinningと、両OSexpected helper PID bindingを必須gateとして残す。先行不正接続によるlease消費はcredential漏えいなし・単一ローカル生成のfail-closed失敗に限定されるためsecurity findingから除外した。
+- 初回PR #34 Windows CI `32670323133`はRelease build、Settings UI、Capability、Brokerまで成功したが、cold PowerShell foreign-peer canaryが5秒のprocess wait上限に達した。broker server lifetimeを20秒、process waitを15秒へ分け、server expiryによる偽陽性を避けながらCI起動時間を許容するbounded timeoutへ修正した。
+- 修正後macOS回帰で、foreign peerが拒否応答前にsocketを閉じた際の`SIGPIPE` exit 141を1回再現した。broker server/client socketへ`SO_NOSIGPIPE`を設定し、signal終了ではなく通常のfail-closed write failureへ固定した。
+- 修正後code head `cd3be0d`のPR [#34](https://github.com/shotaro311/hover-pocket/pull/34)で、Windows [32670574517](https://github.com/shotaro311/hover-pocket/actions/runs/32670574517)はRelease warning 0 / error 0、foreign-peer / unauthorized-peer / helperの全BEGIN / END、Pocket App generationと全後続verifierが成功した。macOS [32670574498](https://github.com/shotaro311/hover-pocket/actions/runs/32670574498)とRouter [32670573186](https://github.com/shotaro311/hover-pocket/actions/runs/32670573186)も成功した。
+- final exact-range Codex Security scan `63f51914-16de-4553-b765-bd3119ac2086`はreportable finding 0件で封印・再読込した。snapshot digestは`codex-security-snapshot/v1:sha256:40827c3008d55d7d8abd24e3a09d14328c2f3820693ccef02fb662f798433f04`。coverageはpartialで、macOS server identity pinningと両OSexpected helper PID bindingをproduction有効化前gateに残す。
+- 正本AN3-B3A Pro runは同一sessionで`inProgress`、bridgeはsignal未着のままであり、新規送信・再送・成果物先読みをしていない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an5-credential-broker-identity.md`。
+
+## 2026-08-24 AI-native AN5 Host-owned credential broker foundation
+
+- `codex/ai-native-an5-codex-confinement` head `e6747898`からstack branch `codex/ai-native-an5-credential-broker-foundation`を分離し、macOSのprivate Unix socketとWindowsの`CurrentUserOnly` Named Pipeへ、最大60秒・256 bit・一度だけ使えるcapability leaseを実装した。secretは最大8 KiB、制御文字禁止、request / response上限と2秒timeoutを持つ。
+- 両OSのHost executableへ`--codex-credential-helper`入口を追加した。helperはendpointとcapabilityだけを環境から受け、secretを成功時の標準出力だけへ返す。API keyの値を引数、ファイル、ログ、UI、fixtureへ置かない。実credential storeとproduction generatorはまだ接続せず、fail-closedを維持する。
+- Windows clientはCancellationTokenだけでなく、`.NET 10`の明示`TimeSpan` timeout付き`NamedPipeClientStream.ConnectAsync`を使い、server不在時も接続待ちを有限化した。
+- Windows CIの停止位置を段階ログで`named-pipe`の最初の`await`へ絞り、WPF UI threadでasync verifierを同期待ちしていたdeadlockを修正した。broker verifierはthread pool上で開始し、CI stepにも2分上限を設けた。
+- 修正後head `143ed3f`のDraft PR [#33](https://github.com/shotaro311/hover-pocket/pull/33)で、Windows [32668817459](https://github.com/shotaro311/hover-pocket/actions/runs/32668817459)はRelease build warning 0 / error 0、lease / Named Pipe / wrong capability / helperの全broker段階、Pocket App generation、Settings、Voice、rendered UIまで成功した。macOS [32668817516](https://github.com/shotaro311/hover-pocket/actions/runs/32668817516)とRouter [32668816613](https://github.com/shotaro311/hover-pocket/actions/runs/32668816613)も成功した。
+- macOSでone-shot、expiry、replay、wrong capability、socket権限、helper child process、明示cancel cleanupを検証した。セキュリティ監査でdeinit-only deadlockを再現したため、FD / socket / directoryのcleanup stateをserver objectから分離し、明示cancelなしの子process probeを追加した。修正後probeはexit 0、新規一時socket残留0件である。
+- Codex Security diff scan `cc22a511-9d5a-4052-a3ea-7097aa17dd3f`はreportable finding 0件で封印・再読込した。coverageはpartialで、production接続前にhelper peer identity、macOS socket identity、両OSのsame-user first-client raceを実機canaryで再検証する5項目を残す。manifest SHA-256は`090a54f6df21106c35ba76fd9cc96ae30a37010da2e954084503682c200f0e42`。
+- macOS warnings-as-errors build、Pocket App package / lifecycle / generation / migration / health / workspace backup、Pocket Surface、Capability、Broker、Voice、15 schema / 71 fixture、Voice contract 42件、`git diff --check`が成功した。このMacには.NET SDKがないため、Windows Release buildとnative broker verifierはDraft PR CIを必須gateにする。
+- 不一致だった旧Pro deliveryはreceipt / artifactを読まず、適用・`mark-done`・再利用をしていない。正本AN3-B3A bridgeは`running`のままで、新しいsignalを待つ。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an5-credential-broker.md`。
+
+## 2026-08-24 AI-native AN5 Codex confinement audit
+
+- 通知された旧AN3-B3A Pro deliveryは、delivery ID / expected state hash付き`claim-synthesis`が`run state hash does not match the completion signal`で失敗した。receipt・成果物を読まず、適用・`mark-done`・同run再利用を行っていない。後続の正本runは別deliveryとして検証・terminal化済みである。
+- Codex CLI 0.145.0のnamed permission profileを実コードから確認し、`:minimal`と生成workspaceだけをread、network無効、shell environment継承なしにした。直接sandboxとGPT-5.6 Solの実`codex exec` canaryで、workspaceだけがreadable、兄弟worktree・`~/.codex/auth.json`・Obsidian Vaultはunreadableになった。
+- ファイル隔離はmacOSで成立したが、API keyを環境変数・引数・auth fileへ置かないHost-owned credential brokerとWindows実機canaryは未実装である。現行macOS / Windows production generatorのfail-closedを維持する。
+- 採用案はKeychain / Credential Manager、one-time capability、private Unix socket / named pipe、isolated `CODEX_HOME` / `HOME`、command-backed bearer auth、helper path denyを組み合わせる。AN3-B3Aのcredential store exact diff確定後、別の小さいstacked branchで実装する。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an5-codex-confinement-audit.md`。
+- 隔離branch `codex/ai-native-an5-codex-confinement`で、macOS / Windows adapterをrun単位のworkspace / `CODEX_HOME` / HOME / tempへ分離し、named permission profile、network無効、tool環境継承なしへ変更した。macOS warnings-as-errors build、Pocket App / Surface / Capability / Broker / Voice、15 schema / 71 fixtureが成功した。Windows C#はDraft PR CIを必須gateに残し、credential broker未接続のため両OSproduction generatorはfail-closedを維持する。
+- code head `4a38a9f`のDraft PR [#32](https://github.com/shotaro311/hover-pocket/pull/32)で、Windows [32666112335](https://github.com/shotaro311/hover-pocket/actions/runs/32666112335)はRelease build warning 0 / error 0とPocket App生成・Voice・Settings・rendered UI verifier、macOS [32666112324](https://github.com/shotaro311/hover-pocket/actions/runs/32666112324)はwarnings-as-errors buildとPocket App / Voice contract、Router [32666112338](https://github.com/shotaro311/hover-pocket/actions/runs/32666112338)が成功した。PRはDraft / MERGEABLE / CLEANで、実Windows confinement canaryは未完了gateに残す。
+
+## 2026-08-24 AI-native AN3-B3A Realtime BYOK provider
+
+- GPT-5.6 SolのPro artifact `changes.patch`を、delivery ID / state hashの一意claim後にexact base `b95ef1681510781a38ccbb0b95cbf51384faa594`へ適用した。artifactは187,716 bytes、SHA-256 `0b089aee...c952`、standalone検証済みである。CodexはWindows build、Settings fixture、API key削除readback、Voice transition rollback、SDP応答上限の局所修正だけを追加した。
+- Windowsへ明示provider選択、既定OFF、Credential Manager、Host-owned `/v1/realtime/calls` SDP交換、`gpt-realtime-2.1`、Registry由来Calendar list/create・Timer startだけのfunction surface、Capability Broker承認/readback、call ID / generation / root / size fenceを実装した。既存Codex app-server providerの互換gateは弱めていない。
+- macOSへ同じprovider設定、Keychain、adapter seamを追加した。production audio adapterはAN3-B3Bまで明示的にunavailableであり、実音声transportへ暗黙fallbackしない。
+- ローカルではSwift warnings-as-errors、Voice runtime / 静的42件、Capability 20 handler、Broker 21 descriptor / 20 handler、Pocket Surface、Panel layout 128件、Timer、共通contract 15 schema / 71 fixture、Windows UI構文、Settings生成先、`git diff --check`が成功した。
+- Draft PR [#36](https://github.com/shotaro311/hover-pocket/pull/36) code head `16cc7a0`で、Windows [32717846919](https://github.com/shotaro311/hover-pocket/actions/runs/32717846919)、macOS [32717846913](https://github.com/shotaro311/hover-pocket/actions/runs/32717846913)、3 OS contract / byte比較 [32717847153](https://github.com/shotaro311/hover-pocket/actions/runs/32717847153)、Router [32717844455](https://github.com/shotaro311/hover-pocket/actions/runs/32717844455)を含む7/7 checkが成功し、進捗同期後のdocs-only headでも7/7を再確認した。PRは`Draft / MERGEABLE / CLEAN`、review / comment / unresolved thread 0件、remote parity `0 / 0`である。
+- Pro run `20260824-144554-hoverpocket-an3-b3a-realtime-byok-windows-vertical-slice-patch`はlocal verification `PASS`、受入7/7 `PASS`、release gate readyをreadback後に`done`へfinalizeした。bridge terminal receipt SHA-256は`6404ac9f...f9c`で、同deliveryの再適用を禁止した。AN3-B3BにはmacOS実transport、Windows実機microphone / remote audio一往復、native-owned media isolationを残す。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an3-b3a-realtime-byok.md`。
+
+## 2026-08-24 AI-native AN8-C workspace backup / restore
+
+- 正本Pro deliveryをdelivery ID / state hash付きでclaimしたが、same-session harvest timeoutで成果物は空だった。再送せず、PR #30 exact head `d93abf8`から隔離branch `codex/ai-native-an8-backup-restore-core`を作り、CodexがAN8-Cを実装した。
+- macOS / Windows共通のversion付きcanonical JSON schema、package全version / lifecycle / permission / data digest、native file dialog、default-No承認、stale preview拒否、commit後runtime / data readback、失敗時の復元前snapshot rollbackを追加した。OAuth、credential、Capability audit / receipt、Codex workspace、外部pathは対象外である。
+- macOS warnings-as-errors build、Pocket App workspace backup回帰、Capability、Broker、Pocket Surface、Timer、Panel layout 128件、Voice foundation、共通contract `15 schema / 71 fixture`、Windows Settings JavaScript、`git diff --check`が成功した。
+- 初回Windows CIがC# collection expressionの型互換エラー6件を検出したため、実装commit `d00de9b`で明示型へ修正した。Draft PR [#31](https://github.com/shotaro311/hover-pocket/pull/31)で、Windows [32662630254](https://github.com/shotaro311/hover-pocket/actions/runs/32662630254)、macOS [32662630273](https://github.com/shotaro311/hover-pocket/actions/runs/32662630273)、3 OS contract / byte比較 [32662630305](https://github.com/shotaro311/hover-pocket/actions/runs/32662630305)、Router [32662629078](https://github.com/shotaro311/hover-pocket/actions/runs/32662629078)を含む全7 checkが成功し、進捗同期後のdocs-only headでも再成功した。PRは`Draft / MERGEABLE / CLEAN`、review / comment / unresolved thread 0件、remote parity `0 / 0`である。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an8-workspace-backup-restore.md`。
+
+## 2026-08-24 AI-native Core GA旧AI直結経路の除去
+
+- `codex/ai-native-an8-windows-signing-pipeline` head `3448eda`からstack branch `codex/ai-native-core-ga-legacy-path-removal`を分離し、UI非表示だけで残っていたmacOSの`AICommandStore -> CalendarPocketTool(approved: Bool)`と、Windowsの`AiLaneController -> CalendarStore`を製品sourceから除去した。Voice / Text / Native UI / PocketSurfaceの実行正本はCapability Registry / Brokerだけに限定する。
+- Windowsの既存`--verify ailane`は互換名を維持しつつ、旧`aiLane` state、`ailane.submit / approve / reject` bridge route、旧AI Providerがすべて存在しないことを検証するnegative verifierへ置換した。共通Voice contractも旧実装ファイルの再混入を拒否する。
+- macOS warnings-as-errors build、Panel layout 128件、Capability 20 handler、Broker 21 descriptor / 20 handler、Pocket App / Surface / Voice / Timer、Pocket contract `14 schema / 69 fixture`、Voice contract、Windows JavaScript構文、`git diff --check`が成功した。Draft PR [#30](https://github.com/shotaro311/hover-pocket/pull/30)のcode head `1874daa`で、Windows [32659682483](https://github.com/shotaro311/hover-pocket/actions/runs/32659682483)はRelease build、旧AI lane不在、Voice、Broker、rendered UIを含め全成功し、macOS [32659682571](https://github.com/shotaro311/hover-pocket/actions/runs/32659682571)もwarnings-as-errors buildと全AI-native verifierに成功した。
+- Core GA全体は未完了である。残りはAN8-C backup / export / restore正式回収、両OSproduction Voiceと実音声E2E、VoiceからPocket App生成・導入する実Codex confinement E2E、Windows正式署名済み配布とrollback、stack PRの人手mergeである。AN6 / AN7は計画どおりCore GAを塞がない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-core-ga-legacy-removal.md`。
+
+## 2026-08-24 AI-native AN8 Windows正式署名生成経路
+
+- 現行stack head `c8366b0`から公開release readback [32657994406](https://github.com/shotaro311/hover-pocket/actions/runs/32657994406)をbeta modeで実行し、macOS signature / notarization / Gatekeeper / Sparkleと、Windows 0.2.7 Setup / Portable / full package identityを再確認した。3 artifactを別経路で取得し、report hashも固定した。
+- Windows公開版は引き続き未署名betaで、repository variable `WINDOWS_SIGNER_CERT_SHA256`とActions secretは未登録である。formal Authenticodeは未完了のままbeta identityと分離した。
+- `codex/ai-native-an8-windows-signing-pipeline`で、Windows certificate store選択、HTTPS RFC 3161 timestamp、Velopack `--signParams`、pack後のSetup / Portable / full package 3点署名readbackを追加した。全検証成功後だけmanifestを`signed-timestamped-verified`にし、betaへの署名引数混在、不正fingerprint、HTTP / credential入りtimestamp URLは停止する。既存publish / release outputの余剰payload混入を防ぐため、空でないdirectory、file、reparse pointも削除・上書きせず停止する。
+- exact stack head `b95ef168`からmacOS release transition run [32664697767](https://github.com/shotaro311/hover-pocket/actions/runs/32664697767)を実行し、`v0.1.0-161 -> v0.1.0-168`のinstall、upgrade、rollback、uninstall、reinstallとuser data保持が成功した。artifact receiptのSHA-256は`7d72c722...d4080ea`である。Windows実行と未署名beta許可は無効のまま維持した。
+- 同じexact stack headから公開release監視run [32664908332](https://github.com/shotaro311/hover-pocket/actions/runs/32664908332)を実行し、macOS 6 asset / Sparkle / Developer ID / stapled notarization / Gatekeeperと、Windows `win-v0.2.7`の8 asset / Setup / Portable / full package identityを再確認した。3 reportのSHA-256は以前のrunと同一だった。Windowsは未署名のためformal Authenticodeだけ未完了である。
+- 現行stack binaryでBroker retention、Pocket App capability migration / health / workspace backup、Pocket Surfaceを再実行し、すべて成功した。共通contract 15 schema / 71 fixtureは2回のreportがbyte一致した。横断証拠: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an8-operations-readback.md`。
+- Python release readback 19件、py_compile、shell構文、YAML、JavaScript、`git diff --check`が成功した。Draft PR [#29](https://github.com/shotaro311/hover-pocket/pull/29)のcode head `397b52f`で、Windows [32658702169](https://github.com/shotaro311/hover-pocket/actions/runs/32658702169)はRelease build warning 0 / error 0、署名contract、Capabilities / Broker / Pocket Surface / Voice / Updater / rendered UIを含め全成功した。release readbackのpush / PR両runもdeterministic testsとPowerShell contractが成功した。PRは`Draft / MERGEABLE / CLEAN`、remote parity `0 / 0`である。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an8-windows-signing.md`。
+
+## 2026-08-24 AI-native AN8 Pocket App健全性・復帰耐性
+
+- `codex/ai-native-an8-compatibility-migration` head `707ecb3`からstack branch `codex/ai-native-an8-app-health`を作り、Host-ownedのPocket App健全性メタデータをmacOS / Windowsへ追加した。最終利用、起動成功、連続起動失敗をローカルだけに保存し、30日以上未使用のAppはSettingsで無効化を提案する。自動無効化は行わない。
+- 生成パネルの表示・選択・Host操作を実利用として記録し、5分間はdisk writeを抑制する。3回連続の起動失敗または破損メタデータは要確認、無効Appは無効化済みと表示する。破損・symlinkはfail-safeで提案を出さない。
+- macOS / Windowsのsystem transitionはVoice復帰に加えて、enabled Pocket Appの再activation、Registry / Surface readback、Settings health再読込を行う。64回の復帰反復、512回の利用記録、30日判定、破損・symlink、atomic temporary cleanupを決定論的verifierへ固定した。
+- macOS warnings-as-errors build、Pocket App package / lifecycle / generation / migration / health、Voice foundation、Panel layout 128件、共有contract `14 schema / 69 fixture`、report 2回byte一致、Windows Settings JavaScript構文、`git diff --check`が成功した。このMacには.NET SDKがないためWindows C#とrendered SettingsはDraft PR CIを受入gateにする。
+- Draft PR [#28](https://github.com/shotaro311/hover-pocket/pull/28)のcode head `3b12a8a`でWindows [32657261437](https://github.com/shotaro311/hover-pocket/actions/runs/32657261437)、macOS [32657261433](https://github.com/shotaro311/hover-pocket/actions/runs/32657261433)、Router [32657261441](https://github.com/shotaro311/hover-pocket/actions/runs/32657261441)が成功した。WindowsはRelease build警告0・エラー0、Health / runtime activation、Settings、rendered WebView UIまで成功した。PRは`Draft / MERGEABLE / CLEAN`、review / comment 0件、remote parity `0 / 0`である。
+- dangling symlinkを記録なしと誤認しないhardeningを`1854d72`へ追加し、Windows [32657525511](https://github.com/shotaro311/hover-pocket/actions/runs/32657525511)、macOS [32657525510](https://github.com/shotaro311/hover-pocket/actions/runs/32657525510)、Router [32657524602](https://github.com/shotaro311/hover-pocket/actions/runs/32657524602)が再成功した。
+- AN8-C Pro backup / export / restore正本runは`monitoring / pending / unclaimed`であり、未claim成果物を先読みしていない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an8-app-health.md`。
+
+## 2026-08-24 AI-native AN8 Capability互換・移行
+
+- `codex/ai-native-an8-retention-governance` head `65694b6`からstack branch `codex/ai-native-an8-compatibility-migration`を作り、Capabilityの`active / deprecated / removed`、version基準の廃止猶予、明示置換、循環禁止をmacOS / Windows / 共有contractへ追加した。現行built-in catalogは空なので既存Capabilityは変化しない。
+- Pocket App migratorはinstalled sourceを直接変更せず、新app versionのmanifest / Workflow / Surface referenceだけを置換し、state schema bytesとuser data storeを保持する。Settingsの「互換更新を準備」から既存preview、tests、permission / grant差分、明示承認、immutable install、readbackを通す。
+- macOS warnings-as-errors buildとToday Focusの実package縦断が成功した。承認前の1.0.0維持、承認後の1.0.1、旧版snapshot保持、issue解消をreadbackした。共有contractは`14 schema / 69 fixture`全一致、report 2回byte一致、Windows Settings JavaScript構文と`git diff --check`も成功した。
+- このMacには.NET SDKがないためWindowsはDraft PR CIを必須gateにする。AN8-C Pro backup / export / restore runは正式delivery待ちで、未claim成果物を先読みしていない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an8-compatibility-migration.md`。
+- Draft PR [#27](https://github.com/shotaro311/hover-pocket/pull/27)の修正後head `66de848`でWindows、macOS、3 OS contract / compare、Routerの全7 checkが成功した。初回Windows compileで検出したverifierのnamespace import漏れは`66de848`で修正済みである。
+
+## 2026-08-24 AI-native AN8 Capability履歴保持・削除
+
+- `codex/ai-native-an8-core-integration-candidate` head `a330099`からstack branch `codex/ai-native-an8-retention-governance`を作り、macOS / WindowsへCapability監査ログとreceiptの`7日 / 30日 / 90日 / 無期限`保持、既定90日、Settings専用の確認付き全削除を実装した。
+- 完了receipt内容を削除してもplan / argument / capability digestとcompleted stateの墓標を残し、同じidempotency key / plan IDは`unknown`で停止する。audit fileはstrict filename regular fileだけを対象とし、malformed / symlink / reparseをfail closedにする。
+- macOS warnings-as-errors build、Broker retention / migration / symlink回帰、Capability、Pocket App、Pocket Surface、Voice、Panel layout 128件、Timer、13 schema / 66 fixture、Windows Settings JavaScript構文が成功した。Draft PR [#26](https://github.com/shotaro311/hover-pocket/pull/26)のcode head `cd3b974`でWindows [32653742569](https://github.com/shotaro311/hover-pocket/actions/runs/32653742569)、macOS [32653742576](https://github.com/shotaro311/hover-pocket/actions/runs/32653742576)、3 OS contract / compare [32653742551](https://github.com/shotaro311/hover-pocket/actions/runs/32653742551)、Router [32653742728](https://github.com/shotaro311/hover-pocket/actions/runs/32653742728)が成功した。
+- PR #26は`Draft / MERGEABLE / CLEAN`、remote parity `0 / 0`である。mainへ自動mergeせず、Core Integration Candidateへのstack順とexact diffを人手gateに残す。
+- AN8-C Pro backup / export / restore runは正式delivery待ちであり、成果物を先読み・再送していない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-an8-retention-governance.md`。
+
+## 2026-08-24 AI-native Core Integration Candidate
+
+- 分岐していたAN5-C + AN3 Voice / Calendar / Timer stack、Controls / approval presentation再統合、AN8 release transition / readbackを通常mergeだけで`codex/ai-native-an8-core-integration-candidate`へ集約した。統合候補headは`4e297b7`で、各exact headのancestryをreadbackした。
+- 競合は進捗正本とWindows Host composition / verifierに限定された。共有BrokerへVoice runtimeとControls、Sticky Notesに結び付くHost承認表示を同時接続し、21 descriptor / 20 handlerの構成を維持した。
+- macOSでwarnings-as-errors build、13 schema / 66 fixture、Voice contract 42件、release readback unit 19件、Capability、Broker、Pocket App、Pocket Surface、Voice、Timer、Panel layout 128件、Windows JavaScript構文、shell構文、`git diff --check`が成功した。このMacには.NET SDKがないためWindowsはDraft PR CIを受入gateにする。
+- Draft PR [#25](https://github.com/shotaro311/hover-pocket/pull/25)のhead `32b316f`で、Windows Release / native / rendered UI、macOS Capability、3 OS deterministic contract / cross-OS byte比較、release metadata、transition syntax、Routerを含む19 checkが成功し、失敗0、pending 0だった。公開署名成果物が必要な14 checkはPRでは意図どおりskipであり、未完了gateとして維持する。PRは`Draft / MERGEABLE / CLEAN`、remote parity `0 / 0`である。
+- 正しいAN8-C Pro runは継続回収中であり、旧oversize runは成果物なしとして再利用しない。統合候補はDraft、人手merge gate、AI / Voice default-off、未署名Windows beta自動実行なしを維持する。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-core-integration-candidate.md`。
+
+## 2026-08-23 AI-native AN3-B2 Final Safety Integration
+
+- Draft PR #21の最終head `d29849a`をDraft PR #22へ通常mergeし、Calendar read / Timer startのCapability Broker経路へAN3-Aの最終表示秘匿とAN3-B1のtransport teardown直列化を伝播した。CoordinatorはRealtime cleanupとapp-server owner teardownを別Taskで保持し、crash、unexpected request、stale startup disconnect後のrestart / Voice再有効化 /終了が旧client破棄完了を待つ。Broker-only production approvalは`false`、Calendar grantはSettings-only既定OFF、`eventRef`非送信、Timer native approvalは維持した。
+- ローカルではSwift warnings-as-errors build、署名付きmacOS app、Voice foundation、Panel layout 128件、Capability 14 handlers、Broker、Pocket Surface、Pocket App package / lifecycle / generation、Timer、Voice contract 42件、共通contract 13 schema / 60 fixture、Windows JavaScript構文、署名検証、`git diff --check`が成功した。
+- 統合code head `f77ac87`でWindows [32644395509](https://github.com/shotaro311/hover-pocket/actions/runs/32644395509)、macOS [32644395539](https://github.com/shotaro311/hover-pocket/actions/runs/32644395539)、3OS contract / compare [32644395501](https://github.com/shotaro311/hover-pocket/actions/runs/32644395501)、Router [32644394230](https://github.com/shotaro311/hover-pocket/actions/runs/32644394230)の全7 checkが成功した。exact Security scan `824fcceb-34c9-4312-a42f-155f29aeffc3`は5 / 5 surface、coverage complete、finding 0、sealed completeである。
+- docs-only headのmacOS CIで、timeoutがhandler開始前に勝つ安全な経路を`timeout_handler_cancelled`として誤検知するflaky verifierを検出した。本番Brokerを変えず、未開始または開始後取消の両経路で遅延結果を返さないことを検証する`caa13c1`へ修正した。Swift warnings-as-errors buildとBroker verifier 50回連続が成功し、Security scan `3c86f9cc-972d-4ba0-876a-2c3c0fc9fbe1`は1 / 1 surface、finding 0、sealed completeである。Windows [32645098065](https://github.com/shotaro311/hover-pocket/actions/runs/32645098065)、macOS [32645098030](https://github.com/shotaro311/hover-pocket/actions/runs/32645098030)、3OS contract / compare [32645098063](https://github.com/shotaro311/hover-pocket/actions/runs/32645098063)、Router [32645096808](https://github.com/shotaro311/hover-pocket/actions/runs/32645096808)の全7 checkが成功した。
+- PR #22はDraft、`CLEAN / MERGEABLE`、remote parity `0 / 0`である。現行Codexには正のBroker-only tool allowlistがないためproduction Voiceは引き続きapp-server開始前にfail closedとし、Draftを維持する。PRのmerge自体は人手gateである。次はAN8 release-readback PR #23へ進み、配布後readbackと長期運用の残差を閉じる。詳細: `progress/2026-08/2026-08-23_hover-pocket-ai-native-an3-b2-integration.md`。
+
+## 2026-08-23 AI-native AN3-B1 Final Safety Integration
+
+- 検証済みPR #19 branchをDraft PR #21へ通常mergeし、Windowsのproduction microphone / WebRTC / Codex experimental Realtimeへ最終AN3-A安全境界を取り込んだ。CoordinatorはRealtime cleanup taskとtransport teardown taskを別々に保持し、crash / unexpected request / stale startup disconnectの旧client破棄完了後だけrestart、Voice再有効化、終了を進める。current-root、user / assistant role、relative path、Bearer、OpenAI key、JSON credential fieldの表示前境界も実Realtime transcriptへ接続した。
+- 署名付きmacOS app、Voice verifier、Swift warnings-as-errors、42件Voice contract、Windows JavaScript構文、`git diff --check`は成功した。Windows [32643782605](https://github.com/shotaro311/hover-pocket/actions/runs/32643782605)、macOS [32643782572](https://github.com/shotaro311/hover-pocket/actions/runs/32643782572)、3OS contract [32643782576](https://github.com/shotaro311/hover-pocket/actions/runs/32643782576)、Router [32643781540](https://github.com/shotaro311/hover-pocket/actions/runs/32643781540)も成功した。
+- exact integration Security scan `b09c2248-5609-4417-8202-59171f3bfdec`は4 / 4 surfaceをcoverage completeで閉じ、finding 0、sealed completeとなった。PR #21はDraft、review thread 0件、`CLEAN / MERGEABLE`、remote parity `0 / 0`である。実Windows端末のinstalled Codex / microphone / remote audio 1往復までDraftを維持し、次にPR #22へ通常mergeで伝播する。詳細: `progress/2026-08/2026-08-23_hover-pocket-ai-native-an3-b1-integration.md`。
+
+## 2026-08-23 AI-native AN3-A Final Review Hardening
+
+- PR #19のreview 2件をChatGPT Pro Orchestratorの`pro-primary` / builderへ委譲し、exact base `b506557`に対する`changes.patch`（13,796 bytes、SHA-256 `f7ee3235...f88d`）をbase / hash / 4 allowed pathまで検証して適用した。最終code head `90492d8`では、macOS / Windowsの可視VoiceテキストからPOSIX / Windows relative filesystem path、Bearer、裸のOpenAI key、JSON token / API key / client secretを表示前に秘匿する。Windowsのcrash / disconnect / active unexpected request / stale startup disconnect後restartは旧app-server clientの非同期teardown完了を待ち、追跡用completionをowner disposal開始前に登録する。
+- macOS bundle build、署名検証、`--verify-voice-foundation`、Swift warnings-as-errors、Voice contract 42件、`git diff --check`は成功した。ローカルMacには.NET SDKがないためWindowsローカル検証は実行できず、Windows [32643299113](https://github.com/shotaro311/hover-pocket/actions/runs/32643299113)、macOS [32643299061](https://github.com/shotaro311/hover-pocket/actions/runs/32643299061)、3OS contract [32643299059](https://github.com/shotaro311/hover-pocket/actions/runs/32643299059)、Router [32643297550](https://github.com/shotaro311/hover-pocket/actions/runs/32643297550)を最終code受入根拠とした。
+- 最終follow-up Security diff scan `e05df431-7f64-410e-87e4-c3a7bf9581a5`は`57052db...90492d8`の4 / 4 surfaceをcoverage completeで閉じ、finding 0、sealed completeとなった。先行するBearer、stale disconnect、teardown事前登録、裸のOpenAI key、JSON credential fieldのexact scanもすべてfinding 0である。PR #19はreview thread 66件中未解決0件、Ready、`CLEAN / MERGEABLE`、remote parity `0 / 0`である。docs-only headまで全CI成功後、PR #19の修正をPR #21、その後PR #21をPR #22へ通常mergeで伝播する。PRのmerge自体は人手gateを維持する。詳細: `progress/2026-08/2026-08-23_hover-pocket-ai-native-an3-a-review-followup.md`。
+
+## 2026-08-21 AI-native AN3-B2 Voice Capability Security Remediation
+
+- Draft PR #22のexact head `c9be7e4`を対象にしたSecurity scan `84b21db5-185f-4300-b813-3e150a52a11a`で、Codex RealtimeがHoverPocketのdynamic toolsに加えてambient shell / MCP / app / plugin / extensionを継承し得るHigh、Voice Calendar permissionをruntime自身が生成するMedium、Timer native approvalを並行要求で滞留させ得るLowの3件を確認した。
+- Codex app-server 0.145.0の`dynamicTools`は既存toolへの追加であり、`read-only`、`approvalPolicy=never`、instructions、`environments=[]`だけではBroker限定を証明できない。実生成schemaにも正のtool policyがないことをreadbackした。このため、official positive allowlistとdelegated turn E2Eを確認済みのversionだけを明示承認するproduction gateを追加し、現行0.145.0はapp-server開始前に固定理由でfail closedにした。将来fieldが追加されてもsource側の承認定数を自動解除しない。
+- Calendar予定名 / 時刻のCodex共有は、Google接続・Voice有効化・Microphoneとは別のSettings permissionとして既定OFF、native approval、永続化、取り消し可能にした。許可前はCalendar toolを定義へ含めず、runtime再確認でもProvider呼出しを0件にする。許可変更中のactive Voiceは停止して再構成する。
+- TimerはHost-owned custom WPF dialogへexact title / durationを表示し、既定操作をキャンセルにした。native promptは同時1件、1分3件までとし、拒否もrate limitへ数える。session取消ではqueued / visible dialogを閉じ、未使用Broker approvalをrejectし、停止後のtool resultをapp-serverへ返さない。
+- ローカルではSwift warnings-as-errors build、macOS Voice foundation、Panel layout 128件、Capability 14 handler、Broker、Pocket Surface、Pocket App package / lifecycle / generation、Timer、Voice contract 42件、共通contract 13 schema / 60 fixture、Settings generation、Windows JavaScript syntax、`git diff --check`が成功した。このMacには.NETがないため、Windows Release build、Voice / Settings / rendered WebView /既存Provider verifierはpush後CIを最終gateとする。
+- 主要修正head `9705fe0`のSecurity scan `7e463a78-a2b0-4305-849e-f1418c495949`は15 / 15件、compile-only head `057d090`の増分scan `ef74ba38-38cd-4df9-8fc7-a813566d1dac`は1 / 1件を完全確認し、いずれもreportable finding 0件でsealed completeとなった。
+- 本番解禁前の防御強化として、Codexへ返すCalendar結果からProvider内部`eventRef`を除去した。Voice有効化とCalendar grant変更を同じHost semaphoreで直列化し、Calendar権限取消は設定保存より先にactive Voice tool処理を非取消で停止する。Voice contractとnative verifierへ識別子非送信、直列化、revoke-before-saveを固定した。
+- 最終source head `8e8a064`の増分Security scan `c5d44635-05a9-4081-9236-65937fbb289e`は5 / 5件、coverage complete、reportable finding 0件でsealed completeとなった。Windows [32406234638](https://github.com/shotaro311/hover-pocket/actions/runs/32406234638)、macOS [32406234704](https://github.com/shotaro311/hover-pocket/actions/runs/32406234704)、3OS contract / compare [32406234731](https://github.com/shotaro311/hover-pocket/actions/runs/32406234731)、PR Router [32406231112](https://github.com/shotaro311/hover-pocket/actions/runs/32406231112)が成功した。PR #22はDraft、`MERGEABLE / CLEAN`、remote head一致、未解決review thread・review・commentはいずれも0件である。
+- PR #21最終head `97099ea`を通常mergeし、実WebRTC / Codex Realtime / root-scoped transcriptとCalendar read / Timer startのCapability Broker経路を同じCoordinatorへ統合した。競合はHost compositionとCoordinator停止処理の2ファイルだけで、Broker-backed tool、Settings-only Calendar grant、Timer native approval、tool取消、`Stopping`表示、非取消のdisable teardownをすべて維持した。
+- 統合head `b197f3a`のexact Security scan `95c5ee8a-8105-4bcf-97f7-d3bd3f10f02e`は16 / 16 review item、coverage complete、reportable finding 0件でsealed completeとなった。Windows [32419442331](https://github.com/shotaro311/hover-pocket/actions/runs/32419442331)、macOS [32419442358](https://github.com/shotaro311/hover-pocket/actions/runs/32419442358)、3OS contract / compare [32419442324](https://github.com/shotaro311/hover-pocket/actions/runs/32419442324)、PR Router [32419439979](https://github.com/shotaro311/hover-pocket/actions/runs/32419439979)は全7 check成功。未解決review thread 0件、`CLEAN / MERGEABLE`、remote parity `0 / 0`をreadbackした。
+- 現行Codex 0.145.0ではpositive Broker-only tool policyがないためapp-server開始前に停止し、実Codex Voice E2Eは実行しない。次はCore Integration Gateの残差をlive監査し、公式positive allowlistまたはBrokerだけを公開する専用最小runtimeの採否を確定する。詳細: `progress/2026-08/2026-08-21_hover-pocket-ai-native-an3-b2-security.md`。
+
+## 2026-08-21 AI-native AN3-B1 Windows Voice Runtime
+
+- AN3-A PR #19 head `b34c1fc`から隔離worktree / branchを作り、Windowsの明示microphone click → exact-origin permission → WebRTC offer / answer → Codex experimental Realtime → remote audio / transcript → mute / stopをdefault-offで接続した。AN3-B1のroot threadはread-only / approval never / tools禁止で、Capability Broker / MCPへは未接続である。
+- installed Codexは絶対path / SHA-256、experimental schema、platform、account、voice一覧を検証する。app-serverとschema probeはkill-on-close Job Objectへ所属し、SDPは262,144 bytes上限とroot thread / connection generationで束縛する。SettingsへVoice state / SDPを渡さず、raw audio / SDP / transcriptを監査やdiskへ保存しない。
+- 初回Security scan `2ab97a76-4999-41f5-9413-04f00df8fdf7`で、getUserMedia成功後のWebRTC構築失敗と、明示終了時のapp-server応答待ちによりlocal microphone停止が遅れる2件を再現した。取得直後のstreamを必ずcleanup対象へ置き、終了操作はnative停止より先にlocal track / peer / audioを破棄するよう修正した。exact-code回帰は両経路の即時停止を確認した。
+- 修正後のexact working-tree Security scan `878927ec-12f6-49ea-a571-ed47182f1692`は14 / 14 review itemを完了し、reportable finding 0件でsealed completeとなった。外部Codex CLIの初回trust anchorとProcess.StartからJob assignmentまでのWindows raceは、Windows実機 / 製品方針で確定するfollow-upとして残す。
+- ローカルではVoice contract 42件、Windows JS syntax、macOS warnings-as-errors build、Voice foundation、Panel layout 128件、Capability 14 handler、Broker、Pocket Surface、Pocket App、Timer、共通contract 13 schema / 60 fixture、`git diff --check`が成功した。fake app-serverとrendered fake WebRTC回帰を追加済みである。このMacには`dotnet`がないためWindows Release / native / rendered UIはPR CI、実Codex / microphone / WebRTC 1往復はWindows実機を最終gateとする。詳細: `progress/2026-08/2026-08-21_hover-pocket-ai-native-an3-b1.md`。
+- Draft PR [#21](https://github.com/shotaro311/hover-pocket/pull/21)をPR #19へstackした。初回Windows CIでJob Object情報classの定数名とstruct名が衝突するcompile errorを検出し、`aa25244`で意味を変えず定数名を修正した。修正後headではWindows [32390802586](https://github.com/shotaro311/hover-pocket/actions/runs/32390802586)、macOS [32390802558](https://github.com/shotaro311/hover-pocket/actions/runs/32390802558)、3OS contract [32390802562](https://github.com/shotaro311/hover-pocket/actions/runs/32390802562)、PR Router [32390800203](https://github.com/shotaro311/hover-pocket/actions/runs/32390800203)がすべて成功した。WindowsはRelease build、Voiceのaccount / voice / Realtime / SDP / stop回帰、Settings、rendered WebView UI、既存Provider回帰まで成功した。実Windows Codex / microphone / remote audio 1往復を通すまでDraftを維持する。
+- PR #19最終head `b506557`を通常mergeし、実Realtime transcriptへroot session ID、非損失identifier、path / secret / Unicode format control除去、重複event統合を接続した。統合Security scan `4c7e30aa-5797-4cda-bedf-739dd5093467`で外部`system` roleをHost表示に昇格できるlow finding 1件を検出し、`190ce80`で`user / assistant`だけを受理してpartial蓄積前に拒否し、UI fallbackも非権威化した。remediation scan `d8751ccf-e635-4747-9ad0-56d1b2b83539`は4 / 4 review、finding 0、sealed completeである。
+- 最終実装head `190ce80`のWindows [32418050929](https://github.com/shotaro311/hover-pocket/actions/runs/32418050929)、macOS [32418050661](https://github.com/shotaro311/hover-pocket/actions/runs/32418050661)、3OS contract / byte比較 [32418050662](https://github.com/shotaro311/hover-pocket/actions/runs/32418050662)、PR Router [32418047807](https://github.com/shotaro311/hover-pocket/actions/runs/32418047807)は全7 check成功。未解決review thread 0件、`CLEAN / MERGEABLE`、remote parity `0 / 0`をreadbackした。
+
+## 2026-08-21 AI-native AN3-A Review Follow-up
+
+- PR #19の実装head `fd61652`で、macOS / WindowsのVoice停止中表示、終了時transition drain、system recovery取消直列化、未知transcript role拒否、非損失ID検証、可視テキストのpath / secret / Unicode format control除去、互換性状態のwire値、root単位のtranscript分離を完成させた。SwiftのJSON復号でcustom initializerを迂回したevent / sessionもruntime境界で再sanitizationし、同一event IDのinterim / finalは1件へ統合してfinalからinterimへ戻さない。
+- Windows [32416504434](https://github.com/shotaro311/hover-pocket/actions/runs/32416504434)はRelease build、Settings、Voice、rendered WebViewまで成功した。macOS [32416504417](https://github.com/shotaro311/hover-pocket/actions/runs/32416504417)、3OS contract / byte比較 [32416504404](https://github.com/shotaro311/hover-pocket/actions/runs/32416504404)、PR Router [32416501502](https://github.com/shotaro311/hover-pocket/actions/runs/32416501502)も成功した。PRは`CLEAN / MERGEABLE`、remote parity `0 / 0`、未解決review thread 0件である。
+- 追加Security scan `b520fb75-bb1d-4bb8-bd4b-6c14d04b434b`（7 / 7）、`c90ca20e-099c-4c0d-ae80-8d1a6d59fea4`（6 / 6）、`166c9616-3ea4-405a-ac6c-a3778e21b15a`（5 / 5）はcoverage complete、finding 0でsealed completeとなった。これ以前のremediation scan 3件もfinding 0である。未完了はPR #21 / #22への通常mergeと各headのCI / review、AN8 release-readback修正である。詳細: `progress/2026-08/2026-08-21_hover-pocket-ai-native-an3-a-review-followup.md`。
+
+## 2026-08-20 AI-native AN3-A Voice Lane Foundation
+
+- 最終source head `7ce9a68`でWindows [32378916573](https://github.com/shotaro311/hover-pocket/actions/runs/32378916573)、macOS [32378916499](https://github.com/shotaro311/hover-pocket/actions/runs/32378916499)、3OS contract / byte比較 [32378916471](https://github.com/shotaro311/hover-pocket/actions/runs/32378916471)、PR Router [32378945838](https://github.com/shotaro311/hover-pocket/actions/runs/32378945838)がすべて成功した。PR #19は未解決review thread 0件、`CLEAN / MERGEABLE`、remote parity `0 / 0`である。PR #18も最終head `2d8b89c`で全check成功、未解決thread 0件、`CLEAN / MERGEABLE`であり、両PRとも人手merge待ちである。
+- 追加Codex review 6件を修正した。Windows app-server受信loopはfail-closed handler登録後にだけ開始し、client生成前から待機する想定外requestもReadyへ昇格させない。Voice UIはwire値`waiting_for_approval` / `waiting_for_user`を両言語へ変換し、未知error codeより互換性理由を優先表示する。WindowsのON / OFF変更を直列化し、macOSは切り離した旧adapter停止と音声終了 / mute commandをruntime所有Taskとして順序どおり完了させ、設定変更・復旧・shutdownが待つ。PR #18の最新head `2d8b89c`もmerge済みである。統合後のmacOS warnings-as-errors build、Voice、Broker、Pocket App 18 negative、Voice contract 42件、共通contract 13 schema / 60 fixture、Windows JavaScript構文、`git diff --check`は成功し、Windows C# buildとPR CIを最終gateとする。
+- PR [#19](https://github.com/shotaro311/hover-pocket/pull/19)の最終source head `77af78f`で、追加Codex review 4件を修正した。Windowsは起動途中candidateをVoice OFF前に取消・破棄し、app-server teardownの非同期処理をWPF dispatcherへ戻さず、切断とReady昇格の競合を同一lock内で判定する。macOSはVoice Laneのstatus、placeholder、session、button、accessibility文言をAppLanguageの日本語 / 英語へ統一した。
+- 最終headのWindows [32372769351](https://github.com/shotaro311/hover-pocket/actions/runs/32372769351)、macOS [32372769330](https://github.com/shotaro311/hover-pocket/actions/runs/32372769330)、3OS contract / byte比較 [32372769256](https://github.com/shotaro311/hover-pocket/actions/runs/32372769256)、PR Router [32372766956](https://github.com/shotaro311/hover-pocket/actions/runs/32372766956)はすべて成功した。PRは`CLEAN`、remote head一致、未解決review thread 0件をreadbackした。
+- exact差分の追加security reviewでは、権限拡張、Bridge越境、raw transcript / secret出力、生成Appの直接Provider Storeアクセス、path境界の後退は見つからなかった。今回の追加差分はprocess / startup cleanup、atomic promotion、表示localizationに限定される。ChatGPT Pro Orchestrator delivery `return-1624b849f10726e95b63d0eecb8feaf6`は最終受入後に`processed`へmark-doneした。
+- AN5-Cの途中head `0c121f1`から隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an3a`、branch `codex/ai-native-an3-voice-foundation`を作り、AN3を実音声より前の安全なfoundationへ分割した。実装後、AN5-C最新head `eb08eba`の2コミットを競合なく取り込み、Pocket App入力検証を欠落させないstacked branchへ更新した。
+- macOS / Windowsへ、全Provider共通のHost-owned最下段Voice Lane、default-off、Compact / Expanded、明示toggle、root / child / descendant session card、memory-only transcript、bounded redaction、fail-closed server request、schema / account / capability gate、bounded restart stateを追加した。Compactは視覚タイトルを持たず、ExpandedはProvider領域を変えずパネル外枠だけを下へ伸ばす。
+- macOSの全パネル非表示経路を同じdetach / mute境界へ集約した。WindowsはVoice transcript / session stateをPanel surfaceだけへ返し、Settings WebViewへ渡さない。app-server clientは初期化失敗・取消・transport crashでもownerを破棄し、受信JSONLは改行前に1 MiB上限を強制する。deterministic回帰を追加した。
+- ChatGPT Pro Orchestratorはrun `20260820-170946-an5-c-exact-head-0c121f1pr-6voicean3-aoshost-owned-voice-lane-foundationdefault-offcompact-expandedroot-scoped-cardslifecycle-state-machinedeterministic-testschanges-patch`のbuilderとして使用した。返却receiptを検証後、Codexが不足修正、安全境界、検証を補完し、ローカル / CI受入完了後にmark-doneした。
+- macOSでSwift warnings-as-errors build、Voice foundation、Panel layout 128件、Capability 14 handler、Broker、Pocket Surface、Pocket App package / lifecycle / generation、Timer、共通contract 13 schema / 60 fixture、Voice geometry / scope 42件、Windows JS syntax、Settings generation target、`git diff --check`が成功した。開発bundleはApple Development署名の`codesign --verify --deep --strict`に合格し、`SUFeedURL`を持たない。
+- AN3-Aではproduction microphone、WebRTC、実Codex Realtime、Broker tool execution、MCP公開を有効化しない。PR CIとreview gateは完了した。残りはPR #18を先に人手でmergeした後のPR #19 merge、両OS実機UI、AN3-Bの実音声接続である。詳細: `progress/2026-08/2026-08-20_hover-pocket-ai-native-an3-a.md`。
+
+## 2026-08-16 AI-native AN5-C Runtime / Surface Activation
+
+- PR #18の追加reviewで、同じworkflow inputへ異なる選択肢集合を持つ複数Pickerを束縛するとmacOS / Windowsの実行可否が分岐する問題を確認した。package導入時に同一bindingのPicker domain完全一致を両OS runtimeと共通contract verifierで必須にし、相反packageをnegative回帰へ追加した。durationPickerはschemaどおり`$input`専用であることも意味検証へ明示した。ローカルのmacOS warnings-as-errors build、Pocket App 18 negative、共通contract 13 schema / 60 fixture、Windows renderer構文、`git diff --check`は成功し、Windows C# buildとPR CIを最終gateとする。
+- PR [#18](https://github.com/shotaro311/hover-pocket/pull/18)のhead `f968bc0`では、Windows [32367934055](https://github.com/shotaro311/hover-pocket/actions/runs/32367934055)、macOS [32367934146](https://github.com/shotaro311/hover-pocket/actions/runs/32367934146)、3OS contract / byte比較 [32367934240](https://github.com/shotaro311/hover-pocket/actions/runs/32367934240)を含む全checkが成功した。その後の追加review修正は新しいCIをgateとする。mergeと両OS実機readbackは未実施である。
+- 最終head `0c121f1`への追加Codex reviewで、複数Surface間の入力束縛をpackage全体で合算していたP2を検出した。ボタンから到達するworkflowごとに、同じSurface内の`$input` / `$state`束縛だけで全宣言inputを解決できることをmacOS / Windows runtimeと共通contract verifierで検証する。表示されない別Surfaceだけが不足inputを束縛するpackageを両OSのnegative回帰へ追加し、commit `54ff41e`へ反映した。ローカルのmacOS warnings-as-errors build、Pocket App 18 negative、Pocket Surface 15 negative、共通contract 13 schema / 60 fixture、`git diff --check`は成功した。PRではWindows [32348665332](https://github.com/shotaro311/hover-pocket/actions/runs/32348665332)、macOS [32348665277](https://github.com/shotaro311/hover-pocket/actions/runs/32348665277)、3OS contract / byte比較 [32348665365](https://github.com/shotaro311/hover-pocket/actions/runs/32348665365)、PR Router [32348663509](https://github.com/shotaro311/hover-pocket/actions/runs/32348663509)を含む全11 checkが成功した。review thread解決と最終remote readbackを残す。
+- source head `454a2d0`までの最終Codex reviewを完了し、重大な追加指摘なし、未解決thread 0件をreadbackした。Windows [32346140249](https://github.com/shotaro311/hover-pocket/actions/runs/32346140249)、macOS [32346140248](https://github.com/shotaro311/hover-pocket/actions/runs/32346140248)、3OS contract / byte比較 [32346140258](https://github.com/shotaro311/hover-pocket/actions/runs/32346140258)、PR Router [32346138524](https://github.com/shotaro311/hover-pocket/actions/runs/32346138524)はすべて成功した。PR #18は`MERGEABLE`である。
+- 最終review追随として、Windows生成Surfaceの更新前state保存を全controlへ統合し、失敗値を次回flushまで保持する。更新中はoperation ID単位のleaseで元・差替え後rendererをinertにし、重複操作を個別完了する。install / update / rollback / disable / remove / AI-native OFF / defaults resetは保存失敗時に中止し、成功・失敗の完了時に同じleaseの全rendererを復帰する。採用されなかったruntime activation candidateはreceipt不一致、復元不一致、commit前失敗、構築途中例外の全経路でlease無効化とRuntimeHandle破棄を行う。
+- 2026-08-20再開時に残っていた3件を修正した。生成Surfaceのstate束縛controlは型付きHost state storeへ保存して再生成後も復元する。durable workflow開始後の取消は、未実行stepをfailed receiptへ確定し、既成功Timerを非取消経路でrollbackしてworkflowを完了保存する。Windowsの生成Provider設定はdisabled中のdurable managed package IDを保持し、remove後だけorder / visibility / preferred / last-selectedから除去する。
+- 最終head reviewで追加検出した2件も修正した。入力宣言0件でliteralだけを使う生成workflowをWindowsで実行可能にし、macOS / Windowsの`Apps`直下に`.DS_Store`や無関係directoryがあっても正常Appの管理snapshotと復元を継続する。両OS回帰を追加し、macOSローカル検証は成功した。Windows rendered WebViewは修正push後のCIをgateとする。
+- 最終security reviewで検出した生成App stateのpath差替え境界も両OSで閉じた。macOSは固定directory descriptorから`openat` / `renameat`で相対読み書きし、WindowsはrootとApp directoryをreparse拒否・置換不可handleで固定する。他App directoryへのsymlink / junction差替えをfail closedにし、macOSの生成Providerはpreserve-only remove後にorder / hidden / preferred / last-selected設定も削除する。macOSの全関連verifyは成功し、Windows buildと回帰は修正push後のCIをgateとする。
+- source head `4489791`のWindows [32333436230](https://github.com/shotaro311/hover-pocket/actions/runs/32333436230)、macOS [32333436235](https://github.com/shotaro311/hover-pocket/actions/runs/32333436235)、Ubuntu / macOS / Windows contractとbyte比較 [32333436242](https://github.com/shotaro311/hover-pocket/actions/runs/32333436242)、PR Router [32333435108](https://github.com/shotaro311/hover-pocket/actions/runs/32333435108)はすべて成功した。exact Security diff scan `e030446e-9c8f-401d-9d44-1b2cc996d943`は51 / 51 review itemを完了し、reportable finding 0件でsealed completeとなった。
+- 上記headへの最終Codex reviewで、生成Providerを再度開いても同じSurface modelを再利用してqueryを更新できない点と、macOSで同名の`$state`更新が`$input`へ複製される点を検出した。Surface表示ごとにfresh modelを生成し、activation解除時は生存中modelをすべて無効化する。`$input`と`$state`は独立namespaceのままworkflow準備時にだけ解決し、再表示と同名binding分離の回帰を追加した。
+- source head `7816771`の再reviewでWindowsの3件を追加修正した。runtime activation失敗後も生成Provider routeの`state.changed`を発行し、開いているPanelから失効Surfaceを除く。Surface control、state schema、workflow宣言inputの型を両OS package load時に照合して、state fallbackを含む不整合packageを導入前に拒否する。state束縛text fieldは180ms debounceで保存し、Provider切替時は未保存値をdisposeから即時flushする。
+- source head `1c8b93f`で、Windows [32331372164](https://github.com/shotaro311/hover-pocket/actions/runs/32331372164)、macOS [32331372103](https://github.com/shotaro311/hover-pocket/actions/runs/32331372103)、Ubuntu / macOS / Windows contractとbyte比較 [32331372312](https://github.com/shotaro311/hover-pocket/actions/runs/32331372312)、PR Router [32331370130](https://github.com/shotaro311/hover-pocket/actions/runs/32331370130)がすべて成功した。WindowsはRelease build、Settings、Timer、rendered WebView UIを含む全verifyが成功した。
+- PR #18の全review threadへ修正根拠を返信し、未解決threadを0件にした。progress同期後のexact Security diff scan、最終CI / mergeability / remote parity readback、両OS実機gateを残す。詳細: `progress/2026-08/2026-08-20_hover-pocket-ai-native-an5-c-resume.md`。
+- PR #17はmerge commit `a35b0ea8c224809ad4ff1bf1dc466882fc70169b`でmainへ統合し、merge後のWindows、macOS、3OS contract CIも成功した。最新`origin/main`から隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an5c`、branch `codex/ai-native-an5-runtime-activation`を作成し、ahead / behind `0 / 0`、cleanをreadbackした。
+- AN5-Cは、検証済みactive packageをapp ID単位の`PocketSurfaceRegistry` / execution-runtime registryへ反映し、install / update / enable / disable / preserve-only remove / rollback / restart restoration後にapp ID、version、package digest、effective permission grantがLifecycle receiptと描画・実行側で一致した場合だけ成功にする。組み込みToday Focusと生成Appは別entryとし、複数生成Appを共存させる。
+- ChatGPT Pro Orchestratorへexact base `a35b0ea`、GitHub read-only、GPT-5.6 Sol / Pro、builder、patch artifactとして実装と両OS回帰を委譲した。run: `20260816-074324-hoverpocket-an5-c-runtime-activation-registryos`。Codexはartifactのbase / hash / path検証、適用、ローカル検証、security review、Git / PR / mergeを担当する。実Codex生成activationは引き続きfail closedとする。
+- 適用前baselineとして、Swift warnings-as-errors build、Pocket App package / lifecycle / generation、Capability 14 handler、Broker、Today Focus、Pocket Surface、Timer、共通contract、`git diff --check`が成功した。`./script/build_and_run.sh --build-only`でmacOS app bundleを作成し、Apple Development署名の`codesign --verify --deep --strict`も成功した。開発buildは`SPARKLE_FEED_URL`を明示しない限り`SUFeedURL`を持たない設計であり、feed、notarization、配布署名はAN8の正式成果物で検証する。
+- Pro返却はdelivery ID / state hashをclaimしてreceiptを検証したが、適用可能なpatch contractを満たさなかった。1回のrepair上限後はSkillのisolated-recovery手順へ切り替え、mainを変更せず専用worktree内でCodexがAN5-Cを復元した。返却は再適用せずmark-done済みである。
+- 両OSへapp ID keyed runtime / Surface Registry、receiptとapp ID / version / digest / effective grantの一致、複数App分離、disable / remove / rollback、restart restoration、activation失敗時のdurable disabled fallbackを実装した。生成App用のglobal WebView bridgeは公開せず、実Codex生成もfail closedのままである。
+- security reviewで検出したstale runtime競合を持ち越さず、macOSはactivation leaseが実行Taskを取消し、BrokerとTimer writeが取消を再確認するようにした。Windowsはlease CancellationTokenをBridgeのtokenへ連結し、Brokerのqueue / step / handlerへ伝播する。disable / remove / default-off後にqueue済み実行がmaterial writeへ進まない回帰を追加した。
+- 初回実装commit `63fc75b`をPR [#18](https://github.com/shotaro311/hover-pocket/pull/18)へpushし、Windows Release [31917292784](https://github.com/shotaro311/hover-pocket/actions/runs/31917292784)、macOS [31917292788](https://github.com/shotaro311/hover-pocket/actions/runs/31917292788)、3OS contract / compare [31917454979](https://github.com/shotaro311/hover-pocket/actions/runs/31917454979)が成功した。reviewで、WindowsのAI-native OFF時に生成App runtimeを解除していない点と、起動時復元失敗をdurable disabledへ戻していない点を検出した。
+- review修正では、WindowsのAI-native OFF / defaults resetで全activation leaseとSurfaceを即時解除し、両OSの起動時復元失敗をLifecycle Manager経由でdisabledへ保存・再読込確認する。shutdownと復元失敗永続化のdeterministic回帰を両OSへ追加し、Macのwarnings-as-errors build、Pocket App、Capability、Broker、Surface、Timer、共通contract、bundle build、Apple Development署名検証が再成功した。旧scan `d40de7c5-0469-4f95-985b-d97b1a30c08e`は初回差分の証拠であり、review修正後のexact差分は再scanを完了条件とする。
+- exact range `a35b0ea...8c0e2ee`のscan `9eb0f0ad-8926-4f80-b1f8-7b215fb7f407`は22 / 22 fileを確認し、Windowsで組み込みToday Focusの実行中取消がOFFへ連動しないlow finding 1件と、生成Registryのactivation / Shutdown競合を検出した。組み込みruntimeとdirect Today FocusへHost所有leaseを接続し、OFF / reset / disposeでcancelする。生成Registryはactivation、復元、OFF、disposeを同じlockとenabled stateで直列化する。実行中handler取消、後続Sticky writeなし、activation競合後のentry 0件、再有効化後の新規transition成功をdeterministic回帰へ追加した。
+- 未完了は上記remediationのWindows CI、修正後exact Security scan、push、macOS / 3OS contract CI再確認、review thread解決、merge後readback、両OS実機での生成Surface / runtime activation readback、実Codex confinement、Voiceから生成・導入するCore Integration E2Eである。詳細: `progress/2026-08/2026-08-16_hover-pocket-ai-native-an5-c.md`。
+
+## 2026-08-24 AI-native Core Capability Reintegration
+
+- current `main` exact `a35b0ea`をbaseに、隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-core-reintegration`、branch `codex/ai-native-core-capability-reintegration`で、競合中PR #13のHost-owned destructive approval presentationとPR #15のControls Capabilityを再統合した。既存PRのユーザー変更は戻していない。
+- macOS / Windows共通でControls 6 CapabilityをRegistry / Broker / OS adapterへ接続し、明示mute set、mute保持volume set、対象displayだけのfresh brightness readback、boundedかつ制御文字除去済みmedia metadataを実装した。WindowsのCapability media経路はdirect UIのtimeout fallbackを使わず、providerが返すcommand confirmation / errorを保持する。
+- Windows DDC/CIでは、write後read失敗時に楽観更新値を成功readbackへ転用しない。`fresh.Error`があれば`WriteVerified=false`とし、deterministic verifierへ回帰を追加した。macOS外部display音量も、通常UIは従来の記憶値fallbackを維持する一方、Capability readbackでは実DDC/CoreAudio観測がなければfail closedにした。
+- exact working-tree Security scan `8d09288e-c2a3-4c21-988d-1c96ca07ca71`は変更source 30 / 30をreviewし、sealed complete、reportable finding 0件となった。DDC false readbackは実在したが現行は同一ユーザーのlocal manual UIだけでself-onlyのためsecurity policy上ignore。実装安全gateとして上記修正を適用した。Sticky delete target-version binding、完全なcross-platform media causal identity、custom WebView bridge分離はgeneric Voice / MCP / generated UI公開前の未完了gateとして残す。
+- ローカルMacでSwift warnings-as-errors build、Capability 20 handler、Broker 21 descriptor / 20 handler、Pocket Surface、Pocket App package / lifecycle / generation、共通contract 13 schema / 64 fixtureの2回成功、`git diff --check`をreadbackした。Windows .NET SDKはこのMacにないため、Windows build / Controls / Capability / Broker verifierはPR CIを必須gateとする。
+- Draft PR [#24](https://github.com/shotaro311/hover-pocket/pull/24)のimplementation head `5a1369c`で、Windows、macOS、Ubuntu / macOS / Windows contract、2件のcross-OS compare、PR Routerを含む11 / 11 checkが成功し、`MERGEABLE / CLEAN`をreadbackした。PRはDraftのまま保持し、自動mergeしていない。
+- ChatGPT Pro OrchestratorへAN8-C backup / export / restore / data-version readbackのexact base `2d8b89c`・両OSchanges patchを委譲済み。run `20260824-000623-hoverpocket-an8-cpocket-app-workspacebackup-export-restoredata-version-readbackmacoswindowschanges-patch`は自動回収待ちで、返却時はdelivery ID / state hash claim後だけ適用する。
+- 次はPR #24のhuman reviewを受け、同時にAN8-C返却を隔離worktreeで検証する。Windows unsigned betaは明示承認なしに実行しない。詳細: `progress/2026-08/2026-08-24_hover-pocket-ai-native-core-capability-reintegration.md`。
+
+## 2026-08-15 AI-native Controls Capability
+
+- exact `main` `2cd51b9`から隔離worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-core-expansion`、branch `codex/ai-native-core-capability-expansion`を作成し、Built-in Capability ExpansionのControls単位を実装した。
+- macOS / WindowsのRegistryとProvider adapterへ`controls.availability.get@1`、`controls.volume.get@1`、`controls.volume.set@1`、`controls.mute.set@1`、`controls.brightness.set@1`、`controls.media.command@1`を追加した。readは`controls.read`、writeは`controls.write`、writeはidempotency key、Broker承認、実OS状態readbackを必須にし、出力はvolume / mute、bounded display ID、safe title / sourceだけへ限定した。
+- 監査で、再生位置の自然な進行だけでnext / previous成功と誤認できる問題と、macOSのvolume setが承認されていないmute解除も行う問題を検出して修正した。track readbackはtitleの変化を要求し、volume setはmute状態を保持する。外部DDCで保持できない場合は、音を出さずfail closedにする。
+- ローカルMacでSwift warnings-as-errors build、Capability 20 handler、Broker 21 descriptor / 20 handler、Controlsのnegative readback、Media、Timer、Clipboard、Pocket Surface、Pocket App、Panel layout、12 schema / 63 fixtureの2回の決定論的contract report、全Windows JavaScript syntax、`git diff --check`が成功した。Windows .NET SDKはこのMacにないため、Windows Release build / verifierはPR CIを必須gateとする。
+- exact working-treeのCodex Security diff scan `27dc0225-9797-4d2f-b8eb-0eb111210182`は変更source 15 / 15を確認し、sealed complete、reportable finding 0件となった。2件は現行のdefault-offかつControls adapter未公開では攻撃経路なしとしてrejectedだが、将来Voice / Pocket App / MCPへ公開する前の必須修正として実装へ反映済みである。詳細: `progress/2026-08/2026-08-15_hover-pocket-ai-native-controls-capability.md`。
+
+## 2026-08-23 AI-native AN8-B Release Transition Gate
+
+- PR [#23](https://github.com/shotaro311/hover-pocket/pull/23)へ、公開済み旧版と新版のinstall、upgrade、明示rollback、再upgrade、uninstall、reinstall、user data sentinel保持を確認するOS別手動workflowを追加した。通常push / PRではBash / PowerShell構文とWindowsのrelease snapshot差し替え拒否contractだけを実行し、公開release codeはOS別の明示inputがある場合だけ使い捨てrunnerで実行する。
+- workflow_dispatchの自由入力tagは`run:`へ直接展開せずenv経由へ固定した。macOS / Windowsとも開始時にtag、draft / prerelease状態、全assetの名前・size・GitHub SHA-256・download URLをsnapshot化し、合格証跡の直前に再取得して完全一致しない場合は失敗する。
+- Windows 0.2.x未署名betaは`execute_windows_release_code`と`allow_unsigned_beta`の二重opt-inを必須にした。正式署名版はSetupだけの署名確認では受理せず、full package内アプリを独立した正式署名readback snapshotへ結合できるまで失敗側に閉じた。
+- Macローカルで公開版`v0.1.0-161`→`v0.1.0-168`の全遷移、codesign、Apple公証staple、Gatekeeper、Sparkle Ed25519署名、user data保持、開始 / 終了release snapshot一致が成功した。一時結果は恒久削除せずTrashへ移動した。
+- 手動workflow [32646526001](https://github.com/shotaro311/hover-pocket/actions/runs/32646526001)はexact head `35077c9be0109089701cc55788e7aa72aad8e2fc`でmacOS実transition、macOS / Windows contractが成功し、Windows実行は意図どおりskipした。artifact `macos-release-transition` ID `9495013952`を別経路downloadし、全遷移=`verified`、`userDataPreserved=true`を確認した。
+- 初回手動run [32646384473](https://github.com/shotaro311/hover-pocket/actions/runs/32646384473)は`actions/upload-artifact`の短縮SHAをGitHubが拒否してsetup段階で失敗した。GitHub APIが解決した完全commit SHAへ両jobを修正し、上記成功runで証跡uploadまで再確認した。
+- 初回Security scan `b4dec798-00d3-4a79-8b1e-a3019b036dea`はrelease途中差し替えで古いpassed receiptが残り得るCWE-367をlow 1件として検出した。snapshot再取得で修正し、full remediation scan `cb82d38f-2c6f-4cdc-b069-34cbb261bab4`は6領域、final action-pin scan `3ec61eaa-b29d-4b70-8e27-629bd51b599b`は2領域をcoverage complete、finding 0件でsealed completeにした。
+- PRはDraft、`MERGEABLE / CLEAN`を維持し、人間merge gateを変更していない。残る実行gateはWindows未署名betaの明示承認と、将来の正式署名Windows releaseでの再検証である。日常端末のSparkle / Velopack UI、実データmigration、sleep-wake、長時間soakは後続gateに残す。詳細: `progress/2026-08/2026-08-23_hover-pocket-ai-native-an8-transition.md`。
+
+## 2026-08-21 AI-native AN8-A Codex Review Follow-up
+
+- PR [#20](https://github.com/shotaro311/hover-pocket/pull/20)のCodex review 2件をGmailとGitHubの両方で照合した。指摘どおり、formal Windows gateはSetup / PortableだけでVelopack full update package内アプリを検証しておらず、macOS readbackはversioned release側の手動install ZIPを実downloadしていなかった。
+- Windows formal gateはfeedが指定する唯一のfull `.nupkg`を再取得し、checksum / feed size / SHA-1 / SHA-256を照合してから安全に展開する。Setup、Portable内アプリ、full package内アプリの3点すべてでtimestamped Authenticodeを確認し、署名者一致を必須にした。
+- macOSはversioned Sparkle ZIP、`macos-latest`手動ZIP、versioned release手動ZIPの3コピーを別々に再取得し、GitHub metadataと相互のsize / SHA-256一致を確認する。versioned手動ZIPの改変を拒否するunit testを追加した。
+- 追加reviewで、`auto`がWindows prereleaseを選び得る点と、Windows releaseがGitHub汎用Latestを置換しても検出できない点を確認した。両言語の自動選択からdraft / prereleaseを除外し、汎用Latestはrelease選択に使わずmacOS versioned releaseのままであることだけを検査する。
+- unit 12件、Python compile、workflow YAML parse、`git diff --check`が成功した。公開beta readbackも再実行し、macOS `v0.1.0-168`の3コピーとSparkle署名、Windows `win-v0.2.7`の全asset / feed / checksum、汎用Latest=`v0.1.0-168`が一致した。ローカルMacにPowerShellがないため、formal scriptのparseとWindows側確認はPR CIを最終gateとする。詳細: `progress/2026-08/2026-08-21_hover-pocket-ai-native-an8-review-followup.md`。
+- source head `77dc721`でPR CIのrelease metadata、PowerShell構文、Windows verifier、PR Routerがすべて成功した。exact security diff scan `11fdb6d9-9e92-45d1-9ffe-c5f3df1c7fbc`はcoverage complete、reportable finding 0件でsealed completeとなった。4件のreviewへ検証根拠を返信し、未解決thread 0件をreadbackした。
+- 追加reviewで、formal実行時にmetadata jobとAuthenticode jobが`auto`を別々に解決する競合を確認した。Windows tagは専用jobで1回だけ確定し、両jobへ同じoutputを渡す。`actions/upload-artifact`はGitHubが要求する完全commit SHAへ修正し、手動run [32421539868](https://github.com/shotaro311/hover-pocket/actions/runs/32421539868)で`auto`が`win-v0.2.7`へ固定され、公開readbackが成功した。
+- Gmailで届いた追加reviewは、共通Python verifierが`Type=Full`と整合したhash / sizeだけを確認し、Setup executableを偽のFull targetとして受理できる点だった。`abae752`でfeed targetをexact `HoverPocketWin-<version>-full.nupkg`へ固定し、Setupを指すnegative testを追加した。
+- さらに、Pythonの失敗が`tee`のexit 0で隠れるworkflow経路と、任意prefixのSetup / Portable名を受理する経路を確認した。`b850daf`で明示`bash`のpipefailを有効にし、Python / PowerShellともcanonical `HoverPocketWin-win-Setup.exe` / `HoverPocketWin-win-Portable.zip`へ固定した。unit 16件、Python compile、workflow YAML parse、PRのrelease metadata / PowerShell構文 / Windows verifier / Routerが成功した。
+- incremental security scan `efc4bd2f-f212-46e7-8a30-d6afea320c87`、`9e9fb119-5642-451d-baf5-0c3933ab344e`、`25c81e42-a975-4749-9c7a-992218c1f256`はいずれもcoverage complete、reportable finding 0件、sealed complete。最終手動run [32422064352](https://github.com/shotaro311/hover-pocket/actions/runs/32422064352)のartifactも`status=passed`。合計8件のreviewへ検証根拠を返信して解決し、未解決thread 0件をreadbackした。
+- 最後の追加reviewで、同じtagのassetを`--clobber`中に並行2 jobが別世代として検証できる競合を確認した。`aff7ab6`でpublished jobが実downloadした全8 assetのname / size / SHA-256 snapshotをartifactへ保存し、formal jobは同じsnapshotの全assetを再download/hash、署名前後にGitHub metadataも再照合する。unit 17件とincremental security scan `0de1ebe2-4950-49ea-be21-f884bb4bd5f1`は成功。beta run [32422720262](https://github.com/shotaro311/hover-pocket/actions/runs/32422720262)で8 asset snapshotをreadbackし、formal run [32422832966](https://github.com/shotaro311/hover-pocket/actions/runs/32422832966)は現行未署名manifestを意図どおり拒否した。合計9件のreviewを解決し、未解決thread 0件をreadbackした。
+- 2026-08-23の追加reviewを`7cb1764`、`b957a54`、`b34d576`、`1e6a8c8`、`3e8b79f`で修正した。macOSは3 ZIP、stable / versioned appcast、checksumの6資産をimmutable snapshotへ固定し、最終metadata再取得まで同一性を確認する。配布bundleの`SUFeedURL`、`SUPublicEDKey`、`TeamIdentifier=N7VVPW44ZA`もexact検証する。Windows betaの初期修正ではSetup SFX末尾とfull `.nupkg`全byte、Portable `current/`の506ファイルとfull package `lib/app/`を照合した。Setupの末尾推測は後続`da75587`で正規bundle header解析へ置換した。workflow path filterもmacOS native verifier変更時に起動する。
+- 途中run [32627459690](https://github.com/shotaro311/hover-pocket/actions/runs/32627459690)、[32627869765](https://github.com/shotaro311/hover-pocket/actions/runs/32627869765)、[32628233979](https://github.com/shotaro311/hover-pocket/actions/runs/32628233979)でSFX展開とnuspec探索の実形式差を検出して修正し、[32628492824](https://github.com/shotaro311/hover-pocket/actions/runs/32628492824)でSetup payload検証まで成功した。最終run [32629166708](https://github.com/shotaro311/hover-pocket/actions/runs/32629166708)はexact head `3e8b79f217d2052a17b6acc101e320456ccb5d62`で全job成功した。
+- 最終runの3 report artifactを新しい一時directoryへ別経路downloadした。macOSは6資産、3 ZIP / 2 appcastのbyte同一性、Sparkle公開鍵 / feed URL、Team ID、codesign / stapler / Gatekeeperを確認した。Windowsは`win-v0.2.7`のSetup全payloadとPortable 506ファイルのfull package同一性を確認した。unit 19件、Python compile、shell構文、YAML parse、`git diff --check`も成功した。security scan `1889e238-6153-4579-8ea6-d7801b6d2351`、`7291eb3a-5841-4176-942a-66f4ae39f02b`、`84906546-9cf0-472f-9e08-a33d5b3da72a`はすべてcoverage complete、reportable finding 0件、sealed completeである。詳細: `progress/2026-08/2026-08-23_hover-pocket-ai-native-an8-final-readback.md`。
+- 追加review 2件を`da75587`で修正した。Setup payloadは末尾推測を撤回し、Velopack 1.2.0の固定marker直前にあるlittle-endian offset / lengthをstreaming KMPで一意に解決するため、AuthenticodeのPE証明書表をpackageと誤認しない。formalでは3成果物のSignerCertificate raw byte SHA-256が同一で、repository variable `WINDOWS_SIGNER_CERT_SHA256`の正規64桁値と一致することも必須にした。betaのIdentityOnlyは署名評価を行わず`publisherIdentity=not-evaluated`を返す。
+- exact scan `f436ab83-bc71-4ab6-b104-d49738aeeb45`はrange `59cd53a...da75587`の5 / 5 fileを確認し、coverage complete、finding 0件、sealed complete。Windows native beta run [32638170997](https://github.com/shotaro311/hover-pocket/actions/runs/32638170997)はexact head `da75587759959f5760eedb9a59b153d5971fc786`で全job成功した。3 report artifactの別経路readbackでも、Setup / Portable payload、macOS 6資産、署名 / 公証 / Gatekeeper、beta publisher分離が一致した。
+- 最終review 2件を`e2e6a4a`で修正した。appcastはnamespaceなし`rss` root、direct childの`channel` 1件、`item` 1件、`enclosure` 1件を順に必須化し、非RSS rootと複数channelを拒否する。GitHub汎用Latestは約270 MBの公開asset検証後に再取得してからmacOS releaseとの一致を判定する。unit 19件とexact scan `ce3db805-6663-48a6-aad0-c650efc9be0f`は成功。最終run [32638515063](https://github.com/shotaro311/hover-pocket/actions/runs/32638515063)はexact head `e2e6a4a4f7de80c9dd40578cf138e89a858aa5f3`で全job成功し、3 report artifactの別経路readbackでもmacOS 6資産、Windows 8資産、Setup / Portable payload、署名 / 公証 / Gatekeeper、beta publisher分離が一致した。
+- PR #20のreview 14件へcommit / CI / artifact / scanの根拠を返信して解決し、fresh GraphQL readbackで未解決thread 0件を確認した。PRはReadyを維持し、人間mergeの境界を変更しない。
+
+## 2026-08-20 AI-native AN8-A Public Release Readback
+
+- 最新`origin/main`の`a35b0ea`から専用worktree `/Users/shotaro/code/share/hover-menu-preview-ai-native-an8-readback`、branch `codex/ai-native-an8-release-readback-main`を作成した。mainは`origin/main`と同一、cleanへ戻した。
+- macOSとWindowsの公開channelをGitHubの汎用Latestで混同せず、`macos-latest` / versioned macOS releaseと最大semantic versionの`win-v...` releaseを別々にreadbackする検証器を追加した。
+- macOSはappcast、versioned ZIP、手動インストールZIPを公開URLから再取得し、実測size / SHA-256、checksum、公開鍵によるSparkle Ed25519署名を照合する。Windowsは全公開assetを再取得し、実測size / SHA-256、checksum、feed内full packageのSHA-1を照合する。
+- Windows正式版はmanifestの自己申告だけで完了にせず、Windows runnerで公開SetupとPortable内`HoverPocket.Shell.exe`の実Authenticode署名、タイムスタンプ、署名者一致を確認する別gateを追加した。週次は現行未署名betaを監視し、formalは手動実行に限定する。
+- deterministic unit 10件、Python構文、YAML parse、`git diff --check`は成功した。公開中のmacOS `0.1.0 (168)`とWindows `0.2.7`を合計約270MB再取得したlive beta readbackも成功し、Windows formal gateは未署名manifestを理由にexit 1で正しく拒否した。
+- このAN8-Aは公開asset / signature / feedの継続readback基盤である。AN8全体の完了には、Windows正式署名済みrelease、両OSのclean install / upgrade / downgrade / uninstall / reinstall、Host / Pocket App / data version rollback、migration、offline / sleep-wake / long-running soak、retention / backup / restoreの実機証拠が残る。詳細: `progress/2026-08/2026-08-20_hover-pocket-ai-native-an8-release-readback.md`。
 
 ## 2026-08-16 AI-native AN5-B Codex Pocket App Generation / Management UI
 

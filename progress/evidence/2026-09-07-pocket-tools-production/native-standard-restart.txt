@@ -1,0 +1,20 @@
+The following is a diff from the previous accessibility tree for Window: "" with ~ and + representing changed and added elements, respectively. Removed elements are summarized by ID range.
+Removed element IDs: 0-57
++61 system dialog Secondary Actions: Raise
++	62 container
++		63 text 読書メモ
++		64 button Description: パネルサイズ 小, Help: パネルサイズ: 小
++		65 button Description: 関数, Help: 電卓, ID: function
++		66 button Description: 積み重ねられた長方形の中のスパークル, Help: 読書メモ, ID: sparkles.rectangle.stack
++		67 button Description: 積み重ねられた長方形の中のスパークル, Help: 水やり記録, ID: sparkles.rectangle.stack
++		68 button Description: 積み重ねられた長方形の中のスパークル, Help: 作業開始, ID: sparkles.rectangle.stack
++		69 button Description: 歯車の図形, Help: 設定, ID: gearshape
++		70 text 読書メモ
++		71 button Description: 最新の記録を読み込む, ID: arrow.clockwise
++		72 button 追加
++		73 text field (settable) 検索
++		74 scroll area
++			75 list Secondary Actions: AXScrollToTop, AXScrollToBottom
++				76 button 本番パネルで読む本, 読了: はい, 読んだページ数: 42
++				77 button Description: 記録を削除, ID: trash
+The focused UI element is 61 system dialog Secondary Actions: Raise

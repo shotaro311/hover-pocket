@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hoverpocket://schemas/pocket-app-workspace-backup/v1",
+  "title": "HoverPocket Pocket App workspace backup v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "createdAt",
+    "sourcePlatform",
+    "hostVersion",
+    "apps",
+    "files"
+  ],
+  "properties": {
+    "schema": {
+      "const": "hoverpocket.pocket-app-workspace-backup/v1"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sourcePlatform": {
+      "enum": ["macos", "windows"]
+    },
+    "hostVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$",
+      "maxLength": 64
+    },
+    "apps": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/app"
+      }
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 2048,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/file"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "appId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z0-9][a-z0-9-]*){2,}$",
+      "maxLength": 160
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$",
+      "maxLength": 64
+    },
+    "installedVersion": {
+      "type": "object",
+      "required": ["version", "packageDigest"],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "packageDigest": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "additionalProperties": false
+    },
+    "app": {
+      "type": "object",
+      "required": [
+        "appId",
+        "activeVersion",
+        "activePackageDigest",
+        "stateSchemaDigest",
+        "lifecycleState",
+        "effectivePermissions",
+        "installedVersions",
+        "dataVersion",
+        "dataDigest"
+      ],
+      "properties": {
+        "appId": {
+          "$ref": "#/$defs/appId"
+        },
+        "activeVersion": {
+          "$ref": "#/$defs/version"
+        },
+        "activePackageDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "stateSchemaDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "lifecycleState": {
+          "enum": ["enabled", "disabled"]
+        },
+        "effectivePermissions": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z0-9][a-z0-9-]*)+$",
+            "maxLength": 128
+          }
+        },
+        "installedVersions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/installedVersion"
+          }
+        },
+        "dataVersion": {
+          "const": 1
+        },
+        "dataDigest": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "additionalProperties": false
+    },
+    "file": {
+      "type": "object",
+      "required": ["path", "size", "sha256", "contentBase64"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^(?:apps/[a-z][a-z0-9]*(?:\\.[a-z0-9][a-z0-9-]*){2,}/versions/(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?/[0-9a-f]{64}/package/[A-Za-z0-9][A-Za-z0-9._/-]*|data/[a-z][a-z0-9]*(?:\\.[a-z0-9][a-z0-9-]*){2,}/state\\.json)$",
+          "maxLength": 1024
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "contentBase64": {
+          "type": "string",
+          "maxLength": 1398104
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

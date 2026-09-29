@@ -3,6 +3,8 @@ import SwiftUI
 
 struct HoverPillView: View {
     @ObservedObject var settings: AppSettings
+    @ObservedObject var stickyReminders = StickyReminderController.shared
+    @ObservedObject private var voiceRuntime = VoiceLaneRuntime.shared
     @ObservedObject private var timerStore = TimerStore.shared
     let onEnter: () -> Void
     let onExit: () -> Void
@@ -10,11 +12,17 @@ struct HoverPillView: View {
 
     var body: some View {
         Group {
-            if showsVisibleSideHandle {
+            if showsVoiceConversation {
+                voiceAccessIndicator
+            } else if showsVisibleSideHandle {
                 visiblePill
-                    .modifier(TimerAlertBounceModifier(alert: timerStore.activeAlert))
+                    .modifier(TimerAlertBounceModifier(
+                        startedAt: timerStore.activeAlert?.startedAt ?? stickyReminders.startedAt
+                    ))
+                    .onTapGesture(perform: onTap)
             } else {
                 Color.black.opacity(0.001)
+                    .onTapGesture(perform: onTap)
             }
         }
         .frame(
@@ -22,12 +30,44 @@ struct HoverPillView: View {
             idealWidth: PanelLayout.defaultPillWidth,
             maxWidth: .infinity
         )
-        .frame(height: PanelLayout.pillHeight)
+        .frame(height: showsVoiceConversation
+            ? nil : PanelLayout.pillHeight)
         .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
         .onHover { inside in
+            guard !showsVoiceConversation else { return }
             inside ? onEnter() : onExit()
         }
+    }
+
+    private var showsVoiceConversation: Bool {
+        VoiceActivityPresentation(snapshot: voiceRuntime.snapshot).showsConversation
+    }
+
+    private var voiceAccessIndicator: some View {
+        GeometryReader { geometry in
+            VoiceAccessIndicator(
+                presentation: VoiceActivityPresentation(snapshot: voiceRuntime.snapshot),
+                language: settings.appLanguage,
+                notchWidth: max(0, geometry.size.width - PanelLayout.notchHandleWidth * 2),
+                height: geometry.size.height,
+                onMuteToggle: toggleVoiceMute,
+                onEndVoiceSession: endVoiceSession,
+                onCenterTap: onTap,
+                onCenterHover: handleVoiceCenterHover
+            )
+        }
+    }
+
+    private func toggleVoiceMute() {
+        voiceRuntime.setMuted(!voiceRuntime.snapshot.muted)
+    }
+
+    private func endVoiceSession() {
+        voiceRuntime.endAudioSession()
+    }
+
+    private func handleVoiceCenterHover(_ inside: Bool) {
+        inside ? onEnter() : onExit()
     }
 
     private var showsVisibleSideHandle: Bool {
@@ -35,7 +75,7 @@ struct HoverPillView: View {
     }
 
     private var alertAccent: Color? {
-        timerStore.activeAlert?.color.color
+        timerStore.activeAlert?.color.color ?? stickyReminders.activeNote?.color.color
     }
 
     private var visiblePill: some View {
@@ -82,13 +122,16 @@ struct HoverPillView: View {
 /// retracted into the top edge and pops downward, so it never detaches from
 /// the screen edge. Skipped entirely when Reduce Motion is on.
 struct TimerAlertBounceModifier: ViewModifier {
-    let alert: TimerAlert?
+    let startedAt: Date?
+
+    init(alert: TimerAlert?) { startedAt = alert?.startedAt }
+    init(startedAt: Date?) { self.startedAt = startedAt }
 
     func body(content: Content) -> some View {
-        if let alert, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        if let startedAt, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             TimelineView(.animation) { context in
                 content.offset(
-                    y: Self.bounceOffset(elapsed: context.date.timeIntervalSince(alert.startedAt))
+                    y: Self.bounceOffset(elapsed: context.date.timeIntervalSince(startedAt))
                 )
             }
         } else {
@@ -107,6 +150,9 @@ struct TimerAlertBounceModifier: ViewModifier {
 }
 
 struct HoverMiniBarView: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var stickyReminders = StickyReminderController.shared
+    @ObservedObject private var voiceRuntime = VoiceLaneRuntime.shared
     let onBarEnter: () -> Void
     let onBarExit: () -> Void
     let onTap: () -> Void
@@ -114,6 +160,46 @@ struct HoverMiniBarView: View {
     @ObservedObject private var timerStore = TimerStore.shared
 
     var body: some View {
+        Group {
+            if showsVoiceConversation {
+                voiceAccessIndicator
+            } else {
+                restingBar
+            }
+        }
+    }
+
+    private var showsVoiceConversation: Bool {
+        VoiceActivityPresentation(snapshot: voiceRuntime.snapshot).showsConversation
+    }
+
+    private var voiceAccessIndicator: some View {
+        GeometryReader { geometry in
+            VoiceAccessIndicator(
+                presentation: VoiceActivityPresentation(snapshot: voiceRuntime.snapshot),
+                language: settings.appLanguage,
+                height: geometry.size.height,
+                onMuteToggle: toggleVoiceMute,
+                onEndVoiceSession: endVoiceSession,
+                onCenterTap: onTap,
+                onCenterHover: handleVoiceCenterHover
+            )
+        }
+    }
+
+    private func toggleVoiceMute() {
+        voiceRuntime.setMuted(!voiceRuntime.snapshot.muted)
+    }
+
+    private func endVoiceSession() {
+        voiceRuntime.endAudioSession()
+    }
+
+    private func handleVoiceCenterHover(_ inside: Bool) {
+        inside ? onBarEnter() : onBarExit()
+    }
+
+    private var restingBar: some View {
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
                 Color.black.opacity(0.001)
@@ -140,7 +226,9 @@ struct HoverMiniBarView: View {
 
             VStack(spacing: 0) {
                 bar
-                    .modifier(TimerAlertBounceModifier(alert: timerStore.activeAlert))
+                    .modifier(TimerAlertBounceModifier(
+                        startedAt: timerStore.activeAlert?.startedAt ?? stickyReminders.startedAt
+                    ))
                     .offset(y: isExpandedLook ? PanelLayout.miniBarExpandedTopOffset : 0)
 
                 Spacer(minLength: 0)
@@ -154,7 +242,7 @@ struct HoverMiniBarView: View {
     }
 
     private var alertAccent: Color? {
-        timerStore.activeAlert?.color.color
+        timerStore.activeAlert?.color.color ?? stickyReminders.activeNote?.color.color
     }
 
     /// While a timer alert is active the bar keeps its expanded look even

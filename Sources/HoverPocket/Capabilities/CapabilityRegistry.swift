@@ -5,12 +5,21 @@ enum PocketCapabilityKeys {
     static let calendarList = PocketCapabilityKey(id: "calendar.events.list", version: 1)
     static let calendarGet = PocketCapabilityKey(id: "calendar.event.get", version: 1)
     static let calendarCreate = PocketCapabilityKey(id: "calendar.event.create", version: 1)
+    static let controlsAvailability = PocketCapabilityKey(id: "controls.availability.get", version: 1)
+    static let controlsBrightnessGet = PocketCapabilityKey(id: "controls.brightness.get", version: 1)
+    static let controlsBrightnessSet = PocketCapabilityKey(id: "controls.brightness.set", version: 1)
+    static let controlsMediaCommand = PocketCapabilityKey(id: "controls.media.command", version: 1)
+    static let controlsMuteSet = PocketCapabilityKey(id: "controls.mute.set", version: 1)
+    static let controlsVolumeGet = PocketCapabilityKey(id: "controls.volume.get", version: 1)
+    static let controlsVolumeSet = PocketCapabilityKey(id: "controls.volume.set", version: 1)
     static let timerStart = PocketCapabilityKey(id: "timer.countdown.start", version: 1)
     static let timerGet = PocketCapabilityKey(id: "timer.countdown.get", version: 1)
     static let timerPause = PocketCapabilityKey(id: "timer.countdown.pause", version: 1)
     static let timerResume = PocketCapabilityKey(id: "timer.countdown.resume", version: 1)
     static let timerStop = PocketCapabilityKey(id: "timer.countdown.stop", version: 1)
     static let stickyUpsert = PocketCapabilityKey(id: "sticky.note.upsert", version: 1)
+    static let stickyUpsertV2 = PocketCapabilityKey(id: "sticky.note.upsert", version: 2)
+    static let stickyGetV2 = PocketCapabilityKey(id: "sticky.note.get", version: 2)
     static let stickyGet = PocketCapabilityKey(id: "sticky.note.get", version: 1)
     static let stickyStatus = PocketCapabilityKey(id: "sticky.note.status", version: 1)
     static let stickyArchive = PocketCapabilityKey(id: "sticky.note.archive", version: 1)
@@ -86,10 +95,12 @@ struct PocketCapabilityDescriptor: Sendable {
 final class CapabilityRegistry {
     private let descriptors: [PocketCapabilityKey: PocketCapabilityDescriptor]
     private let handlers: PocketCapabilityHandlerSet
+    private let compatibilityCatalog: PocketCapabilityCompatibilityCatalog
 
     init(
         descriptors: [PocketCapabilityDescriptor] = PocketCapabilityDescriptors.builtIn,
-        handlers: PocketCapabilityHandlerSet
+        handlers: PocketCapabilityHandlerSet,
+        compatibilityCatalog: PocketCapabilityCompatibilityCatalog = .builtIn
     ) throws {
         var mapped: [PocketCapabilityKey: PocketCapabilityDescriptor] = [:]
         for descriptor in descriptors {
@@ -100,6 +111,7 @@ final class CapabilityRegistry {
         }
         self.descriptors = mapped
         self.handlers = handlers
+        self.compatibilityCatalog = compatibilityCatalog
     }
 
     var descriptorKeys: [PocketCapabilityKey] {
@@ -114,6 +126,7 @@ final class CapabilityRegistry {
         guard let descriptor = descriptors[key] else {
             throw CapabilityBrokerError.unknownCapability(key)
         }
+        try compatibilityCatalog.requireRuntimeExecutable(key)
         guard descriptor.approvalPolicy != .runtimeProhibited else {
             throw CapabilityBrokerError.runtimeProhibited(key)
         }
@@ -125,6 +138,10 @@ final class CapabilityRegistry {
 
     func descriptor(_ key: PocketCapabilityKey) -> PocketCapabilityDescriptor? {
         descriptors[key]
+    }
+
+    func compatibilityIssue(_ key: PocketCapabilityKey) -> PocketCapabilityCompatibilityIssue? {
+        compatibilityCatalog.issue(for: key)
     }
 
     func invoke(
@@ -143,13 +160,19 @@ enum PocketCapabilityDescriptors {
         maximumPayloadBytes: 4_096,
         maximumCallsPerMinute: 120
     )
+    private static let calendarReadLimits = CapabilityLimits(
+        timeoutMilliseconds: 15_000,
+        maximumPayloadBytes: 4_096,
+        maximumCallsPerMinute: 30
+    )
     private static let localWriteLimits = CapabilityLimits(
         timeoutMilliseconds: 3_000,
         maximumPayloadBytes: 4_096,
         maximumCallsPerMinute: 120
     )
 
-    static let builtIn: [PocketCapabilityDescriptor] = [
+    static let builtIn: [PocketCapabilityDescriptor] = (PersonalToolOperation.allCases.map(\.descriptor) + [
+        PocketAITextService.descriptor,
         descriptor(
             PocketCapabilityKeys.calculatorEvaluate,
             effect: .pure,
@@ -180,7 +203,7 @@ enum PocketCapabilityDescriptors {
             permissions: ["calendar.events.read"],
             approval: .permissionGrant,
             idempotency: .optional,
-            limits: readLimits,
+            limits: calendarReadLimits,
             readback: CapabilityReadbackPolicy(strategy: .sameStoreSnapshot, query: nil, matchFields: ["eventRef", "eventId", "start", "end", "safeTitle"]),
             rollback: false,
             input: CapabilitySchemaValidation.calendarGetInput,
@@ -192,11 +215,74 @@ enum PocketCapabilityDescriptors {
             permissions: ["calendar.events.read"],
             approval: .permissionGrant,
             idempotency: .optional,
-            limits: readLimits,
+            limits: calendarReadLimits,
             readback: CapabilityReadbackPolicy(strategy: .sameStoreSnapshot, query: nil, matchFields: ["events"]),
             rollback: false,
             input: CapabilitySchemaValidation.calendarListInput,
             output: CapabilitySchemaValidation.calendarListOutput
+        ),
+        controlsDescriptor(
+            PocketCapabilityKeys.controlsAvailability,
+            effect: .privateRead,
+            approval: .permissionGrant,
+            idempotency: .optional,
+            input: CapabilitySchemaValidation.emptyInput,
+            output: CapabilitySchemaValidation.controlsAvailabilityOutput,
+            matchFields: ["volumeAvailable", "brightnessAvailable", "mediaAvailable", "displayIds"]
+        ),
+        controlsDescriptor(
+            PocketCapabilityKeys.controlsBrightnessGet,
+            effect: .privateRead,
+            approval: .permissionGrant,
+            idempotency: .optional,
+            input: CapabilitySchemaValidation.controlsBrightnessGetInput,
+            output: CapabilitySchemaValidation.controlsBrightnessOutput,
+            matchFields: ["displayId", "level", "controllable"]
+        ),
+        controlsDescriptor(
+            PocketCapabilityKeys.controlsBrightnessSet,
+            effect: .reversibleLocalWrite,
+            approval: .brokerPolicy,
+            idempotency: .required,
+            input: CapabilitySchemaValidation.controlsBrightnessInput,
+            output: CapabilitySchemaValidation.controlsBrightnessOutput,
+            matchFields: ["displayId", "level", "controllable"]
+        ),
+        controlsDescriptor(
+            PocketCapabilityKeys.controlsMediaCommand,
+            effect: .reversibleLocalWrite,
+            approval: .brokerPolicy,
+            idempotency: .required,
+            input: CapabilitySchemaValidation.controlsMediaInput,
+            output: CapabilitySchemaValidation.controlsMediaOutput,
+            matchFields: ["command", "available", "isPlaying", "safeTitle", "safeSource"]
+        ),
+        controlsDescriptor(
+            PocketCapabilityKeys.controlsMuteSet,
+            effect: .reversibleLocalWrite,
+            approval: .brokerPolicy,
+            idempotency: .required,
+            input: CapabilitySchemaValidation.controlsMuteInput,
+            output: CapabilitySchemaValidation.controlsVolumeOutput,
+            matchFields: ["level", "muted"]
+        ),
+        controlsDescriptor(
+            PocketCapabilityKeys.controlsVolumeGet,
+            effect: .privateRead,
+            approval: .permissionGrant,
+            idempotency: .optional,
+            input: CapabilitySchemaValidation.emptyInput,
+            output: CapabilitySchemaValidation.controlsVolumeOutput,
+            matchFields: ["level", "muted"]
+        ),
+        controlsDescriptor(
+            PocketCapabilityKeys.controlsVolumeSet,
+            effect: .reversibleLocalWrite,
+            approval: .brokerPolicy,
+            idempotency: .required,
+            input: CapabilitySchemaValidation.controlsVolumeInput,
+            output: CapabilitySchemaValidation.controlsVolumeOutput,
+            matchFields: ["level", "muted"]
         ),
         descriptor(
             PocketCapabilityKeys.stickyArchive,
@@ -259,6 +345,30 @@ enum PocketCapabilityDescriptors {
             output: CapabilitySchemaValidation.stickyOutput
         ),
         descriptor(
+            PocketCapabilityKeys.stickyGetV2,
+            effect: .privateRead,
+            permissions: ["sticky.read"],
+            approval: .permissionGrant,
+            idempotency: .optional,
+            limits: readLimits,
+            readback: CapabilityReadbackPolicy(strategy: .sameStoreSnapshot, query: nil, matchFields: ["noteId", "updatedAt", "reminder"]),
+            rollback: false,
+            input: CapabilitySchemaValidation.stickyIDInput,
+            output: CapabilitySchemaValidation.stickyOutputV2
+        ),
+        descriptor(
+            PocketCapabilityKeys.stickyUpsertV2,
+            effect: .reversibleLocalWrite,
+            permissions: ["sticky.write"],
+            approval: .brokerPolicy,
+            idempotency: .required,
+            limits: localWriteLimits,
+            readback: CapabilityReadbackPolicy(strategy: .capabilityQuery, query: PocketCapabilityKeys.stickyGetV2, matchFields: ["noteId", "title", "body", "updatedAt", "reminder"]),
+            rollback: false,
+            input: CapabilitySchemaValidation.stickyUpsertInputV2,
+            output: CapabilitySchemaValidation.stickyOutputV2
+        ),
+        descriptor(
             PocketCapabilityKeys.nativeAuthority,
             effect: .nativeAuthority,
             permissions: ["system.native"],
@@ -280,7 +390,7 @@ enum PocketCapabilityDescriptors {
         timerDescriptor(PocketCapabilityKeys.timerResume, effect: .reversibleLocalWrite, approval: .brokerPolicy, idempotency: .required, input: CapabilitySchemaValidation.timerIDInput, rollback: false),
         timerDescriptor(PocketCapabilityKeys.timerStart, effect: .reversibleLocalWrite, approval: .brokerPolicy, idempotency: .required, input: CapabilitySchemaValidation.timerStartInput, rollback: true),
         timerDescriptor(PocketCapabilityKeys.timerStop, effect: .reversibleLocalWrite, approval: .brokerPolicy, idempotency: .required, input: CapabilitySchemaValidation.timerIDInput, rollback: false)
-    ].sorted { $0.key < $1.key }
+    ]).sorted { $0.key < $1.key }
 
     private static func descriptor(
         _ key: PocketCapabilityKey,
@@ -334,6 +444,33 @@ enum PocketCapabilityDescriptors {
             output: CapabilitySchemaValidation.timerOutput
         )
     }
+
+    private static func controlsDescriptor(
+        _ key: PocketCapabilityKey,
+        effect: CapabilityEffect,
+        approval: CapabilityApprovalPolicy,
+        idempotency: CapabilityIdempotencyPolicy,
+        input: @escaping @Sendable (CapabilityObject) throws -> Void,
+        output: @escaping @Sendable (CapabilityObject) throws -> Void,
+        matchFields: [String]
+    ) -> PocketCapabilityDescriptor {
+        descriptor(
+            key,
+            effect: effect,
+            permissions: [effect == .privateRead ? "controls.read" : "controls.write"],
+            approval: approval,
+            idempotency: idempotency,
+            limits: effect == .privateRead ? readLimits : localWriteLimits,
+            readback: CapabilityReadbackPolicy(
+                strategy: effect == .privateRead ? .sameStoreSnapshot : .osState,
+                query: nil,
+                matchFields: matchFields
+            ),
+            rollback: false,
+            input: input,
+            output: output
+        )
+    }
 }
 
 enum CapabilitySchemaValidation {
@@ -376,6 +513,22 @@ enum CapabilitySchemaValidation {
         return value
     }
 
+    static func number(_ object: CapabilityObject, _ key: String, range: ClosedRange<Double>) throws -> Double {
+        let value: Double
+        switch object[key] {
+        case .some(.number(let number)):
+            value = number
+        case .some(.integer(let integer)):
+            value = Double(integer)
+        default:
+            throw CapabilityBrokerError.invalidPlan("schema_\(key)")
+        }
+        guard value.isFinite, range.contains(value) else {
+            throw CapabilityBrokerError.invalidPlan("schema_\(key)")
+        }
+        return value
+    }
+
     static func boolean(_ object: CapabilityObject, _ key: String) throws -> Bool {
         guard case .bool(let value)? = object[key] else {
             throw CapabilityBrokerError.invalidPlan("schema_\(key)")
@@ -398,6 +551,79 @@ enum CapabilitySchemaValidation {
         guard TimeZone(identifier: timezone) != nil else {
             throw CapabilityBrokerError.invalidPlan("schema_timezone")
         }
+    }
+
+    static func emptyInput(_ object: CapabilityObject) throws {
+        try exactKeys(object, [])
+    }
+
+    static func controlsVolumeInput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["level"])
+        _ = try number(object, "level", range: 0...1)
+    }
+
+    static func controlsMuteInput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["muted"])
+        _ = try boolean(object, "muted")
+    }
+
+    static func controlsBrightnessInput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["displayId", "level"])
+        _ = try string(object, "displayId", minimum: 1, maximum: 128)
+        _ = try number(object, "level", range: 0.05...1)
+    }
+
+    static func controlsBrightnessGetInput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["displayId"])
+        _ = try string(object, "displayId", minimum: 1, maximum: 128)
+    }
+
+    static func controlsMediaInput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["command"])
+        _ = try string(object, "command", minimum: 1, maximum: 16, allowed: ["play_pause", "next", "previous"])
+    }
+
+    static func controlsVolumeOutput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["level", "muted"])
+        _ = try number(object, "level", range: 0...1)
+        _ = try boolean(object, "muted")
+    }
+
+    static func controlsBrightnessOutput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["displayId", "level", "controllable"])
+        _ = try string(object, "displayId", minimum: 1, maximum: 128)
+        _ = try number(object, "level", range: 0...1)
+        guard try boolean(object, "controllable") else {
+            throw CapabilityBrokerError.invalidPlan("schema_controllable")
+        }
+    }
+
+    static func controlsAvailabilityOutput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["volumeAvailable", "brightnessAvailable", "mediaAvailable", "displayIds"])
+        _ = try boolean(object, "volumeAvailable")
+        _ = try boolean(object, "brightnessAvailable")
+        _ = try boolean(object, "mediaAvailable")
+        guard case .array(let ids)? = object["displayIds"], ids.count <= 16 else {
+            throw CapabilityBrokerError.invalidPlan("schema_displayIds")
+        }
+        for id in ids {
+            guard case .string(let value) = id,
+                  !value.isEmpty,
+                  value.unicodeScalars.count <= 128 else {
+                throw CapabilityBrokerError.invalidPlan("schema_displayIds")
+            }
+        }
+    }
+
+    static func controlsMediaOutput(_ object: CapabilityObject) throws {
+        try exactKeys(object, ["command", "available", "isPlaying", "safeTitle", "safeSource"])
+        _ = try string(object, "command", minimum: 1, maximum: 16, allowed: ["play_pause", "next", "previous"])
+        guard try boolean(object, "available") else {
+            throw CapabilityBrokerError.invalidPlan("schema_available")
+        }
+        _ = try boolean(object, "isPlaying")
+        _ = try string(object, "safeTitle", maximum: 160)
+        _ = try string(object, "safeSource", maximum: 120)
     }
 
     static func calculatorInput(_ object: CapabilityObject) throws {
@@ -492,6 +718,63 @@ enum CapabilitySchemaValidation {
         _ = try string(object, "title", maximum: 120)
         _ = try string(object, "body", maximum: 10_000)
         _ = try string(object, "color", minimum: 1, maximum: 16, allowed: ["yellow", "blue", "green", "pink", "gray"])
+    }
+
+    static func stickyUpsertInputV2(_ object: CapabilityObject) throws {
+        var legacy = object
+        let reminder = legacy.removeValue(forKey: "reminder")
+        try stickyUpsertInput(legacy)
+        if let reminder { try stickyReminder(reminder, output: false) }
+    }
+
+    static func stickyOutputV2(_ object: CapabilityObject) throws {
+        var legacy = object
+        guard let reminder = legacy.removeValue(forKey: "reminder") else {
+            throw CapabilityBrokerError.invalidPlan("schema_reminder")
+        }
+        try stickyOutput(legacy)
+        try stickyReminder(reminder, output: true)
+    }
+
+    static func stickyReminder(_ value: CapabilityValue, output: Bool) throws {
+        if value == .null { return }
+        guard case .object(let object) = value else {
+            throw CapabilityBrokerError.invalidPlan("schema_reminder")
+        }
+        try exactKeys(object, output ? ["scheduledAt", "timeZone", "acknowledgedAt"] : ["scheduledAt", "timeZone"])
+        let scheduled = try string(object, "scheduledAt", minimum: 1, maximum: 64)
+        let zone = try string(object, "timeZone", minimum: 1, maximum: 128)
+        guard reminderDate(scheduled) != nil,
+              TimeZone.knownTimeZoneIdentifiers.contains(zone) || zone == "UTC" else {
+            throw CapabilityBrokerError.invalidPlan("schema_reminder_date_timezone")
+        }
+        if output {
+            switch object["acknowledgedAt"] {
+            case .some(.null): break
+            case .some(.string(let value)) where reminderDate(value) != nil: break
+            default: throw CapabilityBrokerError.invalidPlan("schema_reminder_acknowledgedAt")
+            }
+        }
+    }
+
+    static func reminderDate(_ value: String) -> Date? {
+        guard value.range(of: #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$"#, options: .regularExpression) == value.startIndex..<value.endIndex,
+              let date = CapabilityDateCodec.date(from: value) else { return nil }
+        var offset = 0
+        if !value.hasSuffix("Z") {
+            let suffix = String(value.suffix(6))
+            guard let hours = Int(suffix.dropFirst().prefix(2)), hours <= 23,
+                  let minutes = Int(suffix.suffix(2)), minutes <= 59 else { return nil }
+            offset = (hours * 60 + minutes) * 60 * (suffix.hasPrefix("-") ? -1 : 1)
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: offset)
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        // ISO8601DateFormatter can normalize impossible dates; never silently move a reminder.
+        guard formatter.string(from: date) == String(value.prefix(19)) else { return nil }
+        return date
     }
 
     static func stickyIDInput(_ object: CapabilityObject) throws {

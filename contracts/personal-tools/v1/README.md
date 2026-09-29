@@ -1,0 +1,11 @@
+# Personal tool operation contract v1
+
+The canonical operation definitions are `PersonalToolOperation` in the macOS source. `operations.json` is generated with `HoverPocket --export-personal-tool-contracts`; CI compares the generated output byte for byte. Definitions are additive: existing capability versions, saved Timer/Sticky JSON, and Pocket App packages are unchanged. These new handlers currently ship on macOS; Windows must report unavailable until it implements the same operations, not reinterpret an existing version.
+
+Voice uses `targetId` from a successful list/read/create in the same conversation. Unknown IDs fail. Lists return candidates; identical names require user selection. `remainingSeconds` and `deltaSeconds` use seconds; absolute and relative values cannot be combined. Dates are RFC3339 with timezone offset; all-day dates are YYYY-MM-DD and the end is exclusive. Omitted edit fields retain existing values; empty strings explicitly clear supported text fields. `expectedRevision` is added only by the Host after a fresh read and is bound to confirmation and execution. It is not a model input.
+
+The successful response contains `status=succeeded`, `readback=verified`, `result`, and `contentIsUntrusted=true`. Lists return `items`. Sticky lists expose `total` and nullable `nextOffset`. A `truncated` list requires narrowing the search; `contentOmitted` means the text is not included; `truncatedFields` means text is a partial excerpt and must not be used to replace full contents. No note body, copied text, or Calendar credentials belong in the audit log.
+
+Destructive operations require a separate strong-per-call Host confirmation and never inherit Voice confirmation-OFF. Calendar writes use If-Match and sendUpdates=all, then GET readback; deletion is verified only with missing/cancelled state. Pending-action cancellation is Voice session control, not a data capability, and cannot undo completed actions. Media stop is represented by pause; native full stop is unavailable through the existing adapter.
+
+Rollback of this code returns to build 630 without a data migration. Already modified Calendar events are external state and are not reverted by replacing the app binary. Existing local Undo applies to note deletion.

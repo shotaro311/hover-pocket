@@ -1,3 +1,6 @@
+using HoverPocket.Shell.Voice;
+using HoverPocket.Shell.Capabilities;
+
 namespace HoverPocket.Shell.Configuration;
 
 internal sealed class UserSettings
@@ -17,6 +20,16 @@ internal sealed class UserSettings
     public bool AutoCheckForUpdates { get; set; } = true;
 
     public bool AiNativeEnabled { get; set; }
+
+    public CapabilityDataRetentionPeriod CapabilityDataRetentionPeriod { get; set; } = CapabilityDataRetentionPeriod.NinetyDays;
+
+    public bool VoiceEnabled { get; set; }
+
+    public string VoiceProviderId { get; set; } = VoiceProviderIds.Off;
+
+    public bool VoiceCalendarAccessGranted { get; set; }
+
+    public VoiceLaneLayoutPreference VoiceLaneLayout { get; set; } = VoiceLaneLayoutPreference.Compact;
 
     public bool ClipboardPrivateMode { get; set; }
 
@@ -48,6 +61,11 @@ internal sealed class UserSettings
             StartWithWindows = StartWithWindows,
             AutoCheckForUpdates = AutoCheckForUpdates,
             AiNativeEnabled = AiNativeEnabled,
+            CapabilityDataRetentionPeriod = CapabilityDataRetentionPeriod,
+            VoiceEnabled = VoiceEnabled,
+            VoiceProviderId = VoiceProviderId,
+            VoiceCalendarAccessGranted = VoiceCalendarAccessGranted,
+            VoiceLaneLayout = VoiceLaneLayout,
             ClipboardPrivateMode = ClipboardPrivateMode,
             RememberLastSelectedProvider = RememberLastSelectedProvider,
             PreferredProviderId = PreferredProviderId,

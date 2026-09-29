@@ -1,0 +1,16 @@
+{
+  "formatVersion": 1,
+  "schemaVersion": 1,
+  "revision": 1,
+  "records": [
+    {
+      "id": "9a91a009-2213-4506-a780-260598d039dc",
+      "fields": {
+        "title": "検証用記録",
+        "count": 1,
+        "done": false,
+        "optional": null
+      }
+    }
+  ]
+}

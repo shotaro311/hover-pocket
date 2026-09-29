@@ -1,0 +1,414 @@
+import Combine
+import Foundation
+
+@MainActor
+final class CodexVoiceRuntimeHost: ObservableObject {
+    @Published private(set) var availableVoices: [String] = []
+    var preferredVoice: (() -> String)?
+    private weak var voiceRuntime: VoiceLaneRuntime?
+    private let workspaceDirectory: URL
+    private let injectedClientFactory: CodexVoiceCoordinator.ClientFactory?
+    private var configuredExecutableURL: URL?
+    private var configuredExecutableIdentity: String?
+    private var configuredProfile: CodexVoiceAppServerProfile?
+    private var toolAdapter: (any CodexVoiceCapabilityToolAdapterProtocol)?
+    private var coordinator: CodexVoiceCoordinator?
+    private var desiredEnabled = false
+    private var lifecycleGeneration: UInt64 = 0
+    private var panelVisible = false
+    private var sessionsVisible = false
+    private var microphonePermissionArmedUntil: Date?
+    private var microphonePermissionAttemptCount = 0
+    private var publishedTranscript: [CodexVoiceTranscriptEntry] = []
+    private var publishedSessions: [String: CodexVoiceThreadSummary] = [:]
+    private var publishedRootThreadID: String?
+    private var publishedErrorCode: String?
+
+    private(set) var snapshot = CodexVoiceRuntimeHost.disabledSnapshot
+
+    init(
+        voiceRuntime: VoiceLaneRuntime,
+        workspaceDirectory: URL? = nil,
+        clientFactory: CodexVoiceCoordinator.ClientFactory? = nil
+    ) {
+        self.voiceRuntime = voiceRuntime
+        self.workspaceDirectory = workspaceDirectory
+            ?? HoverPocketRuntimeEnvironment.shared.storageDirectory("VoiceWorkspace")
+        self.injectedClientFactory = clientFactory
+    }
+
+    func configureToolAdapter(_ adapter: any CodexVoiceCapabilityToolAdapterProtocol) {
+        guard !desiredEnabled, coordinator == nil else { return }
+        toolAdapter = adapter
+    }
+
+    func configureExecutable(
+        _ executableURL: URL,
+        expectedIdentity: String,
+        profile: CodexVoiceAppServerProfile
+    ) -> Bool {
+        let resolved = executableURL.standardizedFileURL.resolvingSymlinksInPath()
+        if desiredEnabled || coordinator != nil {
+            return configuredExecutableURL == resolved
+                && configuredExecutableIdentity == expectedIdentity
+                && configuredProfile == profile
+        }
+        configuredExecutableURL = resolved
+        configuredExecutableIdentity = expectedIdentity
+        configuredProfile = profile
+        return true
+    }
+
+    func reconfigureExecutable(
+        _ executableURL: URL,
+        expectedIdentity: String,
+        profile: CodexVoiceAppServerProfile
+    ) async -> Bool {
+        let resolved = executableURL.standardizedFileURL.resolvingSymlinksInPath()
+        let unchanged = configuredExecutableURL == resolved
+            && configuredExecutableIdentity == expectedIdentity
+            && configuredProfile == profile
+        guard !unchanged else { return true }
+
+        if desiredEnabled || coordinator != nil {
+            await setEnabled(false)
+        }
+        return configureExecutable(
+            resolved,
+            expectedIdentity: expectedIdentity,
+            profile: profile
+        )
+    }
+
+    func setEnabled(_ enabled: Bool) async {
+        desiredEnabled = enabled
+        lifecycleGeneration &+= 1
+        let generation = lifecycleGeneration
+
+        guard enabled else {
+            finishMicrophoneRequest()
+            let previous = coordinator
+            coordinator = nil
+            previous?.snapshotHandler = nil
+            if let rootThreadID = snapshot.rootThreadID {
+                toolAdapter?.cancelSession(rootThreadID)
+            }
+            if let previous {
+                await previous.close()
+            }
+            guard generation == lifecycleGeneration else { return }
+            resetPublishedState()
+            snapshot = Self.disabledSnapshot
+            return
+        }
+
+        guard coordinator == nil, let toolAdapter else { return }
+        let resolvedClientFactory: CodexVoiceCoordinator.ClientFactory?
+        if let injectedClientFactory {
+            resolvedClientFactory = injectedClientFactory
+        } else if let executableURL = configuredExecutableURL,
+                  let expectedIdentity = configuredExecutableIdentity,
+                  let profile = configuredProfile {
+            resolvedClientFactory = {
+                guard CodexAppServerCompatibilityProbe.identityToken(executableURL)
+                        == expectedIdentity else {
+                    throw CodexVoiceRuntimeError.compatibility("codex_executable_changed")
+                }
+                return try await CodexAppServerClient.start(
+                    options: CodexAppServerClientOptions(
+                        executableURL: executableURL,
+                        launchArguments: CodexVoiceAppServerLaunchPolicy.arguments,
+                        processEnvironment: profile.processEnvironment,
+                        workingDirectoryURL: profile.codexHomeURL,
+                        clientTitle: "HoverPocket Voice Lane",
+                        clientVersion: Bundle.main.object(
+                            forInfoDictionaryKey: "CFBundleShortVersionString"
+                        ) as? String ?? "0.0.0",
+                        experimentalAPI: true
+                    )
+                )
+            }
+        } else {
+            resolvedClientFactory = nil
+        }
+        guard let resolvedClientFactory else {
+            snapshot = CodexVoiceSnapshot(
+                featureEnabled: true,
+                availability: .incompatible,
+                sessionStatus: .blockedFailure,
+                rootThreadID: nil,
+                transportAttached: false,
+                isMuted: true,
+                transcript: [],
+                sessions: [],
+                lastErrorCode: "codex_executable_not_pinned",
+                appServerProcessID: nil,
+                restartAttempt: 0,
+                voiceCount: 0
+            )
+            publish(snapshot)
+            return
+        }
+        let candidate = CodexVoiceCoordinator(
+            featureEnabled: true,
+            workspaceDirectory: workspaceDirectory,
+            clientFactory: resolvedClientFactory,
+            toolAdapter: toolAdapter
+        )
+        candidate.preferredVoice = { [weak self] in self?.preferredVoice?() ?? "" }
+        candidate.snapshotHandler = { [weak self, weak candidate] (snapshot: CodexVoiceSnapshot) in
+            guard let self, let candidate, self.coordinator === candidate else { return }
+            self.publish(snapshot)
+        }
+        coordinator = candidate
+        candidate.setSessionsVisible(sessionsVisible)
+        publish(candidate.snapshot)
+        await candidate.initialize()
+        availableVoices = candidate.availableVoices
+
+        guard desiredEnabled,
+              generation == lifecycleGeneration,
+              coordinator === candidate else {
+            candidate.snapshotHandler = nil
+            if coordinator === candidate {
+                coordinator = nil
+            }
+            await candidate.close()
+            return
+        }
+        publish(candidate.snapshot)
+    }
+
+    func appendHostNotice(sessionID: String, text: String) async -> Bool {
+        await coordinator?.appendHostNotice(sessionID: sessionID, text: text) ?? false
+    }
+
+    func resetRealtimeForCapabilityChange(alreadyStopped: Bool = false) async {
+        guard desiredEnabled, let coordinator else { return }
+        if let rootThreadID = snapshot.rootThreadID {
+            toolAdapter?.cancelSession(rootThreadID)
+        }
+        await coordinator.resetRealtimeSession(alreadyStopped: alreadyStopped)
+    }
+
+    func clearTransientUIState() {
+        panelVisible = false
+        finishMicrophoneRequest()
+        coordinator?.clearTransientUIState()
+    }
+
+    func setPanelVisible(_ visible: Bool) {
+        panelVisible = visible
+        if !visible {
+            finishMicrophoneRequest()
+        }
+    }
+
+    func setSessionsVisible(_ visible: Bool) {
+        sessionsVisible = visible
+        coordinator?.setSessionsVisible(visible)
+    }
+
+    func beginMicrophoneRequest(now: Date = Date()) -> Bool {
+        guard desiredEnabled,
+              panelVisible,
+              snapshot.availability == .ready else {
+            finishMicrophoneRequest()
+            return false
+        }
+        microphonePermissionAttemptCount = 0
+        microphonePermissionArmedUntil = now.addingTimeInterval(5)
+        coordinator?.markSessionRequestingPermission()
+        return true
+    }
+
+    func consumeMicrophonePermission(now: Date = Date()) -> CodexVoiceMicrophonePermissionDecision {
+        let decision = Self.microphonePermissionDecision(
+            desiredEnabled: desiredEnabled,
+            panelVisible: panelVisible,
+            availability: snapshot.availability,
+            armedUntil: microphonePermissionArmedUntil,
+            attemptCount: microphonePermissionAttemptCount,
+            now: now
+        )
+        switch decision {
+        case .allowed:
+            if microphonePermissionAttemptCount == 0 {
+                microphonePermissionArmedUntil = nil
+            }
+            microphonePermissionAttemptCount += 1
+        case .denied:
+            finishMicrophoneRequest()
+        }
+        return decision
+    }
+
+    func finishMicrophoneRequest() {
+        microphonePermissionArmedUntil = nil
+        microphonePermissionAttemptCount = 0
+    }
+
+    func startWebRTC(sdpOffer: String) async throws -> CodexVoiceWebRTCAnswer {
+        guard let coordinator else {
+            throw CodexVoiceRuntimeError.compatibility("voice_not_enabled")
+        }
+        return try await coordinator.startWebRTC(sdpOffer: sdpOffer)
+    }
+
+    func markTransportAttached() {
+        coordinator?.markTransportAttached()
+        voiceRuntime?.reportTransportActivity(.listening)
+    }
+
+    func reportAudioActivity(_ activity: VoiceLaneActivity) {
+        voiceRuntime?.reportTransportActivity(activity)
+    }
+
+    func markTransportDetached(reconnectExpected: Bool) {
+        guard let sourceCoordinator = coordinator else { return }
+        let sourceGeneration = lifecycleGeneration
+        sourceCoordinator.detachTransport(reconnectExpected: reconnectExpected)
+        let errorCode = reconnectExpected
+            ? "webrtc_transport_detached"
+            : "webrtc_transport_closed"
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await sourceCoordinator.stopRealtime()
+            guard self.desiredEnabled,
+                  self.lifecycleGeneration == sourceGeneration,
+                  self.coordinator === sourceCoordinator else { return }
+            self.voiceRuntime?.reportTransportFailure(errorCode)
+        }
+    }
+
+    func markSessionFailure(_ errorCode: String) {
+        finishMicrophoneRequest()
+        coordinator?.markSessionFailure(errorCode)
+        voiceRuntime?.reportTransportFailure(errorCode)
+    }
+
+    func setMuted(_ muted: Bool) {
+        coordinator?.setMuted(muted)
+    }
+
+    func stopRealtime() async {
+        await coordinator?.stopRealtime()
+    }
+
+    private func publish(_ snapshot: CodexVoiceSnapshot) {
+        self.snapshot = snapshot
+        guard desiredEnabled, let voiceRuntime else { return }
+
+        if snapshot.rootThreadID != publishedRootThreadID {
+            publishedRootThreadID = snapshot.rootThreadID
+            publishedTranscript = []
+            publishedSessions = [:]
+            voiceRuntime.setRootSessionID(snapshot.rootThreadID)
+        }
+        if let rootThreadID = snapshot.rootThreadID {
+            for (index, entry) in snapshot.transcript.enumerated() {
+                guard index >= publishedTranscript.count
+                        || publishedTranscript[index] != entry else { continue }
+                let role: VoiceTranscriptEvent.Role = switch entry.role.lowercased() {
+                case "user": .user
+                case "assistant", "agent": .assistant
+                default: .system
+                }
+                voiceRuntime.appendTranscript(VoiceTranscriptEvent(
+                    id: "codex.transcript.\(index)",
+                    rootSessionID: rootThreadID,
+                    role: role,
+                    text: entry.text,
+                    isFinal: entry.isComplete,
+                    timestamp: entry.updatedAt
+                ))
+            }
+            publishedTranscript = snapshot.transcript
+
+            for session in snapshot.sessions where publishedSessions[session.threadID] != session {
+                let status: VoiceSessionStatus = switch session.state {
+                case .running: .running
+                case .completed: .succeeded
+                case .failed: .failed
+                }
+                voiceRuntime.upsertSession(VoiceSessionSummary(
+                    sessionID: session.threadID,
+                    rootSessionID: rootThreadID,
+                    parentSessionID: session.isCurrentRoot ? nil : rootThreadID,
+                    title: session.isCurrentRoot ? "この会話" : session.title,
+                    status: status,
+                    safeSummary: session.detail,
+                    updatedAt: session.updatedAt
+                ))
+                publishedSessions[session.threadID] = session
+            }
+        }
+
+        if let errorCode = snapshot.lastErrorCode,
+           errorCode != publishedErrorCode,
+           ([.incompatible, .signedOut, .unavailable, .faulted, .blocked]
+            .contains(snapshot.availability)
+            || [.blockedFailure, .recoverableFailure].contains(snapshot.sessionStatus)) {
+            publishedErrorCode = errorCode
+            voiceRuntime.reportTransportFailure(errorCode)
+        } else if snapshot.lastErrorCode == nil {
+            publishedErrorCode = nil
+        }
+    }
+
+    private func resetPublishedState() {
+        publishedTranscript = []
+        publishedSessions = [:]
+        publishedRootThreadID = nil
+        publishedErrorCode = nil
+    }
+
+    private static let disabledSnapshot = CodexVoiceSnapshot(
+        featureEnabled: false,
+        availability: .disabled,
+        sessionStatus: .idle,
+        rootThreadID: nil,
+        transportAttached: false,
+        isMuted: true,
+        transcript: [],
+        sessions: [],
+        lastErrorCode: nil,
+        appServerProcessID: nil,
+        restartAttempt: 0,
+        voiceCount: 0
+    )
+
+    static let maximumMicrophonePermissionAttempts = 4
+
+    static func microphonePermissionDecision(
+        desiredEnabled: Bool,
+        panelVisible: Bool,
+        availability: CodexVoiceAvailability,
+        armedUntil: Date?,
+        attemptCount: Int,
+        now: Date
+    ) -> CodexVoiceMicrophonePermissionDecision {
+        guard desiredEnabled,
+              panelVisible,
+              availability == .ready else {
+            return .denied("microphone_request_not_armed")
+        }
+        guard attemptCount < maximumMicrophonePermissionAttempts else {
+            return .denied("microphone_request_exhausted")
+        }
+        if attemptCount == 0 {
+            guard let armedUntil else {
+                return .denied("microphone_request_not_armed")
+            }
+            guard now <= armedUntil else {
+                return .denied("microphone_request_expired")
+            }
+        }
+        return .allowed
+    }
+}
+
+enum CodexVoiceMicrophonePermissionDecision: Equatable {
+    case allowed
+    case denied(String)
+}

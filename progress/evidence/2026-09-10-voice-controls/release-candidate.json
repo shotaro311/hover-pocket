@@ -1,0 +1,10 @@
+{
+  "build": "643",
+  "source_commit": "df10209b20cf09c15610f4c548e5d241cb876237",
+  "source_files_match": 197,
+  "notarization_status": "Accepted",
+  "notarization_id": "72472115-4dfc-4c85-946b-d6908dc1a8d6",
+  "archive_sha256": "4881fba25dfa23fa8a30656fe499383c2354fec890d38f9b42a78fad6ce9fea0",
+  "signed_release_checks": "passed",
+  "github_contracts_run": 34476473324
+}

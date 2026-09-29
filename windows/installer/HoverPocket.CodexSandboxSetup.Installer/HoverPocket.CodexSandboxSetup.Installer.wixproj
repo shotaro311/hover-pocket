@@ -1,0 +1,18 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.2.7</ProductVersion>
+    <DefineConstants>ProductVersion=$(ProductVersion);HelperPublishDir=$(HelperPublishDir)</DefineConstants>
+  </PropertyGroup>
+
+  <Target Name="ValidateCodexSandboxHelperPublish"
+          BeforeTargets="Build">
+    <Error Condition="'$(HelperPublishDir)' == ''"
+           Text="HelperPublishDir must name the explicit self-contained win-x64 helper publish directory." />
+    <Error Condition="!Exists('$(HelperPublishDir)\HoverPocket.CodexSandboxSetup.exe')"
+           Text="HelperPublishDir does not contain HoverPocket.CodexSandboxSetup.exe." />
+  </Target>
+
+</Project>

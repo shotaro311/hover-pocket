@@ -1,0 +1,92 @@
+{
+  "build": "634",
+  "binarySHA256": "391fcbec8c1d21d3c947463ae6349345d381013ee93701b32c40da48b5de7c51",
+  "checks": [
+    {
+      "arguments": [
+        "--verify-pocket-tools-platform"
+      ],
+      "exitCode": 0,
+      "seconds": 2.46,
+      "log": "packaged-verify-pocket-tools-platform.log"
+    },
+    {
+      "arguments": [
+        "--verify-pocket-app"
+      ],
+      "exitCode": 0,
+      "seconds": 3.76,
+      "log": "packaged-verify-pocket-app.log"
+    },
+    {
+      "arguments": [
+        "--verify-pocket-tools-html"
+      ],
+      "exitCode": 0,
+      "seconds": 0.65,
+      "log": "packaged-verify-pocket-tools-html.log"
+    },
+    {
+      "arguments": [
+        "--verify-pocket-tools-generated-ui",
+        "contracts/pocket/v2/fixtures/plants-location",
+        "--previous-tool",
+        "contracts/pocket/v2/fixtures/plants"
+      ],
+      "exitCode": 0,
+      "seconds": 1.16,
+      "log": "packaged-verify-pocket-tools-generated-ui.log"
+    },
+    {
+      "arguments": [
+        "--verify-pocket-tools-actions",
+        "/Users/shotaro/code/share/hover-menu-preview-macos-release-629/progress/evidence/2026-09-07-pocket-tools-production/start-work-panel"
+      ],
+      "exitCode": 0,
+      "seconds": 0.18,
+      "log": "packaged-verify-pocket-tools-actions.log"
+    },
+    {
+      "arguments": [
+        "--verify-broker"
+      ],
+      "exitCode": 0,
+      "seconds": 0.38,
+      "log": "packaged-verify-broker.log"
+    },
+    {
+      "arguments": [
+        "--verify-personal-tools"
+      ],
+      "exitCode": 0,
+      "seconds": 0.1,
+      "log": "packaged-verify-personal-tools.log"
+    },
+    {
+      "arguments": [
+        "--verify-voice-foundation"
+      ],
+      "exitCode": 0,
+      "seconds": 0.43,
+      "log": "packaged-verify-voice-foundation.log"
+    },
+    {
+      "arguments": [
+        "--verify-panel-layout"
+      ],
+      "exitCode": 0,
+      "seconds": 1.68,
+      "log": "packaged-verify-panel-layout.log"
+    },
+    {
+      "arguments": [
+        "--verify-panel-soak",
+        "--pocket-package",
+        "/Users/shotaro/code/share/hover-menu-preview-macos-release-629/progress/evidence/2026-09-07-pocket-tools-production/plants-panel-location"
+      ],
+      "exitCode": 1,
+      "seconds": 11.21,
+      "log": "packaged-verify-panel-soak.log"
+    }
+  ]
+}

@@ -1,8 +1,85 @@
 import Combine
 import Foundation
 
+protocol AppSettingsDefaultsStoring: AnyObject {
+    func set(_ value: Any?, forKey defaultName: String)
+    func removeObject(forKey defaultName: String)
+    func object(forKey defaultName: String) -> Any?
+    func string(forKey defaultName: String) -> String?
+    func data(forKey defaultName: String) -> Data?
+    func bool(forKey defaultName: String) -> Bool
+    func stringArray(forKey defaultName: String) -> [String]?
+}
+
+extension UserDefaults: AppSettingsDefaultsStoring {}
+
+final class EphemeralAppSettingsDefaults: AppSettingsDefaultsStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String: Any] = [:]
+
+    func set(_ value: Any?, forKey defaultName: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        storage[defaultName] = value
+    }
+
+    func removeObject(forKey defaultName: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        storage.removeValue(forKey: defaultName)
+    }
+
+    func object(forKey defaultName: String) -> Any? {
+        withValue(forKey: defaultName) { $0 }
+    }
+
+    func string(forKey defaultName: String) -> String? {
+        withValue(forKey: defaultName) { $0 as? String }
+    }
+
+    func data(forKey defaultName: String) -> Data? {
+        withValue(forKey: defaultName) { $0 as? Data }
+    }
+
+    func bool(forKey defaultName: String) -> Bool {
+        withValue(forKey: defaultName) { value in
+            if let value = value as? Bool {
+                return value
+            }
+            return (value as? NSNumber)?.boolValue ?? false
+        }
+    }
+
+    func stringArray(forKey defaultName: String) -> [String]? {
+        withValue(forKey: defaultName) { $0 as? [String] }
+    }
+
+    private func withValue<T>(
+        forKey defaultName: String,
+        _ body: (Any?) -> T
+    ) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body(storage[defaultName])
+    }
+}
+
 @MainActor
 final class AppSettings: ObservableObject {
+    @Published var codexVoiceSelection: String {
+        didSet { defaults.set(codexVoiceSelection, forKey: "codexVoiceSelection") }
+    }
+    @Published private(set) var disabledPocketLibraries: Set<String> {
+        didSet { defaults.set(disabledPocketLibraries.sorted(), forKey: "disabledPocketLibraries") }
+    }
+
+    func saveDisabledPocketLibraries(_ ids: Set<String>) {
+        disabledPocketLibraries = ids
+    }
+
+    @Published var pocketToolReasoningEffort: String {
+        didSet { defaults.set(pocketToolReasoningEffort, forKey: "pocketToolReasoningEffort") }
+    }
     @Published var appLanguage: AppLanguage {
         didSet {
             defaults.set(appLanguage.rawValue, forKey: Self.appLanguageKey)
@@ -122,7 +199,58 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    private let defaults: UserDefaults
+    @Published var capabilityDataRetentionPeriod: CapabilityDataRetentionPeriod {
+        didSet {
+            defaults.set(capabilityDataRetentionPeriod.rawValue, forKey: Self.capabilityDataRetentionPeriodKey)
+        }
+    }
+
+    @Published var voiceProvider: VoiceProviderID {
+        didSet {
+            defaults.set(voiceProvider.rawValue, forKey: Self.voiceProviderKey)
+            if voiceProvider == .off, voiceEnabled {
+                voiceEnabled = false
+            }
+        }
+    }
+
+    @Published var voiceEnabled: Bool {
+        didSet {
+            defaults.set(voiceEnabled, forKey: Self.voiceEnabledKey)
+        }
+    }
+
+    @Published var voiceLaneLayoutPreference: VoiceLaneLayoutPreference {
+        didSet {
+            defaults.set(voiceLaneLayoutPreference.rawValue, forKey: Self.voiceLaneLayoutPreferenceKey)
+        }
+    }
+
+    @Published var voiceCalendarAccessEnabled: Bool {
+        didSet {
+            defaults.set(voiceCalendarAccessEnabled, forKey: Self.voiceCalendarAccessEnabledKey)
+        }
+    }
+
+    @Published var voiceContinueWhenPanelHidden: Bool {
+        didSet {
+            defaults.set(voiceContinueWhenPanelHidden, forKey: Self.voiceContinueWhenPanelHiddenKey)
+        }
+    }
+
+    @Published var voiceActionConfirmationEnabled: Bool {
+        didSet {
+            defaults.set(voiceActionConfirmationEnabled, forKey: Self.voiceActionConfirmationEnabledKey)
+        }
+    }
+
+    @Published var voiceDestructiveConfirmationEnabled: Bool {
+        didSet {
+            defaults.set(voiceDestructiveConfirmationEnabled, forKey: Self.voiceDestructiveConfirmationEnabledKey)
+        }
+    }
+
+    private let defaults: any AppSettingsDefaultsStoring
     private static let appLanguageKey = "appLanguage"
     private static let displayPlacementModeKey = "displayPlacementMode"
     private static let panelSizeKey = "panelSize"
@@ -143,9 +271,19 @@ final class AppSettings: ObservableObject {
     private static let showStickyNoteUndoToastKey = "showStickyNoteUndoToast"
     private static let stickyNoteGridSizeKey = "stickyNoteGridSize"
     private static let aiNativeEnabledKey = "aiNativeEnabled"
+    private static let capabilityDataRetentionPeriodKey = "capabilityDataRetentionPeriod"
+    private static let voiceProviderKey = "voiceProvider"
+    private static let voiceEnabledKey = "voiceEnabled"
+    private static let voiceLaneLayoutPreferenceKey = "voiceLaneLayoutPreference"
+    private static let voiceCalendarAccessEnabledKey = "voiceCalendarAccessEnabled"
+    private static let voiceContinueWhenPanelHiddenKey = "voiceContinueWhenPanelHidden"
+    private static let voiceActionConfirmationEnabledKey = "voiceActionConfirmationEnabled"
+    private static let voiceDestructiveConfirmationEnabledKey = "voiceDestructiveConfirmationEnabled"
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: any AppSettingsDefaultsStoring = UserDefaults.standard) {
         self.defaults = defaults
+        self.disabledPocketLibraries = Set(defaults.stringArray(forKey: "disabledPocketLibraries") ?? [])
+        self.pocketToolReasoningEffort = defaults.string(forKey: "pocketToolReasoningEffort") ?? "medium"
         let languageRawValue = defaults.string(forKey: Self.appLanguageKey)
         self.appLanguage = languageRawValue.flatMap(AppLanguage.init(rawValue:)) ?? .japanese
         let rawValue = defaults.string(forKey: Self.displayPlacementModeKey)
@@ -210,6 +348,32 @@ final class AppSettings: ObservableObject {
         self.aiNativeEnabled = defaults.object(forKey: Self.aiNativeEnabledKey) == nil
             ? false
             : defaults.bool(forKey: Self.aiNativeEnabledKey)
+        self.capabilityDataRetentionPeriod = defaults.string(forKey: Self.capabilityDataRetentionPeriodKey)
+            .flatMap(CapabilityDataRetentionPeriod.init(rawValue:)) ?? .ninetyDays
+        self.codexVoiceSelection = defaults.string(forKey: "codexVoiceSelection") ?? ""
+        let storedVoiceProvider = defaults.string(forKey: Self.voiceProviderKey)
+            .flatMap(VoiceProviderID.init(rawValue:)) ?? .off
+        self.voiceProvider = storedVoiceProvider
+        self.voiceEnabled = storedVoiceProvider == .off
+            ? false
+            : defaults.object(forKey: Self.voiceEnabledKey) == nil
+                ? false
+                : defaults.bool(forKey: Self.voiceEnabledKey)
+        self.voiceLaneLayoutPreference = defaults.string(forKey: Self.voiceLaneLayoutPreferenceKey)
+            .flatMap(VoiceLaneLayoutPreference.init(rawValue:)) ?? .compact
+        self.voiceCalendarAccessEnabled = defaults.object(forKey: Self.voiceCalendarAccessEnabledKey) == nil
+            ? false
+            : defaults.bool(forKey: Self.voiceCalendarAccessEnabledKey)
+        self.voiceContinueWhenPanelHidden = defaults.object(forKey: Self.voiceContinueWhenPanelHiddenKey) == nil
+            ? false
+            : defaults.bool(forKey: Self.voiceContinueWhenPanelHiddenKey)
+        self.voiceActionConfirmationEnabled = defaults.object(forKey: Self.voiceActionConfirmationEnabledKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.voiceActionConfirmationEnabledKey)
+
+        self.voiceDestructiveConfirmationEnabled = defaults.object(forKey: Self.voiceDestructiveConfirmationEnabledKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.voiceDestructiveConfirmationEnabledKey)
 
         if defaults.data(forKey: Self.weatherLocationKey) == nil,
            let weatherLocationData = try? JSONEncoder().encode(weatherLocation) {
@@ -234,7 +398,28 @@ final class AppSettings: ObservableObject {
         !hiddenProviderRawValues.contains(id.rawValue)
     }
 
-    func setProvider(_ id: PluginID, isVisible: Bool, manifests: [PluginManifest]) {
+    var savedGeneratedProviderIDs: Set<String> {
+        var configured = Set(providerOrderRawValues).union(hiddenProviderRawValues)
+        if let preferredProviderRawValue {
+            configured.insert(preferredProviderRawValue)
+        }
+        if let lastSelectedProviderRawValue {
+            configured.insert(lastSelectedProviderRawValue)
+        }
+        return Set(configured.compactMap { providerID in
+            guard let appID = PocketSurfaceRegistry.generatedAppID(providerID: providerID) else {
+                return nil
+            }
+            return PocketSurfaceRegistry.generatedProviderID(appID: appID)
+        })
+    }
+
+    func setProvider(
+        _ id: PluginID,
+        isVisible: Bool,
+        manifests: [PluginManifest],
+        preservingProviderIDs: Set<String> = []
+    ) {
         var hidden = hiddenProviderRawValues
         if isVisible {
             hidden.remove(id.rawValue)
@@ -246,22 +431,31 @@ final class AppSettings: ObservableObject {
         hiddenProviderRawValues = hidden
 
         let visibleIDs = Set(visibleManifests(manifests).map(\.id.rawValue))
-        if let preferredProviderRawValue, !visibleIDs.contains(preferredProviderRawValue) {
+        let validSelectionIDs = visibleIDs.union(preservingProviderIDs)
+        if let preferredProviderRawValue, !validSelectionIDs.contains(preferredProviderRawValue) {
             self.preferredProviderRawValue = visibleIDs.first
         }
-        if let lastSelectedProviderRawValue, !visibleIDs.contains(lastSelectedProviderRawValue) {
+        if let lastSelectedProviderRawValue, !validSelectionIDs.contains(lastSelectedProviderRawValue) {
             self.lastSelectedProviderRawValue = visibleIDs.first
         }
     }
 
-    func moveProvider(_ id: PluginID, by offset: Int, manifests: [PluginManifest]) {
+    func moveProvider(
+        _ id: PluginID,
+        by offset: Int,
+        manifests: [PluginManifest],
+        preservingProviderIDs: Set<String> = []
+    ) {
         let visibleIDs = visibleManifests(manifests).map(\.id.rawValue)
         guard let index = visibleIDs.firstIndex(of: id.rawValue) else { return }
         let destination = min(max(index + offset, 0), visibleIDs.count - 1)
         guard destination != index else { return }
 
         let targetID = visibleIDs[destination]
-        var orderedIDs = orderedManifests(manifests).map(\.id.rawValue)
+        var orderedIDs = orderedProviderIDs(
+            manifests,
+            preservingProviderIDs: preservingProviderIDs
+        )
         orderedIDs.removeAll { $0 == id.rawValue }
         guard let targetIndex = orderedIDs.firstIndex(of: targetID) else { return }
         let insertionIndex = offset > 0 ? targetIndex + 1 : targetIndex
@@ -269,13 +463,21 @@ final class AppSettings: ObservableObject {
         providerOrderRawValues = orderedIDs
     }
 
-    func moveProvider(_ id: PluginID, to targetID: PluginID, manifests: [PluginManifest]) {
+    func moveProvider(
+        _ id: PluginID,
+        to targetID: PluginID,
+        manifests: [PluginManifest],
+        preservingProviderIDs: Set<String> = []
+    ) {
         guard id != targetID else { return }
         let visibleIDs = visibleManifests(manifests).map(\.id.rawValue)
         guard let sourceIndex = visibleIDs.firstIndex(of: id.rawValue),
               let targetIndex = visibleIDs.firstIndex(of: targetID.rawValue) else { return }
 
-        var orderedIDs = orderedManifests(manifests).map(\.id.rawValue)
+        var orderedIDs = orderedProviderIDs(
+            manifests,
+            preservingProviderIDs: preservingProviderIDs
+        )
         orderedIDs.removeAll { $0 == id.rawValue }
         guard let adjustedTargetIndex = orderedIDs.firstIndex(of: targetID.rawValue) else { return }
         let insertionIndex = sourceIndex < targetIndex ? adjustedTargetIndex + 1 : adjustedTargetIndex
@@ -303,6 +505,30 @@ final class AppSettings: ObservableObject {
         if preferredProviderRawValue == nil {
             preferredProviderRawValue = id.rawValue
         }
+    }
+
+    func pruneProviderConfiguration(_ id: PluginID) {
+        providerOrderRawValues.removeAll { $0 == id.rawValue }
+        hiddenProviderRawValues.remove(id.rawValue)
+        if preferredProviderRawValue == id.rawValue {
+            preferredProviderRawValue = nil
+        }
+        if lastSelectedProviderRawValue == id.rawValue {
+            lastSelectedProviderRawValue = nil
+        }
+    }
+
+    private func orderedProviderIDs(
+        _ manifests: [PluginManifest],
+        preservingProviderIDs: Set<String>
+    ) -> [String] {
+        let availableIDs = Set(manifests.map(\.id.rawValue))
+        let retainedIDs = availableIDs.union(preservingProviderIDs)
+        var seen = Set<String>()
+        let retainedOrder = providerOrderRawValues.filter {
+            retainedIDs.contains($0) && seen.insert($0).inserted
+        }
+        return retainedOrder + manifests.map(\.id.rawValue).filter { seen.insert($0).inserted }
     }
 
     private func setOptionalString(_ value: String?, forKey key: String) {

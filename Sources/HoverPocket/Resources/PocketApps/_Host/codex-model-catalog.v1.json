@@ -1,0 +1,50 @@
+{
+  "models": [
+    {
+      "slug": "gpt-5.6-sol",
+      "display_name": "GPT-5.6 Sol",
+      "description": "Pinned HoverPocket Pocket App DSL generator.",
+      "default_reasoning_level": "medium",
+      "supported_reasoning_levels": [
+        {
+          "effort": "medium",
+          "description": "Balanced reasoning for deterministic Pocket App DSL generation."
+        }
+      ],
+      "shell_type": "shell_command",
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 1,
+      "availability_nux": null,
+      "upgrade": null,
+      "base_instructions": "Generate only the requested HoverPocket Pocket App DSL document. Do not call tools. Return only one JSON object that satisfies the supplied output schema.",
+      "include_skills_usage_instructions": false,
+      "supports_reasoning_summary_parameter": true,
+      "default_reasoning_summary": "none",
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "web_search_tool_type": "text",
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "supports_parallel_tool_calls": false,
+      "supports_image_detail_original": false,
+      "context_window": 272000,
+      "max_context_window": 272000,
+      "auto_compact_token_limit": null,
+      "comp_hash": "3000",
+      "effective_context_window_percent": 95,
+      "experimental_supported_tools": [],
+      "input_modalities": [
+        "text"
+      ],
+      "supports_search_tool": false,
+      "use_responses_lite": false,
+      "auto_review_model_override": null,
+      "tool_mode": null,
+      "multi_agent_version": null
+    }
+  ]
+}

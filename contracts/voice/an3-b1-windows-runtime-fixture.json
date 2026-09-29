@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "phase": "AN3-B1",
+  "operatingSystem": "windows",
+  "defaultOff": true,
+  "activation": {
+    "surface": "panel",
+    "explicitMicrophoneClick": true,
+    "exactOrigin": "https://app.hoverpocket.local",
+    "permissionLifetimeSeconds": 5,
+    "settingsPermissionPrompt": false,
+    "backgroundPermissionPrompt": false
+  },
+  "appServer": {
+    "experimentalApi": true,
+    "requiredMethods": [
+      "initialize",
+      "account/read",
+      "thread/realtime/listVoices",
+      "thread/start",
+      "thread/realtime/start",
+      "thread/realtime/stop"
+    ],
+    "requiredNotifications": [
+      "thread/realtime/sdp",
+      "thread/realtime/transcript/delta",
+      "thread/realtime/transcript/done",
+      "thread/realtime/outputAudio/delta",
+      "thread/realtime/error",
+      "thread/realtime/closed"
+    ],
+    "sandbox": "read-only",
+    "approvalPolicy": "never"
+  },
+  "transport": {
+    "type": "webrtc",
+    "maximumSdpBytes": 262144,
+    "threadAndGenerationBound": true,
+    "remoteAudio": true,
+    "muteInputAndOutput": true,
+    "explicitStopCleansLocalMedia": true,
+    "hoverHideStopsSession": false
+  },
+  "privacy": {
+    "transcriptInMemoryOnly": true,
+    "settingsReceivesVoiceState": false,
+    "auditStoresSdp": false,
+    "auditStoresAudio": false,
+    "auditStoresTranscript": false
+  },
+  "outOfScope": {
+    "brokerToolExecution": true,
+    "mcpExposure": true,
+    "macProductionAdapter": true
+  }
+}

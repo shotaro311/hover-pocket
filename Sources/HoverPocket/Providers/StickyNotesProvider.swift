@@ -3,6 +3,14 @@ import SwiftUI
 struct StickyNotesProvider: PocketProvider {
     static let pluginID = PluginID(rawValue: "sticky-notes")
 
+    private let store: StickyNotesStore?
+    private let reminders: StickyReminderController?
+
+    init(store: StickyNotesStore? = nil, reminders: StickyReminderController? = nil) {
+        self.store = store
+        self.reminders = reminders
+    }
+
     let manifest = PluginManifest(
         id: StickyNotesProvider.pluginID,
         title: "Sticky Notes",
@@ -18,6 +26,10 @@ struct StickyNotesProvider: PocketProvider {
         state: ProviderState,
         actions: ProviderActions
     ) -> AnyView {
-        AnyView(StickyNotesView(actions: actions))
+        AnyView(StickyNotesView(
+            actions: actions,
+            store: store ?? .shared,
+            reminders: reminders ?? .shared
+        ))
     }
 }

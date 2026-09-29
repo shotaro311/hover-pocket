@@ -1,0 +1,29 @@
+PASS live Astra model discovery: Medium supported
+CHECK tool-routing-verified
+CHECK generation-thread-started
+CHECK draft-tool:pocket_guide
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_validate
+CHECK turn-status:completed
+CHECK generation-output-received
+PASS live generated tool 1: package validated, 3 staging checks
+CHECK generation-thread-started
+CHECK draft-tool:pocket_guide
+CHECK draft-tool:pocket_guide
+CHECK draft-tool:pocket_guide
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_file
+CHECK draft-tool:pocket_draft_validate
+CHECK turn-status:completed
+CHECK generation-output-received
+PASS live generated tool 2: package validated, 3 staging checks
+Live generation artifacts: /var/folders/mv/0d7m444d25d_q88sj2wfntj80000gn/T/PocketToolsLive-EF02FC94-B955-4C54-A81F-9B2262BBA2D1

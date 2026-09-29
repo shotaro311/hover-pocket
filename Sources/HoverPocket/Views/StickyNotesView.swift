@@ -5,7 +5,8 @@ import UniformTypeIdentifiers
 struct StickyNotesView: View {
     let actions: ProviderActions
 
-    @ObservedObject private var store = StickyNotesStore.shared
+    @ObservedObject private var store: StickyNotesStore
+    @ObservedObject private var reminders: StickyReminderController
     @Namespace private var cardNamespace
     @State private var selectedNoteID: UUID?
     @State private var hoveredNoteID: UUID?
@@ -20,6 +21,16 @@ struct StickyNotesView: View {
     @State private var undoToast: StickyNoteUndoToast?
     @State private var pendingNewNoteIDs = Set<UUID>()
     @State private var isArchiveDropTargeted = false
+
+    init(
+        actions: ProviderActions,
+        store: StickyNotesStore = .shared,
+        reminders: StickyReminderController = .shared
+    ) {
+        self.actions = actions
+        _store = ObservedObject(wrappedValue: store)
+        _reminders = ObservedObject(wrappedValue: reminders)
+    }
 
     private let gridSpacing: CGFloat = 10
 
@@ -159,12 +170,16 @@ struct StickyNotesView: View {
                 draftTitle: $draftTitle,
                 draftBody: $draftBody,
                 draftColor: $draftColor,
-                onDraftChanged: updateSelectedDraft,
+                onDraftChanged: { _ = updateSelectedDraft(expectedID: note.id) },
+                onSaveReminder: { scheduledAt in
+                    saveReminder(for: note.id, scheduledAt: scheduledAt)
+                },
                 onArchive: { archiveEdited(note) },
                 onDelete: { deleteEdited(note) },
                 onDone: finishEditing,
                 contextMenu: { contextMenu(for: note) }
             )
+            .id(note.id)
         } else {
             StickyNotePreviewCard(
                 note: note,
@@ -183,6 +198,8 @@ struct StickyNotesView: View {
                 hoveredNoteID = inside ? note.id : (hoveredNoteID == note.id ? nil : hoveredNoteID)
             }
             .onDrag {
+                guard closeCurrentEditor() else { return NSItemProvider() }
+                selectedNoteID = nil
                 draggingNoteID = note.id
                 didBeginExternalDrag = false
                 scheduleExternalDragCheck()
@@ -238,6 +255,8 @@ struct StickyNotesView: View {
     }
 
     private func createNote(color: StickyNoteColor? = nil) {
+        guard closeCurrentEditor() else { return }
+        selectedNoteID = nil
         let beforeIDs = Set(store.activeNotes.map(\.id))
         store.createNote()
         guard let note = store.activeNotes.first(where: { !beforeIDs.contains($0.id) }) else {
@@ -253,9 +272,8 @@ struct StickyNotesView: View {
 
     private func beginEditing(_ note: StickyNoteItem) {
         NSApp.activate(ignoringOtherApps: true)
-        if selectedNoteID != note.id {
-            closeCurrentEditor()
-        }
+        guard selectedNoteID != note.id else { return }
+        guard closeCurrentEditor() else { return }
         withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
             selectedNoteID = note.id
             draftTitle = note.title
@@ -265,32 +283,45 @@ struct StickyNotesView: View {
     }
 
     private func finishEditing() {
-        guard selectedNoteID != nil else { return }
-        closeCurrentEditor()
+        guard selectedNoteID != nil, closeCurrentEditor() else { return }
         withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
             selectedNoteID = nil
         }
     }
 
-    private func updateSelectedDraft() {
-        guard let selectedNoteID, let draftColor else { return }
-        store.updateNote(id: selectedNoteID, title: draftTitle, body: draftBody, color: draftColor)
+    private func updateSelectedDraft(expectedID: UUID? = nil) -> Bool {
+        guard let selectedNoteID, expectedID == nil || expectedID == selectedNoteID,
+              let draftColor else { return false }
+        return store.updateNote(id: selectedNoteID, title: draftTitle, body: draftBody, color: draftColor)
     }
 
-    private func closeCurrentEditor() {
-        guard let selectedNoteID else { return }
+    private func saveReminder(for id: UUID, scheduledAt: Date?) -> Bool {
+        guard selectedNoteID == id, let draftColor else { return false }
+        commitTextEditing()
+        let change: StickyNoteReminderChange = scheduledAt.map {
+            .set(scheduledAt: $0, timeZone: TimeZone.current.identifier)
+        } ?? .clear
+        return store.updateNote(
+            id: id, title: draftTitle, body: draftBody, color: draftColor,
+            reminderChange: change
+        )
+    }
+
+    private func closeCurrentEditor() -> Bool {
+        guard let selectedNoteID else { return true }
         commitTextEditing()
         let isBlank = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             draftBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
-        if pendingNewNoteIDs.contains(selectedNoteID), isBlank {
-            store.discardNote(id: selectedNoteID)
+        if pendingNewNoteIDs.contains(selectedNoteID), isBlank, store.note(id: selectedNoteID)?.reminder == nil {
+            guard store.discardNote(id: selectedNoteID) else { return false }
             pendingNewNoteIDs.remove(selectedNoteID)
-            return
+            return true
         }
 
-        updateSelectedDraft()
+        guard updateSelectedDraft(expectedID: selectedNoteID) else { return false }
         pendingNewNoteIDs.remove(selectedNoteID)
+        return true
     }
 
     private func commitTextEditing() {
@@ -298,17 +329,16 @@ struct StickyNotesView: View {
     }
 
     private func archiveEdited(_ note: StickyNoteItem) {
-        closeCurrentEditor()
         archive(note)
     }
 
     private func deleteEdited(_ note: StickyNoteItem) {
-        closeCurrentEditor()
         delete(note)
     }
 
     private func archive(_ note: StickyNoteItem) {
-        store.archiveNote(id: note.id)
+        guard closeCurrentEditor() else { return }
+        guard store.archiveNote(id: note.id) else { return }
         if selectedNoteID == note.id {
             selectedNoteID = nil
         }
@@ -317,7 +347,8 @@ struct StickyNotesView: View {
     }
 
     private func delete(_ note: StickyNoteItem) {
-        store.deleteNote(id: note.id)
+        guard closeCurrentEditor() else { return }
+        guard store.deleteNote(id: note.id) else { return }
         if selectedNoteID == note.id {
             selectedNoteID = nil
         }
@@ -326,7 +357,8 @@ struct StickyNotesView: View {
     }
 
     private func undoLastAction() {
-        store.undoLastAction()
+        guard closeCurrentEditor() else { return }
+        guard store.undoLastAction() else { return }
         withAnimation(.easeOut(duration: 0.16)) {
             undoToast = nil
         }

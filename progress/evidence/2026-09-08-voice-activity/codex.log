@@ -1,0 +1,9 @@
+codex_app_server_installed_gate=ready
+codex_app_server_schema_probe_executions=1
+codex_app_server_broker_invocation=verified
+codex_app_server_managed_login_scenarios=4
+codex_app_server_managed_login_process_count=6
+codex_app_server_managed_login_browser=stubbed_4
+codex_app_server_managed_login_credential_reuse=verified
+codex_app_server_managed_login_process_state=closed
+PASS codex app-server foundation: schema and exact tool route, ChatGPT account policy, cached probe, Broker bridge, WebRTC contract

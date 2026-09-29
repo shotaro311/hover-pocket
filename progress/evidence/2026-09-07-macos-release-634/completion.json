@@ -1,0 +1,11 @@
+{
+  "publicMacOSBuild": "634",
+  "sourceTagSHA": "71f96d5a662e35e1b60467641a8bae65b517e318",
+  "publicArtifactEqualsTestedArtifact": true,
+  "publicChecks": 93,
+  "macOSCodesignAndGatekeeper": "passed",
+  "windowsAssetsUnchanged": true,
+  "installedBuild": "633",
+  "testAppClosed": true,
+  "sourceDigestReadback": true
+}

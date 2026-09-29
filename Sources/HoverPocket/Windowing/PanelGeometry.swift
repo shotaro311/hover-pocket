@@ -82,15 +82,21 @@ enum PanelGeometry {
     static func frames(
         on screen: NSScreen,
         panelSize: PanelSizeOption,
-        showsNotchSideHandleArea: Bool = true
+        additionalPreviewHeight: CGFloat = 0,
+        showsNotchSideHandleArea: Bool = true,
+        showsVoiceConversation: Bool = false
     ) -> PanelFrames {
         let notchProfile = notchProfile(on: screen)
         let access = accessMetrics(
             on: screen,
             notchProfile: notchProfile,
-            showsNotchSideHandleArea: showsNotchSideHandleArea
+            showsNotchSideHandleArea: showsNotchSideHandleArea,
+            showsVoiceConversation: showsVoiceConversation
         )
-        let previewSize = PanelLayout.panelTotalSize(for: panelSize)
+        let previewSize = previewSize(
+            panelSize: panelSize,
+            additionalHeight: additionalPreviewHeight
+        )
         let accessFrame = NSRect(
             x: access.minX,
             y: screen.frame.maxY - access.height,
@@ -122,6 +128,17 @@ enum PanelGeometry {
         )
     }
 
+    static func previewSize(
+        panelSize: PanelSizeOption,
+        additionalHeight: CGFloat = 0
+    ) -> NSSize {
+        let baseline = PanelLayout.panelTotalSize(for: panelSize)
+        return NSSize(
+            width: baseline.width,
+            height: baseline.height + max(0, additionalHeight)
+        )
+    }
+
     static func notchProfile(on screen: NSScreen) -> ScreenNotchProfile {
         if let leftArea = screen.auxiliaryTopLeftArea,
            let rightArea = screen.auxiliaryTopRightArea,
@@ -134,11 +151,36 @@ enum PanelGeometry {
         return .none(centerX: screen.frame.midX)
     }
 
-    private static func accessMetrics(
+    static func voiceAccessHeight(topInset: CGFloat, backingScaleFactor: CGFloat) -> CGFloat {
+        // Leave one physical pixel above the usable content area on each display.
+        max(0, min(PanelLayout.pillHeight, topInset) - 1 / max(1, backingScaleFactor))
+    }
+
+    static func accessMetrics(
         on screen: NSScreen,
         notchProfile: ScreenNotchProfile,
-        showsNotchSideHandleArea: Bool
+        showsNotchSideHandleArea: Bool,
+        showsVoiceConversation: Bool = false
     ) -> PillMetrics {
+        if showsVoiceConversation {
+            let topInset = screen.safeAreaInsets.top > 0
+                ? screen.safeAreaInsets.top : screen.frame.maxY - screen.visibleFrame.maxY
+            let height = voiceAccessHeight(topInset: topInset > 0 ? topInset : NSStatusBar.system.thickness,
+                backingScaleFactor: screen.backingScaleFactor)
+            let width: CGFloat
+            let style: PanelAccessStyle
+            switch notchProfile {
+            case .actual(_, let notchWidth, _):
+                width = notchWidth + PanelLayout.notchHandleWidth * 2
+                style = .notchPill
+            case .none:
+                width = PanelLayout.notchHandleWidth * 2
+                style = .miniBar
+            }
+            return PillMetrics(minX: notchProfile.centerX - width / 2, width: width,
+                height: height, previewTopY: screen.frame.maxY - height,
+                style: style)
+        }
         switch notchProfile {
         case let .actual(minX, width, _):
             guard showsNotchSideHandleArea else {

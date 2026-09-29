@@ -28,12 +28,14 @@ CONTRACT_NAME = "hoverpocket.pocket/v1"
 EXPECTED_SCHEMAS: dict[str, str] = {
     "agent-session-summary.schema.json": "hoverpocket://schemas/agent-session-summary/v1",
     "approval-request.schema.json": "hoverpocket://schemas/approval-request/v1",
+    "capability-compatibility.schema.json": "hoverpocket://schemas/capability-compatibility/v1",
     "capability-descriptor.schema.json": "hoverpocket://schemas/capability-descriptor/v1",
     "error.schema.json": "hoverpocket://schemas/error/v1",
     "execution-plan.schema.json": "hoverpocket://schemas/execution-plan/v1",
     "invocation.schema.json": "hoverpocket://schemas/invocation/v1",
     "pocket-app.schema.json": "hoverpocket://schemas/pocket-app/v1",
     "pocket-app-generation-output.schema.json": "hoverpocket://schemas/pocket-app-generation-output/v1",
+    "pocket-app-workspace-backup.schema.json": "hoverpocket://schemas/pocket-app-workspace-backup/v1",
     "pocket-surface.schema.json": "hoverpocket://schemas/pocket-surface/v1",
     "pocket-workflow.schema.json": "hoverpocket://schemas/pocket-workflow/v1",
     "receipt.schema.json": "hoverpocket://schemas/receipt/v1",
@@ -57,6 +59,8 @@ SUPPORTED_SCHEMA_KEYWORDS = frozenset(
         "const",
         "enum",
         "items",
+        "minProperties",
+        "maxProperties",
         "minItems",
         "maxItems",
         "uniqueItems",
@@ -82,7 +86,10 @@ STABLE_ERROR_CODES = (
     "AUDIT_KEYSET_MISMATCH",
     "AUDIT_VALUE_UNSAFE",
     "CAPABILITY_ARGUMENT_INVALID",
+    "CAPABILITY_DEPRECATION_WINDOW_INVALID",
     "CAPABILITY_DESCRIPTOR_POLICY",
+    "CAPABILITY_MIGRATION_INVALID",
+    "CAPABILITY_REMOVED",
     "CAPABILITY_RUNTIME_PROHIBITED",
     "CAPABILITY_UNKNOWN",
     "CAPABILITY_VERSION_MISMATCH",
@@ -222,6 +229,13 @@ WRITE_EFFECTS = frozenset(
         "external_write",
         "destructive_sensitive",
         "native_authority",
+    }
+)
+
+PRESENTABLE_POCKET_WORKFLOW_CAPABILITIES = frozenset(
+    {
+        ("timer.countdown.start", 1),
+        ("sticky.note.upsert", 1),
     }
 )
 
@@ -574,6 +588,10 @@ class SchemaEngine:
             fail("SCHEMA_VALUE_INVALID", location, "value is not in enum")
 
         if isinstance(instance, dict):
+            if "minProperties" in schema and len(instance) < schema["minProperties"]:
+                fail("SCHEMA_VALUE_INVALID", location, "object has too few properties")
+            if "maxProperties" in schema and len(instance) > schema["maxProperties"]:
+                fail("SCHEMA_VALUE_INVALID", location, "object has too many properties")
             required = schema.get("required", [])
             for key in required:
                 if key not in instance:
@@ -834,7 +852,7 @@ def enforce_schema_policy(
             except re.error as exc:
                 fail("SCHEMA_POLICY_VIOLATION", node_location, f"invalid regex pattern: {exc}")
 
-        for keyword in ("minLength", "maxLength", "minItems", "maxItems"):
+        for keyword in ("minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties"):
             if keyword in node and (
                 not isinstance(node[keyword], int)
                 or isinstance(node[keyword], bool)
@@ -845,6 +863,8 @@ def enforce_schema_policy(
             fail("SCHEMA_POLICY_VIOLATION", node_location, "minLength exceeds maxLength")
         if "minItems" in node and "maxItems" in node and node["minItems"] > node["maxItems"]:
             fail("SCHEMA_POLICY_VIOLATION", node_location, "minItems exceeds maxItems")
+        if "minProperties" in node and "maxProperties" in node and node["minProperties"] > node["maxProperties"]:
+            fail("SCHEMA_POLICY_VIOLATION", node_location, "minProperties exceeds maxProperties")
         if "uniqueItems" in node and not isinstance(node["uniqueItems"], bool):
             fail("SCHEMA_POLICY_VIOLATION", node_location, "uniqueItems must be boolean")
 
@@ -1633,6 +1653,12 @@ def validate_pocket_surface(document: Mapping[str, Any], context: FixtureContext
                 f"{location}.items.query",
                 "APP_REFERENCE_INVALID",
             )
+            if (capability_id, version) != ("calendar.events.list", 1):
+                fail(
+                    "APP_REFERENCE_INVALID",
+                    f"{location}.items.query",
+                    "calendarEventPicker requires calendar.events.list@1 output",
+                )
             descriptor = context.registry.resolve(capability_id, version, f"{location}.items.query")
             scope = requested_scope(context, capability_id, version, f"{location}.items.query")
             if descriptor["effect"] not in {"pure", "private_read"}:
@@ -1679,6 +1705,115 @@ def validate_pocket_surface(document: Mapping[str, Any], context: FixtureContext
             fail("APP_REFERENCE_INVALID", location, "PocketSurface cannot render a Host-owned execution receipt")
 
     walk(document["root"], "$.root", 1)
+
+
+def validate_surface_workflow_input_bindings(
+    surfaces: Mapping[str, Mapping[str, Any]],
+    workflows: Mapping[str, Mapping[str, Any]],
+    state_schema: Mapping[str, Any],
+) -> None:
+    input_types: dict[str, str] = {}
+    for workflow in workflows.values():
+        for name, declared_type in workflow["inputs"].items():
+            existing = input_types.get(name)
+            if existing is not None and existing != declared_type:
+                fail(
+                    "WORKFLOW_INPUT_TYPE_MISMATCH",
+                    f"$.workflows.{workflow['id']}.inputs.{name}",
+                    "the same surface input name has conflicting workflow types",
+                )
+            input_types[name] = declared_type
+
+    accepted: dict[tuple[str, str], frozenset[str]] = {
+        ("textField", "value"): frozenset({"string"}),
+        ("toggle", "value"): frozenset({"boolean"}),
+        ("picker", "value"): frozenset({"string"}),
+        ("calendarEventPicker", "selection"): frozenset({"entity-ref"}),
+        ("calendarEventPicker", "titleTarget"): frozenset({"string"}),
+        ("durationPicker", "value"): frozenset({"integer", "number"}),
+    }
+    accepted_state: dict[tuple[str, str], frozenset[str]] = {
+        ("textField", "value"): frozenset({"string"}),
+        ("toggle", "value"): frozenset({"boolean"}),
+        ("picker", "value"): frozenset({"string"}),
+        ("calendarEventPicker", "selection"): frozenset({"string"}),
+        ("calendarEventPicker", "titleTarget"): frozenset({"string"}),
+    }
+    state_types: dict[str, frozenset[str]] = {}
+    for name, property_schema in state_schema.get("properties", {}).items():
+        declared = property_schema.get("type")
+        state_types[name] = frozenset({declared} if isinstance(declared, str) else declared or [])
+
+    def walk(
+        node: Mapping[str, Any],
+        location: str,
+        bound_inputs: set[str],
+        referenced_workflows: set[str],
+    ) -> None:
+        node_type = node["type"]
+        if node_type == "button":
+            referenced_workflows.add(node["workflow"])
+        for property_name, binding in node.items():
+            if not isinstance(binding, str) or not binding.startswith(("$input.", "$state.")):
+                continue
+            if binding.startswith("$input."):
+                accepted_types = accepted.get((node_type, property_name))
+                input_name = binding[len("$input."):]
+                declared_type = input_types.get(input_name)
+                compatible = accepted_types is not None and declared_type in accepted_types
+            else:
+                accepted_types = accepted_state.get((node_type, property_name))
+                input_name = binding[len("$state."):]
+                declared_state_types = state_types.get(input_name, frozenset()) - {"null"}
+                compatible = (
+                    accepted_types is not None
+                    and bool(declared_state_types)
+                    and declared_state_types.issubset(accepted_types)
+                )
+                fallback_type = input_types.get(input_name)
+                if fallback_type is not None:
+                    compatible = compatible and fallback_type in accepted.get((node_type, property_name), frozenset())
+            if not compatible:
+                fail(
+                    "WORKFLOW_INPUT_TYPE_MISMATCH",
+                    f"{location}.{property_name}",
+                    "surface control and declared workflow input types are incompatible",
+                )
+            if input_name in input_types:
+                bound_inputs.add(input_name)
+        for index, child in enumerate(node.get("children", [])):
+            walk(child, f"{location}.children[{index}]", bound_inputs, referenced_workflows)
+
+    for surface_id, surface in surfaces.items():
+        bound_inputs: set[str] = set()
+        referenced_workflows: set[str] = set()
+        picker_domains: dict[str, frozenset[str]] = {}
+
+        def validate_picker_domains(node: Mapping[str, Any], location: str) -> None:
+            if node["type"] == "picker":
+                binding = node["value"]
+                domain = frozenset(option["value"] for option in node["options"])
+                existing = picker_domains.get(binding)
+                if existing is not None and existing != domain:
+                    fail(
+                        "APP_REFERENCE_INVALID",
+                        f"{location}.value",
+                        "pickers sharing one binding must declare the same option domain",
+                    )
+                picker_domains[binding] = domain
+            for index, child in enumerate(node.get("children", [])):
+                validate_picker_domains(child, f"{location}.children[{index}]")
+
+        validate_picker_domains(surface["root"], f"$.surfaces.{surface_id}.root")
+        walk(surface["root"], f"$.surfaces.{surface_id}.root", bound_inputs, referenced_workflows)
+        for workflow_id in referenced_workflows:
+            missing_inputs = set(workflows[workflow_id]["inputs"]) - bound_inputs
+            if missing_inputs:
+                fail(
+                    "APP_REFERENCE_INVALID",
+                    f"$.surfaces.{surface_id}.root",
+                    "button workflow inputs must be bound on the same reachable surface",
+                )
 
 
 def input_schema_accepts_type(schema: Mapping[str, Any], workflow_type: str) -> bool:
@@ -1731,6 +1866,12 @@ def validate_pocket_workflow(document: Mapping[str, Any], context: FixtureContex
                 fail("WORKFLOW_REFERENCE_INVALID", exc.location, exc.detail)
             raise
         ensure_capability_executable(descriptor, f"$.steps[{index}].use")
+        if (capability_id, version) not in PRESENTABLE_POCKET_WORKFLOW_CAPABILITIES:
+            fail(
+                "WORKFLOW_REFERENCE_INVALID",
+                f"$.steps[{index}].use",
+                "Pocket App workflow capability has no Host-owned approval presentation",
+            )
         scope = requested_scope(context, capability_id, version, f"$.steps[{index}].use")
         has_writes = has_writes or descriptor["effect"] in WRITE_EFFECTS
         total_timeout_seconds += descriptor["limits"]["timeoutMs"] / 1000.0
@@ -2155,6 +2296,115 @@ def validate_error_codes(document: Mapping[str, Any]) -> None:
         fail("FIXTURE_MANIFEST_MISMATCH", "$", "stable verifier error code set changed")
 
 
+def validate_capability_compatibility(document: Mapping[str, Any]) -> None:
+    def semantic_version(value: str) -> tuple[int, int, int]:
+        major, minor, patch = value.split(".")
+        return int(major), int(minor), int(patch)
+
+    def capability_key(value: Mapping[str, Any]) -> tuple[str, int]:
+        return value["id"], value["version"]
+
+    host_version = semantic_version(document["hostVersion"])
+    entries: dict[tuple[str, int], Mapping[str, Any]] = {}
+    lifecycle_sources: dict[tuple[str, int], Mapping[str, Any]] = {}
+
+    for index, entry in enumerate(document["entries"]):
+        location = f"$.entries[{index}]"
+        source = capability_key(entry["capability"])
+        if source in entries:
+            fail("CAPABILITY_MIGRATION_INVALID", f"{location}.capability", "capability lifecycle entry is duplicated")
+        entries[source] = entry
+
+        introduced = semantic_version(entry["introducedInHostVersion"])
+        if introduced > host_version:
+            fail(
+                "CAPABILITY_DEPRECATION_WINDOW_INVALID",
+                f"{location}.introducedInHostVersion",
+                "capability cannot be introduced after the policy host version",
+            )
+        if entry["status"] == "active":
+            continue
+
+        lifecycle_sources[source] = entry
+        deprecated = semantic_version(entry["deprecatedInHostVersion"])
+        removal_not_before = semantic_version(entry["removalNotBeforeHostVersion"])
+        if introduced > deprecated:
+            fail(
+                "CAPABILITY_DEPRECATION_WINDOW_INVALID",
+                f"{location}.deprecatedInHostVersion",
+                "deprecation cannot precede introduction",
+            )
+        if deprecated >= removal_not_before:
+            fail(
+                "CAPABILITY_DEPRECATION_WINDOW_INVALID",
+                f"{location}.removalNotBeforeHostVersion",
+                "deprecation window must include at least one later host version",
+            )
+        if deprecated > host_version:
+            fail(
+                "CAPABILITY_DEPRECATION_WINDOW_INVALID",
+                f"{location}.deprecatedInHostVersion",
+                "deprecated lifecycle state cannot precede the policy host version",
+            )
+        if entry["status"] == "removed" and host_version < removal_not_before:
+            fail(
+                "CAPABILITY_REMOVED",
+                f"{location}.status",
+                "capability cannot be removed before its declared removal version",
+            )
+        if capability_key(entry["replacement"]) == source:
+            fail("CAPABILITY_MIGRATION_INVALID", f"{location}.replacement", "replacement must differ from source")
+
+    migrations_by_id: dict[str, Mapping[str, Any]] = {}
+    migrations_by_source: dict[tuple[str, int], Mapping[str, Any]] = {}
+    graph: dict[tuple[str, int], tuple[str, int]] = {}
+    for index, migration in enumerate(document["migrations"]):
+        location = f"$.migrations[{index}]"
+        source = capability_key(migration["from"])
+        target = capability_key(migration["to"])
+        if migration["id"] in migrations_by_id:
+            fail("CAPABILITY_MIGRATION_INVALID", f"{location}.id", "migration id is duplicated")
+        if source in migrations_by_source:
+            fail("CAPABILITY_MIGRATION_INVALID", f"{location}.from", "migration source is duplicated")
+        if source == target:
+            fail("CAPABILITY_MIGRATION_INVALID", f"{location}.to", "migration target must differ from source")
+        migrations_by_id[migration["id"]] = migration
+        migrations_by_source[source] = migration
+        graph[source] = target
+
+    for source, entry in lifecycle_sources.items():
+        migration = migrations_by_source.get(source)
+        if migration is None:
+            fail("CAPABILITY_MIGRATION_INVALID", "$.migrations", "deprecated or removed capability requires migration")
+        expected_target = capability_key(entry["replacement"])
+        if migration["id"] != entry["migrationId"] or capability_key(migration["to"]) != expected_target:
+            fail("CAPABILITY_MIGRATION_INVALID", "$.migrations", "migration does not match lifecycle replacement")
+        target_entry = entries.get(expected_target)
+        if target_entry is not None and target_entry["status"] == "removed":
+            fail("CAPABILITY_MIGRATION_INVALID", "$.migrations", "replacement cannot target a removed capability")
+
+    if set(migrations_by_source) != set(lifecycle_sources):
+        fail("CAPABILITY_MIGRATION_INVALID", "$.migrations", "migration sources must exactly match lifecycle sources")
+
+    visited: set[tuple[str, int]] = set()
+    visiting: set[tuple[str, int]] = set()
+
+    def visit(source: tuple[str, int]) -> None:
+        if source in visiting:
+            fail("CAPABILITY_MIGRATION_INVALID", "$.migrations", "capability migration graph contains a cycle")
+        if source in visited:
+            return
+        visiting.add(source)
+        target = graph.get(source)
+        if target is not None and target in graph:
+            visit(target)
+        visiting.remove(source)
+        visited.add(source)
+
+    for source in graph:
+        visit(source)
+
+
 def load_fixture_support(context: FixtureContext, manifest: Mapping[str, Any]) -> FixtureSupport:
     engine = SchemaEngine(context.schemas_by_id)
     support_schemas = {
@@ -2235,6 +2485,12 @@ def load_fixture_support(context: FixtureContext, manifest: Mapping[str, Any]) -
         source = bindings.get(package_path)
         if source is None or load_json(context.fixture_dir / source, location=source) != workflows[workflow_id]:
             fail("APP_REFERENCE_INVALID", package_path, "manifest workflow is not bound to its validated fixture")
+    state_schema_path = reference_app["state"]["schema"]
+    state_schema_source = bindings.get(state_schema_path)
+    if state_schema_source is None:
+        fail("APP_REFERENCE_INVALID", state_schema_path, "manifest state schema is not bound to the reference package")
+    state_schema = load_json(context.fixture_dir / state_schema_source, location=state_schema_source)
+    validate_surface_workflow_input_bindings(surfaces, workflows, state_schema)
     return FixtureSupport(
         plans_by_id=plans,
         invocations_by_id=invocations,
@@ -2401,6 +2657,8 @@ def validate_schema_case(
             schemas_by_id=context.schemas_by_id,
             registry=context.registry,
         )
+    elif schema_name == "capability-compatibility.schema.json":
+        validate_capability_compatibility(document)
     elif schema_name == "invocation.schema.json":
         validate_invocation(document, context)
     elif schema_name == "execution-plan.schema.json":

@@ -1,0 +1,1 @@
+{"$schema":"hoverpocket://schemas/pocket-collection/v1","schemaVersion":1,"title":"読書メモ","fields":{"title":{"title":"本のタイトル","type":"string","required":true,"nullable":false},"pagesRead":{"title":"読んだページ数","type":"number","required":false,"nullable":false},"finished":{"title":"読了","type":"boolean","required":true,"nullable":false}}}

@@ -1,0 +1,9 @@
+{
+  "kind": "native-ui-readback",
+  "standard_form_add_edit_search": true,
+  "preview_data_separated": true,
+  "installed_record_title_verified": true,
+  "restored_checkpoint_preserves_record": true,
+  "preview_scratch_removed": true,
+  "source": "Production SwiftUI views in isolated verification app; real Astra-generated definition replayed for UI test"
+}

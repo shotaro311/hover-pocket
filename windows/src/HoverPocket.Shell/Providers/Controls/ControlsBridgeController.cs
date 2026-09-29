@@ -177,6 +177,18 @@ internal sealed class ControlsBridgeController : IDisposable
         return snapshot;
     }
 
+    public async Task<ControlsSnapshot> SetMutedAsync(bool muted, CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        await AwaitOrFallbackAsync(
+            Task.Run(() => _volume.SetMutedAsync(muted, CancellationToken.None), CancellationToken.None),
+            new VolumeState(false, 0, false, "Mute command timed out."),
+            cancellationToken);
+        var snapshot = await GetSnapshotAsync(cancellationToken, forceRefresh: true);
+        PublishSnapshot(snapshot, force: true);
+        return snapshot;
+    }
+
     public async Task<ControlsSnapshot> SetBrightnessAsync(
         string displayId,
         int value,
@@ -235,6 +247,23 @@ internal sealed class ControlsBridgeController : IDisposable
             await _preview.StartAsync(snapshot.Media, cancellationToken);
         }
 
+        return snapshot;
+    }
+
+    public async Task<ControlsSnapshot> ExecuteMediaCommandForCapabilityAsync(
+        string command,
+        double? value,
+        CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        var commandResult = await _media.ExecuteAsync(command, value, cancellationToken);
+        var snapshot = await GetSnapshotAsync(cancellationToken, forceRefresh: true);
+        snapshot = snapshot with
+        {
+            Media = commandResult,
+            RefreshedAt = DateTimeOffset.UtcNow
+        };
+        PublishSnapshot(snapshot, force: true);
         return snapshot;
     }
 

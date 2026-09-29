@@ -2,6 +2,7 @@ import Foundation
 
 struct PocketAppStagingTestRunner {
     static let supportedCaseIDs: Set<String> = [
+        "surface-renders", "collections-valid", "workflow-approval",
         "calendar-read",
         "start-focus-approved",
         "start-focus-idempotent-replay",
@@ -34,6 +35,15 @@ struct PocketAppStagingTestRunner {
 
     private func observe(_ id: String, package: PocketAppPackage) throws -> String {
         switch id {
+        case "surface-renders":
+            return try package.surfaces.values.allSatisfy { try !$0.canonicalRenderModelData().isEmpty } ? "pass" : "reject"
+        case "collections-valid":
+            return package.collections.isEmpty ? "reject" : "pass"
+        case "workflow-approval":
+            return package.workflows.values.allSatisfy { workflow in
+                !workflow.steps.contains { descriptors[$0.capability]?.effect.isWrite == true }
+                    || workflow.approvalMode == "before_writes"
+            } ? "pass" : "reject"
         case "calendar-read":
             return calendarReadIsBound(package) ? "pass" : "reject"
         case "start-focus-approved":

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="HoverPocket Codex Sandbox Setup"
+           Manufacturer="HoverPocket"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="{9E28ABD6-A496-472E-98AB-AE8D70C27B48}"
+           Scope="perMachine"
+           InstallerVersion="500"
+           Compressed="yes">
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer HoverPocket Codex Sandbox Setup is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="HoverPocketProgramFilesFolder" Name="HoverPocket">
+        <Directory Id="INSTALLFOLDER" Name="CodexSandboxSetup" />
+      </Directory>
+    </StandardDirectory>
+
+    <Files Directory="INSTALLFOLDER"
+           Include="$(var.HelperPublishDir)\**" />
+  </Package>
+</Wix>

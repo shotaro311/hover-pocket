@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Combine
 import OSLog
 import QuartzCore
@@ -21,6 +22,7 @@ final class HoverWindowController {
     private var accessWindows: [String: NSPanel] = [:]
     private var accessWindowStyles: [String: PanelAccessStyle] = [:]
     private var previewWindow: NSPanel?
+    private var awaitingPointerAfterExplicitOpen = false
     private var activePreviewScreen: NSScreen?
     private var closeTask: DispatchWorkItem?
     private var resetTask: DispatchWorkItem?
@@ -31,7 +33,12 @@ final class HoverWindowController {
     private var lastAccessWindowHealthCheck = Date.distantPast
     private var previewAnimationToken = 0
     private let usesDirectHoverEvents = !CommandLine.arguments.contains("--verify-hover-recovery")
+    private let isPanelSoakVerification = CommandLine.arguments.contains(
+        "--verify-panel-soak"
+    )
+    private var panelSoakUsesImmediateTransitions = true
     private let logger = Logger(subsystem: "com.hoverpocket.app", category: "HoverWindowRecovery")
+    private let stickyReminders: StickyReminderController
     private let settings: AppSettings
     private let menuStore: HoverMenuStore
     private let settingsWindowController: SettingsWindowController
@@ -41,9 +48,19 @@ final class HoverWindowController {
         settings
     }
 
-    init() {
-        let settings = AppSettings()
-        let menuStore = HoverMenuStore(settings: settings)
+    init(
+        settingsDefaults: any AppSettingsDefaultsStoring = HoverPocketRuntimeEnvironment.shared.settingsDefaults,
+        providerRegistry: ProviderRegistry? = nil,
+        stickyReminders: StickyReminderController = .shared
+    ) {
+        self.stickyReminders = stickyReminders
+        let settings = AppSettings(defaults: settingsDefaults)
+        HoverPocketRuntimeEnvironment.shared.applyVoiceE2EDefaults(to: settings)
+        let providerStore = ProviderStore(
+            registry: providerRegistry ?? HoverPocketRuntimeEnvironment.shared.providerRegistry,
+            settings: settings
+        )
+        let menuStore = HoverMenuStore(settings: settings, providerStore: providerStore)
         self.settings = settings
         self.menuStore = menuStore
         self.settingsWindowController = SettingsWindowController(
@@ -53,8 +70,10 @@ final class HoverWindowController {
 
         syncAccessWindows(orderFront: false)
         configurePreviewWindow()
+        settingsWindowController.onOpenProvider = { [weak self] in self?.openPanel(showing: $0) }
         observeSettings()
         observeTimerAlerts()
+        observeStickyReminders()
     }
 
     func showPill() {
@@ -86,6 +105,7 @@ final class HoverWindowController {
         syncAccessWindows(orderFront: false)
         guard let screen = activePreviewScreen ?? targetScreen() else { return }
 
+        applyResolvedVoiceLaneLayout(on: screen)
         let frames = panelFrames(on: screen)
 
         if previewWindow?.isVisible == true {
@@ -97,6 +117,7 @@ final class HoverWindowController {
 
     func openPanelFromMenu() {
         showPreview(on: targetScreen())
+        awaitingPointerAfterExplicitOpen = true
     }
 
     /// Opens the panel and switches to the given provider. `select` must run
@@ -105,17 +126,254 @@ final class HoverWindowController {
     func openPanel(showing pluginID: PluginID) {
         showPreview(on: targetScreen())
         menuStore.providerStore.select(pluginID)
+        awaitingPointerAfterExplicitOpen = true
+    }
+
+    func connectAppController() {
+        let controller = PocketAppOSController.shared
+        controller.providerStore = menuStore.providerStore
+        controller.actionConfirmationEnabled = { [weak self] in self?.settings.voiceActionConfirmationEnabled ?? true }
+        controller.destructiveConfirmationEnabled = { [weak self] in self?.settings.voiceDestructiveConfirmationEnabled ?? true }
+        controller.readWeather = { [weak self] in
+            guard let self, HoverPocketRuntimeEnvironment.shared.externalIntegrationsEnabled else {
+                throw WeatherForecastServiceError.invalidRequest
+            }
+            return try await WeatherVoiceReader.read(store: .shared, location: self.settings.weatherLocation,
+                temperatureUnit: self.settings.weatherTemperatureUnit)
+        }
+        controller.calendarAccessGranted = { [weak self] in self?.settings.voiceCalendarAccessEnabled == true }
+        PocketCodexLibrary.host.preferredVoice = { [weak self] in self?.settings.codexVoiceSelection ?? "" }
+        controller.notifySession = { session, text in
+            await PocketCodexLibrary.host.appendHostNotice(sessionID: session, text: text)
+        }
+        controller.openScreen = { [weak self] id in
+            guard let self else { return false }
+            self.openPanel(showing: id)
+            return self.previewWindow?.isVisible == true && self.menuStore.providerStore.selectedPluginID == id
+        }
+        controller.openTools = { [weak self] in
+            self?.menuStore.providerStore.objectWillChange.send()
+            self?.openPanel(showing: PocketDraftProvider.pluginID)
+        }
     }
 
     func openSettingsFromMenu() {
         showSettings()
     }
 
+    func runNonPhysicalSoakVerification(
+        iterations: Int,
+        providerIDs: [PluginID]
+    ) async throws -> PanelSoakVerificationResult {
+        guard isPanelSoakVerification,
+              iterations >= 1,
+              providerIDs.count >= 2,
+              settings.voiceProvider == .off,
+              !settings.voiceEnabled,
+              VoiceLaneRuntime.shared.snapshot.mode == .disabled
+        else {
+            throw PanelSoakVerificationError.failed("panel_soak_precondition_failed")
+        }
+        guard let screen = targetScreen(), let previewWindow else {
+            throw PanelSoakVerificationError.failed("panel_soak_screen_unavailable")
+        }
+
+        let microphoneAuthorization = AVCaptureDevice.authorizationStatus(for: .audio)
+        showPill()
+        for providerID in providerIDs.prefix(2) {
+            openPanel(showing: providerID)
+            closePreview()
+            await settlePanelSoakRunLoop()
+        }
+        await settlePanelSoakRunLoop(milliseconds: 500)
+
+        let baselinePreviewIdentifier = ObjectIdentifier(previewWindow)
+        let baselineAccessWindowCount = accessWindows.count
+        let baselineWindowCount = NSApp.windows.count
+        let baselineTask = try processTaskSnapshot()
+        let baselineThreadCount = baselineTask.threadCount
+        let baselineResidentMiB = baselineTask.residentMiB
+        let baselineSocketCount = try processSocketCount()
+        let baselineChildProcessCount = try childProcessCount()
+        let expectedFrame = PanelGeometry.frames(
+            on: screen,
+            panelSize: settings.panelSize,
+            additionalPreviewHeight: 0,
+            showsNotchSideHandleArea: showsVisibleNotchSideHandle,
+            showsVoiceConversation: VoiceActivityPresentation(snapshot: VoiceLaneRuntime.shared.snapshot).showsConversation
+        ).preview
+        var maximumThreadCount = baselineThreadCount
+        var maximumOpenMilliseconds = 0.0
+        var providerSwitches = 0
+        var recoveryCycles = 0
+        var animatedTransitionCycles = 0
+
+        for index in 0..<iterations {
+            let providerID = providerIDs[index % providerIDs.count]
+            let startedAt = CFAbsoluteTimeGetCurrent()
+            openPanel(showing: providerID)
+            await Task.yield()
+            maximumOpenMilliseconds = max(
+                maximumOpenMilliseconds,
+                (CFAbsoluteTimeGetCurrent() - startedAt) * 1_000
+            )
+            guard previewWindow.isVisible,
+                  menuStore.providerStore.selectedPluginID == providerID,
+                  VoiceLaneRuntime.shared.snapshot.mode == .disabled,
+                  voiceLaneHeight(on: screen) == 0
+            else {
+                throw PanelSoakVerificationError.failed("panel_soak_open_readback_failed iteration=\(index) visible=\(previewWindow.isVisible) selected=\(menuStore.providerStore.selectedPluginID == providerID) voice_off=\(VoiceLaneRuntime.shared.snapshot.mode == .disabled) voice_height=\(voiceLaneHeight(on: screen)) app_active=\(NSApp.isActive) key=\(previewWindow.isKeyWindow)")
+            }
+            providerSwitches += 1
+
+            closePreview()
+            await settlePanelSoakRunLoop()
+            guard !previewWindow.isVisible,
+                  hoverMonitorTimer == nil,
+                  accessMonitorTimer != nil,
+                  ObjectIdentifier(previewWindow) == baselinePreviewIdentifier,
+                  accessWindows.count == baselineAccessWindowCount
+            else {
+                throw PanelSoakVerificationError.failed("panel_soak_close_readback_failed")
+            }
+
+            if (index + 1).isMultiple(of: 20) {
+                performSystemRecovery()
+                await settlePanelSoakRunLoop()
+                recoveryCycles += 1
+            }
+            if (index + 1).isMultiple(of: 25) {
+                maximumThreadCount = max(
+                    maximumThreadCount,
+                    try processTaskSnapshot().threadCount
+                )
+            }
+        }
+
+        panelSoakUsesImmediateTransitions = false
+        defer { panelSoakUsesImmediateTransitions = true }
+        for index in 0..<3 {
+            let providerID = providerIDs[index % providerIDs.count]
+            openPanel(showing: providerID)
+            let openDeadline = Date().addingTimeInterval(2)
+            repeat { await settlePanelSoakRunLoop(milliseconds: 20) }
+            while (previewWindow.ignoresMouseEvents || previewWindow.frame != expectedFrame) && Date() < openDeadline
+            guard previewWindow.isVisible,
+                  !previewWindow.ignoresMouseEvents,
+                  menuStore.providerStore.selectedPluginID == providerID,
+                  VoiceLaneRuntime.shared.snapshot.mode == .disabled,
+                  voiceLaneHeight(on: screen) == 0
+            else {
+                throw PanelSoakVerificationError.failed("panel_soak_animated_open_readback_failed")
+            }
+
+            closePreview()
+            let closeDeadline = Date().addingTimeInterval(2)
+            repeat { await settlePanelSoakRunLoop(milliseconds: 20) }
+            while previewWindow.isVisible && Date() < closeDeadline
+            guard !previewWindow.isVisible,
+                  resetTask == nil,
+                  hoverMonitorTimer == nil,
+                  accessMonitorTimer != nil,
+                  ObjectIdentifier(previewWindow) == baselinePreviewIdentifier,
+                  accessWindows.count == baselineAccessWindowCount
+            else {
+                throw PanelSoakVerificationError.failed("panel_soak_animated_close_readback_failed")
+            }
+            animatedTransitionCycles += 1
+        }
+
+        await settlePanelSoakRunLoop(milliseconds: 500)
+        let finalTask = try processTaskSnapshot()
+        maximumThreadCount = max(maximumThreadCount, finalTask.threadCount)
+        let finalWindowCount = NSApp.windows.count
+        let finalSocketCount = try processSocketCount()
+        let finalChildProcessCount = try childProcessCount()
+
+        let resourceInvariants = [
+            (finalWindowCount <= baselineWindowCount, "window_count"),
+            (accessWindows.count == baselineAccessWindowCount, "access_window_count"),
+            (ObjectIdentifier(previewWindow) == baselinePreviewIdentifier, "preview_identity"),
+            (previewWindow.frame.isApproximatelyEqual(to: expectedFrame), "preview_frame"),
+            (finalTask.threadCount <= baselineThreadCount + 8, "final_thread_count"),
+            (maximumThreadCount <= baselineThreadCount + 12, "maximum_thread_count"),
+            (finalTask.residentMiB <= baselineResidentMiB + 64, "resident_memory"),
+            (
+                finalSocketCount <= baselineSocketCount + 1,
+                "socket_count:\(baselineSocketCount)->\(finalSocketCount)"
+            ),
+            (finalChildProcessCount == baselineChildProcessCount, "child_process_count"),
+            (AVCaptureDevice.authorizationStatus(for: .audio) == microphoneAuthorization, "microphone_authorization"),
+            (settings.voiceProvider == .off, "voice_provider"),
+            (!settings.voiceEnabled, "voice_enabled"),
+            (VoiceLaneRuntime.shared.snapshot.mode == .disabled, "voice_lane_mode")
+        ]
+        let failedResourceInvariants = resourceInvariants.compactMap { passed, name in
+            passed ? nil : name
+        }
+        if !failedResourceInvariants.isEmpty {
+            throw PanelSoakVerificationError.failed(
+                "panel_soak_resource_invariant_failed:\(failedResourceInvariants.joined(separator: ","))"
+            )
+        }
+
+        return PanelSoakVerificationResult(
+            iterations: iterations,
+            providerSwitches: providerSwitches,
+            recoveryCycles: recoveryCycles,
+            animatedTransitionCycles: animatedTransitionCycles,
+            warmOpenMaximumMilliseconds: maximumOpenMilliseconds,
+            baselineWindowCount: baselineWindowCount,
+            finalWindowCount: finalWindowCount,
+            baselineThreadCount: baselineThreadCount,
+            finalThreadCount: finalTask.threadCount,
+            maximumThreadCount: maximumThreadCount,
+            baselineResidentMiB: baselineResidentMiB,
+            finalResidentMiB: finalTask.residentMiB,
+            baselineSocketCount: baselineSocketCount,
+            finalSocketCount: finalSocketCount,
+            baselineChildProcessCount: baselineChildProcessCount,
+            finalChildProcessCount: finalChildProcessCount
+        )
+    }
+
     private func panelFrames(on screen: NSScreen) -> PanelFrames {
         PanelGeometry.frames(
             on: screen,
             panelSize: settings.panelSize,
-            showsNotchSideHandleArea: showsVisibleNotchSideHandle
+            additionalPreviewHeight: voiceLaneHeight(on: screen),
+            showsNotchSideHandleArea: showsVisibleNotchSideHandle,
+            showsVoiceConversation: VoiceActivityPresentation(snapshot: VoiceLaneRuntime.shared.snapshot).showsConversation
+        )
+    }
+
+    private func resolvedVoiceLaneLayout(on screen: NSScreen) -> VoiceLaneLayoutPreference {
+        guard settings.voiceEnabled else { return .compact }
+        let baseline = PanelGeometry.frames(
+            on: screen,
+            panelSize: settings.panelSize,
+            showsNotchSideHandleArea: showsVisibleNotchSideHandle,
+            showsVoiceConversation: VoiceActivityPresentation(snapshot: VoiceLaneRuntime.shared.snapshot).showsConversation
+        )
+        let availableExtraHeight = max(0, baseline.preview.minY - screen.visibleFrame.minY)
+        return VoiceLaneGeometry.resolvedPreference(
+            requested: settings.voiceLaneLayoutPreference,
+            availableExtraHeight: Double(availableExtraHeight),
+            panelSizeRawValue: settings.panelSize.rawValue
+        )
+    }
+
+    private func voiceLaneHeight(on _: NSScreen) -> CGFloat {
+        CGFloat(VoiceLaneGeometry.height(
+            panelSizeRawValue: settings.panelSize.rawValue,
+            mode: VoiceLaneRuntime.shared.snapshot.mode
+        ))
+    }
+
+    private func applyResolvedVoiceLaneLayout(on screen: NSScreen) {
+        VoiceLaneRuntime.shared.setResolvedLayout(
+            requested: settings.voiceLaneLayoutPreference,
+            resolved: resolvedVoiceLaneLayout(on: screen)
         )
     }
 
@@ -143,6 +401,7 @@ final class HoverWindowController {
             return AnyView(
                 HoverPillView(
                     settings: settings,
+                    stickyReminders: stickyReminders,
                     onEnter: { [weak self] in self?.handleDirectHover(on: screen) },
                     onExit: { [weak self] in self?.scheduleClose() },
                     onTap: { [weak self] in self?.togglePreview(on: screen) }
@@ -151,6 +410,8 @@ final class HoverWindowController {
         case .miniBar:
             return AnyView(
                 HoverMiniBarView(
+                    settings: settings,
+                    stickyReminders: stickyReminders,
                     onBarEnter: { [weak self] in self?.handleDirectHover(on: screen) },
                     onBarExit: { [weak self] in self?.scheduleClose() },
                     onTap: { [weak self] in self?.togglePreview(on: screen) }
@@ -165,13 +426,20 @@ final class HoverWindowController {
             onExit: { [weak self] in self?.scheduleClose() }
         )
 
-        let panel = makePanel(size: PanelLayout.previewSize(for: settings.panelSize), acceptsKeyboardFocus: true)
+        let panel = makePanel(
+            size: PanelGeometry.previewSize(
+                panelSize: settings.panelSize,
+                additionalHeight: targetScreen().map { voiceLaneHeight(on: $0) } ?? 0
+            ),
+            acceptsKeyboardFocus: true
+        )
         panel.hasShadow = true
         let hostingController = NSHostingController(
             rootView: HoverPanelShell(
                 hoverState: hoverState,
                 store: menuStore,
                 settings: settings,
+                stickyReminders: stickyReminders,
                 onOpenSettings: { [weak self] in self?.showSettings() },
                 onClosePanel: { [weak self] in self?.closePreview() },
                 onExternalDragStarted: { [weak self] in self?.prepareForExternalDrag() }
@@ -184,6 +452,15 @@ final class HoverWindowController {
         hostingController.sizingOptions = []
         panel.contentViewController = hostingController
         previewWindow = panel
+        NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification, object: panel)
+            .sink { [weak self] _ in
+                // The nonphysical soak drives open/close itself; desktop focus is checked in UI acceptance.
+                guard let self, !self.isPanelSoakVerification, self.awaitingPointerAfterExplicitOpen,
+                      self.previewWindow?.attachedSheet == nil else { return }
+                self.awaitingPointerAfterExplicitOpen = false
+                self.closePreview()
+            }
+            .store(in: &settingsCancellables)
     }
 
     private func makePanel(size: NSSize, acceptsKeyboardFocus: Bool) -> NSPanel {
@@ -213,7 +490,7 @@ final class HoverWindowController {
     }
 
     private func handleDirectHover(on screen: NSScreen) {
-        guard usesDirectHoverEvents else { return }
+        guard usesDirectHoverEvents, !isVoiceControlLocation(on: screen) else { return }
         showPreview(on: screen)
     }
 
@@ -249,7 +526,7 @@ final class HoverWindowController {
         if let screen = previewWindow.screen ?? activePreviewScreen ?? targetScreen() {
             previewWindow.setFrame(panelFrames(on: screen).preview, display: false)
         }
-        previewWindow.orderOut(nil)
+        orderOutPreviewWindow(previewWindow)
         menuStore.providerStore.prepareForPanelClose()
     }
 
@@ -262,6 +539,8 @@ final class HoverWindowController {
 
         guard let screen = requestedScreen ?? targetScreen(), let previewWindow else { return }
         activePreviewScreen = screen
+        applyResolvedVoiceLaneLayout(on: screen)
+        VoiceLaneRuntime.shared.attachPanel()
         let frames = panelFrames(on: screen)
         menuStore.providerStore.prepareForPanelOpen(isSecondaryDisplay: isSecondaryDisplay(screen))
         setProviderActive(true)
@@ -337,7 +616,10 @@ final class HoverWindowController {
         let task = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.closeTask = nil
-            guard !self.isMouseInsideHoverRegion() else { return }
+            guard !self.isMouseInsideHoverRegion(), self.previewWindow?.attachedSheet == nil,
+                  !self.awaitingPointerAfterExplicitOpen,
+                  TimerStore.shared.activeAlert == nil,
+                  self.stickyReminders.activeNote == nil else { return }
             self.closePreview()
         }
         closeTask = task
@@ -353,6 +635,7 @@ final class HoverWindowController {
     }
 
     private func closePreview() {
+        awaitingPointerAfterExplicitOpen = false
         guard let previewWindow, previewWindow.isVisible else {
             menuStore.providerStore.prepareForPanelClose()
             return
@@ -368,7 +651,7 @@ final class HoverWindowController {
         setProviderActive(false)
 
         guard !shouldReduceMotion, let screen = previewWindow.screen ?? activePreviewScreen ?? targetScreen() else {
-            previewWindow.orderOut(nil)
+            orderOutPreviewWindow(previewWindow)
             setPreviewContentVisible(false, animated: false)
             previewWindow.alphaValue = 1
             previewWindow.hasShadow = true
@@ -412,7 +695,7 @@ final class HoverWindowController {
         stopHoverMonitor()
         mouseEventsEnableTask?.cancel()
         mouseEventsEnableTask = nil
-        previewWindow.orderOut(nil)
+        orderOutPreviewWindow(previewWindow)
         setProviderActive(false)
         activePreviewScreen = nil
         menuStore.providerStore.prepareForPanelClose()
@@ -424,11 +707,46 @@ final class HoverWindowController {
         previewWindow.setFrame(frame, display: false)
     }
 
+    private func orderOutPreviewWindow(_ previewWindow: NSPanel) {
+        VoiceLaneRuntime.shared.detachPanel()
+        previewWindow.orderOut(nil)
+    }
+
     private func isMouseInsideHoverRegion() -> Bool {
         let location = NSEvent.mouseLocation
         let accessContainsMouse = accessWindows.values.contains { $0.frame.insetBy(dx: -4, dy: -4).contains(location) }
         let previewContainsMouse = previewWindow?.frame.insetBy(dx: -4, dy: -4).contains(location) ?? false
         return accessContainsMouse || previewContainsMouse
+    }
+
+    /// Voice controls on the closed access surface must receive the click
+    /// without opening the panel first. The center gap keeps the normal panel
+    /// hover/click entry available, including on the no-notch 108pt bar.
+    private func isVoiceControlLocation(on screen: NSScreen) -> Bool {
+        guard VoiceActivityPresentation(snapshot: VoiceLaneRuntime.shared.snapshot).showsConversation,
+              let accessWindow = accessWindows[screenKey(screen)],
+              let style = accessWindowStyles[screenKey(screen)] else {
+            return false
+        }
+
+        let sideWidth = style == .notchPill
+            ? PanelLayout.notchHandleWidth
+            : VoiceAccessIndicator.noNotchSideControlWidth
+        let frame = accessWindow.frame
+        let location = NSEvent.mouseLocation
+        let leftControl = NSRect(
+            x: frame.minX,
+            y: frame.minY,
+            width: sideWidth,
+            height: frame.height
+        )
+        let rightControl = NSRect(
+            x: frame.maxX - sideWidth,
+            y: frame.minY,
+            width: sideWidth,
+            height: frame.height
+        )
+        return leftControl.contains(location) || rightControl.contains(location)
     }
 
     private func startHoverMonitor() {
@@ -451,9 +769,13 @@ final class HoverWindowController {
     }
 
     private func closeIfMouseLeftHoverRegion() {
+        if isMouseInsideHoverRegion() { awaitingPointerAfterExplicitOpen = false }
         guard previewWindow?.isVisible == true,
               closeTask == nil,
+              previewWindow?.attachedSheet == nil,
+              !awaitingPointerAfterExplicitOpen,
               TimerStore.shared.activeAlert == nil,
+              stickyReminders.activeNote == nil,
               !isMouseInsideHoverRegion()
         else {
             return
@@ -488,7 +810,8 @@ final class HoverWindowController {
         for screen in accessScreens() {
             guard let accessWindow = accessWindows[screenKey(screen)],
                   accessWindow.isVisible,
-                  accessWindow.frame.contains(mouseLocation)
+                  accessWindow.frame.contains(mouseLocation),
+                  !isVoiceControlLocation(on: screen)
             else {
                 continue
             }
@@ -640,7 +963,93 @@ final class HoverWindowController {
     }
 
     private var shouldReduceMotion: Bool {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if isPanelSoakVerification {
+            return panelSoakUsesImmediateTransitions
+        }
+        return NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    private func settlePanelSoakRunLoop(milliseconds: UInt64 = 2) async {
+        try? await Task.sleep(nanoseconds: milliseconds * 1_000_000)
+    }
+
+    private func processTaskSnapshot() throws -> (threadCount: Int, residentMiB: Double) {
+        var info = proc_taskinfo()
+        let expectedSize = MemoryLayout<proc_taskinfo>.size
+        let readSize = withUnsafeMutablePointer(to: &info) { pointer in
+            proc_pidinfo(
+                getpid(),
+                PROC_PIDTASKINFO,
+                0,
+                pointer,
+                Int32(expectedSize)
+            )
+        }
+        guard readSize == expectedSize else {
+            throw PanelSoakVerificationError.failed("panel_soak_task_readback_failed")
+        }
+        return (
+            Int(info.pti_threadnum),
+            Double(info.pti_resident_size) / 1_048_576
+        )
+    }
+
+    private func processSocketCount() throws -> Int {
+        errno = 0
+        let requiredSize = proc_pidinfo(getpid(), PROC_PIDLISTFDS, 0, nil, 0)
+        guard requiredSize >= 0, requiredSize > 0 || errno == 0 else {
+            throw PanelSoakVerificationError.failed("panel_soak_socket_readback_failed")
+        }
+        var descriptors = [proc_fdinfo](
+            repeating: proc_fdinfo(),
+            count: max(1, Int(requiredSize) / MemoryLayout<proc_fdinfo>.size)
+        )
+        errno = 0
+        let readSize = descriptors.withUnsafeMutableBytes { buffer in
+            proc_pidinfo(
+                getpid(),
+                PROC_PIDLISTFDS,
+                0,
+                buffer.baseAddress,
+                Int32(buffer.count)
+            )
+        }
+        guard readSize >= 0, readSize > 0 || errno == 0 else {
+            throw PanelSoakVerificationError.failed("panel_soak_socket_readback_failed")
+        }
+        let count = Int(readSize) / MemoryLayout<proc_fdinfo>.size
+        return descriptors.prefix(count).filter { $0.proc_fdtype == PROX_FDTYPE_SOCKET }.count
+    }
+
+    private func childProcessCount() throws -> Int {
+        errno = 0
+        let requiredSize = proc_listpids(
+            UInt32(PROC_PPID_ONLY),
+            UInt32(getpid()),
+            nil,
+            0
+        )
+        guard requiredSize >= 0, requiredSize > 0 || errno == 0 else {
+            throw PanelSoakVerificationError.failed("panel_soak_child_readback_failed")
+        }
+        var processIdentifiers = [pid_t](
+            repeating: 0,
+            count: max(1, Int(requiredSize) / MemoryLayout<pid_t>.size)
+        )
+        errno = 0
+        let readSize = processIdentifiers.withUnsafeMutableBytes { buffer in
+            proc_listpids(
+                UInt32(PROC_PPID_ONLY),
+                UInt32(getpid()),
+                buffer.baseAddress,
+                Int32(buffer.count)
+            )
+        }
+        guard readSize >= 0, readSize > 0 || errno == 0 else {
+            throw PanelSoakVerificationError.failed("panel_soak_child_readback_failed")
+        }
+        let count = Int(readSize) / MemoryLayout<pid_t>.size
+        return processIdentifiers.prefix(count).filter { $0 > 0 }.count
     }
 
     private func setPreviewContentVisible(_ isVisible: Bool, animated: Bool) {
@@ -682,6 +1091,48 @@ final class HoverWindowController {
             }
             .store(in: &settingsCancellables)
 
+        settings.$voiceEnabled
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.resizePreviewForPanelSizeChange()
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        VoiceLaneRuntime.shared.$snapshot
+            .map(\.mode)
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.resizePreviewForPanelSizeChange()
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        VoiceLaneRuntime.shared.$snapshot
+            .map { VoiceActivityPresentation(snapshot: $0).showsConversation }
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.positionWindows()
+                }
+            }
+            .store(in: &settingsCancellables)
+
+        settings.$voiceLaneLayoutPreference
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    self?.resizePreviewForPanelSizeChange()
+                }
+            }
+            .store(in: &settingsCancellables)
+
         settings.$showNotchSideHandleArea
             .dropFirst()
             .sink { [weak self] _ in
@@ -717,9 +1168,21 @@ final class HoverWindowController {
             .store(in: &settingsCancellables)
     }
 
+    private func observeStickyReminders() {
+        stickyReminders.$activeNote
+            .map { $0?.id }
+            .removeDuplicates()
+            .sink { [weak self] noteID in
+                guard noteID != nil else { return }
+                self?.openPanel(showing: StickyNotesProvider.pluginID)
+            }
+            .store(in: &settingsCancellables)
+    }
+
     private func resizePreviewForPanelSizeChange() {
         syncAccessWindows(orderFront: false)
         guard let screen = activePreviewScreen ?? previewWindow?.screen ?? targetScreen() else { return }
+        applyResolvedVoiceLaneLayout(on: screen)
         let frames = panelFrames(on: screen)
 
         guard let previewWindow else { return }

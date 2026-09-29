@@ -14,6 +14,34 @@
 - macOS公開ZIPはDeveloper ID署名、Apple notarization、staple済みです。
 - Windows公開ベータはVelopackの`win` channelを使い、macOSのLatest / appcastと分離しています。
 
+## 設定画面
+
+左側のカテゴリから「表示と操作」「機能」「自作ツール」「音声・AI」「カレンダー・天気」「データと履歴」「一般」を切り替えます。表示する機能は「機能」、AIで作るツールは「自作ツール」、アップデートは「一般」にあります。カテゴリを切り替えても入力途中のツール依頼は保持します。
+
+## 個人用ツール（macOS）
+
+設定の「自作ツール」で「AIネイティブ機能」を有効にすると、欲しいツールを文章で依頼できます。生成した画面をプレビューで試し、「このツールを追加・更新」でパネルへ追加します。続けて修正内容を入力するか、導入済みツールの「会話で修正」を選ぶと、その定義を引き継いで編集できます。
+
+標準の記録管理画面と、通信やファイルへの直接アクセスを制限した独自HTML画面を使えます。生成はGPT-6 Astra、既定の推論強度はMediumで、設定から変更できます。作成途中の履歴を残し、復元後も記録したデータを保持します。保存項目の変更には移行内容の確認を出します。
+
+実際のHoverPocketパネルに共通の暗い配色と文字サイズ設定を適用し、一覧を先に表示します。追加・編集時だけ入力欄を開き、パネルの大きさに合わせて操作できます。タイマーと付箋の操作は本体の確認画面を経て実行し、結果を表示します。
+
+自作ツールの「削除…」では、記録と作成履歴を残すアンインストール、記録・作成履歴も含む削除を選べます。アンインストール済みのツールは専用欄から復元できます。完全削除では、そのツールの定義、記録、作成履歴、内部の移行前バックアップをmacOSのゴミ箱へ移します。標準のカレンダーやミラー、ツールを使って作成した付箋・タイマー・予定、書き出したバックアップは保持します。
+
+音声では「通常操作を音声で確認」と「削除・取消操作を音声で確認」を個別に設定できます。両方オフなら、削除を含め追加の確認なしで依頼を実行します。確認をオンにした操作も、マウスを使わず音声で承認・取消できます。天気は設定済みの地域と温度単位で取得します。
+
+macOSの追加実装・配信状況は[音声操作と天気の記録](progress/2026-09/2026-09-07_hover-pocket-voice-only-weather-release.md)を参照してください。Windows版の個人用ツールは未実装です。
+
+macOS版642では、自作ツールの「機能ライブラリ」から利用可能な機能と利用中のツールを確認できます。有効なライブラリをCodexが選んで組み合わせ、未使用の機能は無効化・再有効化できます。利用中のツールや復元用の履歴がある機能は保護します。ライブラリの追加配布はアプリ更新で行います。[実装・検証](progress/2026-09/2026-09-08_hover-pocket-libraries.md)。 生成したHTMLツールからのAI文章処理も利用できます。送信内容を毎回確認し、要約などの結果をツールへ返します。[本番配信とAI処理の検証](progress/2026-09/2026-09-08_hover-pocket-ai-release.md)。
+
+macOS版644では、付箋の作成・編集画面からリマインダー日時を設定できます。指定時刻に画面と音で知らせ、付箋を非表示にしていても通知を停止できます。「10分後に資料を送る、とリマインダー付きの付箋を作って」のように音声でCodexへ依頼することもできます。スリープ中・終了中の未確認通知は復帰・次回起動時に表示します。[実装・配信記録](progress/2026-09/2026-09-11_hover-pocket-sticky-reminders.md)。
+
+macOS版643を本番配信しました。音声の開始・終了は波形ボタン、ミュート切替はマイクボタンに分けました。閉じたノッチの左マイクでミュートを切り替え、右の波形で会話を終了できます。ミュート時の波形はグレーの点だけになり、Codex更新後の接続判定も再検査します。署名・Apple公証・公開物の検証と、このMacの更新を完了しています。[変更・配信記録](progress/2026-09/2026-09-10_hover-pocket-voice-controls.md)。
+
+macOSの640では、音声バーの高さを画面の上端領域内に収め、下端に1物理ピクセルの余裕を残すよう修正しました。[修正・配信記録](progress/2026-09/2026-09-08_hover-pocket-voice-height.md)。
+
+macOSの639では、会話中の波形、ミュートの斜線、ノッチ左右／ノッチなし画面の会話表示、音声による会話終了を追加し、試験機能Today Focusを削除しました。署名・Apple公証・公開ファイルの検証と、このMacの更新を完了しています。実マイクでの発話は未検証です。[実装・配信記録](progress/2026-09/2026-09-08_hover-pocket-voice-activity.md)。
+
 ## ダウンロードとインストール
 
 ### macOS
@@ -32,7 +60,7 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 
 ## 現在できること
 
-現在は組み込みの `Mirror`、`Controls`、`Calendar`、`Clipboard`、`Sticky Notes`、`Timer`、`Calculator` プロバイダーを搭載しています。AI command lane は計画・開発途中のため、現在のアプリ UI からは一旦外しています。
+現在は組み込みの `Mirror`、`Controls`、`Calendar`、`Clipboard`、`Sticky Notes`、`Timer`、`Calculator` プロバイダーを搭載しています。macOSでは設定の「音声・AI」から音声操作を、「自作ツール」から個人用機能の作成を有効にできます。
 
 ### ミラー
 
@@ -164,6 +192,13 @@ GitHub が自動で表示する `Source code (zip)` / `Source code (tar.gz)` は
 
 成功すると `HoverPocket launched` と表示されます。
 
+macOSのCodex app-server経路を確認する場合は、次のコマンドを使います。通常の解決順ではChatGPT.app同梱の互換Codexを優先し、OpenAI APIキーは使用しません。2つ目の検証も物理マイクは取得せず、無音トラックでaccount、voices、ephemeral thread、SDP、WebRTC、process終了をreadbackします。
+
+```bash
+.build/debug/HoverPocket --require-codex-app-server-ready
+.build/debug/HoverPocket --verify-codex-app-server-realtime
+```
+
 Small / Medium / Large / Extra Large と文字サイズごとの provider layout を確認する場合は次のコマンドを使います。
 
 ```bash
@@ -281,6 +316,44 @@ PUBLISH_DRY_RUN=1 PUBLISH_REQUIRE_NOTARIZED=0 ./script/publish_github_release.sh
 ```
 
 通常の一般配布では `PUBLISH_REQUIRE_NOTARIZED=0` は使わないでください。
+
+配布用worktreeにも、既存の審査済みGoogle設定を環境変数またはGit管理外の`.env.local`で渡してください。`GOOGLE_SIGN_IN_CLIENT_ID`と対応するURL schemeが必要です。`package_zip.sh`と公開前のZIP検証は、Google設定、署名済みの位置情報entitlement、位置情報の利用目的を確認し、欠落時には公開を止めます。確認値や秘密情報をログへ出力しないでください。
+
+### 公開成果物のOS別readback
+
+公開後は、macOSの`macos-latest`とversioned release、Windowsの最新`win-v...` releaseを同じ`latest`扱いにせず、次のコマンドで別々に検証します。
+
+```bash
+python3 script/verify_release_readback.py --windows-signing-gate beta
+```
+
+この検証は公開URLから成果物を再取得し、macOS appcast、versioned ZIP、手動インストールZIP、GitHub SHA-256、公開鍵によるSparkle Ed25519署名、Windows feed、manifest、全公開assetの実測SHA-256、Velopack packageのSHA-1を照合します。Windows成果物を合計約270MB再取得するため、公開後または週次監視で使います。
+
+Windows正式版の受入時は、共通readbackに加えてWindows runner上でSetup、Portable版アプリ、Velopack full package内アプリの実Authenticode署名、タイムスタンプ、3成果物の署名証明書一致、repository variableへ固定した正規証明書SHA-256との一致を確認します。manifest内の文字列だけでは正式版の署名証拠にしません。
+
+```bash
+python3 script/verify_release_readback.py --windows-signing-gate formal
+```
+
+Windows 0.2.xの未署名公開ベータは`beta` gateには合格しますが、`formal` gateには合格しません。週次の公開readbackは`beta`で監視し、正式版候補はworkflowを`formal`で手動実行します。PRでは外部ネットワークに依存しない署名ベクトル・metadata試験とPowerShell構文検証だけを実行します。
+
+### install・rollback遷移の実機CI
+
+`Verify Release Install and Rollback Transitions` workflowは手動実行専用です。明示した旧版と新版をGitHubの使い捨てmacOS / Windows runnerへ取得し、次の順序を検証します。
+
+1. 旧版を一時install先へ導入
+2. 新版へupgrade
+3. 旧版packageへrollback
+4. 新版へ再upgrade
+5. uninstall
+6. 新版をreinstall
+7. install先と分離したuser data sentinelが保持されることをreadback
+
+macOSは一時Applications領域で署名・公証・Gatekeeper・Sparkle署名済みbundleの置換を検証します。WindowsはVelopack Setupの`--silent --installto`と`Update.exe apply --package`を使い、一時install rootだけを変更します。OSごとに`execute_macos_release_code`または`execute_windows_release_code`を明示した場合だけ公開release codeを実行します。未署名Windows betaは追加で`allow_unsigned_beta`を明示する必要があります。正式署名Windows版の遷移は、Setupだけでなくfull package内アプリまでを独立した正式署名readback snapshotへ固定できるまで失敗側に閉じます。
+
+両OSとも開始時にtag、draft / prerelease状態、全assetの名前・size・GitHub SHA-256・download URLを固定し、合格証跡を書く直前に公開releaseを再取得して完全一致を確認します。途中でrelease assetが差し替わった場合は遷移自体が成功しても合格にしません。
+
+このCIは使い捨てrunner上のpackage lifecycle gateです。日常利用中の端末でのSparkle / Velopack UI、自動更新、実データmigration、sleep-wakeは別のrelease-candidate実機gateとして残します。
 
 ## 自動アップデート
 

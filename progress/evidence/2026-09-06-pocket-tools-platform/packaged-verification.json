@@ -1,0 +1,45 @@
+{
+  "build": "632",
+  "version": "0.1.0",
+  "binarySHA256": "b97c10f1b4ca51682757f308255e174c9152b2bda9d6cc705affb922121bba1c",
+  "checks": [
+    {
+      "check": "pocket-tools-platform",
+      "exitCode": 0
+    },
+    {
+      "check": "pocket-app",
+      "exitCode": 0
+    },
+    {
+      "check": "broker",
+      "exitCode": 0
+    },
+    {
+      "check": "personal-tools",
+      "exitCode": 0
+    },
+    {
+      "check": "voice-foundation",
+      "exitCode": 0
+    },
+    {
+      "check": "pocket-tools-html",
+      "exitCode": 0
+    },
+    {
+      "check": "pocket-tools-generated-ui",
+      "exitCode": 0
+    },
+    {
+      "check": "codesign",
+      "exitCode": 0
+    },
+    {
+      "check": "configuration",
+      "exitCode": 0
+    }
+  ],
+  "published": false,
+  "notarized": false
+}

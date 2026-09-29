@@ -1,0 +1,65 @@
+{
+  "$schema": "hoverpocket://schemas/capability-compatibility/v1",
+  "policyVersion": 1,
+  "hostVersion": "2.0.0",
+  "entries": [
+    {
+      "capability": {
+        "id": "timer.countdown.get",
+        "version": 1
+      },
+      "status": "deprecated",
+      "introducedInHostVersion": "1.0.0",
+      "deprecatedInHostVersion": "2.0.0",
+      "removalNotBeforeHostVersion": "3.0.0",
+      "replacement": {
+        "id": "timer.countdown.get",
+        "version": 2
+      },
+      "migrationId": "timer-countdown-get-v1-to-v2",
+      "noticeKey": "capability.timer.countdown.get.v1.deprecated"
+    },
+    {
+      "capability": {
+        "id": "timer.countdown.get",
+        "version": 2
+      },
+      "status": "deprecated",
+      "introducedInHostVersion": "1.0.0",
+      "deprecatedInHostVersion": "2.0.0",
+      "removalNotBeforeHostVersion": "3.0.0",
+      "replacement": {
+        "id": "timer.countdown.get",
+        "version": 1
+      },
+      "migrationId": "timer-countdown-get-v2-to-v1",
+      "noticeKey": "capability.timer.countdown.get.v2.deprecated"
+    }
+  ],
+  "migrations": [
+    {
+      "id": "timer-countdown-get-v1-to-v2",
+      "operation": "replace_reference",
+      "from": {
+        "id": "timer.countdown.get",
+        "version": 1
+      },
+      "to": {
+        "id": "timer.countdown.get",
+        "version": 2
+      }
+    },
+    {
+      "id": "timer-countdown-get-v2-to-v1",
+      "operation": "replace_reference",
+      "from": {
+        "id": "timer.countdown.get",
+        "version": 2
+      },
+      "to": {
+        "id": "timer.countdown.get",
+        "version": 1
+      }
+    }
+  ]
+}

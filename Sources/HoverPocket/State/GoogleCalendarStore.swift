@@ -226,6 +226,78 @@ final class GoogleCalendarStore: ObservableObject {
         }
     }
 
+    private var personalApprovalTargets: [String: (revision: CapabilityValue, label: String)] = [:]
+
+    func personalApprovalLabel(_ target: String, revision: CapabilityValue?) -> String? {
+        guard let stored = personalApprovalTargets[target], stored.revision == revision else { return nil }
+        return stored.label
+    }
+
+    func personalTool(_ operation: PersonalToolOperation, arguments: CapabilityObject) async throws -> CapabilityObject {
+        guard connectionState == .signedIn else { throw GoogleCalendarToolError.notConnected }
+        if operation == .calendarSearch {
+            let start = try PersonalToolDate.parse( arguments.requiredString("start", maxLength: 64))
+            let end = try PersonalToolDate.parse( arguments.requiredString("end", maxLength: 64))
+            guard end > start, end.timeIntervalSince(start) <= 31 * 86400 else { throw CapabilityHandlerError.invalidArgument("date_range") }
+            var month = Calendar.current.dateInterval(of: .month, for: start)!.start
+            var events: [GoogleCalendarEventOccurrence] = []
+            var ids: Set<String> = []
+            while month < end {
+                try Task.checkCancellation()
+                let snapshot = try await loadMonthForTool(containing: month)
+                for event in snapshot.events where ids.insert(event.id).inserted { events.append(event) }
+                guard let next = Calendar.current.date(byAdding: .month, value: 1, to: month), next > month else { throw CapabilityHandlerError.invalidArgument("date_range") }
+                month = next
+            }
+            let matching = events.filter { $0.start < end && $0.end > start }.sorted { $0.start < $1.start }
+            return ["items": .array(matching.prefix(100).map { .object([
+                "targetId": .string($0.id), "title": .string(String($0.title.prefix(160))),
+                "start": .string($0.allDayStartDate ?? CapabilityDateCodec.string(from: $0.start)),
+                "end": .string($0.allDayEndDate ?? CapabilityDateCodec.string(from: $0.end)), "isAllDay": .bool($0.isAllDay)
+            ]) }), "truncated": .bool(matching.count > 100)]
+        }
+        let target = try arguments.requiredString("targetId", maxLength: 512)
+        guard let separator = target.lastIndex(of: ":") else { throw CapabilityHandlerError.invalidArgument("targetId") }
+        let calendarID = String(target[..<separator]); let eventID = String(target[target.index(after: separator)...])
+        guard !calendarID.isEmpty, !eventID.isEmpty else { throw CapabilityHandlerError.invalidArgument("targetId") }
+        guard let before = try await apiClient.personalEventResource(calendarID: calendarID, eventID: eventID), before["status"] != .string("cancelled") else { throw CapabilityHandlerError.unavailable("event_not_found") }
+        if operation.isWrite {
+            let snapshot = try await loadMonthForTool(containing: Date())
+            guard snapshot.sources.contains(where: { $0.id == calendarID && $0.canWrite }) else { throw CapabilityHandlerError.unavailable("calendar_read_only") }
+            let revision = try before.requiredString("etag", maxLength: 256)
+            guard arguments["expectedRevision"] == .string(revision) else { throw CapabilityHandlerError.unavailable("event_changed") }
+            let patch = try PersonalCalendarEditing.patch(arguments: arguments, before: before)
+            try Task.checkCancellation()
+            try await apiClient.modifyPersonalEvent(calendarID: calendarID, eventID: eventID, revision: revision, patch: operation == .calendarDelete ? nil : patch)
+            let observed = try await apiClient.personalEventResource(calendarID: calendarID, eventID: eventID)
+            if operation == .calendarDelete {
+                guard observed == nil || observed?["status"] == .string("cancelled") else { throw CapabilityHandlerError.readbackMismatch("event_delete") }
+                refreshMonth(containing: lastLoadedMonth ?? Date(), force: true)
+                return ["targetId": .string(target), "state": .string("deleted")]
+            }
+            guard let observed else { throw CapabilityHandlerError.readbackMismatch("event_edit") }
+            try PersonalCalendarEditing.verify(patch: patch, observed: observed)
+            refreshMonth(containing: lastLoadedMonth ?? Date(), force: true)
+            return try personalEventSnapshot(observed, target: target, calendarID: calendarID)
+        }
+        return try personalEventSnapshot(before, target: target, calendarID: calendarID)
+    }
+
+    private func personalEventSnapshot(_ event: CapabilityObject, target: String, calendarID: String) throws -> CapabilityObject {
+        guard case .object(let start)? = event["start"], case .object(let end)? = event["end"] else { throw GoogleCalendarAPIError.invalidResponse }
+        var result: CapabilityObject = ["targetId": .string(target), "title": event["summary"] ?? .string(""),
+            "start": start["date"] ?? start["dateTime"] ?? .null, "end": end["date"] ?? end["dateTime"] ?? .null,
+            "isAllDay": .bool(start["date"] != nil), "location": event["location"] ?? .string(""), "notes": event["description"] ?? .string(""),
+            "revision": .string(try event.requiredString("etag", maxLength: 256)), "isRecurringSeries": .bool(event["recurrence"] != nil)]
+        if case .string(let series)? = event["recurringEventId"] { result["seriesTargetId"] = .string(calendarID + ":" + series) }
+        if case .array(let attendees)? = event["attendees"] { result["attendeeCount"] = .integer(attendees.count) }
+        if personalApprovalTargets.count > 256 { personalApprovalTargets.removeAll() }
+        if case .string(let title)? = result["title"], let revision = result["revision"] {
+            personalApprovalTargets[target] = (revision, title.isEmpty ? "予定（タイトルなし）" : title)
+        }
+        return result
+    }
+
     func listEventsForCapability(from start: Date, to end: Date) async throws -> [GoogleCalendarEventOccurrence] {
         let snapshot = try await loadMonthForTool(containing: start)
         return snapshot.events

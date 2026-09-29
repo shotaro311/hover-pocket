@@ -96,6 +96,8 @@ internal interface IVolumeEndpointService
 
     Task<VolumeState> SetVolumeAsync(int value, CancellationToken cancellationToken);
 
+    Task<VolumeState> SetMutedAsync(bool muted, CancellationToken cancellationToken);
+
     Task<VolumeState> ToggleMuteAsync(CancellationToken cancellationToken);
 }
 
