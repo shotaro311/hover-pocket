@@ -164,4 +164,4 @@ jobs:
       - name: Verify weather location and release configuration
         run: |
           .build/debug/HoverPocket --verify-weather-location
-          python3 -m unittest discover -s script/tests
+          python3 -m unittest script/tests/test_verify_macos_app_configuration.py script/tests/test_verify_codex_auth_control_plane_macos.py

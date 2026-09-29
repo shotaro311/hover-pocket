@@ -14,7 +14,7 @@
 - Codex認証検証のschema固定ハッシュが、個人用ツールのcollections/views追加前の値だった。元ブランチでも失敗を再現し、eae1f22のschema変更を確認して更新。改変されたschema/fixtureを引き続き拒否する回帰テストを追加。
 - 音声の承認検証で、付箋v2の実handlerとstubを二重登録していた。stub除外キーを実handler一覧から導出し、23項目の検証が成功。
 - App OS音声検証のdispatchMain経路でMainActorスレッド警告が発生。既存のGUI検証と同じNSApplicationイベントループを使い、実Codexのcatalog読取・終了と警告消失を確認。
-- macOS CIへ音声承認検証とPython全30テストを組み込み、再発を検出する。
+- macOS CIへ音声承認検証と認証契約のPython回帰テストを組み込み、再発を検出する。配布メタデータ23テストは既存Ubuntu CIで実行する。
 
 ## ローカル検証
 
@@ -32,6 +32,9 @@
 - runner参照: https://github.com/actions/runner-images/blob/macos-15-arm64/20260907.0337/images/macos/macos-15-arm64-Readme.md
 
 - Windows CIはDebug/Release・installer・Capability・Brokerまで成功後、共有generation schemaとの不一致で停止。Windowsの出力schemaを共有正本へ一致させ、Mac専用collections/viewsをWindowsのmaterializerが拒否する既存制約は保持。拒否ケース2件を追加した。WindowsでMac専用機能が使用可能になったとは扱わない。
+
+- macOS CIへPython全件を追加した際、既存のOpenSSL依存の配布署名テストがrunner環境で失敗した。配布検証は従来どおり既存Ubuntuジョブで23テストを実行し、macOSジョブは設定5件・認証契約2件を明示実行する。テストの削除や署名検証の緩和は行わない。
+- 9f4325dのWindows CIは全段階が成功。Macもビルド・音声・Capability・Broker・保存復元・Timer・天気地点まで成功。
 
 ## 残る確認
 
