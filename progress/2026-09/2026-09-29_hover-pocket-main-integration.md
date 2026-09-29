@@ -36,9 +36,16 @@
 - macOS CIへPython全件を追加した際、既存のOpenSSL依存の配布署名テストがrunner環境で失敗した。配布検証は従来どおり既存Ubuntuジョブで23テストを実行し、macOSジョブは設定5件・認証契約2件を明示実行する。テストの削除や署名検証の緩和は行わない。
 - 9f4325dのWindows CIは全段階が成功。Macもビルド・音声・Capability・Broker・保存復元・Timer・天気地点まで成功。
 
-## 残る確認
+## 統合とreadback
 
-- GitHub CI、remote mainとlocal mainの最終SHA一致を確認する。
+- [PR #41](https://github.com/shotaro311/hover-pocket/pull/41)をユーザーの明示依頼に基づきmerge。検証head `bd34e8b`、merge commit `48c1c037333931cb724de093dc97fd6a06d7b0cb`。両者のtree一致を確認。
+- 最新headのCIは10 SUCCESS、8 SKIPPED、failure/pending 0。Mac / Windowsのnative buildと既存機能検証、3 OS契約と比較、配布/更新スクリプト検証が成功。配信・実機インストールの8件はPRで意図したskipであり、受入済みとは扱わない。
+- 元フォルダのmainをfast-forwardし、GitHub mainと同一SHAを別経路でreadback。元の未追跡49ファイルは全件SHA-256不変。うち4件は同一内容の追跡ファイルになった。
+- 既存progressの34行追記は、原本・patch・stashで保全し、この記録反映後に同じmain作業フォルダへ未コミット差分として戻す。既存の他worktreeは変更していない。
+- macOS appcastのSHA-256は事前調査と不変。公開アプリは644のままで、新規配信なし。
+- [検証結果とCIリンク](../evidence/2026-09-29-main-integration/readback.json)。本記録の追記は統合後の文書変更のみ。
+
+## 未検証範囲
 - 実マイク会話、他Mac、Windows実機の利用者操作は今回の受入対象外。
 
 ## 参照

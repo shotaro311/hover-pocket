@@ -2,14 +2,14 @@
 project_slug: hover-menu-preview
 updated: 2026-09-29
 updated_by: codex
-status: macos-644-main-integration-verifying; published-macos-644; physical-voice-e2e-pending
+status: macos-644-main-integrated; published-macos-644; physical-voice-e2e-pending
 ---
 
 ## 現在地（2026-09-29）
 
-- 本番644を含む `codex/pocket-tools-platform`（`35701a4`）を `main`（`1782066`）へ統合する。現在は統合候補の検証中。
+- 本番644を含む `codex/pocket-tools-platform`（`35701a4`）を [PR #41](https://github.com/shotaro311/hover-pocket/pull/41) でmainへ統合済み（`48c1c03`）。ローカルmainとGitHub mainの一致を確認。GitHub CIは10件成功・8件予定どおりスキップ・失敗0件。
 - 公開Mac版とこのMacのインストール済み版は0.1.0（644）。公開ZIPとインストール済み105ファイルが一致し、署名・公証・Gatekeeperを確認済み。
-- main側の新アイコンとGitHub Codex Autofix廃止を保持する。既存worktreeの未コミット変更は今回の統合へ混ぜない。
+- main側の新アイコンとGitHub Codex Autofix廃止を保持。既存worktreeの未コミット変更は別途保持し、今回の統合へ混ぜていない。
 - 実マイク会話、他Mac、Windows実機の受入は別途必要。今回、新しいアプリ配信は行わない。
 - 詳細: [main統合の検証記録](2026-09/2026-09-29_hover-pocket-main-integration.md)。以下は各作業日時点の履歴で、現在の公開・統合状態はこの節を優先する。
 

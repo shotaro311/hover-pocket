@@ -1,0 +1,120 @@
+{
+  "pr": "https://github.com/shotaro311/hover-pocket/pull/41",
+  "tested_head": "bd34e8bd292b949fec841197fc2371977bfb2562",
+  "merge_commit": "48c1c037333931cb724de093dc97fd6a06d7b0cb",
+  "merge_tree_matches_tested_head": true,
+  "local_main_matches_remote_merge": true,
+  "original_untracked_files_preserved": 49,
+  "existing_progress_addition_lines": 34,
+  "macos_feed_sha256": "8895a8f8df93be5cdd62aa1e841e027a5472aa6ba21c8c5395137ca2a0696ebc",
+  "checks": [
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549803986/job/109345277380",
+      "name": "Compare reports across all operating systems",
+      "state": "SUCCESS",
+      "workflow": "Verify Pocket Contracts"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549804021/job/109345021071",
+      "name": "Read back macOS signature, notarization, and Gatekeeper",
+      "state": "SKIPPED",
+      "workflow": "Verify Published Release Readback"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549804021/job/109345021123",
+      "name": "Read back Windows package identity",
+      "state": "SKIPPED",
+      "workflow": "Verify Published Release Readback"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549804021/job/109345021067",
+      "name": "Read back timestamped Windows Authenticode",
+      "state": "SKIPPED",
+      "workflow": "Verify Published Release Readback"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549804021/job/109345020982",
+      "name": "Read back macOS and Windows public releases",
+      "state": "SKIPPED",
+      "workflow": "Verify Published Release Readback"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549804021/job/109345020231",
+      "name": "Pin one Windows release tag",
+      "state": "SKIPPED",
+      "workflow": "Verify Published Release Readback"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549803994/job/109345014334",
+      "name": "Windows install, update, rollback, and reinstall",
+      "state": "SKIPPED",
+      "workflow": "Verify Release Install and Rollback Transitions"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549803994/job/109345014701",
+      "name": "Signed Codex sandbox MSI install, upgrade, rollback, uninstall",
+      "state": "SKIPPED",
+      "workflow": "Verify Release Install and Rollback Transitions"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549803994/job/109345001546",
+      "name": "macOS package install and rollback transition",
+      "state": "SKIPPED",
+      "workflow": "Verify Release Install and Rollback Transitions"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549803986/job/109344920525",
+      "name": "macOS deterministic contract verifier",
+      "state": "SUCCESS",
+      "workflow": "Verify Pocket Contracts"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549803994/job/109344921442",
+      "name": "macOS transition script syntax",
+      "state": "SUCCESS",
+      "workflow": "Verify Release Install and Rollback Transitions"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549804011/job/109344921373",
+      "name": "verify",
+      "state": "SUCCESS",
+      "workflow": "Verify macOS Capabilities"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549803994/job/109344921808",
+      "name": "Windows transition script syntax",
+      "state": "SUCCESS",
+      "workflow": "Verify Release Install and Rollback Transitions"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549803986/job/109344920978",
+      "name": "Windows deterministic contract verifier",
+      "state": "SUCCESS",
+      "workflow": "Verify Pocket Contracts"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549803986/job/109344920914",
+      "name": "Ubuntu deterministic contract verifier",
+      "state": "SUCCESS",
+      "workflow": "Verify Pocket Contracts"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549803969/job/109344920623",
+      "name": "verify",
+      "state": "SUCCESS",
+      "workflow": "Verify Windows"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549804021/job/109344922072",
+      "name": "Deterministic release metadata verifier",
+      "state": "SUCCESS",
+      "workflow": "Verify Published Release Readback"
+    },
+    {
+      "link": "https://github.com/shotaro311/hover-pocket/actions/runs/36549804021/job/109344922407",
+      "name": "Windows Authenticode verifier syntax",
+      "state": "SUCCESS",
+      "workflow": "Verify Published Release Readback"
+    }
+  ]
+}
