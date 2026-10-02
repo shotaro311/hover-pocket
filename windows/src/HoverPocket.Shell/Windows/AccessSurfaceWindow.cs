@@ -14,8 +14,8 @@ internal sealed class AccessSurfaceWindow : NoActivateWindow
     public const double SurfaceWidth = ExpandedWidth;
     public const double SurfaceHeight = 9;
 
-    private static readonly WpfColor DefaultBackgroundColor = WpfColor.FromArgb(238, 13, 15, 20);
-    private static readonly WpfColor DefaultBorderColor = WpfColor.FromArgb(80, 255, 255, 255);
+    private static readonly WpfColor DefaultBackgroundColor = WpfColor.FromArgb(255, 4, 4, 6);
+    private static readonly WpfColor DefaultBorderColor = WpfColor.FromArgb(0, 255, 255, 255);
     private readonly Border _surface;
     private readonly Grid _handleIcon = new()
     {

@@ -425,3 +425,6 @@ input {
     animation: none;
   }
 }
+
+/* The native liquid surface owns the outline and its screen-edge connection. */
+.hp-panel { border: 0; border-radius: 0; box-shadow: none; }

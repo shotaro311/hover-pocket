@@ -96,6 +96,7 @@ async function renderNow(state, options = {}) {
   document.documentElement.style.setProperty("--hp-header-height", `${state.panel.headerHeight}px`);
   document.documentElement.style.setProperty("--hp-voice-height", `${state.panel.voiceLaneHeight ?? 0}px`);
   document.documentElement.dataset.textSize = state.settings.textSize;
+  document.documentElement.dataset.panelAttachment = state.settings.effectivePanelAttachmentStyle;
   document.documentElement.dataset.panelSize = state.settings.panelSize;
   setLanguage(state.settings.language);
 

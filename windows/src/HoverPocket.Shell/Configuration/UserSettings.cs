@@ -46,6 +46,12 @@ internal sealed class UserSettings
 
     public HandleIconStyle HandleIconStyle { get; set; } = HandleIconStyle.B;
 
+    public PanelAttachmentStyle PanelAttachmentStyle { get; set; } = PanelAttachmentStyle.PreserveMenu;
+
+    public bool AutomaticScreenEdgeAttachment { get; set; }
+
+    public bool ReduceMotion { get; set; }
+
     public bool ShowTopHandleSideArea { get; set; } = true;
 
     public bool DisableTopEdgeInFullscreen { get; set; } = true;
@@ -78,6 +84,9 @@ internal sealed class UserSettings
             PreferredProviderId = PreferredProviderId,
             LastSelectedProviderId = LastSelectedProviderId,
             HandleIconStyle = HandleIconStyle,
+            PanelAttachmentStyle = PanelAttachmentStyle,
+            AutomaticScreenEdgeAttachment = AutomaticScreenEdgeAttachment,
+            ReduceMotion = ReduceMotion,
             ShowTopHandleSideArea = ShowTopHandleSideArea,
             DisableTopEdgeInFullscreen = DisableTopEdgeInFullscreen,
             ProviderOrder = [.. ProviderOrder],

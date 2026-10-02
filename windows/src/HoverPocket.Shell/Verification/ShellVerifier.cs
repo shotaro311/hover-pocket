@@ -7,7 +7,7 @@ namespace HoverPocket.Shell.Verification;
 
 internal sealed class ShellVerifier
 {
-    private const int StressCycles = 25;
+    private const int StressCycles = 100;
     private readonly HoverShellController _controller;
     private readonly List<string> _failures = [];
 
@@ -33,16 +33,27 @@ internal sealed class ShellVerifier
         }
 
         VerifyWindow("panel", _controller.Panel.Hwnd);
+        VerifyConsole.WriteLine("shell stage: VerifySecondInstanceAsync");
         await VerifySecondInstanceAsync();
         await ResetPanelAfterSecondInstanceProbeAsync();
+        VerifyConsole.WriteLine("shell stage: VerifyPollingOnlyOpenAsync");
         await VerifyPollingOnlyOpenAsync();
+        VerifyConsole.WriteLine("shell stage: VerifyAccessSurfaceHealthRecoveryAsync");
         await VerifyAccessSurfaceHealthRecoveryAsync();
+        VerifyConsole.WriteLine("shell stage: VerifyPanelHealthRecoveryAsync");
         await VerifyPanelHealthRecoveryAsync();
+        VerifyConsole.WriteLine("shell stage: VerifyUnrecoverableWindowRecreationAsync");
         await VerifyUnrecoverableWindowRecreationAsync();
+        VerifyConsole.WriteLine("shell stage: VerifyStagedRecoverySchedulerAsync");
         await VerifyStagedRecoverySchedulerAsync();
+        VerifyConsole.WriteLine("shell stage: VerifyPanelPositionStableWhilePointerMovesAsync");
         await VerifyPanelPositionStableWhilePointerMovesAsync();
+        VerifyConsole.WriteLine("shell stage: VerifyPointerOutsideClosesPanelAsync");
         await VerifyPointerOutsideClosesPanelAsync();
-        await VerifyPanelClosesWithoutVisibleCollapseAsync();
+        VerifyConsole.WriteLine("shell stage: VerifyLiquidCloseAsync");
+        await VerifyLiquidCloseAsync();
+
+        await new LiquidMotionVerifier(_controller).RunAsync();
 
         for (var cycle = 0; cycle < StressCycles; cycle++)
         {
@@ -64,7 +75,7 @@ internal sealed class ShellVerifier
         {
             VerifyConsole.WriteLine(
                 $"PASS shell verify: windows={afterWindowCount}, cycles={StressCycles}, stable_position=true, outside_close=true, "
-                + "instant_close=true, polling_open=true, health_repair=true, window_recreate=true, staged_recovery=true, "
+                + "liquid_close=true, polling_open=true, health_repair=true, window_recreate=true, staged_recovery=true, "
                 + $"animation_frames={_controller.Panel.LastAnimationDiagnostics.FrameCount}, "
                 + $"animation_max_gap_ms={_controller.Panel.LastAnimationDiagnostics.MaxFrameGap.TotalMilliseconds:0.0}");
             return 0;
@@ -87,9 +98,9 @@ internal sealed class ShellVerifier
         }
 
         var diagnostics = _controller.Panel.LastAnimationDiagnostics;
-        if (!diagnostics.Direction.Equals("Open", StringComparison.Ordinal))
+        if (!diagnostics.Direction.Equals("Close", StringComparison.Ordinal))
         {
-            _failures.Add($"animation: expected latest animated transition to be Open, got {diagnostics.Direction}");
+            _failures.Add($"animation: expected latest animated transition to be Close, got {diagnostics.Direction}");
         }
 
         if (diagnostics.FrameCount < 6)
@@ -465,22 +476,20 @@ internal sealed class ShellVerifier
         }
     }
 
-    private async Task VerifyPanelClosesWithoutVisibleCollapseAsync()
+    private async Task VerifyLiquidCloseAsync()
     {
         await _controller.ShowPanelForVerifyAsync();
         await WaitForPanelPlacementAsync(_controller.ActiveLayoutForVerify);
 
         var closeTask = _controller.HidePanelForVerifyAsync();
-        if (_controller.Panel.IsVisible)
-        {
-            _failures.Add("instant close: panel remained visible after the close request started");
-        }
+        if (System.Windows.SystemParameters.ClientAreaAnimation && !_controller.Panel.IsAnimating)
+            _failures.Add("liquid close: close did not start the spring transition");
 
         await closeTask;
         if (_controller.Panel.IsVisible || _controller.Panel.IsAnimating)
         {
             _failures.Add(
-                "instant close: panel retained a visible or animated intermediate state; "
+                "liquid close: panel retained a visible or animated intermediate state; "
                 + $"visible={_controller.Panel.IsVisible}, animating={_controller.Panel.IsAnimating}");
         }
     }
@@ -510,7 +519,7 @@ internal sealed class ShellVerifier
         {
             UseShellExecute = false,
             CreateNoWindow = true,
-            ArgumentList = { "--second-instance-probe" }
+            ArgumentList = { "--verify", "shell", "--second-instance-probe" }
         });
 
         if (process is null)

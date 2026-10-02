@@ -75,6 +75,27 @@ internal sealed class SettingsVerifier
         using var panelAttachment = controller.Attach(panelDispatcher, BridgeSurface.Panel);
 
         VerifyDefaults(store, registry, startup);
+        var legacyStore = UserSettingsStore.CreateTemporary("LiquidLegacySettings");
+        Directory.CreateDirectory(Path.GetDirectoryName(legacyStore.SettingsPath)!);
+        File.WriteAllText(legacyStore.SettingsPath, """{"language":"english","panelSize":"extraLarge","textSize":"large"}""");
+        var legacy = legacyStore.Load(registry.ProviderIds);
+        if (legacy.Language != AppLanguage.English || legacy.PanelSize != PanelSize.ExtraLarge
+            || legacy.TextSize != PanelTextSize.Large || legacy.PanelAttachmentStyle != PanelAttachmentStyle.PreserveMenu
+            || legacy.AutomaticScreenEdgeAttachment || legacy.ReduceMotion)
+            _failures.Add("legacy settings lost existing choices or gained automatic attachment/motion overrides");
+        await Send(dispatcher, """{"id":"liquid0","method":"settings.setPanelAttachment","params":{"style":"preserveMenu","automatic":true,"reduceMotion":true}}""");
+        var attachmentReadback = store.ReloadOrDefault(registry.ProviderIds);
+        if (attachmentReadback.PanelAttachmentStyle != PanelAttachmentStyle.PreserveMenu
+            || !attachmentReadback.AutomaticScreenEdgeAttachment || !attachmentReadback.ReduceMotion
+            || PanelAttachment.Resolve(attachmentReadback) != PanelAttachmentStyle.CoverMenu
+            || PanelAttachment.Resolve(attachmentReadback, hasNotch: true) != PanelAttachmentStyle.PreserveMenu)
+            _failures.Add("liquid attachment settings did not preserve manual selection or resolve per screen");
+        await Send(dispatcher, """{"id":"liquid1","method":"settings.setPanelAttachment","params":{"automatic":false,"reduceMotion":false}}""");
+        var manualReadback = store.ReloadOrDefault(registry.ProviderIds);
+        if (PanelAttachment.Resolve(manualReadback) != PanelAttachmentStyle.PreserveMenu)
+            _failures.Add("automatic attachment disabled did not restore manual selection");
+        await Send(dispatcher, """{"id":"liquid2","method":"settings.resetDefaults"}""");
+
         VerifyWebViewSecurityPolicy();
         await VerifyCodexSandboxFailClosedAsync(registry);
         VerifyVoiceAvailabilityWireValues();
@@ -1128,6 +1149,9 @@ internal sealed class SettingsVerifier
             || defaults.PreferredProviderId != "controls"
             || defaults.HandleIconStyle != HandleIconStyle.B
             || !defaults.ShowTopHandleSideArea
+            || defaults.PanelAttachmentStyle != PanelAttachmentStyle.PreserveMenu
+            || defaults.AutomaticScreenEdgeAttachment
+            || defaults.ReduceMotion
             || !defaults.DisableTopEdgeInFullscreen)
         {
             _failures.Add("defaults were not restored");

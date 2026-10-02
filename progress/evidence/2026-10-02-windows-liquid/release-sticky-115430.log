@@ -1,0 +1,2 @@
+PASS sticky verify: CRUD, reorder, archive/drop/delete undo, blank discard, persistence, corrupt JSON recovery
+sticky_root=C:\Users\shotaro\AppData\Local\Temp\HoverPocket\StickyVerify\2ca87c21a07346f88c21da83a3cafb24

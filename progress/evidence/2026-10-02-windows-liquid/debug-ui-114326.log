@@ -1,0 +1,4 @@
+UI verify: WebView2 host + bridge + provider registry + settings
+PASS liquid geometry: shapes=1616, refresh_rate=60/120, top_gap=0, closed_protrusions=0
+FAIL ui verify:
+- InvalidOperationException: Liquid: native region includes outside bottom corner

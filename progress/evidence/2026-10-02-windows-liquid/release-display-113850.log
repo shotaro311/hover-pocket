@@ -1,0 +1,2 @@
+PASS display verify: monitors=1, current_surfaces=1
+- monitor-0-10001: primary=True, bounds=0,0 5120x2160, dpi=144x144

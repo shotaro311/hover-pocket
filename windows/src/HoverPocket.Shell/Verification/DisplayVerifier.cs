@@ -3,6 +3,7 @@ using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Display;
 using HoverPocket.Shell.Interop;
 using HoverPocket.Shell.Windows;
+using HoverPocket.Shell.Voice;
 
 namespace HoverPocket.Shell.Verification;
 
@@ -36,6 +37,7 @@ internal sealed class DisplayVerifier
         VerifyPlacement(monitors, DisplayPlacement.Sub);
         VerifyPlacement(monitors, DisplayPlacement.All);
         VerifyControllerWindows();
+        VerifySyntheticDpiLayouts();
 
         if (_failures.Count == 0)
         {
@@ -75,6 +77,30 @@ internal sealed class DisplayVerifier
         {
             _failures.Add($"{monitor.Id}: invalid scale {monitor.ScaleX:0.###}x{monitor.ScaleY:0.###}");
         }
+    }
+
+    private void VerifySyntheticDpiLayouts()
+    {
+        foreach (var dpi in new uint[] { 96, 120, 144, 192 })
+        foreach (var left in new[] { 0, -2560 })
+        foreach (var size in Enum.GetValues<PanelSize>())
+        {
+            var monitor = new DisplayMonitor($"synthetic-{dpi}-{left}", "Synthetic", IntPtr.Zero,
+                new PhysicalRect(left, -1440, 2560, 1440), new PhysicalRect(left, -1440, 2560, 1400), left == 0, dpi, dpi);
+            var layout = _displayLayoutService.CreateLayout(monitor, size);
+            VerifyLayout(DisplayPlacement.All, layout);
+            if (layout.PanelTarget.PhysicalRect.Top != monitor.Bounds.Top)
+                _failures.Add($"{monitor.Id}: liquid panel detached from screen top");
+            foreach (var mode in new[] { VoiceLaneMode.Compact, VoiceLaneMode.Expanded })
+            {
+                var voice = VoicePanelGeometry.ExtendDownward(layout.PanelTarget, monitor, size, mode, out _);
+                VerifyContained(monitor.Id, $"voice-{mode}", monitor.Bounds, voice.PhysicalRect);
+                VerifyRoundTrip(monitor.Id, $"voice-{mode}", monitor, voice);
+                if (voice.PhysicalRect.Top != monitor.Bounds.Top)
+                    _failures.Add($"{monitor.Id}: Voice panel detached from screen top");
+            }
+        }
+        VerifyConsole.WriteLine("display synthetic geometry: sizes=4, dpi=96/120/144/192, negative_origins=true");
     }
 
     private void VerifyPlacement(IReadOnlyList<DisplayMonitor> monitors, DisplayPlacement placement)

@@ -374,6 +374,7 @@ internal sealed class PanelBridgeController : IDisposable
         Register("settings.setPreferredProvider", SetPreferredProviderAsync);
         Register("settings.setHandleIcon", SetHandleIconAsync);
         Register("settings.setShowTopHandleSideArea", SetShowTopHandleSideAreaAsync);
+        Register("settings.setPanelAttachment", SetPanelAttachmentAsync);
         Register("settings.setDisableTopEdgeInFullscreen", SetDisableTopEdgeInFullscreenAsync);
         Register("settings.setStartWithWindows", SetStartWithWindowsAsync);
         Register("settings.setAutoCheckForUpdates", SetAutoCheckForUpdatesAsync);
@@ -593,6 +594,10 @@ internal sealed class PanelBridgeController : IDisposable
                 lastSelectedProviderId = CurrentSettings.LastSelectedProviderId,
                 handleIcon = ToWireValue(CurrentSettings.HandleIconStyle),
                 showTopHandleSideArea = CurrentSettings.ShowTopHandleSideArea,
+                panelAttachmentStyle = PanelAttachment.WireValue(CurrentSettings.PanelAttachmentStyle),
+                effectivePanelAttachmentStyle = PanelAttachment.WireValue(PanelAttachment.Resolve(CurrentSettings)),
+                automaticScreenEdgeAttachment = CurrentSettings.AutomaticScreenEdgeAttachment,
+                reduceMotion = CurrentSettings.ReduceMotion,
                 disableTopEdgeInFullscreen = CurrentSettings.DisableTopEdgeInFullscreen,
                 providerOrder = EffectiveProviderOrder(),
                 providerVisibility = CurrentSettings.ProviderVisibility
@@ -1129,6 +1134,27 @@ internal sealed class PanelBridgeController : IDisposable
             SaveSettings(updated);
         }
 
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetPanelAttachmentAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var updated = CurrentSettings.Clone();
+        if (parameters is { } p)
+        {
+            if (p.TryGetProperty("style", out var style))
+            {
+                updated.PanelAttachmentStyle = style.GetString() switch
+                {
+                    "preserveMenu" => PanelAttachmentStyle.PreserveMenu,
+                    "coverMenu" => PanelAttachmentStyle.CoverMenu,
+                    _ => throw new ArgumentException("Unknown panel attachment style.")
+                };
+            }
+            if (p.TryGetProperty("automatic", out var automatic)) updated.AutomaticScreenEdgeAttachment = automatic.GetBoolean();
+            if (p.TryGetProperty("reduceMotion", out var reduce)) updated.ReduceMotion = reduce.GetBoolean();
+        }
+        SaveSettings(updated);
         return await PublishStateAsync(cancellationToken);
     }
 

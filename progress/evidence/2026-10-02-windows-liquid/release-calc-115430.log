@@ -1,0 +1,1 @@
+PASS calc verify: arithmetic, precedence, JIS keyboard tokens, expression display, history value input, restore, clear, error, recovery, backspace, AC

@@ -1,0 +1,7 @@
+SETTINGS_CASE_BEGIN surface-isolation
+SETTINGS_CASE_PASS surface-isolation
+SETTINGS_CASE_BEGIN generated-provider-lifecycle
+SETTINGS_CASE_PASS generated-provider-lifecycle
+SETTINGS_CASE_BEGIN ai-native-disable-flush
+SETTINGS_CASE_PASS ai-native-disable-flush
+PASS settings verify: settings read/write, defaults, HKCU Run dry-run registration, update auto-check

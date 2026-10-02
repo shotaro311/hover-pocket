@@ -2,13 +2,15 @@
 project_slug: hover-pocket
 target: Windows version requirements
 created: 2026-07-05
-updated: 2026-09-10
+updated: 2026-10-02
 updated_by: codex
 status: draft-integrated
 source_app_release: v0.1.0-98
 ---
 
 # HoverPocket Windows 版 要件定義
+
+2026-10-02追補: 開閉・途中反転・上端との接続・手動/自動設定は[Windows液体アニメーションの要件と契約](windows-liquid-motion-20261002.md)に従う。
 
 ## 0. 結論
 

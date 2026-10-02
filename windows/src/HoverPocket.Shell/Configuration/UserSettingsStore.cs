@@ -178,6 +178,7 @@ internal sealed class UserSettingsStore
             settings.WeatherLocation = Providers.Weather.WeatherLocation.Default;
         if (settings.WeatherTemperatureUnit is not ("automatic" or "celsius" or "fahrenheit"))
             settings.WeatherTemperatureUnit = "automatic";
+        if (!Enum.IsDefined(settings.PanelAttachmentStyle)) settings.PanelAttachmentStyle = PanelAttachmentStyle.PreserveMenu;
         var known = providerIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var order = settings.ProviderOrder
             .Where(id => known.Contains(id))

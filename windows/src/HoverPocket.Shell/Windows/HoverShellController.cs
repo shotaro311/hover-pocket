@@ -386,7 +386,8 @@ internal sealed class HoverShellController : IDisposable
         TraceHover("close", GetPointerPosition(), false, _activeLayout, "panel-close");
         _panelExpectedVisible = false;
         await _panel.CloseAsync(_activeLayout);
-        await _panelBridgeController.NotifyPanelClosedAsync();
+        if (!_panelExpectedVisible && !_panel.IsOpening)
+            await _panelBridgeController.NotifyPanelClosedAsync();
     }
 
     private async Task OpenSettingsAsync()
@@ -431,7 +432,7 @@ internal sealed class HoverShellController : IDisposable
         {
             _closeDelayTimer.Stop();
             TraceHover("poll", pointer, true, hoveredLayout, _panel.IsVisible ? "keep-open" : "open");
-            if (!_panel.IsVisible)
+            if (!_panel.IsVisible || _closingTask is { IsCompleted: false })
             {
                 _ = ShowPanelAsync(hoveredLayout ?? ResolveLayoutForPointer(pointer));
             }
@@ -462,7 +463,7 @@ internal sealed class HoverShellController : IDisposable
 
             hoveredLayout = activeLayout;
             return IsInsideInflatedPlacement(activeLayout.AccessSurface, activeLayout.Monitor, pointer)
-                || IsInsideInflatedPlacement(EffectivePanelTarget(activeLayout), activeLayout.Monitor, pointer);
+                || _panel.ContainsPhysicalPoint(pointer.X, pointer.Y, HoverToleranceDips);
         }
 
         foreach (var layout in _surfaceLayouts.Values)
@@ -566,7 +567,7 @@ internal sealed class HoverShellController : IDisposable
             }
             else
             {
-                _panel.ApplyPlacement(EffectivePanelTarget(_activeLayout), show: true);
+                _ = _panel.OpenAsync(_activeLayout, EffectivePanelTarget(_activeLayout));
             }
         }
     }
@@ -734,7 +735,7 @@ internal sealed class HoverShellController : IDisposable
                 RepairStyles(_panel.Hwnd, requireNoActivate: !_panel.KeyboardInteractionEnabled);
                 if (_panelExpectedVisible)
                 {
-                    _panel.ApplyPlacement(expectedPlacement, show: true);
+                    await _panel.OpenAsync(panelLayout, expectedPlacement);
                     _panel.Opacity = 1;
                     _panel.ShowNoActivate();
                 }
@@ -797,7 +798,7 @@ internal sealed class HoverShellController : IDisposable
                 return;
             }
 
-            replacement.ApplyPlacement(EffectivePanelTarget(layout), show: true);
+            await replacement.OpenAsync(layout, EffectivePanelTarget(layout));
             replacement.Opacity = 1;
             replacement.ShowNoActivate();
         }
@@ -862,7 +863,10 @@ internal sealed class HoverShellController : IDisposable
 
         if (_panel.IsVisible)
         {
+            if (sender is AccessSurfaceWindow entered && _surfaceLayouts.TryGetValue(entered, out var enteredLayout)
+                && enteredLayout.Monitor.Id != _activeLayout?.Monitor.Id) return;
             _closeDelayTimer.Stop();
+            if (_closingTask is { IsCompleted: false }) _ = ShowPanelAsync(_activeLayout);
             TraceHover("surface-enter", GetPointerPosition(), true, _activeLayout, "panel-already-visible");
             return;
         }
@@ -1178,7 +1182,10 @@ internal sealed class HoverShellController : IDisposable
             return;
         }
 
-        var panelSizeChanged = _lastAppliedSettings.PanelSize != settings.PanelSize;
+        var panelSizeChanged = _lastAppliedSettings.PanelSize != settings.PanelSize
+            || _lastAppliedSettings.PanelAttachmentStyle != settings.PanelAttachmentStyle
+            || _lastAppliedSettings.AutomaticScreenEdgeAttachment != settings.AutomaticScreenEdgeAttachment
+            || _lastAppliedSettings.ReduceMotion != settings.ReduceMotion;
         var voiceGeometryChanged = _lastAppliedSettings.VoiceEnabled != settings.VoiceEnabled
             || _lastAppliedSettings.VoiceLaneLayout != settings.VoiceLaneLayout;
         var placementChanged = _lastAppliedSettings.DisplayPlacement != settings.DisplayPlacement;

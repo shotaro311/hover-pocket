@@ -1,6 +1,7 @@
 using System.Text.Json;
 using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Windows;
+using HoverPocket.Shell.Settings;
 
 namespace HoverPocket.Shell.Verification;
 
@@ -20,6 +21,8 @@ internal sealed class UiVerifier
 
         try
         {
+            var entry = _controller.Layouts[0].AccessSurface.PhysicalRect;
+            _controller.SetPointerSimulationForVerify(entry.Left + entry.Width / 2, entry.Top + 1);
             await _controller.ShowPanelForUiVerifyAsync();
             var ready = await _controller.Panel.WaitForUiReadyAsync(TimeSpan.FromSeconds(8));
             if (!ready)
@@ -273,8 +276,12 @@ internal sealed class UiVerifier
 
             if (ready)
             {
+                await new LiquidMotionVerifier(_controller).RunAsync();
+                var monitor = _controller.Layouts[0].Monitor.Bounds;
+                _controller.SetPointerSimulationForVerify(monitor.Left + 10, monitor.Bottom - 10);
                 await VerifyHiddenPanelTimerAsync(withSecondaryView: true);
                 await VerifyHiddenPanelTimerAsync(withSecondaryView: false);
+                await VerifyLiquidSettingsSurfaceAsync();
             }
 
             if (_controller.Panel.ProcessFailures.Count > 0)
@@ -287,6 +294,7 @@ internal sealed class UiVerifier
             _failures.Add(ex.GetType().Name + ": " + ex.Message);
         }
 
+        _controller.ClearPointerSimulationForVerify();
         if (_failures.Count == 0)
         {
             VerifyConsole.WriteLine(
@@ -301,6 +309,62 @@ internal sealed class UiVerifier
         }
 
         return 1;
+    }
+
+    private async Task VerifyLiquidSettingsSurfaceAsync()
+    {
+        var dataRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "HoverPocket", "LiquidSettings", Guid.NewGuid().ToString("N"));
+        var settings = new SettingsWindow(_controller.PanelBridgeController, false, dataRoot, externalIntegrationsEnabled: false);
+        try
+        {
+            settings.Show();
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (settings.WebViewForVerify?.CoreWebView2 is not null
+                    && await settings.WebViewForVerify.ExecuteScriptAsync("document.querySelectorAll('[data-panel-attachment] button').length === 2") == "true") break;
+                await Task.Delay(50);
+            }
+            var web = settings.WebViewForVerify ?? throw new InvalidOperationException("settings UI failed to initialize");
+            await web.ExecuteScriptAsync("""
+                window.__liquidSettingsResult = null;
+                import('/js/bridge.js').then(async ({request}) => {
+                    const wait = async (predicate) => {
+                        for (let i = 0; i < 100; i++) {
+                            const state = await request('app.getState');
+                            if (predicate(state.settings)) return;
+                            await new Promise(resolve => setTimeout(resolve, 20));
+                        }
+                        throw new Error('settings surface readback timed out');
+                    };
+                    document.querySelectorAll('[data-panel-attachment] button')[1].click();
+                    await wait(s => s.panelAttachmentStyle === 'coverMenu');
+                    const auto = document.querySelector('[data-automatic-attachment]');
+                    auto.checked = true; auto.dispatchEvent(new Event('change'));
+                    await wait(s => s.automaticScreenEdgeAttachment === true);
+                    document.querySelectorAll('[data-panel-attachment] button')[0].click();
+                    await wait(s => s.panelAttachmentStyle === 'preserveMenu' && s.effectivePanelAttachmentStyle === 'coverMenu');
+                    auto.checked = false; auto.dispatchEvent(new Event('change'));
+                    await wait(s => !s.automaticScreenEdgeAttachment && s.effectivePanelAttachmentStyle === 'preserveMenu');
+                    const reduced = document.querySelector('[data-reduce-motion]');
+                    reduced.checked = true; reduced.dispatchEvent(new Event('change'));
+                    await wait(s => s.reduceMotion === true);
+                    reduced.checked = false; reduced.dispatchEvent(new Event('change'));
+                    await wait(s => s.reduceMotion === false);
+                    window.__liquidSettingsResult = true;
+                }).catch(error => { window.__liquidSettingsResult = String(error); });
+                """);
+            deadline = DateTime.UtcNow.AddSeconds(10);
+            while (DateTime.UtcNow < deadline)
+            {
+                var result = await web.ExecuteScriptAsync("window.__liquidSettingsResult");
+                if (result == "true") { VerifyConsole.WriteLine("PASS liquid Settings WebView2: manual buttons, automatic/manual preservation, Reduce Motion controls, bridge readback"); return; }
+                if (result != "null") throw new InvalidOperationException("settings surface: " + result);
+                await Task.Delay(50);
+            }
+            throw new TimeoutException("liquid settings surface verification");
+        }
+        finally { settings.Close(); }
     }
 
     private async Task VerifyHiddenPanelTimerAsync(bool withSecondaryView)

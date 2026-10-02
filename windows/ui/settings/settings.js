@@ -5,6 +5,9 @@ import { createWeatherSettings } from "./weather-settings.js";
 
 const languageEl = document.querySelector("[data-language]");
 const displayPlacementEl = document.querySelector("[data-display-placement]");
+const attachmentEl = document.querySelector("[data-panel-attachment]");
+const automaticAttachmentEl = document.querySelector("[data-automatic-attachment]");
+const reduceMotionEl = document.querySelector("[data-reduce-motion]");
 const panelSizeEl = document.querySelector("[data-panel-size]");
 const textSizeEl = document.querySelector("[data-text-size]");
 const switchingEl = document.querySelector("[data-switching]");
@@ -180,6 +183,16 @@ function render(state) {
     { id: "c", label: "C" },
     { id: "none", label: t("none") },
   ], state.settings.handleIcon, (handleIcon) => update("settings.setHandleIcon", { handleIcon }));
+  const attachmentEnglish = state.settings.language === "en";
+  document.querySelector("[data-attachment-heading]").textContent = attachmentEnglish ? "Screen edge attachment" : "上端とのつながり";
+  document.querySelector("[data-automatic-attachment-label]").textContent = attachmentEnglish ? "Automatically cover the top on screens without a notch" : "ノッチがない画面では自動で上端まで覆う";
+  document.querySelector("[data-reduce-motion-label]").textContent = attachmentEnglish ? "Reduce motion" : "動きを減らす";
+  renderSegment(attachmentEl, [
+    { id: "preserveMenu", label: attachmentEnglish ? "Keep narrow entry" : "細い入口を残す" },
+    { id: "coverMenu", label: attachmentEnglish ? "Cover screen edge" : "上端まで覆う" },
+  ], state.settings.panelAttachmentStyle, (style) => update("settings.setPanelAttachment", { style }));
+  automaticAttachmentEl.checked = Boolean(state.settings.automaticScreenEdgeAttachment);
+  reduceMotionEl.checked = Boolean(state.settings.reduceMotion);
   handleSideAreaEl.checked = state.settings.showTopHandleSideArea !== false;
   disableFullscreenEl.checked = state.settings.disableTopEdgeInFullscreen !== false;
   clipboardPrivateEl.checked = Boolean(state.settings.clipboardPrivateMode);
@@ -815,3 +828,6 @@ async function update(method, params = undefined) {
     render(currentState);
   }
 }
+
+automaticAttachmentEl.addEventListener("change", () => update("settings.setPanelAttachment", { automatic: automaticAttachmentEl.checked }));
+reduceMotionEl.addEventListener("change", () => update("settings.setPanelAttachment", { reduceMotion: reduceMotionEl.checked }));

@@ -1,0 +1,14 @@
+UI verify: WebView2 host + bridge + provider registry + settings
+PASS liquid geometry: shapes=1616, refresh_rate=60/120, top_gap=0, closed_protrusions=0
+PASS liquid native: size=small, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=small, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+liquid observation: size=medium, mode=preserveMenu, hwnd=1641490
+PASS liquid native: size=medium, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+liquid observation: size=medium, mode=coverMenu, hwnd=1641490
+PASS liquid native: size=medium, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=large, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=large, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=extraLarge, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=extraLarge, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: reentry_reversals=30, automatic_manual_preserved=true, reduce_motion=true
+PASS ui verify: background bridge delivery, hidden-panel timer alert/reopen, stable Controls refresh, source activation and rate actions, responsive Timer cards/input/stopwatch, media fallback, tabbed centered Clipboard split/full preview/trash actions, Calculator history sidebar, declarative PocketSurface renderer with host-owned approval, draggable stable icons, text scaling/input activation, stable Mac-style calendar editor, bridge/provider/settings round-trip

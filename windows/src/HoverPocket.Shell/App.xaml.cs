@@ -325,7 +325,12 @@ public partial class App : System.Windows.Application
         }
 
         var verifier = new ShellVerifier(_shellController);
-        Environment.ExitCode = await verifier.RunAsync();
+        try { Environment.ExitCode = await verifier.RunAsync(); }
+        catch (Exception exception)
+        {
+            VerifyConsole.WriteLine($"FAIL shell: {exception}");
+            Environment.ExitCode = 1;
+        }
         Shutdown();
     }
 

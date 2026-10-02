@@ -1,0 +1,1 @@
+PASS clipboard verify: CRUD/explicit delete, limits, favorites, legacy defaults, PNG normalization, dedup, persistence, corrupt fallback, private mode

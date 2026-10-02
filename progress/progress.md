@@ -1,9 +1,16 @@
 ---
 project_slug: hover-menu-preview
-updated: 2026-09-29
+updated: 2026-10-02
 updated_by: codex
 status: macos-644-main-integrated; published-macos-644; physical-voice-e2e-pending
 ---
+
+## 2026-10-02 Windows液体アニメーションをローカル実装
+
+- Mac開発版661の輪郭とばねをWPFへ移植。2モード、手動選択を保持する自動切替、Reduce Motionを追加し、描画・WebView2の切り抜き・Windowsのヒット判定を共通化。
+- WindowsネイティブDebug/Releaseが警告0・エラー0。実パネル4サイズ×2モード、上端の隙間0、300回の保持判定、30回の再進入、100回開閉、設定WebView2操作・保存復元、既存関連14検査が通過。
+- 実接続は5120×2160・150%・1画面。100/125/150/200%と負の画面座標、Voice高さは座標検査で確認。実ノッチ、複数画面の実接続、実音声会話は未確認。
+- 既存dirty checkoutとstabilization worktreeを保護してDownloads内の独立cloneで作業。開発版0.2.9-local.3。公開・インストール置換は未実施。[実装・検証・起動記録](2026-10/2026-10-02_hover-pocket-windows-liquid.md)。
 
 ## 2026-09-22 Windows版の644相当対応を開始
 

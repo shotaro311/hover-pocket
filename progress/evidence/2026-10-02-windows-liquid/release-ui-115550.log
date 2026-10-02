@@ -1,0 +1,23 @@
+UI verify: WebView2 host + bridge + provider registry + settings
+PASS liquid geometry: shapes=1616, refresh_rate=60/120, top_gap=0, closed_protrusions=0
+native screen capture: native-small-preserveMenu.png, 780x572
+PASS liquid native: size=small, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+native screen capture: native-small-coverMenu.png, 780x572
+PASS liquid native: size=small, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+native screen capture: native-medium-preserveMenu.png, 900x659
+liquid idle CPU: mode=preserveMenu, main_one_core_percent=0.52, browser_one_core_percent=0.52, seconds=3.0, spring_loop=false; renderer/GPU excluded
+PASS liquid native: size=medium, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+native screen capture: native-medium-coverMenu.png, 900x659
+liquid idle CPU: mode=coverMenu, main_one_core_percent=1.56, browser_one_core_percent=0.00, seconds=3.0, spring_loop=false; renderer/GPU excluded
+PASS liquid native: size=medium, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+native screen capture: native-large-preserveMenu.png, 1020x746
+PASS liquid native: size=large, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+native screen capture: native-large-coverMenu.png, 1020x746
+PASS liquid native: size=large, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+native screen capture: native-extraLarge-preserveMenu.png, 1170x854
+PASS liquid native: size=extraLarge, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+native screen capture: native-extraLarge-coverMenu.png, 1170x854
+PASS liquid native: size=extraLarge, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: reentry_reversals=30, automatic_manual_preserved=true, reduce_motion=true
+PASS liquid Settings WebView2: manual buttons, automatic/manual preservation, Reduce Motion controls, bridge readback
+PASS ui verify: background bridge delivery, hidden-panel timer alert/reopen, stable Controls refresh, source activation and rate actions, responsive Timer cards/input/stopwatch, media fallback, tabbed centered Clipboard split/full preview/trash actions, Calculator history sidebar, declarative PocketSurface renderer with host-owned approval, draggable stable icons, text scaling/input activation, stable Mac-style calendar editor, bridge/provider/settings round-trip

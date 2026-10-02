@@ -1,0 +1,1 @@
+PASS weather verify: 18 checks (forecast, search, cache, offline, cancellation, schema, XL)

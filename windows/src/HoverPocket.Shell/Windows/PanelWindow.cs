@@ -4,7 +4,6 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using HoverPocket.Shell.Bridge;
 using HoverPocket.Shell.Configuration;
 using HoverPocket.Shell.Display;
@@ -20,8 +19,6 @@ internal sealed class PanelWindow : NoActivateWindow
 {
     public const double CollapsedWidth = AccessSurfaceWindow.SurfaceWidth;
     public const double CollapsedHeight = AccessSurfaceWindow.SurfaceHeight;
-    public static readonly TimeSpan AnimationDuration = TimeSpan.FromMilliseconds(220);
-    public static readonly TimeSpan ResizeAnimationDuration = TimeSpan.FromMilliseconds(180);
     private const string UiHostName = "app.hoverpocket.local";
     private const string UiBaseUrl = "https://app.hoverpocket.local/index.html";
     private const double CornerRadiusDips = 18;
@@ -34,21 +31,15 @@ internal sealed class PanelWindow : NoActivateWindow
     private readonly bool _externalIntegrationsEnabled;
     private readonly string _webViewDataDirectory;
     private readonly Grid _root = new();
-    private readonly Border _fallbackVisual;
-    private readonly System.Windows.Controls.Image _morphImage = new()
+    private readonly Grid _contentHost = new()
     {
-        Stretch = Stretch.Fill,
-        Visibility = Visibility.Collapsed,
-        IsHitTestVisible = false
+        HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+        VerticalAlignment = System.Windows.VerticalAlignment.Top
     };
+    private readonly Border _fallbackVisual;
     private readonly List<string> _processFailures = [];
-    private readonly SemaphoreSlim _snapshotCaptureGate = new(1, 1);
-    private int _animationGeneration;
-    private int _snapshotRefreshGeneration;
     private bool _isAnimating;
-    private bool _morphActive;
-    private BitmapSource? _lastSnapshot;
-    private WebView2? _webView;
+    private WebView2CompositionControl? _webView;
     private Task? _initializationTask;
     private IDisposable? _bridgeAttachment;
     private long _microphoneGestureExpiresAt;
@@ -70,16 +61,19 @@ internal sealed class PanelWindow : NoActivateWindow
         _enableDevTools = enableDevTools;
         _externalIntegrationsEnabled = externalIntegrationsEnabled;
         _webViewDataDirectory = webViewDataDirectory;
+        Title = "HoverPocket";
 
         var metrics = PanelSizeCatalog.Get(_bridgeController.CurrentSettings.PanelSize);
         Width = metrics.Width;
         Height = metrics.TotalHeight
             + VoicePanelGeometry.Height(_bridgeController.CurrentSettings.PanelSize, _bridgeController.ResolvedVoiceLaneMode);
-        MinWidth = PanelSizeCatalog.Get(PanelSize.Small).Width;
-        MinHeight = PanelSizeCatalog.Get(PanelSize.Small).TotalHeight;
+        _contentHost.Width = Width;
+        _contentHost.Height = Height;
+        MinWidth = 1;
+        MinHeight = 1;
         MaxWidth = PanelSizeCatalog.Get(PanelSize.ExtraLarge).Width;
         MaxHeight = PanelSizeCatalog.Get(PanelSize.ExtraLarge).TotalHeight
-            + VoicePanelGeometry.ExpandedHeight(PanelSize.ExtraLarge);
+            + VoicePanelGeometry.ExpandedHeight(PanelSize.ExtraLarge) + AccessSurfaceWindow.SurfaceHeight;
         Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(4, 4, 6));
 
         _fallbackVisual = new Border
@@ -100,8 +94,7 @@ internal sealed class PanelWindow : NoActivateWindow
             }
         };
         _root.Children.Add(_fallbackVisual);
-        _root.Children.Add(_morphImage);
-        System.Windows.Controls.Panel.SetZIndex(_morphImage, 2);
+        _root.Children.Add(_contentHost);
         Content = _root;
 
         SizeChanged += (_, _) =>
@@ -121,7 +114,7 @@ internal sealed class PanelWindow : NoActivateWindow
 
     protected override bool ActivatesOnMouseInteraction => true;
 
-    public WebView2? WebView => _webView;
+    public WebView2CompositionControl? WebView => _webView;
 
     public void ReleaseBridgeAttachment()
     {
@@ -133,12 +126,6 @@ internal sealed class PanelWindow : NoActivateWindow
     {
         MinWidth = 1;
         MinHeight = 1;
-    }
-
-    public void RestorePanelMinimums()
-    {
-        MinWidth = PanelSizeCatalog.Get(PanelSize.Small).Width;
-        MinHeight = PanelSizeCatalog.Get(PanelSize.Small).TotalHeight;
     }
 
     public async Task EnsureWebViewInitializedAsync()
@@ -367,364 +354,187 @@ internal sealed class PanelWindow : NoActivateWindow
         throw new TimeoutException($"UI verification timed out at step: {step ?? "unknown"}");
     }
 
-    public void ApplyPanelSize(PanelSize panelSize)
-    {
-        var metrics = PanelSizeCatalog.Get(panelSize);
-        Width = metrics.Width;
-        Height = metrics.TotalHeight
-            + VoicePanelGeometry.Height(panelSize, _bridgeController.ResolvedVoiceLaneMode);
-        ApplyRoundedRegion();
-    }
-
     public Task OpenAsync(DisplaySurfaceLayout layout) =>
         OpenAsync(layout, layout.PanelTarget);
 
-    public async Task OpenAsync(DisplaySurfaceLayout layout, WindowPlacement target)
+    private readonly LiquidSpring _reveal = new(0);
+    private readonly LiquidSpring _attachment = new(0);
+    private LiquidSpring _liquidWidth = new(600);
+    private LiquidSpring _liquidHeight = new(439);
+    private DisplaySurfaceLayout? _liquidLayout;
+    private WindowPlacement? _liquidTarget;
+    private LiquidPanelShape? _liquidShape;
+    private TaskCompletionSource? _transition;
+    private long _previousTick;
+    private long _transitionStart;
+    private int _frameCount;
+    private TimeSpan _maximumGap;
+    private string _direction = "None";
+    private long _liquidRevision;
+
+    public double RevealForVerify => _reveal.Value;
+    public LiquidPanelShape? ShapeForVerify => _liquidShape;
+    public bool IsOpening => _reveal.Target > 0;
+    public WindowPlacement? LiquidTargetForVerify => _liquidTarget;
+    private bool MotionReduced => _bridgeController.CurrentSettings.ReduceMotion || !SystemParameters.ClientAreaAnimation;
+
+    public Task OpenAsync(DisplaySurfaceLayout layout, WindowPlacement? target = null)
     {
-        var generation = ++_animationGeneration;
-        WindowPlacement from;
-
-        if (!IsVisible)
-        {
-            PrepareCollapsedState();
-            ApplyPlacement(layout.PanelCollapsed, show: true);
-            Opacity = 0;
-            from = layout.PanelCollapsed;
-        }
-        else
-        {
-            ShowNoActivate();
-            from = GetCurrentPlacement(layout.PanelCollapsed);
-        }
-
-        if (_lastSnapshot is not null)
-        {
-            BeginMorph(_lastSnapshot);
-        }
-
-        await AnimateToAsync(
-            from,
-            target,
-            1,
-            generation,
-            AnimationDuration,
-            MorphDirection.Open);
-        if (generation == _animationGeneration)
-        {
-            ApplyPlacement(target, show: true);
-            Opacity = 1;
-            ResetMorphState();
-            ScheduleSnapshotRefresh();
-        }
+        _liquidLayout = layout;
+        SetLiquidTarget(target ?? layout.PanelTarget, snap: !IsVisible);
+        if (!IsVisible) _reveal.Snap(0);
+        Opacity = 1;
+        // Install the small region before showing the full content host.
+        ApplyLiquidSurface();
+        ShowNoActivate();
+        return RetargetLiquid(1, "Open");
     }
 
     public Task CloseAsync(DisplaySurfaceLayout layout)
     {
         EndKeyboardInteraction();
-        if (!IsVisible)
-        {
-            return Task.CompletedTask;
-        }
+        return !IsVisible ? Task.CompletedTask : RetargetLiquid(0, "Close");
+    }
 
-        ++_animationGeneration;
-        ++_snapshotRefreshGeneration;
+    public Task ResizeAsync(WindowPlacement target)
+    {
+        SetLiquidTarget(target, snap: !IsVisible);
+        return IsVisible ? RetargetLiquid(_reveal.Target, "Resize") : Task.CompletedTask;
+    }
+
+    private void SetLiquidTarget(WindowPlacement target, bool snap)
+    {
+        _liquidTarget = target;
+        if (snap)
+        {
+            _liquidWidth.Snap(target.DipRect.Width);
+            _liquidHeight.Snap(target.DipRect.Height);
+        }
+        else
+        {
+            _liquidWidth.Target = target.DipRect.Width;
+            _liquidHeight.Target = target.DipRect.Height;
+        }
+        _attachment.Target = PanelAttachment.Resolve(_bridgeController.CurrentSettings) == PanelAttachmentStyle.CoverMenu ? 1 : 0;
+        if (snap || MotionReduced) _attachment.Snap(_attachment.Target);
+    }
+
+    private Task RetargetLiquid(double target, string direction)
+    {
+        _liquidRevision++;
+        _transition?.TrySetResult();
+        var transition = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _transition = transition;
+        _reveal.Target = target;
+        _attachment.Target = PanelAttachment.Resolve(_bridgeController.CurrentSettings) == PanelAttachmentStyle.CoverMenu ? 1 : 0;
+        _direction = direction;
+        _transitionStart = _previousTick = Stopwatch.GetTimestamp();
+        _frameCount = 0;
+        _maximumGap = TimeSpan.Zero;
+        if (MotionReduced)
+        {
+            _reveal.Snap(target);
+            _attachment.Snap(_attachment.Target);
+            _liquidWidth.Snap(_liquidWidth.Target);
+            _liquidHeight.Snap(_liquidHeight.Target);
+            CompleteLiquid();
+        }
+        else if (!_isAnimating)
+        {
+            _isAnimating = true;
+            CompositionTarget.Rendering += RenderLiquid;
+        }
+        return transition.Task;
+    }
+
+    private void RenderLiquid(object? sender, EventArgs e)
+    {
+        if (_closed) { StopLiquid(); return; }
+        var gap = Stopwatch.GetElapsedTime(_previousTick);
+        if (gap.TotalMilliseconds < 5) return;
+        _previousTick = Stopwatch.GetTimestamp();
+        _maximumGap = gap > _maximumGap ? gap : _maximumGap;
+        var dt = Math.Min(1.0 / 30, gap.TotalSeconds);
+        _reveal.Step(dt, _reveal.Target > 0 ? .32 : .26);
+        _attachment.Step(dt, .28);
+        _liquidWidth.Step(dt, .28);
+        _liquidHeight.Step(dt, .28);
+        _frameCount++;
+        if (_reveal.Target == 0 && _reveal.Value <= .012) _reveal.Snap(0);
+        if (_reveal.Settled() && _attachment.Settled()
+            && _liquidWidth.Settled(.1, .5) && _liquidHeight.Settled(.1, .5))
+            CompleteLiquid();
+        else ApplyLiquidSurface();
+    }
+
+    private void CompleteLiquid()
+    {
+        var revision = _liquidRevision;
+        var transition = _transition;
+        _reveal.Snap(_reveal.Target);
+        _attachment.Snap(_attachment.Target);
+        _liquidWidth.Snap(_liquidWidth.Target);
+        _liquidHeight.Snap(_liquidHeight.Target);
+        ApplyLiquidSurface();
+        // Native placement may pump settings/Voice messages and retarget the spring.
+        if (revision != _liquidRevision) return;
+        StopLiquid();
+        LastAnimationDiagnostics = new AnimationDiagnostics(_direction, _frameCount,
+            Stopwatch.GetElapsedTime(_transitionStart), _maximumGap);
+        if (_reveal.Target == 0)
+        {
+            Opacity = 0;
+            Hide();
+            if (_liquidLayout is { } layout) ApplyPlacement(layout.PanelCollapsed, show: false);
+        }
+        transition?.TrySetResult();
+    }
+
+    private void StopLiquid()
+    {
+        CompositionTarget.Rendering -= RenderLiquid;
         _isAnimating = false;
-        Opacity = 0;
-        PrepareCollapsedState();
-        Hide();
-        ApplyPlacement(layout.PanelCollapsed, show: false);
-        ResetMorphState(restoreMinimums: false);
-        return Task.CompletedTask;
     }
 
-    public async Task ResizeAsync(WindowPlacement target)
+    private void ApplyLiquidSurface()
     {
-        if (!IsVisible)
-        {
-            ApplyPlacement(target, show: false);
-            return;
-        }
-
-        var generation = ++_animationGeneration;
-        var from = GetCurrentPlacement(target);
-        if (_lastSnapshot is not null)
-        {
-            BeginMorph(_lastSnapshot);
-        }
-
-        await AnimateToAsync(
-            from,
-            target,
-            1,
-            generation,
-            ResizeAnimationDuration,
-            MorphDirection.Resize);
-        if (generation == _animationGeneration)
-        {
-            ApplyPlacement(target, show: true);
-            Opacity = 1;
-            ResetMorphState();
-            ScheduleSnapshotRefresh();
-        }
-    }
-
-    private WindowPlacement GetCurrentPlacement(WindowPlacement fallback)
-    {
-        var dipRect = new Rect(Left, Top, Width, Height);
-        if (Hwnd == IntPtr.Zero || !NativeMethods.TryGetWindowRect(Hwnd, out var nativeRect))
-        {
-            return new WindowPlacement(dipRect, fallback.PhysicalRect);
-        }
-
-        return new WindowPlacement(dipRect, PhysicalRect.FromNative(nativeRect));
-    }
-
-    private void BeginMorph(BitmapSource snapshot)
-    {
-        _morphImage.Source = snapshot;
-        _morphImage.Opacity = 1;
-        _morphImage.Visibility = Visibility.Visible;
-        _morphActive = true;
+        if (_liquidTarget is not { } target || _liquidLayout is not { } layout) return;
+        var w = Math.Max(1, _liquidWidth.Value);
+        var h = Math.Max(1, _liquidHeight.Value);
+        var scaleX = layout.Monitor.ScaleX;
+        var scaleY = layout.Monitor.ScaleY;
+        var dip = new Rect(target.DipRect.Left + (target.DipRect.Width - w) / 2, target.DipRect.Top, w, h);
+        var placement = new WindowPlacement(dip, new PhysicalRect(
+            (int)Math.Round(dip.Left * scaleX), target.PhysicalRect.Top,
+            (int)Math.Round(w * scaleX), (int)Math.Round(h * scaleY)));
+        ApplyPlacement(placement, show: false);
+        var contentTop = layout.AccessSurface.DipRect.Height;
+        _liquidShape = LiquidPanelGeometry.Shape(_reveal.Value, w, h,
+            layout.AccessSurface.DipRect.Width, contentTop, _attachment.Value);
+        _root.Clip = _liquidShape.Path;
+        _fallbackVisual.Margin = new Thickness(0, contentTop, 0, 0);
         if (_webView is not null)
         {
-            _webView.Visibility = Visibility.Hidden;
+            _contentHost.Margin = new Thickness(0, contentTop, 0, 0);
+            // CompositionControl's capture pool rejects zero-sized content during collapse.
+            // Keep content at panel dimensions; only the shared silhouette shrinks.
+            _contentHost.Width = w;
+            _contentHost.Height = Math.Max(1, h - contentTop);
+            _contentHost.Opacity = _liquidShape.ContentOpacity;
+            _contentHost.RenderTransform = new TranslateTransform(0, _liquidShape.ContentOffset);
+            _webView.IsHitTestVisible = _reveal.Value >= .88 && _reveal.Target > 0;
         }
-
-        // Allow the WPF layout to shrink together with the native window rect so the
-        // Stretch=Fill snapshot scales down instead of being clipped at the small-panel minimum.
-        MinWidth = 1;
-        MinHeight = 1;
+        NativeMethods.SetLiquidWindowRegion(Hwnd, _liquidShape.Path, scaleX, scaleY);
     }
 
-    private void ResetMorphState(bool restoreMinimums = true)
+    public bool ContainsPhysicalPoint(int x, int y, double toleranceDips = 0)
     {
-        _morphActive = false;
-        _morphImage.Visibility = Visibility.Collapsed;
-        _morphImage.Source = null;
-        if (_webView is not null)
-        {
-            _webView.Visibility = Visibility.Visible;
-        }
-        if (restoreMinimums)
-        {
-            RestorePanelMinimums();
-        }
+        if (_liquidShape is null || _liquidLayout is null) return false;
+        var rect = new Rect(Left, Top, Width, Height);
+        return _liquidShape.Contains(new System.Windows.Point(x / _liquidLayout.Monitor.ScaleX - rect.Left,
+            y / _liquidLayout.Monitor.ScaleY - rect.Top), toleranceDips);
     }
 
-    private async Task<BitmapSource?> CaptureWebViewAsync()
-    {
-        var core = _webView?.CoreWebView2;
-        if (core is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            using var stream = new MemoryStream();
-            await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, stream);
-            stream.Position = 0;
-            var bitmap = new BitmapImage();
-            bitmap.BeginInit();
-            bitmap.CacheOption = BitmapCacheOption.OnLoad;
-            bitmap.StreamSource = stream;
-            bitmap.EndInit();
-            bitmap.Freeze();
-            return bitmap;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private void ScheduleSnapshotRefresh()
-    {
-        if (!IsVisible || _webView?.CoreWebView2 is null)
-        {
-            return;
-        }
-
-        var generation = ++_snapshotRefreshGeneration;
-        _ = RefreshSnapshotAsync(generation);
-    }
-
-    private async Task RefreshSnapshotAsync(int generation)
-    {
-        await Task.Delay(120);
-        if (generation != _snapshotRefreshGeneration || !IsVisible || _morphActive)
-        {
-            return;
-        }
-
-        await _snapshotCaptureGate.WaitAsync();
-        try
-        {
-            if (generation != _snapshotRefreshGeneration || !IsVisible || _morphActive)
-            {
-                return;
-            }
-
-            var snapshot = await CaptureWebViewAsync();
-            if (snapshot is not null
-                && generation == _snapshotRefreshGeneration
-                && !_morphActive)
-            {
-                _lastSnapshot = snapshot;
-            }
-        }
-        finally
-        {
-            _snapshotCaptureGate.Release();
-        }
-    }
-
-    private async Task AnimateToAsync(
-        WindowPlacement from,
-        WindowPlacement to,
-        double targetOpacity,
-        int generation,
-        TimeSpan duration,
-        MorphDirection direction)
-    {
-        if (!SystemParameters.ClientAreaAnimation)
-        {
-            ApplyPlacement(to, show: targetOpacity > 0);
-            Opacity = targetOpacity;
-            return;
-        }
-
-        var startOpacity = Opacity;
-        var start = Stopwatch.GetTimestamp();
-        var previousFrame = start;
-        var frameCount = 0;
-        var maxFrameGap = TimeSpan.Zero;
-        _isAnimating = true;
-        ApplyRoundedRegion(to);
-        try
-        {
-            while (true)
-            {
-                if (generation != _animationGeneration)
-                {
-                    return;
-                }
-
-                var elapsed = Stopwatch.GetElapsedTime(start);
-                var frameGap = Stopwatch.GetElapsedTime(previousFrame);
-                previousFrame = Stopwatch.GetTimestamp();
-                maxFrameGap = frameGap > maxFrameGap ? frameGap : maxFrameGap;
-                frameCount++;
-                var progress = Math.Clamp(elapsed.TotalMilliseconds / duration.TotalMilliseconds, 0, 1);
-                var eased = EaseOutCubic(progress);
-                ApplyPlacement(Interpolate(from, to, eased), show: true);
-                Opacity = Interpolate(startOpacity, targetOpacity, eased);
-                UpdateMorphCrossfade(direction, progress, targetOpacity);
-
-                if (progress >= 1)
-                {
-                    return;
-                }
-
-                await WaitForNextFrameAsync(previousFrame);
-            }
-        }
-        finally
-        {
-            if (generation == _animationGeneration)
-            {
-                LastAnimationDiagnostics = new AnimationDiagnostics(
-                    direction.ToString(),
-                    frameCount,
-                    Stopwatch.GetElapsedTime(start),
-                    maxFrameGap);
-                _isAnimating = false;
-                ApplyRoundedRegion();
-            }
-        }
-    }
-
-    private void UpdateMorphCrossfade(MorphDirection direction, double progress, double targetOpacity)
-    {
-        if (!_morphActive)
-        {
-            return;
-        }
-
-        if (progress >= 0.72 && _webView is not null)
-        {
-            _webView.Visibility = Visibility.Visible;
-        }
-
-        _morphImage.Opacity = progress < 0.68
-            ? 1
-            : 1 - SmoothStep((progress - 0.68) / 0.32);
-    }
-
-    private static async Task WaitForNextFrameAsync(long previousFrameTimestamp)
-    {
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        EventHandler? handler = null;
-        handler = (_, _) =>
-        {
-            // WPF may raise multiple Rendering events for one native resize. Limiting
-            // placement updates to 200 Hz still covers 144/165 Hz displays without
-            // creating a SetWindowPos feedback loop.
-            if (Stopwatch.GetElapsedTime(previousFrameTimestamp) < TimeSpan.FromMilliseconds(5))
-            {
-                return;
-            }
-
-            CompositionTarget.Rendering -= handler;
-            completion.TrySetResult();
-        };
-        CompositionTarget.Rendering += handler;
-        try
-        {
-            _ = await Task.WhenAny(completion.Task, Task.Delay(50));
-        }
-        finally
-        {
-            CompositionTarget.Rendering -= handler;
-        }
-    }
-
-    private static WindowPlacement Interpolate(WindowPlacement from, WindowPlacement to, double progress)
-    {
-        return new WindowPlacement(
-            new Rect(
-                Interpolate(from.DipRect.Left, to.DipRect.Left, progress),
-                Interpolate(from.DipRect.Top, to.DipRect.Top, progress),
-                Interpolate(from.DipRect.Width, to.DipRect.Width, progress),
-                Interpolate(from.DipRect.Height, to.DipRect.Height, progress)),
-            new PhysicalRect(
-                Interpolate(from.PhysicalRect.Left, to.PhysicalRect.Left, progress),
-                Interpolate(from.PhysicalRect.Top, to.PhysicalRect.Top, progress),
-                Interpolate(from.PhysicalRect.Width, to.PhysicalRect.Width, progress),
-                Interpolate(from.PhysicalRect.Height, to.PhysicalRect.Height, progress)));
-    }
-
-    private static int Interpolate(int from, int to, double progress)
-    {
-        return (int)Math.Round(Interpolate((double)from, to, progress), MidpointRounding.AwayFromZero);
-    }
-
-    private static double Interpolate(double from, double to, double progress)
-    {
-        return from + ((to - from) * progress);
-    }
-
-    private static double EaseOutCubic(double progress)
-    {
-        var inverse = 1 - progress;
-        return 1 - (inverse * inverse * inverse);
-    }
-
-    private static double SmoothStep(double progress)
-    {
-        var clamped = Math.Clamp(progress, 0, 1);
-        return clamped * clamped * (3 - (2 * clamped));
-    }
 
     protected override void OnSourceInitialized(EventArgs e)
     {
@@ -740,7 +550,7 @@ internal sealed class PanelWindow : NoActivateWindow
         }
 
         var uiFolder = ResolveUiFolder();
-        var webView = new WebView2
+        var webView = new WebView2CompositionControl
         {
             CreationProperties = new CoreWebView2CreationProperties
             {
@@ -751,7 +561,8 @@ internal sealed class PanelWindow : NoActivateWindow
         };
 
         _webView = webView;
-        _root.Children.Add(webView);
+        _contentHost.Margin = new Thickness(0, AccessSurfaceWindow.SurfaceHeight, 0, 0);
+        _contentHost.Children.Add(webView);
         System.Windows.Controls.Panel.SetZIndex(webView, 1);
         _fallbackVisual.Visibility = Visibility.Collapsed;
 
@@ -828,12 +639,11 @@ internal sealed class PanelWindow : NoActivateWindow
         webView.CoreWebView2.WebMessageReceived += async (_, args) =>
         {
             await dispatcher.HandleRawMessageAsync(args.TryGetWebMessageAsString());
-            ScheduleSnapshotRefresh();
         };
         webView.CoreWebView2.Navigate(UiBaseUrl);
     }
 
-    private async Task PostBridgeJsonAsync(WebView2 webView, string json)
+    private async Task PostBridgeJsonAsync(WebView2CompositionControl webView, string json)
     {
         if (Dispatcher.CheckAccess())
         {
@@ -858,7 +668,7 @@ internal sealed class PanelWindow : NoActivateWindow
         }
     }
 
-    private void PostBridgeJson(WebView2 webView, string json)
+    private void PostBridgeJson(WebView2CompositionControl webView, string json)
     {
         if (_closed || !ReferenceEquals(_webView, webView) || webView.CoreWebView2 is null)
         {
@@ -866,7 +676,6 @@ internal sealed class PanelWindow : NoActivateWindow
         }
 
         webView.CoreWebView2.PostWebMessageAsJson(json);
-        ScheduleSnapshotRefresh();
     }
 
     private object BeginKeyboardInteraction()
@@ -896,6 +705,8 @@ internal sealed class PanelWindow : NoActivateWindow
     protected override void OnClosed(EventArgs e)
     {
         _closed = true;
+        StopLiquid();
+        _transition?.TrySetResult();
         Interlocked.Exchange(ref _microphoneGestureExpiresAt, 0);
         EndKeyboardInteraction();
         ReleaseBridgeAttachment();
@@ -979,33 +790,9 @@ internal sealed class PanelWindow : NoActivateWindow
 
     private void ApplyRoundedRegion()
     {
-        if (Hwnd == IntPtr.Zero)
-        {
-            return;
-        }
-
-        var dpi = VisualTreeHelper.GetDpi(this);
-        var width = Math.Max(1, (int)Math.Round(ActualWidth * dpi.DpiScaleX));
-        var height = Math.Max(1, (int)Math.Round(ActualHeight * dpi.DpiScaleY));
-        var ellipse = Math.Max(1, (int)Math.Round(CornerRadiusDips * 2 * dpi.DpiScaleX));
-        NativeMethods.SetRoundedWindowRegion(Hwnd, width, height, ellipse, ellipse);
-    }
-
-    private void ApplyRoundedRegion(WindowPlacement placement)
-    {
-        if (Hwnd == IntPtr.Zero)
-        {
-            return;
-        }
-
-        var dpi = VisualTreeHelper.GetDpi(this);
-        var ellipse = Math.Max(1, (int)Math.Round(CornerRadiusDips * 2 * dpi.DpiScaleX));
-        NativeMethods.SetRoundedWindowRegion(
-            Hwnd,
-            Math.Max(1, placement.PhysicalRect.Width),
-            Math.Max(1, placement.PhysicalRect.Height),
-            ellipse,
-            ellipse);
+        if (_liquidShape is not null && _liquidLayout is not null)
+            NativeMethods.SetLiquidWindowRegion(Hwnd, _liquidShape.Path,
+                _liquidLayout.Monitor.ScaleX, _liquidLayout.Monitor.ScaleY);
     }
 
     private static bool DisableGpuRequested()
@@ -1016,11 +803,6 @@ internal sealed class PanelWindow : NoActivateWindow
             StringComparison.OrdinalIgnoreCase);
     }
 
-    private enum MorphDirection
-    {
-        Open,
-        Resize
-    }
 }
 
 internal sealed record AnimationDiagnostics(
