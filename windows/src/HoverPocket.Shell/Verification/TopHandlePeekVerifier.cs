@@ -21,6 +21,8 @@ internal sealed class TopHandlePeekVerifier(HoverShellController controller)
         try
         {
             await Send("settings.setAutoHideTopHandle", new { enabled = true });
+            Require(controller.PointerPollingIntervalForVerify == HoverShellController.AutoHidePollingInterval,
+                "auto-hide did not enable responsive pointer polling");
             foreach (var size in PanelSizeCatalog.All)
             foreach (var wide in new[] { true, false })
             {
@@ -29,10 +31,30 @@ internal sealed class TopHandlePeekVerifier(HoverShellController controller)
                 var layout = controller.Layouts[0];
                 var entry = layout.AccessSurface.PhysicalRect;
                 var surface = controller.AccessSurfaces[0];
-                var near = (X: entry.Left + entry.Width / 2, Y: entry.Top + (int)Math.Round(24 * layout.Monitor.ScaleY));
+                var near = (X: entry.Left + entry.Width / 2, Y: entry.Top + (int)Math.Round(60 * layout.Monitor.ScaleY));
                 Require(!surface.IsVisible && !NativeMethods.IsWindowShown(surface.Hwnd), "entry was visible while away");
                 await controller.RunHealthCheckForVerifyAsync();
                 Require(!NativeMethods.IsWindowShown(surface.Hwnd), "health recovery exposed the hidden entry");
+
+                var directTimer = Stopwatch.StartNew();
+                controller.SimulatePointerMoveForVerify(near.X, entry.Top);
+                Require(controller.PanelExpectedVisibleForVerify && controller.Panel.IsVisible && surface.PeekReady,
+                    "direct jump to top waited for the entry animation");
+                var directMilliseconds = directTimer.Elapsed.TotalMilliseconds;
+                await Wait(() => !controller.Panel.IsAnimating);
+                controller.SimulatePointerMoveForVerify(far.X, far.Y);
+                await Wait(() => !controller.Panel.IsVisible && !surface.IsVisible && !surface.IsPeeking);
+
+                controller.SimulatePointerMoveForVerify(entry.Left - (int)Math.Round(64 * layout.Monitor.ScaleX),
+                    entry.Top + (int)Math.Round(24 * layout.Monitor.ScaleY));
+                Require(!controller.Panel.IsVisible, "expanded side proximity opened the panel");
+                await Task.Delay(40);
+                controller.SimulatePointerMoveForVerify(near.X, entry.Top);
+                Require(controller.Panel.IsVisible && surface.PeekReady,
+                    "jump to top during entry animation waited for it to settle");
+                await Wait(() => !controller.Panel.IsAnimating);
+                controller.SimulatePointerMoveForVerify(far.X, far.Y);
+                await Wait(() => !controller.Panel.IsVisible && !surface.IsVisible && !surface.IsPeeking);
 
                 controller.SimulatePointerMoveForVerify(near.X, near.Y);
                 Require(!controller.Panel.IsVisible, "proximity immediately opened the panel");
@@ -47,7 +69,7 @@ internal sealed class TopHandlePeekVerifier(HoverShellController controller)
                 controller.SimulatePointerMoveForVerify(far.X, far.Y);
                 await Wait(() => !controller.Panel.IsVisible && !surface.IsVisible && !surface.IsPeeking);
                 Require(!NativeMethods.IsWindowShown(surface.Hwnd), "entry left a native window after closing");
-                VerifyConsole.WriteLine($"PASS top-entry peek: size={size.Id}, wide={wide}, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true");
+                VerifyConsole.WriteLine($"PASS top-entry peek: size={size.Id}, wide={wide}, hidden=true, direct_top_open=true, direct_dispatch_ms={directMilliseconds:0.0}, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true");
             }
 
             // Passing near the entry must not open a panel, even during a reveal/reversal.
@@ -77,6 +99,8 @@ internal sealed class TopHandlePeekVerifier(HoverShellController controller)
             await Wait(() => !controller.AccessSurface.IsVisible);
             await Send("settings.setAutoHideTopHandle", new { enabled = false });
             Require(controller.AccessSurface.PeekReady, "always-visible setting was not restored");
+            Require(controller.PointerPollingIntervalForVerify == HoverShellController.PollingInterval,
+                "always-visible setting did not restore pointer polling interval");
             VerifyConsole.WriteLine("PASS top-entry peek: pass-through/reentry=true, hidden_native_repair=true, reduce_motion=true, always_visible_restored=true");
         }
         finally

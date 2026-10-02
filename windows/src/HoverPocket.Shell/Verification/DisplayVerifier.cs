@@ -94,6 +94,10 @@ internal sealed class DisplayVerifier
             if (!proximity.Contains(layout.AccessSurface.PhysicalRect)
                 || proximity.Height <= layout.AccessSurface.PhysicalRect.Height)
                 _failures.Add($"{monitor.Id}: peek proximity did not include space below the entry");
+            var previousWidth = layout.AccessSurface.PhysicalRect.Width + 2 * (int)Math.Ceiling(40 * monitor.ScaleX);
+            var previousHeight = (int)Math.Ceiling(36 * monitor.ScaleY);
+            if (Math.Abs(proximity.Width - previousWidth * 2) > 1 || proximity.Height != previousHeight * 2)
+                _failures.Add($"{monitor.Id}: peek proximity was not doubled in both dimensions");
             if (layout.PanelTarget.PhysicalRect.Top != monitor.Bounds.Top)
                 _failures.Add($"{monitor.Id}: liquid panel detached from screen top");
             foreach (var mode in new[] { VoiceLaneMode.Compact, VoiceLaneMode.Expanded })

@@ -23,6 +23,7 @@ internal sealed class HoverShellController : IDisposable
 {
     public static readonly TimeSpan CloseDelay = TimeSpan.FromMilliseconds(60);
     public static readonly TimeSpan PollingInterval = TimeSpan.FromMilliseconds(120);
+    internal static readonly TimeSpan AutoHidePollingInterval = TimeSpan.FromMilliseconds(30);
     public static readonly TimeSpan HealthCheckInterval = TimeSpan.FromSeconds(2);
     internal static readonly TimeSpan[] RecoveryDelays =
     [
@@ -31,8 +32,8 @@ internal sealed class HoverShellController : IDisposable
         TimeSpan.FromMilliseconds(1400)
     ];
     public const double HoverToleranceDips = 4;
-    internal const double PeekSidePaddingDips = 40;
-    internal const double PeekDepthDips = 36;
+    internal const double PeekSidePaddingDips = 80;
+    internal const double PeekDepthDips = 72;
 
     private readonly Dispatcher _dispatcher;
     private readonly bool _enablePanelWebView;
@@ -114,7 +115,7 @@ internal sealed class HoverShellController : IDisposable
 
         _pollingTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
         {
-            Interval = PollingInterval
+            Interval = userSettings.AutoHideTopHandle ? AutoHidePollingInterval : PollingInterval
         };
         _pollingTimer.Tick += (_, _) => PollPointer();
 
@@ -159,6 +160,8 @@ internal sealed class HoverShellController : IDisposable
     public int VoiceTransitionCountForVerify => _voiceTransitionCountForVerify;
 
     public bool PollingEnabledForVerify => _pollingTimer.IsEnabled;
+
+    internal TimeSpan PointerPollingIntervalForVerify => _pollingTimer.Interval;
 
     public bool HealthTimerEnabledForVerify => _healthTimer.IsEnabled;
 
@@ -347,8 +350,9 @@ internal sealed class HoverShellController : IDisposable
         _activeLayout = layout;
         _closeDelayTimer.Stop();
         TraceHover("open", GetPointerPosition(), true, layout, "panel-open");
-        await _panel.EnsureWebViewInitializedAsync();
-        await _panel.OpenAsync(layout, EffectivePanelTarget(layout));
+        await Task.WhenAll(
+            _panel.EnsureWebViewInitializedAsync(),
+            _panel.OpenAsync(layout, EffectivePanelTarget(layout)));
         await _panelBridgeController.NotifyPanelOpenedAsync();
     }
 
@@ -474,10 +478,10 @@ internal sealed class HoverShellController : IDisposable
                 || _panel.ContainsPhysicalPoint(pointer.X, pointer.Y, HoverToleranceDips);
         }
 
-        foreach (var (surface, layout) in _surfaceLayouts)
+        foreach (var layout in _surfaceLayouts.Values)
         {
             var inside = _panelBridgeController.CurrentSettings.AutoHideTopHandle
-                ? surface.PeekReady && layout.AccessSurface.PhysicalRect.Contains(pointer.X, pointer.Y)
+                ? layout.AccessSurface.PhysicalRect.Contains(pointer.X, pointer.Y)
                 : IsInsideInflatedPlacement(layout.AccessSurface, layout.Monitor, pointer);
             if (inside)
             {
@@ -503,7 +507,7 @@ internal sealed class HoverShellController : IDisposable
     internal static PhysicalRect PeekProximityBounds(DisplaySurfaceLayout layout)
     {
         var access = layout.AccessSurface.PhysicalRect;
-        var padding = (int)Math.Ceiling(PeekSidePaddingDips * layout.Monitor.ScaleX);
+        var padding = (int)Math.Ceiling(access.Width / 2.0 + PeekSidePaddingDips * layout.Monitor.ScaleX);
         return new PhysicalRect(access.Left - padding, access.Top, access.Width + padding * 2,
             (int)Math.Ceiling(PeekDepthDips * layout.Monitor.ScaleY)).ClampTo(layout.Monitor.Bounds);
     }
@@ -893,8 +897,6 @@ internal sealed class HoverShellController : IDisposable
 
     private void OnAccessSurfaceHoverEntered(object? sender, EventArgs e)
     {
-        if (!_panel.IsVisible && _panelBridgeController.CurrentSettings.AutoHideTopHandle
-            && sender is AccessSurfaceWindow peeking && !peeking.PeekReady) return;
         if (!_panel.IsVisible && IsTopEdgeSuppressed())
         {
             return;
@@ -1229,6 +1231,7 @@ internal sealed class HoverShellController : IDisposable
             || _lastAppliedSettings.VoiceLaneLayout != settings.VoiceLaneLayout;
         var placementChanged = _lastAppliedSettings.DisplayPlacement != settings.DisplayPlacement;
         _lastAppliedSettings = settings.Clone();
+        _pollingTimer.Interval = settings.AutoHideTopHandle ? AutoHidePollingInterval : PollingInterval;
         ResyncDisplayLayout(
             animateVisiblePanel: (panelSizeChanged || voiceGeometryChanged) && !placementChanged);
     }

@@ -22,7 +22,12 @@ internal sealed class UiVerifier
         try
         {
             var entry = _controller.Layouts[0].AccessSurface.PhysicalRect;
-            _controller.SetPointerSimulationForVerify(entry.Left + entry.Width / 2, entry.Top + 1);
+            var coldStart = System.Diagnostics.Stopwatch.StartNew();
+            _controller.SimulatePointerMoveForVerify(entry.Left + entry.Width / 2, entry.Top);
+            if (!_controller.Panel.IsVisible || !_controller.PanelExpectedVisibleForVerify)
+                _failures.Add("cold start: panel waited for WebView2 initialization before showing");
+            else
+                VerifyConsole.WriteLine($"PASS cold top-edge open: panel_visible_before_webview_ready=true, dispatch_ms={coldStart.Elapsed.TotalMilliseconds:0.0}");
             await _controller.ShowPanelForUiVerifyAsync();
             var ready = await _controller.Panel.WaitForUiReadyAsync(TimeSpan.FromSeconds(8));
             if (!ready)
