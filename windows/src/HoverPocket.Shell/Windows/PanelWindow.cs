@@ -37,6 +37,7 @@ internal sealed class PanelWindow : NoActivateWindow
         VerticalAlignment = System.Windows.VerticalAlignment.Top
     };
     private readonly Border _fallbackVisual;
+    private readonly TranslateTransform _contentTransform = new();
     private readonly List<string> _processFailures = [];
     private bool _isAnimating;
     private WebView2CompositionControl? _webView;
@@ -95,6 +96,7 @@ internal sealed class PanelWindow : NoActivateWindow
         };
         _root.Children.Add(_fallbackVisual);
         _root.Children.Add(_contentHost);
+        _contentHost.RenderTransform = _contentTransform;
         Content = _root;
 
         SizeChanged += (_, _) =>
@@ -521,7 +523,7 @@ internal sealed class PanelWindow : NoActivateWindow
             _contentHost.Width = w;
             _contentHost.Height = Math.Max(1, h - contentTop);
             _contentHost.Opacity = _liquidShape.ContentOpacity;
-            _contentHost.RenderTransform = new TranslateTransform(0, _liquidShape.ContentOffset);
+            _contentTransform.Y = _liquidShape.ContentOffset;
             _webView.IsHitTestVisible = _reveal.Value >= .88 && _reveal.Target > 0;
         }
         NativeMethods.SetLiquidWindowRegion(Hwnd, _liquidShape.Path, scaleX, scaleY);

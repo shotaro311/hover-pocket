@@ -11,6 +11,26 @@ namespace HoverPocket.Shell.Verification;
 
 internal sealed class LiquidMotionVerifier(HoverShellController controller)
 {
+    internal static void MeasureStationaryWork(PanelWindow panel)
+    {
+        var target = panel.LiquidTargetForVerify!;
+        var updates = panel.PlacementUpdatesForVerify;
+        var timer = Stopwatch.StartNew();
+        for (var i = 0; i < 100; i++) panel.ApplyPlacement(target, show: false);
+        var placementMilliseconds = timer.Elapsed.TotalMilliseconds;
+        var allocated = GC.GetAllocatedBytesForCurrentThread();
+        timer.Restart();
+        var outsideHits = 0;
+        for (var i = 0; i < 10000; i++)
+            if (panel.ContainsPhysicalPoint(target.PhysicalRect.Left - 1000, target.PhysicalRect.Top - 1000, 4)) outsideHits++;
+        var hitMilliseconds = timer.Elapsed.TotalMilliseconds;
+        allocated = GC.GetAllocatedBytesForCurrentThread() - allocated;
+        Require(outsideHits == 0, "outside pointer was treated as a hover");
+        VerifyConsole.WriteLine($"liquid stationary work: repeated_placements=100, native_updates={panel.PlacementUpdatesForVerify - updates}, placement_ms={placementMilliseconds:0.00}, outside_hit_tests=10000, hit_ms={hitMilliseconds:0.00}, allocated_bytes={allocated}");
+        Require(panel.PlacementUpdatesForVerify == updates, "unchanged placement kept updating the native window");
+        Require(allocated < 4096, "stationary outside hit tests kept allocating");
+    }
+
     public async Task RunAsync()
     {
         VerifySpringAndShapes();
@@ -47,7 +67,7 @@ internal sealed class LiquidMotionVerifier(HoverShellController controller)
                     "Windows hit test includes the clipped corner");
                 Require(!NativeMethods.LiquidRegionContains(panel.Hwnd, 0, target.PhysicalRect.Height - 1),
                     $"native region includes outside bottom corner: size={size.Id}, mode={mode}, target={target.PhysicalRect}, frame={nativeFrame.Width}x{nativeFrame.Height}, reveal={panel.RevealForVerify}, shape={panel.ShapeForVerify?.Path.Bounds}");
-                if (panel.WebView is not null) CaptureNativeSurface(panel, size.Id, mode);
+                if (panel.WebView is not null) await CaptureNativeSurfaceAsync(panel, size.Id, mode);
                 if (size.Id == "medium" && panel.WebView is not null)
                 {
                     using var process = Process.GetCurrentProcess();
@@ -143,6 +163,7 @@ internal sealed class LiquidMotionVerifier(HoverShellController controller)
         for (var i = 0; i < 60; i++) a.Step(1.0 / 60, .32);
         for (var i = 0; i < 120; i++) b.Step(1.0 / 120, .32);
         Require(Math.Abs(a.Value - b.Value) < 1e-10 && Math.Abs(a.Velocity - b.Velocity) < 1e-10, "spring depends on refresh rate");
+        var hitTests = 0;
         foreach (var size in PanelSizeCatalog.All)
         foreach (var origin in new[] { 72.0, 168.0 })
         foreach (var blend in new[] { 0.0, 1.0 })
@@ -153,15 +174,33 @@ internal sealed class LiquidMotionVerifier(HoverShellController controller)
             Require(shape.Contains(new Point(size.Width / 2, .01)), "entry is outside shape");
             Require(!shape.Contains(new Point(-1, 1)), "shape protrudes outside frame");
             if (i == 0) Require(Math.Abs(shape.Path.Bounds.Width - origin) < 1e-8, "closed shape has side protrusions");
+            if (i % 25 != 0) continue;
+            var bounds = shape.Path.Bounds;
+            foreach (var tolerance in new[] { 0.0, 4.0, 8.0 })
+            {
+                var pen = new System.Windows.Media.Pen(System.Windows.Media.Brushes.Black, tolerance * 2);
+                foreach (var x in new[] { bounds.Left - 81, bounds.Left - 1, bounds.Left, bounds.Left + 1, size.Width / 2, bounds.Right - 1, bounds.Right, bounds.Right + 1, bounds.Right + 81 })
+                foreach (var y in new[] { -81.0, -1.0, 0.0, 1.0, bounds.Height / 2, bounds.Bottom - 1, bounds.Bottom, bounds.Bottom + 1, bounds.Bottom + 81 })
+                {
+                    var point = new Point(x, y);
+                    var expected = shape.Path.FillContains(point) || (tolerance > 0 && shape.Path.StrokeContains(pen, point));
+                    Require(shape.Contains(point, tolerance) == expected, $"cached hit test changed a boundary: point={point}, tolerance={tolerance}");
+                    hitTests++;
+                }
+            }
         }
         VerifyConsole.WriteLine("PASS liquid geometry: shapes=1616, refresh_rate=60/120, top_gap=0, closed_protrusions=0");
+        VerifyConsole.WriteLine($"PASS liquid hit-test boundaries: comparisons={hitTests}, tolerance=0/4/8, partial_shapes=true");
     }
 
-    private static void CaptureNativeSurface(PanelWindow panel, string size, string mode)
+    private static async Task CaptureNativeSurfaceAsync(PanelWindow panel, string size, string mode)
     {
         var log = Environment.GetEnvironmentVariable("HOVERPOCKET_VERIFY_LOG");
         if (string.IsNullOrEmpty(log) || panel.ShapeForVerify is not { } shape
             || !NativeMethods.TryGetWindowRect(panel.Hwnd, out var frame)) return;
+        // Live desktop media metadata must not enter public verification artifacts.
+        var mediaJson = await panel.WebView!.ExecuteScriptAsync("JSON.stringify(Array.from(document.querySelectorAll('.hp-media'), node => { const r = node.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; }))");
+        var mediaRects = JsonSerializer.Deserialize<CaptureRect[]>(JsonSerializer.Deserialize<string>(mediaJson)!, BridgeJson.Options)!;
         using var capture = new System.Drawing.Bitmap(frame.Width, frame.Height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
         using (var screen = System.Drawing.Graphics.FromImage(capture))
             screen.CopyFromScreen(frame.Left, frame.Top, 0, 0, capture.Size);
@@ -181,11 +220,17 @@ internal sealed class LiquidMotionVerifier(HoverShellController controller)
         }
         graphics.SetClip(path);
         graphics.DrawImageUnscaled(capture, 0, 0);
+        using var privacyBrush = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(16, 18, 22));
+        foreach (var media in mediaRects)
+            graphics.FillRectangle(privacyBrush, (float)(media.Left * sx),
+                (float)((media.Top + panel.Height - panel.WebView.ActualHeight) * sy),
+                (float)(media.Width * sx), (float)(media.Height * sy));
         var destination = Path.Combine(Path.GetDirectoryName(log)!, $"native-{size}-{mode}.png");
         output.Save(destination, System.Drawing.Imaging.ImageFormat.Png);
-        VerifyConsole.WriteLine($"native screen capture: {Path.GetFileName(destination)}, {frame.Width}x{frame.Height}");
+        VerifyConsole.WriteLine($"native screen capture: {Path.GetFileName(destination)}, {frame.Width}x{frame.Height}, media_redacted={mediaRects.Length}");
         System.Drawing.PointF ToPixel(Point point) => new((float)(point.X * sx), (float)(point.Y * sy));
     }
+    private sealed record CaptureRect(double Left, double Top, double Width, double Height);
     private static void Require(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException("Liquid: " + message);

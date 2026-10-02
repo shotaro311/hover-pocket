@@ -1,6 +1,7 @@
 param(
     [ValidateSet('Debug','Release')][string]$Configuration = 'Debug',
-    [string[]]$Targets = @('ui','shell','display','settings','ui-model','weather','voice','timer','calendar')
+    [string[]]$Targets = @('ui','shell','display','settings','ui-model','weather','voice','timer','calendar'),
+    [ValidateRange(1,900)][int]$TimeoutSeconds = 360
 )
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -13,7 +14,7 @@ foreach ($target in $Targets) {
     $env:HOVERPOCKET_VERIFY_LOG = $log
     $started = [DateTime]::UtcNow
     $process = Start-Process -FilePath $executable -ArgumentList '--verify',$target -WindowStyle Hidden -PassThru
-    if (-not $process.WaitForExit(240000)) { throw "$target verifier timeout, PID $($process.Id) remains for diagnosis" }
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) { throw "$target verifier timeout, PID $($process.Id) remains for diagnosis" }
     $results += [pscustomobject]@{ target=$target; exit_code=$process.ExitCode; elapsed_seconds=([DateTime]::UtcNow-$started).TotalSeconds; log=$log }
     Write-Output "$Configuration $target exit=$($process.ExitCode)"
     if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log }

@@ -1,0 +1,32 @@
+[
+  {
+    "target": "display",
+    "exit_code": 0,
+    "elapsed_seconds": 2.3145386,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-display-131926.log"
+  },
+  {
+    "target": "settings",
+    "exit_code": 0,
+    "elapsed_seconds": 4.6686445,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-settings-131928.log"
+  },
+  {
+    "target": "shell",
+    "exit_code": 0,
+    "elapsed_seconds": 207.5294926,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-shell-132141.log"
+  },
+  {
+    "target": "controls",
+    "exit_code": 0,
+    "elapsed_seconds": 2.6348655,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-controls-132532.log"
+  },
+  {
+    "target": "ui",
+    "exit_code": 0,
+    "elapsed_seconds": 131.201776,
+    "log": "C:\\Users\\shotaro\\Downloads\\hover-pocket-windows-liquid-20261002\\progress\\evidence\\2026-10-02-windows-liquid\\release-ui-132535.log"
+  }
+]

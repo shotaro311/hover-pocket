@@ -19,6 +19,7 @@ internal sealed class AccessSurfaceWindow : NoActivateWindow
     private static readonly WpfColor DefaultBackgroundColor = WpfColor.FromArgb(255, 4, 4, 6);
     private static readonly WpfColor DefaultBorderColor = WpfColor.FromArgb(0, 255, 255, 255);
     private readonly Border _surface;
+    private readonly TranslateTransform _peekTransform = new();
     private readonly LiquidSpring _peek = new(1);
     private bool _peekAnimating;
     private long _peekTick;
@@ -54,6 +55,7 @@ internal sealed class AccessSurfaceWindow : NoActivateWindow
             BorderThickness = new Thickness(1, 0, 1, 1),
             CornerRadius = new CornerRadius(0, 0, 7, 7),
             SnapsToDevicePixels = true,
+            RenderTransform = _peekTransform,
             Child = _handleIcon
         };
         var root = new Grid { ClipToBounds = true };
@@ -82,7 +84,11 @@ internal sealed class AccessSurfaceWindow : NoActivateWindow
     public void SetPeekVisible(bool visible, bool immediate)
     {
         var target = visible ? 1.0 : 0.0;
-        if (_peek.Target == target && (_peekAnimating || IsVisible == visible) && !immediate) return;
+        if (_peek.Target == target)
+        {
+            if (_peekAnimating && !immediate) return;
+            if (!_peekAnimating && IsVisible == visible && NativeMethods.IsWindowShown(Hwnd) == visible) return;
+        }
         _peek.Target = target;
         IsHitTestVisible = false;
         if (visible) ShowNoActivate();
@@ -105,7 +111,7 @@ internal sealed class AccessSurfaceWindow : NoActivateWindow
         if (elapsed.TotalMilliseconds < 5) return;
         _peekTick = Stopwatch.GetTimestamp();
         _peek.Step(Math.Min(1.0 / 30, elapsed.TotalSeconds), .16);
-        _surface.RenderTransform = new TranslateTransform(0, -SurfaceHeight * (1 - _peek.Value));
+        _peekTransform.Y = -SurfaceHeight * (1 - _peek.Value);
         if (_peek.Settled(.005, .03)) FinishPeek();
     }
 
@@ -114,7 +120,7 @@ internal sealed class AccessSurfaceWindow : NoActivateWindow
         CompositionTarget.Rendering -= RenderPeek;
         _peekAnimating = false;
         _peek.Snap(_peek.Target);
-        _surface.RenderTransform = new TranslateTransform(0, -SurfaceHeight * (1 - _peek.Value));
+        _peekTransform.Y = -SurfaceHeight * (1 - _peek.Value);
         IsHitTestVisible = _peek.Target == 1;
         if (_peek.Target == 0)
         {

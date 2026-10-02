@@ -351,8 +351,8 @@ internal sealed class HoverShellController : IDisposable
         _closeDelayTimer.Stop();
         TraceHover("open", GetPointerPosition(), true, layout, "panel-open");
         await Task.WhenAll(
-            _panel.EnsureWebViewInitializedAsync(),
-            _panel.OpenAsync(layout, EffectivePanelTarget(layout)));
+            _panel.OpenAsync(layout, EffectivePanelTarget(layout)),
+            _panel.EnsureWebViewInitializedAsync());
         await _panelBridgeController.NotifyPanelOpenedAsync();
     }
 

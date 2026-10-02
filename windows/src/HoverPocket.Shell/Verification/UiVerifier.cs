@@ -35,6 +35,7 @@ internal sealed class UiVerifier
                 _failures.Add("webview: UI did not report ready within 8s");
             }
 
+            if (ready) LiquidMotionVerifier.MeasureStationaryWork(_controller.Panel);
             var result = ready ? await _controller.Panel.RunWebVerifyScriptAsync() : null;
             if (result is null)
             {

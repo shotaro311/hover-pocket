@@ -27,8 +27,23 @@ internal sealed class LiquidSpring(double value)
 
 internal sealed record LiquidPanelShape(Geometry Path, double ContentOpacity, double ContentOffset)
 {
-    public bool Contains(Point point, double tolerance = 0) => Path.FillContains(point)
-        || (tolerance > 0 && Path.StrokeContains(new Pen(Brushes.Black, tolerance * 2), point));
+    private static Pen? _hitPen;
+
+    public bool Contains(Point point, double tolerance = 0)
+    {
+        var bounds = Path.Bounds;
+        if (tolerance <= 0) return bounds.Contains(point) && Path.FillContains(point);
+        var pen = _hitPen;
+        if (pen is null || pen.Thickness != tolerance * 2)
+        {
+            pen = new Pen(Brushes.Black, tolerance * 2);
+            pen.Freeze();
+            _hitPen = pen;
+        }
+        var padding = tolerance * Math.Max(1, pen.MiterLimit);
+        bounds.Inflate(padding, padding);
+        return bounds.Contains(point) && (Path.FillContains(point) || Path.StrokeContains(pen, point));
+    }
 }
 
 internal static class LiquidPanelGeometry

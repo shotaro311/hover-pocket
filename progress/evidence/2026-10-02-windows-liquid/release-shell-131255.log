@@ -1,0 +1,29 @@
+shell stage: VerifySecondInstanceAsync
+shell stage: VerifyPollingOnlyOpenAsync
+shell stage: VerifyAccessSurfaceHealthRecoveryAsync
+shell stage: VerifyPanelHealthRecoveryAsync
+shell stage: VerifyUnrecoverableWindowRecreationAsync
+shell stage: VerifyStagedRecoverySchedulerAsync
+shell stage: VerifyPanelPositionStableWhilePointerMovesAsync
+shell stage: VerifyPointerOutsideClosesPanelAsync
+shell stage: VerifyLiquidCloseAsync
+PASS top-entry peek: size=small, wide=True, hidden=true, direct_top_open=true, direct_dispatch_ms=15.7, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=small, wide=False, hidden=true, direct_top_open=true, direct_dispatch_ms=20.6, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=medium, wide=True, hidden=true, direct_top_open=true, direct_dispatch_ms=16.6, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=medium, wide=False, hidden=true, direct_top_open=true, direct_dispatch_ms=18.7, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=large, wide=True, hidden=true, direct_top_open=true, direct_dispatch_ms=21.1, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=large, wide=False, hidden=true, direct_top_open=true, direct_dispatch_ms=21.8, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=extraLarge, wide=True, hidden=true, direct_top_open=true, direct_dispatch_ms=18.3, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=extraLarge, wide=False, hidden=true, direct_top_open=true, direct_dispatch_ms=19.6, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: pass-through/reentry=true, hidden_native_repair=true, reduce_motion=true, always_visible_restored=true
+PASS liquid geometry: shapes=1616, refresh_rate=60/120, top_gap=0, closed_protrusions=0
+PASS liquid native: size=small, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=small, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=medium, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=medium, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=large, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=large, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=extraLarge, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=extraLarge, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: reentry_reversals=30, automatic_manual_preserved=true, reduce_motion=true
+PASS shell verify: windows=12, cycles=100, stable_position=true, outside_close=true, liquid_close=true, polling_open=true, health_repair=true, window_recreate=true, staged_recovery=true, animation_frames=35, animation_max_gap_ms=36.4

@@ -1,0 +1,34 @@
+UI verify: WebView2 host + bridge + provider registry + settings
+PASS cold top-edge open: panel_visible_before_webview_ready=true, dispatch_ms=190.1
+liquid stationary work: repeated_placements=100, native_updates=100, placement_ms=7.67, outside_hit_tests=10000, hit_ms=48.51, allocated_bytes=1600056
+PASS top-entry peek: size=small, wide=True, hidden=true, direct_top_open=true, direct_dispatch_ms=22.1, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=small, wide=False, hidden=true, direct_top_open=true, direct_dispatch_ms=28.7, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=medium, wide=True, hidden=true, direct_top_open=true, direct_dispatch_ms=29.7, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=medium, wide=False, hidden=true, direct_top_open=true, direct_dispatch_ms=41.9, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=large, wide=True, hidden=true, direct_top_open=true, direct_dispatch_ms=27.6, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=large, wide=False, hidden=true, direct_top_open=true, direct_dispatch_ms=25.2, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=extraLarge, wide=True, hidden=true, direct_top_open=true, direct_dispatch_ms=29.3, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=extraLarge, wide=False, hidden=true, direct_top_open=true, direct_dispatch_ms=28.7, animating_entry_open=true, expanded_proximity=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: pass-through/reentry=true, hidden_native_repair=true, reduce_motion=true, always_visible_restored=true
+PASS liquid geometry: shapes=1616, refresh_rate=60/120, top_gap=0, closed_protrusions=0
+native screen capture: native-small-preserveMenu.png, 780x572
+PASS liquid native: size=small, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+native screen capture: native-small-coverMenu.png, 780x572
+PASS liquid native: size=small, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+native screen capture: native-medium-preserveMenu.png, 900x659
+liquid idle CPU: mode=preserveMenu, main_one_core_percent=4.17, browser_one_core_percent=0.00, seconds=3.0, spring_loop=false; renderer/GPU excluded
+PASS liquid native: size=medium, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+native screen capture: native-medium-coverMenu.png, 900x659
+liquid idle CPU: mode=coverMenu, main_one_core_percent=5.21, browser_one_core_percent=0.00, seconds=3.0, spring_loop=false; renderer/GPU excluded
+PASS liquid native: size=medium, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+native screen capture: native-large-preserveMenu.png, 1020x746
+PASS liquid native: size=large, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+native screen capture: native-large-coverMenu.png, 1020x746
+PASS liquid native: size=large, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+native screen capture: native-extraLarge-preserveMenu.png, 1170x854
+PASS liquid native: size=extraLarge, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+native screen capture: native-extraLarge-coverMenu.png, 1170x854
+PASS liquid native: size=extraLarge, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: reentry_reversals=30, automatic_manual_preserved=true, reduce_motion=true
+PASS liquid Settings WebView2: manual buttons, automatic/manual preservation, Reduce Motion controls, bridge readback
+PASS ui verify: background bridge delivery, hidden-panel timer alert/reopen, stable Controls refresh, source activation and rate actions, responsive Timer cards/input/stopwatch, media fallback, tabbed centered Clipboard split/full preview/trash actions, Calculator history sidebar, declarative PocketSurface renderer with host-owned approval, draggable stable icons, text scaling/input activation, stable Mac-style calendar editor, bridge/provider/settings round-trip

@@ -9,6 +9,7 @@ namespace HoverPocket.Shell.Windows;
 internal abstract class NoActivateWindow : Window
 {
     public IntPtr Hwnd { get; private set; }
+    internal int PlacementUpdatesForVerify { get; private set; }
 
     public event EventHandler<Win32MessageEventArgs>? Win32MessageReceived;
 
@@ -97,8 +98,11 @@ internal abstract class NoActivateWindow : Window
             Show();
         }
 
-        if (Hwnd != IntPtr.Zero)
+        if (Hwnd != IntPtr.Zero && (show || !NativeMethods.TryGetWindowRect(Hwnd, out var current)
+            || current.Left != placement.PhysicalRect.Left || current.Top != placement.PhysicalRect.Top
+            || current.Width != placement.PhysicalRect.Width || current.Height != placement.PhysicalRect.Height))
         {
+            PlacementUpdatesForVerify++;
             NativeMethods.SetWindowBoundsNoActivate(
                 Hwnd,
                 placement.PhysicalRect.Left,
