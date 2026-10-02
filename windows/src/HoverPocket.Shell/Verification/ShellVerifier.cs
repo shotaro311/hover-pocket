@@ -53,6 +53,7 @@ internal sealed class ShellVerifier
         VerifyConsole.WriteLine("shell stage: VerifyLiquidCloseAsync");
         await VerifyLiquidCloseAsync();
 
+        await new TopHandlePeekVerifier(_controller).RunAsync();
         await new LiquidMotionVerifier(_controller).RunAsync();
 
         for (var cycle = 0; cycle < StressCycles; cycle++)

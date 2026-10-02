@@ -1,8 +1,10 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using HoverPocket.Shell.Configuration;
+using HoverPocket.Shell.Interop;
 using WpfColor = System.Windows.Media.Color;
 
 namespace HoverPocket.Shell.Windows;
@@ -17,6 +19,14 @@ internal sealed class AccessSurfaceWindow : NoActivateWindow
     private static readonly WpfColor DefaultBackgroundColor = WpfColor.FromArgb(255, 4, 4, 6);
     private static readonly WpfColor DefaultBorderColor = WpfColor.FromArgb(0, 255, 255, 255);
     private readonly Border _surface;
+    private readonly LiquidSpring _peek = new(1);
+    private bool _peekAnimating;
+    private long _peekTick;
+    private DateTimeOffset? _peekHideAt;
+
+    public bool PeekTargetVisible => _peek.Target == 1;
+    public bool IsPeeking => _peekAnimating;
+    public bool PeekReady => IsVisible && !_peekAnimating && _peek.Value == 1;
     private readonly Grid _handleIcon = new()
     {
         Width = 15,
@@ -46,9 +56,78 @@ internal sealed class AccessSurfaceWindow : NoActivateWindow
             SnapsToDevicePixels = true,
             Child = _handleIcon
         };
-        Content = _surface;
+        var root = new Grid { ClipToBounds = true };
+        root.Children.Add(_surface);
+        Content = root;
 
         MouseEnter += (_, _) => HoverEntered?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void UpdatePeekVisibility(bool visible, bool reduceMotion)
+    {
+        if (visible)
+        {
+            _peekHideAt = null;
+            if (!PeekTargetVisible || !IsVisible || (_peekAnimating && reduceMotion))
+                SetPeekVisible(true, reduceMotion);
+        }
+        else
+        {
+            _peekHideAt ??= DateTimeOffset.UtcNow.AddMilliseconds(240);
+            if (DateTimeOffset.UtcNow >= _peekHideAt && (PeekTargetVisible || IsVisible))
+                SetPeekVisible(false, reduceMotion);
+        }
+    }
+
+    public void SetPeekVisible(bool visible, bool immediate)
+    {
+        var target = visible ? 1.0 : 0.0;
+        if (_peek.Target == target && (_peekAnimating || IsVisible == visible) && !immediate) return;
+        _peek.Target = target;
+        IsHitTestVisible = false;
+        if (visible) ShowNoActivate();
+        if (immediate)
+        {
+            _peek.Snap(target);
+            FinishPeek();
+        }
+        else if (!_peekAnimating)
+        {
+            _peekAnimating = true;
+            _peekTick = Stopwatch.GetTimestamp();
+            CompositionTarget.Rendering += RenderPeek;
+        }
+    }
+
+    private void RenderPeek(object? sender, EventArgs e)
+    {
+        var elapsed = Stopwatch.GetElapsedTime(_peekTick);
+        if (elapsed.TotalMilliseconds < 5) return;
+        _peekTick = Stopwatch.GetTimestamp();
+        _peek.Step(Math.Min(1.0 / 30, elapsed.TotalSeconds), .16);
+        _surface.RenderTransform = new TranslateTransform(0, -SurfaceHeight * (1 - _peek.Value));
+        if (_peek.Settled(.005, .03)) FinishPeek();
+    }
+
+    private void FinishPeek()
+    {
+        CompositionTarget.Rendering -= RenderPeek;
+        _peekAnimating = false;
+        _peek.Snap(_peek.Target);
+        _surface.RenderTransform = new TranslateTransform(0, -SurfaceHeight * (1 - _peek.Value));
+        IsHitTestVisible = _peek.Target == 1;
+        if (_peek.Target == 0)
+        {
+            Hide();
+            NativeMethods.HideWindow(Hwnd);
+        }
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        CompositionTarget.Rendering -= RenderPeek;
+        _peekAnimating = false;
+        base.OnClosed(e);
     }
 
     public void UpdateAppearance(UserSettings settings)

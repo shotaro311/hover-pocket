@@ -1,0 +1,30 @@
+shell stage: VerifySecondInstanceAsync
+shell stage: VerifyPollingOnlyOpenAsync
+shell stage: VerifyAccessSurfaceHealthRecoveryAsync
+shell stage: VerifyPanelHealthRecoveryAsync
+shell stage: VerifyUnrecoverableWindowRecreationAsync
+shell stage: VerifyStagedRecoverySchedulerAsync
+shell stage: VerifyPanelPositionStableWhilePointerMovesAsync
+shell stage: VerifyPointerOutsideClosesPanelAsync
+shell stage: VerifyLiquidCloseAsync
+PASS top-entry peek: size=small, wide=True, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=small, wide=False, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=medium, wide=True, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=medium, wide=False, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=large, wide=True, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=large, wide=False, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=extraLarge, wide=True, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=extraLarge, wide=False, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: pass-through/reentry=true, hidden_native_repair=true, reduce_motion=true, always_visible_restored=true
+PASS liquid geometry: shapes=1616, refresh_rate=60/120, top_gap=0, closed_protrusions=0
+PASS liquid native: size=small, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=small, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=medium, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=medium, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=large, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=large, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=extraLarge, mode=preserveMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: size=extraLarge, mode=coverMenu, top_gap=0, stationary_hover=300, reversal=true, idle=true
+PASS liquid native: reentry_reversals=30, automatic_manual_preserved=true, reduce_motion=true
+FAIL shell verify:
+- top-level window count changed: before=12, after=14

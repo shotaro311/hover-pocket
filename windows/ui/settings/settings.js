@@ -6,6 +6,7 @@ import { createWeatherSettings } from "./weather-settings.js";
 const languageEl = document.querySelector("[data-language]");
 const displayPlacementEl = document.querySelector("[data-display-placement]");
 const attachmentEl = document.querySelector("[data-panel-attachment]");
+const autoHideHandleEl = document.querySelector("[data-auto-hide-handle]");
 const automaticAttachmentEl = document.querySelector("[data-automatic-attachment]");
 const reduceMotionEl = document.querySelector("[data-reduce-motion]");
 const panelSizeEl = document.querySelector("[data-panel-size]");
@@ -184,6 +185,9 @@ function render(state) {
     { id: "none", label: t("none") },
   ], state.settings.handleIcon, (handleIcon) => update("settings.setHandleIcon", { handleIcon }));
   const attachmentEnglish = state.settings.language === "en";
+  document.querySelector("[data-auto-hide-handle-label]").textContent = attachmentEnglish ? "Automatically hide the top entry" : "上部の入口を自動で隠す";
+  document.querySelector("[data-auto-hide-handle-note]").textContent = attachmentEnglish ? "Move near the top to reveal the entry, then hover over it to open the panel." : "上部にマウスを近づけると入口が現れ、入口にホバーするとパネルが開きます。";
+  autoHideHandleEl.checked = Boolean(state.settings.autoHideTopHandle);
   document.querySelector("[data-attachment-heading]").textContent = attachmentEnglish ? "Screen edge attachment" : "上端とのつながり";
   document.querySelector("[data-automatic-attachment-label]").textContent = attachmentEnglish ? "Automatically cover the top on screens without a notch" : "ノッチがない画面では自動で上端まで覆う";
   document.querySelector("[data-reduce-motion-label]").textContent = attachmentEnglish ? "Reduce motion" : "動きを減らす";
@@ -830,4 +834,5 @@ async function update(method, params = undefined) {
 }
 
 automaticAttachmentEl.addEventListener("change", () => update("settings.setPanelAttachment", { automatic: automaticAttachmentEl.checked }));
+autoHideHandleEl.addEventListener("change", () => update("settings.setAutoHideTopHandle", { enabled: autoHideHandleEl.checked }));
 reduceMotionEl.addEventListener("change", () => update("settings.setPanelAttachment", { reduceMotion: reduceMotionEl.checked }));

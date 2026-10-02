@@ -89,6 +89,11 @@ internal sealed class DisplayVerifier
                 new PhysicalRect(left, -1440, 2560, 1440), new PhysicalRect(left, -1440, 2560, 1400), left == 0, dpi, dpi);
             var layout = _displayLayoutService.CreateLayout(monitor, size);
             VerifyLayout(DisplayPlacement.All, layout);
+            var proximity = HoverShellController.PeekProximityBounds(layout);
+            VerifyContained(monitor.Id, "peek proximity", monitor.Bounds, proximity);
+            if (!proximity.Contains(layout.AccessSurface.PhysicalRect)
+                || proximity.Height <= layout.AccessSurface.PhysicalRect.Height)
+                _failures.Add($"{monitor.Id}: peek proximity did not include space below the entry");
             if (layout.PanelTarget.PhysicalRect.Top != monitor.Bounds.Top)
                 _failures.Add($"{monitor.Id}: liquid panel detached from screen top");
             foreach (var mode in new[] { VoiceLaneMode.Compact, VoiceLaneMode.Expanded })

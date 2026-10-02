@@ -9,15 +9,18 @@
 
 ## 保存・ブリッジ契約
 
-`UserSettings`が保存形式の正本。既存JSONへ省略可能な3項目を追加する。DB/OpenAPIや別の設定Schemaは存在しない。
+`UserSettings`が保存形式の正本。既存JSONへ省略可能な4項目を追加する。DB/OpenAPIや別の設定Schemaは存在しない。
 
 |項目|保存値・既定|意味|
 |---|---|---|
 |panelAttachmentStyle|preserveMenu / coverMenu、既定preserveMenu|手動選択|
 |automaticScreenEdgeAttachment|boolean、既定false|ノッチなし画面では実効値coverMenu|
 |reduceMotion|boolean、既定false|Windows側のアニメーション設定と併用|
+|autoHideTopHandle|boolean、既定false|上部の入口を自動で隠し、近接で入口だけ表示する|
 
 `settings.setPanelAttachment`のparamsは`style`、`automatic`、`reduceMotion`。省略した項目は保持する。ブリッジの`effectivePanelAttachmentStyle`は共通resolverで導出し、保存しない。Windowsの現在のディスプレイ列挙は物理ノッチ情報を持たないため、各表示先をノッチなしとして解決する。手動選択を上書きしない。
+
+`settings.setAutoHideTopHandle`のparamsは必須booleanの`enabled`。設定画面の「上部の入口を自動で隠す」で切り替える。オンでは画面上端の入口の左右40 DIPs、深さ36 DIPsへ近づくと入口だけが滑り出し、表示が落ち着いた入口の実領域にホバーするとパネルが開く。近接だけではパネルを開かない。パネルを閉じて近接領域から離れると240ms待って入口も隠す。近接領域には透明ウィンドウを作らず、非表示完了時はネイティブウィンドウも隠す。表示中のパネルに対応する入口は保持する。Reduce Motionは入口の動きにも適用し、静止時はRendering購読を解除する。
 
 旧JSONに項目がなくても既存の言語・サイズ等を保持して既定を補う。旧バイナリは追加項目を無視できるため、ファイルの破壊的なmigrationは不要。legacy fixture、既定、保存・再読込、手動/自動の復帰をsettings verifierで検証する。
 

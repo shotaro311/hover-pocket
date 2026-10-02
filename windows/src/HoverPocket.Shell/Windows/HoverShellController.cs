@@ -31,6 +31,8 @@ internal sealed class HoverShellController : IDisposable
         TimeSpan.FromMilliseconds(1400)
     ];
     public const double HoverToleranceDips = 4;
+    internal const double PeekSidePaddingDips = 40;
+    internal const double PeekDepthDips = 36;
 
     private readonly Dispatcher _dispatcher;
     private readonly bool _enablePanelWebView;
@@ -318,6 +320,10 @@ internal sealed class HoverShellController : IDisposable
         }
 
         _panelExpectedVisible = true;
+        var entryLayout = _panel.IsVisible ? _activeLayout ?? layout : layout;
+        foreach (var (surface, surfaceLayout) in _surfaceLayouts)
+            if (surfaceLayout.Monitor.Id == entryLayout.Monitor.Id)
+                surface.SetPeekVisible(true, immediate: true);
 
         if (_closingTask is { IsCompleted: false })
         {
@@ -419,15 +425,17 @@ internal sealed class HoverShellController : IDisposable
 
     private void PollPointer()
     {
+        var pointer = GetPointerPosition();
         if (_pointerOverrideForVerify is null
             && !_panel.IsVisible
             && IsTopEdgeSuppressed())
         {
+            RefreshAccessSurfaceVisibility(pointer, allowProximity: false);
             _closeDelayTimer.Stop();
             return;
         }
 
-        var pointer = GetPointerPosition();
+        RefreshAccessSurfaceVisibility(pointer);
         if (IsPointerInHoverRegion(pointer, out var hoveredLayout))
         {
             _closeDelayTimer.Stop();
@@ -466,9 +474,12 @@ internal sealed class HoverShellController : IDisposable
                 || _panel.ContainsPhysicalPoint(pointer.X, pointer.Y, HoverToleranceDips);
         }
 
-        foreach (var layout in _surfaceLayouts.Values)
+        foreach (var (surface, layout) in _surfaceLayouts)
         {
-            if (IsInsideInflatedPlacement(layout.AccessSurface, layout.Monitor, pointer))
+            var inside = _panelBridgeController.CurrentSettings.AutoHideTopHandle
+                ? surface.PeekReady && layout.AccessSurface.PhysicalRect.Contains(pointer.X, pointer.Y)
+                : IsInsideInflatedPlacement(layout.AccessSurface, layout.Monitor, pointer);
+            if (inside)
             {
                 hoveredLayout = layout;
                 return true;
@@ -487,6 +498,30 @@ internal sealed class HoverShellController : IDisposable
 
         var mousePosition = WinForms.Control.MousePosition;
         return (mousePosition.X, mousePosition.Y);
+    }
+
+    internal static PhysicalRect PeekProximityBounds(DisplaySurfaceLayout layout)
+    {
+        var access = layout.AccessSurface.PhysicalRect;
+        var padding = (int)Math.Ceiling(PeekSidePaddingDips * layout.Monitor.ScaleX);
+        return new PhysicalRect(access.Left - padding, access.Top, access.Width + padding * 2,
+            (int)Math.Ceiling(PeekDepthDips * layout.Monitor.ScaleY)).ClampTo(layout.Monitor.Bounds);
+    }
+
+    private bool ShouldRevealAccessSurface(DisplaySurfaceLayout layout, (int X, int Y) pointer, bool allowProximity = true)
+    {
+        if (!_panelBridgeController.CurrentSettings.AutoHideTopHandle) return true;
+        if (_panel.IsVisible || _panelExpectedVisible)
+            return layout.Monitor.Id == _activeLayout?.Monitor.Id;
+        return allowProximity && PeekProximityBounds(layout).Contains(pointer.X, pointer.Y);
+    }
+
+    private bool ReducePeekMotion => _panelBridgeController.CurrentSettings.ReduceMotion || !SystemParameters.ClientAreaAnimation;
+
+    private void RefreshAccessSurfaceVisibility((int X, int Y) pointer, bool allowProximity = true)
+    {
+        foreach (var (surface, layout) in _surfaceLayouts)
+            surface.UpdatePeekVisibility(ShouldRevealAccessSurface(layout, pointer, allowProximity), ReducePeekMotion);
     }
 
     private WindowPlacement EffectivePanelTarget(DisplaySurfaceLayout layout)
@@ -541,7 +576,8 @@ internal sealed class HoverShellController : IDisposable
             var layout = _layouts[index];
             accessSurface.UpdateAppearance(userSettings);
             _surfaceLayouts[accessSurface] = layout;
-            accessSurface.ApplyPlacement(layout.AccessSurface, show: true);
+            accessSurface.ApplyPlacement(layout.AccessSurface, show: false);
+            accessSurface.SetPeekVisible(ShouldRevealAccessSurface(layout, GetPointerPosition()), immediate: true);
         }
 
         if (!_panelExpectedVisible)
@@ -690,23 +726,24 @@ internal sealed class HoverShellController : IDisposable
                 var replacement = CreateAccessSurfaceWindow();
                 _accessSurfaces[index] = replacement;
                 _surfaceLayouts[replacement] = layout;
-                replacement.ApplyPlacement(layout.AccessSurface, show: true);
+                replacement.ApplyPlacement(layout.AccessSurface, show: false);
+                replacement.SetPeekVisible(ShouldRevealAccessSurface(layout, GetPointerPosition()), immediate: true);
                 accessRecreated++;
                 continue;
             }
 
-            if (NeedsNativeRepair(
+            if (!accessSurface.IsPeeking && NeedsNativeRepair(
                     accessSurface.Hwnd,
                     accessSurface.IsVisible,
-                    expectedVisible: true,
+                    expectedVisible: accessSurface.PeekTargetVisible,
                     layout.AccessSurface.PhysicalRect,
                     checkFrame: true,
                     requireNoActivate: true))
             {
                 RepairStyles(accessSurface.Hwnd, requireNoActivate: true);
                 accessSurface.UpdateAppearance(_panelBridgeController.CurrentSettings);
-                accessSurface.ApplyPlacement(layout.AccessSurface, show: true);
-                accessSurface.ShowNoActivate();
+                accessSurface.ApplyPlacement(layout.AccessSurface, show: accessSurface.PeekTargetVisible);
+                accessSurface.SetPeekVisible(accessSurface.PeekTargetVisible, immediate: true);
                 accessRepaired++;
             }
         }
@@ -856,6 +893,8 @@ internal sealed class HoverShellController : IDisposable
 
     private void OnAccessSurfaceHoverEntered(object? sender, EventArgs e)
     {
+        if (!_panel.IsVisible && _panelBridgeController.CurrentSettings.AutoHideTopHandle
+            && sender is AccessSurfaceWindow peeking && !peeking.PeekReady) return;
         if (!_panel.IsVisible && IsTopEdgeSuppressed())
         {
             return;

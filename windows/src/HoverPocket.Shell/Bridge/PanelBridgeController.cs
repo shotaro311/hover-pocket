@@ -374,6 +374,7 @@ internal sealed class PanelBridgeController : IDisposable
         Register("settings.setPreferredProvider", SetPreferredProviderAsync);
         Register("settings.setHandleIcon", SetHandleIconAsync);
         Register("settings.setShowTopHandleSideArea", SetShowTopHandleSideAreaAsync);
+        Register("settings.setAutoHideTopHandle", SetAutoHideTopHandleAsync);
         Register("settings.setPanelAttachment", SetPanelAttachmentAsync);
         Register("settings.setDisableTopEdgeInFullscreen", SetDisableTopEdgeInFullscreenAsync);
         Register("settings.setStartWithWindows", SetStartWithWindowsAsync);
@@ -594,6 +595,7 @@ internal sealed class PanelBridgeController : IDisposable
                 lastSelectedProviderId = CurrentSettings.LastSelectedProviderId,
                 handleIcon = ToWireValue(CurrentSettings.HandleIconStyle),
                 showTopHandleSideArea = CurrentSettings.ShowTopHandleSideArea,
+                autoHideTopHandle = CurrentSettings.AutoHideTopHandle,
                 panelAttachmentStyle = PanelAttachment.WireValue(CurrentSettings.PanelAttachmentStyle),
                 effectivePanelAttachmentStyle = PanelAttachment.WireValue(PanelAttachment.Resolve(CurrentSettings)),
                 automaticScreenEdgeAttachment = CurrentSettings.AutomaticScreenEdgeAttachment,
@@ -1154,6 +1156,14 @@ internal sealed class PanelBridgeController : IDisposable
             if (p.TryGetProperty("automatic", out var automatic)) updated.AutomaticScreenEdgeAttachment = automatic.GetBoolean();
             if (p.TryGetProperty("reduceMotion", out var reduce)) updated.ReduceMotion = reduce.GetBoolean();
         }
+        SaveSettings(updated);
+        return await PublishStateAsync(cancellationToken);
+    }
+
+    private async Task<object?> SetAutoHideTopHandleAsync(JsonElement? parameters, CancellationToken cancellationToken)
+    {
+        var updated = CurrentSettings.Clone();
+        updated.AutoHideTopHandle = ReadRequiredBool(parameters, "enabled");
         SaveSettings(updated);
         return await PublishStateAsync(cancellationToken);
     }

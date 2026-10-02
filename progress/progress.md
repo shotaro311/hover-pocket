@@ -5,6 +5,12 @@ updated_by: codex
 status: macos-644-main-integrated; published-macos-644; physical-voice-e2e-pending
 ---
 
+## 2026-10-02 Windows上部入口の自動非表示
+
+- 「上部の入口を自動で隠す」を設定へ追加。近接で入口だけを表示し、入口へのホバーでパネルを開く。離れると入口も隠す。旧設定の既定オフ、保存再読込、Reduce Motionに対応。
+- Debug/Releaseのbuild、最終shell/UI/display/settingsが通過。4サイズ×2入口幅、100回の開閉、設定画面・保存復元・異常な値の拒否を確認。実接続は1画面・150%、他DPIと負の座標は座標検査。
+- 前回の独立cloneで作業。開発版0.2.9-local.4を21:36 JSTに通常起動し、自動非表示だけをオンへ設定。他の設定を保持してバックアップ済み。[実装・検証・起動記録](2026-10/2026-10-02_hover-pocket-top-entry-peek.md)。
+
 ## 2026-10-02 Windows液体アニメーションをローカル実装
 
 - Mac開発版661の輪郭とばねをWPFへ移植。2モード、手動選択を保持する自動切替、Reduce Motionを追加し、描画・WebView2の切り抜き・Windowsのヒット判定を共通化。

@@ -276,6 +276,7 @@ internal sealed class UiVerifier
 
             if (ready)
             {
+                await new TopHandlePeekVerifier(_controller).RunAsync();
                 await new LiquidMotionVerifier(_controller).RunAsync();
                 var monitor = _controller.Layouts[0].Monitor.Bounds;
                 _controller.SetPointerSimulationForVerify(monitor.Left + 10, monitor.Bottom - 10);
@@ -337,6 +338,11 @@ internal sealed class UiVerifier
                         }
                         throw new Error('settings surface readback timed out');
                     };
+                    const hiddenEntry = document.querySelector('[data-auto-hide-handle]');
+                    hiddenEntry.checked = true; hiddenEntry.dispatchEvent(new Event('change'));
+                    await wait(s => s.autoHideTopHandle === true);
+                    hiddenEntry.checked = false; hiddenEntry.dispatchEvent(new Event('change'));
+                    await wait(s => s.autoHideTopHandle === false);
                     document.querySelectorAll('[data-panel-attachment] button')[1].click();
                     await wait(s => s.panelAttachmentStyle === 'coverMenu');
                     const auto = document.querySelector('[data-automatic-attachment]');

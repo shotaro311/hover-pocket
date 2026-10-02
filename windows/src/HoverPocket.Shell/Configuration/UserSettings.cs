@@ -54,6 +54,8 @@ internal sealed class UserSettings
 
     public bool ShowTopHandleSideArea { get; set; } = true;
 
+    public bool AutoHideTopHandle { get; set; }
+
     public bool DisableTopEdgeInFullscreen { get; set; } = true;
 
     public List<string> ProviderOrder { get; set; } = [];
@@ -88,6 +90,7 @@ internal sealed class UserSettings
             AutomaticScreenEdgeAttachment = AutomaticScreenEdgeAttachment,
             ReduceMotion = ReduceMotion,
             ShowTopHandleSideArea = ShowTopHandleSideArea,
+            AutoHideTopHandle = AutoHideTopHandle,
             DisableTopEdgeInFullscreen = DisableTopEdgeInFullscreen,
             ProviderOrder = [.. ProviderOrder],
             ProviderVisibility = new Dictionary<string, bool>(ProviderVisibility, StringComparer.OrdinalIgnoreCase)

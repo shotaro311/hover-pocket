@@ -81,7 +81,7 @@ internal sealed class SettingsVerifier
         var legacy = legacyStore.Load(registry.ProviderIds);
         if (legacy.Language != AppLanguage.English || legacy.PanelSize != PanelSize.ExtraLarge
             || legacy.TextSize != PanelTextSize.Large || legacy.PanelAttachmentStyle != PanelAttachmentStyle.PreserveMenu
-            || legacy.AutomaticScreenEdgeAttachment || legacy.ReduceMotion)
+            || legacy.AutomaticScreenEdgeAttachment || legacy.ReduceMotion || legacy.AutoHideTopHandle)
             _failures.Add("legacy settings lost existing choices or gained automatic attachment/motion overrides");
         await Send(dispatcher, """{"id":"liquid0","method":"settings.setPanelAttachment","params":{"style":"preserveMenu","automatic":true,"reduceMotion":true}}""");
         var attachmentReadback = store.ReloadOrDefault(registry.ProviderIds);
@@ -95,6 +95,16 @@ internal sealed class SettingsVerifier
         if (PanelAttachment.Resolve(manualReadback) != PanelAttachmentStyle.PreserveMenu)
             _failures.Add("automatic attachment disabled did not restore manual selection");
         await Send(dispatcher, """{"id":"liquid2","method":"settings.resetDefaults"}""");
+        await Send(dispatcher, """{"id":"peek-on","method":"settings.setAutoHideTopHandle","params":{"enabled":true}}""");
+        if (!store.ReloadOrDefault(registry.ProviderIds).AutoHideTopHandle)
+            _failures.Add("auto-hide top handle was not persisted");
+        var invalidPeek = await dispatcher.ProcessRawMessageAsync("""{"id":"peek-invalid","method":"settings.setAutoHideTopHandle","params":{"enabled":"false"}}""");
+        if (invalidPeek?.Contains("handler_error", StringComparison.Ordinal) != true
+            || !controller.CurrentSettings.AutoHideTopHandle || !store.ReloadOrDefault(registry.ProviderIds).AutoHideTopHandle)
+            _failures.Add("invalid auto-hide request changed settings or was accepted");
+        await Send(dispatcher, """{"id":"peek-off","method":"settings.setAutoHideTopHandle","params":{"enabled":false}}""");
+        if (store.ReloadOrDefault(registry.ProviderIds).AutoHideTopHandle)
+            _failures.Add("auto-hide top handle did not return to always-visible");
 
         VerifyWebViewSecurityPolicy();
         await VerifyCodexSandboxFailClosedAsync(registry);
@@ -1152,6 +1162,7 @@ internal sealed class SettingsVerifier
             || defaults.PanelAttachmentStyle != PanelAttachmentStyle.PreserveMenu
             || defaults.AutomaticScreenEdgeAttachment
             || defaults.ReduceMotion
+            || defaults.AutoHideTopHandle
             || !defaults.DisableTopEdgeInFullscreen)
         {
             _failures.Add("defaults were not restored");

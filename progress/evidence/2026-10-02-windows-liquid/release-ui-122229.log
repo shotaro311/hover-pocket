@@ -1,0 +1,11 @@
+UI verify: WebView2 host + bridge + provider registry + settings
+PASS top-entry peek: size=small, wide=True, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=small, wide=False, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=medium, wide=True, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=medium, wide=False, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=large, wide=True, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=large, wide=False, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=extraLarge, wide=True, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+PASS top-entry peek: size=extraLarge, wide=False, hidden=true, proximity_only=true, hover_open=true, leave_hide=true, idle=true
+FAIL ui verify:
+- InvalidOperationException: Top-entry peek: repair did not restore native hidden state
