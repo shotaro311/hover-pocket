@@ -2,8 +2,15 @@
 project_slug: hover-menu-preview
 updated: 2026-10-04
 updated_by: codex
-status: windows-preview-opening-local-15-verified-running; termination-cause-unconfirmed-diagnostics-added; published-macos-644; macos-asset-library-and-distribution-acceptance-pending
+status: windows-0.2.9-published-installed-running; termination-cause-unconfirmed-diagnostics-added; published-macos-644; macos-asset-library-and-distribution-acceptance-pending
 ---
+
+## 2026-10-04 Windows 0.2.9を本番配信・この端末へ適用
+
+- ユーザーがlocal.15を確認して本番反映を依頼。[PR #42](https://github.com/shotaro311/hover-pocket/pull/42)をmainへ統合し、18:40 JSTに[win-v0.2.9](https://github.com/shotaro311/hover-pocket/releases/tag/win-v0.2.9)を公開。素材管理・撮影・収録・注釈編集と開閉のちらつき修正を含む。
+- 配布用バイナリの素材UI検査、Windows CI、3 OSの契約比較が通過。CIでは空フォルダの作成を待たない検査と、OS側でアニメーションが無効でも途中反転を要求する検査を修正した。製品の表示処理は確認済みlocal.15から変更していない。
+- 公開された8ファイルを再取得し、feed・ハッシュ・サイズを検証。隔離CIで0.2.8からのインストール・更新・旧版への戻し・アンインストール・再インストールとユーザーデータ保持が通過。macOS appcastのバイト列とGitHub Latest（v0.1.0-644）は不変。
+- この端末を公開パッケージから0.2.9へ更新し、正規インストール先から起動（PID26176）。設定・撮影設定・素材7件・DB全体の内容・自動起動先が不変。通常起動と準備完了、アンインストール情報の0.2.9をreadback。旧ファイルとデータのバックアップは保持。[配信記録・根拠](2026-10/2026-10-04_hover-pocket-windows-029-release.md)。
 
 ## 2026-10-04 開く瞬間のちらつきをClaudeで追加修正
 
